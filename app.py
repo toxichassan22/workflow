@@ -2066,257 +2066,80 @@ DESIGN_VARIATIONS = [
 ]
 
 # Condensed single-slide prompt — short base rules only
-CONDENSED_DESIGN_PROMPT = """You are a luxury real estate presentation designer for "منافع الاقتصادية للعقار".
-Brand colors: Burgundy #670D0C, Gold #C2A176, Silver #A7A9AC, Beige #F5F0EE, White #FFFFFF, Dark #0F172A
-Font: 'The Sans Arabic', Arial
-RTL layout. Arabic text only. ALL text alignment RIGHT.
+CONDENSED_DESIGN_PROMPT = """Luxury real estate presentation designer for "منافع الاقتصادية للعقار".
+Brand: Burgundy #670D0C, Gold #C2A176, Beige #F5F0EE, White. Font: 'The Sans Arabic', Arial. RTL Arabic only.
 
-══════════════════════════════════════════════════════════════════
-CRITICAL: SLIDE DIMENSIONS — MUST BE EXACT
-══════════════════════════════════════════════════════════════════
-The slide is EXACTLY 1280px wide × 720px tall (16:9 aspect ratio).
-Your outer container div MUST have these EXACT styles:
-  dir="rtl" lang="ar" width:1280px; height:720px; overflow:hidden; position:relative; box-sizing:border-box; font-family:'The Sans Arabic',Arial,sans-serif
-ALL content MUST fit within 1280×720. NEVER exceed the boundaries.
-DO NOT use width:700px, transform:scale(), or small inner containers. The outer div IS the full slide.
+SLIDE: EXACTLY 1280×720px. Outer div: dir="rtl" lang="ar" width:1280px; height:720px; overflow:hidden; position:relative; box-sizing:border-box; font-family:'The Sans Arabic',Arial,sans-serif. ALL content inside. dir="rtl" lang="ar" is MANDATORY for connected Arabic.
 
-⚠️ CRITICAL: Arabic text MUST be connected. The outer div MUST have dir="rtl" lang="ar". Without this, Arabic letters will appear separated/disconnected. This is MANDATORY.
+{variation}
 
-══════════════════════════════════════════════════════════════════
-MANDATORY HEADER (top of every slide)
-══════════════════════════════════════════════════════════════════
-- Top-right corner: logo placeholder <img src="##LOGO##" style="height:48px;width:auto;object-fit:contain"> (the frontend will replace it)
-- Next to logo (to its left): slide title in small font (13px, bold, burgundy)
-- A thin horizontal line (1px, gradient from gold to burgundy) below the header
-- Header background: semi-transparent white gradient
+DESIGN: Card-based, rounded corners (12-16px), shadows (0 4px 20px rgba(0,0,0,0.06)). Financial numbers LARGE (32-40px, bold, burgundy). Max 3 colors. Content between header (~70px) and footer (~50px). Use EXACT text from slide description. Subtle SVG patterns 5-8% opacity. Professional LINE icons.
 
-══════════════════════════════════════════════════════════════════
-MANDATORY FOOTER (bottom of every slide)
-══════════════════════════════════════════════════════════════════
-- Left side: slide number inside a small burgundy circle (28×28px, white text, font-weight:900)
-- Center: project name (from data) + "منافع الاقتصادية للعقار"
-- Right side: thin separator line
-- Footer height: ~40px, fixed at bottom, NEVER overlaps content
-- Background: white with subtle top border
-
-══════════════════════════════════════════════════════════════════
-DESIGN RULES
-══════════════════════════════════════════════════════════════════
-1. Outer <div> with ALL inline CSS: dir="rtl" lang="ar", width:1280px, height:720px, overflow:hidden, position:relative, box-sizing:border-box, font-family:'The Sans Arabic',Arial,sans-serif
-2. Card-based layouts, rounded corners (12-16px), subtle shadows (0 4px 20px rgba(0,0,0,0.06)).
-3. Financial numbers MUST be LARGE: 32-40px, font-weight:900, color:burgundy or dark. Make them the visual focal point.
-4. Max 3 colors per slide. Use generous white space — content area is between header and footer ONLY.
-5. Content MUST fit within 1280×720. Reduce font size if needed — NEVER change the text.
-6. Use EXACT text from the slide description. Do NOT paraphrase or abbreviate.
-7. Subtle geometric/architectural SVG background patterns: thin lines, abstract building shapes, grid patterns, or investment-themed motifs at 5-8% opacity. NOT distracting.
-8. Professional LINE icons (not cartoon): use thin SVG stroke icons for each content section. Examples: building outline, chart outline, map-pin outline, dollar outline, calendar outline.
-9. {variation}
-
-CONTENT AREA LAYOUT:
-- Content area is between header (top ~70px) and footer (bottom ~50px)
-- Available content height: ~600px
-- Use CSS grid or flexbox for organized layouts
-- Cards should fill the available width — DO NOT use narrow containers
-- If image is present: use flex row — image on one side (40%), content on other (60%). NEVER overlap.
-
-IMAGE RULES:
-- ##MOODBOARD_IMAGE_1## → Cover slide ONLY (full-bleed background)
-- ##MOODBOARD_IMAGE_2## → Location Features slide ONLY
-- ##MOODBOARD_IMAGE_3## → Project Features slide ONLY
-- ##MOODBOARD_IMAGE_4## → Components/Table slide ONLY
-- Each image used EXACTLY once. Wrap in a flex container — image on one side, content on the other.
-- NEVER place text/tables on top of an image container.
+IMAGES: ##MOODBOARD_IMAGE_1## → Cover only, ##MOODBOARD_IMAGE_2## → Location, ##MOODBOARD_IMAGE_3## → Features, ##MOODBOARD_IMAGE_4## → Components. Each once only. Image flex row — never overlap text.
 
 Return ONLY valid JSON: {{"slides": [{{"title": "Slide title", "html": "<div>...</div>"}}]}}"""
 
-# Per-slide design instructions — appended to system prompt based on slide type
+# Per-slide design instructions — compact versions
 SLIDE_DESIGN_INSTRUCTIONS = {
-    'cover': """SLIDE 1 — الغلاف (COVER):
-- Use ##IMAGE_COVER## as FULL-SCREEN background: position:absolute, inset:0, width:100%, height:100%, object-fit:cover
-- Add semi-transparent overlay: background:linear-gradient(135deg, rgba(103,13,12,0.65), rgba(26,5,5,0.75))
-- CENTER the logo: <img src="##LOGO##" style="width:200px;height:auto"> — BIG and prominent, NOT small in corner
-- Below logo: project name in HUGE font (48-56px, font-weight:900, white)
-- Below project name: thin gold line (80px wide, 3px height, #C2A176)
-- Below line: subtitle "عرض مشروع استثماري" or project type + city (18-20px, gold #C2A176)
-- Bottom: "منافع الاقتصادية للعقار" in small text (13px, semi-transparent white)
-- Add subtle architectural line patterns or geometric shapes at edges (thin SVG, 5-8% opacity)
-- NO tables, NO cards, NO clutter — luxury minimal cover
-- NO header, NO footer on cover slide — full-bleed design""",
+    'cover': "COVER: Full-bleed ##IMAGE_COVER## background, overlay gradient. Center logo big (200px), project name (48-56px white bold), gold line, subtitle. No header/footer. Luxury minimal.",
 
-    'dashboard': """SLIDE 2 — الملخص التنفيذي (EXECUTIVE DASHBOARD):
-- Top section: brief 2-3 line project description in a clean text area
-- Main area: 6 KPI cards in 3×2 grid layout filling the content area
-- Cards: إجمالي التكلفة، الإيرادات السنوية، إجمالي الأرباح طوال الفترة، العائد السنوي المتوقع، NOI المتوقع، استرداد رأس المال
-- Each card: SVG icon (top), value (32-40px, font-weight:900, burgundy), label (12px, gray)
-- "إجمالي الأرباح طوال الفترة" = LARGEST card, MOST prominent, gold accent border
-- Cards: white background, rounded corners 14px, subtle shadow (0 4px 20px rgba(0,0,0,0.06))
-- Subtle gradient or shadow on cards. Professional investment dashboard feel.""",
+    'dashboard': "DASHBOARD: 6 KPI cards in 3×2 grid. Each: SVG icon, value (32-40px bold burgundy), label (12px gray). Total profit = biggest card with gold accent.",
 
-    'info-cards': """SLIDE 3 — فكرة المشروع والهيكلة (PROJECT CONCEPT):
-- Organized info board: 5 cards in grid layout
-- Cards: فكرة المشروع، الموقع، هيكلة المشروع، نوع المشروع، المطور/الجهة
-- Each card: SVG icon (lightbulb, map-pin, calendar, building, user), title, description
-- If Google Maps link exists: prominent clickable button "فتح موقع المشروع على Google Maps" with map icon
-- Subtle architectural background or abstract map at 5% opacity
-- Cards fill the full width — use CSS grid 2-3 columns""",
+    'info-cards': "INFO-CARDS: 5 cards grid — idea, location, structure, type, developer. Each with SVG icon. Google Maps button if link exists.",
 
-    'feature-cards-location': """SLIDE 4 — مميزات الموقع (LOCATION FEATURES):
-- Each feature = independent card with professional LINE icon (Location Pin, Road, Accessibility, Population, Growth)
-- Grid layout (2-3 columns), beige background cards, burgundy headings
-- Background: transparent map pin or abstract map element at 5% opacity
-- Google Maps button: prominent, styled, at bottom or side of slide
-- Design should convey: strategic location, investment attraction
-- If using image: flex layout with image (40%) on right, cards (60%) on left. NEVER overlap.""",
+    'feature-cards-location': "LOCATION FEATURES: Feature cards with LINE icons. Grid 2-3 columns. Google Maps button. Image flex if present.",
 
-    'feature-cards': """SLIDE 5 — مميزات المشروع (PROJECT FEATURES):
-- Grid of 4+ cards based on content
-- Each card: professional LINE SVG icon, short title (14px bold), brief description (12px)
-- Background: light beige #F5F0EE with burgundy headings #670D0C
-- Marketing-focused, attractive design — NOT plain bullet points
-- Subtle architectural or real estate elements in background at low opacity
-- Cards fill the full content area with proper spacing""",
+    'feature-cards': "PROJECT FEATURES: 4+ cards grid. LINE SVG icons, title (14px bold), description (12px). Real estate feel.",
 
-    'table': """SLIDE 6 — مكونات المشروع والمساحات (COMPONENTS TABLE):
-- Professional table: burgundy header #670D0C with white text
-- Alternating row colors: white and light beige #F5F0EE
-- "الإجمالي / المتوسط" row: bold, different background color,突出显示
-- Below table: 3 info cards in a row:
-  1. مساحة الأرض (land icon)  2. نسبة البناء (building icon)  3. ملاحظة المساحات (note icon)
-- Table must fill the available width — not narrow
-- If using image: flex layout with image (35%) and table (65%) side by side. NEVER overlap.""",
+    'table': "COMPONENTS TABLE: Professional table — burgundy header, alternating rows. Below: 3 info cards (land area, building ratio, note). Image flex if present.",
 
-    'equation': """SLIDE 7 — افتراضات الربح التشغيلي التأجيري (RENTAL PROFIT EQUATION):
-- Visual equation layout: الإيرادات السنوية − المصروف التشغيلي السنوي = إجمالي الربح التأجيري السنوي
-- Each number in a large financial card (32-40px, bold)
-- SVG icons: Revenue (arrow up), Expense (arrow down), Profit (star)
-- Use horizontal arrows or minus/equals signs between cards
-- إجمالي الربح التأجيري السنوي = BIGGEST card, MOST prominent (gold border or larger size)
-- Optional: small reference table below as footnote
-- NOT just a plain equation — make it a visual flow""",
+    'equation': "RENTAL EQUATION: Visual flow — Revenue − Expense = Profit. Each in large card (32-40px bold). Profit = biggest. Arrows between.",
 
-    'comparison': """SLIDE 8 — افتراضات التكاليف (COST COMPARISON):
-- Two large cards side-by-side: تكلفة الأرض (left) vs تكلفة التطوير (right)
-- Each card: SVG icon (Land, Construction), value (36px bold), label
-- Below or center: إجمالي التكلفة in BIGGEST card (40px+, gold accent, most prominent)
-- Proportional bar chart showing each cost's share of total
-- SVG icons: Land, Construction, Total Cost
-- If using image: flex column with image above comparison cards. NEVER overlap.""",
+    'comparison': "COST COMPARISON: Two cards side-by-side (land vs dev). Total cost = biggest gold card. Bar chart showing proportions.",
 
-    'flow': """SLIDE 9 — الأرباح والتخارج (PROFITS & EXIT):
-- Visual value flow: الربح التشغيلي طوال الفترة → +قيمة التخارج → = إجمالي الأرباح طوال الفترة
-- Horizontal flow diagram with arrows connecting the steps
-- Each step = card with value (32px+ bold) and label
-- Exit value and total profit = MOST prominent (larger, gold accent)
-- SVG icons: Exit, Growth, Profit
-- Connected flow — NOT scattered separate cards
-- Arrow elements between cards showing the flow direction""",
+    'flow': "PROFITS & EXIT: Horizontal flow diagram — Operating Profit → Exit Value → Total. Arrows connecting cards. Total = most prominent.",
 
-    'dashboard-finance': """SLIDE 10 — المؤشرات المالية المتوقعة (FINANCIAL KPIs):
-- Financial Dashboard layout
-- Top row: 3 large KPI cards — ROI, NOI, Payback Period
-  Each: SVG icon (Gauge, Chart, Clock), value (36-40px bold), label
-- Bottom section: visual comparison — إجمالي التكلفة vs إجمالي الأرباح
-  Use bar chart or side-by-side cards
-- Numbers must be VERY prominent and clear
-- Design conveys confidence and professionalism
-- Investment-grade visual feel""",
+    'dashboard-finance': "FINANCIAL KPIs: Top row 3 KPIs (ROI, NOI, Payback). Bottom: cost vs profit comparison. Numbers very prominent.",
 
-    'timeline': """SLIDE 11 — الجدول الزمني ومراحل المشروع (TIMELINE):
-- Professional timeline matching reference design
-- Years and Q1/Q2/Q3/Q4 clearly at the TOP
-- Each phase = horizontal bar extending by duration
-- Colors: burgundy #670D0C, brown #A9847A, beige #C9B08B, gray #A7A9AC
-- Phase names: clear, inside or next to bars, NO overlap
-- Text inside bars must NOT overflow — truncate or use smaller font
-- Light background with time grid lines
-- Phase labels in Arabic, clearly readable""",
+    'timeline': "TIMELINE: Years/Q1-Q3 at top. Phase bars by duration. Colors: burgundy, brown, beige, gray. Arabic labels.",
 
-    'risks': """SLIDE 12 — فرص الاستثمار ونقاط القوة (INVESTMENT OPPORTUNITIES):
-- High Impact design — marketing-focused
-- Each opportunity = large card with professional LINE icon
-- Each card: icon, short title (16px bold), brief description (13px)
-- Marketing-oriented, attractive — conveys investment strength
-- Subtle growth arrow or ascending chart element in background
-- Use bold colors and strong visual hierarchy
-- NOT plain bullet points — each opportunity is visually compelling""",
+    'risks': "OPPORTUNITIES: Large cards with LINE icons. Marketing-focused, attractive. Growth elements in background.",
 
-    'risks-assumptions': """SLIDE 13 — المخاطر والافتراضات (RISKS & ASSUMPTIONS):
-- Professional, calm design — NOT negative or scary
-- Ordered risk cards (numbered 1, 2, 3...)
-- Each card: warning triangle SVG icon, risk text
-- Colors: gray #64748B, beige #F5F0EE, burgundy accent #670D0C
-- Subtitle: "نقاط يجب التحقق منها في الدراسة التفصيلية"
-- Organized, clean layout — conveys thoroughness, not alarm
-- Cards in a numbered list or grid""",
+    'risks-assumptions': "RISKS: Ordered numbered cards (1,2,3). Warning triangle icons. Gray/beige/burgundy. Calm professional feel.",
 
-    'closing': """SLIDE 14 — الختام (CLOSING):
-- Background: burgundy #670D0C with ##IMAGE_COVER## at 25% opacity
-- Overlay: gradient from rgba(103,13,12,0.92) to rgba(80,10,10,0.95)
-- Center: logo <img src="##LOGO##" style="width:180px;height:auto"> inside white rounded card
-- Below logo: "شكراً لكم" in HUGE font (52px, font-weight:900, white)
-- Below text: thin gold line (80px, 3px, #C2A176)
-- Below line: project name (20px, gold #C2A176)
-- Bottom: contact info in small text (prepared by, contact)
-- Simple, luxurious, minimal — NO tables, NO cards
-- NO header, NO footer — full-bleed closing design""",
+    'closing': "CLOSING: Burgundy bg, image at 25% opacity. Center logo in white card, 'شكراً لكم' (52px white), gold line, project name. No header/footer.",
 
-    'standard': """STANDARD SLIDE DESIGN:
-- Card-based layout with clear visual hierarchy
-- Professional LINE SVG icons for each content section
-- Large financial numbers when present (32-40px, bold, burgundy)
-- Subtle geometric/architectural background patterns at 5-8% opacity
-- Cards fill the full content width — proper grid/flex layout
-- Professional investment brochure feel
-- White space between cards — not cramped""",
+    'standard': "STANDARD: Card-based layout, LINE SVG icons, large financial numbers, subtle SVG patterns. Professional investment feel.",
 }
 
 # ═══════════════════════════════════════════════════════════════════
 # BLUEPRINT SYSTEM — shared design identity for all slides
 # ═══════════════════════════════════════════════════════════════════
 
-BLUEPRINT_PROMPT = """You are a brand identity designer for "منافع الاقتصادية للعقار".
-Generate a complete design blueprint for a luxury real estate investment presentation.
+BLUEPRINT_PROMPT = """Brand identity designer for "منافع الاقتصادية للعقار". Generate a design blueprint JSON for a luxury real estate presentation.
 
-Return ONLY valid JSON with this exact structure:
+Return ONLY valid JSON:
 {{
   "blueprint": {{
     "primary_color": "#670D0C",
     "secondary_color": "#C2A176",
     "background_color": "#FBFAF8",
     "card_background": "#FFFFFF",
-    "accent_color": "#A7A9AC",
     "font_family": "'The Sans Arabic', Arial, sans-serif",
-    "header_html": "<!-- HTML for the header section -->",
-    "footer_html": "<!-- HTML for the footer section -->",
+    "header_html": "<!-- header: logo ##LOGO## + title + gradient line -->",
+    "footer_html": "<!-- footer: page number + project name + company -->",
     "card_style": "border-radius:14px; box-shadow:0 4px 20px rgba(0,0,0,0.06);",
-    "title_style": "font-size:14px; font-weight:800; color:#670D0C; letter-spacing:.2px;",
+    "title_style": "font-size:14px; font-weight:800; color:#670D0C;",
     "value_style": "font-size:36px; font-weight:900; color:#670D0C;",
     "label_style": "font-size:12px; font-weight:600; color:#64748B;",
-    "svg_icon_style": "width:32px; height:32px; stroke:#670D0C; stroke-width:1.5; fill:none;",
-    "background_pattern": "<!-- subtle SVG pattern for slide backgrounds -->"
+    "background_pattern": "<!-- subtle SVG pattern 5-8% opacity -->"
   }}
 }}
 
-The header MUST include:
-- Logo placeholder: <img src="##LOGO##" style="height:48px;width:auto;object-fit:contain">
-- Slide title area next to logo (13px, bold, burgundy)
-- Thin gradient line below (gold to burgundy)
-- Semi-transparent white background
-
-The footer MUST include:
-- Left: slide number in burgundy circle (28×28px)
-- Center: project name + "منافع الاقتصادية للعقار"
-- Thin top border
-- Height ~40px
-
-The background_pattern MUST be subtle (5-8% opacity) architectural/geometric SVG.
-
-Project info for personalization:
-- Project: {project_name}
-- Type: {project_type}
-- City: {city}
-
-Return ONLY the JSON. No extra text."""
+Header: logo ##LOGO## (height:48px) + slide title (13px bold burgundy) + thin gradient line. Semi-transparent white bg.
+Footer: slide number in burgundy circle (28×28px) + project name + "منافع الاقتصادية للعقار". Height ~40px.
+Project: {project_name}, Type: {project_type}, City: {city}
+Return ONLY the JSON."""
 
 
 def generate_blueprint(project_data, user_id):
