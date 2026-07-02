@@ -21,6 +21,9 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+# Install Playwright Chromium browser for PDF export
+RUN playwright install --with-deps chromium
+
 # Copy all project files
 COPY . .
 

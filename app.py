@@ -3473,6 +3473,16 @@ def api_logo():
     from config.logo_data import LOGO_B64
     return jsonify({'logo': LOGO_B64})
 
+@app.route('/api/font-light')
+def api_font_light():
+    from config.fonts_data import FONT_LIGHT_B64
+    return jsonify({'font': 'data:font/opentype;base64,' + FONT_LIGHT_B64})
+
+@app.route('/api/font-bold')
+def api_font_bold():
+    from config.fonts_data import FONT_BOLD_B64
+    return jsonify({'font': 'data:font/truetype;base64,' + FONT_BOLD_B64})
+
 # ════════════════════════════════════════════════════════════════════
 # PDF GENERATION — renders PDF from (pre-)designed slides
 # ════════════════════════════════════════════════════════════════════

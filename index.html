@@ -13,28 +13,28 @@
   <style>
     @font-face {
       font-family: 'The Sans Arabic';
-      src: url('assets/fonts/TheSansArabic-Light.otf') format('opentype');
+      src: url('/api/font-light') format('woff2');
       font-weight: 300;
       font-style: normal;
       font-display: swap;
     }
     @font-face {
       font-family: 'The Sans Arabic';
-      src: url('assets/fonts/TheSansArabic-Light.otf') format('opentype');
+      src: url('/api/font-light') format('woff2');
       font-weight: 400;
       font-style: normal;
       font-display: swap;
     }
     @font-face {
       font-family: 'The Sans Arabic';
-      src: url('assets/fonts/BahijTheSansArabic-Bold.ttf') format('truetype');
+      src: url('/api/font-bold') format('woff2');
       font-weight: 700;
       font-style: normal;
       font-display: swap;
     }
     @font-face {
       font-family: 'The Sans Arabic';
-      src: url('assets/fonts/BahijTheSansArabic-Bold.ttf') format('truetype');
+      src: url('/api/font-bold') format('woff2');
       font-weight: 800;
       font-style: normal;
       font-display: swap;
@@ -3218,21 +3218,7 @@
             applyLogoBase64();
           }
         })
-        .catch(function() {
-          var xhr = new XMLHttpRequest();
-          xhr.open('GET', manafeLogoPath, true);
-          xhr.responseType = 'arraybuffer';
-          xhr.onload = function() {
-            if (xhr.status === 200 && xhr.response) {
-              var bytes = new Uint8Array(xhr.response);
-              var binary = '';
-              for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-              var ext = (bytes[0] === 0x89 && bytes[1] === 0x50) ? 'png' : 'jpeg';
-              logoBase64 = 'data:image/' + ext + ';base64,' + btoa(binary);
-            }
-          };
-          xhr.send();
-        });
+        .catch(function() {});
     })();
     function applyLogoBase64() {
       if (logoBase64) {
