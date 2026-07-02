@@ -2272,7 +2272,7 @@ def _generate_single_slide(slide_data, project_data, user_id, variation_idx=0, b
 
     # MOOD BOARD — hardcoded template, NO GLM call
     if slide_type == 'mood_board':
-        mood_html = f'''<div dir="rtl" lang="ar" style="width:1280px;height:720px;position:relative;overflow:hidden;font-family:'The Sans Arabic',Arial,sans-serif;background:#FBFAF8;">
+        mood_html = f'''<div dir="rtl" lang="ar" style="width:1280px;height:720px;position:relative;overflow:hidden;font-family:'The Sans Arabic',Arial,sans-serif;background:#FBFAF8;display:flex;flex-direction:column;">
 <div style="position:relative;z-index:3;display:flex;align-items:center;justify-content:space-between;padding:14px 32px 12px;border-bottom:1px solid #EFE7DC;background:linear-gradient(180deg,rgba(255,255,255,.7),rgba(255,255,255,.0))">
 <div style="display:flex;align-items:center;gap:12px">
 <img src="##LOGO##" style="height:48px;width:auto;object-fit:contain;display:block">

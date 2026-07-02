@@ -4254,19 +4254,25 @@
         source.push({ title: 'شريحة ' + (source.length + 1), type: 'content', requires_image: false, content: '' });
       }
       if (targetCount >= 2) {
+        var existingMB = source[targetCount - 2] || {};
+        var existingClosing = source[targetCount - 1] || {};
         source[targetCount - 2] = {
           icon: '🎨',
           title: 'المود بورد',
           type: 'mood_board',
           requires_image: true,
-          content: (typeof getMoodBoardHtml === 'function') ? getMoodBoardHtml() : '<div class="ge-slide-title">المود بورد</div><div class="ge-slide-body">لوحة أنماط وألوان المشروع</div>'
+          content: existingMB.content || ((typeof getMoodBoardHtml === 'function') ? getMoodBoardHtml() : '<div class="ge-slide-title">المود بورد</div><div class="ge-slide-body">لوحة أنماط وألوان المشروع</div>'),
+          glm_html: existingMB.glm_html || null,
+          glm_content: existingMB.glm_content || null
         };
         source[targetCount - 1] = {
           icon: '🙏',
           title: 'الختام',
           type: 'closing',
           requires_image: false,
-          content: '<div class="ge-slide-title">شكراً لكم</div><div class="ge-slide-body">' + (d.projectName || '') + '</div>'
+          content: existingClosing.content || ('<div class="ge-slide-title">شكراً لكم</div><div class="ge-slide-body">' + (d.projectName || '') + '</div>'),
+          glm_html: existingClosing.glm_html || null,
+          glm_content: existingClosing.glm_content || null
         };
       }
       return source;
@@ -4855,7 +4861,7 @@
       while (imgs.length < 4) {
         imgs.push('placeholder');
       }
-      let gridHtml = '<div class="ge-moodboard-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px;height:240px">';
+      let gridHtml = '<div class="ge-moodboard-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px;flex:1;min-height:300px">';
       imgs.slice(0, 4).forEach((img, idx) => {
         if (img === 'placeholder') {
           gridHtml += `<div style="background:#f7f4ef;border:1px dashed #dcd8d0;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:12px">Image ${idx + 1}</div>`;
@@ -5139,7 +5145,7 @@
         '<div style="position:relative;z-index:3;display:flex;align-items:center;justify-content:space-between;padding:14px 32px 12px;border-bottom:1px solid #EFE7DC;background:linear-gradient(180deg,rgba(255,255,255,.7),rgba(255,255,255,.0))">' +
           // Right: Logo + slide title
           '<div style="display:flex;align-items:center;gap:12px">' +
-            '<img src="' + manafeLogoPath + '" alt="منافع" style="height:52px;width:auto;object-fit:contain;display:block" onerror="this.outerHTML=\'<div style=&quot;height:52px;display:flex;align-items:center;justify-content:center;padding:0 12px;background:#7A0C0C;color:#fff;border-radius:6px;font-size:12px;font-weight:800&quot;>منافع</div>\'" />' +
+            '<img src="' + (logoBase64 || manafeLogoPath) + '" alt="منافع" style="height:52px;width:auto;object-fit:contain;display:block" onerror="this.outerHTML=\'<div style=&quot;height:52px;display:flex;align-items:center;justify-content:center;padding:0 12px;background:#7A0C0C;color:#fff;border-radius:6px;font-size:12px;font-weight:800&quot;>منافع</div>\'" />' +
             '<div style="width:1px;height:30px;background:#EFE7DC"></div>' +
             '<div style="font-size:13px;font-weight:800;color:#7A0C0C;letter-spacing:.2px">' + (title || '') + '</div>' +
           '</div>' +
@@ -5251,10 +5257,11 @@
         ? '<div style="position:absolute;inset:0;background-image:url(' + img + ');background-size:cover;background-position:center;z-index:0"></div><div style="position:absolute;inset:0;background:linear-gradient(135deg,rgba(122,12,12,0.78),rgba(60,4,4,0.85));z-index:1"></div>'
         : '<div style="position:absolute;inset:0;background:linear-gradient(135deg,#5A0808,#7A0C0C 60%,#4A0808);z-index:0"></div>';
       var subtleLines = '<svg style="position:absolute;top:0;right:0;width:240px;height:240px;opacity:.18;z-index:2" viewBox="0 0 240 240"><g stroke="#C2A176" stroke-width="1" fill="none"><path d="M240 0 L120 120 L240 240"/><path d="M0 240 L120 120 L240 240"/><circle cx="120" cy="120" r="90"/></g></svg><svg style="position:absolute;bottom:0;left:0;width:200px;height:200px;opacity:.15;z-index:2" viewBox="0 0 200 200"><g stroke="#C2A176" stroke-width="1" fill="none"><rect x="20" y="20" width="160" height="160"/><rect x="50" y="50" width="100" height="100"/></g></svg>';
+      var logoSrc = logoBase64 || manafeLogoPath;
       return '<div style="position:relative;width:100%;height:100%;min-height:560px;overflow:hidden;border-radius:18px;font-family:\'The Sans Arabic\',Arial,sans-serif">' +
         heroBg + subtleLines +
         '<div style="position:relative;z-index:3;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px">' +
-          '<div style="margin-bottom:22px"><img src="' + manafeLogoPath + '" alt="منافع" style="height:120px;width:auto;object-fit:contain;filter:drop-shadow(0 4px 18px rgba(0,0,0,.45))" onerror="this.outerHTML=\'<div style=&quot;height:120px;display:flex;align-items:center;justify-content:center;padding:0 26px;background:rgba(255,255,255,.15);border:2px solid #C2A176;border-radius:12px;color:#fff;font-size:22px;font-weight:800&quot;>منافع الاقتصادية</div>\'"></div>' +
+          '<div style="margin-bottom:22px"><img src="' + logoSrc + '" alt="منافع" style="height:120px;width:auto;object-fit:contain;filter:drop-shadow(0 4px 18px rgba(0,0,0,.45))" onerror="this.outerHTML=\'<div style=&quot;height:120px;display:flex;align-items:center;justify-content:center;padding:0 26px;background:rgba(255,255,255,.15);border:2px solid #C2A176;border-radius:12px;color:#fff;font-size:22px;font-weight:800&quot;>منافع الاقتصادية</div>\'"></div>' +
           '<div style="color:#fff;font-size:54px;font-weight:900;line-height:1.15;margin-bottom:14px;max-width:880px;text-shadow:0 4px 20px rgba(0,0,0,.5)">' + (c.title || d.projectName || 'اسم المشروع') + '</div>' +
           '<div style="color:#C2A176;font-size:18px;font-weight:700;letter-spacing:.5px;margin-bottom:6px">' + (c.subtitle || ((d.projectType || '') + (d.city ? ' · ' + d.city : ''))) + '</div>' +
           '<div style="width:60px;height:2px;background:#C2A176;margin:14px 0"></div>' +
@@ -5450,9 +5457,10 @@
     function renderClosing(c, d) {
       var contact = (d && d.contactInfo) ? '<div style="margin-top:10px">' + d.contactInfo + '</div>' : '';
       var prepared = (d && d.preparedBy) ? '<div style="margin-top:4px">إعداد: ' + d.preparedBy + '</div>' : '';
+      var logoSrc = logoBase64 || manafeLogoPath;
       return '<div style="position:relative;width:100%;height:100%;min-height:560px;background:linear-gradient(135deg,#5A0808,#7A0C0C 50%,#4A0808);border-radius:18px;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px;font-family:\'The Sans Arabic\',Arial,sans-serif">' +
         '<svg style="position:absolute;top:0;right:0;width:300px;height:300px;opacity:.15" viewBox="0 0 300 300"><g stroke="#C2A176" stroke-width="1" fill="none"><circle cx="150" cy="150" r="120"/><circle cx="150" cy="150" r="80"/><circle cx="150" cy="150" r="40"/></g></svg>' +
-        '<div style="position:relative;z-index:2;margin-bottom:22px"><img src="' + manafeLogoPath + '" alt="منافع" style="height:110px;width:auto;filter:drop-shadow(0 4px 18px rgba(0,0,0,.45))" onerror="this.outerHTML=\'<div style=&quot;height:110px;display:flex;align-items:center;justify-content:center;padding:0 30px;background:rgba(255,255,255,.15);border:2px solid #C2A176;border-radius:10px;color:#fff;font-size:20px;font-weight:800&quot;>منافع الاقتصادية</div>\'"></div>' +
+        '<div style="position:relative;z-index:2;margin-bottom:22px"><img src="' + logoSrc + '" alt="منافع" style="height:110px;width:auto;filter:drop-shadow(0 4px 18px rgba(0,0,0,.45))" onerror="this.outerHTML=\'<div style=&quot;height:110px;display:flex;align-items:center;justify-content:center;padding:0 30px;background:rgba(255,255,255,.15);border:2px solid #C2A176;border-radius:10px;color:#fff;font-size:20px;font-weight:800&quot;>منافع الاقتصادية</div>\'"></div>' +
         '<div style="position:relative;z-index:2;color:#fff;font-size:72px;font-weight:900;line-height:1.1;margin-bottom:14px;text-shadow:0 4px 20px rgba(0,0,0,.4)">' + (c.title || 'شكراً لكم') + '</div>' +
         '<div style="position:relative;z-index:2;color:#C2A176;font-size:20px;font-weight:700;margin-bottom:18px">' + (c.subtitle || (d && d.projectName) || '') + '</div>' +
         '<div style="position:relative;z-index:2;width:60px;height:2px;background:#C2A176;margin-bottom:18px"></div>' +
