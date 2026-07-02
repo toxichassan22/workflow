@@ -1,0 +1,21 @@
+# Requires Python >=3.10
+flask>=3.0.0
+openai>=1.12.0
+replicate>=0.25.0
+python-pptx>=0.6.21
+python-dotenv>=1.0.0
+Pillow>=10.0.0
+pydantic>=2.5.0
+requests>=2.31.0
+tenacity>=8.2.0
+PyYAML>=6.0
+# Plus system LibreOffice for PDF export (soffice --headless --convert-to pdf)
+# Install on Windows: https://www.libreoffice.org/download/
+# Install on Ubuntu: sudo apt install libreoffice
+PyMuPDF>=1.23.0
+python-docx>=1.1.0
+google-genai
+reportlab>=4.0.0
+arabic_reshaper>=3.0.0
+python-bidi>=0.6.0
+playwright>=1.40.0

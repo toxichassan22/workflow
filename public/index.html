@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>منافع الاقتصادية — مولّد العروض التقديمية</title>
+  <style>
+    @font-face {
+      font-family: 'The Sans Arabic';
+      src: url('../assets/fonts/TheSansArabic-Light.otf') format('opentype');
+      font-weight: 300;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'The Sans Arabic';
+      src: url('../assets/fonts/TheSansArabic-Light.otf') format('opentype');
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'The Sans Arabic';
+      src: url('../assets/fonts/TheSansArabic-Light.otf') format('opentype');
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'The Sans Arabic';
+      src: url('../assets/fonts/TheSansArabic-Light.otf') format('opentype');
+      font-weight: 800;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    :root {
+      --burgundy: #8B1A1A;
+      --burgundy-dark: #6B1010;
+      --burgundy-light: #A52A2A;
+      --gold: #C4A35A;
+      --gold-light: #D4B76A;
+      --white: #FFFFFF;
+      --off-white: #F8F6F3;
+      --gray-light: #E8E4E0;
+      --gray: #999;
+      --gray-dark: #555;
+      --shadow: 0 8px 32px rgba(139,26,26,0.15);
+      --shadow-lg: 0 16px 48px rgba(139,26,26,0.2);
+    }
+
+    body {
+      font-family: 'The Sans Arabic', sans-serif;
+      background: var(--off-white);
+      min-height: 100vh;
+      color: #333;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, var(--burgundy-dark) 0%, var(--burgundy) 50%, var(--burgundy-light) 100%);
+      color: white;
+      padding: 0;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .header::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(ellipse at center, rgba(196,163,90,0.1) 0%, transparent 70%);
+      animation: shimmer 8s ease-in-out infinite;
+    }
+
+    @keyframes shimmer {
+      0%, 100% { transform: translateX(-30%) translateY(-30%); }
+      50% { transform: translateX(30%) translateY(30%); }
+    }
+
+    .header-content {
+      position: relative;
+      z-index: 1;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 30px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .logo-img {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      border: 3px solid var(--gold);
+      object-fit: cover;
+    }
+
+    .header-text h1 {
+      font-size: 28px;
+      font-weight: 900;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .header-text p {
+      font-size: 14px;
+      opacity: 0.85;
+      margin-top: 4px;
+    }
+
+    .header-badge {
+      background: rgba(196,163,90,0.2);
+      border: 1px solid var(--gold);
+      color: var(--gold-light);
+      padding: 8px 20px;
+      border-radius: 50px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    /* Main Content */
+    .main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+    }
+
+    /* Cards */
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(196,163,90,0.15);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .card-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--burgundy);
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--gray-light);
+    }
+
+    .card-title .icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--burgundy), var(--burgundy-light));
+      color: white;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    /* Form */
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--gray-dark);
+      margin-bottom: 8px;
+    }
+
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      padding: 14px 16px;
+      border: 2px solid var(--gray-light);
+      border-radius: 12px;
+      font-family: 'The Sans Arabic', sans-serif;
+      font-size: 15px;
+      transition: border-color 0.3s, box-shadow 0.3s;
+      background: var(--off-white);
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: var(--burgundy);
+      box-shadow: 0 0 0 4px rgba(139,26,26,0.1);
+      background: white;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 120px;
+    }
+
+    .btn-generate {
+      width: 100%;
+      padding: 16px;
+      background: linear-gradient(135deg, var(--burgundy) 0%, var(--burgundy-light) 100%);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-family: 'The Sans Arabic', sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-generate:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(139,26,26,0.35);
+    }
+
+    .btn-generate:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .btn-generate:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+
+    .btn-generate .spinner {
+      display: none;
+      width: 22px;
+      height: 22px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .btn-generate.loading .spinner { display: block; }
+    .btn-generate.loading .btn-text { display: none; }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Status */
+    .status-box {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      display: none;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .status-box.success {
+      display: block;
+      background: #f0fdf4;
+      border: 1px solid #86efac;
+      color: #166534;
+    }
+
+    .status-box.error {
+      display: block;
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      color: #991b1b;
+    }
+
+    .status-box.loading {
+      display: block;
+      background: #eff6ff;
+      border: 1px solid #93c5fd;
+      color: #1e40af;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Progress */
+    .progress-bar {
+      display: none;
+      margin-top: 16px;
+      height: 6px;
+      background: var(--gray-light);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-bar.active { display: block; }
+
+    .progress-bar .fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--burgundy), var(--gold));
+      border-radius: 3px;
+      animation: progress 8s ease-in-out infinite;
+    }
+
+    @keyframes progress {
+      0% { width: 5%; }
+      50% { width: 70%; }
+      100% { width: 90%; }
+    }
+
+    /* Files List */
+    .files-list {
+      list-style: none;
+    }
+
+    .files-list li {
+      padding: 14px 16px;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      background: var(--off-white);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: background 0.2s;
+      border: 1px solid transparent;
+    }
+
+    .files-list li:hover {
+      background: #f0ebe5;
+      border-color: var(--gold);
+    }
+
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex: 1;
+    }
+
+    .file-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--burgundy), var(--burgundy-light));
+      color: white;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .file-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: #333;
+      word-break: break-all;
+    }
+
+    .file-date {
+      font-size: 12px;
+      color: var(--gray);
+      margin-top: 2px;
+    }
+
+    .btn-download {
+      padding: 8px 20px;
+      background: var(--gold);
+      color: var(--burgundy-dark);
+      border: none;
+      border-radius: 8px;
+      font-family: 'The Sans Arabic', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-download:hover {
+      background: var(--gold-light);
+      transform: translateY(-1px);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--gray);
+    }
+
+    .empty-state .icon-big {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 30px;
+      color: var(--gray);
+      font-size: 13px;
+    }
+
+    .footer a {
+      color: var(--burgundy);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .main {
+        grid-template-columns: 1fr;
+        padding: 20px;
+      }
+      .header-content {
+        flex-direction: column;
+        text-align: center;
+        gap: 16px;
+      }
+      .header-right {
+        flex-direction: column;
+      }
+    }
+
+    /* Full-width card */
+    .card-full {
+      grid-column: 1 / -1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-content">
+      <div class="header-right">
+        <img src="manafe-logo.png" alt="منافع" class="logo-img" onerror="this.style.display='none'">
+        <div class="header-text">
+          <h1>🏢 منافع الاقتصادية</h1>
+          <p>نظام توليد العروض التقديمية بالذكاء الاصطناعي</p>
+        </div>
+      </div>
+      <div class="header-badge">🤖 GLM 5.1 + Gemini Flash</div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main">
+
+    <!-- Generate Card -->
+    <div class="card">
+      <div class="card-title">
+        <div class="icon">✨</div>
+        توليد عرض تقديمي جديد
+      </div>
+
+      <form id="generateForm" onsubmit="return generate(event)">
+        <div class="form-group">
+          <label>📌 عنوان الموضوع</label>
+          <input type="text" id="topic" placeholder='مثال: عرض سكني فاخر — مشروع تركي كلين' required>
+        </div>
+
+        <button type="submit" class="btn-generate" id="btnGenerate">
+          <div class="spinner"></div>
+          <span class="btn-text">🚀 توليد العرض التقديمي</span>
+        </button>
+
+        <div class="progress-bar" id="progressBar">
+          <div class="fill"></div>
+        </div>
+
+        <div class="status-box" id="statusBox"></div>
+      </form>
+    </div>
+
+    <!-- Files Card -->
+    <div class="card">
+      <div class="card-title">
+        <div class="icon">📁</div>
+        العروض المولّدة
+      </div>
+
+      <ul class="files-list" id="filesList">
+        <li class="empty-state">
+          <div>
+            <div class="icon-big">📂</div>
+            <div>لا توجد عروض بعد</div>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Project Data Card -->
+    <div class="card card-full">
+      <div class="card-title">
+        <div class="icon">📊</div>
+        بيانات المشروع الحالية
+      </div>
+      <div id="projectDataView" style="font-size:14px; color:#555; line-height:2;">جاري التحميل...</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    منافع经济效益 &copy; 2026 — صُنع بـ ❤️ بواسطة GLM 5.1 & Gemini Flash
+  </div>
+
+  <script>
+    // Load files on start
+    loadFiles();
+    loadProjectData();
+
+    function loadFiles() {
+      fetch('/api/files')
+        .then(function(r) { return r.json(); })
+        .then(function(files) {
+          var list = document.getElementById('filesList');
+          if (files.length === 0) {
+            list.innerHTML = '<li class="empty-state"><div><div class="icon-big">📂</div><div>لا توجد عروض بعد</div></div></li>';
+            return;
+          }
+          list.innerHTML = files.map(function(f) {
+            var date = new Date(f.time).toLocaleDateString('ar-EG', { 
+              year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+            });
+            var sizeMB = (f.size / 1024 / 1024).toFixed(2);
+            return '<li>' +
+              '<div class="file-info">' +
+                '<div class="file-icon">PPT</div>' +
+                '<div>' +
+                  '<div class="file-name">' + f.name + '</div>' +
+                  '<div class="file-date">' + date + ' — ' + sizeMB + ' MB</div>' +
+                '</div>' +
+              '</div>' +
+              '<a href="' + f.url + '" class="btn-download" download>📥 تحميل</a>' +
+            '</li>';
+          }).join('');
+        })
+        .catch(function(err) {
+          console.error('Failed to load files:', err);
+        });
+    }
+
+    function loadProjectData() {
+      fetch('/api/project-data')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (!data) {
+            document.getElementById('projectDataView').innerHTML = 'لا توجد بيانات مشروع';
+            return;
+          }
+          var html = '<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:16px;">';
+          
+          var fields = [
+            { label: 'اسم المشروع', value: data.projectName },
+            { label: 'الشركة', value: data.company },
+            { label: 'العميل', value: data.client },
+            { label: 'الموقع', value: data.location },
+            { label: 'نوع المشروع', value: data.projectType },
+            { label: 'إجمالي الوحدات', value: data.totalUnits },
+            { label: 'مساحة الأرض', value: data.landArea },
+            { label: 'المساحة المبنية', value: data.builtArea },
+            { label: 'تاريخ التسليم', value: data.deliveryDate },
+          ];
+
+          fields.forEach(function(f) {
+            if (f.value) {
+              html += '<div style="background:var(--off-white); padding:12px; border-radius:10px; border:1px solid var(--gray-light);">' +
+                '<div style="font-size:12px; color:var(--gray); margin-bottom:4px;">' + f.label + '</div>' +
+                '<div style="font-weight:700; color:var(--burgundy);">' + f.value + '</div>' +
+              '</div>';
+            }
+          });
+
+          if (data.unitTypes && data.unitTypes.length) {
+            html += '<div style="grid-column:1/-1; background:var(--off-white); padding:16px; border-radius:10px; border:1px solid var(--gray-light);">' +
+              '<div style="font-weight:700; color:var(--burgundy); margin-bottom:10px;">🏠 أنواع الوحدات</div>';
+            html += '<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:8px;">';
+            data.unitTypes.forEach(function(u) {
+              html += '<div style="background:white; padding:10px; border-radius:8px; text-align:center;">' +
+                '<div style="font-weight:700; font-size:13px;">' + u.type + '</div>' +
+                '<div style="font-size:12px; color:var(--gray);">' + u.area + ' — ' + u.price + ' ر.س</div>' +
+                '<div style="font-size:11px; color:var(--gold); font-weight:600;">' + u.count + ' وحدة</div>' +
+              '</div>';
+            });
+            html += '</div></div>';
+          }
+
+          if (data.highlights && data.highlights.length) {
+            html += '<div style="grid-column:1/-1; background:var(--off-white); padding:16px; border-radius:10px; border:1px solid var(--gray-light);">' +
+              '<div style="font-weight:700; color:var(--burgundy); margin-bottom:10px;">⭐ مميزات المشروع</div>' +
+              '<div style="display:flex; flex-wrap:wrap; gap:8px;">';
+            data.highlights.forEach(function(h) {
+              html += '<span style="background:white; padding:6px 14px; border-radius:20px; font-size:13px; border:1px solid var(--gray-light);">✨ ' + h + '</span>';
+            });
+            html += '</div></div>';
+          }
+
+          html += '</div>';
+          document.getElementById('projectDataView').innerHTML = html;
+        });
+    }
+
+    function generate(e) {
+      e.preventDefault();
+      
+      var topic = document.getElementById('topic').value.trim();
+      if (!topic) return false;
+
+      var btn = document.getElementById('btnGenerate');
+      var status = document.getElementById('statusBox');
+      var progress = document.getElementById('progressBar');
+
+      btn.classList.add('loading');
+      btn.disabled = true;
+      progress.classList.add('active');
+      status.className = 'status-box loading';
+      status.innerHTML = '⏳ جاري التوليد... قد يستغرق هذا حوالي 2-3 دقائق. يتم توليد العرض بواسطة GLM 5.1 ثم إنشاء الصور بواسطة Gemini Flash.';
+
+      fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic: topic })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+        progress.classList.remove('active');
+
+        if (data.success) {
+          status.className = 'status-box success';
+          if (data.file) {
+            status.innerHTML = '✅ تم التوليد بنجاح! <br><a href="' + data.downloadUrl + '" download style="color:var(--burgundy);font-weight:700;margin-top:8px;display:inline-block;">📥 تحميل العرض التقديمي</a>';
+          } else {
+            status.innerHTML = '✅ تم التوليد بنجاح!';
+          }
+          loadFiles();
+        } else {
+          status.className = 'status-box error';
+          status.innerHTML = '❌ خطأ: ' + (data.error || 'حدث خطأ غير معروف');
+        }
+      })
+      .catch(function(err) {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+        progress.classList.remove('active');
+        status.className = 'status-box error';
+        status.innerHTML = '❌ خطأ في الاتصال: ' + err.message;
+      });
+
+      return false;
+    }
+  </script>
+
+</body>
+</html>

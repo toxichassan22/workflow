@@ -1,0 +1,83 @@
+company:
+  name_ar: "شركة منافع الاقتصادية للعقار"
+  name_en: "Manafe Economic Co. for Real Estate"
+  tagline_ar: "دراسة جدوى"
+  tagline_en: "Feasibility Study"
+
+colors:
+  primary: "#670D0C"        # Corporate Burgundy / عنابي شركة
+  secondary: "#A7A9AC"      # Corporate Silver / فضي شركة
+  accent: "#C2A176"         # Corporate Gold / ذهبي شركة
+  background: "#F8FAFC"     # Soft Light Gray / خلفية رمادية فاتحة ناعمة
+  text_dark: "#0F172A"      # Slate 900
+  text_light: "#FFFFFF"     # White
+  text_muted: "#64748B"     # Slate 500
+  chart_1: "#670D0C"
+  chart_2: "#A7A9AC"
+  chart_3: "#C2A176"
+  chart_4: "#334155"
+
+fonts:
+  heading: "The Sans Arabic"
+  body: "The Sans Arabic"
+  english: "The Sans Arabic"
+
+sizes:
+  title: 30
+  heading: 20
+  subheading: 16
+  body: 13
+  caption: 9
+
+slide:
+  width_inches: 13.333
+  height_inches: 7.5
+  background: "#FFFFFF"
+  text_dark: "#32373C"
+  text_muted: "#757575"
+
+footer:
+  text_ar: "دراسة جدوى - شركة منافع الاقتصادية للعقار"
+  text_en: "Feasibility Study - Manafe Economic Co."
+
+# ── UI Design Tokens ──────────────────────────────────────────────────
+# These drive the Streamlit web app aesthetic. Edit with care.
+ui:
+  surface: "#FFFFFF"        # Crisp white surface
+  surface_raised: "#FFFFFF" # Crisp white raised surface
+  surface_inset: "#F1F5F9"  # Light gray inset
+  text_primary: "#0F172A"
+  text_secondary: "#334155"
+  text_tertiary: "#64748B"
+  border: "#E2E8F0"         # Slate-tinted border
+  border_strong: "#CBD5E1"  # Stronger border
+  success: "#10B981"
+  warning: "#F59E0B"
+  error: "#EF4444"
+
+  space_1: 4
+  space_2: 8
+  space_3: 12
+  space_4: 16
+  space_5: 24
+  space_6: 32
+  space_7: 48
+  space_8: 64
+
+  radius_sm: "6px"
+  radius_md: "8px"
+  radius_lg: "12px"
+  radius_xl: "16px"
+  radius_full: "999px"
+
+  shadow_sm: "0 1px 2px 0 rgba(0,0,0,0.20)"
+  shadow_md: "0 4px 6px -1px rgba(0,0,0,0.20), 0 2px 4px -1px rgba(0,0,0,0.10)"
+  shadow_lg: "0 10px 15px -3px rgba(0,0,0,0.30), 0 4px 6px -2px rgba(0,0,0,0.20)"
+
+  bp_mobile: 640
+  bp_tablet: 768
+  bp_desktop: 1024
+  bp_wide: 1280
+
+  max_content_width: "1280px"
+  page_padding: "24px"

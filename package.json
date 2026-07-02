@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "express": "^5.2.1",
+    "playwright": "^1.61.0",
+    "pptxgenjs": "^4.0.1"
+  }
+}

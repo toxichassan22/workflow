@@ -1,0 +1,13 @@
+[build]
+  publish = "dist"
+
+[[headers]]
+  for = "/slides/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000"
+
+[[headers]]
+  for = "/download/*"
+  [headers.values]
+    Content-Disposition = "attachment; filename=\"proposal.pptx\""
+    Cache-Control = "public, max-age=86400"
