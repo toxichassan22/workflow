@@ -2285,7 +2285,7 @@ def _generate_single_slide(slide_data, project_data, user_id, variation_idx=0, b
 </div>
 </div>
 <div style="position:relative;z-index:2;flex:1;padding:18px 32px 8px;display:flex;flex-direction:column;min-height:0">
-<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:14px;flex:1">
+<div style="display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:1fr 1fr;gap:14px;margin-top:14px;flex:1">
 <div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(0,0,0,0.08);background:#f7f4ef">
 <img src="##MOODBOARD_IMAGE_1##" style="width:100%;height:100%;object-fit:cover;display:block">
 <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,rgba(103,13,12,0.88),rgba(103,13,12,0.6));padding:8px 12px;color:#fff;font-size:12px;font-weight:700;text-align:center">Exterior Hero</div>
