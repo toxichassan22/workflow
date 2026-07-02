@@ -3210,19 +3210,29 @@
     const manafeLogoPath = '/manafe-logo.png';
     let logoBase64 = '';
     (function preloadLogo() {
-      var xhr = new XMLHttpRequest();
-      xhr.open('GET', manafeLogoPath, true);
-      xhr.responseType = 'arraybuffer';
-      xhr.onload = function() {
-        if (xhr.status === 200 && xhr.response) {
-          var bytes = new Uint8Array(xhr.response);
-          var binary = '';
-          for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-          var ext = (bytes[0] === 0x89 && bytes[1] === 0x50) ? 'png' : 'jpeg';
-          logoBase64 = 'data:image/' + ext + ';base64,' + btoa(binary);
-        }
-      };
-      xhr.send();
+      fetch('/api/logo')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d && d.logo) {
+            logoBase64 = d.logo;
+            applyLogoBase64();
+          }
+        })
+        .catch(function() {
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', manafeLogoPath, true);
+          xhr.responseType = 'arraybuffer';
+          xhr.onload = function() {
+            if (xhr.status === 200 && xhr.response) {
+              var bytes = new Uint8Array(xhr.response);
+              var binary = '';
+              for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+              var ext = (bytes[0] === 0x89 && bytes[1] === 0x50) ? 'png' : 'jpeg';
+              logoBase64 = 'data:image/' + ext + ';base64,' + btoa(binary);
+            }
+          };
+          xhr.send();
+        });
     })();
     function applyLogoBase64() {
       if (logoBase64) {
@@ -5195,7 +5205,7 @@
       var header =
         '<div style="position:relative;z-index:3;display:flex;align-items:center;justify-content:space-between;padding:14px 32px 12px;border-bottom:1px solid #EFE7DC;background:linear-gradient(180deg,rgba(255,255,255,.7),rgba(255,255,255,.0))">' +
           '<div style="display:flex;align-items:center;gap:12px">' +
-            '<img src="' + manafeLogoPath + '" alt="منافع" style="height:52px;width:auto;object-fit:contain;display:block" />' +
+            '<img src="' + (logoBase64 || manafeLogoPath) + '" alt="منافع" style="height:52px;width:auto;object-fit:contain;display:block" />' +
             '<div style="width:1px;height:30px;background:#EFE7DC"></div>' +
             '<div style="font-size:14px;font-weight:800;color:#7A0C0C;letter-spacing:.3px">' + moodTitle + '</div>' +
           '</div>' +

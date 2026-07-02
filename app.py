@@ -3593,6 +3593,15 @@ def api_pdf_design_stream():
 
 
 # ════════════════════════════════════════════════════════════════════
+# LOGO ENDPOINT — serves the company logo as base64 data URI
+# ════════════════════════════════════════════════════════════════════
+
+@app.route('/api/logo')
+def api_logo():
+    from config.logo_data import LOGO_B64
+    return jsonify({'logo': LOGO_B64})
+
+# ════════════════════════════════════════════════════════════════════
 # PDF GENERATION — renders PDF from (pre-)designed slides
 # ════════════════════════════════════════════════════════════════════
 
@@ -3613,6 +3622,7 @@ def api_export_pdf():
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         from config.fonts_data import FONT_LIGHT_B64, FONT_BOLD_B64
+        from config.logo_data import LOGO_B64
         font_faces = ''
         for family, b64, mime, css_format, css_weight in [
             ('TheSansArabic-Light', FONT_LIGHT_B64, 'font/opentype', 'opentype', 'normal'),
@@ -3620,6 +3630,10 @@ def api_export_pdf():
         ]:
             font_faces += f"@font-face {{ font-family:'{family}'; src:url('data:{mime};base64,{b64}') format('{css_format}'); font-weight:{css_weight}; font-style:normal; font-display:swap; }}\n"
             font_faces += f"@font-face {{ font-family:'The Sans Arabic'; src:url('data:{mime};base64,{b64}') format('{css_format}'); font-weight:{css_weight}; font-style:normal; font-display:swap; }}\n"
+        
+        logo_tag = f'<img src="{LOGO_B64}" style="height:48px;width:auto;object-fit:contain;display:block">'
+        slides_html = slides_html.replace('##LOGO##', logo_tag)
+        slides_html = slides_html.replace('/manafe-logo.png', LOGO_B64)
         
         full_html = f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
