@@ -3909,7 +3909,7 @@
         (async function () {
           try {
             var controller = new AbortController();
-            var timeoutId = setTimeout(function () { controller.abort(); }, 60000);
+            var timeoutId = setTimeout(function () { controller.abort(); }, 180000);
             var res = await fetch('/api/generate-content', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },

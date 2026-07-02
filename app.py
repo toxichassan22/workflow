@@ -3506,12 +3506,12 @@ def api_export_pdf():
         from config.fonts_data import FONT_LIGHT_B64, FONT_BOLD_B64
         from config.logo_data import LOGO_B64
         font_faces = ''
-        for family, b64, mime, css_format, css_weight in [
-            ('TheSansArabic-Light', FONT_LIGHT_B64, 'font/opentype', 'opentype', 'normal'),
-            ('TheSansArabic-Bold', FONT_BOLD_B64, 'font/truetype', 'truetype', 'bold'),
-        ]:
-            font_faces += f"@font-face {{ font-family:'{family}'; src:url('data:{mime};base64,{b64}') format('{css_format}'); font-weight:{css_weight}; font-style:normal; font-display:swap; }}\n"
-            font_faces += f"@font-face {{ font-family:'The Sans Arabic'; src:url('data:{mime};base64,{b64}') format('{css_format}'); font-weight:{css_weight}; font-style:normal; font-display:swap; }}\n"
+        # Light font covers weights 300-600
+        for w in [300, 400, 500, 600]:
+            font_faces += f"@font-face {{ font-family:'The Sans Arabic'; src:url('data:font/opentype;base64,{FONT_LIGHT_B64}') format('opentype'); font-weight:{w}; font-style:normal; font-display:swap; }}\n"
+        # Bold font covers weights 700-900
+        for w in [700, 800, 900]:
+            font_faces += f"@font-face {{ font-family:'The Sans Arabic'; src:url('data:font/truetype;base64,{FONT_BOLD_B64}') format('truetype'); font-weight:{w}; font-style:normal; font-display:swap; }}\n"
         
         logo_tag = f'<img src="{LOGO_B64}" style="height:48px;width:auto;object-fit:contain;display:block">'
         slides_html = slides_html.replace('##LOGO##', logo_tag)
@@ -3523,7 +3523,7 @@ def api_export_pdf():
 @page {{ size: 1280px 720px; margin: 0; }}
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 {font_faces}
-.slide {{ width: 1280px; height: 720px; direction: rtl; font-family: 'The Sans Arabic', 'TheSansArabic-Light', 'TheSansArabic-Bold', Tahoma, Arial, sans-serif; position: relative; overflow: hidden; page-break-after: always; page-break-inside: avoid; }}
+.slide {{ width: 1280px; height: 720px; direction: rtl; font-family: 'The Sans Arabic', Tahoma, Arial, sans-serif; position: relative; overflow: hidden; page-break-after: always; page-break-inside: avoid; }}
 .slide:last-child {{ page-break-after: auto; }}
 img {{ max-width: 100%; max-height: 100%; object-fit: cover; }}
 </style></head>
@@ -3534,10 +3534,11 @@ img {{ max-width: 100%; max-height: 100%; object-fit: cover; }}
         
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            browser = p.chromium.launch(args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'])
+            browser = p.chromium.launch(args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'])
             page = browser.new_page()
             page.set_content(full_html, wait_until='load')
-            page.wait_for_timeout(500)
+            page.evaluate('document.fonts.ready')
+            page.wait_for_timeout(1000)
             page.pdf(
                 path=output_path,
                 width='1280px',
