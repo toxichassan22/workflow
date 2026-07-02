@@ -2234,7 +2234,7 @@ def _generate_single_slide(slide_data, project_data, user_id, variation_idx=0, b
 <img src="##IMAGE_COVER##" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;">
 <div style="position:absolute;top:0;left:0;width:100%;height:100%;background:linear-gradient(135deg,rgba(26,5,5,0.7) 0%,rgba(103,13,12,0.5) 100%);"></div>
 <svg style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0.06;z-index:1" viewBox="0 0 1280 720"><line x1="0" y1="0" x2="1280" y2="720" stroke="#C2A176" stroke-width="1"/><line x1="1280" y1="0" x2="0" y2="720" stroke="#C2A176" stroke-width="1"/><rect x="100" y="100" width="1080" height="520" fill="none" stroke="#C2A176" stroke-width="0.5"/></svg>
-<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;width:80%;z-index:2;">
+<div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;z-index:2;">
 <img src="##LOGO##" style="width:200px;height:auto;margin-bottom:28px;">
 <h1 style="font-size:52px;font-weight:900;color:#FFFFFF;margin:0 0 16px 0;letter-spacing:1px;">{project_name}</h1>
 <div style="width:80px;height:3px;background:#C2A176;margin:0 auto 20px;"></div>
@@ -2252,7 +2252,7 @@ def _generate_single_slide(slide_data, project_data, user_id, variation_idx=0, b
 <img src="##IMAGE_COVER##" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;opacity:0.25;">
 <div style="position:absolute;top:0;left:0;width:100%;height:100%;background:linear-gradient(180deg,rgba(103,13,12,0.92) 0%,rgba(80,10,10,0.95) 100%);"></div>
 <svg style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0.05;z-index:1" viewBox="0 0 1280 720"><line x1="0" y1="180" x2="1280" y2="180" stroke="#C2A176" stroke-width="0.5"/><line x1="0" y1="540" x2="1280" y2="540" stroke="#C2A176" stroke-width="0.5"/><rect x="80" y="80" width="1120" height="560" fill="none" stroke="#C2A176" stroke-width="0.5"/></svg>
-<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;width:80%;z-index:2;">
+<div style="position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;z-index:2;">
 <div style="background:rgba(255,255,255,0.95);border-radius:20px;padding:24px 40px;display:inline-block;margin-bottom:30px;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
 <img src="##LOGO##" style="width:180px;height:auto;">
 </div>
