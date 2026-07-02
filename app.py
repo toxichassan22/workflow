@@ -2270,6 +2270,55 @@ def _generate_single_slide(slide_data, project_data, user_id, variation_idx=0, b
 </div>'''
         return {'idx': idx, 'success': True, 'html': closing_html, 'title': title}
 
+    # MOOD BOARD — hardcoded template, NO GLM call
+    if slide_type == 'mood_board':
+        mood_html = f'''<div dir="rtl" lang="ar" style="width:1280px;height:720px;position:relative;overflow:hidden;font-family:'The Sans Arabic',Arial,sans-serif;background:#FBFAF8;">
+<div style="position:relative;z-index:3;display:flex;align-items:center;justify-content:space-between;padding:14px 32px 12px;border-bottom:1px solid #EFE7DC;background:linear-gradient(180deg,rgba(255,255,255,.7),rgba(255,255,255,.0))">
+<div style="display:flex;align-items:center;gap:12px">
+<img src="##LOGO##" style="height:48px;width:auto;object-fit:contain;display:block">
+<div style="width:1px;height:28px;background:#EFE7DC"></div>
+<div style="font-size:14px;font-weight:800;color:#7A0C0C;letter-spacing:.3px">MOOD BOARD</div>
+</div>
+<div style="display:flex;align-items:center;gap:8px">
+<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:.5px">Visual Inspiration</div>
+<div style="width:8px;height:8px;border-radius:50%;background:#C2A176"></div>
+</div>
+</div>
+<div style="position:relative;z-index:2;flex:1;padding:18px 32px 8px;display:flex;flex-direction:column;min-height:0">
+<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:14px;flex:1">
+<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(0,0,0,0.08);background:#f7f4ef">
+<img src="##MOODBOARD_IMAGE_1##" style="width:100%;height:100%;object-fit:cover;display:block">
+<div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,rgba(103,13,12,0.88),rgba(103,13,12,0.6));padding:8px 12px;color:#fff;font-size:12px;font-weight:700;text-align:center">Exterior Hero</div>
+</div>
+<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(0,0,0,0.08);background:#f7f4ef">
+<img src="##MOODBOARD_IMAGE_2##" style="width:100%;height:100%;object-fit:cover;display:block">
+<div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,rgba(103,13,12,0.88),rgba(103,13,12,0.6));padding:8px 12px;color:#fff;font-size:12px;font-weight:700;text-align:center">Right Facade</div>
+</div>
+<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(0,0,0,0.08);background:#f7f4ef">
+<img src="##MOODBOARD_IMAGE_3##" style="width:100%;height:100%;object-fit:cover;display:block">
+<div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,rgba(103,13,12,0.88),rgba(103,13,12,0.6));padding:8px 12px;color:#fff;font-size:12px;font-weight:700;text-align:center">Aerial View</div>
+</div>
+<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(0,0,0,0.08);background:#f7f4ef">
+<img src="##MOODBOARD_IMAGE_4##" style="width:100%;height:100%;object-fit:cover;display:block">
+<div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,rgba(103,13,12,0.88),rgba(103,13,12,0.6));padding:8px 12px;color:#fff;font-size:12px;font-weight:700;text-align:center">Left Facade</div>
+</div>
+</div>
+<div style="margin-top:10px;display:flex;gap:14px;justify-content:center;font-size:11px;color:#7A0C0C;font-weight:bold">
+<span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#670D0C;border-radius:3px;display:inline-block"></span> Burgundy</span>
+<span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#C2A176;border-radius:3px;display:inline-block"></span> Gold</span>
+<span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#F5F0EE;border-radius:3px;display:inline-block;border:1px solid #ccc"></span> Beige</span>
+</div>
+</div>
+<div style="position:relative;z-index:3;display:flex;align-items:center;justify-content:space-between;padding:10px 32px;border-top:1px solid #EFE7DC;background:linear-gradient(0deg,rgba(255,255,255,.7),rgba(255,255,255,.0))">
+<div style="display:flex;align-items:center;gap:12px">
+<div style="width:28px;height:28px;border-radius:50%;background:#7A0C0C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900">{idx+1}</div>
+</div>
+<div style="font-size:12px;color:#7A0C0C;font-weight:800">{project_name}</div>
+<div style="font-size:11px;color:#888;font-weight:600">منافع الاقتصادية للعقار</div>
+</div>
+</div>'''
+        return {'idx': idx, 'success': True, 'html': mood_html, 'title': title}
+
     try:
         slide_list = f"{idx+1}. {title}"
         if bullets:
