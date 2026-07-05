@@ -526,7 +526,8 @@ def api_generate():
         html = extract_html_from_glm(response)
         html = validate_html(html)
 
-        print(f"[GENERATE] Final HTML: {len(html)} chars, {html.count('class=\"slide\"')} slides")
+        slide_count = html.count('class="slide"')
+        print(f"[GENERATE] Final HTML: {len(html)} chars, {slide_count} slides")
         return jsonify({'success': True, 'html': html})
 
     except Exception as e:
