@@ -19,3 +19,4 @@ reportlab>=4.0.0
 arabic_reshaper>=3.0.0
 python-bidi>=0.6.0
 playwright>=1.40.0
+gunicorn>=21.0.0

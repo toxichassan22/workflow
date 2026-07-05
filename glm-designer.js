@@ -14,7 +14,7 @@ var OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 var GLM_MODEL = 'glm-5.1';
 var IMAGE_MODEL = 'google/gemini-3.1-flash-image-preview';
 var OUTPUT_DIR = path.join(__dirname, 'outputs');
-var LOGO_PATH = path.join(__dirname, 'manafe-logo.png');
+var LOGO_PATH = path.join(__dirname, 'assets', 'logo.png');
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
@@ -43,7 +43,7 @@ Examples:
 - 4 slides: COVER + 2 CONTENT + CLOSING
 - 5 slides: COVER + 3 CONTENT + CLOSING
 - 10 slides: COVER + 8 CONTENT + CLOSING
-- 16 slides: COVER + TOC + 13 CONTENT + CLOSING
+- 14 slides: COVER + 12 CONTENT + CLOSING
 
 RULE: NEVER add content to slide 1 or slide N. They are ONLY cover and closing.
 

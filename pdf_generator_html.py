@@ -8,24 +8,29 @@ import re
 import base64
 from pathlib import Path
 from config.settings import PROJECT_ROOT
-from config.fonts_data import FONT_LIGHT_B64, FONT_BOLD_B64
 
 PAGE_W_PT = 960
 PAGE_H_PT = 540
 PAGE_W_IN = 13.333
 PAGE_H_IN = 7.5
 
+FONT_DIR = str(PROJECT_ROOT / 'assets' / 'fonts')
+
 
 def _font_face_css():
     faces = []
-    for name, b64, mime, fmt in [
-        ('The Sans Arabic', FONT_LIGHT_B64, 'font/opentype', 'opentype'),
-        ('The Sans Arabic Bold', FONT_BOLD_B64, 'font/truetype', 'truetype'),
-    ]:
-        faces.append(f"""
+    font_files = {
+        'TheSansArabic-Light': ('TheSansArabic-Light', 'TheSansArabic-Light.otf'),
+        'TheSansArabic-Bold': ('TheSansArabic-Bold', 'BahijTheSansArabic-Bold.ttf'),
+    }
+    for family, (name, filename) in font_files.items():
+        fp = os.path.join(FONT_DIR, filename)
+        if os.path.exists(fp):
+            uri = Path(fp).as_uri()
+            faces.append(f"""
 @font-face {{
     font-family: '{name}';
-    src: url('data:{mime};base64,{b64}') format('{fmt}');
+    src: url('{uri}') format('truetype');
     font-weight: normal;
     font-style: normal;
 }}""")
@@ -49,7 +54,7 @@ def _base_css():
     height: 720px;
     direction: rtl;
     unicode-bidi: bidi-override;
-    font-family: 'The Sans Arabic', 'The Sans Arabic Bold', Tahoma, Arial, sans-serif;
+    font-family: 'TheSansArabic-Light', 'TheSansArabic-Bold', Tahoma, Arial, sans-serif;
     position: relative;
     overflow: hidden;
     page-break-after: always;
@@ -313,6 +318,20 @@ def _decorations_html(d):
     for i, el in enumerate(elements):
         parts.append(f'<div class="deco-{i}"></div>')
     return '\n'.join(parts)
+
+
+def _get_logo_data_uri():
+    try:
+        from pathlib import Path
+        project_root = Path(__file__).resolve().parent
+        logo_path = os.path.join(str(project_root), 'assets', 'logo.png')
+        if os.path.exists(logo_path):
+            with open(logo_path, 'rb') as f:
+                encoded = base64.b64encode(f.read()).decode('utf-8')
+            return f"data:image/png;base64,{encoded}"
+    except Exception as e:
+        print(f"[PDF Logo Load Error] {e}")
+    return ""
 
 
 def _header_footer_html(slide, d, num, total, show_header=True):
@@ -910,6 +929,73 @@ def _render_image_focus(slide, d, num, total):
 </div>"""
 
 
+def _render_mood_board(slide, d, num, total):
+    primary = d.get('primary_color', '#7A0C0C')
+    accent = d.get('accent_color', '#C4A35A')
+    text_c = d.get('text_color', '#2D2D2D')
+    title = slide.get('title', 'المود بورد')
+
+    header, footer = _header_footer_html(slide, d, num, total)
+
+    mb_list = d.get('moodboardImages') or slide.get('moodboardImages') or []
+    
+    img_cover = slide.get('cover_image_b64') or slide.get('image_b64') or ''
+    img_right = slide.get('facade_right_b64') or ''
+    img_left = slide.get('facade_left_b64') or ''
+    img_aerial = slide.get('aerial_view_b64') or ''
+
+    if not img_cover and len(mb_list) > 0: img_cover = mb_list[0]
+    if not img_right and len(mb_list) > 1: img_right = mb_list[1]
+    if not img_left and len(mb_list) > 2: img_left = mb_list[2]
+    if not img_aerial and len(mb_list) > 3: img_aerial = mb_list[3]
+
+    def _to_src(val):
+        if not val:
+            return ""
+        if val.startswith('data:') or val.startswith('http'):
+            return val
+        return f"data:image/png;base64,{val}"
+
+    srcs = [
+        _to_src(img_cover),
+        _to_src(img_right),
+        _to_src(img_left),
+        _to_src(img_aerial)
+    ]
+    mb_names = ['Exterior Hero', 'Right Facade', 'Left Facade', 'Aerial View']
+
+    grid_items_html = ""
+    for i in range(4):
+        src = srcs[i]
+        name = mb_names[i]
+        if src:
+            grid_items_html += f"""
+            <div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(0,0,0,0.08);background:#f7f4ef;height:100%;">
+                <img src="{src}" style="width:100%;height:100%;object-fit:cover;display:block;">
+                <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,rgba(103,13,12,0.88),rgba(103,13,12,0.6));padding:8px 12px;color:#fff;font-size:12px;font-weight:700;text-align:center;">{name}</div>
+            </div>"""
+        else:
+            grid_items_html += f"""
+            <div style="background:#f7f4ef;border:2px dashed #dcd8d0;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:13px;height:100%;min-height:140px;">{name}</div>"""
+
+    return f"""
+<div class="slide" style="{_background_css(d)}">
+    {_decorations_html(d)}
+    {header}
+    <div class="slide-content" style="justify-content:center;align-items:center;z-index:5;padding:20pt 40pt;box-sizing:border-box;display:flex;flex-direction:column;height:100%;">
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;width:100%;flex:1;min-height:0;">
+            {grid_items_html}
+        </div>
+        <div style="margin-top:10px;display:flex;gap:14px;justify-content:center;font-size:11px;color:{primary};font-weight:bold;">
+            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#670D0C;border-radius:3px;display:inline-block;"></span> عنابي</span>
+            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#C2A176;border-radius:3px;display:inline-block;"></span> ذهبي</span>
+            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:#F5F0EE;border-radius:3px;display:inline-block;border:1px solid #ccc;"></span> بيج فاخر</span>
+        </div>
+    </div>
+    {footer}
+</div>"""
+
+
 # ════════════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ════════════════════════════════════════════════════════════════════
@@ -926,6 +1012,7 @@ RENDERERS = {
     'two_column': _render_two_column,
     'timeline': _render_timeline,
     'image_focus': _render_image_focus,
+    'mood_board': _render_mood_board,
 }
 
 
@@ -953,18 +1040,168 @@ def _default_design(slide_type):
     return d
 
 
+def _resolve_glm_html(slide, html, num, total):
+    if not html:
+        return ""
+    
+    logo_data_uri = _get_logo_data_uri()
+    if logo_data_uri:
+        html = html.replace('##LOGO##', logo_data_uri)
+    
+    img_cover = slide.get('cover_image_b64') or slide.get('image_b64') or ''
+    img_right = slide.get('facade_right_b64') or slide.get('image_b64') or ''
+    img_left = slide.get('facade_left_b64') or slide.get('image_b64') or ''
+    img_aerial = slide.get('aerial_view_b64') or slide.get('image_b64') or ''
+    
+    def _to_src(val):
+        if not val:
+            return ""
+        if val.startswith('data:') or val.startswith('http'):
+            return val
+        return f"data:image/png;base64,{val}"
+
+    # Semantic project images mapping
+    src_cover = _to_src(img_cover)
+    src_right = _to_src(img_right)
+    src_left = _to_src(img_left)
+    src_aerial = _to_src(img_aerial)
+
+    html = html.replace('##MOODBOARD_IMAGE_1##', src_cover)
+    html = html.replace('##MAIN_IMAGE##', src_cover)
+    html = html.replace('##IMAGE_COVER##', src_cover)
+    html = html.replace('##PROJECT_IMAGE_COVER##', src_cover)
+    
+    html = html.replace('##MOODBOARD_IMAGE_2##', src_right)
+    html = html.replace('##PROJECT_IMAGE_RIGHT##', src_right)
+    html = html.replace('##FACADE_RIGHT##', src_right)
+    html = html.replace('##IMAGE_FACADE_RIGHT##', src_right)
+    
+    html = html.replace('##MOODBOARD_IMAGE_3##', src_left)
+    html = html.replace('##PROJECT_IMAGE_LEFT##', src_left)
+    html = html.replace('##FACADE_LEFT##', src_left)
+    html = html.replace('##IMAGE_FACADE_LEFT##', src_left)
+    
+    html = html.replace('##MOODBOARD_IMAGE_4##', src_aerial)
+    html = html.replace('##PROJECT_IMAGE_AERIAL##', src_aerial)
+    html = html.replace('##AERIAL_VIEW##', src_aerial)
+    html = html.replace('##IMAGE_AERIAL##', src_aerial)
+    
+    if logo_data_uri:
+        html = html.replace('##LOGO##', logo_data_uri)
+
+    # ─── PARITY STRIPPING LOGIC (BeautifulSoup) ───
+    title = slide.get('title', '') or ''
+    is_cover = (num == 1) or any(w in title.lower() for w in ['غلاف', 'cover'])
+    is_closing = (num == total) or any(w in title.lower() for w in ['ختام', 'closing', 'شكراً', 'thanks'])
+    is_index = any(w in title.lower() for w in ['فهرس', 'محتويات', 'index', 'toc'])
+
+    if not is_cover and not is_closing:
+        try:
+            from bs4 import BeautifulSoup
+            import re
+            
+            project_images = [src_cover, src_right, src_left, src_aerial]
+            project_images = [img for img in project_images if img]
+
+            def is_project_image(src):
+                if not src:
+                    return False
+                clean_src = src.strip().replace('"', '').replace("'", "")
+                clean_src_base64 = re.sub(r'^data:image/[a-zA-Z+.-]+;base64,', '', clean_src)
+                
+                for p_img in project_images:
+                    if not p_img:
+                        continue
+                    p_img_clean = p_img.strip().replace('"', '').replace("'", "")
+                    p_img_clean_base64 = re.sub(r'^data:image/[a-zA-Z+.-]+;base64,', '', p_img_clean)
+                    
+                    if len(p_img_clean_base64) > 50 and p_img_clean_base64[:50] in clean_src_base64:
+                        return True
+                    if p_img_clean_base64 in clean_src_base64 or clean_src_base64 in p_img_clean_base64:
+                        return True
+                return False
+
+            soup = BeautifulSoup(html, 'html.parser')
+            is_moodboard = any(w in title.lower() for w in ['مود بورد', 'moodboard', 'لوحة أنماط', 'لوحة الأنماط'])
+
+            # 1. Remove all <img> except logo and (for non-index slides) valid project images
+            for img in soup.find_all('img'):
+                src = img.get('src', '') or ''
+                alt = img.get('alt', '') or ''
+                is_logo = (logo_data_uri and logo_data_uri[:40] in src) or any(w in (src + ' ' + alt).lower() for w in ['logo', 'manafe', 'منافع'])
+                is_proj = not is_index and is_project_image(src)
+                if not is_logo and not is_proj:
+                    img.decompose()
+                # On moodboard slides, remove project images from the header zone (top 80px)
+                elif is_moodboard and is_proj:
+                    parent = img.parent
+                    is_in_header = False
+                    while parent and parent.name:
+                        parent_style = parent.get('style', '') or ''
+                        if 'header' in (parent.get('class', '') or '').lower() if isinstance(parent.get('class'), list) else 'header' in str(parent.get('class', '')):
+                            is_in_header = True
+                            break
+                        if re.search(r'position\s*:\s*absolute', parent_style, re.IGNORECASE):
+                            top_match = re.search(r'top\s*:\s*(\d+)', parent_style, re.IGNORECASE)
+                            if top_match and int(top_match.group(1)) < 80:
+                                is_in_header = True
+                                break
+                            break
+                        parent = parent.parent
+                    if is_in_header:
+                        img.decompose()
+            
+            # 2. Remove all <svg> except logo
+            for svg in soup.find_all('svg'):
+                svg_class = svg.get('class', '') or ''
+                svg_id = svg.get('id', '') or ''
+                if isinstance(svg_class, list):
+                    svg_class = ' '.join(svg_class)
+                svg_text = (svg_class + ' ' + svg_id + ' ' + str(svg)).lower()
+                if not any(w in svg_text for w in ['logo', 'manafe', 'منافع']):
+                    svg.decompose()
+            
+            # 3. Remove background/background-image containing url() (except logo and, for non-index slides, valid project images)
+            for el in soup.find_all(style=True):
+                style = el.get('style', '')
+                if 'background' in style:
+                    url_match = re.search(r'url\s*\(\s*([^)]+)\s*\)', style, re.IGNORECASE)
+                    if url_match:
+                        bg_url = url_match.group(1).replace('"', '').replace("'", "").strip()
+                        is_logo = any(w in style.lower() for w in ['logo', 'manafe', 'منافع'])
+                        is_proj = not is_index and is_project_image(bg_url)
+                        if not is_logo and not is_proj:
+                            new_style = re.sub(r'background(-image)?\s*:\s*url\([^)]*\);?', '', style, flags=re.IGNORECASE)
+                            el['style'] = new_style
+            
+            html = str(soup)
+        except Exception as e:
+            print(f"Error in backend element stripping: {e}")
+        
+    if "overflow" not in html[:500].lower():
+        html = html.replace('width:1280px', 'width:1280px;overflow:hidden')
+        html = html.replace('height:720px', 'height:720px;overflow:hidden')
+        
+    return html
+
+
 def generate_pdf(slides, project_name='project', output_path='output.pdf'):
     total = len(slides)
     slides_html = []
 
     for i, slide in enumerate(slides):
-        design = slide.get('design', {})
-        slide_type = slide.get('type', 'content')
-        if not design or len(design) < 3:
-            design = _default_design(slide_type)
+        slide_html = slide.get('glm_html') or slide.get('html')
+        if slide_html:
+            slide_html = _resolve_glm_html(slide, slide_html, i + 1, total)
+        else:
+            design = slide.get('design', {})
+            slide_type = slide.get('type', 'content')
+            if not design or len(design) < 3:
+                design = _default_design(slide_type)
 
-        renderer = RENDERERS.get(slide_type, _render_content)
-        slide_html = renderer(slide, design, i + 1, total)
+            renderer = RENDERERS.get(slide_type, _render_content)
+            slide_html = renderer(slide, design, i + 1, total)
+        
         if slide_html:
             slides_html.append(slide_html)
 
@@ -981,9 +1218,24 @@ def generate_pdf(slides, project_name='project', output_path='output.pdf'):
 
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'])
         page = browser.new_page()
         page.set_content(full_html, wait_until='networkidle')
+
+        page.evaluate('''() => {
+            document.querySelectorAll('.slide *').forEach(el => {
+                const s = getComputedStyle(el);
+                if (s.boxShadow && s.boxShadow !== 'none') el.style.boxShadow = 'none';
+                if (s.filter && s.filter !== 'none') el.style.filter = 'none';
+                if (s.backdropFilter && s.backdropFilter !== 'none') el.style.backdropFilter = 'none';
+                if (s.opacity !== '1') el.style.opacity = '1';
+                if (s.backgroundImage && s.backgroundImage.includes('gradient')) {
+                    el.style.backgroundImage = 'none';
+                    if (s.backgroundColor && s.backgroundColor !== 'rgba(0, 0, 0, 0)') el.style.background = s.backgroundColor;
+                }
+            });
+        }''')
+
         page.pdf(
             path=output_path,
             width='1280px',

@@ -22,3 +22,5 @@ inspect_*.py
 test_*.py
 gen_*.py
 _scratch/
+.codetb-cache
+.codetb-cache.md

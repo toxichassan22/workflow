@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "playwright": "^1.61.0",
     "pptxgenjs": "^4.0.1"
   }

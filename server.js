@@ -3,6 +3,24 @@ var path = require('path');
 var fs = require('fs');
 var { execSync, exec } = require('child_process');
 
+// ═══ Load .env file (same logic as Python's dotenv) ═══
+(function loadEnv() {
+  var envPath = path.join(__dirname, '.env');
+  try {
+    var lines = fs.readFileSync(envPath, 'utf8').split('\n');
+    lines.forEach(function(line) {
+      var trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      var eqIdx = trimmed.indexOf('=');
+      if (eqIdx < 1) return;
+      var key = trimmed.substring(0, eqIdx).trim();
+      var val = trimmed.substring(eqIdx + 1).trim();
+      // Only set if not already in environment (env vars take priority)
+      if (!process.env[key]) process.env[key] = val;
+    });
+  } catch (e) { /* no .env file, that's ok */ }
+})();
+
 var app = express();
 var PORT = process.env.PORT || 3000;
 
@@ -14,8 +32,15 @@ var OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 var GLM_MODEL = 'glm-5.1';
 var IMAGE_MODEL = 'google/gemini-3.1-flash-image-preview';
 var OUTPUT_DIR = path.join(__dirname, 'outputs');
-var LOGO_PATH = path.join(__dirname, 'manafe-logo.png');
+var LOGO_PATH = path.join(__dirname, 'assets', 'logo.png');
 var USERS_DB_PATH = path.join(__dirname, 'users_db.json');
+
+// Vision-capable model (Gemini via OpenRouter). ZAI's GLM models do NOT
+// support multi-modal image input, so any endpoint that must "see" images
+// (designer-generate with uploaded creative images, designer-chat that views
+// a rendered slide) routes through this model instead.
+var VISION_MODEL = process.env.VISION_MODEL || 'google/gemini-3.1-flash-image-preview';
+var VISION_BASE = OPENROUTER_BASE;
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
@@ -61,10 +86,47 @@ function saveTrainingHistory(userId, messages) {
 
 // Truncate project data to fit within GLM token limits
 function truncateProjectData(data, maxChars) {
-  maxChars = maxChars || 8000;
   if (!data) return data;
-  var str = JSON.stringify(data);
-  if (str.length <= maxChars) return data;
+
+  // Recursively clean out known base64 image keys
+  function cleanData(obj) {
+    if (!obj) return obj;
+    if (Array.isArray(obj)) {
+      var res = [];
+      for (var i = 0; i < obj.length; i++) {
+        var item = obj[i];
+        if (typeof item === 'string' && (item.indexOf('data:image/') === 0 || (item.length > 1000 && item.indexOf(';base64,') !== -1))) {
+          continue;
+        }
+        res.push(cleanData(item));
+      }
+      return res;
+    }
+    if (typeof obj === 'object') {
+      var cleaned = {};
+      for (var k in obj) {
+        if (obj.hasOwnProperty(k)) {
+          if (['mainImageData', 'moodboardImages', 'aiGeneratedImages', 'creativeImages', 'creativeSlots', 'image_b64', 'image', 'logo', 'referenceImage', 'slides'].indexOf(k) !== -1) {
+            continue;
+          }
+          cleaned[k] = cleanData(obj[k]);
+        }
+      }
+      return cleaned;
+    }
+    if (typeof obj === 'string') {
+      if (obj.indexOf('data:image/') === 0 || (obj.length > 1000 && obj.indexOf(';base64,') !== -1)) {
+        return '[IMAGE_DATA_OMITTED]';
+      }
+      return obj;
+    }
+    return obj;
+  }
+
+  var cleanedData = cleanData(data);
+  maxChars = maxChars || 8000;
+  var str = JSON.stringify(cleanedData);
+  if (str.length <= maxChars) return cleanedData;
   var obj = JSON.parse(str);
   var keys = Object.keys(obj);
   var perKey = Math.floor(maxChars / keys.length);
@@ -201,13 +263,30 @@ async function callZaiChat(systemPrompt, userContent, userId, options) {
   var maxTokens = options.maxTokens || 4000;
   var disableThinking = options.disableThinking !== undefined ? options.disableThinking : true;
   var referenceImage = options.referenceImage;
+  var images = options.images; // NEW: array of image data URIs/URLs (multi-image vision)
+
+  // Normalize all provided images into a single ordered list.
+  // Backward compatible: referenceImage (single) is treated as the first image.
+  var allImages = [];
+  if (Array.isArray(images)) {
+    images.forEach(function(img) {
+      if (img && typeof img === 'string' && (img.startsWith('data:image/') || img.startsWith('http'))) {
+        allImages.push(img);
+      }
+    });
+  }
+  if (referenceImage && typeof referenceImage === 'string' && (referenceImage.startsWith('data:image/') || referenceImage.startsWith('http'))) {
+    if (allImages.indexOf(referenceImage) === -1) {
+      allImages.unshift(referenceImage);
+    }
+  }
 
   var userMessageContent;
-  if (referenceImage && typeof referenceImage === 'string' && (referenceImage.startsWith('data:image/') || referenceImage.startsWith('http'))) {
-    userMessageContent = [
-      { type: "text", text: userContent },
-      { type: "image_url", image_url: { url: referenceImage } }
-    ];
+  if (allImages.length > 0) {
+    userMessageContent = [{ type: "text", text: userContent }];
+    allImages.forEach(function(img) {
+      userMessageContent.push({ type: "image_url", image_url: { url: img } });
+    });
   } else {
     userMessageContent = userContent;
   }
@@ -240,6 +319,63 @@ async function callZaiChat(systemPrompt, userContent, userId, options) {
 
   var data = await response.json();
   return { data: data, messages: promptMessages };
+}
+
+// Vision-enabled chat via OpenRouter (Gemini). Used when the model must
+// actually SEE images (creative board images, rendered slide screenshots).
+// Supports a system prompt + multi-image user content + conversation history.
+async function callVisionChat(systemPrompt, userText, images, userId, options) {
+  options = options || {};
+  var temperature = typeof options.temperature === 'number' ? options.temperature : 0.7;
+  var maxTokens = options.maxTokens || 8000;
+  var history = options.history || []; // [{role, content}]
+
+  // Build user content: text first, then each image
+  var userContent = [{ type: "text", text: userText }];
+  if (Array.isArray(images)) {
+    images.forEach(function(img) {
+      if (img && typeof img === 'string' && (img.startsWith('data:image/') || img.startsWith('http'))) {
+        userContent.push({ type: "image_url", image_url: { url: img } });
+      }
+    });
+  }
+
+  var messages = [];
+  if (systemPrompt) {
+    messages.push({ role: "system", content: systemPrompt });
+  }
+  // Append prior conversation history (keep it compact)
+  if (Array.isArray(history)) {
+    history.forEach(function(h) {
+      if (h && h.role && h.content) {
+        messages.push({ role: h.role, content: typeof h.content === 'string' ? h.content : JSON.stringify(h.content) });
+      }
+    });
+  }
+  messages.push({ role: "user", content: userContent });
+
+  var payload = {
+    model: VISION_MODEL,
+    messages: messages,
+    temperature: temperature,
+    max_tokens: maxTokens
+  };
+
+  var response = await fetch(VISION_BASE + '/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + OPENROUTER_KEY,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://github.com',
+      'X-Title': 'Manafe Designer Agent'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  var data = await response.json();
+  // Normalize: OpenRouter returns the same OpenAI shape. Attach an empty
+  // messages array so downstream writeSystemPrombetBackup-style code is safe.
+  return { data: data, messages: messages };
 }
 
 // Compute Cache Status and Metrics from Z.ai API Response
@@ -635,13 +771,15 @@ You edit individual slide content based on user requests.
 
 RULES:
 - Return a JSON object with: { "title": "slide title", "content": "new HTML content for the slide", "bullets": ["bullet1", "bullet2"] }
-- The content should be HTML that works inside a div
+- The content MUST be a complete styled HTML div (1280x720) with ALL inline CSS styles preserved from the original.
+- Preserve ALL design elements: header bar, footer, background colors, card layouts, typography, spacing.
+- ONLY modify the text/content the user requested to change. Do NOT strip the visual design.
 - Keep the same style and language as the original
 - Make smart improvements based on the user's request
 - For investment project slides, maintain professional tone in Arabic
 - Return ONLY valid JSON, no markdown`;
 
-    var userMessage = 'SLIDE TITLE: ' + slideTitle + '\n\nCURRENT CONTENT:\n' + slideContent + '\n\nPROJECT DATA CONTEXT:\n' + JSON.stringify(projectData || {}, null, 2) + '\n\nEDIT REQUEST:\n' + editRequest;
+    var userMessage = 'SLIDE TITLE: ' + slideTitle + '\n\nCURRENT CONTENT (this is the FULL styled HTML of the slide — preserve ALL styles):\n' + slideContent + '\n\nPROJECT DATA CONTEXT:\n' + JSON.stringify(projectData || {}, null, 2) + '\n\nEDIT REQUEST:\n' + editRequest;
 
     var { data, messages } = await callZaiChat(systemPrompt, userMessage, userId, {
       referenceImage: projectData ? projectData.mainImageData : null
@@ -762,6 +900,62 @@ Return ONLY valid JSON.`;
 });
 
 // ─────────────────────────────────────────────
+//  5b. POST /api/generate-cover-prompt
+//      Generate image prompt from project data using GLM
+// ─────────────────────────────────────────────
+app.post('/api/generate-cover-prompt', async function(req, res) {
+  var projectData = req.body.projectData || {};
+
+  if (req.body.mock) {
+    return res.json({ success: true, prompt: 'مجمّع تجاري فاخر بواجهات زجاجية عصرية في جدة، إضاءة غروب ذهبية، تصميم معماري حديث' });
+  }
+
+  console.log('\n[CoverPrompt] Generating cover image prompt from project data...');
+
+  var systemPrompt = 'أنت خبير في كتابة Prompts لتوليد الصور المعمارية بالذكاء الاصطناعي.\n' +
+    'مهمتك كتابة وصف (prompt) تفصيلي ودقيق لصورة غلاف عرض تقديمي استثماري لمشروع عقاري.\n\n' +
+    'القواعد:\n' +
+    '1. اكتب باللغة الإنجليزية\n' +
+    '2. اذكر نوع المشروع (تجاري، سكني، فندقي، إلخ)\n' +
+    '3. اذكر الموقع والمدينة\n' +
+    '4. اوصف الواجهة المعمارية بالتفصيل (زجاج، حجر، إلخ)\n' +
+    '5. اذكر اللمسات المميزة (إضاءة، حدائق، مواقف)\n' +
+    '6. أضف جودة التصوير (فوتوريالستيك، جودة عالية)\n' +
+    '7. لا تضع نصوصاً أو أرقاماً في الصورة\n' +
+    '8. اجعل الوصف مناسباً لصورة غلاف احترافية 16:9\n' +
+    '9. اذكر اسم المبنى إذا كان موجوداً\n\n' +
+    'أعد النتيجة كـ JSON فقط:\n' +
+    '{"prompt": "الوصف التفصيلي بالإنجليزية"}';
+
+  var userMsg = 'بيانات المشروع:\n' + JSON.stringify(projectData, null, 2) + '\n\nاكتب prompt تفصيلي لصورة غلاف هذا المشروع.';
+
+  try {
+    var { data, messages } = await callZaiChat(systemPrompt, userMsg, 'default_user', {
+      maxTokens: 1000,
+      disableThinking: true
+    });
+
+    if (!data.choices || !data.choices[0]) throw new Error('GLM failed: ' + JSON.stringify(data));
+
+    var text = (data.choices[0].message.content || '').trim();
+
+    var match = text.match(/\{[\s\S]*"prompt"[\s\S]*\}/);
+    if (!match) throw new Error('No JSON in GLM response');
+
+    var result = JSON.parse(match[0]);
+    var prompt = result.prompt || '';
+
+    if (!prompt) throw new Error('Empty prompt in response');
+
+    console.log('  ✓ Generated cover prompt: ' + prompt.substring(0, 80) + '...');
+    res.json({ success: true, prompt: prompt });
+  } catch (err) {
+    console.error('  ✗ Cover prompt error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────
 //  6. POST /api/generate-slide-image
 //     Generate a single image for a specific slide
 // ─────────────────────────────────────────────
@@ -812,7 +1006,7 @@ app.post('/api/generate-slide-image', async function(req, res) {
 app.post('/api/generate-outline', async function(req, res) {
   var projectData = truncateProjectData(req.body.projectData, 4000);
   var userId = req.body.userId || 'default_user';
-  var totalSlides = parseInt(req.body.slideCount) || 16;
+  var totalSlides = parseInt(req.body.slideCount) || 14;
 
   if (totalSlides < 3) totalSlides = 3;
   var contentCount = totalSlides - 2;
@@ -894,38 +1088,41 @@ app.post('/api/generate-titles', async function(req, res) {
   var userId = req.body.userId || 'default_user';
   var totalSlides = parseInt(req.body.slideCount) || 16;
 
-  if (totalSlides < 3) totalSlides = 3;
-  var contentCount = totalSlides - 4; // cover + toc + moodboard + closing are fixed
+  if (totalSlides < 4) totalSlides = 4;
+  var contentCount = totalSlides - 4;
 
   if (req.body.mock) {
-    console.log('  [Mock Mode] Returning mock titles for ' + totalSlides + ' slides (cover + toc + ' + contentCount + ' content + moodboard + closing)');
+    console.log('  [Mock Mode] Returning mock titles for ' + totalSlides + ' slides (' + contentCount + ' content)');
     var allMockTitles = [
-      { title: 'غلاف المشروع', requires_image: true, type: 'cover' },
-      { title: 'الفهرس', requires_image: false, type: 'toc' },
-      { title: 'الملخص التنفيذي', requires_image: false, type: 'content' },
-      { title: 'فكرة المشروع والهيكلة', requires_image: false, type: 'content' },
-      { title: 'مميزات الموقع', requires_image: true, type: 'content' },
-      { title: 'مميزات المشروع', requires_image: true, type: 'content' },
-      { title: 'مكونات المشروع والمساحات', requires_image: true, type: 'content' },
-      { title: 'افتراضات الربح التشغيلي التأجيري', requires_image: false, type: 'content' },
-      { title: 'افتراضات التكاليف', requires_image: false, type: 'content' },
-      { title: 'الأرباح والتخارج', requires_image: false, type: 'content' },
-      { title: 'المؤشرات المالية المتوقعة', requires_image: false, type: 'content' },
-      { title: 'الجدول الزمني ومراحل المشروع', requires_image: false, type: 'content' },
-      { title: 'فرص الاستثمار ونقاط القوة', requires_image: false, type: 'content' },
-      { title: 'المخاطر والافتراضات', requires_image: false, type: 'content' },
-      { title: 'معاينة الهوية البصرية', requires_image: true, type: 'moodboard' },
-      { title: 'ختام العرض', requires_image: false, type: 'closing' }
+      "الملخص التنفيذي",
+      "فكرة المشروع والهيكلة",
+      "مميزات الموقع",
+      "مميزات المشروع",
+      "مكونات المشروع والمساحات",
+      "افتراضات الربح التشغيلي التأجيري",
+      "افتراضات التكاليف",
+      "الأرباح والتخارج",
+      "المؤشرات المالية المتوقعة",
+      "الجدول الزمني ومراحل المشروع",
+      "فرص الاستثمار ونقاط القوة",
+      "المخاطر والافتراضات"
     ];
+    var mockTitles = allMockTitles.slice(0, contentCount);
+    var mockFinalTitles = [
+      { title: 'غلاف المشروع', requires_image: true, type: 'cover', bullets: [] },
+      { title: 'فهرس المحتويات', requires_image: false, type: 'index', bullets: [] }
+    ];
+    mockTitles.forEach(function(t) { mockFinalTitles.push({ title: t, requires_image: false, type: 'content', bullets: [] }); });
+    mockFinalTitles.push({ title: 'المود بورد', requires_image: false, type: 'mood_board', bullets: [] });
+    mockFinalTitles.push({ title: 'ختام العرض', requires_image: false, type: 'closing', bullets: [] });
     return res.json({
       success: true,
-      titles: allMockTitles,
-      totalSlides: allMockTitles.length,
+      titles: mockFinalTitles,
       cache_analytics: { status: "MOCKED", cached_tokens: 0, total_tokens: 0 }
     });
   }
 
-  console.log('\n[Titles] Generating ' + totalSlides + ' titles (cover + toc + ' + contentCount + ' content + moodboard + closing)...');
+  console.log('\n[Titles] Generating ' + contentCount + ' content titles for ' + totalSlides + ' total slides...');
   var startTime = Date.now();
 
   try {
@@ -947,20 +1144,25 @@ app.post('/api/generate-titles', async function(req, res) {
     var systemContent = 'أنت خبير في العروض التقديمية الاستثمارية.\n\n' +
       'العرض التقديمي يحتوي على ' + totalSlides + ' شريحة بالكامل:\n' +
       '- الشريحة 1 = غلاف (لا تحتاج عنوان - ستولّد تلقائياً)\n' +
-      '- الشريحة 2 = فهرس (لا تحتاج عنوان - ستولّد تلقائياً)\n' +
-      '- الشريحة ' + (totalSlides - 1) + ' = مود بورد (لا تحتاج عنوان - ستولّد تلقائياً)\n' +
       '- الشريحة ' + totalSlides + ' = ختام (لا تحتاج عنوان - ستولّد تلقائياً)\n' +
-      '- الشريحتان 3 إلى ' + (totalSlides - 2) + ' = شرائح محتوى (هنا تضع أنت العناوين)\n\n' +
+      '- الشريحتان 2 إلى ' + (totalSlides - 1) + ' = شرائح محتوى (هنا تضع أنت العناوين)\n\n' +
       'مهمتك: ولّد ' + contentCount + ' عنوان شريحة محتوى مناسبة لهذا العرض الاستثماري.\n\n' +
+      'قواعد العناوين الواضحة:\n' +
+      '- العناوين يجب أن تكون واضحة ومباشرة ومفهومة فوراً بدون قراءة المحتوى\n' +
+      '- اذكر المحتوى الرئيسي في العنوان (مثال: "مواقع المكونات: محلات تجارية ومكاتب" بدلاً من "مكونات المشروع")\n' +
+      '- اذكر الأرقام المالية في العناوين عند توفرها (مثال: "الإيرادات: 2.4 مليون ريال سنوياً" بدلاً من "الإيرادات")\n' +
+      '- تجنب العناوين الغامضة مثل "نظرة عامة" أو "تفاصيل" — كن محدداً\n' +
+      '- العنوان الواحد يصف محتوى الشريحة بالكامل\n' +
+      '- مثال جيد: "التكاليف: 146 مليون ريال (أرض + تطوير)" | مثال سيء: "التكاليف"\n\n' +
       'اختر من هذه المواضيع (' + contentCount + ' فقط):\n' +
       allTopics.map(function(t, i) { return (i + 1) + '. ' + t; }).join('\n') + '\n\n' +
       'أعد النتيجة كـ JSON فقط بالصيغة:\n' +
-      '{"titles": [{"title": "عنوان الشريحة", "requires_image": true أو false}]}\n\n' +
+      '{"titles": [{"title": "عنوان الشريحة الواضح والمفصل", "requires_image": true أو false}]}\n\n' +
       'قواعد:\n' +
       '1. ولّد بالضبط ' + contentCount + ' عناوين (لا أكثر ولا أقل)\n' +
       '2. حدد requires_image: true لـ 3 شرائح بصرية كحد أقصى (صور الموقع ومميزات المشروع ومكوناته)\n' +
       '3. باقي الشرائح requires_image: false\n' +
-      '4. لا تضع عناوين للغلاف أو الفهرس أو المود بورد أو الختام — هي تلقائية';
+      '4. لا تضع عناوين للغلاف أو الختام';
 
     var userContent = 'بيانات المشروع:\n' + JSON.stringify(projectData || {}, null, 2);
 
@@ -986,23 +1188,15 @@ app.post('/api/generate-titles', async function(req, res) {
       titles = titles.slice(0, contentCount);
     }
 
-    // Add all 16 titles: cover + toc + content + moodboard + closing
     var finalTitles = [
-      { title: 'غلاف المشروع', requires_image: true, type: 'cover' },
-      { title: 'الفهرس', requires_image: false, type: 'toc' }
+      { title: 'غلاف المشروع', requires_image: true, type: 'cover', bullets: [] },
+      { title: 'فهرس المحتويات', requires_image: false, type: 'index', bullets: [] }
     ];
-    titles.forEach(function(t) {
-      if (typeof t === 'string') {
-        finalTitles.push({ title: t, requires_image: false, type: 'content' });
-      } else {
-        t.type = 'content';
-        finalTitles.push(t);
-      }
-    });
-    finalTitles.push({ title: 'معاينة الهوية البصرية', requires_image: true, type: 'moodboard' });
-    finalTitles.push({ title: 'ختام العرض', requires_image: false, type: 'closing' });
+    finalTitles = finalTitles.concat(titles);
+    finalTitles.push({ title: 'المود بورد', requires_image: false, type: 'mood_board', bullets: [] });
+    finalTitles.push({ title: 'ختام العرض', requires_image: false, type: 'closing', bullets: [] });
 
-    console.log('  ✓ Got ' + finalTitles.length + ' titles (cover + toc + ' + titles.length + ' content + moodboard + closing) | Cache: ' + cacheAnalytics.status);
+    console.log('  ✓ Got ' + finalTitles.length + ' titles (cover + index + ' + titles.length + ' content + moodboard + closing) | Cache: ' + cacheAnalytics.status);
     res.json({ success: true, titles: finalTitles, totalSlides: finalTitles.length, cache_analytics: cacheAnalytics });
   } catch (err) {
     console.error('  ✗ Titles error:', err.message);
@@ -1022,7 +1216,7 @@ app.post('/api/official-outline', async function(req, res) {
 
   var officialTitles = [
     { title: 'غلاف المشروع', requires_image: true, type: 'cover', bullets: [] },
-    { title: 'الفهرس', requires_image: false, type: 'toc', bullets: [] },
+    { title: 'فهرس المحتويات', requires_image: false, type: 'index', bullets: [] },
     { title: 'الملخص التنفيذي', requires_image: false, type: 'content', bullets: [
       'نظرة عامة على المشروع والأهداف الرئيسية',
       'إجمالي التكلفة والعائد المتوقع',
@@ -1083,11 +1277,7 @@ app.post('/api/official-outline', async function(req, res) {
       'تقلبات أسعار البناء',
       'مخاطر السوق والمنافسة'
     ]},
-    { title: 'معاينة الهوية البصرية', requires_image: true, type: 'moodboard', bullets: [
-      'لوحة الألوان والهوية البصرية',
-      'نمط التصميم المعماري',
-      'الصور التوضيحية للمشروع'
-    ]},
+    { title: 'المود بورد', requires_image: false, type: 'mood_board', bullets: [] },
     { title: 'الختام', requires_image: false, type: 'closing', bullets: [] }
   ];
 
@@ -1411,6 +1601,133 @@ app.post('/api/organize-text', async function(req, res) {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════
+//  DESIGNER AGENT PROMPTS (new generation + editing flow)
+//  GLM builds the whole deck from approved creative-board images and
+//  then edits slides via a vision-enabled chat.
+// ═══════════════════════════════════════════════════════════════
+var DESIGNER_SYSTEM_PROMPT = `أنت مصمم عروض استثمارية عقارية فاخرة عالمي المستوى لشركة "منافع الاقتصادية للعقار". مهمتك تصميم عرض من 16 شريحة (HTML/CSS بأنماط مضمّنة) جاهز للعرض أمام المستثمرين.
+
+═════════════════════════════════════════════════════════════════
+قواعد مقدّسة — لا تخالفها أبداً
+═════════════════════════════════════════════════════════════════
+1. لا تغيّر أي رقم مالي أو اسم بند — انقلها كما هي من بيانات المشروع.
+2. لا تحذف أي شريحة. صمّم الـ16 بالضبط.
+3. كل النصوص عربية. كل المحاذاة يمين. الاتجاه RTL. dir="rtl" lang="ar" على كل حاوية.
+4. كل شريحة <div> قائمة بذاتها بأنماط مضمّنة (inline CSS) — بدون ملفات خارجية، بدون position:absolute مفرط (فقط للطبقات الخلفية والشعار).
+5. الحاوية دائماً: width:1280px;height:720px;overflow:hidden;box-sizing:border-box;font-family:'The Sans Arabic','Cairo','Tajawal',sans-serif;position:relative.
+6. الأرقام المالية كبيرة جداً وبارزة (28-48px) ومنسّقة بفواصل (مثال: 1,500,000).
+7. استخدم بطاقات بظلال خفيفة وزوايا مدورة (border-radius:12-16px)، حشو داخلي كافٍ (padding:18-24px)، النص لا يلمس الحواف.
+8. أيقونات SVG خطية احترافية مضمّنة (line-style، stroke-width:1.8) — ليست كرتونية ولا emoji كبيرة.
+9. أقصى 3-4 ألوان لكل شريحة. مساحات بيضاء كافية — لا ازدحام أبداً.
+10. أضف عناصر هندسية/معمارية خفيفة في الخلفية (خطوط رفيعة، أشكال مجردة، pattern بسيط بشفافية منخفضة).
+
+═════════════════════════════════════════════════════════════════
+الهوية البصرية
+═════════════════════════════════════════════════════════════════
+الشركة: منافع الاقتصادية للعقار
+الألوان:
+  - العنابي الغامق (رئيسي): #670D0C
+  - الذهبي/البرونزي (لمسات): #C2A176
+  - الفضي: #A7A9AC
+  - البيج الفاتح (بطاقات فقط): #F5F0EE
+  - الأبيض (خلفية الشرائح): #FFFFFF
+  - النص الداكن: #0F172A
+  - النص الهادئ: #64748B
+الخط: 'The Sans Arabic', 'Cairo', 'Tajawal', sans-serif
+ملاحظة: خلفية الشرائح دائماً بيضاء (#FFFFFF) ما عدا الغلاف والختام (عنابي/صورة). لا تستخدم البيج كخلفية للشريحة، فقط للبطاقات.
+
+═════════════════════════════════════════════════════════════════
+الهيدر والتذييل الموحّد — لكل الشرائح ما عدا الغلاف(1) والختام(16)
+═════════════════════════════════════════════════════════════════
+الهيدر (أعلى): شعار ##LOGO## أعلى اليمين بحجم واضح (height:48-56px، object-fit:contain) + اسم الشركة/المشروع بخط صغير مرتب + خط رفيع عنابي (2px #670D0C) أسفل الهيدر.
+التذييل (أسفل): خط رفيع رمادي (#E2E8F0) + على اليمين اسم المشروع، وسط اسم الشركة "منافع الاقتصادية للعقار"، يسار رقم الشريحة داخل دائرة/مستطيل صغير باللون العنابي (background:#670D0C;color:#fff;border-radius:50%).
+التذييل موحّد في كل الشرائح ولا يزاحم المحتوى. اترك مساحة (60-70px) للهيدر من الأعلى و(50-56px) للتذييل من الأسفل.
+
+═════════════════════════════════════════════════════════════════
+الصور — استخدم الرموز (TOKENS) فقط، لا تضع روابط
+═════════════════════════════════════════════════════════════════
+مهم جداً: لا تضع أي data URI أو رابط صورة حقيقي في src. استخدم هذه الرموز الحرفية بالضبط في داخل src="...":
+  - "##PROJECT_IMAGE_COVER##"  → صورة الغلاف (الشريحة 1)
+  - "##PROJECT_IMAGE_1##"      → شريحة مميزات الموقع (الشريحة 5)
+  - "##PROJECT_IMAGE_2##"      → شريحة مميزات المشروع (الشريحة 6)
+  - "##PROJECT_IMAGE_3##"      → شريحة فكرة المشروع (الشريحة 4)
+  - "##PROJECT_IMAGE_4##"      → شريحة فرص الاستثمار (الشريحة 13)
+  - "##MOODBOARD_IMAGE_1##","##MOODBOARD_IMAGE_2##","##MOODBOARD_IMAGE_3##","##MOODBOARD_IMAGE_4##" → الشريحة 15 (المودبورد، الـ4 معاً)
+
+النظام سيستبدل هذه الرموز تلقائياً بالصور الحقيقية. اكتب <img src="##PROJECT_IMAGE_1##" style="width:100%;height:100%;object-fit:cover"> داخل حاوية منسقة.
+قاعدة الصور: ضع صورة واحدة على الأقل في كل شريحة محتوى بصرية (4/5/6/13) وكل الـ4 في شريحة المودبورد(15). الصورة جزء من المحتوى: حاوية بعرض 38-42% جنب المحتوى (object-fit:cover، border-radius:12px، box-shadow خفيف) + caption تحتها (عنوان عنابي bold + وصف رمادي). لا تضع صوراً على الشرائح المالية البحتة (جداول/KPI/معادلات).
+
+═════════════════════════════════════════════════════════════════
+تصميم الشرائح الـ16 بالتفصيل (التزم بالترتيب والمحتوى)
+═════════════════════════════════════════════════════════════════
+الشريحة 1 — الغلاف: خلفية كاملة ##PROJECT_IMAGE_COVER## (cover، بدون تشويه) + طبقة عنابية شفافة (rgba(103,13,12,0.55)) + شعار ##LOGO## وسط بحجم كبير (height:90-110px) + اسم المشروع بخط عربي ضخم أبيض أسفل الشعار + خط ذهبي رفيع زخرفي + وصف صغير "عرض مشروع استثماري". فاخر وبسيط، بلا هيدر/تذييل/جداول، لمسة هندسية في الأطراف.
+
+الشريحة 2 — فهرس المحتويات: قائمة رسمية بكل عناوين الشرائح من 1 إلى 16، كل عنوان برقمه داخل دائرة/مربع عنابي صغير في عمود جانبي أنيق. لا عناوين عشوائية ولا مختصرة.
+
+الشريحة 3 — الملخص التنفيذي (Dashboard): 6 بطاقات KPI كبيرة: إجمالي التكلفة، الإيرادات السنوية، إجمالي الأرباح طوال الفترة، العائد السنوي المتوقع، NOI المتوقع، استرداد رأس المال. اجعل "إجمالي الأرباح طوال الفترة" الأكبر والأبرز. كل بطاقة: أيقونة + رقم ضخم + عنوان. ظلال خفيفة.
+
+الشريحة 4 — فكرة المشروع والهيكلة: 5 بطاقات (فكرة المشروع، الموقع، هيكلة المشروع، نوع المشروع، المطور/الجهة) بأيقونات (فكرة/موقع/تقويم/مبنى/مطور) + صورة ##PROJECT_IMAGE_3## على جانب. زر "فتح موقع المشروع على Google Maps" بارز وقابل للضغط (a href) إن وُجد الرابط.
+
+الشريحة 5 — مميزات الموقع: كل ميزة بطاقة مستقلة بأيقونة (Location Pin/Road/Accessibility/Population/Growth) + صورة ##PROJECT_IMAGE_1## + عنصر خريطة/Pin شفاف في الخلفية + زر Google Maps مميز.
+
+الشريحة 6 — مميزات المشروع: شبكة (Grid) 4 بطاقات+ (أيقونة + عنوان مختصر + وصف صغير)، خلفية بيج فاتحة للبطاقات، عناوين عنابية، عناصر معمارية مجردة في الخلفية + صورة ##PROJECT_IMAGE_2##.
+
+الشريحة 7 — مكونات المشروع والمساحات: جدول احترافي (رأس عنابي/نص أبيض، صفوف متبادلة أبيض/بيج، صف الإجمالي bold بخلفية مميزة) + 3 بطاقات أسفله (مساحة الأرض، نسبة البناء، ملاحظة المساحات) بأيقونات صغيرة.
+
+الشريحة 8 — افتراضات الربح التشغيلي التأجيري: معادلة بصرية (الإيرادات السنوية − المصروف التشغيلي السنوي = إجمالي الربح التأجيري السنوي) كل رقم في بطاقة مالية منفصلة بأيقونة، والربح التأجيري الأكبر والأبرز. جدول مرجعي صغير جداً أسفل إن لزم.
+
+الشريحة 9 — افتراضات التكاليف: مقارنة بصرية بطاقتين كبيرتين (تكلفة الأرض) و(تكلفة التطوير) + بطاقة (إجمالي التكلفة) أكبر وأبرز + مخطط شريطي (bar) بسيط لنسبة مساهمة كل بند + أيقونات (Land/Construction/Total Cost).
+
+الشريحة 10 — الأرباح والتخارج: مسار قيمة استثماري متسلسل (Flow/سهم أفقي): (إجمالي الربح التشغيلي طوال الفترة + قيمة التخارج = إجمالي الأرباح طوال الفترة). اجعل "قيمة التخارج" و"إجمالي الأرباح" الأضخم والأبرز + أيقونات (Exit/Growth/Profit).
+
+الشريحة 11 — المؤشرات المالية المتوقعة: Financial Dashboard: بطاقات علوية رئيسية لـ ROI/NOI/Payback بأرقام كبيرة + مقارنة بصرية أسفلها لإجمالي التكلفة وإجمالي الأرباح + أيقونات (Gauge/Chart/Clock/Investment).
+
+الشريحة 12 — الجدول الزمني ومراحل المشروع: Gantt احترافي: سنوات وربوع Q1/Q2/Q3/Q4 في الأعلى كشبكة زمنية + كل مرحلة شريط أفقي ممتد بدقة حسب مدتها، أسماء المراحل بوضوح داخل/بجانب الشرائط بلا تداخل ولا تكرار. ألوان هادئة (عنابي/بني فاتح/بيج/رمادي).
+
+الشريحة 13 — فرص الاستثمار ونقاط القوة: High Impact تسويقية: كل فرصة بطاقة كبيرة مستقلة (عنوان قصير + وصف مختصر + أيقونة قوية) + سهم نمو/مخطط صاعد خفيف في الخلفية + صورة ##PROJECT_IMAGE_4##.
+
+الشريحة 14 — المخاطر والافتراضات: احترافية هادئة غير منفرة (ابعد عن الألوان التحذيرية الصارخة): بطاقات رمادية/بيج بلمسة عنابية وأيقونة تنبيه خطية + عنوان فرعي "نقاط يجب التحقق منها في الدراسة التفصيلية".
+
+الشريحة 15 — المودبورد (Moodboard): شبكة 2×2 أنيقة للصور الأربع (##MOODBOARD_IMAGE_1##..4##)، فواصل رمادية/بيج خفيفة جداً، تظهر كمعرض معماري فاخر يبرز روح التصميم والهوية. (النظام سيبني هذه الشبكة تلقائياً من الصور — يمكنك أيضاً تصميمها يدوياً باستخدام الرموز الأربعة.)
+
+الشريحة 16 — الختام: خلفية عنابية فاخرة كاملة (#670D0C) + شعار ##LOGO## كبير واضح + عبارة "شكراً لكم" بخط عربي فخم ضخم أبيض + اسم المشروع + بيانات التواصل منظمة أسفلها. بلا هيدر/تذييل.
+
+═════════════════════════════════════════════════════════════════
+تنسيق الإخراج — JSON صارم
+═════════════════════════════════════════════════════════════════
+أرجع فقط JSON صالح (بدون ماركداون، بدون كتل كود \`\`\`):
+{
+  "slides": [
+    { "title": "عنوان الشريحة بالعربية", "html": "<div dir='rtl' lang='ar' style='width:1280px;height:720px;overflow:hidden;box-sizing:border-box;font-family:"The Sans Arabic","Cairo",sans-serif;position:relative;background:#fff'>...</div>" }
+  ]
+}
+
+صمم بالضبط الـ16 شريحة حسب الفهرس التالي:
+{{OUTLINE}}
+
+كل البيانات المالية تطابق بيانات المشروع المقدمة تماماً. النصوص عربية فقط. كثّف الخطوط لتكون واضحة أثناء العرض.`;
+
+var DESIGNER_CHAT_PROMPT = `أنت مصمم العروض التقديمية الخاص بالمستخدم — تتعامل معه كأنك مصمم بشري يرى عمله ويفهمه.
+
+السياق: تم إرفاق صورة الشريحة الحالية (مقدمة من المتصفح) لتراها بعينك. ترى التصميم كما هو معروض، وتفهم المشاكل البصرية والمحتوى.
+
+دورك:
+- أنت ترى الشريحة وتفهم تركيبها البصري بالكامل.
+- عندما يطلب المستخدم تعديلاً (مثل "ضع الصورة هنا"، "أزل الصورة"، "كبّر العنوان"، "غيّر لون البطاقة")، عدّل HTML الشريحة وأرجعها كاملة ومحدثة.
+- حافظ على الهوية البصرية: البورجوندي #670D0C، الذهبي #C2A176، خط The Sans Arabic، اتجاه RTL.
+- كل الأنماط مضمّنة (inline). الحاوية: width:1280px, height:720px, dir=rtl, lang=ar, overflow:hidden.
+- لا تخترع صوراً وهمية — استخدم الصور المرفقة فقط (إذا أُرفقت صور مرجعية جديدة استخدمها).
+- كن دقيقاً: عدّل فقط ما طلبه المستخدم، واحتفظ بباقي التصميم سليماً.
+
+عندما يتطلب الطلب تعديلاً:
+{"action": "update_slide", "title": "العنوان (أبقه إن لم يتغير)", "html": "HTML كامل ومحدث بكل الأنماط المضمّنة"}
+
+عندما يكون الطلب سؤالاً أو لا يتطلب تعديلاً:
+{"action": "chat", "response": "ردك بالعربية"}
+
+أرجع فقط JSON صالح.`;
+
 // ─────────────────────────────────────────────
 //  10. POST /api/generate-design
 //      GLM 5.1 generates HTML/CSS slide designs (luxury PDF presentation)
@@ -1454,13 +1771,20 @@ CRITICAL RULES
 14. Add subtle geometric/architectural background patterns (light lines, shapes)
 
 ═════════════════════════════════════════════════════════════════
-IMAGE PLACEHOLDERS (CRITICAL)
+IMAGE PLACEHOLDERS (CRITICAL - USE ALL 4 IMAGES)
 ═════════════════════════════════════════════════════════════════
-You MUST use these exact placeholder strings as the \`src\` attribute for images:
-- "##MOODBOARD_IMAGE_1##": Use for Cover (Slide 1) and Closing (Slide 14) background image.
-- "##MOODBOARD_IMAGE_2##": Use for Location Features (Slide 4) image card (representing a map or site view).
-- "##MOODBOARD_IMAGE_3##": Use for Project Advantages (Slide 5) image card.
-- "##MOODBOARD_IMAGE_4##": Use for Components (Slide 6) image card.
+You MUST use ALL 4 moodboard images. Each image placeholder appears EXACTLY ONCE across the whole presentation.
+Each placeholder MUST be placed on a DIFFERENT content slide (never on cover, index, closing, or purely financial/dashboard table/chart slides).
+
+Select the 4 most suitable content slides that contain textual lists, bullet points, or concepts (such as Executive Summary, Project Concept, Geographic Location/Advantages, Project Features, Specifications, or Market Demand).
+Do NOT place image placeholders on slides containing purely financial dashboards, KPI grids, capitalization structure tables, or exit values where a full-width card layout is more appropriate.
+
+Placeholders (copy-paste these EXACTLY into your HTML image src tags):
+- "##MOODBOARD_IMAGE_1##" -> Suitable text/concept slide (e.g. Executive Summary / Project Concept)
+- "##MOODBOARD_IMAGE_2##" -> Suitable text/concept slide (e.g. Project Concept / Location features)
+- "##MOODBOARD_IMAGE_3##" -> Suitable text/concept slide (e.g. Features / Specifications)
+- "##MOODBOARD_IMAGE_4##" -> Suitable text/concept slide (e.g. Advantages / Market Demand / Aerial View description)
+
 Always style images with object-fit: cover, width: 100%, and height: 100% inside their respective styled containers.
 
 [Design rules removed - new rules will be provided separately]
@@ -1499,7 +1823,7 @@ DESIGN REQUIREMENTS
 - Don't use random images — only project images or abstract elements
 - Don't change content — only improve design
 - Final output must look like a professional investment presentation ready to send to investors
-- Generate EXACTLY 16 slides
+- Generate EXACTLY 14 slides
 - All financial data must match the project data provided
 - Numbers formatted with commas (e.g., 1,500,000)
 - Arabic text only for all labels and content
@@ -1831,7 +2155,8 @@ async function callImageAPI(prompt) {
       },
       body: JSON.stringify({
         model: IMAGE_MODEL,
-        messages: [{ role: 'user', content: prompt }]
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt + ' --aspect 16:9' }] }],
+        modalities: ['image', 'text']
       }),
       signal: controller.signal
     });
@@ -1870,11 +2195,12 @@ async function callImageAPIWithReference(referenceImageBase64, prompt) {
           {
             role: 'user',
             content: [
-              { type: 'text', text: prompt },
+              { type: 'text', text: prompt + ' --aspect 16:9' },
               { type: 'image_url', image_url: { url: referenceImageBase64 } }
             ]
           }
-        ]
+        ],
+        modalities: ['image', 'text']
       }),
       signal: controller.signal
     });
@@ -1898,7 +2224,7 @@ async function callImageAPIWithReference(referenceImageBase64, prompt) {
 //  PDF EXPORT — Playwright Node.js (editable text layers)
 // ═══════════════════════════════════════════════════════════════
 
-var { generatePdf } = require('./pdf_engine');
+var { generatePdf, renderSlideImage } = require('./pdf_engine');
 
 app.post('/api/export-pdf', async function(req, res) {
   try {
@@ -1918,6 +2244,557 @@ app.post('/api/export-pdf', async function(req, res) {
 });
 
 // ═══════════════════════════════════════════════════════════════
+//  DESIGNER AGENT — new generation + editing flow
+//  GLM builds the whole deck from approved creative-board images,
+//  then a vision-enabled chat lets the user direct edits by seeing
+//  each rendered slide.
+// ═══════════════════════════════════════════════════════════════
+
+// Strip ```json ... ``` / ``` ... ``` markdown code fences from model output.
+function stripCodeFences(text) {
+  if (!text) return text;
+  return text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '').trim();
+}
+
+// Extract the first syntactically-valid JSON object from free-form model
+// output. Handles code fences, repeated/duplicated objects, and trailing
+// text. Returns the parsed object or null.
+function parseFirstJsonObject(text) {
+  if (!text || typeof text !== 'string') return null;
+  var cleaned = stripCodeFences(text);
+  var start = 0;
+  while (true) {
+    var brace = cleaned.indexOf('{', start);
+    if (brace === -1) return null;
+    // Walk forward tracking brace depth (respecting strings).
+    var depth = 0, inStr = false, esc = false, end = -1;
+    for (var i = brace; i < cleaned.length; i++) {
+      var ch = cleaned[i];
+      if (inStr) {
+        if (esc) { esc = false; }
+        else if (ch === '\\') { esc = true; }
+        else if (ch === '"') { inStr = false; }
+      } else {
+        if (ch === '"') { inStr = true; }
+        else if (ch === '{') { depth++; }
+        else if (ch === '}') { depth--; if (depth === 0) { end = i; break; } }
+      }
+    }
+    if (end !== -1) {
+      var candidate = cleaned.substring(brace, end + 1);
+      try { return JSON.parse(candidate); }
+      catch (e) { /* keep scanning from the next brace */ }
+    }
+    start = brace + 1;
+  }
+}
+
+
+// Render a single slide's HTML to a PNG (base64) so the chat can "see" it.
+app.post('/api/render-slide-image', async function(req, res) {
+  try {
+    var slideHtml = req.body.slideHtml;
+    if (!slideHtml) return res.status(400).json({ error: 'slideHtml is required' });
+    var dataUri = await renderSlideImage(slideHtml, { scale: req.body.scale || 2 });
+    res.json({ success: true, image: dataUri });
+  } catch (e) {
+    console.error('Render slide image error:', e);
+    res.status(500).json({ error: e.message || 'Slide render failed' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  POST-PROCESSING: enforce image usage & rebuild special slides
+//  The vision model cannot reliably copy long data URIs into <img src>.
+//  We therefore (a) resolve every image TOKEN to a real image, (b) rebuild
+//  the COVER (slide 1) and MOODBOARD (slide 15) deterministically, and
+//  (c) inject a project image into content slides that ended up image-less.
+//  This guarantees every approved image is actually displayed.
+// ═══════════════════════════════════════════════════════════════
+function postProcessDesignerSlides(slides, images, projectData) {
+  if (!Array.isArray(slides)) return slides;
+  // Normalize the image pool. images[0] is the cover; the rest are moodboard.
+  var imgs = (Array.isArray(images) ? images : []).filter(function (x) { return typeof x === 'string' && x; });
+  if (imgs.length === 0) return slides;
+
+  // imgByToken: cover + 4 named content/moodboard images, cycling if too few.
+  function tok(n) {
+    if (imgs.length === 0) return '';
+    if (n <= imgs.length) return imgs[n - 1];
+    // cycle: reuse last available so a token never resolves empty
+    return imgs[imgs.length - 1];
+  }
+  var imgCover = tok(1);
+  var img1 = tok(2) || imgCover;
+  var img2 = tok(3) || img1;
+  var img3 = tok(4) || img2;
+  var img4 = tok(5) || img3;
+
+  function escapeHtmlAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  for (var i = 0; i < slides.length; i++) {
+    var s = slides[i];
+    var slideNo = s._slideNo || (i + 1);
+    var html = s.html || '';
+    if (typeof html !== 'string') html = '';
+
+    // (a) Resolve TOKENS → real image URIs everywhere first.
+    html = html
+      .replace(/##PROJECT_IMAGE_COVER##/g, imgCover)
+      .replace(/##COVER_IMAGE##/g, imgCover)
+      .replace(/##MAIN_IMAGE##/g, imgCover)
+      .replace(/##PROJECT_IMAGE_1##/g, img1)
+      .replace(/##PROJECT_IMAGE_2##/g, img2)
+      .replace(/##PROJECT_IMAGE_3##/g, img3)
+      .replace(/##PROJECT_IMAGE_4##/g, img4)
+      .replace(/##MOODBOARD_IMAGE_1##/g, img1)
+      .replace(/##MOODBOARD_IMAGE_2##/g, img2)
+      .replace(/##MOODBOARD_IMAGE_3##/g, img3)
+      .replace(/##MOODBOARD_IMAGE_4##/g, img4);
+    s.html = html;
+    s._slideNo = slideNo;
+
+    // (b) Rebuild COVER (slide 1) deterministically.
+    if (slideNo === 1) {
+      s.html = buildCoverSlideHtml(imgCover, projectData);
+      continue;
+    }
+
+    // (b) Rebuild MOODBOARD (slide 15) deterministically — all images.
+    if (slideNo === 15) {
+      s.html = buildMoodboardSlideHtml([img1, img2, img3, img4], projectData);
+      continue;
+    }
+
+    // (b) Rebuild CLOSING (slide 16) deterministically — burgundy bg + logo +
+    // "شكراً لكم" + contact info. Guarantees the real logo appears.
+    if (slideNo === 16) {
+      s.html = buildClosingSlideHtml(projectData);
+      continue;
+    }
+
+    // (c) GUARANTEE 4 content slides each carry a DIFFERENT project image.
+    // Map: slide 4 → img1, 5 → img2, 6 → img3, 13 → img4. We count ONLY real
+    // project images (excluding the logo path) so a logo-only <img> does not
+    // make us think a project image is already present.
+    function countProjectImages(htmlStr) {
+      var matches = String(htmlStr || '').match(/<img\b[^>]*>/gi) || [];
+      var logoPat = /logo|assets\/logo|manafe|منافع/i;
+      var projPat = new RegExp(
+        [img1, img2, img3, img4, imgCover].filter(Boolean)
+          .map(function (x) { return escapeHtmlAttr(x.substring(0, 30)); })
+          .join('|'),
+        'i'
+      );
+      var cnt = 0;
+      for (var mi = 0; mi < matches.length; mi++) {
+        if (logoPat.test(matches[mi])) continue;       // skip logo
+        if (projPat.test(matches[mi])) cnt++;           // real project image
+      }
+      return cnt;
+    }
+
+    var imageSlideMap = { 4: img1, 5: img2, 6: img3, 13: img4 };
+    if (imageSlideMap[slideNo]) {
+      var assigned = imageSlideMap[slideNo];
+      // Force-inject if the assigned image is not already on this slide.
+      var assignedPat = new RegExp(escapeHtmlAttr(assigned.substring(0, 30)), 'i');
+      var hasAssigned = /<img\b/i.test(html) && assignedPat.test(html);
+      if (!hasAssigned) {
+        s.html = injectSideImage(html, assigned);
+      }
+    } else if (slideNo >= 3 && slideNo !== 2 && slideNo !== 15 && slideNo !== 16) {
+      // Other visual content slides: ensure at least ONE project image present.
+      if (countProjectImages(html) === 0) {
+        // distribute remaining images round-robin
+        var pick2 = [img1, img2, img3, img4][slideNo % 4] || imgCover;
+        s.html = injectSideImage(html, pick2);
+      }
+    }
+  }
+
+  return slides;
+}
+
+// Escape a data URI / URL so it is safe inside an HTML attribute.
+function safeAttr(s) {
+  return String(s).replace(/"/g, '&quot;');
+}
+
+function _slideShell(bg) {
+  bg = bg || '#FFFFFF';
+  return 'dir="rtl" lang="ar" style="width:1280px;height:720px;overflow:hidden;box-sizing:border-box;' +
+    'font-family:\'The Sans Arabic\',\'Cairo\',\'Tajawal\',sans-serif;position:relative;background:' + bg + '"';
+}
+
+// Build the COVER slide (slide 1): full-bleed image + burgundy overlay +
+// centered logo + huge project name + gold rule + subtitle.
+function buildCoverSlideHtml(imgCover, projectData) {
+  var name = (projectData && projectData.projectName) || 'عرض مشروع استثماري';
+  var ptype = (projectData && projectData.projectType) || '';
+  var city = (projectData && projectData.city) || '';
+  var sub = 'عرض مشروع استثماري';
+  if (ptype || city) sub = [ptype, city].filter(Boolean).join(' - ');
+  var bg = imgCover ? 'background-image:url(\'' + safeAttr(imgCover) + '\');background-size:cover;background-position:center;' : 'background:#670D0C;';
+  var img = safeAttr(imgCover);
+  return '<div data-no-reprocess="true" ' + _slideShell('#670D0C') + '>' +
+    '<div style="position:absolute;inset:0;' + bg + '"></div>' +
+    '<div style="position:absolute;inset:0;background:linear-gradient(135deg,rgba(103,13,12,0.72),rgba(15,23,42,0.55))"></div>' +
+    // corner accents
+    '<div style="position:absolute;top:0;right:0;width:160px;height:160px;border-top:3px solid #C2A176;border-right:3px solid #C2A176;opacity:.7"></div>' +
+    '<div style="position:absolute;bottom:0;left:0;width:160px;height:160px;border-bottom:3px solid #C2A176;border-left:3px solid #C2A176;opacity:.7"></div>' +
+    '<div style="position:relative;z-index:5;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 60px">' +
+      '<div style="background:#fff;border-radius:18px;padding:22px 40px;box-shadow:0 16px 48px rgba(0,0,0,0.30);margin-bottom:32px;display:flex;flex-direction:column;align-items:center;gap:10px">' +
+        '<img src="##LOGO##" alt="منافع الاقتصادية" style="height:120px;width:auto;max-width:360px;object-fit:contain;display:block" />' +
+        '<div style="color:#670D0C;font-size:18px;font-weight:800;letter-spacing:.5px">منافع الاقتصادية للعقار</div>' +
+        '<div style="color:#A7A9AC;font-size:12px;letter-spacing:2px">MANAFE ECONOMIC CO.</div>' +
+      '</div>' +
+      '<div style="color:#FFFFFF;font-size:54px;font-weight:900;line-height:1.25;max-width:980px;text-shadow:0 2px 12px rgba(0,0,0,0.5)">' + name + '</div>' +
+      '<div style="width:140px;height:3px;background:#C2A176;margin:22px 0"></div>' +
+      '<div style="color:#C2A176;font-size:18px;font-weight:700;letter-spacing:1px">' + sub + '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+// Build the MOODBOARD slide (slide 15): 2x2 gallery of the 4 images.
+function buildMoodboardSlideHtml(imgs, projectData) {
+  var names = ['Exterior Hero', 'Right Facade', 'Left Facade', 'Aerial View'];
+  var grid = '';
+  for (var i = 0; i < 4; i++) {
+    var im = imgs[i] || '';
+    if (im) {
+      grid += '<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(0,0,0,0.10);background:#f7f4ef">' +
+        '<img src="' + safeAttr(im) + '" style="width:100%;height:100%;object-fit:cover;display:block">' +
+        '<div style="position:absolute;left:0;right:0;bottom:0;padding:9px 12px;background:linear-gradient(0deg,rgba(103,13,12,0.9),rgba(103,13,12,0.45));color:#fff;font-size:13px;font-weight:700;text-align:center">' + names[i] + '</div>' +
+        '</div>';
+    } else {
+      grid += '<div style="background:#f7f4ef;border:2px dashed #dcd8d0;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:13px">' + names[i] + '</div>';
+    }
+  }
+  var projName = (projectData && projectData.projectName) || 'عرض استثماري';
+  return '<div data-no-reprocess="true" ' + _slideShell('#FFFFFF') + '>' +
+    '<div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,transparent,transparent 38px,rgba(103,13,12,0.03) 38px,rgba(103,13,12,0.03) 76px);pointer-events:none"></div>' +
+    // header
+    '<div style="position:relative;z-index:3;display:flex;align-items:center;justify-content:space-between;padding:18px 36px 14px;border-bottom:2px solid #670D0C">' +
+      '<div style="display:flex;align-items:center;gap:12px">' +
+        '<div style="background:#fff;border-radius:10px;padding:6px 10px;color:#670D0C;font-weight:800;font-size:14px">منافع الاقتصادية للعقار</div>' +
+        '<div style="width:1px;height:26px;background:#EFE7DC"></div>' +
+        '<div style="font-size:15px;font-weight:800;color:#670D0C">المودبورد — لوحة الإلهام والتصور البصري</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px">' +
+        '<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:.5px">VISUAL INSPIRATION</div>' +
+        '<div style="width:8px;height:8px;border-radius:50%;background:#C2A176"></div>' +
+      '</div>' +
+    '</div>' +
+    // gallery
+    '<div style="position:relative;z-index:2;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:16px;padding:22px 36px;flex:1;height:560px">' + grid + '</div>' +
+    // palette swatches
+    '<div style="position:relative;z-index:3;display:flex;gap:16px;justify-content:center;align-items:center;padding:8px 0 16px;font-size:11px;color:#670D0C;font-weight:700">' +
+      '<span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#670D0C;border-radius:3px;display:inline-block"></span> عنابي</span>' +
+      '<span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#C2A176;border-radius:3px;display:inline-block"></span> ذهبي</span>' +
+      '<span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#F5F0EE;border-radius:3px;display:inline-block;border:1px solid #ccc"></span> بيج فاخر</span>' +
+    '</div>' +
+    // footer
+    '<div style="position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;padding:10px 36px;border-top:1px solid #E2E8F0;background:#fff">' +
+      '<div style="color:#64748B;font-size:11px">' + projName + '</div>' +
+      '<div style="color:#64748B;font-size:11px">منافع الاقتصادية للعقار</div>' +
+      '<div style="width:24px;height:24px;border-radius:50%;background:#670D0C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800">15</div>' +
+    '</div>' +
+  '</div>';
+}
+
+// Build the CLOSING slide (slide 16): full burgundy background + logo + big
+// "شكراً لكم" + project name + organized contact info.
+function buildClosingSlideHtml(projectData) {
+  var name = (projectData && projectData.projectName) || 'عرض مشروع استثماري';
+  var preparedBy = (projectData && projectData.preparedBy) || '';
+  var contact = (projectData && projectData.contactInfo) || '';
+  // Contact info: split common separators into rows.
+  var contactLines = String(contact).split(/[\n,،;|]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+  var contactHtml = '';
+  if (contactLines.length) {
+    contactHtml = '<div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;max-width:760px">';
+    contactLines.forEach(function (line) {
+      contactHtml += '<div style="color:#E8E0D5;font-size:15px;font-weight:600;direction:rtl">' + line + '</div>';
+    });
+    contactHtml += '</div>';
+  }
+  return '<div data-no-reprocess="true" ' + _slideShell('#670D0C') + '>' +
+    // subtle geometric pattern
+    '<div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,transparent,transparent 60px,rgba(255,255,255,0.03) 60px,rgba(255,255,255,0.03) 120px);pointer-events:none"></div>' +
+    '<div style="position:absolute;top:0;right:0;width:200px;height:200px;border-top:3px solid #C2A176;border-right:3px solid #C2A176;opacity:.6"></div>' +
+    '<div style="position:absolute;bottom:0;left:0;width:200px;height:200px;border-bottom:3px solid #C2A176;border-left:3px solid #C2A176;opacity:.6"></div>' +
+    '<div style="position:relative;z-index:5;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:50px 70px">' +
+      '<div style="background:#fff;border-radius:18px;padding:18px 30px;box-shadow:0 16px 48px rgba(0,0,0,0.35);margin-bottom:30px">' +
+        '<img src="##LOGO##" alt="منافع الاقتصادية" style="height:74px;width:auto;max-width:260px;object-fit:contain;display:block" />' +
+      '</div>' +
+      '<div style="color:#FFFFFF;font-size:60px;font-weight:900;line-height:1.2;text-shadow:0 2px 12px rgba(0,0,0,0.4)">شكراً لكم</div>' +
+      '<div style="width:130px;height:3px;background:#C2A176;margin:22px 0"></div>' +
+      '<div style="color:#C2A176;font-size:22px;font-weight:700">' + name + '</div>' +
+      (preparedBy ? '<div style="color:#E8E0D5;font-size:14px;font-weight:600;margin-top:8px">إعداد: ' + preparedBy + '</div>' : '') +
+      contactHtml +
+      '<div style="margin-top:28px;color:#A7A9AC;font-size:12px;letter-spacing:1px;font-weight:700">منافع الاقتصادية للعقار · MANAFE ECONOMIC CO.</div>' +
+    '</div>' +
+  '</div>';
+}
+
+// Inject a side image (≈40% width) into a content slide that has none.
+// Wraps the existing inner content to keep the layout intact.
+function injectSideImage(html, img) {
+  if (!img) return html;
+  var imgSafe = safeAttr(img);
+  var sideBlock =
+    '<div style="width:38%;flex-shrink:0;align-self:stretch;display:flex;flex-direction:column;gap:8px">' +
+      '<div style="flex:1;border-radius:14px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,0.10);min-height:200px">' +
+        '<img src="' + imgSafe + '" style="width:100%;height:100%;object-fit:cover;display:block">' +
+      '</div>' +
+    '</div>';
+  // If the slide already uses a main flex row, append our block; otherwise wrap.
+  if (/display:\s*flex/i.test(html) && /class=["'][^"']*content/i.test(html)) {
+    // attempt to insert before the last closing content div — simple & safe: append
+    var lastClose = html.lastIndexOf('</div>');
+    if (lastClose > 0) {
+      return html.substring(0, lastClose) + sideBlock + html.substring(lastClose);
+    }
+  }
+  // fallback: wrap the whole inner content in a row with the image on the left
+  var firstClose = html.indexOf('>');
+  if (firstClose > 0) {
+    var open = html.substring(0, firstClose + 1);
+    var rest = html.substring(firstClose + 1);
+    return open + '<div style="display:flex;gap:20px;width:100%;height:100%;padding:90px 40px 60px;box-sizing:border-box">' +
+      sideBlock + '<div style="flex:1;min-width:0">' + rest + '</div></div>';
+  }
+  return html;
+}
+
+// DESIGNER GENERATION: GLM builds the full deck from approved images.
+// All creative-board images are uploaded to GLM so it has full visual
+// context, plus header/footer rules + brand constraints.
+app.post('/api/designer-generate', async function(req, res) {
+  var projectData = req.body.projectData ? truncateProjectData(req.body.projectData, 8000) : null;
+  var outline = req.body.outline || [];
+  var images = req.body.images || []; // approved creative-board images (data URIs)
+  var userId = req.body.userId || 'default_user';
+  var userInstructions = req.body.instructions || '';
+  var conversation = req.body.conversation || []; // prior chat (for regeneration)
+
+  if (!projectData) return res.status(400).json({ error: 'Project data is required' });
+  if (!Array.isArray(images) || images.length === 0) {
+    return res.status(400).json({ error: 'At least one approved image is required' });
+  }
+
+  console.log('\n[Designer] Generating full deck with ' + images.length + ' images in batches...');
+  console.log('  Slides: ' + outline.length + ' | Has images: ' + images.length);
+
+  try {
+    var slideList = outline.map(function(s, i) {
+      return (i + 1) + '. ' + s.title + (s.bullets && s.bullets.length > 0 ? '\n   ' + s.bullets.join('\n   ') : '');
+    }).join('\n');
+
+    var designerPrompt = DESIGNER_SYSTEM_PROMPT
+      .replace('{{IMAGE_COUNT}}', images.length)
+      .replace('{{OUTLINE}}', slideList);
+
+    var baseUserMessage = 'بيانات المشروع:\n' + JSON.stringify({
+      projectName: projectData.projectName,
+      projectType: projectData.projectType,
+      city: projectData.city,
+      location: projectData.location,
+      idea: projectData.idea,
+      structure: projectData.structure,
+      developer: projectData.developer,
+      components: projectData.components,
+      landArea: projectData.landArea,
+      buildingRatio: projectData.buildingRatio,
+      areaNote: projectData.areaNote,
+      avgRent: projectData.avgRent,
+      serviceFees: projectData.serviceFees,
+      annualRevenue: projectData.annualRevenue,
+      annualOpex: projectData.annualOpex,
+      landCost: projectData.landCost,
+      developmentCost: projectData.developmentCost,
+      totalOperatingProfit: projectData.totalOperatingProfit,
+      exitValue: projectData.exitValue,
+      capRate: projectData.capRate,
+      annualROI: projectData.annualROI,
+      noiRate: projectData.noiRate,
+      payback: projectData.payback,
+      timelineRows: projectData.timelineRows,
+      risks: projectData.risks,
+      recommendation: projectData.recommendation,
+      preparedBy: projectData.preparedBy,
+      contactInfo: projectData.contactInfo,
+      googleMapsLink: projectData.googleMapsLink,
+      locationFeatures: projectData.locationFeatures,
+      projectFeatures: projectData.projectFeatures,
+      investmentHighlights: projectData.investmentHighlights
+    }, null, 2);
+
+    baseUserMessage += '\n\nفهرس الشرائح الكامل:\n' + slideList;
+    baseUserMessage += '\n\nالصور المعتمدة (' + images.length + ' صورة): تم رفعها لك في هذه الرسالة. صمم العرض كاملاً بناءً عليها.';
+    baseUserMessage += '\nصِف كل صورة وأين ستستخدمها في تصميمك.';
+    if (userInstructions) baseUserMessage += '\n\nتعليمات إضافية:\n' + userInstructions;
+
+    // Batch configuration
+    var BATCH_SIZE = 3;
+    var totalSlides = outline.length;
+    var allSlides = [];
+    var lastCacheAnalytics = null;
+    var allMessagesBackup = [];
+
+    for (var startIdx = 0; startIdx < totalSlides; startIdx += BATCH_SIZE) {
+      var endIdx = Math.min(startIdx + BATCH_SIZE, totalSlides);
+      var batchOutline = outline.slice(startIdx, endIdx);
+      var batchIndices = [];
+      for (var k = startIdx + 1; k <= endIdx; k++) batchIndices.push(k);
+      var batchIndicesStr = batchIndices.join(', ');
+
+      console.log('  [Designer Batch] Designing slides ' + batchIndicesStr + ' of ' + totalSlides + '...');
+
+      var batchUserMessage = baseUserMessage + '\n\n'
+        + '⚠️ مطلوب منك الآن تصميم الشرائح رقم [' + batchIndicesStr + '] فقط من الفهرس المرفق.\n'
+        + 'لا تصمم أي شريحة أخرى خارج هذا النطاق.\n'
+        + 'أرجع كائن JSON صالح بالشكل التالي يحتوي فقط على الـ ' + batchOutline.length + ' شرائح المطلوبة في هذه الدفعة:\n'
+        + '{"slides": [\n'
+        + '  {"title": "عنوان الشريحة", "html": "HTML الشريحة..."}\n'
+        + ']}';
+
+      var responseVal = await callVisionChat(designerPrompt, batchUserMessage, images, userId, {
+        maxTokens: 8000,
+        temperature: 0.7
+      });
+
+      var data = responseVal.data;
+      var messages = responseVal.messages;
+
+      if (!data.choices || !data.choices[0]) {
+        throw new Error('Vision model failed on batch ' + batchIndicesStr + ': ' + JSON.stringify(data));
+      }
+
+      var cacheAnalytics = computeCacheAnalytics(data, 'designer_gen_batch_' + Date.now());
+      lastCacheAnalytics = cacheAnalytics;
+      var resultText = data.choices[0].message.content.trim();
+
+      // Save messages for backup
+      allMessagesBackup = allMessagesBackup.concat(messages);
+      allMessagesBackup.push({ role: 'assistant', content: resultText });
+
+      var result = parseFirstJsonObject(resultText);
+      if (!result || !result.slides) {
+        throw new Error('No valid JSON object with "slides" array found in designer response for batch ' + batchIndicesStr);
+      }
+
+      var batchSlides = result.slides || [];
+      // Tag each slide with its REAL 1-based number so post-processing can
+      // target the cover (1), index (2), moodboard (15), closing (16) precisely.
+      // batchIndices are already 1-based numbers for this batch.
+      for (var bi = 0; bi < batchSlides.length && bi < batchIndices.length; bi++) {
+        batchSlides[bi]._slideNo = batchIndices[bi];
+      }
+      console.log('  [Designer Batch] Successfully generated ' + batchSlides.length + ' slides for batch ' + batchIndicesStr);
+      allSlides = allSlides.concat(batchSlides);
+    }
+
+    // ═══ POST-PROCESSING: enforce images & special slides ═══
+    // We cannot trust the vision model to copy data URIs into src (it often
+    // drops them). So we ALWAYS resolve the tokens here and rebuild the
+    // cover + moodboard slides deterministically. This guarantees every
+    // approved image is used.
+    allSlides = postProcessDesignerSlides(allSlides, images, projectData);
+
+    // Write backup of the combined conversation/responses
+    writeSystemPrombetBackup(allMessagesBackup);
+
+    console.log('  ✓ Generated total of ' + allSlides.length + ' slides with images');
+    res.json({ success: true, slides: allSlides, cache_analytics: lastCacheAnalytics });
+
+  } catch (err) {
+    console.error('  ✗ Designer generation error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DESIGNER CHAT: vision-enabled editing conversation.
+// The current slide is rendered to an image and sent to GLM so it can
+// "see" the design and respond with an updated full HTML for that slide.
+// Conversation history is passed in and persisted by the client.
+app.post('/api/designer-chat', async function(req, res) {
+  var message = req.body.message;
+  var currentSlideHtml = req.body.currentSlideHtml;
+  var currentSlideTitle = req.body.currentSlideTitle || '';
+  var slideImages = req.body.slideImages || []; // additional reference images to attach
+  var projectData = truncateProjectData(req.body.projectData, 4000);
+  var conversation = req.body.conversation || []; // [{role, content}]
+  var userId = req.body.userId || 'default_user';
+
+  if (!message) return res.status(400).json({ error: 'Message is required' });
+
+  console.log('\n[Designer Chat] ' + message.substring(0, 80));
+
+  try {
+    // Render the current slide to an image so GLM can see it.
+    var slideImageData = null;
+    if (currentSlideHtml) {
+      try {
+        slideImageData = await renderSlideImage(currentSlideHtml, { scale: 2 });
+        console.log('  ✓ Rendered current slide for vision');
+      } catch (renderErr) {
+        console.warn('  ⚠ Could not render slide image:', renderErr.message);
+      }
+    }
+
+    var images = [];
+    if (slideImageData) images.push(slideImageData);
+    if (Array.isArray(slideImages)) {
+      slideImages.forEach(function(img) {
+        if (img && typeof img === 'string' && (img.indexOf('data:image/') === 0 || img.indexOf('http') === 0)) {
+          images.push(img);
+        }
+      });
+    }
+
+    var userText = 'طلب المستخدم: ' + message + '\n\n';
+    userText += 'الشريحة الحالية: ' + (currentSlideTitle || 'غير محدد') + '\n\n';
+    userText += 'HTML الحالي للشريحة:\n' + (currentSlideHtml || 'لا يوجد') + '\n\n';
+    if (images.length > 0) {
+      userText += 'تم إرفاق صورة الشريحة الحالية' + (images.length > 1 ? ' وصور مرجعية' : '') + ' لتراها.\n\n';
+    }
+    userText += 'التعليمات: عدّل الشريحة حسب طلب المستخدم. أرجع JSON بالشكل: {"action": "update_slide", "title": "العنوان (أبقه إن لم يتغير)", "html": "HTML كامل ومحدث بكل الأنماط المضمّنة"}. إذا كان الطلب سؤالاً أو لا يتطلب تعديلاً، أرجع {"action": "chat", "response": "ردك بالعربية"}.';
+
+    // Vision-enabled editing: the rendered slide screenshot must be SEEN by
+    // the model. GLM (ZAI) cannot see images, so route through Gemini.
+    var { data, messages } = await callVisionChat(DESIGNER_CHAT_PROMPT, userText, images, userId, {
+      maxTokens: 8000,
+      temperature: 0.6,
+      history: conversation
+    });
+
+    if (!data.choices || !data.choices[0]) {
+      throw new Error('Vision model failed: ' + JSON.stringify(data));
+    }
+
+    var cacheAnalytics = computeCacheAnalytics(data, 'designer_chat_' + Date.now());
+    var resultText = data.choices[0].message.content.trim();
+    writeSystemPrombetBackup(messages, resultText);
+
+    var result = parseFirstJsonObject(resultText);
+    if (!result) {
+      result = { action: 'chat', response: stripCodeFences(resultText).substring(0, 2000) };
+    }
+
+    console.log('  ✓ Designer chat: ' + (result.action || 'chat'));
+    res.json({ success: true, data: result, cache_analytics: cacheAnalytics });
+
+  } catch (err) {
+    console.error('  ✗ Designer chat error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
 //  START SERVER
 // ═══════════════════════════════════════════════════════════════
 
@@ -1931,6 +2808,7 @@ app.listen(PORT, function() {
   console.log('    GET  /api/files');
   console.log('    POST /api/generate-main-image');
   console.log('    POST /api/generate-images');
+  console.log('    POST /api/generate-cover-prompt');
   console.log('    POST /api/generate-slide-image');
   console.log('    POST /api/generate-design');
   console.log('    POST /api/redesign-slide');

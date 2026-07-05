@@ -20,12 +20,5 @@ __pycache__/
 *.pyd
 .firebase/
 .netlify/
-*.otf
-*.ttf
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.woff
-*.woff2
-*.webp
+*.log
+*.pid

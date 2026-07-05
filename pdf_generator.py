@@ -59,16 +59,8 @@ ARABIC_FONT_BOLD = 'Helvetica-Bold'  # Will be updated after registration
 def register_fonts():
     global ARABIC_FONT, ARABIC_FONT_BOLD
     font_paths = [
-        ('tahoma', 'C:/Windows/Fonts/tahoma.ttf'),
-        ('tahomabd', 'C:/Windows/Fonts/tahomabd.ttf'),
-        ('TheSansArabic-Light', str(PROJECT_ROOT / 'assets' / 'fonts' / 'TheSansArabic-Light.otf')),
+        ('TheSansArabic-Light', str(PROJECT_ROOT / 'assets' / 'fonts' / 'TheSansArabic-Light.ttf')),
         ('TheSansArabic-Bold', str(PROJECT_ROOT / 'assets' / 'fonts' / 'BahijTheSansArabic-Bold.ttf')),
-        ('NotoSansArabic-Regular', '/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf'),
-        ('NotoSansArabic-Bold', '/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf'),
-        ('DejaVuSans', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'),
-        ('arial', 'C:/Windows/Fonts/arial.ttf'),
-        ('arialbd', 'C:/Windows/Fonts/arialbd.ttf'),
-        ('arabtype', 'C:/Windows/Fonts/arabtype.ttf'),
     ]
     for name, fp in font_paths:
         if os.path.exists(fp):
@@ -77,43 +69,17 @@ def register_fonts():
             except:
                 pass
 
-    # Set regular + bold Arabic font pairs
-    font_pairs = [
-        ('TheSansArabic-Light', 'TheSansArabic-Bold'),
-        ('tahoma', 'tahomabd'),
-        ('NotoSansArabic-Regular', 'NotoSansArabic-Bold'),
-        ('arial', 'arialbd'),
-        ('arabtype', 'arabtype'),
-    ]
-    for reg, bold in font_pairs:
+    # Always use The Sans Arabic
+    try:
+        pdfmetrics.getFont('TheSansArabic-Light')
+        ARABIC_FONT = 'TheSansArabic-Light'
         try:
-            pdfmetrics.getFont(reg)
-            ARABIC_FONT = reg
-            try:
-                pdfmetrics.getFont(bold)
-                ARABIC_FONT_BOLD = bold
-            except:
-                ARABIC_FONT_BOLD = reg
-            break
+            pdfmetrics.getFont('TheSansArabic-Bold')
+            ARABIC_FONT_BOLD = 'TheSansArabic-Bold'
         except:
-            continue
-
-    # Fallback: search system fonts
-    if ARABIC_FONT == 'Helvetica':
-        for root, dirs, files in os.walk('/usr/share/fonts'):
-            for f in files:
-                if f.endswith('.ttf') and ('noto' in f.lower() or 'arab' in f.lower()):
-                    try:
-                        fp = os.path.join(root, f)
-                        name = os.path.splitext(f)[0]
-                        pdfmetrics.registerFont(TTFont(name, fp))
-                        ARABIC_FONT = name
-                        ARABIC_FONT_BOLD = name
-                        break
-                    except:
-                        pass
-            if ARABIC_FONT != 'Helvetica':
-                break
+            ARABIC_FONT_BOLD = 'TheSansArabic-Light'
+    except:
+        pass
 
     print(f"  [PDF] Using font: {ARABIC_FONT} (bold: {ARABIC_FONT_BOLD})")
     return True

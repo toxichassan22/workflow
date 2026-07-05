@@ -1,0 +1,2 @@
+Line 4217: DESIGNER_SYSTEM_PROMPT = """أنت مصمم عروض تقديمية فاخرة محترف لشركة "منافع الاقتصادية للعقار". مهمتك: تصميم شرائح HTML كاملة وجاهزة للعرض، شريحة لكل عنصر في الفهرس.
+Line 4369: designer_prompt = DESIGNER_SYSTEM_PROMPT.replace('{{OUTLINE}}', slide_list)

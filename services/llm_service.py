@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-pro")
-OPENROUTER_CHAT_MODEL = os.getenv("OPENROUTER_CHAT_MODEL", "google/gemini-3.5-flash")
 
 
 def _get_api_key() -> str:
@@ -132,17 +131,14 @@ def generate_content(system_prompt: str, user_prompt: str, images: list[dict] = 
     retry=lambda retry_state: _is_retryable(retry_state.outcome.exception()) if retry_state.outcome and retry_state.outcome.failed else False,
     reraise=True,
 )
-def _generate_json_inner(system_prompt: str, user_prompt: str, stream_callback=None, images: list[dict] = None, use_chat_model: bool = False) -> dict[str, Any]:
+def _generate_json_inner(system_prompt: str, user_prompt: str, stream_callback=None, images: list[dict] = None) -> dict[str, Any]:
     """Inner retried JSON generation logic."""
     system_prompt = _truncate_prompt(system_prompt)
     user_prompt = _truncate_prompt(user_prompt)
     client, model = _get_client()
     global _client_type
     
-    if _client_type == "openrouter":
-        target_model = OPENROUTER_CHAT_MODEL if use_chat_model else model
-    else:
-        target_model = model
+    target_model = model
         
     logger.info("LLM JSON request (%s): %s...", target_model, user_prompt[:80])
 
@@ -226,11 +222,11 @@ def _generate_json_inner(system_prompt: str, user_prompt: str, stream_callback=N
         )
 
 
-def generate_json(system_prompt: str, user_prompt: str, stream_callback=None, images: list[dict] = None, use_chat_model: bool = False) -> dict[str, Any]:
+def generate_json(system_prompt: str, user_prompt: str, stream_callback=None, images: list[dict] = None) -> dict[str, Any]:
     """Generate structured JSON content. Fails instantly if key is missing."""
     if not _get_api_key():
         raise ValueError(
             "API Key is missing. "
             "Please set ZAI_KEY or OPENROUTER_API_KEY in your environment, or provide it in the API settings sidebar."
         )
-    return _generate_json_inner(system_prompt, user_prompt, stream_callback, images, use_chat_model)
+    return _generate_json_inner(system_prompt, user_prompt, stream_callback, images)
