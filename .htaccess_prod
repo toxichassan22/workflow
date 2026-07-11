@@ -1,0 +1,10 @@
+DirectoryIndex disabled
+
+RewriteEngine On
+
+# Exclude .well-known / Let's Encrypt certificates from proxying
+RewriteCond %{REQUEST_URI} ^/\.well-known [NC]
+RewriteRule ^ - [L]
+
+# Proxy all other requests to Node.js running on port 3000
+RewriteRule ^(.*)$ http://127.0.0.1:3000/$1 [P,L]

@@ -22,3 +22,5 @@ __pycache__/
 .netlify/
 *.log
 *.pid
+mirror/
+.codetb-cache/

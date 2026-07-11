@@ -84,6 +84,90 @@ function saveTrainingHistory(userId, messages) {
   saveUserDB(db);
 }
 
+// ═══ Brand Profiles Management ═══
+app.get('/api/branding-profiles', function(req, res) {
+  var userId = req.query.userId || 'default_user';
+  var db = loadUserDB();
+  var user = db.users[userId];
+  var profiles = (user && user.brandProfiles) ? user.brandProfiles : [];
+  res.json({ success: true, profiles: profiles });
+});
+
+app.post('/api/save-branding-profile', function(req, res) {
+  var userId = req.body.userId || 'default_user';
+  var profile = req.body.profile;
+  if (!profile || !profile.id) {
+    return res.status(400).json({ error: 'Profile data and profile.id are required' });
+  }
+  var db = loadUserDB();
+  if (!db.users[userId]) db.users[userId] = {};
+  if (!db.users[userId].brandProfiles) db.users[userId].brandProfiles = [];
+  
+  var existingIdx = db.users[userId].brandProfiles.findIndex(function(p) { return p.id === profile.id; });
+  if (existingIdx !== -1) {
+    db.users[userId].brandProfiles[existingIdx] = profile;
+  } else {
+    db.users[userId].brandProfiles.push(profile);
+  }
+  saveUserDB(db);
+  res.json({ success: true, profiles: db.users[userId].brandProfiles });
+});
+
+app.post('/api/delete-branding-profile', function(req, res) {
+  var userId = req.body.userId || 'default_user';
+  var profileId = req.body.profileId;
+  if (!profileId) {
+    return res.status(400).json({ error: 'profileId is required' });
+  }
+  var db = loadUserDB();
+  if (db.users[userId] && db.users[userId].brandProfiles) {
+    db.users[userId].brandProfiles = db.users[userId].brandProfiles.filter(function(p) { return p.id !== profileId; });
+    saveUserDB(db);
+  }
+  var profiles = (db.users[userId] && db.users[userId].brandProfiles) ? db.users[userId].brandProfiles : [];
+  res.json({ success: true, profiles: profiles });
+});
+
+function hexToRgb(hex) {
+  if (!hex) return '103,13,12';
+  hex = String(hex).replace('#', '');
+  if (hex.length === 3) {
+    hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  }
+  if (hex.length !== 6) return '103,13,12';
+  var r = parseInt(hex.substring(0, 2), 16);
+  var g = parseInt(hex.substring(2, 4), 16);
+  var b = parseInt(hex.substring(4, 6), 16);
+  return r + ',' + g + ',' + b;
+}
+
+function customizePrompts(prompt, projectData) {
+  if (!projectData) return prompt;
+  var companyName = projectData.clientCompanyName || 'منافع الاقتصادية للعقار';
+  var colors = projectData.clientColors || {};
+  var primary = colors.primary || '#670D0C';
+  var secondary = colors.secondary || '#C2A176';
+  var rgb = hexToRgb(primary);
+  
+  var result = prompt
+    .replace(/منافع الاقتصادية للعقار/g, companyName)
+    .replace(/شركة منافع الاقتصادية/g, companyName)
+    .replace(/منافع الاقتصادية/g, companyName)
+    .replace(/شركة منافع/g, companyName)
+    .replace(/Manafe Economic Co\. for Real Estate/gi, companyName)
+    .replace(/Manafe Economic Co\./gi, companyName)
+    .replace(/Manafe/gi, companyName)
+    .replace(/#670D0C/g, primary)
+    .replace(/#7A0C0C/g, primary)
+    .replace(/#C2A176/g, secondary)
+    .replace(/#C4A35A/g, secondary)
+    .replace(/#C5A880/g, secondary)
+    .replace(/103,\s*13,\s*12/g, rgb);
+    
+  return result;
+}
+
+
 // Truncate project data to fit within GLM token limits
 function truncateProjectData(data, maxChars) {
   if (!data) return data;
@@ -106,7 +190,7 @@ function truncateProjectData(data, maxChars) {
       var cleaned = {};
       for (var k in obj) {
         if (obj.hasOwnProperty(k)) {
-          if (['mainImageData', 'moodboardImages', 'aiGeneratedImages', 'creativeImages', 'creativeSlots', 'image_b64', 'image', 'logo', 'referenceImage', 'slides'].indexOf(k) !== -1) {
+          if (['mainImageData', 'moodboardImages', 'aiGeneratedImages', 'creativeImages', 'creativeSlots', 'image_b64', 'image', 'logo', 'referenceImage', 'slides', 'clientLogo', 'clientReferenceImage'].indexOf(k) !== -1) {
             continue;
           }
           cleaned[k] = cleanData(obj[k]);
@@ -115,7 +199,7 @@ function truncateProjectData(data, maxChars) {
       return cleaned;
     }
     if (typeof obj === 'string') {
-      if (obj.indexOf('data:image/') === 0 || (obj.length > 1000 && obj.indexOf(';base64,') !== -1)) {
+      if (obj.indexOf('data:image/') === 0 || (obj.length > 500 && obj.indexOf(';base64,') !== -1)) {
         return '[IMAGE_DATA_OMITTED]';
       }
       return obj;
