@@ -21,10 +21,11 @@ GLM يعمل كل حاجة في call واحد:
 
 ---
 
-## Phase 1: إنشاء Mirror Folder ✅
+## Phase 1: الكود الأساسي ✅
 ```
-D:\workflow\mirror\  (موجود)
+النسخة الحالية هي الرسمية — لا يوجد mirror منفصل
 ```
+> **تم:** الـ mirror أصبح هو الكود الأساسي رسمياً، وتم إلغاء مفهوم الـ mirror تماماً.
 
 ## Phase 2: Backend الجديد
 
@@ -648,29 +649,25 @@ def test_generation_time():
 ## Phase 5: Migration
 
 ### 5.1 Timeline
-- **Phase 1:** Setup mirror ✅ (موجود)
+- **Phase 1:** الكود الأساسي ✅ (تم — mirror أصبح الرسمي)
 - **Phase 2:** Backend جديد (3-4 ساعات)
 - **Phase 3:** Frontend adjustments (2-3 ساعات)
 - **Phase 4:** Testing (2-3 ساعات)
-- **Phase 5:** Migration to main (1 ساعة)
+- **Phase 5:** Migration to main ✅ (تم — الكود الحالي هو الرسمي)
 
 ### 5.2 Rollback Plan
-- Mirror موجود كـ backup
-- لو في مشكلة، نرجع للنظام القديم
+- Git history متاح كـ backup
+- لو في مشكلة، نرجع لـ commit سابق
 - نعمل backup للـ .env
 
 ### 5.3 Deployment
 ```bash
-# 1. Backup current
-cp -r D:\workflow\app.py D:\workflow\app.py.backup
+# الكود الحالي هو الرسمي — لا حاجة لنسخ من mirror
 
-# 2. Deploy new
-cp D:\workflow\mirror\app.py D:\workflow\app.py
-
-# 3. Test
+# 1. Test
 python D:\workflow\app.py
 
-# 4. If OK, deploy to HF
+# 2. If OK, deploy to HF
 python upload_to_hf.py
 ```
 

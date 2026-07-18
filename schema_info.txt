@@ -1,0 +1,25 @@
+=== tenants columns ===
+(0, 'id', 'TEXT', 0, None, 1)
+(1, 'company_name', 'TEXT', 1, None, 0)
+(2, 'subdomain', 'TEXT', 0, None, 0)
+(3, 'email', 'TEXT', 1, None, 0)
+(4, 'password_hash', 'TEXT', 1, None, 0)
+(5, 'plan', 'TEXT', 0, "'free'", 0)
+(6, 'is_active', 'INTEGER', 0, '1', 0)
+(7, 'is_admin', 'INTEGER', 0, '0', 0)
+(8, 'created_at', 'TEXT', 0, "datetime('now')", 0)
+(9, 'settings_json', 'TEXT', 0, None, 0)
+(10, 'domain', 'TEXT', 0, None, 0)
+
+=== tenant_id columns ===
+tenant_branding: ['tenant_id', 'primary_color', 'secondary_color', 'accent_color', 'background_color', 'text_color', 'logo_path', 'company_name', 'tagline', 'font_family', 'font_arabic', 'design_template', 'reference_image_path', 'header_enabled', 'footer_enabled', 'header_height', 'footer_height', 'card_style', 'slide_ratio', 'moodboard_enabled', 'cover_image_enabled', 'default_slide_count', 'min_slides', 'max_slides', 'updated_at']
+tenant_input_fields: ['id', 'tenant_id', 'field_key', 'field_label', 'field_type', 'field_options', 'is_required', 'is_active', 'is_custom', 'sort_order', 'placeholder', 'default_value', 'ai_hint', 'created_at', 'section_key']
+tenant_slide_templates: ['id', 'tenant_id', 'slide_type', 'slide_name', 'design_instructions', 'is_active', 'sort_order', 'created_at']
+presentations: ['id', 'tenant_id', 'title', 'project_data', 'slides_data', 'slide_count', 'status', 'created_at', 'updated_at']
+exports: ['id', 'presentation_id', 'tenant_id', 'format', 'file_path', 'created_at']
+users: ['id', 'tenant_id', 'name', 'email', 'password_hash', 'role', 'is_active', 'created_at']
+invite_links: ['id', 'tenant_id', 'email', 'token', 'expires_at', 'used_at']
+tenant_training_data: ['id', 'tenant_id', 'title', 'content', 'category', 'is_active', 'created_at', 'updated_at']
+presentation_approvals: ['id', 'presentation_id', 'tenant_id', 'requested_by', 'requested_by_name', 'status', 'reviewed_by', 'reviewed_by_name', 'review_note', 'created_at', 'reviewed_at']
+ai_rules_log: ['id', 'tenant_id', 'user_id', 'user_name', 'rule_category', 'rule_key', 'old_value', 'new_value', 'risk_level', 'created_at']
+map_images: ['id', 'tenant_id', 'presentation_id', 'image_type', 'file_path', 'placeholder', 'metadata_json', 'created_at']

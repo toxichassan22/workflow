@@ -1,0 +1,6 @@
+Tables: ['tenants', 'tenant_branding', 'tenant_input_fields', 'tenant_slide_templates', 'presentations', 'exports', 'users', 'presentation_versions', 'edit_log', 'invite_links', 'tenant_training_data', 'presentation_approvals', 'ai_rules_log', 'map_images', 'user_permissions', 'user_field_sections']
+
+=== tenants ===
+email=admin@system.local, company=System Administration, admin=1, active=0, created=2026-07-12 17:33:57
+email=sag@example.com, company=System Administration, admin=1, active=1, created=2026-07-13 21:09:43
+

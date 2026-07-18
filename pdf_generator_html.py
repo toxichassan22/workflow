@@ -7,7 +7,8 @@ import os
 import re
 import base64
 from pathlib import Path
-from config.settings import PROJECT_ROOT
+PROJECT_ROOT = Path(__file__).resolve().parent
+
 
 PAGE_W_PT = 960
 PAGE_H_PT = 540
