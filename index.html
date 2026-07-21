@@ -1532,7 +1532,6 @@ main {width: 100%}
       </div>
       <div class="tenant-form-actions" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)">
         <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
-        <button class="btn primary" onclick="submitTenantProject()">التالي: اقتراح خطة الشرائح</button>
         <button class="btn ghost" onclick="fillSampleProjectData()">تعبئة بيانات تجريبية</button>
         <button class="btn ghost" onclick="approveAllSections()">اعتماد كل الأقسام</button>
         <button class="btn ghost" onclick="requestProjectDraftApproval()">طلب اعتماد المسودة</button>
@@ -1552,7 +1551,6 @@ main {width: 100%}
           <div class="tenant-btns">
             <button class="btn ghost" onclick="addPlanSlide()">إضافة شريحة</button>
             <button class="btn ghost" onclick="regenerateTenantSlidePlan()">إعادة الاقتراح</button>
-            <button class="btn primary" onclick="goToTenantMainImage()">التالي: توليد الصورة الرئيسية</button>
             <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">عودة</button>
           </div>
         </div>
@@ -1568,8 +1566,6 @@ main {width: 100%}
           <p class="tenant-hint" style="margin-bottom:16px">هذه الصورة ستظهر في غلاف العرض. يمكنك إعادة توليدها حتى تصل للشكل المناسب.</p>
           <div id="tenantMainImagePreview" class="tenant-creative-preview">لم يتم توليد صورة رئيسية بعد.</div>
           <div class="tenant-btns">
-            <button class="btn primary" onclick="generateTenantMainImage()">توليد الصورة الرئيسية</button>
-            <button class="btn primary" onclick="goToTenantMoodboard()">التالي: صور المود بورد</button>
             <button class="btn ghost" onclick="showTenantPage('tenantSlidePlanPage')">عودة للهيكل</button>
           </div>
         </div>
@@ -1585,7 +1581,6 @@ main {width: 100%}
           <p class="tenant-hint" style="margin-bottom:16px">أربع صور مرجعية تُستخدم في لوحة الإلهام وفي الشرائح المرتبطة بالمشروع.</p>
           <div id="tenantMoodboardPreview" class="tenant-moodboard-grid"></div>
           <div class="tenant-btns">
-            <button class="btn primary" onclick="generateTenantMoodboardImages()">توليد صور المود بورد</button>
             <button class="btn primary" onclick="generateTenantSlides()">توليد العرض والتصميم</button>
             <button class="btn ghost" onclick="goToTenantMainImage()">عودة للصورة الرئيسية</button>
           </div>
@@ -2029,14 +2024,14 @@ main {width: 100%}
       { pageId: 'tenantMoodboardPage', label: 'توليد المود بورد' },
     ];
 
-    function navigateTenantWorkflow(pageId) {
+    async function navigateTenantWorkflow(pageId) {
       if (pageId === 'tenantProjectPage') {
         showTenantPage(pageId);
         return;
       }
       if (pageId === 'tenantSlidePlanPage') {
         if (!tenantSlidePlan) {
-          toast('أكمل بيانات المشروع واضغط التالي لتوليد الهيكل أولاً.');
+          await submitTenantProject();
           return;
         }
         renderTenantSlidePlan();
@@ -3872,22 +3867,28 @@ main {width: 100%}
       }).join('');
     }
 
-    function goToTenantMainImage() {
+    async function goToTenantMainImage() {
       if (!tenantSlidePlan || !tenantProjectData) {
         toast('أنشئ هيكل الشرائح أولاً.');
         return;
       }
       renderTenantMainImage();
       showTenantPage('tenantMainImagePage');
+      if (!tenantCreativeImages.cover) {
+        await generateTenantMainImage();
+      }
     }
 
-    function goToTenantMoodboard() {
+    async function goToTenantMoodboard() {
       if (!tenantSlidePlan || !tenantProjectData) {
         toast('أنشئ هيكل الشرائح أولاً.');
         return;
       }
       renderTenantMoodboard();
       showTenantPage('tenantMoodboardPage');
+      if (!tenantCreativeImages.moodboard || !tenantCreativeImages.moodboard.length) {
+        await generateTenantMoodboardImages();
+      }
     }
 
     async function generateTenantMainImage() {
