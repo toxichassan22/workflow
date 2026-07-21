@@ -1532,7 +1532,6 @@ main {width: 100%}
       </div>
       <div class="tenant-form-actions" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)">
         <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
-        <button class="btn primary" onclick="submitTenantProject()">التالي: اقتراح خطة الشرائح</button>
         <button class="btn ghost" onclick="fillSampleProjectData()">تعبئة بيانات تجريبية</button>
         <button class="btn ghost" onclick="approveAllSections()">اعتماد كل الأقسام</button>
         <button class="btn ghost" onclick="requestProjectDraftApproval()">طلب اعتماد المسودة</button>
@@ -2029,14 +2028,14 @@ main {width: 100%}
       { pageId: 'tenantMoodboardPage', label: 'توليد المود بورد' },
     ];
 
-    function navigateTenantWorkflow(pageId) {
+    async function navigateTenantWorkflow(pageId) {
       if (pageId === 'tenantProjectPage') {
         showTenantPage(pageId);
         return;
       }
       if (pageId === 'tenantSlidePlanPage') {
         if (!tenantSlidePlan) {
-          toast('أكمل بيانات المشروع واضغط التالي لتوليد الهيكل أولاً.');
+          await submitTenantProject();
           return;
         }
         renderTenantSlidePlan();
