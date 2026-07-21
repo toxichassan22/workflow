@@ -1,0 +1,27 @@
+# Render Blueprint for the Real Estate Proposal Generator (Manafe)
+# This deploys the Flask backend + frontend as a single Docker web service
+# and connects it to your existing Render PostgreSQL database via DATABASE_URL.
+
+services:
+  - type: web
+    name: manafe
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ZAI_KEY
+        sync: false
+      - key: OPENROUTER_KEY
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: GLM_USE_OPENROUTER
+        value: "false"

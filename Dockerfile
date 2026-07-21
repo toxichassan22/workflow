@@ -35,6 +35,6 @@ ENV FONTCONFIG_PATH=/etc/fonts
 EXPOSE 7860
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:7860/health')" || exit 1
+    CMD python -c "import os, sys, urllib.request; urllib.request.urlopen('http://localhost:' + os.environ.get('PORT','7860') + '/health'); sys.exit(0)"
 
-CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--timeout", "120", "--workers", "1", "--threads", "4", "app:app"]
+CMD exec gunicorn --bind 0.0.0.0:${PORT:-7860} --timeout 120 --workers 1 --threads 4 app:app

@@ -38,3 +38,26 @@ To enable map slides (location overview, landmarks, access, catchment), you need
 ## AI Rules Management
 
 Company admins can manage AI design/content rules from the new **قواعد AI** page. Changes are classified by risk (green/yellow/red) and logged in the `ai_rules_log` table.
+
+## Deploy on Render
+
+The repo includes a `render.yaml` Blueprint that deploys the Flask backend and the single-page frontend as one Docker Web Service, using Render PostgreSQL as the database.
+
+1. Push the latest code to GitHub:
+   ```bash
+   git add .
+   git commit -m "Render deploy config"
+   git push origin main
+   ```
+2. In the Render Dashboard, create a **New Blueprint** and select your `toxichassan22/workflow` repo.
+3. Render will detect `render.yaml`. Open the new `manafe` Web Service and set the environment variables:
+   - `DATABASE_URL` — copy the **Internal Connection String** from your existing Render Postgres (`dpg-d9fmm13rjlhs73alaau0-a`)
+   - `ADMIN_EMAIL` — super-admin email address (e.g. `admin@yourdomain.com`)
+   - `ADMIN_PASSWORD` — strong password (12+ characters)
+   - `ZAI_KEY` — your Z.ai API key
+   - `OPENROUTER_KEY` — your OpenRouter API key
+   - `GOOGLE_MAPS_API_KEY` — your Google Maps API key
+4. Save the environment variables and trigger a deploy.
+5. Once the deploy succeeds, open the service URL. The first request will create all Postgres tables and seed the admin account.
+
+If `DATABASE_URL` is not set, the service will fall back to a local SQLite file inside the container (data is lost on redeploy).

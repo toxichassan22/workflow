@@ -4,13 +4,18 @@ SQLite-based with full migration support.
 """
 
 import os
-import sqlite3
 import uuid
 import json
 from datetime import datetime
 from flask import g
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'app.db')
+import db_driver as sqlite3
+
+DB_PATH = (
+    os.environ.get('DB_PATH')
+    or os.environ.get('DATABASE_URL')
+    or os.path.join(os.path.dirname(__file__), 'app.db')
+)
 
 
 def get_db():

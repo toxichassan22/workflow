@@ -5,8 +5,9 @@ import time
 import re
 import base64
 import requests
-import sqlite3
 import uuid as _uuid
+
+import db_driver
 import concurrent.futures
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_file, send_from_directory, g
@@ -2541,7 +2542,7 @@ def api_register():
             conn.commit()
         # Create company admin user
         db.create_user(tenant_id, company_name, email, hash_password(password), role='company_admin')
-    except sqlite3.IntegrityError:
+    except db_driver.IntegrityError:
         return jsonify({'error': 'Email or subdomain already registered'}), 409
     token = create_token(tenant_id, email, is_admin=False, user_id=None, user_name=company_name, user_role='company_admin')
     return jsonify({
@@ -2697,7 +2698,7 @@ def api_add_user():
 
     try:
         user_id = db.create_user(g.tenant_id, name, email, hash_password(password), role=role)
-    except sqlite3.IntegrityError:
+    except db_driver.IntegrityError:
         return jsonify({'error': 'Email already in use'}), 409
     return jsonify({'success': True, 'userId': user_id}), 201
 
