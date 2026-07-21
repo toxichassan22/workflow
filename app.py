@@ -1278,8 +1278,8 @@ def api_designer_chat():
     print(f"[DEBUG DESIGNER CHAT] user_msg:\n{user_msg}\n")
 
     try:
-        response = call_zai_chat(system_prompt, user_msg, max_tokens=6000)
-        print(f"[DEBUG DESIGNER CHAT] raw response:\n{response}\n")
+        # Race two provider calls so one transient failure does not become a 500.
+        response = call_zai_chat_parallel(system_prompt, user_msg, max_tokens=5000, attempts=2)
         reply = extract_chat_content(response, "DESIGNER-CHAT").strip()
         print(f"[DEBUG DESIGNER CHAT] reply content:\n{reply}\n")
 
@@ -1353,7 +1353,9 @@ def api_designer_chat():
             })
     except Exception as e:
         print(f"[DESIGNER-CHAT ERROR] {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        # 503 tells the frontend this is a transient model/provider failure and
+        # allows apiWithRetry to retry it automatically.
+        return jsonify({'success': False, 'error': 'تعذر الوصول لنموذج التصميم مؤقتًا. جارٍ إعادة المحاولة.'}), 503
 
 
 @app.route('/api/files', methods=['GET'])
@@ -2050,10 +2052,11 @@ def api_generate_slide_single():
     if not branding:
         return jsonify({'error': 'Branding not configured'}), 400
 
-    # Build map placeholders if needed
-    map_placeholders = {}
-    if slide_index == 0 or 'map' in slides[slide_index].get('type', ''):
-        map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=data.get('presentationId'), force=True)
+    # Build map placeholders only when the frontend has not already generated
+    # the shared map set once for all parallel slide workers.
+    map_placeholders = images.get('map_placeholders', {}) if isinstance(images, dict) else {}
+    if not map_placeholders and 'map' in str(slides[slide_index].get('type', '')).lower():
+        map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=data.get('presentationId'), force=False)
         if map_result.get('placeholders'):
             if not isinstance(images, dict):
                 images = {'cover': None, 'moodboard': []}
@@ -2096,7 +2099,9 @@ def api_generate_slide_single():
     def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
         if training_context:
             sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
-        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2)
+        # Slide requests already run concurrently in the browser. Keep one model
+        # call per worker to avoid multiplying four slides into eight provider calls.
+        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=min(max_tokens, 4500), attempts=1)
 
     slide = slides[slide_index]
     total = len(slides)

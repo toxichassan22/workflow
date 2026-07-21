@@ -1961,8 +1961,23 @@ main {width: 100%}
           removeTenantToken();
           showAuthPage();
         }
+        data._httpStatus = res.status;
         return data;
-      }).catch(e => ({ error: 'Network error: ' + e.message }));
+      }).catch(e => ({ error: 'Network error: ' + e.message, _httpStatus: 0 }));
+    }
+
+    async function apiWithRetry(method, path, body, options = {}) {
+      const retries = Number.isInteger(options.retries) ? options.retries : 2;
+      const retryable = new Set([0, 429, 500, 502, 503, 504]);
+      let lastResult = null;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        lastResult = await api(method, path, body);
+        if (lastResult && lastResult.success) return lastResult;
+        const status = lastResult?._httpStatus || 0;
+        if (attempt >= retries || !retryable.has(status)) return lastResult;
+        await new Promise(resolve => setTimeout(resolve, 700 * Math.pow(2, attempt)));
+      }
+      return lastResult || { success: false, error: 'Request failed' };
     }
 
     // Auth UI
@@ -4018,67 +4033,84 @@ main {width: 100%}
 
     async function generateTenantSlides() {
       if (!tenantSlidePlan || !tenantProjectData) return;
-      const totalSlides = (tenantSlidePlan.slides || []).length;
+      const plans = tenantSlidePlan.slides || [];
+      const totalSlides = plans.length;
       if (!totalSlides) { toast('لا توجد شرائح في الخطة'); return; }
 
-      tenantSlidesData = [];
+      const CONCURRENT_SLIDE_WORKERS = Math.min(4, totalSlides);
+
+      // Generate shared map assets once before parallel workers. Previously every
+      // map slide could regenerate the complete map set independently.
+      const needsMaps = plans.some(plan => String(plan?.type || '').toLowerCase().includes('map'));
+      if (needsMaps && !tenantCreativeImages.map_placeholders) {
+        renderTenantSlidesProgress(totalSlides, 0, 'تجهيز الخرائط المشتركة');
+        const mapData = await apiWithRetry('POST', '/api/generate-map-images', {
+          projectData: tenantProjectData,
+          presentationId: tenantPresentationId,
+          force: false
+        }, { retries: 1 });
+        if (mapData.success && mapData.placeholders) {
+          tenantCreativeImages.map_placeholders = mapData.placeholders;
+          tenantCreativeImages.map_landmarks = mapData.landmarks || [];
+        }
+      }
+
+      tenantSlidesData = new Array(totalSlides).fill(null);
       activeSlideIndex = 0;
       showTenantPage('tenantSlidesPage');
-      renderTenantSlidesProgress(totalSlides, 0);
+      renderTenantSlidesProgress(totalSlides, 0, 'تشغيل ' + CONCURRENT_SLIDE_WORKERS + ' نماذج بالتوازي');
 
-      for (let i = 0; i < totalSlides; i++) {
-        const plan = tenantSlidePlan.slides[i] || {};
-        renderTenantSlidesProgress(totalSlides, i, plan.title || ('شريحة ' + (i + 1)));
+      let nextIndex = 0;
+      let completed = 0;
+      const fallbackSlide = (plan, index, message) => ({
+        title: plan.title || ('شريحة ' + (index + 1)),
+        type: plan.type || 'content',
+        html: '<div class="slide" style="width:1280px;height:720px;display:flex;align-items:center;justify-content:center;background:#fff;"><p>' + escapeHtml(message) + '</p></div>',
+        designStyle: plan.design_style || 'cards',
+        bullets: plan.bullets || [],
+        metrics: plan.metrics || []
+      });
 
+      async function generateSlideAt(index) {
+        const plan = plans[index] || {};
+        const genPayload = { projectData: tenantProjectData, slidePlan: tenantSlidePlan, images: tenantCreativeImages, slideIndex: index };
+        if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
         try {
-          const genPayload = {
-            projectData: tenantProjectData,
-            slidePlan: tenantSlidePlan,
-            images: tenantCreativeImages,
-            slideIndex: i
-          };
-          if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
-
-          const data = await api('POST', '/api/generate-slide-single', genPayload);
-
+          const data = await apiWithRetry('POST', '/api/generate-slide-single', genPayload, { retries: 2 });
           if (data.success && data.slide) {
-            tenantSlidesData.push({
+            return {
               title: data.slide.title || plan.title,
               type: data.slide.type || plan.type || 'content',
               html: data.slide.html,
               designStyle: data.slide.designStyle || plan.design_style || 'cards',
-              bullets: plan.bullets || [],
-              metrics: plan.metrics || []
-            });
-          } else {
-            tenantSlidesData.push({
-              title: plan.title || ('شريحة ' + (i + 1)),
-              type: plan.type || 'content',
-              html: '<div class="slide" style="width:1280px;height:720px;display:flex;align-items:center;justify-content:center;background:#fff;"><p>فشل توليد هذه الشريحة</p></div>',
-              designStyle: plan.design_style || 'cards',
-              bullets: plan.bullets || [],
-              metrics: plan.metrics || []
-            });
+              bullets: plan.bullets || [], metrics: plan.metrics || []
+            };
           }
-        } catch (err) {
-          console.error('Slide generation error for index', i, err);
-          tenantSlidesData.push({
-            title: plan.title || ('شريحة ' + (i + 1)),
-            type: plan.type || 'content',
-            html: '<div class="slide" style="width:1280px;height:720px;display:flex;align-items:center;justify-content:center;background:#fff;"><p>خطأ في توليد الشريحة</p></div>',
-            designStyle: plan.design_style || 'cards',
-            bullets: plan.bullets || [],
-            metrics: plan.metrics || []
-          });
+          console.error('Slide generation failed', index, data);
+          return fallbackSlide(plan, index, 'فشل توليد هذه الشريحة — يمكن إعادة توليدها لاحقًا');
+        } catch (error) {
+          console.error('Slide generation error', index, error);
+          return fallbackSlide(plan, index, 'خطأ مؤقت في توليد الشريحة — يمكن إعادة المحاولة');
         }
-        renderTenantSlides();
-        renderTenantSlidesProgress(totalSlides, i + 1);
       }
 
+      async function worker() {
+        while (true) {
+          const index = nextIndex++;
+          if (index >= totalSlides) return;
+          tenantSlidesData[index] = await generateSlideAt(index);
+          completed += 1;
+          renderTenantSlides();
+          renderTenantSlidesProgress(totalSlides, completed, plans[index]?.title || ('شريحة ' + (index + 1)));
+        }
+      }
+
+      await Promise.all(Array.from({ length: CONCURRENT_SLIDE_WORKERS }, () => worker()));
+      tenantSlidesData = tenantSlidesData.filter(Boolean);
       hideSlideProgress();
       await saveTenantPresentation();
       renderTenantSlides();
-      toast('تم توليد كل الشرائح (' + totalSlides + ')');
+      toast('تم توليد كل الشرائح (' + totalSlides + ') باستخدام ' + CONCURRENT_SLIDE_WORKERS + ' نماذج متوازية');
     }
 
     function renderTenantSlidesProgress(total, done, currentTitle) {
@@ -4349,14 +4381,14 @@ main {width: 100%}
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
       }
 
-      const data = await api('POST', '/api/designer-chat', {
+      const data = await apiWithRetry('POST', '/api/designer-chat', {
         message,
         slideHtml: slide.html,
         slideTitle: slide.title,
         slideIndex: tenantChatSlideIndex,
         projectData: tenantProjectData,
         presentationId: tenantPresentationId
-      });
+      }, { retries: 2 });
 
       // Remove typing indicator
       if (indicator) indicator.remove();
