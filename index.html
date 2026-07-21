@@ -1929,6 +1929,10 @@ main {width: 100%}
     let tenantMapPreviewState = null;
     let tenantMapPolygonPoints = [];
     let tenantMapPolygonMode = false;
+    let tenantDraftSaveTimer = null;
+    let tenantDraftSaveInFlight = false;
+    let tenantDraftSaveQueued = false;
+    let tenantDraftRestoring = false;
 
     function getTenantToken() { return tenantToken || localStorage.getItem(T_TOKEN_KEY); }
     function setTenantToken(t) { tenantToken = t; localStorage.setItem(T_TOKEN_KEY, t); }
@@ -2810,6 +2814,7 @@ main {width: 100%}
 
     // Dynamic Project Form
     async function startTenantProject() {
+      tenantDraftRestoring = true;
       tenantPresentationId = null;
       tenantSlidesData = [];
       tenantSlidePlan = null;
@@ -2838,10 +2843,16 @@ main {width: 100%}
         if (draftResp.success && draftResp.draft && draftResp.draft.draft_data) {
           const draftData = draftResp.draft.draft_data;
           const sectionStatuses = draftResp.draft.section_statuses || {};
+          tenantSlidePlan = draftData._slidePlan || null;
+          tenantCreativeImages = draftData._creativeImages || { cover: '', moodboard: [] };
+          tenantProjectData = Object.fromEntries(
+            Object.entries(draftData).filter(([key]) => !key.startsWith('_'))
+          );
           tenantProjectSectionStatuses = { ...sectionStatuses };
           tenantProjectDraftApproval = draftResp.draft;
           setTimeout(() => {
             Object.entries(draftData).forEach(([key, value]) => {
+              if (key.startsWith('_')) return;
               const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
               if (input && input.type !== 'file') input.value = value;
             });
@@ -2872,6 +2883,7 @@ main {width: 100%}
           }, 300);
         }
       } catch(e) { console.log('No draft to load'); }
+      setTimeout(() => { tenantDraftRestoring = false; }, 400);
     }
 
     function getProjectSectionElement(sectionKey) {
@@ -3441,14 +3453,64 @@ main {width: 100%}
 
     function setupSidebarObserver() {}
 
-    async function saveProjectAsDraft() {
-      const data = await collectTenantFormData();
-      const resp = await api('POST', '/api/project-draft', { draftData: data, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' });
-      if (resp.success) {
-        toast('تم حفظ المسودة على الخادم');
-      } else {
-        toast(resp.error || 'فشل حفظ المسودة');
+    function buildTenantDraftPayload(formData) {
+      return {
+        ...formData,
+        _slidePlan: tenantSlidePlan,
+        _creativeImages: tenantCreativeImages
+      };
+    }
+
+    async function persistTenantDraft(notify = false, status = 'draft') {
+      if (tenantDraftRestoring || !getTenantToken()) return false;
+      if (tenantDraftSaveInFlight) {
+        tenantDraftSaveQueued = true;
+        return false;
       }
+      tenantDraftSaveInFlight = true;
+      try {
+        const formData = await collectTenantFormData();
+        tenantProjectData = { ...(tenantProjectData || {}), ...formData };
+        const draftData = buildTenantDraftPayload(tenantProjectData);
+        const resp = await api('POST', '/api/project-draft', {
+          draftData,
+          sectionStatuses: tenantProjectSectionStatuses,
+          status
+        });
+        if (notify) toast(resp.success ? 'تمت مزامنة المسودة' : (resp.error || 'فشل حفظ المسودة'));
+        return !!resp.success;
+      } catch (error) {
+        if (notify) toast('تعذرت مزامنة المسودة');
+        console.error('Draft autosave failed:', error);
+        return false;
+      } finally {
+        tenantDraftSaveInFlight = false;
+        if (tenantDraftSaveQueued) {
+          tenantDraftSaveQueued = false;
+          scheduleTenantDraftSave(0);
+        }
+      }
+    }
+
+    function scheduleTenantDraftSave(delay = 500) {
+      if (tenantDraftRestoring) return;
+      clearTimeout(tenantDraftSaveTimer);
+      tenantDraftSaveTimer = setTimeout(() => persistTenantDraft(false, 'draft'), delay);
+    }
+
+    document.addEventListener('input', event => {
+      if (event.target.closest('#tenantProjectForm')) scheduleTenantDraftSave();
+    });
+    document.addEventListener('change', event => {
+      if (event.target.closest('#tenantProjectForm')) scheduleTenantDraftSave();
+    });
+    document.addEventListener('click', event => {
+      if (event.target.closest('#tenantProjectForm button')) scheduleTenantDraftSave();
+    });
+
+    async function saveProjectAsDraft() {
+      clearTimeout(tenantDraftSaveTimer);
+      await persistTenantDraft(true, 'draft');
     }
 
     function confirmDeleteProject() {
@@ -3771,14 +3833,15 @@ main {width: 100%}
     async function submitTenantProject() {
       tenantProjectData = await collectTenantFormData();
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
-      // Auto-save draft to server before proceeding
-      await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
+      // Persist the complete draft before generating its structure.
+      await persistTenantDraft(false, 'submitted');
       showLoader('جاري تحليل بيانات المشروع', 'AI يقترح عدد الشرائح وتوزيع المحتوى');
       const data = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
       hideLoader();
       if (data.success && data.plan) {
         tenantSlidePlan = data.plan;
         renderTenantSlidePlan();
+        scheduleTenantDraftSave(0);
         showTenantPage('tenantSlidePlanPage');
       } else {
         toast(data.error || 'فشل اقتراح خطة الشرائح');
@@ -3832,6 +3895,34 @@ main {width: 100%}
       tenantSlidePlan.slides.splice(idx, 0, { title: 'شريحة جديدة', type: 'content', designStyle: 'cards', design_style: 'cards', bullets: [] });
       tenantSlidePlan.proposed_count = tenantSlidePlan.slides.length;
       renderTenantSlidePlan();
+      scheduleTenantDraftSave(0);
+    }
+
+    function updatePlanSlideTitle(index, value) {
+      if (!tenantSlidePlan?.slides?.[index]) return;
+      tenantSlidePlan.slides[index].title = value;
+      scheduleTenantDraftSave();
+    }
+
+    function updatePlanSlideType(index, value) {
+      if (!tenantSlidePlan?.slides?.[index]) return;
+      tenantSlidePlan.slides[index].type = value;
+      scheduleTenantDraftSave();
+    }
+
+    function updatePlanSlideStyle(index, value) {
+      if (!tenantSlidePlan?.slides?.[index]) return;
+      tenantSlidePlan.slides[index].designStyle = value;
+      tenantSlidePlan.slides[index].design_style = value;
+      scheduleTenantDraftSave();
+    }
+
+    function removePlanSlide(index) {
+      if (!tenantSlidePlan?.slides || index < 0 || index >= tenantSlidePlan.slides.length) return;
+      tenantSlidePlan.slides.splice(index, 1);
+      tenantSlidePlan.proposed_count = tenantSlidePlan.slides.length;
+      renderTenantSlidePlan();
+      scheduleTenantDraftSave(0);
     }
 
     async function regenerateTenantSlidePlan() {
@@ -3842,6 +3933,7 @@ main {width: 100%}
       if (data.success && data.plan) {
         tenantSlidePlan = data.plan;
         renderTenantSlidePlan();
+        scheduleTenantDraftSave(0);
       } else {
         toast(data.error || 'فشل إعادة الاقتراح');
       }
@@ -3899,6 +3991,7 @@ main {width: 100%}
       if (data.success && data.image) {
         tenantCreativeImages.cover = data.image;
         renderTenantMainImage();
+        scheduleTenantDraftSave(0);
         toast('تم توليد الصورة الرئيسية.');
       } else {
         const errMsg = data.error_code === 'NO_API_KEY' ? 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env' : (data.error || 'تعذر توليد الصورة الرئيسية');
@@ -3915,6 +4008,7 @@ main {width: 100%}
       if (data.success && data.images) {
         tenantCreativeImages.moodboard = (data.images.moodboard || []).filter(Boolean);
         renderTenantMoodboard();
+        scheduleTenantDraftSave(0);
         toast('تم توليد صور المود بورد.');
       } else {
         const errMsg = data.error_code === 'NO_API_KEY' ? 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env' : (data.error || 'تعذر توليد صور المود بورد');
