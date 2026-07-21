@@ -119,8 +119,82 @@ def _api_key_error():
     return {'error': 'Google Maps API key not configured'}
 
 
+def _distance_meters(lat_a, lng_a, lat_b, lng_b):
+    """Great-circle distance used to keep nearby landmarks genuinely nearby."""
+    earth_radius_m = 6_371_000
+    lat1, lat2 = math.radians(float(lat_a)), math.radians(float(lat_b))
+    dlat = lat2 - lat1
+    dlng = math.radians(float(lng_b) - float(lng_a))
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+    return 2 * earth_radius_m * math.asin(math.sqrt(a))
+
+
+def extract_coords_from_maps_link(url):
+    """Extract lat/lng from a Google Maps link (shortened or full).
+    
+    Supports:
+    - Short links: https://maps.app.goo.gl/...
+    - Full links: https://www.google.com/maps/@lat,lng,zoom
+    - Place links: https://www.google.com/maps/place/.../@lat,lng
+    - Data links: !3d for lat, !4d for lng
+    
+    Returns dict with lat, lng on success or None.
+    """
+    if not url:
+        return None
+    
+    url = url.strip()
+    if not url.startswith('http'):
+        return None
+    
+    # Step 1: Follow shortened links (maps.app.goo.gl)
+    try:
+        if 'maps.app.goo.gl' in url or 'goo.gl/maps' in url or 'maps.google.com' in url:
+            resp = requests.get(url, timeout=10, allow_redirects=True, headers={'User-Agent': 'Mozilla/5.0'})
+            url = resp.url
+            print(f"[MAPS LINK] Resolved shortened URL to: {url}")
+    except Exception as e:
+        print(f"[MAPS LINK] Failed to resolve shortened URL: {e}")
+    
+    # Step 2: Try to extract coordinates from the resolved URL
+    # Pattern 1: /@lat,lng,zoom (common Google Maps URL format)
+    match = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)(?:,\d+(?:\.\d+)?z)?', url)
+    if match:
+        return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
+    
+    # Pattern 2: !3d(lat)!4d(lng) (embedded coordinates)
+    lat_match = re.search(r'!3d(-?\d+\.\d+)', url)
+    lng_match = re.search(r'!4d(-?\d+\.\d+)', url)
+    if lat_match and lng_match:
+        return {'lat': float(lat_match.group(1)), 'lng': float(lng_match.group(1))}
+    
+    # Pattern 3: q=lat,lng or query=lat,lng (query parameter)
+    match = re.search(r'[?&](?:q|query)=(-?\d+\.\d+),(-?\d+\.\d+)', url)
+    if match:
+        return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
+    
+    # Pattern 4: center=lat,lng (center parameter)
+    match = re.search(r'center=(-?\d+\.\d+),(-?\d+\.\d+)', url)
+    if match:
+        return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
+    
+    # Pattern 5: ll=lat,lng (ll parameter)
+    match = re.search(r'll=(-?\d+\.\d+),(-?\d+\.\d+)', url)
+    if match:
+        return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
+    
+    # Pattern 6: Just two numbers after maps/place/...
+    match = re.search(r'/maps/place/[^/]*?/(-?\d+\.\d+),(-?\d+\.\d+)', url)
+    if match:
+        return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
+    
+    print(f"[MAPS LINK] Could not extract coordinates from URL: {url}")
+    return None
+
+
 def geocode_address(address, tenant_id=None):
-    """Convert address string to lat/lng using Geocoding API."""
+    """Convert address string to lat/lng using Geocoding API.
+    Prefers ROOFTOP precision results when available."""
     if not _has_api_key():
         return _api_key_error()
 
@@ -137,8 +211,12 @@ def geocode_address(address, tenant_id=None):
         if data.get('status') != 'OK':
             return {'error': f"Geocoding API error: {data.get('status')}", 'details': data}
 
-        result = data['results'][0]
+        # Prefer ROOFTOP results for highest precision
+        results = data['results']
+        rooftop = [r for r in results if r.get('geometry', {}).get('location_type') == 'ROOFTOP']
+        result = rooftop[0] if rooftop else results[0]
         loc = result['geometry']['location']
+        location_type = result.get('geometry', {}).get('location_type', 'APPROXIMATE')
         viewport = result.get('geometry', {}).get('viewport')
         viewport_polygon = None
         if viewport:
@@ -160,6 +238,8 @@ def geocode_address(address, tenant_id=None):
             'formatted_address': result.get('formatted_address'),
             'place_id': result.get('place_id'),
             'viewport_polygon': viewport_polygon,
+            'location_type': location_type,
+            'precision': 'high' if location_type == 'ROOFTOP' else 'medium' if location_type == 'RANGE_INTERPOLATED' else 'low',
         }
     except Exception as e:
         return {'error': f"Geocoding request failed: {str(e)}"}
@@ -382,15 +462,51 @@ def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, siz
 
 
 def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
-    """Find nearby landmarks using Places API (New)."""
+    """Find nearby landmarks using Places API (New).
+    Filters out irrelevant place types like gas stations, parking, ATMs, etc."""
     if not _has_api_key():
         return _api_key_error()
+
+    IRRELEVANT_TYPES = {
+        'gas_station', 'parking', 'atm', 'bank', 'post_office', 'courier',
+        'laundry', 'dry_cleaning', 'hair_care', 'beauty_salon', 'barber_shop',
+        'car_wash', 'car_repair', 'car_dealer', 'tire_shop', 'storage',
+        'self_storage_laundry', 'electric_vehicle_charging_station',
+        'convenience_store', 'supermarket', 'grocery_store', 'bakery',
+        'florist', 'hardware_store', 'furniture_store', 'clothing_store',
+        'shoe_store', 'jewelry_store', 'pet_store', 'book_store',
+        'electronics_store', 'home_goods_store', 'department_store',
+        'discount_store', 'dollar_store', 'liquor_store', 'tobacco_shop',
+        'meal_takeaway', 'meal_delivery', 'food_delivery', 'restaurant',
+        'cafe', 'bar', 'night_club', 'liquor_store',
+        'tourist_attraction', 'travel_agency', 'car_rental',
+        'bus_stop', 'subway_station', 'transit_station', 'light_rail_station',
+        'train_station', 'taxi_stand',
+        'pharmacy', 'doctor', 'dentist', 'veterinary_care',
+        'plumber', 'electrician', 'roofing_contractor', 'general_contractor',
+        'real_estate_agency', 'insurance_agency', 'accounting', 'lawyer',
+        'notary_public', 'post_box', 'public_phone',
+    }
+    
+    PREFERRED_TYPES = {
+        'school', 'university', 'hospital', 'shopping_mall', 'stadium',
+        'mosque', 'church', 'hindu_temple', 'synagogue', 'place_of_worship',
+        'city_hall', 'embassy', 'museum', 'library', 'art_gallery',
+        'amusement_park', 'aquarium', 'zoo', 'park', 'garden',
+        'stadium', 'sports_complex', 'golf_course', 'swimming_pool',
+        'tourist_attraction', 'landmark', 'historical_landmark',
+        'cemetery', 'monument', 'civic_center', 'city_hall',
+        'primary_school', 'secondary_school', 'preschool',
+        'movie_theater', 'performing_arts_theater', 'concert_hall',
+        'convention_center', 'event_venue', 'wedding_venue',
+        'government_office', 'police', 'fire_station',
+    }
 
     url = 'https://places.googleapis.com/v1/places:searchNearby'
     headers = {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GOOGLE_API_KEY,
-        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.id,places.types',
+        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.id,places.types,places.rating',
     }
     body = {
         'locationRestriction': {
@@ -399,7 +515,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
                 'radius': radius,
             }
         },
-        'maxResultCount': max_results,
+        'maxResultCount': max_results * 3,
     }
     if keyword:
         body['keyword'] = keyword
@@ -413,14 +529,36 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
         places = []
         for p in data.get('places', []):
             loc = p.get('location', {})
+            p_types = set(p.get('types', []))
+            
+            if p_types & IRRELEVANT_TYPES:
+                continue
+            
+            is_preferred = bool(p_types & PREFERRED_TYPES)
+            place_lat = loc.get('latitude')
+            place_lng = loc.get('longitude')
+            if place_lat is None or place_lng is None:
+                continue
+            distance_meters = _distance_meters(lat, lng, place_lat, place_lng)
+            # Nearby Search can return edge results; do not label a distant place as nearby.
+            if distance_meters > radius:
+                continue
+            
             places.append({
                 'name': p.get('displayName', {}).get('text', 'Unknown'),
                 'address': p.get('formattedAddress', ''),
-                'lat': loc.get('latitude'),
-                'lng': loc.get('longitude'),
+                'lat': place_lat,
+                'lng': place_lng,
                 'place_id': p.get('id'),
                 'types': p.get('types', []),
+                'rating': p.get('rating', 0),
+                'preferred': is_preferred,
+                'distance_meters': round(distance_meters),
             })
+        
+        places.sort(key=lambda x: (not x.get('preferred', False), x.get('distance_meters', float('inf')), -(x.get('rating') or 0)))
+        places = places[:max_results]
+        
         return {'success': True, 'landmarks': places}
     except Exception as e:
         return {'error': f"Places request failed: {str(e)}"}
@@ -588,14 +726,13 @@ def _point_in_polygon(lat, lng, coords):
     return inside
 
 
-def _fetch_osm_polygon(lat, lng, radius_m=150):
+def _fetch_osm_polygon(lat, lng, radius_m=200):
     """Fetch the real building/compound polygon from OpenStreetMap via Overpass API in a single optimized query."""
     
     overpass_servers = [
         "https://overpass-api.de/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter",
-        "https://overpass.osm.ch/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
     ]
     
     headers = {
@@ -604,19 +741,23 @@ def _fetch_osm_polygon(lat, lng, radius_m=150):
     
     # Combine all tags into a single Overpass query for maximum speed (1 request instead of 4)
     # We query around the coordinate for leisure, amenity, landuse, and buildings
-    query = f"""[out:json][timeout:10];
+    # Added: relation queries for larger compounds, more landuse types, highway for road context
+    query = f"""[out:json][timeout:15];
     (
-      way(around:{radius_m},{lat},{lng})["leisure"~"sports_centre|stadium|fitness_centre|golf_course|resort|park|playground|garden"];
-      way(around:{radius_m},{lat},{lng})["amenity"~"school|university|hospital|college|club|clinic|place_of_worship|public_building"];
-      way(around:{radius_m},{lat},{lng})["landuse"~"construction|commercial|retail|residential|industrial"];
+      way(around:{radius_m},{lat},{lng})["leisure"~"sports_centre|stadium|fitness_centre|golf_course|resort|park|playground|garden|nature_reserve|recreation_ground"];
+      way(around:{radius_m},{lat},{lng})["amenity"~"school|university|hospital|college|club|clinic|place_of_worship|public_building|community_centre|conference_centre|exhibition_centre|arts_centre"];
+      way(around:{radius_m},{lat},{lng})["landuse"~"construction|commercial|retail|residential|industrial|military|institutional|religious|cemetery|recreation_ground|village_green|allotments"];
+      way(around:{radius_m},{lat},{lng})["building"~"commercial|industrial|religious|public|civic|hospital|school|university|college|stadium|warehouse|retail|office"];
       way(around:{radius_m},{lat},{lng})["building"];
+      relation(around:{radius_m},{lat},{lng})["leisure"~"sports_centre|stadium|fitness_centre|golf_course|resort|park|playground|garden"];
+      relation(around:{radius_m},{lat},{lng})["landuse"~"construction|commercial|retail|residential|industrial|military|institutional"];
     );
     out geom;"""
     
     data = None
     for server_url in overpass_servers:
         try:
-            resp = requests.post(server_url, data={'data': query}, headers=headers, timeout=12)
+            resp = requests.post(server_url, data={'data': query}, headers=headers, timeout=8)
             if resp.status_code == 200:
                 data = resp.json()
                 break
@@ -1131,8 +1272,89 @@ def _decode_polyline(polyline_str):
     return coordinates
 
 
+def _snap_to_roads(lat, lng, tenant_id=None):
+    """Snap coordinates to nearest road using Google Roads API for precision."""
+    if not _has_api_key():
+        return None
+    url = 'https://roads.googleapis.com/v1/nearestRoads'
+    params = {
+        'points': f"{lat},{lng}",
+        'key': GOOGLE_API_KEY,
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
+        if 'snappedPoints' in data and data['snappedPoints']:
+            sp = data['snappedPoints'][0]
+            loc = sp.get('location', {})
+            if loc.get('latitude') and loc.get('longitude'):
+                if tenant_id:
+                    _record_maps_call(tenant_id)
+                return {
+                    'lat': loc['latitude'],
+                    'lng': loc['longitude'],
+                    'place_id': sp.get('placeId'),
+                }
+    except Exception as e:
+        print(f"[ROADS API ERROR] {e}")
+    return None
+
+
+def _google_directions_route(origin_lat, origin_lng, destination_lat, destination_lng, tenant_id=None):
+    """Return Google Maps road geometry; never fall back to a third-party router."""
+    if not _has_api_key():
+        return None
+    params = {
+        'origin': f'{origin_lat},{origin_lng}',
+        'destination': f'{destination_lat},{destination_lng}',
+        'mode': 'driving',
+        'alternatives': 'false',
+        'key': GOOGLE_API_KEY,
+    }
+    try:
+        response = requests.get('https://maps.googleapis.com/maps/api/directions/json', params=params, timeout=15)
+        data = response.json()
+        if data.get('status') != 'OK' or not data.get('routes'):
+            print(f"[GOOGLE DIRECTIONS] {data.get('status', 'no route')}")
+            return None
+        route = data['routes'][0]
+        encoded = route.get('overview_polyline', {}).get('points')
+        coordinates = _decode_polyline(encoded) if encoded else []
+        if len(coordinates) < 2:
+            return None
+        if tenant_id:
+            _record_maps_call(tenant_id)
+        return {'coords': coordinates, 'summary': route.get('summary', '')}
+    except Exception as error:
+        print(f"[GOOGLE DIRECTIONS ERROR] {error}")
+        return None
+
+
+def _google_reverse_geocode_road(lat, lng, tenant_id=None):
+    """Ask Google which named road is nearest to a point used for an access route."""
+    if not _has_api_key():
+        return ''
+    try:
+        response = requests.get(
+            'https://maps.googleapis.com/maps/api/geocode/json',
+            params={'latlng': f'{lat},{lng}', 'key': GOOGLE_API_KEY, 'language': 'ar'}, timeout=15
+        )
+        data = response.json()
+        if data.get('status') != 'OK':
+            return ''
+        for result in data.get('results', []):
+            for component in result.get('address_components', []):
+                if 'route' in component.get('types', []):
+                    if tenant_id:
+                        _record_maps_call(tenant_id)
+                    return component.get('long_name') or ''
+    except Exception as error:
+        print(f"[GOOGLE ROAD NAME ERROR] {error}")
+    return ''
+
+
 def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, project_data=None, tenant_id=None):
-    """Fetch nearby main roads via OSRM & Geocoding APIs and draw them highlighted in gold with white arrows and plaques."""
+    """Draw only Google Maps-derived access-road geometry and labels."""
     def _reshape_arabic_text(text):
         try:
             import arabic_reshaper
@@ -1141,28 +1363,6 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             return get_display(reshaped)
         except Exception:
             return text
-
-    def _draw_outlined_arrow(draw, p1, p2, fill_color=(255, 255, 255, 240), outline_color=(0, 0, 0, 200), arrow_len=14, arrow_w=8):
-        dx = p2[0] - p1[0]
-        dy = p2[1] - p1[1]
-        length = math.sqrt(dx*dx + dy*dy)
-        if length == 0:
-            return
-        ux = dx / length
-        uy = dy / length
-
-        ap1 = (int(p2[0]), int(p2[1]))
-        ap2 = (int(p2[0] - ux * arrow_len + uy * arrow_w), int(p2[1] - uy * arrow_len - ux * arrow_w))
-        ap3 = (int(p2[0] - ux * arrow_len - uy * arrow_w), int(p2[1] - uy * arrow_len + ux * arrow_w))
-
-        o_len = arrow_len + 2
-        o_w = arrow_w + 1.5
-        op1 = (int(p2[0] + ux * 1.5), int(p2[1] + uy * 1.5))
-        op2 = (int(p2[0] - ux * o_len + uy * o_w), int(p2[1] - uy * o_len - ux * o_w))
-        op3 = (int(p2[0] - ux * o_len - o_w), int(p2[1] - uy * o_len + ux * o_w))
-
-        draw.polygon([op1, op2, op3], fill=outline_color)
-        draw.polygon([ap1, ap2, ap3], fill=fill_color)
 
     def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 230), border_color=(240, 230, 210, 200)):
         if not font:
@@ -1200,85 +1400,47 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         
         gold_color = (212, 163, 89, 180) # Premium gold/bronze color matching branding
         
-        # Parse road names from project_data
-        roads = []
-        if project_data:
-            main_roads_text = project_data.get('main_roads', '')
-            sec_roads_text = project_data.get('secondary_roads', '')
-            
-            # Combine and parse road lists
-            raw_roads = []
-            if main_roads_text:
-                raw_roads.extend(re.split(r'[\n,;]', main_roads_text))
-            if sec_roads_text:
-                raw_roads.extend(re.split(r'[\n,;]', sec_roads_text))
-                
-            for r in raw_roads:
-                r_clean = r.strip().lstrip('-').lstrip('•').strip()
-                if r_clean and r_clean not in roads:
-                    roads.append(r_clean)
-
-        city = "Riyadh"
-        if project_data and project_data.get('location_address'):
-            addr = project_data.get('location_address', '')
-            parts = [p.strip() for p in addr.split(',')]
-            if len(parts) > 1:
-                city = parts[-1]
-            elif parts:
-                city = parts[0]
-
+        # Road geometry and road names are determined only by Google Roads,
+        # Directions, and reverse Geocoding APIs.  No frontend road list is used.
         routes_coords = []
         road_route_mapping = [] # stores (coords, road_name)
-        
-        # 1. Try to query routes based on geocoded road names
-        for road in roads:
-            geo = geocode_address(f"{road}, {city}", tenant_id=tenant_id)
-            if not geo.get('success'):
-                # Try geocoding without city
-                geo = geocode_address(road, tenant_id=tenant_id)
-                
-            if geo.get('success'):
-                origin = f"{geo['lng']},{geo['lat']}"
-                dest = f"{center_lng},{center_lat}"
-                url = f"http://router.project-osrm.org/route/v1/driving/{origin};{dest}?overview=full"
-                try:
-                    res = requests.get(url, timeout=8).json()
-                    if 'routes' in res and res['routes']:
-                        poly = res['routes'][0]['geometry']
-                        coords = _decode_polyline(poly)
-                        if coords:
-                            road_route_mapping.append((coords, road))
-                            routes_coords.append(coords)
-                except Exception as e:
-                    print(f"[OSRM ROAD ERROR] {road}: {e}")
 
-        # 2. If no road-specific routes found, fallback to general snap routes around center
+        # Find actual nearby access roads through Google Roads + Directions.
+        # The target points are only geographic probes; Google returns the road
+        # snap, route geometry, and road name used in the final map.
         if not routes_coords:
-            print("[ACCESS ROADS DEBUG] No geocoded road routes found, querying snap routes...")
-            # Query 4 directional routes snapping to nearest roads
-            general_queries = [
-                ((center_lat - 0.008, center_lng), (center_lat + 0.008, center_lng)), # N-S
-                ((center_lat, center_lng - 0.008), (center_lat, center_lng + 0.008)), # E-W
-                ((center_lat - 0.006, center_lng - 0.006), (center_lat + 0.006, center_lng + 0.006)), # NW-SE
+            print("[ACCESS ROADS] Discovering nearby roads through Google Maps APIs...")
+            probe_points = [
+                (center_lat + 0.009, center_lng),
+                (center_lat - 0.009, center_lng),
+                (center_lat, center_lng + 0.011),
+                (center_lat, center_lng - 0.011),
             ]
-            for idx, (orig, dst) in enumerate(general_queries):
-                origin = f"{orig[1]},{orig[0]}"
-                dest = f"{dst[1]},{dst[0]}"
-                url = f"http://router.project-osrm.org/route/v1/driving/{origin};{dest}?overview=full"
-                try:
-                    res = requests.get(url, timeout=8).json()
-                    if 'routes' in res and res['routes']:
-                        poly = res['routes'][0]['geometry']
-                        coords = _decode_polyline(poly)
-                        if coords:
-                            # Map to generic label if roads are list-based
-                            label = roads[idx] if idx < len(roads) else f"Route {idx+1}"
-                            road_route_mapping.append((coords, label))
-                            routes_coords.append(coords)
-                except Exception as e:
-                    print(f"[OSRM GENERAL ERROR] {idx}: {e}")
+            seen_road_names = set()
+            for probe_lat, probe_lng in probe_points:
+                snapped = _snap_to_roads(probe_lat, probe_lng, tenant_id=tenant_id)
+                destination_lat = snapped['lat'] if snapped else probe_lat
+                destination_lng = snapped['lng'] if snapped else probe_lng
+                route = _google_directions_route(
+                    center_lat, center_lng, destination_lat, destination_lng, tenant_id=tenant_id
+                )
+                if not route:
+                    continue
+                road_name = route.get('summary') or _google_reverse_geocode_road(
+                    destination_lat, destination_lng, tenant_id=tenant_id
+                )
+                road_name = road_name or 'طريق قريب'
+                if road_name in seen_road_names:
+                    continue
+                seen_road_names.add(road_name)
+                road_route_mapping.append((route['coords'], road_name))
+                routes_coords.append(route['coords'])
+                if len(routes_coords) >= 3:
+                    break
 
         # 3. Draw routes and labels
+        placed_label_rects = []  # track (x1,y1,x2,y2) of placed labels to avoid overlap
+        
         if routes_coords:
             for coords, label_text in road_route_mapping:
                 pixels = []
@@ -1293,56 +1455,71 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 # Draw thick gold road line
                 draw.line(valid_pixels, fill=gold_color, width=12)
                 
-                # Draw white arrows along the road
-                interval = max(len(valid_pixels) // 3, 4)
-                for idx in range(interval, len(valid_pixels) - 2, interval):
-                    p1 = valid_pixels[idx - 1]
-                    p2 = valid_pixels[idx]
-                    _draw_outlined_arrow(draw, p1, p2)
-                
-                # Find best place to draw road label (away from center)
+                # Find best place to draw road label (away from center, no overlap)
                 best_p = None
+                # Sort candidates by distance from center (prefer farther)
+                candidates = []
                 for p in valid_pixels:
                     px, py = p
-                    if 100 <= px <= img_w - 100 and 80 <= py <= img_h - 80:
+                    if 80 <= px <= img_w - 80 and 60 <= py <= img_h - 60:
                         dist = math.sqrt((px - cx)**2 + (py - cy)**2)
-                        if 180 <= dist <= 400:
-                            best_p = p
+                        if 150 <= dist <= 450:
+                            candidates.append((dist, p))
+                candidates.sort(key=lambda c: -c[0])  # farthest first
+                
+                for dist, p in candidates:
+                    # Estimate label rect (approx 120x30 with padding)
+                    lx1 = p[0] - 70
+                    ly1 = p[1] - 18
+                    lx2 = p[0] + 70
+                    ly2 = p[1] + 18
+                    # Check collision with already placed labels
+                    collision = False
+                    for rx1, ry1, rx2, ry2 in placed_label_rects:
+                        if not (lx2 < rx1 or lx1 > rx2 or ly2 < ry1 or ly1 > ry2):
+                            collision = True
                             break
+                    if not collision:
+                        best_p = p
+                        placed_label_rects.append((lx1, ly1, lx2, ly2))
+                        break
+                
+                # Fallback: if all candidates collide, try offsetting vertically
+                if not best_p and candidates:
+                    for offset in [-60, 60, -90, 90, -120, 120]:
+                        p = candidates[0][1]
+                        test_p = (p[0], p[1] + offset)
+                        if 60 <= test_p[1] <= img_h - 60:
+                            lx1 = test_p[0] - 70
+                            ly1 = test_p[1] - 18
+                            lx2 = test_p[0] + 70
+                            ly2 = test_p[1] + 18
+                            collision = False
+                            for rx1, ry1, rx2, ry2 in placed_label_rects:
+                                if not (lx2 < rx1 or lx1 > rx2 or ly2 < ry1 or ly1 > ry2):
+                                    collision = True
+                                    break
+                            if not collision:
+                                best_p = test_p
+                                placed_label_rects.append((lx1, ly1, lx2, ly2))
+                                break
+                
+                # Last resort fallback
                 if not best_p and valid_pixels:
-                    best_p = valid_pixels[len(valid_pixels) // 3]
+                    best_p = valid_pixels[len(valid_pixels) // 4]
+                    placed_label_rects.append((best_p[0] - 70, best_p[1] - 18, best_p[0] + 70, best_p[1] + 18))
                 
                 if best_p and label_text:
                     _draw_road_label(draw, best_p[0], best_p[1], label_text)
                     
             img = Image.alpha_composite(img, overlay)
             img.save(image_path, 'PNG')
-            print("[ACCESS ROADS DEBUG] Successfully drew roads using OSRM")
+            print("[ACCESS ROADS] Successfully drew Google Maps road routes")
             return True
 
-        # 4. Pure PIL local fallback if OSRM fails completely
-        print("[ACCESS ROADS DEBUG] OSRM failed completely, drawing schematic grid fallback...")
-        # Draw slightly offset roads representing grid structure
-        # North-South road on East side (e.g. Olaya Street)
-        draw.line([(cx + 120, -50), (cx + 180, img_h + 50)], fill=gold_color, width=14)
-        # East-West road on South side (e.g. Al Urubah Road)
-        draw.line([(-50, cy + 150), (img_w + 50, cy + 120)], fill=gold_color, width=14)
-        
-        # Arrow on N-S road
-        _draw_outlined_arrow(draw, (cx + 130, cy + 100), (cx + 140, cy - 100))
-        # Arrow on E-W road
-        _draw_outlined_arrow(draw, (cx - 150, cy + 140), (cx + 150, cy + 130))
-        
-        # Labels
-        ns_label = roads[0] if len(roads) > 0 else "Olaya Street"
-        ew_label = roads[1] if len(roads) > 1 else "Al Urubah Road"
-        _draw_road_label(draw, cx + 150, cy - 150, ns_label)
-        _draw_road_label(draw, cx - 180, cy + 135, ew_label)
-        
-        img = Image.alpha_composite(img, overlay)
-        img.save(image_path, 'PNG')
-        print("[ACCESS ROADS DEBUG] Local grid fallback drawn successfully")
-        return True
+        # Never invent a schematic road grid when Google has no verified route.
+        print("[ACCESS ROADS] No Google-derived road route available; leaving the base map unchanged")
+        return False
     except Exception as e:
         print(f"[DRAW ACCESS ROADS ERROR] {e}")
         return False
@@ -1357,24 +1534,31 @@ def _get_cached_map_images(tenant_id, presentation_id):
     placeholders = {}
     required_types = {'overview', 'access', 'catchment', 'landmarks', 'streetview_1', 'streetview_2', 'streetview_3', 'streetview_4'}
     found_types = set()
+    metadata_by_type = {}
     for img in existing:
         if not os.path.exists(img['file_path']):
             continue
         found_types.add(img['image_type'])
         placeholders[img['placeholder']] = img['file_path']
+        try:
+            metadata_by_type[img['image_type']] = json.loads(img.get('metadata_json') or '{}')
+        except Exception:
+            metadata_by_type[img['image_type']] = {}
     if required_types - found_types:
         return None
     metadata = {}
-    if existing:
-        try:
-            metadata = json.loads(existing[0].get('metadata_json') or '{}')
-        except Exception:
-            metadata = {}
+    if metadata_by_type:
+        metadata = next(iter(metadata_by_type.values()))
+    zooms = {
+        image_type: meta['zoom'] for image_type, meta in metadata_by_type.items()
+        if isinstance(meta, dict) and meta.get('zoom') is not None
+    }
     return {
         'lat': metadata.get('lat'),
         'lng': metadata.get('lng'),
         'placeholders': placeholders,
         'landmarks': metadata.get('landmarks', []),
+        'zooms': zooms,
         'cached': True,
     }
 
@@ -1394,6 +1578,13 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
 
     lat = _extract_coordinate(project_data.get('location_lat'))
     lng = _extract_coordinate(project_data.get('location_lng'))
+
+    if lat is None or lng is None:
+        maps_link = project_data.get('location_maps_link') or project_data.get('maps_link') or ''
+        linked_coords = extract_coords_from_maps_link(maps_link) if maps_link else None
+        if linked_coords:
+            lat = linked_coords['lat']
+            lng = linked_coords['lng']
 
     if lat is None or lng is None:
         address = project_data.get('location_address') or project_data.get('location', '')
@@ -1468,8 +1659,12 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             d_lng = max_lng - min_lng
             max_dim = max(d_lat, d_lng)
             if max_dim > 0:
-                # Target: polygon max dimension occupies 20% to 35% of the screen
-                suggested_zoom = int(math.log2(540.0 / max_dim))
+                # Target: polygon max dimension occupies ~25% of the 1280px screen
+                # At zoom z, 360 degrees = 256 * 2^z pixels, so 1 degree = 256*2^z/360 px
+                # We want max_dim degrees = 0.25 * 1280 px = 320px
+                # 320 = max_dim * 256 * 2^z / 360
+                # 2^z = 320 * 360 / (max_dim * 256) = 450 / max_dim
+                suggested_zoom = int(math.log2(450.0 / max_dim))
                 overview_zoom = max(13, min(19, suggested_zoom))
                 
                 # Make other zoom levels relative to overview_zoom
@@ -1479,6 +1674,13 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 print(f"[DYNAMIC ZOOM] Adjusted zoom levels based on polygon: overview={overview_zoom}, landmarks={landmarks_zoom}, access={access_zoom}, catchment={catchment_zoom}")
         except Exception as ez:
             print(f"[DYNAMIC ZOOM ERROR] {ez}")
+
+    result['zooms'] = {
+        'overview': overview_zoom,
+        'landmarks': landmarks_zoom,
+        'access': access_zoom,
+        'catchment': catchment_zoom,
+    }
 
     # Compute polygon centroid for site marker placement
     # When a polygon exists, place the pin at its centroid so it sits ON the highlight
@@ -1531,31 +1733,36 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     landmarks_text = project_data.get('nearby_landmarks', '')
     landmarks = _parse_landmarks_text(landmarks_text)
 
-    # If no structured landmarks, fetch from Places API
+    landmark_radius_m = 1000
+    # If no structured landmarks, fetch verified nearby places from Google only.
     if not landmarks:
-        places = get_nearby_landmarks(lat, lng, radius=2000, max_results=6)
+        places = get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=6)
         if places.get('success'):
             landmarks = places['landmarks']
             _record_maps_call(tenant_id)
 
-    # Geocode text-parsed landmarks that lack coordinates
+    # Geocode text-entered landmarks against the actual project location first,
+    # rather than accepting a same-named landmark in another city.
+    location_context = project_data.get('location_address') or project_data.get('location', '')
     for lm in landmarks:
         if lm.get('lat') is None or lm.get('lng') is None:
-            geo = geo = geocode_address(lm['name'], tenant_id=tenant_id)
+            query = f"{lm['name']}, {location_context}" if location_context else lm['name']
+            geo = geocode_address(query, tenant_id=tenant_id)
             if geo.get('success'):
                 lm['lat'] = geo['lat']
                 lm['lng'] = geo['lng']
 
-    # Filter out landmarks that are extremely close to the site (within ~50 meters)
+    # Keep the maps truthful: reject duplicate/site pins and distant geocoding hits.
     filtered_landmarks = []
     for lm in landmarks:
-        if lm.get('lat') is not None and lm.get('lng') is not None:
-            dx = lm['lat'] - lat
-            dy = lm['lng'] - lng
-            if math.sqrt(dx*dx + dy*dy) < 0.0005:
-                continue
+        if lm.get('lat') is None or lm.get('lng') is None:
+            continue
+        distance_meters = _distance_meters(lat, lng, lm['lat'], lm['lng'])
+        if distance_meters < 50 or distance_meters > landmark_radius_m:
+            continue
+        lm['distance_meters'] = round(distance_meters)
         filtered_landmarks.append(lm)
-    landmarks = filtered_landmarks
+    landmarks = sorted(filtered_landmarks, key=lambda item: item.get('distance_meters', float('inf')))[:6]
 
     # Get driving times for landmarks with coordinates
     geocoded_landmarks = [lm for lm in landmarks if lm.get('lat') is not None and lm.get('lng') is not None]
@@ -1600,7 +1807,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = overview_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, overview_path, placeholder, presentation_id, {'lat': lat, 'lng': lng})
+                add_map_image(tenant_id, img_suffix, overview_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom})
 
     # Generate map_landmarks (closer zoom)
     if 'landmarks' in enabled_maps and landmarks:
@@ -1628,7 +1835,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = landmarks_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'landmarks': landmarks})
+                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'landmarks': landmarks})
 
     # Generate map_access
     if 'access' in enabled_maps:
@@ -1655,7 +1862,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = access_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, access_path, placeholder, presentation_id, {'lat': lat, 'lng': lng})
+                add_map_image(tenant_id, img_suffix, access_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': access_zoom})
 
     # Generate map_catchment
     if 'catchment' in enabled_maps:
@@ -1687,7 +1894,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = catchment_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zones': zones})
+                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'zones': zones})
 
     # Generate street view images
     if 'streetview' in enabled_maps:

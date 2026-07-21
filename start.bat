@@ -4,6 +4,8 @@ echo   منافع الاقتصادية - تشغيل السيرفر
 echo ════════════════════════════════════════
 echo.
 set PORT=7860
+set ADMIN_EMAIL=admin@system.local
+set ADMIN_PASSWORD=Admin@123456
 echo   جاري تشغيل السيرفر على Port %PORT%...
 echo   افتح المتصفح على: http://localhost:%PORT%
 echo   اضغط Ctrl+C لإيقاف السيرفر

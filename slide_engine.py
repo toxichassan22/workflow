@@ -8,6 +8,9 @@ import re
 import concurrent.futures
 from design_templates import build_design_rules
 
+
+_ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Content Distribution Rules
 # ─────────────────────────────────────────────────────────────────────────────
@@ -365,6 +368,15 @@ def _ensure_map_placeholder(html, slide_type):
 
 def postprocess_slide(html, slide_type):
     """Post-process generated HTML to enforce image and placeholder rules."""
+    # The product design deliberately has no icon language.  Models sometimes
+    # reintroduce SVGs, icon-font markup, or emoji despite the prompt, so enforce
+    # that contract at the output boundary used by HTML/PDF/PPTX generation.
+    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', '', html, flags=re.IGNORECASE)
+    html = re.sub(
+        r'<(?:i|span|div)\b[^>]*(?:class|id)=["\'][^"\']*(?:icon|emoji|lucide|fa-|material-icons)[^"\']*["\'][^>]*>[\s\S]*?</(?:i|span|div)\s*>',
+        '', html, flags=re.IGNORECASE
+    )
+    html = _ICON_RE.sub('', html)
     html = _block_external_images(html)
     html = _ensure_map_placeholder(html, slide_type)
     return html

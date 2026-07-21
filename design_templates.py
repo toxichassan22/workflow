@@ -11,7 +11,7 @@ DESIGN_TEMPLATES = {
         'card_style': 'bordered',
         'header_style': 'minimal',
         'use_gradients': False,
-        'icon_style': 'unicode',
+        'icon_style': 'none',
         'default_colors': {
             'primary': '#3B6E91',
             'secondary': '#254B66',
@@ -27,7 +27,7 @@ DESIGN_TEMPLATES = {
         'card_style': 'shadow',
         'header_style': 'ornate',
         'use_gradients': True,
-        'icon_style': 'unicode',
+        'icon_style': 'none',
         'default_colors': {
             'primary': '#3B6E91',
             'secondary': '#254B66',
@@ -59,7 +59,7 @@ DESIGN_TEMPLATES = {
         'card_style': 'gradient',
         'header_style': 'ornate',
         'use_gradients': True,
-        'icon_style': 'unicode',
+        'icon_style': 'none',
         'default_colors': {
             'primary': '#1B1B1B',
             'secondary': '#0D0D0D',
@@ -75,7 +75,7 @@ DESIGN_TEMPLATES = {
         'card_style': 'bordered',
         'header_style': 'minimal',
         'use_gradients': False,
-        'icon_style': 'unicode',
+        'icon_style': 'none',
         'default_colors': {
             'primary': '#003366',
             'secondary': '#002244',
@@ -91,7 +91,7 @@ DESIGN_TEMPLATES = {
         'card_style': 'flat',
         'header_style': 'minimal',
         'use_gradients': False,
-        'icon_style': 'unicode',
+        'icon_style': 'none',
         'default_colors': {
             'primary': '#2D5016',
             'secondary': '#1A3009',
@@ -227,26 +227,7 @@ top:{content_top}px → bottom:{content_bottom}px. padding: 20px 40px.
     elif card_style == 'gradient':
         rules += f"كل بطاقة: background:linear-gradient(135deg,{primary},{secondary}) border-radius:12px padding:16-24px color:#fff.\n"
 
-    if template['icon_style'] == 'unicode':
-        rules += f"""
-## الأيقونات — قواعد صارمة
-⛔ ممنوع تماماً استخدام Unicode Emojis الملونة (🏗️ 📊 💰 🏠 📍 ✅ ⚠️ 🔑 📈) — هذا عرض عقاري احترافي وليس رسالة واتساب.
-✅ استخدم أيقونات SVG inline أحادية اللون (monochrome) بحجم 20-28px.
-- لون الأيقونات: {primary} أو {accent} أو #FFFFFF (حسب خلفية البطاقة)
-- الأيقونات يجب أن تكون بسيطة وهندسية (geometric) — خطوط رفيعة بدون تعبئة
-- مثال على SVG مقبول:
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="{primary}" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-- أيقونات مقترحة حسب الموضوع:
-  * موقع/عنوان: دائرة بداخلها نقطة (location pin بسيط)
-  * مبنى/عقار: مستطيل بخطوط أفقية (building outline)
-  * مالية/أرقام: مستطيلات بأعمدة (bar chart)
-  * طرق/وصول: خطوط متقاطعة (road intersection)
-  * مساحة: مربع بأبعاد (square with dimensions)
-  * وقت: دائرة بعقارب (clock)
-  * نقطة إيجابية: دائرة بعلامة صح (checkmark circle)
-"""
-    else:
-        rules += "بدون أيقونات. اعتمد على التخطيط والمساحات.\n"
+    rules += "بدون أيقونات. اعتمد على التخطيط والمساحات.\n"
 
     if template['use_gradients']:
         rules += f"تدرجات: استخدم linear-gradient(135deg,{primary},{secondary}) في الخلفيات والبطاقات المميزة.\n"

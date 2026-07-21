@@ -636,7 +636,7 @@ main {width: 100%}
 .tenant-grid.three {grid-template-columns: repeat(3, minmax(0, 1fr));}
 .tenant-grid.full {grid-template-columns: 1fr;}
 .tenant-form-section {grid-column: 1 / -1;
-      display: grid;
+      display: none;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 16px;
       padding: 20px;
@@ -903,7 +903,239 @@ main {width: 100%}
       }
 .tenant-grid.three {
         grid-template-columns: 1fr;
-      }}</style>
+      }
+
+/* U1: Responsive topbar */
+.tenant-topbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 14px;
+      }
+.tenant-brand {
+        justify-content: center;
+      }
+.tenant-nav {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px;
+      }
+.tenant-nav .btn {
+        font-size: 12px;
+        padding: 6px 10px;
+      }
+.tenant-dropdown-menu {
+        right: auto;
+        left: 0;
+        min-width: 160px;
+      }
+}
+@media (max-width: 600px) {
+.tenant-nav {
+        gap: 4px;
+      }
+.tenant-nav .btn {
+        font-size: 11px;
+        padding: 5px 8px;
+      }
+#tenantUserInfo {
+        font-size: 10px !important;
+        padding: 3px 6px !important;
+      }
+      .pf-layout {
+        flex-direction: column;
+      }
+      .pf-sidebar {
+        width: 100% !important;
+        max-height: 200px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        flex-direction: row !important;
+        flex-wrap: nowrap;
+      }
+      .pf-sidebar-item {
+        flex-shrink: 0;
+        min-width: max-content;
+      }
+      .pf-main {
+        width: 100% !important;
+      }
+    }</style>
+  <style>
+    .project-form-layout {
+      display: grid;
+      grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+    .project-form-sidebar {
+      position: sticky;
+      top: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: calc(100vh - 130px);
+      overflow-y: auto;
+      padding: 10px;
+      background: #f7fafc;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+    .project-form-sidebar-title {
+      margin: 2px 6px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .project-section-nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 10px 11px;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      font-size: 13px;
+      text-align: right;
+      cursor: pointer;
+    }
+    .project-section-nav-item:hover { background: #fff; border-color: var(--line); }
+    .project-section-nav-item.active { background: var(--p); color: #fff; border-color: var(--p); }
+    .project-section-nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-section-nav-status {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 2px 7px;
+      background: #fcf8e3;
+      color: #8a6d3b;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .project-section-nav-item.active .project-section-nav-status { background: rgba(255,255,255,.2); color: #fff; }
+    .project-section-nav-status.approved { background: #dff0d8; color: #3c763d; }
+    .project-section-nav-item.active .project-section-nav-status.approved { background: rgba(255,255,255,.2); color: #fff; }
+    .project-form-content { min-width: 0; }
+    .project-form-content .tenant-form-section {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 20px;
+    }
+    .project-form-content .tenant-form-section { display: none; }
+    .project-form-content .tenant-form-section.active { display: grid; }
+    .project-form-content .tenant-form-section .tenant-section-title {
+      grid-column: 1 / -1;
+      margin: 0 0 8px;
+      color: var(--p);
+      font-size: 18px;
+    }
+    .project-form-content .tenant-form-section > .fin-table-wrap,
+    .project-form-content .tenant-form-section > .tenant-grid,
+    .project-form-content .tenant-form-section > h4,
+    .project-form-content .tenant-form-section > div[id^="financialIndicators"] {
+      grid-column: 1 / -1;
+    }
+    .workflow-stage-layout {
+      display: grid;
+      grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+    .workflow-stage-content { min-width: 0; }
+    .workflow-sidebar-divider {
+      height: 1px;
+      margin: 8px 4px;
+      background: var(--line);
+    }
+    .tenant-form-section.section-draft { border-right: 4px solid #f0ad4e; }
+    .tenant-form-section.section-approved { border-right: 4px solid #5cb85c; }
+    .section-status-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    .section-status-badge.draft { background: #fcf8e3; color: #8a6d3b; }
+    .section-status-badge.approved { background: #dff0d8; color: #3c763d; }
+    .section-approve-btn {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    .section-approve-btn:hover { background: var(--soft); }
+    @media (max-width: 800px) {
+      .project-form-layout, .workflow-stage-layout { grid-template-columns: 1fr; }
+      .project-form-sidebar {
+        position: static;
+        flex-direction: row;
+        max-height: none;
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      .project-form-sidebar-title { display: none; }
+      .project-section-nav-item { flex: 0 0 auto; width: auto; }
+    }
+    /* ===== Google Maps Link Field ===== */
+    .maps-link-field { position: relative; }
+    .maps-link-field input {
+      padding-left: 40px !important;
+      direction: ltr !important;
+      text-align: left !important;
+      font-size: 13px !important;
+    }
+    /* ===== Financial Table ===== */
+    .fin-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      margin-top: 10px;
+    }
+    .fin-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .fin-table th {
+      background: var(--p);
+      color: #fff;
+      padding: 8px 12px;
+      font-weight: 700;
+      white-space: nowrap;
+      text-align: right;
+    }
+    .fin-table td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .fin-table tr:nth-child(even) td { background: #f8f6f4; }
+    .fin-table .total-row td {
+      font-weight: 800;
+      background: var(--soft);
+      border-top: 2px solid var(--p);
+    }
+    .fin-table input {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 13px;
+      width: 100%;
+      text-align: right;
+    }
+  </style>
   <style id="zai-global-styles"></style>
 </head>
 
@@ -916,7 +1148,7 @@ main {width: 100%}
       style="background:#fff;padding:32px;border-radius:20px;text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.3);max-width:420px;width:90%;color:#222;position:relative">
       <button onclick="hideLoader()"
         style="position:absolute;top:10px;left:10px;background:none;border:none;font-size:22px;color:#999;cursor:pointer;padding:4px 10px;border-radius:8px"
-        title="إلغاء">✕</button>
+        title="إلغاء">×</button>
       <div class="spinner"
         style="width:48px;height:48px;border:4.5px solid var(--p);border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px">
       </div>
@@ -986,10 +1218,10 @@ main {width: 100%}
         </div>
       </div>
       <div class="tenant-nav">
-        <button class="btn ghost" data-permission="create_presentation" onclick="startTenantProject()">➕ عرض جديد</button>
-        <button class="btn ghost" data-permission="view_presentations" onclick="openTenantPresentations()">📊 العروض</button>
+        <button class="btn ghost" data-permission="create_presentation" onclick="startTenantProject()">عرض جديد</button>
+        <button class="btn ghost" data-permission="view_presentations" onclick="openTenantPresentations()">العروض</button>
         <div class="tenant-dropdown tenant-admin-only">
-          <button class="btn ghost" onclick="toggleTenantDropdown(this)">⚙️ الإدارة ▾</button>
+          <button class="btn ghost" onclick="toggleTenantDropdown(this)">الإدارة ▾</button>
           <div class="tenant-dropdown-menu">
             <button class="btn ghost" data-permission="company_settings" onclick="openTenantSettings(); closeTenantDropdown()">إعدادات الشركة</button>
             <button class="btn ghost" data-permission="custom_fields" onclick="openTenantFields(); closeTenantDropdown()">الحقول</button>
@@ -999,13 +1231,44 @@ main {width: 100%}
             <button class="btn ghost tenant-hidden" data-permission="sag_admin_panel" id="tenantAdminBtn" onclick="openTenantAdmin(); closeTenantDropdown()">لوحة المدير</button>
           </div>
         </div>
-        <span id="tenantUserInfo" class="tenant-hint"></span>
+        <span id="tenantUserInfo" class="tenant-hint" style="background:#E8F4FA;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:600;white-space:nowrap"></span>
         <button class="btn danger" onclick="tenantLogout()">خروج</button>
       </div>
     </div>
 
     <!-- Dashboard -->
     <section id="tenantDashboardPage" class="tenant-page active">
+      <!-- U3: Onboarding guide for first-time users -->
+      <div id="onboardingGuide" style="display:none;background:linear-gradient(135deg,#f0f7ff,#e8f4fa);border:1px solid #b3d4f0;border-radius:14px;padding:18px 20px;margin-bottom:20px;position:relative">
+        <button onclick="document.getElementById('onboardingGuide').style.display='none';localStorage.setItem('onboardingSeen','1')" style="position:absolute;top:10px;left:10px;background:none;border:none;font-size:18px;cursor:pointer;color:#888">×</button>
+        <h3 style="margin:0 0 6px;color:var(--p);font-size:16px">أهلاً بك في المنصة!</h3>
+        <p style="margin:0 0 12px;color:#555;font-size:13px;line-height:1.7">
+          هذا دليل سريع لبدء استخدام المنصة:
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+          <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
+            <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">1</div>
+            <strong style="font-size:13px">عرض تقديمي جديد</strong>
+            <p style="margin:4px 0 0;font-size:12px;color:#666">اضغط "عرض جديد" وأدخل بيانات مشروعك (أو استخدم البيانات التجريبية)</p>
+          </div>
+          <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
+            <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">2</div>
+            <strong style="font-size:13px">اقتراح خطة الشرائح</strong>
+            <p style="margin:4px 0 0;font-size:12px;color:#666">AI يقترح عدد وتوزيع الشرائح — ممكن تعدّل قبل المتابعة</p>
+          </div>
+          <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
+            <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">3</div>
+            <strong style="font-size:13px">توليد الصور والشرائح</strong>
+            <p style="margin:4px 0 0;font-size:12px;color:#666">توليد صورة الغلاف والمودبورد ثم الشرائح الكاملة</p>
+          </div>
+          <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
+            <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">4</div>
+            <strong style="font-size:13px">معاينة وتصدير</strong>
+            <p style="margin:4px 0 0;font-size:12px;color:#666">راجع الشرائح، عدّلها، ثم صدّرها كـ PDF أو PPTX</p>
+          </div>
+        </div>
+      </div>
+
       <div id="dashboardStats" class="tenant-dashboard-stats" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px;">
         <div class="tenant-dash-card" style="cursor:default">
           <h3 style="font-size:32px; margin:0; color:var(--p);" id="dashStatTotal">0</h3>
@@ -1022,8 +1285,15 @@ main {width: 100%}
 
     <!-- Settings -->
     <section id="tenantSettingsPage" class="tenant-page">
-      <h2>إعدادات الشركة والهوية البصرية</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <div>
+          <h2 style="margin:0">إعدادات الشركة والهوية البصرية</h2>
+          <p class="tenant-hint" style="margin:4px 0 0">تحكم في الشعار والألوان والخطوط وشكل العروض.</p>
+        </div>
+        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
+      </div>
       <div id="settingsError" class="auth-error" style="display:none"></div>
+      <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px">
       <div class="tenant-grid">
         <div class="tenant-field full">
           <label>اسم الشركة (يظهر في العروض)</label>
@@ -1133,6 +1403,7 @@ main {width: 100%}
         <button class="btn ghost" onclick="analyzeReferenceImage()">تحليل الصورة المرجعية</button>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
+      </div>
     </section>
 
     <!-- Dynamic Fields -->
@@ -1140,15 +1411,29 @@ main {width: 100%}
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
         <div>
           <h2>الحقول المخصصة للمشاريع</h2>
-          <p class="tenant-hint">كل شركة عندها حقولها الخاصة. تقدر تضيف/تخفي/تمسح/ترتّب الحقول اللي تظهر في فورم بيانات المشروع.</p>
+          <p class="tenant-hint">أنشئ أقساماً وحقولاً مخصصة لشركتك، ثم أضفها أو عدّلها أو رتّبها دون تغيير الحقول والأقسام الثابتة.</p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
       <div id="tenantFieldsList" style="margin-bottom: 20px;"></div>
 
+      <!-- Custom Sections Manager -->
+      <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
+        <h3 style="margin-bottom:6px">إدارة الأقسام</h3>
+        <p class="tenant-hint">أنشئ أقساماً مخصصة لتنظيم بياناتك. الأقسام الأساسية ثابتة، والقسم المخصص يظهر في القائمة الجانبية لفورم المشروع.</p>
+        <div id="customSectionsList" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="tenant-field" style="flex:1;min-width:180px">
+            <label>اسم القسم الجديد</label>
+            <input type="text" id="newSectionLabel" placeholder="مثال: معلومات التسويق" style="width:100%">
+          </div>
+          <button class="btn primary" onclick="addCustomSection()">إضافة قسم</button>
+        </div>
+      </div>
+
       <!-- AI Input Builder -->
       <div style="background:#fff8e1;border:1px solid #f57f17;border-radius:16px;padding:18px;margin-bottom:20px">
-        <h3 style="margin-bottom:6px">🤖 بنّاء الحقول الذكي (AI Input Builder)</h3>
+        <h3 style="margin-bottom:6px">بنّاء الحقول الذكي (AI Input Builder)</h3>
         <p class="tenant-hint">اكتب وصف سريع للمشروع أو لطبيعة شركتك، واقترح AI الحقول المناسبة. تقدر توافق، ترفض، أو تعدل الاقتراح.</p>
 
         <div class="tenant-grid full" style="margin-bottom:12px">
@@ -1174,9 +1459,9 @@ main {width: 100%}
         </div>
       </div>
 
-      <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px">
-        <h3 style="margin-bottom:6px">إضافة حقل جديد يدوياً</h3>
-        <p class="tenant-hint">الخطوة 1: اكتب اسم الحقل. الخطوة 2: اختار نوعه. (الكود الإنجليزي للنظام بس.)</p>
+      <div id="tenantFieldEditor" style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px">
+        <h3 id="tenantFieldFormTitle" style="margin-bottom:6px">إضافة حقل جديد يدوياً</h3>
+        <p id="tenantFieldFormHint" class="tenant-hint">أنشئ قسماً مخصصاً أولاً عند الحاجة، ثم أضف داخله الحقول التي تريدها.</p>
         <div class="tenant-grid">
           <div class="tenant-field">
             <label>اسم الحقل (اللي يظهر للمستخدم) *</label>
@@ -1225,7 +1510,8 @@ main {width: 100%}
         </div>
 
         <div class="tenant-btns" style="margin-top:16px">
-          <button class="btn primary" onclick="addTenantField()">+ إضافة الحقل</button>
+          <button id="tenantFieldFormSubmit" class="btn primary" onclick="addTenantField()">إضافة الحقل</button>
+          <button id="tenantFieldEditCancel" class="btn ghost" style="display:none" onclick="clearNewFieldForm()">إلغاء التعديل</button>
           <button class="btn ghost" onclick="clearNewFieldForm()">تفريغ</button>
         </div>
       </div>
@@ -1236,67 +1522,74 @@ main {width: 100%}
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
           <h2>بيانات المشروع</h2>
-          <p class="tenant-hint">كل شركة تتحكم في الحقول اللي تظهر هنا. ممكن تضيف/تخفي/ترتّب حاجات مختلفة.</p>
+          <p class="tenant-hint">اختر القسم من القائمة الجانبية. أضف الأقسام والحقول المخصصة من صفحة تخصيص الحقول، ثم اضغط التالي بعد اكتمال البيانات.</p>
         </div>
-        <button class="btn ghost" onclick="openTenantFields()">⚙️ تخصيص الحقول</button>
+        <button class="btn ghost" onclick="openTenantFields()">تخصيص الحقول</button>
       </div>
-      <div id="tenantProjectForm" class="tenant-grid"></div>
-      <div class="tenant-btns">
+      <div class="project-form-layout">
+        <aside id="tenantProjectSidebar" class="project-form-sidebar" aria-label="أقسام بيانات المشروع"></aside>
+        <div id="tenantProjectForm" class="project-form-content"></div>
+      </div>
+      <div class="tenant-form-actions" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)">
+        <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
         <button class="btn primary" onclick="submitTenantProject()">التالي: اقتراح خطة الشرائح</button>
         <button class="btn ghost" onclick="fillSampleProjectData()">تعبئة بيانات تجريبية</button>
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">إلغاء</button>
+        <button class="btn ghost" onclick="approveAllSections()">اعتماد كل الأقسام</button>
+        <button class="btn ghost" onclick="requestProjectDraftApproval()">طلب اعتماد المسودة</button>
+        <button class="btn danger" onclick="confirmDeleteProject()">حذف المشروع</button>
+        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
       </div>
     </section>
 
     <!-- Slide Plan -->
     <section id="tenantSlidePlanPage" class="tenant-page">
-      <div class="tenant-workflow-tabs" aria-label="مراحل إنشاء العرض">
-        <button type="button" onclick="showTenantPage('tenantSlidePlanPage')">1. الهيكل</button>
-        <button type="button" onclick="goToTenantMainImage()">2. الصورة الرئيسية</button>
-        <button type="button" onclick="goToTenantMoodboard()">3. المود بورد</button>
-      </div>
-      <h2>خطة الشرائح</h2>
-      <div id="slidePlanInfo" class="tenant-hint" style="margin-bottom:16px"></div>
-      <div id="tenantSlidePlanList"></div>
-      <div class="tenant-btns">
-        <button class="btn ghost" onclick="addPlanSlide()">+ إضافة شريحة</button>
-        <button class="btn ghost" onclick="regenerateTenantSlidePlan()">إعادة الاقتراح</button>
-        <button class="btn primary" onclick="goToTenantMainImage()">التالي: توليد الصورة الرئيسية</button>
-        <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">عودة</button>
+      <div class="workflow-stage-layout">
+        <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
+        <div class="workflow-stage-content">
+          <h2>خطة الشرائح</h2>
+          <div id="slidePlanInfo" class="tenant-hint" style="margin-bottom:16px"></div>
+          <div id="tenantSlidePlanList"></div>
+          <div class="tenant-btns">
+            <button class="btn ghost" onclick="addPlanSlide()">إضافة شريحة</button>
+            <button class="btn ghost" onclick="regenerateTenantSlidePlan()">إعادة الاقتراح</button>
+            <button class="btn primary" onclick="goToTenantMainImage()">التالي: توليد الصورة الرئيسية</button>
+            <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">عودة</button>
+          </div>
+        </div>
       </div>
     </section>
 
     <!-- Cover image generation -->
     <section id="tenantMainImagePage" class="tenant-page">
-      <div class="tenant-workflow-tabs" aria-label="مراحل إنشاء العرض">
-        <button type="button" onclick="showTenantPage('tenantSlidePlanPage')">1. الهيكل</button>
-        <button type="button" onclick="showTenantPage('tenantMainImagePage')">2. الصورة الرئيسية</button>
-        <button type="button" onclick="goToTenantMoodboard()">3. المود بورد</button>
-      </div>
-      <h2>توليد الصورة الرئيسية</h2>
-      <p class="tenant-hint" style="margin-bottom:16px">هذه الصورة ستظهر في غلاف العرض. يمكنك إعادة توليدها حتى تصل للشكل المناسب.</p>
-      <div id="tenantMainImagePreview" class="tenant-creative-preview">لم يتم توليد صورة رئيسية بعد.</div>
-      <div class="tenant-btns">
-        <button class="btn primary" onclick="generateTenantMainImage()">✨ توليد الصورة الرئيسية</button>
-        <button class="btn primary" onclick="goToTenantMoodboard()">التالي: صور المود بورد</button>
-        <button class="btn ghost" onclick="showTenantPage('tenantSlidePlanPage')">عودة للهيكل</button>
+      <div class="workflow-stage-layout">
+        <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
+        <div class="workflow-stage-content">
+          <h2>توليد الصورة الرئيسية</h2>
+          <p class="tenant-hint" style="margin-bottom:16px">هذه الصورة ستظهر في غلاف العرض. يمكنك إعادة توليدها حتى تصل للشكل المناسب.</p>
+          <div id="tenantMainImagePreview" class="tenant-creative-preview">لم يتم توليد صورة رئيسية بعد.</div>
+          <div class="tenant-btns">
+            <button class="btn primary" onclick="generateTenantMainImage()">توليد الصورة الرئيسية</button>
+            <button class="btn primary" onclick="goToTenantMoodboard()">التالي: صور المود بورد</button>
+            <button class="btn ghost" onclick="showTenantPage('tenantSlidePlanPage')">عودة للهيكل</button>
+          </div>
+        </div>
       </div>
     </section>
 
     <!-- Moodboard image generation -->
     <section id="tenantMoodboardPage" class="tenant-page">
-      <div class="tenant-workflow-tabs" aria-label="مراحل إنشاء العرض">
-        <button type="button" onclick="showTenantPage('tenantSlidePlanPage')">1. الهيكل</button>
-        <button type="button" onclick="goToTenantMainImage()">2. الصورة الرئيسية</button>
-        <button type="button" onclick="showTenantPage('tenantMoodboardPage')">3. المود بورد</button>
-      </div>
-      <h2>توليد صور المود بورد</h2>
-      <p class="tenant-hint" style="margin-bottom:16px">أربع صور مرجعية تُستخدم في لوحة الإلهام وفي الشرائح المرتبطة بالمشروع.</p>
-      <div id="tenantMoodboardPreview" class="tenant-moodboard-grid"></div>
-      <div class="tenant-btns">
-        <button class="btn primary" onclick="generateTenantMoodboardImages()">✨ توليد صور المود بورد</button>
-        <button class="btn primary" onclick="generateTenantSlides()">توليد العرض والتصميم</button>
-        <button class="btn ghost" onclick="goToTenantMainImage()">عودة للصورة الرئيسية</button>
+      <div class="workflow-stage-layout">
+        <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
+        <div class="workflow-stage-content">
+          <h2>توليد صور المود بورد</h2>
+          <p class="tenant-hint" style="margin-bottom:16px">أربع صور مرجعية تُستخدم في لوحة الإلهام وفي الشرائح المرتبطة بالمشروع.</p>
+          <div id="tenantMoodboardPreview" class="tenant-moodboard-grid"></div>
+          <div class="tenant-btns">
+            <button class="btn primary" onclick="generateTenantMoodboardImages()">توليد صور المود بورد</button>
+            <button class="btn primary" onclick="generateTenantSlides()">توليد العرض والتصميم</button>
+            <button class="btn ghost" onclick="goToTenantMainImage()">عودة للصورة الرئيسية</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1310,7 +1603,7 @@ main {width: 100%}
         </div>
         <div class="tenant-btns" style="display:flex; gap:8px; margin:0; flex-wrap:wrap;">
           <button class="btn primary" onclick="saveExistingPresentation()" style="background:#fff; color:#3B6E91; border:none; padding:8px 16px; font-weight:700; border-radius:8px;">حفظ التعديلات</button>
-          <button class="btn primary" data-permission="create_presentation" onclick="toggleMapStylePanel()" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">🗺️ إعدادات الخرائط</button>
+          <button class="btn primary" data-permission="create_presentation" onclick="toggleMapStylePanel()" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">إعدادات الخرائط</button>
           <button class="btn primary" onclick="requestPresentationApproval(tenantPresentationId)" id="btnRequestApproval" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">طلب تعميد</button>
           <button class="btn primary tenant-admin-only" data-permission="export_files" onclick="exportTenantSlides('pptx')" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">تصدير PPTX</button>
           <button class="btn primary tenant-admin-only" data-permission="export_files" onclick="exportTenantSlides('pdf')" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">تصدير PDF</button>
@@ -1330,7 +1623,7 @@ main {width: 100%}
         <div class="ge-right-panel" id="tenantSlidesChat">
           <div class="ge-panel-header" style="border-bottom:1px solid #e8e4e0; padding:16px; flex-shrink:0;">
             <h3 style="display:flex; align-items:center; gap:6px; color:#3B6E91; margin:0 0 4px; font-size:16px; font-weight:700;">
-              <span>🧠 شات مصمم الـ AI</span>
+              <span>شات مصمم الـ AI</span>
               <span style="font-size:10px; background:#e8f4fa; color:#3B6E91; padding:2px 8px; border-radius:12px; font-weight:700;">نشط</span>
             </h3>
             <p class="tenant-hint" style="margin:0; font-size:11px; color:#666;">اختر الشريحة من اليمين أو القائمة، واكتب تعديلاتك.</p>
@@ -1351,50 +1644,50 @@ main {width: 100%}
       <!-- Map Style Selector Panel (Modal style) -->
       <div id="mapStylePanel" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center; padding:20px;">
         <div style="background:#fff; border-radius:20px; padding:24px; max-width:600px; width:100%; box-shadow: 0 10px 40px rgba(0,0,0,0.2); position:relative;">
-          <h3 style="margin-top:0; margin-bottom:12px; color:#3B6E91; font-size:18px; font-weight:700;">🗺️ نوع الخريطة لكل شريحة</h3>
+          <h3 style="margin-top:0; margin-bottom:12px; color:#3B6E91; font-size:18px; font-weight:700;">نوع الخريطة لكل شريحة</h3>
           <p class="tenant-hint" style="margin-bottom:14px; font-size:13px;">اختار النوع المناسب لكل خريطة (قمر صناعي، جرافيك، تضاريس، أو هجين)</p>
           
           <div class="tenant-grid" style="display:grid; grid-template-columns:1fr; gap:12px; max-height:50vh; overflow-y:auto; padding-right:4px;">
             <div class="tenant-field">
               <label style="font-weight:700; font-size:13px; display:block; margin-bottom:4px;">خريطة الموقع العام (Overview)</label>
               <select id="mapStyleOverview" style="width:100%; border:1px solid #e0dcd8; border-radius:8px; padding:8px; font-family:inherit;">
-                <option value="satellite">🛰️ قمر صناعي</option>
-                <option value="roadmap">🗺️ جرافيك (خريطة طرق)</option>
-                <option value="terrain">⛰️ تضاريس</option>
-                <option value="hybrid">🔀 هجين (قمر صناعي + أسماء)</option>
+                <option value="satellite">قمر صناعي</option>
+                <option value="roadmap">جرافيك (خريطة طرق)</option>
+                <option value="terrain">تضاريس</option>
+                <option value="hybrid">هجين (قمر صناعي + أسماء)</option>
               </select>
             </div>
             <div class="tenant-field">
               <label style="font-weight:700; font-size:13px; display:block; margin-bottom:4px;">خريطة المعالم المحيطة (Landmarks)</label>
               <select id="mapStyleLandmarks" style="width:100%; border:1px solid #e0dcd8; border-radius:8px; padding:8px; font-family:inherit;">
-                <option value="satellite">🛰️ قمر صناعي</option>
-                <option value="roadmap">🗺️ جرافيك (خريطة طرق)</option>
-                <option value="terrain">⛰️ تضاريس</option>
-                <option value="hybrid">🔀 هجين (قمر صناعي + أسماء)</option>
+                <option value="satellite">قمر صناعي</option>
+                <option value="roadmap">جرافيك (خريطة طرق)</option>
+                <option value="terrain">تضاريس</option>
+                <option value="hybrid">هجين (قمر صناعي + أسماء)</option>
               </select>
             </div>
             <div class="tenant-field">
               <label style="font-weight:700; font-size:13px; display:block; margin-bottom:4px;">خريطة شبكة الطرق (Access)</label>
               <select id="mapStyleAccess" style="width:100%; border:1px solid #e0dcd8; border-radius:8px; padding:8px; font-family:inherit;">
-                <option value="satellite">🛰️ قمر صناعي</option>
-                <option value="roadmap">🗺️ جرافيك (خريطة طرق)</option>
-                <option value="terrain">⛰️ تضاريس</option>
-                <option value="hybrid">🔀 هجين (قمر صناعي + أسماء)</option>
+                <option value="satellite">قمر صناعي</option>
+                <option value="roadmap">جرافيك (خريطة طرق)</option>
+                <option value="terrain">تضاريس</option>
+                <option value="hybrid">هجين (قمر صناعي + أسماء)</option>
               </select>
             </div>
             <div class="tenant-field">
               <label style="font-weight:700; font-size:13px; display:block; margin-bottom:4px;">خريطة نطاق الخدمة (Catchment)</label>
               <select id="mapStyleCatchment" style="width:100%; border:1px solid #e0dcd8; border-radius:8px; padding:8px; font-family:inherit;">
-                <option value="satellite">🛰️ قمر صناعي</option>
-                <option value="roadmap">🗺️ جرافيك (خريطة طرق)</option>
-                <option value="terrain">⛰️ تضاريس</option>
-                <option value="hybrid">🔀 هجين (قمر صناعي + أسماء)</option>
+                <option value="satellite">قمر صناعي</option>
+                <option value="roadmap">جرافيك (خريطة طرق)</option>
+                <option value="terrain">تضاريس</option>
+                <option value="hybrid">هجين (قمر صناعي + أسماء)</option>
               </select>
             </div>
           </div>
           
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px; border-top:1px solid #e8e4e0; padding-top:14px;">
-            <button class="btn primary" onclick="regeneratePresentationMaps(); toggleMapStylePanel();" style="background:#3B6E91; color:#fff; border:none; padding:10px 18px; font-weight:700; border-radius:8px; cursor:pointer;">🔄 إعادة توليد الخرائط</button>
+            <button class="btn primary" onclick="regeneratePresentationMaps(); toggleMapStylePanel();" style="background:#3B6E91; color:#fff; border:none; padding:10px 18px; font-weight:700; border-radius:8px; cursor:pointer;">إعادة توليد الخرائط</button>
             <button class="btn ghost" onclick="toggleMapStylePanel()" style="background:#f5f5f5; border:none; padding:10px 18px; border-radius:8px; cursor:pointer;">إلغاء</button>
           </div>
         </div>
@@ -1412,17 +1705,17 @@ main {width: 100%}
 
     <!-- Users Management (company admin only) -->
     <section id="tenantUsersPage" class="tenant-page">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
-          <h2>إدارة الموظفين</h2>
-          <p class="tenant-hint">أضف موظفين لشركتك أو ابعتهم لينك دعوة.</p>
+          <h2 style="margin:0">إدارة الموظفين</h2>
+          <p class="tenant-hint" style="margin:4px 0 0">أضف موظفين لشركتك أو ابعتهم لينك دعوة — تتحكم بالصلاحيات من هنا.</p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
 
       <div id="tenantUsersList" class="tenant-grid full" style="margin-bottom:20px"></div>
 
-      <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px">
+      <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px">
         <h3 style="margin-bottom:12px">إضافة موظف جديد</h3>
         <div class="tenant-grid">
           <div class="tenant-field">
@@ -1482,7 +1775,7 @@ main {width: 100%}
           <button class="btn primary" onclick="sendTrainingChat()" style="align-self:flex-end;">إرسال</button>
         </div>
         <div style="text-align:left;margin-top:10px;">
-          <button class="btn small ghost" onclick="saveLastTrainingChatMessage()">💾 حفظ آخر رسالة كبيانات تدريب</button>
+          <button class="btn small ghost" onclick="saveLastTrainingChatMessage()">حفظ آخر رسالة كبيانات تدريب</button>
         </div>
       </div>
 
@@ -1503,8 +1796,8 @@ main {width: 100%}
       </div>
 
       <div class="tenant-tabs" style="display:flex;gap:8px;border-bottom:1px solid #ddd;margin-bottom:16px;">
-        <button class="btn ghost" id="aiTabTraining" onclick="showAIRuleTab('training')">🧠 بيانات التدريب</button>
-        <button class="btn ghost" id="aiTabLog" onclick="showAIRuleTab('log')">📝 سجل التدريب</button>
+        <button class="btn ghost" id="aiTabTraining" onclick="showAIRuleTab('training')">بيانات التدريب</button>
+        <button class="btn ghost" id="aiTabLog" onclick="showAIRuleTab('log')">سجل التدريب</button>
       </div>
 
       <div id="aiRulesTraining" class="ai-rule-tab">
@@ -1515,8 +1808,30 @@ main {width: 100%}
             <button class="btn primary" onclick="sendAIRulesChat()" style="align-self:flex-end;">إرسال</button>
           </div>
           <div style="text-align:left;margin-top:10px;">
-            <button class="btn small ghost" onclick="saveLastAIRulesChatMessage()">💾 حفظ آخر رسالة كبيانات تدريب</button>
+            <button class="btn small ghost" onclick="saveLastAIRulesChatMessage()">حفظ آخر رسالة كبيانات تدريب</button>
           </div>
+        </div>
+        <div style="margin-bottom:20px;padding:16px;border:2px dashed var(--line);border-radius:12px;text-align:center;">
+          <h3 style="margin-bottom:8px">رفع صورة للتحليل بالذكاء الاصطناعي</h3>
+          <p class="tenant-hint" style="margin-bottom:12px">ارفع صورة (موقع، مخطط، عرض تقديمي، خريطة) وسيقوم AI بتحليلها واستخراج المعلومات تلقائياً</p>
+          <div style="display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;">
+            <input type="text" id="trainingImageTitle" placeholder="عنوان الصورة (اختياري)" style="width:250px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;">
+            <input type="file" id="trainingImageFile" accept="image/png,image/jpeg,image/jpg,image/webp" style="display:none">
+            <button class="btn primary" onclick="document.getElementById('trainingImageFile').click()">اختيار صورة</button>
+            <button class="btn ghost" onclick="uploadTrainingImage()">رفع الصورة</button>
+            <span id="trainingImageStatus" style="font-size:13px;color:var(--muted);"></span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:10px;">
+            <select id="trainingImageType" aria-label="نوع الصورة" style="padding:8px 12px;border:1px solid var(--line);border-radius:8px;">
+              <option value="reference">صورة مرجعية</option>
+              <option value="design_sample">نموذج تصميم</option>
+              <option value="logo">شعار</option>
+              <option value="watermark">علامة مائية</option>
+            </select>
+            <input type="text" id="trainingImageDescription" placeholder="وصف أو تعليمات استخدام الصورة (اختياري)" style="width:360px;max-width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:8px;">
+            <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;"><input type="checkbox" id="trainingImageConsent"> أؤكد أن الصورة تخص الشركة ومسموح استخدامها للتدريب</label>
+          </div>
+          <div id="trainingImagePreview" style="margin-top:12px;"></div>
         </div>
         <h3 style="margin-bottom:10px">البيانات المحفوظة</h3>
         <div id="aiTrainingList"></div>
@@ -1604,8 +1919,12 @@ main {width: 100%}
     let tenantBranding = null;
     let tenantFields = [];
     let tenantFieldSections = [];
+    let editingTenantFieldId = null;
     let tenantAllowedFieldSections = {};
     let tenantProjectData = {};
+    let tenantProjectSectionStatuses = {};
+    let tenantProjectDraftApproval = null;
+    let tenantActiveProjectSection = null;
     let tenantSlidePlan = null;
     let tenantSlidesData = [];
     let tenantPresentationId = null;
@@ -1648,6 +1967,7 @@ main {width: 100%}
     }
 
     // Auth UI
+
     function switchAuthTab(tab) {
       document.getElementById('loginTab').classList.toggle('active', tab === 'login');
       document.getElementById('employeeTab').classList.toggle('active', tab === 'employee');
@@ -1655,6 +1975,8 @@ main {width: 100%}
       document.getElementById('loginForm').classList.toggle('active', tab === 'login');
       document.getElementById('employeeForm').classList.toggle('active', tab === 'employee');
       document.getElementById('registerForm').classList.toggle('active', tab === 'register');
+      const hintEl = document.getElementById('authTabHint');
+      if (hintEl && AUTH_TAB_HINTS[tab]) hintEl.innerHTML = AUTH_TAB_HINTS[tab];
       showTenantError('loginError', '');
       showTenantError('employeeError', '');
       showTenantError('registerError', '');
@@ -1688,8 +2010,79 @@ main {width: 100%}
         }
       }
       
-      if (pageId === 'tenantDashboardPage') loadDashboard();
+      if (pageId === 'tenantDashboardPage') {
+        loadDashboard();
+        // U3: Show onboarding guide for first-time users
+        if (!localStorage.getItem('onboardingSeen')) {
+          const guide = document.getElementById('onboardingGuide');
+          if (guide) guide.style.display = 'block';
+        }
+      }
+      renderWorkflowStageSidebars(pageId);
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    const TENANT_WORKFLOW_ITEMS = [
+      { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
+      { pageId: 'tenantSlidePlanPage', label: 'توليد الهيكل' },
+      { pageId: 'tenantMainImagePage', label: 'توليد الصورة الرئيسية' },
+      { pageId: 'tenantMoodboardPage', label: 'توليد المود بورد' },
+    ];
+
+    function navigateTenantWorkflow(pageId) {
+      if (pageId === 'tenantProjectPage') {
+        showTenantPage(pageId);
+        return;
+      }
+      if (pageId === 'tenantSlidePlanPage') {
+        if (!tenantSlidePlan) {
+          toast('أكمل بيانات المشروع واضغط التالي لتوليد الهيكل أولاً.');
+          return;
+        }
+        renderTenantSlidePlan();
+        showTenantPage(pageId);
+        return;
+      }
+      if (pageId === 'tenantMainImagePage') {
+        goToTenantMainImage();
+        return;
+      }
+      if (pageId === 'tenantMoodboardPage') {
+        goToTenantMoodboard();
+      }
+    }
+
+    function appendWorkflowNavigation(sidebar, activePageId, includeProject) {
+      if (!sidebar) return;
+      if (sidebar.childElementCount) {
+        const divider = document.createElement('div');
+        divider.className = 'workflow-sidebar-divider';
+        sidebar.appendChild(divider);
+      }
+      const title = document.createElement('p');
+      title.className = 'project-form-sidebar-title';
+      title.textContent = includeProject ? 'أقسام العرض' : 'التوليد والتصميم';
+      sidebar.appendChild(title);
+
+      TENANT_WORKFLOW_ITEMS
+        .filter(item => includeProject || item.pageId !== 'tenantProjectPage')
+        .forEach(item => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'project-section-nav-item';
+          button.textContent = item.label;
+          button.classList.toggle('active', item.pageId === activePageId);
+          if (item.pageId === activePageId) button.setAttribute('aria-current', 'page');
+          button.addEventListener('click', () => navigateTenantWorkflow(item.pageId));
+          sidebar.appendChild(button);
+        });
+    }
+
+    function renderWorkflowStageSidebars(activePageId) {
+      document.querySelectorAll('.workflow-stage-sidebar').forEach(sidebar => {
+        sidebar.innerHTML = '';
+        appendWorkflowNavigation(sidebar, activePageId, true);
+      });
     }
 
     function toggleTenantDropdown(btn) {
@@ -1732,7 +2125,7 @@ main {width: 100%}
         return;
       }
       list.innerHTML = recent.map(p => {
-        const statusLabel = p.status === 'pending_approval' ? '⏳ في انتظار التعميد' : p.status === 'approved' ? '✅ معتمد' : (p.status || 'draft');
+        const statusLabel = p.status === 'pending_approval' ? 'في انتظار التعميد' : p.status === 'approved' ? 'معتمد' : (p.status || 'draft');
         const date = (p.updatedAt || p.createdAt || '').slice(0, 16).replace('T', ' ');
         return '<div class="tenant-presentation-card" style="cursor:pointer" onclick="openExistingPresentation(\'' + p.id + '\')">' +
           '<div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
@@ -1895,7 +2288,8 @@ main {width: 100%}
       // Logo
       const logoEl = document.getElementById('tenantLogo');
       if (logoEl && b.logo_path) {
-        logoEl.src = b.logo_path.startsWith('http') ? b.logo_path : b.logo_path;
+        const logoSrc = b.logo_path.startsWith('http') ? b.logo_path : b.logo_path + '?t=' + Date.now();
+        logoEl.src = logoSrc;
       }
       if (logoEl && !b.logo_path) logoEl.src = 'assets/logo.png';
     }
@@ -1928,7 +2322,7 @@ main {width: 100%}
       setValue('settingsDefaultSlideCount', b.default_slide_count || 16);
       // previews
       const logoPreview = document.getElementById('settingsLogoPreview');
-      if (logoPreview) logoPreview.innerHTML = b.logo_path ? '<img src="/tenant-assets/' + tenantUser.id + '/logo" alt="logo" style="max-height:120px">' : 'اضغط لرفع لوجو الشركة (PNG/JPG/WEBP)';
+      if (logoPreview) logoPreview.innerHTML = b.logo_path ? '<img src="/tenant-assets/' + tenantUser.id + '/logo?t=' + Date.now() + '" alt="logo" style="max-height:120px">' : 'اضغط لرفع لوجو الشركة (PNG/JPG/WEBP)';
       const refPreview = document.getElementById('settingsRefPreview');
       if (refPreview) refPreview.textContent = b.reference_image_path ? 'تم رفع صورة مرجعية' : 'اضغط لرفع صورة مرجعية للاستيل التصميمي';
     }
@@ -2038,7 +2432,80 @@ main {width: 100%}
       if (sectionSelect) {
         sectionSelect.innerHTML = tenantFieldSections.map(s => '<option value="' + s.key + '">' + escapeHtml(s.label) + '</option>').join('');
       }
+      renderCustomSectionsList();
       await renderTenantFields();
+    }
+
+    function renderCustomSectionsList() {
+      const container = document.getElementById('customSectionsList');
+      if (!container) return;
+      container.innerHTML = '';
+      tenantFieldSections.forEach(s => {
+        const isCustom = s.custom === true;
+        const chip = document.createElement('div');
+        chip.style.cssText = 'display:flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px 12px;font-size:13px';
+        const label = document.createElement('span');
+        label.textContent = s.label;
+        chip.appendChild(label);
+        if (isCustom) {
+          const editButton = document.createElement('button');
+          editButton.className = 'btn ghost';
+          editButton.style.cssText = 'padding:2px 6px;font-size:11px';
+          editButton.textContent = 'تعديل';
+          editButton.addEventListener('click', () => renameCustomSection(s.key, s.label));
+          const deleteButton = document.createElement('button');
+          deleteButton.className = 'btn danger';
+          deleteButton.style.cssText = 'padding:2px 6px;font-size:11px';
+          deleteButton.textContent = 'حذف';
+          deleteButton.addEventListener('click', () => deleteCustomSection(s.key, s.label));
+          chip.append(editButton, deleteButton);
+        } else {
+          const fixedLabel = document.createElement('span');
+          fixedLabel.style.cssText = 'font-size:10px;color:#999';
+          fixedLabel.textContent = 'ثابت';
+          chip.appendChild(fixedLabel);
+        }
+        container.appendChild(chip);
+      });
+    }
+
+    async function addCustomSection() {
+      const label = document.getElementById('newSectionLabel').value.trim();
+      if (!label) { toast('اكتب اسم القسم'); return; }
+      const data = await api('POST', '/api/field-sections/custom', { label });
+      if (data.success) {
+        toast('تم إضافة القسم: ' + label);
+        document.getElementById('newSectionLabel').value = '';
+        await openTenantFields();
+      } else {
+        toast(data.error || 'فشل إضافة القسم');
+      }
+    }
+
+    async function renameCustomSection(key, currentLabel) {
+      const label = prompt('اسم القسم:', currentLabel);
+      if (label === null) return;
+      const cleanLabel = label.trim();
+      if (!cleanLabel) { toast('اكتب اسم القسم'); return; }
+      if (cleanLabel === currentLabel) return;
+      const data = await api('PUT', '/api/field-sections/custom/' + encodeURIComponent(key), { label: cleanLabel });
+      if (data.success) {
+        toast('تم تعديل اسم القسم');
+        await openTenantFields();
+      } else {
+        toast(data.error || 'فشل تعديل القسم');
+      }
+    }
+
+    async function deleteCustomSection(key, label) {
+      if (!confirm('حذف قسم "' + label + '"؟ الحقول داخله ستنقل لقسم "عام".')) return;
+      const data = await api('DELETE', '/api/field-sections/custom/' + encodeURIComponent(key));
+      if (data.success) {
+        toast('تم حذف القسم');
+        await openTenantFields();
+      } else {
+        toast(data.error || 'فشل حذف القسم');
+      }
     }
 
     async function renderTenantFields() {
@@ -2065,17 +2532,22 @@ main {width: 100%}
           '<div style="display: flex; flex-direction: column; gap: 8px;">' +
           fields.map(f => {
             const idx = tenantFields.findIndex(ff => ff.id === f.id);
-            const statusBadge = f.isActive ? '<span style="color:#2e7d32;">● مفعّل</span>' : '<span style="color:#999;">● معطّل</span>';
+            const statusBadge = f.isActive ? '<span style="color:#2e7d32;">مفعّل</span>' : '<span style="color:#999;">معطّل</span>';
+            const fieldId = "'" + String(f.id).replace(/\\/g, '\\\\').replace(/'/g, "\\\\'") + "'";
+            const controls = f.isCustom
+              ? '<button class="btn small ghost" onclick="moveTenantField(' + idx + ', -1)">أعلى</button>' +
+                '<button class="btn small ghost" onclick="moveTenantField(' + idx + ', 1)">أسفل</button>' +
+                '<button class="btn small ghost" onclick="beginEditTenantField(' + fieldId + ')">تعديل</button>' +
+                '<button class="btn small ' + (f.isActive ? 'green' : 'ghost') + '" onclick="toggleTenantField(' + fieldId + ')">' + (f.isActive ? 'تعطيل' : 'تفعيل') + '</button>' +
+                '<button class="btn small danger" onclick="deleteTenantField(' + fieldId + ')">حذف</button>'
+              : '<span class="tenant-hint" style="white-space:nowrap">حقل ثابت</span>';
             return '<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: #fafafa; border: 1px solid var(--line); border-radius: 10px;">' +
               '<div style="flex: 1; min-width: 0;">' +
               '<div style="font-weight: 600; margin-bottom: 2px;">' + escapeHtml(f.fieldLabel) + '</div>' +
               '<div class="meta" style="font-size: 12px;">' + escapeHtml(f.fieldKey) + ' | ' + (typeMap[f.fieldType] || f.fieldType) + ' | ' + (f.isCustom ? 'مخصص' : 'جاهز') + ' | ' + statusBadge + '</div>' +
               '</div>' +
               '<div style="display: flex; gap: 4px; align-items: center;">' +
-              '<button class="btn small ghost" title="لأعلى" onclick="moveTenantField(' + idx + ', -1)">↑</button>' +
-              '<button class="btn small ghost" title="لأسفل" onclick="moveTenantField(' + idx + ', 1)">↓</button>' +
-              '<button class="btn small ' + (f.isActive ? 'green' : 'ghost') + '" onclick="toggleTenantField(\'' + f.id + '\')">' + (f.isActive ? 'تعطيل' : 'تفعيل') + '</button>' +
-              '<button class="btn small danger" onclick="deleteTenantField(\'' + f.id + '\')">حذف</button>' +
+              controls +
               '</div>' +
               '</div>';
           }).join('') +
@@ -2099,6 +2571,8 @@ main {width: 100%}
     }
 
     function clearNewFieldForm() {
+      editingTenantFieldId = null;
+      document.getElementById('newFieldKey').value = '';
       document.getElementById('newFieldLabel').value = '';
       document.getElementById('newFieldType').value = 'text';
       document.getElementById('newFieldOptions').value = '';
@@ -2109,6 +2583,38 @@ main {width: 100%}
       document.getElementById('newFieldRequired').checked = false;
       onNewFieldTypeChange();
       document.getElementById('newFieldAdvanced').style.display = 'none';
+      document.getElementById('tenantFieldFormTitle').textContent = 'إضافة حقل جديد يدوياً';
+      document.getElementById('tenantFieldFormHint').textContent = 'أنشئ قسماً مخصصاً أولاً عند الحاجة، ثم أضف داخله الحقول التي تريدها.';
+      document.getElementById('tenantFieldFormSubmit').textContent = 'إضافة الحقل';
+      document.getElementById('tenantFieldEditCancel').style.display = 'none';
+    }
+
+    function beginEditTenantField(fieldId) {
+      const field = tenantFields.find(f => String(f.id) === String(fieldId));
+      if (!field || !field.isCustom) {
+        toast('يمكن تعديل الحقول المخصصة فقط');
+        return;
+      }
+      editingTenantFieldId = field.id;
+      document.getElementById('newFieldKey').value = field.fieldKey || '';
+      document.getElementById('newFieldLabel').value = field.fieldLabel || '';
+      document.getElementById('newFieldType').value = field.fieldType || 'text';
+      document.getElementById('newFieldOptions').value = Array.isArray(field.fieldOptions) ? field.fieldOptions.join('، ') : '';
+      const sectionSelect = document.getElementById('newFieldSection');
+      if (sectionSelect && Array.from(sectionSelect.options).some(option => option.value === field.sectionKey)) {
+        sectionSelect.value = field.sectionKey;
+      }
+      document.getElementById('newFieldPlaceholder').value = field.placeholder || '';
+      document.getElementById('newFieldDefault').value = field.defaultValue || '';
+      document.getElementById('newFieldRequired').checked = Boolean(field.isRequired);
+      onNewFieldTypeChange();
+      document.getElementById('newFieldAdvanced').style.display = 'grid';
+      document.getElementById('tenantFieldFormTitle').textContent = 'تعديل حقل مخصص';
+      document.getElementById('tenantFieldFormHint').textContent = 'عدّل بيانات الحقل المخصص ثم احفظ التغييرات.';
+      document.getElementById('tenantFieldFormSubmit').textContent = 'حفظ التعديل';
+      document.getElementById('tenantFieldEditCancel').style.display = '';
+      document.getElementById('tenantFieldEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('newFieldLabel').focus();
     }
 
     async function addTenantField() {
@@ -2116,24 +2622,43 @@ main {width: 100%}
       const label = document.getElementById('newFieldLabel').value.trim();
       const type = document.getElementById('newFieldType').value;
       const sectionKey = document.getElementById('newFieldSection').value;
-      const options = document.getElementById('newFieldOptions').value.split(',').map(s => s.trim()).filter(Boolean);
+      const options = document.getElementById('newFieldOptions').value.split(/[,،]/).map(s => s.trim()).filter(Boolean);
       const placeholder = document.getElementById('newFieldPlaceholder').value.trim();
       const defaultValue = document.getElementById('newFieldDefault').value.trim();
       const isRequired = document.getElementById('newFieldRequired').checked;
       if (!label) { toast('اسم الحقل مطلوب'); return; }
       if (type === 'select' && !options.length) { toast('أضف خيار واحد على الأقل للقائمة المنسدلة'); return; }
-      const data = await api('POST', '/api/fields', { fieldKey: key, fieldLabel: label, fieldType: type, fieldOptions: options, sectionKey, placeholder, defaultValue, isRequired });
+      const isEditing = Boolean(editingTenantFieldId);
+      const payload = {
+        fieldKey: key,
+        fieldLabel: label,
+        fieldType: type,
+        fieldOptions: type === 'select' ? options : null,
+        sectionKey,
+        placeholder,
+        defaultValue,
+        isRequired
+      };
+      const data = await api(isEditing ? 'PUT' : 'POST', isEditing ? '/api/fields/' + encodeURIComponent(editingTenantFieldId) : '/api/fields', payload);
       if (data.success) {
-        toast('تم إضافة الحقل');
+        toast(isEditing ? 'تم تعديل الحقل' : 'تم إضافة الحقل');
         clearNewFieldForm();
-        renderTenantFields();
+        await renderTenantFields();
       } else {
-        toast(data.error || 'فشل إضافة الحقل');
+        toast(data.error || (isEditing ? 'فشل تعديل الحقل' : 'فشل إضافة الحقل'));
       }
     }
 
     async function moveTenantField(index, direction) {
-      const newIndex = index + direction;
+      const movingField = tenantFields[index];
+      if (!movingField || !movingField.isCustom) {
+        toast('يمكن ترتيب الحقول المخصصة فقط');
+        return;
+      }
+      let newIndex = index + direction;
+      while (newIndex >= 0 && newIndex < tenantFields.length && !tenantFields[newIndex].isCustom) {
+        newIndex += direction;
+      }
       if (newIndex < 0 || newIndex >= tenantFields.length) return;
       const reordered = tenantFields.slice();
       const temp = reordered[index];
@@ -2147,6 +2672,11 @@ main {width: 100%}
     }
 
     async function toggleTenantField(fieldId) {
+      const field = tenantFields.find(f => String(f.id) === String(fieldId));
+      if (!field || !field.isCustom) {
+        toast('يمكن تغيير حالة الحقول المخصصة فقط');
+        return;
+      }
       const data = await api('POST', '/api/fields/' + fieldId + '/toggle');
       if (data.success) {
         toast('تم تغيير الحالة');
@@ -2157,6 +2687,11 @@ main {width: 100%}
     }
 
     async function deleteTenantField(fieldId) {
+      const field = tenantFields.find(f => String(f.id) === String(fieldId));
+      if (!field || !field.isCustom) {
+        toast('لا يمكن حذف حقل ثابت');
+        return;
+      }
       if (!confirm('حذف هذا الحقل؟')) return;
       const data = await api('DELETE', '/api/fields/' + fieldId);
       if (data.success) {
@@ -2289,6 +2824,9 @@ main {width: 100%}
       tenantMapPreviewState = null;
       tenantMapPolygonPoints = [];
       tenantMapPolygonMode = false;
+      tenantProjectSectionStatuses = {};
+      tenantProjectDraftApproval = null;
+      tenantActiveProjectSection = null;
       showTenantPage('tenantProjectPage');
       const [fieldsData, sectionsData] = await Promise.all([
         api('GET', '/api/fields'),
@@ -2299,13 +2837,152 @@ main {width: 100%}
       tenantFieldSections = sectionsData.available || [];
       tenantAllowedFieldSections = sectionsData.allowed || {};
       renderTenantProjectForm(tenantFields);
+      // Load server-side draft and populate form
+      try {
+        const draftResp = await api('GET', '/api/project-draft');
+        if (draftResp.success && draftResp.draft && draftResp.draft.draft_data) {
+          const draftData = draftResp.draft.draft_data;
+          const sectionStatuses = draftResp.draft.section_statuses || {};
+          tenantProjectSectionStatuses = { ...sectionStatuses };
+          tenantProjectDraftApproval = draftResp.draft;
+          setTimeout(() => {
+            Object.entries(draftData).forEach(([key, value]) => {
+              const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+              if (input && input.type !== 'file') input.value = value;
+            });
+            // Restore table data if present
+            if (draftData.componentsTableData) {
+              try {
+                const rows = JSON.parse(draftData.componentsTableData);
+                const tbody = document.getElementById('componentsTableBody');
+                if (tbody) {
+                  tbody.innerHTML = '';
+                  rows.forEach(r => addComponentRow(r));
+                }
+              } catch(e) {}
+            }
+            if (draftData.timelineTableData) {
+              try {
+                const rows = JSON.parse(draftData.timelineTableData);
+                const tbody = document.getElementById('timelineTableBody');
+                if (tbody) {
+                  tbody.innerHTML = '';
+                  rows.forEach(r => addTimelineRow(r));
+                }
+              } catch(e) {}
+            }
+            if (typeof recalcFinancials === 'function') recalcFinancials();
+            applySectionStatuses(sectionStatuses);
+            toast('تم استرجاع المسودة المحفوظة');
+          }, 300);
+        }
+      } catch(e) { console.log('No draft to load'); }
+    }
+
+    function getProjectSectionElement(sectionKey) {
+      return Array.from(document.querySelectorAll('#tenantProjectForm .tenant-form-section[data-section]'))
+        .find(section => section.dataset.section === sectionKey) || document.getElementById(sectionKey);
+    }
+
+    function updateProjectSidebarStatus(sectionKey, status) {
+      const approved = status === 'approved';
+      document.querySelectorAll('#tenantProjectSidebar [data-section-key]').forEach(button => {
+        if (button.dataset.sectionKey !== sectionKey) return;
+        const statusLabel = button.querySelector('.project-section-nav-status');
+        if (!statusLabel) return;
+        statusLabel.textContent = approved ? 'معتمد' : 'مسودة';
+        statusLabel.classList.toggle('approved', approved);
+      });
+    }
+
+    function createProjectSectionHeader(sectionKey, label) {
+      const title = document.createElement('h3');
+      title.className = 'tenant-section-title';
+
+      const status = tenantProjectSectionStatuses[sectionKey] || 'draft';
+      const badge = document.createElement('span');
+      badge.id = 'badge-' + sectionKey;
+      badge.className = 'section-status-badge ' + status;
+      badge.textContent = status === 'approved' ? 'معتمد' : 'مسودة';
+      title.appendChild(badge);
+
+      const titleText = document.createElement('span');
+      titleText.className = 'project-section-title-label';
+      titleText.textContent = label;
+      title.appendChild(titleText);
+
+      const approveButton = document.createElement('button');
+      approveButton.type = 'button';
+      approveButton.className = 'section-approve-btn';
+      approveButton.textContent = 'اعتماد القسم';
+      approveButton.addEventListener('click', () => setSectionStatus(sectionKey, 'approved'));
+      title.appendChild(approveButton);
+
+      const resetButton = document.createElement('button');
+      resetButton.type = 'button';
+      resetButton.className = 'section-approve-btn';
+      resetButton.textContent = 'إلغاء الاعتماد';
+      resetButton.addEventListener('click', () => setSectionStatus(sectionKey, 'draft'));
+      title.appendChild(resetButton);
+      return title;
+    }
+
+    function applySectionStatuses(statuses) {
+      tenantProjectSectionStatuses = { ...tenantProjectSectionStatuses, ...(statuses || {}) };
+      Object.entries(statuses || {}).forEach(([sectionKey, status]) => {
+        const normalizedStatus = status === 'approved' ? 'approved' : 'draft';
+        const section = getProjectSectionElement(sectionKey);
+        if (section) {
+          section.classList.remove('section-draft', 'section-approved');
+          section.classList.add(normalizedStatus === 'approved' ? 'section-approved' : 'section-draft');
+        }
+        const badge = document.getElementById('badge-' + sectionKey);
+        if (badge) {
+          badge.className = 'section-status-badge ' + normalizedStatus;
+          badge.textContent = normalizedStatus === 'approved' ? 'معتمد' : 'مسودة';
+        }
+        updateProjectSidebarStatus(sectionKey, normalizedStatus);
+      });
+    }
+
+    async function setSectionStatus(sectionKey, status) {
+      const result = await api('POST', '/api/project-draft/section-status', { sectionKey: sectionKey, sectionStatus: status });
+      if (!result.success) { toast(result.error || 'تعذر تحديث حالة القسم'); return; }
+      applySectionStatuses({ [sectionKey]: status });
+    }
+
+    async function approveAllSections() {
+      const sections = document.querySelectorAll('.tenant-form-section[data-section]');
+      const statuses = {};
+      sections.forEach(sec => {
+        const key = sec.dataset.section;
+        statuses[key] = 'approved';
+      });
+      const results = await Promise.all(Object.entries(statuses).map(([key, status]) =>
+        api('POST', '/api/project-draft/section-status', { sectionKey: key, sectionStatus: status })
+      ));
+      if (results.some(result => !result.success)) { toast('تعذر اعتماد قسم أو أكثر'); return; }
+      applySectionStatuses(statuses);
+      toast('تم اعتماد جميع الأقسام');
+    }
+
+    async function requestProjectDraftApproval() {
+      const result = await api('POST', '/api/project-draft/request-approval', {});
+      if (!result.success) { toast(result.error || 'لا يمكن طلب الاعتماد الآن'); return; }
+      tenantProjectDraftApproval = result.draft || null;
+      toast('تم إرسال المسودة للاعتماد');
     }
 
     function renderTenantProjectForm(fields) {
       const form = document.getElementById('tenantProjectForm');
       if (!form) return;
       form.innerHTML = '';
-      if (!fields.length) { form.innerHTML = '<p class="tenant-hint">لا توجد حقول مفعّلة</p>'; return; }
+      if (!fields.length) {
+        form.innerHTML = '<p class="tenant-hint">لا توجد حقول مفعّلة</p>';
+        const sidebar = document.getElementById('tenantProjectSidebar');
+        if (sidebar) sidebar.innerHTML = '';
+        return;
+      }
       fields.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
       // Group fields by section; hide sections not allowed for current user
@@ -2322,19 +2999,19 @@ main {width: 100%}
       let addressInput = null;
       let latInput = null;
       let lngInput = null;
+      let locationSection = null;
 
       const sectionOrder = tenantFieldSections.map(s => s.key).concat(['general']);
       sectionOrder.forEach(sectionKey => {
         const sectionFields = grouped[sectionKey];
         if (!sectionFields || !sectionFields.length) return;
-        if (!tenantAllowedFieldSections[sectionKey]) return; // hide unauthorized section
+        if (sectionKey !== 'general' && !tenantAllowedFieldSections[sectionKey]) return; // hide unauthorized section
 
         const sectionDiv = document.createElement('div');
         sectionDiv.className = 'tenant-form-section';
-        const sectionTitle = document.createElement('h3');
-        sectionTitle.className = 'tenant-section-title';
-        sectionTitle.textContent = sectionMap[sectionKey] || 'عام';
-        sectionDiv.appendChild(sectionTitle);
+        sectionDiv.dataset.section = sectionKey;
+        sectionDiv.id = 'project-section-' + sectionKey;
+        sectionDiv.appendChild(createProjectSectionHeader(sectionKey, sectionMap[sectionKey] || 'عام'));
 
         sectionFields.forEach(f => {
           const div = document.createElement('div');
@@ -2373,9 +3050,9 @@ main {width: 100%}
           if (f.defaultValue) input.value = f.defaultValue;
           if (f.isRequired) input.required = true;
 
-          if (f.fieldKey === 'location_address') addressInput = input;
-          if (f.fieldKey === 'location_lat') latInput = input;
-          if (f.fieldKey === 'location_lng') lngInput = input;
+          if (f.fieldKey === 'location_address') { addressInput = input; locationSection = sectionDiv; }
+          if (f.fieldKey === 'location_lat') { latInput = input; locationSection = sectionDiv; }
+          if (f.fieldKey === 'location_lng') { lngInput = input; locationSection = sectionDiv; }
 
           div.appendChild(label);
           div.appendChild(input);
@@ -2385,10 +3062,19 @@ main {width: 100%}
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'btn ghost';
-            btn.textContent = '📍 إيجاد الإحداثيات';
+            btn.textContent = 'إيجاد الإحداثيات';
             btn.style.marginTop = '8px';
             btn.onclick = () => geocodeProjectAddress(addressInput, latInput, lngInput);
             div.appendChild(btn);
+            // M4: Add Google Maps link field after address field
+            const linkDiv = document.createElement('div');
+            linkDiv.className = 'tenant-field full maps-link-field';
+            linkDiv.innerHTML = '<label>رابط الموقع على قوقل ماب (اختياري)</label>' +
+              '<div style="position:relative">' +
+              '<input type="text" data-key="location_maps_link" data-type="text" placeholder="https://maps.app.goo.gl/..." style="direction:ltr;text-align:left;font-size:13px" />' +
+              '</div>' +
+              '<span class="tenant-hint">الصقي رابط الموقع من قوقل ماب — الروابط المختصرة تدعم تلقائياً.</span>';
+            sectionDiv.appendChild(linkDiv);
             addressInput.addEventListener('blur', () => {
               if (addressInput.value.trim() && (!latInput || !latInput.value.trim() || !lngInput || !lngInput.value.trim())) {
                 geocodeProjectAddress(addressInput, latInput, lngInput);
@@ -2410,9 +3096,9 @@ main {width: 100%}
         previewDiv.innerHTML = `
           <label>معاينة الموقع</label>
           <div style="display:flex;gap:8px;margin-bottom:10px;">
-            <button type="button" class="btn ghost" onclick="previewProjectMap()">🗺️ عرض الخريطة</button>
-            <button type="button" class="btn ghost" onclick="fetchNearbyLandmarks()">🏛️ اقتراح المعالم</button>
-            <button type="button" class="btn ghost" onclick="toggleTenantPolygonMode()">✏️ رسم حدود الموقع</button>
+            <button type="button" class="btn ghost" onclick="previewProjectMap()">عرض الخريطة</button>
+            <button type="button" class="btn ghost" onclick="fetchNearbyLandmarks()">اقتراح المعالم</button>
+            <button type="button" class="btn ghost" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>
             <button type="button" class="btn ghost" onclick="clearTenantPolygon()">مسح الحدود</button>
           </div>
           <div id="mapPreviewImage" style="display:none;max-width:100%;border-radius:8px;overflow:hidden;border:1px solid #ddd;position:relative;">
@@ -2423,22 +3109,381 @@ main {width: 100%}
           <input id="tenantLocationPolygon" type="hidden" data-key="location_polygon" data-type="text" value="">
           <div id="landmarksPreview" style="margin-top:10px;display:none;"></div>
         `;
-        form.appendChild(previewDiv);
+        (locationSection || form).appendChild(previewDiv);
+      }
+
+      // S3: Add Components Table (العناصر/المساحة المبنية/المساحة التأجيرية/الإيجار)
+      addComponentsTable(form);
+      // S4: Add Financial Calculations Table
+      addFinancialCalculations(form);
+      // S5: Add Timeline Table
+      addTimelineTable(form);
+      const projectSections = Array.from(form.querySelectorAll('.tenant-form-section[data-section]'));
+      populateProjectSidebar(projectSections);
+      const initialStatuses = {};
+      projectSections.forEach(section => {
+        initialStatuses[section.dataset.section] = tenantProjectSectionStatuses[section.dataset.section] || 'draft';
+      });
+      applySectionStatuses(initialStatuses);
+      const initialSection = projectSections.find(section => section.dataset.section === tenantActiveProjectSection) || projectSections[0];
+      if (initialSection) showSection(initialSection.dataset.section);
+    }
+
+    // S3: Components Table
+    function addComponentsTable(form) {
+      const div = document.createElement('div');
+      div.className = 'tenant-form-section';
+      div.id = 'section-components';
+      div.dataset.section = 'section-components';
+      div.innerHTML = `
+        <h3 class="tenant-section-title">جدول المكونات والعناصر</h3>
+        <div class="fin-table-wrap">
+          <table class="fin-table" id="componentsTable">
+            <thead>
+              <tr>
+                <th style="width:30px">#</th>
+                <th>العنصر</th>
+                <th>العدد</th>
+                <th>المساحة المبنية (م²)</th>
+                <th>المساحة التأجيرية (م²)</th>
+                <th>الإيجار/المتر/سنة (ر.س)</th>
+                <th style="width:40px"></th>
+              </tr>
+            </thead>
+            <tbody id="componentsTableBody"></tbody>
+            <tfoot>
+              <tr class="total-row">
+                <td colspan="3" style="text-align:center;font-weight:800">الإجمالي</td>
+                <td id="totalBuiltArea">0</td>
+                <td id="totalRentalArea">0</td>
+                <td id="totalAnnualRevenue">0</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <button type="button" class="btn ghost small" style="margin-top:10px" onclick="addComponentRow()">+ إضافة عنصر</button>
+        <input type="hidden" data-key="components_table_data" data-type="text" id="componentsTableData">
+      `;
+      div.querySelector('.tenant-section-title')?.replaceWith(
+        createProjectSectionHeader('section-components', 'جدول المكونات والعناصر')
+      );
+      form.appendChild(div);
+      addComponentRow(); // Start with one empty row
+    }
+
+    function addComponentRow(data = {}) {
+      const tbody = document.getElementById('componentsTableBody');
+      if (!tbody) return;
+      const idx = tbody.rows.length + 1;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="text-align:center;color:#888">${idx}</td>
+        <td><input type="text" placeholder="مثال: فيلا standalone" class="comp-name" value="${data.name || ''}"></td>
+        <td><input type="number" placeholder="0" class="comp-count" value="${data.count || ''}" onchange="recalcComponents()"></td>
+        <td><input type="number" placeholder="0" class="comp-built" value="${data.builtArea || ''}" onchange="recalcComponents()"></td>
+        <td><input type="number" placeholder="0" class="comp-rental" value="${data.rentalArea || ''}" onchange="recalcComponents()"></td>
+        <td><input type="number" placeholder="0" class="comp-price" value="${data.pricePerSqm || ''}" onchange="recalcComponents()"></td>
+        <td><button type="button" class="btn danger small" onclick="this.closest('tr').remove();recalcComponents()" style="padding:4px 8px;font-size:11px">×</button></td>
+      `;
+      tbody.appendChild(tr);
+      recalcComponents();
+    }
+
+    function recalcComponents() {
+      let totalBuilt = 0, totalRental = 0, totalRevenue = 0;
+      document.querySelectorAll('#componentsTableBody tr').forEach(tr => {
+        const count = parseFloat(tr.querySelector('.comp-count')?.value) || 0;
+        const built = parseFloat(tr.querySelector('.comp-built')?.value) || 0;
+        const rental = parseFloat(tr.querySelector('.comp-rental')?.value) || 0;
+        const price = parseFloat(tr.querySelector('.comp-price')?.value) || 0;
+        totalBuilt += count * built;
+        totalRental += count * rental;
+        totalRevenue += count * rental * price;
+      });
+      const fmt = n => n.toLocaleString('ar-SA');
+      document.getElementById('totalBuiltArea').textContent = fmt(totalBuilt);
+      document.getElementById('totalRentalArea').textContent = fmt(totalRental);
+      document.getElementById('totalAnnualRevenue').textContent = fmt(totalRevenue);
+      // Save to hidden input
+      const data = [];
+      document.querySelectorAll('#componentsTableBody tr').forEach(tr => {
+        data.push({
+          name: tr.querySelector('.comp-name')?.value || '',
+          count: tr.querySelector('.comp-count')?.value || '',
+          builtArea: tr.querySelector('.comp-built')?.value || '',
+          rentalArea: tr.querySelector('.comp-rental')?.value || '',
+          pricePerSqm: tr.querySelector('.comp-price')?.value || ''
+        });
+      });
+      const hidden = document.getElementById('componentsTableData');
+      if (hidden) hidden.value = JSON.stringify(data);
+    }
+
+    // S4: Financial Calculations Table
+    function addFinancialCalculations(form) {
+      const div = document.createElement('div');
+      div.className = 'tenant-form-section';
+      div.id = 'section-financial-calc';
+      div.dataset.section = 'section-financial-calc';
+      div.innerHTML = `
+        <h3 class="tenant-section-title">الافتراضات المالية والمؤشرات المحسوبة</h3>
+        <div class="tenant-grid" style="grid-template-columns:repeat(2,1fr);gap:12px">
+          <div class="tenant-field"><label>متوسط إيجار المتر/سنة (ر.س)</label><input type="number" id="finAvgRent" data-key="fin_avg_rent" data-type="number" onchange="recalcFinancials()" placeholder="0"></div>
+          <div class="tenant-field"><label>رسوم الخدمات (%)</label><input type="number" id="finServiceFee" data-key="fin_service_fee" data-type="number" value="5" onchange="recalcFinancials()" placeholder="5"></div>
+          <div class="tenant-field"><label>تكلفة الأرض (ر.س)</label><input type="number" id="finLandCost" data-key="fin_land_cost" data-type="number" onchange="recalcFinancials()" placeholder="0"></div>
+          <div class="tenant-field"><label>تكلفة التطوير (ر.س)</label><input type="number" id="finDevCost" data-key="fin_dev_cost" data-type="number" onchange="recalcFinancials()" placeholder="0"></div>
+          <div class="tenant-field"><label>المصروف التشغيلي السنوي (ر.س)</label><input type="number" id="finOpex" data-key="fin_opex" data-type="number" onchange="recalcFinancials()" placeholder="0"></div>
+          <div class="tenant-field"><label>قيمة التخارج (ر.س)</label><input type="number" id="finExitValue" data-key="fin_exit_value" data-type="number" onchange="recalcFinancials()" placeholder="0"></div>
+          <div class="tenant-field"><label>معامل الرسملة (%)</label><input type="number" id="finCapRate" data-key="fin_cap_rate" data-type="number" value="8" onchange="recalcFinancials()" placeholder="8"></div>
+        </div>
+        <h4 style="margin:16px 0 10px;color:var(--p)">المؤشرات المحسوبة تلقائياً</h4>
+        <div id="financialIndicators" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px"></div>
+        <input type="hidden" data-key="financial_calc_data" data-type="text" id="financialCalcData">
+      `;
+      div.querySelector('.tenant-section-title')?.replaceWith(
+        createProjectSectionHeader('section-financial-calc', 'الافتراضات المالية والمؤشرات المحسوبة')
+      );
+      form.appendChild(div);
+    }
+
+    function recalcFinancials() {
+      const avgRent = parseFloat(document.getElementById('finAvgRent')?.value) || 0;
+      const serviceFee = parseFloat(document.getElementById('finServiceFee')?.value) || 0;
+      const landCost = parseFloat(document.getElementById('finLandCost')?.value) || 0;
+      const devCost = parseFloat(document.getElementById('finDevCost')?.value) || 0;
+      const opex = parseFloat(document.getElementById('finOpex')?.value) || 0;
+      const exitValue = parseFloat(document.getElementById('finExitValue')?.value) || 0;
+      const capRate = parseFloat(document.getElementById('finCapRate')?.value) || 8;
+
+      // Get rental area from components table
+      let totalRentalArea = 0;
+      document.querySelectorAll('#componentsTableBody tr').forEach(tr => {
+        const count = parseFloat(tr.querySelector('.comp-count')?.value) || 0;
+        const rental = parseFloat(tr.querySelector('.comp-rental')?.value) || 0;
+        totalRentalArea += count * rental;
+      });
+
+      const totalCost = landCost + devCost;
+      const grossRevenue = totalRentalArea * avgRent;
+      const serviceDeduction = grossRevenue * (serviceFee / 100);
+      const annualRevenue = grossRevenue - serviceDeduction;
+      const annualProfit = annualRevenue - opex;
+      const noi = annualRevenue - opex;
+      const totalProfit = (exitValue > 0 ? exitValue : annualProfit * 5) - totalCost;
+      const roi = totalCost > 0 ? ((annualProfit / totalCost) * 100).toFixed(1) : 0;
+      const noiYield = totalCost > 0 ? ((noi / totalCost) * 100).toFixed(1) : 0;
+      const payback = annualProfit > 0 ? (totalCost / annualProfit).toFixed(1) : '∞';
+      const capValue = noi > 0 ? (noi / (capRate / 100)).toFixed(0) : 0;
+
+      const fmt = n => Number(n).toLocaleString('ar-SA', {maximumFractionDigits: 0});
+      const indicators = [
+        { label: 'إجمالي التكلفة', value: fmt(totalCost) + ' ر.س', color: '#b71c1c' },
+        { label: 'الإيرادات السنوية', value: fmt(annualRevenue) + ' ر.س', color: '#0d7b55' },
+        { label: 'صافي الأرباح السنوية', value: fmt(annualProfit) + ' ر.س', color: '#1565c0' },
+        { label: 'ROI %', value: roi + '%', color: '#6a1b9a' },
+        { label: 'NOI %', value: noiYield + '%', color: '#e65100' },
+        { label: 'مدة الاسترداد', value: payback + ' سنة', color: '#00838f' },
+        { label: 'قيمة الرسملة', value: fmt(capValue) + ' ر.س', color: '#4e342e' },
+        { label: 'إجمالي الأرباح', value: fmt(totalProfit) + ' ر.س', color: totalProfit >= 0 ? '#0d7b55' : '#b71c1c' },
+      ];
+      const container = document.getElementById('financialIndicators');
+      if (container) {
+        container.innerHTML = indicators.map(i => `
+          <div class="metric" style="text-align:center;border-left:4px solid ${i.color}">
+            <span>${i.label}</span>
+            <strong style="color:${i.color}">${i.value}</strong>
+          </div>
+        `).join('');
+      }
+      const hidden = document.getElementById('financialCalcData');
+      if (hidden) hidden.value = JSON.stringify({ totalCost, annualRevenue, annualProfit, roi, noiYield, payback, capValue, totalProfit, totalRentalArea });
+    }
+
+    // S5: Timeline Table
+    function addTimelineTable(form) {
+      const div = document.createElement('div');
+      div.className = 'tenant-form-section';
+      div.id = 'section-timeline';
+      div.dataset.section = 'section-timeline';
+      div.innerHTML = `
+        <h3 class="tenant-section-title">الجدول الزمني للمشروع</h3>
+        <div class="tenant-grid" style="grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:12px">
+          <div class="tenant-field"><label>سنة البداية</label><input type="number" id="tlStartYear" data-key="timeline_start_year" data-type="number" value="2026" onchange="recalcTimeline()"></div>
+          <div class="tenant-field"><label>عدد السنوات</label><input type="number" id="tlYears" data-key="timeline_years" data-type="number" value="3" onchange="recalcTimeline()"></div>
+          <div class="tenant-field full"><label>عنوان الشريحة</label><input type="text" data-key="timeline_slide_title" data-type="text" value="الجدول الزمني للمشروع" placeholder="الجدول الزمني للمشروع"></div>
+          <div class="tenant-field full"><label>عنوان فرعي</label><input type="text" data-key="timeline_slide_subtitle" data-type="text" placeholder="مراحل التنفيذ والتوزيع الزمني"></div>
+        </div>
+        <div class="fin-table-wrap">
+          <table class="fin-table" id="timelineTable">
+            <thead><tr><th>المرحلة</th><th>السنة</th><th>الربع</th><th>المدة (أشهر)</th><th>الملاحظات</th></tr></thead>
+            <tbody id="timelineTableBody"></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn ghost small" style="margin-top:10px" onclick="addTimelineRow()">+ إضافة مرحلة</button>
+        <input type="hidden" data-key="timeline_table_data" data-type="text" id="timelineTableData">
+      `;
+      div.querySelector('.tenant-section-title')?.replaceWith(
+        createProjectSectionHeader('section-timeline', 'الجدول الزمني للمشروع')
+      );
+      form.appendChild(div);
+      recalcTimeline();
+    }
+
+    function recalcTimeline() {
+      const startYear = parseInt(document.getElementById('tlStartYear')?.value) || 2026;
+      const years = parseInt(document.getElementById('tlYears')?.value) || 3;
+      const tbody = document.getElementById('timelineTableBody');
+      if (!tbody || tbody.rows.length > 0) return; // Don't regenerate if rows exist
+      const phases = [
+        { name: 'الحصول على التراخيص', q: 'Q1', dur: 3 },
+        { name: 'أعمال البنية التحتية', q: 'Q2', dur: 6 },
+        { name: 'البناء (المرحلة الأولى)', q: 'Q4', dur: 9 },
+        { name: 'البناء (المرحلة الثانية)', q: 'Q2', dur: 9 },
+        { name: 'التشطيبات النهائية', q: 'Q1', dur: 4 },
+        { name: 'التسليم والتشغيل', q: 'Q2', dur: 3 },
+      ];
+      let currentQ = 1;
+      let currentYear = startYear;
+      phases.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><input type="text" class="tl-name" value="${p.name}" onchange="saveTimelineData()"></td>
+          <td><input type="number" class="tl-year" value="${currentYear}" onchange="saveTimelineData()"></td>
+          <td><input type="text" class="tl-quarter" value="Q${currentQ}" style="width:60px" onchange="saveTimelineData()"></td>
+          <td><input type="number" class="tl-duration" value="${p.dur}" style="width:60px" onchange="saveTimelineData()"></td>
+          <td><input type="text" class="tl-notes" placeholder="ملاحظات" onchange="saveTimelineData()"></td>
+        `;
+        tbody.appendChild(tr);
+        currentQ += Math.ceil(p.dur / 3);
+        if (currentQ > 4) { currentQ -= 4; currentYear++; }
+      });
+      saveTimelineData();
+    }
+
+    function addTimelineRow() {
+      const tbody = document.getElementById('timelineTableBody');
+      if (!tbody) return;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" class="tl-name" value="" placeholder="اسم المرحلة" onchange="saveTimelineData()"></td>
+        <td><input type="number" class="tl-year" value="" onchange="saveTimelineData()"></td>
+        <td><input type="text" class="tl-quarter" value="" style="width:60px" onchange="saveTimelineData()"></td>
+        <td><input type="number" class="tl-duration" value="" style="width:60px" onchange="saveTimelineData()"></td>
+        <td><input type="text" class="tl-notes" placeholder="ملاحظات" onchange="saveTimelineData()"></td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    function saveTimelineData() {
+      const data = [];
+      document.querySelectorAll('#timelineTableBody tr').forEach(tr => {
+        data.push({
+          name: tr.querySelector('.tl-name')?.value || '',
+          year: tr.querySelector('.tl-year')?.value || '',
+          quarter: tr.querySelector('.tl-quarter')?.value || '',
+          duration: tr.querySelector('.tl-duration')?.value || '',
+          notes: tr.querySelector('.tl-notes')?.value || ''
+        });
+      });
+      const hidden = document.getElementById('timelineTableData');
+      if (hidden) hidden.value = JSON.stringify(data);
+    }
+
+    function populateProjectSidebar(sections) {
+      const sidebar = document.getElementById('tenantProjectSidebar');
+      if (!sidebar) return;
+      sidebar.innerHTML = '';
+
+      const title = document.createElement('p');
+      title.className = 'project-form-sidebar-title';
+      title.textContent = 'أقسام المشروع';
+      sidebar.appendChild(title);
+
+      sections.forEach(section => {
+        const sectionKey = section.dataset.section;
+        const sectionLabel = section.querySelector('.project-section-title-label')?.textContent || 'قسم المشروع';
+        const status = tenantProjectSectionStatuses[sectionKey] || 'draft';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'project-section-nav-item';
+        button.dataset.sectionKey = sectionKey;
+        button.setAttribute('aria-controls', section.id || '');
+        button.addEventListener('click', () => showSection(sectionKey));
+
+        const label = document.createElement('span');
+        label.className = 'project-section-nav-label';
+        label.textContent = sectionLabel;
+        button.appendChild(label);
+
+        const statusLabel = document.createElement('span');
+        statusLabel.className = 'project-section-nav-status' + (status === 'approved' ? ' approved' : '');
+        statusLabel.textContent = status === 'approved' ? 'معتمد' : 'مسودة';
+        button.appendChild(statusLabel);
+        sidebar.appendChild(button);
+      });
+      appendWorkflowNavigation(sidebar, 'tenantProjectPage', false);
+    }
+
+    function showSection(sectionKey) {
+      const sections = Array.from(document.querySelectorAll('#tenantProjectForm .tenant-form-section[data-section]'));
+      const target = sections.find(section => section.dataset.section === sectionKey);
+      if (!target) return;
+
+      sections.forEach(section => section.classList.toggle('active', section === target));
+      document.querySelectorAll('#tenantProjectSidebar [data-section-key]').forEach(button => {
+        const active = button.dataset.sectionKey === sectionKey;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-current', active ? 'page' : 'false');
+      });
+      tenantActiveProjectSection = sectionKey;
+    }
+
+    // Keep for backward compatibility with older callers.
+    function scrollToSection(sectionKey) {
+      showSection(sectionKey);
+    }
+
+    function setupSidebarObserver() {}
+
+    async function saveProjectAsDraft() {
+      const data = await collectTenantFormData();
+      const resp = await api('POST', '/api/project-draft', { draftData: data, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' });
+      if (resp.success) {
+        toast('تم حفظ المسودة على الخادم');
+      } else {
+        toast(resp.error || 'فشل حفظ المسودة');
+      }
+    }
+
+    function confirmDeleteProject() {
+      if (confirm('هل أنتِ متأكدة من حذف بيانات المشروع؟ هذا الإجراء لا يمكن التراجع عنه.')) {
+        document.getElementById('tenantProjectForm').innerHTML = '';
+        localStorage.removeItem('projectDraft');
+        api('DELETE', '/api/project-draft');
+        toast('تم حذف بيانات المشروع');
+        showTenantPage('tenantDashboardPage');
       }
     }
 
     async function geocodeProjectAddress(addressInput, latInput, lngInput) {
       const address = addressInput ? addressInput.value.trim() : '';
-      if (!address) { toast('أدخل عنوان الموقع أولاً'); return; }
+      const mapsLinkInput = document.querySelector('#tenantProjectForm [data-key="location_maps_link"]');
+      const mapsLink = mapsLinkInput ? mapsLinkInput.value.trim() : '';
+      if (!address && !mapsLink) { toast('أدخل عنوان الموقع أو رابط قوقل ماب أولاً'); return; }
       showLoader('جاري تحديد الإحداثيات', '');
-      const data = await api('POST', '/api/geocode', { address });
+      const payload = {};
+      if (address) payload.address = address;
+      if (mapsLink) payload.maps_link = mapsLink;
+      const data = await api('POST', '/api/geocode', payload);
       hideLoader();
       if (data.success && data.lat && data.lng) {
         if (latInput) latInput.value = data.lat;
         if (lngInput) lngInput.value = data.lng;
-        toast(`تم تحديد الموقع: ${data.formatted_address || address}`);
+        const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || address);
+        toast('تم تحديد الموقع: ' + msg);
       } else {
-        toast(data.error || 'تعذر تحديد الإحداثيات');
+        toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر');
       }
     }
 
@@ -2462,7 +3507,11 @@ main {width: 100%}
         previewBox.style.display = 'block';
         const hint = document.getElementById('mapPreviewHint');
         if (hint) hint.style.display = 'block';
-        tenantMapPreviewState = { lat: Number(data.lat || lat), lng: Number(data.lng || lng), zoom: 13 };
+        tenantMapPreviewState = {
+          lat: Number(data.lat || lat),
+          lng: Number(data.lng || lng),
+          zoom: Number((data.zooms && data.zooms.overview) || 13)
+        };
         renderTenantMapPolygonOverlay();
         window.__lastMapPlaceholders = data.placeholders;
       } else {
@@ -2634,7 +3683,7 @@ main {width: 100%}
 
         /* ── SWOT ───────────────────────────────── */
         swot_strengths:         'موقع استراتيجي على طريق الملك فهد\nتصميم معماري عالي الجودة\nمرافق ترفيهية متكاملة\nقرب من المطار والخدمات الحيوية\nشبكة طرق مميزة',
-        swot_weaknesses:        'تطلب استثمار أولي مرتفع (280 مليون ريال)\nمنافسة شديدة في سوق الفيلات الفاخرة\n依赖 على مؤشرات السوق السكني',
+        swot_weaknesses:        'تطلب استثمار أولي مرتفع (280 مليون ريال)\nمنافسة شديدة في سوق الفيلات الفاخرة\nاعتماد كبير على مؤشرات السوق السكني',
         swot_opportunities:     'نمو سكاني متزايد في الرياض (5% سنوياً)\nزيادة الطلب على الفيلات الفاخرة\nدعم حكومي لمشاريع الإسكان\nبرامج التمويل العقاري المتاحة',
         swot_threats:           'تغيرات اقتصادية محتملة\nزيادة تكاليف البناء والمواد\nمنافسة مشاريع جديدة في المنطقة\nتغيرات في اللوائح والأنظمة البلدية',
 
@@ -2646,6 +3695,22 @@ main {width: 100%}
         infrastructure:         'كهرباء 11kV، مياه شرب من شبكة مياه الرياض، شبكة صرف صحي، إنترنت ألياف بصرية، نظام ري بالتنقيط',
         nearby_landmarks:       'مجمع الراشد Mall — 5 دقائق\nجامعة الملك سعود — 10 دقائق\nمطار الملك خالد الدولي — 15 دقائق\nمركز المملكة — 20 دقائق',
         description:            'مجمع سكني فاخر يتكون من 120 فيلا بتصميم معماري حديث في حي النرجس شمال الرياض. يتضمن المجمع مرافق ترفيهية متنوعة منها مسبح أولمبي ونادي صحي ومساحات خضراء واسعة.',
+        location_maps_link:    'https://maps.app.goo.gl/narjis-riyadh',
+
+        /* ── Financial Calc fields ──────────────── */
+        fin_avg_rent:           '1200',
+        fin_service_fee:        '5',
+        fin_land_cost:          '95000000',
+        fin_dev_cost:           '185000000',
+        fin_opex:               '8400000',
+        fin_exit_value:         '420000000',
+        fin_cap_rate:           '8',
+
+        /* ── Timeline fields ────────────────────── */
+        timeline_start_year:    '2026',
+        timeline_years:         '3',
+        timeline_slide_title:   'الجدول الزمني للمشروع',
+        timeline_slide_subtitle:'مراحل التنفيذ من التراخيص إلى التسليم',
       };
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
       let filled = 0;
@@ -2660,7 +3725,33 @@ main {width: 100%}
         }
         filled++;
       });
-      toast(filled > 0 ? 'تم تعبئة ' + filled + ' حقل تجريبي — بيانات مجمع الواحة السكني، حي النرجس، الرياض' : 'لا توجد حقول مطابقة');
+
+      // Fill components table
+      const componentsData = [
+        { name: 'فيلا Standalone', count: '40', builtArea: '450', rentalArea: '380', pricePerSqm: '850' },
+        { name: 'فيلا Townhouse', count: '50', builtArea: '380', rentalArea: '320', pricePerSqm: '700' },
+        { name: 'فيلا Duplex', count: '30', builtArea: '320', rentalArea: '270', pricePerSqm: '600' },
+        { name: 'مرافق ترفيهية', count: '1', builtArea: '5000', rentalArea: '0', pricePerSqm: '0' },
+        { name: 'مسبح أولمبي', count: '1', builtArea: '2000', rentalArea: '0', pricePerSqm: '0' },
+        { name: 'نادي صحي', count: '1', builtArea: '1500', rentalArea: '0', pricePerSqm: '0' },
+      ];
+      const tbody = document.getElementById('componentsTableBody');
+      if (tbody) {
+        tbody.innerHTML = '';
+        componentsData.forEach(d => addComponentRow(d));
+        recalcComponents();
+        filled += componentsData.length;
+      }
+
+      // Trigger financial recalc
+      const finCalcDone = typeof recalcFinancials === 'function';
+      if (finCalcDone) { recalcFinancials(); filled += 7; }
+
+      // Trigger timeline calc
+      const tlDone = typeof recalcTimeline === 'function';
+      if (tlDone) { recalcTimeline(); filled += 4; }
+
+      toast(filled > 0 ? 'تم تعبئة ' + filled + ' حقل + جداول تجريبية — بيانات مجمع الواحة السكني، حي النرجس، الرياض' : 'لا توجد حقول مطابقة');
     }
 
     async function collectTenantFormData() {
@@ -2685,6 +3776,8 @@ main {width: 100%}
     async function submitTenantProject() {
       tenantProjectData = await collectTenantFormData();
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
+      // Auto-save draft to server before proceeding
+      await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
       showLoader('جاري تحليل بيانات المشروع', 'AI يقترح عدد الشرائح وتوزيع المحتوى');
       const data = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
       hideLoader();
@@ -2807,42 +3900,107 @@ main {width: 100%}
         renderTenantMainImage();
         toast('تم توليد الصورة الرئيسية.');
       } else {
-        toast(data.error || 'تعذر توليد الصورة الرئيسية');
+        const errMsg = data.error_code === 'NO_API_KEY' ? 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env' : (data.error || 'تعذر توليد الصورة الرئيسية');
+        toast(errMsg);
       }
     }
 
     async function generateTenantMoodboardImages() {
       if (!tenantProjectData) return;
       showLoader('جاري توليد صور المود بورد', 'يتم إنشاء 4 صور مرجعية للتصميم');
-      const data = await api('POST', '/api/generate-images', { projectData: tenantProjectData, includeCover: false });
+      const refImage = tenantCreativeImages.cover || null;
+      const data = await api('POST', '/api/generate-images', { projectData: tenantProjectData, includeCover: false, referenceImage: refImage });
       hideLoader();
       if (data.success && data.images) {
         tenantCreativeImages.moodboard = (data.images.moodboard || []).filter(Boolean);
         renderTenantMoodboard();
         toast('تم توليد صور المود بورد.');
       } else {
-        toast(data.error || 'تعذر توليد صور المود بورد');
+        const errMsg = data.error_code === 'NO_API_KEY' ? 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env' : (data.error || 'تعذر توليد صور المود بورد');
+        toast(errMsg);
       }
     }
 
     async function generateTenantSlides() {
       if (!tenantSlidePlan || !tenantProjectData) return;
-      showLoader('جاري توليد الشرائح', 'قد يستغرق 30-60 ثانية');
-      const genPayload = { projectData: tenantProjectData, slidePlan: tenantSlidePlan, images: tenantCreativeImages };
-      if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
-      const data = await api('POST', '/api/generate-slides', genPayload);
-      hideLoader();
-      if (data.success && data.slides) {
-        tenantSlidesData = data.slides.map((s, i) => {
-          const plan = tenantSlidePlan.slides[i] || {};
-          return { title: s.title || plan.title, type: s.type || plan.type || 'content', html: s.html, designStyle: s.designStyle || plan.designStyle || 'cards', bullets: plan.bullets || [], metrics: plan.metrics || [] };
-        });
-        await saveTenantPresentation();
+      const totalSlides = (tenantSlidePlan.slides || []).length;
+      if (!totalSlides) { toast('لا توجد شرائح في الخطة'); return; }
+
+      tenantSlidesData = [];
+      activeSlideIndex = 0;
+      showTenantPage('tenantSlidesPage');
+      renderTenantSlidesProgress(totalSlides, 0);
+
+      for (let i = 0; i < totalSlides; i++) {
+        const plan = tenantSlidePlan.slides[i] || {};
+        renderTenantSlidesProgress(totalSlides, i, plan.title || ('شريحة ' + (i + 1)));
+
+        try {
+          const genPayload = {
+            projectData: tenantProjectData,
+            slidePlan: tenantSlidePlan,
+            images: tenantCreativeImages,
+            slideIndex: i
+          };
+          if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
+
+          const data = await api('POST', '/api/generate-slide-single', genPayload);
+
+          if (data.success && data.slide) {
+            tenantSlidesData.push({
+              title: data.slide.title || plan.title,
+              type: data.slide.type || plan.type || 'content',
+              html: data.slide.html,
+              designStyle: data.slide.designStyle || plan.design_style || 'cards',
+              bullets: plan.bullets || [],
+              metrics: plan.metrics || []
+            });
+          } else {
+            tenantSlidesData.push({
+              title: plan.title || ('شريحة ' + (i + 1)),
+              type: plan.type || 'content',
+              html: '<div class="slide" style="width:1280px;height:720px;display:flex;align-items:center;justify-content:center;background:#fff;"><p>فشل توليد هذه الشريحة</p></div>',
+              designStyle: plan.design_style || 'cards',
+              bullets: plan.bullets || [],
+              metrics: plan.metrics || []
+            });
+          }
+        } catch (err) {
+          console.error('Slide generation error for index', i, err);
+          tenantSlidesData.push({
+            title: plan.title || ('شريحة ' + (i + 1)),
+            type: plan.type || 'content',
+            html: '<div class="slide" style="width:1280px;height:720px;display:flex;align-items:center;justify-content:center;background:#fff;"><p>خطأ في توليد الشريحة</p></div>',
+            designStyle: plan.design_style || 'cards',
+            bullets: plan.bullets || [],
+            metrics: plan.metrics || []
+          });
+        }
         renderTenantSlides();
-        showTenantPage('tenantSlidesPage');
-      } else {
-        toast(data.error || 'فشل توليد الشرائح');
+        renderTenantSlidesProgress(totalSlides, i + 1);
       }
+
+      hideSlideProgress();
+      await saveTenantPresentation();
+      renderTenantSlides();
+      toast('تم توليد كل الشرائح (' + totalSlides + ')');
+    }
+
+    function renderTenantSlidesProgress(total, done, currentTitle) {
+      let bar = document.getElementById('slideGenProgress');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'slideGenProgress';
+        bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#fff;border-bottom:2px solid var(--p);padding:10px 20px;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.1)';
+        document.body.appendChild(bar);
+      }
+      const pct = Math.round((done / total) * 100);
+      bar.innerHTML = '<div style="flex:1"><div style="font-weight:700;margin-bottom:4px">جاري توليد الشرائح: ' + done + ' / ' + total + (currentTitle ? ' — ' + escapeHtml(currentTitle) : '') + '</div><div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--p);transition:width .3s"></div></div></div>';
+    }
+
+    function hideSlideProgress() {
+      const bar = document.getElementById('slideGenProgress');
+      if (bar) bar.remove();
     }
 
     let activeSlideIndex = 0;
@@ -3296,7 +4454,7 @@ main {width: 100%}
         const download = exps.map(e => '<a class="btn small ghost" href="' + (e.downloadUrl || e.url) + '" target="_blank">' + e.format.toUpperCase() + '</a>').join('');
         return '<div class="tenant-presentation-card">' +
           '<div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
-          '<div class="meta">' + (p.slideCount || 0) + ' شريحة | ' + (p.status === 'pending_approval' ? '⏳ في انتظار التعميد' : p.status === 'approved' ? '✅ معتمد' : p.status || 'draft') + ' | ' + (p.createdAt ? p.createdAt.slice(0, 16).replace('T', ' ') : '') + '</div></div>' +
+          '<div class="meta">' + (p.slideCount || 0) + ' شريحة | ' + (p.status === 'pending_approval' ? 'في انتظار التعميد' : p.status === 'approved' ? 'معتمد' : p.status || 'draft') + ' | ' + (p.createdAt ? p.createdAt.slice(0, 16).replace('T', ' ') : '') + '</div></div>' +
           '<div class="tenant-actions">' +
           '<button class="btn small primary" onclick="openExistingPresentation(\'' + p.id + '\')">فتح / تعديل</button>' +
           download +
@@ -3326,16 +4484,16 @@ main {width: 100%}
     function renderSagStats(stats) {
       const el = document.getElementById('sagAdminStats');
       const cards = [
-        { label: 'إجمالي الشركات', value: stats.total_tenants || sagAllTenants.length, icon: '🏢' },
-        { label: 'شركات نشطة', value: sagAllTenants.filter(t => t.isActive).length, icon: '✅' },
-        { label: 'شركات معطلة', value: sagAllTenants.filter(t => !t.isActive).length, icon: '⏸️' },
-        { label: 'إجمالي العروض', value: stats.total_presentations || 0, icon: '📊' },
-        { label: 'إجمالي التصديرات', value: stats.total_exports || 0, icon: '📥' },
+        { label: 'إجمالي الشركات', value: stats.total_tenants || sagAllTenants.length },
+        { label: 'شركات نشطة', value: sagAllTenants.filter(t => t.isActive).length },
+        { label: 'شركات معطلة', value: sagAllTenants.filter(t => !t.isActive).length },
+        { label: 'إجمالي العروض', value: stats.total_presentations || 0 },
+        { label: 'إجمالي التصديرات', value: stats.total_exports || 0 },
       ];
       el.innerHTML = cards.map(c =>
         '<div class="tenant-dash-card" style="cursor:default">' +
         '<h3 style="font-size:28px;margin:0">' + c.value + '</h3>' +
-        '<p style="margin:4px 0 0;color:var(--muted)">' + c.icon + ' ' + c.label + '</p></div>'
+        '<p style="margin:4px 0 0;color:var(--muted)">' + c.label + '</p></div>'
       ).join('');
     }
 
@@ -3349,7 +4507,7 @@ main {width: 100%}
         return '<div class="tenant-presentation-card">' +
           '<div><h3>' + escapeHtml(t.companyName || '') + adminBadge + '</h3>' +
           '<div class="meta">' + escapeHtml(t.email) + ' | ' + planBadge + ' | ' + statusBadge +
-          (t.domain ? ' | 🌐 ' + escapeHtml(t.domain) : '') +
+          (t.domain ? ' | ' + escapeHtml(t.domain) : '') +
           (t.subdomain ? ' | ' + escapeHtml(t.subdomain) : '') +
           (t.createdAt ? ' | ' + t.createdAt.slice(0, 10) : '') +
           '</div></div>' +
@@ -3626,9 +4784,12 @@ main {width: 100%}
       if (!aiRulesData.training.length) { list.innerHTML = '<p class="tenant-hint">لا توجد بيانات تدريب بعد</p>'; return; }
       list.innerHTML = aiRulesData.training.map(e =>
         '<div class="tenant-presentation-card">' +
-        '<div><h3>' + escapeHtml(e.title) + '</h3>' +
+        '<div style="display:flex;gap:12px;align-items:flex-start;">' +
+        (e.imageUrl ? '<div style="width:80px;min-height:54px;padding:8px;border:1px solid var(--line);border-radius:8px;flex-shrink:0;font-size:12px;color:var(--muted);">صورة شركة محفوظة</div>' : '') +
+        '<div style="flex:1"><h3>' + escapeHtml(e.title) + '</h3>' +
         '<div class="meta">' + escapeHtml(e.category || 'general') + ' | ' + (e.is_active ? 'نشط' : 'معطل') + ' | ' + escapeHtml(e.created_at || '') + '</div>' +
         '<p style="margin:8px 0 0;font-size:13px;color:var(--muted);white-space:pre-wrap;max-height:100px;overflow:auto">' + escapeHtml(e.content) + '</p></div>' +
+        '</div>' +
         '<div class="tenant-actions">' +
         '<button class="btn small ' + (e.is_active ? 'danger' : 'green') + '" onclick="toggleAITrainingEntry(\'' + e.id + '\', ' + (!e.is_active) + ')">' + (e.is_active ? 'تعطيل' : 'تفعيل') + '</button>' +
         '<button class="btn small danger" onclick="deleteAITrainingEntry(\'' + e.id + '\')">حذف</button>' +
@@ -3646,6 +4807,60 @@ main {width: 100%}
       if (!confirm('حذف هذه البيانات؟')) return;
       const data = await api('DELETE', '/api/training/' + entryId);
       if (data.success) { toast('تم الحذف'); await loadAIRules(); }
+    }
+
+    async function uploadTrainingImage() {
+      const fileInput = document.getElementById('trainingImageFile');
+      const titleInput = document.getElementById('trainingImageTitle');
+      const typeInput = document.getElementById('trainingImageType');
+      const descriptionInput = document.getElementById('trainingImageDescription');
+      const consentInput = document.getElementById('trainingImageConsent');
+      const statusEl = document.getElementById('trainingImageStatus');
+      const previewEl = document.getElementById('trainingImagePreview');
+      const file = fileInput.files[0];
+      if (!file) { toast('اختر صورة أولاً'); return; }
+      if (!consentInput.checked) { toast('أكد أن الصورة تخص الشركة ومسموح استخدامها للتدريب'); return; }
+      const localPreviewUrl = URL.createObjectURL(file);
+      statusEl.textContent = 'جاري الرفع والتحليل...';
+      statusEl.style.color = 'var(--p)';
+      previewEl.innerHTML = '';
+      const formData = new FormData();
+      formData.append('image', file);
+      if (titleInput.value.trim()) formData.append('title', titleInput.value.trim());
+      formData.append('category', 'image_analysis');
+      formData.append('imageType', typeInput.value);
+      formData.append('description', descriptionInput.value.trim());
+      formData.append('companyDataConsent', 'true');
+      const token = getTenantToken();
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      try {
+        const resp = await fetch('/api/training/upload-image', {
+          method: 'POST',
+          headers: headers,
+          body: formData
+        });
+        const data = await resp.json();
+        if (data.success) {
+          statusEl.textContent = 'تم التحليل بنجاح';
+          statusEl.style.color = '#5cb85c';
+          previewEl.innerHTML = '<img src="' + localPreviewUrl + '" alt="معاينة محلية للصورة المرفوعة" style="max-width:200px;border-radius:8px;margin-top:8px;"><p style="margin-top:8px;font-size:13px;color:var(--muted);">' + escapeHtml(data.analysis || '').substring(0, 200) + '</p>';
+          toast('تم رفع الصورة وتحليلها بنجاح');
+          await loadAIRules();
+          fileInput.value = '';
+          titleInput.value = '';
+          descriptionInput.value = '';
+          consentInput.checked = false;
+        } else {
+          statusEl.textContent = data.error || 'فشل الرفع';
+          statusEl.style.color = '#d9534f';
+        }
+      } catch(e) {
+        statusEl.textContent = 'خطأ: ' + e.message;
+        statusEl.style.color = '#d9534f';
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(localPreviewUrl), 60000);
+      }
     }
 
     function renderAILogList() {

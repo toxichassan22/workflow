@@ -152,6 +152,10 @@ def extract_chat_content(response, label="GLM"):
 # Helper: Call Image API (OpenRouter - Gemini)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def call_image_api(prompt):
+    # AI4: Check if OpenRouter key is configured
+    if not OPENROUTER_KEY:
+        print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
+        return None
     try:
         headers = {
             "Authorization": f"Bearer {OPENROUTER_KEY}",
@@ -166,17 +170,39 @@ def call_image_api(prompt):
         }
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=120)
         data = response.json()
+        # AI4: Detect specific error codes and return descriptive messages
+        if response.status_code == 401:
+            print("[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)")
+            return None
+        if response.status_code == 402:
+            print("[IMAGE ERROR] OpenRouter account has insufficient credits (402 Payment Required)")
+            return None
+        if response.status_code == 429:
+            print("[IMAGE ERROR] OpenRouter rate limit exceeded (429 Too Many Requests)")
+            return None
+        if 'error' in data:
+            err_msg = data['error'].get('message', '') if isinstance(data['error'], dict) else str(data['error'])
+            print(f"[IMAGE ERROR] OpenRouter API error: {err_msg}")
+            return None
         if "choices" in data and len(data["choices"]) > 0:
             msg = data["choices"][0].get("message", {})
             if "images" in msg and len(msg["images"]) > 0:
                 img = msg["images"][0]
                 if isinstance(img, dict) and "image_url" in img:
                     return img["image_url"].get("url")
+    except requests.exceptions.Timeout:
+        print("[IMAGE ERROR] OpenRouter API request timed out")
+    except requests.exceptions.ConnectionError:
+        print("[IMAGE ERROR] Cannot connect to OpenRouter API")
     except Exception as e:
         print("[IMAGE ERROR]", str(e))
     return None
 
 def call_image_api_with_reference(reference_image_base64, prompt):
+    # AI4: Check if OpenRouter key is configured
+    if not OPENROUTER_KEY:
+        print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
+        return None
     try:
         headers = {
             "Authorization": f"Bearer {OPENROUTER_KEY}",
@@ -195,12 +221,30 @@ def call_image_api_with_reference(reference_image_base64, prompt):
         }
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=120)
         data = response.json()
+        # AI4: Detect specific error codes
+        if response.status_code == 401:
+            print("[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)")
+            return None
+        if response.status_code == 402:
+            print("[IMAGE ERROR] OpenRouter account has insufficient credits (402 Payment Required)")
+            return None
+        if response.status_code == 429:
+            print("[IMAGE ERROR] OpenRouter rate limit exceeded (429 Too Many Requests)")
+            return None
+        if 'error' in data:
+            err_msg = data['error'].get('message', '') if isinstance(data['error'], dict) else str(data['error'])
+            print(f"[IMAGE ERROR] OpenRouter API error: {err_msg}")
+            return None
         if "choices" in data and len(data["choices"]) > 0:
             msg = data["choices"][0].get("message", {})
             if "images" in msg and len(msg["images"]) > 0:
                 img = msg["images"][0]
                 if isinstance(img, dict) and "image_url" in img:
                     return img["image_url"].get("url")
+    except requests.exceptions.Timeout:
+        print("[IMAGE ERROR] OpenRouter API request timed out")
+    except requests.exceptions.ConnectionError:
+        print("[IMAGE ERROR] Cannot connect to OpenRouter API")
     except Exception as e:
         print("[IMAGE ERROR]", str(e))
     return None
@@ -246,17 +290,17 @@ SLIDE_DEFS = [
     {'num': 1,  'title': 'شريحة الغلاف',     'type': 'cover',     'desc': 'cover: خلفية صورة الغلاف ##IMAGE_COVER## بكامل الشريحة. طبقة شفافة بلون رئيسي داكن بنسبة opacity:0.65. شعار ##LOGO## height:80px في المنتصف. اسم المشروع أبيض font-size:48px. وصف بلون مميز (accent) font-size:20px. خطوط هندسية زخرفية بلون مميز. بدون هيدر/فوتر.'},
     {'num': 2,  'title': 'الفهرس',            'type': 'index',     'desc': 'index: عناوين الشرائح 1-16 في جدول فهرس احترافي عمودين. رقم كل شريحة في دائرة باللون الرئيسي. خلفية بلون الخلفية المعتمد. ⚠️ هيدر إلزامي في الأعلى (شعار ##LOGO## + خط رأسي مميز + عنوان الشريحة). ⚠️ فوتر إلزامي في الأسفل (اسم المشروع + رقم الشريحة في دائرة بلون مميز). ⛔ ممنوع إطلاقاً: أي صور أو base64 أو روابط صور. النص فقط + أرقام الشرائح في دوائر.'},
     {'num': 3,  'title': 'الملخص التنفيذي',    'type': 'content',   'desc': 'content: Dashboard مالي — بطاقات كرتونية كبيرة: إجمالي التكلفة، الإيرادات السنوية، إجمالي الأرباح (الأكبر بصرياً)، ROI %، NOI، مدة الاسترداد. الأرقام بخط كبير 32-48px باللون الرئيسي. بدون صور.'},
-    {'num': 4,  'title': 'الرؤية والفكرة',     'type': 'content',   'desc': 'content: نص تعريفي عن المشروع + بطاقات للمكونات الرئيسية مع أيقونات Unicode. يمكنك استخدام ##MOODBOARD_IMAGE_1## كخلفية شفافة opacity:0.15.'},
-    {'num': 5,  'title': 'الموقع الاستراتيجي', 'type': 'content',   'desc': 'content: بطاقات مميزات الموقع (القرب من الخدمات، الوصول، المدينة) مع أيقونات. يمكنك استخدام ##MOODBOARD_IMAGE_2## كخلفية شفافة opacity:0.15.'},
-    {'num': 6,  'title': 'مميزات المشروع',     'type': 'content',   'desc': 'content: Grid 2×3 من البطاقات الفاخرة: كل بطاقة فيها أيقونة Unicode كبيرة + عنوان bold + وصف قصير. خلفية كل بطاقة بيضاء مع border بلون مميز رفيع. بدون صور.'},
+    {'num': 4,  'title': 'الرؤية والفكرة',     'type': 'content',   'desc': 'content: نص تعريفي عن المشروع + بطاقات للمكونات الرئيسية بالنص والتخطيط فقط. يمكنك استخدام ##MOODBOARD_IMAGE_1## كخلفية شفافة opacity:0.15.'},
+    {'num': 5,  'title': 'الموقع الاستراتيجي', 'type': 'content',   'desc': 'content: بطاقات مميزات الموقع (القرب من الخدمات، الوصول، المدينة) بعناوين ووصف نصي فقط. يمكنك استخدام ##MOODBOARD_IMAGE_2## كخلفية شفافة opacity:0.15.'},
+    {'num': 6,  'title': 'مميزات المشروع',     'type': 'content',   'desc': 'content: Grid 2×3 من البطاقات الفاخرة: كل بطاقة فيها عنوان bold + وصف قصير. خلفية كل بطاقة بيضاء مع border بلون مميز رفيع. بدون صور أو أيقونات.'},
     {'num': 7,  'title': 'مكونات المشروع',     'type': 'content',   'desc': 'content: جدول احترافي: header باللون الرئيسي وأبيض، صفوف متبادلة بلون خلفية خفيف وأبيض، صف الإجمالي بارز. أسفل الجدول 3 بطاقات ملخص. بدون صور.'},
     {'num': 8,  'title': 'افتراضات الربح التشغيلي', 'type': 'content', 'desc': 'content: معادلة بصرية كبيرة: (إيرادات سنوية − مصاريف سنوية = صافي ربح). كل عنصر في بطاقة مع سهم يربطها. أرقام بخط كبير باللون الرئيسي. بدون صور.'},
     {'num': 9,  'title': 'افتراضات التكاليف',  'type': 'content',   'desc': 'content: 3 بطاقات كبيرة: بطاقة تكلفة الأرض (مع تفاصيل السعر/م²)، بطاقة تكلفة التطوير، بطاقة الإجمالي (الأكبر والأبرز). بدون صور.'},
     {'num': 10, 'title': 'الأرباح والتخارج',   'type': 'content',   'desc': 'content: Flow diagram أفقي: بطاقة ربح تشغيلي → علامة + → بطاقة قيمة التخارج → علامة = → بطاقة إجمالي الأرباح (الأكبر). يمكنك استخدام ##MOODBOARD_IMAGE_3## كخلفية شفافة opacity:0.1.'},
     {'num': 11, 'title': 'المؤشرات المالية',   'type': 'content',   'desc': 'content: أعلى الشريحة 3 بطاقات كبيرة: ROI % و NOI و مدة الاسترداد. أسفلها مقارنة بصرية: شريطين أفقيين (إجمالي التكلفة vs إجمالي الأرباح). بدون صور.'},
     {'num': 12, 'title': 'الجدول الزمني',      'type': 'content',   'desc': 'content: Timeline أفقي: خط رأسي في المنتصف، نقاط على الخط لكل مرحلة، أشرطة ملونة باللون الرئيسي واللون المميز. Years والأرباع Q1-Q4 في الأعلى. بدون صور.'},
-    {'num': 13, 'title': 'فرص الاستثمار',      'type': 'content',   'desc': 'content: 3-4 بطاقات High-Impact: عنوان bold + وصف + أيقونة Unicode كبيرة. يمكنك استخدام ##MOODBOARD_IMAGE_4## كخلفية شفافة opacity:0.1.'},
-    {'num': 14, 'title': 'المخاطر والافتراضات', 'type': 'content',  'desc': 'content: بطاقات رمادية وبيج هادئة + أيقونة ⚠️ خطية باللون الرئيسي. عنوان فرعي: نقاط يجب التحقق منها. بدون أي صور إطلاقاً.'},
+    {'num': 13, 'title': 'فرص الاستثمار',      'type': 'content',   'desc': 'content: 3-4 بطاقات High-Impact: عنوان bold + وصف نصي واضح. يمكنك استخدام ##MOODBOARD_IMAGE_4## كخلفية شفافة opacity:0.1.'},
+    {'num': 14, 'title': 'المخاطر والافتراضات', 'type': 'content',  'desc': 'content: بطاقات رمادية وبيج هادئة بالنص فقط. عنوان فرعي: نقاط يجب التحقق منها. بدون أي صور أو أيقونات.'},
     {'num': 15, 'title': 'المود بورد',         'type': 'moodboard', 'desc': 'moodboard: Grid 2×2 يشغل المساحة بين top:56px و bottom:36px. كل خلية فيها صورة واحدة: ##MOODBOARD_IMAGE_1## و ##MOODBOARD_IMAGE_2## و ##MOODBOARD_IMAGE_3## و ##MOODBOARD_IMAGE_4##. كل صورة بـ background-size:cover;background-position:center. فواصل رفيعة 4px بين الخلايا.'},
     {'num': 16, 'title': 'الختام',             'type': 'closing',   'desc': 'closing: خلفية بلون رئيسي داكن gradient linear-gradient(135deg, [اللون الرئيسي], [اللون الرئيسي الداكن/الثانوي]) تملأ الشريحة. شعار ##LOGO## height:80px في المنتصف. "شكراً لكم" أبيض 48px. اسم المشروع باللون المميز. بيانات التواصل. بدون هيدر/فوتر.'},
 ]
@@ -298,7 +342,7 @@ top:56px → bottom:36px. padding: 20px 40px.
 
 ## البطاقات (Cards)
 كل بطاقة: background:#fff border:1px solid rgba(196,163,90,0.2) border-radius:8px padding:16-24px.
-أيقونات: استخدم Unicode emojis كبيرة (🏗️ 📊 💰 🏠 📍 ✅ ⚠️ 🔑 📈) بدل الصور.
+لا تستخدم أيقونات أو رموز أو emoji؛ اعتمد على النص والمساحات والألوان فقط.
 
 ## الصور Placeholder
 - صورة الغلاف: ##IMAGE_COVER## (background-image فقط)
@@ -374,8 +418,24 @@ def build_slide_user_msg(slide_num):
 - لا تكتب شرح أو markdown أو كود إضافي
 - التصميم يجب أن يكون احترافي وفاخر"""
 
+_PRESENTATION_ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
+
+
+def _strip_presentation_icons(html):
+    """Remove generated icon markup and emoji while retaining company logo images."""
+    if not html:
+        return html
+    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', '', html, flags=re.IGNORECASE)
+    html = re.sub(
+        r'<(?:i|span|div)\b[^>]*(?:class|id)=["\'][^"\']*(?:icon|emoji|lucide|fa-|material-icons)[^"\']*["\'][^>]*>[\s\S]*?</(?:i|span|div)\s*>',
+        '', html, flags=re.IGNORECASE
+    )
+    return _PRESENTATION_ICON_RE.sub('', html)
+
+
 def postprocess_slide(html, slide_num, tenant_id=None):
-    """Post-process: strip forbidden images and ensure header/footer exist."""
+    """Post-process: strip icons/forbidden images and ensure header/footer exist."""
+    html = _strip_presentation_icons(html)
     # Slides where <img> tags are strictly forbidden (desc says 'بدون صور')
     NO_IMAGE_SLIDES = {2, 3, 6, 7, 8, 9, 11, 12, 14}
     if slide_num in NO_IMAGE_SLIDES:
@@ -431,7 +491,7 @@ def postprocess_slide(html, slide_num, tenant_id=None):
         if branding.get('logo_path'):
             logo_url = branding['logo_path']
     html = html.replace('##LOGO##', logo_url)
-    return html
+    return _strip_presentation_icons(html)
 
 def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=2):
     """Generate a single slide. system_prompt is pre-built and shared."""
@@ -619,12 +679,13 @@ def api_generate_images():
     data = request.json
     project_data = clean_project_data(data.get('projectData', {}))
     include_cover = data.get('includeCover', True) is not False
+    reference_image = data.get('referenceImage') or project_data.get('cover') or project_data.get('mainImageData') or None
 
     project_name = project_data.get('project_name') or project_data.get('projectName') or 'مشروع'
     project_type = project_data.get('project_type') or project_data.get('projectType') or 'سكني'
     location = project_data.get('location_address') or project_data.get('location') or 'السعودية'
 
-    print(f"\n[IMAGES] Generating {'5' if include_cover else '4'} images for: {project_name}")
+    print(f"\n[IMAGES] Generating {'5' if include_cover else '4'} images for: {project_name}, ref: {'yes' if reference_image else 'no'}")
 
     images = {'cover': None, 'moodboard': []}
 
@@ -635,17 +696,22 @@ def api_generate_images():
         images['cover'] = call_image_api(cover_prompt)
         print(f"[IMAGES] Cover: {'OK' if images['cover'] else 'FAILED'}")
 
-    # 2. Four moodboard images
+    # 2. Four moodboard images — use reference image (main image) to maintain visual consistency
+    ref_style = ', matching the architectural style, colors, and materials of the reference image provided' if reference_image else ''
+    ref_note = 'CRITICAL: NO other buildings around the building — the building stands ALONE.'
     moodboard_prompts = [
-        f"Interior design of luxury {project_type}, modern elegant living space, warm lighting, premium finishes, architectural photography",
-        f"Aerial view of {project_type} complex in {location}, modern architecture, landscaped gardens, professional photography",
-        f"Living room interior of premium {project_type}, contemporary furniture, large windows, natural light, interior design photography",
-        f"Architectural details of luxury {project_type}, facade close-up, premium materials, marble and glass, professional photography"
+        f"Cover photo of {project_name} — a {project_type} building in {location}{ref_style}. {ref_note} Professional architectural photography, warm golden hour lighting, premium luxury facade, photorealistic.",
+        f"Right-side facade view of {project_name} — the same building from the right angle. {ref_note} Clear sky background, professional architectural photography, showing the building's right side details, materials, and textures.{ref_style}",
+        f"Left-side facade view of {project_name} — the same building from the left angle. {ref_note} Clear sky background, professional architectural photography, showing the building's left side details and design elements.{ref_style}",
+        f"Aerial top-down view of {project_name} — bird's eye view of the building from above. {ref_note} Professional drone photography, showing the roof, overall building shape, and surrounding empty land.{ref_style}"
     ]
 
     for i, prompt in enumerate(moodboard_prompts):
-        print(f"[IMAGES] Generating moodboard {i+1}/4...")
-        img = call_image_api(prompt)
+        print(f"[IMAGES] Generating moodboard {i+1}/4 (ref: {'yes' if reference_image else 'no'})...")
+        if reference_image:
+            img = call_image_api_with_reference(reference_image, prompt)
+        else:
+            img = call_image_api(prompt)
         images['moodboard'].append(img)
         print(f"[IMAGES] Moodboard {i+1}: {'OK' if img else 'FAILED'}")
         if i < len(moodboard_prompts) - 1:
@@ -760,7 +826,10 @@ def api_generate_main_image():
         if image:
             return jsonify({'success': True, 'image': image})
         else:
-            return jsonify({'success': False, 'error': 'No image generated'})
+            # AI4: Return descriptive Arabic error based on config state
+            if not OPENROUTER_KEY:
+                return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
+            return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -782,7 +851,9 @@ def api_generate_slide_image():
         if image:
             return jsonify({'success': True, 'image': image})
         else:
-            return jsonify({'success': False, 'error': 'No image generated'})
+            if not OPENROUTER_KEY:
+                return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
+            return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -803,7 +874,9 @@ def api_generate_image_single():
         if image:
             return jsonify({'success': True, 'image': image})
         else:
-            return jsonify({'success': False, 'error': 'No image generated'})
+            if not OPENROUTER_KEY:
+                return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
+            return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -1468,6 +1541,17 @@ def api_add_field():
     if field_type not in valid_types:
         return jsonify({'error': f'Invalid fieldType. Must be one of: {valid_types}'}), 400
 
+    # A field must belong to one of this tenant's visible sections.  Keep
+    # ``general`` as a backwards-compatible fallback for older custom fields
+    # and for fields whose custom section was deleted.
+    section_key = data.get('sectionKey', 'general')
+    if not isinstance(section_key, str):
+        return jsonify({'error': 'sectionKey must be a string'}), 400
+    section_key = section_key.strip()
+    valid_section_keys = {'general'} | {section['key'] for section in db.get_all_sections(g.tenant_id)}
+    if section_key not in valid_section_keys:
+        return jsonify({'error': 'Invalid sectionKey for this company'}), 400
+
     field_id = db.add_custom_field(
         tenant_id=g.tenant_id,
         field_key=field_key,
@@ -1479,7 +1563,7 @@ def api_add_field():
         default_value=data.get('defaultValue'),
         ai_hint=data.get('aiHint'),
         sort_order=data.get('sortOrder', 100),
-        section_key=data.get('sectionKey', 'general'),
+        section_key=section_key,
     )
     return jsonify({'success': True, 'fieldId': field_id}), 201
 
@@ -1493,6 +1577,17 @@ def api_update_field(field_id):
         return jsonify({'error': 'Field not found'}), 404
 
     data = request.json or {}
+    if 'sectionKey' in data:
+        section_key = data['sectionKey']
+        if not isinstance(section_key, str):
+            return jsonify({'error': 'sectionKey must be a string'}), 400
+        section_key = section_key.strip()
+        valid_section_keys = {'general'} | {section['key'] for section in db.get_all_sections(g.tenant_id)}
+        if section_key not in valid_section_keys:
+            return jsonify({'error': 'Invalid sectionKey for this company'}), 400
+        # Persist the normalized key rather than the untrimmed request value.
+        data['sectionKey'] = section_key
+
     updates = {}
     for k in ['fieldKey', 'fieldLabel', 'fieldType', 'fieldOptions', 'sectionKey', 'isRequired', 'isActive', 'sortOrder', 'placeholder', 'defaultValue', 'aiHint']:
         if k in data:
@@ -1615,7 +1710,7 @@ def api_ai_input_builder():
     existing = db.get_fields(g.tenant_id, active_only=False)
     existing_keys = [f['field_key'] for f in existing] + (data.get('existingKeys') or [])
     training_context = db.get_training_context(g.tenant_id) or ''
-    section_keys = [s['key'] for s in db.FIELD_SECTIONS]
+    section_keys = [s['key'] for s in db.get_all_sections(g.tenant_id)]
 
     system_prompt = """أنت مساعد ذكي لمنصة توليد عروض تقديمية عقارية. مهمتك اقتراح حقول إدخال (input fields) مناسبة لمشروع عقاري معيّن بناءً على:
 - وصف المشروع.
@@ -1807,11 +1902,32 @@ def api_slide_plan():
 @app.route('/api/geocode', methods=['POST'])
 @require_auth
 def api_geocode():
-    """Geocode an address to lat/lng."""
+    """Geocode an address or Google Maps link to lat/lng."""
     data = request.json or {}
     address = data.get('address', '').strip()
+    maps_link = data.get('maps_link', '').strip()
+    # M1-M3: If a Google Maps link is provided, try extracting coords first
+    if maps_link:
+        coords = maps_service.extract_coords_from_maps_link(maps_link)
+        if coords:
+            print(f"[MAPS LINK] Extracted coords from link: {coords}")
+            return jsonify({
+                'success': True,
+                'lat': coords['lat'],
+                'lng': coords['lng'],
+                'formatted_address': address or 'تم الاستخراج من رابط خرائط جوجل',
+                'source': 'maps_link'
+            })
+        else:
+            # Could not extract from link, try geocoding the address text
+            if address:
+                result = maps_service.geocode_address(address)
+                if result.get('success'):
+                    result['source'] = 'geocode_fallback'
+                    return jsonify(result)
+            return jsonify({'success': False, 'error': 'ما قدرنا نحدد الموقع من هذا الرابط — جربي لصق رابط قوقل ماب مباشر أو كتابة العنوان النصي'})
     if not address:
-        return jsonify({'error': 'address is required'}), 400
+        return jsonify({'error': 'address or maps_link is required'}), 400
     result = maps_service.geocode_address(address)
     return jsonify(result)
 
@@ -1908,6 +2024,101 @@ def api_regenerate_presentation_maps(pres_id):
         'landmarks': result.get('landmarks', []),
         'lat': result.get('lat'),
         'lng': result.get('lng'),
+    })
+
+
+@app.route('/api/generate-slide-single', methods=['POST'])
+@require_permission('create_presentation')
+def api_generate_slide_single():
+    """Generate a single slide by index. Returns one slide HTML."""
+    from slide_engine import generate_single_slide, build_design_rules, _replace_map_placeholders, _replace_creative_image_placeholders
+    data = request.json or {}
+    project_data = clean_project_data(data.get('projectData', {}))
+    slide_plan = data.get('slidePlan', {})
+    images = data.get('images', {})
+    slide_index = int(data.get('slideIndex', 0))
+
+    if not slide_plan or 'slides' not in slide_plan:
+        return jsonify({'error': 'slidePlan with slides array is required'}), 400
+
+    slides = slide_plan.get('slides', [])
+    if slide_index < 0 or slide_index >= len(slides):
+        return jsonify({'error': 'Invalid slide index'}), 400
+
+    branding = db.get_branding(g.tenant_id)
+    if not branding:
+        return jsonify({'error': 'Branding not configured'}), 400
+
+    # Build map placeholders if needed
+    map_placeholders = {}
+    if slide_index == 0 or 'map' in slides[slide_index].get('type', ''):
+        map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=data.get('presentationId'), force=True)
+        if map_result.get('placeholders'):
+            if not isinstance(images, dict):
+                images = {'cover': None, 'moodboard': []}
+            for placeholder, path in map_result['placeholders'].items():
+                if path and os.path.exists(path):
+                    rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
+                    map_placeholders[placeholder] = f"/{rel_path}"
+                else:
+                    map_placeholders[placeholder] = None
+            images['map_placeholders'] = map_placeholders
+            images['map_landmarks'] = map_result.get('landmarks', [])
+            project_data['_resolved_location'] = {'lat': map_result['lat'], 'lng': map_result['lng']}
+
+    images_info = _get_images_info(images)
+    training_context = db.get_training_context(g.tenant_id)
+
+    design_rules = build_design_rules(branding)
+    project_json = json.dumps(project_data, ensure_ascii=False, indent=2)
+    if len(project_json) > 4000:
+        project_json = project_json[:4000] + '\n... [تم اختصار البيانات]'
+
+    system_prompt = f"""{design_rules}
+
+## بيانات المشروع
+{project_json}
+
+## الصور المتوفرة
+{images_info}
+
+## قواعد عامة
+- كل شريحة 1280x720px (أو حسب نسبة العرض المحددة)
+- CSS inline فقط
+- ممنوع box-shadow/filter/backdrop-filter
+- استخدم ##LOGO## للشعار، ##IMAGE_COVER## لصورة الغلاف، ##MOODBOARD_IMAGE_N## لصور المود بورد
+- للخرائط: ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##
+- لصور الموقع: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
+- ⛔ ممنوع base64 أو روابط صور خارجية
+"""
+
+    def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
+        if training_context:
+            sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
+        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2)
+
+    slide = slides[slide_index]
+    total = len(slides)
+    html = generate_single_slide(system_prompt, slide, slide_index + 1, total, branding, call_glm_fn)
+
+    if not html:
+        title = slide.get('title', f'شريحة {slide_index + 1}')
+        html = f'<div class="slide" style="width:1280px;height:720px;direction:rtl;font-family:sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;background:#fff;"><h1>{title}</h1></div>'
+
+    if map_placeholders:
+        html = _replace_map_placeholders(html, map_placeholders)
+    html = _replace_creative_image_placeholders(html, images, slide.get('type', 'content'))
+
+    return jsonify({
+        'success': True,
+        'slide': {
+            'html': html,
+            'title': slide.get('title', f'شريحة {slide_index + 1}'),
+            'type': slide.get('type', 'content'),
+            'designStyle': slide.get('design_style', 'cards'),
+        },
+        'slideIndex': slide_index,
+        'totalSlides': total,
     })
 
 
@@ -2086,8 +2297,123 @@ def api_update_presentation(pres_id):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# EXPORT ENDPOINTS (Tenant-Aware)
+# PROJECT DRAFTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _project_draft_actor_id():
+    """Return a non-NULL, tenant-scoped owner for the unified project draft."""
+    return g.user_id or f'tenant-admin:{g.tenant_id}'
+
+
+def _project_draft_actor_name():
+    return g.user_name or 'Company administrator'
+
+@app.route('/api/project-draft', methods=['GET'])
+@require_auth
+def api_get_project_draft():
+    """Get the current user's project draft."""
+    draft = db.get_project_draft(g.tenant_id, _project_draft_actor_id())
+    if not draft:
+        return jsonify({'success': True, 'draft': None})
+    return jsonify({'success': True, 'draft': draft})
+
+
+@app.route('/api/project-draft', methods=['POST'])
+@require_auth
+def api_save_project_draft():
+    """Save or update the current user's project draft."""
+    data = request.json or {}
+    draft_data = data.get('draftData', {})
+    if not isinstance(draft_data, dict):
+        return jsonify({'error': 'draftData must be an object'}), 400
+    # Absence or {} means preserve already-reviewed sections (legacy clients send {}).
+    section_statuses = data.get('sectionStatuses')
+    if section_statuses is not None and not isinstance(section_statuses, dict):
+        return jsonify({'error': 'sectionStatuses must be an object'}), 400
+    status = data.get('status', 'draft')
+    if status not in {'draft', 'submitted'}:
+        status = 'draft'
+    draft_id = db.save_project_draft(
+        g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status
+    )
+    return jsonify({'success': True, 'draftId': draft_id})
+
+
+@app.route('/api/project-draft', methods=['DELETE'])
+@require_auth
+def api_delete_project_draft():
+    """Delete the current user's project draft."""
+    db.delete_project_draft(g.tenant_id, _project_draft_actor_id())
+    return jsonify({'success': True})
+
+
+@app.route('/api/project-draft/section-status', methods=['POST'])
+@require_auth
+def api_update_section_status():
+    """Update a single section's status in the draft."""
+    data = request.json or {}
+    section_key = data.get('sectionKey')
+    section_status = data.get('sectionStatus')
+    if not isinstance(section_key, str) or not section_key or section_status not in {'draft', 'approved'}:
+        return jsonify({'error': 'A valid sectionKey and sectionStatus are required'}), 400
+    result = db.update_draft_section_status(
+        g.tenant_id, _project_draft_actor_id(), section_key, section_status
+    )
+    if not result:
+        return jsonify({'error': 'Unable to update section status'}), 400
+    return jsonify({'success': True})
+
+
+@app.route('/api/project-draft/request-approval', methods=['POST'])
+@require_auth
+def api_request_project_draft_approval():
+    """Request one overall approval after all tracked sections are approved."""
+    draft = db.request_project_draft_approval(
+        g.tenant_id, _project_draft_actor_id(), _project_draft_actor_id(), _project_draft_actor_name()
+    )
+    if draft.get('error') == 'draft_not_found':
+        return jsonify({'error': 'No project draft found'}), 404
+    if draft.get('error') == 'sections_not_approved':
+        return jsonify({
+            'error': 'All project sections must be approved before requesting approval',
+            'sectionStatuses': draft.get('section_statuses', {})
+        }), 400
+    return jsonify({'success': True, 'draft': draft})
+
+
+@app.route('/api/project-draft/approval-status', methods=['GET'])
+@require_auth
+def api_project_draft_approval_status():
+    """Return the current actor's overall draft-review state."""
+    draft = db.get_project_draft(g.tenant_id, _project_draft_actor_id())
+    return jsonify({'success': True, 'approval': draft})
+
+
+@app.route('/api/project-draft/pending-approvals', methods=['GET'])
+@require_permission('approvals')
+def api_pending_project_draft_approvals():
+    """List tenant-only draft approval requests for authorized reviewers."""
+    drafts = db.get_pending_project_drafts(g.tenant_id)
+    return jsonify({'success': True, 'drafts': drafts})
+
+
+@app.route('/api/project-draft/review', methods=['POST'])
+@require_permission('approvals')
+def api_review_project_draft():
+    """Approve or return a tenant-scoped project draft for correction."""
+    data = request.json or {}
+    draft_id = data.get('draftId')
+    review_status = data.get('status')
+    note = (data.get('note') or '').strip()[:3000]
+    if not isinstance(draft_id, str) or not draft_id or review_status not in {'approved', 'rejected'}:
+        return jsonify({'error': 'draftId and status (approved or rejected) are required'}), 400
+    if not db.review_project_draft(
+        g.tenant_id, draft_id, review_status, _project_draft_actor_id(), _project_draft_actor_name(), note
+    ):
+        return jsonify({'error': 'Pending draft approval not found'}), 404
+    return jsonify({'success': True})
+
+
 
 @app.route('/api/export', methods=['POST'])
 @require_permission('export_files')
@@ -2451,10 +2777,79 @@ def api_get_my_permissions():
 @app.route('/api/field-sections', methods=['GET'])
 @require_auth
 def api_get_field_sections():
-    """Get available field sections and current user's allowed sections."""
-    available = db.FIELD_SECTIONS
-    allowed = db.get_user_field_sections(g.user_id) if g.user_id else db.DEFAULT_FIELD_SECTIONS.copy()
+    """Get available field sections (built-in + custom) and current user's allowed sections."""
+    available = db.get_all_sections(g.tenant_id)
+    allowed = db.get_user_field_sections(g.user_id, g.tenant_id) if g.user_id else {s['key']: True for s in available}
     return jsonify({'success': True, 'available': available, 'allowed': allowed})
+
+
+@app.route('/api/field-sections/custom', methods=['POST'])
+@require_permission('custom_fields')
+def api_add_custom_section():
+    """Create a custom field section."""
+    data = request.json or {}
+    label = (data.get('label') or '').strip()
+    if not label:
+        return jsonify({'error': 'اسم القسم مطلوب'}), 400
+    # Generate key from label if not provided
+    key = (data.get('key') or '').strip().lower().replace(' ', '_').replace('-', '_')
+    if not key:
+        import re as _re
+        # Transliterate Arabic to approximate key
+        ar_map = {'أ': 'a', 'إ': 'a', 'آ': 'a', 'ا': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th', 'ج': 'j', 'ح': 'h', 'خ': 'kh', 'د': 'd', 'ذ': 'th', 'ر': 'r', 'ز': 'z', 'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ق': 'q', 'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n', 'ه': 'h', 'و': 'w', 'ي': 'y', 'ى': 'a', 'ة': 'a', 'ء': '', 'ئ': 'y', 'ؤ': 'w'}
+        key = ''.join(ar_map.get(c, c) for c in label)
+        key = _re.sub(r'[^a-zA-Z0-9_]', '', key)
+        if not key:
+            key = 'section_' + str(uuid.uuid4())[:8]
+    # Prevent collision with built-in keys
+    builtin_keys = {s['key'] for s in db.FIELD_SECTIONS}
+    if key in builtin_keys:
+        return jsonify({'error': 'لا يمكن استخدام اسم قسم موجود مسبقاً'}), 400
+    sort_order = int(data.get('sortOrder', 100))
+    section_id = db.add_custom_section(g.tenant_id, key, label, sort_order)
+    if not section_id:
+        return jsonify({'error': 'قسم بهذا الاسم موجود مسبقاً'}), 409
+    return jsonify({'success': True, 'sectionId': section_id, 'key': key}), 201
+
+
+@app.route('/api/field-sections/custom/<section_key>', methods=['PUT'])
+@require_permission('custom_fields')
+def api_update_custom_section(section_key):
+    """Update a custom field section."""
+    # The route is deliberately custom-only: built-in section labels and
+    # structure stay stable, while each company can rename its own additions.
+    if not db.get_custom_section(g.tenant_id, section_key):
+        return jsonify({'error': 'Custom section not found'}), 404
+
+    data = request.json or {}
+    updates = {}
+    if 'label' in data:
+        label = (data.get('label') or '').strip()
+        if not label:
+            return jsonify({'error': 'اسم القسم لا يمكن أن يكون فارغاً'}), 400
+        updates['section_label'] = label
+    if 'sortOrder' in data:
+        updates['sort_order'] = int(data.get('sortOrder', 100))
+    if 'isActive' in data:
+        updates['is_active'] = 1 if data.get('isActive') else 0
+    if not updates:
+        return jsonify({'error': 'لا توجد تغييرات'}), 400
+    db.update_custom_section(g.tenant_id, section_key, **updates)
+    return jsonify({'success': True})
+
+
+@app.route('/api/field-sections/custom/<section_key>', methods=['DELETE'])
+@require_permission('custom_fields')
+def api_delete_custom_section(section_key):
+    """Delete a custom field section. Fields move to 'general'."""
+    # Prevent deleting built-in sections
+    builtin_keys = {s['key'] for s in db.FIELD_SECTIONS}
+    if section_key in builtin_keys:
+        return jsonify({'error': 'لا يمكن حذف قسم أساسي'}), 400
+    if not db.get_custom_section(g.tenant_id, section_key):
+        return jsonify({'error': 'Custom section not found'}), 404
+    db.delete_custom_section(g.tenant_id, section_key)
+    return jsonify({'success': True})
 
 
 @app.route('/api/users/<user_id>/field-sections', methods=['GET'])
@@ -2464,8 +2859,8 @@ def api_get_user_field_sections(user_id):
     user = db.get_user_by_id(user_id)
     if not user or user['tenant_id'] != g.tenant_id:
         return jsonify({'error': 'User not found'}), 404
-    sections = db.get_user_field_sections(user_id)
-    return jsonify({'success': True, 'sections': sections, 'available': db.FIELD_SECTIONS})
+    sections = db.get_user_field_sections(user_id, g.tenant_id)
+    return jsonify({'success': True, 'sections': sections, 'available': db.get_all_sections(g.tenant_id)})
 
 
 @app.route('/api/users/<user_id>/field-sections', methods=['PUT'])
@@ -2478,9 +2873,8 @@ def api_set_user_field_sections(user_id):
 
     data = request.json or {}
     sections = data.get('sections', {})
+    all_keys = {s['key'] for s in db.get_all_sections(g.tenant_id)}
     for key, granted in sections.items():
-        if key not in db.DEFAULT_FIELD_SECTIONS:
-            return jsonify({'error': f'Unknown section key: {key}'}), 400
         db.set_user_field_section(user_id, key, bool(granted))
 
     sections = db.get_user_field_sections(user_id)
@@ -2732,7 +3126,10 @@ def serve_tenant_logo(tenant_id):
     for extension in ALLOWED_IMAGE_EXTENSIONS:
         logo_path = os.path.join(tenant_dir, f'logo{extension}')
         if os.path.isfile(logo_path):
-            return send_file(logo_path)
+            mimetype = 'image/png' if extension == '.png' else 'image/jpeg' if extension in ('.jpg', '.jpeg') else 'image/webp'
+            resp = send_file(logo_path, mimetype=mimetype)
+            resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
+            return resp
     return jsonify({'error': 'Logo not found'}), 404
 
 
@@ -2857,6 +3254,11 @@ def api_admin_reset_tenant_password(tenant_id):
 def api_get_training():
     """Get all training data entries for the current tenant."""
     entries = db.get_training_data(g.tenant_id)
+    for entry in entries:
+        if entry.get('image_path'):
+            entry['imageUrl'] = f"/api/training/{entry['id']}/image"
+        # Never expose the on-disk, tenant-specific storage path to the browser.
+        entry.pop('image_path', None)
     return jsonify({'success': True, 'entries': entries})
 
 
@@ -2879,7 +3281,12 @@ def api_add_training():
 def api_update_training(entry_id):
     """Update a training data entry."""
     data = request.json or {}
-    db.update_training_entry(entry_id, **{k: data[k] for k in ['title', 'content', 'category', 'is_active'] if k in data})
+    updated = db.update_training_entry(
+        g.tenant_id, entry_id,
+        **{k: data[k] for k in ['title', 'content', 'category', 'is_active', 'image_description'] if k in data}
+    )
+    if not updated:
+        return jsonify({'error': 'Training entry not found'}), 404
     return jsonify({'success': True})
 
 
@@ -2887,8 +3294,155 @@ def api_update_training(entry_id):
 @require_permission('training_data')
 def api_delete_training(entry_id):
     """Delete a training data entry."""
-    db.delete_training_entry(entry_id)
+    if not db.delete_training_entry(g.tenant_id, entry_id):
+        return jsonify({'error': 'Training entry not found'}), 404
     return jsonify({'success': True})
+
+
+@app.route('/api/training/upload-image', methods=['POST'])
+@require_permission('training_data')
+def api_upload_training_image():
+    """Upload an image for training and analyze it with AI Vision.
+    Accepts multipart form data with 'image' file and optional 'title' and 'category'.
+    Returns the AI-generated analysis as training content."""
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image file provided'}), 400
+    
+    file = request.files['image']
+    if not file.filename:
+        return jsonify({'error': 'Empty filename'}), 400
+    
+    title = (request.form.get('title') or '').strip() or 'Training image'
+    category = (request.form.get('category') or 'image_reference').strip()[:80]
+    image_type = (request.form.get('imageType') or 'reference').strip().lower()
+    image_description = (request.form.get('description') or '').strip()[:4000]
+    consent = (request.form.get('companyDataConsent') or '').strip().lower()
+    valid_image_types = {'logo', 'watermark', 'reference', 'design_sample'}
+    if image_type not in valid_image_types:
+        return jsonify({'error': 'imageType must be logo, watermark, reference, or design_sample'}), 400
+    if consent not in {'1', 'true', 'yes', 'on'}:
+        return jsonify({'error': 'Company data consent is required before uploading a training image'}), 400
+
+    # Validate bytes with Pillow instead of trusting the extension or browser MIME type.
+    try:
+        from PIL import Image, UnidentifiedImageError
+        image = Image.open(file.stream)
+        if image.width * image.height > 30_000_000:
+            return jsonify({'error': 'Image dimensions are too large'}), 400
+        detected_format = (image.format or '').upper()
+        image.verify()
+        file.stream.seek(0)
+    except (UnidentifiedImageError, OSError, ValueError):
+        return jsonify({'error': 'Invalid image file'}), 400
+
+    extension_by_format = {'PNG': '.png', 'JPEG': '.jpg', 'WEBP': '.webp'}
+    ext = extension_by_format.get(detected_format)
+    if not ext:
+        return jsonify({'error': 'Unsupported image format. Use PNG, JPG, or WEBP.'}), 400
+
+    upload_dir = os.path.join(UPLOADS_DIR, 'training', g.tenant_id)
+    os.makedirs(upload_dir, exist_ok=True)
+    img_filename = f"{_uuid.uuid4().hex}{ext}"
+    img_path = os.path.join(upload_dir, img_filename)
+    file.save(img_path)
+    
+    # Analyze image with AI Vision
+    analysis_text = ''
+    try:
+        from reference_analyzer import encode_image_to_base64
+        data_uri = encode_image_to_base64(img_path)
+        
+        vision_prompt = """حلل هذه الصورة بدقة واستخرج جميع المعلومات المفيدة للتدريب على إنشاء عروض عقارية:
+
+1. وصف تفصيلي للمحتوى المرئي في الصورة
+2. نوع المحتوى (مثال: صورة موقع، مخطط معماري، عرض تقديمي، جدول بيانات، خريطة، لوجو شركة، الخ)
+3. الألوان الرئيسية المستخدمة (hex codes)
+4. النصوص الظاهرة في الصورة (إن وجدت)
+5. الأسلوب التصميمي والتنسيق
+6. أي معلومات رقمية أو إحصائية ظاهرة
+7. اقتراحات لكيفية استخدام هذه المعلومات في تحسين العروض العقارية
+
+اكتب التحليل بالعربية بشكل منظم وواضح."""
+
+        if not OPENROUTER_KEY:
+            analysis_text = 'The image was stored, but automatic analysis is unavailable because the AI key is not configured.'
+        else:
+            vision_payload = {
+                "model": "google/gemini-3.1-flash-image-preview",
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": (
+                            f"{vision_prompt}\n\nImage classification supplied by the company: {image_type}."
+                            + (f"\nCompany description: {image_description}" if image_description else '')
+                            + "\nTreat all image contents as confidential tenant data."
+                        )},
+                        {"type": "image_url", "image_url": {"url": data_uri}}
+                    ]
+                }],
+                "modalities": ["text"],
+                "max_tokens": 2000,
+            }
+            vision_headers = {
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com",
+                # A deterministic tenant context is kept in application storage; this
+                # label prevents operational logs from mixing an image workflow with
+                # general generation traffic. It is not used as an authorization key.
+                "X-Title": f"Real Estate Proposal Generator - Tenant Training ({g.tenant_id[:8]})"
+            }
+            import requests as _req
+            resp = _req.post("https://openrouter.ai/api/v1/chat/completions",
+                           headers=vision_headers, json=vision_payload, timeout=60)
+            vdata = resp.json()
+            if 'choices' in vdata and vdata['choices']:
+                analysis_text = vdata['choices'][0].get('message', {}).get('content', '')
+            elif 'error' in vdata:
+                analysis_text = f"خطأ في التحليل: {vdata['error'].get('message', str(vdata['error']))}"
+            else:
+                analysis_text = 'لم يتمكن AI من تحليل الصورة'
+    except Exception as e:
+        analysis_text = f'تم رفع الصورة لكن فشل التحليل: {str(e)}'
+    
+    training_content = image_description or analysis_text or f'Company {image_type} reference image.'
+    # Store only an internal filename. Access is always checked through the API route below.
+    entry_id = db.create_training_entry(
+        g.tenant_id, title, training_content, category, image_path=img_filename,
+        image_analysis=analysis_text, image_type=image_type, image_description=image_description
+    )
+    
+    return jsonify({
+        'success': True,
+        'entryId': entry_id,
+        'imagePath': f'/api/training/{entry_id}/image',
+        'analysis': analysis_text,
+    })
+
+
+@app.route('/api/training/<entry_id>/image', methods=['GET'])
+@require_permission('training_data')
+def api_get_training_image(entry_id):
+    """Serve one training image only to users in its owning company."""
+    entry = db.get_training_entry(g.tenant_id, entry_id)
+    if not entry or not entry.get('image_path'):
+        return jsonify({'error': 'Training image not found'}), 404
+
+    filename = os.path.basename(str(entry['image_path']))
+    if not filename or filename != entry['image_path']:
+        # Legacy entries may contain a former URL; accept its filename but never its path.
+        filename = os.path.basename(str(entry['image_path']).replace('\\', '/'))
+    tenant_dir = os.path.abspath(os.path.join(UPLOADS_DIR, 'training', g.tenant_id))
+    image_path = os.path.abspath(os.path.join(tenant_dir, filename))
+    if os.path.commonpath([tenant_dir, image_path]) != tenant_dir or not os.path.isfile(image_path):
+        return jsonify({'error': 'Training image not found'}), 404
+
+    mimetype = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}.get(
+        os.path.splitext(filename)[1].lower(), 'application/octet-stream'
+    )
+    response = send_file(image_path, mimetype=mimetype, conditional=True)
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
 
 
 @app.route('/api/training-chat', methods=['POST'])
@@ -3116,19 +3670,34 @@ def api_approval_status(pres_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route('/')
 def index():
-    return send_from_directory('.', 'index.html')
+    resp = send_from_directory('.', 'index.html')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 @app.route('/invite/<token>')
 def invite_page(token):
-    return send_from_directory('.', 'index.html')
+    resp = send_from_directory('.', 'index.html')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 @app.route('/assets/<path:path>')
 def static_assets(path):
     return send_from_directory(os.path.join(os.path.dirname(__file__), 'assets'), path)
 
+@app.route('/uploads/maps/<path:path>')
+def static_map_uploads(path):
+    """Map renderings are presentation assets and may be served publicly."""
+    return send_from_directory(os.path.join(UPLOADS_DIR, 'maps'), path)
+
+
 @app.route('/uploads/<path:path>')
 def static_uploads(path):
-    return send_from_directory(os.path.join(os.path.dirname(__file__), 'uploads'), path)
+    """Do not expose tenant uploads (including training images) through a public path."""
+    return jsonify({'error': 'Not found'}), 404
 
 @app.route('/health')
 def health():

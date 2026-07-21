@@ -16,6 +16,7 @@ PAGE_W_IN = 13.333
 PAGE_H_IN = 7.5
 
 FONT_DIR = str(PROJECT_ROOT / 'assets' / 'fonts')
+_ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
 
 
 def _font_face_css():
@@ -664,13 +665,6 @@ def _render_metrics(slide, d, num, total):
     start_y = 70
     cards_html = ''
 
-    icons_map = {
-        0: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>',
-        1: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
-        2: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
-        3: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="1.8"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>',
-    }
-
     for idx, m in enumerate(metrics):
         col = idx % cols
         x = PAGE_W_PT - 30 - (col + 1) * cw - col * gap
@@ -678,17 +672,10 @@ def _render_metrics(slide, d, num, total):
         label = m.get('label', '')
         value = str(m.get('value', ''))
         subtitle = m.get('subtitle', '')
-        icon_svg = icons_map.get(idx % 4, icons_map[0]).format(color=primary)
-
         subtitle_html = f'<div style="font-size:7pt;color:#999;margin-top:3pt;">{subtitle}</div>' if subtitle else ''
 
         cards_html += f"""
 <div style="position:absolute;left:{x}pt;top:{y}pt;width:{cw}pt;height:{card_h}pt;background:#FFF;border-radius:10pt;box-shadow:0 2pt 12pt rgba(0,0,0,0.06);padding:16pt;display:flex;flex-direction:column;justify-content:space-between;">
-    <div style="display:flex;justify-content:flex-start;">
-        <div style="width:40pt;height:40pt;border-radius:8pt;background:{_hex_to_rgba(primary, 0.08)};display:flex;align-items:center;justify-content:center;">
-            {icon_svg}
-        </div>
-    </div>
     <div>
         <div style="font-size:8pt;color:#888;margin-bottom:2pt;">{label}</div>
         <div style="font-size:22pt;font-weight:700;color:{primary};line-height:1.2;">{value}</div>
@@ -1044,6 +1031,14 @@ def _default_design(slide_type):
 def _resolve_glm_html(slide, html, num, total):
     if not html:
         return ""
+
+    # Keep exported PDF output aligned with the icon-free presentation contract.
+    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', '', html, flags=re.IGNORECASE)
+    html = re.sub(
+        r'<(?:i|span|div)\b[^>]*(?:class|id)=["\'][^"\']*(?:icon|emoji|lucide|fa-|material-icons)[^"\']*["\'][^>]*>[\s\S]*?</(?:i|span|div)\s*>',
+        '', html, flags=re.IGNORECASE
+    )
+    html = _ICON_RE.sub('', html)
     
     logo_data_uri = _get_logo_data_uri()
     if logo_data_uri:
