@@ -23,7 +23,7 @@ __pycache__/
 *.log
 *.pid
 .codetb-cache/
-*.db
+
 .jwt_secret
 uploads/
 exports/
