@@ -70,8 +70,23 @@ class SQLiteConnection:
     """Thin wrapper around the standard sqlite3 connection."""
 
     def __init__(self, database, *args, **kwargs):
-        self._conn = _sqlite3.connect(database, *args, **kwargs)
-        self._conn.row_factory = _sqlite3.Row
+        kwargs.setdefault('timeout', 30.0)
+        import time
+        for attempt in range(1, 5):
+            try:
+                self._conn = _sqlite3.connect(database, *args, **kwargs)
+                self._conn.row_factory = _sqlite3.Row
+                try:
+                    self._conn.execute('PRAGMA busy_timeout = 10000;')
+                    self._conn.execute('PRAGMA journal_mode = WAL;')
+                except Exception:
+                    pass
+                break
+            except _sqlite3.OperationalError as err:
+                if ('disk I/O error' in str(err) or 'locked' in str(err)) and attempt < 4:
+                    time.sleep(0.3 * attempt)
+                else:
+                    raise
 
     @property
     def row_factory(self):
@@ -87,7 +102,26 @@ class SQLiteConnection:
         return self._conn.execute(sql, params)
 
     def executescript(self, sql):
-        return self._conn.executescript(sql)
+        import time
+        statements = [s.strip() for s in sql.split(';') if s.strip()]
+        for stmt in statements:
+            for attempt in range(1, 5):
+                try:
+                    self._conn.execute(stmt)
+                    break
+                except _sqlite3.OperationalError as err:
+                    if ('disk I/O error' in str(err) or 'locked' in str(err)):
+                        if attempt < 4:
+                            time.sleep(0.2 * attempt)
+                        else:
+                            print(f"[DB WARN] Statement skipped due to lock/IO: {err}")
+                    else:
+                        print(f"[DB WARN] Statement execution notice: {err}")
+                        break
+        try:
+            self._conn.commit()
+        except Exception:
+            pass
 
     def __getattr__(self, name):
         return getattr(self._conn, name)

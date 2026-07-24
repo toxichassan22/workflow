@@ -111,8 +111,13 @@ def _check_maps_rate_limit(tenant_id):
     return None
 
 
+def _get_api_key():
+    return os.environ.get('GOOGLE_MAPS_API_KEY', '') or GOOGLE_API_KEY
+
+
 def _has_api_key():
-    return bool(GOOGLE_API_KEY and GOOGLE_API_KEY.startswith('AIza'))
+    key = _get_api_key()
+    return bool(key and key.startswith('AIza'))
 
 
 def _api_key_error():
@@ -1309,13 +1314,14 @@ def _google_directions_route(origin_lat, origin_lng, destination_lat, destinatio
         'destination': f'{destination_lat},{destination_lng}',
         'mode': 'driving',
         'alternatives': 'false',
-        'key': GOOGLE_API_KEY,
+        'key': _get_api_key(),
     }
     try:
         response = requests.get('https://maps.googleapis.com/maps/api/directions/json', params=params, timeout=15)
         data = response.json()
         if data.get('status') != 'OK' or not data.get('routes'):
-            print(f"[GOOGLE DIRECTIONS] {data.get('status', 'no route')}")
+            err_msg = data.get('error_message', '')
+            print(f"[GOOGLE DIRECTIONS] {data.get('status', 'no route')} - {err_msg}")
             return None
         route = data['routes'][0]
         encoded = route.get('overview_polyline', {}).get('points')
@@ -1337,7 +1343,7 @@ def _google_reverse_geocode_road(lat, lng, tenant_id=None):
     try:
         response = requests.get(
             'https://maps.googleapis.com/maps/api/geocode/json',
-            params={'latlng': f'{lat},{lng}', 'key': GOOGLE_API_KEY, 'language': 'ar'}, timeout=15
+            params={'latlng': f'{lat},{lng}', 'key': _get_api_key(), 'language': 'ar'}, timeout=15
         )
         data = response.json()
         if data.get('status') != 'OK':
@@ -1417,26 +1423,34 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 (center_lat, center_lng - 0.011),
             ]
             seen_road_names = set()
-            for probe_lat, probe_lng in probe_points:
-                snapped = _snap_to_roads(probe_lat, probe_lng, tenant_id=tenant_id)
-                destination_lat = snapped['lat'] if snapped else probe_lat
-                destination_lng = snapped['lng'] if snapped else probe_lng
+
+            def _fetch_probe_route(probe):
+                p_lat, p_lng = probe
+                snapped = _snap_to_roads(p_lat, p_lng, tenant_id=tenant_id)
+                dest_lat = snapped['lat'] if snapped else p_lat
+                dest_lng = snapped['lng'] if snapped else p_lng
                 route = _google_directions_route(
-                    center_lat, center_lng, destination_lat, destination_lng, tenant_id=tenant_id
+                    center_lat, center_lng, dest_lat, dest_lng, tenant_id=tenant_id
                 )
                 if not route:
-                    continue
+                    return None
                 road_name = route.get('summary') or _google_reverse_geocode_road(
-                    destination_lat, destination_lng, tenant_id=tenant_id
+                    dest_lat, dest_lng, tenant_id=tenant_id
                 )
                 road_name = road_name or 'طريق قريب'
-                if road_name in seen_road_names:
-                    continue
-                seen_road_names.add(road_name)
-                road_route_mapping.append((route['coords'], road_name))
-                routes_coords.append(route['coords'])
-                if len(routes_coords) >= 3:
-                    break
+                return (route['coords'], road_name)
+
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                probe_results = list(executor.map(_fetch_probe_route, probe_points))
+
+            for res in probe_results:
+                if res and res[1] not in seen_road_names:
+                    seen_road_names.add(res[1])
+                    road_route_mapping.append(res)
+                    routes_coords.append(res[0])
+                    if len(routes_coords) >= 3:
+                        break
 
         # 3. Draw routes and labels
         placed_label_rects = []  # track (x1,y1,x2,y2) of placed labels to avoid overlap
@@ -1576,26 +1590,37 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     if limit_error:
         return limit_error
 
-    lat = _extract_coordinate(project_data.get('location_lat'))
-    lng = _extract_coordinate(project_data.get('location_lng'))
+    lat = _extract_coordinate(
+        project_data.get('location_lat') or project_data.get('locationLat') or
+        project_data.get('latitude') or project_data.get('lat')
+    )
+    lng = _extract_coordinate(
+        project_data.get('location_lng') or project_data.get('locationLng') or
+        project_data.get('longitude') or project_data.get('lng')
+    )
 
+    # If coordinates are missing, fallback to maps link extraction
     if lat is None or lng is None:
-        maps_link = project_data.get('location_maps_link') or project_data.get('maps_link') or ''
+        maps_link = (
+            project_data.get('location_maps_link') or project_data.get('maps_link') or
+            (project_data.get('location_address') if str(project_data.get('location_address', '')).startswith('http') else '')
+        )
         linked_coords = extract_coords_from_maps_link(maps_link) if maps_link else None
         if linked_coords:
             lat = linked_coords['lat']
             lng = linked_coords['lng']
 
+    # Final fallback: geocode address text if not a URL
     if lat is None or lng is None:
         address = project_data.get('location_address') or project_data.get('location', '')
-        if address:
+        if address and not address.startswith('http'):
             geo = geocode_address(address, tenant_id=tenant_id)
             if geo.get('success'):
                 lat = geo['lat']
                 lng = geo['lng']
 
     if lat is None or lng is None:
-        return {'error': 'No valid location coordinates found'}
+        return {'error': 'لم يتم العثور على موقع أو إحداثيات للمشروع. يرجى إدخال عنوان المشروع أو رابط Google Maps في البيانات.'}
 
     if not force and presentation_id:
         cached = _get_cached_map_images(tenant_id, presentation_id)
@@ -1864,6 +1889,8 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 from db import add_map_image
                 add_map_image(tenant_id, img_suffix, access_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': access_zoom})
 
+
+
     # Generate map_catchment
     if 'catchment' in enabled_maps:
         zones = _parse_catchment_zones(project_data.get('catchment_areas', ''))
@@ -1896,20 +1923,6 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 from db import add_map_image
                 add_map_image(tenant_id, img_suffix, catchment_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'zones': zones})
 
-    # Generate street view images
-    if 'streetview' in enabled_maps:
-        for i, heading in enumerate([0, 90, 180, 270], 1):
-            sv_path = _unique_map_path(tenant_id, presentation_id, f'streetview_{i}')
-            sv_res = get_street_view(lat, lng, heading=heading, output_path=sv_path)
-            if sv_res.get('success'):
-                # Post-process Street View with contrast, vignette, borders, and direction label
-                _post_process_streetview(sv_path, heading, i)
-                placeholder = f"##STREET_VIEW_{i}##"
-                result['placeholders'][placeholder] = sv_path
-                _record_maps_call(tenant_id)
-                from db import add_map_image
-                add_map_image(tenant_id, f'streetview_{i}', sv_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'heading': heading})
-
     return result
 
 
@@ -1925,24 +1938,30 @@ def _extract_coordinate(value):
     """Extract float coordinate from string or number."""
     if value is None:
         return None
-    try:
+    if isinstance(value, (int, float)):
         return float(value)
-    except (ValueError, TypeError):
-        return None
+    if isinstance(value, str):
+        val_str = value.strip()
+        if not val_str:
+            return None
+        match = re.search(r'(-?\d+\.\d+)', val_str)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                pass
+    return None
 
 
 def _parse_landmarks_text(text):
     """Parse landmark text like 'ميدان السارية - 1 دقيقة' into structured list."""
     if not text:
         return []
-    # This is a simple text-only parser; driving times and coordinates will be
-    # enriched later by Places API + Distance Matrix.
     landmarks = []
     for line in text.strip().split('\n'):
         line = line.strip()
         if not line:
             continue
-        # Remove bullet markers and common separators
         line = line.lstrip('-').lstrip('•').strip()
         name = line
         duration = None
@@ -1950,7 +1969,6 @@ def _parse_landmarks_text(text):
             parts = line.rsplit(' - ', 1)
             name = parts[0].strip()
             duration_text = parts[1].strip()
-            # Try to extract a number
             digits = ''.join([c for c in duration_text if c.isdigit()])
             if digits:
                 duration = int(digits)

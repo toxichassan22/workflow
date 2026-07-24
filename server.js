@@ -8,7 +8,7 @@ var { execSync, exec } = require('child_process');
   var envPath = path.join(__dirname, '.env');
   try {
     var lines = fs.readFileSync(envPath, 'utf8').split('\n');
-    lines.forEach(function(line) {
+    lines.forEach(function (line) {
       var trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return;
       var eqIdx = trimmed.indexOf('=');
@@ -85,7 +85,7 @@ function saveTrainingHistory(userId, messages) {
 }
 
 // ═══ Brand Profiles Management ═══
-app.get('/api/branding-profiles', function(req, res) {
+app.get('/api/branding-profiles', function (req, res) {
   var userId = req.query.userId || 'default_user';
   var db = loadUserDB();
   var user = db.users[userId];
@@ -93,7 +93,7 @@ app.get('/api/branding-profiles', function(req, res) {
   res.json({ success: true, profiles: profiles });
 });
 
-app.post('/api/save-branding-profile', function(req, res) {
+app.post('/api/save-branding-profile', function (req, res) {
   var userId = req.body.userId || 'default_user';
   var profile = req.body.profile;
   if (!profile || !profile.id) {
@@ -102,8 +102,8 @@ app.post('/api/save-branding-profile', function(req, res) {
   var db = loadUserDB();
   if (!db.users[userId]) db.users[userId] = {};
   if (!db.users[userId].brandProfiles) db.users[userId].brandProfiles = [];
-  
-  var existingIdx = db.users[userId].brandProfiles.findIndex(function(p) { return p.id === profile.id; });
+
+  var existingIdx = db.users[userId].brandProfiles.findIndex(function (p) { return p.id === profile.id; });
   if (existingIdx !== -1) {
     db.users[userId].brandProfiles[existingIdx] = profile;
   } else {
@@ -113,7 +113,7 @@ app.post('/api/save-branding-profile', function(req, res) {
   res.json({ success: true, profiles: db.users[userId].brandProfiles });
 });
 
-app.post('/api/delete-branding-profile', function(req, res) {
+app.post('/api/delete-branding-profile', function (req, res) {
   var userId = req.body.userId || 'default_user';
   var profileId = req.body.profileId;
   if (!profileId) {
@@ -121,7 +121,7 @@ app.post('/api/delete-branding-profile', function(req, res) {
   }
   var db = loadUserDB();
   if (db.users[userId] && db.users[userId].brandProfiles) {
-    db.users[userId].brandProfiles = db.users[userId].brandProfiles.filter(function(p) { return p.id !== profileId; });
+    db.users[userId].brandProfiles = db.users[userId].brandProfiles.filter(function (p) { return p.id !== profileId; });
     saveUserDB(db);
   }
   var profiles = (db.users[userId] && db.users[userId].brandProfiles) ? db.users[userId].brandProfiles : [];
@@ -132,7 +132,7 @@ function hexToRgb(hex) {
   if (!hex) return '103,13,12';
   hex = String(hex).replace('#', '');
   if (hex.length === 3) {
-    hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
   }
   if (hex.length !== 6) return '103,13,12';
   var r = parseInt(hex.substring(0, 2), 16);
@@ -148,7 +148,7 @@ function customizePrompts(prompt, projectData) {
   var primary = colors.primary || '#670D0C';
   var secondary = colors.secondary || '#C2A176';
   var rgb = hexToRgb(primary);
-  
+
   var result = prompt
     .replace(/منافع الاقتصادية للعقار/g, companyName)
     .replace(/شركة منافع الاقتصادية/g, companyName)
@@ -163,7 +163,7 @@ function customizePrompts(prompt, projectData) {
     .replace(/#C4A35A/g, secondary)
     .replace(/#C5A880/g, secondary)
     .replace(/103,\s*13,\s*12/g, rgb);
-    
+
   return result;
 }
 
@@ -236,12 +236,12 @@ function writeSystemPrombetBackup(messages, aiResponse) {
     if (aiResponse) {
       merged.push({ role: 'assistant', content: typeof aiResponse === 'string' ? aiResponse : JSON.stringify(aiResponse, null, 2) });
     }
-    
-    var backupContent = merged.map(function(m) {
+
+    var backupContent = merged.map(function (m) {
       var contentVal = m.content;
       if (Array.isArray(contentVal)) {
         var contentStr = "";
-        contentVal.forEach(function(part) {
+        contentVal.forEach(function (part) {
           if (part.type === 'text') {
             contentStr += (part.text || '') + '\n';
           } else if (part.type === 'image_url') {
@@ -257,11 +257,11 @@ function writeSystemPrombetBackup(messages, aiResponse) {
       }
       return "[" + m.role.toUpperCase() + "]:\n" + contentVal;
     }).join('\n\n═══════════════════════════════════════\n\n');
-    
+
     fs.writeFileSync(path.join(__dirname, 'systemprombet'), backupContent, 'utf8');
     fs.writeFileSync(path.join(__dirname, 'systemprombet.txt'), backupContent, 'utf8');
     fs.writeFileSync(path.join(__dirname, 'systemprombet.json'), JSON.stringify(merged, null, 2), 'utf8');
-    
+
     // Auto-sync files to GitHub in background if token exists
     syncToGitHub();
   } catch (err) {
@@ -274,24 +274,24 @@ function syncToGitHub() {
   if (!token) {
     return; // Silently skip if no GitHub token is provided
   }
-  
+
   var gitUrl = 'https://toxichassan22:' + token + '@github.com/toxichassan22/manafe-presentation-generator.git';
-  
+
   // Check if git repo exists, if not initialize one (Docker container won't have .git)
   var initCmd = '';
   if (!fs.existsSync(path.join(__dirname, '.git'))) {
     initCmd = 'git init && git remote add origin ' + gitUrl + ' && git fetch origin main && git reset origin/main && ';
   }
-  
+
   var cmd = initCmd +
-            'git config user.email "toxichassan22@github.com" && ' +
-            'git config user.name "toxichassan22" && ' +
-            'git add -f systemprombet systemprombet.txt systemprombet.json users_db.json && ' +
-            'git diff --cached --quiet && echo "No changes to commit" || ' +
-            '(git commit -m "Auto-save chat history and backup [bot]" && ' +
-            'git push ' + gitUrl + ' HEAD:main)';
-            
-  exec(cmd, { cwd: __dirname }, function(err, stdout, stderr) {
+    'git config user.email "toxichassan22@github.com" && ' +
+    'git config user.name "toxichassan22" && ' +
+    'git add -f systemprombet systemprombet.txt systemprombet.json users_db.json && ' +
+    'git diff --cached --quiet && echo "No changes to commit" || ' +
+    '(git commit -m "Auto-save chat history and backup [bot]" && ' +
+    'git push ' + gitUrl + ' HEAD:main)';
+
+  exec(cmd, { cwd: __dirname }, function (err, stdout, stderr) {
     if (err) {
       console.error('[Git Auto-Save] Sync failed:', err.message);
       if (stderr) console.error('[Git Auto-Save] stderr:', stderr);
@@ -305,13 +305,15 @@ function buildMessagesWithTraining(systemContent, currentMessages, userId) {
   var MAX_HISTORY_CHARS = 4000; // Limit training history to prevent exceeding GLM context limits
   var history = getTrainingHistory(userId || 'default_user');
   var merged = [];
-  
+
   if (systemContent) {
-    merged.push({ role: 'system', content: [
+    merged.push({
+      role: 'system', content: [
         { type: 'text', text: systemContent, cache_control: { type: 'ephemeral' } }
-    ]});
+      ]
+    });
   }
-  
+
   // Prepend training history messages for implicit context caching, but limit total size
   if (history && history.length > 0) {
     var historyChars = 0;
@@ -323,21 +325,21 @@ function buildMessagesWithTraining(systemContent, currentMessages, userId) {
       historyChars += msgLen;
       trimmedHistory.unshift(history[i]);
     }
-    trimmedHistory.forEach(function(msg) {
+    trimmedHistory.forEach(function (msg) {
       if (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system') {
         merged.push({ role: msg.role, content: msg.content });
       }
     });
   }
-  
+
   // Append current prompt/messages
-  currentMessages.forEach(function(msg) {
+  currentMessages.forEach(function (msg) {
     merged.push(msg);
   });
 
   // Backup system prompt & conversation chat (pre-response)
   writeSystemPrombetBackup(merged, null);
-  
+
   return merged;
 }
 
@@ -353,7 +355,7 @@ async function callZaiChat(systemPrompt, userContent, userId, options) {
   // Backward compatible: referenceImage (single) is treated as the first image.
   var allImages = [];
   if (Array.isArray(images)) {
-    images.forEach(function(img) {
+    images.forEach(function (img) {
       if (img && typeof img === 'string' && (img.startsWith('data:image/') || img.startsWith('http'))) {
         allImages.push(img);
       }
@@ -368,7 +370,7 @@ async function callZaiChat(systemPrompt, userContent, userId, options) {
   var userMessageContent;
   if (allImages.length > 0) {
     userMessageContent = [{ type: "text", text: userContent }];
-    allImages.forEach(function(img) {
+    allImages.forEach(function (img) {
       userMessageContent.push({ type: "image_url", image_url: { url: img } });
     });
   } else {
@@ -417,7 +419,7 @@ async function callVisionChat(systemPrompt, userText, images, userId, options) {
   // Build user content: text first, then each image
   var userContent = [{ type: "text", text: userText }];
   if (Array.isArray(images)) {
-    images.forEach(function(img) {
+    images.forEach(function (img) {
       if (img && typeof img === 'string' && (img.startsWith('data:image/') || img.startsWith('http'))) {
         userContent.push({ type: "image_url", image_url: { url: img } });
       }
@@ -430,7 +432,7 @@ async function callVisionChat(systemPrompt, userText, images, userId, options) {
   }
   // Append prior conversation history (keep it compact)
   if (Array.isArray(history)) {
-    history.forEach(function(h) {
+    history.forEach(function (h) {
       if (h && h.role && h.content) {
         messages.push({ role: h.role, content: typeof h.content === 'string' ? h.content : JSON.stringify(h.content) });
       }
@@ -469,27 +471,27 @@ function computeCacheAnalytics(responseJson, fallbackSessionId) {
   var promptTokens = 0;
   var completionTokens = 0;
   var totalTokens = 0;
-  
+
   if (usage) {
     promptTokens = usage.prompt_tokens || 0;
     completionTokens = usage.completion_tokens || 0;
     totalTokens = usage.total_tokens || 0;
-    
+
     if (typeof usage.cached_tokens === 'number') {
       cachedTokens = usage.cached_tokens;
     } else if (usage.prompt_tokens_details && typeof usage.prompt_tokens_details.cached_tokens === 'number') {
       cachedTokens = usage.prompt_tokens_details.cached_tokens;
     }
   }
-  
+
   var savingPercentage = 0;
   if (promptTokens > 0) {
     savingPercentage = parseFloat(((cachedTokens / promptTokens) * 100).toFixed(1));
   }
-  
+
   var status = cachedTokens > 0 ? 'HIT' : 'MISS';
   var sessionId = responseJson.id || fallbackSessionId || 'sess_' + Math.random().toString(36).substring(2, 11);
-  
+
   return {
     status: status,
     cached_tokens: cachedTokens,
@@ -508,7 +510,7 @@ function getMockImageUri() {
       var data = fs.readFileSync(p);
       return 'data:image/png;base64,' + data.toString('base64');
     }
-  } catch(e) {}
+  } catch (e) { }
   return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNmYGD4DwAEhQGDc2a8fAAAAABJRU5ErkJggg==';
 }
 
@@ -517,7 +519,7 @@ function getMockImageUri() {
 // ═══════════════════════════════════════════════════════════════
 
 // Serve project data
-app.get('/api/project-data', function(req, res) {
+app.get('/api/project-data', function (req, res) {
   var dataPath = path.join(__dirname, 'project-data.json');
   if (fs.existsSync(dataPath)) {
     res.json(JSON.parse(fs.readFileSync(dataPath, 'utf8')));
@@ -527,7 +529,7 @@ app.get('/api/project-data', function(req, res) {
 });
 
 // Generate presentation (existing - calls glm-designer.js)
-app.post('/api/generate', function(req, res) {
+app.post('/api/generate', function (req, res) {
   var topic = req.body.topic;
   if (!topic) {
     return res.status(400).json({ error: 'Topic is required' });
@@ -541,9 +543,9 @@ app.post('/api/generate', function(req, res) {
   try {
     var dataFile = path.join(__dirname, 'project-data.json');
     var cmd = 'node glm-designer.js "' + topic.replace(/"/g, '\\"') + '" ' + dataFile;
-    var output = execSync(cmd, { 
-      cwd: __dirname, 
-      encoding: 'utf8', 
+    var output = execSync(cmd, {
+      cwd: __dirname,
+      encoding: 'utf8',
       timeout: 300000,
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -551,15 +553,15 @@ app.post('/api/generate', function(req, res) {
 
     // Find the generated file
     var files = fs.readdirSync(path.join(__dirname, 'outputs'))
-      .filter(function(f) { return f.endsWith('.pptx'); })
-      .map(function(f) { 
-        return { name: f, time: fs.statSync(path.join(__dirname, 'outputs', f)).mtime.getTime() }; 
+      .filter(function (f) { return f.endsWith('.pptx'); })
+      .map(function (f) {
+        return { name: f, time: fs.statSync(path.join(__dirname, 'outputs', f)).mtime.getTime() };
       })
-      .sort(function(a, b) { return b.time - a.time; });
+      .sort(function (a, b) { return b.time - a.time; });
 
     if (files.length > 0) {
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         file: files[0].name,
         downloadUrl: '/outputs/' + files[0].name
       });
@@ -573,35 +575,35 @@ app.post('/api/generate', function(req, res) {
 });
 
 // List generated files
-app.get('/api/files', function(req, res) {
+app.get('/api/files', function (req, res) {
   var outDir = path.join(__dirname, 'outputs');
   if (!fs.existsSync(outDir)) {
     return res.json([]);
   }
   var files = fs.readdirSync(outDir)
-    .filter(function(f) { return f.endsWith('.pptx'); })
-    .map(function(f) { 
-      return { 
-        name: f, 
+    .filter(function (f) { return f.endsWith('.pptx'); })
+    .map(function (f) {
+      return {
+        name: f,
         url: '/outputs/' + f,
         size: fs.statSync(path.join(outDir, f)).size,
         time: fs.statSync(path.join(outDir, f)).mtime
-      }; 
+      };
     })
-    .sort(function(a, b) { return new Date(b.time) - new Date(a.time); });
+    .sort(function (a, b) { return new Date(b.time) - new Date(a.time); });
   res.json(files);
 });
 
 // ─────────────────────────────────────────────
 //  AI Customization / Training History Endpoints
 // ─────────────────────────────────────────────
-app.post('/api/save-training', function(req, res) {
+app.post('/api/save-training', function (req, res) {
   var messages = req.body.messages || req.body.history;
   var userId = req.body.userId || 'default_user';
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'Messages array is required' });
   }
-  
+
   try {
     saveTrainingHistory(userId, messages);
     writeSystemPrombetBackup(messages, null);
@@ -613,7 +615,7 @@ app.post('/api/save-training', function(req, res) {
   }
 });
 
-app.get('/api/get-training', function(req, res) {
+app.get('/api/get-training', function (req, res) {
   var userId = req.query.userId || 'default_user';
   try {
     var history = getTrainingHistory(userId);
@@ -632,7 +634,7 @@ app.get('/api/get-training', function(req, res) {
 //  1. POST /api/generate-main-image
 //     Generate the main cover image via Gemini Flash
 // ─────────────────────────────────────────────
-app.post('/api/generate-main-image', async function(req, res) {
+app.post('/api/generate-main-image', async function (req, res) {
   var prompt = req.body.prompt;
   var referenceImage = req.body.referenceImage;
   if (!prompt) {
@@ -678,7 +680,7 @@ app.post('/api/generate-main-image', async function(req, res) {
 //  2. POST /api/generate-images
 //     Generate multiple AI images (mood board)
 // ─────────────────────────────────────────────
-app.post('/api/generate-images', async function(req, res) {
+app.post('/api/generate-images', async function (req, res) {
   var prompts = req.body.prompts;
   var referenceImage = req.body.referenceImage;
   if (!prompts || !Array.isArray(prompts) || prompts.length === 0) {
@@ -688,7 +690,7 @@ app.post('/api/generate-images', async function(req, res) {
   if (req.body.mock) {
     console.log('  [Mock Mode] Returning mock variant images');
     var mockImg = getMockImageUri();
-    var images = prompts.map(function(p) { return { url: mockImg, prompt: p }; });
+    var images = prompts.map(function (p) { return { url: mockImg, prompt: p }; });
     return res.json({ success: true, images: images });
   }
 
@@ -716,7 +718,7 @@ app.post('/api/generate-images', async function(req, res) {
           console.log('    ✓ Fallback created');
         }
         if (i < prompts.length - 1) {
-          await new Promise(function(r) { setTimeout(r, 1500); });
+          await new Promise(function (r) { setTimeout(r, 1500); });
         }
       }
     } else {
@@ -742,7 +744,7 @@ app.post('/api/generate-images', async function(req, res) {
             images.push({ url: firstImage, prompt: prompts[i] });
             console.log('    ✓ Used base image as fallback');
           }
-          await new Promise(function(r) { setTimeout(r, 1500); });
+          await new Promise(function (r) { setTimeout(r, 1500); });
         }
       } else {
         // If first image fails, generate all independently
@@ -753,13 +755,13 @@ app.post('/api/generate-images', async function(req, res) {
           );
           images.push({ url: img, prompt: prompts[i] });
           if (i < prompts.length - 1) {
-            await new Promise(function(r) { setTimeout(r, 1500); });
+            await new Promise(function (r) { setTimeout(r, 1500); });
           }
         }
       }
     }
 
-    console.log('  ✓ Generated ' + images.filter(function(x) { return x.url; }).length + '/' + prompts.length + ' images');
+    console.log('  ✓ Generated ' + images.filter(function (x) { return x.url; }).length + '/' + prompts.length + ' images');
     res.json({ success: true, images: images });
   } catch (err) {
     console.error('  ✗ Images error:', err.message);
@@ -771,7 +773,7 @@ app.post('/api/generate-images', async function(req, res) {
 //  3. POST /api/edit-deck-data
 //     AI-powered editing of project form data
 // ─────────────────────────────────────────────
-app.post('/api/edit-deck-data', async function(req, res) {
+app.post('/api/edit-deck-data', async function (req, res) {
   var editRequest = req.body.request;
   var projectData = req.body.data;
   var userId = req.body.userId || 'default_user';
@@ -796,7 +798,7 @@ RULES:
 - Return the FULL data object with all fields`;
 
     var userMessage = 'PROJECT DATA:\n' + JSON.stringify(projectData, null, 2) + '\n\nEDIT REQUEST:\n' + editRequest;
-    
+
     var { data, messages } = await callZaiChat(systemPrompt, userMessage, userId, {
       referenceImage: projectData ? projectData.mainImageData : null
     });
@@ -812,7 +814,7 @@ RULES:
     }
 
     var resultText = data.choices[0].message.content.trim();
-    
+
     // Backup the full conversation (including the AI response)
     writeSystemPrombetBackup(messages, resultText);
 
@@ -835,7 +837,7 @@ RULES:
 //  4. POST /api/ai-edit-slide
 //     AI-powered single slide content editing
 // ─────────────────────────────────────────────
-app.post('/api/ai-edit-slide', async function(req, res) {
+app.post('/api/ai-edit-slide', async function (req, res) {
   var slideTitle = req.body.slideTitle;
   var slideContent = req.body.slideContent;
   var editRequest = req.body.editRequest;
@@ -897,7 +899,7 @@ RULES:
 //  5. POST /api/ai-chat
 //     General AI chat for slide editing
 // ─────────────────────────────────────────────
-app.post('/api/ai-chat', async function(req, res) {
+app.post('/api/ai-chat', async function (req, res) {
   var message = req.body.message;
   var slidesData = req.body.slidesData;
   var currentSlideIdx = req.body.currentSlideIdx;
@@ -947,7 +949,7 @@ Return ONLY valid JSON.`;
       message: message
     };
     if (slidesData) {
-      contextData.slides = slidesData.map(function(s, i) {
+      contextData.slides = slidesData.map(function (s, i) {
         return { idx: i, title: s.title, contentPreview: (s.content || '').substring(0, 200) };
       });
     }
@@ -987,7 +989,7 @@ Return ONLY valid JSON.`;
 //  5b. POST /api/generate-cover-prompt
 //      Generate image prompt from project data using GLM
 // ─────────────────────────────────────────────
-app.post('/api/generate-cover-prompt', async function(req, res) {
+app.post('/api/generate-cover-prompt', async function (req, res) {
   var projectData = req.body.projectData || {};
 
   if (req.body.mock) {
@@ -1043,7 +1045,7 @@ app.post('/api/generate-cover-prompt', async function(req, res) {
 //  6. POST /api/generate-slide-image
 //     Generate a single image for a specific slide
 // ─────────────────────────────────────────────
-app.post('/api/generate-slide-image', async function(req, res) {
+app.post('/api/generate-slide-image', async function (req, res) {
   var prompt = req.body.prompt;
   var referenceImage = req.body.referenceImage;
 
@@ -1087,7 +1089,7 @@ app.post('/api/generate-slide-image', async function(req, res) {
 //  7. POST /api/generate-outline
 //     GLM 5.1 generates outline structure (slide titles + bullets)
 // ─────────────────────────────────────────────
-app.post('/api/generate-outline', async function(req, res) {
+app.post('/api/generate-outline', async function (req, res) {
   var projectData = truncateProjectData(req.body.projectData, 4000);
   var userId = req.body.userId || 'default_user';
   var totalSlides = parseInt(req.body.slideCount) || 14;
@@ -1120,7 +1122,7 @@ app.post('/api/generate-outline', async function(req, res) {
       '- الشريحتان 2 إلى ' + (totalSlides - 1) + ' = شرائح محتوى (هنا تضع أنت العناوين والنقاط)\n\n' +
       'مهمتك: ولّد ' + contentCount + ' عنوان شريحة محتوى مع النقاط الأساسية.\n\n' +
       'اختر من هذه المواضيع (' + contentCount + ' فقط):\n' +
-      allTopics.map(function(t, i) { return (i + 1) + '. ' + t; }).join('\n') + '\n\n' +
+      allTopics.map(function (t, i) { return (i + 1) + '. ' + t; }).join('\n') + '\n\n' +
       'أعد النتيجة كـ JSON فقط بدون أي نص إضافي بالشكل:\n' +
       '{"slides": [{"title": "عنوان الشريحة", "bullets": ["نقطة 1", "نقطة 2"], "requires_image": true أو false}]}\n\n' +
       'قواعد:\n' +
@@ -1167,7 +1169,7 @@ app.post('/api/generate-outline', async function(req, res) {
 //  7b. POST /api/generate-titles
 //      Fast: returns just slide titles (no bullets)
 // ─────────────────────────────────────────────
-app.post('/api/generate-titles', async function(req, res) {
+app.post('/api/generate-titles', async function (req, res) {
   var projectData = truncateProjectData(req.body.projectData, 4000);
   var userId = req.body.userId || 'default_user';
   var totalSlides = parseInt(req.body.slideCount) || 16;
@@ -1196,7 +1198,7 @@ app.post('/api/generate-titles', async function(req, res) {
       { title: 'غلاف المشروع', requires_image: true, type: 'cover', bullets: [] },
       { title: 'فهرس المحتويات', requires_image: false, type: 'index', bullets: [] }
     ];
-    mockTitles.forEach(function(t) { mockFinalTitles.push({ title: t, requires_image: false, type: 'content', bullets: [] }); });
+    mockTitles.forEach(function (t) { mockFinalTitles.push({ title: t, requires_image: false, type: 'content', bullets: [] }); });
     mockFinalTitles.push({ title: 'المود بورد', requires_image: false, type: 'mood_board', bullets: [] });
     mockFinalTitles.push({ title: 'ختام العرض', requires_image: false, type: 'closing', bullets: [] });
     return res.json({
@@ -1239,7 +1241,7 @@ app.post('/api/generate-titles', async function(req, res) {
       '- العنوان الواحد يصف محتوى الشريحة بالكامل\n' +
       '- مثال جيد: "التكاليف: 146 مليون ريال (أرض + تطوير)" | مثال سيء: "التكاليف"\n\n' +
       'اختر من هذه المواضيع (' + contentCount + ' فقط):\n' +
-      allTopics.map(function(t, i) { return (i + 1) + '. ' + t; }).join('\n') + '\n\n' +
+      allTopics.map(function (t, i) { return (i + 1) + '. ' + t; }).join('\n') + '\n\n' +
       'أعد النتيجة كـ JSON فقط بالصيغة:\n' +
       '{"titles": [{"title": "عنوان الشريحة الواضح والمفصل", "requires_image": true أو false}]}\n\n' +
       'قواعد:\n' +
@@ -1292,7 +1294,7 @@ app.post('/api/generate-titles', async function(req, res) {
 //  7b2. POST /api/official-outline
 //       Returns a fixed official outline (no AI call)
 // ─────────────────────────────────────────────
-app.post('/api/official-outline', async function(req, res) {
+app.post('/api/official-outline', async function (req, res) {
   var projectData = req.body.projectData || {};
   var totalSlides = 16;
 
@@ -1301,66 +1303,90 @@ app.post('/api/official-outline', async function(req, res) {
   var officialTitles = [
     { title: 'غلاف المشروع', requires_image: true, type: 'cover', bullets: [] },
     { title: 'فهرس المحتويات', requires_image: false, type: 'index', bullets: [] },
-    { title: 'الملخص التنفيذي', requires_image: false, type: 'content', bullets: [
-      'نظرة عامة على المشروع والأهداف الرئيسية',
-      'إجمالي التكلفة والعائد المتوقع',
-      'التوصية النهائية للمستثمرين'
-    ]},
-    { title: 'فكرة المشروع والهيكلة', requires_image: false, type: 'content', bullets: [
-      'تعريف المشروع ورسالته',
-      'هيكلة المشروع والunits المختلفة',
-      'الجهة المطورة والخبرات'
-    ]},
-    { title: 'مميزات الموقع', requires_image: true, type: 'content', bullets: [
-      'الموقع الجغرافي والاستراتيجي',
-      'البنية التحتية المحيطة',
-      'سهولة الوصول والمواصلات'
-    ]},
-    { title: 'مميزات المشروع', requires_image: true, type: 'content', bullets: [
-      'التصميم المعماري والعصري',
-      'المرافق والتجهيزات الفاخرة',
-      'نظام الأمان والتشغيل الذكي'
-    ]},
-    { title: 'مكونات المشروع والمساحات', requires_image: false, type: 'content', bullets: [
-      'تفصيل الوحدات السكنية والتجارية',
-      'المساحات المبنية والتأجيرية',
-      'أسعار الإيجار المقدرة'
-    ]},
-    { title: 'افتراضات الربح التشغيلي التأجيري', requires_image: false, type: 'content', bullets: [
-      'متوسط إيجار المتر ورسوم الخدمات',
-      'الإيرادات السنوية المتوقعة',
-      'المصروف التشغيلي السنوي'
-    ]},
-    { title: 'افتراضات التكاليف', requires_image: false, type: 'content', bullets: [
-      'تكلفة الأرض والتطوير',
-      'إجمالي التكلفة الاستثمارية',
-      'هيكل التمويل المتوقع'
-    ]},
-    { title: 'الأرباح والتخارج', requires_image: false, type: 'content', bullets: [
-      'الربح التشغيلي طوال فترة المشروع',
-      'قيمة التخارج المتوقعة',
-      'معامل الرسملة وال returns'
-    ]},
-    { title: 'المؤشرات المالية المتوقعة', requires_image: false, type: 'content', bullets: [
-      'نسبة العائد السنوي على الاستثمار',
-      'نسبة صافي الربح التشغيلي NOI',
-      'فترة استرداد رأس المال'
-    ]},
-    { title: 'الجدول الزمني ومراحل المشروع', requires_image: false, type: 'content', bullets: [
-      'مراحل التصميم والتصاريح',
-      'مراحل البناء والتشطيبات',
-      'موعد التسليم والتشغيل'
-    ]},
-    { title: 'فرص الاستثمار ونقاط القوة', requires_image: false, type: 'content', bullets: [
-      'الطلب المتزايد في المنطقة',
-      'العائد الإيجالي المرتفع',
-      'فرصة ارتفاع القيمة'
-    ]},
-    { title: 'المخاطر والافتراضات', requires_image: false, type: 'content', bullets: [
-      'مخاطر الترخيص والتأخير',
-      'تقلبات أسعار البناء',
-      'مخاطر السوق والمنافسة'
-    ]},
+    {
+      title: 'الملخص التنفيذي', requires_image: false, type: 'content', bullets: [
+        'نظرة عامة على المشروع والأهداف الرئيسية',
+        'إجمالي التكلفة والعائد المتوقع',
+        'التوصية النهائية للمستثمرين'
+      ]
+    },
+    {
+      title: 'فكرة المشروع والهيكلة', requires_image: false, type: 'content', bullets: [
+        'تعريف المشروع ورسالته',
+        'هيكلة المشروع والunits المختلفة',
+        'الجهة المطورة والخبرات'
+      ]
+    },
+    {
+      title: 'مميزات الموقع', requires_image: true, type: 'content', bullets: [
+        'الموقع الجغرافي والاستراتيجي',
+        'البنية التحتية المحيطة',
+        'سهولة الوصول والمواصلات'
+      ]
+    },
+    {
+      title: 'مميزات المشروع', requires_image: true, type: 'content', bullets: [
+        'التصميم المعماري والعصري',
+        'المرافق والتجهيزات الفاخرة',
+        'نظام الأمان والتشغيل الذكي'
+      ]
+    },
+    {
+      title: 'مكونات المشروع والمساحات', requires_image: false, type: 'content', bullets: [
+        'تفصيل الوحدات السكنية والتجارية',
+        'المساحات المبنية والتأجيرية',
+        'أسعار الإيجار المقدرة'
+      ]
+    },
+    {
+      title: 'افتراضات الربح التشغيلي التأجيري', requires_image: false, type: 'content', bullets: [
+        'متوسط إيجار المتر ورسوم الخدمات',
+        'الإيرادات السنوية المتوقعة',
+        'المصروف التشغيلي السنوي'
+      ]
+    },
+    {
+      title: 'افتراضات التكاليف', requires_image: false, type: 'content', bullets: [
+        'تكلفة الأرض والتطوير',
+        'إجمالي التكلفة الاستثمارية',
+        'هيكل التمويل المتوقع'
+      ]
+    },
+    {
+      title: 'الأرباح والتخارج', requires_image: false, type: 'content', bullets: [
+        'الربح التشغيلي طوال فترة المشروع',
+        'قيمة التخارج المتوقعة',
+        'معامل الرسملة وال returns'
+      ]
+    },
+    {
+      title: 'المؤشرات المالية المتوقعة', requires_image: false, type: 'content', bullets: [
+        'نسبة العائد السنوي على الاستثمار',
+        'نسبة صافي الربح التشغيلي NOI',
+        'فترة استرداد رأس المال'
+      ]
+    },
+    {
+      title: 'الجدول الزمني ومراحل المشروع', requires_image: false, type: 'content', bullets: [
+        'مراحل التصميم والتصاريح',
+        'مراحل البناء والتشطيبات',
+        'موعد التسليم والتشغيل'
+      ]
+    },
+    {
+      title: 'فرص الاستثمار ونقاط القوة', requires_image: false, type: 'content', bullets: [
+        'الطلب المتزايد في المنطقة',
+        'العائد الإيجالي المرتفع',
+        'فرصة ارتفاع القيمة'
+      ]
+    },
+    {
+      title: 'المخاطر والافتراضات', requires_image: false, type: 'content', bullets: [
+        'مخاطر الترخيص والتأخير',
+        'تقلبات أسعار البناء',
+        'مخاطر السوق والمنافسة'
+      ]
+    },
     { title: 'المود بورد', requires_image: false, type: 'mood_board', bullets: [] },
     { title: 'الختام', requires_image: false, type: 'closing', bullets: [] }
   ];
@@ -1377,14 +1403,14 @@ app.post('/api/official-outline', async function(req, res) {
 //  7c. POST /api/generate-bullets
 //      Returns bullets for multiple slides in parallel
 // ─────────────────────────────────────────────
-app.post('/api/generate-bullets', async function(req, res) {
+app.post('/api/generate-bullets', async function (req, res) {
   var projectData = truncateProjectData(req.body.projectData, 4000);
   var slides = req.body.slides || []; // [{index, title}, ...]
   var userId = req.body.userId || 'default_user';
 
   if (req.body.mock) {
     console.log('  [Mock Mode] Returning mock bullets for ' + slides.length + ' slides');
-    var mockResults = slides.map(function(s) {
+    var mockResults = slides.map(function (s) {
       var bullets = [];
       if (s.title === "مميزات الموقع") {
         bullets = [
@@ -1419,7 +1445,7 @@ app.post('/api/generate-bullets', async function(req, res) {
   console.log('\n[Bullets] Generating bullets for ' + slides.length + ' slides...');
 
   try {
-    var promises = slides.map(function(slide) {
+    var promises = slides.map(function (slide) {
       var systemContent = 'أنت خبير في العروض التقديمية الاستثمارية. أنشئ 3-5 نقاط مختصرة واحترافية لهذه الشريحة. إذا كانت الشريحة هي "مميزات الموقع" وكان هناك رابط قوقل ماب (googleMapsLink) في بيانات المشروع، أضف نقطة تحتوي على رابط قوقل ماب المعطى بوضوح.\n\nأعد النتيجة كـ JSON فقط:\n{"bullets": ["نقطة 1", "نقطة 2", "نقطة 3"]}';
       var userContent = 'بيانات المشروع:\n' + JSON.stringify(projectData || {}, null, 2) + '\n\nعنوان الشريحة: ' + slide.title;
 
@@ -1427,22 +1453,22 @@ app.post('/api/generate-bullets', async function(req, res) {
         maxTokens: 1000,
         disableThinking: true,
         referenceImage: projectData ? projectData.mainImageData : null
-      }).then(function(result) {
+      }).then(function (result) {
         var d = result.data;
         var m = (d.choices && d.choices[0] && d.choices[0].message) ? d.choices[0].message : {};
         var text = (m.content || '').trim();
         var jm = text.match(/\{[\s\S]*\}/);
         var bullets = [];
-        if (jm) { try { bullets = JSON.parse(jm[0]).bullets || []; } catch(e) {} }
+        if (jm) { try { bullets = JSON.parse(jm[0]).bullets || []; } catch (e) { } }
         return { index: slide.index, title: slide.title, bullets: bullets, usage: d.usage, id: d.id };
-      }).catch(function(err) {
+      }).catch(function (err) {
         console.error('  ✗ Bullet error ' + slide.index + ':', err.message);
         return { index: slide.index, title: slide.title, bullets: [], usage: null, id: null };
       });
     });
 
     var results = await Promise.all(promises);
-    results.sort(function(a, b) { return a.index - b.index; });
+    results.sort(function (a, b) { return a.index - b.index; });
 
     // Consolidate caching analytics across parallel requests
     var totalPromptTokens = 0;
@@ -1451,7 +1477,7 @@ app.post('/api/generate-bullets', async function(req, res) {
     var totalTokensCount = 0;
     var sessionIds = [];
 
-    results.forEach(function(r) {
+    results.forEach(function (r) {
       if (r.usage) {
         totalPromptTokens += r.usage.prompt_tokens || 0;
         totalCompletionTokens += r.usage.completion_tokens || 0;
@@ -1500,14 +1526,14 @@ app.post('/api/generate-bullets', async function(req, res) {
 //  8. POST /api/generate-content
 //     GLM 5.1 writes full content for all slides
 // ─────────────────────────────────────────────
-app.post('/api/generate-content', async function(req, res) {
+app.post('/api/generate-content', async function (req, res) {
   var projectData = truncateProjectData(req.body.projectData, 4000);
   var outline = req.body.outline;
   var userId = req.body.userId || 'default_user';
 
   // Truncate outline to prevent exceeding GLM context limits
   if (outline && outline.length > 0) {
-    outline = outline.map(function(s) {
+    outline = outline.map(function (s) {
       return {
         title: s.title || '',
         bullets: Array.isArray(s.bullets) ? s.bullets.slice(0, 4) : (s.bullets || ''),
@@ -1518,15 +1544,15 @@ app.post('/api/generate-content', async function(req, res) {
 
   if (req.body.mock) {
     console.log('  [Mock Mode] Returning mock HTML content for slides');
-    var mockSlides = outline.map(function(s, idx) {
+    var mockSlides = outline.map(function (s, idx) {
       var html = '<div class="ge-slide-title">' + s.title + '</div>';
       html += '<div class="ge-slide-subtitle">تفاصيل وبنية الشريحة الاستثمارية ' + (idx + 1) + '</div>';
-      
+
       if (s.title === "مميزات الموقع" && projectData && projectData.googleMapsLink) {
         html += '<div class="ge-slide-body">';
         html += '<ul>';
         if (s.bullets && s.bullets.length > 0) {
-          s.bullets.forEach(function(b) {
+          s.bullets.forEach(function (b) {
             html += '<li>' + b + '</li>';
           });
         }
@@ -1539,7 +1565,7 @@ app.post('/api/generate-content', async function(req, res) {
         html += '<div class="ge-slide-body">';
         html += '<ul>';
         if (s.bullets && s.bullets.length > 0) {
-          s.bullets.forEach(function(b) {
+          s.bullets.forEach(function (b) {
             html += '<li>' + b + '</li>';
           });
         } else {
@@ -1613,7 +1639,7 @@ app.post('/api/generate-content', async function(req, res) {
               try {
                 var slide = JSON.parse(match[0]);
                 if (slide.title) slides.push(slide);
-              } catch (e) {}
+              } catch (e) { }
             }
             if (slides.length > 0) {
               result = { slides: slides };
@@ -1641,7 +1667,7 @@ app.post('/api/generate-content', async function(req, res) {
 //  9. POST /api/organize-text
 //     GLM 5.1 organizes raw text across slides
 // ─────────────────────────────────────────────
-app.post('/api/organize-text', async function(req, res) {
+app.post('/api/organize-text', async function (req, res) {
   var projectData = truncateProjectData(req.body.projectData, 4000);
   var rawText = req.body.rawText;
   var userId = req.body.userId || 'default_user';
@@ -1700,8 +1726,11 @@ var DESIGNER_SYSTEM_PROMPT = `أنت مصمم عروض استثمارية عقا
 3. كل النصوص عربية. كل المحاذاة يمين. الاتجاه RTL. dir="rtl" lang="ar" على كل حاوية.
 4. كل شريحة <div> قائمة بذاتها بأنماط مضمّنة (inline CSS) — بدون ملفات خارجية، بدون position:absolute مفرط (فقط للطبقات الخلفية والشعار).
 5. الحاوية دائماً: width:1280px;height:720px;overflow:hidden;box-sizing:border-box;font-family:'The Sans Arabic','Cairo','Tajawal',sans-serif;position:relative.
-6. الأرقام المالية كبيرة جداً وبارزة (28-48px) ومنسّقة بفواصل (مثال: 1,500,000).
-7. استخدم بطاقات بظلال خفيفة وزوايا مدورة (border-radius:12-16px)، حشو داخلي كافٍ (padding:18-24px)، النص لا يلمس الحواف.
+   ⚠️ إرشاد الأبعاد الصارم: مساحة المحتوى الصافية بين الهيدر والفوتر هي 1200px عرض × 580px ارتفاع كحد أقصى. يُحظر تماماً تصميم أي شريحة يتجاوز ارتفاع محتواها 580px.
+   أحجام الخطوط المحددة: العنوان الرئيسي 24-28px (أقصى حد 32px)، عناوين البطاقات 15-18px، النص الداخلي والجداول 12-14px، الأرقام المالية الكبيرة 24-32px (أقصى حد 36px).
+   تنسيق التكيف: إذا كان في الشريحة أكثر من 4 بطاقات أو بنود، وزعها فوراً على شبكة متعددة الأعمدة (Grid 2x2 أو 3x2 أو 4x2 مع gap:10px) وحشو داخلي للبطاقة (padding:10px 14px)، وممنوع رص البطاقات في عمود رأسي واحد طويل يتجاوز أبعاد الشريحة.
+6. الأرقام المالية كبيرة جداً وبارزة (24-32px) ومنسّقة بفواصل (مثال: 1,500,000).
+7. استخدم بطاقات بظلال خفيفة وزوايا مدورة (border-radius:10-12px)، حشو داخلي كافٍ ومناسب (padding:10-14px)، box-sizing:border-box لكل العناصر، النص لا يلمس الحواف.
 8. أيقونات SVG خطية احترافية مضمّنة (line-style، stroke-width:1.8) — ليست كرتونية ولا emoji كبيرة.
 9. أقصى 3-4 ألوان لكل شريحة. مساحات بيضاء كافية — لا ازدحام أبداً.
 10. أضف عناصر هندسية/معمارية خفيفة في الخلفية (خطوط رفيعة، أشكال مجردة، pattern بسيط بشفافية منخفضة).
@@ -1798,11 +1827,14 @@ var DESIGNER_CHAT_PROMPT = `أنت مصمم العروض التقديمية ال
 
 دورك:
 - أنت ترى الشريحة وتفهم تركيبها البصري بالكامل.
-- عندما يطلب المستخدم تعديلاً (مثل "ضع الصورة هنا"، "أزل الصورة"، "كبّر العنوان"، "غيّر لون البطاقة")، عدّل HTML الشريحة وأرجعها كاملة ومحدثة.
+- أبعاد الشريحة مقدسة وثابتة دائماً: 1280px عرض × 720px ارتفاع (dir="rtl" lang="ar" overflow:hidden box-sizing:border-box).
+- ⚠️ قانون المساحة الصارم: عند إضافة أي عنصر أو بطاقة جديدة (مثل إضافة بند خامس أو سادس)، يُمنع زيادة الارتفاع الرأسي بما يتجاوز أبعاد الشريحة (720px). يجب عليك فوراً تعديل التخطيط ليكون شبكة متعددة الأعمدة (مثلاً 2x2 أو 4x2 أو 3x2 مع gap:10px) وتقليل الخطوط (العنوان الرئيسي 24-28px، النص 13-14px، padding البطاقة 10-14px) لضمان احتواء كامل المحتوى داخل الـ 720px بدون انقطاع أي عنصر.
+- عندما يطلب المستخدم تعديلاً، عدّل HTML الشريحة وأرجعها كاملة ومحدثة ومطابقة لقوانين المساحة.
+- ⚠️ عند تعديل شريحة المودبورد (Moodboard) أو إضافة صور فيها: يجب تضمين الصور الأربعة دائماً في شبكة 2x2 مستخدماً الرموز الدقيقة ##MOODBOARD_IMAGE_1## إلى ##MOODBOARD_IMAGE_4## داخل عناصر <img src="..."> أو background-image:url('##MOODBOARD_IMAGE_N##'). يمنع منعاً باتاً ترك البطاقات فارغة بدون صور، ويمنع كتابة #### في الرموز.
 - حافظ على الهوية البصرية: البورجوندي #670D0C، الذهبي #C2A176، خط The Sans Arabic، اتجاه RTL.
-- كل الأنماط مضمّنة (inline). الحاوية: width:1280px, height:720px, dir=rtl, lang=ar, overflow:hidden.
-- لا تخترع صوراً وهمية — استخدم الصور المرفقة فقط (إذا أُرفقت صور مرجعية جديدة استخدمها).
-- كن دقيقاً: عدّل فقط ما طلبه المستخدم، واحتفظ بباقي التصميم سليماً.
+- كل الأنماط مضمّنة (inline). الحاوية: width:1280px, height:720px, dir=rtl, lang=ar, overflow:hidden, box-sizing:border-box.
+- لا تخترع صوراً وهمية — استخدم الرموز المحددة للصور فقط.
+- كن دقيقاً: عدّل فقط ما طلبه المستخدم، واحتفظ بباقي التصميم سليماً ومستقراً.
 
 عندما يتطلب الطلب تعديلاً:
 {"action": "update_slide", "title": "العنوان (أبقه إن لم يتغير)", "html": "HTML كامل ومحدث بكل الأنماط المضمّنة"}
@@ -1914,7 +1946,7 @@ DESIGN REQUIREMENTS
 - Return ONLY valid JSON, no explanations, no markdown code blocks
 `;
 
-app.post('/api/generate-design', async function(req, res) {
+app.post('/api/generate-design', async function (req, res) {
   var projectData = req.body.projectData ? truncateProjectData(req.body.projectData, 8000) : null;
   var outline = req.body.outline || [];
   var userId = req.body.userId || 'default_user';
@@ -1930,7 +1962,7 @@ app.post('/api/generate-design', async function(req, res) {
 
   try {
     // Build the user message with all context
-    var slideList = outline.map(function(s, i) {
+    var slideList = outline.map(function (s, i) {
       return (i + 1) + '. ' + s.title + (s.bullets && s.bullets.length > 0 ? '\n   ' + s.bullets.join('\n   ') : '');
     }).join('\n');
 
@@ -1941,7 +1973,7 @@ app.post('/api/generate-design', async function(req, res) {
     // Collect additional images from the project data
     var additionalImages = [];
     if (projectData && projectData.slides) {
-      projectData.slides.forEach(function(s) {
+      projectData.slides.forEach(function (s) {
         if (s.image_b64 && s.image_b64 !== projectData.mainImageData) {
           additionalImages.push(s.image_b64);
         }
@@ -2084,7 +2116,7 @@ app.post('/api/generate-design', async function(req, res) {
 //  11. POST /api/redesign-slide
 //      GLM 5.1 redesigns a single slide based on user instructions
 // ─────────────────────────────────────────────
-app.post('/api/redesign-slide', async function(req, res) {
+app.post('/api/redesign-slide', async function (req, res) {
   var slideHtml = req.body.slideHtml;
   var slideTitle = req.body.slideTitle;
   var editRequest = req.body.editRequest;
@@ -2130,7 +2162,7 @@ app.post('/api/redesign-slide', async function(req, res) {
 
     if (isGlobalStyle && allSlides.length > 0) {
       userMessage += 'ALL CURRENT SLIDES:\n';
-      allSlides.forEach(function(s, i) {
+      allSlides.forEach(function (s, i) {
         userMessage += '\n--- Slide ' + (i + 1) + ': ' + s.title + ' ---\n';
         userMessage += (s.html || '').substring(0, 500) + '\n...\n';
       });
@@ -2200,7 +2232,7 @@ app.post('/api/redesign-slide', async function(req, res) {
 //      Saves a base64 encoded file (PPTX/PDF) to outputs dir
 //      to bypass client-side iframe download restrictions
 // ─────────────────────────────────────────────
-app.post('/api/save-file', function(req, res) {
+app.post('/api/save-file', function (req, res) {
   var filename = req.body.filename;
   var base64Data = req.body.data;
   if (!filename || !base64Data) {
@@ -2227,7 +2259,7 @@ app.post('/api/save-file', function(req, res) {
 async function callImageAPI(prompt) {
   try {
     var controller = new AbortController();
-    var timeout = setTimeout(function() { controller.abort(); }, 120000);
+    var timeout = setTimeout(function () { controller.abort(); }, 120000);
 
     var response = await fetch(OPENROUTER_BASE + '/chat/completions', {
       method: 'POST',
@@ -2263,7 +2295,7 @@ async function callImageAPI(prompt) {
 async function callImageAPIWithReference(referenceImageBase64, prompt) {
   try {
     var controller = new AbortController();
-    var timeout = setTimeout(function() { controller.abort(); }, 120000);
+    var timeout = setTimeout(function () { controller.abort(); }, 120000);
 
     var response = await fetch(OPENROUTER_BASE + '/chat/completions', {
       method: 'POST',
@@ -2310,7 +2342,7 @@ async function callImageAPIWithReference(referenceImageBase64, prompt) {
 
 var { generatePdf, renderSlideImage } = require('./pdf_engine');
 
-app.post('/api/export-pdf', async function(req, res) {
+app.post('/api/export-pdf', async function (req, res) {
   try {
     var { slidesHtml, projectName } = req.body;
     if (!slidesHtml) return res.status(400).json({ error: 'slidesHtml is required' });
@@ -2375,7 +2407,7 @@ function parseFirstJsonObject(text) {
 
 
 // Render a single slide's HTML to a PNG (base64) so the chat can "see" it.
-app.post('/api/render-slide-image', async function(req, res) {
+app.post('/api/render-slide-image', async function (req, res) {
   try {
     var slideHtml = req.body.slideHtml;
     if (!slideHtml) return res.status(400).json({ error: 'slideHtml is required' });
@@ -2391,28 +2423,36 @@ app.post('/api/render-slide-image', async function(req, res) {
 //  POST-PROCESSING: enforce image usage & rebuild special slides
 //  The vision model cannot reliably copy long data URIs into <img src>.
 //  We therefore (a) resolve every image TOKEN to a real image, (b) rebuild
-//  the COVER (slide 1) and MOODBOARD (slide 15) deterministically, and
-//  (c) inject a project image into content slides that ended up image-less.
+//  the COVER, MOODBOARD, and final CLOSING deterministically, and (c) inject
+//  a project image into content slides that ended up image-less.
 //  This guarantees every approved image is actually displayed.
 // ═══════════════════════════════════════════════════════════════
 function postProcessDesignerSlides(slides, images, projectData) {
   if (!Array.isArray(slides)) return slides;
+  var defaultStock = [
+    '/uploads/luxury_skyscraper_cover.png',
+    '/uploads/moodboard_exterior.png',
+    '/uploads/moodboard_interior.png',
+    '/uploads/moodboard_materials.png',
+    '/uploads/moodboard_urban_lifestyle.png'
+  ];
   // Normalize the image pool. images[0] is the cover; the rest are moodboard.
   var imgs = (Array.isArray(images) ? images : []).filter(function (x) { return typeof x === 'string' && x; });
-  if (imgs.length === 0) return slides;
+  if (imgs.length === 0) {
+    imgs = defaultStock;
+  }
 
   // imgByToken: cover + 4 named content/moodboard images, cycling if too few.
   function tok(n) {
-    if (imgs.length === 0) return '';
+    if (imgs.length === 0) return defaultStock[n - 1] || defaultStock[0];
     if (n <= imgs.length) return imgs[n - 1];
-    // cycle: reuse last available so a token never resolves empty
-    return imgs[imgs.length - 1];
+    return imgs[(n - 1) % imgs.length];
   }
   var imgCover = tok(1);
-  var img1 = tok(2) || imgCover;
-  var img2 = tok(3) || img1;
-  var img3 = tok(4) || img2;
-  var img4 = tok(5) || img3;
+  var img1 = tok(2) || defaultStock[1];
+  var img2 = tok(3) || defaultStock[2];
+  var img3 = tok(4) || defaultStock[3];
+  var img4 = tok(5) || defaultStock[4];
 
   function escapeHtmlAttr(s) {
     return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -2424,19 +2464,20 @@ function postProcessDesignerSlides(slides, images, projectData) {
     var html = s.html || '';
     if (typeof html !== 'string') html = '';
 
-    // (a) Resolve TOKENS → real image URIs everywhere first.
+    // (a) Resolve TOKENS → real image URIs everywhere first (including malformed ones).
     html = html
-      .replace(/##PROJECT_IMAGE_COVER##/g, imgCover)
-      .replace(/##COVER_IMAGE##/g, imgCover)
-      .replace(/##MAIN_IMAGE##/g, imgCover)
-      .replace(/##PROJECT_IMAGE_1##/g, img1)
-      .replace(/##PROJECT_IMAGE_2##/g, img2)
-      .replace(/##PROJECT_IMAGE_3##/g, img3)
-      .replace(/##PROJECT_IMAGE_4##/g, img4)
-      .replace(/##MOODBOARD_IMAGE_1##/g, img1)
-      .replace(/##MOODBOARD_IMAGE_2##/g, img2)
-      .replace(/##MOODBOARD_IMAGE_3##/g, img3)
-      .replace(/##MOODBOARD_IMAGE_4##/g, img4);
+      .replace(/#*PROJECT_IMAGE_COVER#*/gi, imgCover)
+      .replace(/#*COVER_IMAGE#*/gi, imgCover)
+      .replace(/#*MAIN_IMAGE#*/gi, imgCover)
+      .replace(/#*IMAGE_COVER#*/gi, imgCover)
+      .replace(/#*PROJECT_IMAGE_1#*/gi, img1)
+      .replace(/#*PROJECT_IMAGE_2#*/gi, img2)
+      .replace(/#*PROJECT_IMAGE_3#*/gi, img3)
+      .replace(/#*PROJECT_IMAGE_4#*/gi, img4)
+      .replace(/#*MOODBOARD_IMAGE_1#*/gi, img1)
+      .replace(/#*MOODBOARD_IMAGE_2#*/gi, img2)
+      .replace(/#*MOODBOARD_IMAGE_3#*/gi, img3)
+      .replace(/#*MOODBOARD_IMAGE_4#*/gi, img4);
     s.html = html;
     s._slideNo = slideNo;
 
@@ -2446,16 +2487,20 @@ function postProcessDesignerSlides(slides, images, projectData) {
       continue;
     }
 
-    // (b) Rebuild MOODBOARD (slide 15) deterministically — all images.
-    if (slideNo === 15) {
-      s.html = buildMoodboardSlideHtml([img1, img2, img3, img4], projectData);
+    // Rebuild the final slide as CLOSING regardless of the deck length.
+    // The previous slide-16 assumption left headers/footers in short decks.
+    var isLastSlide = (i === slides.length - 1);
+    var isClosingType = String(s.type || '').toLowerCase() === 'closing' ||
+      /ختام|closing|شكراً|thanks/i.test(String(s.title || ''));
+    if (isLastSlide || isClosingType) {
+      s.html = buildClosingSlideHtml(projectData);
       continue;
     }
 
-    // (b) Rebuild CLOSING (slide 16) deterministically — burgundy bg + logo +
-    // "شكراً لكم" + contact info. Guarantees the real logo appears.
-    if (slideNo === 16) {
-      s.html = buildClosingSlideHtml(projectData);
+    // Rebuild MOODBOARD when it is explicitly the moodboard slide.
+    if (slideNo === 15 || String(s.type || '').toLowerCase() === 'moodboard' ||
+      /مود.?بورد|moodboard|لوحة الأنماط/i.test(String(s.title || ''))) {
+      s.html = buildMoodboardSlideHtml([img1, img2, img3, img4], projectData);
       continue;
     }
 
@@ -2489,7 +2534,7 @@ function postProcessDesignerSlides(slides, images, projectData) {
       if (!hasAssigned) {
         s.html = injectSideImage(html, assigned);
       }
-    } else if (slideNo >= 3 && slideNo !== 2 && slideNo !== 15 && slideNo !== 16) {
+    } else if (slideNo >= 3 && slideNo !== 2 && slideNo !== 15 && !isLastSlide && !isClosingType) {
       // Other visual content slides: ensure at least ONE project image present.
       if (countProjectImages(html) === 0) {
         // distribute remaining images round-robin
@@ -2530,63 +2575,65 @@ function buildCoverSlideHtml(imgCover, projectData) {
     '<div style="position:absolute;top:0;right:0;width:160px;height:160px;border-top:3px solid #C2A176;border-right:3px solid #C2A176;opacity:.7"></div>' +
     '<div style="position:absolute;bottom:0;left:0;width:160px;height:160px;border-bottom:3px solid #C2A176;border-left:3px solid #C2A176;opacity:.7"></div>' +
     '<div style="position:relative;z-index:5;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 60px">' +
-      '<div style="background:#fff;border-radius:18px;padding:22px 40px;box-shadow:0 16px 48px rgba(0,0,0,0.30);margin-bottom:32px;display:flex;flex-direction:column;align-items:center;gap:10px">' +
-        '<img src="##LOGO##" alt="منافع الاقتصادية" style="height:120px;width:auto;max-width:360px;object-fit:contain;display:block" />' +
-        '<div style="color:#670D0C;font-size:18px;font-weight:800;letter-spacing:.5px">منافع الاقتصادية للعقار</div>' +
-        '<div style="color:#A7A9AC;font-size:12px;letter-spacing:2px">MANAFE ECONOMIC CO.</div>' +
-      '</div>' +
-      '<div style="color:#FFFFFF;font-size:54px;font-weight:900;line-height:1.25;max-width:980px;text-shadow:0 2px 12px rgba(0,0,0,0.5)">' + name + '</div>' +
-      '<div style="width:140px;height:3px;background:#C2A176;margin:22px 0"></div>' +
-      '<div style="color:#C2A176;font-size:18px;font-weight:700;letter-spacing:1px">' + sub + '</div>' +
+    '<div style="background:#fff;border-radius:18px;padding:22px 40px;box-shadow:0 16px 48px rgba(0,0,0,0.30);margin-bottom:32px;display:flex;flex-direction:column;align-items:center;gap:10px">' +
+    '<img src="##LOGO##" alt="منافع الاقتصادية" style="height:120px;width:auto;max-width:360px;object-fit:contain;display:block" />' +
+    '<div style="color:#670D0C;font-size:18px;font-weight:800;letter-spacing:.5px">منافع الاقتصادية للعقار</div>' +
+    '<div style="color:#A7A9AC;font-size:12px;letter-spacing:2px">MANAFE ECONOMIC CO.</div>' +
     '</div>' +
-  '</div>';
+    '<div style="color:#FFFFFF;font-size:54px;font-weight:900;line-height:1.25;max-width:980px;text-shadow:0 2px 12px rgba(0,0,0,0.5)">' + name + '</div>' +
+    '<div style="width:140px;height:3px;background:#C2A176;margin:22px 0"></div>' +
+    '<div style="color:#C2A176;font-size:18px;font-weight:700;letter-spacing:1px">' + sub + '</div>' +
+    '</div>' +
+    '</div>';
 }
 
 // Build the MOODBOARD slide (slide 15): 2x2 gallery of the 4 images.
 function buildMoodboardSlideHtml(imgs, projectData) {
-  var names = ['Exterior Hero', 'Right Facade', 'Left Facade', 'Aerial View'];
+  var names = ['الطابع المعماري (Exterior)', 'الألوان والمواد (Materials)', 'المساحات الداخلية (Interior)', 'البيئة المحيطة (Lifestyle)'];
+  var defaultImgs = [
+    '/uploads/moodboard_exterior.png',
+    '/uploads/moodboard_materials.png',
+    '/uploads/moodboard_interior.png',
+    '/uploads/moodboard_urban_lifestyle.png'
+  ];
   var grid = '';
   for (var i = 0; i < 4; i++) {
-    var im = imgs[i] || '';
-    if (im) {
-      grid += '<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(0,0,0,0.10);background:#f7f4ef">' +
-        '<img src="' + safeAttr(im) + '" style="width:100%;height:100%;object-fit:cover;display:block">' +
-        '<div style="position:absolute;left:0;right:0;bottom:0;padding:9px 12px;background:linear-gradient(0deg,rgba(103,13,12,0.9),rgba(103,13,12,0.45));color:#fff;font-size:13px;font-weight:700;text-align:center">' + names[i] + '</div>' +
-        '</div>';
-    } else {
-      grid += '<div style="background:#f7f4ef;border:2px dashed #dcd8d0;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:13px">' + names[i] + '</div>';
-    }
+    var im = (imgs && imgs[i]) || defaultImgs[i];
+    grid += '<div style="border-radius:14px;overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(0,0,0,0.10);background:#f7f4ef;height:100%">' +
+      '<img src="' + safeAttr(im) + '" style="width:100%;height:100%;object-fit:cover;display:block">' +
+      '<div style="position:absolute;left:0;right:0;bottom:0;padding:9px 12px;background:linear-gradient(0deg,rgba(103,13,12,0.9),rgba(103,13,12,0.45));color:#fff;font-size:13px;font-weight:700;text-align:center">' + names[i] + '</div>' +
+      '</div>';
   }
   var projName = (projectData && projectData.projectName) || 'عرض استثماري';
   return '<div data-no-reprocess="true" ' + _slideShell('#FFFFFF') + '>' +
     '<div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,transparent,transparent 38px,rgba(103,13,12,0.03) 38px,rgba(103,13,12,0.03) 76px);pointer-events:none"></div>' +
     // header
     '<div style="position:relative;z-index:3;display:flex;align-items:center;justify-content:space-between;padding:18px 36px 14px;border-bottom:2px solid #670D0C">' +
-      '<div style="display:flex;align-items:center;gap:12px">' +
-        '<div style="background:#fff;border-radius:10px;padding:6px 10px;color:#670D0C;font-weight:800;font-size:14px">منافع الاقتصادية للعقار</div>' +
-        '<div style="width:1px;height:26px;background:#EFE7DC"></div>' +
-        '<div style="font-size:15px;font-weight:800;color:#670D0C">المودبورد — لوحة الإلهام والتصور البصري</div>' +
-      '</div>' +
-      '<div style="display:flex;align-items:center;gap:8px">' +
-        '<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:.5px">VISUAL INSPIRATION</div>' +
-        '<div style="width:8px;height:8px;border-radius:50%;background:#C2A176"></div>' +
-      '</div>' +
+    '<div style="display:flex;align-items:center;gap:12px">' +
+    '<div style="background:#fff;border-radius:10px;padding:6px 10px;color:#670D0C;font-weight:800;font-size:14px">منافع الاقتصادية للعقار</div>' +
+    '<div style="width:1px;height:26px;background:#EFE7DC"></div>' +
+    '<div style="font-size:15px;font-weight:800;color:#670D0C">المودبورد — لوحة الإلهام والتصور البصري</div>' +
+    '</div>' +
+    '<div style="display:flex;align-items:center;gap:8px">' +
+    '<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:.5px">VISUAL INSPIRATION</div>' +
+    '<div style="width:8px;height:8px;border-radius:50%;background:#C2A176"></div>' +
+    '</div>' +
     '</div>' +
     // gallery
     '<div style="position:relative;z-index:2;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:16px;padding:22px 36px;flex:1;height:560px">' + grid + '</div>' +
     // palette swatches
     '<div style="position:relative;z-index:3;display:flex;gap:16px;justify-content:center;align-items:center;padding:8px 0 16px;font-size:11px;color:#670D0C;font-weight:700">' +
-      '<span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#670D0C;border-radius:3px;display:inline-block"></span> عنابي</span>' +
-      '<span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#C2A176;border-radius:3px;display:inline-block"></span> ذهبي</span>' +
-      '<span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#F5F0EE;border-radius:3px;display:inline-block;border:1px solid #ccc"></span> بيج فاخر</span>' +
+    '<span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#670D0C;border-radius:3px;display:inline-block"></span> عنابي</span>' +
+    '<span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#C2A176;border-radius:3px;display:inline-block"></span> ذهبي</span>' +
+    '<span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;background:#F5F0EE;border-radius:3px;display:inline-block;border:1px solid #ccc"></span> بيج فاخر</span>' +
     '</div>' +
     // footer
     '<div style="position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;padding:10px 36px;border-top:1px solid #E2E8F0;background:#fff">' +
-      '<div style="color:#64748B;font-size:11px">' + projName + '</div>' +
-      '<div style="color:#64748B;font-size:11px">منافع الاقتصادية للعقار</div>' +
-      '<div style="width:24px;height:24px;border-radius:50%;background:#670D0C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800">15</div>' +
+    '<div style="color:#64748B;font-size:11px">' + projName + '</div>' +
+    '<div style="color:#64748B;font-size:11px">منافع الاقتصادية للعقار</div>' +
+    '<div style="width:24px;height:24px;border-radius:50%;background:#670D0C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800">15</div>' +
     '</div>' +
-  '</div>';
+    '</div>';
 }
 
 // Build the CLOSING slide (slide 16): full burgundy background + logo + big
@@ -2611,17 +2658,17 @@ function buildClosingSlideHtml(projectData) {
     '<div style="position:absolute;top:0;right:0;width:200px;height:200px;border-top:3px solid #C2A176;border-right:3px solid #C2A176;opacity:.6"></div>' +
     '<div style="position:absolute;bottom:0;left:0;width:200px;height:200px;border-bottom:3px solid #C2A176;border-left:3px solid #C2A176;opacity:.6"></div>' +
     '<div style="position:relative;z-index:5;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:50px 70px">' +
-      '<div style="background:#fff;border-radius:18px;padding:18px 30px;box-shadow:0 16px 48px rgba(0,0,0,0.35);margin-bottom:30px">' +
-        '<img src="##LOGO##" alt="منافع الاقتصادية" style="height:74px;width:auto;max-width:260px;object-fit:contain;display:block" />' +
-      '</div>' +
-      '<div style="color:#FFFFFF;font-size:60px;font-weight:900;line-height:1.2;text-shadow:0 2px 12px rgba(0,0,0,0.4)">شكراً لكم</div>' +
-      '<div style="width:130px;height:3px;background:#C2A176;margin:22px 0"></div>' +
-      '<div style="color:#C2A176;font-size:22px;font-weight:700">' + name + '</div>' +
-      (preparedBy ? '<div style="color:#E8E0D5;font-size:14px;font-weight:600;margin-top:8px">إعداد: ' + preparedBy + '</div>' : '') +
-      contactHtml +
-      '<div style="margin-top:28px;color:#A7A9AC;font-size:12px;letter-spacing:1px;font-weight:700">منافع الاقتصادية للعقار · MANAFE ECONOMIC CO.</div>' +
+    '<div style="background:#fff;border-radius:18px;padding:18px 30px;box-shadow:0 16px 48px rgba(0,0,0,0.35);margin-bottom:30px">' +
+    '<img src="##LOGO##" alt="منافع الاقتصادية" style="height:74px;width:auto;max-width:260px;object-fit:contain;display:block" />' +
     '</div>' +
-  '</div>';
+    '<div style="color:#FFFFFF;font-size:60px;font-weight:900;line-height:1.2;text-shadow:0 2px 12px rgba(0,0,0,0.4)">شكراً لكم</div>' +
+    '<div style="width:130px;height:3px;background:#C2A176;margin:22px 0"></div>' +
+    '<div style="color:#C2A176;font-size:22px;font-weight:700">' + name + '</div>' +
+    (preparedBy ? '<div style="color:#E8E0D5;font-size:14px;font-weight:600;margin-top:8px">إعداد: ' + preparedBy + '</div>' : '') +
+    contactHtml +
+    '<div style="margin-top:28px;color:#A7A9AC;font-size:12px;letter-spacing:1px;font-weight:700">منافع الاقتصادية للعقار · MANAFE ECONOMIC CO.</div>' +
+    '</div>' +
+    '</div>';
 }
 
 // Inject a side image (≈40% width) into a content slide that has none.
@@ -2631,9 +2678,9 @@ function injectSideImage(html, img) {
   var imgSafe = safeAttr(img);
   var sideBlock =
     '<div style="width:38%;flex-shrink:0;align-self:stretch;display:flex;flex-direction:column;gap:8px">' +
-      '<div style="flex:1;border-radius:14px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,0.10);min-height:200px">' +
-        '<img src="' + imgSafe + '" style="width:100%;height:100%;object-fit:cover;display:block">' +
-      '</div>' +
+    '<div style="flex:1;border-radius:14px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,0.10);min-height:200px">' +
+    '<img src="' + imgSafe + '" style="width:100%;height:100%;object-fit:cover;display:block">' +
+    '</div>' +
     '</div>';
   // If the slide already uses a main flex row, append our block; otherwise wrap.
   if (/display:\s*flex/i.test(html) && /class=["'][^"']*content/i.test(html)) {
@@ -2657,7 +2704,7 @@ function injectSideImage(html, img) {
 // DESIGNER GENERATION: GLM builds the full deck from approved images.
 // All creative-board images are uploaded to GLM so it has full visual
 // context, plus header/footer rules + brand constraints.
-app.post('/api/designer-generate', async function(req, res) {
+app.post('/api/designer-generate', async function (req, res) {
   var projectData = req.body.projectData ? truncateProjectData(req.body.projectData, 8000) : null;
   var outline = req.body.outline || [];
   var images = req.body.images || []; // approved creative-board images (data URIs)
@@ -2674,7 +2721,7 @@ app.post('/api/designer-generate', async function(req, res) {
   console.log('  Slides: ' + outline.length + ' | Has images: ' + images.length);
 
   try {
-    var slideList = outline.map(function(s, i) {
+    var slideList = outline.map(function (s, i) {
       return (i + 1) + '. ' + s.title + (s.bullets && s.bullets.length > 0 ? '\n   ' + s.bullets.join('\n   ') : '');
     }).join('\n');
 
@@ -2773,7 +2820,7 @@ app.post('/api/designer-generate', async function(req, res) {
 
       var batchSlides = result.slides || [];
       // Tag each slide with its REAL 1-based number so post-processing can
-      // target the cover (1), index (2), moodboard (15), closing (16) precisely.
+      // target the cover (1) and the final closing slide regardless of deck length.
       // batchIndices are already 1-based numbers for this batch.
       for (var bi = 0; bi < batchSlides.length && bi < batchIndices.length; bi++) {
         batchSlides[bi]._slideNo = batchIndices[bi];
@@ -2785,8 +2832,8 @@ app.post('/api/designer-generate', async function(req, res) {
     // ═══ POST-PROCESSING: enforce images & special slides ═══
     // We cannot trust the vision model to copy data URIs into src (it often
     // drops them). So we ALWAYS resolve the tokens here and rebuild the
-    // cover + moodboard slides deterministically. This guarantees every
-    // approved image is used.
+    // cover + moodboard + final closing slides deterministically. This also
+    // guarantees that cover and closing never receive a header or footer.
     allSlides = postProcessDesignerSlides(allSlides, images, projectData);
 
     // Write backup of the combined conversation/responses
@@ -2805,7 +2852,7 @@ app.post('/api/designer-generate', async function(req, res) {
 // The current slide is rendered to an image and sent to GLM so it can
 // "see" the design and respond with an updated full HTML for that slide.
 // Conversation history is passed in and persisted by the client.
-app.post('/api/designer-chat', async function(req, res) {
+app.post('/api/designer-chat', async function (req, res) {
   var message = req.body.message;
   var currentSlideHtml = req.body.currentSlideHtml;
   var currentSlideTitle = req.body.currentSlideTitle || '';
@@ -2833,7 +2880,7 @@ app.post('/api/designer-chat', async function(req, res) {
     var images = [];
     if (slideImageData) images.push(slideImageData);
     if (Array.isArray(slideImages)) {
-      slideImages.forEach(function(img) {
+      slideImages.forEach(function (img) {
         if (img && typeof img === 'string' && (img.indexOf('data:image/') === 0 || img.indexOf('http') === 0)) {
           images.push(img);
         }
@@ -2846,7 +2893,10 @@ app.post('/api/designer-chat', async function(req, res) {
     if (images.length > 0) {
       userText += 'تم إرفاق صورة الشريحة الحالية' + (images.length > 1 ? ' وصور مرجعية' : '') + ' لتراها.\n\n';
     }
-    userText += 'التعليمات: عدّل الشريحة حسب طلب المستخدم. أرجع JSON بالشكل: {"action": "update_slide", "title": "العنوان (أبقه إن لم يتغير)", "html": "HTML كامل ومحدث بكل الأنماط المضمّنة"}. إذا كان الطلب سؤالاً أو لا يتطلب تعديلاً، أرجع {"action": "chat", "response": "ردك بالعربية"}.';
+    userText += 'التعليمات:\n';
+    userText += '- للتعديل على الشريحة الحالية: أرجع JSON بالشكل: {"action": "update_slide", "title": "العنوان (أبقه إن لم يتغير)", "html": "HTML كامل ومحدث بكل الأنماط المضمّنة"}.\n';
+    userText += '- لإضافة شريحة جديدة في موضع محدد: أرجع JSON بالشكل: {"action": "add_slide", "insertAfterIndex": رقم_الشريحة_المطلوب_الوضع_بعدها (مثلاً لو طُلب الوضع بعد شريحة 3 أرجع 3 لتكون هي رقم 4), "title": "عنوان الشريحة الجديدة", "html": "HTML كامل للشريحة الجديدة"}.\n';
+    userText += '- إذا كان الطلب سؤالاً أو لا يتطلب تعديلاً، أرجع {"action": "chat", "response": "ردك بالعربية"}.';
 
     // Vision-enabled editing: the rendered slide screenshot must be SEEN by
     // the model. GLM (ZAI) cannot see images, so route through Gemini.
@@ -2869,6 +2919,59 @@ app.post('/api/designer-chat', async function(req, res) {
       result = { action: 'chat', response: stripCodeFences(resultText).substring(0, 2000) };
     }
 
+    if (result.action === 'update_slide' || result.action === 'add_slide' || result.action === 'insert_slide') {
+      var slideHtml = result.html || '';
+      var defaultImgs = [
+        '/uploads/luxury_skyscraper_cover.png',
+        '/uploads/moodboard_exterior.png',
+        '/uploads/moodboard_materials.png',
+        '/uploads/moodboard_interior.png',
+        '/uploads/moodboard_urban_lifestyle.png'
+      ];
+      var userImgs = [];
+      if (req.body.creativeImages) {
+        if (req.body.creativeImages.cover) userImgs.push(req.body.creativeImages.cover);
+        if (Array.isArray(req.body.creativeImages.moodboard)) {
+          userImgs = userImgs.concat(req.body.creativeImages.moodboard.filter(Boolean));
+        }
+      }
+      var activeImgs = userImgs.length >= 5 ? userImgs : defaultImgs;
+      var imgCover = activeImgs[0] || defaultImgs[0];
+      var img1 = activeImgs[1] || defaultImgs[1];
+      var img2 = activeImgs[2] || defaultImgs[2];
+      var img3 = activeImgs[3] || defaultImgs[3];
+      var img4 = activeImgs[4] || defaultImgs[4];
+
+      var isMoodboard = /مود.?بورد|moodboard|لوحة الأنماط/i.test(String(result.title || currentSlideTitle || ''));
+      if (isMoodboard && (!slideHtml.includes('<img') && !slideHtml.includes('background-image'))) {
+        result.html = buildMoodboardSlideHtml([img1, img2, img3, img4], projectData);
+      } else {
+        result.html = slideHtml
+          .replace(/#*IMAGE_COVER#*/gi, imgCover)
+          .replace(/#*COVER_IMAGE#*/gi, imgCover)
+          .replace(/#*MAIN_IMAGE#*/gi, imgCover)
+          .replace(/#*PROJECT_IMAGE_COVER#*/gi, imgCover)
+          .replace(/#*PROJECT_IMAGE_1#*/gi, img1)
+          .replace(/#*PROJECT_IMAGE_2#*/gi, img2)
+          .replace(/#*PROJECT_IMAGE_3#*/gi, img3)
+          .replace(/#*PROJECT_IMAGE_4#*/gi, img4)
+          .replace(/#*MOODBOARD_IMAGE_1#*/gi, img1)
+          .replace(/#*MOODBOARD_IMAGE_2#*/gi, img2)
+          .replace(/#*MOODBOARD_IMAGE_3#*/gi, img3)
+          .replace(/#*MOODBOARD_IMAGE_4#*/gi, img4);
+      }
+    }
+
+    // The chat model can reintroduce a header/footer while editing the closing
+    // slide. Keep the closing slide deterministic in every generation path.
+    var resultTitle = String(result.title || currentSlideTitle || '');
+    var isClosingEdit = result.action === 'update_slide' &&
+      /ختام|closing|شكراً|thanks/i.test(resultTitle);
+    if (isClosingEdit) {
+      result.title = result.title || currentSlideTitle || 'الختام';
+      result.html = buildClosingSlideHtml(projectData || {});
+    }
+
     console.log('  ✓ Designer chat: ' + (result.action || 'chat'));
     res.json({ success: true, data: result, cache_analytics: cacheAnalytics });
 
@@ -2882,7 +2985,7 @@ app.post('/api/designer-chat', async function(req, res) {
 //  START SERVER
 // ═══════════════════════════════════════════════════════════════
 
-app.listen(PORT, function() {
+app.listen(PORT, function () {
   console.log('\n═══════════════════════════════════════');
   console.log('  🌐 Server running on port ' + PORT);
   console.log('  🔗 http://localhost:' + PORT);

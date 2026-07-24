@@ -183,16 +183,21 @@ def build_design_rules(branding):
 - نص: {text_color}
 - أبيض: #FFFFFF
 
-## الخط
+## أبعاد الشريحة وقواعد الاحتواء الصارمة (ممنوع التداخل أو التجاوز إطلاقاً)
+- الأبعاد الكلية: {slide_w}px عرض × {slide_h}px ارتفاع.
+- أقصى ارتفاع للمحتوى داخل الشريحة: {slide_h - header_h - footer_h - 20}px صافي بين الهيدر والفوتر.
+- ⚠️ قانون عدم الخروج عن الحدود: يجب أن يتناسب كل محتوى الشريحة تماماً داخل هذا الارتفاع دون أن يقطع أي جزء منه.
+
+## الخطوط والأحجام المحددة للتناسب
 font-family: '{font}', Arial, sans-serif
-- عناوين كبيرة: 36-48px font-weight:700 color:{primary}
-- عناوين فرعية: 24-28px font-weight:600 color:{primary}
-- نصوص عادية: 14-18px font-weight:400 color:{text_color}
-- أرقام مالية كبيرة: 32-48px font-weight:700 color:{primary}
+- العنوان الرئيسي للشريحة: 24px-28px font-weight:700 color:{primary} (أقصى حد 30px)
+- عناوين البطاقات والأقسام: 15px-17px font-weight:600 color:{primary}
+- النصوص العادية ونصوص البطاقات والجداول: 12px-14px font-weight:400 color:{text_color}
+- الأرقام المالية الكبيرة: 24px-30px font-weight:700 color:{primary} (أقصى حد 32px)
 
 ## الشريحة الأساسية
-<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;font-family:'{font}',Arial,sans-serif;">
-CSS inline فقط. ممنوع box-shadow/filter/backdrop-filter.
+<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;font-family:'{font}',Arial,sans-serif;">
+CSS inline فقط. ممنوع box-shadow/filter/backdrop-filter. استخدم box-sizing:border-box لكل العناصر.
 """
 
     if header_enabled:
@@ -212,20 +217,21 @@ position:absolute;bottom:0;right:0;left:0;height:{footer_h}px;background:{primar
     content_top = header_h if header_enabled else 0
     content_bottom = footer_h if footer_enabled else 0
     rules += f"""
-## منطقة المحتوى
-top:{content_top}px → bottom:{content_bottom}px. padding: 20px 40px.
+## منطقة المحتوى والتخطيط
+top:{content_top}px → bottom:{content_bottom}px. padding: 16px 36px.
+- إذا زاد عدد البطاقات أو العناصر عن 4، استخدم شبكة متعددة الأعمدة (grid 2x2 أو 3x2 مع gap:10px) أو توزيع أفقياً لضمان ملاءمة المحتوى كاملاً داخل الارتفاع المتاح.
 
 ## البطاقات (Cards) — نمط {card_style}
 """
     if card_style == 'bordered':
         accent_rgb = _hex_to_rgb(accent)
-        rules += f"كل بطاقة: background:#fff border:1px solid rgba({accent_rgb},0.2) border-radius:8px padding:16-24px.\n"
+        rules += f"كل بطاقة: background:#fff border:1px solid rgba({accent_rgb},0.2) border-radius:8px padding:10px 14px; box-sizing:border-box.\n"
     elif card_style == 'shadow':
-        rules += f"كل بطاقة: background:#fff border-radius:12px padding:16-24px. ظل خفيف: box-shadow:0 2px 8px rgba(0,0,0,0.08).\n"
+        rules += f"كل بطاقة: background:#fff border-radius:10px padding:10px 14px; box-sizing:border-box. ظل خفيف: box-shadow:0 2px 6px rgba(0,0,0,0.06).\n"
     elif card_style == 'flat':
-        rules += f"كل بطاقة: background:{bg} border-radius:8px padding:16-24px. بدون حدود أو ظلال.\n"
+        rules += f"كل بطاقة: background:{bg} border-radius:8px padding:10px 14px; box-sizing:border-box. بدون حدود أو ظلال.\n"
     elif card_style == 'gradient':
-        rules += f"كل بطاقة: background:linear-gradient(135deg,{primary},{secondary}) border-radius:12px padding:16-24px color:#fff.\n"
+        rules += f"كل بطاقة: background:linear-gradient(135deg,{primary},{secondary}) border-radius:10px padding:10px 14px color:#fff; box-sizing:border-box.\n"
 
     rules += "بدون أيقونات. اعتمد على التخطيط والمساحات.\n"
 

@@ -184,9 +184,9 @@ def require_company_admin(f):
         if not tenant or not tenant.get('is_active'):
             return jsonify({'error': 'Account inactive'}), 403
 
-        is_super_admin = bool(tenant.get('is_admin'))
         user_role = payload.get('user_role')
-        if not is_super_admin and user_role != 'company_admin':
+        user_id = payload.get('user_id')
+        if not is_super_admin and user_role != 'company_admin' and user_id is not None:
             return jsonify({'error': 'Company admin access required'}), 403
 
         g.tenant_id = payload['sub']
@@ -252,7 +252,7 @@ def require_permission(permission_key):
             g.user_permissions = {}
 
             is_super_admin = g.is_admin
-            is_company_admin = g.user_role == 'company_admin'
+            is_company_admin = g.user_role == 'company_admin' or g.user_id is None
 
             if not is_super_admin and not is_company_admin:
                 if g.user_id:

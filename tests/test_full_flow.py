@@ -152,10 +152,17 @@ def test_flow():
     assert r.status_code == 200
     assert len(make_json(r)['presentations']) >= 1
 
-    print('--- Fetching exports list...')
+    print('--- Deleting presentation...')
+    r = client.delete(f'/api/presentations/{pres_id}', headers=headers)
+    assert r.status_code == 200, make_json(r)
+    r = client.get('/api/presentations', headers=headers)
+    assert all(p['id'] != pres_id for p in make_json(r)['presentations'])
+
+    print('--- Fetching exports list after deletion...')
     r = client.get('/api/exports', headers=headers)
     assert r.status_code == 200
-    assert len(make_json(r)['exports']) >= 2
+    exports_after_delete = make_json(r)['exports']
+    assert not any(e['downloadUrl'].endswith(f'/{pres_id}') for e in exports_after_delete)
 
     # Tenant isolation
     uid2 = uuid.uuid4().hex[:8]

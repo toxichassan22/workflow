@@ -84,6 +84,11 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - swot: تحليل SWOT في grid 2×2
 - map: خريطة كخلفية + طبقة نص شفافة
 
+## تنبيه مهم
+- اختر نوع الشريحة (`type`) ونمط التصميم (`design_style`) تلقائياً بناءً على بيانات المشروع وسياق التدريب الخاص بالشركة.
+- لا تترك أي قرار لواجهة المستخدم بشأن النوع أو النمط.
+- لا تطلب من المستخدم اختيار `type` أو `design_style` لاحقاً.
+
 ## أعد JSON فقط بالصيغة التالية:
 {{
   "proposed_count": <عدد الشرائح الإجمالي>,
@@ -211,9 +216,18 @@ def parse_slide_plan(response_text):
         plan['slides'][0]['type'] = 'cover'
         plan['slides'][-1]['type'] = 'closing'
 
-    # Ensure second slide is index (if more than 2 slides)
+    # Ensure second slide is index when there are at least three slides
     if len(plan['slides']) > 2:
         plan['slides'][1]['type'] = 'index'
+
+    # Fill defaults for any missing slide metadata
+    for slide in plan['slides']:
+        if 'design_style' not in slide:
+            slide['design_style'] = 'cards'
+        if 'content_density' not in slide:
+            slide['content_density'] = 'medium'
+        if 'requires_image' not in slide:
+            slide['requires_image'] = False
 
     return plan
 
@@ -250,8 +264,12 @@ def validate_slide_plan(plan, branding):
         issues.append("Second slide must be 'index'")
     if slides[-1].get('type') != 'closing':
         issues.append("Last slide must be 'closing'")
-    if len(slides) > 2 and slides[-2].get('type') != 'moodboard':
-        issues.append("Second-to-last slide must be 'moodboard'")
+
+    # If a moodboard slide exists, ensure it is placed immediately before the closing slide
+    moodboard_indices = [i for i, slide in enumerate(slides) if slide.get('type') == 'moodboard']
+    if moodboard_indices:
+        if moodboard_indices[-1] != len(slides) - 2:
+            issues.append("Moodboard slide must be second-to-last if present")
 
     # Check each slide type and content
     for i, slide in enumerate(slides):
@@ -464,14 +482,23 @@ def _replace_map_placeholders(html, map_placeholders):
 
 
 def _creative_image_values(images):
-    """Return the generated cover and moodboard image URLs in a safe shape."""
+    """Return the generated cover and moodboard image URLs in a safe shape with fallbacks."""
+    default_cover = '/uploads/luxury_skyscraper_cover.png'
+    default_moodboard = [
+        '/uploads/moodboard_exterior.png',
+        '/uploads/moodboard_materials.png',
+        '/uploads/moodboard_interior.png',
+        '/uploads/moodboard_urban_lifestyle.png'
+    ]
     if not isinstance(images, dict):
-        return '', []
-    cover = images.get('cover') or images.get('mainImageData') or ''
+        return default_cover, default_moodboard
+    cover = images.get('cover') or images.get('mainImageData') or default_cover
     moodboard = images.get('moodboard') or images.get('moodboardImages') or []
-    if not isinstance(moodboard, list):
-        moodboard = []
-    return str(cover or ''), [str(image or '') for image in moodboard]
+    if not isinstance(moodboard, list) or not any(moodboard):
+        moodboard = default_moodboard
+    else:
+        moodboard = [moodboard[i] if i < len(moodboard) and moodboard[i] else default_moodboard[i % 4] for i in range(4)]
+    return str(cover), [str(img) for img in moodboard]
 
 
 def _css_url(image_url):
@@ -480,14 +507,35 @@ def _css_url(image_url):
 
 
 def _build_moodboard_fallback(images):
-    """Build a deterministic moodboard when the model omits its image tokens."""
+    """Build a deterministic moodboard layout matching the exact number of images."""
+    default_moodboard = [
+        '/uploads/moodboard_exterior.png',
+        '/uploads/moodboard_materials.png',
+        '/uploads/moodboard_interior.png',
+        '/uploads/moodboard_urban_lifestyle.png'
+    ]
+    if not images or not any(images):
+        images = default_moodboard
+    images = [img or default_moodboard[i % 4] for i, img in enumerate(images)]
+    count = len(images)
+
+    # Dynamic CSS grid layout calculation based on image count
+    if count <= 1:
+        cols, rows = "1fr", "1fr"
+    elif count == 2:
+        cols, rows = "1fr 1fr", "1fr"
+    elif count <= 4:
+        cols, rows = "1fr 1fr", "1fr 1fr"
+    elif count <= 6:
+        cols, rows = "1fr 1fr 1fr", "1fr 1fr"
+    elif count <= 8:
+        cols, rows = "1fr 1fr 1fr 1fr", "1fr 1fr"
+    else:
+        cols, rows = f"repeat(auto-fill, minmax(220px, 1fr))", "auto"
+
     tiles = []
-    for index in range(4):
-        image = images[index] if index < len(images) else ''
-        if image:
-            background = "background-image:url('" + _css_url(image) + "');"
-        else:
-            background = 'background:linear-gradient(135deg,#6B1C23,#C2A176);'
+    for image in images:
+        background = "background-image:url('" + _css_url(image) + "');"
         tiles.append(
             '<div style="min-width:0;min-height:0;background-size:cover;background-position:center;'
             + background + '"></div>'
@@ -496,9 +544,9 @@ def _build_moodboard_fallback(images):
         '<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;'
         'background:#171717;color:#fff;font-family:Arial,sans-serif;box-sizing:border-box;padding:42px;">'
         '<div style="display:flex;align-items:center;justify-content:space-between;height:52px;margin-bottom:20px;">'
-        '<div style="font-size:30px;font-weight:700;">لوحة الإلهام</div>'
+        '<div style="font-size:30px;font-weight:700;">لوحة الإلهام (Moodboard)</div>'
         '<div style="width:170px;height:4px;background:#C2A176;"></div></div>'
-        '<div style="height:560px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;">'
+        f'<div style="height:560px;display:grid;grid-template-columns:{cols};grid-template-rows:{rows};gap:8px;">'
         + ''.join(tiles) + '</div></div>'
     )
 
@@ -508,15 +556,17 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
     if not html:
         return html
     cover, moodboard = _creative_image_values(creative_images)
-    replacements = {
-        '##IMAGE_COVER##': cover,
-        '##COVER_IMAGE##': cover,
-        '##MAIN_IMAGE##': cover,
-    }
-    for index in range(4):
-        replacements[f'##MOODBOARD_IMAGE_{index + 1}##'] = moodboard[index] if index < len(moodboard) else ''
-    for token, image in replacements.items():
-        html = html.replace(token, image)
+
+    # Replace cover tokens
+    for cover_pat in [r'#*IMAGE_COVER#*', r'#*COVER_IMAGE#*', r'#*MAIN_IMAGE#*', r'#*PROJECT_IMAGE_COVER#*']:
+        html = re.sub(cover_pat, cover, html, flags=re.IGNORECASE)
+
+    # Replace moodboard & project image tokens (including malformed variations)
+    for index in range(16):
+        img_url = moodboard[index] if index < len(moodboard) else moodboard[index % len(moodboard)]
+        num = index + 1
+        html = re.sub(rf'#*MOODBOARD_IMAGE_{num}#*', img_url, html, flags=re.IGNORECASE)
+        html = re.sub(rf'#*PROJECT_IMAGE_{num}#*', img_url, html, flags=re.IGNORECASE)
 
     # Do not leave the cover blank simply because the model forgot its token.
     if slide_type == 'cover' and cover and cover not in html:
@@ -526,12 +576,81 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
         )
         html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1' + background, html, count=1)
 
-    # A moodboard has a fixed job: show the four approved images. Make that
-    # reliable even when a model response forgets one or more placeholders.
-    if slide_type == 'moodboard' and moodboard:
-        image_count = sum(1 for image in moodboard if image and image in html)
-        if image_count < min(4, len([image for image in moodboard if image])):
+    # A moodboard slide should show the exact moodboard images
+    if slide_type == 'moodboard' or 'moodboard' in str(slide_type).lower() or 'مودبورد' in html:
+        if not re.search(r'<img|background-image', html, re.IGNORECASE):
             html = _build_moodboard_fallback(moodboard)
+    return html
+
+
+def _replace_data_placeholders(html, project_data, branding=None):
+    """Replace all field & data tokens (like ##PROJECT_NAME##, ##land_area##, ##noi##, ##LOGO##) with real values."""
+    if not html:
+        return html
+
+    project_data = project_data or {}
+    branding = branding or {}
+
+    replacements = {}
+
+    # 1. Logo replacement
+    logo_url = branding.get('logo') or branding.get('logo_url') or '/assets/logo.png'
+    replacements['##LOGO##'] = logo_url
+
+    # 2. Add all dynamic key-value pairs from project_data
+    for k, v in project_data.items():
+        if v is None or isinstance(v, (dict, list)):
+            continue
+        val_str = str(v)
+        replacements[f'##{k}##'] = val_str
+        replacements[f'##{k.lower()}##'] = val_str
+        replacements[f'##{k.upper()}##'] = val_str
+
+    # 3. Known key aliases & fallback mappings for template placeholders
+    aliases = {
+        'PROJECT_NAME': project_data.get('project_name') or project_data.get('projectName') or project_data.get('name') or 'المشروع الاستثماري',
+        'PROJECT_TYPE': project_data.get('project_type') or project_data.get('projectType') or 'مشروع عقاري',
+        'PROJECT_DESCRIPTION': project_data.get('project_description') or project_data.get('description') or '',
+        'land_area': project_data.get('land_area') or project_data.get('total_area_sqm') or project_data.get('landArea') or '—',
+        'built_area': project_data.get('built_area') or project_data.get('total_built_area') or project_data.get('builtArea') or '—',
+        'location_address': project_data.get('location_address') or project_data.get('location') or project_data.get('address') or 'المملكة العربية السعودية',
+        'location_lat': str(project_data.get('location_lat') or project_data.get('lat') or ''),
+        'location_lng': str(project_data.get('location_lng') or project_data.get('lng') or ''),
+        'altsnyf_altkhtyty': project_data.get('altsnyf_altkhtyty') or project_data.get('zoning') or project_data.get('planning_classification') or '—',
+        'building_system': project_data.get('building_system') or project_data.get('buildingSystem') or '—',
+        'nsba_albna__far': project_data.get('nsba_albna__far') or project_data.get('far') or project_data.get('building_ratio') or '—',
+        'plot_number': project_data.get('plot_number') or project_data.get('plotNumber') or project_data.get('plan_number') or '—',
+        'infrastructure': project_data.get('infrastructure') or project_data.get('utilities') or 'مكتملة الخدمات',
+        'budget': project_data.get('budget') or project_data.get('total_cost') or project_data.get('totalCost') or '—',
+        'noi': project_data.get('noi') or project_data.get('annual_profit') or project_data.get('net_operating_income') or '—',
+        'roi': project_data.get('roi') or project_data.get('return_on_investment') or '—',
+        'alqrma_almdafa_almtwqaa__cap_rate': project_data.get('cap_rate') or project_data.get('capRate') or project_data.get('alqrma_almdafa_almtwqaa__cap_rate') or '—',
+        'nsba_alashgal_almtwqaa': project_data.get('occupancy_rate') or project_data.get('occupancy') or '—',
+    }
+
+    for a_key, a_val in aliases.items():
+        if a_val is not None:
+            val_s = str(a_val)
+            replacements[f'##{a_key}##'] = val_s
+            replacements[f'##{a_key.lower()}##'] = val_s
+            replacements[f'##{a_key.upper()}##'] = val_s
+
+    # Perform replacements
+    for token, value in replacements.items():
+        if token in html:
+            html = html.replace(token, value)
+
+    # Regex search for any custom tokens generated by LLM (e.g. ##custom_key##)
+    def token_replacer(match):
+        token_str = match.group(0)
+        raw_key = token_str.replace('##', '').strip()
+        for k, v in project_data.items():
+            if k.lower() == raw_key.lower() and v is not None:
+                return str(v)
+        return ''
+
+    html = re.sub(r'##[a-zA-Z0-9_]+##', token_replacer, html)
+
     return html
 
 
@@ -591,6 +710,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
             if map_placeholders:
                 html = _replace_map_placeholders(html, map_placeholders)
             html = _replace_creative_image_placeholders(html, creative_images, slide.get('type', 'content'))
+            html = _replace_data_placeholders(html, project_data, branding)
             results[idx] = html
 
     return results
