@@ -1770,6 +1770,184 @@
       width: 100%;
       text-align: right;
     }
+    /* ===== Tenant Global Rail ===== */
+    .tgr {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 288px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-left: 1px solid #e5e5e5;
+      box-shadow: -2px 0 12px rgba(0, 0, 0, .06);
+      z-index: 850;
+      transition: width .18s ease;
+      direction: rtl;
+      font-size: 13px;
+    }
+
+    .tgr-head {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tgr-toggle {
+      background: none;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 4px 9px;
+      cursor: pointer;
+    }
+
+    .tgr-tabs {
+      display: flex;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .tgr-tabs button {
+      flex: 1;
+      padding: 6px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fafafa;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px;
+    }
+
+    .tgr-tabs button.active {
+      background: #7A0C0C;
+      color: #fff;
+      border-color: #7A0C0C;
+    }
+
+    .tgr-body {
+      flex: 1;
+      overflow: auto;
+      padding: 10px;
+    }
+
+    .tgr-foot {
+      padding: 10px;
+      border-top: 1px solid #eee;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .tgr-act {
+      padding: 7px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px;
+    }
+
+    .tgr-hidden {
+      display: none !important;
+    }
+
+    .tgr-stage {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 9px;
+      margin-bottom: 6px;
+      border: 1px solid #e5e5e5;
+      border-radius: 10px;
+      background: #fff;
+      cursor: pointer;
+      text-align: right;
+      font-family: inherit;
+      font-size: 13px;
+    }
+
+    .tgr-stage.current {
+      border-color: #C4A35A;
+      background: #FDF8EF;
+      font-weight: 700;
+    }
+
+    .tgr-stage[disabled] {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    .tgr-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      border-bottom: 1px dashed #f0f0f0;
+    }
+
+    .tgr-row button {
+      border: none;
+      background: none;
+      color: #7A0C0C;
+      cursor: pointer;
+      font-size: 12px;
+      flex: 0 0 auto;
+    }
+
+    .tgr-row span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tgr-empty {
+      color: #999;
+      padding: 8px;
+    }
+
+    /* rail hidden by default, shown only when body.tgr-on is set */
+    body:not(.tgr-on) .tgr {
+      display: none;
+    }
+
+    /* collapsed rail */
+    body.tgr-collapsed .tgr {
+      width: 46px;
+      overflow: hidden;
+    }
+
+    body.tgr-collapsed .tgr-tabs,
+    body.tgr-collapsed .tgr-body,
+    body.tgr-collapsed .tgr-foot {
+      display: none;
+    }
+
+    /* shift main content so the rail does not overlap */
+    body.tgr-on .tenant-app {
+      margin-right: 288px;
+      margin-left: auto;
+      max-width: min(1180px, calc(100% - 288px));
+      transition: margin .18s ease;
+    }
+
+    body.tgr-on.tgr-collapsed .tenant-app {
+      margin-right: 46px;
+      max-width: min(1180px, calc(100% - 46px));
+    }
+
+    @media (max-width: 1200px) {
+      body.tgr-on .tenant-app {
+        margin-right: 46px;
+        max-width: min(1180px, calc(100% - 46px));
+      }
+    }
+
   </style>
   <style id="zai-global-styles"></style>
 </head>
@@ -2444,6 +2622,23 @@
 
     </section>
 
+    <!-- Tenant Global Rail — fixed right sidebar for workflow navigation & inputs -->
+    <aside id="tenantGlobalRail" class="tgr" aria-label="شريط التنقل العام">
+      <div class="tgr-head">
+        <button class="tgr-toggle" onclick="toggleGlobalRail()" title="طي/فتح الشريط">☰</button>
+        <div class="tgr-tabs">
+          <button type="button" data-tgr-tab="nav" class="active" onclick="setGlobalRailTab('nav')">المراحل</button>
+          <button type="button" data-tgr-tab="inputs" onclick="setGlobalRailTab('inputs')">المدخلات</button>
+        </div>
+      </div>
+      <div id="tgrNav" class="tgr-body"></div>
+      <div id="tgrInputs" class="tgr-body tgr-hidden"></div>
+      <div class="tgr-foot">
+        <button type="button" class="tgr-act" onclick="saveProjectAsDraft()">💾 حفظ كمسودة</button>
+        <button type="button" class="tgr-act" onclick="renderGlobalRailInputs()">↻ تحديث الملخص</button>
+      </div>
+    </aside>
+
     <!-- Map Style Selector Panel (Modal style) — shared by project & slides pages -->
       <div id="mapStylePanel"
         style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center; padding:20px;">
@@ -2998,6 +3193,7 @@
         }
       }
       renderWorkflowStageSidebars(pageId);
+      refreshGlobalRail();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -3076,6 +3272,160 @@
         sidebar.innerHTML = '';
         appendWorkflowNavigation(sidebar, activePageId, true);
       });
+    }
+
+    /* ===== Tenant Global Rail ===== */
+    const TGR_STAGES = [
+      { id: 'tenantProjectPage', label: 'بيانات المشروع', icon: '📝' },
+      { id: 'tenantSlidePlanPage', label: 'خطة الشرائح', icon: '🗂️' },
+      { id: 'tenantMainImagePage', label: 'الصورة الرئيسية', icon: '🖼️' },
+      { id: 'tenantMoodboardPage', label: 'المود بورد', icon: '🎨' },
+      { id: 'tenantSlidesPage', label: 'معاينة الشرائح', icon: '📊' }
+    ];
+
+    const TGR_HIDE_ON = [
+      'tenantAuthPage',
+      'tenantDashboardPage',
+      'tenantSettingsPage',
+      'tenantFieldsPage',
+      'tenantPresentationsPage',
+      'tenantUsersPage',
+      'tenantTrainingPage',
+      'tenantAIRulesPage',
+      'tenantApprovalsPage',
+      'tenantAdminPage'
+    ];
+
+    function tgrCurrentPageId() {
+      const el = document.querySelector('.tenant-page.active');
+      return el ? el.id : null;
+    }
+
+    function renderGlobalRailNav() {
+      const host = document.getElementById('tgrNav');
+      if (!host) return;
+      const cur = tgrCurrentPageId();
+      host.innerHTML = TGR_STAGES.map(s => {
+        const exists = !!document.getElementById(s.id);
+        const isCurrent = s.id === cur;
+        return '<button class="tgr-stage' + (isCurrent ? ' current' : '') + '"' +
+          (exists ? '' : ' disabled') +
+          ' onclick="tgrGoStage(\'' + s.id + '\')"><span>' + s.icon + '</span><span>' + s.label + '</span></button>';
+      }).join('');
+    }
+
+    function tgrGoStage(pageId) {
+      if (typeof navigateTenantWorkflow === 'function') {
+        navigateTenantWorkflow(pageId);
+      } else if (typeof showTenantPage === 'function') {
+        showTenantPage(pageId);
+      } else {
+        document.querySelectorAll('.tenant-page').forEach(p => p.classList.remove('active'));
+        const t = document.getElementById(pageId);
+        if (t) t.classList.add('active');
+      }
+      refreshGlobalRail();
+    }
+
+    function setGlobalRailTab(tab) {
+      document.querySelectorAll('[data-tgr-tab]').forEach(b =>
+        b.classList.toggle('active', b.getAttribute('data-tgr-tab') === tab));
+      const navBody = document.getElementById('tgrNav');
+      const inputsBody = document.getElementById('tgrInputs');
+      if (navBody) navBody.classList.toggle('tgr-hidden', tab !== 'nav');
+      if (inputsBody) inputsBody.classList.toggle('tgr-hidden', tab !== 'inputs');
+      if (tab === 'inputs') renderGlobalRailInputs();
+      localStorage.setItem('tgrTab', tab);
+    }
+
+    function toggleGlobalRail() {
+      const collapsed = document.body.classList.toggle('tgr-collapsed');
+      localStorage.setItem('tgrCollapsed', collapsed ? '1' : '0');
+      setTimeout(tgrRefit, 220);
+    }
+
+    function tgrRefit() {
+      if (typeof autoFitSlideContent !== 'function') return;
+      // Resize slide preview stages so they fit inside the remaining width when the rail is open.
+      document.querySelectorAll('.tenant-slide-stage').forEach(st => {
+        const main = st.closest('.ge-main') || st.closest('#tenantSlidesMain');
+        const maxW = main ? main.clientWidth - 32 : 960;
+        const stageW = Math.min(960, Math.max(480, maxW));
+        st.style.setProperty('--stage-w', stageW + 'px');
+        st.style.setProperty('--slide-scale', (stageW / 1280).toFixed(4));
+        autoFitSlideContent(st);
+      });
+      document.querySelectorAll('.ge-slide-stage').forEach(st => autoFitSlideContent(st));
+    }
+
+    function renderGlobalRailInputs() {
+      const host = document.getElementById('tgrInputs');
+      const form = document.getElementById('tenantProjectForm');
+      if (!host) return;
+      if (!form) { host.innerHTML = '<div class="tgr-empty">افتح بيانات المشروع أولاً</div>'; return; }
+
+      let html = '';
+      const groups = form.querySelectorAll('.tenant-form-section, fieldset');
+      (groups.length ? groups : [form]).forEach(sec => {
+        const t = sec.querySelector('.tenant-section-title, h3, h4, legend');
+        const title = (t && t.textContent.trim()) || 'بيانات';
+        let rows = '';
+        sec.querySelectorAll('input, select, textarea').forEach(el => {
+          if (el.type === 'file' || el.type === 'hidden' || el.disabled) return;
+          const fieldId = el.id || el.dataset.key;
+          if (!fieldId) return;
+          const fieldWrap = el.closest('.tenant-field');
+          const lab = fieldWrap ? fieldWrap.querySelector('label') : null;
+          const label = (lab && lab.textContent.trim()) || el.name || fieldId;
+          let val;
+          if (el.type === 'checkbox') val = el.checked ? 'نعم' : 'لا';
+          else if (el.tagName === 'SELECT') val = (el.options[el.selectedIndex] || {}).text || '—';
+          else val = el.value || '—';
+          val = String(val).replace(/\s+/g, ' ').trim().slice(0, 32) || '—';
+          rows += '<div class="tgr-row"><span title="' + escapeHtml(label) + '">' + escapeHtml(label) + ': <b>' + escapeHtml(val) +
+                  '</b></span><button onclick="tgrGoField(\'' + fieldId + '\')">تعديل</button></div>';
+        });
+        if (rows) html += '<details open><summary>' + escapeHtml(title) + '</summary>' + rows + '</details>';
+      });
+      host.innerHTML = html || '<div class="tgr-empty">لا توجد مدخلات بعد</div>';
+    }
+
+    function tgrGoField(fieldId) {
+      tgrGoStage('tenantProjectPage');
+      setTimeout(() => {
+        const el = document.getElementById(fieldId) ||
+                   document.querySelector('#tenantProjectForm [data-key="' + fieldId + '"]');
+        if (!el) return;
+        const det = el.closest('details');
+        if (det) det.open = true;
+        const sec = el.closest('.tenant-form-section');
+        if (sec && sec.style.display === 'none') sec.style.display = 'block';
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus({ preventScroll: true });
+        el.style.outline = '2px solid #C4A35A';
+        setTimeout(() => { el.style.outline = ''; }, 1300);
+      }, 80);
+    }
+
+    function refreshGlobalRail() {
+      const cur = tgrCurrentPageId();
+      const show = !!cur && TGR_HIDE_ON.indexOf(cur) === -1;
+      document.body.classList.toggle('tgr-on', show);
+      if (!show) return;
+      renderGlobalRailNav();
+      const inputsBody = document.getElementById('tgrInputs');
+      if (inputsBody && !inputsBody.classList.contains('tgr-hidden')) renderGlobalRailInputs();
+      if (cur === 'tenantSlidesPage') setTimeout(tgrRefit, 220);
+    }
+
+    function initGlobalRail() {
+      if (localStorage.getItem('tgrCollapsed') === '1') document.body.classList.add('tgr-collapsed');
+      setGlobalRailTab(localStorage.getItem('tgrTab') || 'nav');
+      refreshGlobalRail();
+      if (!window._tgrResizeBound) {
+        window.addEventListener('resize', tgrRefit);
+        window._tgrResizeBound = true;
+      }
     }
 
     function toggleTenantDropdown(btn) {
@@ -3968,6 +4318,7 @@
           }, 300);
         }
       } catch (e) { console.log('No draft to load'); }
+      refreshGlobalRail();
     }
 
     function getProjectSectionElement(sectionKey) {
@@ -4160,6 +4511,7 @@
             input = document.createElement('input');
             input.type = 'text';
           }
+          input.id = f.fieldKey;
           input.dataset.key = f.fieldKey;
           input.dataset.type = f.fieldType;
           input.placeholder = f.placeholder || '';
@@ -4187,7 +4539,7 @@
             linkDiv.className = 'tenant-field full maps-link-field';
             linkDiv.innerHTML = '<label>رابط الموقع على قوقل ماب (اختياري)</label>' +
               '<div style="position:relative">' +
-              '<input type="text" data-key="location_maps_link" data-type="text" placeholder="https://maps.app.goo.gl/..." style="direction:ltr;text-align:left;font-size:13px" />' +
+              '<input type="text" id="location_maps_link" data-key="location_maps_link" data-type="text" placeholder="https://maps.app.goo.gl/..." style="direction:ltr;text-align:left;font-size:13px" />' +
               '</div>' +
               '<span class="tenant-hint">الصقي رابط الموقع من قوقل ماب — الروابط المختصرة تدعم تلقائياً.</span>';
             sectionDiv.appendChild(linkDiv);
@@ -4580,6 +4932,7 @@
       autoSaveDraftTimer = setTimeout(() => {
         saveProjectAsDraft(true);
       }, 700);
+      renderGlobalRailInputs();
     }
 
     async function saveProjectAsDraft(silent = false) {
@@ -5659,6 +6012,7 @@
 
       renderTenantSlidesSidebar();
       renderTenantDesignerChat();
+      setTimeout(tgrRefit, 0);
     }
 
     function moveTenantSlide(fromIdx, toIdx) {
@@ -6133,6 +6487,7 @@
         editorInfo.textContent = 'عرض: ' + (p.title || '') + ' | ' + (p.slideCount || 0) + ' شريحة';
       }
       showTenantPage('tenantSlidesPage');
+      refreshGlobalRail();
       toast('تم فتح العرض: ' + (p.title || ''));
     }
 
@@ -6254,6 +6609,7 @@
               tenantSlidesData = draftData.tenantSlidesData;
             }
             applySectionStatuses(sectionStatuses);
+            refreshGlobalRail();
 
             toast('تم فتح المسودة المحفوظة بنجاح');
           }, 300);
@@ -7585,6 +7941,7 @@
           showAuthPage();
         }
       }
+      initGlobalRail();
     }
 
     async function showInvitePage(inviteToken) {
