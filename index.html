@@ -3333,6 +3333,7 @@
         setValue('settingsFontFamily', 'custom');
         const preview = document.getElementById('settingsFontPreview');
         if (preview) preview.textContent = 'تم رفع الخط: ' + file.name;
+        await loadTenantFontCss();
         toast('تم رفع الخط بنجاح');
       } else {
         toast(data.error || 'فشل رفع الخط');

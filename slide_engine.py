@@ -141,6 +141,58 @@ def resolve_slide_bounds(branding):
     return min_slides, max_slides, default_count
 
 
+def build_fallback_plan(branding):
+    """Build a default slide plan when AI slide planning fails.
+
+    Uses the tenant's min/max/default slide count bounds.
+    """
+    min_s, max_s, default_count = resolve_slide_bounds(branding)
+    count = max(min_s, min(default_count, max_s))
+    slides = [
+        {'title': 'الغلاف', 'type': 'cover', 'design_style': 'image', 'requires_image': True, 'bullets': [], 'content_density': 'low'},
+        {'title': 'الفهرس', 'type': 'index', 'design_style': 'flow', 'requires_image': False, 'bullets': [], 'content_density': 'low'},
+    ]
+    content_titles = [
+        'نظرة عامة على المشروع',
+        'الموقع والمميزات',
+        'الوحدات والمساحات',
+        'العائد الاستثماري',
+        'الخدمات والمرافق',
+        'لماذا هذا المشروع؟',
+        'التحليل المالي والجدوى',
+        'دراسة السوق والطلب',
+        'الفرص والمزايا التنافسية',
+        'خطة التنفيذ والجدول الزمني',
+        'إدارة المخاطر والاستدامة',
+        'المواصفات الفنية والهندسية',
+    ]
+    needed = max(0, count - 4)  # cover + index + moodboard + closing
+    for i, title in enumerate(content_titles):
+        if len(slides) - 1 >= needed:
+            break
+        slides.append({
+            'title': title,
+            'type': 'content',
+            'design_style': 'cards',
+            'requires_image': False,
+            'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
+            'content_density': 'medium',
+        })
+    while len(slides) - 1 < needed:
+        idx = len(slides) - 1
+        slides.append({
+            'title': f'تفاصيل محتوى فرعي {idx}',
+            'type': 'content',
+            'design_style': 'cards',
+            'requires_image': False,
+            'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
+            'content_density': 'medium',
+        })
+    slides.append({'title': 'مود بورد', 'type': 'moodboard', 'design_style': 'grid', 'requires_image': True, 'bullets': [], 'content_density': 'low'})
+    slides.append({'title': 'شكراً لكم', 'type': 'closing', 'design_style': 'minimal', 'requires_image': False, 'bullets': [], 'content_density': 'low'})
+    return {'proposed_count': len(slides), 'slides': slides}
+
+
 def build_slide_plan_prompt(project_data, branding):
     """Build the prompt for AI to propose a slide plan."""
     project_json = json.dumps(project_data, ensure_ascii=False, indent=2)
@@ -753,15 +805,18 @@ def resolve_logo_in_html(html, tenant_id=None):
             else:
                 img_tag = img_tag.replace('<img', f'<img src="{logo_url}"')
 
-            if 'style=' in img_tag.lower():
-                img_tag = re.sub(
-                    r'style=["\']([^"\']*)["\']',
-                    r'style="\1;max-height:50px;width:auto;object-fit:contain;display:inline-block;"',
-                    img_tag,
-                    flags=re.IGNORECASE
-                )
-            else:
-                img_tag = img_tag.replace('<img', f'<img style="max-height:50px;width:auto;object-fit:contain;display:inline-block;"')
+            # Only add the logo sizing style once
+            _LOGO_STYLE = 'max-height:50px;width:auto;object-fit:contain;display:inline-block;'
+            if _LOGO_STYLE not in img_tag:
+                if 'style=' in img_tag.lower():
+                    img_tag = re.sub(
+                        r'style=["\']([^"\']*)["\']',
+                        lambda m: f'style="{m.group(1).rstrip(";")};{_LOGO_STYLE}"',
+                        img_tag,
+                        flags=re.IGNORECASE
+                    )
+                else:
+                    img_tag = img_tag.replace('<img', f'<img style="{_LOGO_STYLE}"')
         return img_tag
 
     html = re.sub(r'<img\s[^>]*>', _fix_logo_img, html, flags=re.IGNORECASE)
@@ -772,6 +827,11 @@ def _strip_presentation_icons(html):
     """Remove generated icon markup and emoji while retaining company logo images."""
     if not html:
         return html
+    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', '', html, flags=re.IGNORECASE)
+    html = re.sub(
+        r'<(?:i|span|div)\b[^>]*(?:class|id)=["\'][^"\']*(?:icon|emoji|lucide|fa-|material-icons)[^"\']*["\'][^>]*>[\s\S]*?</(?:i|span|div)\s*>',
+        '', html, flags=re.IGNORECASE
+    )
     return _ICON_RE.sub('', html)
 
 
@@ -782,7 +842,12 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     slide_type is the semantic type (cover, index, content, closing, ...).
     slide_num / total_slides are used for page numbers and cover/closing detection.
     """
+    # Strip SVGs, icon fonts and emojis first.
     html = _strip_presentation_icons(html)
+
+    # Enforce image/placeholder rules.
+    html = _block_external_images(html)
+    html = _ensure_map_placeholder(html, slide_type)
 
     # Cover and closing must never receive the universal header/footer.
     normalized_title = str(slide_title or '').strip().lower()
@@ -809,8 +874,8 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         return tag
     html = re.sub(r'<img\s[^>]*>', _strip_srcless_img, html, flags=re.IGNORECASE)
 
-    # Content slides get a header/footer; cover, moodboard and closing never do.
-    if slide_type == 'content' and not is_cover_or_closing:
+    # Content/map/site slides get a header/footer; cover, moodboard and closing never do.
+    if slide_type not in ('cover', 'closing', 'moodboard') and not is_cover_or_closing:
         has_header = bool(re.search(r'height:\s*56px', html))
         has_footer = bool(re.search(r'height:\s*36px', html))
 
@@ -849,8 +914,7 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
             )
             html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
 
-    html = resolve_logo_in_html(html, tenant_id or (branding or {}).get('tenant_id'))
-    return _strip_presentation_icons(html)
+    return html
 
 
 def finalize_slide_html(html, slide_type, project_data, branding, creative_images=None,

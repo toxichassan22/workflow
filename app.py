@@ -489,6 +489,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
                 continue
             html = extract_html_from_glm(response)
             html = postprocess_slide(html, slide_num, tenant_id=tenant_id, slide_title=slide_title, total_slides=total, slide_type='content')
+            html = slide_engine.resolve_logo_in_html(html, tenant_id)
             count = html.count('class="slide"')
             if count >= 1:
                 print(f"[SLIDE-{slide_num}] OK Done ({len(html)} chars)")
@@ -510,8 +511,9 @@ def build_glm_prompt(project_data, images, branding=None):
         tenant_id = getattr(g, 'tenant_id', None)
         branding = db.get_branding(tenant_id) if tenant_id else {}
     dynamic_rules = build_design_rules(branding)
-    slide_count, _, _ = resolve_slide_bounds(branding)
-    fallback_plan = slide_engine.build_fallback_plan(branding)
+    min_s, max_s, default_count = resolve_slide_bounds(branding)
+    slide_count = max(min_s, min(default_count, max_s))
+    fallback_plan = build_fallback_plan(branding)
     slides = fallback_plan.get('slides', [])
     generic_slide = {
         'title': 'تفاصيل إضافية',
@@ -2166,7 +2168,7 @@ def api_ai_input_builder():
 from slide_engine import (
     build_slide_plan_prompt, parse_slide_plan, validate_slide_plan,
     generate_all_slides, extract_html_from_glm, CONTENT_DISTRIBUTION_RULES,
-    resolve_slide_bounds
+    resolve_slide_bounds, build_fallback_plan
 )
 
 
@@ -2216,52 +2218,6 @@ def api_slide_plan():
     prompt = build_slide_plan_prompt(project_data, effective_branding)
     if training_context:
         prompt = f"## بيانات خاصة بالشركة والتزام بحد الشرائح\nتنبيه هام جداً: التزم بحد الشرائح لهذه الشركة ({effective_min_slides} إلى {effective_max_slides} شريحة كحد أقصى).\n{training_context}\n\n---\n\n{prompt}"
-
-    def build_fallback_plan(b):
-        count = max(effective_min_slides, min(b.get('max_slides', 35), b.get('default_slide_count', effective_min_slides)))
-        slides = [
-            {'title': 'الغلاف', 'type': 'cover', 'design_style': 'image', 'requires_image': True, 'bullets': [], 'content_density': 'low'},
-            {'title': 'الفهرس', 'type': 'index', 'design_style': 'flow', 'requires_image': False, 'bullets': [], 'content_density': 'low'},
-        ]
-        content_titles = [
-            'نظرة عامة على المشروع',
-            'الموقع والمميزات',
-            'الوحدات والمساحات',
-            'العائد الاستثماري',
-            'الخدمات والمرافق',
-            'لماذا هذا المشروع؟',
-            'التحليل المالي والجدوى',
-            'دراسة السوق والطلب',
-            'الفرص والمزايا التنافسية',
-            'خطة التنفيذ والجدول الزمني',
-            'إدارة المخاطر والاستدامة',
-            'المواصفات الفنية والهندسية',
-        ]
-        needed = max(0, count - 4)  # cover + index + moodboard + closing
-        for i, title in enumerate(content_titles):
-            if len(slides) - 1 >= needed:
-                break
-            slides.append({
-                'title': title,
-                'type': 'content',
-                'design_style': 'cards',
-                'requires_image': False,
-                'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
-                'content_density': 'medium',
-            })
-        while len(slides) - 1 < needed:
-            idx = len(slides) - 1
-            slides.append({
-                'title': f'تفاصيل محتوى فرعي {idx}',
-                'type': 'content',
-                'design_style': 'cards',
-                'requires_image': False,
-                'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
-                'content_density': 'medium',
-            })
-        slides.append({'title': 'مود بورد', 'type': 'moodboard', 'design_style': 'grid', 'requires_image': True, 'bullets': [], 'content_density': 'low'})
-        slides.append({'title': 'شكراً لكم', 'type': 'closing', 'design_style': 'minimal', 'requires_image': False, 'bullets': [], 'content_density': 'low'})
-        return {'proposed_count': len(slides), 'slides': slides}
 
     plan = None
     last_error = None

@@ -100,13 +100,15 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
                 html = slide_data.get('html', '')
                 if not html:
                     continue
-                # Inject tenant logo as base64, then fix any remaining broken logo references
+                # Resolve all logo placeholders/paths to the tenant-assets URL first
+                html = resolve_logo_in_html(html, tenant_id)
+                # Inject tenant logo as base64
                 if logo_data_uri:
                     html = html.replace('##LOGO##', logo_data_uri)
                     if branding and branding.get('logo_path'):
-                        html = html.replace(branding['logo_path'].split('?')[0], logo_data_uri)
+                        # Remove the cache-busting query when replacing the tenant logo path
+                        html = re.sub(re.escape(branding['logo_path'].split('?')[0]) + r"(?:\?[^\"'\\)\\s]*)?", logo_data_uri, html)
                     html = html.replace('/assets/logo.png', logo_data_uri)
-                html = resolve_logo_in_html(html, tenant_id)
 
                 full_html = f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">

@@ -60,10 +60,26 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     print(f"[PDF] Generating PDF: {out_path.name}")
 
     # Resolve tenant logo placeholders and broken paths
-    html = resolve_logo_in_html(html, tenant_id or (branding or {}).get('tenant_id'))
+    tenant_id = tenant_id or (branding or {}).get('tenant_id')
+    html = resolve_logo_in_html(html, tenant_id)
+
+    # Convert the logo reference to an actual file URI so Playwright can render it
+    def _local_logo_uri(tid):
+        if not tid:
+            return None
+        for ext in ('.png', '.jpg', '.jpeg', '.webp'):
+            p = BASE_DIR / 'uploads' / str(tid) / f'logo{ext}'
+            if p.exists():
+                return p.as_uri()
+        return None
+
+    logo_uri = _local_logo_uri(tenant_id)
+    if logo_uri:
+        # Replace /tenant-assets/<tenant>/logo?... with the real file URI
+        html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/logo(?:\?[^\s"\'\\)]+)?', logo_uri, html)
 
     # Inject tenant font CSS and print styles
-    font_css, font_family = build_font_css(branding or {}, tenant_id or (branding or {}).get('tenant_id'), embed=True)
+    font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
     custom_style = f"""
 {font_css}
     @media print {{
