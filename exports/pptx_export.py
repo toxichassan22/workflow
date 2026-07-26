@@ -7,8 +7,6 @@ import base64
 import os
 import time
 import re
-import tempfile
-import shutil
 from pathlib import Path
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
@@ -67,15 +65,16 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
         slide_w = Inches(13.333)
         slide_h = Inches(7.5)
 
-    # Build tenant font CSS / family
+    # Build tenant font CSS / family (font_family is a CSS list, already quoted)
     font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
+    # Plain display name for python-pptx fallback text boxes
+    pptx_font_name = (branding or {}).get('font_family') or 'IBM Plex Sans Arabic'
 
     # Resolve tenant logo to a local file path for Playwright
     logo_local_path = None
     if tenant_id:
-        from pathlib import Path
         for ext in ['.png', '.jpg', '.jpeg', '.webp']:
-            candidate = Path(__file__).resolve().parent.parent / 'uploads' / tenant_id / f'logo{ext}'
+            candidate = Path(__file__).resolve().parent.parent / 'uploads' / str(tenant_id) / f'logo{ext}'
             if candidate.exists():
                 logo_local_path = candidate
                 break
@@ -117,7 +116,7 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 {font_css}
-body {{ direction:rtl; font-family:'{font_family}',Tahoma,Arial,sans-serif; }}
+body {{ direction:rtl; font-family:{font_family}; }}
 .slide {{ width:{slide_w_px}px; height:{slide_h_px}px; direction:rtl; position:relative; overflow:hidden; }}
 img {{ max-width:100%; max-height:100%; object-fit:cover; }}
 </style>
@@ -125,8 +124,11 @@ img {{ max-width:100%; max-height:100%; object-fit:cover; }}
 <body>{html}</body>
 </html>"""
                 page.set_content(full_html, wait_until='load')
-                page.wait_for_timeout(500)
-                page.evaluate('document.fonts.ready')
+                page.evaluate("() => document.fonts.ready")
+                page.wait_for_function(
+                    "() => Array.from(document.images).every(i => i.complete)",
+                    timeout=120000
+                )
                 # Screenshot the .slide element
                 slide_el = page.query_selector('.slide')
                 if slide_el:
@@ -155,7 +157,7 @@ img {{ max-width:100%; max-height:100%; object-fit:cover; }}
             # Fallback: text-only slide
             title = slide_data.get('title', f'شريحة {i+1}')
             _add_textbox(slide, Inches(1), Inches(3), Inches(11), Inches(1.5),
-                         title, font_size=36, bold=True, font_name=font_family)
+                         title, font_size=36, bold=True, font_name=pptx_font_name)
 
     safe_name = ''.join(c for c in project_name if c.isalnum() or c in '-_ ')[:50].strip() or 'presentation'
     output_path = os.path.join(output_dir, f"{safe_name}_{int(time.time())}.pptx")
