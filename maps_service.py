@@ -1627,9 +1627,11 @@ def _get_cached_map_images(tenant_id, presentation_id):
         return None
     placeholders = {}
     metadata_by_type = {}
+    found_types = set()
     for img in existing:
         if not os.path.exists(img['file_path']):
             continue
+        found_types.add(img['image_type'])
         placeholders[img['placeholder']] = img['file_path']
         try:
             metadata_by_type[img['image_type']] = json.loads(img.get('metadata_json') or '{}')
@@ -1637,18 +1639,25 @@ def _get_cached_map_images(tenant_id, presentation_id):
             metadata_by_type[img['image_type']] = {}
     if not placeholders:
         return None
-    metadata = next(iter(metadata_by_type.values())) if metadata_by_type else {}
+    found_base = {t.split('_')[0] for t in found_types}
+    meta = next((m for t, m in metadata_by_type.items() if t.startswith('overview')), None)
+    if meta is None:
+        meta = next(iter(metadata_by_type.values()), {})
+    landmarks = next((m.get('landmarks') for m in metadata_by_type.values() if m.get('landmarks')), [])
+    landmarks_matrix = next((m.get('landmarks_matrix') for m in metadata_by_type.values() if m.get('landmarks_matrix')), [])
     zooms = {
         image_type: meta['zoom'] for image_type, meta in metadata_by_type.items()
         if isinstance(meta, dict) and meta.get('zoom') is not None
     }
     return {
-        'lat': metadata.get('lat'),
-        'lng': metadata.get('lng'),
+        'lat': meta.get('lat'),
+        'lng': meta.get('lng'),
         'placeholders': placeholders,
-        'landmarks': metadata.get('landmarks', []),
-        'landmarks_matrix': metadata.get('landmarks_matrix', []),
+        'landmarks': landmarks,
+        'landmarks_matrix': landmarks_matrix,
         'zooms': zooms,
+        'found_types': found_types,
+        'found_base': found_base,
         'cached': True,
     }
 
@@ -1659,11 +1668,6 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     Returns dict of placeholder -> file_path.
     If force=False and valid cached images exist, returns them without calling Google APIs.
     """
-    if not force and presentation_id:
-        cached = _get_cached_map_images(tenant_id, presentation_id)
-        if cached and cached.get('placeholders'):
-            return cached
-
     if not _has_api_key():
         return {'error': 'Google Maps API key not configured'}
 
@@ -1702,6 +1706,23 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
 
     if lat is None or lng is None:
         return {'error': 'لم يتم العثور على موقع أو إحداثيات للمشروع. يرجى إدخال عنوان المشروع أو رابط Google Maps في البيانات.'}
+
+    enabled_maps = project_data.get('enabled_maps')
+    if isinstance(enabled_maps, str):
+        try:
+            enabled_maps = json.loads(enabled_maps)
+        except Exception:
+            enabled_maps = None
+    if not isinstance(enabled_maps, list):
+        enabled_maps = ['overview', 'landmarks', 'access', 'catchment', 'streetview']
+
+    if not force and presentation_id:
+        cached = _get_cached_map_images(tenant_id, presentation_id)
+        if cached and cached.get('lat') == lat and cached.get('lng') == lng:
+            found_base = cached.get('found_base') or set()
+            required_base = {t for t in enabled_maps if t not in ('streetview',)}
+            if not (required_base - found_base):
+                return cached
 
     if force and presentation_id:
         from db import delete_map_images
@@ -1792,16 +1813,6 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             marker_lng = sum(pt[1] for pt in polygon_coords) / len(polygon_coords)
         except Exception:
             marker_lat, marker_lng = lat, lng
-
-    # Parse enabled maps (default to all if not specified)
-    enabled_maps = project_data.get('enabled_maps')
-    if isinstance(enabled_maps, str):
-        try:
-            enabled_maps = json.loads(enabled_maps)
-        except Exception:
-            enabled_maps = None
-    if not isinstance(enabled_maps, list):
-        enabled_maps = ['overview', 'landmarks', 'access', 'catchment', 'streetview']
 
     # Parse UI element flags (compass, inset map)
     draw_compass = project_data.get('draw_compass', True)

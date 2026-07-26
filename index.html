@@ -2837,25 +2837,43 @@
         tenantProjectData = { ...tenantProjectData, ...fresh };
       }
 
+      function recordError(res) {
+        tenantCreativeImages.last_error =
+          (res && res.error_code === 'NO_API_KEY')
+            ? 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env'
+            : ((res && res.error) || null);
+      }
+
       if (needImages) {
-        if (!force && hasStoredImages()) {
+        const staleImages = !hasStoredImages();
+        if (!force && !staleImages) {
           console.log('[ASSETS] reusing stored cover/moodboard');
         } else {
-          const payload = { projectData: tenantProjectData, includeCover: includeCover !== false };
+          const count = (tenantBranding && tenantBranding.moodboard_count) || 4;
+          const payload = {
+            projectData: tenantProjectData,
+            includeCover: includeCover !== false,
+            count: count,
+            referenceImage: (includeCover === false ? (tenantCreativeImages.cover || null) : null)
+          };
           const res = await api('POST', '/api/generate-images', payload);
           if (res && res.success && res.images) {
             if (includeCover !== false) tenantCreativeImages.cover = res.images.cover || tenantCreativeImages.cover;
             tenantCreativeImages.moodboard = res.images.moodboard || tenantCreativeImages.moodboard;
             tenantCreativeImages.images_signature = imagesSignature();
+            tenantCreativeImages.last_error = null;
+          } else {
+            recordError(res);
           }
         }
       }
 
       if (needMaps) {
-        if (!force && hasStoredMaps()) {
+        const staleMaps = !hasStoredMaps();
+        if (!force && !staleMaps) {
           console.log('[ASSETS] reusing stored maps');
         } else {
-          const payload = { projectData: tenantProjectData, force: !!force };
+          const payload = { projectData: tenantProjectData, force: !!force || staleMaps };
           if (tenantPresentationId) payload.presentationId = tenantPresentationId;
           const res = await api('POST', '/api/generate-map-images', payload);
           if (res && res.success) {
@@ -2865,6 +2883,9 @@
             tenantCreativeImages.map_lng = res.lng || tenantCreativeImages.map_lng;
             tenantCreativeImages.map_zooms = res.zooms || tenantCreativeImages.map_zooms;
             tenantCreativeImages.maps_signature = mapsSignature();
+            tenantCreativeImages.last_error = null;
+          } else {
+            recordError(res);
           }
         }
       }
@@ -5110,14 +5131,14 @@
     async function generateTenantMainImage() {
       if (!tenantProjectData) return;
       showLoader('جاري توليد الصورة الرئيسية', 'يتم إعداد صورة غلاف خاصة بالمشروع');
-      await ensureProjectAssets({ needMaps: false, includeCover: true });
+      await ensureProjectAssets({ force: true, needMaps: false, includeCover: true });
       hideLoader();
       if (tenantCreativeImages.cover) {
         renderTenantMainImage();
         triggerAutoSaveDraft();
         toast('تم توليد الصورة الرئيسية.');
       } else {
-        toast('تعذر توليد الصورة الرئيسية');
+        toast(tenantCreativeImages.last_error || 'تعذر توليد الصورة الرئيسية');
       }
     }
 
@@ -5125,14 +5146,14 @@
       if (!tenantProjectData) return;
       const count = (tenantBranding && tenantBranding.moodboard_count) ? tenantBranding.moodboard_count : 4;
       showLoader('جاري توليد صور المود بورد', 'يتم إنشاء ' + count + ' صور مرجعية للتصميم');
-      await ensureProjectAssets({ needMaps: false, includeCover: false });
+      await ensureProjectAssets({ force: true, needMaps: false, includeCover: false });
       hideLoader();
       if (tenantCreativeImages.moodboard && tenantCreativeImages.moodboard.length) {
         renderTenantMoodboard();
         triggerAutoSaveDraft();
         toast('تم توليد ' + tenantCreativeImages.moodboard.length + ' صور للمود بورد.');
       } else {
-        toast('تعذر توليد صور المود بورد');
+        toast(tenantCreativeImages.last_error || 'تعذر توليد صور المود بورد');
       }
     }
 

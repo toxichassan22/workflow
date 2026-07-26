@@ -733,6 +733,14 @@ def api_generate_images():
             time.sleep(1)
 
     print(f"[IMAGES] Done. Cover: {'OK' if images['cover'] else 'FAIL'}, Moodboard: {sum(1 for x in images['moodboard'] if x)}/{target_count}")
+    has_cover = bool(images['cover'])
+    has_moodboard = any(images['moodboard'])
+    requested_cover = include_cover
+    ok = (not requested_cover or has_cover) and (target_count == 0 or has_moodboard)
+    if not ok:
+        if not OPENROUTER_KEY:
+            return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'}), 400
+        return jsonify({'success': False, 'error': 'تعذر توليد الصور — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'}), 400
     return jsonify({'success': True, 'images': images})
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
