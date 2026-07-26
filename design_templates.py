@@ -2,6 +2,9 @@
 Design templates for Multi-Tenant SaaS.
 Pre-built design styles that companies can choose from.
 """
+import base64
+import os
+
 
 DESIGN_TEMPLATES = {
     'modern': {
@@ -158,7 +161,7 @@ def build_design_rules(branding):
     accent = branding.get('accent_color', '#6DA3C3')
     bg = branding.get('background_color', '#F4F9FC')
     text_color = branding.get('text_color', '#333333')
-    font = branding.get('font_family', 'The Sans Arabic')
+    _font_css, font = build_font_css(branding, branding.get('tenant_id'))
     header_enabled = branding.get('header_enabled', 1)
     footer_enabled = branding.get('footer_enabled', 1)
     header_h = branding.get('header_height', 56)
@@ -189,14 +192,14 @@ def build_design_rules(branding):
 - ⚠️ قانون عدم الخروج عن الحدود: يجب أن يتناسب كل محتوى الشريحة تماماً داخل هذا الارتفاع دون أن يقطع أي جزء منه.
 
 ## الخطوط والأحجام المحددة للتناسب
-font-family: '{font}', Arial, sans-serif
+font-family: {font}
 - العنوان الرئيسي للشريحة: 24px-28px font-weight:700 color:{primary} (أقصى حد 30px)
 - عناوين البطاقات والأقسام: 15px-17px font-weight:600 color:{primary}
 - النصوص العادية ونصوص البطاقات والجداول: 12px-14px font-weight:400 color:{text_color}
 - الأرقام المالية الكبيرة: 24px-30px font-weight:700 color:{primary} (أقصى حد 32px)
 
 ## الشريحة الأساسية
-<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;font-family:'{font}',Arial,sans-serif;">
+<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;font-family:{font};">
 CSS inline فقط. ممنوع box-shadow/filter/backdrop-filter. استخدم box-sizing:border-box لكل العناصر.
 """
 
@@ -256,6 +259,25 @@ top:{content_top}px → bottom:{content_bottom}px. padding: 16px 36px.
 """
 
     return rules
+
+
+def build_font_css(branding, tenant_id=None, embed=True):
+    """@font-face isolated inside .slide only — does not affect site UI."""
+    path = branding.get('font_file_path')
+    family = f"tenant-font-{tenant_id or branding.get('tenant_id', 'x')}"
+    fallback = "'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif"
+    if not path or not os.path.exists(path):
+        return "", f"{branding.get('font_family', 'IBM Plex Sans Arabic')}, {fallback}"
+    ext = os.path.splitext(path)[1].lower()
+    fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff2': 'woff2', '.woff': 'woff'}.get(ext, 'truetype')
+    if embed:
+        with open(path, 'rb') as f:
+            src = f"url(data:font/{fmt};base64,{base64.b64encode(f.read()).decode()}) format('{fmt}')"
+    else:
+        src = f"url('/{path.lstrip('/')}') format('{fmt}')"
+    css = (f"@font-face{{font-family:'{family}';src:{src};font-weight:100 900;"
+           f"font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}")
+    return css, f"'{family}', {fallback}"
 
 
 def _hex_to_rgb(hex_color):

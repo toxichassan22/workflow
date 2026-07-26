@@ -111,8 +111,10 @@ def _create_tables(conn):
         cover_image_enabled INTEGER DEFAULT 1,
         moodboard_count INTEGER DEFAULT 4,
         default_slide_count INTEGER DEFAULT 16,
+        lock_slide_count INTEGER DEFAULT 1,
         min_slides INTEGER DEFAULT 8,
         max_slides INTEGER DEFAULT 30,
+        default_map_type TEXT DEFAULT 'satellite',
         map_style_overview TEXT DEFAULT 'satellite',
         map_style_landmarks TEXT DEFAULT 'satellite',
         map_style_access TEXT DEFAULT 'satellite',
@@ -345,6 +347,12 @@ def _create_tables(conn):
     if 'moodboard_count' not in branding_cols:
         conn.execute('ALTER TABLE tenant_branding ADD COLUMN moodboard_count INTEGER DEFAULT 4')
         print('[DB] Migration: added moodboard_count column to tenant_branding')
+    if 'lock_slide_count' not in branding_cols:
+        conn.execute('ALTER TABLE tenant_branding ADD COLUMN lock_slide_count INTEGER DEFAULT 1')
+        print('[DB] Migration: added lock_slide_count column to tenant_branding')
+    if 'default_map_type' not in branding_cols:
+        conn.execute("ALTER TABLE tenant_branding ADD COLUMN default_map_type TEXT DEFAULT 'satellite'")
+        print('[DB] Migration: added default_map_type column to tenant_branding')
 
     # Migration: add domain column to existing tenants table
     cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenants)').fetchall()]
@@ -528,8 +536,8 @@ def update_branding(tenant_id, **fields):
         'design_template', 'reference_image_path',
         'header_enabled', 'footer_enabled', 'header_height', 'footer_height',
         'card_style', 'slide_ratio', 'moodboard_enabled', 'cover_image_enabled', 'moodboard_count',
-        'default_slide_count', 'min_slides', 'max_slides',
-        'map_style_overview', 'map_style_landmarks', 'map_style_access', 'map_style_catchment',
+        'default_slide_count', 'lock_slide_count', 'min_slides', 'max_slides',
+        'default_map_type', 'map_style_overview', 'map_style_landmarks', 'map_style_access', 'map_style_catchment',
         'draw_compass', 'draw_inset', 'font_file_path',
     }
     updates = {k: v for k, v in fields.items() if k in allowed}

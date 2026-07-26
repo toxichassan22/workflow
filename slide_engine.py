@@ -126,8 +126,9 @@ def build_slide_plan_prompt(project_data, branding):
     if len(project_json) > 6000:
         project_json = project_json[:6000] + '\n... [تم اختصار البيانات]'
 
-    min_slides = branding.get('min_slides', 8)
-    max_slides = branding.get('max_slides', 30)
+    default_count = branding.get('default_slide_count') or 16
+    min_slides = branding.get('min_slides') or default_count
+    max_slides = branding.get('max_slides') or default_count
 
     return SLIDE_PLAN_PROMPT.format(
         project_json=project_json,
@@ -245,8 +246,9 @@ def validate_slide_plan(plan, branding):
         return False, issues
 
     # Check min/max slides
-    min_s = branding.get('min_slides', 8)
-    max_s = branding.get('max_slides', 30)
+    default_count = branding.get('default_slide_count') or 16
+    min_s = branding.get('min_slides') or default_count
+    max_s = branding.get('max_slides') or default_count
     count = len(slides)
     if count < min_s:
         issues.append(f"Too few slides: {count} (min: {min_s})")
@@ -594,7 +596,12 @@ def _replace_data_placeholders(html, project_data, branding=None):
     replacements = {}
 
     # 1. Logo replacement
-    logo_url = branding.get('logo_path') or branding.get('logo') or branding.get('logo_url') or '/assets/logo.png'
+    logo_url = branding.get('logo_path') or branding.get('logo') or branding.get('logo_url')
+    if not logo_url:
+        print('[REPLACE] WARNING: no logo_path in branding; falling back to /assets/logo.png')
+        logo_url = '/assets/logo.png'
+    elif not logo_url.startswith('/') and not logo_url.startswith('http'):
+        logo_url = f"/{logo_url.lstrip('/')}"
     replacements['##LOGO##'] = logo_url
 
     # 2. Add all dynamic key-value pairs from project_data
@@ -654,6 +661,16 @@ def _replace_data_placeholders(html, project_data, branding=None):
     return html
 
 
+def finalize_slide_html(html, slide_type, project_data, branding, creative_images=None, map_placeholders=None):
+    """Unified post-processing pipeline for every generated slide."""
+    html = postprocess_slide(html, slide_type)
+    if map_placeholders:
+        html = _replace_map_placeholders(html, map_placeholders)
+    html = _replace_creative_image_placeholders(html, creative_images, slide_type)
+    html = _replace_data_placeholders(html, project_data, branding)
+    return html
+
+
 def generate_all_slides(slide_plan, project_data, branding, images_info, call_glm_fn, map_placeholders=None,
                         creative_images=None):
     """
@@ -669,6 +686,11 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
     if len(project_json) > 4000:
         project_json = project_json[:4000] + '\n... [تم اختصار البيانات]'
 
+    landmarks_matrix = project_data.get('landmarks_matrix')
+    landmarks_note = ''
+    if landmarks_matrix:
+        landmarks_note = "استخدم الأرقام التالية كما هي وممنوع تعديلها:\n" + json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
+
     system_prompt = f"""{design_rules}
 
 ## بيانات المشروع
@@ -676,6 +698,9 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
 
 ## الصور المتوفرة
 {images_info}
+
+## بيانات المسافات والأوقات (ممنوع تعديل الأرقام)
+{landmarks_note}
 
 ## قواعد عامة
 - كل شريحة 1280x720px (أو حسب نسبة العرض المحددة)
@@ -707,10 +732,14 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
                 title = slide.get('title', f'شريحة {idx + 1}')
                 html = f'<div class="slide" style="width:1280px;height:720px;direction:rtl;font-family:sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;background:#fff;"><h1>{title}</h1></div>'
                 print(f"[SLIDE-{idx + 1}] Using fallback HTML")
-            if map_placeholders:
-                html = _replace_map_placeholders(html, map_placeholders)
-            html = _replace_creative_image_placeholders(html, creative_images, slide.get('type', 'content'))
-            html = _replace_data_placeholders(html, project_data, branding)
+            html = finalize_slide_html(
+                html,
+                slide.get('type', 'content'),
+                project_data,
+                branding,
+                creative_images=creative_images,
+                map_placeholders=map_placeholders,
+            )
             results[idx] = html
 
     return results

@@ -277,8 +277,14 @@ def call_image_api_with_reference(reference_image_base64, prompt):
 # Helper: Generate PDF with Playwright
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def generate_pdf_with_playwright(html, project_name, branding=None, output_dir=None):
+    """Generate a PDF from slide HTML using the new generate_pdf export."""
     from exports.pdf_export import generate_pdf
-    return generate_pdf(html, project_name, branding, output_dir or OUTPUT_DIR)
+    out_dir = output_dir or OUTPUT_DIR
+    os.makedirs(out_dir, exist_ok=True)
+    safe_name = ''.join(c for c in project_name if c.isalnum() or c in '-_ ')[:50].strip() or 'presentation'
+    out_path = os.path.join(out_dir, f"{safe_name}_{int(time.time())}.pdf")
+    generate_pdf(html, branding, out_path)
+    return out_path
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Clean base64 and large image data from project data
@@ -2592,7 +2598,7 @@ def api_regenerate_presentation_maps(pres_id):
 @require_permission('create_presentation')
 def api_generate_slide_single():
     """Generate a single slide by index. Returns one slide HTML."""
-    from slide_engine import generate_single_slide, build_design_rules, _replace_map_placeholders, _replace_creative_image_placeholders, _replace_data_placeholders
+    from slide_engine import generate_single_slide, build_design_rules, finalize_slide_html
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
     slide_plan = data.get('slidePlan', {})
@@ -2640,6 +2646,11 @@ def api_generate_slide_single():
     if len(project_json) > 4000:
         project_json = project_json[:4000] + '\n... [تم اختصار البيانات]'
 
+    landmarks_matrix = project_data.get('landmarks_matrix')
+    landmarks_note = ''
+    if landmarks_matrix:
+        landmarks_note = "استخدم الأرقام التالية كما هي وممنوع تعديلها:\n" + json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
+
     system_prompt = f"""{design_rules}
 
 ## بيانات المشروع
@@ -2647,6 +2658,9 @@ def api_generate_slide_single():
 
 ## الصور المتوفرة
 {images_info}
+
+## بيانات المسافات والأوقات (ممنوع تعديل الأرقام)
+{landmarks_note}
 
 ## قواعد عامة
 - كل شريحة 1280x720px (أو حسب نسبة العرض المحددة)
@@ -2678,11 +2692,14 @@ def api_generate_slide_single():
             'totalSlides': total,
         }), 502
 
-    if map_placeholders:
-        html = _replace_map_placeholders(html, map_placeholders)
-    html = _replace_creative_image_placeholders(html, images, slide.get('type', 'content'))
-    html = _replace_data_placeholders(html, project_data, branding)
-    html = resolve_logo_in_html(html, g.tenant_id)
+    html = finalize_slide_html(
+        html,
+        slide.get('type', 'content'),
+        project_data,
+        branding,
+        creative_images=images,
+        map_placeholders=map_placeholders,
+    )
 
     return jsonify({
         'success': True,
@@ -2760,7 +2777,7 @@ def api_generate_slides():
         for i, html in enumerate(htmls):
             slide_info = plan_slides[i] if i < len(plan_slides) else {}
             slides_out.append({
-                'html': postprocess_slide(html or '', i + 1, g.tenant_id),
+                'html': html or '',
                 'title': slide_info.get('title', f'شريحة {i+1}'),
                 'type': slide_info.get('type', 'content'),
                 'designStyle': slide_info.get('design_style', 'cards'),
@@ -3033,16 +3050,36 @@ def api_export():
         if fmt == 'pdf':
             from exports.pdf_export import generate_pdf
             slides_html = data.get('slidesHtml', '')
-            if not slides_html:
-                return jsonify({'error': 'slidesHtml is required for PDF export'}), 400
+            slides_data = data.get('slidesData', [])
+            presentation_id = data.get('presentationId')
 
-            pdf_path = generate_pdf(slides_html, project_name, branding, tenant_output_dir)
+            # Fallback: load latest saved slides from DB
+            if not slides_html and not slides_data and presentation_id:
+                pres = db.get_presentation(presentation_id, g.tenant_id)
+                if pres and pres.get('slides_data'):
+                    try:
+                        loaded = pres['slides_data']
+                        if isinstance(loaded, str):
+                            loaded = json.loads(loaded)
+                        slides_data = loaded if isinstance(loaded, list) else []
+                    except Exception as e:
+                        print(f"[EXPORT] failed to load slides_data: {e}")
+
+            if not slides_html:
+                if slides_data:
+                    slides_html = '\n'.join(str(s.get('html', '')) for s in slides_data)
+                if not slides_html:
+                    return jsonify({'error': 'slidesHtml or slidesData is required for PDF export'}), 400
+
+            safe_name = ''.join(c for c in project_name if c.isalnum() or c in '-_ ')[:50].strip() or 'presentation'
+            pdf_path = os.path.join(tenant_output_dir, f"{safe_name}_{int(time.time())}.pdf")
+            generate_pdf(slides_html, branding, pdf_path)
             relative_url = f'/outputs/{g.tenant_id}/{os.path.basename(pdf_path)}'
 
             # Record export
-            export_id = db.create_export(data.get('presentationId'), g.tenant_id, 'pdf', pdf_path)
-            if data.get('presentationId'):
-                db.log_edit(data['presentationId'], g.user_id, g.user_name or 'System', 'export', f'Exported as PDF')
+            export_id = db.create_export(presentation_id, g.tenant_id, 'pdf', pdf_path)
+            if presentation_id:
+                db.log_edit(presentation_id, g.user_id, g.user_name or 'System', 'export', f'Exported as PDF')
             return jsonify({'success': True, 'url': f'/api/exports/{export_id}/download', 'exportId': export_id, 'format': 'pdf'})
 
         elif fmt == 'pptx':
@@ -3666,9 +3703,10 @@ def api_upload_reference():
 
 
 @app.route('/api/upload-font', methods=['POST'])
+@app.route('/api/branding/font', methods=['POST'])
 @require_permission('company_settings')
 def api_upload_font():
-    """Upload a custom font file (TTF/OTF/WOFF/WOFF2)."""
+    """Upload a custom font file (TTF/OTF/WOFF/WOFF2) to uploads/fonts/<tenant_id>/."""
     if 'font' not in request.files:
         return jsonify({'error': 'No font file provided'}), 400
     file = request.files['font']
@@ -3687,10 +3725,11 @@ def api_upload_font():
     filepath = os.path.join(font_dir, filename)
     file.save(filepath)
 
+    font_file_path = os.path.relpath(filepath, os.path.dirname(__file__)).replace('\\', '/')
     font_url = f"/tenant-assets/{g.tenant_id}/fonts/{filename}"
     font_name = safe_name.replace('_', ' ').title()
-    db.update_branding(g.tenant_id, font_file_path=font_url, font_family=font_name)
-    return jsonify({'success': True, 'font_url': font_url, 'font_name': font_name})
+    db.update_branding(g.tenant_id, font_file_path=font_file_path, font_family=font_name)
+    return jsonify({'success': True, 'font_url': font_url, 'font_file_path': font_file_path, 'font_name': font_name})
 
 
 @app.route('/api/branding/analyze-reference', methods=['POST'])

@@ -11,6 +11,8 @@ import uuid
 import time
 import requests
 import re
+import hashlib
+import shutil
 
 # Force UTF-8 stdout so Arabic/unicode OSM tag names don't crash on Windows cp1252
 try:
@@ -263,15 +265,27 @@ def _download_image(url, params, output_path):
         return {'error': f"Image download failed: {str(e)}"}
 
 
+def _map_cache_path(lat, lng, maptype, zoom):
+    """Deterministic cache path for a raw static map based on location/zoom/type."""
+    key = hashlib.md5(f"{lat},{lng},{maptype},{zoom}".encode('utf-8')).hexdigest()
+    return os.path.join(MAPS_DIR, f"map_{key}.png")
+
+
 def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720), output_path=None,
                    maptype='satellite', styles=None, use_google_markers=False, language='ar'):
-    """Generate a static map image with optional markers and paths."""
+    """Generate a static map image with optional markers and paths (cached by lat,lng,maptype,zoom)."""
     if not _has_api_key():
         return _api_key_error()
 
+    cache_path = _map_cache_path(lat, lng, maptype, zoom)
     if output_path is None:
-        filename = f"map_{uuid.uuid4().hex}.png"
-        output_path = os.path.join(MAPS_DIR, filename)
+        output_path = cache_path
+
+    # Re-use cached raw map image if available
+    if os.path.exists(cache_path):
+        if output_path != cache_path:
+            shutil.copyfile(cache_path, output_path)
+        return {'success': True, 'path': output_path, 'size': os.path.getsize(output_path), 'cached': True}
 
     url = 'https://maps.googleapis.com/maps/api/staticmap'
     params = {
@@ -292,7 +306,12 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
     if paths:
         params['path'] = paths
 
-    return _download_image(url, params, output_path)
+    res = _download_image(url, params, cache_path)
+    if not res.get('success'):
+        return res
+    if output_path != cache_path:
+        shutil.copyfile(cache_path, output_path)
+    return {'success': True, 'path': output_path, 'size': os.path.getsize(output_path), 'cached': False}
 
 
 def _latlng_to_pixel_offset(lat, lng, center_lat, center_lng, zoom, scale=2):
@@ -611,6 +630,72 @@ def get_driving_times(origin_lat, origin_lng, destinations):
         return {'success': True, 'times': times}
     except Exception as e:
         return {'error': f"Distance Matrix request failed: {str(e)}"}
+
+
+def get_drive_matrix(origin, destinations):
+    """Return [{name, distance_km, duration_min}] for driving from origin to each destination.
+
+    origin may be (lat, lng) or a dict with lat/lng keys.
+    """
+    if not _has_api_key():
+        return []
+
+    if not destinations:
+        return []
+
+    if isinstance(origin, (tuple, list)) and len(origin) >= 2:
+        origin_str = f"{origin[0]},{origin[1]}"
+    else:
+        origin_str = f"{origin.get('lat')},{origin.get('lng')}"
+
+    points = []
+    names = []
+    for d in destinations:
+        lat = d.get('lat') if isinstance(d, dict) else d[0]
+        lng = d.get('lng') if isinstance(d, dict) else d[1]
+        if lat is not None and lng is not None:
+            points.append(f"{lat},{lng}")
+            names.append(d.get('name', '') if isinstance(d, dict) else '')
+
+    if not points:
+        return []
+
+    url = 'https://maps.googleapis.com/maps/api/distancematrix/json'
+    params = {
+        'origins': origin_str,
+        'destinations': '|'.join(points),
+        'mode': 'driving',
+        'language': 'ar',
+        'region': 'SA',
+        'key': GOOGLE_API_KEY,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        data = response.json()
+        if data.get('status') != 'OK':
+            print(f"[DRIVE MATRIX] API error: {data.get('status')}")
+            return []
+
+        rows = data.get('rows', [])
+        if not rows:
+            return []
+
+        elements = rows[0].get('elements', [])
+        result = []
+        for i, elem in enumerate(elements):
+            if elem.get('status') == 'OK' and elem.get('duration') and elem.get('distance'):
+                distance_km = round(elem['distance']['value'] / 1000.0, 1)
+                duration_min = math.ceil(elem['duration']['value'] / 60)
+                result.append({
+                    'name': names[i] if i < len(names) else '',
+                    'distance_km': distance_km,
+                    'duration_min': duration_min,
+                })
+        return result
+    except Exception as e:
+        print(f"[DRIVE MATRIX] request failed: {e}")
+        return []
 
 
 def get_street_view(lat, lng, heading=None, pitch=0, fov=90, size=(640, 480), output_path=None):
@@ -1755,18 +1840,19 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             map_styles_raw = json.loads(map_styles_raw)
         except Exception:
             map_styles_raw = {}
+    default_map_type = project_data.get('map_type') or (branding.get('default_map_type') if branding else None) or 'satellite'
     if not map_styles_raw and branding:
         map_styles_raw = {
-            'overview': branding.get('map_style_overview', 'satellite'),
-            'landmarks': branding.get('map_style_landmarks', 'satellite'),
-            'access': branding.get('map_style_access', 'satellite'),
-            'catchment': branding.get('map_style_catchment', 'satellite'),
+            'overview': default_map_type,
+            'landmarks': default_map_type,
+            'access': default_map_type,
+            'catchment': default_map_type,
         }
     VALID_MAPTYPES = {'satellite', 'roadmap', 'terrain', 'hybrid', 'both'}
     map_styles = {}
     for key in ('overview', 'landmarks', 'access', 'catchment'):
-        val = map_styles_raw.get(key, 'satellite')
-        map_styles[key] = val if val in VALID_MAPTYPES else 'satellite'
+        val = map_styles_raw.get(key, default_map_type)
+        map_styles[key] = val if val in VALID_MAPTYPES else default_map_type
 
     # Parse nearby landmarks from text
     landmarks_text = project_data.get('nearby_landmarks', '')
@@ -1803,14 +1889,17 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
         filtered_landmarks.append(lm)
     landmarks = sorted(filtered_landmarks, key=lambda item: item.get('distance_meters', float('inf')))[:6]
 
-    # Get driving times for landmarks with coordinates
+    # Get driving times and distances for landmarks with coordinates
     geocoded_landmarks = [lm for lm in landmarks if lm.get('lat') is not None and lm.get('lng') is not None]
     if geocoded_landmarks:
-        times = get_driving_times(lat, lng, geocoded_landmarks)
-        if times.get('success'):
-            for i, t in enumerate(times['times']):
-                geocoded_landmarks[i]['duration_minutes'] = t['duration_minutes']
-                geocoded_landmarks[i]['distance_text'] = t.get('distance_text')
+        matrix = get_drive_matrix((lat, lng), geocoded_landmarks)
+        if matrix:
+            project_data['landmarks_matrix'] = matrix
+            result['landmarks_matrix'] = matrix
+            for i, lm in enumerate(geocoded_landmarks):
+                if i < len(matrix):
+                    lm['duration_minutes'] = matrix[i]['duration_min']
+                    lm['distance_text'] = f"{matrix[i]['distance_km']} km"
             _record_maps_call(tenant_id)
         result['landmarks'] = landmarks
 

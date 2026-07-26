@@ -204,6 +204,23 @@
       box-shadow: 0 0 0 3px var(--p), 0 8px 36px rgba(122, 12, 12, .15);
     }
 
+    .slide-editable {
+      cursor: text;
+      transition: outline-color .15s, background-color .15s;
+      outline: 1px dashed transparent;
+      outline-offset: 2px;
+    }
+
+    .slide-editable:hover {
+      outline-color: rgba(59, 110, 145, .55);
+      background-color: rgba(59, 110, 145, .06);
+    }
+
+    .slide-editable:focus {
+      outline: 2px solid var(--p);
+      background-color: rgba(59, 110, 145, .1);
+    }
+
     :root {
       --p: #3B6E91;
       --pd: #254B66;
@@ -2031,6 +2048,11 @@
             <label>عدد الشرائح الافتراضي</label>
             <input type="number" id="settingsDefaultSlideCount" value="16">
           </div>
+          <div class="tenant-field" style="align-items:flex-start;justify-content:center">
+            <label>قفل عدد الشرائح</label>
+            <input type="checkbox" id="settingsLockSlideCount" style="width:20px;height:20px;margin-top:4px">
+            <span class="tenant-hint">منع AI من تغيير عدد الشرائح عند توليد الهيكل.</span>
+          </div>
           <div class="tenant-field">
             <label>عدد صور المود بورد (Moodboard)</label>
             <input type="number" id="settingsMoodboardCount" value="4" min="1" max="16">
@@ -2040,6 +2062,15 @@
 
         <h3 style="margin-top:20px; margin-bottom:12px; color:#3B6E91; font-size:15px; font-weight:700;">إعدادات الخرائط</h3>
         <div class="tenant-grid">
+          <div class="tenant-field">
+            <label>نمط الخريطة الافتراضي</label>
+            <select id="settingsDefaultMapType">
+              <option value="satellite">قمر صناعي</option>
+              <option value="roadmap">جرافيك (خريطة طرق / مروري)</option>
+              <option value="terrain">تضاريس</option>
+              <option value="hybrid">هجين (قمر صناعي + أسماء)</option>
+            </select>
+          </div>
           <div class="tenant-field">
             <label>ستايل الخريطة العامة (Overview)</label>
             <select id="settingsMapStyleOverview">
@@ -2249,6 +2280,9 @@
         <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
         <button class="btn ghost" onclick="fillSampleProjectData()">تعبئة بيانات تجريبية</button>
         <button class="btn ghost" onclick="approveAllSections()">اعتماد كل الأقسام</button>
+        <button class="btn primary" data-permission="create_presentation" onclick="toggleMapStylePanel()"
+          style="background:#3B6E91; color:#fff; border:none; padding:8px 16px; border-radius:8px;">إعدادات
+          الخرائط</button>
         <button class="btn primary" onclick="directGenerateProposalFile()">توليد ملف</button>
         <button class="btn danger" onclick="confirmDeleteProject()">حذف المشروع</button>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
@@ -2400,7 +2434,9 @@
         </div>
       </div>
 
-      <!-- Map Style Selector Panel (Modal style) -->
+    </section>
+
+    <!-- Map Style Selector Panel (Modal style) — shared by project & slides pages -->
       <div id="mapStylePanel"
         style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center; padding:20px;">
         <div
@@ -2468,7 +2504,6 @@
           </div>
         </div>
       </div>
-    </section>
 
     <!-- Presentations -->
     <section id="tenantPresentationsPage" class="tenant-page">
@@ -3149,7 +3184,9 @@
       setValue('settingsMinSlides', b.min_slides || 8);
       setValue('settingsMaxSlides', b.max_slides || 30);
       setValue('settingsDefaultSlideCount', b.default_slide_count || 16);
+      setChecked('settingsLockSlideCount', b.lock_slide_count !== 0);
       setValue('settingsMoodboardCount', b.moodboard_count || 4);
+      setValue('settingsDefaultMapType', b.default_map_type || 'satellite');
       setValue('settingsMapStyleOverview', b.map_style_overview || 'satellite');
       setValue('settingsMapStyleLandmarks', b.map_style_landmarks || 'satellite');
       setValue('settingsMapStyleAccess', b.map_style_access || 'satellite');
@@ -3169,7 +3206,7 @@
     function getChecked(id) { const el = document.getElementById(id); return el ? el.checked : false; }
 
     function collectSettings() {
-      return {
+      const settings = {
         company_name: getValue('settingsCompanyName'),
         tagline: getValue('settingsTagline'),
         primary_color: getValue('settingsPrimaryColor'),
@@ -3189,7 +3226,9 @@
         min_slides: parseInt(getValue('settingsMinSlides') || '8', 10),
         max_slides: parseInt(getValue('settingsMaxSlides') || '30', 10),
         default_slide_count: parseInt(getValue('settingsDefaultSlideCount') || '16', 10),
+        lock_slide_count: getChecked('settingsLockSlideCount') ? 1 : 0,
         moodboard_count: parseInt(getValue('settingsMoodboardCount') || '4', 10),
+        default_map_type: getValue('settingsDefaultMapType') || 'satellite',
         map_style_overview: getValue('settingsMapStyleOverview') || 'satellite',
         map_style_landmarks: getValue('settingsMapStyleLandmarks') || 'satellite',
         map_style_access: getValue('settingsMapStyleAccess') || 'satellite',
@@ -3200,6 +3239,7 @@
       if (tenantBranding && tenantBranding.font_file_path) {
         settings.font_file_path = tenantBranding.font_file_path;
       }
+      return settings;
     }
 
     async function saveTenantSettings() {
@@ -3266,9 +3306,9 @@
       }
       const form = new FormData();
       form.append('font', file);
-      const data = await api('POST', '/api/upload-font', form, true);
+      const data = await api('POST', '/api/branding/font', form, true);
       if (data.success) {
-        tenantBranding.font_file_path = data.font_url;
+        tenantBranding.font_file_path = data.font_file_path || data.font_url;
         tenantBranding.font_family = data.font_name;
         setValue('settingsFontFamily', 'custom');
         const preview = document.getElementById('settingsFontPreview');
@@ -5300,6 +5340,76 @@
       }
     }
 
+    function collectSlideTextNodes(root) {
+      const nodes = [];
+      if (!root) return nodes;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+          const parent = node.parentElement;
+          if (!parent) return NodeFilter.FILTER_REJECT;
+          const tag = parent.tagName;
+          if (tag === 'SCRIPT' || tag === 'STYLE') return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      let node;
+      while ((node = walker.nextNode())) nodes.push(node);
+      return nodes;
+    }
+
+    function enableSlideInlineEditing(stage, index) {
+      const slide = stage.querySelector('.slide');
+      if (!slide) return;
+      const seen = new Set();
+      collectSlideTextNodes(slide).forEach(node => {
+        const el = node.parentElement;
+        if (!el || seen.has(el) || el.hasAttribute('contenteditable')) return;
+        seen.add(el);
+        el.setAttribute('contenteditable', 'plaintext-only');
+        el.setAttribute('spellcheck', 'false');
+        el.classList.add('slide-editable');
+        el.title = 'اضغط للتعديل المباشر على النص';
+        el.addEventListener('mousedown', e => e.stopPropagation());
+        el.addEventListener('click', e => e.stopPropagation());
+        el.addEventListener('keydown', e => {
+          e.stopPropagation();
+          if (e.key === 'Escape') { el.blur(); }
+        });
+        el.addEventListener('blur', () => commitSlideInlineEdit(stage, index, el));
+      });
+    }
+
+    function commitSlideInlineEdit(stage, index, editedEl) {
+      const slide = stage.querySelector('.slide');
+      const slideData = tenantSlidesData[index];
+      if (!slide || !slideData || !slideData.html) return;
+
+      const doc = new DOMParser().parseFromString(slideData.html, 'text/html');
+      const rawRoot = doc.querySelector('.slide');
+      if (!rawRoot) return;
+
+      const liveNodes = collectSlideTextNodes(slide);
+      const rawNodes = collectSlideTextNodes(rawRoot);
+      // Structure mismatch means we cannot map text safely — keep the original HTML.
+      if (liveNodes.length !== rawNodes.length) return;
+
+      let changed = false;
+      liveNodes.forEach((node, i) => {
+        if (editedEl && !editedEl.contains(node)) return;
+        if (rawNodes[i].nodeValue !== node.nodeValue) {
+          rawNodes[i].nodeValue = node.nodeValue;
+          changed = true;
+        }
+      });
+      if (!changed) return;
+
+      slideData.html = rawRoot.outerHTML;
+      renderTenantSlidesSidebar();
+      triggerAutoSaveDraft();
+      toast('تم تعديل النص. اضغط "حفظ التعديلات" للحفظ النهائي.');
+    }
+
     function renderTenantSlides() {
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
@@ -5325,6 +5435,7 @@
           stage.innerHTML = '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
         }
         autoFitSlideContent(stage);
+        enableSlideInlineEditing(stage, i);
         container.appendChild(stage);
 
         // Slide controls (edit/delete buttons)

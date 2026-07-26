@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-core \
     fonts-noto-extra \
     fonts-arabeyes \
+    fonts-noto-naskh-arabic \
     fontconfig \
     && fc-cache -f \
     && apt-get clean \
