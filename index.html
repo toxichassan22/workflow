@@ -1948,6 +1948,23 @@
       }
     }
 
+    @media (max-width: 900px) {
+      body.tgr-on .tgr {
+        width: 46px;
+      }
+      body.tgr-on .tgr-tabs,
+      body.tgr-on .tgr-body,
+      body.tgr-on .tgr-foot {
+        display: none;
+      }
+    }
+
+    /* keep header action buttons from sitting flush against the rail */
+    body.tgr-on .tenant-topbar,
+    body.tgr-on .ge-topbar {
+      padding-right: 12px;
+    }
+
   </style>
   <style id="zai-global-styles"></style>
 </head>
@@ -3297,7 +3314,8 @@
     ];
 
     function tgrCurrentPageId() {
-      const el = document.querySelector('.tenant-page.active');
+      const el = document.querySelector('.tenant-page.active') ||
+                 Array.from(document.querySelectorAll('.tenant-page')).find(p => p.offsetParent !== null);
       return el ? el.id : null;
     }
 
@@ -3364,6 +3382,12 @@
       if (!host) return;
       if (!form) { host.innerHTML = '<div class="tgr-empty">افتح بيانات المشروع أولاً</div>'; return; }
 
+      const tgrOpen = new Set();
+      host.querySelectorAll('details').forEach(d => {
+        const k = d.querySelector('summary')?.textContent || '';
+        if (d.open && k) tgrOpen.add(k);
+      });
+
       let html = '';
       const groups = form.querySelectorAll('.tenant-form-section, fieldset');
       (groups.length ? groups : [form]).forEach(sec => {
@@ -3372,7 +3396,7 @@
         let rows = '';
         sec.querySelectorAll('input, select, textarea').forEach(el => {
           if (el.type === 'file' || el.type === 'hidden' || el.disabled) return;
-          const fieldId = el.id || el.dataset.key;
+          const fieldId = el.dataset.key || el.id;
           if (!fieldId) return;
           const fieldWrap = el.closest('.tenant-field');
           const lab = fieldWrap ? fieldWrap.querySelector('label') : null;
@@ -3383,9 +3407,10 @@
           else val = el.value || '—';
           val = String(val).replace(/\s+/g, ' ').trim().slice(0, 32) || '—';
           rows += '<div class="tgr-row"><span title="' + escapeHtml(label) + '">' + escapeHtml(label) + ': <b>' + escapeHtml(val) +
-                  '</b></span><button onclick="tgrGoField(\'' + fieldId + '\')">تعديل</button></div>';
+                  '</b></span><button type="button" class="tgr-edit" data-field="' + escapeHtml(fieldId) + '">تعديل</button></div>';
         });
-        if (rows) html += '<details open><summary>' + escapeHtml(title) + '</summary>' + rows + '</details>';
+        const openAttr = (tgrOpen.size === 0 || tgrOpen.has(title)) ? ' open' : '';
+        if (rows) html += '<details' + openAttr + '><summary>' + escapeHtml(title) + '</summary>' + rows + '</details>';
       });
       host.innerHTML = html || '<div class="tgr-empty">لا توجد مدخلات بعد</div>';
     }
@@ -3393,8 +3418,8 @@
     function tgrGoField(fieldId) {
       tgrGoStage('tenantProjectPage');
       setTimeout(() => {
-        const el = document.getElementById(fieldId) ||
-                   document.querySelector('#tenantProjectForm [data-key="' + fieldId + '"]');
+        const el = document.querySelector('#tenantProjectForm [data-key="' + fieldId + '"]') ||
+                   document.getElementById(fieldId);
         if (!el) return;
         const det = el.closest('details');
         if (det) det.open = true;
@@ -3420,6 +3445,13 @@
 
     function initGlobalRail() {
       if (localStorage.getItem('tgrCollapsed') === '1') document.body.classList.add('tgr-collapsed');
+      const inputsHost = document.getElementById('tgrInputs');
+      if (inputsHost) {
+        inputsHost.addEventListener('click', e => {
+          const b = e.target.closest('.tgr-edit');
+          if (b && b.dataset.field) tgrGoField(b.dataset.field);
+        });
+      }
       setGlobalRailTab(localStorage.getItem('tgrTab') || 'nav');
       refreshGlobalRail();
       if (!window._tgrResizeBound) {
@@ -4511,7 +4543,6 @@
             input = document.createElement('input');
             input.type = 'text';
           }
-          input.id = f.fieldKey;
           input.dataset.key = f.fieldKey;
           input.dataset.type = f.fieldType;
           input.placeholder = f.placeholder || '';
@@ -4539,7 +4570,7 @@
             linkDiv.className = 'tenant-field full maps-link-field';
             linkDiv.innerHTML = '<label>رابط الموقع على قوقل ماب (اختياري)</label>' +
               '<div style="position:relative">' +
-              '<input type="text" id="location_maps_link" data-key="location_maps_link" data-type="text" placeholder="https://maps.app.goo.gl/..." style="direction:ltr;text-align:left;font-size:13px" />' +
+              '<input type="text" data-key="location_maps_link" data-type="text" placeholder="https://maps.app.goo.gl/..." style="direction:ltr;text-align:left;font-size:13px" />' +
               '</div>' +
               '<span class="tenant-hint">الصقي رابط الموقع من قوقل ماب — الروابط المختصرة تدعم تلقائياً.</span>';
             sectionDiv.appendChild(linkDiv);
@@ -4931,8 +4962,9 @@
       clearTimeout(autoSaveDraftTimer);
       autoSaveDraftTimer = setTimeout(() => {
         saveProjectAsDraft(true);
+        const ib = document.getElementById('tgrInputs');
+        if (ib && !ib.classList.contains('tgr-hidden')) renderGlobalRailInputs();
       }, 700);
-      renderGlobalRailInputs();
     }
 
     async function saveProjectAsDraft(silent = false) {
