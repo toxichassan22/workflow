@@ -265,9 +265,18 @@ def _download_image(url, params, output_path):
         return {'error': f"Image download failed: {str(e)}"}
 
 
-def _map_cache_path(lat, lng, maptype, zoom):
-    """Deterministic cache path for a raw static map based on location/zoom/type."""
-    key = hashlib.md5(f"{lat},{lng},{maptype},{zoom}".encode('utf-8')).hexdigest()
+def _map_cache_path(lat, lng, maptype, zoom, markers=None, paths=None, size=None, styles=None):
+    """Deterministic cache path for a raw static map.
+
+    Every parameter that changes the rendered pixels must be part of the key,
+    otherwise different maps (overview/landmarks/access/catchment) at the same
+    coordinates would collide and reuse each other's image.
+    """
+    raw = json.dumps(
+        [lat, lng, maptype, zoom, markers, paths, size, styles],
+        ensure_ascii=False, sort_keys=True, default=str
+    )
+    key = hashlib.md5(raw.encode('utf-8')).hexdigest()
     return os.path.join(MAPS_DIR, f"map_{key}.png")
 
 
@@ -277,7 +286,9 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
     if not _has_api_key():
         return _api_key_error()
 
-    cache_path = _map_cache_path(lat, lng, maptype, zoom)
+    chosen_styles = styles or SATELLITE_WITH_LABELS_STYLES
+    cache_markers = markers if use_google_markers else None
+    cache_path = _map_cache_path(lat, lng, maptype, zoom, cache_markers, paths, size, chosen_styles)
     if output_path is None:
         output_path = cache_path
 
@@ -298,7 +309,6 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
         'language': language,
     }
 
-    chosen_styles = styles or SATELLITE_WITH_LABELS_STYLES
     params['style'] = chosen_styles
 
     if markers and use_google_markers:
@@ -589,47 +599,28 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
 
 
 def get_driving_times(origin_lat, origin_lng, destinations):
-    """Get driving times from origin to multiple destinations using Distance Matrix API."""
+    """Backwards-compatible wrapper around get_drive_matrix.
+
+    Kept so older callers keep working, but the numbers come from a single
+    source of truth (get_drive_matrix) to avoid divergent results.
+    """
     if not _has_api_key():
         return _api_key_error()
 
     if not destinations:
         return {'success': True, 'times': []}
 
-    url = 'https://maps.googleapis.com/maps/api/distancematrix/json'
-    dest_str = '|'.join([f"{d['lat']},{d['lng']}" for d in destinations])
-    params = {
-        'origins': f"{origin_lat},{origin_lng}",
-        'destinations': dest_str,
-        'mode': 'driving',
-        'key': GOOGLE_API_KEY,
-    }
-
-    try:
-        response = requests.get(url, params=params, timeout=15)
-        data = response.json()
-        if data.get('status') != 'OK':
-            return {'error': f"Distance Matrix API error: {data.get('status')}", 'details': data}
-
-        rows = data.get('rows', [])
-        if not rows:
-            return {'success': True, 'times': []}
-
-        elements = rows[0].get('elements', [])
-        times = []
-        for i, elem in enumerate(elements):
-            duration_min = None
-            if elem.get('status') == 'OK' and elem.get('duration'):
-                duration_min = math.ceil(elem['duration']['value'] / 60)
-            times.append({
-                'landmark': destinations[i],
-                'duration_minutes': duration_min,
-                'distance_text': elem.get('distance', {}).get('text') if elem.get('status') == 'OK' else None,
-                'status': elem.get('status'),
-            })
-        return {'success': True, 'times': times}
-    except Exception as e:
-        return {'error': f"Distance Matrix request failed: {str(e)}"}
+    matrix = get_drive_matrix({'lat': origin_lat, 'lng': origin_lng}, destinations)
+    times = []
+    for i, dest in enumerate(destinations):
+        entry = matrix[i] if i < len(matrix) else None
+        times.append({
+            'landmark': dest,
+            'duration_minutes': entry['duration_min'] if entry else None,
+            'distance_text': f"{entry['distance_km']} km" if entry else None,
+            'status': 'OK' if entry else 'NOT_FOUND',
+        })
+    return {'success': True, 'times': times}
 
 
 def get_drive_matrix(origin, destinations):
@@ -653,9 +644,10 @@ def get_drive_matrix(origin, destinations):
     for d in destinations:
         lat = d.get('lat') if isinstance(d, dict) else d[0]
         lng = d.get('lng') if isinstance(d, dict) else d[1]
-        if lat is not None and lng is not None:
-            points.append(f"{lat},{lng}")
-            names.append(d.get('name', '') if isinstance(d, dict) else '')
+        if lat is None or lng is None:
+            return []  # index alignment with destinations must be preserved
+        points.append(f"{lat},{lng}")
+        names.append(d.get('name', '') if isinstance(d, dict) else '')
 
     if not points:
         return []
@@ -684,14 +676,17 @@ def get_drive_matrix(origin, destinations):
         elements = rows[0].get('elements', [])
         result = []
         for i, elem in enumerate(elements):
+            distance_km = None
+            duration_min = None
             if elem.get('status') == 'OK' and elem.get('duration') and elem.get('distance'):
                 distance_km = round(elem['distance']['value'] / 1000.0, 1)
                 duration_min = math.ceil(elem['duration']['value'] / 60)
-                result.append({
-                    'name': names[i] if i < len(names) else '',
-                    'distance_km': distance_km,
-                    'duration_min': duration_min,
-                })
+            # One entry per destination, in order, so callers can zip by index.
+            result.append({
+                'name': names[i] if i < len(names) else '',
+                'distance_km': distance_km,
+                'duration_min': duration_min,
+            })
         return result
     except Exception as e:
         print(f"[DRIVE MATRIX] request failed: {e}")
@@ -1840,18 +1835,24 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             map_styles_raw = json.loads(map_styles_raw)
         except Exception:
             map_styles_raw = {}
-    default_map_type = project_data.get('map_type') or (branding.get('default_map_type') if branding else None) or 'satellite'
-    if not map_styles_raw and branding:
-        map_styles_raw = {
-            'overview': default_map_type,
-            'landmarks': default_map_type,
-            'access': default_map_type,
-            'catchment': default_map_type,
-        }
+    if not isinstance(map_styles_raw, dict):
+        map_styles_raw = {}
+    else:
+        map_styles_raw = dict(map_styles_raw)
+    # default_map_type is only a fallback; explicit per-map tenant settings win.
+    default_map_type = (
+        project_data.get('map_type')
+        or (branding.get('default_map_type') if branding else None)
+        or 'satellite'
+    )
+    if branding:
+        for key in ('overview', 'landmarks', 'access', 'catchment'):
+            if not map_styles_raw.get(key):
+                map_styles_raw[key] = branding.get(f'map_style_{key}') or default_map_type
     VALID_MAPTYPES = {'satellite', 'roadmap', 'terrain', 'hybrid', 'both'}
     map_styles = {}
     for key in ('overview', 'landmarks', 'access', 'catchment'):
-        val = map_styles_raw.get(key, default_map_type)
+        val = map_styles_raw.get(key) or default_map_type
         map_styles[key] = val if val in VALID_MAPTYPES else default_map_type
 
     # Parse nearby landmarks from text
@@ -1894,12 +1895,21 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     if geocoded_landmarks:
         matrix = get_drive_matrix((lat, lng), geocoded_landmarks)
         if matrix:
-            project_data['landmarks_matrix'] = matrix
-            result['landmarks_matrix'] = matrix
             for i, lm in enumerate(geocoded_landmarks):
-                if i < len(matrix):
-                    lm['duration_minutes'] = matrix[i]['duration_min']
-                    lm['distance_text'] = f"{matrix[i]['distance_km']} km"
+                if i >= len(matrix):
+                    break
+                entry = matrix[i]
+                if not entry.get('name'):
+                    entry['name'] = lm.get('name', '')
+                if entry['duration_min'] is None:
+                    continue
+                lm['duration_minutes'] = entry['duration_min']
+                lm['distance_text'] = f"{entry['distance_km']} km"
+            # Only rows with real Google numbers are handed to the AI prompt.
+            usable = [m for m in matrix if m.get('duration_min') is not None]
+            if usable:
+                project_data['landmarks_matrix'] = usable
+                result['landmarks_matrix'] = usable
             _record_maps_call(tenant_id)
         result['landmarks'] = landmarks
 

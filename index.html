@@ -3127,11 +3127,31 @@
       if (adminBtn) adminBtn.classList.toggle('tenant-hidden', !tenantUser.isAdmin);
     }
 
+    async function loadTenantFontCss() {
+      const token = getTenantToken();
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      try {
+        const res = await fetch('/api/branding/font.css', { headers });
+        const css = res.ok ? await res.text() : '';
+        let style = document.getElementById('tenantFontCss');
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'tenantFontCss';
+          document.head.appendChild(style);
+        }
+        style.textContent = css || '';
+      } catch (e) {
+        console.warn('[FONT CSS] load failed', e);
+      }
+    }
+
     async function loadTenantBranding() {
       const data = await api('GET', '/api/branding');
       if (!data.success || !data.branding) return;
       tenantBranding = data.branding;
       const b = data.branding;
+      await loadTenantFontCss();
       // Apply CSS variables
       const root = document.documentElement;
       if (b.primary_color) {
@@ -5190,6 +5210,7 @@
     }
 
     let activeSlideIndex = 0;
+    const slideInlineEditStates = {};
 
     function processSlideHtmlClient(html, slideType) {
       if (!html) return '';
@@ -5361,23 +5382,54 @@
     function enableSlideInlineEditing(stage, index) {
       const slide = stage.querySelector('.slide');
       if (!slide) return;
+      const enabled = !!slideInlineEditStates[index];
       const seen = new Set();
       collectSlideTextNodes(slide).forEach(node => {
         const el = node.parentElement;
-        if (!el || seen.has(el) || el.hasAttribute('contenteditable')) return;
+        if (!el || seen.has(el)) return;
         seen.add(el);
-        el.setAttribute('contenteditable', 'plaintext-only');
-        el.setAttribute('spellcheck', 'false');
-        el.classList.add('slide-editable');
-        el.title = 'اضغط للتعديل المباشر على النص';
-        el.addEventListener('mousedown', e => e.stopPropagation());
-        el.addEventListener('click', e => e.stopPropagation());
-        el.addEventListener('keydown', e => {
-          e.stopPropagation();
-          if (e.key === 'Escape') { el.blur(); }
-        });
-        el.addEventListener('blur', () => commitSlideInlineEdit(stage, index, el));
+        if (enabled) {
+          if (el.hasAttribute('contenteditable')) return;
+          el.setAttribute('contenteditable', 'plaintext-only');
+          el.setAttribute('spellcheck', 'false');
+          el.classList.add('slide-editable');
+          el.title = 'اضغط للتعديل المباشر على النص (Esc للخروج)';
+          el.addEventListener('mousedown', stopEditEvent);
+          el.addEventListener('click', stopEditEvent);
+          el.addEventListener('keydown', onInlineEditKey);
+          el.addEventListener('paste', onInlineEditPaste);
+          el.addEventListener('blur', () => commitSlideInlineEdit(stage, index, el));
+        } else {
+          el.removeAttribute('contenteditable');
+          el.removeAttribute('spellcheck');
+          el.classList.remove('slide-editable');
+          el.removeAttribute('title');
+          el.removeEventListener('mousedown', stopEditEvent);
+          el.removeEventListener('click', stopEditEvent);
+          el.removeEventListener('keydown', onInlineEditKey);
+          el.removeEventListener('paste', onInlineEditPaste);
+        }
       });
+      // Re-fit the slide when toggling edit mode.
+      autoFitSlideContent(stage);
+    }
+
+    function stopEditEvent(e) { e.stopPropagation(); }
+    function onInlineEditKey(e) {
+      e.stopPropagation();
+      if (e.key === 'Escape') { e.target.blur(); }
+    }
+    function onInlineEditPaste(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+      document.execCommand('insertText', false, text);
+    }
+
+    function toggleSlideInlineEditing(index) {
+      slideInlineEditStates[index] = !slideInlineEditStates[index];
+      renderTenantSlides();
+      toast(slideInlineEditStates[index] ? 'تم تفعيل التعديل المباشر لهذه الشريحة' : 'تم إيقاف التعديل المباشر');
     }
 
     function commitSlideInlineEdit(stage, index, editedEl) {
@@ -5407,7 +5459,15 @@
       slideData.html = rawRoot.outerHTML;
       renderTenantSlidesSidebar();
       triggerAutoSaveDraft();
+      // Record an edit log entry when a saved presentation is open.
+      if (tenantPresentationId) {
+        api('POST', '/api/presentations/' + tenantPresentationId + '/log', {
+          action: 'inline_text',
+          details: 'تعديل نص مباشر على شريحة ' + (index + 1)
+        }).catch(() => {});
+      }
       toast('تم تعديل النص. اضغط "حفظ التعديلات" للحفظ النهائي.');
+      autoFitSlideContent(stage);
     }
 
     function renderTenantSlides() {
@@ -5442,9 +5502,12 @@
         const controls = document.createElement('div');
         controls.className = 'ge-slide-controls';
         controls.style.cssText = 'position:absolute;top:8px;left:8px;display:flex;gap:4px;z-index:10;';
+        const editLabel = slideInlineEditStates[i] ? 'إيقاف التعديل' : 'تعديل نص';
         controls.innerHTML = 
+          '<button onclick="event.stopPropagation(); toggleSlideInlineEditing(' + i + ')" title="تعديل نص الشريحة مباشرة" ' +
+          'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">' + editLabel + '</button>' +
           '<button onclick="event.stopPropagation(); editSlideHtml(' + i + ')" title="تعديل الشريحة" ' +
-          'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">تعديل</button>' +
+          'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">HTML</button>' +
           '<button onclick="event.stopPropagation(); deleteSlide(' + i + ')" title="حذف الشريحة" ' +
           'style="background:#fff;border:1px solid #f5a5a5;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">حذف</button>';
         container.appendChild(controls);

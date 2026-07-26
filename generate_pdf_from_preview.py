@@ -1,13 +1,17 @@
 import os
+import re
+import shutil
+import tempfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 from design_templates import build_font_css
+from slide_engine import resolve_logo_in_html
 
 BASE_DIR = Path(__file__).resolve().parent
 
 
 def _resolve_asset_urls(html):
-    """Convert relative uploads/ and assets/ references to absolute file URIs."""
+    """Convert relative uploads/, assets/, and tenant-assets/ references to absolute file URIs."""
     if not html:
         return html
     base = BASE_DIR.as_uri()
@@ -28,13 +32,21 @@ def _resolve_asset_urls(html):
         ('url(assets/', f'url({base}/assets/'),
         ('url(/uploads/', f'url({base}/uploads/'),
         ('url(/assets/', f'url({base}/assets/'),
+        ('"/tenant-assets/', f'"{base}/uploads/'),
+        ("'/tenant-assets/", f"'{base}/uploads/"),
+        ('url("/tenant-assets/', f'url("{base}/uploads/'),
+        ("url('/tenant-assets/", f"url('{base}/uploads/"),
+        ('url(/tenant-assets/', f'url({base}/uploads/'),
+        ('"/tenant-assets/', f'"{base}/uploads/'),
     ]
     for old, new in prefixes:
         html = html.replace(old, new)
+    # Strip cache-busting query strings from local asset URLs so Playwright can load them
+    html = re.sub(r'((?:' + re.escape(base) + r')?/uploads/[^"\'\)]+)\?[^"\'\)]+', r'\1', html)
     return html
 
 
-def generate_pdf(slides_html, branding=None, out_path=None):
+def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     if not out_path:
         raise ValueError("out_path is required")
     out_path = Path(out_path)
@@ -47,8 +59,11 @@ def generate_pdf(slides_html, branding=None, out_path=None):
 
     print(f"[PDF] Generating PDF: {out_path.name}")
 
+    # Resolve tenant logo placeholders and broken paths
+    html = resolve_logo_in_html(html, tenant_id or (branding or {}).get('tenant_id'))
+
     # Inject tenant font CSS and print styles
-    font_css = build_font_css(branding or {}, (branding or {}).get('tenant_id'))[0]
+    font_css, font_family = build_font_css(branding or {}, tenant_id or (branding or {}).get('tenant_id'), embed=True)
     custom_style = f"""
 {font_css}
     @media print {{
@@ -94,47 +109,52 @@ def generate_pdf(slides_html, branding=None, out_path=None):
 <body style="margin:0;padding:0;background:#fff;">{html}</body>
 </html>"""
 
-    resolved_html_path = out_path.with_suffix('.html')
+    # Use a temporary directory for the preview HTML so it is cleaned up automatically
+    tmp_dir = tempfile.mkdtemp(prefix='pdf_preview_')
+    resolved_html_path = Path(tmp_dir) / 'preview.html'
     print(f"[PDF] Writing resolved HTML to {resolved_html_path}...")
     with open(resolved_html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
-    print("[PDF] Launching Playwright...")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--font-render-hinting=none"
-            ]
-        )
-        page = browser.new_page()
-        page.set_viewport_size({"width": 1280, "height": 720})
+    try:
+        print("[PDF] Launching Playwright...")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--font-render-hinting=none"
+                ]
+            )
+            page = browser.new_page()
+            page.set_viewport_size({"width": 1280, "height": 720})
 
-        file_url = resolved_html_path.as_uri()
-        print(f"[PDF] Loading {file_url}...")
-        page.goto(file_url, wait_until="networkidle")
+            file_url = resolved_html_path.as_uri()
+            print(f"[PDF] Loading {file_url}...")
+            page.goto(file_url, wait_until="networkidle")
 
-        # Wait for fonts and images to load before printing
-        print("[PDF] Waiting for fonts and images...")
-        page.evaluate("() => document.fonts.ready")
-        page.wait_for_function(
-            "() => Array.from(document.images).every(i => i.complete)",
-            timeout=120000
-        )
+            # Wait for fonts and images to load before printing
+            print("[PDF] Waiting for fonts and images...")
+            page.evaluate("() => document.fonts.ready")
+            page.wait_for_function(
+                "() => Array.from(document.images).every(i => i.complete)",
+                timeout=120000
+            )
 
-        # Generate the PDF
-        print(f"[PDF] Printing to {out_path.name}...")
-        page.pdf(
-            path=str(out_path),
-            width="1280px",
-            height="720px",
-            print_background=True,
-            margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
-        )
-        browser.close()
+            # Generate the PDF
+            print(f"[PDF] Printing to {out_path.name}...")
+            page.pdf(
+                path=str(out_path),
+                width="1280px",
+                height="720px",
+                print_background=True,
+                margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
+            )
+            browser.close()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     print("[PDF] Generation complete!")
     return str(out_path)

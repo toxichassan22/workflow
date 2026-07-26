@@ -5,6 +5,8 @@ Pre-built design styles that companies can choose from.
 import base64
 import os
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 DESIGN_TEMPLATES = {
     'modern': {
@@ -161,7 +163,9 @@ def build_design_rules(branding):
     accent = branding.get('accent_color', '#6DA3C3')
     bg = branding.get('background_color', '#F4F9FC')
     text_color = branding.get('text_color', '#333333')
-    _font_css, font = build_font_css(branding, branding.get('tenant_id'))
+    # Only the family name is needed here, so never read/base64 the font file
+    # on every slide prompt build.
+    _font_css, font = build_font_css(branding, branding.get('tenant_id'), family_only=True)
     header_enabled = branding.get('header_enabled', 1)
     footer_enabled = branding.get('footer_enabled', 1)
     header_h = branding.get('header_height', 56)
@@ -261,20 +265,53 @@ top:{content_top}px → bottom:{content_bottom}px. padding: 16px 36px.
     return rules
 
 
-def build_font_css(branding, tenant_id=None, embed=True):
-    """@font-face isolated inside .slide only — does not affect site UI."""
+def resolve_font_path(path):
+    """Resolve a stored font path to an absolute path.
+
+    font_file_path is stored relative to the project root, so relying on the
+    process CWD (which differs under gunicorn) would silently fail.
+    """
+    if not path:
+        return None
+    if os.path.isabs(path):
+        return path if os.path.exists(path) else None
+    candidate = os.path.join(BASE_DIR, path.lstrip('/\\'))
+    return candidate if os.path.exists(candidate) else None
+
+
+def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
+    """@font-face isolated inside .slide only — does not affect site UI.
+
+    family_only=True skips all disk I/O and returns just the font-family value,
+    for callers that only need the name (e.g. prompt building).
+    """
+    branding = branding or {}
     path = branding.get('font_file_path')
     family = f"tenant-font-{tenant_id or branding.get('tenant_id', 'x')}"
     fallback = "'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif"
-    if not path or not os.path.exists(path):
+    abs_path = resolve_font_path(path)
+    if not abs_path:
+        if path:
+            print(f"[FONT] WARNING: font_file_path not found on disk: {path}")
         return "", f"{branding.get('font_family', 'IBM Plex Sans Arabic')}, {fallback}"
-    ext = os.path.splitext(path)[1].lower()
+    if family_only:
+        return "", f"'{family}', {fallback}"
+    ext = os.path.splitext(abs_path)[1].lower()
     fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff2': 'woff2', '.woff': 'woff'}.get(ext, 'truetype')
-    if embed:
-        with open(path, 'rb') as f:
-            src = f"url(data:font/{fmt};base64,{base64.b64encode(f.read()).decode()}) format('{fmt}')"
+
+    served_url = None
+    if not embed:
+        # Only /tenant-assets/<tenant>/fonts/<file> is publicly served; the raw
+        # uploads path is not. Without a servable URL we must embed instead.
+        owner = tenant_id or branding.get('tenant_id')
+        if owner:
+            served_url = f"/tenant-assets/{owner}/fonts/{os.path.basename(abs_path)}"
+
+    if served_url:
+        src = f"url('{served_url}') format('{fmt}')"
     else:
-        src = f"url('/{path.lstrip('/')}') format('{fmt}')"
+        with open(abs_path, 'rb') as f:
+            src = f"url(data:font/{fmt};base64,{base64.b64encode(f.read()).decode()}) format('{fmt}')"
     css = (f"@font-face{{font-family:'{family}';src:{src};font-weight:100 900;"
            f"font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}")
     return css, f"'{family}', {fallback}"

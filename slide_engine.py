@@ -4,10 +4,14 @@ AI analyzes project data and proposes a balanced slide plan.
 """
 
 import json
+import os
 import re
+import math
+import shutil
+import hashlib
 import concurrent.futures
 from design_templates import build_design_rules
-
+import db
 
 _ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
 
@@ -120,15 +124,30 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 """
 
 
+def resolve_slide_bounds(branding):
+    """Resolve (min_slides, max_slides, default_count) from branding.
+
+    When lock_slide_count is enabled the tenant's default_slide_count becomes an
+    exact requirement, otherwise min/max act as the allowed range.
+    """
+    branding = branding or {}
+    default_count = int(branding.get('default_slide_count') or 16)
+    if branding.get('lock_slide_count'):
+        return default_count, default_count, default_count
+    min_slides = int(branding.get('min_slides') or 8)
+    max_slides = int(branding.get('max_slides') or 30)
+    if min_slides > max_slides:
+        min_slides = max_slides
+    return min_slides, max_slides, default_count
+
+
 def build_slide_plan_prompt(project_data, branding):
     """Build the prompt for AI to propose a slide plan."""
     project_json = json.dumps(project_data, ensure_ascii=False, indent=2)
     if len(project_json) > 6000:
         project_json = project_json[:6000] + '\n... [تم اختصار البيانات]'
 
-    default_count = branding.get('default_slide_count') or 16
-    min_slides = branding.get('min_slides') or default_count
-    max_slides = branding.get('max_slides') or default_count
+    min_slides, max_slides, _default_count = resolve_slide_bounds(branding)
 
     return SLIDE_PLAN_PROMPT.format(
         project_json=project_json,
@@ -194,7 +213,39 @@ def _extract_json_from_text(response_text):
     return None
 
 
-def parse_slide_plan(response_text):
+def _enforce_slide_count(slides, target_count):
+    """Trim or pad a slide list to exactly target_count, keeping fixed slides intact.
+
+    The cover, index, moodboard and closing slides keep their reserved positions;
+    only content slides are removed or appended.
+    """
+    if target_count < 1 or len(slides) == target_count:
+        return slides
+
+    reserved_tail_types = {'moodboard', 'closing'}
+
+    if len(slides) > target_count:
+        head = slides[:2]                      # cover + index
+        tail = [s for s in slides[-2:] if s.get('type') in reserved_tail_types]
+        middle = slides[len(head):len(slides) - len(tail)]
+        keep_middle = max(0, target_count - len(head) - len(tail))
+        return (head + middle[:keep_middle] + tail)[:target_count]
+
+    tail = [s for s in slides[-2:] if s.get('type') in reserved_tail_types]
+    body = slides[:len(slides) - len(tail)]
+    while len(body) + len(tail) < target_count:
+        body.append({
+            'title': f'تفاصيل إضافية {len(body)}',
+            'type': 'content',
+            'design_style': 'cards',
+            'content_density': 'medium',
+            'requires_image': False,
+            'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
+        })
+    return body + tail
+
+
+def parse_slide_plan(response_text, branding=None):
     """Parse the AI response into a slide plan dict."""
     json_text = _extract_json_from_text(response_text)
     if not json_text:
@@ -209,8 +260,16 @@ def parse_slide_plan(response_text):
     if 'slides' not in plan or not isinstance(plan['slides'], list):
         raise ValueError("Missing 'slides' array in response")
 
-    if 'proposed_count' not in plan:
-        plan['proposed_count'] = len(plan['slides'])
+    # A locked slide count is a hard tenant requirement: reshape the plan
+    # instead of failing validation and burning another generation round.
+    if branding and branding.get('lock_slide_count'):
+        _min_s, _max_s, default_count = resolve_slide_bounds(branding)
+        if len(plan['slides']) != default_count:
+            print(f"[SLIDE-PLAN] lock_slide_count active: reshaping "
+                  f"{len(plan['slides'])} -> {default_count} slides")
+            plan['slides'] = _enforce_slide_count(plan['slides'], default_count)
+
+    plan['proposed_count'] = len(plan['slides'])
 
     # Ensure first slide is cover and last is closing
     if plan['slides']:
@@ -246,9 +305,7 @@ def validate_slide_plan(plan, branding):
         return False, issues
 
     # Check min/max slides
-    default_count = branding.get('default_slide_count') or 16
-    min_s = branding.get('min_slides') or default_count
-    max_s = branding.get('max_slides') or default_count
+    min_s, max_s, _default_count = resolve_slide_bounds(branding)
     count = len(slides)
     if count < min_s:
         issues.append(f"Too few slides: {count} (min: {min_s})")
@@ -425,7 +482,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                 print(f"[SLIDE-{slide_num}] ERROR: no HTML extracted (attempt {attempt})")
                 continue
 
-            html = postprocess_slide(html, slide_type)
+            html = postprocess_slide(html, slide_type, slide_num=slide_num, slide_title=slide_title, total_slides=total_slides, tenant_id=branding.get('tenant_id'), branding=branding)
             count = html.count('class="slide"')
             if count >= 1:
                 print(f"[SLIDE-{slide_num}] OK: {len(html)} chars")
@@ -661,14 +718,156 @@ def _replace_data_placeholders(html, project_data, branding=None):
     return html
 
 
-def finalize_slide_html(html, slide_type, project_data, branding, creative_images=None, map_placeholders=None):
+def resolve_logo_in_html(html, tenant_id=None):
+    """Replace all logo placeholders and broken logo paths with tenant's logo URL."""
+    if not html:
+        return html
+    logo_url = '/assets/logo.png'
+    if tenant_id:
+        branding = db.get_branding(tenant_id) or {}
+        if branding.get('logo_path'):
+            logo_url = branding['logo_path']
+            if not logo_url.startswith('http') and '?t=' not in logo_url:
+                logo_url = f"{logo_url}?t=1"
+        else:
+            logo_url = f"/tenant-assets/{tenant_id}/logo?t=1"
+    else:
+        logo_url = '/assets/logo.png'
+
+    if not logo_url.startswith('/') and not logo_url.startswith('http'):
+        logo_url = f"/{logo_url}"
+
+    html = html.replace('##LOGO##', logo_url)
+    html = re.sub(
+        r'src=["\'](?:/?assets/logo\.png|logo\.png|/logo\.png|undefined|null|none)["\']',
+        f'src="{logo_url}"',
+        html,
+        flags=re.IGNORECASE
+    )
+
+    def _fix_logo_img(match):
+        img_tag = match.group(0)
+        if 'logo' in img_tag.lower() or '##LOGO##' in img_tag or 'tenant-assets' in img_tag:
+            if 'src=' in img_tag.lower():
+                img_tag = re.sub(r'src=["\'][^"\']*["\']', f'src="{logo_url}"', img_tag, flags=re.IGNORECASE)
+            else:
+                img_tag = img_tag.replace('<img', f'<img src="{logo_url}"')
+
+            if 'style=' in img_tag.lower():
+                img_tag = re.sub(
+                    r'style=["\']([^"\']*)["\']',
+                    r'style="\1;max-height:50px;width:auto;object-fit:contain;display:inline-block;"',
+                    img_tag,
+                    flags=re.IGNORECASE
+                )
+            else:
+                img_tag = img_tag.replace('<img', f'<img style="max-height:50px;width:auto;object-fit:contain;display:inline-block;"')
+        return img_tag
+
+    html = re.sub(r'<img\s[^>]*>', _fix_logo_img, html, flags=re.IGNORECASE)
+    return html
+
+
+def _strip_presentation_icons(html):
+    """Remove generated icon markup and emoji while retaining company logo images."""
+    if not html:
+        return html
+    return _ICON_RE.sub('', html)
+
+
+def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_slides=None,
+                       tenant_id=None, branding=None):
+    """Post-process a slide while keeping cover and closing free of header/footer.
+
+    slide_type is the semantic type (cover, index, content, closing, ...).
+    slide_num / total_slides are used for page numbers and cover/closing detection.
+    """
+    html = _strip_presentation_icons(html)
+
+    # Cover and closing must never receive the universal header/footer.
+    normalized_title = str(slide_title or '').strip().lower()
+    is_cover = slide_type == 'cover' or int(slide_num or 0) == 1 or bool(
+        re.search(r'غلاف|cover|front', normalized_title)
+    )
+    is_closing = slide_type == 'closing' or bool(
+        re.search(r'ختام|closing|شكراً|thanks', normalized_title)
+    ) or (total_slides is not None and int(slide_num or 0) == int(total_slides))
+    is_cover_or_closing = is_cover or is_closing
+
+    # Clean out empty/broken img tags across all slides
+    html = re.sub(
+        r'<img\b[^>]*(?:src=["\']\s*["\']|src=["\']#(?:["\']|$)|\bsrc=["\'](?:undefined|null|none)["\'])[^>]*>',
+        '',
+        html,
+        flags=re.IGNORECASE
+    )
+
+    def _strip_srcless_img(match):
+        tag = match.group(0)
+        if 'src=' not in tag.lower():
+            return ''
+        return tag
+    html = re.sub(r'<img\s[^>]*>', _strip_srcless_img, html, flags=re.IGNORECASE)
+
+    # Content slides get a header/footer; cover, moodboard and closing never do.
+    if slide_type == 'content' and not is_cover_or_closing:
+        has_header = bool(re.search(r'height:\s*56px', html))
+        has_footer = bool(re.search(r'height:\s*36px', html))
+
+        title = slide_title or f'شريحة {slide_num}' or 'العنوان'
+        primary = '#7A0C0C'
+        accent = '#C4A35A'
+        company_name = 'منافع الاقتصادية للعقار'
+
+        if branding is None and tenant_id:
+            branding = db.get_branding(tenant_id) or {}
+        if branding:
+            primary = branding.get('primary_color') or primary
+            accent = branding.get('accent_color') or accent
+            company_name = branding.get('company_name') or company_name
+            if not company_name:
+                tenant = db.get_tenant(tenant_id) if tenant_id else None
+                company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
+
+        if not has_header:
+            header_html = (
+                f'<div style="position:absolute;top:0;right:0;left:0;height:56px;background:#fff;border-bottom:2px solid {primary};display:flex;align-items:center;padding:0 20px;z-index:10;">'
+                '<img src="##LOGO##" style="height:40px;margin-right:12px;" />'
+                f'<div style="width:3px;height:28px;background:{accent};margin:0 12px;"></div>'
+                f'<span style="font-size:16px;font-weight:600;color:{primary};">{title}</span>'
+                '</div>'
+            )
+            html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
+
+        if not has_footer:
+            footer_html = (
+                f'<div style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{primary};display:flex;align-items:center;padding:0 16px;z-index:10;">'
+                f'<span style="font-size:13px;color:#fff;">{title}</span>'
+                f'<span style="font-size:13px;color:rgba(255,255,255,0.7);margin-right:auto;margin-left:8px;">{company_name}</span>'
+                f'<div style="width:24px;height:24px;border-radius:50%;background:{accent};color:{primary};font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;">{slide_num}</div>'
+                '</div>'
+            )
+            html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
+
+    html = resolve_logo_in_html(html, tenant_id or (branding or {}).get('tenant_id'))
+    return _strip_presentation_icons(html)
+
+
+def finalize_slide_html(html, slide_type, project_data, branding, creative_images=None,
+                        map_placeholders=None, tenant_id=None, slide_num=None, slide_title=None,
+                        total_slides=None):
     """Unified post-processing pipeline for every generated slide."""
-    html = postprocess_slide(html, slide_type)
+    html = postprocess_slide(
+        html, slide_type, slide_num=slide_num, slide_title=slide_title,
+        total_slides=total_slides, tenant_id=tenant_id, branding=branding
+    )
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
     html = _replace_creative_image_placeholders(html, creative_images, slide_type)
     html = _replace_data_placeholders(html, project_data, branding)
+    html = resolve_logo_in_html(html, tenant_id)
     return html
+
 
 
 def generate_all_slides(slide_plan, project_data, branding, images_info, call_glm_fn, map_placeholders=None,
@@ -739,6 +938,10 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
                 branding,
                 creative_images=creative_images,
                 map_placeholders=map_placeholders,
+                tenant_id=branding.get('tenant_id'),
+                slide_num=idx + 1,
+                slide_title=slide.get('title', f'شريحة {idx + 1}'),
+                total_slides=total,
             )
             results[idx] = html
 

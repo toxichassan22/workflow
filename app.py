@@ -17,6 +17,7 @@ load_dotenv()
 import db
 import auth
 import maps_service
+import slide_engine
 from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
 from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules
 
@@ -276,14 +277,14 @@ def call_image_api_with_reference(reference_image_base64, prompt):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Generate PDF with Playwright
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def generate_pdf_with_playwright(html, project_name, branding=None, output_dir=None):
+def generate_pdf_with_playwright(html, project_name, branding=None, output_dir=None, tenant_id=None):
     """Generate a PDF from slide HTML using the new generate_pdf export."""
     from exports.pdf_export import generate_pdf
     out_dir = output_dir or OUTPUT_DIR
     os.makedirs(out_dir, exist_ok=True)
     safe_name = ''.join(c for c in project_name if c.isalnum() or c in '-_ ')[:50].strip() or 'presentation'
     out_path = os.path.join(out_dir, f"{safe_name}_{int(time.time())}.pdf")
-    generate_pdf(html, branding, out_path)
+    generate_pdf(html, branding, out_path, tenant_id)
     return out_path
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -313,80 +314,7 @@ def clean_project_data(data):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Slide-by-slide generation (1 slide per API call for smaller prompts)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-SLIDE_DEFS = [
-    {'num': 1,  'title': 'شريحة الغلاف',     'type': 'cover',     'desc': 'cover: خلفية صورة الغلاف ##IMAGE_COVER## بكامل الشريحة. طبقة شفافة بلون رئيسي داكن بنسبة opacity:0.65. شعار ##LOGO## height:80px في المنتصف. اسم المشروع أبيض font-size:48px. وصف بلون مميز (accent) font-size:20px. خطوط هندسية زخرفية بلون مميز. بدون هيدر/فوتر.'},
-    {'num': 2,  'title': 'الفهرس',            'type': 'index',     'desc': 'index: عناوين الشرائح 1-16 في جدول فهرس احترافي عمودين. رقم كل شريحة في دائرة باللون الرئيسي. خلفية بلون الخلفية المعتمد. ⚠️ هيدر إلزامي في الأعلى (شعار ##LOGO## + خط رأسي مميز + عنوان الشريحة). ⚠️ فوتر إلزامي في الأسفل (اسم المشروع + رقم الشريحة في دائرة بلون مميز). ⛔ ممنوع إطلاقاً: أي صور أو base64 أو روابط صور. النص فقط + أرقام الشرائح في دوائر.'},
-    {'num': 3,  'title': 'الملخص التنفيذي',    'type': 'content',   'desc': 'content: Dashboard مالي — بطاقات كرتونية كبيرة: إجمالي التكلفة، الإيرادات السنوية، إجمالي الأرباح (الأكبر بصرياً)، ROI %، NOI، مدة الاسترداد. الأرقام بخط كبير 32-48px باللون الرئيسي. بدون صور.'},
-    {'num': 4,  'title': 'الرؤية والفكرة',     'type': 'content',   'desc': 'content: نص تعريفي عن المشروع + بطاقات للمكونات الرئيسية بالنص والتخطيط فقط. يمكنك استخدام ##MOODBOARD_IMAGE_1## كخلفية شفافة opacity:0.15.'},
-    {'num': 5,  'title': 'الموقع الاستراتيجي', 'type': 'content',   'desc': 'content: بطاقات مميزات الموقع (القرب من الخدمات، الوصول، المدينة) بعناوين ووصف نصي فقط. يمكنك استخدام ##MOODBOARD_IMAGE_2## كخلفية شفافة opacity:0.15.'},
-    {'num': 6,  'title': 'مميزات المشروع',     'type': 'content',   'desc': 'content: Grid 2×3 من البطاقات الفاخرة: كل بطاقة فيها عنوان bold + وصف قصير. خلفية كل بطاقة بيضاء مع border بلون مميز رفيع. بدون صور أو أيقونات.'},
-    {'num': 7,  'title': 'مكونات المشروع',     'type': 'content',   'desc': 'content: جدول احترافي: header باللون الرئيسي وأبيض، صفوف متبادلة بلون خلفية خفيف وأبيض، صف الإجمالي بارز. أسفل الجدول 3 بطاقات ملخص. بدون صور.'},
-    {'num': 8,  'title': 'افتراضات الربح التشغيلي', 'type': 'content', 'desc': 'content: معادلة بصرية كبيرة: (إيرادات سنوية − مصاريف سنوية = صافي ربح). كل عنصر في بطاقة مع سهم يربطها. أرقام بخط كبير باللون الرئيسي. بدون صور.'},
-    {'num': 9,  'title': 'افتراضات التكاليف',  'type': 'content',   'desc': 'content: 3 بطاقات كبيرة: بطاقة تكلفة الأرض (مع تفاصيل السعر/م²)، بطاقة تكلفة التطوير، بطاقة الإجمالي (الأكبر والأبرز). بدون صور.'},
-    {'num': 10, 'title': 'الأرباح والتخارج',   'type': 'content',   'desc': 'content: Flow diagram أفقي: بطاقة ربح تشغيلي → علامة + → بطاقة قيمة التخارج → علامة = → بطاقة إجمالي الأرباح (الأكبر). يمكنك استخدام ##MOODBOARD_IMAGE_3## كخلفية شفافة opacity:0.1.'},
-    {'num': 11, 'title': 'المؤشرات المالية',   'type': 'content',   'desc': 'content: أعلى الشريحة 3 بطاقات كبيرة: ROI % و NOI و مدة الاسترداد. أسفلها مقارنة بصرية: شريطين أفقيين (إجمالي التكلفة vs إجمالي الأرباح). بدون صور.'},
-    {'num': 12, 'title': 'الجدول الزمني',      'type': 'content',   'desc': 'content: Timeline أفقي: خط رأسي في المنتصف، نقاط على الخط لكل مرحلة، أشرطة ملونة باللون الرئيسي واللون المميز. Years والأرباع Q1-Q4 في الأعلى. بدون صور.'},
-    {'num': 13, 'title': 'فرص الاستثمار',      'type': 'content',   'desc': 'content: 3-4 بطاقات High-Impact: عنوان bold + وصف نصي واضح. يمكنك استخدام ##MOODBOARD_IMAGE_4## كخلفية شفافة opacity:0.1.'},
-    {'num': 14, 'title': 'المخاطر والافتراضات', 'type': 'content',  'desc': 'content: بطاقات رمادية وبيج هادئة بالنص فقط. عنوان فرعي: نقاط يجب التحقق منها. بدون أي صور أو أيقونات.'},
-    {'num': 15, 'title': 'المود بورد',         'type': 'moodboard', 'desc': 'moodboard: Grid 2×2 يشغل المساحة بين top:56px و bottom:36px. كل خلية فيها صورة واحدة: ##MOODBOARD_IMAGE_1## و ##MOODBOARD_IMAGE_2## و ##MOODBOARD_IMAGE_3## و ##MOODBOARD_IMAGE_4##. كل صورة بـ background-size:cover;background-position:center. فواصل رفيعة 4px بين الخلايا.'},
-    {'num': 16, 'title': 'الختام',             'type': 'closing',   'desc': 'closing: خلفية بلون رئيسي داكن gradient linear-gradient(135deg, [اللون الرئيسي], [اللون الرئيسي الداكن/الثانوي]) تملأ الشريحة. شعار ##LOGO## height:80px في المنتصف. "شكراً لكم" أبيض 48px. اسم المشروع باللون المميز. بيانات التواصل. بدون هيدر/فوتر.'},
-]
-
-# Design rules — sent ONCE in system prompt, not per-slide
-DESIGN_RULES = """أنت مصمم عروض تقديمية عقارية فاخرة بالسعودية. صمم كل شريحة كلوحة فنية احترافية.
-
-## الألوان
-- عنابي: #7A0C0C (اللون الرئيسي للعناوين والأزرار)
-- عنابي غامق: #5A0808 (التدرجات)
-- ذهبي: #C4A35A (الزخارف والتفاصيل)
-- خلفية: #FBFAF8
-- نص: #333333
-- أبيض: #FFFFFF
-
-## الخط
-font-family: 'The Sans Arabic', Arial, sans-serif
-- عناوين الكبيرة: 36-48px font-weight:700 color:#7A0C0C
-- عناوين فرعية: 24-28px font-weight:600 color:#7A0C0C
-- نصوص عادية: 14-18px font-weight:400 color:#333
-- أرقام مالية كبيرة: 32-48px font-weight:700 color:#7A0C0C
-
-## الشريحة الأساسية
-<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;font-family:'The Sans Arabic',Arial,sans-serif;">
-CSS inline فقط. ممنوع box-shadow/filter/backdrop-filter.
-
-## هيدر إلزامي — يجب أن يوجد في كل شريحة من 2 إلى 15
-position:absolute;top:0;right:0;left:0;height:56px;background:#fff;border-bottom:2px solid #7A0C0C;
-المحتوى: شعار ##LOGO## height:40px يساراً + خط رأسي ذهبي 4px + اسم الشريحة 16px font-weight:600 color:#7A0C0C
-⚠️ شريحة 2 (الفهرس) لابد أن يكون فيها هذا الهيدر. شريحة الغلاف (1) والختام (16) فقط بدون هيدر.
-
-## فوتر إلزامي — يجب أن يوجد في كل شريحة من 2 إلى 15
-position:absolute;bottom:0;right:0;left:0;height:36px;background:#7A0C0C;display:flex;align-items:center;padding:0 16px;
-المحتوى: اسم المشروع 13px أبيض + 'منافع الاقتصادية للعقار' opacity:0.7 + رقم الشريحة في دائرة ذهبية 24px
-⚠️ شريحة 2 (الفهرس) لابد أن يكون فيها هذا الفوتر.
-
-## منطقة المحتوى (شرائح 2-15)
-top:56px → bottom:36px. padding: 20px 40px.
-
-## البطاقات (Cards)
-كل بطاقة: background:#fff border:1px solid rgba(196,163,90,0.2) border-radius:8px padding:16-24px.
-لا تستخدم أيقونات أو رموز أو emoji؛ اعتمد على النص والمساحات والألوان فقط.
-
-## الصور Placeholder
-- صورة الغلاف: ##IMAGE_COVER## (background-image فقط)
-- صور المود بورد: ##MOODBOARD_IMAGE_1## إلى ##MOODBOARD_IMAGE_4##
-- ⛔ ممنوع إطلاقاً: base64، روابط خارجية، أو أي صور `<img>` في شريحة الفهرس (شريحة 2) أو المخاطر (شريحة 14)
-- شريحة 2 (الفهرس): نص + أرقام فقط. بدون أي `<img>` أو صور مطلقاً
-- شريحة 14 (المخاطر): بطاقات نصية فقط. بدون أي `<img>` أو صور مطلقاً
-
-## قواعد التصميم
-- تجنب النص الطويل — استخدم بطاقات ونقاط مختصرة
-- كل شريحة = تصور واحد واضح (dashboard, grid, timeline, etc.)
-- الأرقام المالية يجب أن تكون بارزة بصرياً
-- استخدم الألوان لتوضيح الهرمية: عنابي للعناوين، ذهبي للتفاصيل، رمادي للنصوص الفرعية"""
-
 def _get_images_info(images):
     if isinstance(images, list):
         has_cover = bool(images[0]) if images else False
@@ -438,7 +366,7 @@ def _get_images_info(images):
 def build_system_prompt(project_data, images_info, design_rules=None):
     """Build the shared system prompt ONCE for all slides (~3K chars)."""
     if design_rules is None:
-        design_rules = DESIGN_RULES
+        design_rules = build_design_rules({})
     project_json = json.dumps(project_data, ensure_ascii=False, indent=2)
     # Truncate project data if too long to keep system prompt compact
     if len(project_json) > 4000:
@@ -450,34 +378,6 @@ def build_system_prompt(project_data, images_info, design_rules=None):
 
 ## الصور المتوفرة
 {images_info}"""
-
-def build_slide_user_msg(slide_num):
-    """Build the user message for a single slide (~500 chars)."""
-    s = SLIDE_DEFS[slide_num - 1]
-    return f"""أنشئ شريحة {s['num']}/16: {s['title']}
-النوع: {s['type']}
-{s['desc']}
-
-ملاحظات:
-- أنشئ فقط الشريحة {s['num']} لا غير
-- اكتب HTML في div class=\"slide\" واحد فقط
-- لا تكتب شرح أو markdown أو كود إضافي
-- التصميم يجب أن يكون احترافي وفاخر"""
-
-_PRESENTATION_ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
-
-
-def _strip_presentation_icons(html):
-    """Remove generated icon markup and emoji while retaining company logo images."""
-    if not html:
-        return html
-    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', '', html, flags=re.IGNORECASE)
-    html = re.sub(
-        r'<(?:i|span|div)\b[^>]*(?:class|id)=["\'][^"\']*(?:icon|emoji|lucide|fa-|material-icons)[^"\']*["\'][^>]*>[\s\S]*?</(?:i|span|div)\s*>',
-        '', html, flags=re.IGNORECASE
-    )
-    return _PRESENTATION_ICON_RE.sub('', html)
-
 
 def resolve_logo_in_html(html, tenant_id=None):
     """Replace all logo placeholders and broken logo paths with tenant's logo URL."""
@@ -530,89 +430,48 @@ def resolve_logo_in_html(html, tenant_id=None):
     return html
 
 
-def postprocess_slide(html, slide_num, tenant_id=None, slide_title=None, total_slides=None):
-    """Post-process a slide while keeping cover and closing free of header/footer."""
-    html = _strip_presentation_icons(html)
+def postprocess_slide(html, slide_num=None, tenant_id=None, slide_title=None, total_slides=None, slide_type=None):
+    """Compatibility wrapper around slide_engine.postprocess_slide.
 
-    # Cover and closing must never receive the universal header/footer. Use
-    # semantic data as well as position because some compatibility callers
-    # historically pass a hard-coded content-slide number.
-    normalized_title = str(slide_title or '').strip().lower()
-    is_closing = bool(re.search(r'ختام|closing|شكراً|شكرًا|thanks', normalized_title))
-    is_cover_or_closing = int(slide_num or 0) == 1 or is_closing or (
-        total_slides is not None and int(slide_num or 0) == int(total_slides)
+    Existing callers in app.py pass (html, slide_num, tenant_id). The slide_engine
+    implementation is semantic-type driven and no longer depends on SLIDE_DEFS.
+    """
+    if slide_type is None:
+        n = int(slide_num or 0)
+        t = int(total_slides or 0)
+        normalized_title = str(slide_title or '').strip().lower()
+        if n == 1 or re.search(r'غلاف|cover|front', normalized_title):
+            slide_type = 'cover'
+        elif (t and n == t) or re.search(r'ختام|closing|شكراً|شكرًا|thanks', normalized_title):
+            slide_type = 'closing'
+        else:
+            slide_type = 'content'
+
+    branding = db.get_branding(tenant_id) if tenant_id else None
+    return slide_engine.postprocess_slide(
+        html,
+        slide_type,
+        slide_num=slide_num,
+        slide_title=slide_title,
+        total_slides=total_slides,
+        tenant_id=tenant_id,
+        branding=branding,
     )
-
-    # Clean out empty/broken img tags across all slides
-    html = re.sub(r'<img\b[^>]*(?:src=["\']\s*["\']|src=["\']#(?:["\']|$)|\bsrc=["\'](?:undefined|null|none)["\'])[^>]*>', '', html, flags=re.IGNORECASE)
-    def _strip_srcless_img(match):
-        tag = match.group(0)
-        if 'src=' not in tag.lower():
-            return ''
-        return tag
-    html = re.sub(r'<img\s[^>]*>', _strip_srcless_img, html, flags=re.IGNORECASE)
-
-    # Slides where <img> tags are strictly forbidden EXCEPT logo images
-    NO_IMAGE_SLIDES = {2, 3, 6, 7, 8, 9, 11, 12, 14}
-    if slide_num in NO_IMAGE_SLIDES:
-        def _strip_non_logo(match):
-            tag = match.group(0)
-            if 'logo' in tag.lower() or '##LOGO##' in tag or 'tenant-assets' in tag:
-                return tag
-            return ''
-        html = re.sub(r'<img\s[^>]*>', _strip_non_logo, html, flags=re.IGNORECASE)
-
-    # Content slides get a header/footer; cover and closing never do.
-    HEADER_FOOTER_SLIDES = set(range(2, 16))
-    if slide_num in HEADER_FOOTER_SLIDES and not is_cover_or_closing:
-        has_header = bool(re.search(r'height:\s*56px', html))
-        has_footer = bool(re.search(r'height:\s*36px', html))
-        slide_title = SLIDE_DEFS[slide_num - 1]['title']
-
-        primary = '#7A0C0C'
-        accent = '#C4A35A'
-        company_name = 'منافع الاقتصادية للعقار'
-
-        if tenant_id:
-            branding = db.get_branding(tenant_id) or {}
-            primary = branding.get('primary_color') or primary
-            accent = branding.get('accent_color') or accent
-            company_name = branding.get('company_name')
-            if not company_name:
-                tenant = db.get_tenant(tenant_id)
-                company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
-            if not company_name:
-                company_name = 'منافع الاقتصادية للعقار'
-
-        if not has_header:
-            header_html = (
-                f'<div style="position:absolute;top:0;right:0;left:0;height:56px;background:#fff;border-bottom:2px solid {primary};display:flex;align-items:center;padding:0 20px;z-index:10;">'
-                '<img src="##LOGO##" style="height:40px;margin-right:12px;" />'
-                f'<div style="width:3px;height:28px;background:{accent};margin:0 12px;"></div>'
-                f'<span style="font-size:16px;font-weight:600;color:{primary};">{slide_title}</span>'
-                '</div>'
-            )
-            html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
-            print(f"[POST] Injected header into slide {slide_num}")
-
-        if not has_footer:
-            footer_html = (
-                f'<div style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{primary};display:flex;align-items:center;padding:0 16px;z-index:10;">'
-                f'<span style="font-size:13px;color:#fff;">{slide_title}</span>'
-                f'<span style="font-size:13px;color:rgba(255,255,255,0.7);margin-right:auto;margin-left:8px;">{company_name}</span>'
-                f'<div style="width:24px;height:24px;border-radius:50%;background:{accent};color:{primary};font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;">{slide_num}</div>'
-                '</div>'
-            )
-            html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
-            print(f"[POST] Injected footer into slide {slide_num}")
-
-    html = resolve_logo_in_html(html, tenant_id)
-    return _strip_presentation_icons(html)
 
 def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=2):
     """Generate one complete slide, retrying with a stricter prompt when needed."""
-    base_user_msg = build_slide_user_msg(slide_num)
-    slide_title = SLIDE_DEFS[slide_num - 1]['title']
+    slide_title = f'شريحة {slide_num}'
+    slide = {
+        'title': slide_title,
+        'type': 'content',
+        'design_style': 'cards',
+        'content_density': 'medium',
+        'requires_image': False,
+        'bullets': []
+    }
+    branding = db.get_branding(tenant_id) if tenant_id else {}
+    total = int(branding.get('default_slide_count') or 16)
+    base_user_msg = slide_engine.build_slide_user_msg(slide, slide_num, total, branding)
 
     for attempt in range(1, max_retries + 2):
         try:
@@ -629,7 +488,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
                 print(f"[SLIDE-{slide_num}] ERROR: no choices (attempt {attempt})")
                 continue
             html = extract_html_from_glm(response)
-            html = postprocess_slide(html, slide_num, tenant_id)
+            html = postprocess_slide(html, slide_num, tenant_id=tenant_id, slide_title=slide_title, total_slides=total, slide_type='content')
             count = html.count('class="slide"')
             if count >= 1:
                 print(f"[SLIDE-{slide_num}] OK Done ({len(html)} chars)")
@@ -641,18 +500,33 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
     print(f"[SLIDE-{slide_num}] FAIL All attempts failed for {slide_title}")
     return ''
 
-def build_glm_prompt(project_data, images):
-    """Legacy single-shot prompt builder (kept for /api/generate compatibility)"""
+def build_glm_prompt(project_data, images, branding=None):
+    """Legacy single-shot prompt builder (kept for /api/generate compatibility)."""
     project_data = clean_project_data(project_data)
     images_info = _get_images_info(images)
-    
-    # Resolve dynamic brand rules if tenant context is available
-    tenant_id = getattr(g, 'tenant_id', None)
-    branding = db.get_branding(tenant_id) if tenant_id else {}
+
+    # Resolve dynamic brand rules
+    if branding is None:
+        tenant_id = getattr(g, 'tenant_id', None)
+        branding = db.get_branding(tenant_id) if tenant_id else {}
     dynamic_rules = build_design_rules(branding)
-    
+    slide_count, _, _ = resolve_slide_bounds(branding)
+    fallback_plan = slide_engine.build_fallback_plan(branding)
+    slides = fallback_plan.get('slides', [])
+    generic_slide = {
+        'title': 'تفاصيل إضافية',
+        'type': 'content',
+        'design_style': 'cards',
+        'content_density': 'medium',
+        'requires_image': False,
+        'bullets': []
+    }
+
     sys_prompt = build_system_prompt(project_data, images_info, dynamic_rules)
-    return sys_prompt + '\n\n'.join(build_slide_user_msg(i) for i in range(1, 17))
+    return sys_prompt + '\n\n'.join(
+        slide_engine.build_slide_user_msg(slides[i] if i < len(slides) else generic_slide, i + 1, slide_count, branding)
+        for i in range(slide_count)
+    )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Extract HTML from GLM response
@@ -875,7 +749,7 @@ def api_export_pdf():
         return jsonify({'success': False, 'error': 'No HTML provided'}), 400
 
     try:
-        output_path = generate_pdf_with_playwright(slides_html, project_name)
+        output_path = generate_pdf_with_playwright(slides_html, project_name, tenant_id=g.tenant_id)
         filename = os.path.basename(output_path)
         print(f"[PDF] Generated: {filename}")
         return jsonify({'success': True, 'url': f'/outputs/{filename}', 'filename': filename})
@@ -1914,6 +1788,21 @@ def api_design_templates():
     return jsonify({'success': True, 'templates': get_all_templates()})
 
 
+@app.route('/api/branding/font.css', methods=['GET'])
+@require_auth
+def api_branding_font_css():
+    """Return the tenant @font-face CSS so the preview matches the exported PDF.
+
+    The rules are scoped to .slide only, so the site UI font is unaffected.
+    """
+    from design_templates import build_font_css
+    branding = db.get_branding(g.tenant_id) or {}
+    css, _family = build_font_css(branding, g.tenant_id, embed=False)
+    response = app.response_class(css or '/* no tenant font */', mimetype='text/css')
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # INPUT FIELDS ENDPOINTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2276,7 +2165,8 @@ def api_ai_input_builder():
 
 from slide_engine import (
     build_slide_plan_prompt, parse_slide_plan, validate_slide_plan,
-    generate_all_slides, extract_html_from_glm, CONTENT_DISTRIBUTION_RULES
+    generate_all_slides, extract_html_from_glm, CONTENT_DISTRIBUTION_RULES,
+    resolve_slide_bounds
 )
 
 
@@ -2296,27 +2186,31 @@ def api_slide_plan():
         return jsonify({'error': 'Branding not configured'}), 400
 
     training_context = db.get_training_context(g.tenant_id) or ''
-    configured_min = branding.get('min_slides', 5)
-    configured_max = branding.get('max_slides', 30)
+    slide_count_locked = bool(branding.get('lock_slide_count'))
+    configured_min, configured_max, locked_count = resolve_slide_bounds(branding)
 
     effective_max_slides = max(1, configured_max)
     effective_min_slides = min(configured_min, effective_max_slides)
 
-    # Search training context only for explicit min slide constraints
-    matches = re.findall(r'(?:أقل|لا يقل عن|بدون أن يقل عن|الحد الأدنى|من|حوالي|أقل عدد|عدد الشرائح.*?لا يقل عن|الالتزام بـ).*?(\d+)', training_context)
-    if matches:
-        try:
-            nums = [int(m) for m in matches if 1 <= int(m) <= 50]
-            if nums:
-                detected_min = max(nums)
-                effective_min_slides = min(max(effective_min_slides, detected_min), effective_max_slides)
-        except ValueError:
-            pass
+    # A locked slide count outranks any hint found in the training context.
+    if not slide_count_locked:
+        # Search training context only for explicit min slide constraints
+        matches = re.findall(r'(?:أقل|لا يقل عن|بدون أن يقل عن|الحد الأدنى|من|حوالي|أقل عدد|عدد الشرائح.*?لا يقل عن|الالتزام بـ).*?(\d+)', training_context)
+        if matches:
+            try:
+                nums = [int(m) for m in matches if 1 <= int(m) <= 50]
+                if nums:
+                    detected_min = max(nums)
+                    effective_min_slides = min(max(effective_min_slides, detected_min), effective_max_slides)
+            except ValueError:
+                pass
 
     effective_branding = dict(branding)
     effective_branding['min_slides'] = effective_min_slides
     effective_branding['max_slides'] = effective_max_slides
-    if effective_branding.get('default_slide_count', 0) > effective_max_slides:
+    if slide_count_locked:
+        effective_branding['default_slide_count'] = locked_count
+    elif effective_branding.get('default_slide_count', 0) > effective_max_slides:
         effective_branding['default_slide_count'] = effective_max_slides
 
     prompt = build_slide_plan_prompt(project_data, effective_branding)
@@ -2381,7 +2275,7 @@ def api_slide_plan():
                 attempts=2
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
-            plan = parse_slide_plan(content)
+            plan = parse_slide_plan(content, effective_branding)
             print(f"[SLIDE-PLAN] Parsed on attempt {attempt}")
             break
         except Exception as e:
@@ -3073,7 +2967,7 @@ def api_export():
 
             safe_name = ''.join(c for c in project_name if c.isalnum() or c in '-_ ')[:50].strip() or 'presentation'
             pdf_path = os.path.join(tenant_output_dir, f"{safe_name}_{int(time.time())}.pdf")
-            generate_pdf(slides_html, branding, pdf_path)
+            generate_pdf(slides_html, branding, pdf_path, g.tenant_id)
             relative_url = f'/outputs/{g.tenant_id}/{os.path.basename(pdf_path)}'
 
             # Record export
@@ -3085,10 +2979,24 @@ def api_export():
         elif fmt == 'pptx':
             from exports.pptx_export import generate_pptx
             slides_data = data.get('slidesData', [])
+            presentation_id = data.get('presentationId')
+
+            # Fallback: load latest saved slides from DB
+            if not slides_data and presentation_id:
+                pres = db.get_presentation(presentation_id, g.tenant_id)
+                if pres and pres.get('slides_data'):
+                    try:
+                        loaded = pres['slides_data']
+                        if isinstance(loaded, str):
+                            loaded = json.loads(loaded)
+                        slides_data = loaded if isinstance(loaded, list) else []
+                    except Exception as e:
+                        print(f"[EXPORT] failed to load slides_data for PPTX: {e}")
+
             if not slides_data:
                 return jsonify({'error': 'slidesData is required for PPTX export'}), 400
 
-            pptx_path = generate_pptx(slides_data, project_name, branding, tenant_output_dir)
+            pptx_path = generate_pptx(slides_data, project_name, branding, tenant_output_dir, g.tenant_id)
             relative_url = f'/outputs/{g.tenant_id}/{os.path.basename(pptx_path)}'
 
             export_id = db.create_export(data.get('presentationId'), g.tenant_id, 'pptx', pptx_path)
@@ -3631,6 +3539,20 @@ def api_get_edit_log(pres_id):
         return jsonify({'error': 'Presentation not found'}), 404
     log = db.get_edit_log(pres_id)
     return jsonify({'success': True, 'log': log})
+
+
+@app.route('/api/presentations/<pres_id>/log', methods=['POST'])
+@require_permission('create_presentation')
+def api_log_presentation_edit(pres_id):
+    """Record a single edit log entry (used by inline text editing)."""
+    pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
+    if not pres:
+        return jsonify({'error': 'Presentation not found'}), 404
+    data = request.json or {}
+    action = data.get('action', 'edit')
+    details = data.get('details', '')
+    db.log_edit(pres_id, g.user_id, g.user_name or 'System', action, details)
+    return jsonify({'success': True})
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
