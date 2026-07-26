@@ -51,6 +51,7 @@ def init_db():
         _repair_field_options(conn)
         _deduplicate_fields(conn)
         _cleanup_accidental_map_fields(conn)
+        _migrate_branding_columns(conn)
 
         try:
             conn.commit()
@@ -112,6 +113,13 @@ def _create_tables(conn):
         default_slide_count INTEGER DEFAULT 16,
         min_slides INTEGER DEFAULT 8,
         max_slides INTEGER DEFAULT 30,
+        map_style_overview TEXT DEFAULT 'satellite',
+        map_style_landmarks TEXT DEFAULT 'satellite',
+        map_style_access TEXT DEFAULT 'satellite',
+        map_style_catchment TEXT DEFAULT 'satellite',
+        draw_compass INTEGER DEFAULT 1,
+        draw_inset INTEGER DEFAULT 1,
+        font_file_path TEXT,
         updated_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -521,6 +529,8 @@ def update_branding(tenant_id, **fields):
         'header_enabled', 'footer_enabled', 'header_height', 'footer_height',
         'card_style', 'slide_ratio', 'moodboard_enabled', 'cover_image_enabled', 'moodboard_count',
         'default_slide_count', 'min_slides', 'max_slides',
+        'map_style_overview', 'map_style_landmarks', 'map_style_access', 'map_style_catchment',
+        'draw_compass', 'draw_inset', 'font_file_path',
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
@@ -770,6 +780,29 @@ def _cleanup_accidental_map_fields(conn):
         conn.commit()
     except Exception as e:
         print(f"[DB CLEANUP ERR] {e}")
+
+
+def _migrate_branding_columns(conn):
+    """Add new columns to tenant_branding if they don't exist."""
+    try:
+        cursor = conn.execute("PRAGMA table_info(tenant_branding)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        migrations = {
+            'map_style_overview': "ALTER TABLE tenant_branding ADD COLUMN map_style_overview TEXT DEFAULT 'satellite'",
+            'map_style_landmarks': "ALTER TABLE tenant_branding ADD COLUMN map_style_landmarks TEXT DEFAULT 'satellite'",
+            'map_style_access': "ALTER TABLE tenant_branding ADD COLUMN map_style_access TEXT DEFAULT 'satellite'",
+            'map_style_catchment': "ALTER TABLE tenant_branding ADD COLUMN map_style_catchment TEXT DEFAULT 'satellite'",
+            'draw_compass': "ALTER TABLE tenant_branding ADD COLUMN draw_compass INTEGER DEFAULT 1",
+            'draw_inset': "ALTER TABLE tenant_branding ADD COLUMN draw_inset INTEGER DEFAULT 1",
+            'font_file_path': "ALTER TABLE tenant_branding ADD COLUMN font_file_path TEXT",
+        }
+        for col, sql in migrations.items():
+            if col not in existing_cols:
+                conn.execute(sql)
+                print(f"[DB MIGRATION] Added column: {col}")
+        conn.commit()
+    except Exception as e:
+        print(f"[DB MIGRATION ERR] {e}")
 
 
 def add_custom_field(tenant_id, field_key, field_label, field_type, field_options=None,

@@ -594,7 +594,7 @@ def _replace_data_placeholders(html, project_data, branding=None):
     replacements = {}
 
     # 1. Logo replacement
-    logo_url = branding.get('logo') or branding.get('logo_url') or '/assets/logo.png'
+    logo_url = branding.get('logo_path') or branding.get('logo') or branding.get('logo_url') or '/assets/logo.png'
     replacements['##LOGO##'] = logo_url
 
     # 2. Add all dynamic key-value pairs from project_data

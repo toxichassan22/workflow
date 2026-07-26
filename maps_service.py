@@ -1577,7 +1577,7 @@ def _get_cached_map_images(tenant_id, presentation_id):
     }
 
 
-def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False):
+def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None):
     """
     Generate all map images needed for a project.
     Returns dict of placeholder -> file_path.
@@ -1732,22 +1732,36 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     if isinstance(draw_compass, str):
         draw_compass = draw_compass.lower() in ('true', '1', 'yes')
     elif not isinstance(draw_compass, bool):
-        draw_compass = True
+        if branding and 'draw_compass' in branding:
+            draw_compass = bool(branding['draw_compass'])
+        else:
+            draw_compass = True
 
     draw_inset = project_data.get('draw_inset', True)
     if isinstance(draw_inset, str):
         draw_inset = draw_inset.lower() in ('true', '1', 'yes')
     elif not isinstance(draw_inset, bool):
-        draw_inset = True
+        if branding and 'draw_inset' in branding:
+            draw_inset = bool(branding['draw_inset'])
+        else:
+            draw_inset = True
 
     # Parse per-map style preferences (satellite/roadmap/terrain/hybrid/both)
     # Default: all satellite. Employee can override per-map via map_styles dict.
+    # Fallback to tenant branding defaults if not in project_data
     map_styles_raw = project_data.get('map_styles', {})
     if isinstance(map_styles_raw, str):
         try:
             map_styles_raw = json.loads(map_styles_raw)
         except Exception:
             map_styles_raw = {}
+    if not map_styles_raw and branding:
+        map_styles_raw = {
+            'overview': branding.get('map_style_overview', 'satellite'),
+            'landmarks': branding.get('map_style_landmarks', 'satellite'),
+            'access': branding.get('map_style_access', 'satellite'),
+            'catchment': branding.get('map_style_catchment', 'satellite'),
+        }
     VALID_MAPTYPES = {'satellite', 'roadmap', 'terrain', 'hybrid', 'both'}
     map_styles = {}
     for key in ('overview', 'landmarks', 'access', 'catchment'):
@@ -1796,6 +1810,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
         if times.get('success'):
             for i, t in enumerate(times['times']):
                 geocoded_landmarks[i]['duration_minutes'] = t['duration_minutes']
+                geocoded_landmarks[i]['distance_text'] = t.get('distance_text')
             _record_maps_call(tenant_id)
         result['landmarks'] = landmarks
 

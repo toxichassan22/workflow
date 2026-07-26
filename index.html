@@ -1963,11 +1963,22 @@
           </div>
           <div class="tenant-field">
             <label>نوع الخط</label>
-            <select id="settingsFontFamily">
+            <select id="settingsFontFamily" onchange="toggleFontUpload(this.value)">
               <option value="The Sans Arabic">The Sans Arabic</option>
               <option value="Arial">Arial</option>
               <option value="Tahoma">Tahoma</option>
+              <option value="Cairo">Cairo</option>
+              <option value="IBM Plex Sans Arabic">IBM Plex Sans Arabic</option>
+              <option value="Noto Sans Arabic">Noto Sans Arabic</option>
+              <option value="Tajawal">Tajawal</option>
+              <option value="Almarai">Almarai</option>
+              <option value="Readex Pro">Readex Pro</option>
+              <option value="Aref Ruqaa">Aref Ruqaa</option>
+              <option value="custom">خط مخصص (ارفع ملف)</option>
             </select>
+            <input type="file" id="settingsFontUpload" accept=".ttf,.otf,.woff,.woff2" style="display:none"
+              onchange="handleFontUpload(this)">
+            <div id="settingsFontPreview" style="margin-top:8px;font-size:12px;color:#888;"></div>
           </div>
           <div class="tenant-field">
             <label>قالب التصميم</label>
@@ -2024,6 +2035,54 @@
             <label>عدد صور المود بورد (Moodboard)</label>
             <input type="number" id="settingsMoodboardCount" value="4" min="1" max="16">
             <span class="tenant-hint">عدد الصور التي يولدها النظام لشريحة المود بورد (الموديل سيلتزم بنفس العدد).</span>
+          </div>
+        </div>
+
+        <h3 style="margin-top:20px; margin-bottom:12px; color:#3B6E91; font-size:15px; font-weight:700;">إعدادات الخرائط</h3>
+        <div class="tenant-grid">
+          <div class="tenant-field">
+            <label>ستايل الخريطة العامة (Overview)</label>
+            <select id="settingsMapStyleOverview">
+              <option value="satellite">قمر صناعي</option>
+              <option value="roadmap">جرافيك (خريطة طرق)</option>
+              <option value="terrain">تضاريس</option>
+              <option value="hybrid">هجين (قمر صناعي + أسماء)</option>
+            </select>
+          </div>
+          <div class="tenant-field">
+            <label>ستايل خريطة المعالم (Landmarks)</label>
+            <select id="settingsMapStyleLandmarks">
+              <option value="satellite">قمر صناعي</option>
+              <option value="roadmap">جرافيك (خريطة طرق)</option>
+              <option value="terrain">تضاريس</option>
+              <option value="hybrid">هجين (قمر صناعي + أسماء)</option>
+            </select>
+          </div>
+          <div class="tenant-field">
+            <label>ستايل خريطة الطرق (Access)</label>
+            <select id="settingsMapStyleAccess">
+              <option value="satellite">قمر صناعي</option>
+              <option value="roadmap">جرافيك (خريطة طرق)</option>
+              <option value="terrain">تضاريس</option>
+              <option value="hybrid">هجين (قمر صناعي + أسماء)</option>
+            </select>
+          </div>
+          <div class="tenant-field">
+            <label>ستايل خريطة نطاق الخدمة (Catchment)</label>
+            <select id="settingsMapStyleCatchment">
+              <option value="satellite">قمر صناعي</option>
+              <option value="roadmap">جرافيك (خريطة طرق)</option>
+              <option value="terrain">تضاريس</option>
+              <option value="hybrid">هجين (قمر صناعي + أسماء)</option>
+            </select>
+          </div>
+          <div class="tenant-field">
+            <label>إظهار البوصلة</label>
+            <input type="checkbox" id="settingsDrawCompass">
+          </div>
+          <div class="tenant-field">
+            <label>إظهار الخريطة المصغرة</label>
+            <input type="checkbox" id="settingsDrawInset">
           </div>
         </div>
 
@@ -3091,6 +3150,12 @@
       setValue('settingsMaxSlides', b.max_slides || 30);
       setValue('settingsDefaultSlideCount', b.default_slide_count || 16);
       setValue('settingsMoodboardCount', b.moodboard_count || 4);
+      setValue('settingsMapStyleOverview', b.map_style_overview || 'satellite');
+      setValue('settingsMapStyleLandmarks', b.map_style_landmarks || 'satellite');
+      setValue('settingsMapStyleAccess', b.map_style_access || 'satellite');
+      setValue('settingsMapStyleCatchment', b.map_style_catchment || 'satellite');
+      setChecked('settingsDrawCompass', b.draw_compass !== 0);
+      setChecked('settingsDrawInset', b.draw_inset !== 0);
       // previews
       const logoPreview = document.getElementById('settingsLogoPreview');
       if (logoPreview) logoPreview.innerHTML = b.logo_path ? '<img src="/tenant-assets/' + tenantUser.id + '/logo?t=' + Date.now() + '" alt="logo" style="max-height:120px">' : 'اضغط لرفع لوجو الشركة (PNG/JPG/WEBP)';
@@ -3125,7 +3190,16 @@
         max_slides: parseInt(getValue('settingsMaxSlides') || '30', 10),
         default_slide_count: parseInt(getValue('settingsDefaultSlideCount') || '16', 10),
         moodboard_count: parseInt(getValue('settingsMoodboardCount') || '4', 10),
+        map_style_overview: getValue('settingsMapStyleOverview') || 'satellite',
+        map_style_landmarks: getValue('settingsMapStyleLandmarks') || 'satellite',
+        map_style_access: getValue('settingsMapStyleAccess') || 'satellite',
+        map_style_catchment: getValue('settingsMapStyleCatchment') || 'satellite',
+        draw_compass: getChecked('settingsDrawCompass') ? 1 : 0,
+        draw_inset: getChecked('settingsDrawInset') ? 1 : 0,
       };
+      if (tenantBranding && tenantBranding.font_file_path) {
+        settings.font_file_path = tenantBranding.font_file_path;
+      }
     }
 
     async function saveTenantSettings() {
@@ -3179,6 +3253,40 @@
         toast('تم رفع الصورة المرجعية');
       } else {
         toast(data.error || 'فشل رفع الصورة');
+      }
+    }
+
+    async function handleFontUpload(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (!['ttf', 'otf', 'woff', 'woff2'].includes(ext)) {
+        toast('الصيغة غير مدعومة. استخدم TTF أو OTF أو WOFF');
+        return;
+      }
+      const form = new FormData();
+      form.append('font', file);
+      const data = await api('POST', '/api/upload-font', form, true);
+      if (data.success) {
+        tenantBranding.font_file_path = data.font_url;
+        tenantBranding.font_family = data.font_name;
+        setValue('settingsFontFamily', 'custom');
+        const preview = document.getElementById('settingsFontPreview');
+        if (preview) preview.textContent = 'تم رفع الخط: ' + file.name;
+        toast('تم رفع الخط بنجاح');
+      } else {
+        toast(data.error || 'فشل رفع الخط');
+      }
+    }
+
+    function toggleFontUpload(value) {
+      const uploadInput = document.getElementById('settingsFontUpload');
+      const preview = document.getElementById('settingsFontPreview');
+      if (uploadInput) {
+        uploadInput.style.display = value === 'custom' ? 'block' : 'none';
+      }
+      if (preview && value !== 'custom') {
+        preview.textContent = '';
       }
     }
 
@@ -5047,7 +5155,7 @@
       if (!html) return '';
       let cleanHtml = html;
       const projectData = tenantProjectData || {};
-      const logoUrl = (tenantBranding && (tenantBranding.logo || tenantBranding.logo_url)) || '/assets/logo.png';
+      const logoUrl = (tenantBranding && (tenantBranding.logo_path || tenantBranding.logo || tenantBranding.logo_url)) || '/assets/logo.png';
 
       cleanHtml = cleanHtml.replace(/##LOGO##/g, logoUrl);
 
@@ -5218,6 +5326,18 @@
         }
         autoFitSlideContent(stage);
         container.appendChild(stage);
+
+        // Slide controls (edit/delete buttons)
+        const controls = document.createElement('div');
+        controls.className = 'ge-slide-controls';
+        controls.style.cssText = 'position:absolute;top:8px;left:8px;display:flex;gap:4px;z-index:10;';
+        controls.innerHTML = 
+          '<button onclick="event.stopPropagation(); editSlideHtml(' + i + ')" title="تعديل الشريحة" ' +
+          'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">تعديل</button>' +
+          '<button onclick="event.stopPropagation(); deleteSlide(' + i + ')" title="حذف الشريحة" ' +
+          'style="background:#fff;border:1px solid #f5a5a5;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">حذف</button>';
+        container.appendChild(controls);
+
         wrap.appendChild(container);
       });
 
@@ -5597,6 +5717,13 @@
       const panel = document.getElementById('mapStylePanel');
       if (panel) {
         if (panel.style.display === 'none' || !panel.style.display) {
+          if (tenantBranding) {
+            const setSelect = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+            setSelect('mapStyleOverview', tenantBranding.map_style_overview || 'satellite');
+            setSelect('mapStyleLandmarks', tenantBranding.map_style_landmarks || 'satellite');
+            setSelect('mapStyleAccess', tenantBranding.map_style_access || 'satellite');
+            setSelect('mapStyleCatchment', tenantBranding.map_style_catchment || 'satellite');
+          }
           panel.style.display = 'flex';
         } else {
           panel.style.display = 'none';
@@ -5839,7 +5966,13 @@
       if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return; }
       if (!confirm('سيتم إعادة توليد صور الخرائط من Google. قد تستهلك من رصيد API. متابعة؟')) return;
       showLoader('جاري إعادة توليد خرائط الموقع', 'قد تستغرق 30-60 ثانية');
-      const data = await api('POST', '/api/presentations/' + tenantPresentationId + '/regenerate-maps');
+      const mapStyles = {
+        overview: document.getElementById('mapStyleOverview')?.value || 'satellite',
+        landmarks: document.getElementById('mapStyleLandmarks')?.value || 'satellite',
+        access: document.getElementById('mapStyleAccess')?.value || 'satellite',
+        catchment: document.getElementById('mapStyleCatchment')?.value || 'satellite'
+      };
+      const data = await api('POST', '/api/presentations/' + tenantPresentationId + '/regenerate-maps', { map_styles: mapStyles });
       hideLoader();
       if (!data.success) { toast(data.error || 'فشل توليد الخرائط'); return; }
 
@@ -6095,8 +6228,24 @@
       const data = await api('POST', '/api/export', payload);
       hideLoader();
       if (data.success && data.url) {
-        window.open(data.url, '_blank');
-        toast('جاري تحميل الملف');
+        const token = getTenantToken();
+        try {
+          const resp = await fetch(data.url, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
+          if (!resp.ok) throw new Error('Download failed');
+          const blob = await resp.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = data.url.split('/').pop() || ('presentation.' + format);
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(blobUrl);
+          toast('جاري تحميل الملف');
+        } catch (e) {
+          window.open(data.url, '_blank');
+          toast('جاري تحميل الملف');
+        }
       } else {
         toast(data.error || 'فشل التصدير');
       }

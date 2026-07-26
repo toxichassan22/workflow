@@ -414,6 +414,19 @@ def _get_images_info(images):
             if path:
                 label = map_placeholders.get(placeholder, placeholder)
                 info += f"- {label}: {placeholder}\n"
+    
+    # Landmark driving times and distances
+    if isinstance(images, dict) and images.get('map_landmarks'):
+        landmarks = images['map_landmarks']
+        if landmarks:
+            info += "\n## أوقات القيادة والمسافات الفعلية من Google Maps\n"
+            info += "استخدم هذه البيانات الحقيقية في شريحة المعالم (map_landmarks):\n"
+            for lm in landmarks:
+                name = lm.get('name', lm.get('description', 'معلم'))
+                duration = lm.get('duration_minutes', '?')
+                dist = lm.get('distance_text', '?')
+                info += f"- {name}: {duration} دقيقة، {dist}\n"
+    
     return info
 
 def build_system_prompt(project_data, images_info, design_rules=None):
@@ -684,10 +697,11 @@ def extract_html_from_glm(raw_response):
 
     return content
 
-def validate_html(html):
+def validate_html(html, expected_count=None):
     slide_count = html.count('class="slide"')
-    if slide_count < 16:
-        print(f"[WARN] Only {slide_count} slides found, expected 16")
+    threshold = expected_count or 16
+    if slide_count < threshold:
+        print(f"[WARN] Only {slide_count} slides found, expected {threshold}")
     if 'dir="rtl"' not in html:
         html = html.replace('<div class="slide"', '<div class="slide" dir="rtl"')
     return html
@@ -1013,16 +1027,17 @@ def api_designer_generate():
     branding = db.get_branding(g.tenant_id) or {}
     dynamic_rules = build_design_rules(branding)
     system_prompt = build_system_prompt(project_data, images_info, dynamic_rules)
-    print(f"\n[DESIGNER] Starting 16-slide parallel generation (4 workers)...")
+    slide_count = branding.get('default_slide_count', 16)
+    print(f"\n[DESIGNER] Starting {slide_count}-slide parallel generation (4 workers)...")
     print(f"[DESIGNER] System prompt: {len(system_prompt)} chars (shared)")
     start_time = time.time()
 
     try:
-        # Run all 16 slides in parallel with 4 concurrent workers
-        results = [None] * 16
+        # Run slides in parallel with 4 concurrent workers
+        results = [None] * slide_count
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             future_to_idx = {}
-            for i in range(16):
+            for i in range(slide_count):
                 future = executor.submit(generate_single_slide, system_prompt, i + 1, g.tenant_id)
                 future_to_idx[future] = i
 
@@ -1044,7 +1059,7 @@ def api_designer_generate():
 
         elapsed = round(time.time() - start_time, 1)
         combined_html = '\n'.join(h for h in results if h).strip()
-        combined_html = validate_html(combined_html)
+        combined_html = validate_html(combined_html, slide_count)
         total_slides = combined_html.count('class="slide"')
         print(f"[DESIGNER] Done in {elapsed}s — {total_slides} slides total")
 
@@ -2528,11 +2543,12 @@ def api_regenerate_presentation_maps(pres_id):
         return jsonify({'error': 'Presentation not found'}), 404
 
     project_data = json.loads(pres['project_data']) if pres.get('project_data') else {}
+    branding = db.get_branding(g.tenant_id) or {}
     # Accept per-map style overrides from request body
     req_data = request.json or {}
     if req_data.get('map_styles'):
         project_data['map_styles'] = req_data['map_styles']
-    result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=pres_id, force=True)
+    result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=pres_id, force=True, branding=branding)
     if result.get('error'):
         return jsonify({'success': False, 'error': result['error']}), 400
 
@@ -2599,7 +2615,7 @@ def api_generate_slide_single():
     need_maps = (slide_index == 0 or 'map' in slides[slide_index].get('type', ''))
     has_maps = isinstance(images, dict) and isinstance(images.get('map_placeholders'), dict) and bool(images.get('map_placeholders'))
     if need_maps and not has_maps:
-        map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=data.get('presentationId'), force=True)
+        map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=data.get('presentationId'), force=True, branding=branding)
         if map_result.get('placeholders'):
             if not isinstance(images, dict):
                 images = {'cover': None, 'moodboard': []}
@@ -2666,6 +2682,7 @@ def api_generate_slide_single():
         html = _replace_map_placeholders(html, map_placeholders)
     html = _replace_creative_image_placeholders(html, images, slide.get('type', 'content'))
     html = _replace_data_placeholders(html, project_data, branding)
+    html = resolve_logo_in_html(html, g.tenant_id)
 
     return jsonify({
         'success': True,
@@ -2702,7 +2719,7 @@ def api_generate_slides():
         return jsonify({'error': 'slidePlan with slides array is required'}), 400
 
     # Generate map images if project has location data
-    map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=presentation_id, force=True)
+    map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=presentation_id, force=True, branding=branding)
     map_placeholders = {}
     if map_result.get('placeholders'):
         if not isinstance(images, dict):
@@ -3648,6 +3665,34 @@ def api_upload_reference():
     return jsonify({'success': True, 'referenceImageUploaded': True})
 
 
+@app.route('/api/upload-font', methods=['POST'])
+@require_permission('company_settings')
+def api_upload_font():
+    """Upload a custom font file (TTF/OTF/WOFF/WOFF2)."""
+    if 'font' not in request.files:
+        return jsonify({'error': 'No font file provided'}), 400
+    file = request.files['font']
+    if not file.filename:
+        return jsonify({'error': 'No filename'}), 400
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ('.ttf', '.otf', '.woff', '.woff2'):
+        return jsonify({'error': 'Only TTF, OTF, WOFF, WOFF2 are supported'}), 400
+
+    font_dir = os.path.join('uploads', g.tenant_id, 'fonts')
+    os.makedirs(font_dir, exist_ok=True)
+
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', os.path.splitext(file.filename)[0])
+    filename = f"{safe_name}{ext}"
+    filepath = os.path.join(font_dir, filename)
+    file.save(filepath)
+
+    font_url = f"/tenant-assets/{g.tenant_id}/fonts/{filename}"
+    font_name = safe_name.replace('_', ' ').title()
+    db.update_branding(g.tenant_id, font_file_path=font_url, font_family=font_name)
+    return jsonify({'success': True, 'font_url': font_url, 'font_name': font_name})
+
+
 @app.route('/api/branding/analyze-reference', methods=['POST'])
 @require_permission('company_settings')
 def api_analyze_reference():
@@ -3716,6 +3761,22 @@ def serve_tenant_logo(tenant_id):
         resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
         return resp
     return jsonify({'error': 'Logo not found'}), 404
+
+
+@app.route('/tenant-assets/<tenant_id>/fonts/<filename>')
+def serve_tenant_font(tenant_id, filename):
+    """Serve uploaded tenant font files."""
+    import re as _re
+    safe_name = _re.sub(r'[^a-zA-Z0-9_-]', '', filename)
+    font_path = os.path.join(UPLOADS_DIR, tenant_id, 'fonts', safe_name)
+    if not os.path.isfile(font_path):
+        return jsonify({'error': 'Font not found'}), 404
+    ext = os.path.splitext(safe_name)[1].lower()
+    mime_map = {'.ttf': 'font/ttf', '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2'}
+    mimetype = mime_map.get(ext, 'application/octet-stream')
+    resp = send_file(font_path, mimetype=mimetype)
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4233,9 +4294,9 @@ def api_training_chat():
                 if 1 <= num <= 50:
                     parsed_actions.append({
                         'tool': 'update_branding',
-                        'params': {'default_slide_count': num, 'min_slides': num, 'max_slides': num}
+                        'params': {'default_slide_count': num, 'min_slides': max(1, num - 2), 'max_slides': min(50, num + 3)}
                     })
-                    reply = f"تم التعديل! 📊 عدد الشرائح الافتراضي تم تغييره إلى **{num} شرائح**."
+                    reply = f"تم التعديل! 📊 عدد الشرائح الافتراضي تم تغييره إلى **{num} شرائح**. الحد الأدنى: {max(1, num - 2)}، الحد الأقصى: {min(50, num + 3)}."
             except ValueError:
                 pass
 
