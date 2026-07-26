@@ -2383,6 +2383,14 @@
           <button class="btn primary" data-permission="create_presentation" onclick="toggleMapStylePanel()"
             style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">إعدادات
             الخرائط</button>
+          <button class="btn primary" data-permission="create_presentation"
+            onclick="ensureProjectAssets({force:true, needImages:false}).then(()=>toast('تم إعادة توليد الخرائط'))"
+            style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">إعادة
+            توليد الخرائط</button>
+          <button class="btn primary" data-permission="create_presentation"
+            onclick="ensureProjectAssets({force:true, needMaps:false}).then(()=>toast('تم إعادة توليد الصور'))"
+            style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">إعادة
+            توليد الصور</button>
           <button class="btn primary" onclick="requestPresentationApproval(tenantPresentationId)"
             id="btnRequestApproval"
             style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">طلب
@@ -2777,7 +2785,94 @@
     let tenantSlidePlan = null;
     let tenantSlidesData = [];
     let tenantPresentationId = null;
-    let tenantCreativeImages = { cover: '', moodboard: [] };
+    let tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
+
+    function mapsSignature(d) {
+      d = d || tenantProjectData || {};
+      return JSON.stringify({
+        lat: d.location_lat || '',
+        lng: d.location_lng || '',
+        addr: d.location_address || '',
+        landmarks: d.nearby_landmarks || '',
+        roads: d.main_roads || '',
+        catchment: d.catchment_areas || '',
+        mapType: d.map_type || (tenantBranding && tenantBranding.default_map_type) || '',
+        styles: [
+          (tenantBranding || {}).map_style_overview,
+          (tenantBranding || {}).map_style_landmarks,
+          (tenantBranding || {}).map_style_access,
+          (tenantBranding || {}).map_style_catchment
+        ]
+      });
+    }
+
+    function imagesSignature(d) {
+      d = d || tenantProjectData || {};
+      return JSON.stringify({
+        name: d.project_name || '',
+        type: d.project_type || '',
+        desc: d.project_description || '',
+        count: (tenantBranding && tenantBranding.moodboard_count) || 4
+      });
+    }
+
+    function hasStoredMaps() {
+      const c = tenantCreativeImages || {};
+      const mp = c.map_placeholders || {};
+      return Object.values(mp).some(Boolean) && c.maps_signature === mapsSignature();
+    }
+
+    function hasStoredImages() {
+      const c = tenantCreativeImages || {};
+      const mb = Array.isArray(c.moodboard) ? c.moodboard.filter(Boolean) : [];
+      return !!c.cover && mb.length > 0 && c.images_signature === imagesSignature();
+    }
+
+    async function ensureProjectAssets({ force = false, needImages = true, needMaps = true, includeCover = true } = {}) {
+      tenantCreativeImages = tenantCreativeImages || { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
+      if (!tenantProjectData) tenantProjectData = {};
+      // Refresh project data if the form is present
+      if (typeof collectTenantFormData === 'function' && document.getElementById('tenantProjectForm')) {
+        const fresh = await collectTenantFormData();
+        tenantProjectData = { ...tenantProjectData, ...fresh };
+      }
+
+      if (needImages) {
+        if (!force && hasStoredImages()) {
+          console.log('[ASSETS] reusing stored cover/moodboard');
+        } else {
+          const payload = { projectData: tenantProjectData, includeCover: includeCover !== false };
+          const res = await api('POST', '/api/generate-images', payload);
+          if (res && res.success && res.images) {
+            if (includeCover !== false) tenantCreativeImages.cover = res.images.cover || tenantCreativeImages.cover;
+            tenantCreativeImages.moodboard = res.images.moodboard || tenantCreativeImages.moodboard;
+            tenantCreativeImages.images_signature = imagesSignature();
+          }
+        }
+      }
+
+      if (needMaps) {
+        if (!force && hasStoredMaps()) {
+          console.log('[ASSETS] reusing stored maps');
+        } else {
+          const payload = { projectData: tenantProjectData, force: !!force };
+          if (tenantPresentationId) payload.presentationId = tenantPresentationId;
+          const res = await api('POST', '/api/generate-map-images', payload);
+          if (res && res.success) {
+            tenantCreativeImages.map_placeholders = res.placeholders || tenantCreativeImages.map_placeholders;
+            tenantCreativeImages.map_landmarks = res.landmarks_matrix || res.landmarks || tenantCreativeImages.map_landmarks;
+            tenantCreativeImages.map_lat = res.lat || tenantCreativeImages.map_lat;
+            tenantCreativeImages.map_lng = res.lng || tenantCreativeImages.map_lng;
+            tenantCreativeImages.map_zooms = res.zooms || tenantCreativeImages.map_zooms;
+            tenantCreativeImages.maps_signature = mapsSignature();
+          }
+        }
+      }
+
+      triggerAutoSaveDraft();
+      return tenantCreativeImages;
+    }
+
     let tenantDesignerMessages = [];
     let tenantChatSlideIndex = 0;
     let tenantChatSlideScope = 'auto';
@@ -3759,7 +3854,7 @@
       tenantPresentationId = null;
       tenantSlidesData = [];
       tenantSlidePlan = null;
-      tenantCreativeImages = { cover: '', moodboard: [] };
+      tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
       tenantDesignerMessages = [];
       tenantChatSlideIndex = 0;
       tenantMapPreviewState = null;
@@ -3797,7 +3892,15 @@
               renderTenantSlidePlan();
             }
             if (draftData.tenantCreativeImages) {
-              tenantCreativeImages = draftData.tenantCreativeImages;
+              const ci = draftData.tenantCreativeImages;
+              tenantCreativeImages = {
+                cover: ci.cover || '',
+                moodboard: Array.isArray(ci.moodboard) ? ci.moodboard : [],
+                map_placeholders: ci.map_placeholders || {},
+                map_landmarks: ci.map_landmarks || [],
+                images_signature: ci.images_signature || null,
+                maps_signature: ci.maps_signature || null
+              };
               renderTenantMainImage();
               renderTenantMoodboard();
             }
@@ -4512,16 +4615,14 @@
 
     async function previewProjectMap() {
       const formData = await collectTenantFormData();
-      const lat = formData.location_lat || '';
-      const lng = formData.location_lng || '';
+      tenantProjectData = { ...tenantProjectData, ...formData };
+      const lat = tenantProjectData.location_lat || '';
+      const lng = tenantProjectData.location_lng || '';
       if (!lat || !lng) { toast('أدخل خط العرض والطول أولاً أو استخدم زر إيجاد الإحداثيات'); return; }
 
       showLoader('جاري توليد معاينة الخريطة', '');
-      let data = {};
       try {
-        const payload = { projectData: formData, force: true };
-        if (tenantPresentationId) payload.presentationId = tenantPresentationId;
-        data = await api('POST', '/api/generate-map-images', payload);
+        await ensureProjectAssets({ needImages: false, needMaps: true });
       } catch (err) {
         toast('حدث خطأ أثناء الاتصال بالسيرفر');
         return;
@@ -4531,27 +4632,27 @@
 
       const previewBox = document.getElementById('mapPreviewImage');
       const img = previewBox ? previewBox.querySelector('img') : null;
-      const placeholders = data.placeholders || {};
+      const placeholders = tenantCreativeImages.map_placeholders || {};
       const mapUrl = placeholders['##MAP_OVERVIEW##']
         || placeholders['##MAP_OVERVIEW_SATELLITE##']
         || placeholders['##MAP_OVERVIEW_ROADMAP##']
         || Object.values(placeholders).find(v => v);
 
-      if (data.success && mapUrl && img) {
+      if (mapUrl && img) {
         img.onload = () => renderTenantMapPolygonOverlay();
         img.src = mapUrl + (mapUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
         if (previewBox) previewBox.style.display = 'block';
         const hint = document.getElementById('mapPreviewHint');
         if (hint) hint.style.display = 'block';
         tenantMapPreviewState = {
-          lat: Number(data.lat || lat),
-          lng: Number(data.lng || lng),
-          zoom: Number((data.zooms && data.zooms.overview) || 13)
+          lat: Number(tenantCreativeImages.map_lat || lat),
+          lng: Number(tenantCreativeImages.map_lng || lng),
+          zoom: Number((tenantCreativeImages.map_zooms && tenantCreativeImages.map_zooms.overview) || 13)
         };
         renderTenantMapPolygonOverlay();
-        window.__lastMapPlaceholders = data.placeholders;
+        window.__lastMapPlaceholders = placeholders;
       } else {
-        toast(data.error || 'تعذر توليد معاينة الخريطة');
+        toast('تعذر توليد معاينة الخريطة');
       }
     }
 
@@ -5009,16 +5110,14 @@
     async function generateTenantMainImage() {
       if (!tenantProjectData) return;
       showLoader('جاري توليد الصورة الرئيسية', 'يتم إعداد صورة غلاف خاصة بالمشروع');
-      const data = await api('POST', '/api/generate-main-image', { projectData: tenantProjectData });
+      await ensureProjectAssets({ needMaps: false, includeCover: true });
       hideLoader();
-      if (data.success && data.image) {
-        tenantCreativeImages.cover = data.image;
+      if (tenantCreativeImages.cover) {
         renderTenantMainImage();
         triggerAutoSaveDraft();
         toast('تم توليد الصورة الرئيسية.');
       } else {
-        const errMsg = data.error_code === 'NO_API_KEY' ? 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env' : (data.error || 'تعذر توليد الصورة الرئيسية');
-        toast(errMsg);
+        toast('تعذر توليد الصورة الرئيسية');
       }
     }
 
@@ -5026,17 +5125,14 @@
       if (!tenantProjectData) return;
       const count = (tenantBranding && tenantBranding.moodboard_count) ? tenantBranding.moodboard_count : 4;
       showLoader('جاري توليد صور المود بورد', 'يتم إنشاء ' + count + ' صور مرجعية للتصميم');
-      const refImage = tenantCreativeImages.cover || null;
-      const data = await api('POST', '/api/generate-images', { projectData: tenantProjectData, includeCover: false, referenceImage: refImage, count: count });
+      await ensureProjectAssets({ needMaps: false, includeCover: false });
       hideLoader();
-      if (data.success && data.images) {
-        tenantCreativeImages.moodboard = (data.images.moodboard || []).filter(Boolean);
+      if (tenantCreativeImages.moodboard && tenantCreativeImages.moodboard.length) {
         renderTenantMoodboard();
         triggerAutoSaveDraft();
         toast('تم توليد ' + tenantCreativeImages.moodboard.length + ' صور للمود بورد.');
       } else {
-        const errMsg = data.error_code === 'NO_API_KEY' ? 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env' : (data.error || 'تعذر توليد صور المود بورد');
-        toast(errMsg);
+        toast('تعذر توليد صور المود بورد');
       }
     }
 
@@ -5098,27 +5194,24 @@
           tenantProjectData = { ...tenantProjectData, ...freshData };
         }
 
-        if (!tenantCreativeImages.map_placeholders) {
-          const hasLocation = Boolean(
-            tenantProjectData.location_lat ||
-            tenantProjectData.location_lng ||
-            tenantProjectData.location_address ||
-            tenantProjectData.location_maps_link ||
-            tenantProjectData.location
-          );
-          if (hasLocation) {
-            showLoader('جاري إعداد خرائط المشروع', 'يتم توليد خرائط Google مرة واحدة قبل إنشاء الشرائح');
-            try {
-              const mapData = await api('POST', '/api/generate-map-images', { projectData: tenantProjectData, force: false, presentationId: tenantPresentationId });
-              if (mapData.success && mapData.placeholders) {
-                tenantCreativeImages.map_placeholders = mapData.placeholders;
-                tenantCreativeImages.map_landmarks = mapData.landmarks || [];
-              }
-            } catch (mapErr) {
-              console.warn('[MAPS AUTO-GEN] Maps generation skipped:', mapErr);
-            } finally {
-              hideLoader();
+        const hasLocation = Boolean(
+          tenantProjectData.location_lat ||
+          tenantProjectData.location_lng ||
+          tenantProjectData.location_address ||
+          tenantProjectData.location_maps_link ||
+          tenantProjectData.location
+        );
+        if (hasLocation) {
+          showLoader('جاري إعداد خرائط المشروع', 'يتم توليد خرائط Google مرة واحدة قبل إنشاء الشرائح');
+          try {
+            await ensureProjectAssets({ needImages: false, needMaps: true });
+            if (tenantCreativeImages.map_landmarks && tenantCreativeImages.map_landmarks.length) {
+              tenantProjectData.landmarks_matrix = tenantCreativeImages.map_landmarks;
             }
+          } catch (mapErr) {
+            console.warn('[MAPS AUTO-GEN] Maps generation skipped:', mapErr);
+          } finally {
+            hideLoader();
           }
         }
 
@@ -5977,6 +6070,15 @@
       tenantSlidePlan = null;
       tenantDesignerMessages = [];
       tenantChatSlideIndex = 0;
+      const ci = tenantProjectData.tenantCreativeImages || {};
+      tenantCreativeImages = {
+        cover: ci.cover || '',
+        moodboard: Array.isArray(ci.moodboard) ? ci.moodboard : [],
+        map_placeholders: ci.map_placeholders || {},
+        map_landmarks: ci.map_landmarks || [],
+        images_signature: ci.images_signature || null,
+        maps_signature: ci.maps_signature || null
+      };
       renderTenantSlides();
       const editorInfo = document.getElementById('slidesEditorInfo');
       if (editorInfo) {
@@ -6088,7 +6190,15 @@
               renderTenantSlidePlan();
             }
             if (draftData.tenantCreativeImages) {
-              tenantCreativeImages = draftData.tenantCreativeImages;
+              const ci = draftData.tenantCreativeImages;
+              tenantCreativeImages = {
+                cover: ci.cover || '',
+                moodboard: Array.isArray(ci.moodboard) ? ci.moodboard : [],
+                map_placeholders: ci.map_placeholders || {},
+                map_landmarks: ci.map_landmarks || [],
+                images_signature: ci.images_signature || null,
+                maps_signature: ci.maps_signature || null
+              };
               renderTenantMainImage();
               renderTenantMoodboard();
             }
@@ -6096,11 +6206,6 @@
               tenantSlidesData = draftData.tenantSlidesData;
             }
             applySectionStatuses(sectionStatuses);
-
-            // Auto-restore map preview silently if coordinates are present
-            if (draftData.location_lat && draftData.location_lng) {
-              previewProjectMap(true);
-            }
 
             toast('تم فتح المسودة المحفوظة بنجاح');
           }, 300);

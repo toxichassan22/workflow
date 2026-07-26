@@ -1620,29 +1620,24 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
 
 
 def _get_cached_map_images(tenant_id, presentation_id):
-    """Return existing map images for a tenant/presentation if all required ones exist."""
+    """Return existing map images for a tenant/presentation if any exist."""
     from db import get_map_images
     existing = get_map_images(tenant_id, presentation_id=presentation_id)
     if not existing:
         return None
     placeholders = {}
-    required_types = {'overview', 'access', 'catchment', 'landmarks', 'streetview_1', 'streetview_2', 'streetview_3', 'streetview_4'}
-    found_types = set()
     metadata_by_type = {}
     for img in existing:
         if not os.path.exists(img['file_path']):
             continue
-        found_types.add(img['image_type'])
         placeholders[img['placeholder']] = img['file_path']
         try:
             metadata_by_type[img['image_type']] = json.loads(img.get('metadata_json') or '{}')
         except Exception:
             metadata_by_type[img['image_type']] = {}
-    if required_types - found_types:
+    if not placeholders:
         return None
-    metadata = {}
-    if metadata_by_type:
-        metadata = next(iter(metadata_by_type.values()))
+    metadata = next(iter(metadata_by_type.values())) if metadata_by_type else {}
     zooms = {
         image_type: meta['zoom'] for image_type, meta in metadata_by_type.items()
         if isinstance(meta, dict) and meta.get('zoom') is not None
@@ -1652,6 +1647,7 @@ def _get_cached_map_images(tenant_id, presentation_id):
         'lng': metadata.get('lng'),
         'placeholders': placeholders,
         'landmarks': metadata.get('landmarks', []),
+        'landmarks_matrix': metadata.get('landmarks_matrix', []),
         'zooms': zooms,
         'cached': True,
     }
@@ -1663,6 +1659,11 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     Returns dict of placeholder -> file_path.
     If force=False and valid cached images exist, returns them without calling Google APIs.
     """
+    if not force and presentation_id:
+        cached = _get_cached_map_images(tenant_id, presentation_id)
+        if cached and cached.get('placeholders'):
+            return cached
+
     if not _has_api_key():
         return {'error': 'Google Maps API key not configured'}
 
@@ -1701,11 +1702,6 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
 
     if lat is None or lng is None:
         return {'error': 'لم يتم العثور على موقع أو إحداثيات للمشروع. يرجى إدخال عنوان المشروع أو رابط Google Maps في البيانات.'}
-
-    if not force and presentation_id:
-        cached = _get_cached_map_images(tenant_id, presentation_id)
-        if cached and cached.get('lat') == lat and cached.get('lng') == lng:
-            return cached
 
     if force and presentation_id:
         from db import delete_map_images
@@ -1946,7 +1942,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = overview_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, overview_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom})
+                add_map_image(tenant_id, img_suffix, overview_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'landmarks_matrix': result.get('landmarks_matrix')})
 
     # Generate map_landmarks (closer zoom)
     if 'landmarks' in enabled_maps and landmarks:
@@ -1974,7 +1970,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = landmarks_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'landmarks': landmarks})
+                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix')})
 
     # Generate map_access
     if 'access' in enabled_maps:
@@ -2001,7 +1997,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = access_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, access_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': access_zoom})
+                add_map_image(tenant_id, img_suffix, access_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': access_zoom, 'landmarks_matrix': result.get('landmarks_matrix')})
 
 
 
@@ -2035,7 +2031,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = catchment_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'zones': zones})
+                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix')})
 
     return result
 

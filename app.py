@@ -2385,6 +2385,8 @@ def api_generate_map_images():
         'success': True,
         'placeholders': placeholders,
         'landmarks': result.get('landmarks', []),
+        'landmarks_matrix': result.get('landmarks_matrix', []),
+        'zooms': result.get('zooms', {}),
         'lat': result.get('lat'),
         'lng': result.get('lng'),
     })
@@ -2439,6 +2441,8 @@ def api_regenerate_presentation_maps(pres_id):
         'success': True,
         'placeholders': placeholders,
         'landmarks': result.get('landmarks', []),
+        'landmarks_matrix': result.get('landmarks_matrix', []),
+        'zooms': result.get('zooms', {}),
         'lat': result.get('lat'),
         'lng': result.get('lng'),
     })
