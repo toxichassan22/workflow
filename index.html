@@ -2837,11 +2837,12 @@
         tenantProjectData = { ...tenantProjectData, ...fresh };
       }
 
-      function recordError(res) {
+      function recordError(res, fallback) {
         tenantCreativeImages.last_error =
           (res && res.error_code === 'NO_API_KEY')
             ? 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env'
-            : ((res && res.error) || null);
+            : ((res && res.error) || fallback || null);
+        tenantCreativeImages.last_warning = null;
       }
 
       if (needImages) {
@@ -2856,14 +2857,20 @@
             count: count,
             referenceImage: (includeCover === false ? (tenantCreativeImages.cover || null) : null)
           };
-          const res = await api('POST', '/api/generate-images', payload);
+          let res = null;
+          try {
+            res = await api('POST', '/api/generate-images', payload);
+          } catch (e) {
+            res = (e && (e.body || e.response || e.data || e.message)) || null;
+          }
           if (res && res.success && res.images) {
             if (includeCover !== false) tenantCreativeImages.cover = res.images.cover || tenantCreativeImages.cover;
             tenantCreativeImages.moodboard = res.images.moodboard || tenantCreativeImages.moodboard;
             tenantCreativeImages.images_signature = imagesSignature();
             tenantCreativeImages.last_error = null;
+            tenantCreativeImages.last_warning = res.warning || null;
           } else {
-            recordError(res);
+            recordError(res, 'تعذر الاتصال بالسيرفر أثناء توليد الصور');
           }
         }
       }
@@ -2875,7 +2882,12 @@
         } else {
           const payload = { projectData: tenantProjectData, force: !!force || staleMaps };
           if (tenantPresentationId) payload.presentationId = tenantPresentationId;
-          const res = await api('POST', '/api/generate-map-images', payload);
+          let res = null;
+          try {
+            res = await api('POST', '/api/generate-map-images', payload);
+          } catch (e) {
+            res = (e && (e.body || e.response || e.data || e.message)) || null;
+          }
           if (res && res.success) {
             tenantCreativeImages.map_placeholders = res.placeholders || tenantCreativeImages.map_placeholders;
             tenantCreativeImages.map_landmarks = res.landmarks_matrix || res.landmarks || tenantCreativeImages.map_landmarks;
@@ -2884,8 +2896,9 @@
             tenantCreativeImages.map_zooms = res.zooms || tenantCreativeImages.map_zooms;
             tenantCreativeImages.maps_signature = mapsSignature();
             tenantCreativeImages.last_error = null;
+            tenantCreativeImages.last_warning = res.warning || null;
           } else {
-            recordError(res);
+            recordError(res, 'تعذر الاتصال بالسيرفر أثناء توليد الخرائط');
           }
         }
       }
@@ -5131,12 +5144,19 @@
     async function generateTenantMainImage() {
       if (!tenantProjectData) return;
       showLoader('جاري توليد الصورة الرئيسية', 'يتم إعداد صورة غلاف خاصة بالمشروع');
-      await ensureProjectAssets({ force: true, needMaps: false, includeCover: true });
-      hideLoader();
+      try {
+        await ensureProjectAssets({ force: true, needMaps: false, includeCover: true });
+      } finally {
+        hideLoader();
+      }
       if (tenantCreativeImages.cover) {
         renderTenantMainImage();
         triggerAutoSaveDraft();
-        toast('تم توليد الصورة الرئيسية.');
+        if (tenantCreativeImages.last_warning) {
+          toast('تم توليد الصورة الرئيسية — ' + tenantCreativeImages.last_warning);
+        } else {
+          toast('تم توليد الصورة الرئيسية.');
+        }
       } else {
         toast(tenantCreativeImages.last_error || 'تعذر توليد الصورة الرئيسية');
       }
@@ -5146,12 +5166,19 @@
       if (!tenantProjectData) return;
       const count = (tenantBranding && tenantBranding.moodboard_count) ? tenantBranding.moodboard_count : 4;
       showLoader('جاري توليد صور المود بورد', 'يتم إنشاء ' + count + ' صور مرجعية للتصميم');
-      await ensureProjectAssets({ force: true, needMaps: false, includeCover: false });
-      hideLoader();
+      try {
+        await ensureProjectAssets({ force: true, needMaps: false, includeCover: false });
+      } finally {
+        hideLoader();
+      }
       if (tenantCreativeImages.moodboard && tenantCreativeImages.moodboard.length) {
         renderTenantMoodboard();
         triggerAutoSaveDraft();
-        toast('تم توليد ' + tenantCreativeImages.moodboard.length + ' صور للمود بورد.');
+        if (tenantCreativeImages.last_warning) {
+          toast('تم توليد ' + tenantCreativeImages.moodboard.length + ' صور للمود بورد — ' + tenantCreativeImages.last_warning);
+        } else {
+          toast('تم توليد ' + tenantCreativeImages.moodboard.length + ' صور للمود بورد.');
+        }
       } else {
         toast(tenantCreativeImages.last_error || 'تعذر توليد صور المود بورد');
       }

@@ -736,12 +736,17 @@ def api_generate_images():
     has_cover = bool(images['cover'])
     has_moodboard = any(images['moodboard'])
     requested_cover = include_cover
-    ok = (not requested_cover or has_cover) and (target_count == 0 or has_moodboard)
-    if not ok:
+    # Only fail if nothing usable came back; otherwise preserve partial results with a warning.
+    if requested_cover and not has_cover and not has_moodboard:
         if not OPENROUTER_KEY:
             return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'}), 400
         return jsonify({'success': False, 'error': 'تعذر توليد الصور — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'}), 400
-    return jsonify({'success': True, 'images': images})
+    warning = None
+    if requested_cover and not has_cover:
+        warning = 'تعذر توليد صورة الغلاف — تم توليد المود بورد فقط'
+    elif target_count and not has_moodboard:
+        warning = 'تعذر توليد صور المود بورد — تم توليد الغلاف فقط'
+    return jsonify({'success': True, 'images': images, 'warning': warning})
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ENDPOINT 3: Export PDF
