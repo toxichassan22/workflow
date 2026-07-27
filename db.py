@@ -543,6 +543,12 @@ def update_branding(tenant_id, **fields):
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False
+
+    # Guard against missing columns on databases that haven't run the latest migration
+    existing_cols = {row['name'] for row in conn.execute('PRAGMA table_info(tenant_branding)')}
+    updates = {k: v for k, v in updates.items() if k in existing_cols}
+    if not updates:
+        return False
     updates['updated_at'] = datetime.now().isoformat()
     set_clause = ', '.join(f'{k} = ?' for k in updates)
     values = list(updates.values()) + [tenant_id]
