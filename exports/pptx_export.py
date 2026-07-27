@@ -123,12 +123,16 @@ img {{ max-width:100%; max-height:100%; object-fit:cover; }}
 </head>
 <body>{html}</body>
 </html>"""
-                page.set_content(full_html, wait_until='load')
-                page.evaluate("() => document.fonts.ready")
-                page.wait_for_function(
-                    "() => Array.from(document.images).every(i => i.complete)",
-                    timeout=120000
-                )
+                page.set_content(full_html, wait_until='load', timeout=30000)
+                try:
+                    page.evaluate("() => document.fonts.ready")
+                    page.wait_for_function(
+                        "() => Array.from(document.images).every(i => i.complete)",
+                        timeout=30000
+                    )
+                except Exception:
+                    # Don't block PPTX export because a single image is slow to load
+                    pass
                 # Screenshot the .slide element
                 slide_el = page.query_selector('.slide')
                 if slide_el:

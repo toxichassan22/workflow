@@ -2,12 +2,21 @@ import os
 import re
 import shutil
 import tempfile
+import traceback
 from pathlib import Path
-from playwright.sync_api import sync_playwright
 from design_templates import build_font_css
 from slide_engine import resolve_logo_in_html
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def _generate_pdf_with_fitz(html, out_path):
+    """Pure-Python fallback using PyMuPDF when Playwright is unavailable."""
+    import fitz
+    # Render HTML to a 1280x720 pt page; may not be pixel-perfect but avoids 502s.
+    src = fitz.open('html', html.encode('utf-8'), width=1280, height=720)
+    src.save(out_path)
+    return str(out_path)
 
 
 def _resolve_asset_urls(html):
@@ -133,6 +142,7 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
         f.write(html)
 
     try:
+        from playwright.sync_api import sync_playwright
         print("[PDF] Launching Playwright...")
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -149,15 +159,19 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
 
             file_url = resolved_html_path.as_uri()
             print(f"[PDF] Loading {file_url}...")
-            page.goto(file_url, wait_until="networkidle")
+            page.goto(file_url, wait_until="load", timeout=30000)
 
             # Wait for fonts and images to load before printing
             print("[PDF] Waiting for fonts and images...")
-            page.evaluate("() => document.fonts.ready")
-            page.wait_for_function(
-                "() => Array.from(document.images).every(i => i.complete)",
-                timeout=120000
-            )
+            try:
+                page.evaluate("() => document.fonts.ready")
+                page.wait_for_function(
+                    "() => Array.from(document.images).every(i => i.complete)",
+                    timeout=30000
+                )
+            except Exception:
+                # Don't fail export because an image hung; print what we have.
+                pass
 
             # Generate the PDF
             print(f"[PDF] Printing to {out_path.name}...")
@@ -169,11 +183,14 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
                 margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
             )
             browser.close()
+        print("[PDF] Generation complete!")
+        return str(out_path)
+    except Exception as e:
+        print(f"[PDF] Playwright failed ({e}); falling back to PyMuPDF.")
+        traceback.print_exc()
+        return _generate_pdf_with_fitz(html, out_path)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    print("[PDF] Generation complete!")
-    return str(out_path)
 
 
 if __name__ == "__main__":

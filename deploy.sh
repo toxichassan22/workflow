@@ -47,6 +47,11 @@ fi
 "$PIP" install -r "$APP_DIR/requirements.txt"
 "$PIP" install gunicorn
 
+# Ensure headless Chromium is available for Playwright PDF/PPTX export
+if ! "$PYTHON" -m playwright install chromium >/tmp/playwright_install.log 2>&1; then
+  echo "WARNING: Playwright Chromium install failed or skipped; check /tmp/playwright_install.log"
+fi
+
 echo "===== 6. Run database migrations ====="
 "$PYTHON" -c "import app; app.db.init_db()"
 
@@ -76,7 +81,7 @@ sleep 2
 
 echo "===== 9. Start gunicorn ====="
 cd "$APP_DIR"
-"$GUNICORN" -b "127.0.0.1:$PORT" app:app --workers 2 --timeout 120 --daemon --access-logfile "$APP_DIR/server.log" --error-logfile "$APP_DIR/server.log"
+"$GUNICORN" -b "127.0.0.1:$PORT" app:app --workers 2 --timeout 300 --daemon --access-logfile "$APP_DIR/server.log" --error-logfile "$APP_DIR/server.log"
 sleep 3
 
 echo "===== 10. Health check ====="
