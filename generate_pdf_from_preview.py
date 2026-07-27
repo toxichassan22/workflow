@@ -1,10 +1,11 @@
+import json
 import os
 import re
 import shutil
 import tempfile
 import traceback
 from pathlib import Path
-from design_templates import build_font_css
+from design_templates import build_font_css, sanitize_slide_html_for_export
 from slide_engine import resolve_logo_in_html
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -66,6 +67,7 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     else:
         html = str(slides_html)
 
+    print("[PDF] engine=python")
     print(f"[PDF] Generating PDF: {out_path.name}")
 
     # Resolve tenant logo placeholders and broken paths
@@ -87,52 +89,42 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
         # Replace /tenant-assets/<tenant>/logo?... with the real file URI
         html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/logo(?:\?[^\s"\'\\)]+)?', logo_uri, html)
 
-    # Inject tenant font CSS and print styles
-    font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
-    custom_style = f"""
-{font_css}
-    @media print {{
-        body {{
-            background: white !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-        }}
-        .slide {{
-            margin: 0 !important;
-            border: none !important;
-            page-break-after: always !important;
-            page-break-inside: avoid !important;
-            width: 1280px !important;
-            height: 720px !important;
-            box-shadow: none !important;
-        }}
-        .slide:last-child {{
-            page-break-after: auto !important;
-        }}
-    }}
-    """
-
-    # Inject the style block before </head>
-    if "</head>" in html:
-        html = html.replace("</head>", f"<style>{custom_style}</style></head>")
-    else:
-        html = html + f"<style>{custom_style}</style>"
-
     # Resolve relative asset URLs so Playwright can load local images/fonts
     html = _resolve_asset_urls(html)
 
-    # Wrap slide fragments in a minimal HTML document if needed
+    # Strip any previously-baked font-family declarations so the tenant font wins
+    html = sanitize_slide_html_for_export(html)
+
+    # Build tenant font CSS and layout/print CSS
+    font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
+    layout_css = """
+* { margin:0; padding:0; box-sizing:border-box; }
+.slide { width:1280px; height:720px; direction:rtl; position:relative; overflow:hidden; }
+img { max-width:100%; max-height:100%; object-fit:cover; }
+@media print {
+    body { background:white !important; margin:0 !important; padding:0 !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+    .slide { margin:0 !important; border:none !important; page-break-after:always !important; page-break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; }
+    .slide:last-child { page-break-after:auto !important; }
+}
+"""
+
+    # Wrap slide fragments and place the final font CSS just before </body> so it overrides everything
     if "<html" not in html.lower():
         html = f"""<!DOCTYPE html>
 <html dir="rtl">
 <head>
 <meta charset="utf-8">
-<style>{custom_style}</style>
+<style>{layout_css}</style>
 </head>
-<body style="margin:0;padding:0;background:#fff;">{html}</body>
+<body style="margin:0;padding:0;background:#fff;">{html}<style>{font_css}</style></body>
 </html>"""
+    else:
+        if "</head>" in html:
+            html = html.replace("</head>", f"<style>{layout_css}</style></head>", 1)
+        if "</body>" in html:
+            html = html.replace("</body>", f"<style>{font_css}</style></body>", 1)
+        else:
+            html = html + f"<style>{font_css}</style>"
 
     # Use a temporary directory for the preview HTML so it is cleaned up automatically
     tmp_dir = tempfile.mkdtemp(prefix='pdf_preview_')
@@ -169,6 +161,10 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
                     "() => Array.from(document.images).every(i => i.complete)",
                     timeout=30000
                 )
+                first_family = font_family.split(',')[0].strip().strip("\"'")
+                spec = f"16px '{first_family}'"
+                ok = page.evaluate(f"() => document.fonts.check({json.dumps(spec)})")
+                print(f"[FONT] document.fonts.check('{first_family}'): {ok}")
             except Exception:
                 # Don't fail export because an image hung; print what we have.
                 pass

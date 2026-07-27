@@ -94,6 +94,7 @@ ${slideHtml}
 }
 
 async function generatePdf(slidesHtml, outputPath) {
+  console.log('[PDF] engine=node');
   const fullHtml = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>

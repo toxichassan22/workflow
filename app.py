@@ -3781,10 +3781,27 @@ def api_upload_font():
     filepath = os.path.join(font_dir, filename)
     file.save(filepath)
 
+    # Also persist the font bytes in the DB so exports still work if uploads/ is ephemeral
+    try:
+        with open(filepath, 'rb') as f:
+            font_bytes = f.read()
+        fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff': 'woff', '.woff2': 'woff2'}.get(ext, 'truetype')
+        font_file_data = json.dumps({
+            'data': base64.b64encode(font_bytes).decode('ascii'),
+            'format': fmt,
+            'ext': ext
+        })
+    except Exception as e:
+        print(f"[FONT UPLOAD] failed to read font bytes for persistence: {e}")
+        font_file_data = None
+
     font_file_path = os.path.relpath(filepath, os.path.dirname(__file__)).replace('\\', '/')
     font_url = f"/tenant-assets/{g.tenant_id}/fonts/{filename}"
     font_name = safe_name.replace('_', ' ').title()
-    db.update_branding(g.tenant_id, font_file_path=font_file_path, font_family=font_name)
+    updates = {'font_file_path': font_file_path, 'font_family': font_name}
+    if font_file_data:
+        updates['font_file_data'] = font_file_data
+    db.update_branding(g.tenant_id, **updates)
     return jsonify({'success': True, 'font_url': font_url, 'font_file_path': font_file_path, 'font_name': font_name})
 
 

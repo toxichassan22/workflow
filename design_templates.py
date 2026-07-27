@@ -3,9 +3,176 @@ Design templates for Multi-Tenant SaaS.
 Pre-built design styles that companies can choose from.
 """
 import base64
+import json
 import os
+import re
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FALLBACK_FONTS = "'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Font source helpers for export (bundled / Google Fonts / uploaded / persisted)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BUNDLED_FONTS_CACHE = None
+
+
+def _load_bundled_fonts():
+    """Load base64 font data from fonts_bundle.js (guaranteed, not Git LFS)."""
+    global _BUNDLED_FONTS_CACHE
+    if _BUNDLED_FONTS_CACHE is not None:
+        return _BUNDLED_FONTS_CACHE
+    result = {}
+    bundle_path = os.path.join(BASE_DIR, 'fonts_bundle.js')
+    if os.path.exists(bundle_path):
+        try:
+            with open(bundle_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            strings = dict(re.findall(r'var\s+(\w+)\s*=\s*"([^"]+)";', content))
+            exports_match = re.search(r'module\.exports\s*=\s*\{([^}]+)\}', content, re.DOTALL)
+            if exports_match:
+                for m in re.finditer(
+                    r'(\w+)\s*:\s*\{\s*family\s*:\s*"([^"]+)"\s*,\s*format\s*:\s*"([^"]+)"\s*,\s*data\s*:\s*(\w+)\s*\}',
+                    exports_match.group(1),
+                ):
+                    var_name, family, fmt, data_var = m.groups()
+                    data = strings.get(data_var)
+                    if data:
+                        result[family] = (data, fmt)
+        except Exception as e:
+            print(f"[FONT] Failed to load fonts_bundle.js: {e}")
+    _BUNDLED_FONTS_CACHE = result
+    return result
+
+
+def _is_lfs_pointer(path):
+    """Detect Git LFS pointer stubs that should not be treated as real font files."""
+    try:
+        if os.path.getsize(path) < 500:
+            return True
+        with open(path, 'rb') as f:
+            head = f.read(100)
+            if b'version https://git-lfs' in head:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _font_family_list(chosen):
+    if not chosen:
+        chosen = 'IBM Plex Sans Arabic'
+    if not (chosen.startswith("'") or chosen.startswith('"')):
+        chosen = f"'{chosen}'"
+    return f"{chosen}, {FALLBACK_FONTS}"
+
+
+def _resolve_preset_font_source(name):
+    """Map a chosen font-family name to a real bundled or Google Fonts source."""
+    if not name:
+        return None
+    norm = re.sub(r'[\s-]', '', name.lower())
+    bundled = _load_bundled_fonts()
+
+    # Bundled faces use the user-facing display name as the CSS family name.
+    bundled_map = {
+        'thesansarabic': ('The Sans Arabic', 'TheSansArabic-Light'),
+        'thesansarabiclight': ('The Sans Arabic', 'TheSansArabic-Light'),
+        'thesansarabicbold': ('The Sans Arabic', 'TheSansArabic-Bold'),
+        'bahijthesansarabic': ('Bahij TheSansArabic', 'TheSansArabic-Bold'),
+        'bahijthesansarabicbold': ('Bahij TheSansArabic', 'TheSansArabic-Bold'),
+    }
+    if norm in bundled_map:
+        display, file_family = bundled_map[norm]
+        data = bundled.get(file_family)
+        if data:
+            return {'type': 'bundled', 'family': display, 'data': data[0], 'format': data[1]}
+        return None
+
+    google_map = {
+        'cairo': 'Cairo',
+        'notosansarabic': 'Noto+Sans+Arabic',
+        'tajawal': 'Tajawal',
+        'almarai': 'Almarai',
+        'arefruqaa': 'Aref+Ruqaa',
+    }
+    if norm in google_map:
+        encoded = google_map[norm]
+        display = encoded.replace('+', ' ')
+        return {'type': 'google', 'family': display, 'encoded': encoded}
+
+    return None
+
+
+def _build_font_face_from_file(abs_path, family, fallback, embed=True, tenant_id=None):
+    ext = os.path.splitext(abs_path)[1].lower()
+    fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff2': 'woff2', '.woff': 'woff'}.get(ext, 'truetype')
+    mime_map = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}
+    mime = mime_map.get(fmt, 'font/ttf')
+    served_url = None
+    if not embed and tenant_id:
+        served_url = f"/tenant-assets/{tenant_id}/fonts/{os.path.basename(abs_path)}"
+    if served_url:
+        src = f"url('{served_url}') format('{fmt}')"
+    else:
+        with open(abs_path, 'rb') as f:
+            src = f"url(data:{mime};base64,{base64.b64encode(f.read()).decode()}) format('{fmt}')"
+    css = f"@font-face{{font-family:'{family}';src:{src};font-weight:100 900;font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
+    return css, f"'{family}', {fallback}"
+
+
+def _build_font_face_from_data(font_file_data, family, fallback):
+    if isinstance(font_file_data, str) and font_file_data.strip().startswith('{'):
+        parsed = json.loads(font_file_data)
+        data = parsed['data']
+        fmt = parsed.get('format', 'truetype')
+    else:
+        data = font_file_data
+        fmt = 'truetype'
+    mime_map = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}
+    mime = mime_map.get(fmt, 'font/ttf')
+    src = f"url(data:{mime};base64,{data}) format('{fmt}')"
+    css = f"@font-face{{font-family:'{family}';src:{src};font-weight:100 900;font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
+    return css, f"'{family}', {fallback}"
+
+
+def _build_preset_css(source, fallback):
+    family = source['family']
+    if source['type'] == 'bundled':
+        data, fmt = source['data'], source['format']
+        css = f"@font-face{{font-family:'{family}';src:url(data:font/{fmt};base64,{data}) format('{fmt}');font-weight:100 900;font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
+    elif source['type'] == 'google':
+        encoded = source['encoded']
+        css = f"@import url('https://fonts.googleapis.com/css2?family={encoded}:wght@400;700&display=swap');\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
+    else:
+        family_list = _font_family_list(family)
+        css = f".slide,.slide *{{font-family:{family_list} !important;}}"
+        family = family_list
+    return css, f"'{family}', {fallback}" if source['type'] != 'no_source' else family
+
+
+def sanitize_slide_html_for_export(html):
+    """Remove any previously-injected font-family declarations before re-applying the tenant font."""
+    def _clean_style_attr(m):
+        quote = m.group(1)
+        value = m.group(2)
+        cleaned = re.sub(r'\s*font-family\s*:\s*[^;]+;?\s*', '', value, flags=re.I)
+        cleaned = re.sub(r';\s*;', ';', cleaned)
+        cleaned = cleaned.strip().strip(';')
+        if cleaned:
+            return f' style={quote}{cleaned}{quote}'
+        return ''
+
+    html = re.sub(r'\sstyle\s*=\s*(["\'])(.*?)\1', _clean_style_attr, html, flags=re.I | re.S)
+
+    def _clean_style_block(m):
+        block = m.group(1)
+        cleaned = re.sub(r'\s*font-family\s*:\s*[^;]+;?\s*', '', block, flags=re.I)
+        cleaned = re.sub(r';\s*;', ';', cleaned)
+        return f'<style>{cleaned}</style>'
+
+    html = re.sub(r'<style[^>]*>(.*?)</style>', _clean_style_block, html, flags=re.I | re.S)
+    return html
 
 
 DESIGN_TEMPLATES = {
@@ -286,44 +453,42 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
     for callers that only need the name (e.g. prompt building).
     """
     branding = branding or {}
-    path = branding.get('font_file_path')
-    family = f"tenant-font-{tenant_id or branding.get('tenant_id', 'x')}"
-    fallback = "'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif"
-    abs_path = resolve_font_path(path)
-    if not abs_path:
-        if path:
-            print(f"[FONT] WARNING: font_file_path not found on disk: {path}")
-        # Use the tenant-selected family name (not the generated tenant-font id)
-        chosen = branding.get('font_family') or 'IBM Plex Sans Arabic'
-        print(f"[FONT DEBUG] no-file: font_family={chosen!r}, font_file_path={branding.get('font_file_path')!r}")
-        if not (chosen.startswith("'") or chosen.startswith('"')):
-            chosen = f"'{chosen}'"
-        family_list = f"{chosen}, {fallback}"
-        css = f".slide,.slide *{{font-family:{family_list} !important;}}"
-        print(f"[FONT DEBUG] generated CSS: {css}")
-        return css, family_list
+    chosen = branding.get('font_family') or 'IBM Plex Sans Arabic'
+    fallback = FALLBACK_FONTS
+
     if family_only:
-        return f".slide,.slide *{{font-family:'{family}',{fallback} !important;}}", f"'{family}', {fallback}"
-    ext = os.path.splitext(abs_path)[1].lower()
-    fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff2': 'woff2', '.woff': 'woff'}.get(ext, 'truetype')
+        family_list = _font_family_list(chosen)
+        return f".slide,.slide *{{font-family:{family_list} !important;}}", family_list
 
-    served_url = None
-    if not embed:
-        # Only /tenant-assets/<tenant>/fonts/<file> is publicly served; the raw
-        # uploads path is not. Without a servable URL we must embed instead.
-        owner = tenant_id or branding.get('tenant_id')
-        if owner:
-            served_url = f"/tenant-assets/{owner}/fonts/{os.path.basename(abs_path)}"
+    # 1) Custom font file on disk (uploaded by tenant)
+    path = branding.get('font_file_path')
+    abs_path = resolve_font_path(path)
+    if abs_path and not _is_lfs_pointer(abs_path):
+        family = f"tenant-font-{tenant_id or branding.get('tenant_id', 'x')}"
+        return _build_font_face_from_file(abs_path, family, fallback, embed, tenant_id)
+    if path:
+        print(f"[FONT] ERROR: uploaded font file missing or LFS pointer: {path}")
 
-    if served_url:
-        src = f"url('{served_url}') format('{fmt}')"
-    else:
-        with open(abs_path, 'rb') as f:
-            src = f"url(data:font/{fmt};base64,{base64.b64encode(f.read()).decode()}) format('{fmt}')"
-    css = (f"@font-face{{font-family:'{family}';src:{src};font-weight:100 900;"
-           f"font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}")
-    print(f"[FONT DEBUG] custom font file: {abs_path}, generated CSS: {css[:200]}...")
-    return css, f"'{family}', {fallback}"
+    # 2) Persisted base64 font data in DB (fallback when uploads/ is ephemeral)
+    font_file_data = branding.get('font_file_data')
+    if font_file_data:
+        try:
+            family = f"tenant-font-{tenant_id or branding.get('tenant_id', 'x')}"
+            return _build_font_face_from_data(font_file_data, family, fallback)
+        except Exception as e:
+            print(f"[FONT] ERROR: failed to use font_file_data: {e}")
+
+    # 3) Built-in presets: bundled faces or Google Fonts
+    source = _resolve_preset_font_source(chosen)
+    if source:
+        css, family_list = _build_preset_css(source, fallback)
+        print(f"[FONT DEBUG] preset source for '{chosen}': {source['type']}, family={source['family']}")
+        return css, family_list
+
+    # 4) No source available: keep the name and warn loudly
+    print(f"[FONT] ERROR: no bundled or Google font source for '{chosen}'; PDF may fall back to system fonts")
+    family_list = _font_family_list(chosen)
+    return f".slide,.slide *{{font-family:{family_list} !important;}}", family_list
 
 
 def _hex_to_rgb(hex_color):

@@ -4,6 +4,7 @@ Generates a PowerPoint file from slide HTML using Playwright screenshots.
 """
 
 import base64
+import json
 import os
 import time
 import re
@@ -12,7 +13,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
-from design_templates import build_font_css
+from design_templates import build_font_css, sanitize_slide_html_for_export
 from slide_engine import resolve_logo_in_html
 
 
@@ -106,22 +107,25 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
                     html = html.replace('##LOGO##', logo_data_uri)
                     if branding and branding.get('logo_path'):
                         # Remove the cache-busting query when replacing the tenant logo path
-                        html = re.sub(re.escape(branding['logo_path'].split('?')[0]) + r"(?:\?[^\"'\\)\\s]*)?", logo_data_uri, html)
+                        html = re.sub(re.escape(branding['logo_path'].split('?')[0]) + r"(?:\?[^\"'\\)\s]*)?", logo_data_uri, html)
                     html = html.replace('/assets/logo.png', logo_data_uri)
 
+                # Strip any previously-baked font-family declarations so the tenant font wins
+                html = sanitize_slide_html_for_export(html)
+
+                layout_css = f"""
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+.slide {{ width:{slide_w_px}px; height:{slide_h_px}px; direction:rtl; position:relative; overflow:hidden; }}
+img {{ max-width:100%; max-height:100%; object-fit:cover; }}
+body {{ direction:rtl; font-family:{font_family}; }}
+"""
                 full_html = f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<style>
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-{font_css}
-body {{ direction:rtl; font-family:{font_family}; }}
-.slide {{ width:{slide_w_px}px; height:{slide_h_px}px; direction:rtl; position:relative; overflow:hidden; }}
-img {{ max-width:100%; max-height:100%; object-fit:cover; }}
-</style>
+<style>{layout_css}</style>
 </head>
-<body>{html}</body>
+<body>{html}<style>{font_css}</style></body>
 </html>"""
                 page.set_content(full_html, wait_until='load', timeout=30000)
                 try:
@@ -130,6 +134,10 @@ img {{ max-width:100%; max-height:100%; object-fit:cover; }}
                         "() => Array.from(document.images).every(i => i.complete)",
                         timeout=30000
                     )
+                    first_family = font_family.split(',')[0].strip().strip("\"'")
+                    spec = f"16px '{first_family}'"
+                    ok = page.evaluate(f"() => document.fonts.check({json.dumps(spec)})")
+                    print(f"[FONT] document.fonts.check('{first_family}'): {ok}")
                 except Exception:
                     # Don't block PPTX export because a single image is slow to load
                     pass

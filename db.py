@@ -122,6 +122,7 @@ def _create_tables(conn):
         draw_compass INTEGER DEFAULT 1,
         draw_inset INTEGER DEFAULT 1,
         font_file_path TEXT,
+        font_file_data TEXT,
         updated_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -538,7 +539,7 @@ def update_branding(tenant_id, **fields):
         'card_style', 'slide_ratio', 'moodboard_enabled', 'cover_image_enabled', 'moodboard_count',
         'default_slide_count', 'lock_slide_count', 'min_slides', 'max_slides',
         'default_map_type', 'map_style_overview', 'map_style_landmarks', 'map_style_access', 'map_style_catchment',
-        'draw_compass', 'draw_inset', 'font_file_path',
+        'draw_compass', 'draw_inset', 'font_file_path', 'font_file_data',
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
@@ -815,6 +816,7 @@ def _migrate_branding_columns(conn):
             'draw_compass': "ALTER TABLE tenant_branding ADD COLUMN draw_compass INTEGER DEFAULT 1",
             'draw_inset': "ALTER TABLE tenant_branding ADD COLUMN draw_inset INTEGER DEFAULT 1",
             'font_file_path': "ALTER TABLE tenant_branding ADD COLUMN font_file_path TEXT",
+            'font_file_data': "ALTER TABLE tenant_branding ADD COLUMN font_file_data TEXT",
         }
         for col, sql in migrations.items():
             if col not in existing_cols:

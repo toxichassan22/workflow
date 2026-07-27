@@ -14,6 +14,7 @@ GUNICORN="$APP_DIR/venv/bin/gunicorn"
 echo "===== 1. Pull latest code ====="
 cd "$REPO_DIR"
 git pull
+git lfs pull || true
 
 echo "===== 2. Sync to app directory ====="
 mkdir -p "$APP_DIR"
