@@ -295,11 +295,13 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
             print(f"[FONT] WARNING: font_file_path not found on disk: {path}")
         # Use the tenant-selected family name (not the generated tenant-font id)
         chosen = branding.get('font_family') or 'IBM Plex Sans Arabic'
+        print(f"[FONT DEBUG] no-file: font_family={chosen!r}, font_file_path={branding.get('font_file_path')!r}")
         if not (chosen.startswith("'") or chosen.startswith('"')):
             chosen = f"'{chosen}'"
         family_list = f"{chosen}, {fallback}"
-        # Always enforce the latest chosen font on .slide during export
-        return f".slide,.slide *{{font-family:{family_list} !important;}}", family_list
+        css = f".slide,.slide *{{font-family:{family_list} !important;}}"
+        print(f"[FONT DEBUG] generated CSS: {css}")
+        return css, family_list
     if family_only:
         return f".slide,.slide *{{font-family:'{family}',{fallback} !important;}}", f"'{family}', {fallback}"
     ext = os.path.splitext(abs_path)[1].lower()
@@ -320,6 +322,7 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
             src = f"url(data:font/{fmt};base64,{base64.b64encode(f.read()).decode()}) format('{fmt}')"
     css = (f"@font-face{{font-family:'{family}';src:{src};font-weight:100 900;"
            f"font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}")
+    print(f"[FONT DEBUG] custom font file: {abs_path}, generated CSS: {css[:200]}...")
     return css, f"'{family}', {fallback}"
 
 

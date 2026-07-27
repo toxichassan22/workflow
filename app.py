@@ -3068,6 +3068,7 @@ def api_export():
     fmt = data.get('format', 'pdf').lower()
     project_name = data.get('projectName', 'presentation')
     branding = db.get_branding(g.tenant_id)
+    print(f"[EXPORT] format={fmt} tenant={g.tenant_id} font_family={branding.get('font_family')!r} font_file_path={branding.get('font_file_path')!r}")
 
     # Tenant-specific output directory
     tenant_output_dir = os.path.join(OUTPUT_DIR, g.tenant_id)
