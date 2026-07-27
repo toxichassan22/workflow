@@ -13,6 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 def _generate_pdf_with_fitz(html, out_path):
     """Pure-Python fallback using PyMuPDF when Playwright is unavailable."""
+    print("[FONT] WARNING: PyMuPDF fallback cannot render @font-face/base64 fonts; custom font may not apply")
     import fitz
     # Render HTML to a 1280x720 pt page; may not be pixel-perfect but avoids 502s.
     src = fitz.open('html', html.encode('utf-8'), width=1280, height=720)
@@ -163,7 +164,9 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
                 )
                 first_family = font_family.split(',')[0].strip().strip("\"'")
                 spec = f"16px '{first_family}'"
-                ok = page.evaluate(f"() => document.fonts.check({json.dumps(spec)})")
+                ok = page.evaluate(
+                    f"async () => {{ try {{ await document.fonts.load({json.dumps(spec)}); }} catch(e) {{}} return document.fonts.check({json.dumps(spec)}); }}"
+                )
                 print(f"[FONT] document.fonts.check('{first_family}'): {ok}")
             except Exception:
                 # Don't fail export because an image hung; print what we have.

@@ -93,8 +93,12 @@ ${slideHtml}
   }
 }
 
-async function generatePdf(slidesHtml, outputPath) {
+async function generatePdf(slidesHtml, outputPath, fontCss) {
   console.log('[PDF] engine=node');
+  if (!fontCss) {
+    console.warn('[PDF] Node engine did not receive tenant fontCss; using default bundled fonts only');
+  }
+  const finalFontBlock = fontCss ? `<style>${fontCss}</style>` : '';
   const fullHtml = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -103,6 +107,7 @@ async function generatePdf(slidesHtml, outputPath) {
 </head>
 <body>
 ${slidesHtml}
+${finalFontBlock}
 </body>
 </html>`;
 

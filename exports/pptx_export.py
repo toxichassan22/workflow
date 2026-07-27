@@ -136,7 +136,9 @@ body {{ direction:rtl; font-family:{font_family}; }}
                     )
                     first_family = font_family.split(',')[0].strip().strip("\"'")
                     spec = f"16px '{first_family}'"
-                    ok = page.evaluate(f"() => document.fonts.check({json.dumps(spec)})")
+                    ok = page.evaluate(
+                        f"async () => {{ try {{ await document.fonts.load({json.dumps(spec)}); }} catch(e) {{}} return document.fonts.check({json.dumps(spec)}); }}"
+                    )
                     print(f"[FONT] document.fonts.check('{first_family}'): {ok}")
                 except Exception:
                     # Don't block PPTX export because a single image is slow to load

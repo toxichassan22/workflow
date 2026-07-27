@@ -2344,13 +2344,13 @@ var { generatePdf, renderSlideImage } = require('./pdf_engine');
 
 app.post('/api/export-pdf', async function (req, res) {
   try {
-    var { slidesHtml, projectName } = req.body;
+    var { slidesHtml, projectName, fontCss } = req.body;
     if (!slidesHtml) return res.status(400).json({ error: 'slidesHtml is required' });
 
     var filename = (projectName || 'project') + '_' + Date.now() + '.pdf';
     var outputPath = path.join(OUTPUT_DIR, filename);
 
-    await generatePdf(slidesHtml, outputPath);
+    await generatePdf(slidesHtml, outputPath, fontCss);
 
     res.json({ url: '/outputs/' + filename, filename: filename });
   } catch (e) {

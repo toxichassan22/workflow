@@ -18,29 +18,23 @@ _BUNDLED_FONTS_CACHE = None
 
 
 def _load_bundled_fonts():
-    """Load base64 font data from fonts_bundle.js (guaranteed, not Git LFS)."""
+    """Load base64 font data from fonts_bundle.json (guaranteed, not Git LFS)."""
     global _BUNDLED_FONTS_CACHE
     if _BUNDLED_FONTS_CACHE is not None:
         return _BUNDLED_FONTS_CACHE
     result = {}
-    bundle_path = os.path.join(BASE_DIR, 'fonts_bundle.js')
-    if os.path.exists(bundle_path):
+    json_path = os.path.join(BASE_DIR, 'fonts_bundle.json')
+    if os.path.exists(json_path):
         try:
-            with open(bundle_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            strings = dict(re.findall(r'var\s+(\w+)\s*=\s*"([^"]+)";', content))
-            exports_match = re.search(r'module\.exports\s*=\s*\{([^}]+)\}', content, re.DOTALL)
-            if exports_match:
-                for m in re.finditer(
-                    r'(\w+)\s*:\s*\{\s*family\s*:\s*"([^"]+)"\s*,\s*format\s*:\s*"([^"]+)"\s*,\s*data\s*:\s*(\w+)\s*\}',
-                    exports_match.group(1),
-                ):
-                    var_name, family, fmt, data_var = m.groups()
-                    data = strings.get(data_var)
-                    if data:
-                        result[family] = (data, fmt)
+            with open(json_path, 'r', encoding='utf-8') as f:
+                bundle = json.load(f)
+            for family, item in bundle.items():
+                data = item.get('data')
+                fmt = item.get('format', 'truetype')
+                if data:
+                    result[family] = (data, fmt)
         except Exception as e:
-            print(f"[FONT] Failed to load fonts_bundle.js: {e}")
+            print(f"[FONT] Failed to load fonts_bundle.json: {e}")
     _BUNDLED_FONTS_CACHE = result
     return result
 
@@ -141,14 +135,13 @@ def _build_preset_css(source, fallback):
     if source['type'] == 'bundled':
         data, fmt = source['data'], source['format']
         css = f"@font-face{{font-family:'{family}';src:url(data:font/{fmt};base64,{data}) format('{fmt}');font-weight:100 900;font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
-    elif source['type'] == 'google':
+    else:  # google
         encoded = source['encoded']
-        css = f"@import url('https://fonts.googleapis.com/css2?family={encoded}:wght@400;700&display=swap');\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
-    else:
-        family_list = _font_family_list(family)
-        css = f".slide,.slide *{{font-family:{family_list} !important;}}"
-        family = family_list
-    return css, f"'{family}', {fallback}" if source['type'] != 'no_source' else family
+        css = (
+            f"@import url('https://fonts.googleapis.com/css2?family={encoded}:wght@400;700&display=swap');\n"
+            f".slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
+        )
+    return css, f"'{family}', {fallback}"
 
 
 def sanitize_slide_html_for_export(html):
@@ -167,6 +160,8 @@ def sanitize_slide_html_for_export(html):
 
     def _clean_style_block(m):
         block = m.group(1)
+        if '@font-face' in block:
+            return m.group(0)
         cleaned = re.sub(r'\s*font-family\s*:\s*[^;]+;?\s*', '', block, flags=re.I)
         cleaned = re.sub(r';\s*;', ';', cleaned)
         return f'<style>{cleaned}</style>'
