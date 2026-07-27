@@ -7001,12 +7001,8 @@
       const payload = {
         format: format,
         presentationId: tenantPresentationId,
-        projectName: projectName,
-        slidesData: tenantSlidesData
+        projectName: projectName
       };
-      if (format === 'pdf') {
-        payload.slidesHtml = tenantSlidesData.map(s => s.html || '').join('\n');
-      }
       showLoader('جاري تصدير الملف', 'الصيغة: ' + format.toUpperCase());
       const data = await api('POST', '/api/export', payload);
       hideLoader();

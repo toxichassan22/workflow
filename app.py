@@ -22,7 +22,7 @@ from auth import require_auth, require_admin, require_company_admin, require_per
 from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules
 
 app = Flask(__name__, static_folder=None)
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 app.teardown_appcontext(db.close_db)
 
 # Initialize database on startup
