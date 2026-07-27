@@ -293,9 +293,15 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
     if not abs_path:
         if path:
             print(f"[FONT] WARNING: font_file_path not found on disk: {path}")
-        return "", f"{branding.get('font_family', 'IBM Plex Sans Arabic')}, {fallback}"
+        # Use the tenant-selected family name (not the generated tenant-font id)
+        chosen = branding.get('font_family') or 'IBM Plex Sans Arabic'
+        if not (chosen.startswith("'") or chosen.startswith('"')):
+            chosen = f"'{chosen}'"
+        family_list = f"{chosen}, {fallback}"
+        # Always enforce the latest chosen font on .slide during export
+        return f".slide,.slide *{{font-family:{family_list} !important;}}", family_list
     if family_only:
-        return "", f"'{family}', {fallback}"
+        return f".slide,.slide *{{font-family:'{family}',{fallback} !important;}}", f"'{family}', {fallback}"
     ext = os.path.splitext(abs_path)[1].lower()
     fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff2': 'woff2', '.woff': 'woff'}.get(ext, 'truetype')
 
