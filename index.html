@@ -2460,7 +2460,7 @@
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
             <h2 style="margin:0;">بيانات المشروع</h2>
             <span id="draftSyncBadge"
-              style="font-size:12px;padding:3px 10px;border-radius:20px;background:#e2e8f0;color:#475569;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">🟢
+              style="font-size:12px;padding:3px 10px;border-radius:20px;background:#e2e8f0;color:#475569;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">
               جاهز للمزامنة</span>
           </div>
           <p class="tenant-hint" style="margin-top:4px;">اختر القسم من القائمة الجانبية. أضف الأقسام والحقول المخصصة من
@@ -2630,15 +2630,15 @@
           <div
             style="border-top:1px solid #e8e4e0; padding:12px; display:flex; flex-direction:column; gap:8px; background:#fff; flex-shrink:0;">
             <div style="display:flex;flex-wrap:wrap;gap:6px;">
-              <button class="btn small ghost" onclick="setTenantChatExample('غيّر الخط في كل الشرائح إلى الخط الرسمي للشركة')">📝 الخط</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('طبق ألوان العلامة (الأساسي والثانوي) على كل الشرائح')">🎨 الألوان</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('ضع لوجو الشركة في الهيدر')">🖼️ اللوجو</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('استبدل الصور بصور جديدة توضح المشروع')">🖼️ الصور</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('أعد توليد خرائط الموقع')">🗺️ الخرائط</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('أزل أي أيقونات أو emojis واستبدلها بخط عربي فقط')">🚫 الأيقونات</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('غيّر الخط في كل الشرائح إلى الخط الرسمي للشركة')">الخط</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('طبق ألوان العلامة (الأساسي والثانوي) على كل الشرائح')">الألوان</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('ضع لوجو الشركة في الهيدر')">اللوجو</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('استبدل الصور بصور جديدة توضح المشروع')">الصور</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('أعد توليد خرائط الموقع')">الخرائط</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('أزل أي أيقونات أو emojis واستبدلها بخط عربي فقط')">الأيقونات</button>
             </div>
             <div style="display:flex; gap:8px; align-items:flex-end;">
-              <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()" title="إرفاق صورة للشات" style="padding:8px 12px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:#f9f9f9;">📷</button>
+              <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()" title="إرفاق صورة للشات" style="padding:8px 12px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:#f9f9f9;">إرفاق صورة</button>
               <textarea id="tenantChatInput" placeholder="اكتب التعديل المطلوب أو الصق/اسحب صورة (Ctrl+V)..."
                 rows="2"
                 style="flex:1; resize:none; border:1px solid #ddd; border-radius:10px; padding:10px; font-family:inherit; font-size:13px; outline:none;"></textarea>
@@ -2820,11 +2820,11 @@
           style="width:260px;min-width:240px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;">
           <button class="btn primary small" onclick="createNewChatSession('training')"
             style="width:100%;justify-content:center;gap:6px;font-weight:600;padding:10px;">
-            <span>➕</span> محادثة جديدة
+             محادثة جديدة
           </button>
           <div
             style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e2e8f0;padding-bottom:6px;">
-            <span style="font-size:12px;font-weight:700;color:var(--accent);">💬 سجل المحادثات</span>
+            <span style="font-size:12px;font-weight:700;color:var(--accent);">سجل المحادثات</span>
             <button class="btn small danger ghost" onclick="clearAllChatSessions('training')" title="مسح كل السجلات"
               style="padding:2px 6px;font-size:11px;">مسح الكل</button>
           </div>
@@ -2836,10 +2836,10 @@
         <div class="chatbox" style="flex:1;min-width:320px;margin-bottom:0;">
           <div id="trainingChatLog" class="chatlog" style="height:350px;"></div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
-            <button class="btn small ghost" onclick="setTrainingChatExample('نحب نبرز جودة المواد والتشطيبات الفاخرة في كل عرض تقديمي')">🎨 جودة التشطيبات</button>
-            <button class="btn small ghost" onclick="setTrainingChatExample('الشركة تستهدف المستثمرين السعوديين الباحثين عن عوائد سنوية 8% وما فوق')">💰 المستثمرون</button>
-            <button class="btn small ghost" onclick="setTrainingChatExample('اللون الأساسي للشركة هو العنابي الداكن والذهبي، ويجب استخدامه في كل شريحة')">🎨 ألوان العلامة</button>
-            <button class="btn small ghost" onclick="setTrainingChatExample('نستخدم مصطلحات مثل: عائد استثمار، نسبة شغل، قيمة مضافة، قرب المرافق')">📝 مصطلحات التسويق</button>
+            <button class="btn small ghost" onclick="setTrainingChatExample('نحب نبرز جودة المواد والتشطيبات الفاخرة في كل عرض تقديمي')">جودة التشطيبات</button>
+            <button class="btn small ghost" onclick="setTrainingChatExample('الشركة تستهدف المستثمرين السعوديين الباحثين عن عوائد سنوية 8% وما فوق')">المستثمرون</button>
+            <button class="btn small ghost" onclick="setTrainingChatExample('اللون الأساسي للشركة هو العنابي الداكن والذهبي، ويجب استخدامه في كل شريحة')">ألوان العلامة</button>
+            <button class="btn small ghost" onclick="setTrainingChatExample('نستخدم مصطلحات مثل: عائد استثمار، نسبة شغل، قيمة مضافة، قرب المرافق')">مصطلحات التسويق</button>
           </div>
           <div style="display:flex;gap:10px;margin-top:10px;">
             <textarea id="trainingChatInput" placeholder="مثال: الشركة تركز على مشاريع سكنية فاخرة في شمال الرياض..."
@@ -2848,7 +2848,7 @@
             <button class="btn primary" onclick="sendTrainingChat()" style="align-self:flex-end;">إرسال</button>
           </div>
           <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
-            <button class="btn small ghost" onclick="saveLastTrainingChatMessage()">💾 حفظ آخر رسالة كبيانات
+            <button class="btn small ghost" onclick="saveLastTrainingChatMessage()">حفظ آخر رسالة كبيانات
               تدريب</button>
           </div>
         </div>
@@ -2880,11 +2880,11 @@
             style="width:260px;min-width:240px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;">
             <button class="btn primary small" onclick="createNewChatSession('ai_rules')"
               style="width:100%;justify-content:center;gap:6px;font-weight:600;padding:10px;">
-              <span>➕</span> محادثة جديدة
+               محادثة جديدة
             </button>
             <div
               style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e2e8f0;padding-bottom:6px;">
-              <span style="font-size:12px;font-weight:700;color:var(--accent);">💬 سجل المحادثات</span>
+              <span style="font-size:12px;font-weight:700;color:var(--accent);">سجل المحادثات</span>
               <button class="btn small danger ghost" onclick="clearAllChatSessions('ai_rules')" title="مسح كل السجلات"
                 style="padding:2px 6px;font-size:11px;">مسح الكل</button>
             </div>
@@ -2901,7 +2901,7 @@
                 style="display:none" onchange="handleChatImageSelected(this)">
               <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()"
                 title="إرفاق صورة للشات"
-                style="padding:10px 14px;font-size:16px;border:1px solid var(--line);border-radius:10px;background:#f9f9f9;">📷</button>
+                style="padding:10px 14px;font-size:16px;border:1px solid var(--line);border-radius:10px;background:#f9f9f9;">إرفاق صورة</button>
               <textarea id="aiRulesChatInput" placeholder="اكتب معلومات لتدريب AI أو أرفق صورة للاستفسار والتحليل..."
                 style="flex:1;min-height:56px;resize:none;"
                 onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendAIRulesChat();}"></textarea>
@@ -2909,7 +2909,7 @@
             </div>
 
             <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
-              <button class="btn small ghost" onclick="saveLastAIRulesChatMessage()">💾 حفظ آخر رسالة كبيانات
+              <button class="btn small ghost" onclick="saveLastAIRulesChatMessage()">حفظ آخر رسالة كبيانات
                 تدريب</button>
             </div>
 
@@ -5035,14 +5035,14 @@
             const timeStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
             badge.style.background = '#dcfce7';
             badge.style.color = '#166534';
-            badge.innerHTML = '🟢 مُمزامن تلقائياً (' + timeStr + ')';
+            badge.innerHTML = 'مُمزامن تلقائياً (' + timeStr + ')';
           }
           if (!silent) toast('تم حفظ المسودة على الخادم');
         } else {
           if (badge) {
             badge.style.background = '#fee2e2';
             badge.style.color = '#991b1b';
-            badge.innerHTML = '⚠️ فشل الحفظ التلقائي';
+            badge.innerHTML = 'فشل الحفظ التلقائي';
           }
           if (!silent) toast(resp.error || 'فشل حفظ المسودة');
         }
@@ -5051,7 +5051,7 @@
         if (badge) {
           badge.style.background = '#fee2e2';
           badge.style.color = '#991b1b';
-          badge.innerHTML = '⚠️ خطأ في الاتصال';
+          badge.innerHTML = 'خطأ في الاتصال';
         }
       }
     }
@@ -6301,10 +6301,10 @@
       if (select) {
         let optionsHtml = '';
         if (tenantSlidesData.length) {
-          optionsHtml += '<option value="auto"' + (tenantChatSlideScope === 'auto' ? ' selected' : '') + '>✨ ذكي تلقائي</option>';
-          optionsHtml += '<option value="all"' + (tenantChatSlideScope === 'all' ? ' selected' : '') + '>🌐 تطبيق التعديل على جميع الشرائح</option>';
+          optionsHtml += '<option value="auto"' + (tenantChatSlideScope === 'auto' ? ' selected' : '') + '>ذكي تلقائي</option>';
+          optionsHtml += '<option value="all"' + (tenantChatSlideScope === 'all' ? ' selected' : '') + '>تطبيق التعديل على جميع الشرائح</option>';
           optionsHtml += tenantSlidesData.map((slide, index) =>
-            '<option value="' + index + '"' + (tenantChatSlideScope === index || (tenantChatSlideScope !== 'auto' && tenantChatSlideScope !== 'all' && index === tenantChatSlideIndex) ? ' selected' : '') + '>📍 شريحة ' + (index + 1) + ': ' + escapeHtml(slide.title || '') + '</option>'
+            '<option value="' + index + '"' + (tenantChatSlideScope === index || (tenantChatSlideScope !== 'auto' && tenantChatSlideScope !== 'all' && index === tenantChatSlideIndex) ? ' selected' : '') + '> شريحة ' + (index + 1) + ': ' + escapeHtml(slide.title || '') + '</option>'
           ).join('');
         } else {
           optionsHtml = '<option value="">لا توجد شرائح للتعديل</option>';
@@ -6378,7 +6378,7 @@
         moveTenantSlide(moveCmd.fromIdx, moveCmd.toIdx);
         tenantDesignerMessages.push({
           role: 'assistant',
-          content: 'تم نقل الشريحة رقم ' + (moveCmd.fromIdx + 1) + ' لتصبح الشريحة رقم ' + (moveCmd.toIdx + 1) + ' فوراً وبدون الحاجة لإعادة التوليد! 🚀'
+          content: 'تم نقل الشريحة رقم ' + (moveCmd.fromIdx + 1) + ' لتصبح الشريحة رقم ' + (moveCmd.toIdx + 1) + ' فوراً وبدون الحاجة لإعادة التوليد!'
         });
         renderTenantDesignerChat();
         return;
@@ -6612,14 +6612,14 @@
 
       // Section 1: Saved Project Drafts
       if (drafts.length) {
-        html += '<h3 style="margin:16px 0 8px;color:var(--p);font-size:16px;border-bottom:2px solid var(--p);padding-bottom:6px">📝 مسودات المشاريع المحفوظة (' + drafts.length + ')</h3>';
+        html += '<h3 style="margin:16px 0 8px;color:var(--p);font-size:16px;border-bottom:2px solid var(--p);padding-bottom:6px">مسودات المشاريع المحفوظة (' + drafts.length + ')</h3>';
         html += drafts.map(d => {
           const dData = d.draft_data || d.draftData || {};
           const title = dData.project_name || dData.name || 'مسودة مشروع بدون عنوان';
           const statusText = d.status === 'pending_approval' ? 'في انتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
           const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
           return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid #cbd5e1;margin-bottom:12px;">' +
-            '<div><h3>📝 ' + escapeHtml(title) + '</h3>' +
+            '<div><h3>' + escapeHtml(title) + '</h3>' +
             '<div class="meta">' + statusText + ' | آخر تحديث: ' + date + '</div></div>' +
             '<div class="tenant-actions">' +
             '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح وإكمال المسودة</button>' +
@@ -6629,7 +6629,7 @@
       }
 
       // Section 2: Final Presentations
-      html += '<h3 style="margin:24px 0 8px;color:var(--p);font-size:16px;border-bottom:2px solid var(--p);padding-bottom:6px">📊 العروض التقديمية النهائية (' + presentations.length + ')</h3>';
+      html += '<h3 style="margin:24px 0 8px;color:var(--p);font-size:16px;border-bottom:2px solid var(--p);padding-bottom:6px">العروض التقديمية النهائية (' + presentations.length + ')</h3>';
       if (!presentations.length) {
         html += '<p class="tenant-hint" style="margin-bottom:16px">لا توجد عروض تقديمية نهائية مُنشأة بعد.</p>';
       } else {
@@ -6939,11 +6939,11 @@
           <div onclick="selectChatSession('training', '${s.id}')" style="background:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:6px;transition:all 0.15s ease;">
             <div style="overflow:hidden;flex:1;">
               <div style="font-size:12px;font-weight:${isActive ? '700' : '500'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(s.title)}">
-                💬 ${escapeHtml(s.title)}
+                ${escapeHtml(s.title)}
               </div>
               <div style="font-size:10px;color:var(--muted);margin-top:2px;">${count} رسالة • ${s.createdAt || ''}</div>
             </div>
-            <button onclick="deleteChatSession('training', '${s.id}', event)" title="حذف" style="background:none;border:none;cursor:pointer;font-size:13px;opacity:0.6;padding:2px;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🗑️</button>
+            <button onclick="deleteChatSession('training', '${s.id}', event)" title="حذف" style="background:none;border:none;cursor:pointer;font-size:13px;opacity:0.6;padding:2px;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"></button>
           </div>
         `;
       }).join('');
@@ -6967,11 +6967,11 @@
           <div onclick="selectChatSession('ai_rules', '${s.id}')" style="background:${bg};border:1px solid ${border};border-radius:8px;padding:8px 10px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:6px;transition:all 0.15s ease;">
             <div style="overflow:hidden;flex:1;">
               <div style="font-size:12px;font-weight:${isActive ? '700' : '500'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(s.title)}">
-                💬 ${escapeHtml(s.title)}
+                ${escapeHtml(s.title)}
               </div>
               <div style="font-size:10px;color:var(--muted);margin-top:2px;">${count} رسالة • ${s.createdAt || ''}</div>
             </div>
-            <button onclick="deleteChatSession('ai_rules', '${s.id}', event)" title="حذف" style="background:none;border:none;cursor:pointer;font-size:13px;opacity:0.6;padding:2px;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🗑️</button>
+            <button onclick="deleteChatSession('ai_rules', '${s.id}', event)" title="حذف" style="background:none;border:none;cursor:pointer;font-size:13px;opacity:0.6;padding:2px;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"></button>
           </div>
         `;
       }).join('');
@@ -7204,7 +7204,7 @@
       const log = document.getElementById('trainingChatLog');
       if (!log) return;
       if (!trainingChatHistory.length) {
-        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><div style="font-size:36px;margin-bottom:12px;">🤖</div><h3 style="margin:0 0 8px;color:var(--accent);">وكيل الإدارة الذكي</h3><p class="tenant-hint" style="margin:0;font-size:13px;line-height:1.7;">أنا مساعدك التنفيذي الكامل — أقدر أعدّل الألوان، الحقول، الشرائح، الموظفين، الصلاحيات، وكل إعدادات النظام مباشرة من هنا.<br>جرّب تسألني: <em>"كم عدد الشرائح عندنا؟"</em> أو <em>"أضف حقل عدد الوحدات السكنية"</em></p></div>';
+        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><h3 style="margin:0 0 8px;color:var(--accent);">وكيل الإدارة الذكي</h3><p class="tenant-hint" style="margin:0;font-size:13px;line-height:1.7;">أنا مساعدك التنفيذي الكامل — أقدر أعدّل الألوان، الحقول، الشرائح، الموظفين، الصلاحيات، وكل إعدادات النظام مباشرة من هنا.<br>جرّب تسألني: <em>"كم عدد الشرائح عندنا؟"</em> أو <em>"أضف حقل عدد الوحدات السكنية"</em></p></div>';
         return;
       }
       log.innerHTML = trainingChatHistory.map(m => {
@@ -7217,7 +7217,7 @@
           html += '<div style="margin-top:10px;">';
           m.actions.forEach(a => {
             const isOk = a.status === 'success';
-            const icon = isOk ? '⚡' : '❌';
+            const icon = isOk ? '' : '';
             const bg = isOk ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
             const border = isOk ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)';
             const color = isOk ? '#16a34a' : '#dc2626';
@@ -7315,7 +7315,7 @@
         if (data.actions && data.actions.length) {
           const successCount = data.actions.filter(a => a.status === 'success').length;
           if (successCount) {
-            toast('⚡ تم تنفيذ ' + successCount + ' إجراء بنجاح');
+            toast('تم تنفيذ ' + successCount + ' إجراء بنجاح');
             await applyAgentWorkspaceActions(data.actions);
             await loadTrainingList();
             await refreshSystemDataAfterAgentAction();
@@ -7503,7 +7503,7 @@
         if (consentInput) consentInput.checked = true;
         handleChatImageSelected(input);
       }
-      toast('📸 تم إرفاق الصورة وتجهيزها بنجاح!');
+      toast('تم إرفاق الصورة وتجهيزها بنجاح!');
     }
 
     function bindImagePasteAndDrop(elementId) {
@@ -7580,7 +7580,7 @@
       const log = document.getElementById('aiRulesChatLog');
       if (!log) return;
       if (!aiRulesChatHistory.length) {
-        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><div style="font-size:36px;margin-bottom:12px;">🤖</div><h3 style="margin:0 0 8px;color:var(--accent);">وكيل الإدارة الذكي</h3><p class="tenant-hint" style="margin:0;font-size:13px;line-height:1.7;">أنا مساعدك التنفيذي — أقدر أغيّر الألوان، القوالب، الحقول، صلاحيات الموظفين، وكل شيء من هنا مباشرة.<br>أرسل صورة لتحليلها وحفظها كبيانات تدريب 📷</p></div>';
+        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><h3 style="margin:0 0 8px;color:var(--accent);">وكيل الإدارة الذكي</h3><p class="tenant-hint" style="margin:0;font-size:13px;line-height:1.7;">أنا مساعدك التنفيذي — أقدر أغيّر الألوان، القوالب، الحقول، صلاحيات الموظفين، وكل شيء من هنا مباشرة.<br>أرسل صورة لتحليلها وحفظها كبيانات تدريب </p></div>';
         return;
       }
       log.innerHTML = aiRulesChatHistory.map(m => {
@@ -7593,7 +7593,7 @@
           content += '<div style="margin-top:10px;">';
           m.actions.forEach(a => {
             const isOk = a.status === 'success';
-            const icon = isOk ? '⚡' : '❌';
+            const icon = isOk ? '' : '';
             const bg = isOk ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)';
             const border = isOk ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)';
             const color = isOk ? '#16a34a' : '#dc2626';
@@ -7634,7 +7634,7 @@
         const file = fileInput.files[0];
         const localPreviewUrl = URL.createObjectURL(file);
         const title = file.name;
-        const displayUserText = text ? ('📷 [' + escapeHtml(title) + ']\n' + text) : ('📷 [' + escapeHtml(title) + ']');
+        const displayUserText = text ? ('[' + escapeHtml(title) + ']\n' + text) : ('[' + escapeHtml(title) + ']');
 
         aiRulesChatHistory.push({ role: 'user', text: displayUserText, imageUrl: localPreviewUrl });
         saveCurrentSessionState('ai_rules', aiRulesChatHistory);
@@ -7656,18 +7656,18 @@
           const resp = await api('POST', '/api/training/upload-image', formData, true);
           if (statusEl) statusEl.textContent = '';
           if (resp && resp.success) {
-            const aiMsg = '🤖 تم تحليل الصورة وحفظها كبيانات تدريب بنجاح:\n\n' + (resp.analysis || 'تم حفظ الصورة كمرجع.');
+            const aiMsg = 'تم تحليل الصورة وحفظها كبيانات تدريب بنجاح:\n\n' + (resp.analysis || 'تم حفظ الصورة كمرجع.');
             aiRulesChatHistory.push({ role: 'ai', text: aiMsg });
             saveCurrentSessionState('ai_rules', aiRulesChatHistory);
             toast('تم رفع الصورة وتحليلها بنجاح');
             await loadAIRules();
           } else {
-            aiRulesChatHistory.push({ role: 'ai', text: '❌ ' + (resp && resp.error ? resp.error : 'فشل رفع الصورة') });
+            aiRulesChatHistory.push({ role: 'ai', text: '' + (resp && resp.error ? resp.error : 'فشل رفع الصورة') });
             saveCurrentSessionState('ai_rules', aiRulesChatHistory);
           }
         } catch (e) {
           if (statusEl) statusEl.textContent = '';
-          aiRulesChatHistory.push({ role: 'ai', text: '❌ خطأ: ' + e.message });
+          aiRulesChatHistory.push({ role: 'ai', text: 'خطأ: ' + e.message });
           saveCurrentSessionState('ai_rules', aiRulesChatHistory);
         }
         renderAIRulesChat();
@@ -7689,7 +7689,7 @@
           if (data.actions && data.actions.length) {
             const successCount = data.actions.filter(a => a.status === 'success').length;
             if (successCount) {
-              toast('⚡ تم تنفيذ ' + successCount + ' إجراء بنجاح');
+              toast('تم تنفيذ ' + successCount + ' إجراء بنجاح');
               await loadAIRules();
               await refreshSystemDataAfterAgentAction();
             }
