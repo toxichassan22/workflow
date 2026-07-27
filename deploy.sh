@@ -22,6 +22,7 @@ rsync -av \
   --exclude='app.db' \
   --exclude='data.db' \
   --exclude='.env' \
+  --exclude='.git' \
   --exclude='venv' \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
