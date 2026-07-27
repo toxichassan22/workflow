@@ -796,6 +796,8 @@ def _migrate_branding_columns(conn):
         cursor = conn.execute("PRAGMA table_info(tenant_branding)")
         existing_cols = {row[1] for row in cursor.fetchall()}
         migrations = {
+            'lock_slide_count': "ALTER TABLE tenant_branding ADD COLUMN lock_slide_count INTEGER DEFAULT 1",
+            'default_map_type': "ALTER TABLE tenant_branding ADD COLUMN default_map_type TEXT DEFAULT 'satellite'",
             'map_style_overview': "ALTER TABLE tenant_branding ADD COLUMN map_style_overview TEXT DEFAULT 'satellite'",
             'map_style_landmarks': "ALTER TABLE tenant_branding ADD COLUMN map_style_landmarks TEXT DEFAULT 'satellite'",
             'map_style_access': "ALTER TABLE tenant_branding ADD COLUMN map_style_access TEXT DEFAULT 'satellite'",
