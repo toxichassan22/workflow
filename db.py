@@ -111,7 +111,7 @@ def _create_tables(conn):
         cover_image_enabled INTEGER DEFAULT 1,
         moodboard_count INTEGER DEFAULT 4,
         default_slide_count INTEGER DEFAULT 16,
-        lock_slide_count INTEGER DEFAULT 1,
+        lock_slide_count INTEGER DEFAULT 0,
         min_slides INTEGER DEFAULT 8,
         max_slides INTEGER DEFAULT 30,
         default_map_type TEXT DEFAULT 'satellite',
@@ -348,7 +348,7 @@ def _create_tables(conn):
         conn.execute('ALTER TABLE tenant_branding ADD COLUMN moodboard_count INTEGER DEFAULT 4')
         print('[DB] Migration: added moodboard_count column to tenant_branding')
     if 'lock_slide_count' not in branding_cols:
-        conn.execute('ALTER TABLE tenant_branding ADD COLUMN lock_slide_count INTEGER DEFAULT 1')
+        conn.execute('ALTER TABLE tenant_branding ADD COLUMN lock_slide_count INTEGER DEFAULT 0')
         print('[DB] Migration: added lock_slide_count column to tenant_branding')
     if 'default_map_type' not in branding_cols:
         conn.execute("ALTER TABLE tenant_branding ADD COLUMN default_map_type TEXT DEFAULT 'satellite'")
@@ -428,8 +428,8 @@ def _seed_admin(conn):
             (admin_name, hash_password(admin_password), 'enterprise', existing['id'])
         )
         conn.execute(
-            'INSERT OR IGNORE INTO tenant_branding (tenant_id, company_name, primary_color, secondary_color, accent_color, background_color) VALUES (?, ?, ?, ?, ?, ?)',
-            (existing['id'], admin_name, '#3B6E91', '#254B66', '#6DA3C3', '#F4F9FC')
+            'INSERT OR IGNORE INTO tenant_branding (tenant_id, company_name, primary_color, secondary_color, accent_color, background_color, lock_slide_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (existing['id'], admin_name, '#3B6E91', '#254B66', '#6DA3C3', '#F4F9FC', 0)
         )
         return
 
@@ -439,8 +439,8 @@ def _seed_admin(conn):
         (admin_id, admin_name, admin_email, hash_password(admin_password), 'enterprise')
     )
     conn.execute(
-        'INSERT INTO tenant_branding (tenant_id, company_name, primary_color, secondary_color, accent_color, background_color) VALUES (?, ?, ?, ?, ?, ?)',
-        (admin_id, admin_name, '#3B6E91', '#254B66', '#6DA3C3', '#F4F9FC')
+        'INSERT INTO tenant_branding (tenant_id, company_name, primary_color, secondary_color, accent_color, background_color, lock_slide_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (admin_id, admin_name, '#3B6E91', '#254B66', '#6DA3C3', '#F4F9FC', 0)
     )
     print(f"[DB] Seeded super admin: {admin_email}")
 
@@ -459,8 +459,8 @@ def create_tenant(company_name, email, password_hash, subdomain=None, plan='free
         (tenant_id, company_name, subdomain, email, password_hash, plan)
     )
     conn.execute(
-        'INSERT INTO tenant_branding (tenant_id, company_name, primary_color, secondary_color, accent_color, background_color) VALUES (?, ?, ?, ?, ?, ?)',
-        (tenant_id, company_name, '#3B6E91', '#254B66', '#6DA3C3', '#F4F9FC')
+        'INSERT INTO tenant_branding (tenant_id, company_name, primary_color, secondary_color, accent_color, background_color, lock_slide_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (tenant_id, company_name, '#3B6E91', '#254B66', '#6DA3C3', '#F4F9FC', 0)
     )
     _seed_default_fields(conn, tenant_id)
     conn.commit()

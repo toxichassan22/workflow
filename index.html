@@ -2626,13 +2626,23 @@
           </div>
 
           <div
-            style="border-top:1px solid #e8e4e0; padding:12px; display:flex; gap:8px; align-items:flex-end; background:#fff; flex-shrink:0;">
-            <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()" title="إرفاق صورة للشات" style="padding:8px 12px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:#f9f9f9;">📷</button>
-            <textarea id="tenantChatInput" placeholder="اكتب التعديل المطلوب أو الصق/اسحب صورة (Ctrl+V)..."
-              rows="2"
-              style="flex:1; resize:none; border:1px solid #ddd; border-radius:10px; padding:10px; font-family:inherit; font-size:13px; outline:none;"></textarea>
-            <button class="btn primary" onclick="sendTenantDesignerChat()"
-              style="flex-shrink:0; background:#3B6E91; color:#fff; border:none; padding:8px 16px; font-weight:700; border-radius:8px; cursor:pointer;">إرسال</button>
+            style="border-top:1px solid #e8e4e0; padding:12px; display:flex; flex-direction:column; gap:8px; background:#fff; flex-shrink:0;">
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              <button class="btn small ghost" onclick="setTenantChatExample('غيّر الخط في كل الشرائح إلى الخط الرسمي للشركة')">📝 الخط</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('طبق ألوان العلامة (الأساسي والثانوي) على كل الشرائح')">🎨 الألوان</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('ضع لوجو الشركة في الهيدر')">🖼️ اللوجو</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('استبدل الصور بصور جديدة توضح المشروع')">🖼️ الصور</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('أعد توليد خرائط الموقع')">🗺️ الخرائط</button>
+              <button class="btn small ghost" onclick="setTenantChatExample('أزل أي أيقونات أو emojis واستبدلها بخط عربي فقط')">🚫 الأيقونات</button>
+            </div>
+            <div style="display:flex; gap:8px; align-items:flex-end;">
+              <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()" title="إرفاق صورة للشات" style="padding:8px 12px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:#f9f9f9;">📷</button>
+              <textarea id="tenantChatInput" placeholder="اكتب التعديل المطلوب أو الصق/اسحب صورة (Ctrl+V)..."
+                rows="2"
+                style="flex:1; resize:none; border:1px solid #ddd; border-radius:10px; padding:10px; font-family:inherit; font-size:13px; outline:none;"></textarea>
+              <button class="btn primary" onclick="sendTenantDesignerChat()"
+                style="flex-shrink:0; background:#3B6E91; color:#fff; border:none; padding:8px 16px; font-weight:700; border-radius:8px; cursor:pointer;">إرسال</button>
+            </div>
           </div>
         </div>
       </div>
@@ -2823,6 +2833,12 @@
         <!-- Main Chat Area -->
         <div class="chatbox" style="flex:1;min-width:320px;margin-bottom:0;">
           <div id="trainingChatLog" class="chatlog" style="height:350px;"></div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+            <button class="btn small ghost" onclick="setTrainingChatExample('نحب نبرز جودة المواد والتشطيبات الفاخرة في كل عرض تقديمي')">🎨 جودة التشطيبات</button>
+            <button class="btn small ghost" onclick="setTrainingChatExample('الشركة تستهدف المستثمرين السعوديين الباحثين عن عوائد سنوية 8% وما فوق')">💰 المستثمرون</button>
+            <button class="btn small ghost" onclick="setTrainingChatExample('اللون الأساسي للشركة هو العنابي الداكن والذهبي، ويجب استخدامه في كل شريحة')">🎨 ألوان العلامة</button>
+            <button class="btn small ghost" onclick="setTrainingChatExample('نستخدم مصطلحات مثل: عائد استثمار، نسبة شغل، قيمة مضافة، قرب المرافق')">📝 مصطلحات التسويق</button>
+          </div>
           <div style="display:flex;gap:10px;margin-top:10px;">
             <textarea id="trainingChatInput" placeholder="مثال: الشركة تركز على مشاريع سكنية فاخرة في شمال الرياض..."
               style="flex:1;min-height:60px;resize:none;"
@@ -3001,6 +3017,7 @@
 
     function mapsSignature(d) {
       d = d || tenantProjectData || {};
+      const projectStyles = d.map_styles || {};
       return JSON.stringify({
         lat: d.location_lat || '',
         lng: d.location_lng || '',
@@ -3009,11 +3026,12 @@
         roads: d.main_roads || '',
         catchment: d.catchment_areas || '',
         mapType: d.map_type || (tenantBranding && tenantBranding.default_map_type) || '',
+        projectStyles: projectStyles,
         styles: [
-          (tenantBranding || {}).map_style_overview,
-          (tenantBranding || {}).map_style_landmarks,
-          (tenantBranding || {}).map_style_access,
-          (tenantBranding || {}).map_style_catchment
+          projectStyles.overview || (tenantBranding || {}).map_style_overview,
+          projectStyles.landmarks || (tenantBranding || {}).map_style_landmarks,
+          projectStyles.access || (tenantBranding || {}).map_style_access,
+          projectStyles.catchment || (tenantBranding || {}).map_style_catchment
         ]
       });
     }
@@ -6298,6 +6316,14 @@
       return null;
     }
 
+    function setTenantChatExample(text) {
+      const input = document.getElementById('tenantChatInput');
+      if (input) {
+        input.value = (input.value ? input.value + '\n' : '') + text;
+        input.focus();
+      }
+    }
+
     async function sendTenantDesignerChat() {
       const input = document.getElementById('tenantChatInput');
       const message = input ? input.value.trim() : '';
@@ -6419,13 +6445,13 @@
       const panel = document.getElementById('mapStylePanel');
       if (panel) {
         if (panel.style.display === 'none' || !panel.style.display) {
-          if (tenantBranding) {
-            const setSelect = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
-            setSelect('mapStyleOverview', tenantBranding.map_style_overview || 'satellite');
-            setSelect('mapStyleLandmarks', tenantBranding.map_style_landmarks || 'satellite');
-            setSelect('mapStyleAccess', tenantBranding.map_style_access || 'satellite');
-            setSelect('mapStyleCatchment', tenantBranding.map_style_catchment || 'satellite');
-          }
+          const pStyles = (tenantProjectData && tenantProjectData.map_styles) || {};
+          const bStyles = tenantBranding || {};
+          const setSelect = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+          setSelect('mapStyleOverview', pStyles.overview || bStyles.map_style_overview || 'satellite');
+          setSelect('mapStyleLandmarks', pStyles.landmarks || bStyles.map_style_landmarks || 'satellite');
+          setSelect('mapStyleAccess', pStyles.access || bStyles.map_style_access || 'satellite');
+          setSelect('mapStyleCatchment', pStyles.catchment || bStyles.map_style_catchment || 'satellite');
           panel.style.display = 'flex';
         } else {
           panel.style.display = 'none';
@@ -6688,6 +6714,10 @@
         access: document.getElementById('mapStyleAccess')?.value || 'satellite',
         catchment: document.getElementById('mapStyleCatchment')?.value || 'satellite'
       };
+      // Persist per-project map style overrides
+      tenantProjectData = tenantProjectData || {};
+      tenantProjectData.map_styles = mapStyles;
+      await triggerAutoSaveDraft();
       const data = await api('POST', '/api/presentations/' + tenantPresentationId + '/regenerate-maps', { map_styles: mapStyles });
       hideLoader();
       if (!data.success) { toast(data.error || 'فشل توليد الخرائط'); return; }
@@ -7210,6 +7240,14 @@
         triggerAutoSaveDraft();
       }
       return changed;
+    }
+
+    function setTrainingChatExample(text) {
+      const input = document.getElementById('trainingChatInput');
+      if (input) {
+        input.value = (input.value ? input.value + '\n' : '') + text;
+        input.focus();
+      }
     }
 
     async function sendTrainingChat() {

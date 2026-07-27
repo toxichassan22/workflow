@@ -458,9 +458,9 @@ def postprocess_slide(html, slide_num=None, tenant_id=None, slide_title=None, to
         branding=branding,
     )
 
-def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=2):
+def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=2, total=None, title=None):
     """Generate one complete slide, retrying with a stricter prompt when needed."""
-    slide_title = f'شريحة {slide_num}'
+    slide_title = title or f'شريحة {slide_num}'
     slide = {
         'title': slide_title,
         'type': 'content',
@@ -470,7 +470,10 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
         'bullets': []
     }
     branding = db.get_branding(tenant_id) if tenant_id else {}
-    total = int(branding.get('default_slide_count') or 16)
+    if total is None:
+        _min_s, _max_s, total = resolve_slide_bounds(branding)
+        total = max(_min_s, min(total, _max_s))
+    total = int(total)
     base_user_msg = slide_engine.build_slide_user_msg(slide, slide_num, total, branding)
 
     for attempt in range(1, max_retries + 2):
@@ -581,7 +584,12 @@ def extract_html_from_glm(raw_response):
 
 def validate_html(html, expected_count=None):
     slide_count = html.count('class="slide"')
-    threshold = expected_count or 16
+    threshold = expected_count
+    if threshold is None:
+        tenant_id = getattr(g, 'tenant_id', None)
+        branding = db.get_branding(tenant_id) if tenant_id else {}
+        _min_s, _max_s, threshold = resolve_slide_bounds(branding)
+        threshold = max(_min_s, min(threshold, _max_s))
     if slide_count < threshold:
         print(f"[WARN] Only {slide_count} slides found, expected {threshold}")
     if 'dir="rtl"' not in html:
@@ -778,18 +786,31 @@ def api_export_pdf():
 
 @app.route('/api/official-outline', methods=['POST'])
 def api_official_outline():
-    """Compatibility: Generate outline/titles for 16 slides"""
+    """Compatibility: Generate outline/titles following tenant slide bounds."""
     project_data = clean_project_data(request.json.get('projectData', {}))
     print(f"\n[OUTLINE] Generating outline for: {project_data.get('projectName', 'Unknown')}")
 
+    tenant_id = getattr(g, 'tenant_id', None)
+    branding = db.get_branding(tenant_id) if tenant_id else {}
+    min_s, max_s, default_count = resolve_slide_bounds(branding)
+    target_count = max(min_s, min(default_count, max_s))
+
+    structure_lines = ['1. شريحة غلاف (type="cover")']
+    if target_count >= 2:
+        structure_lines.append('2. شريحة فهرس (type="index")')
+    if target_count >= 4:
+        structure_lines.append(f'3-{target_count - 2}. شرائح محتوى (type="content")')
+        structure_lines.append(f'{target_count - 1}. شريحة مود بورد (type="mood_board")')
+    elif target_count == 3:
+        structure_lines.append('3. شريحة محتوى (type="content")')
+    if target_count >= 2:
+        structure_lines.append(f'{target_count}. شريحة ختام (type="closing")')
+    structure_text = '\n'.join(structure_lines)
+
     prompt = f"""أنت محلل مالي وعقاري ذكي. قم بإنشاء هيكل (outline) عرض تقديمي مخصص بالكامل لمشروع المستخدم.
 
-المطلوب: بالضبط 16 شريحة بالترتيب التالي:
-1. شريحة غلاف (type="cover")
-2. شريحة فهرس (type="index")
-3-14. 12 شريحة محتوى (type="content")
-15. شريحة مود بورد (type="mood_board")
-16. شريحة ختام (type="closing")
+المطلوب: {target_count} شرائح بالترتيب التالي:
+{structure_text}
 
 بيانات المشروع:
 {json.dumps(project_data, ensure_ascii=False, indent=2)}
@@ -798,7 +819,7 @@ Return ONLY valid JSON: {{"titles": [{{"title": "عنوان الشريحة", "bu
 """
 
     try:
-        response = call_zai_chat(prompt, "اكتب الهيكل المكون من 16 شريحة.", max_tokens=4000)
+        response = call_zai_chat(prompt, f"اكتب الهيكل المكون من {target_count} شريحة.", max_tokens=4000)
         raw = extract_chat_content(response, "OUTLINE")
 
         json_match = re.search(r'\{[\s\S]*"titles"[\s\S]*\}', raw)
@@ -808,9 +829,12 @@ Return ONLY valid JSON: {{"titles": [{{"title": "عنوان الشريحة", "bu
         parsed = json.loads(json_match.group())
         titles = parsed.get('titles', [])
 
-        if len(titles) < 16:
-            while len(titles) < 16:
+        if len(titles) < target_count:
+            while len(titles) < target_count:
                 titles.append({'title': f'شريحة {len(titles)+1}', 'bullets': [], 'type': 'content'})
+
+        if len(titles) > target_count:
+            titles = titles[:target_count]
 
         print(f"[OUTLINE] Generated {len(titles)} slides")
         return jsonify({'success': True, 'titles': titles})
@@ -912,17 +936,21 @@ def api_generate_image_single():
 @app.route('/api/designer-generate', methods=['POST'])
 @require_auth
 def api_designer_generate():
-    """Generate slides HTML: 16 individual slides in parallel (4 concurrent workers)."""
+    """Generate slides HTML: variable slide count in parallel (4 concurrent workers)."""
     project_data = clean_project_data(request.json.get('projectData', {}))
     outline = request.json.get('outline', [])
     images = request.json.get('images', {})
     images_info = _get_images_info(images)
 
-    # Build system prompt ONCE — shared across all 16 slides
+    # Build system prompt ONCE — shared across all slides
     branding = db.get_branding(g.tenant_id) or {}
     dynamic_rules = build_design_rules(branding)
     system_prompt = build_system_prompt(project_data, images_info, dynamic_rules)
-    slide_count = branding.get('default_slide_count', 16)
+    min_s, max_s, default_count = resolve_slide_bounds(branding)
+    if outline:
+        slide_count = max(min_s, min(max_s, len(outline)))
+    else:
+        slide_count = max(min_s, min(default_count, max_s))
     print(f"\n[DESIGNER] Starting {slide_count}-slide parallel generation (4 workers)...")
     print(f"[DESIGNER] System prompt: {len(system_prompt)} chars (shared)")
     start_time = time.time()
@@ -933,7 +961,7 @@ def api_designer_generate():
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             future_to_idx = {}
             for i in range(slide_count):
-                future = executor.submit(generate_single_slide, system_prompt, i + 1, g.tenant_id)
+                future = executor.submit(generate_single_slide, system_prompt, i + 1, g.tenant_id, total=slide_count)
                 future_to_idx[future] = i
 
             for future in concurrent.futures.as_completed(future_to_idx):
@@ -949,7 +977,7 @@ def api_designer_generate():
             print(f"[DESIGNER] Retrying missing slides after parallel run: {missing}")
             for slide_num in missing:
                 results[slide_num - 1] = generate_single_slide(
-                    system_prompt, slide_num, g.tenant_id, max_retries=1
+                    system_prompt, slide_num, g.tenant_id, max_retries=1, total=slide_count
                 )
 
         elapsed = round(time.time() - start_time, 1)
@@ -958,13 +986,12 @@ def api_designer_generate():
         total_slides = combined_html.count('class="slide"')
         print(f"[DESIGNER] Done in {elapsed}s — {total_slides} slides total")
 
-        DEFAULT_TITLES = [
-            'الغلاف', 'الفهرس', 'الملخص التنفيذي', 'الرؤية والفكرة',
-            'الموقع الاستراتيجي', 'مميزات المشروع', 'مكونات المشروع',
-            'افتراضات الإيرادات', 'افتراضات التكاليف', 'الأرباح والتخارج',
-            'المؤشرات المالية', 'الجدول الزمني', 'فرص الاستثمار',
-            'المخاطر', 'المود بورد', 'الختام'
-        ]
+        # Build dynamic fallback titles from the fallback plan, padded to slide_count
+        fallback_slides = build_fallback_plan(branding).get('slides', [])
+        DEFAULT_TITLES = [s.get('title', f'شريحة {i + 1}') for i, s in enumerate(fallback_slides)]
+        if len(DEFAULT_TITLES) < slide_count:
+            for i in range(len(DEFAULT_TITLES), slide_count):
+                DEFAULT_TITLES.append(f'شريحة {i + 1}')
 
         def extract_slide_title(s_html, def_title):
             for pattern in [r'<h[1-6][^>]*>([\s\S]*?)</h[1-6]>',
@@ -2448,7 +2475,9 @@ def api_regenerate_presentation_maps(pres_id):
                 updated = True
         if updated:
             slides_data = json.loads(slides_json)
-            db.update_presentation(pres_id, slides_data=slides_data)
+            db.update_presentation(pres_id, project_data=project_data, slides_data=slides_data)
+        else:
+            db.update_presentation(pres_id, project_data=project_data)
 
     return jsonify({
         'success': True,
@@ -2488,7 +2517,7 @@ def api_generate_slide_single():
     need_maps = (slide_index == 0 or 'map' in slides[slide_index].get('type', ''))
     has_maps = isinstance(images, dict) and isinstance(images.get('map_placeholders'), dict) and bool(images.get('map_placeholders'))
     if need_maps and not has_maps:
-        map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=data.get('presentationId'), force=True, branding=branding)
+        map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=data.get('presentationId'), force=False, branding=branding)
         if map_result.get('placeholders'):
             if not isinstance(images, dict):
                 images = {'cover': None, 'moodboard': []}
@@ -2602,8 +2631,8 @@ def api_generate_slides():
     if not slide_plan or 'slides' not in slide_plan:
         return jsonify({'error': 'slidePlan with slides array is required'}), 400
 
-    # Generate map images if project has location data
-    map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=presentation_id, force=True, branding=branding)
+    # Generate map images if project has location data (use cache unless missing)
+    map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=presentation_id, force=False, branding=branding)
     map_placeholders = {}
     if map_result.get('placeholders'):
         if not isinstance(images, dict):
@@ -5189,6 +5218,7 @@ DEFAULT_BRANDING_VALUES = {
     'moodboard_enabled': 1,
     'cover_image_enabled': 1,
     'default_slide_count': 16,
+    'lock_slide_count': 0,
     'min_slides': 8,
     'max_slides': 30,
 }

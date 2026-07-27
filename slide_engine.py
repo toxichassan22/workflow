@@ -573,24 +573,31 @@ def _replace_map_placeholders(html, map_placeholders):
     return html
 
 
+DEFAULT_MOODBOARD_IMAGES = [
+    '/uploads/moodboard_exterior.png',
+    '/uploads/moodboard_materials.png',
+    '/uploads/moodboard_interior.png',
+    '/uploads/moodboard_urban_lifestyle.png'
+]
+
+
 def _creative_image_values(images):
     """Return the generated cover and moodboard image URLs in a safe shape with fallbacks."""
     default_cover = '/uploads/luxury_skyscraper_cover.png'
-    default_moodboard = [
-        '/uploads/moodboard_exterior.png',
-        '/uploads/moodboard_materials.png',
-        '/uploads/moodboard_interior.png',
-        '/uploads/moodboard_urban_lifestyle.png'
-    ]
     if not isinstance(images, dict):
-        return default_cover, default_moodboard
+        return default_cover, DEFAULT_MOODBOARD_IMAGES[:]
     cover = images.get('cover') or images.get('mainImageData') or default_cover
     moodboard = images.get('moodboard') or images.get('moodboardImages') or []
     if not isinstance(moodboard, list) or not any(moodboard):
-        moodboard = default_moodboard
-    else:
-        moodboard = [moodboard[i] if i < len(moodboard) and moodboard[i] else default_moodboard[i % 4] for i in range(4)]
-    return str(cover), [str(img) for img in moodboard]
+        moodboard = DEFAULT_MOODBOARD_IMAGES[:]
+    return str(cover), [str(img) if img else '' for img in moodboard]
+
+
+def _moodboard_url(index, moodboard):
+    """Pick an image for a moodboard token, falling back to the default set if needed."""
+    if index < len(moodboard) and moodboard[index]:
+        return moodboard[index]
+    return DEFAULT_MOODBOARD_IMAGES[index % len(DEFAULT_MOODBOARD_IMAGES)]
 
 
 def _css_url(image_url):
@@ -600,15 +607,9 @@ def _css_url(image_url):
 
 def _build_moodboard_fallback(images):
     """Build a deterministic moodboard layout matching the exact number of images."""
-    default_moodboard = [
-        '/uploads/moodboard_exterior.png',
-        '/uploads/moodboard_materials.png',
-        '/uploads/moodboard_interior.png',
-        '/uploads/moodboard_urban_lifestyle.png'
-    ]
     if not images or not any(images):
-        images = default_moodboard
-    images = [img or default_moodboard[i % 4] for i, img in enumerate(images)]
+        images = DEFAULT_MOODBOARD_IMAGES[:]
+    images = [img or DEFAULT_MOODBOARD_IMAGES[i % len(DEFAULT_MOODBOARD_IMAGES)] for i, img in enumerate(images)]
     count = len(images)
 
     # Dynamic CSS grid layout calculation based on image count
@@ -654,11 +655,12 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
         html = re.sub(cover_pat, cover, html, flags=re.IGNORECASE)
 
     # Replace moodboard & project image tokens (including malformed variations)
-    for index in range(16):
-        img_url = moodboard[index] if index < len(moodboard) else moodboard[index % len(moodboard)]
-        num = index + 1
-        html = re.sub(rf'#*MOODBOARD_IMAGE_{num}#*', img_url, html, flags=re.IGNORECASE)
-        html = re.sub(rf'#*PROJECT_IMAGE_{num}#*', img_url, html, flags=re.IGNORECASE)
+    def _replace_moodboard_token(match):
+        index = int(match.group(1)) - 1
+        return _moodboard_url(index, moodboard)
+
+    html = re.sub(r'#*MOODBOARD_IMAGE_(\d+)#*', _replace_moodboard_token, html, flags=re.IGNORECASE)
+    html = re.sub(r'#*PROJECT_IMAGE_(\d+)#*', _replace_moodboard_token, html, flags=re.IGNORECASE)
 
     # Do not leave the cover blank simply because the model forgot its token.
     if slide_type == 'cover' and cover and cover not in html:
@@ -804,15 +806,43 @@ def resolve_logo_in_html(html, tenant_id=None):
     return html
 
 
-def _strip_presentation_icons(html):
-    """Remove generated icon markup and emoji while retaining company logo images."""
+INLINE_ICON_SVG = (
+    '<svg class="ge-inline-icon" width="16" height="16" viewBox="0 0 24 24" '
+    'fill="currentColor" style="display:inline-block;vertical-align:middle;margin-left:4px">'
+    '<path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>'
+    '</svg>'
+)
+
+
+def _replace_emojis_with_svg(html):
+    """Replace emoji characters in text content between HTML tags with small inline SVG icons."""
     if not html:
         return html
-    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', '', html, flags=re.IGNORECASE)
+    def _emoji_repl(match):
+        # group 1 and 3 are surrounding text; group 2 is the emoji(s)
+        return match.group(1) + INLINE_ICON_SVG + match.group(3)
+    # Only replace inside text nodes (between > and <), not inside tag definitions.
+    return re.sub(
+        r'>([^<]*?)([\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)([^<]*?)<',
+        _emoji_repl,
+        html
+    )
+
+
+def _strip_presentation_icons(html):
+    """Remove generated icon markup and emoji while retaining company logo images and inline icons."""
+    if not html:
+        return html
+    def _remove_svg(match):
+        if 'ge-inline-icon' in match.group(0):
+            return match.group(0)
+        return ''
+    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', _remove_svg, html, flags=re.IGNORECASE)
     html = re.sub(
         r'<(?:i|span|div)\b[^>]*(?:class|id)=["\'][^"\']*(?:icon|emoji|lucide|fa-|material-icons)[^"\']*["\'][^>]*>[\s\S]*?</(?:i|span|div)\s*>',
         '', html, flags=re.IGNORECASE
     )
+    # Any remaining emojis are stripped, but ideally _replace_emojis_with_svg handled them first.
     return _ICON_RE.sub('', html)
 
 
@@ -823,7 +853,8 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     slide_type is the semantic type (cover, index, content, closing, ...).
     slide_num / total_slides are used for page numbers and cover/closing detection.
     """
-    # Strip SVGs, icon fonts and emojis first.
+    # Replace emojis with inline SVGs, then strip external SVG/icon fonts.
+    html = _replace_emojis_with_svg(html)
     html = _strip_presentation_icons(html)
 
     # Enforce image/placeholder rules.
