@@ -1,12 +1,3 @@
-# Stage 1: resolve Git LFS pointer files so real font data is available in the image.
-# The .git directory is removed before the final stage so it does not bloat the image.
-FROM python:3.11-slim AS lfs
-RUN apt-get update && apt-get install -y --no-install-recommends git git-lfs \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-WORKDIR /repo
-COPY . .
-RUN git lfs pull || true && rm -rf .git
-
 FROM python:3.11-slim
 
 # Install Arabic/system fonts (no LibreOffice needed - PDF uses Playwright)
@@ -24,15 +15,15 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # Install Python dependencies
-COPY --from=lfs /repo/requirements.txt ./
+COPY requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Install Playwright browsers inside app directory for Hugging Face permissions
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
 RUN playwright install --with-deps chromium
 
-# Copy all project files (with real LFS-pulled fonts)
-COPY --from=lfs /repo .
+# Copy all project files (fonts_bundle.json contains the real bundled font data)
+COPY . .
 
 # Create writable directories and fix permissions for HF non-root user
 RUN mkdir -p /app/outputs /app/uploads /app/.cache && \
