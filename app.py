@@ -795,16 +795,19 @@ def api_official_outline():
     min_s, max_s, default_count = resolve_slide_bounds(branding)
     target_count = max(min_s, min(default_count, max_s))
 
-    structure_lines = ['1. شريحة غلاف (type="cover")']
-    if target_count >= 2:
-        structure_lines.append('2. شريحة فهرس (type="index")')
-    if target_count >= 4:
-        structure_lines.append(f'3-{target_count - 2}. شرائح محتوى (type="content")')
-        structure_lines.append(f'{target_count - 1}. شريحة مود بورد (type="mood_board")')
+    if target_count == 1:
+        structure_lines = ['1. شريحة غلاف (type="cover")']
+    elif target_count == 2:
+        structure_lines = ['1. شريحة غلاف (type="cover")', '2. شريحة ختام (type="closing")']
     elif target_count == 3:
-        structure_lines.append('3. شريحة محتوى (type="content")')
-    if target_count >= 2:
-        structure_lines.append(f'{target_count}. شريحة ختام (type="closing")')
+        structure_lines = ['1. شريحة غلاف (type="cover")', '2. شريحة فهرس (type="index")', '3. شريحة ختام (type="closing")']
+    elif target_count == 4:
+        structure_lines = ['1. شريحة غلاف (type="cover")', '2. شريحة فهرس (type="index")', '3. شريحة محتوى (type="content")', '4. شريحة ختام (type="closing")']
+    else:
+        structure_lines = ['1. شريحة غلاف (type="cover")', '2. شريحة فهرس (type="index")',
+                           f'3-{target_count - 2}. شرائح محتوى (type="content")',
+                           f'{target_count - 1}. شريحة مود بورد (type="mood_board")',
+                           f'{target_count}. شريحة ختام (type="closing")']
     structure_text = '\n'.join(structure_lines)
 
     prompt = f"""أنت محلل مالي وعقاري ذكي. قم بإنشاء هيكل (outline) عرض تقديمي مخصص بالكامل لمشروع المستخدم.
@@ -961,7 +964,8 @@ def api_designer_generate():
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             future_to_idx = {}
             for i in range(slide_count):
-                future = executor.submit(generate_single_slide, system_prompt, i + 1, g.tenant_id, total=slide_count)
+                slide_title = outline[i].get('title') if i < len(outline) else None
+                future = executor.submit(generate_single_slide, system_prompt, i + 1, g.tenant_id, total=slide_count, title=slide_title)
                 future_to_idx[future] = i
 
             for future in concurrent.futures.as_completed(future_to_idx):
@@ -976,8 +980,9 @@ def api_designer_generate():
         if missing:
             print(f"[DESIGNER] Retrying missing slides after parallel run: {missing}")
             for slide_num in missing:
+                slide_title = outline[slide_num - 1].get('title') if slide_num - 1 < len(outline) else None
                 results[slide_num - 1] = generate_single_slide(
-                    system_prompt, slide_num, g.tenant_id, max_retries=1, total=slide_count
+                    system_prompt, slide_num, g.tenant_id, max_retries=1, total=slide_count, title=slide_title
                 )
 
         elapsed = round(time.time() - start_time, 1)
@@ -2053,15 +2058,27 @@ def api_reorder_fields():
 # يقترح AI حقول الإدخال المناسبة للشركة بناءً على وصف المشروع + بيانات التدريب
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _flatten_ai_fields(parsed):
+    """Normalize an LLM response into a list of field/section dicts."""
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, dict):
+        for k in ('fields', 'sections', 'suggestions', 'data', 'items'):
+            if k in parsed:
+                return parsed[k]
+    return []
+
+
 def _parse_ai_fields_json(text):
-    """Extract the first JSON array from LLM text."""
+    """Extract the first JSON array (or object with fields/sections) from LLM text."""
     # Try code block first
     cb = re.search(r'```(?:json)?\s*\n?([\s\S]*?)```', text)
     if cb:
         try:
             parsed = json.loads(cb.group(1).strip())
-            if isinstance(parsed, list):
-                return parsed
+            flattened = _flatten_ai_fields(parsed)
+            if flattened:
+                return flattened
         except (json.JSONDecodeError, ValueError):
             pass
     # Try balanced bracket scan for array
@@ -2088,15 +2105,19 @@ def _parse_ai_fields_json(text):
                     depth -= 1
                     if depth == 0:
                         try:
-                            return json.loads(text[start:i+1])
+                            parsed = json.loads(text[start:i+1])
+                            flattened = _flatten_ai_fields(parsed)
+                            if flattened:
+                                return flattened
                         except (json.JSONDecodeError, ValueError):
                             pass
                         break
     # Fallback: whole text
     try:
         parsed = json.loads(text.strip())
-        if isinstance(parsed, list):
-            return parsed
+        flattened = _flatten_ai_fields(parsed)
+        if flattened:
+            return flattened
     except (json.JSONDecodeError, ValueError):
         pass
     return []
@@ -2265,39 +2286,45 @@ def api_ai_build_fields():
         for s in suggestions:
             if not isinstance(s, dict):
                 continue
-            key = re.sub(r'[^a-z0-9_]', '_', (s.get('fieldKey') or '').strip().lower()).strip('_')
-            label = (s.get('fieldLabel') or key).strip()
-            if not key or not label or key in existing_keys or label.lower() in existing_labels:
-                continue
-            ftype = s.get('fieldType', 'text')
-            if ftype not in valid_types:
-                ftype = 'text'
-            section = s.get('sectionKey', 'general').strip().lower()
-            section_label = (s.get('sectionLabel') or section).strip()
-            if section not in section_keys and section_label:
+            # Expand a section that contains a nested 'fields' list.
+            nested = s.get('fields') if isinstance(s.get('fields'), list) else None
+            items = nested if nested else [s]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                key = re.sub(r'[^a-z0-9_]', '_', (item.get('fieldKey') or item.get('field_key') or '').strip().lower()).strip('_')
+                label = (item.get('fieldLabel') or item.get('field_label') or key).strip()
+                if not key or not label or key in existing_keys or label.lower() in existing_labels:
+                    continue
+                ftype = item.get('fieldType') or item.get('field_type') or 'text'
+                if ftype not in valid_types:
+                    ftype = 'text'
+                section = (item.get('sectionKey') or item.get('section_key') or 'general').strip().lower()
+                section_label = (item.get('sectionLabel') or item.get('section_label') or section).strip()
+                if section not in section_keys and section_label:
+                    try:
+                        db.add_custom_section(g.tenant_id, section, section_label)
+                        section_keys.add(section)
+                    except Exception as se:
+                        print(f"[AI-BUILD-FIELDS] section creation failed: {se}")
+                        section = 'general'
+                opts = item.get('fieldOptions') if isinstance(item.get('fieldOptions'), list) else (item.get('field_options') if isinstance(item.get('field_options'), list) else None)
                 try:
-                    db.add_custom_section(g.tenant_id, section, section_label)
-                    section_keys.add(section)
-                except Exception as se:
-                    print(f"[AI-BUILD-FIELDS] section creation failed: {se}")
-                    section = 'general'
-            opts = s.get('fieldOptions') if isinstance(s.get('fieldOptions'), list) else None
-            try:
-                field_id = db.add_custom_field(
-                    g.tenant_id, key, label, ftype,
-                    field_options=opts,
-                    is_required=bool(s.get('isRequired')),
-                    placeholder=str(s.get('placeholder') or '').strip() or None,
-                    default_value=str(s.get('defaultValue') or '').strip() or None,
-                    ai_hint=str(s.get('aiHint') or '').strip() or None,
-                    section_key=section
-                )
-                created.append({'id': field_id, 'field_key': key, 'field_label': label, 'section_key': section})
-                existing_keys.append(key)
-                existing_labels.add(label.lower())
-            except Exception as fe:
-                print(f"[AI-BUILD-FIELDS] field creation failed: {fe}")
-                errors.append(f"{label}: {fe}")
+                    field_id = db.add_custom_field(
+                        g.tenant_id, key, label, ftype,
+                        field_options=opts,
+                        is_required=bool(item.get('isRequired') or item.get('is_required')),
+                        placeholder=str(item.get('placeholder') or '').strip() or None,
+                        default_value=str(item.get('defaultValue') or item.get('default_value') or '').strip() or None,
+                        ai_hint=str(item.get('aiHint') or item.get('ai_hint') or '').strip() or None,
+                        section_key=section
+                    )
+                    created.append({'id': field_id, 'field_key': key, 'field_label': label, 'section_key': section})
+                    existing_keys.append(key)
+                    existing_labels.add(label.lower())
+                except Exception as fe:
+                    print(f"[AI-BUILD-FIELDS] field creation failed: {fe}")
+                    errors.append(f"{label}: {fe}")
 
         return jsonify({'success': True, 'created': created, 'errors': errors, 'count': len(created)})
     except Exception as e:
@@ -3833,9 +3860,10 @@ def serve_tenant_logo(tenant_id):
 @app.route('/tenant-assets/<tenant_id>/fonts/<filename>')
 def serve_tenant_font(tenant_id, filename):
     """Serve uploaded tenant font files."""
-    import re as _re
-    safe_name = _re.sub(r'[^a-zA-Z0-9_-]', '', filename)
-    font_path = os.path.join(UPLOADS_DIR, tenant_id, 'fonts', safe_name)
+    safe_name = os.path.basename(filename)
+    if '..' in safe_name or safe_name.startswith('.') or not safe_name:
+        return jsonify({'error': 'Invalid font filename'}), 400
+    font_path = os.path.join(UPLOADS_DIR, str(tenant_id), 'fonts', safe_name)
     if not os.path.isfile(font_path):
         return jsonify({'error': 'Font not found'}), 404
     ext = os.path.splitext(safe_name)[1].lower()

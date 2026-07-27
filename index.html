@@ -3758,6 +3758,9 @@
 
     function collectSettings() {
       const fontFamily = getValue('settingsFontFamily');
+      const isCustomFont = fontFamily === 'custom';
+      const storedFontName = (tenantBranding && tenantBranding.font_family) || 'The Sans Arabic';
+      const fontToSave = isCustomFont ? storedFontName : fontFamily;
       const settings = {
         company_name: getValue('settingsCompanyName'),
         tagline: getValue('settingsTagline'),
@@ -3766,8 +3769,8 @@
         accent_color: getValue('settingsAccentColor'),
         background_color: getValue('settingsBackgroundColor'),
         text_color: getValue('settingsTextColor'),
-        font_family: fontFamily,
-        font_arabic: fontFamily,
+        font_family: fontToSave,
+        font_arabic: fontToSave,
         design_template: getValue('settingsDesignTemplate'),
         card_style: getValue('settingsCardStyle'),
         slide_ratio: getValue('settingsSlideRatio'),
@@ -3789,7 +3792,7 @@
         draw_inset: getChecked('settingsDrawInset') ? 1 : 0,
       };
       // Only keep custom uploaded font when 'custom' is selected; otherwise clear the file path.
-      if (fontFamily === 'custom') {
+      if (isCustomFont) {
         if (tenantBranding && tenantBranding.font_file_path) {
           settings.font_file_path = tenantBranding.font_file_path;
         }

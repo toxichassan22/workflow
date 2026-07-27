@@ -797,7 +797,7 @@ def _migrate_branding_columns(conn):
         existing_cols = {row[1] for row in cursor.fetchall()}
         migrations = {
             'default_slide_count': "ALTER TABLE tenant_branding ADD COLUMN default_slide_count INTEGER DEFAULT 16",
-            'lock_slide_count': "ALTER TABLE tenant_branding ADD COLUMN lock_slide_count INTEGER DEFAULT 1",
+            'lock_slide_count': "ALTER TABLE tenant_branding ADD COLUMN lock_slide_count INTEGER DEFAULT 0",
             'min_slides': "ALTER TABLE tenant_branding ADD COLUMN min_slides INTEGER DEFAULT 8",
             'max_slides': "ALTER TABLE tenant_branding ADD COLUMN max_slides INTEGER DEFAULT 30",
             'default_map_type': "ALTER TABLE tenant_branding ADD COLUMN default_map_type TEXT DEFAULT 'satellite'",
@@ -814,6 +814,8 @@ def _migrate_branding_columns(conn):
             if col not in existing_cols:
                 conn.execute(sql)
                 print(f"[DB MIGRATION] Added column: {col}")
+        # Fix rows created during the brief window when lock_slide_count defaulted to 1.
+        conn.execute('UPDATE tenant_branding SET lock_slide_count = 0 WHERE lock_slide_count = 1')
         conn.commit()
     except Exception as e:
         print(f"[DB MIGRATION ERR] {e}")

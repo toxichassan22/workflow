@@ -30,5 +30,8 @@ exports/*.pdf
 exports/*.pptx
 exports/*.png
 .tmp_examples_review/
+.tmp*
 examples/
 mirror/
+*.db
+how\ to\ push\ on\ server.md

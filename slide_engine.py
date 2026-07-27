@@ -9,6 +9,7 @@ import re
 import concurrent.futures
 from design_templates import build_design_rules
 import db
+import emoji_icons
 
 _ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
 
@@ -597,7 +598,9 @@ def _moodboard_url(index, moodboard):
     """Pick an image for a moodboard token, falling back to the default set if needed."""
     if index < len(moodboard) and moodboard[index]:
         return moodboard[index]
-    return DEFAULT_MOODBOARD_IMAGES[index % len(DEFAULT_MOODBOARD_IMAGES)]
+    if index < len(DEFAULT_MOODBOARD_IMAGES):
+        return DEFAULT_MOODBOARD_IMAGES[index]
+    return DEFAULT_MOODBOARD_IMAGES[0] if DEFAULT_MOODBOARD_IMAGES else ''
 
 
 def _css_url(image_url):
@@ -609,7 +612,10 @@ def _build_moodboard_fallback(images):
     """Build a deterministic moodboard layout matching the exact number of images."""
     if not images or not any(images):
         images = DEFAULT_MOODBOARD_IMAGES[:]
-    images = [img or DEFAULT_MOODBOARD_IMAGES[i % len(DEFAULT_MOODBOARD_IMAGES)] for i, img in enumerate(images)]
+    # Prefer generated images; for missing slots use the first default image instead of
+    # cycling 4 assets, which produced 4 images repeated many times for large counts.
+    fallback_img = DEFAULT_MOODBOARD_IMAGES[0] if DEFAULT_MOODBOARD_IMAGES else ''
+    images = [img if img else (DEFAULT_MOODBOARD_IMAGES[i] if i < len(DEFAULT_MOODBOARD_IMAGES) else fallback_img) for i, img in enumerate(images)]
     count = len(images)
 
     # Dynamic CSS grid layout calculation based on image count
@@ -806,27 +812,15 @@ def resolve_logo_in_html(html, tenant_id=None):
     return html
 
 
-INLINE_ICON_SVG = (
-    '<svg class="ge-inline-icon" width="16" height="16" viewBox="0 0 24 24" '
-    'fill="currentColor" style="display:inline-block;vertical-align:middle;margin-left:4px">'
-    '<path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>'
-    '</svg>'
-)
-
-
 def _replace_emojis_with_svg(html):
-    """Replace emoji characters in text content between HTML tags with small inline SVG icons."""
+    """Replace emoji characters inside HTML text nodes with relevant inline SVG icons."""
     if not html:
         return html
-    def _emoji_repl(match):
-        # group 1 and 3 are surrounding text; group 2 is the emoji(s)
-        return match.group(1) + INLINE_ICON_SVG + match.group(3)
+    def _node_repl(match):
+        # Preserve the tag delimiters and replace every emoji in the text node.
+        return '>' + emoji_icons.replace_emojis_in_text(match.group(1)) + '<'
     # Only replace inside text nodes (between > and <), not inside tag definitions.
-    return re.sub(
-        r'>([^<]*?)([\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)([^<]*?)<',
-        _emoji_repl,
-        html
-    )
+    return re.sub(r'>([^<]*?)<', _node_repl, html)
 
 
 def _strip_presentation_icons(html):

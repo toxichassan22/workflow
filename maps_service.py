@@ -1486,10 +1486,24 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         
         gold_color = (212, 163, 89, 180) # Premium gold/bronze color matching branding
         
-        # Road geometry and road names are determined only by Google Roads,
-        # Directions, and reverse Geocoding APIs.  No frontend road list is used.
+        # Road geometry is discovered via Google APIs, but labels prefer the
+        # main_roads / secondary_roads the tenant/user provided in project data.
         routes_coords = []
         road_route_mapping = [] # stores (coords, road_name)
+
+        user_road_names = []
+        if project_data:
+            for key in ('main_roads', 'secondary_roads'):
+                val = project_data.get(key) or project_data.get(key.replace('_', ''))
+                if isinstance(val, str):
+                    for name in val.split(','):
+                        n = name.strip()
+                        if n:
+                            user_road_names.append(n)
+                elif isinstance(val, list):
+                    user_road_names.extend(str(v).strip() for v in val if v)
+            if user_road_names:
+                print(f"[ACCESS ROADS] User supplied road names: {user_road_names}")
 
         # Find actual nearby access roads through Google Roads + Directions.
         # The target points are only geographic probes; Google returns the road
@@ -1534,9 +1548,10 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
 
         # 3. Draw routes and labels
         placed_label_rects = []  # track (x1,y1,x2,y2) of placed labels to avoid overlap
-        
+
         if routes_coords:
-            for coords, label_text in road_route_mapping:
+            for i, (coords, google_label) in enumerate(road_route_mapping):
+                label_text = user_road_names[i] if i < len(user_road_names) else google_label
                 pixels = []
                 for lat, lng in coords:
                     dx, dy = _latlng_to_pixel_offset(lat, lng, center_lat, center_lng, zoom, scale=scale)
