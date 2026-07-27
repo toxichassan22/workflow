@@ -2051,12 +2051,15 @@
         </div>
       </div>
       <div class="tenant-nav">
-        <button class="btn ghost" data-permission="create_presentation" onclick="startTenantProject()">عرض جديد</button>
-        <button class="btn ghost" data-permission="view_presentations"
-          onclick="openTenantPresentations()">العروض</button>
-        <div class="tenant-dropdown tenant-admin-only">
-          <button class="btn ghost" onclick="toggleTenantDropdown(this)">الإدارة ▾</button>
-          <div class="tenant-dropdown-menu">
+        <span id="tenantUserInfo" class="tenant-hint"
+          style="background:#E8F4FA;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:600;white-space:nowrap"></span>
+        <div class="tenant-dropdown" style="position:relative">
+          <button class="btn ghost" onclick="toggleTenantDropdown(this)">☰ القائمة</button>
+          <div class="tenant-dropdown-menu" style="min-width:200px">
+            <button class="btn ghost" data-permission="create_presentation"
+              onclick="startTenantProject(); closeTenantDropdown()">عرض جديد</button>
+            <button class="btn ghost" data-permission="view_presentations"
+              onclick="openTenantPresentations(); closeTenantDropdown()">العروض</button>
             <button class="btn ghost" data-permission="company_settings"
               onclick="openTenantSettings(); closeTenantDropdown()">إعدادات الشركة</button>
             <button class="btn ghost" data-permission="custom_fields"
@@ -2071,8 +2074,6 @@
               onclick="openTenantAdmin(); closeTenantDropdown()">لوحة المدير</button>
           </div>
         </div>
-        <span id="tenantUserInfo" class="tenant-hint"
-          style="background:#E8F4FA;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:600;white-space:nowrap"></span>
         <button class="btn danger" onclick="tenantLogout()">خروج</button>
       </div>
     </div>
@@ -2376,6 +2377,7 @@
         <div class="tenant-btns" style="margin-bottom:16px">
           <button class="btn primary" id="btnAiSuggestFields" onclick="suggestAiFields()">اقتراح حقول بالذكاء
             الاصطناعي</button>
+          <button class="btn primary" id="btnAiBuildFields" onclick="aiAutoBuildFields()" style="background:#4CAF50;">بناء حقول تلقائياً (AI)</button>
           <button class="btn ghost" onclick="clearAiFieldBuilder()">تفريغ</button>
         </div>
 
@@ -3755,6 +3757,7 @@
     function getChecked(id) { const el = document.getElementById(id); return el ? el.checked : false; }
 
     function collectSettings() {
+      const fontFamily = getValue('settingsFontFamily');
       const settings = {
         company_name: getValue('settingsCompanyName'),
         tagline: getValue('settingsTagline'),
@@ -3763,8 +3766,8 @@
         accent_color: getValue('settingsAccentColor'),
         background_color: getValue('settingsBackgroundColor'),
         text_color: getValue('settingsTextColor'),
-        font_family: getValue('settingsFontFamily'),
-        font_arabic: getValue('settingsFontFamily'),
+        font_family: fontFamily,
+        font_arabic: fontFamily,
         design_template: getValue('settingsDesignTemplate'),
         card_style: getValue('settingsCardStyle'),
         slide_ratio: getValue('settingsSlideRatio'),
@@ -3785,8 +3788,13 @@
         draw_compass: getChecked('settingsDrawCompass') ? 1 : 0,
         draw_inset: getChecked('settingsDrawInset') ? 1 : 0,
       };
-      if (tenantBranding && tenantBranding.font_file_path) {
-        settings.font_file_path = tenantBranding.font_file_path;
+      // Only keep custom uploaded font when 'custom' is selected; otherwise clear the file path.
+      if (fontFamily === 'custom') {
+        if (tenantBranding && tenantBranding.font_file_path) {
+          settings.font_file_path = tenantBranding.font_file_path;
+        }
+      } else {
+        settings.font_file_path = null;
       }
       return settings;
     }
@@ -4180,6 +4188,32 @@
       document.getElementById('aiFieldSuggestions').style.display = 'none';
       document.getElementById('aiFieldSuggestionsList').innerHTML = '';
       aiFieldSuggestions = [];
+    }
+
+    async function aiAutoBuildFields() {
+      const description = document.getElementById('aiFieldDescription').value.trim();
+      if (!description) { toast('اكتب وصف المشروع أولاً'); return; }
+      if (!confirm('سيقوم AI بإنشاء الحقول والأقسام مباشرة في قاعدة البيانات. متابعة؟')) return;
+
+      const btn = document.getElementById('btnAiBuildFields');
+      btn.disabled = true;
+      btn.textContent = 'جاري البناء...';
+      showLoader('AI يبني حقول المدخلات', 'قد يستغرق لحظات');
+
+      const data = await api('POST', '/api/ai-build-fields', { description });
+      hideLoader();
+      btn.disabled = false;
+      btn.textContent = 'بناء حقول تلقائياً (AI)';
+
+      if (!data.success) {
+        toast(data.error || 'فشل البناء التلقائي');
+        return;
+      }
+      toast(`تم إنشاء ${data.count || 0} حقل تلقائياً`);
+      await renderTenantFields();
+      const sectionsData = await api('GET', '/api/field-sections');
+      tenantFieldSections = sectionsData.available || [];
+      clearAiFieldBuilder();
     }
 
     async function suggestAiFields() {

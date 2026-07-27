@@ -1450,7 +1450,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         except Exception:
             return text
 
-    def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 230), border_color=(240, 230, 210, 200)):
+    def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 245), border_color=(240, 230, 210, 220)):
         if not font:
             font_paths = [
                 "fonts/BahijTheSansArabic-Bold.ttf",
@@ -1459,22 +1459,22 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             ]
             for fp in font_paths:
                 try:
-                    font = ImageFont.truetype(fp, 13)
+                    font = ImageFont.truetype(fp, 17)
                     break
                 except Exception:
                     continue
             if not font:
                 font = ImageFont.load_default()
-                
+
         reshaped_text = _reshape_arabic_text(text)
         bbox = draw.textbbox((0, 0), reshaped_text, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        
-        pad_x = 10
-        pad_y = 5
+
+        pad_x = 12
+        pad_y = 7
         rect = [int(px - tw // 2 - pad_x), int(py - th // 2 - pad_y), int(px + tw // 2 + pad_x), int(py + th // 2 + pad_y)]
-        
-        draw.rounded_rectangle(rect, radius=5, fill=bg_color, outline=border_color, width=1)
+
+        draw.rounded_rectangle(rect, radius=8, fill=bg_color, outline=border_color, width=2)
         draw.text((int(px - tw // 2), int(py - th // 2 - 2)), reshaped_text, fill='#FFFFFF', font=font)
 
     try:

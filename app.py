@@ -2201,6 +2201,110 @@ def api_ai_input_builder():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/ai-build-fields', methods=['POST'])
+@require_permission('custom_fields')
+def api_ai_build_fields():
+    """
+    AI suggests input fields and auto-creates them in DB (with sections).
+    Input: { description: '...' }
+    Output: { created: [...], errors: [] }
+    """
+    data = request.json or {}
+    description = (data.get('description') or '').strip()
+    if not description:
+        return jsonify({'error': 'description is required'}), 400
+
+    existing = db.get_fields(g.tenant_id, active_only=False)
+    existing_keys = [f['field_key'] for f in existing]
+    existing_labels = {f['field_label'].strip().lower() for f in existing}
+    training_context = db.get_training_context(g.tenant_id) or ''
+    section_keys = {s['key'] for s in db.get_all_sections(g.tenant_id)}
+
+    system_prompt = """أنت مساعد ذكي لمنصة توليد عروض تقديمية عقارية. مهمتك اقتراح وبناء حقول إدخال (input fields) مناسبة لمشروع عقاري أو شركة معيّنة.
+
+أعد الرد كـ JSON array فقط. كل عنصر يمثل قسماً أو حقل إدخال واحد."""
+
+    user_prompt = f"""ابنِ حقول إدخال مناسبة للوصف التالي:
+
+{description}
+
+بيانات التدريب الخاصة بالشركة:
+{training_context[:2000] if training_context else 'لا يوجد تدريب خاص بالشركة بعد.'}
+
+الحقول الموجودة حالياً (لا تكررها): {', '.join(existing_keys) if existing_keys else 'لا يوجد حقول'}
+
+الأنواع المسموح بها فقط: text, textarea, number, select, date, image.
+
+المخرجات المطلوبة: JSON array فقط. كل عنصر بهذه المفاتيح:
+- sectionKey: مفتاح القسم (snake_case). استخدم قسماً منطقيًا مثل: basic, location, financial, features, swot, marketing, timeline, compliance.
+- sectionLabel: اسم القسم بالعربي (إذا كان القسم جديدًا).
+- fieldKey: مفتاح إنجليزي صغير بدون مسافات (snake_case).
+- fieldLabel: اسم الحقل بالعربي.
+- fieldType: أحد الأنواع المسموح بها.
+- fieldOptions: array من strings (إذا كان fieldType = select)، وإلا null.
+- isRequired: true/false.
+- placeholder: نص توضيحي داخل الحقل (اختياري).
+- defaultValue: قيمة افتراضية (اختياري).
+- aiHint: توجيه للـ AI عند توليد الشرائح (اختياري).
+
+قواعد:
+- لا تُرجع أكثر من 12 حقل (لضمان جودة الرد).
+- اجعل الرد مدمجاً: لا تكرر الوصف الطويل، واستخدم قيم قصيرة.
+- fieldKey يجب أن يكون فريداً وsnake_case.
+- إذا كان القسم غير موجود في الأقسام المعروفة، سيتم إنشاؤه تلقائياً باستخدام sectionLabel.
+"""
+
+    try:
+        response = call_zai_chat(system_prompt, user_prompt, temperature=0.7, max_tokens=4000)
+        content = extract_chat_content(response, "AI-BUILD-FIELDS")
+        suggestions = _parse_ai_fields_json(content)
+
+        valid_types = {'text', 'textarea', 'number', 'select', 'date', 'image'}
+        created = []
+        errors = []
+        for s in suggestions:
+            if not isinstance(s, dict):
+                continue
+            key = re.sub(r'[^a-z0-9_]', '_', (s.get('fieldKey') or '').strip().lower()).strip('_')
+            label = (s.get('fieldLabel') or key).strip()
+            if not key or not label or key in existing_keys or label.lower() in existing_labels:
+                continue
+            ftype = s.get('fieldType', 'text')
+            if ftype not in valid_types:
+                ftype = 'text'
+            section = s.get('sectionKey', 'general').strip().lower()
+            section_label = (s.get('sectionLabel') or section).strip()
+            if section not in section_keys and section_label:
+                try:
+                    db.add_custom_section(g.tenant_id, section, section_label)
+                    section_keys.add(section)
+                except Exception as se:
+                    print(f"[AI-BUILD-FIELDS] section creation failed: {se}")
+                    section = 'general'
+            opts = s.get('fieldOptions') if isinstance(s.get('fieldOptions'), list) else None
+            try:
+                field_id = db.add_custom_field(
+                    g.tenant_id, key, label, ftype,
+                    field_options=opts,
+                    is_required=bool(s.get('isRequired')),
+                    placeholder=str(s.get('placeholder') or '').strip() or None,
+                    default_value=str(s.get('defaultValue') or '').strip() or None,
+                    ai_hint=str(s.get('aiHint') or '').strip() or None,
+                    section_key=section
+                )
+                created.append({'id': field_id, 'field_key': key, 'field_label': label, 'section_key': section})
+                existing_keys.append(key)
+                existing_labels.add(label.lower())
+            except Exception as fe:
+                print(f"[AI-BUILD-FIELDS] field creation failed: {fe}")
+                errors.append(f"{label}: {fe}")
+
+        return jsonify({'success': True, 'created': created, 'errors': errors, 'count': len(created)})
+    except Exception as e:
+        print(f"[AI-BUILD-FIELDS ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # SLIDE PLAN & GENERATION ENDPOINTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

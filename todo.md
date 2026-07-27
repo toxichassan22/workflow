@@ -145,23 +145,23 @@
 ## 4. الـ Todo التفصيلي
 
 ### أولوية عالية
-- [ ] **F1** — توحيد مصدر قواعد التصميم: إزالة `DESIGN_RULES` الثابت من `app.py`.
-- [ ] **F2** — دعم رفع ملفات الخطوط (`woff2/ttf/otf`) في `tenantSettingsPage` + `/api/branding`.
-- [ ] **F3** — تضمين الخط المرفوع تلقائياً في Preview/PDF/PPTX مع fallback.
-- [ ] **M1** — إضافة overlay لأسماء الطرق على `map_access` باستخدام `main_roads`/`secondary_roads`.
-- [ ] **M2** — cache للخرائط في `map_images` لمنع التكرار وضمان الاستقرار.
-- [ ] **M3** — نقل اختيار نوع الخريطة لـ `tenantProjectPage` وحفظه في `project_data`.
-- [ ] **I1** — post-process يمنع Emojis ويستبدلها بـ SVG inline في `slide_engine.py`.
-- [ ] **G1** — جعل عدد صور Moodboard متغير وتحكم به من الأدمن (`moodboard_count`).
-- [ ] **G2** — جعل عدد الشرائح يتبع `default_slide_count`/`min_slides`/`max_slides` بدلاً من 16 ثابت.
+- [x] **F1** — توحيد مصدر قواعد التصميم: إزالة `DESIGN_RULES` الثابت من `app.py`.
+- [x] **F2** — دعم رفع ملفات الخطوط (`woff2/ttf/otf`) في `tenantSettingsPage` + `/api/branding`.
+- [x] **F3** — تضمين الخط المرفوع تلقائياً في Preview/PDF/PPTX مع fallback.
+- [x] **M1** — إضافة overlay لأسماء الطرق على `map_access` باستخدام `main_roads`/`secondary_roads`.
+- [x] **M2** — cache للخرائط في `map_images` لمنع التكرار وضمان الاستقرار.
+- [x] **M3** — نقل اختيار نوع الخريطة لـ `tenantProjectPage` وحفظه في `project_data`.
+- [x] **I1** — post-process يمنع Emojis ويستبدلها بـ SVG inline في `slide_engine.py`.
+- [x] **G1** — جعل عدد صور Moodboard متغير وتحكم به من الأدمن (`moodboard_count`).
+- [x] **G2** — جعل عدد الشرائح يتبع `default_slide_count`/`min_slides`/`max_slides` بدلاً من 16 ثابت.
 - [ ] **G3** — شاشة موافقة على الصورة الأساسية قبل توليد باقي الشرائح.
 
 ### أولوية متوسطة
-- [ ] **A1** — بناء chat ذكي لتوليد حقول المدخلات من `tenant_training_data`.
-- [ ] **A2** — تحويل `tenantTrainingPage` لـ chat تفاعلي مع أمثلة جاهزة.
-- [ ] **U1** — إعادة تنظيم `tenant-topbar` بـ dropdown menu.
+- [x] **A1** — بناء chat ذكي لتوليد حقول المدخلات من `tenant_training_data`.
+- [x] **A2** — تحويل `tenantTrainingPage` لـ chat تفاعلي مع أمثلة جاهزة.
+- [x] **U1** — إعادة تنظيم `tenant-topbar` بـ dropdown menu.
 - [ ] **U2** — تقسيم `tenantProjectPage` لأقسام collapsible/tabs بوضوح.
-- [ ] **C1** — شات تعديل الشرائح (خط، لون، لوجو، صور، خرائط، أيقونات).
+- [x] **C1** — شات تعديل الشرائح (خط، لون، لوجو، صور، خرائط، أيقونات).
 
 ### أولوية منخفضة / نشر
 - [ ] **D1** — إضافة علامة مائية/بيانات التعميد في PDF/PPTX.
