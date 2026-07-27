@@ -35,10 +35,13 @@ fi
 log "WARN: health check failed on port $PORT; restarting..."
 
 # Stop any old gunicorn, preferring the configured port
-fuser -k "$PORT/tcp" 2>/dev/null || true
+pkill -TERM -f "gunicorn.*:$PORT" 2>/dev/null || true
+for i in $(seq 1 15); do
+  (echo >/dev/tcp/127.0.0.1/$PORT) 2>/dev/null || break
+  sleep 1
+done
 pkill -9 -f "gunicorn.*:$PORT" 2>/dev/null || true
 pkill -9 -f gunicorn 2>/dev/null || true
-sleep 2
 
 # Pick a free port, preferring APP_PORT
 SELECTED_PORT=""
@@ -57,16 +60,17 @@ fi
 log "Starting gunicorn on 127.0.0.1:$SELECTED_PORT"
 
 cd "$APP_DIR"
-"$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
+setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --workers 3 \
   --threads 2 \
   --timeout 300 \
   --graceful-timeout 30 \
   --max-requests 200 \
   --max-requests-jitter 50 \
-  --daemon \
   --access-logfile "$APP_DIR/server.log" \
-  --error-logfile "$APP_DIR/server.log"
+  --error-logfile "$APP_DIR/server.log" \
+  </dev/null >>"$APP_DIR/boot.log" 2>&1 &
+disown
 
 sleep 3
 

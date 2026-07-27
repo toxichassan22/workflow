@@ -29,6 +29,7 @@ rsync -av \
   --exclude='server_stderr.log' \
   --exclude='server_stdout.log' \
   --exclude='watchdog.log' \
+  --exclude='boot.log' \
   --exclude='outputs' \
   --exclude='uploads' \
   "$REPO_DIR/" "$APP_DIR/"
