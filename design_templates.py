@@ -132,16 +132,20 @@ def _build_font_face_from_data(font_file_data, family, fallback):
 
 def _build_preset_css(source, fallback):
     family = source['family']
+    family_list = f"'{family}', {fallback}"
     if source['type'] == 'bundled':
         data, fmt = source['data'], source['format']
-        css = f"@font-face{{font-family:'{family}';src:url(data:font/{fmt};base64,{data}) format('{fmt}');font-weight:100 900;font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
+        css = (
+            f"@font-face{{font-family:'{family}';src:url(data:font/{fmt};base64,{data}) format('{fmt}');font-weight:100 900;font-display:swap;}}\n"
+            f".slide,.slide *{{font-family:{family_list} !important;}}"
+        )
     else:  # google
         encoded = source['encoded']
         css = (
             f"@import url('https://fonts.googleapis.com/css2?family={encoded}:wght@400;700&display=swap');\n"
-            f".slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
+            f".slide,.slide *{{font-family:{family_list} !important;}}"
         )
-    return css, f"'{family}', {fallback}"
+    return css, family_list
 
 
 def sanitize_slide_html_for_export(html):

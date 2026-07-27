@@ -2342,21 +2342,12 @@ async function callImageAPIWithReference(referenceImageBase64, prompt) {
 
 var { generatePdf, renderSlideImage } = require('./pdf_engine');
 
+// Disabled: the front-end and all branded exports now use /api/export (Flask/Python).
+// The Node pdf_engine.js is only used for designer-chat slide preview images.
 app.post('/api/export-pdf', async function (req, res) {
-  try {
-    var { slidesHtml, projectName, fontCss } = req.body;
-    if (!slidesHtml) return res.status(400).json({ error: 'slidesHtml is required' });
-
-    var filename = (projectName || 'project') + '_' + Date.now() + '.pdf';
-    var outputPath = path.join(OUTPUT_DIR, filename);
-
-    await generatePdf(slidesHtml, outputPath, fontCss);
-
-    res.json({ url: '/outputs/' + filename, filename: filename });
-  } catch (e) {
-    console.error('PDF export error:', e);
-    res.status(500).json({ error: e.message || 'PDF generation failed' });
-  }
+  res.status(410).json({
+    error: 'This endpoint is disabled. Use POST /api/export (Python engine) for branded PDF export.'
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -2411,7 +2402,7 @@ app.post('/api/render-slide-image', async function (req, res) {
   try {
     var slideHtml = req.body.slideHtml;
     if (!slideHtml) return res.status(400).json({ error: 'slideHtml is required' });
-    var dataUri = await renderSlideImage(slideHtml, { scale: req.body.scale || 2 });
+    var dataUri = await renderSlideImage(slideHtml, { scale: req.body.scale || 2, fontCss: req.body.fontCss });
     res.json({ success: true, image: dataUri });
   } catch (e) {
     console.error('Render slide image error:', e);

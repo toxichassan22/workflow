@@ -10,6 +10,34 @@ try { EMBEDDED_FONTS = require('./fonts_bundle'); } catch (e) {
   console.warn('[PDF] fonts_bundle.js not found — will fall back to font files on disk');
 }
 
+// Strip any previously-baked font-family declarations so the tenant font wins.
+// Mirrors the Python sanitize_slide_html_for_export helper.
+function stripInlineFontFamily(html) {
+  if (!html) return html;
+
+  // Remove font-family from inline style attributes
+  html = html.replace(/\sstyle\s*=\s*(["'])(.*?)\1/gis, (match, quote, value) => {
+    let cleaned = value
+      .replace(/\s*font-family\s*:\s*[^;]+;?\s*/gi, '')
+      .replace(/;\s*;/g, ';')
+      .trim()
+      .replace(/^;+|;+$/g, '');
+    if (!cleaned) return '';
+    return ` style=${quote}${cleaned}${quote}`;
+  });
+
+  // Remove font-family from <style> blocks but leave @font-face blocks intact
+  html = html.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (match, block) => {
+    if (block.includes('@font-face')) return match;
+    const cleaned = block
+      .replace(/\s*font-family\s*:\s*[^;]+;?\s*/gi, '')
+      .replace(/;\s*;/g, ';');
+    return `<style>${cleaned}</style>`;
+  });
+
+  return html;
+}
+
 const FONT_DIR = path.join(__dirname, 'assets', 'fonts');
 
 function fontFaceCss() {
@@ -66,6 +94,8 @@ img { max-width: 100%; max-height: 100%; object-fit: cover; }
 async function renderSlideImage(slideHtml, opts) {
   opts = opts || {};
   const scale = opts.scale || 2;
+  const fontBlock = opts.fontCss ? `<style>${opts.fontCss}</style>` : '';
+  const cleanHtml = stripInlineFontFamily(slideHtml);
   const fullHtml = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -73,7 +103,8 @@ async function renderSlideImage(slideHtml, opts) {
   <style>${baseCss()}</style>
 </head>
 <body>
-${slideHtml}
+${cleanHtml}
+${fontBlock}
 </body>
 </html>`;
 
@@ -99,6 +130,7 @@ async function generatePdf(slidesHtml, outputPath, fontCss) {
     console.warn('[PDF] Node engine did not receive tenant fontCss; using default bundled fonts only');
   }
   const finalFontBlock = fontCss ? `<style>${fontCss}</style>` : '';
+  const cleanHtml = stripInlineFontFamily(slidesHtml);
   const fullHtml = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -106,7 +138,7 @@ async function generatePdf(slidesHtml, outputPath, fontCss) {
   <style>${baseCss()}</style>
 </head>
 <body>
-${slidesHtml}
+${cleanHtml}
 ${finalFontBlock}
 </body>
 </html>`;
