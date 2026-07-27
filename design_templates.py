@@ -152,10 +152,12 @@ def _build_preset_css(source, fallback):
         )
     elif source['type'] == 'google':
         encoded = source['encoded']
-        css = (
-            f"@import url('https://fonts.googleapis.com/css2?family={encoded}:wght@400;700&display=swap');\n"
-            f".slide,.slide *{{font-family:{family_list} !important;}}"
+        import_line = (
+            "@import url('https://fonts.googleapis.com/css2?family="
+            + encoded
+            + ":wght@400;700&display=swap');\n"
         )
+        css = import_line + f".slide,.slide *{{font-family:{family_list} !important;}}"
     else:  # system
         css = f".slide,.slide *{{font-family:{family_list} !important;}}"
     return css, family_list
