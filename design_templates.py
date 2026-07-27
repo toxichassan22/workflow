@@ -84,16 +84,26 @@ def _resolve_preset_font_source(name):
         return None
 
     google_map = {
+        'ibmplexsansarabic': 'IBM+Plex+Sans+Arabic',
         'cairo': 'Cairo',
         'notosansarabic': 'Noto+Sans+Arabic',
         'tajawal': 'Tajawal',
         'almarai': 'Almarai',
         'arefruqaa': 'Aref+Ruqaa',
+        'readexpro': 'Readex+Pro',
     }
     if norm in google_map:
         encoded = google_map[norm]
         display = encoded.replace('+', ' ')
         return {'type': 'google', 'family': display, 'encoded': encoded}
+
+    # Known system fonts that do not need a web font file
+    system_map = {
+        'arial': 'Arial',
+        'tahoma': 'Tahoma',
+    }
+    if norm in system_map:
+        return {'type': 'system', 'family': system_map[norm]}
 
     return None
 
@@ -135,16 +145,19 @@ def _build_preset_css(source, fallback):
     family_list = f"'{family}', {fallback}"
     if source['type'] == 'bundled':
         data, fmt = source['data'], source['format']
+        mime = {'truetype':'font/ttf','opentype':'font/otf','woff2':'font/woff2','woff':'font/woff'}.get(fmt,'font/ttf')
         css = (
-            f"@font-face{{font-family:'{family}';src:url(data:font/{fmt};base64,{data}) format('{fmt}');font-weight:100 900;font-display:swap;}}\n"
+            f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{data}) format('{fmt}');font-weight:100 900;font-display:swap;}}\n"
             f".slide,.slide *{{font-family:{family_list} !important;}}"
         )
-    else:  # google
+    elif source['type'] == 'google':
         encoded = source['encoded']
         css = (
             f"@import url('https://fonts.googleapis.com/css2?family={encoded}:wght@400;700&display=swap');\n"
             f".slide,.slide *{{font-family:{family_list} !important;}}"
         )
+    else:  # system
+        css = f".slide,.slide *{{font-family:{family_list} !important;}}"
     return css, family_list
 
 
