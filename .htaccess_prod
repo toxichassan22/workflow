@@ -6,5 +6,5 @@ RewriteEngine On
 RewriteCond %{REQUEST_URI} ^/\.well-known [NC]
 RewriteRule ^ - [L]
 
-# Proxy all other requests to Node.js running on port 3000
+# Proxy all other requests to the Gunicorn app (port replaced by deploy/start_server)
 RewriteRule ^(.*)$ http://127.0.0.1:3000/$1 [P,L]
