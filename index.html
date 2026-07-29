@@ -6221,6 +6221,15 @@
     function renderTenantSlides() {
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
+      // If branding hasn't loaded yet (failed/slow earlier), retry it and re-render
+      // when it arrives so the real logo replaces the sample one automatically.
+      if (!tenantBranding && !renderTenantSlides._brandingRetry) {
+        renderTenantSlides._brandingRetry = true;
+        loadTenantBranding().finally(() => {
+          renderTenantSlides._brandingRetry = false;
+          if (tenantBranding) renderTenantSlides();
+        });
+      }
       wrap.innerHTML = '';
 
       tenantSlidesData.forEach((s, i) => {
