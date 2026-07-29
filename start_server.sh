@@ -26,8 +26,8 @@ log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$WATCHDOG_LOG"
 }
 
-# Already healthy on the configured port?
-if curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" >/dev/null 2>&1; then
+# Already healthy on the configured port? (bypassed if --force is passed)
+if [ "$1" != "--force" ] && curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" >/dev/null 2>&1; then
   log "OK: gunicorn already healthy on port $PORT"
   exit 0
 fi

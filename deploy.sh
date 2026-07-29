@@ -13,7 +13,8 @@ GUNICORN="$APP_DIR/venv/bin/gunicorn"
 
 echo "===== 1. Pull latest code ====="
 cd "$REPO_DIR"
-git pull
+git fetch origin main
+git reset --hard origin/main
 git lfs pull || true
 
 echo "===== 2. Sync to app directory ====="
@@ -57,4 +58,4 @@ echo "===== 5. Run database migrations ====="
 "$PYTHON" -c "import app; app.db.init_db()"
 
 echo "===== 6. Start/restart application server ====="
-bash "$APP_DIR/start_server.sh"
+bash "$APP_DIR/start_server.sh" --force
