@@ -11,4 +11,4 @@ jobs:
     steps:
       - name: Trigger Server Deployment Webhook
         run: |
-          curl -s -X POST "https://sagdemo.site/api/deploy-webhook?secret=workflow_deploy_sec_2026"
+          curl -s -X POST "https://sagdemo.site/api/deploy-webhook?secret=${{ secrets.DEPLOY_WEBHOOK_SECRET }}"

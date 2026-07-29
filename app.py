@@ -5703,13 +5703,15 @@ def static_uploads(path):
         return send_from_directory(maps_dir, filename)
     return jsonify({'error': 'Not found'}), 404
 
-DEPLOY_WEBHOOK_SECRET = os.environ.get('DEPLOY_WEBHOOK_SECRET', 'workflow_deploy_sec_2026')
-
 @app.route('/api/deploy-webhook', methods=['GET', 'POST'])
 def deploy_webhook():
     """Endpoint for GitHub or cPanel webhook to trigger automated deployment after commits."""
+    env_secret = os.environ.get('DEPLOY_WEBHOOK_SECRET')
+    if not env_secret:
+        return jsonify({'error': 'DEPLOY_WEBHOOK_SECRET not configured in environment'}), 403
+
     secret = request.args.get('secret') or request.headers.get('X-Deploy-Secret') or (request.json.get('secret') if (request.is_json and request.json) else None)
-    if secret != DEPLOY_WEBHOOK_SECRET:
+    if not secret or secret != env_secret:
         return jsonify({'error': 'Unauthorized'}), 401
     
     deploy_script = '/home/sagdemo/proposal-generator/deploy.sh'
