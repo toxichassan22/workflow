@@ -233,11 +233,19 @@ def extract_coords_from_maps_link(url):
     if match:
         return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
     
-    # Pattern 6: Just two numbers after maps/place/...
-    match = re.search(r'/maps/place/[^/]*?/(-?\d+\.\d+),(-?\d+\.\d+)', url)
-    if match:
-        return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
-    
+    # Pattern 7: Place name fallback from /maps/place/Place+Name/...
+    place_match = re.search(r'/maps/place/([^/@?]+)', url)
+    if place_match:
+        try:
+            place_name = requests.utils.unquote(place_match.group(1).replace('+', ' '))
+            if place_name:
+                print(f"[MAPS LINK] Attempting geocode for place name from link: {place_name}")
+                geo = geocode_address(place_name)
+                if geo.get('success'):
+                    return {'lat': geo['lat'], 'lng': geo['lng']}
+        except Exception as e:
+            print(f"[MAPS LINK] Failed place name geocode fallback: {e}")
+
     print(f"[MAPS LINK] Could not extract coordinates from URL: {url}")
     return None
 
@@ -872,6 +880,34 @@ def _is_viewport_rectangle(coords):
     return len(unique_lats) == 2 and len(unique_lngs) == 2
 
 
+def _point_to_segment_dist_m(plat, plng, alat, alng, blat, blng):
+    """Shortest distance in meters from a point to a line segment between two vertices."""
+    mlat = math.radians((plat + alat + blat) / 3.0)
+    mx = 111320.0 * math.cos(mlat)
+    my = 110540.0
+    px, py = plng * mx, plat * my
+    ax, ay = alng * mx, alat * my
+    bx, by = blng * mx, blat * my
+    dx, dy = bx - ax, by - ay
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq == 0:
+        return math.hypot(px - ax, py - ay)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg_len_sq))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def _min_dist_to_polygon_m(plat, plng, coords):
+    """Shortest distance from point to polygon perimeter (edges, not just vertices)."""
+    best = float('inf')
+    for i in range(len(coords)):
+        a = coords[i]
+        b = coords[(i + 1) % len(coords)]
+        d = _point_to_segment_dist_m(plat, plng, a[0], a[1], b[0], b[1])
+        if d < best:
+            best = d
+    return best
+
+
 def _fetch_osm_polygon(lat, lng, radius_m=400):
     """Fetch the real building/compound polygon from OpenStreetMap via Overpass API in a single optimized query."""
     
@@ -916,8 +952,11 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
         return None
         
     MAX_PLOT_AREA_SQM = 250000
-    NEAR_MISS_MAX_DIST_M = 25.0
-    NEAR_MISS_MAX_AREA_SQM = 50000
+    NEAR_MISS_MAX_DIST_M = 45.0
+    NEAR_MISS_MAX_AREA_SQM = 120000
+
+    print(f"[OSM POLYGON] Overpass returned {len(elements)} elements near ({lat}, {lng})")
+    rejected = {'no_tag': 0, 'too_large': 0, 'too_small': 0, 'too_far': 0}
 
     best_el = None
     best_sort_key = None
@@ -953,25 +992,26 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
             tag_type = "building:" + str(tags['building'])
             
         if priority == 999:
+            rejected['no_tag'] += 1
             continue
             
         if area_sqm > max_area or area_sqm > MAX_PLOT_AREA_SQM:
-            print(f"[OSM POLYGON] Rejected too-large {tag_type}: {area_sqm:.0f} sqm")
+            rejected['too_large'] += 1
             continue
         if area_sqm < 10:
+            rejected['too_small'] += 1
             continue
             
-        def get_dist_m(pt_lat, pt_lng):
-            dy = (pt_lat - lat) * 111000.0
-            dx = (pt_lng - lng) * 111000.0 * math.cos(math.radians((pt_lat + lat) / 2.0))
-            return math.sqrt(dx*dx + dy*dy)
-            
-        min_dist_to_vertex = min(get_dist_m(p_lat, p_lng) for p_lat, p_lng in coords)
+        min_dist_to_vertex = _min_dist_to_polygon_m(lat, lng, coords)
         is_inside = _point_in_polygon(lat, lng, coords)
         
         if not is_inside:
             if min_dist_to_vertex > NEAR_MISS_MAX_DIST_M or area_sqm > NEAR_MISS_MAX_AREA_SQM:
+                rejected['too_far'] += 1
+                print(f"[OSM CANDIDATE] rejected-far {tag_type}: {area_sqm:.0f} sqm, {min_dist_to_vertex:.1f} m")
                 continue
+
+        print(f"[OSM CANDIDATE] accepted {tag_type}: {area_sqm:.0f} sqm, {min_dist_to_vertex:.1f} m, inside={is_inside}")
             
         # Sort key: prioritize smallest area among containing polygons to select building/plot instead of district/landuse
         sort_key = (0 if is_inside else 1, area_sqm, min_dist_to_vertex)
@@ -993,7 +1033,7 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
             print(f"[OSM POLYGON] Found {is_inside_str} {tag_type} '{safe_name}' ({best_sort_key[1]:.0f} sqm), ~{area_sqm:.0f} sqm")
         return coords
         
-    print(f"[OSM POLYGON] No suitable polygon found near ({lat}, {lng})")
+    print(f"[OSM POLYGON] No suitable polygon found near ({lat}, {lng}) | rejected={rejected}")
     return None
 
 

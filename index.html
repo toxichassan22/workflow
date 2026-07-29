@@ -4604,7 +4604,12 @@
           if (f.defaultValue) input.value = f.defaultValue;
           if (f.isRequired) input.required = true;
 
-          if (f.fieldKey === 'location_address') { addressInput = input; locationSection = sectionDiv; }
+          if (f.fieldKey === 'location_address') {
+            addressInput = input;
+            locationSection = sectionDiv;
+            label.textContent = 'موقع المشروع (عنوان نصي أو رابط قوقل ماب)';
+            input.placeholder = 'مثال: طريق الملك فهد، الرياض أو لصق رابط قوقل ماب مباشر';
+          }
           if (f.fieldKey === 'location_lat') { latInput = input; locationSection = sectionDiv; }
           if (f.fieldKey === 'location_lng') { lngInput = input; locationSection = sectionDiv; }
 
@@ -4620,15 +4625,6 @@
             btn.style.marginTop = '8px';
             btn.onclick = () => geocodeProjectAddress(addressInput, latInput, lngInput);
             div.appendChild(btn);
-            // M4: Add Google Maps link field after address field
-            const linkDiv = document.createElement('div');
-            linkDiv.className = 'tenant-field full maps-link-field';
-            linkDiv.innerHTML = '<label>رابط الموقع على قوقل ماب (اختياري)</label>' +
-              '<div style="position:relative">' +
-              '<input type="text" data-key="location_maps_link" data-type="text" placeholder="https://maps.app.goo.gl/..." style="direction:ltr;text-align:left;font-size:13px" />' +
-              '</div>' +
-              '<span class="tenant-hint">الصقي رابط الموقع من قوقل ماب — الروابط المختصرة تدعم تلقائياً.</span>';
-            sectionDiv.appendChild(linkDiv);
             addressInput.addEventListener('blur', () => {
               if (addressInput.value.trim() && (!latInput || !latInput.value.trim() || !lngInput || !lngInput.value.trim())) {
                 geocodeProjectAddress(addressInput, latInput, lngInput);
@@ -5067,23 +5063,19 @@
     }
 
     async function geocodeProjectAddress(addressInput, latInput, lngInput) {
-      const address = addressInput ? addressInput.value.trim() : '';
-      const mapsLinkInput = document.querySelector('#tenantProjectForm [data-key="location_maps_link"]');
-      const mapsLink = mapsLinkInput ? mapsLinkInput.value.trim() : '';
-      if (!address && !mapsLink) { toast('أدخل عنوان الموقع أو رابط قوقل ماب أولاً'); return; }
+      const val = addressInput ? addressInput.value.trim() : '';
+      if (!val) { toast('أدخل عنوان الموقع أو رابط قوقل ماب أولاً'); return; }
       showLoader('جاري تحديد الإحداثيات', '');
-      const payload = {};
-      if (address) payload.address = address;
-      if (mapsLink) payload.maps_link = mapsLink;
+      const payload = { address: val, maps_link: val };
       const data = await api('POST', '/api/geocode', payload);
       hideLoader();
       if (data.success && data.lat && data.lng) {
         if (latInput) latInput.value = data.lat;
         if (lngInput) lngInput.value = data.lng;
-        const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || address);
+        const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || val);
         toast('تم تحديد الموقع: ' + msg);
       } else {
-        toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر');
+        toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر أو عنوان نصي');
       }
     }
 

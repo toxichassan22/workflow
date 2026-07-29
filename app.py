@@ -2532,6 +2532,27 @@ def api_geocode():
     return jsonify({'success': False, 'error': 'ما قدرنا نحدد الموقع من هذا الرابط أو العنوان — جربي كتابة العنوان النصي أو استخدام رابط قوقل ماب مباشر'})
 
 
+@app.route('/api/debug-osm-polygon', methods=['GET'])
+@require_auth
+def api_debug_osm_polygon():
+    try:
+        lat = float(request.args.get('lat'))
+        lng = float(request.args.get('lng'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'lat and lng are required'}), 400
+    radius = int(request.args.get('radius', 400))
+    maps_service._osm_polygon_cache.clear()
+    coords = maps_service._fetch_osm_polygon(lat, lng, radius_m=radius)
+    if not coords:
+        return jsonify({'found': False, 'lat': lat, 'lng': lng, 'radius_m': radius})
+    return jsonify({
+        'found': True,
+        'points': len(coords),
+        'area_sqm': round(maps_service._approx_polygon_area_sqm(coords)),
+        'coords': coords,
+    })
+
+
 @app.route('/api/nearby-landmarks', methods=['POST'])
 @require_auth
 def api_nearby_landmarks():
