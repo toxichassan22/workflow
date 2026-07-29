@@ -3072,12 +3072,35 @@
       'map_type', 'maps_link', 'nearby_landmarks'
     ];
 
+    // A drawn/detected boundary can carry thousands of points, which alone exceeds the
+    // request size the hosting proxy can forward intact. Sampling it down keeps the
+    // shape visually identical while keeping the payload small.
+    const MAX_POLYGON_POINTS = 400;
+
+    function decimatePolygon(poly) {
+      const shrink = (arr) => {
+        if (arr.length <= MAX_POLYGON_POINTS) return arr;
+        const step = arr.length / MAX_POLYGON_POINTS;
+        const out = [];
+        for (let i = 0; i < MAX_POLYGON_POINTS; i++) out.push(arr[Math.floor(i * step)]);
+        out.push(arr[arr.length - 1]);
+        return out;
+      };
+      if (typeof poly === 'string') {
+        const pts = poly.split(';').filter(p => p.includes(','));
+        return pts.length <= MAX_POLYGON_POINTS ? poly : shrink(pts).join(';');
+      }
+      if (Array.isArray(poly)) return shrink(poly);
+      return poly;
+    }
+
     function slimMapProjectData(data) {
       const src = data || {};
       const slim = {};
       MAP_PAYLOAD_FIELDS.forEach(key => {
         if (src[key] !== undefined && src[key] !== null && src[key] !== '') slim[key] = src[key];
       });
+      if (slim.location_polygon) slim.location_polygon = decimatePolygon(slim.location_polygon);
       return slim;
     }
 
@@ -3135,6 +3158,11 @@
         } else {
           const payload = { projectData: slimMapProjectData(tenantProjectData), force: !!force || staleMaps };
           if (tenantPresentationId) payload.presentationId = tenantPresentationId;
+          const payloadKB = (JSON.stringify(payload).length / 1024).toFixed(1);
+          const fieldSizes = Object.entries(payload.projectData)
+            .map(([k, v]) => [k, Math.round(JSON.stringify(v).length / 1024 * 10) / 10])
+            .sort((a, b) => b[1] - a[1]).slice(0, 5);
+          console.log('[MAPS] payload size: ' + payloadKB + ' KB | biggest fields:', fieldSizes);
           let res = null;
           try {
             res = await api('POST', '/api/generate-map-images', payload);
