@@ -2531,6 +2531,10 @@
                   style="background:#2e7d32;color:#fff;border:none;padding:10px 20px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;">
                   ✅ إعتماد الصورة الرئيسية
                 </button>
+                <button class="btn ghost" onclick="refreshImagePromptsWithGLM()"
+                  style="border:1px solid #cbd5e1;padding:10px 16px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;font-size:12px;margin-right:auto;">
+                  🤖 إعادة صياغة الوصف بـ GLM 5.1
+                </button>
               </div>
             </div>
           </div>
@@ -5535,26 +5539,49 @@
     let tempCoverImage = null;
     let tempMoodboardImages = {};
 
-    async function prepareDefaultImagePrompts() {
+    async function prepareDefaultImagePrompts(forceRefresh = false) {
+      if (typeof collectTenantFormData === 'function') {
+        try {
+          const formData = await collectTenantFormData();
+          tenantProjectData = { ...tenantProjectData, ...formData };
+        } catch (e) {
+          console.warn('[FORM] Error collecting form data:', e);
+        }
+      }
       if (!tenantProjectData) return;
       const count = (tenantBranding && tenantBranding.moodboard_count) ? tenantBranding.moodboard_count : 4;
       tenantCreativeImages = tenantCreativeImages || {};
-      if (!tenantCreativeImages.cover_prompt || !tenantCreativeImages.moodboard_prompts || tenantCreativeImages.moodboard_prompts.length < count) {
+      
+      if (forceRefresh || !tenantCreativeImages.cover_prompt || !tenantCreativeImages.moodboard_prompts || tenantCreativeImages.moodboard_prompts.length < count) {
+        showLoader('جاري صياغة أوصاف الصور بالذكاء الاصطناعي', 'يقوم محرك GLM 5.1 بتحليل كامل بيانات المشروع لإنشاء أقصى واقعية معمارية ممكنة...');
         try {
           const res = await api('POST', '/api/get-image-prompts', {
             projectData: tenantProjectData,
             count: count
           });
           if (res && res.success) {
-            if (!tenantCreativeImages.cover_prompt) tenantCreativeImages.cover_prompt = res.cover_prompt;
-            if (!tenantCreativeImages.moodboard_prompts || !tenantCreativeImages.moodboard_prompts.length) {
+            if (forceRefresh || !tenantCreativeImages.cover_prompt) tenantCreativeImages.cover_prompt = res.cover_prompt;
+            if (forceRefresh || !tenantCreativeImages.moodboard_prompts || !tenantCreativeImages.moodboard_prompts.length) {
               tenantCreativeImages.moodboard_prompts = res.moodboard_prompts;
             }
           }
         } catch (e) {
           console.warn('[PROMPTS] Error fetching default prompts:', e);
+        } finally {
+          hideLoader();
         }
       }
+    }
+
+    async function refreshImagePromptsWithGLM() {
+      await prepareDefaultImagePrompts(true);
+      const promptInput = document.getElementById('tenantMainImagePromptInput');
+      if (promptInput && tenantCreativeImages.cover_prompt) {
+        promptInput.value = tenantCreativeImages.cover_prompt;
+      }
+      renderTenantMainImage();
+      renderTenantMoodboard();
+      toast('تمت إعادة صياغة الأوصاف بالذكاء الاصطناعي GLM 5.1 بناءً على جميع بيانات المشروع!');
     }
 
     function renderTenantMainImage() {

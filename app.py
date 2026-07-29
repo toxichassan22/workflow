@@ -950,24 +950,28 @@ def api_get_image_prompts():
     except (TypeError, ValueError):
         count = 4
 
+    formatted_inputs = []
+    for k, v in project_data.items():
+        if v and not str(k).startswith('_') and str(k) not in ('slides_data', 'plan'):
+            formatted_inputs.append(f"- {k}: {v}")
+    
+    inputs_str = "\n".join(formatted_inputs) if formatted_inputs else f"- اسم المشروع: {project_name}\n- النوع: {project_type}\n- الموقع: {location}"
+
     sys_prompt = (
         "أنت خبير هندسي ومعماري ومصمم بصري محترف، متخصص في صياغة الأوصاف النصية (Image Prompts) "
-        "فائقة الدقة والمطابقة لمعايير الواقعية المعمارية بنسبة 80% إلى 99% لتصوير المباني والمشاريع العقارية.\n"
-        "المطلوب منك تحليل بيانات المشروع المدخلة كاملاً وإنشاء أوصاف عربية تفصيلية ومحترفة:\n"
-        "1. cover_prompt: وصف تفصيلي للغلاف يصف الواجهة والارتفاع والخامات والضوء والمحيط بدقة عالية.\n"
-        "2. moodboard_prompts: قائمة بعدد المود بورد المطلوب تشمل لقطات واجهة، منظور أيمن، منظور أيسر، لقطة جوية درون، وتفاصيل معمارية.\n"
-        "يجب أن تعيد النتيجة بصيغة JSON حصرية بالشكل التالي دون أي نصوص إضافية:\n"
+        "فائقة الدقة والمطابقة لتصميم المشروع العقاري المدخل بنسبة 80% إلى 99%.\n"
+        "المطلوب منك تحليل جميع بيانات ومعلومات المشروع المدخلة أدناه لإنشاء أوصاف عربية تفصيلية ومحترفة:\n"
+        "1. cover_prompt: وصف تفصيلي للغلاف يصف الواجهة، المواد (مثل الحجر، الرخام، الزجاج)، الطوابق، الإضاءة، الشارع والمحيط الجغرافي الواقعي بدقة عالية.\n"
+        "2. moodboard_prompts: قائمة بعدد المود بورد المطلوب تشمل لقطات واجهة رئيسية، منظور أيمن، منظور أيسر، لقطة جوية درون، وتفاصيل معمارية.\n"
+        "يجب أن تعيد النتيجة بصيغة JSON حصرية فقط دون أي مقدمات أو شروحات:\n"
         '{\n  "cover_prompt": "...",\n  "moodboard_prompts": ["...", "..."]\n}'
     )
 
     user_msg = (
-        f"بيانات المشروع:\n"
-        f"- اسم المشروع: {project_name}\n"
-        f"- نوع المشروع: {project_type}\n"
-        f"- الموقع: {location}\n"
-        f"- عدد صور المود بورد المطلوبة: {count}\n"
-        f"- تفاصيل وإحصائيات إضافية: {json.dumps(project_data, ensure_ascii=False)}\n\n"
-        f"اكتب الأوصاف بدقة معمارية عالية جداً ومطابقة لواقع البيئة والعمارة."
+        f"بيانات ومواصفات المشروع الكاملة:\n"
+        f"{inputs_str}\n"
+        f"- عدد صور المود بورد المطلوبة: {count}\n\n"
+        f"اكتب الأوصاف بدقة معمارية عالية جداً ومطابقة لواقع وتفاصيل هذا المشروع."
     )
 
     try:
@@ -991,15 +995,23 @@ def api_get_image_prompts():
                     'engine': GLM_MODEL
                 })
     except Exception as e:
-        print(f"[IMAGE PROMPTS GLM ERROR] {e}. Falling back to default generator...")
+        print(f"[IMAGE PROMPTS GLM ERROR] {e}. Falling back to rich template generator...")
 
-    cover_prompt = f"تصوير معماري فاخر لمشروع {project_name} ({project_type}) في {location}، واجهة حديثة أنيقة بخامات راقية، إضاءة دافئة، تصوير احترافي، بدون نصوص"
+    # Rich fallback generator incorporating all available fields
+    arch_style = project_data.get('architectural_style') or project_data.get('style') or 'حديث وعصري'
+    materials = project_data.get('materials') or project_data.get('finishes') or 'حجر فاخر، واجهات زجاجية، وألومنيوم'
+    floors = project_data.get('floors_count') or project_data.get('floors') or ''
+    floors_str = f"يتكون من {floors} أدوار، " if floors else ""
+    desc = project_data.get('project_description') or project_data.get('description') or ''
+    desc_str = f" التفاصيل: {desc}." if desc else ""
+
+    cover_prompt = f"تصوير معماري احترافي فائق الواقعية لمشروع {project_name} ({project_type}) في {location}. المبنى {floors_str}بطراز {arch_style} واستخدام {materials}.{desc_str} إضاءة دافئة، سماء صافية، تصوير سينمائي عالي الجودة بدون نصوص."
 
     base_prompts = [
-        f"لقطة رئيسية لواجهة مشروع {project_name} في {location}، مبنى {project_type} فاخر بتصميم عصري وإضاءة مميزة",
-        f"منظور جانبي أيمن لواجهة {project_name} يبرز التفاصيل المعمارية وخامات البناء الفاخرة",
-        f"منظور جانبي أيسر لمبنى {project_name} يوضح جماليات التصميم والزجاج والفتحات المعمارية",
-        f"لقطة جوية بارافيناميكية لمشروع {project_name} تظهر المبنى من الأعلى والمحيط العام",
+        f"لقطة رئيسية لواجهة مشروع {project_name} في {location}، مبنى {project_type} {floors_str}بطراز {arch_style} وإضاءة معماري مميزة",
+        f"منظور جانبي أيمن لواجهة {project_name} يبرز التفاصيل المعمارية وخامات {materials}",
+        f"منظور جانبي أيسر لمبنى {project_name} يوضح جماليات التصميم والفتحات المعمارية",
+        f"لقطة جوية بارافيناميكية لمشروع {project_name} تظهر المبنى من الأعلى والمحيط العام في {location}",
         f"تفاصيل معمارية دقيقة للمدخل الرئيسي والبهو الخارجي لمشروع {project_name}",
         f"لقطة مسائية ليلية لمشروع {project_name} توضح إضاءة الواجهات الخارجية في وقت الغروب",
         f"تصميم داخلي فاخر لبهو الاستقبال والاستراحة في {project_name}",
