@@ -52,6 +52,7 @@ def init_db():
         _deduplicate_fields(conn)
         _cleanup_accidental_map_fields(conn)
         _migrate_branding_columns(conn)
+        _migrate_map_images_presentation_fk(conn)
 
         try:
             conn.commit()
@@ -332,7 +333,7 @@ def _create_tables(conn):
     CREATE TABLE IF NOT EXISTS map_images (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        presentation_id TEXT REFERENCES presentations(id) ON DELETE CASCADE,
+        presentation_id TEXT,
         image_type TEXT NOT NULL,
         file_path TEXT NOT NULL,
         placeholder TEXT NOT NULL,
@@ -795,6 +796,42 @@ def _cleanup_accidental_map_fields(conn):
         conn.commit()
     except Exception as e:
         print(f"[DB CLEANUP ERR] {e}")
+
+
+def _migrate_map_images_presentation_fk(conn):
+    """Remove the presentations FK from map_images so draft_* ids can be cached."""
+    try:
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='map_images'")
+        if not cur or not cur.fetchone():
+            return
+        fks = conn.execute("PRAGMA foreign_key_list(map_images)").fetchall()
+        has_fk = any(row['from'] == 'presentation_id' or row[2] == 'presentations' for row in fks)
+        if not has_fk:
+            return
+        conn.executescript("""
+            BEGIN TRANSACTION;
+            CREATE TABLE map_images_new (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                presentation_id TEXT,
+                image_type TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                placeholder TEXT NOT NULL,
+                metadata_json TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            INSERT INTO map_images_new SELECT * FROM map_images;
+            DROP TABLE map_images;
+            ALTER TABLE map_images_new RENAME TO map_images;
+            CREATE INDEX IF NOT EXISTS idx_mapimages_tenant ON map_images(tenant_id);
+            CREATE INDEX IF NOT EXISTS idx_mapimages_pres ON map_images(presentation_id);
+            CREATE INDEX IF NOT EXISTS idx_mapimages_type ON map_images(image_type);
+            COMMIT;
+        """)
+        conn.commit()
+        print("[DB MIGRATION] map_images presentation_id foreign key removed")
+    except Exception as e:
+        print(f"[DB MIGRATION ERR] {e}")
 
 
 def _migrate_branding_columns(conn):
