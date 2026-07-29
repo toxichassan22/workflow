@@ -207,16 +207,16 @@ def extract_coords_from_maps_link(url):
         print(f"[MAPS LINK] Failed to resolve shortened URL: {e}")
     
     # Step 2: Try to extract coordinates from the resolved URL
-    # Pattern 1: /@lat,lng,zoom (common Google Maps URL format)
-    match = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)(?:,\d+(?:\.\d+)?z)?', url)
-    if match:
-        return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
-    
-    # Pattern 2: !3d(lat)!4d(lng) (embedded coordinates)
+    # Pattern 1: !3d(lat)!4d(lng) (exact place coordinates, more reliable than @ map center)
     lat_match = re.search(r'!3d(-?\d+\.\d+)', url)
     lng_match = re.search(r'!4d(-?\d+\.\d+)', url)
     if lat_match and lng_match:
         return {'lat': float(lat_match.group(1)), 'lng': float(lng_match.group(1))}
+
+    # Pattern 2: /@lat,lng,zoom (map view center, fallback only)
+    match = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)(?:,\d+(?:\.\d+)?z)?', url)
+    if match:
+        return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
     
     # Pattern 3: q=lat,lng or query=lat,lng (query parameter)
     match = re.search(r'[?&](?:q|query)=(-?\d+\.\d+),(-?\d+\.\d+)', url)
@@ -598,7 +598,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
                 'radius': radius,
             }
         },
-        'maxResultCount': max_results * 3,
+        'maxResultCount': min(max_results * 3, 20),
     }
 
     try:
