@@ -958,7 +958,12 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
     landmarks_matrix = project_data.get('landmarks_matrix')
     landmarks_note = ''
     if landmarks_matrix:
-        landmarks_note = "استخدم الأرقام التالية كما هي وممنوع تعديلها:\n" + json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
+        landmarks_note = (
+            "⚠️ إرشادات هامة لعرض المعالم:\n"
+            "يجب عرض المسافة والوقت معاً لكل معلم بدون استثناء بالصيغة التاعية: (اسم المعلم - المسافة بالكم - الوقت بالدقائق)، مثل: 'ميدان السارية (1.5 كم - 5 دقائق)'.\n"
+            "استخدم البيانات الموثقة التالية كما هي وممنوع تعديل الأرقام:\n" +
+            json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
+        )
 
     system_prompt = f"""{design_rules}
 

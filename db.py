@@ -979,6 +979,13 @@ def create_presentation(tenant_id, title, project_data=None, slides_data=None, s
             slide_count
         )
     )
+    if project_data and isinstance(project_data, dict):
+        draft_id = project_data.get('draft_id') or project_data.get('draftId')
+        if draft_id:
+            conn.execute(
+                'UPDATE map_images SET presentation_id = ? WHERE tenant_id = ? AND presentation_id = ?',
+                (pres_id, tenant_id, f"draft_{draft_id}")
+            )
     conn.commit()
     return pres_id
 
@@ -2005,14 +2012,17 @@ def add_map_image(tenant_id, image_type, file_path, placeholder, presentation_id
     return image_id
 
 
-def get_map_images(tenant_id, presentation_id=None, image_type=None):
-    """Get map images for a tenant, optionally filtered by presentation and type."""
+def get_map_images(tenant_id, presentation_id=None, draft_id=None, image_type=None):
+    """Get map images for a tenant, optionally filtered by presentation, draft, and type."""
     conn = get_db()
     query = 'SELECT * FROM map_images WHERE tenant_id = ?'
     params = [tenant_id]
     if presentation_id:
         query += ' AND presentation_id = ?'
         params.append(presentation_id)
+    elif draft_id:
+        query += ' AND presentation_id = ?'
+        params.append(f"draft_{draft_id}")
     if image_type:
         query += ' AND image_type = ?'
         params.append(image_type)

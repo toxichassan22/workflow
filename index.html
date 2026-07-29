@@ -5210,22 +5210,49 @@
 
     async function fetchNearbyLandmarks() {
       const formData = await collectTenantFormData();
-      const lat = parseFloat(formData.location_lat);
-      const lng = parseFloat(formData.location_lng);
-      if (!lat || !lng) { toast('أدخل الإحداثيات أولاً'); return; }
-
-      showLoader('جاري جلب المعالم المحيطة', '');
-      const data = await api('POST', '/api/nearby-landmarks', { lat, lng, radius: 2000 });
+      showLoader('جاري معاينة وحساب بيانات الخريطة والمعالم', '');
+      const data = await api('POST', '/api/preview-map-data', { projectData: formData });
       hideLoader();
 
       const box = document.getElementById('landmarksPreview');
       if (!box) return;
-      if (data.success && data.landmarks && data.landmarks.length) {
-        const names = data.landmarks.map((l, i) => `${i + 1}. ${l.name}`).join('<br>');
-        box.innerHTML = `<strong>معالم مقترحة:</strong><br>${names}`;
+      const list = data.landmarks_matrix || data.landmarks || [];
+      if (data.success && list && list.length) {
+        const itemsHtml = list.map((l, i) => {
+          const dist = l.distance_km ? `${l.distance_km} كم` : (l.distance_text || '');
+          const dur = l.duration_min ? `${l.duration_min} دقائق` : (l.duration_minutes ? `${l.duration_minutes} دقائق` : '');
+          const details = [dist, dur].filter(Boolean).join(' • ');
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.1);">
+            <span><strong>${i + 1}. ${l.name}</strong></span>
+            <span style="font-size:0.85em;opacity:0.9;color:#e2b85d;">${details}</span>
+          </div>`;
+        }).join('');
+
+        box.innerHTML = `
+          <div style="margin-bottom:8px;"><strong>📍 المعالم والمواقع المحسوبة للقيادة:</strong></div>
+          ${itemsHtml}
+          <button type="button" class="btn secondary sm" style="margin-top:10px;" onclick="applyPreviewedLandmarksToForm()">اعتماد المعالم للفورم</button>
+        `;
         box.style.display = 'block';
+        window._lastPreviewedLandmarks = list;
       } else {
         toast(data.error || 'لم يُعثر على معالم قريبة');
+      }
+    }
+
+    function applyPreviewedLandmarksToForm() {
+      const list = window._lastPreviewedLandmarks || [];
+      if (!list.length) return;
+      const text = list.map(l => {
+        const dist = l.distance_km ? `${l.distance_km} كم` : '';
+        const dur = l.duration_min ? `${l.duration_min} دقائق` : '';
+        const meta = [dist, dur].filter(Boolean).join(' - ');
+        return meta ? `${l.name} - ${meta}` : l.name;
+      }).join('\n');
+      const input = document.getElementById('tenant_nearby_landmarks') || document.querySelector('[name="nearby_landmarks"]');
+      if (input) {
+        input.value = text;
+        toast('تم اعتماد وتحديث قائمة المعالم والقيادة في الفورم بنجاح');
       }
     }
 

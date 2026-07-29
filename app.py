@@ -1244,12 +1244,12 @@ def resolve_designer_chat_placeholders(html_out, project_data, presentation_id, 
     # 1. Gather all map placeholders
     map_placeholders = {}
     
-    # Try to load existing map image records from db
+    draft_id = project_data.get('draft_id') or project_data.get('draftId') if isinstance(project_data, dict) else None
     db_maps = []
     if presentation_id:
         db_maps = db.get_map_images(tenant_id, presentation_id=presentation_id)
-    if not db_maps:
-        db_maps = db.get_map_images(tenant_id)
+    elif draft_id:
+        db_maps = db.get_map_images(tenant_id, draft_id=draft_id)
         
     for m in db_maps:
         placeholder = m.get('placeholder')
@@ -1578,9 +1578,10 @@ def api_designer_chat():
 {{"response":"رسالة عربية تشرح ما ستفعله", "actions":[{{"tool":"edit_slides|generate_image|create_slide|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
-- edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل المطلوبة"}}
-- generate_image: params={{"prompt":"وصف الصورة", "slideIndex":1, "position":"background|right|left|inline"}}
-- create_slide: params={{"title":"العنوان", "type":"content", "instruction":"محتوى الشريحة"}}
+- edit_slides: params={"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل المطلوبة"}
+- generate_image: params={"prompt":"وصف الصورة", "slideIndex":1, "position":"background|right|left|inline"}
+- create_slide: params={"title":"العنوان", "type":"content", "instruction":"محتوى الشريحة"}
+- regenerate_maps: params={"maptype":"roadmap|satellite|hybrid|terrain"} (استخدمها عند طلب التبديل إلى شوارع/مرور/قمر صناعي)
 
 قواعد إضافة الخرائط عند طلب المستخدم (خريطة شوارع، خريطة منطقة، معالم، نطاق):
 إذا طلب المستخدم إضافة خريطة أو تعديل خريطة الشريحة، يرجى توجيه edit_slides بتضمين أحد الرموز التالية داخل كود HTML للشريحة:
@@ -1593,7 +1594,8 @@ def api_designer_chat():
 1. إذا كان الطلب يتضمن تعديل كل الشرائح -> اختر target="all".
 2. إذا حدد المستخدم شرائح بأرقامها أو بأسماءها (مثل: "30", "تلاتين", "7 و 9", "شريحة الموقع") -> ضع أرقام تلك الشرائح في indexes كأرقام (1-based).
 3. إذا كان التعديل عاماً أو يخص الشريحة الحالية فقط -> اختر target="current".
-4. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
+4. إذا طلب المستخدم تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
+5. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
 
 قائمة الشرائح الحالية في العرض ({len(slides)} شريحة):
 {json.dumps(summary, ensure_ascii=False)}"""
@@ -1616,7 +1618,12 @@ def api_designer_chat():
                     target = 'current'
                     target_indexes = [current_index + 1]
 
-            if any(word in message.lower() for word in ('صورة', 'صوره', 'image', 'توليد صورة')):
+            msg_lower = message.lower()
+            if any(word in msg_lower for word in ('شوارع', 'مرور', 'roadmap', 'ملاحة', 'شوارع محيطة')):
+                actions = [{'tool': 'regenerate_maps', 'params': {'maptype': 'roadmap'}}]
+            elif any(word in msg_lower for word in ('قمر صناعي', 'satellite', 'فضائي')):
+                actions = [{'tool': 'regenerate_maps', 'params': {'maptype': 'satellite'}}]
+            elif any(word in msg_lower for word in ('صورة', 'صوره', 'image', 'توليد صورة')):
                 actions = [{'tool': 'generate_image', 'params': {'prompt': message, 'target': target, 'indexes': target_indexes, 'slideIndex': current_index + 1}}]
             else:
                 actions = [{'tool': 'edit_slides', 'params': {'target': target, 'indexes': target_indexes, 'slideIndex': current_index + 1, 'instruction': message}}]
@@ -1699,6 +1706,21 @@ def api_designer_chat():
                 html, _ = _designer_edit_slide('<div class="slide" style="width:1280px;height:720px;"><h1>' + title + '</h1></div>', title, params.get('instruction') or message, len(slides), project_data, presentation_id, branding)
                 slides.append({'html': html, 'title': title, 'type': slide_type, 'designStyle': plan_slide['design_style'], 'bullets': [], 'metrics': []})
                 executed.append({'tool': tool, 'status': 'success', 'index': len(slides) - 1})
+            elif tool in ('regenerate_maps', 'update_map_style', 'change_map_type'):
+                maptype = params.get('maptype') or params.get('style') or 'roadmap'
+                map_styles = {'overview': maptype, 'landmarks': maptype, 'access': maptype, 'catchment': maptype}
+                project_data['map_styles'] = map_styles
+                map_res = maps_service.generate_all_map_images(project_data, tenant_id, presentation_id=presentation_id, force=True, branding=branding)
+                if map_res.get('placeholders'):
+                    slides_json = json.dumps(slides, ensure_ascii=False)
+                    for placeholder, ppath in map_res['placeholders'].items():
+                        if ppath and os.path.exists(ppath):
+                            rel_p = os.path.relpath(ppath, os.path.dirname(__file__)).replace('\\', '/')
+                            ptype = placeholder.replace('##MAP_', '').replace('##STREET_VIEW_', 'streetview_').replace('##', '').lower()
+                            pattern = r'/uploads/maps/[^/]+_[^/]+_' + ptype + r'_[^/]+\.png'
+                            slides_json = re.sub(pattern, lambda m, rp=rel_p: rp, slides_json)
+                    slides = json.loads(slides_json)
+                executed.append({'tool': tool, 'status': 'success', 'maptype': maptype})
             else:
                 executed.append({'tool': tool, 'status': 'skipped', 'message': 'أداة غير معروفة'})
 
@@ -2533,6 +2555,97 @@ def api_nearby_landmarks():
     return jsonify(result)
 
 
+@app.route('/api/preview-map-data', methods=['POST'])
+@require_auth
+def api_preview_map_data():
+    """Preview calculated landmarks, drive matrix times, distances, and catchment zones before generation."""
+    data = request.json or {}
+    project_data = clean_project_data(data.get('projectData', {}))
+
+    lat = maps_service._extract_coordinate(
+        project_data.get('location_lat') or project_data.get('locationLat') or
+        project_data.get('latitude') or project_data.get('lat')
+    )
+    lng = maps_service._extract_coordinate(
+        project_data.get('location_lng') or project_data.get('locationLng') or
+        project_data.get('longitude') or project_data.get('lng')
+    )
+
+    if lat is None or lng is None:
+        address = project_data.get('location_address') or project_data.get('location', '')
+        if address and not address.startswith('http'):
+            geo = maps_service.geocode_address(address, tenant_id=g.tenant_id)
+            if geo.get('success'):
+                lat = geo['lat']
+                lng = geo['lng']
+
+    if lat is None or lng is None:
+        return jsonify({'success': False, 'error': 'لم يتم العثور على إحداثيات للموقع'}), 400
+
+    landmark_radius_m = 1000
+    custom_text = project_data.get('nearby_landmarks') or project_data.get('landmarks_text')
+    landmarks = maps_service._parse_landmarks_text(custom_text) if isinstance(custom_text, str) else (custom_text or [])
+
+    if not landmarks:
+        places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=6)
+        if places.get('success'):
+            landmarks = places['landmarks']
+
+    location_context = project_data.get('location_address') or project_data.get('location', '')
+    for lm in landmarks:
+        if lm.get('lat') is None or lm.get('lng') is None:
+            query = f"{lm['name']}, {location_context}" if location_context else lm['name']
+            geo = maps_service.geocode_address(query, tenant_id=g.tenant_id)
+            if geo.get('success'):
+                if geo.get('precision') == 'low':
+                    nearby = maps_service.get_nearby_landmarks(lat, lng, radius=2000, keyword=lm['name'])
+                    if nearby.get('success') and nearby.get('landmarks'):
+                        best_poi = nearby['landmarks'][0]
+                        lm['lat'] = best_poi['lat']
+                        lm['lng'] = best_poi['lng']
+                    else:
+                        lm['lat'] = geo['lat']
+                        lm['lng'] = geo['lng']
+                else:
+                    lm['lat'] = geo['lat']
+                    lm['lng'] = geo['lng']
+
+    filtered_landmarks = []
+    for lm in landmarks:
+        if lm.get('lat') is None or lm.get('lng') is None:
+            continue
+        dist_m = maps_service._distance_meters(lat, lng, lm['lat'], lm['lng'])
+        if dist_m < 50 or dist_m > landmark_radius_m:
+            continue
+        lm['distance_meters'] = round(dist_m)
+        filtered_landmarks.append(lm)
+
+    landmarks = sorted(filtered_landmarks, key=lambda item: item.get('distance_meters', float('inf')))[:6]
+
+    geocoded = [lm for lm in landmarks if lm.get('lat') is not None and lm.get('lng') is not None]
+    matrix = []
+    if geocoded:
+        matrix = maps_service.get_drive_matrix((lat, lng), geocoded)
+        for i, lm in enumerate(geocoded):
+            if i < len(matrix) and matrix[i]:
+                entry = matrix[i]
+                lm['duration_minutes'] = entry.get('duration_min')
+                lm['distance_km'] = entry.get('distance_km')
+                lm['distance_text'] = f"{entry.get('distance_km')} كم" if entry.get('distance_km') else None
+
+    catchment_text = project_data.get('catchment_areas') or project_data.get('catchment_zones')
+    zones = maps_service._parse_catchment_zones(catchment_text) if isinstance(catchment_text, str) else catchment_text
+
+    return jsonify({
+        'success': True,
+        'lat': lat,
+        'lng': lng,
+        'landmarks': landmarks,
+        'landmarks_matrix': matrix or landmarks,
+        'catchment_zones': zones,
+    })
+
+
 @app.route('/api/generate-map-images', methods=['POST'])
 @require_auth
 def api_generate_map_images():
@@ -2602,7 +2715,7 @@ def api_regenerate_presentation_maps(pres_id):
             ptype = placeholder.replace('##MAP_', '').replace('##STREET_VIEW_', 'streetview_').replace('##', '').lower()
             pattern = r'/uploads/maps/[^/]+_[^/]+_' + ptype + r'_[^/]+\.png'
             if re.search(pattern, slides_json):
-                slides_json = re.sub(pattern, rel_path, slides_json)
+                slides_json = re.sub(pattern, lambda m, rp=rel_path: rp, slides_json)
                 updated = True
         if updated:
             slides_data = json.loads(slides_json)
@@ -2676,7 +2789,12 @@ def api_generate_slide_single():
     landmarks_matrix = project_data.get('landmarks_matrix')
     landmarks_note = ''
     if landmarks_matrix:
-        landmarks_note = "استخدم الأرقام التالية كما هي وممنوع تعديلها:\n" + json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
+        landmarks_note = (
+            "⚠️ إرشادات هامة لعرض المعالم:\n"
+            "يجب عرض المسافة والوقت معاً لكل معلم بدون استثناء بالصيغة التاعية: (اسم المعلم - المسافة بالكم - الوقت بالدقائق)، مثل: 'ميدان السارية (1.5 كم - 5 دقائق)'.\n"
+            "استخدم البيانات الموثقة التالية كما هي وممنوع تعديل الأرقام:\n" +
+            json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
+        )
 
     system_prompt = f"""{design_rules}
 

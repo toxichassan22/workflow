@@ -32,6 +32,50 @@ MAPS_DIR = os.path.join(os.path.dirname(__file__), 'uploads', 'maps')
 # Ensure maps directory exists
 os.makedirs(MAPS_DIR, exist_ok=True)
 
+FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
+
+
+def _get_arabic_font(size=14):
+    """Load an Arabic-compatible TrueType font using absolute paths with fallback."""
+    local_font = os.path.join(FONTS_DIR, 'BahijTheSansArabic-Bold.ttf')
+    if os.path.exists(local_font):
+        try:
+            return ImageFont.truetype(local_font, int(size))
+        except Exception as e:
+            print(f"[FONT WARN] Failed loading local font {local_font}: {e}")
+
+    fallbacks = [
+        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
+        "/usr/share/fonts/opentype/noto/NotoNaskhArabic-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\seguiemj.ttf",
+    ]
+    for fp in fallbacks:
+        if os.path.exists(fp):
+            try:
+                return ImageFont.truetype(fp, int(size))
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def _reshape_arabic_text(text):
+    """Reshape Arabic text for proper RTL display in PIL with explicit error logging."""
+    if not text:
+        return ""
+    text_str = str(text)
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        reshaped = arabic_reshaper.reshape(text_str)
+        return get_display(reshaped)
+    except Exception as e:
+        print(f"[ARABIC RESHAPE WARN] Reshaping failed for '{text_str}': {e}")
+        return text_str
+
+
 # Professional satellite map style — sepia/greyscale tone matching reference examples
 # Road labels kept visible in Arabic for context
 SATELLITE_WITH_LABELS_STYLES = [
@@ -325,14 +369,18 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
 
 
 def _latlng_to_pixel_offset(lat, lng, center_lat, center_lng, zoom, scale=2):
-    """Convert lat/lng to pixel offset from image center for a static map."""
+    """Convert lat/lng to pixel offset from image center for a static map using exact Web Mercator projection."""
     world_width = 256 * (2 ** zoom) * scale
-    x_offset = (lng - center_lng) * world_width / 360
-    lat_rad = math.radians(center_lat)
-    y_world = world_width / (2 * math.pi)
-    # Convert lat difference to radians for correct scaling in Mercator projection
-    y_offset = math.radians(lat - center_lat) * y_world / math.cos(lat_rad)
-    return x_offset, -y_offset
+    x_offset = (lng - center_lng) * world_width / 360.0
+
+    lat_rad = math.radians(lat)
+    center_lat_rad = math.radians(center_lat)
+    # Exact Web Mercator formula for vertical pixel displacement
+    y_lat = math.log(math.tan(math.pi / 4.0 + lat_rad / 2.0))
+    y_center = math.log(math.tan(math.pi / 4.0 + center_lat_rad / 2.0))
+    y_offset = -(y_lat - y_center) * (world_width / (2.0 * math.pi))
+
+    return x_offset, y_offset
 
 
 def _draw_pin_marker(color='#6B1C23', label=None, size=44, is_site=False, label_text=None):
@@ -659,7 +707,11 @@ def get_drive_matrix(origin, destinations):
         'mode': 'driving',
         'language': 'ar',
         'region': 'SA',
-        'key': GOOGLE_API_KEY,
+        # Live traffic: without departure_time Google returns free-flow duration,
+        # which is what made our numbers lower than the Google Maps app.
+        'departure_time': 'now',
+        'traffic_model': 'best_guess',
+        'key': _get_api_key(),
     }
 
     try:
@@ -678,14 +730,21 @@ def get_drive_matrix(origin, destinations):
         for i, elem in enumerate(elements):
             distance_km = None
             duration_min = None
+            in_traffic = False
             if elem.get('status') == 'OK' and elem.get('duration') and elem.get('distance'):
                 distance_km = round(elem['distance']['value'] / 1000.0, 1)
-                duration_min = math.ceil(elem['duration']['value'] / 60)
+                # Prefer the traffic-aware duration; fall back to free-flow.
+                traffic = elem.get('duration_in_traffic') or {}
+                seconds = traffic.get('value') or elem['duration']['value']
+                in_traffic = bool(traffic.get('value'))
+                duration_min = math.ceil(seconds / 60)
             # One entry per destination, in order, so callers can zip by index.
             result.append({
                 'name': names[i] if i < len(names) else '',
                 'distance_km': distance_km,
                 'duration_min': duration_min,
+                'distance_text': f"{distance_km} كم" if distance_km is not None else None,
+                'in_traffic': in_traffic,
             })
         return result
     except Exception as e:
@@ -1063,21 +1122,8 @@ def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale
             
             # Draw elegant label pill for each zone
             label = zone.get('label', f"{zone.get('minutes', 5)} دقائق")
-            try:
-                font = ImageFont.truetype("fonts/BahijTheSansArabic-Bold.ttf", 10 * canvas_scale)
-            except Exception:
-                try:
-                    font = ImageFont.truetype("arial.ttf", 10 * canvas_scale)
-                except Exception:
-                    font = ImageFont.load_default()
-            
-            # Format text using arabic_reshaper if needed
-            try:
-                import arabic_reshaper
-                from bidi.algorithm import get_display
-                reshaped = get_display(arabic_reshaper.reshape(label))
-            except Exception:
-                reshaped = label
+            font = _get_arabic_font(10 * canvas_scale)
+            reshaped = _reshape_arabic_text(label)
                 
             bbox = draw.textbbox((0, 0), reshaped, font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -1161,21 +1207,8 @@ def _post_process_streetview(image_path, heading, index):
             270: "إطلالة الغرب"
         }
         dir_text = directions.get(heading, f"إطلالة {heading}°")
-        
-        try:
-            font = ImageFont.truetype("fonts/BahijTheSansArabic-Bold.ttf", 14)
-        except Exception:
-            try:
-                font = ImageFont.truetype("arial.ttf", 14)
-            except Exception:
-                font = ImageFont.load_default()
-                
-        try:
-            import arabic_reshaper
-            from bidi.algorithm import get_display
-            reshaped = get_display(arabic_reshaper.reshape(dir_text))
-        except Exception:
-            reshaped = dir_text
+        font = _get_arabic_font(14)
+        reshaped = _reshape_arabic_text(dir_text)
             
         bbox = draw.textbbox((0, 0), reshaped, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -1452,19 +1485,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
 
     def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 245), border_color=(240, 230, 210, 220)):
         if not font:
-            font_paths = [
-                "fonts/BahijTheSansArabic-Bold.ttf",
-                "d:/workflow/fonts/BahijTheSansArabic-Bold.ttf",
-                "arial.ttf"
-            ]
-            for fp in font_paths:
-                try:
-                    font = ImageFont.truetype(fp, 17)
-                    break
-                except Exception:
-                    continue
-            if not font:
-                font = ImageFont.load_default()
+            font = _get_arabic_font(17)
 
         reshaped_text = _reshape_arabic_text(text)
         bbox = draw.textbbox((0, 0), reshaped_text, font=font)
@@ -1731,23 +1752,26 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     if not isinstance(enabled_maps, list):
         enabled_maps = ['overview', 'landmarks', 'access', 'catchment', 'streetview']
 
+    draft_id = project_data.get('draft_id') or project_data.get('draftId')
+    effective_pres_id = presentation_id or (f"draft_{draft_id}" if draft_id else None)
+
     def _close(a, b):
         try:
             return a is not None and b is not None and abs(float(a) - float(b)) < 1e-6
         except Exception:
             return False
 
-    if not force and presentation_id:
-        cached = _get_cached_map_images(tenant_id, presentation_id)
+    if not force and effective_pres_id:
+        cached = _get_cached_map_images(tenant_id, effective_pres_id)
         if cached and _close(cached.get('lat'), lat) and _close(cached.get('lng'), lng):
             found_base = cached.get('found_base') or set()
             required_base = {t for t in enabled_maps if t not in ('streetview',)}
             if not (required_base - found_base):
                 return cached
 
-    if force and presentation_id:
+    if force and effective_pres_id:
         from db import delete_map_images
-        delete_map_images(tenant_id, presentation_id=presentation_id)
+        delete_map_images(tenant_id, presentation_id=effective_pres_id)
 
     result = {
         'lat': lat,
@@ -1960,7 +1984,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             styles_to_gen = [(overview_mt, '##MAP_OVERVIEW##', 'overview')]
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
-            overview_path = _unique_map_path(tenant_id, presentation_id, img_suffix)
+            overview_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
             overview_res = get_static_map(lat, lng, zoom=overview_zoom, size=(1280, 720), output_path=overview_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WITH_LABELS_STYLES))
             if overview_res.get('success'):
                 if active_mt == 'satellite':
@@ -1975,7 +1999,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = overview_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, overview_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_landmarks (closer zoom)
     if 'landmarks' in enabled_maps and landmarks:
@@ -1988,7 +2012,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             styles_to_gen = [(landmarks_mt, '##MAP_LANDMARKS##', 'landmarks')]
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
-            landmarks_path = _unique_map_path(tenant_id, presentation_id, img_suffix)
+            landmarks_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
             lm_res = get_static_map(lat, lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES))
             if lm_res.get('success'):
                 if active_mt == 'satellite':
@@ -2003,7 +2027,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = landmarks_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_access
     if 'access' in enabled_maps:
@@ -2016,7 +2040,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             styles_to_gen = [(access_mt, '##MAP_ACCESS##', 'access')]
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
-            access_path = _unique_map_path(tenant_id, presentation_id, img_suffix)
+            access_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
             access_res = get_static_map(lat, lng, zoom=access_zoom, size=(1280, 720), output_path=access_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_CLEAN_STYLES))
             if access_res.get('success'):
                 if active_mt == 'satellite':
@@ -2030,7 +2054,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = access_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, access_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': access_zoom, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, access_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': access_zoom, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
 
 
@@ -2046,7 +2070,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             styles_to_gen = [(catchment_mt, '##MAP_CATCHMENT##', 'catchment')]
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
-            catchment_path = _unique_map_path(tenant_id, presentation_id, img_suffix)
+            catchment_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
             # Fetch clean map without the API-drawn paths, as we will draw them with PIL for premium styling.
             catchment_res = get_static_map(lat, lng, zoom=catchment_zoom, paths=None, size=(1280, 720), output_path=catchment_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES))
             if catchment_res.get('success'):
@@ -2064,7 +2088,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = catchment_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, presentation_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     return result
 
@@ -2097,27 +2121,41 @@ def _extract_coordinate(value):
 
 
 def _parse_landmarks_text(text):
-    """Parse landmark text like 'ميدان السارية - 1 دقيقة' into structured list."""
+    """Parse landmark text into structured list with name, duration_minutes, and distance_km."""
     if not text:
         return []
     landmarks = []
     for line in text.strip().split('\n'):
-        line = line.strip()
+        line = line.strip().lstrip('-').lstrip('•').strip()
         if not line:
             continue
-        line = line.lstrip('-').lstrip('•').strip()
-        name = line
+
         duration = None
-        if ' - ' in line:
-            parts = line.rsplit(' - ', 1)
-            name = parts[0].strip()
-            duration_text = parts[1].strip()
-            digits = ''.join([c for c in duration_text if c.isdigit()])
-            if digits:
-                duration = int(digits)
+        distance = None
+
+        dur_match = re.search(r'(\d+)\s*(?:دقيقة|دقائق|د|min|mins|minutes)', line, re.IGNORECASE)
+        if dur_match:
+            duration = int(dur_match.group(1))
+
+        dist_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:كم|كـم|km|kms|kilometer|kilometers)', line, re.IGNORECASE)
+        if dist_match:
+            distance = float(dist_match.group(1))
+
+        clean_name = line
+        if dur_match:
+            clean_name = clean_name.replace(dur_match.group(0), '')
+        if dist_match:
+            clean_name = clean_name.replace(dist_match.group(0), '')
+
+        clean_name = re.sub(r'[\-\(\)\,\،\s]+', ' ', clean_name).strip()
+        if not clean_name:
+            clean_name = line
+
         landmarks.append({
-            'name': name,
+            'name': clean_name,
             'duration_minutes': duration,
+            'distance_km': distance,
+            'distance_text': f"{distance} كم" if distance is not None else None,
             'lat': None,
             'lng': None,
         })
