@@ -937,6 +937,43 @@ def api_generate_image_single():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/get-image-prompts', methods=['POST'])
+def api_get_image_prompts():
+    """Return default prompts for cover image and moodboard images tailored to project data."""
+    data = request.json or {}
+    project_data = clean_project_data(data.get('projectData', {}))
+    project_name = project_data.get('project_name') or project_data.get('projectName') or 'مشروع عقاري'
+    project_type = project_data.get('project_type') or project_data.get('projectType') or 'سكني'
+    location = project_data.get('location_address') or project_data.get('location') or 'المملكة العربية السعودية'
+    try:
+        count = max(1, min(20, int(data.get('count', 4))))
+    except (TypeError, ValueError):
+        count = 4
+
+    cover_prompt = f"تصوير معماري فاخر لمشروع {project_name} ({project_type}) في {location}، واجهة حديثة أنيقة، إضاءة دافئة، جودة عالية جداً، بدون نصوص"
+
+    base_prompts = [
+        f"لقطة رئيسية لواجهة مشروع {project_name} في {location}، مبنى {project_type} فاخر بتصميم عصري وإضاءة مميزة",
+        f"منظور جانبي أيمن لواجهة {project_name} يبرز التفاصيل المعمارية وخامات البناء الفاخرة",
+        f"منظور جانبي أيسر لمبنى {project_name} يوضح جماليات التصميم والزجاج والفتحات المعمارية",
+        f"لقطة جوية بارافيناميكية لمشروع {project_name} تظهر المبنى من الأعلى والمحيط العام",
+        f"تفاصيل معمارية دقيقة للمدخل الرئيسي والبهو الخارجي لمشروع {project_name}",
+        f"لقطة مسائية ليلية لمشروع {project_name} توضح إضاءة الواجهات الخارجية في وقت الغروب",
+        f"تصميم داخلي فاخر لبهو الاستقبال والاستراحة في {project_name}",
+        f"المساحات الخضراء والحدائق المحيطة بمبنى {project_name}"
+    ]
+
+    moodboard_prompts = base_prompts[:count]
+    while len(moodboard_prompts) < count:
+        moodboard_prompts.append(f"منظور معماري إضافي لمشروع {project_name} رقم {len(moodboard_prompts)+1}")
+
+    return jsonify({
+        'success': True,
+        'cover_prompt': cover_prompt,
+        'moodboard_prompts': moodboard_prompts
+    })
+
+
 @app.route('/api/designer-generate', methods=['POST'])
 @require_auth
 def api_designer_generate():
