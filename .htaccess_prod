@@ -2,6 +2,10 @@ DirectoryIndex disabled
 
 RewriteEngine On
 
+# Block Facebook meta-externalagent crawler spam before it reaches gunicorn
+RewriteCond %{HTTP_USER_AGENT} meta-externalagent [NC]
+RewriteRule ^.*$ - [F,L]
+
 # Exclude .well-known / Let's Encrypt certificates from proxying
 RewriteCond %{REQUEST_URI} ^/\.well-known [NC]
 RewriteRule ^ - [L]

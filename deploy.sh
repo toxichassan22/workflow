@@ -38,12 +38,15 @@ rsync -av \
   --exclude='uploads' \
   "$REPO_DIR/" "$APP_DIR/"
 
-echo "===== 3. Clean Python cache ====="
+echo "===== 3. Ensure scripts are executable ====="
+chmod +x "$APP_DIR/start_server.sh"
+
+echo "===== 4. Clean Python cache ====="
 cd "$APP_DIR"
 find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 find . -name '*.pyc' -delete 2>/dev/null || true
 
-echo "===== 4. Update dependencies ====="
+echo "===== 5. Update dependencies ====="
 if [ ! -d "$APP_DIR/venv" ]; then
   python3 -m venv "$APP_DIR/venv"
 fi
@@ -56,8 +59,8 @@ if ! "$PYTHON" -m playwright install chromium >/tmp/playwright_install.log 2>&1;
   echo "WARNING: Playwright Chromium install failed or skipped; check /tmp/playwright_install.log"
 fi
 
-echo "===== 5. Run database migrations ====="
+echo "===== 6. Run database migrations ====="
 "$PYTHON" -c "import app; app.db.init_db()"
 
-echo "===== 6. Start/restart application server ====="
+echo "===== 7. Start/restart application server ====="
 bash "$APP_DIR/start_server.sh" --force
