@@ -422,13 +422,14 @@ def _draw_pin_marker(color='#6B1C23', label=None, size=44, is_site=False, label_
                       
         if label_text:
             font = _get_arabic_font(60)
-            bbox = draw.textbbox((0, 0), _reshape_arabic_text(label_text), font=font)
+            shaped_label = _reshape_arabic_text(label_text)
+            bbox = draw.textbbox((0, 0), shaped_label, font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
             tx = ccx - tw // 2
             ty = ccy + pin_r + tri_h + 10
             pad = 20
             draw.rounded_rectangle([tx - pad, ty - 8, tx + tw + pad, ty + th + 12], radius=16, fill=color)
-            draw.text((tx, ty), label_text, fill='#FFFFFF', font=font)
+            draw.text((tx, ty), shaped_label, fill='#FFFFFF', font=font)
     else:
         pin_r = (size // 4) * 4
         tri_h = (pin_r * 2) // 3
@@ -567,6 +568,13 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
         'mosque', 'church', 'hindu_temple', 'synagogue', 'place_of_worship',
         'city_hall', 'embassy', 'museum', 'library', 'art_gallery',
         'amusement_park', 'aquarium', 'zoo', 'park', 'garden',
+        'sports_complex', 'golf_course', 'swimming_pool',
+        'tourist_attraction', 'landmark', 'historical_landmark',
+        'cemetery', 'monument', 'civic_center', 'city_hall',
+        'primary_school', 'secondary_school', 'preschool',
+        'movie_theater', 'performing_arts_theater', 'concert_hall',
+        'convention_center', 'event_venue', 'wedding_venue',
+        'government_office', 'police', 'fire_station',
     }
 
     url = 'https://places.googleapis.com/v1/places:searchNearby'
@@ -584,8 +592,6 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
         },
         'maxResultCount': max_results * 3,
     }
-    if keyword:
-        body['textQuery'] = keyword
 
     try:
         response = requests.post(url, headers=headers, json=body, timeout=15)

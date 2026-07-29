@@ -5640,10 +5640,50 @@ def invite_page(token):
 def static_assets(path):
     return send_from_directory(os.path.join(os.path.dirname(__file__), 'assets'), path)
 
+_regenerating_map_presentations = set()
+
 @app.route('/uploads/maps/<path:path>')
 def static_map_uploads(path):
-    """Map renderings are presentation assets and may be served publicly."""
-    return send_from_directory(os.path.join(UPLOADS_DIR, 'maps'), path)
+    """Map renderings are presentation assets and may be served publicly. Auto-regenerate if missing from ephemeral disk."""
+    maps_dir = os.path.join(UPLOADS_DIR, 'maps')
+    full_path = os.path.join(maps_dir, path)
+    if not os.path.exists(full_path):
+        filename = os.path.basename(path)
+        try:
+            conn = db.get_db()
+            row = conn.execute(
+                "SELECT tenant_id, presentation_id FROM map_images WHERE file_path LIKE ? ORDER BY created_at DESC LIMIT 1",
+                (f"%{filename}",)
+            ).fetchone()
+            if row and row['presentation_id']:
+                pres_id = row['presentation_id']
+                tenant_id = row['tenant_id']
+                if pres_id not in _regenerating_map_presentations:
+                    _regenerating_map_presentations.add(pres_id)
+                    try:
+                        pres = db.get_presentation(pres_id, tenant_id=tenant_id)
+                        if pres and pres.get('project_data'):
+                            pdata = json.loads(pres['project_data']) if isinstance(pres['project_data'], str) else pres['project_data']
+                            map_res = maps_service.generate_all_map_images(pdata, tenant_id, presentation_id=pres_id, force=True)
+                            if map_res.get('placeholders') and pres.get('slides_data'):
+                                slides = json.loads(pres['slides_data']) if isinstance(pres['slides_data'], str) else pres['slides_data']
+                                slides_json = json.dumps(slides, ensure_ascii=False)
+                                for placeholder, ppath in map_res['placeholders'].items():
+                                    if ppath and os.path.exists(ppath):
+                                        rel_p = '/' + os.path.relpath(ppath, os.path.dirname(__file__)).replace('\\', '/')
+                                        ptype = placeholder.replace('##MAP_', '').replace('##STREET_VIEW_', 'streetview_').replace('##', '').lower()
+                                        pattern = r'/uploads/maps/[^/]+_[^/]+_' + ptype + r'_[^/]+\.png'
+                                        slides_json = re.sub(pattern, lambda m, rp=rel_p: rp, slides_json)
+                                updated_slides = json.loads(slides_json)
+                                db.update_presentation(pres_id, {'slides_data': json.dumps(updated_slides, ensure_ascii=False)}, tenant_id=tenant_id)
+                    finally:
+                        _regenerating_map_presentations.discard(pres_id)
+        except Exception as e:
+            print(f"[AUTO MAP REGEN ERROR] {e}")
+
+    if os.path.exists(full_path):
+        return send_from_directory(maps_dir, path)
+    return jsonify({'error': 'Map image not found'}), 404
 
 
 @app.route('/uploads/<path:path>')
