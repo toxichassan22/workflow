@@ -869,7 +869,18 @@ def _point_in_polygon(lat, lng, coords):
     return inside
 
 
-def _fetch_osm_polygon(lat, lng, radius_m=200):
+def _is_viewport_rectangle(coords):
+    """Check if coordinates form a 4-point geocoding viewport bounding rectangle."""
+    if not coords or len(coords) != 4:
+        return False
+    lats = [c[0] for c in coords]
+    lngs = [c[1] for c in coords]
+    unique_lats = {round(lat, 5) for lat in lats}
+    unique_lngs = {round(lng, 5) for lng in lngs}
+    return len(unique_lats) == 2 and len(unique_lngs) == 2
+
+
+def _fetch_osm_polygon(lat, lng, radius_m=400):
     """Fetch the real building/compound polygon from OpenStreetMap via Overpass API in a single optimized query."""
     
     overpass_servers = [
@@ -882,18 +893,15 @@ def _fetch_osm_polygon(lat, lng, radius_m=200):
         'User-Agent': 'RealEstateProposalGenerator/1.0'
     }
     
-    # Combine all tags into a single Overpass query for maximum speed (1 request instead of 4)
-    # We query around the coordinate for leisure, amenity, landuse, and buildings
-    # Added: relation queries for larger compounds, more landuse types, highway for road context
     query = f"""[out:json][timeout:15];
     (
       way(around:{radius_m},{lat},{lng})["leisure"~"sports_centre|stadium|fitness_centre|golf_course|resort|park|playground|garden|nature_reserve|recreation_ground"];
       way(around:{radius_m},{lat},{lng})["amenity"~"school|university|hospital|college|club|clinic|place_of_worship|public_building|community_centre|conference_centre|exhibition_centre|arts_centre"];
       way(around:{radius_m},{lat},{lng})["landuse"~"construction|commercial|retail|residential|industrial|military|institutional|religious|cemetery|recreation_ground|village_green|allotments"];
-      way(around:{radius_m},{lat},{lng})["building"~"commercial|industrial|religious|public|civic|hospital|school|university|college|stadium|warehouse|retail|office"];
       way(around:{radius_m},{lat},{lng})["building"];
       relation(around:{radius_m},{lat},{lng})["leisure"~"sports_centre|stadium|fitness_centre|golf_course|resort|park|playground|garden"];
       relation(around:{radius_m},{lat},{lng})["landuse"~"construction|commercial|retail|residential|industrial|military|institutional"];
+      relation(around:{radius_m},{lat},{lng})["building"];
     );
     out geom;"""
     
@@ -915,9 +923,6 @@ def _fetch_osm_polygon(lat, lng, radius_m=200):
     if not elements:
         return None
         
-    # Priority ranking and validation in Python
-    # Class 1: Point is inside the polygon (preferred)
-    # Class 2: Point is near the polygon (within 60 meters)
     best_el = None
     best_sort_key = (999, 999, float('inf'))
     
@@ -928,8 +933,6 @@ def _fetch_osm_polygon(lat, lng, radius_m=200):
             
         coords = [(p['lat'], p['lon']) for p in geom]
         area_sqm = _approx_polygon_area_sqm(coords)
-        
-        # Determine priority and limit based on tags
         tags = el.get('tags', {})
         
         priority = 999
@@ -950,20 +953,18 @@ def _fetch_osm_polygon(lat, lng, radius_m=200):
             tag_type = "landuse:" + tags['landuse']
         elif 'building' in tags:
             priority = 4
-            max_area = 150000
-            tag_type = "building:" + tags['building']
+            max_area = 250000
+            tag_type = "building:" + str(tags['building'])
             
         if priority == 999:
-            continue # Tag does not match our target types
+            continue
             
-        # Validate area limits
         if area_sqm > max_area:
             print(f"[OSM POLYGON] Rejected too-large {tag_type}: {area_sqm:.0f} sqm > {max_area} limit")
             continue
         if area_sqm < 10:
             continue
             
-        # Distance calculation
         def get_dist_m(pt_lat, pt_lng):
             dy = (pt_lat - lat) * 111000.0
             dx = (pt_lng - lng) * 111000.0 * math.cos(math.radians((pt_lat + lat) / 2.0))
@@ -972,11 +973,10 @@ def _fetch_osm_polygon(lat, lng, radius_m=200):
         min_dist_to_vertex = min(get_dist_m(p_lat, p_lng) for p_lat, p_lng in coords)
         is_inside = _point_in_polygon(lat, lng, coords)
         
-        # Check if it contains the point or is very close (within 60 meters)
-        if not is_inside and min_dist_to_vertex > 60.0:
+        # Accept if contains point or is within 120m of a vertex
+        if not is_inside and min_dist_to_vertex > 120.0:
             continue
             
-        # Sort key: (0 if inside else 1, priority, min_dist_to_vertex)
         sort_key = (0 if is_inside else 1, priority, min_dist_to_vertex)
         if sort_key < best_sort_key:
             best_sort_key = sort_key
@@ -992,7 +992,7 @@ def _fetch_osm_polygon(lat, lng, radius_m=200):
         try:
             print(f"[OSM POLYGON] Found {is_inside_str} {tag_type} '{tag_name}' (Priority {best_sort_key[1]}), ~{area_sqm:.0f} sqm")
         except Exception:
-            safe_name = tag_name.encode('ascii', errors='ignore').decode('ascii')
+            safe_name = str(tag_name).encode('ascii', errors='ignore').decode('ascii')
             print(f"[OSM POLYGON] Found {is_inside_str} {tag_type} '{safe_name}' (Priority {best_sort_key[1]}), ~{area_sqm:.0f} sqm")
         return coords
         
@@ -1007,7 +1007,7 @@ _osm_polygon_cache = {}
 def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m=300, size=(1280, 720), scale=2,
                          polygon_coords=None, auto_detect_polygon=True, rotation_deg=18.0):
     """Draw the site highlight using the real building shape.
-    Priority: 1) User-supplied polygon, 2) Auto-detected building polygon from OSM (area-validated), 3) Small circle fallback."""
+    Priority: 1) Real user polygon (excluding geocode viewports), 2) Auto-detected building polygon from OSM, 3) Styled site circle fallback."""
     try:
         img = Image.open(image_path).convert('RGBA')
         img_w, img_h = img.size
@@ -1019,10 +1019,12 @@ def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m
         fill_color = SITE_FILL_COLOR
         border_color = SITE_BORDER_COLOR
 
-        # Priority 1: User-supplied polygon coordinates
+        # Ignore 4-point geocoding viewport rectangles so real OSM building shapes are preferred
+        if polygon_coords and _is_viewport_rectangle(polygon_coords):
+            polygon_coords = None
+
+        # Priority 1 & 2: Real building polygon
         if auto_detect_polygon and (not polygon_coords or len(polygon_coords) < 3):
-            # Priority 2: Auto-detect building polygon from OpenStreetMap
-            # _fetch_osm_polygon now validates area to prevent huge neighborhood polygons
             cache_key = f"{center_lat:.6f},{center_lng:.6f}"
             if cache_key in _osm_polygon_cache:
                 osm_poly = _osm_polygon_cache[cache_key]
@@ -1035,7 +1037,6 @@ def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m
                 polygon_coords = osm_poly
 
         if polygon_coords and len(polygon_coords) >= 3:
-            # Draw real polygon (user-supplied or auto-detected building shape)
             pixel_points = []
             for p_lat, p_lng in polygon_coords:
                 dx, dy = _latlng_to_pixel_offset(p_lat, p_lng, center_lat, center_lng, zoom, scale=scale)
@@ -1044,19 +1045,16 @@ def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m
                 pixel_points.append((px, py))
             
             overlay_draw.polygon(pixel_points, fill=fill_color, outline=border_color, width=5)
-            
-            # White outer border for premium look
             overlay_draw.polygon(pixel_points, fill=None, outline=(255, 255, 255, 160), width=3)
         else:
-            # Priority 3: Small circle fallback when no building polygon found.
-            circle_radius_m = 120
+            # Priority 3: Compact site radius highlight when no building polygon exists
+            circle_radius_m = 60
             edge_lat = center_lat + (circle_radius_m / 111320.0)
             dx, _ = _latlng_to_pixel_offset(edge_lat, center_lng, center_lat, center_lng, zoom, scale=scale)
-            # Make fallback circle size elegant and proportional to zoom level
-            min_r = 16 if zoom <= 13 else (24 if zoom == 14 else 40)
+            min_r = 16 if zoom <= 13 else (24 if zoom == 14 else 36)
             r = max(abs(dx), min_r)
-            overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill_color, outline=border_color, width=5)
-            overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=None, outline=(255, 255, 255, 160), width=3)
+            overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill_color, outline=border_color, width=4)
+            overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=None, outline=(255, 255, 255, 160), width=2)
 
         img = Image.alpha_composite(img, overlay)
         img.save(image_path, 'PNG')
@@ -1688,7 +1686,7 @@ def _get_cached_map_images(tenant_id, presentation_id):
     }
 
 
-def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None):
+def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None):
     """
     Generate all map images needed for a project.
     Returns dict of placeholder -> file_path.
@@ -1742,7 +1740,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     if not isinstance(enabled_maps, list):
         enabled_maps = ['overview', 'landmarks', 'access', 'catchment', 'streetview']
 
-    draft_id = project_data.get('draft_id') or project_data.get('draftId')
+    draft_id = draft_id or project_data.get('draft_id') or project_data.get('draftId')
     effective_pres_id = presentation_id or (f"draft_{draft_id}" if draft_id else None)
 
     def _close(a, b):
