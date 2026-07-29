@@ -235,6 +235,12 @@ def call_image_api(prompt):
                 img = msg["images"][0]
                 if isinstance(img, dict) and "image_url" in img:
                     return img["image_url"].get("url")
+            text_part = msg.get("content")
+            if isinstance(text_part, list):
+                text_part = ' '.join(str(c.get('text', '')) if isinstance(c, dict) else str(c) for c in text_part)
+            print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Text: {str(text_part)[:300]}")
+        else:
+            print(f"[IMAGE ERROR] Unexpected API response (status {response.status_code}): {str(data)[:300]}")
     except requests.exceptions.Timeout:
         print("[IMAGE ERROR] OpenRouter API request timed out")
     except requests.exceptions.ConnectionError:
@@ -286,6 +292,12 @@ def call_image_api_with_reference(reference_image_base64, prompt):
                 img = msg["images"][0]
                 if isinstance(img, dict) and "image_url" in img:
                     return img["image_url"].get("url")
+            text_part = msg.get("content")
+            if isinstance(text_part, list):
+                text_part = ' '.join(str(c.get('text', '')) if isinstance(c, dict) else str(c) for c in text_part)
+            print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Text: {str(text_part)[:300]}")
+        else:
+            print(f"[IMAGE ERROR] Unexpected API response (status {response.status_code}): {str(data)[:300]}")
     except requests.exceptions.Timeout:
         print("[IMAGE ERROR] OpenRouter API request timed out")
     except requests.exceptions.ConnectionError:
