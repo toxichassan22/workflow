@@ -1010,8 +1010,8 @@ def get_presentations(tenant_id):
     return [dict(r) for r in rows]
 
 
-def update_presentation(pres_id, **fields):
-    """Update a presentation."""
+def update_presentation(pres_id, tenant_id=None, **fields):
+    """Update a presentation, optionally scoped to a tenant."""
     conn = get_db()
     allowed = {'title', 'project_data', 'slides_data', 'slide_count', 'status'}
     updates = {k: v for k, v in fields.items() if k in allowed}
@@ -1024,7 +1024,11 @@ def update_presentation(pres_id, **fields):
     updates['updated_at'] = datetime.now().isoformat()
     set_clause = ', '.join(f'{k} = ?' for k in updates)
     values = list(updates.values()) + [pres_id]
-    conn.execute(f'UPDATE presentations SET {set_clause} WHERE id = ?', values)
+    if tenant_id:
+        values.append(tenant_id)
+        conn.execute(f'UPDATE presentations SET {set_clause} WHERE id = ? AND tenant_id = ?', values)
+    else:
+        conn.execute(f'UPDATE presentations SET {set_clause} WHERE id = ?', values)
     conn.commit()
     return True
 

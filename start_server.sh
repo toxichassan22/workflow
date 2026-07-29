@@ -76,10 +76,14 @@ disown
 
 sleep 3
 
-# Final health check before exposing via Apache
+# Expose via Apache immediately using the selected Gunicorn port.
+# This is unconditional so stale/default port numbers (e.g. 3000) cannot linger.
+sed "s/127\\.0\\.0\\.1:[0-9]*/127.0.0.1:$SELECTED_PORT/g" "$APP_DIR/.htaccess_prod" > "$WEB_ROOT/.htaccess"
+log ".htaccess routed to 127.0.0.1:$SELECTED_PORT"
+
+# Final health check
 if curl -fsS -m 10 "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}" >/dev/null 2>&1; then
-  sed "s/127\\.0\\.0\\.1:[0-9]*/127.0.0.1:$SELECTED_PORT/g" "$APP_DIR/.htaccess_prod" > "$WEB_ROOT/.htaccess"
-  log "OK: gunicorn running on port $SELECTED_PORT; .htaccess updated"
+  log "OK: gunicorn running on port $SELECTED_PORT"
 else
   log "ERROR: gunicorn failed health check on port $SELECTED_PORT"
   tail -n 30 "$APP_DIR/server.log" | tee -a "$WATCHDOG_LOG"

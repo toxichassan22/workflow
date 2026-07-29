@@ -5782,7 +5782,7 @@ def static_map_uploads(path):
                                         pattern = r'/uploads/maps/[^/]+_[^/]+_' + ptype + r'_[^/]+\.png'
                                         slides_json = re.sub(pattern, lambda m, rp=rel_p: rp, slides_json)
                                 updated_slides = json.loads(slides_json)
-                                db.update_presentation(pres_id, slides_data=updated_slides)
+                                db.update_presentation(pres_id, tenant_id=tenant_id, slides_data=updated_slides)
 
                                 new_path = map_res['placeholders'].get(placeholder_name)
                                 if new_path and os.path.exists(new_path):
