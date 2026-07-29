@@ -3061,6 +3061,26 @@
       return !!c.cover && mb.length > 0 && c.images_signature === imagesSignature();
     }
 
+    // Fields actually read by maps_service.generate_all_map_images on the server.
+    // Sending the whole project data pushed the request past ~35KB, where the shared
+    // hosting proxy corrupts the body and the request fails (404/502).
+    const MAP_PAYLOAD_FIELDS = [
+      'catchment_areas', 'draft_id', 'draftId', 'draw_compass', 'draw_inset',
+      'enabled_maps', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
+      'location_address', 'location_lat', 'location_lng', 'location_maps_link',
+      'locationLat', 'locationLng', 'location_polygon', 'longitude', 'map_styles',
+      'map_type', 'maps_link', 'nearby_landmarks'
+    ];
+
+    function slimMapProjectData(data) {
+      const src = data || {};
+      const slim = {};
+      MAP_PAYLOAD_FIELDS.forEach(key => {
+        if (src[key] !== undefined && src[key] !== null && src[key] !== '') slim[key] = src[key];
+      });
+      return slim;
+    }
+
     async function ensureProjectAssets({ force = false, needImages = true, needMaps = true, includeCover = true } = {}) {
       tenantCreativeImages = tenantCreativeImages || { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
       if (!tenantProjectData) tenantProjectData = {};
@@ -3113,7 +3133,7 @@
         if (!force && !staleMaps) {
           console.log('[ASSETS] reusing stored maps');
         } else {
-          const payload = { projectData: { ...tenantProjectData, draftId: tenantProjectData.draftId }, force: !!force || staleMaps };
+          const payload = { projectData: slimMapProjectData(tenantProjectData), force: !!force || staleMaps };
           if (tenantPresentationId) payload.presentationId = tenantPresentationId;
           let res = null;
           try {
