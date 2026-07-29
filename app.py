@@ -939,7 +939,7 @@ def api_generate_image_single():
 
 @app.route('/api/get-image-prompts', methods=['POST'])
 def api_get_image_prompts():
-    """Return default prompts for cover image and moodboard images tailored to project data."""
+    """Use GLM 5.1 to generate hyper-realistic, project-tailored architectural prompts for cover and moodboard images."""
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
     project_name = project_data.get('project_name') or project_data.get('projectName') or 'مشروع عقاري'
@@ -950,7 +950,50 @@ def api_get_image_prompts():
     except (TypeError, ValueError):
         count = 4
 
-    cover_prompt = f"تصوير معماري فاخر لمشروع {project_name} ({project_type}) في {location}، واجهة حديثة أنيقة، إضاءة دافئة، جودة عالية جداً، بدون نصوص"
+    sys_prompt = (
+        "أنت خبير هندسي ومعماري ومصمم بصري محترف، متخصص في صياغة الأوصاف النصية (Image Prompts) "
+        "فائقة الدقة والمطابقة لمعايير الواقعية المعمارية بنسبة 80% إلى 99% لتصوير المباني والمشاريع العقارية.\n"
+        "المطلوب منك تحليل بيانات المشروع المدخلة كاملاً وإنشاء أوصاف عربية تفصيلية ومحترفة:\n"
+        "1. cover_prompt: وصف تفصيلي للغلاف يصف الواجهة والارتفاع والخامات والضوء والمحيط بدقة عالية.\n"
+        "2. moodboard_prompts: قائمة بعدد المود بورد المطلوب تشمل لقطات واجهة، منظور أيمن، منظور أيسر، لقطة جوية درون، وتفاصيل معمارية.\n"
+        "يجب أن تعيد النتيجة بصيغة JSON حصرية بالشكل التالي دون أي نصوص إضافية:\n"
+        '{\n  "cover_prompt": "...",\n  "moodboard_prompts": ["...", "..."]\n}'
+    )
+
+    user_msg = (
+        f"بيانات المشروع:\n"
+        f"- اسم المشروع: {project_name}\n"
+        f"- نوع المشروع: {project_type}\n"
+        f"- الموقع: {location}\n"
+        f"- عدد صور المود بورد المطلوبة: {count}\n"
+        f"- تفاصيل وإحصائيات إضافية: {json.dumps(project_data, ensure_ascii=False)}\n\n"
+        f"اكتب الأوصاف بدقة معمارية عالية جداً ومطابقة لواقع البيئة والعمارة."
+    )
+
+    try:
+        res = call_zai_chat(sys_prompt, user_msg, temperature=0.7, max_tokens=2500)
+        if res and 'choices' in res and res['choices']:
+            content = res['choices'][0]['message']['content'].strip()
+            if '```json' in content:
+                content = content.split('```json')[1].split('```')[0].strip()
+            elif '```' in content:
+                content = content.split('```')[1].split('```')[0].strip()
+            
+            parsed = json.loads(content)
+            if 'cover_prompt' in parsed and 'moodboard_prompts' in parsed:
+                moodboard_prompts = parsed['moodboard_prompts']
+                while len(moodboard_prompts) < count:
+                    moodboard_prompts.append(f"منظور معماري إضافي لمشروع {project_name} رقم {len(moodboard_prompts)+1}")
+                return jsonify({
+                    'success': True,
+                    'cover_prompt': parsed['cover_prompt'],
+                    'moodboard_prompts': moodboard_prompts[:count],
+                    'engine': GLM_MODEL
+                })
+    except Exception as e:
+        print(f"[IMAGE PROMPTS GLM ERROR] {e}. Falling back to default generator...")
+
+    cover_prompt = f"تصوير معماري فاخر لمشروع {project_name} ({project_type}) في {location}، واجهة حديثة أنيقة بخامات راقية، إضاءة دافئة، تصوير احترافي، بدون نصوص"
 
     base_prompts = [
         f"لقطة رئيسية لواجهة مشروع {project_name} في {location}، مبنى {project_type} فاخر بتصميم عصري وإضاءة مميزة",
@@ -970,7 +1013,8 @@ def api_get_image_prompts():
     return jsonify({
         'success': True,
         'cover_prompt': cover_prompt,
-        'moodboard_prompts': moodboard_prompts
+        'moodboard_prompts': moodboard_prompts,
+        'engine': 'fallback'
     })
 
 
