@@ -1578,10 +1578,10 @@ def api_designer_chat():
 {{"response":"رسالة عربية تشرح ما ستفعله", "actions":[{{"tool":"edit_slides|generate_image|create_slide|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
-- edit_slides: params={"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل المطلوبة"}
-- generate_image: params={"prompt":"وصف الصورة", "slideIndex":1, "position":"background|right|left|inline"}
-- create_slide: params={"title":"العنوان", "type":"content", "instruction":"محتوى الشريحة"}
-- regenerate_maps: params={"maptype":"roadmap|satellite|hybrid|terrain"} (استخدمها عند طلب التبديل إلى شوارع/مرور/قمر صناعي)
+- edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل المطلوبة"}}
+- generate_image: params={{"prompt":"وصف الصورة", "slideIndex":1, "position":"background|right|left|inline"}}
+- create_slide: params={{"title":"العنوان", "type":"content", "instruction":"محتوى الشريحة"}}
+- regenerate_maps: params={{"maptype":"roadmap|satellite|hybrid|terrain"}} (استخدمها عند طلب التبديل إلى شوارع/مرور/قمر صناعي)
 
 قواعد إضافة الخرائط عند طلب المستخدم (خريطة شوارع، خريطة منطقة، معالم، نطاق):
 إذا طلب المستخدم إضافة خريطة أو تعديل خريطة الشريحة، يرجى توجيه edit_slides بتضمين أحد الرموز التالية داخل كود HTML للشريحة:
@@ -1715,7 +1715,7 @@ def api_designer_chat():
                     slides_json = json.dumps(slides, ensure_ascii=False)
                     for placeholder, ppath in map_res['placeholders'].items():
                         if ppath and os.path.exists(ppath):
-                            rel_p = os.path.relpath(ppath, os.path.dirname(__file__)).replace('\\', '/')
+                            rel_p = '/' + os.path.relpath(ppath, os.path.dirname(__file__)).replace('\\', '/')
                             ptype = placeholder.replace('##MAP_', '').replace('##STREET_VIEW_', 'streetview_').replace('##', '').lower()
                             pattern = r'/uploads/maps/[^/]+_[^/]+_' + ptype + r'_[^/]+\.png'
                             slides_json = re.sub(pattern, lambda m, rp=rel_p: rp, slides_json)
@@ -2597,18 +2597,8 @@ def api_preview_map_data():
             query = f"{lm['name']}, {location_context}" if location_context else lm['name']
             geo = maps_service.geocode_address(query, tenant_id=g.tenant_id)
             if geo.get('success'):
-                if geo.get('precision') == 'low':
-                    nearby = maps_service.get_nearby_landmarks(lat, lng, radius=2000, keyword=lm['name'])
-                    if nearby.get('success') and nearby.get('landmarks'):
-                        best_poi = nearby['landmarks'][0]
-                        lm['lat'] = best_poi['lat']
-                        lm['lng'] = best_poi['lng']
-                    else:
-                        lm['lat'] = geo['lat']
-                        lm['lng'] = geo['lng']
-                else:
-                    lm['lat'] = geo['lat']
-                    lm['lng'] = geo['lng']
+                lm['lat'] = geo['lat']
+                lm['lng'] = geo['lng']
 
     filtered_landmarks = []
     for lm in landmarks:

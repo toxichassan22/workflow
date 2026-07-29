@@ -48,7 +48,6 @@ def _get_arabic_font(size=14):
         "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
         "/usr/share/fonts/opentype/noto/NotoNaskhArabic-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "C:\\Windows\\Fonts\\arial.ttf",
         "C:\\Windows\\Fonts\\seguiemj.ttf",
     ]
@@ -1474,15 +1473,6 @@ def _google_reverse_geocode_road(lat, lng, tenant_id=None):
 
 def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, project_data=None, tenant_id=None):
     """Draw only Google Maps-derived access-road geometry and labels."""
-    def _reshape_arabic_text(text):
-        try:
-            import arabic_reshaper
-            from bidi.algorithm import get_display
-            reshaped = arabic_reshaper.reshape(text)
-            return get_display(reshaped)
-        except Exception:
-            return text
-
     def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 245), border_color=(240, 230, 210, 220)):
         if not font:
             font = _get_arabic_font(17)
