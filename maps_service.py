@@ -1037,14 +1037,103 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
     return None
 
 
+def _fetch_osm_neighborhood(lat, lng, radius_m=2000):
+    """Fetch a neighborhood/suburb/district boundary from OpenStreetMap for sites without building footprints."""
+
+    overpass_servers = [
+        "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+
+    headers = {
+        'User-Agent': 'RealEstateProposalGenerator/1.0'
+    }
+
+    query = f"""[out:json][timeout:20];
+    (
+      way(around:{radius_m},{lat},{lng})["place"~"suburb|neighbourhood|quarter|district|city_block|locality"];
+      relation(around:{radius_m},{lat},{lng})["place"~"suburb|neighbourhood|quarter|district|city_block|locality"];
+      relation(around:{radius_m},{lat},{lng})["boundary"="administrative"]["admin_level"="8"];
+      relation(around:{radius_m},{lat},{lng})["boundary"="administrative"]["admin_level"="9"];
+      relation(around:{radius_m},{lat},{lng})["boundary"="administrative"]["admin_level"="10"];
+    );
+    out geom;"""
+
+    data = None
+    for server_url in overpass_servers:
+        try:
+            resp = requests.post(server_url, data={'data': query}, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                break
+        except Exception as e:
+            print(f"[OSM NEIGHBORHOOD] Server {server_url} failed: {e}")
+            continue
+
+    if not data:
+        return None
+
+    elements = data.get('elements', [])
+    if not elements:
+        return None
+
+    candidates = []
+    for el in elements:
+        el_type = el.get('type')
+        tags = el.get('tags', {})
+        if el_type == 'relation':
+            for member in el.get('members', []):
+                if member.get('type') == 'way' and member.get('role') == 'outer' and member.get('geometry'):
+                    outer = [(p['lat'], p['lon']) for p in member['geometry'] if 'lat' in p and 'lon' in p]
+                    if len(outer) >= 3:
+                        candidates.append({'coords': outer, 'tags': tags})
+        elif el_type == 'way' and el.get('geometry'):
+            outer = [(p['lat'], p['lon']) for p in el['geometry'] if 'lat' in p and 'lon' in p]
+            if len(outer) >= 3:
+                candidates.append({'coords': outer, 'tags': tags})
+
+    if not candidates:
+        return None
+
+    MAX_NEIGHBORHOOD_AREA_SQM = 50_000_000  # 50 km²
+    MIN_NEIGHBORHOOD_AREA_SQM = 10_000      # 1 hectare
+
+    best = None
+    best_key = None
+    best_area = 0
+    for cand in candidates:
+        area_sqm = _approx_polygon_area_sqm(cand['coords'])
+        if area_sqm > MAX_NEIGHBORHOOD_AREA_SQM or area_sqm < MIN_NEIGHBORHOOD_AREA_SQM:
+            continue
+        inside = _point_in_polygon(lat, lng, cand['coords'])
+        dist = _min_dist_to_polygon_m(lat, lng, cand['coords'])
+        # Prefer containing, then smallest containing, then closest non-containing
+        key = (0 if inside else 1, area_sqm if inside else dist, dist if inside else area_sqm)
+        if best is None or key < best_key:
+            best = cand['coords']
+            best_key = key
+            best_area = area_sqm
+
+    if best:
+        print(f"[OSM NEIGHBORHOOD] Found neighborhood {best_area:.0f} sqm, inside={best_key[0] == 0}")
+        return best
+
+    return None
+
+
 # Cache for OSM polygons to avoid re-querying for the same location across map types
 _osm_polygon_cache = {}
 
+# Cache for OSM neighborhood boundaries
+_osm_neighborhood_cache = {}
+
 
 def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m=300, size=(1280, 720), scale=2,
-                         polygon_coords=None, auto_detect_polygon=True, rotation_deg=18.0):
+                         polygon_coords=None, auto_detect_polygon=True, auto_detected=True, rotation_deg=18.0):
     """Draw the site highlight using the real building shape.
-    Priority: 1) Real user polygon (excluding geocode viewports), 2) Auto-detected building polygon from OSM, 3) Styled site circle fallback."""
+    Priority: 1) Real user polygon, 2) Auto-detected building/neighborhood polygon from OSM, 3) Styled site circle fallback.
+    auto_detected=False skips the 4-point viewport-rectangle filter, preserving user-drawn rectangles."""
     try:
         img = Image.open(image_path).convert('RGBA')
         img_w, img_h = img.size
@@ -1056,8 +1145,9 @@ def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m
         fill_color = SITE_FILL_COLOR
         border_color = SITE_BORDER_COLOR
 
-        # Ignore 4-point geocoding viewport rectangles so real OSM building shapes are preferred
-        if polygon_coords and _is_viewport_rectangle(polygon_coords):
+        # Ignore 4-point geocoding viewport rectangles so real OSM building shapes are preferred.
+        # Only apply to auto-detected (OSM) polygons; user-drawn rectangles must be preserved.
+        if auto_detected and polygon_coords and _is_viewport_rectangle(polygon_coords):
             polygon_coords = None
 
         # Priority 1 & 2: Real building polygon
@@ -1805,6 +1895,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
 
     polygon_coords = None
     poly_data = project_data.get('location_polygon')
+    user_polygon_used = False
     if poly_data:
         try:
             if isinstance(poly_data, str):
@@ -1815,14 +1906,14 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                         polygon_coords.append((float(plat.strip()), float(plng.strip())))
             elif isinstance(poly_data, list):
                 polygon_coords = [(float(pt[0]), float(pt[1])) for pt in poly_data if len(pt) >= 2]
+            if polygon_coords and len(polygon_coords) >= 3:
+                user_polygon_used = True
+                print(f"[POLYGON] Using user-provided polygon with {len(polygon_coords)} points")
         except Exception as e:
             print(f"[POLYGON PARSE ERROR] {e}")
 
-    # Force auto-detection of polygon to True to ensure OSM boundary retrieval
-    auto_detect_polygon = True
-
-    # Fetch/Detect OSM polygon early to compute dynamic zoom
-    if auto_detect_polygon and (not polygon_coords or len(polygon_coords) < 3):
+    # Try to auto-detect a building/compound polygon from OSM
+    if not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
         cache_key = f"{lat:.6f},{lng:.6f}"
         if cache_key in _osm_polygon_cache:
             osm_poly = _osm_polygon_cache[cache_key]
@@ -1830,13 +1921,30 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             osm_poly = _fetch_osm_polygon(lat, lng, radius_m=400)
             if osm_poly:
                 _osm_polygon_cache[cache_key] = osm_poly
-        if osm_poly and len(osm_poly) >= 3:
+        if osm_poly and len(osm_poly) >= 3 and not _is_viewport_rectangle(osm_poly):
             polygon_coords = osm_poly
+            print(f"[POLYGON] Using OSM building polygon with {len(polygon_coords)} points")
+
+    # Fallback to a neighborhood/district boundary if no building footprint was found
+    if not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
+        nb_key = f"nb:{lat:.6f},{lng:.6f}"
+        if nb_key in _osm_neighborhood_cache:
+            nb_poly = _osm_neighborhood_cache[nb_key]
+        else:
+            nb_poly = _fetch_osm_neighborhood(lat, lng, radius_m=2000)
+            if nb_poly:
+                _osm_neighborhood_cache[nb_key] = nb_poly
+        if nb_poly and len(nb_poly) >= 3:
+            polygon_coords = nb_poly
+            print(f"[POLYGON] Using OSM neighborhood polygon with {len(polygon_coords)} points")
+
+    auto_detected = not user_polygon_used
 
     # Compute dynamic zoom levels based on polygon size (if present)
-    overview_zoom = 13
-    landmarks_zoom = 14
-    access_zoom = 15
+    # Use a plot-level fallback when no boundary is found so the marker is not lost in a city-wide view
+    overview_zoom = 17
+    landmarks_zoom = 16
+    access_zoom = 18
     catchment_zoom = 12
 
     if polygon_coords and len(polygon_coords) >= 3:
@@ -2012,7 +2120,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 if active_mt == 'satellite':
                     _apply_sepia_tone(overview_path, intensity=0.35)
                     _apply_map_overlay(overview_path, dark_factor=0.12)
-                _draw_site_highlight(overview_path, lat, lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=auto_detect_polygon)
+                _draw_site_highlight(overview_path, lat, lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _overlay_markers(overview_path, lat, lng, overview_zoom, overview_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(overview_path, position='top-right')
@@ -2040,7 +2148,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 if active_mt == 'satellite':
                     _apply_sepia_tone(landmarks_path, intensity=0.35)
                     _apply_map_overlay(landmarks_path, dark_factor=0.20)
-                _draw_site_highlight(landmarks_path, lat, lng, landmarks_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=auto_detect_polygon)
+                _draw_site_highlight(landmarks_path, lat, lng, landmarks_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _overlay_markers(landmarks_path, lat, lng, landmarks_zoom, landmarks_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(landmarks_path, position='top-right')
@@ -2068,7 +2176,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 if active_mt == 'satellite':
                     _apply_sepia_tone(access_path, intensity=0.35)
                     _apply_map_overlay(access_path, dark_factor=0.10)
-                _draw_site_highlight(access_path, lat, lng, access_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=auto_detect_polygon)
+                _draw_site_highlight(access_path, lat, lng, access_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _draw_access_roads(access_path, lat, lng, access_zoom, scale=2, project_data=project_data, tenant_id=tenant_id)
                 _overlay_markers(access_path, lat, lng, access_zoom, access_markers, size=(1280, 720))
                 if draw_compass:
