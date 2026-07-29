@@ -80,6 +80,7 @@ setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --graceful-timeout 30 \
   --max-requests 200 \
   --max-requests-jitter 50 \
+  --capture-output \
   --access-logfile "$APP_DIR/server.log" \
   --error-logfile "$APP_DIR/server.log" \
   </dev/null >>"$APP_DIR/boot.log" 2>&1 &
