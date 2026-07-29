@@ -51,8 +51,9 @@ db.init_db()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Configuration
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ZAI_KEY = os.environ.get("ZAI_KEY")
-OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY")
+# strip(): a stray \r (CRLF endings) or spaces in .env would corrupt auth headers
+ZAI_KEY = (os.environ.get("ZAI_KEY") or "").strip() or None
+OPENROUTER_KEY = (os.environ.get("OPENROUTER_KEY") or "").strip() or None
 ZAI_BASE = 'https://api.z.ai/api/paas/v4'
 OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
 GLM_MODEL = "glm-5.1"
