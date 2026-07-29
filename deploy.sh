@@ -4,6 +4,8 @@
 
 set -e
 
+export PATH="$HOME/bin:$PATH"
+
 REPO_DIR="/home/sagdemo/workflow.git"
 APP_DIR="/home/sagdemo/proposal-generator"
 WEB_ROOT="/home/sagdemo/public_html"

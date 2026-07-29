@@ -5,6 +5,8 @@
 
 set -e
 
+export PATH="$HOME/bin:$PATH"
+
 APP_DIR="/home/sagdemo/proposal-generator"
 WEB_ROOT="/home/sagdemo/public_html"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"
