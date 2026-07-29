@@ -5702,6 +5702,29 @@ def static_uploads(path):
         return send_from_directory(maps_dir, filename)
     return jsonify({'error': 'Not found'}), 404
 
+DEPLOY_WEBHOOK_SECRET = os.environ.get('DEPLOY_WEBHOOK_SECRET', 'workflow_deploy_sec_2026')
+
+@app.route('/api/deploy-webhook', methods=['GET', 'POST'])
+def deploy_webhook():
+    """Endpoint for GitHub or cPanel webhook to trigger automated deployment after commits."""
+    secret = request.args.get('secret') or request.headers.get('X-Deploy-Secret') or (request.json.get('secret') if (request.is_json and request.json) else None)
+    if secret != DEPLOY_WEBHOOK_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    deploy_script = '/home/sagdemo/proposal-generator/deploy.sh'
+    if not os.path.exists(deploy_script):
+        deploy_script = os.path.join(os.path.dirname(__file__), 'deploy.sh')
+
+    if os.path.exists(deploy_script):
+        try:
+            import subprocess
+            subprocess.Popen(['bash', deploy_script])
+            return jsonify({'status': 'Deployment triggered successfully', 'timestamp': datetime.now().isoformat()}), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'deploy.sh not found'}), 404
+
+
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok', 'model': GLM_MODEL, 'image_model': IMAGE_MODEL})

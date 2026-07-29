@@ -1,0 +1,14 @@
+name: Auto Deploy to Hosting
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Server Deployment Webhook
+        run: |
+          curl -s -X POST "https://sagdemo.site/api/deploy-webhook?secret=workflow_deploy_sec_2026"
