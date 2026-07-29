@@ -6,5 +6,13 @@ RewriteEngine On
 RewriteCond %{REQUEST_URI} ^/\.well-known [NC]
 RewriteRule ^ - [L]
 
+# Large POST bodies (e.g. /api/generate-map-images with full project data) were
+# corrupted when forwarded with chunked transfer encoding: gunicorn misparsed the
+# stream and answered 404, and Apache answered 502 for bigger payloads.
+# Spool the body and send a Content-Length instead, and do not reuse connections.
+SetEnv proxy-sendcl 1
+SetEnv proxy-nokeepalive 1
+SetEnv proxy-initial-not-pooled 1
+
 # Proxy all other requests to the Gunicorn app (port replaced by deploy/start_server)
 RewriteRule ^(.*)$ http://127.0.0.1:8000/$1 [P,L]
