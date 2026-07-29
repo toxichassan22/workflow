@@ -5652,19 +5652,21 @@ def static_map_uploads(path):
         try:
             conn = db.get_db()
             row = conn.execute(
-                "SELECT tenant_id, presentation_id FROM map_images WHERE file_path LIKE ? ORDER BY created_at DESC LIMIT 1",
-                (f"%{filename}",)
+                "SELECT tenant_id, presentation_id, placeholder FROM map_images WHERE file_path LIKE ? ORDER BY created_at DESC LIMIT 1",
+                (f"%{filename}%",)
             ).fetchone()
             if row and row['presentation_id']:
                 pres_id = row['presentation_id']
                 tenant_id = row['tenant_id']
+                placeholder_name = row['placeholder']
                 if pres_id not in _regenerating_map_presentations:
                     _regenerating_map_presentations.add(pres_id)
                     try:
                         pres = db.get_presentation(pres_id, tenant_id=tenant_id)
                         if pres and pres.get('project_data'):
                             pdata = json.loads(pres['project_data']) if isinstance(pres['project_data'], str) else pres['project_data']
-                            map_res = maps_service.generate_all_map_images(pdata, tenant_id, presentation_id=pres_id, force=True)
+                            branding = db.get_branding(tenant_id) or {}
+                            map_res = maps_service.generate_all_map_images(pdata, tenant_id, presentation_id=pres_id, force=True, branding=branding)
                             if map_res.get('placeholders') and pres.get('slides_data'):
                                 slides = json.loads(pres['slides_data']) if isinstance(pres['slides_data'], str) else pres['slides_data']
                                 slides_json = json.dumps(slides, ensure_ascii=False)
@@ -5675,7 +5677,11 @@ def static_map_uploads(path):
                                         pattern = r'/uploads/maps/[^/]+_[^/]+_' + ptype + r'_[^/]+\.png'
                                         slides_json = re.sub(pattern, lambda m, rp=rel_p: rp, slides_json)
                                 updated_slides = json.loads(slides_json)
-                                db.update_presentation(pres_id, {'slides_data': json.dumps(updated_slides, ensure_ascii=False)}, tenant_id=tenant_id)
+                                db.update_presentation(pres_id, slides_data=updated_slides)
+
+                                new_path = map_res['placeholders'].get(placeholder_name)
+                                if new_path and os.path.exists(new_path):
+                                    return send_from_directory(os.path.dirname(new_path), os.path.basename(new_path))
                     finally:
                         _regenerating_map_presentations.discard(pres_id)
         except Exception as e:
