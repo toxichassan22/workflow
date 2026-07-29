@@ -3209,13 +3209,30 @@
       el.style.display = msg ? 'block' : 'none';
     }
 
-    function api(method, path, body, isFile) {
+    // The hosting proxy corrupts request bodies above ~35KB (and the failure can
+    // poison the connection for the next request), so big JSON payloads go gzipped.
+    async function gzipIfLarge(json, headers) {
+      if (json.length < 16 * 1024 || typeof CompressionStream === 'undefined') return json;
+      try {
+        const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+        const buf = await new Response(stream).arrayBuffer();
+        headers['Content-Encoding'] = 'gzip';
+        console.log('[API] gzipped body: ' + (json.length / 1024).toFixed(1) + 'KB -> ' + (buf.byteLength / 1024).toFixed(1) + 'KB');
+        return buf;
+      } catch (e) {
+        return json;
+      }
+    }
+
+    async function api(method, path, body, isFile) {
       const token = getTenantToken();
       const headers = {};
       if (token) headers['Authorization'] = 'Bearer ' + token;
       if (!isFile && body && typeof body !== 'undefined') headers['Content-Type'] = 'application/json';
       const opts = { method, headers };
-      if (body) opts.body = isFile ? body : JSON.stringify(body);
+      if (body) {
+        opts.body = isFile ? body : await gzipIfLarge(JSON.stringify(body), headers);
+      }
       return fetch(path, opts).then(async res => {
         const data = await res.json().catch(() => ({}));
         if (res.status === 401) {

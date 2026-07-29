@@ -26,6 +26,25 @@ app = Flask(__name__, static_folder=None)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 app.teardown_appcontext(db.close_db)
 
+
+@app.before_request
+def decompress_gzip_request_body():
+    # The client gzips large JSON bodies because the hosting proxy corrupts
+    # request bodies above ~35KB; restore the original body before routing.
+    if request.headers.get('Content-Encoding', '').lower() != 'gzip':
+        return
+    try:
+        import gzip as _gzip
+        import io
+        raw = request.get_data(cache=True)
+        data = _gzip.decompress(raw)
+        request._cached_data = data
+        request.environ['wsgi.input'] = io.BytesIO(data)
+        request.environ['CONTENT_LENGTH'] = str(len(data))
+    except Exception:
+        app.logger.warning('Could not decompress gzipped request body', exc_info=True)
+
+
 # Initialize database on startup
 db.init_db()
 
