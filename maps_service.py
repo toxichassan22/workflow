@@ -254,7 +254,7 @@ def geocode_address(address, tenant_id=None):
             return limit_error
 
     url = 'https://maps.googleapis.com/maps/api/geocode/json'
-    params = {'address': address, 'key': GOOGLE_API_KEY}
+    params = {'address': address, 'key': _get_api_key()}
     try:
         response = requests.get(url, params=params, timeout=15)
         data = response.json()
@@ -347,7 +347,7 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
         'zoom': zoom,
         'size': f"{size[0]}x{size[1]}",
         'maptype': maptype,
-        'key': GOOGLE_API_KEY,
+        'key': _get_api_key(),
         'scale': 2,
         'language': language,
     }
@@ -421,11 +421,8 @@ def _draw_pin_marker(color='#6B1C23', label=None, size=44, is_site=False, label_
                       (ccx, ccy + inner_size // 2 - 8)], fill='#FFFFFF')
                       
         if label_text:
-            try:
-                font = ImageFont.truetype("arial.ttf", 60)
-            except Exception:
-                font = ImageFont.load_default()
-            bbox = draw.textbbox((0, 0), label_text, font=font)
+            font = _get_arabic_font(60)
+            bbox = draw.textbbox((0, 0), _reshape_arabic_text(label_text), font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
             tx = ccx - tw // 2
             ty = ccy + pin_r + tri_h + 10
@@ -456,10 +453,7 @@ def _draw_pin_marker(color='#6B1C23', label=None, size=44, is_site=False, label_
         draw.ellipse([ccx - pin_r, ccy - pin_r, ccx + pin_r, ccy + pin_r], fill=color)
         
         if label:
-            try:
-                font = ImageFont.truetype("arial.ttf", int(pin_r * 1.1))
-            except Exception:
-                font = ImageFont.load_default()
+            font = _get_arabic_font(int(pin_r * 1.1))
             bbox = draw.textbbox((0, 0), str(label), font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
             tx = ccx - tw // 2
@@ -547,7 +541,6 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
     Filters out irrelevant place types like gas stations, parking, ATMs, etc."""
     if not _has_api_key():
         return _api_key_error()
-
     IRRELEVANT_TYPES = {
         'gas_station', 'parking', 'atm', 'bank', 'post_office', 'courier',
         'laundry', 'dry_cleaning', 'hair_care', 'beauty_salon', 'barber_shop',
@@ -559,8 +552,8 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
         'electronics_store', 'home_goods_store', 'department_store',
         'discount_store', 'dollar_store', 'liquor_store', 'tobacco_shop',
         'meal_takeaway', 'meal_delivery', 'food_delivery', 'restaurant',
-        'cafe', 'bar', 'night_club', 'liquor_store',
-        'tourist_attraction', 'travel_agency', 'car_rental',
+        'cafe', 'bar', 'night_club',
+        'travel_agency', 'car_rental',
         'bus_stop', 'subway_station', 'transit_station', 'light_rail_station',
         'train_station', 'taxi_stand',
         'pharmacy', 'doctor', 'dentist', 'veterinary_care',
@@ -568,25 +561,18 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
         'real_estate_agency', 'insurance_agency', 'accounting', 'lawyer',
         'notary_public', 'post_box', 'public_phone',
     }
-    
+
     PREFERRED_TYPES = {
         'school', 'university', 'hospital', 'shopping_mall', 'stadium',
         'mosque', 'church', 'hindu_temple', 'synagogue', 'place_of_worship',
         'city_hall', 'embassy', 'museum', 'library', 'art_gallery',
         'amusement_park', 'aquarium', 'zoo', 'park', 'garden',
-        'stadium', 'sports_complex', 'golf_course', 'swimming_pool',
-        'tourist_attraction', 'landmark', 'historical_landmark',
-        'cemetery', 'monument', 'civic_center', 'city_hall',
-        'primary_school', 'secondary_school', 'preschool',
-        'movie_theater', 'performing_arts_theater', 'concert_hall',
-        'convention_center', 'event_venue', 'wedding_venue',
-        'government_office', 'police', 'fire_station',
     }
 
     url = 'https://places.googleapis.com/v1/places:searchNearby'
     headers = {
         'Content-Type': 'application/json',
-        'X-Goog-Api-Key': GOOGLE_API_KEY,
+        'X-Goog-Api-Key': _get_api_key(),
         'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.id,places.types,places.rating',
     }
     body = {
@@ -599,7 +585,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
         'maxResultCount': max_results * 3,
     }
     if keyword:
-        body['keyword'] = keyword
+        body['textQuery'] = keyword
 
     try:
         response = requests.post(url, headers=headers, json=body, timeout=15)
@@ -764,7 +750,7 @@ def get_street_view(lat, lng, heading=None, pitch=0, fov=90, size=(640, 480), ou
     params = {
         'location': f"{lat},{lng}",
         'size': f"{size[0]}x{size[1]}",
-        'key': GOOGLE_API_KEY,
+        'key': _get_api_key(),
         'pitch': pitch,
         'fov': fov,
     }
@@ -923,9 +909,13 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
     if not elements:
         return None
         
+    MAX_PLOT_AREA_SQM = 250000
+    NEAR_MISS_MAX_DIST_M = 25.0
+    NEAR_MISS_MAX_AREA_SQM = 50000
+
     best_el = None
-    best_sort_key = (999, 999, float('inf'))
-    
+    best_sort_key = None
+
     for el in elements:
         geom = el.get('geometry', [])
         if len(geom) < 3:
@@ -959,8 +949,8 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
         if priority == 999:
             continue
             
-        if area_sqm > max_area:
-            print(f"[OSM POLYGON] Rejected too-large {tag_type}: {area_sqm:.0f} sqm > {max_area} limit")
+        if area_sqm > max_area or area_sqm > MAX_PLOT_AREA_SQM:
+            print(f"[OSM POLYGON] Rejected too-large {tag_type}: {area_sqm:.0f} sqm")
             continue
         if area_sqm < 10:
             continue
@@ -973,12 +963,13 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
         min_dist_to_vertex = min(get_dist_m(p_lat, p_lng) for p_lat, p_lng in coords)
         is_inside = _point_in_polygon(lat, lng, coords)
         
-        # Accept if contains point or is within 120m of a vertex
-        if not is_inside and min_dist_to_vertex > 120.0:
-            continue
+        if not is_inside:
+            if min_dist_to_vertex > NEAR_MISS_MAX_DIST_M or area_sqm > NEAR_MISS_MAX_AREA_SQM:
+                continue
             
-        sort_key = (0 if is_inside else 1, priority, min_dist_to_vertex)
-        if sort_key < best_sort_key:
+        # Sort key: prioritize smallest area among containing polygons to select building/plot instead of district/landuse
+        sort_key = (0 if is_inside else 1, area_sqm, min_dist_to_vertex)
+        if best_sort_key is None or sort_key < best_sort_key:
             best_sort_key = sort_key
             best_el = el
             
@@ -990,10 +981,10 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
         tag_type = tags.get('leisure', tags.get('building', tags.get('amenity', tags.get('landuse', 'polygon'))))
         is_inside_str = "containing" if best_sort_key[0] == 0 else f"nearby ({best_sort_key[2]:.1f}m away)"
         try:
-            print(f"[OSM POLYGON] Found {is_inside_str} {tag_type} '{tag_name}' (Priority {best_sort_key[1]}), ~{area_sqm:.0f} sqm")
+            print(f"[OSM POLYGON] Found {is_inside_str} {tag_type} '{tag_name}' ({best_sort_key[1]:.0f} sqm), ~{area_sqm:.0f} sqm")
         except Exception:
             safe_name = str(tag_name).encode('ascii', errors='ignore').decode('ascii')
-            print(f"[OSM POLYGON] Found {is_inside_str} {tag_type} '{safe_name}' (Priority {best_sort_key[1]}), ~{area_sqm:.0f} sqm")
+            print(f"[OSM POLYGON] Found {is_inside_str} {tag_type} '{safe_name}' ({best_sort_key[1]:.0f} sqm), ~{area_sqm:.0f} sqm")
         return coords
         
     print(f"[OSM POLYGON] No suitable polygon found near ({lat}, {lng})")
@@ -1051,9 +1042,9 @@ def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m
             circle_radius_m = 60
             edge_lat = center_lat + (circle_radius_m / 111320.0)
             dx, _ = _latlng_to_pixel_offset(edge_lat, center_lng, center_lat, center_lng, zoom, scale=scale)
-            min_r = 16 if zoom <= 13 else (24 if zoom == 14 else 36)
+            min_r = 12 if zoom <= 13 else (16 if zoom == 14 else 24)
             r = max(abs(dx), min_r)
-            overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill_color, outline=border_color, width=4)
+            overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill_color, outline=border_color, width=3)
             overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=None, outline=(255, 255, 255, 160), width=2)
 
         img = Image.alpha_composite(img, overlay)
@@ -1251,11 +1242,8 @@ def _draw_compass(image_path, position='top-right', compass_size=60):
                      fill=(240, 230, 210, 220), outline=COMPASS_COLOR + (255,), width=3)
 
         # Draw "ش" (شمال = North) in center
-        try:
-            font = ImageFont.truetype("arial.ttf", compass_size // 2)
-        except Exception:
-            font = ImageFont.load_default()
-        text = "ش"
+        font = _get_arabic_font(compass_size // 2)
+        text = _reshape_arabic_text("ش")
         bbox = draw.textbbox((0, 0), text, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         draw.text((comp_cx - tw // 2, comp_cy - th // 2 - 2), text,
@@ -1394,7 +1382,7 @@ def _snap_to_roads(lat, lng, tenant_id=None):
     url = 'https://roads.googleapis.com/v1/nearestRoads'
     params = {
         'points': f"{lat},{lng}",
-        'key': GOOGLE_API_KEY,
+        'key': _get_api_key(),
     }
     try:
         resp = requests.get(url, params=params, timeout=10)
@@ -1945,7 +1933,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 if entry['duration_min'] is None:
                     continue
                 lm['duration_minutes'] = entry['duration_min']
-                lm['distance_text'] = f"{entry['distance_km']} km"
+                lm['distance_text'] = entry.get('distance_text') or f"{entry['distance_km']} كم"
             # Only rows with real Google numbers are handed to the AI prompt.
             usable = [m for m in matrix if m.get('duration_min') is not None]
             if usable:
