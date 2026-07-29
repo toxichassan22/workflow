@@ -1864,12 +1864,16 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     if not isinstance(enabled_maps, list):
         enabled_maps = ['overview', 'landmarks', 'access', 'catchment', 'streetview']
 
+    # Pre-parse landmark/catchment data so the cache check only requires what will actually be generated
+    landmarks = _parse_landmarks_text(project_data.get('nearby_landmarks', ''))
+    zones = _parse_catchment_zones(project_data.get('catchment_areas', ''))
+
     draft_id = draft_id or project_data.get('draft_id') or project_data.get('draftId')
     effective_pres_id = presentation_id or (f"draft_{draft_id}" if draft_id else None)
 
     def _close(a, b):
         try:
-            return a is not None and b is not None and abs(float(a) - float(b)) < 1e-6
+            return a is not None and b is not None and abs(float(a) - float(b)) < 1e-5
         except Exception:
             return False
 
@@ -1878,6 +1882,10 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
         if cached and _close(cached.get('lat'), lat) and _close(cached.get('lng'), lng):
             found_base = cached.get('found_base') or set()
             required_base = {t for t in enabled_maps if t not in ('streetview',)}
+            if not landmarks:
+                required_base.discard('landmarks')
+            if not zones:
+                required_base.discard('catchment')
             if not (required_base - found_base):
                 return cached
 
@@ -2038,10 +2046,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
         val = map_styles_raw.get(key) or default_map_type
         map_styles[key] = val if val in VALID_MAPTYPES else default_map_type
 
-    # Parse nearby landmarks from text
-    landmarks_text = project_data.get('nearby_landmarks', '')
-    landmarks = _parse_landmarks_text(landmarks_text)
-
+    # Landmarks were pre-parsed before the cache check.
     landmark_radius_m = 1000
     # If no structured landmarks, fetch verified nearby places from Google only.
     if not landmarks:
@@ -2190,7 +2195,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
 
     # Generate map_catchment
     if 'catchment' in enabled_maps:
-        zones = _parse_catchment_zones(project_data.get('catchment_areas', ''))
+        # zones were pre-parsed before the cache check
         catchment_markers = [{'lat': marker_lat, 'lng': marker_lng, 'color': MARKER_COLOR_SITE, 'type': 'site', 'label': None}]
         catchment_mt = map_styles['catchment']
         if catchment_mt == 'both':

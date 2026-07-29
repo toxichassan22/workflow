@@ -1765,6 +1765,8 @@ def _hydrate_project_draft(row):
     result = dict(row)
     result['draft_data'] = _json_object(result.get('draft_data'))
     result['section_statuses'] = _json_object(result.get('section_statuses'))
+    if result.get('draft_data') and result.get('id'):
+        result['draft_data']['draftId'] = result['id']
     return result
 
 
@@ -1788,9 +1790,18 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         'SELECT * FROM project_drafts WHERE tenant_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1',
         (tenant_id, user_id)
     ).fetchone()
-    draft_json = json.dumps(draft_data if isinstance(draft_data, dict) else {}, ensure_ascii=False)
+
+    # Determine the stable draft id before serializing
+    draft_id = existing['id'] if existing else str(uuid.uuid4())
+
     requested_status = status if status in PROJECT_DRAFT_STATUSES else 'draft'
     now = datetime.now().isoformat()
+
+    # Strip client-supplied draftId so it doesn't trigger false data_changed or bloat the row
+    save_data = dict(draft_data) if isinstance(draft_data, dict) else {}
+    save_data.pop('draftId', None)
+    save_data.pop('draft_id', None)
+    draft_json = json.dumps(save_data, ensure_ascii=False)
 
     if existing:
         old_statuses = _json_object(existing['section_statuses'])
@@ -1803,7 +1814,10 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         else:
             new_statuses = _json_object(section_statuses)
         statuses_json = json.dumps(new_statuses, ensure_ascii=False)
-        data_changed = draft_json != (existing['draft_data'] or '{}')
+        old_data = _json_object(existing['draft_data']) or {}
+        old_data.pop('draftId', None)
+        old_data.pop('draft_id', None)
+        data_changed = save_data != old_data
         statuses_changed = statuses_json != (existing['section_statuses'] or '{}')
         old_overall_status = existing['status'] or 'draft'
 
@@ -1825,10 +1839,9 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         if clear_approval:
             _clear_draft_approval_fields(conn, existing['id'])
         conn.commit()
-        return existing['id']
+        return draft_id
 
     statuses = section_statuses if isinstance(section_statuses, dict) else {}
-    draft_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO project_drafts
            (id, tenant_id, user_id, draft_data, section_statuses, status, created_at, updated_at)

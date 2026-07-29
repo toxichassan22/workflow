@@ -3113,7 +3113,7 @@
         if (!force && !staleMaps) {
           console.log('[ASSETS] reusing stored maps');
         } else {
-          const payload = { projectData: tenantProjectData, force: !!force || staleMaps };
+          const payload = { projectData: { ...tenantProjectData, draftId: tenantProjectData.draftId }, force: !!force || staleMaps };
           if (tenantPresentationId) payload.presentationId = tenantPresentationId;
           let res = null;
           try {
@@ -4350,6 +4350,7 @@
         const draftResp = await api('GET', '/api/project-draft');
         if (draftResp.success && draftResp.draft && draftResp.draft.draft_data) {
           const draftData = draftResp.draft.draft_data;
+          if (draftData.draftId) tenantProjectData.draftId = draftData.draftId;
           const sectionStatuses = draftResp.draft.section_statuses || {};
           tenantProjectSectionStatuses = { ...sectionStatuses };
           tenantProjectDraftApproval = draftResp.draft;
@@ -4624,7 +4625,7 @@
             btn.className = 'btn ghost';
             btn.textContent = 'إيجاد الإحداثيات';
             btn.style.marginTop = '8px';
-            btn.onclick = () => geocodeProjectAddress(addressInput, latInput, lngInput);
+            btn.onclick = () => geocodeProjectAddress(addressInput, latInput, lngInput, true);
             div.appendChild(btn);
             addressInput.addEventListener('blur', () => {
               if (addressInput.value.trim() && (!latInput || !latInput.value.trim() || !lngInput || !lngInput.value.trim())) {
@@ -5026,6 +5027,7 @@
         data.tenantCreativeImages = tenantCreativeImages;
         data.tenantSlidesData = tenantSlidesData;
         const resp = await api('POST', '/api/project-draft', { draftData: data, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' });
+        if (resp.draftId) tenantProjectData.draftId = resp.draftId;
         const badge = document.getElementById('draftSyncBadge');
         if (resp.success) {
           if (badge) {
@@ -5063,8 +5065,9 @@
       }
     }
 
-    async function geocodeProjectAddress(addressInput, latInput, lngInput) {
+    async function geocodeProjectAddress(addressInput, latInput, lngInput, force = false) {
       const val = addressInput ? addressInput.value.trim() : '';
+      if (!force && latInput && latInput.value.trim() && lngInput && lngInput.value.trim()) { return; }
       if (!val) { toast('أدخل عنوان الموقع أو رابط قوقل ماب أولاً'); return; }
       showLoader('جاري تحديد الإحداثيات', '');
       const payload = { address: val, maps_link: val };
@@ -5408,7 +5411,8 @@
     }
 
     async function directGenerateProposalFile() {
-      tenantProjectData = await collectTenantFormData();
+      const formData = await collectTenantFormData();
+      tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
@@ -5433,7 +5437,8 @@
     }
 
     async function submitTenantProject() {
-      tenantProjectData = await collectTenantFormData();
+      const formData = await collectTenantFormData();
+      tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
@@ -6757,6 +6762,7 @@
         if (resp.success && resp.draft) {
           const draft = resp.draft;
           const draftData = draft.draft_data || draft.draftData || {};
+          if (draftData.draftId) tenantProjectData.draftId = draftData.draftId;
           const sectionStatuses = draft.section_statuses || {};
 
           showTenantPage('tenantProjectPage');
