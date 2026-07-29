@@ -5739,6 +5739,13 @@ def deploy_webhook():
     return jsonify({'error': 'deploy.sh not found'}), 404
 
 
+@app.route('/favicon.ico')
+def favicon():
+    if os.path.exists(os.path.join(os.path.dirname(__file__), 'favicon.ico')):
+        return send_from_directory(os.path.dirname(__file__), 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    return ('', 204)
+
+
 @app.route('/health')
 def health():
     commit_hash = 'unknown'
