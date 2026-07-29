@@ -5741,7 +5741,12 @@ def deploy_webhook():
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'ok', 'model': GLM_MODEL, 'image_model': IMAGE_MODEL})
+    commit_hash = 'unknown'
+    try:
+        commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd=os.path.dirname(__file__)).decode().strip()
+    except Exception:
+        pass
+    return jsonify({'status': 'ok', 'commit': commit_hash, 'model': GLM_MODEL, 'image_model': IMAGE_MODEL})
 
 @app.route('/preview')
 def preview():
