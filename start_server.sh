@@ -24,12 +24,23 @@ fi
 PORT="${APP_PORT:-8000}"
 FALLBACK_PORTS="8001 8002 8003 8004 8005 8080 8081 9000 9001 9002 7860 7861"
 
+# On shared hosting the preferred ports are usually taken by other tenants, so the
+# app ends up on a fallback port. The live .htaccess is the source of truth for the
+# port Apache proxies to — health-check THAT port, otherwise the watchdog would
+# kill a healthy app on every run and cause restart loops + downtime.
+HTACCESS_PORT=$(sed -n 's#^RewriteRule .*http://127\.0\.0\.1:\([0-9][0-9]*\)/.*#\1#p' "$WEB_ROOT/.htaccess" 2>/dev/null | head -n 1)
+if [ -n "$HTACCESS_PORT" ]; then
+  PORT="$HTACCESS_PORT"
+fi
+
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$WATCHDOG_LOG"
 }
 
-# Already healthy on the configured port? (bypassed if --force is passed)
-if [ "$1" != "--force" ] && curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" >/dev/null 2>&1; then
+# Already healthy on the live port? (bypassed if --force is passed)
+# The "commit" marker proves the responder is OUR app, not a neighbor's app that
+# happens to answer /health on the same port.
+if [ "$1" != "--force" ] && curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null | grep -q '"commit"'; then
   log "OK: gunicorn already healthy on port $PORT"
   exit 0
 fi
