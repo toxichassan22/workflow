@@ -41,6 +41,108 @@ CONTENT_DISTRIBUTION_RULES = """
 9. **شرائح تحليل الموقع:** إذا وُجدت بيانات موقع (location_lat/lng) أو (location_address)، أضف شرائح map_overview → map_landmarks → map_access → site_specs → site_photos → map_catchment متسلسلة بعد الفهرس
 """
 
+
+def _suggest_design_style(title, bullets=None, slide_type='content'):
+    """Pick a varied design style from the title, bullets, and slide type."""
+    title = (title or '').lower()
+    bullets_text = ' '.join(b or '' for b in (bullets or [])).lower()
+    text = f"{title} {bullets_text}"
+
+    fixed = {
+        'cover': 'image',
+        'index': 'flow',
+        'moodboard': 'grid',
+        'closing': 'minimal',
+    }
+    if slide_type in fixed:
+        return fixed[slide_type]
+    if slide_type.startswith('map_') or slide_type in ('site_specs', 'site_photos'):
+        return 'map'
+
+    if re.search(r'(?:مؤشر|أداء|قيمة مضافة|عائد|roi|noi|ربح|تكلفة|مالي|جدوى|إيراد|نسبة|رقم|إحصائية|تكلفة|دخل|استثمار|profit|cost|financial|revenue)', text):
+        return 'dashboard'
+    if re.search(r'(?:وحدات|مساحات|مواصفات|جدول|مقارنة|أنواع|تفاصيل|مكونات|قائمة|بيانات|units|areas|specs|table|components|details|list|data)', text):
+        return 'table'
+    if re.search(r'(?:خطة|زمن|جدول|مراحل|تنفيذ|تطوير|خطوات|مدة|timeline|schedule|phases|plan|stages|duration)', text):
+        return 'timeline'
+    if re.search(r'(?:موقع|خريطة|وصول|معالم|محيط|منطقة|location|map|access|landmarks|area|surrounding)', text):
+        return 'map'
+    if re.search(r'(?:swot|قوة|ضعف|فرص|تحديات|منافسة|مزايا تنافسية|مخاطر|strength|weakness|opportunities|threats|competitive)', text):
+        return 'swot'
+    if re.search(r'(?:عملية|تدفق|خطوات|عملاء|رحلة|عمل|process|flow|customer journey|steps)', text):
+        return 'flow'
+    if re.search(r'(?:صورة|واجهة|تصميم معماري|انطباع|visual|image|facade|architectural|render)', text):
+        return 'image'
+    if re.search(r'(?:نظرة|نبذة|مقدمة|شرح|وصف|ملخص|تعريف|رؤية|رسالة|فلسفة|overview|introduction|description|summary|vision|mission)', text):
+        return 'text'
+    return 'cards'
+
+
+def _maybe_map_slide_type(title, project_data):
+    """If a content slide title matches a map topic and location data exists, return a map type."""
+    if not project_data:
+        return None
+    has_location = (
+        bool(project_data.get('location_lat') and project_data.get('location_lng'))
+        or bool(project_data.get('location_address'))
+    )
+    if not has_location:
+        return None
+    t = (title or '').lower()
+    if re.search(r'(?:موقع المشروع|الموقع|موقع)', t):
+        return 'map_overview'
+    if re.search(r'(?:معالم|محيط|القرب|المسافات|landmarks)', t):
+        return 'map_landmarks'
+    if re.search(r'(?:وصول|طرق|مداخل|access|roads)', t):
+        return 'map_access'
+    if re.search(r'(?:نطاق|catchment|دوائر)', t):
+        return 'map_catchment'
+    if re.search(r'(?:صور الموقع|street view)', t):
+        return 'site_photos'
+    if re.search(r'(?:خصائص|مواصفات|site specs)', t):
+        return 'site_specs'
+    return None
+
+
+def _location_data_note(project_data):
+    """Build an extra prompt note when map/location data is present."""
+    if not project_data:
+        return ''
+    has_location = (
+        bool(project_data.get('location_lat') and project_data.get('location_lng'))
+        or bool(project_data.get('location_address'))
+    )
+    if not has_location:
+        return ''
+    parts = []
+    if project_data.get('location_lat') and project_data.get('location_lng'):
+        parts.append('إحداثيات الموقع متاحة.')
+    if project_data.get('location_address'):
+        parts.append(f"عنوان الموقع: {project_data.get('location_address')}")
+    if project_data.get('landmarks_matrix'):
+        parts.append('بيانات المعالم المحيطة متاحة.')
+    if project_data.get('main_roads'):
+        parts.append('بيانات الطرق الرئيسية متاحة.')
+    if project_data.get('catchment_areas'):
+        parts.append('بيانات نطاق التأثير متاحة.')
+    if project_data.get('street_view_images'):
+        parts.append('صور Street View متاحة.')
+    if not parts:
+        return ''
+    return (
+        "\n\n## بيانات الموقع/الخرائط المتاحة — يجب استخدامها\n"
+        + '\n'.join(f'- {p}' for p in parts)
+        + "\n\n"
+        "الزامياً: أضف الشرائح التالية بعد الفهرس إن وُجدت البيانات المطلوبة:\n"
+        "- map_overview (يتطلب إحداثيات)\n"
+        "- map_landmarks (يتطلب landmarks_matrix)\n"
+        "- map_access (يتطلب main_roads)\n"
+        "- site_specs (يتطلب بيانات الموقع)\n"
+        "- site_photos (يتطلب street_view_images)\n"
+        "- map_catchment (يتطلب catchment_areas)\n"
+        "استخدم placeholders ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##، ##STREET_VIEW_1##..."
+    )
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Slide Plan Proposal
 # ─────────────────────────────────────────────────────────────────────────────
@@ -168,20 +270,28 @@ def build_fallback_plan(branding):
     for i, title in enumerate(content_titles):
         if len(slides) - 1 >= needed:
             break
+        style = _suggest_design_style(title, slide_type='content')
+        # Avoid long runs of the same style
+        if slides and slides[-1].get('design_style') == style and style == 'cards':
+            style = 'text'
         slides.append({
             'title': title,
             'type': 'content',
-            'design_style': 'cards',
+            'design_style': style,
             'requires_image': False,
             'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
             'content_density': 'medium',
         })
     while len(slides) - 1 < needed:
         idx = len(slides) - 1
+        title = f'تفاصيل محتوى فرعي {idx}'
+        style = _suggest_design_style(title, slide_type='content')
+        if slides and slides[-1].get('design_style') == style and style == 'cards':
+            style = 'text'
         slides.append({
-            'title': f'تفاصيل محتوى فرعي {idx}',
+            'title': title,
             'type': 'content',
-            'design_style': 'cards',
+            'design_style': style,
             'requires_image': False,
             'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
             'content_density': 'medium',
@@ -199,12 +309,16 @@ def build_slide_plan_prompt(project_data, branding):
 
     min_slides, max_slides, _default_count = resolve_slide_bounds(branding)
 
-    return SLIDE_PLAN_PROMPT.format(
+    prompt = SLIDE_PLAN_PROMPT.format(
         project_json=project_json,
         min_slides=min_slides,
         max_slides=max_slides,
         distribution_rules=CONTENT_DISTRIBUTION_RULES,
     )
+    location_note = _location_data_note(project_data)
+    if location_note:
+        prompt += location_note
+    return prompt
 
 
 def _extract_json_from_text(response_text):
@@ -284,10 +398,14 @@ def _enforce_slide_count(slides, target_count):
     tail = [s for s in slides[-2:] if s.get('type') in reserved_tail_types]
     body = slides[:len(slides) - len(tail)]
     while len(body) + len(tail) < target_count:
+        title = f'تفاصيل إضافية {len(body)}'
+        style = _suggest_design_style(title, slide_type='content')
+        if body and body[-1].get('design_style') == style and style == 'cards':
+            style = 'text'
         body.append({
-            'title': f'تفاصيل إضافية {len(body)}',
+            'title': title,
             'type': 'content',
-            'design_style': 'cards',
+            'design_style': style,
             'content_density': 'medium',
             'requires_image': False,
             'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
@@ -295,7 +413,7 @@ def _enforce_slide_count(slides, target_count):
     return body + tail
 
 
-def parse_slide_plan(response_text, branding=None):
+def parse_slide_plan(response_text, branding=None, project_data=None):
     """Parse the AI response into a slide plan dict."""
     json_text = _extract_json_from_text(response_text)
     if not json_text:
@@ -330,14 +448,40 @@ def parse_slide_plan(response_text, branding=None):
     if len(plan['slides']) > 2:
         plan['slides'][1]['type'] = 'index'
 
-    # Fill defaults for any missing slide metadata
+    # If location data exists but the AI marked a location slide as plain content,
+    # convert it to the appropriate map type so the map image is actually used.
+    if project_data:
+        for slide in plan['slides']:
+            if slide.get('type') == 'content':
+                map_type = _maybe_map_slide_type(slide.get('title'), project_data)
+                if map_type:
+                    slide['type'] = map_type
+                    if 'design_style' not in slide or slide.get('design_style') == 'cards':
+                        slide['design_style'] = 'map'
+                    if 'requires_image' not in slide:
+                        slide['requires_image'] = True
+
+    # Fill defaults for any missing slide metadata, and avoid long runs of 4-card layouts
+    prev_content_style = None
     for slide in plan['slides']:
+        slide_type = slide.get('type', 'content')
         if 'design_style' not in slide:
-            slide['design_style'] = 'cards'
+            slide['design_style'] = _suggest_design_style(
+                slide.get('title'), slide.get('bullets', []), slide_type
+            )
+        if slide_type == 'content':
+            if slide.get('design_style') == prev_content_style and prev_content_style == 'cards':
+                slide['design_style'] = 'text'
+            prev_content_style = slide.get('design_style')
         if 'content_density' not in slide:
             slide['content_density'] = 'medium'
         if 'requires_image' not in slide:
-            slide['requires_image'] = False
+            slide['requires_image'] = (
+                slide_type in ('cover', 'moodboard')
+                or slide_type.startswith('map_')
+                or slide_type == 'site_photos'
+                or slide.get('design_style') == 'image'
+            )
 
     return plan
 
@@ -412,14 +556,16 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding):
 
     style_instructions = {
         'dashboard': 'بطاقات أرقام مالية كبيرة (metrics) — كل رقم في بطاقة كبيرة 32-48px',
-        'cards': 'شبكة بطاقات 2×2 أو 2×3 — كل بطاقة فيها عنوان bold + وصف قصير + أيقونة',
+        'cards': 'بطاقات متعددة (2-6 بطاقات) بتخطيط مرن يناسب المحتوى — لا تلجأ تلقائياً إلى 4 بطاقات متساوية',
         'timeline': 'خط زمني أفقي — نقاط لكل مرحلة مع أشرطة ملونة',
         'table': 'جدول احترافي — header ملون + صفوف متبادلة + صف إجمالي بارز',
         'text': 'نص + نقاط (bullets) في قائمة منظمة',
-        'image': 'صورة + نص قصير جانبي',
+        'image': 'صورة رئيسية + نص قصير — استخدم placeholder الصورة المحدد',
         'flow': 'مخطط تدفق أفقي — بطاقات مع أسهم تربطها',
         'swot': 'تحليل SWOT في grid 2×2 — كل ربع بلون مميز: القوة (أخضر)، الضعف (أحمر)، الفرص (أزرق)، التحديات (برتقالي)',
         'map': 'خريطة كخلفية مع طبقة شفافة للنص — استخدم placeholder الخريطة المحدد',
+        'grid': 'شبكة صور المود بورد — استخدم placeholders ##MOODBOARD_IMAGE_1## إلى ##MOODBOARD_IMAGE_4##',
+        'minimal': 'شريحة ختام بسيطة — "شكراً لكم" + بيانات التواصل',
     }.get(design_style, 'بطاقات احترافية')
 
     density_instructions = {
@@ -427,6 +573,37 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding):
         'medium': 'محتوى متوسط — 4-5 عناصر ممتلئة بصرياً',
         'high': 'محتوى كثيف — 5-6 عناصر بدون ازدحام',
     }.get(density, 'محتوى متوسط')
+
+    # Explicit image/map placeholder for this slide
+    placeholder_note = ''
+    if slide_type == 'map_overview':
+        placeholder_note = 'يجب استخدام ##MAP_OVERVIEW## كخلفية رئيسية لهذه الشريحة.'
+    elif slide_type == 'map_landmarks':
+        placeholder_note = 'يجب استخدام ##MAP_LANDMARKS## كخلفية مع جدول أوقات القيادة والمسافات من البيانات.'
+    elif slide_type == 'map_access':
+        placeholder_note = 'يجب استخدام ##MAP_ACCESS## لعرض خريطة الطرق والمداخل.'
+    elif slide_type == 'map_catchment':
+        placeholder_note = 'يجب استخدام ##MAP_CATCHMENT## لعرض دوائر نطاق التأثير.'
+    elif slide_type == 'site_photos':
+        placeholder_note = 'يجب استخدام ##STREET_VIEW_1## إلى ##STREET_VIEW_4## لعرض صور الموقع.'
+    elif slide_type == 'site_specs':
+        placeholder_note = 'استخدم جدول بيانات احترافي لخصائص الموقع.'
+    elif slide_type == 'moodboard':
+        placeholder_note = 'يجب استخدام ##MOODBOARD_IMAGE_1## إلى ##MOODBOARD_IMAGE_4## في شبكة صور المود بورد.'
+    elif design_style == 'image':
+        placeholder_note = 'يمكن استخدام ##IMAGE_COVER## أو ##MOODBOARD_IMAGE_1## إذا كانت مناسبة للموضوع.'
+
+    notes = [
+        f'أنشئ فقط الشريحة {slide_num} لا غير',
+        'اكتب HTML في div class="slide" واحد فقط',
+        'لا تكتب شرح أو markdown أو كود إضافي',
+        'التصميم يجب أن يكون احترافي وفاخر',
+        'املأ الشريحة بصرياً بنسبة 60-85% — لا تتركها فارغة ولا تزدحمها',
+        'لا تلجأ تلقائياً إلى تقسيم 2×2 — اختر التخطيط الأنسب للمحتوى',
+    ]
+    if placeholder_note:
+        notes.insert(0, placeholder_note)
+    notes_text = '\n'.join(f'- {n}' for n in notes)
 
     return f"""أنشئ شريحة {slide_num}/{total_slides}: {title}
 النوع: {slide_type}
@@ -437,11 +614,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding):
 {bullets_text}
 
 ملاحظات:
-- أنشئ فقط الشريحة {slide_num} لا غير
-- اكتب HTML في div class="slide" واحد فقط
-- لا تكتب شرح أو markdown أو كود إضافي
-- التصميم يجب أن يكون احترافي وفاخر
-- املأ الشريحة بصرياً بنسبة 60-85% — لا تتركها فارغة ولا تزدحمها"""
+{notes_text}"""
 
 
 def _block_external_images(html):
@@ -571,6 +744,34 @@ def _replace_map_placeholders(html, map_placeholders):
     for placeholder, path in map_placeholders.items():
         if path:
             html = html.replace(placeholder, path)
+
+    # Fallback: if the model used the generic placeholder but only a satellite/roadmap
+    # variant was generated, substitute the first available variant.
+    base_variants = {
+        '##MAP_OVERVIEW##': [
+            '##MAP_OVERVIEW_SATELLITE##',
+            '##MAP_OVERVIEW_ROADMAP##',
+        ],
+        '##MAP_LANDMARKS##': [
+            '##MAP_LANDMARKS_SATELLITE##',
+            '##MAP_LANDMARKS_ROADMAP##',
+        ],
+        '##MAP_ACCESS##': [
+            '##MAP_ACCESS_SATELLITE##',
+            '##MAP_ACCESS_ROADMAP##',
+        ],
+        '##MAP_CATCHMENT##': [
+            '##MAP_CATCHMENT_SATELLITE##',
+            '##MAP_CATCHMENT_ROADMAP##',
+        ],
+    }
+    for base, variants in base_variants.items():
+        if base in html:
+            for variant in variants:
+                path = map_placeholders.get(variant)
+                if path:
+                    html = html.replace(base, path)
+                    break
     return html
 
 

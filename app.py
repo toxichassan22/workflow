@@ -494,10 +494,11 @@ def postprocess_slide(html, slide_num=None, tenant_id=None, slide_title=None, to
 def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=2, total=None, title=None):
     """Generate one complete slide, retrying with a stricter prompt when needed."""
     slide_title = title or f'شريحة {slide_num}'
+    style = _suggest_design_style(slide_title, slide_type='content')
     slide = {
         'title': slide_title,
         'type': 'content',
-        'design_style': 'cards',
+        'design_style': style,
         'content_density': 'medium',
         'requires_image': False,
         'bullets': []
@@ -554,7 +555,7 @@ def build_glm_prompt(project_data, images, branding=None):
     generic_slide = {
         'title': 'تفاصيل إضافية',
         'type': 'content',
-        'design_style': 'cards',
+        'design_style': _suggest_design_style('تفاصيل إضافية', slide_type='content'),
         'content_density': 'medium',
         'requires_image': False,
         'bullets': []
@@ -2487,7 +2488,7 @@ def api_ai_build_fields():
 from slide_engine import (
     build_slide_plan_prompt, parse_slide_plan, validate_slide_plan,
     generate_all_slides, extract_html_from_glm, CONTENT_DISTRIBUTION_RULES,
-    resolve_slide_bounds, build_fallback_plan
+    resolve_slide_bounds, build_fallback_plan, _suggest_design_style
 )
 
 
@@ -2550,7 +2551,7 @@ def api_slide_plan():
                 attempts=2
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
-            plan = parse_slide_plan(content, effective_branding)
+            plan = parse_slide_plan(content, effective_branding, project_data)
             print(f"[SLIDE-PLAN] Parsed on attempt {attempt}")
             break
         except Exception as e:
