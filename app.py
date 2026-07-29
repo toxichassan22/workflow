@@ -2501,45 +2501,35 @@ def api_geocode():
     address = data.get('address', '').strip()
     maps_link = data.get('maps_link', '').strip()
 
-    # If address itself is a Google Maps URL, treat it as maps_link
-    if address.startswith('http') and not maps_link:
-        maps_link = address
+    if not address and not maps_link:
+        return jsonify({'error': 'العنوان أو رابط قوقل ماب مطلوب لتحديد الإحداثيات'}), 400
 
-    if maps_link:
-        coords = maps_service.extract_coords_from_maps_link(maps_link)
+    query = maps_link or address
+
+    if query.startswith('http'):
+        coords = maps_service.extract_coords_from_maps_link(query)
         if coords:
             print(f"[MAPS LINK] Extracted coords from link: {coords}")
             return jsonify({
                 'success': True,
                 'lat': coords['lat'],
                 'lng': coords['lng'],
-                'formatted_address': address if not address.startswith('http') else 'تم الاستخراج من رابط خرائط جوجل',
+                'formatted_address': address if (address and not address.startswith('http')) else 'تم الاستخراج من رابط خرائط جوجل',
                 'source': 'maps_link'
             })
-        elif address and not address.startswith('http'):
-            result = maps_service.geocode_address(address)
-            if result.get('success'):
-                result['source'] = 'geocode_fallback'
-                return jsonify(result)
-            return jsonify({'success': False, 'error': 'ما قدرنا نحدد الموقع من هذا الرابط — جربي لصق رابط قوقل ماب مباشر أو كتابة العنوان النصي'})
 
-    if not address:
-        return jsonify({'error': 'address or maps_link is required'}), 400
+    text_target = address if (address and not address.startswith('http')) else (maps_link if not maps_link.startswith('http') else '')
+    if not text_target and address:
+        text_target = address
 
-    if address.startswith('http'):
-        coords = maps_service.extract_coords_from_maps_link(address)
-        if coords:
-            return jsonify({
-                'success': True,
-                'lat': coords['lat'],
-                'lng': coords['lng'],
-                'formatted_address': 'تم الاستخراج من رابط خرائط جوجل',
-                'source': 'maps_link'
-            })
-        return jsonify({'success': False, 'error': 'تعذر استخراج الإحداثيات من هذا الرابط'}), 400
+    if text_target:
+        result = maps_service.geocode_address(text_target)
+        if result.get('success'):
+            result['source'] = 'geocode_address'
+            return jsonify(result)
+        return jsonify({'success': False, 'error': result.get('error') or 'لم نتمكن من العثور على الإحداثيات لهذا العنوان'})
 
-    result = maps_service.geocode_address(address)
-    return jsonify(result)
+    return jsonify({'success': False, 'error': 'ما قدرنا نحدد الموقع من هذا الرابط أو العنوان — جربي كتابة العنوان النصي أو استخدام رابط قوقل ماب مباشر'})
 
 
 @app.route('/api/nearby-landmarks', methods=['POST'])
