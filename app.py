@@ -543,13 +543,13 @@ def build_system_prompt(project_data, images_info, design_rules=None):
 ## الصور المتوفرة
 {images_info}"""
 
-def resolve_logo_in_html(html, tenant_id=None):
+def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
     """Replace all logo placeholders and broken logo paths with tenant's logo URL."""
     if not html:
         return html
     logo_url = '/assets/logo.png'
     if tenant_id:
-        branding = db.get_branding(tenant_id) or {}
+        branding = _branding_cache if _branding_cache is not None else (db.get_branding(tenant_id) or {})
         if branding.get('logo_path'):
             logo_url = branding['logo_path']
             if not logo_url.startswith('http') and '?t=' not in logo_url:
@@ -3235,9 +3235,10 @@ def api_get_presentation(pres_id):
 
     pres['projectData'] = json.loads(pres['project_data']) if pres.get('project_data') else {}
     slides = json.loads(pres['slides_data']) if pres.get('slides_data') else []
+    branding = db.get_branding(g.tenant_id) or {}
     for s in slides:
         if isinstance(s, dict) and 'html' in s and isinstance(s['html'], str):
-            s['html'] = resolve_logo_in_html(s['html'], g.tenant_id)
+            s['html'] = resolve_logo_in_html(s['html'], g.tenant_id, _branding_cache=branding)
     pres['slidesData'] = slides
     return jsonify({'success': True, 'presentation': pres})
 

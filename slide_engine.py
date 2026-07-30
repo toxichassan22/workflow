@@ -959,13 +959,13 @@ def _replace_data_placeholders(html, project_data, branding=None):
     return html
 
 
-def resolve_logo_in_html(html, tenant_id=None):
+def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
     """Replace all logo placeholders and broken logo paths with tenant's logo URL."""
     if not html:
         return html
     logo_url = '/assets/logo.png'
     if tenant_id:
-        branding = db.get_branding(tenant_id) or {}
+        branding = _branding_cache if _branding_cache is not None else (db.get_branding(tenant_id) or {})
         if branding.get('logo_path'):
             logo_url = branding['logo_path']
             if not logo_url.startswith('http') and '?t=' not in logo_url:

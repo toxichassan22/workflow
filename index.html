@@ -6220,50 +6220,72 @@
       }
       wrap.innerHTML = '';
 
-      tenantSlidesData.forEach((s, i) => {
+      // Cancel any pending batch render from a previous call
+      if (renderTenantSlides._raf) cancelAnimationFrame(renderTenantSlides._raf);
+      renderTenantSlides._batchTimer && clearTimeout(renderTenantSlides._batchTimer);
+
+      const slides = tenantSlidesData;
+      if (!slides.length) { renderTenantSlidesSidebar(); renderTenantSlidesDesignerChat(); return; }
+
+      // Phase 1: create lightweight skeletons instantly (no heavy processing)
+      const containers = [];
+      slides.forEach((s, i) => {
         const container = document.createElement('div');
         container.className = 'ge-slide-card' + (i === activeSlideIndex ? ' active-slide' : '');
         container.id = 'slide-card-' + i;
         container.style.cssText = 'margin-bottom:24px; position:relative;';
         container.onclick = () => selectTenantSlide(i);
-
-        // Slide Stage content wrapper
         const stage = document.createElement('div');
         stage.className = 'tenant-slide-stage';
         stage.style.setProperty('--stage-w', '960px');
         stage.style.setProperty('--stage-h', '540px');
         stage.style.setProperty('--slide-scale', '0.75');
-
-        const slideHtml = processSlideHtmlClient(s.html, s.type);
-        stage.innerHTML = slideHtml || '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
-        if (!stage.querySelector('.slide')) {
-          stage.innerHTML = '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
-        }
-        autoFitSlideContent(stage);
-        enableSlideInlineEditing(stage, i);
+        stage.innerHTML = '<div class="slide" style="padding:40px;font-size:14px;color:#999;background:#fafafa;">جاري التحميل...</div>';
         container.appendChild(stage);
-
-        // Slide controls (edit/delete buttons)
         const controls = document.createElement('div');
         controls.className = 'ge-slide-controls';
         controls.style.cssText = 'position:absolute;top:8px;left:8px;display:flex;gap:4px;z-index:10;';
-        const editLabel = slideInlineEditStates[i] ? 'إيقاف التعديل' : 'تعديل نص';
-        controls.innerHTML = 
-          '<button onclick="event.stopPropagation(); toggleSlideInlineEditing(' + i + ')" title="تعديل نص الشريحة مباشرة" ' +
-          'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">' + editLabel + '</button>' +
-          '<button onclick="event.stopPropagation(); editSlideHtml(' + i + ')" title="تعديل الشريحة" ' +
-          'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">HTML</button>' +
-          '<button onclick="event.stopPropagation(); deleteSlide(' + i + ')" title="حذف الشريحة" ' +
-          'style="background:#fff;border:1px solid #f5a5a5;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">حذف</button>';
+        controls.innerHTML = '<button style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">جاري التحميل</button>';
         container.appendChild(controls);
-
         wrap.appendChild(container);
+        containers.push({ container, stage, controls, slide: s, index: i });
       });
 
       renderTenantSlidesSidebar();
       renderTenantDesignerChat();
       setTimeout(tgrRefit, 0);
+
+      // Phase 2: batch-process heavy slide rendering off the main-thread bottleneck
+      const BATCH = 4;
+      let cursor = 0;
+      function processBatch() {
+        const end = Math.min(cursor + BATCH, containers.length);
+        for (let j = cursor; j < end; j++) {
+          const { stage, controls, slide: s, index: i } = containers[j];
+          const slideHtml = processSlideHtmlClient(s.html, s.type);
+          stage.innerHTML = slideHtml || '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
+          if (!stage.querySelector('.slide')) {
+            stage.innerHTML = '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
+          }
+          autoFitSlideContent(stage);
+          enableSlideInlineEditing(stage, i);
+          const editLabel = slideInlineEditStates[i] ? 'إيقاف التعديل' : 'تعديل نص';
+          controls.innerHTML =
+            '<button onclick="event.stopPropagation(); toggleSlideInlineEditing(' + i + ')" title="تعديل نص الشريحة مباشرة" ' +
+            'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">' + editLabel + '</button>' +
+            '<button onclick="event.stopPropagation(); editSlideHtml(' + i + ')" title="تعديل الشريحة" ' +
+            'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">HTML</button>' +
+            '<button onclick="event.stopPropagation(); deleteSlide(' + i + ')" title="حذف الشريحة" ' +
+            'style="background:#fff;border:1px solid #f5a5a5;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">حذف</button>';
+        }
+        cursor = end;
+        if (cursor < containers.length) {
+          renderTenantSlides._batchTimer = setTimeout(processBatch, 0);
+        }
+      }
+      renderTenantSlides._batchTimer = setTimeout(processBatch, 0);
     }
+    function renderTenantSlidesDesignerChat() { renderTenantDesignerChat(); }
 
     function moveTenantSlide(fromIdx, toIdx) {
       if (fromIdx < 0 || fromIdx >= tenantSlidesData.length) return;
