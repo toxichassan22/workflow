@@ -211,16 +211,32 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 }}
 
 ## قواعد إضافية:
-- **الشرائح الثابتة في موضعها دائماً مهما تغيّر العدد:**
-  * الشريحة 1 = type=cover (الغلاف)
-  * الشريحة 2 = type=index (الفهرس)
-  * الشريحة قبل الأخيرة = type=moodboard (المود بورد)
-  * الشريحة الأخيرة = type=closing (الختام)
-- باقي الشرائح متغيرة العدد والترتيب حسب قالب الشركة وكمية بيانات المشروع
-- لو في صور مود بورد متوفرة، ضع شريحة moodboard قبل الختام
-- لو في إحداثيات + معالم، أضف شرائح تحليل الموقع (map_*) متسلسلة بعد الفهرس
+- **التسلسل الإلزامي للشرائح (18 شريحة) — اتبعه بالترتيب بالضبط:**
+  * الشريحة 1 = type=cover (الغلاف) — صورة رئيسية للمشروع
+  * الشريحة 2 = type=index (الفهرس) — فهرس يغطي الشرايح 3 إلى 18
+  * الشريحة 3 = type=content, design_style=text (نظرة عامه) — اسم المشروع + معلومات بسيطة
+  * الشريحة 4 = type=map_overview (الموقع) — تحديد المشروع على الخريطه
+  * الشريحة 5 = type=content, design_style=text (الطرق الرئيسيه) — الطرق والوصول
+  * الشريحة 6 = type=content, design_style=table (الأماكن القريبه) — جدول بالاماكن والمده والمسافه
+  * الشريحة 7 = type=content, design_style=dashboard (البيانات الماليه) — أرقام مالية كبيرة
+  * الشريحة 8 = type=content, design_style=cards (دراسات الجدوى) — ملخص دراسات الجدوى
+  * الشريحة 9 = type=content, design_style=dashboard (Charts) — رسوم بيانية ومخططات
+  * الشريحة 10 = type=content, design_style=cards (تفاصيل المشروع) — وصف تفصيلي
+  * الشريحة 11 = type=content, design_style=cards (مميزات وعيوب) — مميزات وعيوب المشروع
+  * الشريحة 12 = type=content, design_style=text (المخاطر والافتراضات) — مخاطر وافتراضات
+  * الشريحة 13 = type=content, design_style=swot (تحليل SWOT) — تحليل نقاط القوة والضعف
+  * الشريحة 14 = type=content, design_style=table (جدول المكونات) — جدول مكونات المشروع
+  * الشريحة 15 = type=content, design_style=dashboard (الافتراضات الماليه) — افتراضات مالية
+  * الشريحة 16 = type=content, design_style=timeline (الجدول الزمني) — جدول زمني للمشروع
+  * الشريحة 17 = type=moodboard (المود بورد) — صور تصميمية
+  * الشريحة 18 = type=closing (الختام) — شريحة الختام
+- **ممنوع تغيير ترتيب الشرائح أو حذف أي شريحة من الأعلى**
+- **ممنوع إضافة شرائح إضافية beyond 18 — إذا المحتوى قليل ادمج، وإذا كثير قسّم داخل نفس الشريحة**
+- لو في صور مود بورد متوفرة، ضع شريحة moodboard قبل الختام (شريحة 17)
+- لو في إحداثيات + معالم، أضف شرائح تحليل الموقع (map_*) في الموضع 4 فقط
 - كل شريحة content لازم يكون فيها 3-6 bullets على الأقل
 - وزع المحتوى بحيث كل شريحة تكون ممتلئة بصرياً 60-85%
+- كل شريحة لها صورة مناسبة: غلاف=صورة المشروع، الموقع=خريطة، الأماكن=خرائط، المود بورد=صور تصميمية
 """
 
 
@@ -231,7 +247,7 @@ def resolve_slide_bounds(branding):
     exact requirement, otherwise min/max act as the allowed range.
     """
     branding = branding or {}
-    default_count = int(branding.get('default_slide_count') or 16)
+    default_count = int(branding.get('default_slide_count') or 18)
     if branding.get('lock_slide_count'):
         return default_count, default_count, default_count
     min_slides = int(branding.get('min_slides') or 8)
@@ -447,6 +463,37 @@ def parse_slide_plan(response_text, branding=None, project_data=None):
     # Ensure second slide is index when there are at least three slides
     if len(plan['slides']) > 2:
         plan['slides'][1]['type'] = 'index'
+
+    # Enforce the mandatory 18-slide order: fix types and design_style
+    # for positions that have a fixed role.
+    _MANDATED = [
+        (2,  'text',     None),        # 3: نظرة عامه
+        (3,  'map_overview', 'map'),   # 4: الموقع
+        (4,  'text',     None),        # 5: الطرق الرئيسيه
+        (5,  'table',    'table'),     # 6: الأماكن القريبه
+        (6,  'dashboard','dashboard'), # 7: البيانات الماليه
+        (7,  'cards',    'cards'),     # 8: دراسات الجدوى
+        (8,  'dashboard','dashboard'), # 9: Charts
+        (9,  'cards',    'cards'),     # 10: تفاصيل المشروع
+        (10, 'cards',    'cards'),     # 11: مميزات وعيوب
+        (11, 'text',     None),        # 12: المخاطر والافتراضات
+        (12, 'swot',     'swot'),     # 13: تحليل SWOT
+        (13, 'table',    'table'),     # 14: جدول المكونات
+        (14, 'dashboard','dashboard'), # 15: الافتراضات الماليه
+        (15, 'timeline', 'timeline'),  # 16: الجدول الزمني
+    ]
+    for idx, mandated_type, mandated_style in _MANDATED:
+        if idx < len(plan['slides']):
+            slide = plan['slides'][idx]
+            slide['type'] = mandated_type
+            if mandated_style:
+                slide['design_style'] = mandated_style
+
+    # The moodboard is always at index 16 (slide 17) when present
+    if len(plan['slides']) >= 17:
+        plan['slides'][16]['type'] = 'moodboard'
+        plan['slides'][16]['design_style'] = 'grid'
+        plan['slides'][16]['requires_image'] = True
 
     # If location data exists but the AI marked a location slide as plain content,
     # convert it to the appropriate map type so the map image is actually used.

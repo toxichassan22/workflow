@@ -4917,7 +4917,7 @@ def _build_agent_system_state(tenant_id):
 - اللوجو: {'موجود' if branding.get('logo_path') else 'غير مرفوع'}
 
 ### 📊 إعدادات الشرائح والصور:
-- عدد الشرائح الافتراضي: {branding.get('default_slide_count', 16)}
+- عدد الشرائح الافتراضي: {branding.get('default_slide_count', 18)}
 - الحد الأدنى: {branding.get('min_slides', 8)}
 - الحد الأقصى: {branding.get('max_slides', 30)}
 - عدد صور المود بورد: {branding.get('moodboard_count', 4)}
@@ -5729,7 +5729,7 @@ DEFAULT_BRANDING_VALUES = {
     'footer_height': 36,
     'moodboard_enabled': 1,
     'cover_image_enabled': 1,
-    'default_slide_count': 16,
+    'default_slide_count': 18,
     'lock_slide_count': 0,
     'min_slides': 8,
     'max_slides': 30,

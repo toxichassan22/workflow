@@ -111,7 +111,7 @@ def _create_tables(conn):
         moodboard_enabled INTEGER DEFAULT 1,
         cover_image_enabled INTEGER DEFAULT 1,
         moodboard_count INTEGER DEFAULT 4,
-        default_slide_count INTEGER DEFAULT 16,
+        default_slide_count INTEGER DEFAULT 18,
         lock_slide_count INTEGER DEFAULT 0,
         min_slides INTEGER DEFAULT 8,
         max_slides INTEGER DEFAULT 30,
