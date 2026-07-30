@@ -7,7 +7,7 @@ import json
 import os
 import re
 import concurrent.futures
-from design_templates import build_design_rules
+from design_templates import build_design_rules, extract_slide_elements
 import db
 import emoji_icons
 
@@ -718,10 +718,9 @@ def extract_html_from_glm(content):
     # Basic cleanup
     html = html.replace('```html', '').replace('```', '').strip()
 
-    # Find the slide div
-    slide_match = re.search(r'(<div[^>]*class=["\']slide["\'][\s\S]*$)', html)
-    if slide_match:
-        html = slide_match.group(1)
+    slides = extract_slide_elements(html)
+    if slides:
+        return '\n'.join(slides)
 
     # If no slide div, wrap the whole HTML in one as a fallback
     if 'class="slide"' not in html and "class='slide'" not in html:

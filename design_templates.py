@@ -10,6 +10,38 @@ import re
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FALLBACK_FONTS = "'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif"
 
+
+def extract_slide_elements(html):
+    """Return only balanced root .slide elements, discarding AI chatter around them."""
+    if not html:
+        return []
+    slide_open = re.compile(
+        r'<div\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\1[^>]*>',
+        re.I,
+    )
+    div_token = re.compile(r'<div\b[^>]*>|</div\s*>', re.I)
+    slides = []
+    cursor = 0
+    while True:
+        match = slide_open.search(html, cursor)
+        if not match:
+            break
+        depth = 1
+        end = None
+        for token in div_token.finditer(html, match.end()):
+            if token.group(0).lower().startswith('</div'):
+                depth -= 1
+                if depth == 0:
+                    end = token.end()
+                    break
+            else:
+                depth += 1
+        if end is None:
+            break
+        slides.append(html[match.start():end].strip())
+        cursor = end
+    return slides
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Font source helpers for export (bundled / Google Fonts / uploaded / persisted)
 # ─────────────────────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 import re
 import base64
+import hashlib
 import requests
 import uuid as _uuid
 
@@ -20,7 +21,7 @@ import auth
 import maps_service
 import slide_engine
 from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
-from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules
+from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules, extract_slide_elements
 
 app = Flask(__name__, static_folder=None)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
@@ -390,6 +391,53 @@ def call_image_api_with_reference(reference_image_base64, prompt):
         print("[IMAGE ERROR]", str(e))
     return None
 
+
+def persist_generated_image(image, tenant_id):
+    """Store generated data-URI images on disk and return a compact public URL."""
+    if not isinstance(image, str) or not image.startswith('data:image/') or ';base64,' not in image:
+        return image
+    header, encoded = image.split(',', 1)
+    mime = header[5:].split(';', 1)[0].lower()
+    extension = {
+        'image/png': '.png',
+        'image/jpeg': '.jpg',
+        'image/jpg': '.jpg',
+        'image/webp': '.webp',
+    }.get(mime)
+    if not extension:
+        return image
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except Exception:
+        return image
+    digest = hashlib.sha256(raw).hexdigest()[:24]
+    safe_tenant = re.sub(r'[^A-Za-z0-9_-]', '', str(tenant_id or 'public')) or 'public'
+    image_dir = os.path.join(os.path.dirname(__file__), 'uploads', 'creative', safe_tenant)
+    os.makedirs(image_dir, exist_ok=True)
+    filename = digest + extension
+    path = os.path.join(image_dir, filename)
+    if not os.path.exists(path):
+        with open(path, 'wb') as image_file:
+            image_file.write(raw)
+    return f'/uploads/creative/{safe_tenant}/{filename}'
+
+
+def normalize_presentation_assets(value, tenant_id):
+    """Replace embedded image data URIs with compact tenant-scoped file URLs."""
+    if isinstance(value, dict):
+        return {key: normalize_presentation_assets(item, tenant_id) for key, item in value.items()}
+    if isinstance(value, list):
+        return [normalize_presentation_assets(item, tenant_id) for item in value]
+    if not isinstance(value, str) or 'data:image/' not in value:
+        return value
+    if value.startswith('data:image/'):
+        return persist_generated_image(value, tenant_id)
+    return re.sub(
+        r'data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+',
+        lambda match: persist_generated_image(match.group(0), tenant_id),
+        value,
+    )
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Generate PDF with Playwright
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -661,31 +709,12 @@ def extract_html_from_glm(raw_response):
     if code_match:
         html = code_match.group(1).strip()
         if 'class="slide"' in html:
-            return html
+            slides = extract_slide_elements(html)
+            if slides:
+                return '\n'.join(slides)
 
-    # Try balanced extraction: find each <div class="slide" and match its closing tags
-    slides = []
-    for m in re.finditer(r'<div[^>]*class=["\']slide["\'][^>]*>', content):
-        start = m.start()
-        # Find the matching closing by counting nested divs
-        depth = 0
-        pos = start
-        while pos < len(content) and pos != -1:
-            next_open = content.find('<div', pos)
-            next_close = content.find('</div>', pos)
-            if next_close == -1:
-                break
-            if next_open != -1 and next_open < next_close:
-                depth += 1
-                pos = next_open + 4
-            else:
-                if depth == 0:
-                    end = next_close + 6
-                    slides.append(content[start:end].strip())
-                    break
-                depth -= 1
-                pos = next_close + 6
-
+    # Keep only complete slide roots; discard AI prose/punctuation around them.
+    slides = extract_slide_elements(content)
     if slides:
         return '\n'.join(slides)
 
@@ -824,7 +853,7 @@ def api_generate_images():
     if include_cover:
         print("[IMAGES] Generating cover image...")
         cover_prompt = f"Modern luxury {project_type} building in {location}, professional architectural photography, elegant design, high quality, no text, no watermark"
-        images['cover'] = call_image_api(cover_prompt)
+        images['cover'] = persist_generated_image(call_image_api(cover_prompt), getattr(g, 'tenant_id', None))
         print(f"[IMAGES] Cover: {'OK' if images['cover'] else 'FAILED'}")
 
     # 2. Moodboard images — use reference image (main image) to maintain visual consistency
@@ -849,9 +878,9 @@ def api_generate_images():
     for i, prompt in enumerate(moodboard_prompts):
         print(f"[IMAGES] Generating moodboard {i+1}/{target_count} (ref: {'yes' if reference_image else 'no'})...")
         if reference_image:
-            img = call_image_api_with_reference(reference_image, prompt)
+            img = persist_generated_image(call_image_api_with_reference(reference_image, prompt), getattr(g, 'tenant_id', None))
         else:
-            img = call_image_api(prompt)
+            img = persist_generated_image(call_image_api(prompt), getattr(g, 'tenant_id', None))
         images['moodboard'].append(img)
         print(f"[IMAGES] Moodboard {i+1}/{target_count}: {'OK' if img else 'FAILED'}")
         if i < len(moodboard_prompts) - 1:
@@ -996,7 +1025,7 @@ def api_generate_main_image():
             image = call_image_api(prompt)
 
         if image:
-            return jsonify({'success': True, 'image': image})
+            return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
             # AI4: Return descriptive Arabic error based on config state
             if not OPENROUTER_KEY:
@@ -1021,7 +1050,7 @@ def api_generate_slide_image():
             image = call_image_api(prompt)
 
         if image:
-            return jsonify({'success': True, 'image': image})
+            return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
             if not OPENROUTER_KEY:
                 return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
@@ -1044,7 +1073,7 @@ def api_generate_image_single():
             image = call_image_api(prompt)
 
         if image:
-            return jsonify({'success': True, 'image': image})
+            return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
         else:
             if not OPENROUTER_KEY:
                 return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ — يرجى إضافته في ملف .env', 'error_code': 'NO_API_KEY'})
@@ -1891,7 +1920,7 @@ def api_designer_chat():
                 executed.append({'tool': tool, 'status': 'success', 'indexes': indexes})
             elif tool in ('generate_image', 'generate_design_image', 'insert_image_into_slide'):
                 prompt = params.get('prompt') or message
-                image = call_image_api(prompt)
+                image = persist_generated_image(call_image_api(prompt), tenant_id)
                 if not image:
                     raise RuntimeError('تعذر توليد الصورة. تحقق من إعداد OpenRouter ورصيده.')
                 targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
@@ -3182,8 +3211,8 @@ def api_save_presentation():
     """Save a new presentation."""
     data = request.json or {}
     title = (data.get('title') or 'عرض بدون عنوان').strip()
-    project_data = data.get('projectData', {})
-    slides_data = data.get('slidesData', [])
+    project_data = normalize_presentation_assets(data.get('projectData', {}), g.tenant_id)
+    slides_data = normalize_presentation_assets(data.get('slidesData', []), g.tenant_id)
     slide_count = data.get('slideCount', len(slides_data))
 
     pres_id = db.create_presentation(
@@ -3226,7 +3255,7 @@ def api_update_presentation(pres_id):
     for k in ['title', 'projectData', 'slidesData', 'slideCount', 'status']:
         if k in data:
             db_key = {'projectData': 'project_data', 'slidesData': 'slides_data', 'slideCount': 'slide_count'}.get(k, k)
-            updates[db_key] = data[k]
+            updates[db_key] = normalize_presentation_assets(data[k], g.tenant_id) if k in {'projectData', 'slidesData'} else data[k]
 
     # Save version snapshot before update if slides_data is changing
     if 'slides_data' in updates:
@@ -3287,7 +3316,8 @@ def api_save_project_draft():
     if status not in {'draft', 'submitted'}:
         status = 'draft'
     draft_id = db.save_project_draft(
-        g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status
+        g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
+        draft_id=draft_data.get('draftId') or draft_data.get('draft_id')
     )
     return jsonify({'success': True, 'draftId': draft_id})
 
@@ -3328,7 +3358,7 @@ def api_update_section_status():
     if not isinstance(section_key, str) or not section_key or section_status not in {'draft', 'approved'}:
         return jsonify({'error': 'A valid sectionKey and sectionStatus are required'}), 400
     result = db.update_draft_section_status(
-        g.tenant_id, _project_draft_actor_id(), section_key, section_status
+        g.tenant_id, _project_draft_actor_id(), section_key, section_status, draft_id=data.get('draftId')
     )
     if not result:
         return jsonify({'error': 'Unable to update section status'}), 400
@@ -3339,8 +3369,10 @@ def api_update_section_status():
 @require_auth
 def api_request_project_draft_approval():
     """Request one overall approval after all tracked sections are approved."""
+    data = request.json or {}
     draft = db.request_project_draft_approval(
-        g.tenant_id, _project_draft_actor_id(), _project_draft_actor_id(), _project_draft_actor_name()
+        g.tenant_id, _project_draft_actor_id(), _project_draft_actor_id(), _project_draft_actor_name(),
+        draft_id=data.get('draftId')
     )
     if draft.get('error') == 'draft_not_found':
         return jsonify({'error': 'No project draft found'}), 404
@@ -5911,6 +5943,19 @@ def static_map_uploads(path):
     if os.path.exists(full_path):
         return send_from_directory(maps_dir, path)
     return jsonify({'error': 'Map image not found'}), 404
+
+
+@app.route('/uploads/creative/<tenant_id>/<path:filename>')
+def static_creative_upload(tenant_id, filename):
+    """Serve generated creative images without exposing arbitrary upload paths."""
+    safe_tenant = re.sub(r'[^A-Za-z0-9_-]', '', tenant_id)
+    safe_filename = os.path.basename(filename)
+    if safe_tenant != tenant_id or safe_filename != filename:
+        return jsonify({'error': 'Not found'}), 404
+    creative_dir = os.path.join(UPLOADS_DIR, 'creative', safe_tenant)
+    if not os.path.isfile(os.path.join(creative_dir, safe_filename)):
+        return jsonify({'error': 'Not found'}), 404
+    return send_from_directory(creative_dir, safe_filename)
 
 
 @app.route('/uploads/<path:path>')

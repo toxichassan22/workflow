@@ -4436,6 +4436,7 @@
     // Dynamic Project Form
     async function startTenantProject() {
       tenantPresentationId = null;
+      tenantProjectData = { draftId: crypto.randomUUID() };
       tenantSlidesData = [];
       tenantSlidePlan = null;
       tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
@@ -4457,68 +4458,6 @@
       tenantFieldSections = sectionsData.available || [];
       tenantAllowedFieldSections = sectionsData.allowed || {};
       renderTenantProjectForm(tenantFields);
-      // Load server-side draft and populate form
-      try {
-        const draftResp = await api('GET', '/api/project-draft');
-        if (draftResp.success && draftResp.draft && draftResp.draft.draft_data) {
-          const draftData = draftResp.draft.draft_data;
-          if (draftData.draftId) tenantProjectData.draftId = draftData.draftId;
-          const sectionStatuses = draftResp.draft.section_statuses || {};
-          tenantProjectSectionStatuses = { ...sectionStatuses };
-          tenantProjectDraftApproval = draftResp.draft;
-          setTimeout(() => {
-            Object.entries(draftData).forEach(([key, value]) => {
-              const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-              if (input && input.type !== 'file') input.value = value;
-            });
-            // Restore slide plan and generated images if present
-            if (draftData.tenantSlidePlan) {
-              tenantSlidePlan = draftData.tenantSlidePlan;
-              renderTenantSlidePlan();
-            }
-            if (draftData.tenantCreativeImages) {
-              const ci = draftData.tenantCreativeImages;
-              tenantCreativeImages = {
-                cover: ci.cover || '',
-                moodboard: Array.isArray(ci.moodboard) ? ci.moodboard : [],
-                map_placeholders: ci.map_placeholders || {},
-                map_landmarks: ci.map_landmarks || [],
-                images_signature: ci.images_signature || null,
-                maps_signature: ci.maps_signature || null
-              };
-              renderTenantMainImage();
-              renderTenantMoodboard();
-            }
-            if (draftData.tenantSlidesData) {
-              tenantSlidesData = draftData.tenantSlidesData;
-            }
-            // Restore table data if present
-            if (draftData.componentsTableData) {
-              try {
-                const rows = JSON.parse(draftData.componentsTableData);
-                const tbody = document.getElementById('componentsTableBody');
-                if (tbody) {
-                  tbody.innerHTML = '';
-                  rows.forEach(r => addComponentRow(r));
-                }
-              } catch (e) { }
-            }
-            if (draftData.timelineTableData) {
-              try {
-                const rows = JSON.parse(draftData.timelineTableData);
-                const tbody = document.getElementById('timelineTableBody');
-                if (tbody) {
-                  tbody.innerHTML = '';
-                  rows.forEach(r => addTimelineRow(r));
-                }
-              } catch (e) { }
-            }
-            if (typeof recalcFinancials === 'function') recalcFinancials();
-            applySectionStatuses(sectionStatuses);
-            toast('تم استرجاع المسودة المحفوظة');
-          }, 300);
-        }
-      } catch (e) { console.log('No draft to load'); }
       refreshGlobalRail();
     }
 
@@ -4589,7 +4528,7 @@
     }
 
     async function setSectionStatus(sectionKey, status) {
-      const result = await api('POST', '/api/project-draft/section-status', { sectionKey: sectionKey, sectionStatus: status });
+      const result = await api('POST', '/api/project-draft/section-status', { draftId: tenantProjectData.draftId, sectionKey: sectionKey, sectionStatus: status });
       if (!result.success) { toast(result.error || 'تعذر تحديث حالة القسم'); return; }
       applySectionStatuses({ [sectionKey]: status });
     }
@@ -4602,7 +4541,7 @@
         statuses[key] = 'approved';
       });
       const results = await Promise.all(Object.entries(statuses).map(([key, status]) =>
-        api('POST', '/api/project-draft/section-status', { sectionKey: key, sectionStatus: status })
+        api('POST', '/api/project-draft/section-status', { draftId: tenantProjectData.draftId, sectionKey: key, sectionStatus: status })
       ));
       if (results.some(result => !result.success)) { toast('تعذر اعتماد قسم أو أكثر'); return; }
       applySectionStatuses(statuses);
@@ -4610,7 +4549,7 @@
     }
 
     async function requestProjectDraftApproval() {
-      const result = await api('POST', '/api/project-draft/request-approval', {});
+      const result = await api('POST', '/api/project-draft/request-approval', { draftId: tenantProjectData.draftId });
       if (!result.success) { toast(result.error || 'لا يمكن طلب الاعتماد الآن'); return; }
       tenantProjectDraftApproval = result.draft || null;
       toast('تم إرسال المسودة للاعتماد');
@@ -5135,6 +5074,8 @@
     async function saveProjectAsDraft(silent = false) {
       try {
         const data = await collectTenantFormData();
+        data.draftId = tenantProjectData.draftId || crypto.randomUUID();
+        tenantProjectData.draftId = data.draftId;
         data.tenantSlidePlan = tenantSlidePlan;
         data.tenantCreativeImages = tenantCreativeImages;
         data.tenantSlidesData = tenantSlidesData;
@@ -6883,7 +6824,16 @@
         if (resp.success && resp.draft) {
           const draft = resp.draft;
           const draftData = draft.draft_data || draft.draftData || {};
-          if (draftData.draftId) tenantProjectData.draftId = draftData.draftId;
+          tenantPresentationId = null;
+          tenantProjectData = { ...draftData, draftId: draftData.draftId || draft.id || draftId };
+          tenantSlidesData = [];
+          tenantSlidePlan = null;
+          tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
+          tenantDesignerMessages = [];
+          tenantChatSlideIndex = 0;
+          tenantMapPreviewState = null;
+          tenantMapPolygonPoints = [];
+          tenantMapPolygonMode = false;
           const sectionStatuses = draft.section_statuses || {};
 
           showTenantPage('tenantProjectPage');

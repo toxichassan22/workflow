@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import traceback
 from pathlib import Path
-from design_templates import build_font_css, sanitize_slide_html_for_export
+from design_templates import build_font_css, extract_slide_elements, sanitize_slide_html_for_export
 from slide_engine import resolve_logo_in_html
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -95,6 +95,9 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
 
     # Strip any previously-baked font-family declarations so the tenant font wins
     html = sanitize_slide_html_for_export(html)
+    slides = extract_slide_elements(html)
+    if slides:
+        html = "\n".join(slides)
 
     # Build tenant font CSS and layout/print CSS
     font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)

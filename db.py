@@ -1816,20 +1816,26 @@ def _clear_draft_approval_fields(conn, draft_id):
     )
 
 
-def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, status='draft'):
+def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, status='draft', draft_id=None):
     """Save one unified draft per tenant actor without losing section approvals.
 
     ``user_id`` is an actor identifier.  Company administrators use a stable
     tenant-admin identifier supplied by the API because their JWT has no user id.
     """
     conn = get_db()
-    existing = conn.execute(
-        'SELECT * FROM project_drafts WHERE tenant_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1',
-        (tenant_id, user_id)
-    ).fetchone()
+    if draft_id:
+        existing = conn.execute(
+            'SELECT * FROM project_drafts WHERE id = ? AND tenant_id = ? AND user_id = ?',
+            (draft_id, tenant_id, user_id)
+        ).fetchone()
+    else:
+        existing = conn.execute(
+            'SELECT * FROM project_drafts WHERE tenant_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1',
+            (tenant_id, user_id)
+        ).fetchone()
 
     # Determine the stable draft id before serializing
-    draft_id = existing['id'] if existing else str(uuid.uuid4())
+    draft_id = existing['id'] if existing else (draft_id or str(uuid.uuid4()))
 
     requested_status = status if status in PROJECT_DRAFT_STATUSES else 'draft'
     now = datetime.now().isoformat()
@@ -1949,15 +1955,17 @@ def delete_project_draft(tenant_id, user_id):
     return cursor.rowcount > 0
 
 
-def update_draft_section_status(tenant_id, user_id, section_key, section_status):
+def update_draft_section_status(tenant_id, user_id, section_key, section_status, draft_id=None):
     """Update one section in a unified draft, resetting overall approval if needed."""
     if section_status not in SECTION_DRAFT_STATUSES:
         return False
-    draft = get_project_draft(tenant_id, user_id)
+    draft = get_project_draft_by_id(tenant_id, draft_id) if draft_id else get_project_draft(tenant_id, user_id)
+    if draft and draft.get('user_id') != user_id:
+        draft = None
     if not draft:
         # A status click can occur before the first explicit Save action.
-        save_project_draft(tenant_id, user_id, {}, {}, 'draft')
-        draft = get_project_draft(tenant_id, user_id)
+        save_project_draft(tenant_id, user_id, {}, {}, 'draft', draft_id=draft_id)
+        draft = get_project_draft_by_id(tenant_id, draft_id) if draft_id else get_project_draft(tenant_id, user_id)
     statuses = draft.get('section_statuses', {})
     changed = statuses.get(section_key) != section_status
     statuses[section_key] = section_status
@@ -1976,9 +1984,11 @@ def update_draft_section_status(tenant_id, user_id, section_key, section_status)
     return True
 
 
-def request_project_draft_approval(tenant_id, user_id, requested_by, requested_by_name):
+def request_project_draft_approval(tenant_id, user_id, requested_by, requested_by_name, draft_id=None):
     """Submit a draft only after every tracked section is approved."""
-    draft = get_project_draft(tenant_id, user_id)
+    draft = get_project_draft_by_id(tenant_id, draft_id) if draft_id else get_project_draft(tenant_id, user_id)
+    if draft and draft.get('user_id') != user_id:
+        draft = None
     if not draft:
         return {'error': 'draft_not_found'}
     statuses = draft.get('section_statuses', {})
