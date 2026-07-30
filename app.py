@@ -4730,6 +4730,25 @@ def api_training_chat():
 ```action
 {{"tool": "generate_workspace", "params": {{"regenerate": true}}}}
 ```
+
+### 23. ملء بيانات المشروع في مساحة العمل من كلام المستخدم:
+```action
+{{"tool": "update_workspace", "params": {{"projectData": {{"project_name": "...", "project_type": "...", "location_address": "...", "land_area": "...", "budget": "..."}}}}}}
+```
+استخدمها عندما يعطيك المستخدم بيانات مشروع في المحادثة ويريد إنشاء عرض منها. أرسل الحقول المتوفرة فقط.
+
+### 24. توليد خطة الشرائح من بيانات المشروع:
+```action
+{{"tool": "generate_slide_plan"}}
+```
+تتطلب projectData في مساحة العمل (استخدم update_workspace أولاً إن لزم).
+
+## سير العمل الكامل لإنشاء عرض جديد من المحادثة:
+1. اجمع بيانات المشروع من كلام المستخدم (اسم المشروع، النوع، الموقع، المساحات، الميزانية...) ونفّذ `update_workspace`
+2. نفّذ `generate_slide_plan` لإنشاء خطة الشرائح
+3. نفّذ `generate_workspace` لتوليد الشرائح فعلياً
+4. أخبر المستخدم أن العرض جاهز في صفحة معاينة الشرائح
+إذا كان مساحة العمل تحتوي بيانات وخطة مسبقاً، تجاوز الخطوتين 1-2 مباشرة إلى 3.
 لا تنفذ التوليد أو التعديل أو التصدير إذا لم تتوفر مساحة عمل صالحة. نفذ الأدوات بالترتيب: inspect ثم التنفيذ ثم validate ثم save/export عند طلب المستخدم.
 
 ## قواعد مهمة وحاسمة:
@@ -4845,6 +4864,16 @@ def api_training_chat():
         try:
             result = _execute_agent_action(g.tenant_id, action, reply_text=reply, workspace=workspace)
             actions_executed.append(result)
+            # Chain workspace mutations so sequential tools in the same reply
+            # (update_workspace → generate_slide_plan → generate_workspace) see updates.
+            rdata = result.get('data') if isinstance(result, dict) else None
+            if isinstance(rdata, dict):
+                if isinstance(rdata.get('projectData'), dict):
+                    workspace['projectData'] = rdata['projectData']
+                if isinstance(rdata.get('slidePlan'), dict):
+                    workspace['slidePlan'] = rdata['slidePlan']
+                if isinstance(rdata.get('slidesData'), list):
+                    workspace['slidesData'] = rdata['slidesData']
             print(f'[SUPER-AGENT] Executed: {action.get("tool")} → {result.get("status")}')
         except Exception as ex:
             print(f'[SUPER-AGENT] Action execution error: {ex}')
@@ -5505,6 +5534,49 @@ HTML الحالي:
                     result['data'] = {'slidesData': slides, 'slideCount': len(slides)}
                     result['message'] = f'تم تعديل الشرائح: {", ".join(str(i + 1) for i in edited)}'
 
+        # ── Update workspace project data from chat ───────────────────
+        elif tool == 'update_workspace':
+            new_data = params.get('projectData')
+            if not isinstance(new_data, dict) or not new_data:
+                result['status'] = 'error'
+                result['message'] = 'أرسل projectData ككائن يحتوي بيانات المشروع'
+            else:
+                merged = workspace.get('projectData') if isinstance(workspace.get('projectData'), dict) else {}
+                merged = {**merged, **new_data}
+                result['data'] = {'projectData': merged}
+                result['message'] = f'تم تحديث بيانات المشروع ({len(new_data)} حقل)'
+
+        # ── Generate slide plan from workspace project data ───────────
+        elif tool == 'generate_slide_plan':
+            project_data = clean_project_data(workspace.get('projectData') or {})
+            if not project_data:
+                result['status'] = 'error'
+                result['message'] = 'لا توجد بيانات مشروع في مساحة العمل. استخدم update_workspace أولاً لملء بيانات المشروع من كلام المستخدم.'
+            else:
+                plan_branding = db.get_branding(tenant_id) or {}
+                training_context = db.get_training_context(tenant_id) or ''
+                plan_prompt = slide_engine.build_slide_plan_prompt(project_data, plan_branding)
+                if training_context:
+                    plan_prompt = f"## بيانات خاصة بالشركة\n{training_context}\n\n---\n\n{plan_prompt}"
+                plan = None
+                last_plan_err = None
+                for _attempt in range(3):
+                    try:
+                        plan_resp = call_zai_chat_parallel(
+                            "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية.",
+                            plan_prompt, max_tokens=4000, attempts=2)
+                        plan = slide_engine.parse_slide_plan(extract_chat_content(plan_resp, "AGENT-SLIDE-PLAN"), plan_branding, project_data)
+                        break
+                    except Exception as plan_err:
+                        last_plan_err = plan_err
+                        time.sleep(1)
+                if plan is None:
+                    result['status'] = 'error'
+                    result['message'] = f'فشل توليد خطة الشرائح: {last_plan_err}'
+                else:
+                    result['data'] = {'slidePlan': plan}
+                    result['message'] = f'تم توليد خطة من {len(plan.get("slides", []))} شريحة — راجعها ثم نفّذ generate_workspace'
+
         # ── Generate workspace slides from the supplied plan ──────────
         elif tool == 'generate_workspace':
             project_data = clean_project_data(workspace.get('projectData') or {})
@@ -5513,7 +5585,16 @@ HTML الحالي:
             plan_slides = slide_plan.get('slides') if isinstance(slide_plan, dict) else None
             if not project_data or not isinstance(plan_slides, list) or not plan_slides:
                 result['status'] = 'error'
-                result['message'] = 'تحتاج مساحة العمل إلى projectData و slidePlan.slides قبل التوليد'
+                missing = []
+                if not project_data:
+                    missing.append('بيانات المشروع (projectData)')
+                if not isinstance(plan_slides, list) or not plan_slides:
+                    missing.append('خطة الشرائح (slidePlan)')
+                result['message'] = (
+                    'مساحة العمل تنقصها: ' + ' و '.join(missing) +
+                    '. الخطوات: 1) اجمع بيانات المشروع من المستخدم ونفّذ update_workspace '
+                    '2) نفّذ generate_slide_plan لإنشاء الخطة 3) أعد المحاولة.'
+                )
             else:
                 branding = db.get_branding(tenant_id) or {}
                 training_context = db.get_training_context(tenant_id) or ''

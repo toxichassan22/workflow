@@ -7447,6 +7447,8 @@
 
     async function applyAgentWorkspaceActions(actions) {
       let changed = false;
+      let planChanged = false;
+      let dataChanged = false;
       (actions || []).forEach(action => {
         const data = action && action.data;
         if (!data || typeof data !== 'object') return;
@@ -7458,17 +7460,38 @@
           tenantPresentationId = data.presentationId;
           changed = true;
         }
+        if (data.projectData && typeof data.projectData === 'object') {
+          tenantProjectData = { ...(tenantProjectData || {}), ...data.projectData };
+          dataChanged = true;
+        }
+        if (data.slidePlan && typeof data.slidePlan === 'object' && Array.isArray(data.slidePlan.slides)) {
+          tenantSlidePlan = data.slidePlan;
+          planChanged = true;
+        }
         if (data.url && data.exportId) {
           window.open(data.url, '_blank', 'noopener');
         }
       });
+      if (dataChanged) {
+        const form = document.getElementById('tenantProjectForm');
+        if (form) {
+          Object.entries(tenantProjectData || {}).forEach(([key, value]) => {
+            const input = form.querySelector('[data-key="' + key + '"]');
+            if (input && input.type !== 'file') input.value = value;
+          });
+        }
+      }
+      if (planChanged && typeof renderTenantSlidePlan === 'function') {
+        renderTenantSlidePlan();
+      }
       if (changed) {
         renderTenantSlides();
         renderTenantSlidesSidebar();
         updateTenantChatSlideSelect();
         triggerAutoSaveDraft();
       }
-      return changed;
+      if (changed || planChanged || dataChanged) triggerAutoSaveDraft();
+      return changed || planChanged || dataChanged;
     }
 
     function setTrainingChatExample(text) {
@@ -7872,7 +7895,7 @@
         saveCurrentSessionState('ai_rules', aiRulesChatHistory);
         aiRulesChatHistory.push({ role: 'ai', text: '⏳ جاري التفكير والتنفيذ...', _typing: true });
         renderAIRulesChat();
-        const data = await api('POST', '/api/training-chat', { message: text, history: aiRulesChatHistory.filter(m => !m._typing).slice(0, -1) });
+        const data = await api('POST', '/api/training-chat', { message: text, history: aiRulesChatHistory.filter(m => !m._typing).slice(0, -1), workspace: buildAgentWorkspacePayload() });
         aiRulesChatHistory = aiRulesChatHistory.filter(m => !m._typing);
         if (data.success) {
           const msg = { role: 'ai', text: data.reply || 'تم استلام رسالتك.' };
@@ -7885,6 +7908,7 @@
             const successCount = data.actions.filter(a => a.status === 'success').length;
             if (successCount) {
               toast('تم تنفيذ ' + successCount + ' إجراء بنجاح');
+              await applyAgentWorkspaceActions(data.actions);
               await loadAIRules();
               await refreshSystemDataAfterAgentAction();
             }
