@@ -2918,6 +2918,7 @@
             <input type="checkbox" id="trainingChatImageConsent" checked style="display:none">
           </div>
         </div>
+        </div>
         <div id="aiRulesLog" class="ai-rule-tab" style="display:none;">
           <div id="aiRulesLogList"></div>
         </div>
@@ -7660,6 +7661,9 @@
         const btn = document.getElementById('aiTab' + (t.charAt(0).toUpperCase() + t.slice(1)));
         if (btn) btn.classList.toggle('primary', t === tab);
       });
+      if (tab === 'log') {
+        renderAILogList();
+      }
       if (tab === 'training') {
         const sessions = getAllChatSessions('ai_rules');
         if (sessions.length) {
