@@ -35,6 +35,10 @@ To enable map slides (location overview, landmarks, access, catchment), you need
 - `POST /api/generate-map-images` — generate all map images for a project
 - `POST /api/generate-slides` — automatically generates map images before creating slides
 
+## Large Request Bodies
+
+The hosting edge corrupts request bodies above ~40KB (the app receives and answers them, but the client gets a fabricated 404/502). The frontend therefore gzips bodies and splits anything above 24KB wire size into small `POST /api/body-chunk` uploads, then sends a tiny `{"__chunked_body": {...}}` envelope that a `before_request` hook reassembles transparently. This is automatic for all JSON endpoints called through the `api()` helper.
+
 ## AI Rules Management
 
 Company admins can manage AI design/content rules from the new **قواعد AI** page. Changes are classified by risk (green/yellow/red) and logged in the `ai_rules_log` table.

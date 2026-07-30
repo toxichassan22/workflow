@@ -45,6 +45,89 @@ def decompress_gzip_request_body():
         app.logger.warning('Could not decompress gzipped request body', exc_info=True)
 
 
+@app.before_request
+def reassemble_chunked_request_body():
+    # The hosting edge corrupts request bodies above ~40KB: the app actually
+    # receives and answers them, but the client gets a fabricated 404/502. The
+    # client therefore uploads large bodies in small chunk envelopes
+    # (POST /api/body-chunk) and finally sends a tiny {"__chunked_body": {...}}
+    # reference; restore the original body here before routing.
+    if request.method != 'POST' or request.path == '/api/body-chunk':
+        return
+    if 'application/json' not in (request.content_type or ''):
+        return
+    try:
+        data = request.get_data(cache=True)
+        if not data or b'__chunked_body' not in data:
+            return
+        meta = (json.loads(data) or {}).get('__chunked_body') or {}
+    except Exception:
+        return
+    upload_id = str(meta.get('id', ''))
+    total = meta.get('total')
+    use_gzip = bool(meta.get('gzip'))
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', upload_id) or not isinstance(total, int) or not (1 <= total <= 1024):
+        return jsonify({'error': 'Invalid chunked body reference'}), 400
+    import gzip as _gzip
+    import io
+    import shutil as _shutil
+    chunk_dir = os.path.join(UPLOADS_DIR, '.body_chunks', upload_id)
+    parts = []
+    try:
+        for i in range(total):
+            with open(os.path.join(chunk_dir, f'{i}.part'), 'rb') as fh:
+                parts.append(fh.read())
+    except OSError:
+        return jsonify({'error': 'Missing uploaded body chunks'}), 400
+    raw = b''.join(parts)
+    if use_gzip:
+        try:
+            raw = _gzip.decompress(raw)
+        except Exception:
+            return jsonify({'error': 'Could not decompress chunked body'}), 400
+    request._cached_data = raw
+    request.environ['wsgi.input'] = io.BytesIO(raw)
+    request.environ['CONTENT_LENGTH'] = str(len(raw))
+    _shutil.rmtree(chunk_dir, ignore_errors=True)
+
+
+@app.route('/api/body-chunk', methods=['POST'])
+@require_auth
+def api_body_chunk():
+    """Receive one chunk of a large request body; reassembled by the before_request hook."""
+    data = request.json or {}
+    upload_id = str(data.get('id', ''))
+    idx = data.get('idx')
+    total = data.get('total')
+    b64 = data.get('data') or ''
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', upload_id):
+        return jsonify({'error': 'Invalid upload id'}), 400
+    if not isinstance(idx, int) or not isinstance(total, int) or isinstance(idx, bool) or isinstance(total, bool) or not (0 <= idx < total <= 1024):
+        return jsonify({'error': 'Invalid chunk index'}), 400
+    if not isinstance(b64, str) or len(b64) > 24 * 1024:
+        return jsonify({'error': 'Chunk too large'}), 400
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except Exception:
+        return jsonify({'error': 'Invalid chunk data'}), 400
+    import shutil as _shutil
+    chunk_root = os.path.join(UPLOADS_DIR, '.body_chunks')
+    chunk_dir = os.path.join(chunk_root, upload_id)
+    os.makedirs(chunk_dir, exist_ok=True)
+    with open(os.path.join(chunk_dir, f'{idx}.part'), 'wb') as fh:
+        fh.write(raw)
+    # Best-effort sweep of stale chunk dirs (>15 min)
+    try:
+        now = time.time()
+        for name in os.listdir(chunk_root):
+            path = os.path.join(chunk_root, name)
+            if os.path.isdir(path) and now - os.path.getmtime(path) > 900:
+                _shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        pass
+    return jsonify({'success': True})
+
+
 # Initialize database on startup
 db.init_db()
 

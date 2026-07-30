@@ -3209,10 +3209,12 @@
       el.style.display = msg ? 'block' : 'none';
     }
 
-    // The hosting proxy corrupts request bodies above ~35KB (and the failure can
-    // poison the connection for the next request), so big JSON payloads go gzipped.
+    // The hosting proxy corrupts request bodies above ~8KB (measured on the live
+    // site: plain 8-16KB POSTs get a 404 from the misparsing backend, >=20KB get
+    // a 502 from Apache) and the failure can poison the connection for the next
+    // request, so anything above 4KB goes gzipped to stay well clear of that window.
     async function gzipIfLarge(json, headers) {
-      if (json.length < 16 * 1024 || typeof CompressionStream === 'undefined') return json;
+      if (json.length < 4 * 1024 || typeof CompressionStream === 'undefined') return json;
       try {
         const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
         const buf = await new Response(stream).arrayBuffer();
@@ -3224,23 +3226,68 @@
       }
     }
 
+    function handleApiResponse(res) {
+      return res.json().catch(() => ({})).then(data => {
+        if (res.status === 401) {
+          removeTenantToken();
+          showAuthPage();
+        }
+        return data;
+      });
+    }
+
+    // The hosting edge corrupts request bodies above ~40KB: the app actually
+    // receives and answers them, but the browser gets a fabricated 404/502.
+    // So large bodies are uploaded in small chunk envelopes (POST /api/body-chunk)
+    // and the real endpoint is then called with a tiny reassembly reference.
+    const CHUNK_WIRE_LIMIT = 24 * 1024;
+    const CHUNK_PART_BYTES = 12 * 1024;
+
+    async function chunkedPost(method, path, wire, isGzip, headers) {
+      const buf = typeof wire === 'string' ? new TextEncoder().encode(wire) : new Uint8Array(wire);
+      const id = crypto.randomUUID();
+      const total = Math.ceil(buf.length / CHUNK_PART_BYTES);
+      const chunkHeaders = Object.assign({}, headers);
+      delete chunkHeaders['Content-Encoding'];
+      for (let i = 0; i < total; i++) {
+        const part = buf.subarray(i * CHUNK_PART_BYTES, (i + 1) * CHUNK_PART_BYTES);
+        let bin = '';
+        for (let j = 0; j < part.length; j++) bin += String.fromCharCode(part[j]);
+        const res = await fetch('/api/body-chunk', {
+          method: 'POST',
+          headers: chunkHeaders,
+          body: JSON.stringify({ id, idx: i, total, data: btoa(bin) }),
+        });
+        if (!res.ok) return { error: 'Chunk upload failed (' + res.status + ')' };
+      }
+      console.log('[API] chunked body: ' + (buf.length / 1024).toFixed(1) + 'KB in ' + total + ' chunks');
+      return fetch(path, {
+        method,
+        headers: chunkHeaders,
+        body: JSON.stringify({ __chunked_body: { id, total, gzip: isGzip } }),
+      });
+    }
+
     async function api(method, path, body, isFile) {
       const token = getTenantToken();
       const headers = {};
       if (token) headers['Authorization'] = 'Bearer ' + token;
       if (!isFile && body && typeof body !== 'undefined') headers['Content-Type'] = 'application/json';
       const opts = { method, headers };
-      if (body) {
-        opts.body = isFile ? body : await gzipIfLarge(JSON.stringify(body), headers);
-      }
-      return fetch(path, opts).then(async res => {
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 401) {
-          removeTenantToken();
-          showAuthPage();
+      if (body && !isFile) {
+        const wire = await gzipIfLarge(JSON.stringify(body), headers);
+        const isGzip = headers['Content-Encoding'] === 'gzip';
+        const wireSize = typeof wire === 'string' ? wire.length : wire.byteLength;
+        if (wireSize > CHUNK_WIRE_LIMIT) {
+          return chunkedPost(method, path, wire, isGzip, headers)
+            .then(handleApiResponse)
+            .catch(e => ({ error: 'Network error: ' + e.message }));
         }
-        return data;
-      }).catch(e => ({ error: 'Network error: ' + e.message }));
+        opts.body = wire;
+      } else if (body) {
+        opts.body = body;
+      }
+      return fetch(path, opts).then(handleApiResponse).catch(e => ({ error: 'Network error: ' + e.message }));
     }
 
     // Auth UI
