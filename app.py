@@ -334,12 +334,57 @@ def call_image_api(prompt):
         print("[IMAGE ERROR]", str(e))
     return None
 
+def _prepare_image_reference_for_model(reference):
+    """Normalize a generated local image URL into a model-readable reference."""
+    if not isinstance(reference, str) or not reference.strip():
+        return None
+    reference = reference.strip()
+    if reference.startswith('data:image/') or re.match(r'^https?://', reference, re.IGNORECASE):
+        return reference
+
+    relative_path = reference.split('?', 1)[0].lstrip('/')
+    if not relative_path.startswith('uploads/'):
+        print(f'[IMAGE ERROR] Unsupported local reference path: {reference}')
+        return None
+
+    uploads_root = os.path.abspath(os.path.join(os.path.dirname(__file__), 'uploads'))
+    image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), relative_path.replace('/', os.sep)))
+    try:
+        if os.path.commonpath([uploads_root, image_path]) != uploads_root:
+            return None
+    except ValueError:
+        return None
+    if not os.path.isfile(image_path) or os.path.getsize(image_path) > 15 * 1024 * 1024:
+        print(f'[IMAGE ERROR] Local reference image is unavailable: {reference}')
+        return None
+
+    mime_type = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp',
+    }.get(os.path.splitext(image_path)[1].lower())
+    if not mime_type:
+        print(f'[IMAGE ERROR] Unsupported local reference format: {reference}')
+        return None
+    try:
+        with open(image_path, 'rb') as image_file:
+            encoded = base64.b64encode(image_file.read()).decode('ascii')
+        return f'data:{mime_type};base64,{encoded}'
+    except OSError as error:
+        print(f'[IMAGE ERROR] Could not read local reference image: {error}')
+        return None
+
+
 def call_image_api_with_reference(reference_image_base64, prompt):
     # AI4: Check if OpenRouter key is configured
     if not OPENROUTER_KEY:
         print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
         return None
     try:
+        reference_for_model = _prepare_image_reference_for_model(reference_image_base64)
+        if not reference_for_model:
+            return None
         headers = {
             "Authorization": f"Bearer {OPENROUTER_KEY}",
             "Content-Type": "application/json",
@@ -348,7 +393,7 @@ def call_image_api_with_reference(reference_image_base64, prompt):
         }
         user_content = [
             {"type": "text", "text": prompt + " --aspect 16:9"},
-            {"type": "image_url", "image_url": {"url": reference_image_base64}}
+            {"type": "image_url", "image_url": {"url": reference_for_model}}
         ]
         payload = {
             "model": IMAGE_MODEL,

@@ -9,7 +9,7 @@ import tempfile
 import unittest
 import io
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, mock_open, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -88,6 +88,26 @@ class MeetingRequirementsTests(unittest.TestCase):
         html = response.get_json()['slide']['html']
         self.assertIn(logo_path + '?t=1', html)
         self.assertNotIn('/assets/logo.png', html)
+
+    def test_local_generated_image_reference_is_embedded_for_moodboard_generation(self):
+        """Generated cover URLs must be converted before the vision request uses them."""
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            'choices': [{'message': {'images': [{'image_url': {'url': 'data:image/png;base64,result'}}]}}]
+        }
+        with patch.object(self.application_module, 'OPENROUTER_KEY', 'test-key'), \
+                patch.object(self.application_module.requests, 'post', return_value=response) as request_post, \
+                patch.object(self.application_module.os.path, 'isfile', return_value=True), \
+                patch.object(self.application_module.os.path, 'getsize', return_value=3), \
+                patch('builtins.open', mock_open(read_data=b'abc')):
+            result = self.application_module.call_image_api_with_reference(
+                '/uploads/creative/tenant-a/cover.png?t=1', 'moodboard prompt'
+            )
+
+        self.assertEqual(result, 'data:image/png;base64,result')
+        request_payload = request_post.call_args.kwargs['json']
+        reference_url = request_payload['messages'][0]['content'][1]['image_url']['url']
+        self.assertEqual(reference_url, 'data:image/png;base64,YWJj')
 
     def test_custom_sections_can_be_renamed_and_fields_require_a_tenant_section(self):
         client = self.app.test_client()
