@@ -1685,7 +1685,23 @@ def _designer_target_indexes(action, count, current_index, force_all=False):
 
 def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None):
     """Ask GLM for one complete slide and retry malformed responses."""
+    if not tenant_id:
+        try:
+            tenant_id = g.tenant_id
+        except Exception:
+            tenant_id = None
+
     rules = build_design_rules(branding)
+    training_context = ''
+    if tenant_id:
+        try:
+            training_context = db.get_training_context(tenant_id) or ''
+        except Exception:
+            training_context = ''
+    training_note = (
+        f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في التصميم)\n{training_context}"
+        if training_context else ''
+    )
 
     # Store base64 data URIs to avoid inflating prompt with hundreds of thousands of tokens
     base64_map = {}
@@ -1699,7 +1715,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
     if len(clean_html) > 30000:
         clean_html = clean_html[:30000]
 
-    prompt = f"""{rules}
+    prompt = f"""{rules}{training_note}
 أنت محرر شرائح. عدّل الشريحة التالية حسب الطلب، وأعد JSON فقط بالشكل:
 {{"html":"<div class=\\"slide\\">...</div>","response":"رسالة عربية قصيرة"}}
 حافظ على كل المحتوى المفيد والهوية البصرية. لا تستخدم روابط صور خارجية أو base64.
@@ -1708,12 +1724,6 @@ HTML الحالي:
 {clean_html}
 الطلب:
 {instruction}"""
-
-    if not tenant_id:
-        try:
-            tenant_id = g.tenant_id
-        except Exception:
-            tenant_id = None
 
     for attempt in range(1, 4):
         try:
@@ -1809,9 +1819,11 @@ def api_designer_chat():
     )
 
     branding = db.get_branding(g.tenant_id) or {}
+    training_context = db.get_training_context(g.tenant_id) or ''
     summary = [{'index': i + 1, 'title': s.get('title', '') if isinstance(s, dict) else ''} for i, s in enumerate(slides)]
     all_note = "\n⚠️ تنبيه هام جداً: المستخدم طلب صراحة تعديل جميع الشرائح دون استثناء! يجب أن تعيد target='all' في الأداة edit_slides." if is_all_slides_request else ""
-    planner_prompt = f"""{build_design_rules(branding)}
+    training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
+    planner_prompt = f"""{build_design_rules(branding)}{training_note}
 أنت وكيل تصميم عروض متميز ذكي يفهم كافة اللهجات العربية، المترادفات، الأرقام، وأوامر إضافة وتحديث الخرائط والتنسيقات.
 حلل طلب المستخدم وخطط لتنفيذه على العرض.{all_note} أعد JSON فقط:
 {{"response":"رسالة عربية تشرح ما ستفعله", "actions":[{{"tool":"edit_slides|generate_image|create_slide|chat_only", "params":{{}}}}]}}
@@ -4917,7 +4929,7 @@ def _build_agent_system_state(tenant_id):
 - اللوجو: {'موجود' if branding.get('logo_path') else 'غير مرفوع'}
 
 ### 📊 إعدادات الشرائح والصور:
-- عدد الشرائح الافتراضي: {branding.get('default_slide_count', 18)}
+- عدد الشرائح الافتراضي: {branding.get('default_slide_count', 16)}
 - الحد الأدنى: {branding.get('min_slides', 8)}
 - الحد الأقصى: {branding.get('max_slides', 30)}
 - عدد صور المود بورد: {branding.get('moodboard_count', 4)}
@@ -5729,7 +5741,7 @@ DEFAULT_BRANDING_VALUES = {
     'footer_height': 36,
     'moodboard_enabled': 1,
     'cover_image_enabled': 1,
-    'default_slide_count': 18,
+    'default_slide_count': 16,
     'lock_slide_count': 0,
     'min_slides': 8,
     'max_slides': 30,
