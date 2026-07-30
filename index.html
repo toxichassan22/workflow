@@ -37,6 +37,75 @@
       display: flex !important;
     }
 
+    .tenant-chat-composer {
+      border-top: 1px solid #e8e4e0;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #fff;
+      flex-shrink: 0;
+    }
+
+    .tenant-chat-shortcuts {
+      color: var(--p);
+      font-size: 12px;
+    }
+
+    .tenant-chat-shortcuts summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+      font-weight: 700;
+    }
+
+    .tenant-chat-shortcuts summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .tenant-chat-shortcuts summary::after {
+      content: '+';
+      float: left;
+      font-size: 16px;
+      line-height: 12px;
+    }
+
+    .tenant-chat-shortcuts[open] summary::after {
+      content: '−';
+    }
+
+    .tenant-chat-shortcut-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding-top: 8px;
+    }
+
+    .tenant-chat-input-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+
+    .tenant-chat-input-row textarea {
+      flex: 1;
+      min-width: 0;
+      resize: none;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 10px;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .tenant-chat-input-row button {
+      flex-shrink: 0;
+    }
+
     .tenant-app.preview-active>#tenantSlidesPage {
       display: flex !important;
       flex-direction: column;
@@ -136,6 +205,81 @@
       min-height: 0 !important;
     }
 
+    @media (max-width: 900px) {
+      .tenant-app.preview-active .ge-body {
+        flex-direction: column;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+      }
+
+      .tenant-app.preview-active .ge-sidebar {
+        order: 0;
+        width: 100%;
+        height: auto;
+        max-height: 82px;
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 8px;
+        border-left: 0;
+        border-bottom: 1px solid #e8e4e0;
+      }
+
+      .tenant-app.preview-active .ge-thumb {
+        min-width: 148px;
+        margin-bottom: 0;
+      }
+
+      .tenant-app.preview-active .ge-main {
+        order: 1;
+        width: 100%;
+        flex: none;
+        min-height: 0;
+        overflow: visible;
+        padding: 12px 8px 24px;
+      }
+
+      .tenant-app.preview-active .ge-right-panel {
+        order: 2;
+        width: 100%;
+        height: 390px !important;
+        max-height: 390px !important;
+        border-right: 0;
+        border-top: 1px solid #e8e4e0;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .tenant-app.preview-active .ge-topbar {
+        padding: 8px 10px;
+      }
+
+      .tenant-app.preview-active .ge-topbar .tenant-btns {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .tenant-app.preview-active .ge-topbar .tenant-btns > button {
+        padding: 6px 9px !important;
+        font-size: 11px;
+      }
+
+      .tenant-app.preview-active .ge-right-panel {
+        height: 360px !important;
+        max-height: 360px !important;
+      }
+
+      .tenant-chat-input-row {
+        align-items: stretch;
+      }
+
+      .tenant-chat-input-row .btn {
+        padding: 8px 9px;
+        font-size: 11px;
+      }
+    }
+
     /* Thumbnails & Slide Cards */
     .ge-thumb {
       position: relative;
@@ -183,6 +327,37 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .ge-thumb-actions {
+      display: inline-flex;
+      gap: 3px;
+      margin-right: auto;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .ge-thumb-move,
+    .ge-thumb-delete {
+      border: 0;
+      border-radius: 5px;
+      padding: 2px 5px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 10px;
+      line-height: 1.2;
+      background: #f5f5f5;
+      color: #777;
+    }
+
+    .ge-thumb-delete {
+      color: #a32828;
+      background: #fff1f1;
+    }
+
+    .ge-thumb-move:hover,
+    .ge-thumb-delete:hover {
+      background: var(--soft);
     }
 
     .ge-slide-card {
@@ -2628,23 +2803,24 @@
             style="flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; background:#fafafa; border:none; border-radius:0;">
           </div>
 
-          <div
-            style="border-top:1px solid #e8e4e0; padding:12px; display:flex; flex-direction:column; gap:8px; background:#fff; flex-shrink:0;">
-            <div style="display:flex;flex-wrap:wrap;gap:6px;">
-              <button class="btn small ghost" onclick="setTenantChatExample('غيّر الخط في كل الشرائح إلى الخط الرسمي للشركة')">الخط</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('طبق ألوان العلامة (الأساسي والثانوي) على كل الشرائح')">الألوان</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('ضع لوجو الشركة في الهيدر')">اللوجو</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('استبدل الصور بصور جديدة توضح المشروع')">الصور</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('أعد توليد خرائط الموقع')">الخرائط</button>
-              <button class="btn small ghost" onclick="setTenantChatExample('أزل أي أيقونات أو emojis واستبدلها بخط عربي فقط')">الأيقونات</button>
-            </div>
-            <div style="display:flex; gap:8px; align-items:flex-end;">
-              <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()" title="إرفاق صورة للشات" style="padding:8px 12px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:#f9f9f9;">إرفاق صورة</button>
-              <textarea id="tenantChatInput" placeholder="اكتب التعديل المطلوب أو الصق/اسحب صورة (Ctrl+V)..."
+          <div id="tenantChatComposer" class="tenant-chat-composer">
+            <details class="tenant-chat-shortcuts">
+              <summary>اقتراحات سريعة</summary>
+              <div class="tenant-chat-shortcut-list">
+                <button class="btn small ghost" onclick="setTenantChatExample('غيّر الخط في كل الشرائح إلى الخط الرسمي للشركة')">الخط</button>
+                <button class="btn small ghost" onclick="setTenantChatExample('طبق ألوان العلامة (الأساسي والثانوي) على كل الشرائح')">الألوان</button>
+                <button class="btn small ghost" onclick="setTenantChatExample('ضع لوجو الشركة في الهيدر')">اللوجو</button>
+                <button class="btn small ghost" onclick="setTenantChatExample('استبدل الصور بصور جديدة توضح المشروع')">الصور</button>
+                <button class="btn small ghost" onclick="setTenantChatExample('أعد توليد خرائط الموقع')">الخرائط</button>
+                <button class="btn small ghost" onclick="setTenantChatExample('أزل أي أيقونات أو emojis واستبدلها بخط عربي فقط')">الأيقونات</button>
+              </div>
+            </details>
+            <div class="tenant-chat-input-row">
+              <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()" title="إرفاق صورة للشات">إرفاق صورة</button>
+              <textarea id="tenantChatInput" placeholder="اكتب التعديل المطلوب..."
                 rows="2"
-                style="flex:1; resize:none; border:1px solid #ddd; border-radius:10px; padding:10px; font-family:inherit; font-size:13px; outline:none;"></textarea>
-              <button class="btn primary" onclick="sendTenantDesignerChat()"
-                style="flex-shrink:0; background:#3B6E91; color:#fff; border:none; padding:8px 16px; font-weight:700; border-radius:8px; cursor:pointer;">إرسال</button>
+                onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendTenantDesignerChat();}"></textarea>
+              <button class="btn primary" onclick="sendTenantDesignerChat()">إرسال</button>
             </div>
           </div>
         </div>
@@ -3105,6 +3281,23 @@
       return slim;
     }
 
+    function replaceCurrentSlideMapAssets(placeholders) {
+      if (!tenantSlidesData || !tenantSlidesData.length || !placeholders) return false;
+      let changed = false;
+      Object.entries(placeholders).forEach(([token, url]) => {
+        if (!url) return;
+        const mapType = token.replace(/##/g, '').replace(/^MAP_/, '').toLowerCase();
+        const oldPathPattern = new RegExp("/uploads/maps/[^\"' )]+_" + mapType + "_[^\"' )]+\\.png", "g");
+        tenantSlidesData.forEach(slide => {
+          if (!slide || typeof slide.html !== 'string') return;
+          const before = slide.html;
+          slide.html = slide.html.split(token).join(url).replace(oldPathPattern, url);
+          if (slide.html !== before) changed = true;
+        });
+      });
+      return changed;
+    }
+
     async function ensureProjectAssets({ force = false, needImages = true, needMaps = true, includeCover = true } = {}) {
       tenantCreativeImages = tenantCreativeImages || { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
       if (!tenantProjectData) tenantProjectData = {};
@@ -3177,6 +3370,7 @@
             tenantCreativeImages.map_lng = res.lng || tenantCreativeImages.map_lng;
             tenantCreativeImages.map_zooms = res.zooms || tenantCreativeImages.map_zooms;
             tenantCreativeImages.maps_signature = mapsSignature();
+            if (replaceCurrentSlideMapAssets(res.placeholders)) renderTenantSlides();
             tenantCreativeImages.last_error = null;
             tenantCreativeImages.last_warning = res.warning || null;
           } else {
@@ -3502,8 +3696,10 @@
       document.querySelectorAll('.tenant-slide-stage').forEach(st => {
         const main = st.closest('.ge-main') || st.closest('#tenantSlidesMain');
         const maxW = main ? main.clientWidth - 32 : 960;
-        const stageW = Math.min(960, Math.max(480, maxW));
+        const minStageW = window.innerWidth <= 900 ? 280 : 480;
+        const stageW = Math.min(960, Math.max(minStageW, maxW));
         st.style.setProperty('--stage-w', stageW + 'px');
+        st.style.setProperty('--stage-h', (stageW * 720 / 1280).toFixed(2) + 'px');
         st.style.setProperty('--slide-scale', (stageW / 1280).toFixed(4));
         autoFitSlideContent(st);
       });
@@ -6119,7 +6315,7 @@
     function enableSlideInlineEditing(stage, index) {
       const slide = stage.querySelector('.slide');
       if (!slide) return;
-      const enabled = !!slideInlineEditStates[index];
+      const enabled = hasPermission('create_presentation');
       const seen = new Set();
       collectSlideTextNodes(slide).forEach(node => {
         const el = node.parentElement;
@@ -6243,13 +6439,8 @@
         stage.style.setProperty('--slide-scale', '0.75');
         stage.innerHTML = '<div class="slide" style="padding:40px;font-size:14px;color:#999;background:#fafafa;">جاري التحميل...</div>';
         container.appendChild(stage);
-        const controls = document.createElement('div');
-        controls.className = 'ge-slide-controls';
-        controls.style.cssText = 'position:absolute;top:8px;left:8px;display:flex;gap:4px;z-index:10;';
-        controls.innerHTML = '<button style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">جاري التحميل</button>';
-        container.appendChild(controls);
         wrap.appendChild(container);
-        containers.push({ container, stage, controls, slide: s, index: i });
+        containers.push({ container, stage, slide: s, index: i });
       });
 
       renderTenantSlidesSidebar();
@@ -6262,7 +6453,7 @@
       function processBatch() {
         const end = Math.min(cursor + BATCH, containers.length);
         for (let j = cursor; j < end; j++) {
-          const { stage, controls, slide: s, index: i } = containers[j];
+          const { stage, slide: s, index: i } = containers[j];
           const slideHtml = processSlideHtmlClient(s.html, s.type);
           stage.innerHTML = slideHtml || '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
           if (!stage.querySelector('.slide')) {
@@ -6270,14 +6461,6 @@
           }
           autoFitSlideContent(stage);
           enableSlideInlineEditing(stage, i);
-          const editLabel = slideInlineEditStates[i] ? 'إيقاف التعديل' : 'تعديل نص';
-          controls.innerHTML =
-            '<button onclick="event.stopPropagation(); toggleSlideInlineEditing(' + i + ')" title="تعديل نص الشريحة مباشرة" ' +
-            'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">' + editLabel + '</button>' +
-            '<button onclick="event.stopPropagation(); editSlideHtml(' + i + ')" title="تعديل الشريحة" ' +
-            'style="background:#fff;border:1px solid #ccc;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">HTML</button>' +
-            '<button onclick="event.stopPropagation(); deleteSlide(' + i + ')" title="حذف الشريحة" ' +
-            'style="background:#fff;border:1px solid #f5a5a5;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">حذف</button>';
         }
         cursor = end;
         if (cursor < containers.length) {
@@ -6309,12 +6492,15 @@
         thumb.className = 'ge-thumb' + (i === activeSlideIndex ? ' active' : '');
         thumb.onclick = () => selectTenantSlide(i);
 
-        const moveUpBtn = i > 0 ? '<button type="button" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;color:#888;" title="تحريك لأعلى" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i - 1) + ')">أعلى</button>' : '';
-        const moveDownBtn = i < tenantSlidesData.length - 1 ? '<button type="button" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;color:#888;" title="تحريك لأسفل" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i + 1) + ')">أسفل</button>' : '';
+        const moveUpBtn = i > 0 ? '<button type="button" class="ge-thumb-move" title="تحريك لأعلى" aria-label="تحريك لأعلى" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i - 1) + ')">↑</button>' : '';
+        const moveDownBtn = i < tenantSlidesData.length - 1 ? '<button type="button" class="ge-thumb-move" title="تحريك لأسفل" aria-label="تحريك لأسفل" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i + 1) + ')">↓</button>' : '';
+        const deleteBtn = hasPermission('create_presentation') && tenantSlidesData.length > 1
+          ? '<button type="button" class="ge-thumb-delete" title="حذف الشريحة" aria-label="حذف الشريحة" onclick="event.stopPropagation(); deleteSlide(' + i + ')">حذف</button>'
+          : '';
 
         thumb.innerHTML = '<span class="ge-thumb-num">' + (i + 1) + '</span>' +
           '<span class="ge-thumb-title" title="' + escapeHtml(s.title || '') + '">' + escapeHtml(s.title || 'شريحة بدون عنوان') + '</span>' +
-          '<div style="display:inline-flex;gap:2px;margin-right:auto;align-items:center;">' + moveUpBtn + moveDownBtn + '</div>';
+          '<div class="ge-thumb-actions">' + moveUpBtn + moveDownBtn + deleteBtn + '</div>';
         sidebar.appendChild(thumb);
       });
     }
@@ -6499,7 +6685,7 @@
       }
 
       if (!tenantDesignerMessages.length) {
-        messages.innerHTML = '<div class="tenant-hint">اكتب ما تريد تعديله. يفهم الذكاء الاصطناعي التعديل على شريحة معينة، جميع الشرائح، إضافة شرائح جديدة، أو توليد صور تلقائياً.</div>';
+        messages.innerHTML = '<div class="tenant-hint">اكتب التعديل المطلوب، وسيطبقه المصمم على الشريحة الحالية أو على العرض كله حسب طلبك.</div>';
         return;
       }
       messages.innerHTML = tenantDesignerMessages.map(message =>
@@ -6683,6 +6869,7 @@
     }
 
     function editSlideHtml(index) {
+      if (!hasPermission('create_presentation')) return;
       const slide = tenantSlidesData[index];
       if (!slide) return;
       const existing = document.getElementById('slideEditModal');
@@ -6705,6 +6892,7 @@
     }
 
     function saveSlideEdit(index) {
+      if (!hasPermission('create_presentation')) return;
       const title = document.getElementById('slideEditTitle').value;
       const html = document.getElementById('slideEditHtml').value;
       tenantSlidesData[index].title = title;
@@ -6724,9 +6912,14 @@
     }
 
     function deleteSlide(index) {
+      if (!hasPermission('create_presentation')) return;
+      if (tenantSlidesData.length <= 1) { toast('لا يمكن حذف آخر شريحة'); return; }
       if (!confirm('حذف الشريحة ' + (index + 1) + '؟')) return;
       tenantSlidesData.splice(index, 1);
+      activeSlideIndex = Math.min(activeSlideIndex, tenantSlidesData.length - 1);
+      tenantChatSlideIndex = Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1);
       renderTenantSlides();
+      triggerAutoSaveDraft();
       toast('تم حذف الشريحة. اضغط "حفظ التعديلات" للحفظ.');
     }
 
@@ -6957,13 +7150,8 @@
 
       // Replace placeholders in current slides with new URLs
       const placeholders = data.placeholders || {};
-      tenantSlidesData.forEach(slide => {
-        if (!slide.html) return;
-        Object.keys(placeholders).forEach(ph => {
-          const url = placeholders[ph];
-          if (url) slide.html = slide.html.split(ph).join(url);
-        });
-      });
+      tenantCreativeImages.map_placeholders = placeholders;
+      replaceCurrentSlideMapAssets(placeholders);
       renderTenantSlides();
       toast('تم إعادة توليد خرائط الموقع');
     }

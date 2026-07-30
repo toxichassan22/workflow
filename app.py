@@ -3096,6 +3096,10 @@ def api_generate_slide_single():
         branding,
         creative_images=images,
         map_placeholders=map_placeholders,
+        tenant_id=g.tenant_id,
+        slide_num=slide_index + 1,
+        slide_title=slide.get('title', f'شريحة {slide_index + 1}'),
+        total_slides=total,
     )
 
     return jsonify({

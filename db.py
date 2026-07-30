@@ -2091,7 +2091,7 @@ def get_map_images(tenant_id, presentation_id=None, draft_id=None, image_type=No
     if image_type:
         query += ' AND image_type = ?'
         params.append(image_type)
-    query += ' ORDER BY created_at DESC'
+    query += ' ORDER BY created_at DESC, rowid DESC'
     rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
 

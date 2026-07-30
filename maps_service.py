@@ -127,6 +127,7 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (160, 50, 50, 130)    # More visible semi-transparent red fill
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
+ACCESS_ROADS_RENDER_VERSION = 'v2'
 
 # Rate limiting: max calls per tenant per window (default 60 calls / 10 minutes)
 MAPS_RATE_LIMIT = int(os.environ.get('MAPS_RATE_LIMIT', 60))
@@ -1593,7 +1594,8 @@ def _google_reverse_geocode_road(lat, lng, tenant_id=None):
     return ''
 
 
-def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, project_data=None, tenant_id=None):
+def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, project_data=None, tenant_id=None,
+                       origin_lat=None, origin_lng=None):
     """Draw only Google Maps-derived access-road geometry and labels."""
     def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 245), border_color=(240, 230, 210, 220)):
         if not font:
@@ -1621,139 +1623,131 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         
         # Road geometry is discovered via Google APIs, but labels prefer the
         # main_roads / secondary_roads the tenant/user provided in project data.
-        routes_coords = []
-        road_route_mapping = [] # stores (coords, road_name)
-
-        user_road_names = []
+        route_origin_lat = origin_lat if origin_lat is not None else center_lat
+        route_origin_lng = origin_lng if origin_lng is not None else center_lng
+        fallback_road_names = []
         if project_data:
             for key in ('main_roads', 'secondary_roads'):
                 val = project_data.get(key) or project_data.get(key.replace('_', ''))
                 if isinstance(val, str):
-                    for name in val.split(','):
-                        n = name.strip()
-                        if n:
-                            user_road_names.append(n)
+                    fallback_road_names.extend(
+                        name.strip() for name in re.split(r'[\n,،]+', val) if name.strip()
+                    )
                 elif isinstance(val, list):
-                    user_road_names.extend(str(v).strip() for v in val if v)
-            if user_road_names:
-                print(f"[ACCESS ROADS] User supplied road names: {user_road_names}")
+                    fallback_road_names.extend(str(value).strip() for value in val if str(value).strip())
 
         # Find actual nearby access roads through Google Roads + Directions.
         # The target points are only geographic probes; Google returns the road
         # snap, route geometry, and road name used in the final map.
-        if not routes_coords:
-            print("[ACCESS ROADS] Discovering nearby roads through Google Maps APIs...")
-            probe_points = [
-                (center_lat + 0.009, center_lng),
-                (center_lat - 0.009, center_lng),
-                (center_lat, center_lng + 0.011),
-                (center_lat, center_lng - 0.011),
-            ]
-            seen_road_names = set()
+        road_route_mapping = []  # stores (coords, road_name)
+        print("[ACCESS ROADS] Discovering nearby roads through Google Maps APIs...")
+        lat_step = 0.0018  # approximately 200 m in Riyadh
+        lng_step = 0.0024
+        probe_points = [
+            (route_origin_lat + lat_step, route_origin_lng),
+            (route_origin_lat - lat_step, route_origin_lng),
+            (route_origin_lat, route_origin_lng + lng_step),
+            (route_origin_lat, route_origin_lng - lng_step),
+        ]
+        seen_road_keys = set()
 
-            def _fetch_probe_route(probe):
-                p_lat, p_lng = probe
-                snapped = _snap_to_roads(p_lat, p_lng, tenant_id=tenant_id)
-                dest_lat = snapped['lat'] if snapped else p_lat
-                dest_lng = snapped['lng'] if snapped else p_lng
-                route = _google_directions_route(
-                    center_lat, center_lng, dest_lat, dest_lng, tenant_id=tenant_id
-                )
-                if not route:
-                    return None
-                road_name = route.get('summary') or _google_reverse_geocode_road(
+        def _fetch_probe_route(probe):
+            p_lat, p_lng = probe
+            snapped = _snap_to_roads(p_lat, p_lng, tenant_id=tenant_id)
+            dest_lat = snapped['lat'] if snapped else p_lat
+            dest_lng = snapped['lng'] if snapped else p_lng
+            route = _google_directions_route(
+                route_origin_lat, route_origin_lng, dest_lat, dest_lng, tenant_id=tenant_id
+            )
+            if not route:
+                return None
+
+            road_name = (route.get('summary') or '').strip()
+            if not road_name or re.search(r'[A-Za-z]', road_name):
+                localized_name = _google_reverse_geocode_road(
                     dest_lat, dest_lng, tenant_id=tenant_id
                 )
-                road_name = road_name or 'طريق قريب'
-                return (route['coords'], road_name)
+                road_name = localized_name or road_name
+            road_name = road_name or (fallback_road_names[0] if fallback_road_names else 'طريق قريب')
+            road_key = (snapped or {}).get('place_id') or road_name.casefold()
+            return route['coords'], road_name, road_key
 
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                probe_results = list(executor.map(_fetch_probe_route, probe_points))
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            probe_results = list(executor.map(_fetch_probe_route, probe_points))
 
-            for res in probe_results:
-                if res and res[1] not in seen_road_names:
-                    seen_road_names.add(res[1])
-                    road_route_mapping.append(res)
-                    routes_coords.append(res[0])
-                    if len(routes_coords) >= 3:
-                        break
+        for result in probe_results:
+            if not result or result[2] in seen_road_keys:
+                continue
+            seen_road_keys.add(result[2])
+            road_route_mapping.append((result[0], result[1]))
+            if len(road_route_mapping) >= 3:
+                break
 
         # 3. Draw routes and labels
         placed_label_rects = []  # track (x1,y1,x2,y2) of placed labels to avoid overlap
 
-        if routes_coords:
-            for i, (coords, google_label) in enumerate(road_route_mapping):
-                label_text = user_road_names[i] if i < len(user_road_names) else google_label
+        if road_route_mapping:
+            origin_dx, origin_dy = _latlng_to_pixel_offset(
+                route_origin_lat, route_origin_lng, center_lat, center_lng, zoom, scale=scale
+            )
+            origin_px, origin_py = cx + origin_dx, cy + origin_dy
+
+            for coords, label_text in road_route_mapping:
                 pixels = []
                 for lat, lng in coords:
                     dx, dy = _latlng_to_pixel_offset(lat, lng, center_lat, center_lng, zoom, scale=scale)
-                    pixels.append((cx + dx, cy + dy))
-                
-                valid_pixels = [(int(p[0]), int(p[1])) for p in pixels if -150 <= p[0] <= img_w + 150 and -150 <= p[1] <= img_h + 150]
-                if len(valid_pixels) < 2:
+                    pixels.append((int(cx + dx), int(cy + dy)))
+
+                segments = []
+                current_segment = []
+                for point in pixels:
+                    inside = -40 <= point[0] <= img_w + 40 and -40 <= point[1] <= img_h + 40
+                    if inside:
+                        current_segment.append(point)
+                    elif len(current_segment) >= 2:
+                        segments.append(current_segment)
+                        current_segment = []
+                    else:
+                        current_segment = []
+                if len(current_segment) >= 2:
+                    segments.append(current_segment)
+                if not segments:
                     continue
-                
+
                 # Draw thick gold road line
-                draw.line(valid_pixels, fill=gold_color, width=12)
-                
+                for segment in segments:
+                    draw.line(segment, fill=(105, 73, 35, 125), width=18)
+                    draw.line(segment, fill=gold_color, width=9)
+
                 # Find best place to draw road label (away from center, no overlap)
                 best_p = None
-                # Sort candidates by distance from center (prefer farther)
+                route_segment = max(segments, key=len)
                 candidates = []
-                for p in valid_pixels:
-                    px, py = p
-                    if 80 <= px <= img_w - 80 and 60 <= py <= img_h - 60:
-                        dist = math.sqrt((px - cx)**2 + (py - cy)**2)
-                        if 150 <= dist <= 450:
-                            candidates.append((dist, p))
-                candidates.sort(key=lambda c: -c[0])  # farthest first
-                
-                for dist, p in candidates:
-                    # Estimate label rect (approx 120x30 with padding)
-                    lx1 = p[0] - 70
-                    ly1 = p[1] - 18
-                    lx2 = p[0] + 70
-                    ly2 = p[1] + 18
-                    # Check collision with already placed labels
-                    collision = False
-                    for rx1, ry1, rx2, ry2 in placed_label_rects:
-                        if not (lx2 < rx1 or lx1 > rx2 or ly2 < ry1 or ly1 > ry2):
-                            collision = True
-                            break
+                for p in route_segment:
+                    distance = math.sqrt((p[0] - origin_px) ** 2 + (p[1] - origin_py) ** 2)
+                    if 120 <= distance and 90 <= p[0] <= img_w - 90 and 60 <= p[1] <= img_h - 60:
+                        candidates.append((distance, p))
+                candidates.sort(key=lambda candidate: -candidate[0])
+
+                label_half_width = min(240, max(90, len(label_text or '') * 7))
+                for _, point in candidates:
+                    lx1 = point[0] - label_half_width
+                    ly1 = point[1] - 24
+                    lx2 = point[0] + label_half_width
+                    ly2 = point[1] + 24
+                    collision = any(
+                        not (lx2 < rx1 or lx1 > rx2 or ly2 < ry1 or ly1 > ry2)
+                        for rx1, ry1, rx2, ry2 in placed_label_rects
+                    )
                     if not collision:
-                        best_p = p
+                        best_p = point
                         placed_label_rects.append((lx1, ly1, lx2, ly2))
                         break
-                
-                # Fallback: if all candidates collide, try offsetting vertically
-                if not best_p and candidates:
-                    for offset in [-60, 60, -90, 90, -120, 120]:
-                        p = candidates[0][1]
-                        test_p = (p[0], p[1] + offset)
-                        if 60 <= test_p[1] <= img_h - 60:
-                            lx1 = test_p[0] - 70
-                            ly1 = test_p[1] - 18
-                            lx2 = test_p[0] + 70
-                            ly2 = test_p[1] + 18
-                            collision = False
-                            for rx1, ry1, rx2, ry2 in placed_label_rects:
-                                if not (lx2 < rx1 or lx1 > rx2 or ly2 < ry1 or ly1 > ry2):
-                                    collision = True
-                                    break
-                            if not collision:
-                                best_p = test_p
-                                placed_label_rects.append((lx1, ly1, lx2, ly2))
-                                break
-                
-                # Last resort fallback
-                if not best_p and valid_pixels:
-                    best_p = valid_pixels[len(valid_pixels) // 4]
-                    placed_label_rects.append((best_p[0] - 70, best_p[1] - 18, best_p[0] + 70, best_p[1] + 18))
-                
+
                 if best_p and label_text:
                     _draw_road_label(draw, best_p[0], best_p[1], label_text)
-                    
+
             img = Image.alpha_composite(img, overlay)
             img.save(image_path, 'PNG')
             print("[ACCESS ROADS] Successfully drew Google Maps road routes")
@@ -1777,15 +1771,22 @@ def _get_cached_map_images(tenant_id, presentation_id):
     metadata_by_type = {}
     found_types = set()
     for img in existing:
-        if not os.path.exists(img['file_path']):
+        image_type = img['image_type']
+        if image_type in metadata_by_type or not os.path.exists(img['file_path']):
             continue
-        found_types.add(img['image_type'])
+        found_types.add(image_type)
         placeholders[img['placeholder']] = img['file_path']
         try:
-            metadata_by_type[img['image_type']] = json.loads(img.get('metadata_json') or '{}')
+            metadata_by_type[image_type] = json.loads(img.get('metadata_json') or '{}')
         except Exception:
-            metadata_by_type[img['image_type']] = {}
+            metadata_by_type[image_type] = {}
     if not placeholders:
+        return None
+    if any(
+        image_type.startswith('access')
+        and metadata_by_type.get(image_type, {}).get('access_roads_version') != ACCESS_ROADS_RENDER_VERSION
+        for image_type in found_types
+    ):
         return None
     found_base = {t.split('_')[0] for t in found_types}
     meta = next((m for t, m in metadata_by_type.items() if t.startswith('overview')), None)
@@ -2182,14 +2183,37 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                     _apply_sepia_tone(access_path, intensity=0.35)
                     _apply_map_overlay(access_path, dark_factor=0.10)
                 _draw_site_highlight(access_path, lat, lng, access_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
-                _draw_access_roads(access_path, lat, lng, access_zoom, scale=2, project_data=project_data, tenant_id=tenant_id)
+                _draw_access_roads(
+                    access_path,
+                    lat,
+                    lng,
+                    access_zoom,
+                    scale=2,
+                    project_data=project_data,
+                    tenant_id=tenant_id,
+                    origin_lat=marker_lat,
+                    origin_lng=marker_lng,
+                )
                 _overlay_markers(access_path, lat, lng, access_zoom, access_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(access_path, position='top-right')
                 result['placeholders'][placeholder] = access_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, access_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': access_zoom, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(
+                    tenant_id,
+                    img_suffix,
+                    access_path,
+                    placeholder,
+                    effective_pres_id,
+                    {
+                        'lat': lat,
+                        'lng': lng,
+                        'zoom': access_zoom,
+                        'access_roads_version': ACCESS_ROADS_RENDER_VERSION,
+                        'landmarks_matrix': result.get('landmarks_matrix') or [],
+                    },
+                )
 
 
 

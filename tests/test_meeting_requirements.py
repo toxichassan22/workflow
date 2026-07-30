@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import io
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -62,6 +63,31 @@ class MeetingRequirementsTests(unittest.TestCase):
             draft_columns = {row['name'] for row in conn.execute('PRAGMA table_info(project_drafts)')}
         self.assertTrue({'image_type', 'image_description'}.issubset(training_columns))
         self.assertTrue({'requested_by', 'reviewed_by', 'review_note', 'reviewed_at'}.issubset(draft_columns))
+
+    def test_single_slide_generation_uses_tenant_logo_immediately(self):
+        """A freshly generated slide must not be finalized with the system logo."""
+        logo_path = f'/tenant-assets/{self.tenant_a}/logo'
+        with self.app.app_context():
+            db.update_branding(self.tenant_a, logo_path=logo_path)
+
+        generated_html = (
+            '<div class="slide" style="width:1280px;height:720px;position:relative;">'
+            '<img src="##LOGO##">'
+            '</div>'
+        )
+        client = self.app.test_client()
+        with patch.object(self.application_module.slide_engine, 'generate_single_slide', return_value=generated_html), \
+                patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={}):
+            response = client.post('/api/generate-slide-single', headers=self._headers(self.token_a), json={
+                'projectData': {},
+                'slidePlan': {'slides': [{'title': 'غلاف', 'type': 'cover'}]},
+                'slideIndex': 0,
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        html = response.get_json()['slide']['html']
+        self.assertIn(logo_path + '?t=1', html)
+        self.assertNotIn('/assets/logo.png', html)
 
     def test_custom_sections_can_be_renamed_and_fields_require_a_tenant_section(self):
         client = self.app.test_client()
