@@ -4430,6 +4430,64 @@ def _font_payload_from_file(file):
     return json.dumps({'data': base64.b64encode(raw).decode('ascii'), 'format': fmt, 'ext': ext}), None
 
 
+def _detect_font_metadata(raw, filename):
+    stem = os.path.splitext(os.path.basename(filename or 'font'))[0]
+    metadata_text = stem.replace('_', ' ').replace('-', ' ')
+    scripts = set()
+    family = metadata_text.strip() or 'Custom Font'
+    weight = 'regular'
+    try:
+        from io import BytesIO
+        from fontTools.ttLib import TTFont
+        font = TTFont(BytesIO(raw), fontNumber=0)
+        names = []
+        for record in font['name'].names:
+            if record.nameID in (1, 2, 4, 17):
+                try:
+                    names.append(record.toUnicode())
+                except Exception:
+                    pass
+        if names:
+            family = next((value for value in names if value.strip()), family).strip()
+            metadata_text = ' '.join(names + [metadata_text])
+        cmap = set()
+        for table in font['cmap'].tables:
+            cmap.update(table.cmap.keys())
+        arabic_count = sum(1 for codepoint in cmap if 0x0600 <= codepoint <= 0x06FF or 0x0750 <= codepoint <= 0x077F or 0xFB50 <= codepoint <= 0xFEFF)
+        latin_count = sum(1 for codepoint in cmap if 0x0041 <= codepoint <= 0x024F)
+        if arabic_count:
+            scripts.add('arabic')
+        if latin_count:
+            scripts.add('latin')
+        weight_class = int(getattr(font.get('OS/2'), 'usWeightClass', 400) or 400)
+        if weight_class <= 300:
+            weight = 'light'
+        elif weight_class <= 450:
+            weight = 'regular'
+        elif weight_class <= 550:
+            weight = 'medium'
+        elif weight_class <= 750:
+            weight = 'bold'
+        else:
+            weight = 'black'
+        font.close()
+    except Exception:
+        pass
+
+    text = metadata_text.lower()
+    if any(token in text for token in ('black', 'heavy', 'extrabold', 'extra bold')):
+        weight = 'black'
+    elif any(token in text for token in ('bold', 'semibold', 'semi bold', 'demi')):
+        weight = 'bold'
+    elif any(token in text for token in ('medium', 'medium')):
+        weight = 'medium'
+    elif any(token in text for token in ('light', 'thin', 'book')):
+        weight = 'light'
+    if not scripts:
+        scripts.add('arabic' if re.search(r'arabic|arab|عربي|نسخ|رقعة', text) else 'latin')
+    return {'family': family, 'weight': weight, 'scripts': sorted(scripts), 'source': 'font_metadata'}
+
+
 @app.route('/api/admin/sag-fonts', methods=['GET'])
 @require_permission('sag_admin_panel')
 def api_get_sag_fonts():
@@ -4460,6 +4518,27 @@ def api_create_sag_font():
     font = db.get_sag_font(font_id) or {}
     font.pop('file_data', None)
     return jsonify({'success': True, 'font': font}), 201
+
+
+@app.route('/api/admin/sag-fonts/auto-upload', methods=['POST'])
+@require_permission('sag_admin_panel')
+def api_auto_upload_sag_font():
+    file = request.files.get('font')
+    if not file or not file.filename:
+        return jsonify({'error': 'No font file provided'}), 400
+    file_data, error = _font_payload_from_file(file)
+    if error:
+        return jsonify({'error': error}), 400
+    raw = base64.b64decode(json.loads(file_data)['data'])
+    detected = _detect_font_metadata(raw, file.filename)
+    created = []
+    for script in detected['scripts']:
+        font_id = db.create_sag_font(
+            detected['family'], detected['family'], script, detected['weight'],
+            source_type='uploaded', source_data=detected['family'], file_data=file_data
+        )
+        created.append(font_id)
+    return jsonify({'success': True, 'detected': detected, 'fontIds': created, 'fonts': db.get_sag_fonts()}), 201
 
 
 @app.route('/api/admin/sag-fonts/<font_id>', methods=['PUT'])
@@ -4536,6 +4615,42 @@ def api_upload_branding_font_variant():
     stored_path = os.path.relpath(filepath, os.path.dirname(__file__)).replace('\\', '/')
     db.set_tenant_font_selection(g.tenant_id, script, weight, custom_font_path=stored_path, custom_font_data=file_data)
     return jsonify({'success': True, 'selections': _public_font_selections(g.tenant_id)})
+
+
+@app.route('/api/branding/fonts/auto-upload', methods=['POST'])
+@require_permission('company_settings')
+def api_auto_upload_branding_font():
+    file = request.files.get('font')
+    if not file or not file.filename:
+        return jsonify({'error': 'No font file provided'}), 400
+    file_data, error = _font_payload_from_file(file)
+    if error:
+        return jsonify({'error': error}), 400
+    parsed = json.loads(file_data)
+    raw = base64.b64decode(parsed['data'])
+    detected = _detect_font_metadata(raw, file.filename)
+    ext = parsed['ext']
+    safe_name = re.sub(r'[^A-Za-z0-9_-]', '_', os.path.splitext(file.filename)[0])
+    font_dir = os.path.join(UPLOADS_DIR, g.tenant_id, 'fonts')
+    os.makedirs(font_dir, exist_ok=True)
+    filename = f'{safe_name}_{detected["weight"]}{ext}'
+    filepath = os.path.join(font_dir, filename)
+    with open(filepath, 'wb') as font_file:
+        font_file.write(raw)
+    stored_path = os.path.relpath(filepath, os.path.dirname(__file__)).replace('\\', '/')
+    for script in detected['scripts']:
+        db.set_tenant_font_selection(
+            g.tenant_id,
+            script,
+            detected['weight'],
+            custom_font_path=stored_path,
+            custom_font_data=file_data,
+        )
+    return jsonify({
+        'success': True,
+        'detected': detected,
+        'selections': _public_font_selections(g.tenant_id),
+    })
 
 
 @app.route('/api/branding/fonts/<script>/<weight>', methods=['DELETE'])

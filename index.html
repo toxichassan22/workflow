@@ -2349,24 +2349,13 @@
             <label>لون النص</label>
             <input type="color" id="settingsTextColor">
           </div>
-          <div class="tenant-field">
-            <label>نوع الخط</label>
-            <select id="settingsFontFamily" onchange="toggleFontUpload(this.value)">
+          <div class="tenant-field" style="display:none;">
+            <select id="settingsFontFamily">
               <option value="The Sans Arabic">The Sans Arabic</option>
               <option value="Arial">Arial</option>
               <option value="Tahoma">Tahoma</option>
-              <option value="Cairo">Cairo</option>
-              <option value="IBM Plex Sans Arabic">IBM Plex Sans Arabic</option>
-              <option value="Noto Sans Arabic">Noto Sans Arabic</option>
-              <option value="Tajawal">Tajawal</option>
-              <option value="Almarai">Almarai</option>
-              <option value="Readex Pro">Readex Pro</option>
-              <option value="Aref Ruqaa">Aref Ruqaa</option>
-              <option value="custom">خط مخصص (ارفع ملف)</option>
             </select>
-            <input type="file" id="settingsFontUpload" accept=".ttf,.otf,.woff,.woff2" style="display:none"
-              onchange="handleFontUpload(this)">
-            <div id="settingsFontPreview" style="margin-top:8px;font-size:12px;color:#888;"></div>
+            <div id="settingsFontPreview"></div>
           </div>
           <div class="tenant-field full" data-permission="company_settings">
             <label>إدارة أوزان وخطوط العرض</label>
@@ -3121,13 +3110,9 @@
       <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:20px;">
         <h3 style="margin:0 0 8px;color:var(--p);">الخطوط المركزية</h3>
         <p class="tenant-hint">ارفع خطًا مركزيًا ليظهر للشركات مع تحديد اللغة والوزن.</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
-          <input id="sagFontName" placeholder="اسم الخط" style="flex:1;min-width:150px;">
-          <input id="sagFontFamily" placeholder="Font family" style="flex:1;min-width:150px;">
-          <select id="sagFontScript"><option value="arabic">عربي</option><option value="latin">لاتيني</option></select>
-          <select id="sagFontWeight"><option value="regular">Regular</option><option value="light">Light</option><option value="medium">Medium</option><option value="bold">Bold</option><option value="black">Black</option></select>
-          <input id="sagFontFile" type="file" accept=".ttf,.otf,.woff,.woff2">
-          <button class="btn primary" onclick="uploadSagFont()">رفع الخط</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input id="sagFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="flex:1;min-width:240px;">
+          <button class="btn primary" onclick="uploadSagFontAutomatically()">رفع الخط والتعرف تلقائيًا</button>
         </div>
         <div id="sagFontsList" style="margin-top:12px;"></div>
       </div>
@@ -4023,21 +4008,27 @@
       if (!host) return;
       const data = await api('GET', '/api/branding/fonts');
       if (!data.success) { host.textContent = 'تعذر تحميل الخطوط'; return; }
-      const selections = {};
-      (data.selections || []).forEach(item => { selections[item.script + ':' + item.weight] = item; });
-      const available = data.available || [];
-      host.innerHTML = ['arabic', 'latin'].map(script => MANAGED_FONT_WEIGHTS.map(weight => {
-        const key = script + ':' + weight;
-        const current = selections[key] || {};
-        const options = available.filter(font => font.script === script && font.weight === weight)
-          .map(font => '<option value="' + escapeHtml(font.id) + '"' + (font.id === current.font_id ? ' selected' : '') + '>' + escapeHtml(font.font_name) + '</option>').join('');
-        return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;padding:7px;">' +
-          '<strong style="min-width:90px">' + (script === 'arabic' ? 'عربي' : 'لاتيني') + ' / ' + weight + '</strong>' +
-          '<select onchange="setTenantFontSelection(\'' + script + '\',\'' + weight + '\',this.value)" style="flex:1;min-width:150px;"><option value="">استخدام الافتراضي</option>' + options + '</select>' +
-          '<input id="tenantFontFile_' + script + '_' + weight + '" type="file" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="uploadTenantFontVariant(\'' + script + '\',\'' + weight + '\',this)">' +
-          '<button class="btn small ghost" onclick="document.getElementById(\'tenantFontFile_' + script + '_' + weight + '\').click()">رفع ملف</button>' +
-          '</div>';
-      }).join('')).join('');
+      const selections = data.selections || [];
+      const summary = selections.length
+        ? selections.map(item => (item.script === 'arabic' ? 'عربي' : 'لاتيني') + ' ' + item.weight).join('، ')
+        : 'لم يتم رفع خط خاص بعد؛ سيتم استخدام الخط الافتراضي';
+      host.innerHTML = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:10px;">' +
+        '<input id="tenantAutoFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="flex:1;min-width:220px;" onchange="uploadTenantFontAutomatically(this)">' +
+        '<button class="btn primary" onclick="document.getElementById(\'tenantAutoFontFile\').click()">رفع ملف الخط</button>' +
+        '<span style="width:100%;font-size:12px;color:var(--muted);">' + escapeHtml(summary) + '</span>' +
+        '</div>';
+    }
+
+    async function uploadTenantFontAutomatically(input) {
+      if (!input.files || !input.files[0]) return;
+      const form = new FormData();
+      form.append('font', input.files[0]);
+      const data = await api('POST', '/api/branding/fonts/auto-upload', form, true);
+      if (!data.success) { toast(data.error || 'فشل رفع الخط'); return; }
+      await loadTenantBranding();
+      await loadTenantFonts();
+      const detected = data.detected || {};
+      toast('تم التعرف على الخط تلقائيًا: ' + (detected.family || input.files[0].name) + ' — ' + (detected.weight || 'regular'));
     }
 
     async function setTenantFontSelection(script, weight, fontId) {
@@ -4073,19 +4064,16 @@
       ).join('') || '<span class="tenant-hint">لا توجد خطوط مركزية</span>';
     }
 
-    async function uploadSagFont() {
+    async function uploadSagFontAutomatically() {
       const file = document.getElementById('sagFontFile');
       if (!file || !file.files || !file.files[0]) { toast('اختر ملف الخط أولاً'); return; }
       const form = new FormData();
-      form.append('font_name', document.getElementById('sagFontName').value.trim());
-      form.append('font_family', document.getElementById('sagFontFamily').value.trim());
-      form.append('script', document.getElementById('sagFontScript').value);
-      form.append('weight', document.getElementById('sagFontWeight').value);
       form.append('font', file.files[0]);
-      const data = await api('POST', '/api/admin/sag-fonts', form, true);
+      const data = await api('POST', '/api/admin/sag-fonts/auto-upload', form, true);
       if (!data.success) { toast(data.error || 'فشل رفع الخط المركزي'); return; }
       await loadSagFonts();
-      toast('تم رفع الخط المركزي');
+      const detected = data.detected || {};
+      toast('تم التعرف على الخط تلقائيًا: ' + (detected.family || file.files[0].name) + ' — ' + (detected.weight || 'regular'));
     }
 
     // Settings
