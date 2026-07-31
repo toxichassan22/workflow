@@ -53,6 +53,8 @@ def init_db():
         _cleanup_accidental_map_fields(conn)
         _migrate_branding_columns(conn)
         _migrate_map_images_presentation_fk(conn)
+        _migrate_location_fields(conn)
+        _migrate_font_system(conn)
 
         try:
             conn.commit()
@@ -587,6 +589,7 @@ PREBUILT_FIELDS = [
     {'key': 'main_roads', 'label': 'الطرق الرئيسية المحيطة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'الطرق الرئيسية بالقرب من الموقع', 'sort_order': 12},
     {'key': 'secondary_roads', 'label': 'الطرق الفرعية', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'الطرق الفرعية والمداخل', 'sort_order': 13},
     {'key': 'nearby_landmarks', 'label': 'أهم المعالم القريبة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'قائمة المعالم القريبة مع أوقات القيادة (مثلاً: ميدان السارية - 1 دقيقة)', 'sort_order': 14},
+    {'key': 'city_landmarks', 'label': 'المعالم الرئيسية في المدينة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'أهم المعالم الرئيسية في المدينة والمناطق المحيطة', 'sort_order': 15},
     {'key': 'catchment_areas', 'label': 'مناطق نطاق التأثير', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'المناطق الرئيسية والثانوية المتأثرة بالمشروع', 'sort_order': 15},
     {'key': 'budget', 'label': 'الميزانية الإجمالية', 'type': 'text', 'section_key': 'financial', 'ai_hint': 'الميزانية الإجمالية للمشروع', 'sort_order': 15},
     {'key': 'target_audience', 'label': 'الجمهور المستهدف', 'type': 'textarea', 'section_key': 'financial', 'ai_hint': 'الفئة المستهدفة من العرض', 'sort_order': 16},
@@ -649,6 +652,150 @@ def _migrate_location_fields(conn):
             )
             print(f'[DB] Migration: added field {f["key"]} to tenant {tenant_id}')
     conn.commit()
+
+
+def _migrate_font_system(conn):
+    """Create central SAG font registry and tenant font overrides."""
+    conn.executescript("""
+    CREATE TABLE IF NOT EXISTS sag_fonts (
+        id TEXT PRIMARY KEY,
+        font_name TEXT NOT NULL,
+        font_family TEXT NOT NULL,
+        script TEXT NOT NULL,
+        weight TEXT NOT NULL,
+        style TEXT DEFAULT 'normal',
+        source_type TEXT NOT NULL DEFAULT 'preset',
+        source_data TEXT,
+        file_data TEXT,
+        is_active INTEGER DEFAULT 1,
+        is_default INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS tenant_font_selections (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        script TEXT NOT NULL,
+        weight TEXT NOT NULL,
+        font_id TEXT REFERENCES sag_fonts(id) ON DELETE SET NULL,
+        custom_font_path TEXT,
+        custom_font_data TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(tenant_id, script, weight)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sag_fonts_script_weight ON sag_fonts(script, weight);
+    CREATE INDEX IF NOT EXISTS idx_tenant_font_selections_tenant ON tenant_font_selections(tenant_id);
+    """)
+    defaults = [
+        ('sag-default-arabic-regular', 'The Sans Arabic', 'The Sans Arabic', 'arabic', 'regular'),
+        ('sag-default-arabic-bold', 'The Sans Arabic Bold', 'The Sans Arabic', 'arabic', 'bold'),
+        ('sag-default-latin-regular', 'Arial', 'Arial', 'latin', 'regular'),
+        ('sag-default-latin-bold', 'Arial Bold', 'Arial', 'latin', 'bold'),
+    ]
+    for font_id, name, family, script, weight in defaults:
+        conn.execute(
+            """INSERT OR IGNORE INTO sag_fonts
+               (id, font_name, font_family, script, weight, source_type, source_data, is_active, is_default)
+               VALUES (?, ?, ?, ?, ?, 'preset', ?, 1, 1)""",
+            (font_id, name, family, script, weight, family),
+        )
+    conn.commit()
+
+
+def get_sag_fonts(script=None, weight=None, active_only=True):
+    conn = get_db()
+    query = 'SELECT id, font_name, font_family, script, weight, style, source_type, source_data, is_active, is_default, created_at, updated_at FROM sag_fonts WHERE 1=1'
+    params = []
+    if active_only:
+        query += ' AND is_active = 1'
+    if script:
+        query += ' AND script = ?'
+        params.append(script)
+    if weight:
+        query += ' AND weight = ?'
+        params.append(weight)
+    query += ' ORDER BY script, weight, is_default DESC, font_name'
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def get_sag_font(font_id):
+    row = get_db().execute('SELECT * FROM sag_fonts WHERE id = ?', (font_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_sag_font(font_name, font_family, script, weight, style='normal', source_type='uploaded', source_data=None, file_data=None):
+    font_id = str(uuid.uuid4())
+    conn = get_db()
+    conn.execute(
+        '''INSERT INTO sag_fonts
+           (id, font_name, font_family, script, weight, style, source_type, source_data, file_data)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (font_id, font_name, font_family, script, weight, style, source_type, source_data, file_data),
+    )
+    conn.commit()
+    return font_id
+
+
+def update_sag_font(font_id, **fields):
+    allowed = {'font_name', 'font_family', 'is_active', 'is_default'}
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    if not updates:
+        return False
+    if updates.get('is_default'):
+        current = get_sag_font(font_id)
+        if current:
+            get_db().execute(
+                'UPDATE sag_fonts SET is_default = 0 WHERE script = ? AND weight = ?',
+                (current['script'], current['weight']),
+            )
+    updates['updated_at'] = datetime.now().isoformat()
+    clause = ', '.join(f'{key} = ?' for key in updates)
+    get_db().execute(f'UPDATE sag_fonts SET {clause} WHERE id = ?', list(updates.values()) + [font_id])
+    get_db().commit()
+    return True
+
+
+def get_tenant_font_selections(tenant_id):
+    rows = get_db().execute(
+        'SELECT * FROM tenant_font_selections WHERE tenant_id = ? ORDER BY script, weight',
+        (tenant_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_tenant_font_selection(tenant_id, script, weight):
+    row = get_db().execute(
+        'SELECT * FROM tenant_font_selections WHERE tenant_id = ? AND script = ? AND weight = ?',
+        (tenant_id, script, weight),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def set_tenant_font_selection(tenant_id, script, weight, font_id=None, custom_font_path=None, custom_font_data=None):
+    selection_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    get_db().execute(
+        '''INSERT INTO tenant_font_selections
+           (id, tenant_id, script, weight, font_id, custom_font_path, custom_font_data, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(tenant_id, script, weight) DO UPDATE SET
+           font_id = excluded.font_id,
+           custom_font_path = excluded.custom_font_path,
+           custom_font_data = excluded.custom_font_data,
+           updated_at = excluded.updated_at''',
+        (selection_id, tenant_id, script, weight, font_id, custom_font_path, custom_font_data, now, now),
+    )
+    get_db().commit()
+    return selection_id
+
+
+def delete_tenant_font_selection(tenant_id, script, weight):
+    get_db().execute(
+        'DELETE FROM tenant_font_selections WHERE tenant_id = ? AND script = ? AND weight = ?',
+        (tenant_id, script, weight),
+    )
+    get_db().commit()
 
 
 def _migrate_field_sections(conn):

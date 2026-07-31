@@ -109,6 +109,77 @@ class MeetingRequirementsTests(unittest.TestCase):
         reference_url = request_payload['messages'][0]['content'][1]['image_url']['url']
         self.assertEqual(reference_url, 'data:image/png;base64,YWJj')
 
+    def test_osm_boundary_ignores_landuse_and_selects_containing_building(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            'elements': [
+                {
+                    'type': 'way',
+                    'tags': {'landuse': 'industrial'},
+                    'geometry': [
+                        {'lat': 24.0, 'lon': 46.0},
+                        {'lat': 24.0, 'lon': 46.01},
+                        {'lat': 24.01, 'lon': 46.01},
+                        {'lat': 24.01, 'lon': 46.0},
+                    ],
+                },
+                {
+                    'type': 'way',
+                    'tags': {'building': 'commercial'},
+                    'geometry': [
+                        {'lat': 23.9998, 'lon': 45.9998},
+                        {'lat': 23.9998, 'lon': 46.0002},
+                        {'lat': 24.0002, 'lon': 46.0002},
+                        {'lat': 24.0002, 'lon': 45.9998},
+                    ],
+                },
+            ]
+        }
+        with patch.object(self.application_module.maps_service.requests, 'post', return_value=response):
+            coords = self.application_module.maps_service._fetch_osm_polygon(24.0, 46.0)
+
+        self.assertEqual(len(coords), 4)
+        self.assertLess(self.application_module.maps_service._approx_polygon_area_sqm(coords), 100000)
+
+    def test_osm_boundary_returns_none_without_building_footprint(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            'elements': [{
+                'type': 'way',
+                'tags': {'landuse': 'commercial'},
+                'geometry': [
+                    {'lat': 24.0, 'lon': 46.0},
+                    {'lat': 24.0, 'lon': 46.01},
+                    {'lat': 24.01, 'lon': 46.01},
+                ],
+            }]
+        }
+        with patch.object(self.application_module.maps_service.requests, 'post', return_value=response):
+            coords = self.application_module.maps_service._fetch_osm_polygon(24.0, 46.0)
+
+        self.assertIsNone(coords)
+
+    def test_site_analysis_fills_google_site_fields_without_touching_unknown_fields(self):
+        client = self.app.test_client()
+        nearby = [{'name': 'معلم قريب', 'lat': 24.001, 'lng': 46.001, 'distance_text': '1 كم'}]
+        city = [{'name': 'معلم المدينة', 'lat': 24.02, 'lng': 46.02}]
+        with patch.object(self.application_module.maps_service, 'get_nearby_landmarks', side_effect=lambda *args, **kwargs: {'success': True, 'landmarks': nearby if kwargs.get('radius') == 1000 else city}), \
+                patch.object(self.application_module.maps_service, 'get_drive_matrix', return_value=[{'distance_text': '1.2 كم', 'duration_min': 5}]), \
+                patch.object(self.application_module.maps_service, 'discover_nearby_roads', return_value=[{'name': 'طريق تجريبي', 'lat': 24.0, 'lng': 46.0}]), \
+                patch.object(self.application_module.maps_service, '_fetch_osm_polygon', return_value=[(23.999, 45.999), (23.999, 46.001), (24.001, 46.001), (24.001, 45.999)]), \
+                patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={'placeholders': {}, 'zooms': {'overview': 17}}):
+            response = client.post('/api/analyze-site', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': '24.0', 'location_lng': '46.0', 'location_address': 'Test site'}
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        fields = response.get_json()['fields']
+        self.assertEqual(fields['main_roads'], 'طريق تجريبي')
+        self.assertIn('معلم قريب', fields['nearby_landmarks'])
+        self.assertIn('معلم المدينة', fields['city_landmarks'])
+        self.assertIn('location_polygon', fields)
+        self.assertNotIn('land_area', fields)
+
     def test_custom_sections_can_be_renamed_and_fields_require_a_tenant_section(self):
         client = self.app.test_client()
         headers_a = self._headers(self.token_a)

@@ -254,6 +254,9 @@ def require_permission(permission_key):
             is_super_admin = g.is_admin
             is_company_admin = g.user_role == 'company_admin' or g.user_id is None
 
+            if permission_key == 'sag_admin_panel' and not is_super_admin:
+                return jsonify({'error': 'Super admin access required'}), 403
+
             if not is_super_admin and not is_company_admin:
                 if g.user_id:
                     g.user_permissions = db.get_user_permissions(g.user_id, g.user_role or 'employee')

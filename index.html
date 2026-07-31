@@ -2275,9 +2275,8 @@
           </div>
           <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
             <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">2</div>
-            <strong style="font-size:13px">اقتراح خطة الشرائح</strong>
-            <p style="margin:4px 0 0;font-size:12px;color:#666">AI يقترح عدد وتوزيع الشرائح — ممكن تعدّل قبل المتابعة
-            </p>
+            <strong style="font-size:13px">تحليل الموقع والبيانات</strong>
+            <p style="margin:4px 0 0;font-size:12px;color:#666">اضغط تحليل الموقع لملء بيانات الطرق والمعالم والخرائط تلقائيًا مع إمكانية تعديلها</p>
           </div>
           <div style="background:#fff;border-radius:10px;padding:12px;border:1px solid #d0e3f0">
             <div style="font-size:20px;margin-bottom:4px;font-weight:700;color:var(--p)">3</div>
@@ -2368,6 +2367,11 @@
             <input type="file" id="settingsFontUpload" accept=".ttf,.otf,.woff,.woff2" style="display:none"
               onchange="handleFontUpload(this)">
             <div id="settingsFontPreview" style="margin-top:8px;font-size:12px;color:#888;"></div>
+          </div>
+          <div class="tenant-field full" data-permission="company_settings">
+            <label>إدارة أوزان وخطوط العرض</label>
+            <div id="tenantFontSelections" style="display:grid;gap:8px;margin-top:6px;"></div>
+            <p class="tenant-hint" style="margin:8px 0 0">يمكن اختيار خط مركزي أو رفع خط خاص للشركة لكل لغة ووزن.</p>
           </div>
           <div class="tenant-field">
             <label>قالب التصميم</label>
@@ -2656,25 +2660,9 @@
         <button class="btn primary" data-permission="create_presentation" onclick="toggleMapStylePanel()"
           style="background:#3B6E91; color:#fff; border:none; padding:8px 16px; border-radius:8px;">إعدادات
           الخرائط</button>
-        <button class="btn primary" onclick="directGenerateProposalFile()">توليد ملف</button>
+        <button class="btn primary" onclick="submitTenantProject()">التالي: الصور</button>
         <button class="btn danger" onclick="confirmDeleteProject()">حذف المشروع</button>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
-      </div>
-    </section>
-
-    <!-- Slide Plan -->
-    <section id="tenantSlidePlanPage" class="tenant-page">
-      <div class="workflow-stage-layout">
-        <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
-        <div class="workflow-stage-content">
-          <h2>خطة الشرائح</h2>
-          <div id="slidePlanInfo" class="tenant-hint" style="margin-bottom:16px"></div>
-          <div id="tenantSlidePlanList"></div>
-          <div class="tenant-btns">
-            <button class="btn ghost" onclick="regenerateTenantSlidePlan()">إعادة الاقتراح</button>
-            <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">عودة</button>
-          </div>
-        </div>
       </div>
     </section>
 
@@ -2693,7 +2681,7 @@
             
             <div style="margin-top:18px;">
               <label style="display:block;font-weight:700;margin-bottom:8px;color:var(--text-main);">وصف الصورة الرئيسية (Prompt)</label>
-              <textarea id="tenantMainImagePromptInput"
+              <textarea id="tenantMainImagePromptInput" oninput="tenantCreativeImages.cover_prompt=this.value;triggerAutoSaveDraft()"
                 placeholder="أدخل الوصف التفصيلي للصورة الرئيسية..." rows="3"
                 style="width:100%;border:1px solid #ddd;border-radius:12px;padding:12px;font-family:inherit;font-size:13px;margin-bottom:12px;"></textarea>
               
@@ -2706,6 +2694,7 @@
                   style="background:#2e7d32;color:#fff;border:none;padding:10px 20px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;">
                   ✅ إعتماد الصورة الرئيسية
                 </button>
+                <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ صفحة الصورة كمسودة</button>
                 <button class="btn ghost" onclick="refreshImagePromptsWithGLM()"
                   style="border:1px solid #cbd5e1;padding:10px 16px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;font-size:12px;margin-right:auto;">
                   🤖 إعادة صياغة الوصف بـ GLM 5.1
@@ -2715,7 +2704,7 @@
           </div>
 
           <div class="tenant-btns" style="display:flex;gap:12px;justify-content:space-between;">
-            <button class="btn ghost" onclick="showTenantPage('tenantSlidePlanPage')">⬅ عودة للهيكل</button>
+            <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">⬅ عودة لبيانات المشروع</button>
             <button class="btn primary" onclick="goToTenantMoodboard()">التالي: صور المود بورد ➔</button>
           </div>
         </div>
@@ -2734,6 +2723,7 @@
           
           <div class="tenant-btns" style="display:flex;gap:12px;justify-content:space-between;margin-top:20px;">
             <button class="btn ghost" onclick="goToTenantMainImage()">⬅ عودة للصورة الرئيسية</button>
+            <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ صفحة المود بورد كمسودة</button>
             <button class="btn primary" onclick="generateTenantSlides()">🚀 توليد العرض والتصميم</button>
           </div>
         </div>
@@ -3127,6 +3117,20 @@
 
       <!-- Stats Cards -->
       <div id="sagAdminStats" class="tenant-dashboard-cards" style="margin-bottom:20px"></div>
+
+      <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:20px;">
+        <h3 style="margin:0 0 8px;color:var(--p);">الخطوط المركزية</h3>
+        <p class="tenant-hint">ارفع خطًا مركزيًا ليظهر للشركات مع تحديد اللغة والوزن.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+          <input id="sagFontName" placeholder="اسم الخط" style="flex:1;min-width:150px;">
+          <input id="sagFontFamily" placeholder="Font family" style="flex:1;min-width:150px;">
+          <select id="sagFontScript"><option value="arabic">عربي</option><option value="latin">لاتيني</option></select>
+          <select id="sagFontWeight"><option value="regular">Regular</option><option value="light">Light</option><option value="medium">Medium</option><option value="bold">Bold</option><option value="black">Black</option></select>
+          <input id="sagFontFile" type="file" accept=".ttf,.otf,.woff,.woff2">
+          <button class="btn primary" onclick="uploadSagFont()">رفع الخط</button>
+        </div>
+        <div id="sagFontsList" style="margin-top:12px;"></div>
+      </div>
 
       <!-- Search & Filter -->
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
@@ -3544,7 +3548,6 @@
 
     const TENANT_WORKFLOW_ITEMS = [
       { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
-      { pageId: 'tenantSlidePlanPage', label: 'توليد الهيكل' },
       { pageId: 'tenantMainImagePage', label: 'توليد الصورة الرئيسية' },
       { pageId: 'tenantMoodboardPage', label: 'توليد المود بورد' },
     ];
@@ -3564,12 +3567,7 @@
         return;
       }
       if (pageId === 'tenantSlidePlanPage') {
-        if (!tenantSlidePlan) {
-          await submitTenantProject();
-          return;
-        }
-        renderTenantSlidePlan();
-        showTenantPage(pageId);
+        await goToTenantMainImage();
         return;
       }
       if (pageId === 'tenantMainImagePage') {
@@ -3622,7 +3620,6 @@
     /* ===== Tenant Global Rail ===== */
     const TGR_STAGES = [
       { id: 'tenantProjectPage', label: 'بيانات المشروع' },
-      { id: 'tenantSlidePlanPage', label: 'خطة الشرائح'},
       { id: 'tenantMainImagePage', label: 'الصورة الرئيسية' },
       { id: 'tenantMoodboardPage', label: 'المود بورد'},
       { id: 'tenantSlidesPage', label: 'معاينة الشرائح' }
@@ -4019,6 +4016,78 @@
       if (logoEl && !b.logo_path) logoEl.src = 'assets/logo.png';
     }
 
+    const MANAGED_FONT_WEIGHTS = ['light', 'regular', 'medium', 'bold', 'black'];
+
+    async function loadTenantFonts() {
+      const host = document.getElementById('tenantFontSelections');
+      if (!host) return;
+      const data = await api('GET', '/api/branding/fonts');
+      if (!data.success) { host.textContent = 'تعذر تحميل الخطوط'; return; }
+      const selections = {};
+      (data.selections || []).forEach(item => { selections[item.script + ':' + item.weight] = item; });
+      const available = data.available || [];
+      host.innerHTML = ['arabic', 'latin'].map(script => MANAGED_FONT_WEIGHTS.map(weight => {
+        const key = script + ':' + weight;
+        const current = selections[key] || {};
+        const options = available.filter(font => font.script === script && font.weight === weight)
+          .map(font => '<option value="' + escapeHtml(font.id) + '"' + (font.id === current.font_id ? ' selected' : '') + '>' + escapeHtml(font.font_name) + '</option>').join('');
+        return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;padding:7px;">' +
+          '<strong style="min-width:90px">' + (script === 'arabic' ? 'عربي' : 'لاتيني') + ' / ' + weight + '</strong>' +
+          '<select onchange="setTenantFontSelection(\'' + script + '\',\'' + weight + '\',this.value)" style="flex:1;min-width:150px;"><option value="">استخدام الافتراضي</option>' + options + '</select>' +
+          '<input id="tenantFontFile_' + script + '_' + weight + '" type="file" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="uploadTenantFontVariant(\'' + script + '\',\'' + weight + '\',this)">' +
+          '<button class="btn small ghost" onclick="document.getElementById(\'tenantFontFile_' + script + '_' + weight + '\').click()">رفع ملف</button>' +
+          '</div>';
+      }).join('')).join('');
+    }
+
+    async function setTenantFontSelection(script, weight, fontId) {
+      const data = await api('PUT', '/api/branding/fonts', { script, weight, font_id: fontId || null });
+      if (!data.success) { toast(data.error || 'فشل اختيار الخط'); return; }
+      await loadTenantBranding();
+      await loadTenantFonts();
+      toast('تم تحديث خط العرض');
+    }
+
+    async function uploadTenantFontVariant(script, weight, input) {
+      if (!input.files || !input.files[0]) return;
+      const form = new FormData();
+      form.append('script', script);
+      form.append('weight', weight);
+      form.append('font', input.files[0]);
+      const data = await api('POST', '/api/branding/fonts/upload', form, true);
+      if (!data.success) { toast(data.error || 'فشل رفع الخط'); return; }
+      await loadTenantBranding();
+      await loadTenantFonts();
+      toast('تم رفع خط الشركة');
+    }
+
+    async function loadSagFonts() {
+      const host = document.getElementById('sagFontsList');
+      if (!host) return;
+      const data = await api('GET', '/api/admin/sag-fonts');
+      if (!data.success) { host.textContent = data.error || 'تعذر تحميل الخطوط المركزية'; return; }
+      host.innerHTML = (data.fonts || []).map(font =>
+        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding:6px 0;">' +
+        '<span>' + escapeHtml(font.font_name) + ' — ' + escapeHtml(font.script) + ' / ' + escapeHtml(font.weight) + '</span>' +
+        '<span class="tenant-hint">' + (font.is_default ? 'افتراضي' : 'متاح') + '</span></div>'
+      ).join('') || '<span class="tenant-hint">لا توجد خطوط مركزية</span>';
+    }
+
+    async function uploadSagFont() {
+      const file = document.getElementById('sagFontFile');
+      if (!file || !file.files || !file.files[0]) { toast('اختر ملف الخط أولاً'); return; }
+      const form = new FormData();
+      form.append('font_name', document.getElementById('sagFontName').value.trim());
+      form.append('font_family', document.getElementById('sagFontFamily').value.trim());
+      form.append('script', document.getElementById('sagFontScript').value);
+      form.append('weight', document.getElementById('sagFontWeight').value);
+      form.append('font', file.files[0]);
+      const data = await api('POST', '/api/admin/sag-fonts', form, true);
+      if (!data.success) { toast(data.error || 'فشل رفع الخط المركزي'); return; }
+      await loadSagFonts();
+      toast('تم رفع الخط المركزي');
+    }
+
     // Settings
     async function openTenantSettings() {
       showTenantPage('tenantSettingsPage');
@@ -4059,6 +4128,7 @@
       if (logoPreview) logoPreview.innerHTML = b.logo_path ? '<img src="/tenant-assets/' + tenantUser.id + '/logo?t=' + Date.now() + '" alt="logo" style="max-height:120px">' : 'اضغط لرفع لوجو الشركة (PNG/JPG/WEBP)';
       const refPreview = document.getElementById('settingsRefPreview');
       if (refPreview) refPreview.textContent = b.reference_image_path ? 'تم رفع صورة مرجعية' : 'اضغط لرفع صورة مرجعية للاستيل التصميمي';
+      await loadTenantFonts();
     }
 
     function setValue(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }
@@ -4637,6 +4707,8 @@
       tenantSlidesData = [];
       tenantSlidePlan = null;
       tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
+      tempCoverImage = null;
+      tempMoodboardImages = {};
       tenantDesignerMessages = [];
       tenantChatSlideIndex = 0;
       tenantMapPreviewState = null;
@@ -4895,7 +4967,8 @@
         previewDiv.id = 'tenantMapPreview';
         previewDiv.innerHTML = `
           <label>معاينة الموقع</label>
-          <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+            <button type="button" class="btn primary" onclick="analyzeTenantSite()">تحليل الموقع وملء البيانات</button>
             <button type="button" class="btn ghost" onclick="previewProjectMap()">عرض الخريطة</button>
             <button type="button" class="btn ghost" onclick="fetchNearbyLandmarks()">اقتراح المعالم</button>
             <button type="button" class="btn ghost" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>
@@ -5276,6 +5349,29 @@
         data.tenantSlidePlan = tenantSlidePlan;
         data.tenantCreativeImages = tenantCreativeImages;
         data.tenantSlidesData = tenantSlidesData;
+        data.pageDrafts = {
+          project: {
+            sectionStatuses: { ...tenantProjectSectionStatuses },
+            status: 'draft'
+          },
+          mainImage: {
+            prompt: tenantCreativeImages.cover_prompt || '',
+            image: tempCoverImage || tenantCreativeImages.cover || '',
+            approved: !!tenantCreativeImages.cover
+          },
+          moodboard: {
+            prompts: Array.isArray(tenantCreativeImages.moodboard_prompts) ? [...tenantCreativeImages.moodboard_prompts] : [],
+            images: { ...tempMoodboardImages },
+            approved: Array.isArray(tenantCreativeImages.moodboard)
+              ? tenantCreativeImages.moodboard.map(image => !!image)
+              : []
+          },
+          slides: {
+            data: tenantSlidesData,
+            generated: tenantSlidesData.length > 0,
+            status: tenantSlidesData.length ? 'draft' : 'empty'
+          }
+        };
         const resp = await api('POST', '/api/project-draft', { draftData: data, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' });
         if (resp.draftId) tenantProjectData.draftId = resp.draftId;
         const badge = document.getElementById('draftSyncBadge');
@@ -5330,6 +5426,57 @@
         toast('تم تحديد الموقع: ' + msg);
       } else {
         toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر أو عنوان نصي');
+      }
+    }
+
+    async function analyzeTenantSite() {
+      const formData = await collectTenantFormData();
+      tenantProjectData = { ...tenantProjectData, ...formData };
+      if (!tenantProjectData.location_address && !tenantProjectData.location_lat) {
+        toast('أدخل رابط Google Maps أو عنوان الموقع أولاً');
+        return;
+      }
+      showLoader('جاري تحليل الموقع', 'يتم جلب الطرق والمعالم والخرائط من Google Maps...');
+      try {
+        const data = await api('POST', '/api/analyze-site', {
+          projectData: tenantProjectData,
+          presentationId: tenantPresentationId,
+          force: true
+        });
+        if (!data || !data.success) {
+          toast((data && data.error) || 'تعذر تحليل الموقع');
+          return;
+        }
+        const fields = data.fields || {};
+        tenantProjectData = { ...tenantProjectData, ...fields };
+        Object.entries(fields).forEach(([key, value]) => {
+          const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+          if (input && value !== null && value !== undefined) input.value = value;
+        });
+        if (fields.location_polygon) {
+          tenantMapPolygonPoints = fields.location_polygon.split(';')
+            .map(point => point.split(',').map(Number))
+            .filter(point => point.length === 2 && point.every(Number.isFinite));
+          syncTenantLocationPolygon();
+        }
+        tenantCreativeImages = tenantCreativeImages || {};
+        tenantCreativeImages.map_placeholders = data.mapPlaceholders || {};
+        tenantCreativeImages.map_lat = data.lat;
+        tenantCreativeImages.map_lng = data.lng;
+        tenantCreativeImages.map_zooms = data.zooms || {};
+        tenantProjectData = { ...tenantProjectData, ...fields };
+        tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
+        triggerAutoSaveDraft();
+        await previewProjectMap();
+        renderTenantMapPolygonOverlay();
+        toast(data.boundary && data.boundary.status === 'verified_building'
+          ? 'تم تحليل الموقع وتعبئة البيانات والخرائط بنجاح'
+          : 'تم تحليل الموقع. راجع الحدود وارسمها يدويًا إذا لزم الأمر');
+      } catch (error) {
+        console.error('[SITE ANALYSIS]', error);
+        toast('حدث خطأ أثناء تحليل الموقع');
+      } finally {
+        hideLoader();
       }
     }
 
@@ -5692,18 +5839,17 @@
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
-      // Auto-save draft to server before proceeding
-      await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
-      showLoader('جاري تحليل بيانات المشروع', 'AI يقترح عدد الشرائح وتوزيع المحتوى');
+      await saveProjectAsDraft(true);
+      showLoader('جاري إعداد خطة العرض', 'AI يبني الهيكل داخليًا وفق تدريب الشركة');
       const data = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
       hideLoader();
       if (data.success && data.plan) {
         tenantSlidePlan = data.plan;
-        renderTenantSlidePlan();
-        showTenantPage('tenantSlidePlanPage');
+        tenantProjectData.tenantSlidePlan = tenantSlidePlan;
         triggerAutoSaveDraft();
+        await goToTenantMainImage();
       } else {
-        toast(data.error || 'فشل اقتراح خطة الشرائح');
+        toast(data.error || 'فشل إعداد خطة العرض');
       }
     }
 
@@ -5711,6 +5857,7 @@
       const plan = tenantSlidePlan;
       const info = document.getElementById('slidePlanInfo');
       const list = document.getElementById('tenantSlidePlanList');
+      if (!info || !list) return;
       if (!plan || !plan.slides) { list.innerHTML = ''; return; }
       info.innerHTML = '<strong>عدد الشرائح المقترح:</strong> ' + plan.slides.length +
         (plan.proposed_count ? ' (مقترح: ' + plan.proposed_count + ')' : '') +
@@ -5897,7 +6044,7 @@
             '</div>' +
             imgBox +
             '<label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475569;">وصف الصورة (Prompt)</label>' +
-            '<textarea id="tenantMoodboardPrompt_' + i + '" rows="2" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px;font-family:inherit;font-size:12px;margin-bottom:10px;resize:vertical;">' + escapeHtml(promptVal) + '</textarea>' +
+            '<textarea id="tenantMoodboardPrompt_' + i + '" rows="2" oninput="tenantCreativeImages.moodboard_prompts=tenantCreativeImages.moodboard_prompts||[];tenantCreativeImages.moodboard_prompts[' + i + ']=this.value;triggerAutoSaveDraft()" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px;font-family:inherit;font-size:12px;margin-bottom:10px;resize:vertical;">' + escapeHtml(promptVal) + '</textarea>' +
           '</div>' +
           '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">' +
             '<button class="btn primary" onclick="generateTenantMoodboardSingleImage(' + i + ')" style="flex:1;background:#3B6E91;color:#fff;border:none;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;">🎨 توليد الصورة</button>' +
@@ -5949,6 +6096,7 @@
         hideLoader();
         if (data && data.success && data.image) {
           tempCoverImage = data.image;
+          triggerAutoSaveDraft();
           renderTenantMainImage();
           toast('تم توليد المعاينة بنجاح! اضغط "إعتماد الصورة" لتثبيتها في العرض.');
         } else {
@@ -5992,6 +6140,7 @@
         hideLoader();
         if (data && data.success && data.image) {
           tempMoodboardImages[index] = data.image;
+          triggerAutoSaveDraft();
           renderTenantMoodboard();
           toast('تم توليد المعاينة للصورة #' + (index + 1) + '! اضغط "إعتماد" لتثبيتها.');
         } else {
@@ -6054,6 +6203,13 @@
           }
         }
 
+        const generationImages = {
+          ...tenantCreativeImages,
+          cover: tenantCreativeImages.cover || tempCoverImage || '',
+          moodboard: Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard.map((image, index) => image || tempMoodboardImages[index] || '') : []
+        };
+        const hasUnapprovedImages = !!tempCoverImage || Object.keys(tempMoodboardImages || {}).length > 0;
+        if (hasUnapprovedImages) toast('سيتم استخدام الصور المولدة غير المعتمدة مع استمرار إمكانية اعتمادها لاحقًا.');
         tenantSlidesData = [];
         activeSlideIndex = 0;
         showTenantPage('tenantSlidesPage');
@@ -6070,7 +6226,7 @@
               const genPayload = {
                 projectData: tenantProjectData,
                 slidePlan: tenantSlidePlan,
-                images: tenantCreativeImages,
+                images: generationImages,
                 slideIndex: i
               };
               if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
@@ -7050,6 +7206,20 @@
           tenantMapPreviewState = null;
           tenantMapPolygonPoints = [];
           tenantMapPolygonMode = false;
+          tempCoverImage = null;
+          tempMoodboardImages = {};
+          if (typeof draftData.location_polygon === 'string') {
+            tenantMapPolygonPoints = draftData.location_polygon.split(';')
+              .map(point => point.split(',').map(Number))
+              .filter(point => point.length === 2 && point.every(Number.isFinite));
+          }
+          const pageDrafts = draftData.pageDrafts || {};
+          if (pageDrafts.mainImage && !pageDrafts.mainImage.approved) {
+            tempCoverImage = pageDrafts.mainImage.image || null;
+          }
+          if (pageDrafts.moodboard && pageDrafts.moodboard.images) {
+            tempMoodboardImages = { ...pageDrafts.moodboard.images };
+          }
           const sectionStatuses = draft.section_statuses || {};
 
           showTenantPage('tenantProjectPage');
@@ -7084,8 +7254,15 @@
                 map_placeholders: ci.map_placeholders || {},
                 map_landmarks: ci.map_landmarks || [],
                 images_signature: ci.images_signature || null,
-                maps_signature: ci.maps_signature || null
+                maps_signature: ci.maps_signature || null,
+                cover_prompt: ci.cover_prompt || (pageDrafts.mainImage && pageDrafts.mainImage.prompt) || '',
+                moodboard_prompts: Array.isArray(ci.moodboard_prompts)
+                  ? ci.moodboard_prompts
+                  : (pageDrafts.moodboard && pageDrafts.moodboard.prompts) || []
               };
+              if (pageDrafts.mainImage && pageDrafts.mainImage.approved && pageDrafts.mainImage.image && !tenantCreativeImages.cover) {
+                tenantCreativeImages.cover = pageDrafts.mainImage.image;
+              }
               renderTenantMainImage();
               renderTenantMoodboard();
             }
@@ -7441,6 +7618,7 @@
       const stats = (statsData.success && statsData.stats) ? statsData.stats : {};
       renderSagStats(stats);
       renderSagTenants(sagAllTenants);
+      loadSagFonts();
     }
 
     function renderSagStats(stats) {

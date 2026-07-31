@@ -924,12 +924,7 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
     
     query = f"""[out:json][timeout:15];
     (
-      way(around:{radius_m},{lat},{lng})["leisure"~"sports_centre|stadium|fitness_centre|golf_course|resort|park|playground|garden|nature_reserve|recreation_ground"];
-      way(around:{radius_m},{lat},{lng})["amenity"~"school|university|hospital|college|club|clinic|place_of_worship|public_building|community_centre|conference_centre|exhibition_centre|arts_centre"];
-      way(around:{radius_m},{lat},{lng})["landuse"~"construction|commercial|retail|residential|industrial|military|institutional|religious|cemetery|recreation_ground|village_green|allotments"];
       way(around:{radius_m},{lat},{lng})["building"];
-      relation(around:{radius_m},{lat},{lng})["leisure"~"sports_centre|stadium|fitness_centre|golf_course|resort|park|playground|garden"];
-      relation(around:{radius_m},{lat},{lng})["landuse"~"construction|commercial|retail|residential|industrial|military|institutional"];
       relation(around:{radius_m},{lat},{lng})["building"];
     );
     out geom;"""
@@ -952,11 +947,9 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
     if not elements:
         return None
         
-    MAX_PLOT_AREA_SQM = 250000
-    NEAR_MISS_MAX_DIST_M = 45.0
-    NEAR_MISS_MAX_AREA_SQM = 120000
+    MAX_BUILDING_AREA_SQM = 100000
 
-    print(f"[OSM POLYGON] Overpass returned {len(elements)} elements near ({lat}, {lng})")
+    print(f"[OSM POLYGON] Overpass returned {len(elements)} building elements near ({lat}, {lng})")
     rejected = {'no_tag': 0, 'too_large': 0, 'too_small': 0, 'too_far': 0}
 
     best_el = None
@@ -971,32 +964,12 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
         area_sqm = _approx_polygon_area_sqm(coords)
         tags = el.get('tags', {})
         
-        priority = 999
-        max_area = 0
-        tag_type = "unknown"
-        
-        if 'leisure' in tags and any(x in tags['leisure'] for x in ("sports_centre", "stadium", "fitness_centre", "golf_course", "resort", "park", "playground", "garden")):
-            priority = 1
-            max_area = 600000
-            tag_type = "leisure:" + tags['leisure']
-        elif 'amenity' in tags and any(x in tags['amenity'] for x in ("school", "university", "hospital", "college", "club", "clinic", "place_of_worship", "public_building")):
-            priority = 2
-            max_area = 400000
-            tag_type = "amenity:" + tags['amenity']
-        elif 'landuse' in tags and any(x in tags['landuse'] for x in ("construction", "commercial", "retail", "residential", "industrial")):
-            priority = 3
-            max_area = 600000
-            tag_type = "landuse:" + tags['landuse']
-        elif 'building' in tags:
-            priority = 4
-            max_area = 250000
-            tag_type = "building:" + str(tags['building'])
-            
-        if priority == 999:
+        if 'building' not in tags:
             rejected['no_tag'] += 1
             continue
-            
-        if area_sqm > max_area or area_sqm > MAX_PLOT_AREA_SQM:
+        tag_type = "building:" + str(tags['building'])
+
+        if area_sqm > MAX_BUILDING_AREA_SQM:
             rejected['too_large'] += 1
             continue
         if area_sqm < 10:
@@ -1007,15 +980,14 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
         is_inside = _point_in_polygon(lat, lng, coords)
         
         if not is_inside:
-            if min_dist_to_vertex > NEAR_MISS_MAX_DIST_M or area_sqm > NEAR_MISS_MAX_AREA_SQM:
-                rejected['too_far'] += 1
-                print(f"[OSM CANDIDATE] rejected-far {tag_type}: {area_sqm:.0f} sqm, {min_dist_to_vertex:.1f} m")
-                continue
+            rejected['too_far'] += 1
+            print(f"[OSM CANDIDATE] rejected-outside {tag_type}: {area_sqm:.0f} sqm, {min_dist_to_vertex:.1f} m")
+            continue
 
         print(f"[OSM CANDIDATE] accepted {tag_type}: {area_sqm:.0f} sqm, {min_dist_to_vertex:.1f} m, inside={is_inside}")
             
-        # Sort key: prioritize smallest area among containing polygons to select building/plot instead of district/landuse
-        sort_key = (0 if is_inside else 1, area_sqm, min_dist_to_vertex)
+        # Prefer the smallest building footprint that contains the exact coordinate.
+        sort_key = (area_sqm, min_dist_to_vertex)
         if best_sort_key is None or sort_key < best_sort_key:
             best_sort_key = sort_key
             best_el = el
@@ -1026,7 +998,7 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
         area_sqm = _approx_polygon_area_sqm(coords)
         tag_name = tags.get('name', '')
         tag_type = tags.get('leisure', tags.get('building', tags.get('amenity', tags.get('landuse', 'polygon'))))
-        is_inside_str = "containing" if best_sort_key[0] == 0 else f"nearby ({best_sort_key[2]:.1f}m away)"
+        is_inside_str = "containing"
         try:
             print(f"[OSM POLYGON] Found {is_inside_str} {tag_type} '{tag_name}' ({best_sort_key[1]:.0f} sqm), ~{area_sqm:.0f} sqm")
         except Exception:
@@ -1594,6 +1566,58 @@ def _google_reverse_geocode_road(lat, lng, tenant_id=None):
     return ''
 
 
+def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=None, origin_lng=None, max_results=6):
+    """Return verified nearby road names from Google Roads + Directions."""
+    route_origin_lat = origin_lat if origin_lat is not None else center_lat
+    route_origin_lng = origin_lng if origin_lng is not None else center_lng
+    lat_step = 0.0018
+    lng_step = 0.0024
+    probes = [
+        (route_origin_lat + lat_step, route_origin_lng),
+        (route_origin_lat - lat_step, route_origin_lng),
+        (route_origin_lat, route_origin_lng + lng_step),
+        (route_origin_lat, route_origin_lng - lng_step),
+    ]
+
+    def fetch(probe):
+        p_lat, p_lng = probe
+        snapped = _snap_to_roads(p_lat, p_lng, tenant_id=tenant_id)
+        dest_lat = snapped['lat'] if snapped else p_lat
+        dest_lng = snapped['lng'] if snapped else p_lng
+        route = _google_directions_route(
+            route_origin_lat, route_origin_lng, dest_lat, dest_lng, tenant_id=tenant_id
+        )
+        if not route:
+            return None
+        name = (route.get('summary') or '').strip()
+        if not name or re.search(r'[A-Za-z]', name):
+            name = _google_reverse_geocode_road(dest_lat, dest_lng, tenant_id=tenant_id) or name
+        name = name or 'طريق قريب'
+        key = (snapped or {}).get('place_id') or name.casefold()
+        return {
+            'name': name,
+            'lat': dest_lat,
+            'lng': dest_lng,
+            'distance_meters': round(_distance_meters(route_origin_lat, route_origin_lng, dest_lat, dest_lng)),
+            'place_id': key,
+        }
+
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        candidates = list(executor.map(fetch, probes))
+
+    roads = []
+    seen = set()
+    for road in candidates:
+        if not road or road['place_id'] in seen:
+            continue
+        seen.add(road['place_id'])
+        roads.append(road)
+        if len(roads) >= max(1, int(max_results)):
+            break
+    return roads
+
+
 def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, project_data=None, tenant_id=None,
                        origin_lat=None, origin_lng=None):
     """Draw only Google Maps-derived access-road geometry and labels."""
@@ -1933,19 +1957,6 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
         if osm_poly and len(osm_poly) >= 3 and not _is_viewport_rectangle(osm_poly):
             polygon_coords = osm_poly
             print(f"[POLYGON] Using OSM building polygon with {len(polygon_coords)} points")
-
-    # Fallback to a neighborhood/district boundary if no building footprint was found
-    if not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
-        nb_key = f"nb:{lat:.6f},{lng:.6f}"
-        if nb_key in _osm_neighborhood_cache:
-            nb_poly = _osm_neighborhood_cache[nb_key]
-        else:
-            nb_poly = _fetch_osm_neighborhood(lat, lng, radius_m=2000)
-            if nb_poly:
-                _osm_neighborhood_cache[nb_key] = nb_poly
-        if nb_poly and len(nb_poly) >= 3:
-            polygon_coords = nb_poly
-            print(f"[POLYGON] Using OSM neighborhood polygon with {len(polygon_coords)} points")
 
     auto_detected = not user_polygon_used
 

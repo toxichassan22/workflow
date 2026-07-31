@@ -492,6 +492,80 @@ def resolve_font_path(path):
     return candidate if os.path.exists(candidate) else None
 
 
+def _managed_font_face(font_data, family, weight):
+    if not font_data:
+        return ''
+    try:
+        parsed = json.loads(font_data) if isinstance(font_data, str) and font_data.strip().startswith('{') else {'data': font_data, 'format': 'truetype'}
+        data = parsed.get('data')
+        fmt = parsed.get('format', 'truetype')
+        if not data:
+            return ''
+        mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+        css_weight = {'light': 300, 'regular': 400, 'medium': 500, 'bold': 700, 'black': 900}.get(weight, 400)
+        return f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{data}) format('{fmt}');font-weight:{css_weight};font-style:normal;font-display:swap;}}"
+    except Exception:
+        return ''
+
+
+def _managed_font_css(branding, tenant_id, fallback):
+    try:
+        from db import get_sag_font, get_sag_fonts, get_tenant_font_selection, get_tenant_font_selections
+    except Exception:
+        return None
+
+    rules = []
+    families = []
+    tenant_selections = get_tenant_font_selections(tenant_id) if tenant_id else []
+    legacy_family = branding.get('font_family') or ''
+    if not tenant_selections and (branding.get('font_file_path') or branding.get('font_file_data')):
+        return None
+    if not tenant_selections and legacy_family and legacy_family not in {'The Sans Arabic'}:
+        return None
+    for script, weights in (('arabic', ('regular', 'light', 'medium', 'bold', 'black')), ('latin', ('regular', 'medium', 'bold'))):
+        family = None
+        for weight in weights:
+            selection = get_tenant_font_selection(tenant_id, script, weight) if tenant_id else None
+            font = get_sag_font(selection.get('font_id')) if selection and selection.get('font_id') else None
+            if not selection:
+                font = next((item for item in get_sag_fonts(script=script, weight=weight) if item.get('is_default')), None)
+            if not selection and not font:
+                continue
+            if selection and selection.get('custom_font_data'):
+                selected_family = f"tenant-{script}-{tenant_id or 'default'}"
+                rule = _managed_font_face(selection['custom_font_data'], selected_family, weight)
+            elif font:
+                selected_family = font.get('font_family') or ('Arial' if script == 'latin' else 'The Sans Arabic')
+                if font.get('file_data'):
+                    rule = _managed_font_face(font['file_data'], selected_family, weight)
+                else:
+                    source = _resolve_preset_font_source(font.get('source_data') or selected_family)
+                    if source and source.get('type') == 'bundled':
+                        data = source.get('data')
+                        fmt = source.get('format', 'truetype')
+                        mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+                        css_weight = {'light': 300, 'regular': 400, 'medium': 500, 'bold': 700, 'black': 900}.get(weight, 400)
+                        rule = f"@font-face{{font-family:'{selected_family}';src:url(data:{mime};base64,{data}) format('{fmt}');font-weight:{css_weight};font-style:normal;font-display:swap;}}"
+                    elif source and source.get('type') == 'google':
+                        rule = "@import url('https://fonts.googleapis.com/css2?family=" + source['encoded'] + ":wght@300;400;500;700;900&display=swap');"
+                    else:
+                        rule = ''
+            else:
+                rule = ''
+                selected_family = None
+            if rule:
+                rules.append(rule)
+                family = family or selected_family
+        if family:
+            families.append(f"'{family}'")
+
+    if not rules or not families:
+        return None
+    family_list = ', '.join(families) + ', ' + fallback
+    rules.append(f'.slide,.slide *{{font-family:{family_list} !important;}}')
+    return '\n'.join(rules), family_list
+
+
 def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
     """@font-face isolated inside .slide only — does not affect site UI.
 
@@ -523,6 +597,10 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
             return _build_font_face_from_data(font_file_data, family, fallback)
         except Exception as e:
             print(f"[FONT] ERROR: failed to use font_file_data: {e}")
+
+    managed = _managed_font_css(branding, tenant_id, fallback)
+    if managed:
+        return managed
 
     # 3) Built-in presets: bundled faces or Google Fonts
     source = _resolve_preset_font_source(chosen)

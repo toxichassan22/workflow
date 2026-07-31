@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import math
 from datetime import datetime
 import re
 import base64
@@ -2943,6 +2944,243 @@ def api_preview_map_data():
     })
 
 
+def _map_image_point_to_coords(x, y, width, height, center_lat, center_lng, zoom, scale=2):
+    """Convert normalized image coordinates to WGS84 using Web Mercator."""
+    world = 256 * (2 ** zoom) * scale
+    center_x = (center_lng + 180.0) / 360.0 * world
+    center_lat_rad = math.radians(center_lat)
+    center_y = (1.0 - math.log(math.tan(math.pi / 4.0 + center_lat_rad / 2.0)) / math.pi) / 2.0 * world
+    target_x = center_x + (float(x) - 0.5) * width
+    target_y = center_y + (float(y) - 0.5) * height
+    lng = target_x / world * 360.0 - 180.0
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * target_y / world))))
+    return lat, lng
+
+
+def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zoom):
+    """Ask the vision model for a conservative building-only polygon estimate."""
+    if not OPENROUTER_KEY or not image_path or not os.path.isfile(image_path):
+        return None
+    try:
+        from reference_analyzer import encode_image_to_base64
+        from PIL import Image
+        image_uri = encode_image_to_base64(image_path)
+        prompt = (
+            'Analyze this satellite map image. The target site is at the exact image center. '
+            'Identify only the footprint of the building or compound directly at the center; '
+            'do not select roads, highways, interchanges, districts, empty land, airport areas, '
+            'or any nearby polygon. Return JSON only: '
+            '{"confidence":0.0,"points":[{"x":0.0,"y":0.0}]} where x and y are normalized '
+            'image coordinates between 0 and 1. Return an empty points array if no building footprint '
+            'can be identified with confidence >= 0.65.'
+        )
+        response = requests.post(
+            f'{OPENROUTER_BASE}/chat/completions',
+            headers={
+                'Authorization': f'Bearer {OPENROUTER_KEY}',
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://github.com',
+                'X-Title': 'Real Estate Proposal Generator - Site Boundary',
+            },
+            json={
+                'model': IMAGE_MODEL,
+                'messages': [{'role': 'user', 'content': [
+                    {'type': 'text', 'text': prompt},
+                    {'type': 'image_url', 'image_url': {'url': image_uri}},
+                ]}],
+                'modalities': ['text'],
+                'max_tokens': 1200,
+            },
+            timeout=90,
+        )
+        payload = response.json()
+        content = payload.get('choices', [{}])[0].get('message', {}).get('content', '')
+        if isinstance(content, list):
+            content = ' '.join(str(part.get('text', '')) if isinstance(part, dict) else str(part) for part in content)
+        match = re.search(r'\{[\s\S]*\}', content or '')
+        if not match:
+            return None
+        result = json.loads(match.group())
+        confidence = float(result.get('confidence', 0) or 0)
+        raw_points = result.get('points') or []
+        if confidence < 0.65 or len(raw_points) < 3 or len(raw_points) > 40:
+            return None
+        with Image.open(image_path) as image:
+            width, height = image.size
+        normalized = []
+        for point in raw_points:
+            if not isinstance(point, dict):
+                return None
+            x, y = float(point.get('x')), float(point.get('y'))
+            if not (0 <= x <= 1 and 0 <= y <= 1):
+                return None
+            normalized.append(_map_image_point_to_coords(x, y, width, height, center_lat, center_lng, zoom))
+        if not maps_service._point_in_polygon(center_lat, center_lng, normalized):
+            return None
+        area = maps_service._approx_polygon_area_sqm(normalized)
+        if area < 20 or area > 100000:
+            return None
+        return normalized
+    except Exception as error:
+        print(f'[SITE BOUNDARY VISION] {error}')
+        return None
+
+
+@app.route('/api/analyze-site', methods=['POST'])
+@require_permission('create_presentation')
+def api_analyze_site():
+    """Analyze site fields from Google data and generate the map assets once."""
+    data = request.json or {}
+    project_data = clean_project_data(data.get('projectData', {}))
+    branding = db.get_branding(g.tenant_id) or {}
+
+    lat = maps_service._extract_coordinate(
+        project_data.get('location_lat') or project_data.get('locationLat') or
+        project_data.get('latitude') or project_data.get('lat')
+    )
+    lng = maps_service._extract_coordinate(
+        project_data.get('location_lng') or project_data.get('locationLng') or
+        project_data.get('longitude') or project_data.get('lng')
+    )
+    address = project_data.get('location_address') or project_data.get('location') or ''
+    source = 'existing_coordinates'
+
+    if lat is None or lng is None:
+        link = address if isinstance(address, str) and address.startswith('http') else project_data.get('location_maps_link') or project_data.get('maps_link')
+        coords = maps_service.extract_coords_from_maps_link(link) if link else None
+        if coords:
+            lat, lng = coords['lat'], coords['lng']
+            source = 'maps_link'
+        elif address and not str(address).startswith('http'):
+            geo = maps_service.geocode_address(address, tenant_id=g.tenant_id)
+            if geo.get('success'):
+                lat, lng = geo['lat'], geo['lng']
+                source = 'geocoding'
+
+    if lat is None or lng is None:
+        return jsonify({'success': False, 'error': 'أدخل رابط Google Maps أو عنوان الموقع أولاً'}), 400
+
+    def landmark_lines(items, matrix=None):
+        matrix = matrix or []
+        lines = []
+        for index, item in enumerate(items or []):
+            name = item.get('name') or item.get('displayName') or ''
+            if not name:
+                continue
+            drive = matrix[index] if index < len(matrix) and isinstance(matrix[index], dict) else {}
+            distance = drive.get('distance_text') or item.get('distance_text')
+            duration = drive.get('duration_min') or item.get('duration_minutes')
+            details = []
+            if distance:
+                details.append(str(distance))
+            if duration:
+                details.append(f'{duration} دقيقة')
+            lines.append(f"{name} - {' - '.join(details)}" if details else name)
+        return '\n'.join(lines)
+
+    nearby = maps_service.get_nearby_landmarks(lat, lng, radius=1000, max_results=6)
+    nearby_items = nearby.get('landmarks', []) if nearby.get('success') else []
+    nearby_matrix = maps_service.get_drive_matrix((lat, lng), nearby_items) if nearby_items else []
+    for index, item in enumerate(nearby_items):
+        if index < len(nearby_matrix) and nearby_matrix[index].get('duration_min') is not None:
+            item['duration_minutes'] = nearby_matrix[index].get('duration_min')
+            item['distance_text'] = nearby_matrix[index].get('distance_text')
+
+    city = maps_service.get_nearby_landmarks(lat, lng, radius=5000, max_results=6)
+    city_items = city.get('landmarks', []) if city.get('success') else []
+    roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=g.tenant_id, max_results=6)
+
+    polygon = None
+    raw_polygon = project_data.get('location_polygon')
+    if isinstance(raw_polygon, str):
+        try:
+            polygon = [
+                (float(lat_value.strip()), float(lng_value.strip()))
+                for point in raw_polygon.split(';') if ',' in point
+                for lat_value, lng_value in [point.split(',', 1)]
+            ]
+            if len(polygon) < 3:
+                polygon = None
+        except (TypeError, ValueError):
+            polygon = None
+    if not polygon:
+        polygon = maps_service._fetch_osm_polygon(lat, lng, radius_m=180)
+
+    fields = {
+        'location_lat': lat,
+        'location_lng': lng,
+        'nearby_landmarks': landmark_lines(nearby_items, nearby_matrix),
+        'city_landmarks': landmark_lines(city_items),
+    }
+    road_names = []
+    for road in roads:
+        name = road.get('name')
+        if name and name not in road_names:
+            road_names.append(name)
+    if road_names:
+        fields['main_roads'] = '\n'.join(road_names)
+    if polygon:
+        fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
+
+    analyzed_project = {**project_data, **fields, 'location_lat': lat, 'location_lng': lng}
+    map_result = maps_service.generate_all_map_images(
+        analyzed_project,
+        g.tenant_id,
+        presentation_id=data.get('presentationId'),
+        force=data.get('force', True) is not False,
+        branding=branding,
+    )
+    estimated_polygon = None
+    if not polygon:
+        overview_path = (
+            map_result.get('placeholders', {}).get('##MAP_OVERVIEW##')
+            or map_result.get('placeholders', {}).get('##MAP_OVERVIEW_SATELLITE##')
+            or map_result.get('placeholders', {}).get('##MAP_OVERVIEW_ROADMAP##')
+        )
+        estimated_polygon = _estimate_site_polygon_from_satellite(
+            overview_path,
+            lat,
+            lng,
+            int((map_result.get('zooms') or {}).get('overview') or 17),
+        ) if overview_path else None
+        if estimated_polygon:
+            polygon = estimated_polygon
+            fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
+            analyzed_project = {**analyzed_project, 'location_polygon': fields['location_polygon']}
+            map_result = maps_service.generate_all_map_images(
+                analyzed_project,
+                g.tenant_id,
+                presentation_id=data.get('presentationId'),
+                force=True,
+                branding=branding,
+            )
+    placeholders = {}
+    for placeholder, path in map_result.get('placeholders', {}).items():
+        if path and os.path.exists(path):
+            rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
+            placeholders[placeholder] = f'/{rel_path}'
+
+    return jsonify({
+        'success': True,
+        'fields': fields,
+        'mapPlaceholders': placeholders,
+        'landmarks': nearby_items,
+        'landmarksMatrix': nearby_matrix,
+        'cityLandmarks': city_items,
+        'roads': roads,
+        'zooms': map_result.get('zooms', {}),
+        'lat': lat,
+        'lng': lng,
+        'source': source,
+        'boundary': {
+            'status': 'verified_building' if polygon and not estimated_polygon else ('estimated_building' if estimated_polygon else 'needs_review'),
+            'estimated': bool(estimated_polygon),
+            'manual_edit_available': True,
+        },
+        'warning': map_result.get('error'),
+    })
+
+
 @app.route('/api/generate-map-images', methods=['POST'])
 @require_auth
 def api_generate_map_images():
@@ -4179,6 +4417,134 @@ def api_upload_reference():
     stored_path = os.path.relpath(ref_path, os.path.dirname(__file__)).replace('\\', '/')
     db.update_branding(g.tenant_id, reference_image_path=stored_path)
     return jsonify({'success': True, 'referenceImageUploaded': True})
+
+
+def _font_payload_from_file(file):
+    ext = os.path.splitext(file.filename or '')[1].lower()
+    if ext not in {'.ttf', '.otf', '.woff', '.woff2'}:
+        return None, 'Only TTF, OTF, WOFF, and WOFF2 fonts are supported'
+    raw = file.read()
+    if not raw or len(raw) > 15 * 1024 * 1024:
+        return None, 'Font file must be between 1 byte and 15 MB'
+    fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff': 'woff', '.woff2': 'woff2'}[ext]
+    return json.dumps({'data': base64.b64encode(raw).decode('ascii'), 'format': fmt, 'ext': ext}), None
+
+
+@app.route('/api/admin/sag-fonts', methods=['GET'])
+@require_permission('sag_admin_panel')
+def api_get_sag_fonts():
+    return jsonify({'success': True, 'fonts': db.get_sag_fonts(
+        script=request.args.get('script'), weight=request.args.get('weight')
+    )})
+
+
+@app.route('/api/admin/sag-fonts', methods=['POST'])
+@require_permission('sag_admin_panel')
+def api_create_sag_font():
+    data = request.form if request.form else (request.json or {})
+    font_name = (data.get('font_name') or data.get('fontName') or '').strip()
+    font_family = (data.get('font_family') or data.get('fontFamily') or '').strip()
+    script = (data.get('script') or '').strip().lower()
+    weight = (data.get('weight') or 'regular').strip().lower()
+    if not font_name or not font_family or script not in {'arabic', 'latin'} or weight not in {'light', 'regular', 'medium', 'bold', 'black'}:
+        return jsonify({'error': 'font_name, font_family, script, and a valid weight are required'}), 400
+    file_data = None
+    if 'font' in request.files:
+        file_data, error = _font_payload_from_file(request.files['font'])
+        if error:
+            return jsonify({'error': error}), 400
+    font_id = db.create_sag_font(
+        font_name, font_family, script, weight, data.get('style', 'normal'),
+        'uploaded' if file_data else 'preset', data.get('source_data') or font_family, file_data
+    )
+    font = db.get_sag_font(font_id) or {}
+    font.pop('file_data', None)
+    return jsonify({'success': True, 'font': font}), 201
+
+
+@app.route('/api/admin/sag-fonts/<font_id>', methods=['PUT'])
+@require_permission('sag_admin_panel')
+def api_update_sag_font(font_id):
+    data = request.json or {}
+    if not db.update_sag_font(font_id, **data):
+        return jsonify({'error': 'Font not found or no valid changes'}), 404
+    return jsonify({'success': True, 'font': db.get_sag_font(font_id)})
+
+
+@app.route('/api/admin/sag-fonts/<font_id>', methods=['DELETE'])
+@require_permission('sag_admin_panel')
+def api_delete_sag_font(font_id):
+    if not db.get_sag_font(font_id):
+        return jsonify({'error': 'Font not found'}), 404
+    db.update_sag_font(font_id, is_active=0, is_default=0)
+    return jsonify({'success': True})
+
+
+def _public_font_selections(tenant_id):
+    hidden = {'custom_font_data'}
+    return [
+        {key: value for key, value in selection.items() if key not in hidden}
+        for selection in db.get_tenant_font_selections(tenant_id)
+    ]
+
+
+@app.route('/api/branding/fonts', methods=['GET'])
+@require_auth
+def api_get_branding_fonts():
+    return jsonify({'success': True, 'selections': _public_font_selections(g.tenant_id), 'available': db.get_sag_fonts()})
+
+
+@app.route('/api/branding/fonts', methods=['PUT'])
+@require_permission('company_settings')
+def api_set_branding_font():
+    data = request.json or {}
+    script = (data.get('script') or '').strip().lower()
+    weight = (data.get('weight') or '').strip().lower()
+    font_id = data.get('font_id') or data.get('fontId')
+    if script not in {'arabic', 'latin'} or weight not in {'light', 'regular', 'medium', 'bold', 'black'}:
+        return jsonify({'error': 'Invalid script or weight'}), 400
+    if font_id and not db.get_sag_font(font_id):
+        return jsonify({'error': 'Font not found'}), 404
+    if font_id:
+        db.set_tenant_font_selection(g.tenant_id, script, weight, font_id=font_id)
+    else:
+        db.delete_tenant_font_selection(g.tenant_id, script, weight)
+    return jsonify({'success': True, 'selections': _public_font_selections(g.tenant_id)})
+
+
+@app.route('/api/branding/fonts/upload', methods=['POST'])
+@require_permission('company_settings')
+def api_upload_branding_font_variant():
+    script = (request.form.get('script') or '').strip().lower()
+    weight = (request.form.get('weight') or 'regular').strip().lower()
+    if script not in {'arabic', 'latin'} or weight not in {'light', 'regular', 'medium', 'bold', 'black'}:
+        return jsonify({'error': 'Invalid script or weight'}), 400
+    file = request.files.get('font')
+    if not file or not file.filename:
+        return jsonify({'error': 'No font file provided'}), 400
+    file_data, error = _font_payload_from_file(file)
+    if error:
+        return jsonify({'error': error}), 400
+    ext = os.path.splitext(file.filename)[1].lower()
+    safe_name = re.sub(r'[^A-Za-z0-9_-]', '_', os.path.splitext(file.filename)[0])
+    font_dir = os.path.join(UPLOADS_DIR, g.tenant_id, 'fonts')
+    os.makedirs(font_dir, exist_ok=True)
+    filename = f'{safe_name}_{script}_{weight}{ext}'
+    filepath = os.path.join(font_dir, filename)
+    with open(filepath, 'wb') as font_file:
+        font_file.write(base64.b64decode(json.loads(file_data)['data']))
+    stored_path = os.path.relpath(filepath, os.path.dirname(__file__)).replace('\\', '/')
+    db.set_tenant_font_selection(g.tenant_id, script, weight, custom_font_path=stored_path, custom_font_data=file_data)
+    return jsonify({'success': True, 'selections': _public_font_selections(g.tenant_id)})
+
+
+@app.route('/api/branding/fonts/<script>/<weight>', methods=['DELETE'])
+@require_permission('company_settings')
+def api_delete_branding_font(script, weight):
+    if script not in {'arabic', 'latin'} or weight not in {'light', 'regular', 'medium', 'bold', 'black'}:
+        return jsonify({'error': 'Invalid script or weight'}), 400
+    db.delete_tenant_font_selection(g.tenant_id, script, weight)
+    return jsonify({'success': True})
 
 
 @app.route('/api/upload-font', methods=['POST'])
