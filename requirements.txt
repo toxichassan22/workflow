@@ -22,4 +22,5 @@ emoji>=2.15.0
 playwright>=1.40.0
 gunicorn>=21.0.0
 pyjwt>=2.8.0
+fontTools>=4.40.0
 psycopg2-binary>=2.9.0

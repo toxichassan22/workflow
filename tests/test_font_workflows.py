@@ -1,0 +1,224 @@
+"""Regression checks for the company font panel and the training-agent font tools.
+
+The suite uses a temporary SQLite database and never calls Google or an AI API.
+"""
+
+import io
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import auth
+import db
+
+
+class FontWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        # Uploads must live on the same drive as app.py: os.path.relpath fails across drives.
+        cls.uploads_temp = tempfile.TemporaryDirectory(dir=ROOT)
+        db.DB_PATH = os.path.join(cls.temp_dir.name, 'font-workflows.db')
+
+        # Import only after redirecting DB_PATH: app.py initializes its database at import time.
+        import app as application_module
+
+        cls.application_module = application_module
+        cls.app = application_module.app
+        cls.app.config.update(TESTING=True)
+        # Uploaded font files written by this suite stay in the temporary folder.
+        cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
+
+        with cls.app.app_context():
+            cls.tenant = db.create_tenant('Font Co', 'fonts@example.test', 'hash-a', 'font-co')
+            cls.other_tenant = db.create_tenant('Other Co', 'other@example.test', 'hash-b', 'other-co')
+            cls.font_ar = db.create_sag_font('Cairo', 'Cairo', 'arabic', 'regular', source_type='preset', source_data='Cairo')
+            cls.font_lat = db.create_sag_font('Cairo', 'Cairo', 'latin', 'regular', source_type='preset', source_data='Cairo')
+
+        cls.token = auth.create_token(
+            cls.tenant, 'fonts@example.test', user_id=None, user_name='Font Co', user_role='company_admin'
+        )
+        cls.other_token = auth.create_token(
+            cls.other_tenant, 'other@example.test', user_id=None, user_name='Other Co', user_role='company_admin'
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temp_dir.cleanup()
+        cls.uploads_temp.cleanup()
+
+    @staticmethod
+    def _headers(token):
+        return {'Authorization': f'Bearer {token}'}
+
+    def setUp(self):
+        # Each test starts from a clean font-selection slate.
+        with self.app.app_context():
+            for script in ('arabic', 'latin'):
+                for weight in ('light', 'regular', 'medium', 'bold', 'black'):
+                    db.delete_tenant_font_selection(self.tenant, script, weight)
+                    db.delete_tenant_font_selection(self.other_tenant, script, weight)
+
+    # ── Branding font API ─────────────────────────────────────────────────
+
+    def test_get_branding_fonts_lists_available_central_fonts(self):
+        client = self.app.test_client()
+        resp = client.get('/api/branding/fonts', headers=self._headers(self.token))
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json()
+        self.assertTrue(payload['success'])
+        self.assertEqual(payload['selections'], [])
+        families = {f['font_family'] for f in payload['available']}
+        self.assertIn('Cairo', families)
+
+    def test_put_and_delete_branding_font_selection(self):
+        client = self.app.test_client()
+        resp = client.put('/api/branding/fonts', headers=self._headers(self.token), json={
+            'script': 'arabic', 'weight': 'regular', 'font_id': self.font_ar,
+        })
+        self.assertEqual(resp.status_code, 200)
+        selections = resp.get_json()['selections']
+        self.assertEqual(len(selections), 1)
+        self.assertEqual(selections[0]['font_id'], self.font_ar)
+        self.assertNotIn('custom_font_data', selections[0])
+
+        resp = client.delete('/api/branding/fonts/arabic/regular', headers=self._headers(self.token))
+        self.assertEqual(resp.status_code, 200)
+        with self.app.app_context():
+            self.assertIsNone(db.get_tenant_font_selection(self.tenant, 'arabic', 'regular'))
+
+    def test_put_rejects_unknown_font_id(self):
+        client = self.app.test_client()
+        resp = client.put('/api/branding/fonts', headers=self._headers(self.token), json={
+            'script': 'arabic', 'weight': 'regular', 'font_id': 'missing-font',
+        })
+        self.assertEqual(resp.status_code, 404)
+
+    def test_auto_upload_detects_and_selects_uploaded_font(self):
+        font_file = ROOT / 'assets' / 'fonts' / 'BahijTheSansArabic-Bold.ttf'
+        self.assertTrue(font_file.exists(), 'bundled test font is missing')
+        client = self.app.test_client()
+        with open(font_file, 'rb') as fh:
+            resp = client.post(
+                '/api/branding/fonts/auto-upload',
+                headers=self._headers(self.token),
+                data={'font': (io.BytesIO(fh.read()), 'BahijTheSansArabic-Bold.ttf')},
+                content_type='multipart/form-data',
+            )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json()
+        self.assertTrue(payload['success'])
+        self.assertTrue(payload['detected']['family'])
+        self.assertTrue(payload['selections'], 'auto-upload must select the font for detected scripts')
+        with self.app.app_context():
+            for sel in db.get_tenant_font_selections(self.tenant):
+                self.assertTrue(sel['custom_font_path'])
+                full_path = os.path.join(self.application_module.UPLOADS_DIR, self.tenant, 'fonts',
+                                         os.path.basename(sel['custom_font_path']))
+                self.assertTrue(os.path.exists(full_path), full_path)
+                # Selections are tenant-scoped: the other tenant must not see them.
+                self.assertEqual(db.get_tenant_font_selections(self.other_tenant), [])
+
+    # ── Training-agent font tools ─────────────────────────────────────────
+
+    def test_agent_list_fonts_tool(self):
+        with self.app.app_context():
+            db.set_tenant_font_selection(self.tenant, 'arabic', 'regular', font_id=self.font_ar)
+            result = self.application_module._execute_agent_action(self.tenant, {'tool': 'list_fonts'})
+        self.assertEqual(result['status'], 'success')
+        # The registry ships with seeded defaults plus the two Cairo rows created in setUpClass.
+        cairo_fonts = [f for f in result['data']['available'] if f['font_family'] == 'Cairo']
+        self.assertEqual(len(cairo_fonts), 2)
+        self.assertEqual(result['data']['current'][0]['font_id'], self.font_ar)
+
+    def test_agent_set_font_by_name_applies_to_all_scripts(self):
+        with self.app.app_context():
+            result = self.application_module._execute_agent_action(
+                self.tenant, {'tool': 'set_font', 'params': {'font_query': 'Cairo'}}
+            )
+            self.assertEqual(result['status'], 'success', result.get('message'))
+            self.assertEqual(
+                db.get_tenant_font_selection(self.tenant, 'arabic', 'regular')['font_id'], self.font_ar
+            )
+            self.assertEqual(
+                db.get_tenant_font_selection(self.tenant, 'latin', 'regular')['font_id'], self.font_lat
+            )
+
+    def test_agent_set_font_resets_to_default(self):
+        with self.app.app_context():
+            db.set_tenant_font_selection(self.tenant, 'arabic', 'regular', font_id=self.font_ar)
+            result = self.application_module._execute_agent_action(
+                self.tenant, {'tool': 'set_font', 'params': {'font_query': 'default'}}
+            )
+            self.assertEqual(result['status'], 'success', result.get('message'))
+            self.assertEqual(db.get_tenant_font_selections(self.tenant), [])
+
+    def test_agent_set_font_rejects_unknown_font(self):
+        with self.app.app_context():
+            result = self.application_module._execute_agent_action(
+                self.tenant, {'tool': 'set_font', 'params': {'font_query': 'NoSuchFont'}}
+            )
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('NoSuchFont', result['message'])
+
+    def test_agent_system_state_includes_font_section(self):
+        with self.app.app_context():
+            db.set_tenant_font_selection(self.tenant, 'arabic', 'regular', font_id=self.font_ar)
+            state = self.application_module._build_agent_system_state(self.tenant)
+        self.assertIn('الخطوط', state)
+        self.assertIn('Cairo', state)
+
+    # ── Training-chat fallback intents (AI unavailable) ───────────────────
+
+    def test_training_chat_font_intent_without_ai(self):
+        client = self.app.test_client()
+        with patch.object(self.application_module, 'call_zai_chat', side_effect=RuntimeError('AI down')):
+            resp = client.post('/api/training-chat', headers=self._headers(self.token), json={
+                'message': 'غيّر الخط إلى Cairo',
+            })
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json()
+        self.assertTrue(payload['success'])
+        font_actions = [a for a in payload['actions'] if a.get('tool') == 'set_font']
+        self.assertTrue(font_actions, payload)
+        self.assertEqual(font_actions[0]['status'], 'success')
+        with self.app.app_context():
+            self.assertEqual(
+                db.get_tenant_font_selection(self.tenant, 'arabic', 'regular')['font_id'], self.font_ar
+            )
+
+    def test_training_chat_font_reset_intent_without_ai(self):
+        with self.app.app_context():
+            db.set_tenant_font_selection(self.tenant, 'arabic', 'regular', font_id=self.font_ar)
+        client = self.app.test_client()
+        with patch.object(self.application_module, 'call_zai_chat', side_effect=RuntimeError('AI down')):
+            resp = client.post('/api/training-chat', headers=self._headers(self.token), json={
+                'message': 'رجّع الخط الافتراضي',
+            })
+        self.assertEqual(resp.status_code, 200)
+        font_actions = [a for a in resp.get_json()['actions'] if a.get('tool') == 'set_font']
+        self.assertTrue(font_actions)
+        with self.app.app_context():
+            self.assertEqual(db.get_tenant_font_selections(self.tenant), [])
+
+    def test_training_chat_slide_plan_word_does_not_trigger_font_intent(self):
+        """'خطة' contains the letters خط — it must never trigger the font fallback."""
+        client = self.app.test_client()
+        with patch.object(self.application_module, 'call_zai_chat', side_effect=RuntimeError('AI down')):
+            resp = client.post('/api/training-chat', headers=self._headers(self.token), json={
+                'message': 'عدّل خطة الشرائح لو سمحت',
+            })
+        self.assertEqual(resp.status_code, 200)
+        font_actions = [a for a in resp.get_json()['actions'] if a.get('tool') == 'set_font']
+        self.assertEqual(font_actions, [])
+
+
+if __name__ == '__main__':
+    unittest.main()

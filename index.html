@@ -3107,16 +3107,6 @@
       <!-- Stats Cards -->
       <div id="sagAdminStats" class="tenant-dashboard-cards" style="margin-bottom:20px"></div>
 
-      <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:20px;">
-        <h3 style="margin:0 0 8px;color:var(--p);">الخطوط المركزية</h3>
-        <p class="tenant-hint">ارفع خطًا مركزيًا ليظهر للشركات مع تحديد اللغة والوزن.</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <input id="sagFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="flex:1;min-width:240px;">
-          <button class="btn primary" onclick="uploadSagFontAutomatically()">رفع الخط والتعرف تلقائيًا</button>
-        </div>
-        <div id="sagFontsList" style="margin-top:12px;"></div>
-      </div>
-
       <!-- Search & Filter -->
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
         <input type="text" id="sagSearchInput" placeholder="بحث بالاسم أو الإيميل أو الدومين..."
@@ -4009,14 +3999,66 @@
       const data = await api('GET', '/api/branding/fonts');
       if (!data.success) { host.textContent = 'تعذر تحميل الخطوط'; return; }
       const selections = data.selections || [];
+      const available = data.available || [];
+      window.tenantAvailableFonts = available;
+      const currentRegular = selections.find(item => item.script === 'arabic' && item.weight === 'regular') || {};
+      const hasCustomFont = !currentRegular.font_id && !!currentRegular.custom_font_path;
+      const customFontName = hasCustomFont
+        ? (currentRegular.custom_font_path.split('/').pop() || 'خط مخصص').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ')
+        : '';
+      const uniqueFonts = [];
+      available.forEach(font => {
+        if (!uniqueFonts.some(item => item.font_family === font.font_family)) uniqueFonts.push(font);
+      });
       const summary = selections.length
-        ? selections.map(item => (item.script === 'arabic' ? 'عربي' : 'لاتيني') + ' ' + item.weight).join('، ')
-        : 'لم يتم رفع خط خاص بعد؛ سيتم استخدام الخط الافتراضي';
-      host.innerHTML = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:10px;">' +
-        '<input id="tenantAutoFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="flex:1;min-width:220px;" onchange="uploadTenantFontAutomatically(this)">' +
-        '<button class="btn primary" onclick="document.getElementById(\'tenantAutoFontFile\').click()">رفع ملف الخط</button>' +
-        '<span style="width:100%;font-size:12px;color:var(--muted);">' + escapeHtml(summary) + '</span>' +
+        ? selections.map(item => (item.script === 'arabic' ? 'عربي' : 'لاتيني') + ' ' + item.weight + (item.custom_font_path ? ' (مرفوع)' : '')).join('، ')
+        : 'سيتم استخدام الخط الافتراضي';
+      let customOption = '';
+      if (hasCustomFont) {
+        customOption = '<option value="custom" selected>خط مرفوع: ' + escapeHtml(customFontName) + '</option>';
+      }
+      host.innerHTML = '<div style="display:grid;gap:10px;border:1px solid var(--line);border-radius:10px;padding:10px;">' +
+        '<select id="tenantPrimaryFontSelect" onchange="selectTenantPrimaryFont(this.value)" style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">' +
+        '<option value="">استخدام الخط الافتراضي</option>' +
+        customOption +
+        uniqueFonts.map(font => '<option value="' + escapeHtml(font.id) + '"' + (font.id === currentRegular.font_id ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + '</option>').join('') +
+        '</select>' +
+        '<label id="tenantAutoFontDropzone" style="display:flex;align-items:center;justify-content:center;min-height:72px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--muted);text-align:center;padding:12px;">اسحب ملف الخط هنا أو اضغط لاختياره<input id="tenantAutoFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="uploadTenantFontAutomatically(this)"></label>' +
+        '<span style="font-size:12px;color:var(--muted);">' + escapeHtml(summary) + '</span>' +
         '</div>';
+      const dropzone = document.getElementById('tenantAutoFontDropzone');
+      if (dropzone) {
+        dropzone.ondragover = event => { event.preventDefault(); dropzone.style.borderColor = 'var(--p)'; };
+        dropzone.ondragleave = () => { dropzone.style.borderColor = 'var(--line)'; };
+        dropzone.ondrop = event => {
+          event.preventDefault();
+          dropzone.style.borderColor = 'var(--line)';
+          uploadTenantFontAutomatically({ files: event.dataTransfer.files });
+        };
+      }
+    }
+
+    async function selectTenantPrimaryFont(fontId) {
+      if (fontId === 'custom') return;
+      if (!fontId) {
+        await Promise.all([
+          api('DELETE', '/api/branding/fonts/arabic/regular'),
+          api('DELETE', '/api/branding/fonts/latin/regular')
+        ]);
+        await loadTenantBranding();
+        await loadTenantFonts();
+        return;
+      }
+      const selected = (window.tenantAvailableFonts || []).find(font => font.id === fontId);
+      if (!selected) return;
+      const matches = (window.tenantAvailableFonts || []).filter(font => font.font_family === selected.font_family && font.weight === 'regular');
+      const target = matches.length ? matches : [selected];
+      for (const font of target) {
+        await setTenantFontSelection(font.script, 'regular', font.id);
+      }
+      await loadTenantBranding();
+      await loadTenantFonts();
+      toast('تم تخصيص الخط للشركة');
     }
 
     async function uploadTenantFontAutomatically(input) {
@@ -4050,30 +4092,6 @@
       await loadTenantBranding();
       await loadTenantFonts();
       toast('تم رفع خط الشركة');
-    }
-
-    async function loadSagFonts() {
-      const host = document.getElementById('sagFontsList');
-      if (!host) return;
-      const data = await api('GET', '/api/admin/sag-fonts');
-      if (!data.success) { host.textContent = data.error || 'تعذر تحميل الخطوط المركزية'; return; }
-      host.innerHTML = (data.fonts || []).map(font =>
-        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding:6px 0;">' +
-        '<span>' + escapeHtml(font.font_name) + ' — ' + escapeHtml(font.script) + ' / ' + escapeHtml(font.weight) + '</span>' +
-        '<span class="tenant-hint">' + (font.is_default ? 'افتراضي' : 'متاح') + '</span></div>'
-      ).join('') || '<span class="tenant-hint">لا توجد خطوط مركزية</span>';
-    }
-
-    async function uploadSagFontAutomatically() {
-      const file = document.getElementById('sagFontFile');
-      if (!file || !file.files || !file.files[0]) { toast('اختر ملف الخط أولاً'); return; }
-      const form = new FormData();
-      form.append('font', file.files[0]);
-      const data = await api('POST', '/api/admin/sag-fonts/auto-upload', form, true);
-      if (!data.success) { toast(data.error || 'فشل رفع الخط المركزي'); return; }
-      await loadSagFonts();
-      const detected = data.detected || {};
-      toast('تم التعرف على الخط تلقائيًا: ' + (detected.family || file.files[0].name) + ' — ' + (detected.weight || 'regular'));
     }
 
     // Settings
@@ -7606,7 +7624,6 @@
       const stats = (statsData.success && statsData.stats) ? statsData.stats : {};
       renderSagStats(stats);
       renderSagTenants(sagAllTenants);
-      loadSagFonts();
     }
 
     function renderSagStats(stats) {
@@ -7900,6 +7917,10 @@
     async function refreshSystemDataAfterAgentAction() {
       try {
         await loadTenantBranding();
+        const settingsPage = document.getElementById('tenantSettingsPage');
+        if (settingsPage && settingsPage.style.display !== 'none') {
+          await loadTenantFonts();
+        }
         const fieldsData = await api('GET', '/api/fields');
         if (fieldsData.success && fieldsData.fields) {
           tenantFields = fieldsData.fields;

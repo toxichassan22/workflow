@@ -5273,6 +5273,19 @@ def api_training_chat():
 ```
 تتطلب projectData في مساحة العمل (استخدم update_workspace أولاً إن لزم).
 
+### 25. عرض الخطوط المتاحة والتخصيص الحالي:
+```action
+{{"tool": "list_fonts"}}
+```
+
+### 26. تخصيص خط الشركة أو الرجوع للخط الافتراضي:
+```action
+{{"tool": "set_font", "params": {{"font_query": "اسم الخط أو عائلته من قائمة الخطوط المتاحة أو default", "weight": "regular"}}}}
+```
+- عند اختيار خط يدعم العربية واللاتينية يُطبَّق على الاثنين تلقائياً.
+- استخدم "default" في font_query للرجوع للخط الافتراضي.
+- رفع ملف خط جديد يتم فقط من إعدادات الشركة (منطقة السحب والإفلات) — إذا طلب المستخدم خطاً غير موجود في القائمة، أخبره برفعه أولاً من الإعدادات.
+
 ## سير العمل الكامل لإنشاء عرض جديد من المحادثة:
 1. اجمع بيانات المشروع من كلام المستخدم (اسم المشروع، النوع، الموقع، المساحات، الميزانية...) ونفّذ `update_workspace`
 2. نفّذ `generate_slide_plan` لإنشاء خطة الشرائح
@@ -5390,6 +5403,25 @@ def api_training_chat():
             })
             reply = "تم استرجاع الألوان القديمة والافتراضية للهوية البصرية بنجاح! 🎨 (Primary: #3B6E91, Secondary: #254B66)."
 
+        # 5. Font intent ("غيّر الخط إلى X" / "استخدم خط X" / "رجّع الخط الافتراضي")
+        font_words = {'خط', 'الخط', 'خطوط', 'الخطوط', 'بالخط', 'فونت', 'الفونت'}
+        tokens = set(re.findall(r'[؀-ۿ]+|[A-Za-z]+', message))
+        if not parsed_actions and (tokens & font_words or 'font' in message.lower()):
+            msg_lower = message.lower()
+            font_hit = None
+            for f in db.get_sag_fonts():
+                name = (f.get('font_name') or '').lower()
+                family = (f.get('font_family') or '').lower()
+                if (name and name in msg_lower) or (family and family in msg_lower):
+                    font_hit = f
+                    break
+            if font_hit:
+                parsed_actions.append({'tool': 'set_font', 'params': {'font_query': font_hit['font_name']}})
+                reply = f"تم تخصيص خط الشركة إلى **{font_hit['font_name']}**. 🔤"
+            elif any(kw in message for kw in ['الخط الافتراضي', 'رجع الخط', 'رجّع الخط', 'استرجاع الخط']):
+                parsed_actions.append({'tool': 'set_font', 'params': {'font_query': 'default'}})
+                reply = 'تم الرجوع للخط الافتراضي للشركة. 🔤'
+
     for action in parsed_actions:
         try:
             result = _execute_agent_action(g.tenant_id, action, reply_text=reply, workspace=workspace)
@@ -5468,6 +5500,29 @@ def _build_agent_system_state(tenant_id):
     for t in active_training[:10]:
         training_lines.append(f"  • [{t['id'][:8]}] {t.get('title', 'بدون عنوان')} — فئة: {t.get('category', 'general')} — {t.get('created_at', '')[:10]}")
 
+    font_selections = db.get_tenant_font_selections(tenant_id)
+    current_font_lines = []
+    for sel in font_selections:
+        if sel.get('font_id'):
+            src = db.get_sag_font(sel['font_id']) or {}
+            font_label = src.get('font_name') or 'خط مركزي'
+        else:
+            font_label = os.path.basename(sel.get('custom_font_path') or 'خط مخصص')
+        script_label = 'عربي' if sel.get('script') == 'arabic' else 'لاتيني'
+        current_font_lines.append(f"  • {script_label} / {sel.get('weight', 'regular')}: {font_label}")
+
+    available_fonts = db.get_sag_fonts()
+    available_font_lines = []
+    seen_families = set()
+    for f in available_fonts:
+        family_key = f.get('font_family') or f.get('font_name')
+        if family_key in seen_families:
+            continue
+        seen_families.add(family_key)
+        script_label = 'عربي' if f.get('script') == 'arabic' else 'لاتيني'
+        default_tag = ' (افتراضي النظام)' if f.get('is_default') else ''
+        available_font_lines.append(f"  • {f.get('font_name')} ({script_label}){default_tag}")
+
     return f"""### 🏢 معلومات الشركة:
 - اسم الشركة: {branding.get('company_name', 'غير محدد')}
 - الشعار النصي: {branding.get('tagline', 'غير محدد')}
@@ -5486,6 +5541,12 @@ def _build_agent_system_state(tenant_id):
 - الهيدر: {'مفعل' if branding.get('header_enabled') else 'معطل'} (ارتفاع {branding.get('header_height', 56)}px)
 - الفوتر: {'مفعل' if branding.get('footer_enabled') else 'معطل'} (ارتفاع {branding.get('footer_height', 36)}px)
 - اللوجو: {'موجود' if branding.get('logo_path') else 'غير مرفوع'}
+
+### 🔤 الخطوط:
+- التخصيص الحالي: {'الخط الافتراضي (لم يتم تخصيص خط)' if not current_font_lines else ''}
+{chr(10).join(current_font_lines) if current_font_lines else ''}
+- الخطوط المتاحة للتخصيص ({len(seen_families)} خط):
+{chr(10).join(available_font_lines) if available_font_lines else '  لا توجد خطوط مركزية — يمكن للأدمن رفع خط مخصص من صفحة الإعدادات.'}
 
 ### 📊 إعدادات الشرائح والصور:
 - عدد الشرائح الافتراضي: {branding.get('default_slide_count', 16)}
@@ -6294,6 +6355,71 @@ HTML الحالي:
                 'has_image': bool(t.get('image_path')),
             } for t in entries]
             result['message'] = f'{len(entries)} سجل تدريب'
+
+        # ── List Fonts ────────────────────────────────────────────────
+        elif tool == 'list_fonts':
+            selections = db.get_tenant_font_selections(tenant_id)
+            fonts = db.get_sag_fonts()
+            result['data'] = {
+                'current': [{
+                    'script': s['script'], 'weight': s['weight'],
+                    'font_id': s.get('font_id'),
+                    'custom': bool(s.get('custom_font_path')),
+                } for s in selections],
+                'available': [{
+                    'id': f['id'], 'font_name': f['font_name'], 'font_family': f['font_family'],
+                    'script': f['script'], 'weight': f['weight'],
+                } for f in fonts],
+            }
+            result['message'] = f'{len(fonts)} خط متاح، {len(selections)} تخصيص حالي'
+
+        # ── Set Font ──────────────────────────────────────────────────
+        elif tool == 'set_font':
+            query = (params.get('font_query') or params.get('font_name') or params.get('font_family') or params.get('query') or '').strip()
+            weight = (params.get('weight') or 'regular').strip().lower()
+            if weight not in {'light', 'regular', 'medium', 'bold', 'black'}:
+                weight = 'regular'
+            script_filter = (params.get('script') or 'both').strip().lower()
+            if not query:
+                result['status'] = 'error'
+                result['message'] = 'font_query مطلوب (اسم الخط أو default)'
+            elif query.lower() in {'default', 'reset', 'الافتراضي', 'الخط الافتراضي'}:
+                for script in ('arabic', 'latin'):
+                    db.delete_tenant_font_selection(tenant_id, script, weight)
+                db.log_ai_rule_change(tenant_id, 'agent_font', 'font_reset', query, 'default', risk_level='yellow')
+                result['message'] = 'تم الرجوع للخط الافتراضي'
+            else:
+                fonts = db.get_sag_fonts()
+                q = query.lower()
+                matches = [
+                    f for f in fonts
+                    if q in (f.get('font_name') or '').lower()
+                    or q in (f.get('font_family') or '').lower()
+                    or ((f.get('font_name') or '').lower() and (f.get('font_name') or '').lower() in q)
+                    or ((f.get('font_family') or '').lower() and (f.get('font_family') or '').lower() in q)
+                ]
+                if not matches:
+                    result['status'] = 'error'
+                    result['message'] = f'الخط "{query}" غير موجود ضمن الخطوط المتاحة'
+                else:
+                    exact = [f for f in matches if (f.get('font_family') or '').lower() == q or (f.get('font_name') or '').lower() == q]
+                    pool = exact or matches
+                    chosen = [f for f in pool if f.get('weight') == weight] or pool
+                    applied = []
+                    for f in chosen:
+                        if script_filter in ('arabic', 'latin') and f['script'] != script_filter:
+                            continue
+                        db.set_tenant_font_selection(tenant_id, f['script'], weight, font_id=f['id'])
+                        applied.append(f)
+                    if not applied:
+                        result['status'] = 'error'
+                        result['message'] = f'الخط "{query}" لا يدعم السكربت المطلوب ({script_filter})'
+                    else:
+                        names = '، '.join(sorted({f['font_name'] for f in applied}))
+                        scripts = ' و '.join('عربي' if s == 'arabic' else 'لاتيني' for s in sorted({f['script'] for f in applied}))
+                        db.log_ai_rule_change(tenant_id, 'agent_font', 'set_font', query, names, risk_level='yellow')
+                        result['changes']['font'] = {'query': query, 'applied': names}
+                        result['message'] = f'تم تخصيص الخط "{names}" ({scripts}) بوزن {weight}'
 
         # ── Unknown tool ──────────────────────────────────────────────
         else:
