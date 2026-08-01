@@ -4078,7 +4078,12 @@
         : '';
       const uniqueFonts = [];
       available.forEach(font => {
-        if (!uniqueFonts.some(item => item.font_family === font.font_family)) uniqueFonts.push(font);
+        const existing = uniqueFonts.find(item => item.font_family === font.font_family);
+        if (!existing) {
+          uniqueFonts.push(font);
+        } else if (font.weight === 'regular' && existing.weight !== 'regular') {
+          uniqueFonts[uniqueFonts.indexOf(existing)] = font;
+        }
       });
       const summary = selections.length
         ? selections.map(item => (item.script === 'arabic' ? 'عربي' : 'لاتيني') + ' ' + item.weight + (item.custom_font_path ? ' (مرفوع)' : '')).join('، ')
@@ -4091,7 +4096,7 @@
         '<select id="tenantPrimaryFontSelect" onchange="selectTenantPrimaryFont(this.value)" style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">' +
         '<option value="">استخدام الخط الافتراضي</option>' +
         customOption +
-        uniqueFonts.map(font => '<option value="' + escapeHtml(font.id) + '"' + (font.id === currentRegular.font_id ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + '</option>').join('') +
+        uniqueFonts.map(font => '<option value="' + escapeHtml(font.id) + '"' + (currentRegular.font_family && font.font_family === currentRegular.font_family && font.script === currentRegular.script ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + '</option>').join('') +
         '</select>' +
         '<label id="tenantAutoFontDropzone" style="display:flex;align-items:center;justify-content:center;min-height:72px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--muted);text-align:center;padding:12px;">اسحب ملف الخط هنا أو اضغط لاختياره<input id="tenantAutoFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="uploadTenantFontAutomatically(this)"></label>' +
         '<span style="font-size:12px;color:var(--muted);">' + escapeHtml(summary) + '</span>' +
@@ -4124,7 +4129,7 @@
       const matches = (window.tenantAvailableFonts || []).filter(font => font.font_family === selected.font_family && font.weight === 'regular');
       const target = matches.length ? matches : [selected];
       for (const font of target) {
-        await setTenantFontSelection(font.script, 'regular', font.id);
+        await setTenantFontSelection(font.script, 'regular', font.id, true);
       }
       await loadTenantBranding();
       await loadTenantFonts();
@@ -4143,9 +4148,10 @@
       toast('تم التعرف على الخط تلقائيًا: ' + (detected.family || input.files[0].name) + ' — ' + (detected.weight || 'regular'));
     }
 
-    async function setTenantFontSelection(script, weight, fontId) {
+    async function setTenantFontSelection(script, weight, fontId, skipReload) {
       const data = await api('PUT', '/api/branding/fonts', { script, weight, font_id: fontId || null });
       if (!data.success) { toast(data.error || 'فشل اختيار الخط'); return; }
+      if (skipReload) return;
       await loadTenantBranding();
       await loadTenantFonts();
       toast('تم تحديث خط العرض');
