@@ -6043,6 +6043,7 @@
 
       // Sync the location tables (roads / landmarks / catchment) with the sample text
       refreshLocationTables();
+      window._lastAnalyzedAddress = (sample.location_address || '').trim();
 
       // Trigger automatic draft save
       triggerAutoSaveDraft();
@@ -7505,6 +7506,7 @@
               if (input && input.type !== 'file') input.value = value;
             });
             refreshLocationTables();
+            window._lastAnalyzedAddress = (draftData.location_address || '').trim();
             if (draftData.tenantSlidePlan) {
               tenantSlidePlan = draftData.tenantSlidePlan;
               renderTenantSlidePlan();
