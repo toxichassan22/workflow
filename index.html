@@ -1950,19 +1950,36 @@
     /* ===== Location data tables (roads / landmarks / catchment) ===== */
     .location-table-field .fin-table-wrap {
       margin-top: 4px;
+      overflow-x: visible;
+    }
+
+    .location-table {
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    .location-table th:first-child,
+    .location-table td:first-child {
+      width: 45%;
     }
 
     .location-table th.lt-dist,
     .location-table th.lt-dur {
-      width: 110px;
+      width: 18%;
     }
 
-    .location-table th.lt-actions {
-      width: 42px;
+    .location-table th.lt-actions,
+    .location-table td.lt-actions {
+      width: 60px;
     }
 
     .location-table td {
       vertical-align: middle;
+    }
+
+    .location-table input {
+      width: 100%;
+      box-sizing: border-box;
     }
 
     .location-table .lt-del {
@@ -5165,9 +5182,9 @@
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'btn ghost';
-            btn.textContent = 'إيجاد الإحداثيات';
+            btn.textContent = 'تحليل الموقع';
             btn.style.marginTop = '8px';
-            btn.onclick = () => geocodeProjectAddress(addressInput, latInput, lngInput, true);
+            btn.onclick = () => analyzeTenantSite();
             div.appendChild(btn);
             // Auto site-analysis: pasting a maps link (or leaving the field with a
             // fresh address) fills roads/landmarks/catchment tables automatically.
