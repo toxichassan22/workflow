@@ -1950,27 +1950,32 @@
     /* ===== Location data tables (roads / landmarks / catchment) ===== */
     .location-table-field .fin-table-wrap {
       margin-top: 4px;
-      overflow-x: visible;
+      overflow-x: auto;
     }
 
     .location-table {
-      table-layout: fixed;
       width: 100%;
+      min-width: 500px;
     }
 
     .location-table th:first-child,
     .location-table td:first-child {
-      width: 45%;
+      width: auto;
     }
 
     .location-table th.lt-dist,
-    .location-table th.lt-dur {
-      width: 18%;
+    .location-table td.lt-dist {
+      width: 100px;
+    }
+
+    .location-table th.lt-dur,
+    .location-table td.lt-dur {
+      width: 100px;
     }
 
     .location-table th.lt-actions,
     .location-table td.lt-actions {
-      width: 60px;
+      width: 40px;
     }
 
     .location-table td {
@@ -1983,7 +1988,7 @@
     }
 
     .location-table .lt-del {
-      padding: 2px 10px;
+      padding: 2px 8px;
       font-size: 15px;
       line-height: 1.4;
     }
