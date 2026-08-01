@@ -1521,6 +1521,8 @@ def _google_directions_route(origin_lat, origin_lng, destination_lat, destinatio
         'destination': f'{destination_lat},{destination_lng}',
         'mode': 'driving',
         'alternatives': 'false',
+        'language': 'ar',
+        'region': 'sa',
         'key': _get_api_key(),
     }
     try:
