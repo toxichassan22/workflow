@@ -2941,7 +2941,7 @@
 
           <div
             style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px; border-top:1px solid #e8e4e0; padding-top:14px;">
-            <button class="btn primary" onclick="regeneratePresentationMaps(); toggleMapStylePanel();"
+            <button class="btn primary" onclick="collectMapStylePanel(); if(tenantPresentationId){ regeneratePresentationMaps(); } else { ensureProjectAssets({force:true, needImages:false}).then(()=>toast('تم إعادة توليد الخرائط')); } toggleMapStylePanel();"
               style="background:#3B6E91; color:#fff; border:none; padding:10px 18px; font-weight:700; border-radius:8px; cursor:pointer;">إعادة
               توليد الخرائط</button>
             <button class="btn ghost" onclick="toggleMapStylePanel()"
@@ -3274,6 +3274,17 @@
       return !!c.cover && mb.length > 0 && c.images_signature === imagesSignature();
     }
 
+    // Collect map style panel values into tenantProjectData.map_styles
+    function collectMapStylePanel() {
+      tenantProjectData = tenantProjectData || {};
+      tenantProjectData.map_styles = {
+        overview: document.getElementById('mapStyleOverview')?.value || 'satellite',
+        landmarks: document.getElementById('mapStyleLandmarks')?.value || 'satellite',
+        access: document.getElementById('mapStyleAccess')?.value || 'satellite',
+        catchment: document.getElementById('mapStyleCatchment')?.value || 'satellite'
+      };
+    }
+
     // Fields actually read by maps_service.generate_all_map_images on the server.
     // Sending the whole project data pushed the request past ~35KB, where the shared
     // hosting proxy corrupts the body and the request fails (404/502).
@@ -3337,6 +3348,8 @@
     async function ensureProjectAssets({ force = false, needImages = true, needMaps = true, includeCover = true } = {}) {
       tenantCreativeImages = tenantCreativeImages || { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
       if (!tenantProjectData) tenantProjectData = {};
+      // Collect map style panel overrides (map_styles is not in #tenantProjectForm)
+      collectMapStylePanel();
       // Refresh project data if the form is present
       if (typeof collectTenantFormData === 'function' && document.getElementById('tenantProjectForm')) {
         const fresh = await collectTenantFormData();
@@ -7573,18 +7586,16 @@
     }
 
     async function regeneratePresentationMaps() {
-      if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return; }
+      collectMapStylePanel();
+      if (!tenantPresentationId) {
+        await ensureProjectAssets({force:true, needImages:false});
+        toast('تم إعادة توليد الخرائط');
+        return;
+      }
       if (!confirm('سيتم إعادة توليد صور الخرائط من Google. قد تستهلك من رصيد API. متابعة؟')) return;
       showLoader('جاري إعادة توليد خرائط الموقع', 'قد تستغرق 30-60 ثانية');
-      const mapStyles = {
-        overview: document.getElementById('mapStyleOverview')?.value || 'satellite',
-        landmarks: document.getElementById('mapStyleLandmarks')?.value || 'satellite',
-        access: document.getElementById('mapStyleAccess')?.value || 'satellite',
-        catchment: document.getElementById('mapStyleCatchment')?.value || 'satellite'
-      };
+      const mapStyles = tenantProjectData.map_styles;
       // Persist per-project map style overrides
-      tenantProjectData = tenantProjectData || {};
-      tenantProjectData.map_styles = mapStyles;
       await triggerAutoSaveDraft();
       const data = await api('POST', '/api/presentations/' + tenantPresentationId + '/regenerate-maps', { map_styles: mapStyles });
       hideLoader();
