@@ -1946,6 +1946,41 @@
       width: 100%;
       text-align: right;
     }
+
+    /* ===== Location data tables (roads / landmarks / catchment) ===== */
+    .location-table-field .fin-table-wrap {
+      margin-top: 4px;
+    }
+
+    .location-table th.lt-dist,
+    .location-table th.lt-dur {
+      width: 110px;
+    }
+
+    .location-table th.lt-actions {
+      width: 42px;
+    }
+
+    .location-table td {
+      vertical-align: middle;
+    }
+
+    .location-table .lt-del {
+      padding: 2px 10px;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    .location-table-add {
+      margin-top: 8px;
+    }
+
+    .location-table-hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
     /* ===== Tenant Global Rail ===== */
     .tgr {
       position: fixed;
@@ -3224,8 +3259,8 @@
       'catchment_areas', 'draft_id', 'draftId', 'draw_compass', 'draw_inset',
       'enabled_maps', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
       'location_address', 'location_lat', 'location_lng', 'location_maps_link',
-      'locationLat', 'locationLng', 'location_polygon', 'longitude', 'map_styles',
-      'map_type', 'maps_link', 'nearby_landmarks'
+      'locationLat', 'locationLng', 'location_polygon', 'longitude', 'main_roads', 'map_styles',
+      'map_type', 'maps_link', 'nearby_landmarks', 'secondary_roads'
     ];
 
     // A drawn/detected boundary can carry thousands of points, which alone exceeds the
@@ -4830,6 +4865,182 @@
       toast('تم إرسال المسودة للاعتماد');
     }
 
+    // ── Location data tables (roads / landmarks / catchment) ──────────────
+    // These fields stay plain text in project data (each row serialized as
+    // "name — X كم — Y دقائق") so maps/AI keep working, but the UI edits them
+    // as proper tables with add/delete rows.
+    const LOCATION_TABLE_FIELDS = {
+      main_roads: { nameLabel: 'الطريق / المنطقة', nameHint: 'مثال: طريق الملك فهد' },
+      secondary_roads: { nameLabel: 'الطريق / الشارع', nameHint: 'مثال: شارع النرجس' },
+      nearby_landmarks: { nameLabel: 'المَعلم / المنطقة', nameHint: 'مثال: مجمع الراشد' },
+      catchment_areas: { nameLabel: 'المنطقة', nameHint: 'مثال: حي النرجس' },
+    };
+
+    function parseLocationFieldText(key, value) {
+      if (Array.isArray(value)) {
+        return value.map(item => ({
+          name: (item && (item.name || item.area || item.title)) || '',
+          distance_km: item && (item.distance_km ?? item.distance ?? ''),
+          duration_minutes: item && (item.duration_minutes ?? item.minutes ?? ''),
+        })).filter(r => r.name);
+      }
+      const rows = [];
+      String(value == null ? '' : value).split('\n').forEach(rawLine => {
+        const line = rawLine.trim().replace(/^[-•*]\s*/, '');
+        if (!line) return;
+        const dur = line.match(/(\d+(?:\.\d+)?)\s*(?:دقيقة|دقائق|min|mins|minutes)/i);
+        const dist = line.match(/(\d+(?:\.\d+)?)\s*(?:كم|كـم|km|kms|kilometers?)/i);
+        let name = line;
+        if (dur) name = name.replace(dur[0], '');
+        if (dist) name = name.replace(dist[0], '');
+        name = name.replace(/^[\s:：\-—–,،]+|[\s:：\-—–,،]+$/g, '').trim();
+        if (!name) name = line;
+        rows.push({ name: name, distance_km: dist ? dist[1] : '', duration_minutes: dur ? dur[1] : '' });
+      });
+      return rows;
+    }
+
+    function serializeLocationTable(key) {
+      const table = document.querySelector('#tenantProjectForm table.location-table[data-location-table="' + key + '"]');
+      const hidden = document.querySelector('#tenantProjectForm [data-key="' + key + '"].location-table-value');
+      if (!table || !hidden) return;
+      const lines = [];
+      table.querySelectorAll('tbody tr').forEach(tr => {
+        const name = (tr.querySelector('.lt-name-input').value || '').trim();
+        if (!name) return;
+        const dist = (tr.querySelector('.lt-dist-input').value || '').trim();
+        const dur = (tr.querySelector('.lt-dur-input').value || '').trim();
+        const parts = [name];
+        if (dist) parts.push(dist + ' كم');
+        if (dur) parts.push(dur + ' دقائق');
+        lines.push(parts.join(' — '));
+      });
+      hidden.value = lines.join('\n');
+    }
+
+    function addLocationTableRow(key, row) {
+      row = row || {};
+      const table = document.querySelector('#tenantProjectForm table.location-table[data-location-table="' + key + '"]');
+      if (!table) return;
+      const cfg = LOCATION_TABLE_FIELDS[key] || {};
+      const tbody = table.querySelector('tbody');
+      const tr = document.createElement('tr');
+
+      const nameTd = document.createElement('td');
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'lt-name-input';
+      nameInput.placeholder = cfg.nameHint || 'الاسم';
+      nameInput.value = row.name || '';
+      nameTd.appendChild(nameInput);
+
+      const distTd = document.createElement('td');
+      const distInput = document.createElement('input');
+      distInput.type = 'number';
+      distInput.className = 'lt-dist-input';
+      distInput.min = '0';
+      distInput.step = '0.1';
+      distInput.placeholder = '—';
+      if (row.distance_km !== undefined && row.distance_km !== null && row.distance_km !== '') distInput.value = row.distance_km;
+      distTd.appendChild(distInput);
+
+      const durTd = document.createElement('td');
+      const durInput = document.createElement('input');
+      durInput.type = 'number';
+      durInput.className = 'lt-dur-input';
+      durInput.min = '0';
+      durInput.step = '1';
+      durInput.placeholder = '—';
+      if (row.duration_minutes !== undefined && row.duration_minutes !== null && row.duration_minutes !== '') durInput.value = row.duration_minutes;
+      durTd.appendChild(durInput);
+
+      const delTd = document.createElement('td');
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn small danger lt-del';
+      delBtn.title = 'حذف الصف';
+      delBtn.textContent = '×';
+      delBtn.addEventListener('click', () => { tr.remove(); serializeLocationTable(key); });
+      delTd.appendChild(delBtn);
+
+      [nameInput, distInput, durInput].forEach(inp => inp.addEventListener('input', () => serializeLocationTable(key)));
+
+      tr.appendChild(nameTd);
+      tr.appendChild(distTd);
+      tr.appendChild(durTd);
+      tr.appendChild(delTd);
+      tbody.appendChild(tr);
+    }
+
+    function setLocationTableValue(key, value) {
+      const table = document.querySelector('#tenantProjectForm table.location-table[data-location-table="' + key + '"]');
+      if (!table) return;
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+      const rows = parseLocationFieldText(key, value);
+      (rows.length ? rows : [{}]).forEach(r => addLocationTableRow(key, r));
+      serializeLocationTable(key);
+    }
+
+    function refreshLocationTables() {
+      Object.keys(LOCATION_TABLE_FIELDS).forEach(key => {
+        const hidden = document.querySelector('#tenantProjectForm [data-key="' + key + '"].location-table-value');
+        if (hidden) setLocationTableValue(key, hidden.value);
+      });
+    }
+
+    function createLocationTableField(key, labelText, currentValue) {
+      const cfg = LOCATION_TABLE_FIELDS[key];
+      const wrap = document.createElement('div');
+      wrap.className = 'tenant-field full location-table-field';
+
+      const label = document.createElement('label');
+      label.textContent = labelText;
+      wrap.appendChild(label);
+
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'fin-table-wrap';
+      const table = document.createElement('table');
+      table.className = 'fin-table location-table';
+      table.dataset.locationTable = key;
+      table.innerHTML = '<thead><tr>' +
+        '<th>' + cfg.nameLabel + '</th>' +
+        '<th class="lt-dist">المسافة (كم)</th>' +
+        '<th class="lt-dur">المدة (دقائق)</th>' +
+        '<th class="lt-actions"></th>' +
+        '</tr></thead><tbody></tbody>';
+      tableWrap.appendChild(table);
+      wrap.appendChild(tableWrap);
+
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'btn ghost small location-table-add';
+      addBtn.textContent = '+ إضافة صف';
+      addBtn.addEventListener('click', () => {
+        addLocationTableRow(key, {});
+        const tbody = table.querySelector('tbody');
+        const last = tbody.lastElementChild;
+        if (last) last.querySelector('.lt-name-input').focus();
+      });
+      wrap.appendChild(addBtn);
+
+      const hint = document.createElement('div');
+      hint.className = 'location-table-hint';
+      hint.textContent = 'تُملأ تلقائيًا من تحليل الموقع — يمكنك التعديل أو الإضافة أو الحذف.';
+      wrap.appendChild(hint);
+
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.dataset.key = key;
+      hidden.dataset.type = 'textarea';
+      hidden.className = 'location-table-value';
+      hidden.value = currentValue || '';
+      wrap.appendChild(hidden);
+
+      setTimeout(() => setLocationTableValue(key, hidden.value), 0);
+      return wrap;
+    }
+
     function renderTenantProjectForm(fields) {
       const form = document.getElementById('tenantProjectForm');
       if (!form) return;
@@ -4871,6 +5082,11 @@
         sectionDiv.appendChild(createProjectSectionHeader(sectionKey, sectionMap[sectionKey] || 'عام'));
 
         sectionFields.forEach(f => {
+          if (LOCATION_TABLE_FIELDS[f.fieldKey]) {
+            const currentTableValue = (tenantProjectData && tenantProjectData[f.fieldKey]) || f.defaultValue || '';
+            sectionDiv.appendChild(createLocationTableField(f.fieldKey, f.fieldLabel + (f.isRequired ? ' *' : ''), currentTableValue));
+            return;
+          }
           const div = document.createElement('div');
           div.className = 'tenant-field' + (f.fieldType === 'textarea' ? ' full' : '');
           const label = document.createElement('label');
@@ -4953,10 +5169,22 @@
             btn.style.marginTop = '8px';
             btn.onclick = () => geocodeProjectAddress(addressInput, latInput, lngInput, true);
             div.appendChild(btn);
+            // Auto site-analysis: pasting a maps link (or leaving the field with a
+            // fresh address) fills roads/landmarks/catchment tables automatically.
+            addressInput.addEventListener('paste', () => {
+              clearTimeout(window._autoAnalyzeTimer);
+              window._autoAnalyzeTimer = setTimeout(() => {
+                const val = addressInput.value.trim();
+                if (!val) return;
+                if (/^https?:\/\//i.test(val) || val.length > 10) analyzeTenantSite();
+              }, 700);
+            });
             addressInput.addEventListener('blur', () => {
-              if (addressInput.value.trim() && (!latInput || !latInput.value.trim() || !lngInput || !lngInput.value.trim())) {
-                geocodeProjectAddress(addressInput, latInput, lngInput);
-              }
+              const val = addressInput.value.trim();
+              if (!val) return;
+              const hasCoords = latInput && latInput.value.trim() && lngInput && lngInput.value.trim();
+              const alreadyAnalyzed = window._lastAnalyzedAddress === val && hasCoords;
+              if (!alreadyAnalyzed) analyzeTenantSite();
             });
           }
 
@@ -5459,6 +5687,8 @@
           const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
           if (input && value !== null && value !== undefined) input.value = value;
         });
+        refreshLocationTables();
+        window._lastAnalyzedAddress = (tenantProjectData.location_address || '').trim();
         if (fields.location_polygon) {
           tenantMapPolygonPoints = fields.location_polygon.split(';')
             .map(point => point.split(',').map(Number))
@@ -5648,9 +5878,10 @@
         const meta = [dist, dur].filter(Boolean).join(' - ');
         return meta ? `${l.name} - ${meta}` : l.name;
       }).join('\n');
-      const input = document.getElementById('tenant_nearby_landmarks') || document.querySelector('[name="nearby_landmarks"]');
+      const input = document.getElementById('tenant_nearby_landmarks') || document.querySelector('[name="nearby_landmarks"]') || document.querySelector('#tenantProjectForm [data-key="nearby_landmarks"]');
       if (input) {
         input.value = text;
+        setLocationTableValue('nearby_landmarks', text);
         toast('تم اعتماد وتحديث قائمة المعالم والقيادة في الفورم بنجاح');
       }
     }
@@ -5787,6 +6018,9 @@
       // Trigger timeline calc
       const tlDone = typeof recalcTimeline === 'function';
       if (tlDone) { recalcTimeline(); filled += 4; }
+
+      // Sync the location tables (roads / landmarks / catchment) with the sample text
+      refreshLocationTables();
 
       // Trigger automatic draft save
       triggerAutoSaveDraft();
@@ -7248,6 +7482,7 @@
               const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
               if (input && input.type !== 'file') input.value = value;
             });
+            refreshLocationTables();
             if (draftData.tenantSlidePlan) {
               tenantSlidePlan = draftData.tenantSlidePlan;
               renderTenantSlidePlan();
@@ -7850,6 +8085,7 @@
             const input = form.querySelector('[data-key="' + key + '"]');
             if (input && input.type !== 'file') input.value = value;
           });
+          refreshLocationTables();
         }
       }
       if (planChanged && typeof renderTenantSlidePlan === 'function') {

@@ -3119,6 +3119,43 @@ def api_analyze_site():
             road_names.append(name)
     if road_names:
         fields['main_roads'] = '\n'.join(road_names)
+
+    # Secondary (immediate) roads: probe at ~60-80 m so we capture the streets
+    # right next to the plot, excluding anything already listed as a main road.
+    secondary_roads = maps_service.discover_nearby_roads(
+        lat, lng, tenant_id=g.tenant_id, max_results=4, lat_step=0.0006, lng_step=0.0008
+    )
+    secondary_names = []
+    for road in secondary_roads:
+        name = road.get('name')
+        if name and name not in road_names and name not in secondary_names:
+            secondary_names.append(name)
+    if secondary_names:
+        fields['secondary_roads'] = '\n'.join(secondary_names)
+
+    # Catchment areas: city-scale landmarks with real drive times, serialized in
+    # the structured table format the UI edits ("name — distance — duration").
+    city_matrix = maps_service.get_drive_matrix((lat, lng), city_items) if city_items else []
+    for index, item in enumerate(city_items):
+        if index < len(city_matrix) and isinstance(city_matrix[index], dict):
+            if city_matrix[index].get('duration_min') is not None:
+                item['duration_minutes'] = city_matrix[index].get('duration_min')
+            if city_matrix[index].get('distance_text'):
+                item['distance_text'] = city_matrix[index].get('distance_text')
+    catchment_lines = []
+    for item in city_items:
+        name = item.get('name')
+        duration = item.get('duration_minutes')
+        if not name or duration is None:
+            continue
+        parts = [name]
+        if item.get('distance_text'):
+            parts.append(str(item['distance_text']))
+        parts.append(f'{duration} دقائق')
+        catchment_lines.append(' — '.join(parts))
+    if catchment_lines:
+        fields['catchment_areas'] = '\n'.join(catchment_lines[:6])
+
     if polygon:
         fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
 

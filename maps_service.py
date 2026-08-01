@@ -1566,12 +1566,11 @@ def _google_reverse_geocode_road(lat, lng, tenant_id=None):
     return ''
 
 
-def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=None, origin_lng=None, max_results=6):
+def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=None, origin_lng=None, max_results=6,
+                          lat_step=0.0018, lng_step=0.0024):
     """Return verified nearby road names from Google Roads + Directions."""
     route_origin_lat = origin_lat if origin_lat is not None else center_lat
     route_origin_lng = origin_lng if origin_lng is not None else center_lng
-    lat_step = 0.0018
-    lng_step = 0.0024
     probes = [
         (route_origin_lat + lat_step, route_origin_lng),
         (route_origin_lat - lat_step, route_origin_lng),
@@ -1655,7 +1654,8 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 val = project_data.get(key) or project_data.get(key.replace('_', ''))
                 if isinstance(val, str):
                     fallback_road_names.extend(
-                        name.strip() for name in re.split(r'[\n,،]+', val) if name.strip()
+                        re.split(r'\s+[—–]\s+', name.strip())[0].strip()
+                        for name in re.split(r'[\n,،]+', val) if name.strip()
                     )
                 elif isinstance(val, list):
                     fallback_road_names.extend(str(value).strip() for value in val if str(value).strip())
@@ -2317,7 +2317,7 @@ def _parse_landmarks_text(text):
         if dist_match:
             clean_name = clean_name.replace(dist_match.group(0), '')
 
-        clean_name = re.sub(r'[\-\(\)\,\،\s]+', ' ', clean_name).strip()
+        clean_name = re.sub(r'[\-\(\)\,\،\s—–]+', ' ', clean_name).strip()
         if not clean_name:
             clean_name = line
 
@@ -2333,18 +2333,41 @@ def _parse_landmarks_text(text):
 
 
 def _parse_catchment_zones(text):
-    """Parse catchment zones text into zone objects."""
+    """Parse catchment zones text into zone objects.
+
+    Supports both the legacy formats ("10 دقائق", "5 دقائق: مجمع الراشد") and the
+    structured table format ("مجمع الراشد — 4.2 كم — 5 دقائق")."""
+    default_zones = [{'minutes': 10, 'km': 8}, {'minutes': 20, 'km': 16}, {'minutes': 35, 'km': 28}]
     if not text:
-        return [{'minutes': 10, 'km': 8}, {'minutes': 20, 'km': 16}, {'minutes': 35, 'km': 28}]
+        return default_zones
+    if not isinstance(text, str):
+        return text or default_zones
     zones = []
     for line in text.strip().split('\n'):
         line = line.strip().lstrip('-').lstrip('•').strip()
         if not line:
             continue
-        digits = ''.join([c for c in line if c.isdigit()])
-        if digits:
+        dur_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:دقيقة|دقائق|min|mins|minutes)', line, re.IGNORECASE)
+        dist_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:كم|كـم|km|kms|kilometer|kilometers)', line, re.IGNORECASE)
+        if dur_match:
+            minutes = int(float(dur_match.group(1)))
+        else:
+            digits = ''.join([c for c in line if c.isdigit()])
+            if not digits:
+                continue
             minutes = int(digits)
-            zones.append({'minutes': minutes, 'km': minutes * 0.8 / 1.60934})
+        zone = {'minutes': minutes, 'km': minutes * 0.8 / 1.60934}
+        if dist_match:
+            zone['km'] = float(dist_match.group(1))
+        label = line
+        if dur_match:
+            label = label.replace(dur_match.group(0), '')
+        if dist_match:
+            label = label.replace(dist_match.group(0), '')
+        label = re.sub(r'^[\s:：\-—–,،]+|[\s:：\-—–,،]+$', '', label).strip()
+        if label:
+            zone['label'] = label
+        zones.append(zone)
     if not zones:
-        return [{'minutes': 10, 'km': 8}, {'minutes': 20, 'km': 16}, {'minutes': 35, 'km': 28}]
+        return default_zones
     return zones
