@@ -4071,10 +4071,12 @@
       const selections = data.selections || [];
       const available = data.available || [];
       window.tenantAvailableFonts = available;
-      const currentRegular = selections.find(item => item.script === 'arabic' && item.weight === 'regular') || {};
-      const hasCustomFont = !currentRegular.font_id && !!currentRegular.custom_font_path;
+      const currentArabic = selections.find(item => item.script === 'arabic') || {};
+      const currentLatin = selections.find(item => item.script === 'latin') || {};
+      const currentSelection = currentArabic.font_id ? currentArabic : currentLatin;
+      const hasCustomFont = !!currentSelection.custom_font_path;
       const customFontName = hasCustomFont
-        ? (currentRegular.custom_font_path.split('/').pop() || 'خط مخصص').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ')
+        ? (currentSelection.custom_font_path.split('/').pop() || 'خط مخصص').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ')
         : '';
       const uniqueFonts = [];
       available.forEach(font => {
@@ -4096,7 +4098,7 @@
         '<select id="tenantPrimaryFontSelect" onchange="selectTenantPrimaryFont(this.value)" style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">' +
         '<option value="">استخدام الخط الافتراضي</option>' +
         customOption +
-        uniqueFonts.map(font => '<option value="' + escapeHtml(font.id) + '"' + (currentRegular.font_family && font.font_family === currentRegular.font_family && font.script === currentRegular.script ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + '</option>').join('') +
+        uniqueFonts.map(font => '<option value="' + escapeHtml(font.id) + '"' + (currentSelection.font_family && font.font_family === currentSelection.font_family && font.script === currentSelection.script ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + '</option>').join('') +
         '</select>' +
         '<label id="tenantAutoFontDropzone" style="display:flex;align-items:center;justify-content:center;min-height:72px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--muted);text-align:center;padding:12px;">اسحب ملف الخط هنا أو اضغط لاختياره<input id="tenantAutoFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="uploadTenantFontAutomatically(this)"></label>' +
         '<span style="font-size:12px;color:var(--muted);">' + escapeHtml(summary) + '</span>' +
@@ -4116,10 +4118,11 @@
     async function selectTenantPrimaryFont(fontId) {
       if (fontId === 'custom') return;
       if (!fontId) {
-        await Promise.all([
-          api('DELETE', '/api/branding/fonts/arabic/regular'),
-          api('DELETE', '/api/branding/fonts/latin/regular')
-        ]);
+        const weights = ['light', 'regular', 'medium', 'bold', 'black'];
+        await Promise.all(weights.flatMap(w => [
+          api('DELETE', '/api/branding/fonts/arabic/' + w),
+          api('DELETE', '/api/branding/fonts/latin/' + w)
+        ]));
         await loadTenantBranding();
         await loadTenantFonts();
         return;
