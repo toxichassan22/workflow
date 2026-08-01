@@ -5627,6 +5627,9 @@
         data.tenantSlidePlan = tenantSlidePlan;
         data.tenantCreativeImages = tenantCreativeImages;
         data.tenantSlidesData = tenantSlidesData;
+        collectMapStylePanel();
+        data.map_styles = tenantProjectData.map_styles || {};
+        data.map_type = tenantProjectData.map_type || '';
         data.pageDrafts = {
           project: {
             sectionStatuses: { ...tenantProjectSectionStatuses },
