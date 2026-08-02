@@ -760,7 +760,7 @@
       box-shadow: 0 12px 36px rgba(0, 0, 0, 0.15);
       width: min(380px, calc(100vw - 48px));
       box-sizing: border-box;
-      color: #222;
+      color: var(--txt);
       position: relative;
       animation: geFloatIn 0.3s ease-out;
     }
@@ -792,7 +792,7 @@
     .global-loader-progress-track,
     .inline-loading-track {
       height: 8px;
-      background: #e8edf1;
+      background: var(--soft);
       border-radius: 999px;
       overflow: hidden;
     }
@@ -801,7 +801,7 @@
     .inline-loading-fill {
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, var(--p), var(--s));
+      background: linear-gradient(90deg, var(--p), var(--pd));
       border-radius: 999px;
       transition: width 0.45s ease;
     }
@@ -833,7 +833,7 @@
       background: none;
       border: none;
       font-size: 18px;
-      color: #aaa;
+      color: var(--muted);
       cursor: pointer;
       padding: 2px 6px;
       border-radius: 6px;
@@ -973,7 +973,7 @@
 
     .progress-bar-fill {
       height: 100%;
-      background: linear-gradient(90deg, var(--green), #20c997);
+      background: linear-gradient(90deg, var(--p), var(--pd));
       border-radius: 4px;
       transition: width 0.8s cubic-bezier(0.25, 0.8, 0.25, 1);
     }
@@ -3489,12 +3489,12 @@
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <section id="tenantGenerationPage" class="tenant-page">
       <div style="max-width:520px;width:100%;text-align:center;padding:20px 0">
-        <h2 id="genTitle" style="margin:0 0 8px;font-size:20px;font-weight:700;color:#222">جاري التوليد...</h2>
+        <h2 id="genTitle" style="margin:0 0 8px;font-size:20px;font-weight:700;color:var(--txt)">جاري التوليد...</h2>
         <p id="genSubtitle" style="margin:0 0 24px;color:var(--muted);font-size:14px"></p>
 
         <!-- Main progress bar -->
-        <div style="background:#f0f0f0;border-radius:8px;height:10px;overflow:hidden;margin-bottom:12px">
-          <div id="genBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--p),var(--s));transition:width .5s ease;border-radius:8px"></div>
+        <div style="background:var(--soft);border-radius:8px;height:10px;overflow:hidden;margin-bottom:12px">
+          <div id="genBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--p),var(--pd));transition:width .5s ease;border-radius:8px"></div>
         </div>
         <div style="display:flex;justify-content:space-between;margin-bottom:32px">
           <span id="genPct" style="font-size:22px;font-weight:800;color:var(--p)">0%</span>
@@ -3719,6 +3719,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     const T_TOKEN_KEY = 'tenant_token';
     const T_TENANT_KEY = 'tenant_user';
+    const T_NAVIGATION_KEY = 'tenant_navigation_state';
     let tenantToken = null;
     let tenantUser = null;
     let tenantBranding = null;
@@ -3733,6 +3734,7 @@
     let tenantSlidePlan = null;
     let tenantSlidesData = [];
     let tenantPresentationId = null;
+    let tenantProjectMode = 'new';
     let tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
 
     function mapsSignature(d) {
@@ -4068,6 +4070,46 @@
       return fetch(path, opts).then(handleApiResponse).catch(e => ({ error: 'Network error: ' + e.message }));
     }
 
+    const TENANT_NAVIGATION_CONTEXT_PAGES = new Set([
+      'tenantProjectPage',
+      'tenantMainImagePage',
+      'tenantMoodboardPage',
+      'tenantSlidesPage',
+      'tenantGenerationPage'
+    ]);
+
+    function getTenantNavigationState() {
+      try {
+        const raw = localStorage.getItem(T_NAVIGATION_KEY);
+        const state = raw ? JSON.parse(raw) : null;
+        return state && state.pageId ? state : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function saveTenantNavigationState(pageId) {
+      if (!pageId || pageId === 'tenantAuthPage') return;
+      const hasProjectContext = TENANT_NAVIGATION_CONTEXT_PAGES.has(pageId);
+      const state = {
+        pageId,
+        tenantId: tenantUser && (tenantUser.id || tenantUser.tenantId) || null,
+        mode: hasProjectContext ? (tenantProjectMode || (tenantPresentationId ? 'presentation' : 'draft')) : null,
+        presentationId: hasProjectContext ? (tenantPresentationId || null) : null,
+        draftId: hasProjectContext && tenantProjectData ? (tenantProjectData.draftId || null) : null,
+        activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null
+      };
+      try {
+        localStorage.setItem(T_NAVIGATION_KEY, JSON.stringify(state));
+      } catch (e) {
+        console.warn('[NAVIGATION] Could not save state:', e);
+      }
+    }
+
+    function clearTenantNavigationState() {
+      localStorage.removeItem(T_NAVIGATION_KEY);
+    }
+
     // Auth UI
 
     function switchAuthTab(tab) {
@@ -4112,6 +4154,8 @@
         }
       }
 
+      saveTenantNavigationState(pageId);
+
       if (pageId === 'tenantDashboardPage') {
         loadDashboard();
         // U3: Show onboarding guide for first-time users
@@ -4146,11 +4190,10 @@
         return;
       }
       if (pageId === 'tenantMainImagePage') {
-        goToTenantMainImage();
-        return;
+        return goToTenantMainImage();
       }
       if (pageId === 'tenantMoodboardPage') {
-        goToTenantMoodboard();
+        return goToTenantMoodboard();
       }
     }
 
@@ -4466,9 +4509,112 @@
     function tenantLogout() {
       removeTenantToken();
       localStorage.removeItem(T_TENANT_KEY);
+      clearTenantNavigationState();
       tenantUser = null;
       tenantBranding = null;
       showAuthPage();
+    }
+
+    async function restoreTenantNavigation() {
+      const state = getTenantNavigationState();
+      if (!state) return false;
+
+      const currentTenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
+      if (state.tenantId && currentTenantId && state.tenantId !== currentTenantId) {
+        clearTenantNavigationState();
+        return false;
+      }
+      if (!state.pageId || !document.getElementById(state.pageId)) {
+        clearTenantNavigationState();
+        return false;
+      }
+
+      try {
+        if (state.presentationId && TENANT_NAVIGATION_CONTEXT_PAGES.has(state.pageId)) {
+          await openExistingPresentation(state.presentationId);
+          if (tenantPresentationId !== state.presentationId) {
+            clearTenantNavigationState();
+            return false;
+          }
+          if (state.pageId === 'tenantGenerationPage') showGenProgress();
+          else if (state.pageId !== 'tenantSlidesPage') {
+            await navigateTenantWorkflow(state.pageId);
+            if (state.pageId === 'tenantProjectPage' && state.activeSection) showSection(state.activeSection);
+          }
+          return true;
+        }
+
+        if (state.draftId && TENANT_NAVIGATION_CONTEXT_PAGES.has(state.pageId)) {
+          const loaded = await openProjectDraftById(state.draftId);
+          if (!loaded) {
+            if (state.mode === 'new') {
+              await startTenantProject();
+              if (state.pageId === 'tenantProjectPage') return true;
+              if (state.pageId === 'tenantGenerationPage') showGenProgress();
+              else showTenantPage(state.pageId);
+              return true;
+            }
+            clearTenantNavigationState();
+            return false;
+          }
+          tenantActiveProjectSection = state.activeSection || tenantActiveProjectSection;
+          if (state.pageId === 'tenantProjectPage') {
+            showTenantPage(state.pageId);
+            if (tenantActiveProjectSection) showSection(tenantActiveProjectSection);
+          } else if (state.pageId === 'tenantGenerationPage') {
+            showGenProgress();
+          } else {
+            await navigateTenantWorkflow(state.pageId);
+          }
+          return true;
+        }
+
+        if (TENANT_NAVIGATION_CONTEXT_PAGES.has(state.pageId)) {
+          await startTenantProject();
+          if (state.pageId === 'tenantProjectPage') return true;
+          if (state.pageId === 'tenantGenerationPage') showGenProgress();
+          else showTenantPage(state.pageId);
+          return true;
+        }
+
+        switch (state.pageId) {
+          case 'tenantDashboardPage':
+            showTenantPage(state.pageId);
+            return true;
+          case 'tenantSettingsPage':
+            await openTenantSettings();
+            return true;
+          case 'tenantFieldsPage':
+            await openTenantFields();
+            return true;
+          case 'tenantPresentationsPage':
+            await openTenantPresentations();
+            return true;
+          case 'tenantUsersPage':
+            await openTenantUsers();
+            return true;
+          case 'tenantTrainingPage':
+            await openTenantTraining();
+            return true;
+          case 'tenantAIRulesPage':
+            await openTenantAIRules();
+            return true;
+          case 'tenantApprovalsPage':
+            await openTenantApprovals();
+            return true;
+          case 'tenantAdminPage':
+            if (!tenantUser.isAdmin) return false;
+            await openTenantAdmin();
+            return true;
+          default:
+            clearTenantNavigationState();
+            return false;
+        }
+      } catch (error) {
+        console.warn('[NAVIGATION] Restore failed:', error);
+        clearTenantNavigationState();
+        return false;
+      }
     }
 
     async function bootstrapTenant() {
@@ -4489,10 +4635,10 @@
       applyRolePermissions();
       await loadTenantBranding();
       showTenantApp();
-      // SAG super admin goes to admin panel, others to dashboard
+      // SAG super admin goes to admin panel, others restore their last page.
       if (tenantUser.isAdmin) {
         openTenantAdmin();
-      } else {
+      } else if (!(await restoreTenantNavigation())) {
         showTenantPage('tenantDashboardPage');
       }
     }
@@ -5374,8 +5520,104 @@
     }
 
     // Dynamic Project Form
+    async function loadTenantProjectForm() {
+      const [fieldsData, sectionsData] = await Promise.all([
+        api('GET', '/api/fields'),
+        api('GET', '/api/field-sections')
+      ]);
+      if (!fieldsData.success) {
+        toast(fieldsData.error || 'تعذر تحميل الحقول');
+        return false;
+      }
+      tenantFields = fieldsData.fields || [];
+      tenantFieldSections = (sectionsData && sectionsData.available) || [];
+      tenantAllowedFieldSections = (sectionsData && sectionsData.allowed) || {};
+      renderTenantProjectForm(tenantFields);
+      return true;
+    }
+
+    function parseStoredProjectTable(value) {
+      if (Array.isArray(value)) return value;
+      if (typeof value !== 'string' || !value.trim()) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function hydrateTenantProjectForm(data) {
+      const form = document.getElementById('tenantProjectForm');
+      if (!form) return;
+      const source = data || {};
+
+      form.querySelectorAll('[data-key]').forEach(input => {
+        const key = input.dataset.key;
+        if (!(key in source) || input.type === 'file') return;
+        const value = source[key];
+        if (input.classList.contains('location-table-value')) {
+          setLocationTableValue(key, value);
+        } else if (value === null || value === undefined) {
+          input.value = '';
+        } else if (typeof value === 'object') {
+          input.value = JSON.stringify(value);
+        } else {
+          input.value = String(value);
+        }
+      });
+
+      const componentRows = parseStoredProjectTable(source.components_table_data);
+      const componentsBody = document.getElementById('componentsTableBody');
+      if (componentsBody && componentRows.length) {
+        componentsBody.innerHTML = '';
+        componentRows.forEach(row => addComponentRow(row));
+      }
+      if (componentsBody) recalcComponents();
+
+      const timelineRows = parseStoredProjectTable(source.timeline_table_data || source.timelineRows);
+      const timelineBody = document.getElementById('timelineTableBody');
+      if (timelineBody && timelineRows.length) {
+        timelineBody.innerHTML = '';
+        timelineRows.forEach(row => {
+          addTimelineRow();
+          const tr = timelineBody.lastElementChild;
+          if (!tr) return;
+          tr.querySelector('.tl-name').value = row.name || '';
+          tr.querySelector('.tl-year').value = row.year || '';
+          tr.querySelector('.tl-quarter').value = row.quarter || '';
+          tr.querySelector('.tl-duration').value = row.duration || '';
+          tr.querySelector('.tl-notes').value = row.notes || '';
+        });
+        const timelineInput = document.getElementById('timelineTableData');
+        if (timelineInput) timelineInput.value = JSON.stringify(timelineRows);
+      }
+
+      refreshLocationTables();
+      recalcFinancials();
+      window._lastAnalyzedAddress = (source.location_address || '').trim();
+    }
+
+    function recoverTenantSlidePlan(projectData, slidesData) {
+      const storedPlan = projectData && (projectData.tenantSlidePlan || projectData.slidePlan);
+      if (storedPlan && Array.isArray(storedPlan.slides) && storedPlan.slides.length) return storedPlan;
+      if (!Array.isArray(slidesData) || !slidesData.length) return null;
+      return {
+        proposed_count: slidesData.length,
+        reasoning: 'تم استعادة هيكل العرض من الشرائح المحفوظة.',
+        slides: slidesData.map(slide => ({
+          title: slide.title || '',
+          type: slide.type || 'content',
+          design_style: slide.designStyle || slide.design_style || 'cards',
+          bullets: slide.bullets || [],
+          metrics: slide.metrics || []
+        }))
+      };
+    }
+
     async function startTenantProject() {
       tenantPresentationId = null;
+      tenantProjectMode = 'new';
       tenantProjectData = { draftId: crypto.randomUUID() };
       tenantSlidesData = [];
       tenantSlidePlan = null;
@@ -5391,16 +5633,7 @@
       tenantProjectDraftApproval = null;
       tenantActiveProjectSection = null;
       showTenantPage('tenantProjectPage');
-      const [fieldsData, sectionsData] = await Promise.all([
-        api('GET', '/api/fields'),
-        api('GET', '/api/field-sections')
-      ]);
-      if (!fieldsData.success) { toast('تعذر تحميل الحقول'); return; }
-      tenantFields = fieldsData.fields || [];
-      tenantFieldSections = sectionsData.available || [];
-      tenantAllowedFieldSections = sectionsData.allowed || {};
-      renderTenantProjectForm(tenantFields);
-      refreshGlobalRail();
+      if (await loadTenantProjectForm()) refreshGlobalRail();
     }
 
     function getProjectSectionElement(sectionKey) {
@@ -6181,6 +6414,7 @@
         button.setAttribute('aria-current', active ? 'page' : 'false');
       });
       tenantActiveProjectSection = sectionKey;
+      saveTenantNavigationState('tenantProjectPage');
     }
 
     // Keep for backward compatibility with older callers.
@@ -6772,6 +7006,7 @@
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
+      await saveProjectAsDraft(true);
       showGenProgress();
       setGenStep('plan', 'active');
       setGenPct(5, 'تحليل بيانات المشروع...');
@@ -6788,7 +7023,7 @@
           setGenStep('plan', 'done');
           setGenPct(100, 'تم توليد الهيكل — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
           toast('تم توليد الهيكل بنجاح — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
-          triggerAutoSaveDraft();
+          await saveProjectAsDraft(true);
         } else {
           setGenStep('plan', 'error');
           toast('فشل توليد الهيكل');
@@ -6984,6 +7219,7 @@
         return;
       }
       await prepareDefaultImagePrompts();
+      if (!tenantPresentationId) await saveProjectAsDraft(true);
       renderTenantMainImage();
       showTenantPage('tenantMainImagePage');
     }
@@ -6994,6 +7230,7 @@
         return;
       }
       await prepareDefaultImagePrompts();
+      if (!tenantPresentationId) await saveProjectAsDraft(true);
       renderTenantMoodboard();
       showTenantPage('tenantMoodboardPage');
     }
@@ -8058,6 +8295,11 @@
 
     async function saveTenantPresentation() {
       const title = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
+      tenantProjectData = {
+        ...tenantProjectData,
+        tenantSlidePlan,
+        tenantCreativeImages
+      };
       const data = await api('POST', '/api/presentations', {
         title: title,
         projectData: tenantProjectData,
@@ -8066,6 +8308,7 @@
       });
       if (data.success && data.presentationId) {
         tenantPresentationId = data.presentationId;
+        tenantProjectMode = 'presentation';
       }
     }
 
@@ -8074,24 +8317,50 @@
       if (!data.success || !data.presentation) { toast('فشل تحميل العرض'); return; }
       const p = data.presentation;
       tenantPresentationId = p.id;
-      tenantProjectData = p.projectData || {};
-      tenantSlidesData = p.slidesData || [];
-      tenantSlidePlan = null;
+      tenantProjectMode = 'presentation';
+      tenantProjectData = { ...(p.projectData || {}) };
+      tenantSlidesData = Array.isArray(p.slidesData)
+        ? p.slidesData
+        : (Array.isArray(tenantProjectData.tenantSlidesData) ? tenantProjectData.tenantSlidesData : []);
+      tenantSlidePlan = recoverTenantSlidePlan(tenantProjectData, tenantSlidesData);
+      if (tenantSlidePlan) tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantDesignerMessages = [];
       tenantChatSlideIndex = 0;
+      activeSlideIndex = 0;
+      tempCoverImage = null;
+      tempMoodboardImages = {};
+      tenantMapPreviewState = null;
+      tenantMapPolygonPoints = [];
+      tenantMapPolygonMode = false;
+      tenantActiveProjectSection = null;
       const ci = tenantProjectData.tenantCreativeImages || {};
       tenantCreativeImages = {
-        cover: ci.cover || '',
+        ...ci,
+        cover: ci.cover || ci.mainImageData || '',
         moodboard: Array.isArray(ci.moodboard) ? ci.moodboard : [],
         map_placeholders: ci.map_placeholders || {},
         map_landmarks: ci.map_landmarks || [],
         images_signature: ci.images_signature || null,
-        maps_signature: ci.maps_signature || null
+        maps_signature: ci.maps_signature || null,
+        cover_prompt: ci.cover_prompt || '',
+        moodboard_prompts: Array.isArray(ci.moodboard_prompts) ? ci.moodboard_prompts : []
       };
+      tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+      tenantProjectSectionStatuses = {
+        ...(p.sectionStatuses || {}),
+        ...(tenantProjectData.sectionStatuses || {}),
+        ...((tenantProjectData.pageDrafts || {}).project?.sectionStatuses || {})
+      };
+      await loadTenantProjectForm();
+      hydrateTenantProjectForm(tenantProjectData);
+      applySectionStatuses(tenantProjectSectionStatuses);
+      renderTenantSlidePlan();
+      renderTenantMainImage();
+      renderTenantMoodboard();
       renderTenantSlides();
       const editorInfo = document.getElementById('slidesEditorInfo');
       if (editorInfo) {
-        editorInfo.textContent = 'عرض: ' + (p.title || '') + ' | ' + (p.slideCount || 0) + ' شريحة';
+        editorInfo.textContent = 'عرض: ' + (p.title || '') + ' | ' + (p.slideCount || tenantSlidesData.length) + ' شريحة';
       }
       showTenantPage('tenantSlidesPage');
       refreshGlobalRail();
@@ -8170,95 +8439,77 @@
       try {
         const resp = await api('GET', '/api/project-draft/' + encodeURIComponent(draftId));
         hideLoader();
-        if (resp.success && resp.draft) {
-          const draft = resp.draft;
-          const draftData = draft.draft_data || draft.draftData || {};
-          tenantPresentationId = null;
-          tenantProjectData = { ...draftData, draftId: draftData.draftId || draft.id || draftId };
-          tenantSlidesData = [];
-          tenantSlidePlan = null;
-          tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
-          tenantDesignerMessages = [];
-          tenantChatSlideIndex = 0;
-          tenantMapPreviewState = null;
-          tenantMapPolygonPoints = [];
-          tenantMapPolygonMode = false;
-          tempCoverImage = null;
-          tempMoodboardImages = {};
-          if (typeof draftData.location_polygon === 'string') {
-            tenantMapPolygonPoints = draftData.location_polygon.split(';')
-              .map(point => point.split(',').map(Number))
-              .filter(point => point.length === 2 && point.every(Number.isFinite));
-          }
-          const pageDrafts = draftData.pageDrafts || {};
-          if (pageDrafts.mainImage && !pageDrafts.mainImage.approved) {
-            tempCoverImage = pageDrafts.mainImage.image || null;
-          }
-          if (pageDrafts.moodboard && pageDrafts.moodboard.images) {
-            tempMoodboardImages = { ...pageDrafts.moodboard.images };
-          }
-          const sectionStatuses = draft.section_statuses || {};
-
-          showTenantPage('tenantProjectPage');
-          const [fieldsData, sectionsData] = await Promise.all([
-            api('GET', '/api/fields'),
-            api('GET', '/api/field-sections')
-          ]);
-          if (fieldsData.success) {
-            tenantFields = fieldsData.fields || [];
-            tenantFieldSections = sectionsData.available || [];
-            tenantAllowedFieldSections = sectionsData.allowed || {};
-            renderTenantProjectForm(tenantFields);
-          }
-
-          tenantProjectSectionStatuses = { ...sectionStatuses };
-          tenantProjectDraftApproval = draft;
-
-          setTimeout(() => {
-            Object.entries(draftData).forEach(([key, value]) => {
-              const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-              if (input && input.type !== 'file') input.value = value;
-            });
-            refreshLocationTables();
-            window._lastAnalyzedAddress = (draftData.location_address || '').trim();
-            if (draftData.tenantSlidePlan) {
-              tenantSlidePlan = draftData.tenantSlidePlan;
-              renderTenantSlidePlan();
-            }
-            if (draftData.tenantCreativeImages) {
-              const ci = draftData.tenantCreativeImages;
-              tenantCreativeImages = {
-                cover: ci.cover || '',
-                moodboard: Array.isArray(ci.moodboard) ? ci.moodboard : [],
-                map_placeholders: ci.map_placeholders || {},
-                map_landmarks: ci.map_landmarks || [],
-                images_signature: ci.images_signature || null,
-                maps_signature: ci.maps_signature || null,
-                cover_prompt: ci.cover_prompt || (pageDrafts.mainImage && pageDrafts.mainImage.prompt) || '',
-                moodboard_prompts: Array.isArray(ci.moodboard_prompts)
-                  ? ci.moodboard_prompts
-                  : (pageDrafts.moodboard && pageDrafts.moodboard.prompts) || []
-              };
-              if (pageDrafts.mainImage && pageDrafts.mainImage.approved && pageDrafts.mainImage.image && !tenantCreativeImages.cover) {
-                tenantCreativeImages.cover = pageDrafts.mainImage.image;
-              }
-              renderTenantMainImage();
-              renderTenantMoodboard();
-            }
-            if (draftData.tenantSlidesData) {
-              tenantSlidesData = draftData.tenantSlidesData;
-            }
-            applySectionStatuses(sectionStatuses);
-            refreshGlobalRail();
-
-            toast('تم فتح المسودة المحفوظة بنجاح');
-          }, 300);
-        } else {
+        if (!resp.success || !resp.draft) {
           toast(resp.error || 'تعذر تحميل المسودة');
+          return false;
         }
+
+        const draft = resp.draft;
+        const draftData = draft.draft_data || draft.draftData || {};
+        const pageDrafts = draftData.pageDrafts || {};
+        const sectionStatuses = draft.section_statuses || {};
+        tenantPresentationId = null;
+        tenantProjectMode = 'draft';
+        tenantProjectData = { ...draftData, draftId: draftData.draftId || draft.id || draftId };
+        tenantSlidesData = Array.isArray(draftData.tenantSlidesData) ? draftData.tenantSlidesData : [];
+        tenantSlidePlan = recoverTenantSlidePlan(tenantProjectData, tenantSlidesData);
+        if (tenantSlidePlan) tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+        tenantDesignerMessages = [];
+        tenantChatSlideIndex = 0;
+        tenantMapPreviewState = null;
+        tenantMapPolygonPoints = [];
+        tenantMapPolygonMode = false;
+        tenantActiveProjectSection = null;
+        tempCoverImage = null;
+        tempMoodboardImages = {};
+        tenantProjectSectionStatuses = { ...sectionStatuses };
+        tenantProjectDraftApproval = draft;
+
+        if (typeof draftData.location_polygon === 'string') {
+          tenantMapPolygonPoints = draftData.location_polygon.split(';')
+            .map(point => point.split(',').map(Number))
+            .filter(point => point.length === 2 && point.every(Number.isFinite));
+        }
+        if (pageDrafts.mainImage && !pageDrafts.mainImage.approved) {
+          tempCoverImage = pageDrafts.mainImage.image || null;
+        }
+        if (pageDrafts.moodboard && pageDrafts.moodboard.images) {
+          tempMoodboardImages = { ...pageDrafts.moodboard.images };
+        }
+
+        const ci = tenantProjectData.tenantCreativeImages || {};
+        tenantCreativeImages = {
+          ...ci,
+          cover: ci.cover || ci.mainImageData || '',
+          moodboard: Array.isArray(ci.moodboard) ? ci.moodboard : [],
+          map_placeholders: ci.map_placeholders || {},
+          map_landmarks: ci.map_landmarks || [],
+          images_signature: ci.images_signature || null,
+          maps_signature: ci.maps_signature || null,
+          cover_prompt: ci.cover_prompt || (pageDrafts.mainImage && pageDrafts.mainImage.prompt) || '',
+          moodboard_prompts: Array.isArray(ci.moodboard_prompts)
+            ? ci.moodboard_prompts
+            : (pageDrafts.moodboard && pageDrafts.moodboard.prompts) || []
+        };
+        if (pageDrafts.mainImage && pageDrafts.mainImage.approved && pageDrafts.mainImage.image && !tenantCreativeImages.cover) {
+          tenantCreativeImages.cover = pageDrafts.mainImage.image;
+        }
+        tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+
+        showTenantPage('tenantProjectPage');
+        await loadTenantProjectForm();
+        hydrateTenantProjectForm(tenantProjectData);
+        applySectionStatuses(sectionStatuses);
+        renderTenantSlidePlan();
+        renderTenantMainImage();
+        renderTenantMoodboard();
+        refreshGlobalRail();
+        toast('تم فتح المسودة المحفوظة بنجاح');
+        return true;
       } catch (e) {
         hideLoader();
         toast('خطأ في تحميل المسودة');
+        return false;
       }
     }
 
@@ -8276,8 +8527,14 @@
     async function saveExistingPresentation() {
       if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return; }
       const title = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
+      tenantProjectData = {
+        ...tenantProjectData,
+        tenantSlidePlan,
+        tenantCreativeImages
+      };
       const data = await api('PUT', '/api/presentations/' + tenantPresentationId, {
         title: title,
+        projectData: tenantProjectData,
         slidesData: tenantSlidesData,
         slideCount: tenantSlidesData.length,
         status: 'edited'
