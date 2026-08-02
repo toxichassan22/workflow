@@ -4220,6 +4220,8 @@
         if (sel.font_id && !sel.font_family) {
           const matched = available.find(f => f.id === sel.font_id);
           if (matched) sel.font_family = matched.font_family;
+        } else if (sel.custom_font_path && !sel.font_family) {
+          sel.font_family = (sel.custom_font_path.split('/').pop() || '').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ');
         }
       });
       const currentArabic = selections.find(item => item.script === 'arabic' && item.weight === 'regular')
@@ -4228,7 +4230,12 @@
       const currentLatin = selections.find(item => item.script === 'latin' && item.weight === 'regular')
         || selections.find(item => item.script === 'latin')
         || {};
-      const currentSelection = (currentArabic.font_id || currentArabic.custom_font_path) ? currentArabic : currentLatin;
+      const activeBranding = (typeof tenantBranding !== 'undefined' && tenantBranding) ? tenantBranding : (window.tenantBranding || null);
+      const matchedBrandingSel = activeBranding && activeBranding.font_family
+        ? selections.find(item => item.font_family && item.font_family.toLowerCase() === activeBranding.font_family.toLowerCase())
+        : null;
+      const currentSelection = matchedBrandingSel
+        || ((currentArabic.font_id || currentArabic.custom_font_path) ? currentArabic : currentLatin);
       const uniqueFonts = [];
       available.forEach(font => {
         const existing = uniqueFonts.find(item => item.font_family === font.font_family);
@@ -4291,6 +4298,7 @@
           api('DELETE', '/api/branding/fonts/arabic/' + w),
           api('DELETE', '/api/branding/fonts/latin/' + w)
         ]));
+        await api('PUT', '/api/branding', { font_family: 'The Sans Arabic', font_arabic: 'The Sans Arabic' });
         await loadTenantBranding();
         await loadTenantFonts();
         return;
@@ -4302,6 +4310,9 @@
       const target = matches.length ? matches : [selected];
       for (const font of target) {
         await setTenantFontSelection(font.script, font.weight || weight, font.id, true);
+      }
+      if (selected.font_family) {
+        await api('PUT', '/api/branding', { font_family: selected.font_family, font_arabic: selected.font_family });
       }
       await loadTenantBranding();
       await loadTenantFonts();
