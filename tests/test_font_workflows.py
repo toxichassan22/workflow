@@ -162,7 +162,7 @@ class FontWorkflowTests(unittest.TestCase):
             css, family = build_font_css({'font_family': 'Custom Company Font'}, self.tenant, embed=True)
         alias = f'tenant-managed-{self.tenant}'
         self.assertIn(f"font-family:'{alias}'", css)
-        self.assertIn('font-weight:500', css)
+        self.assertIn('font-weight:100 900', css)
         self.assertNotIn("font-family:'The Sans Arabic'", css)
         self.assertTrue(family.startswith(f"'{alias}'"))
 
@@ -188,6 +188,7 @@ class FontWorkflowTests(unittest.TestCase):
             css, family = build_font_css({}, self.tenant, embed=True)
         alias = f'tenant-managed-{self.tenant}'
         self.assertIn("src:local('Arial')", css)
+        self.assertIn('font-weight:100 900', css)
         self.assertIn('U+0600-06FF', css)
         self.assertIn('U+0000-024F', css)
         self.assertTrue(family.startswith(f"'{alias}'"))

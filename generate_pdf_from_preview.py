@@ -166,11 +166,30 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
                     timeout=30000
                 )
                 first_family = font_family.split(',')[0].strip().strip("\"'")
-                spec = f"16px '{first_family}'"
-                ok = page.evaluate(
-                    f"async () => {{ try {{ await document.fonts.load({json.dumps(spec)}); }} catch(e) {{}} return document.fonts.check({json.dumps(spec)}); }}"
+                font_probe = 'ابتثجحخدذرزسشصضطظعغفقكلمنهوي ABCxyz 0123456789'
+                loaded = page.evaluate(
+                    """async ({family, probe}) => {
+                        const loaded = [];
+                        for (const weight of [100, 300, 400, 500, 700, 900]) {
+                            try {
+                                const faces = await document.fonts.load(`${weight} 16px \"${family}\"`, probe);
+                                loaded.push(...faces.map(face => ({weight: face.weight, status: face.status})));
+                            } catch (error) {}
+                        }
+                        await document.fonts.ready;
+                        return {
+                            loaded,
+                            checked: document.fonts.check(`400 16px \"${family}\"`, probe),
+                            entries: Array.from(document.fonts).map(face => ({
+                                family: face.family,
+                                weight: face.weight,
+                                status: face.status,
+                            })),
+                        };
+                    }""",
+                    {"family": first_family, "probe": font_probe},
                 )
-                print(f"[FONT] document.fonts.check('{first_family}'): {ok}")
+                print(f"[FONT] loaded '{first_family}': {loaded['checked']} ({len(loaded['loaded'])} faces)")
             except Exception:
                 # Don't fail export because an image hung; print what we have.
                 pass
