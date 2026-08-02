@@ -67,9 +67,10 @@ def _reshape_arabic_text(text):
     text_str = str(text)
     try:
         import arabic_reshaper
-        from bidi.algorithm import get_display
-        reshaped = arabic_reshaper.reshape(text_str)
-        return get_display(reshaped)
+        # Reshape Arabic characters into connected Presentation Forms-B glyphs for PIL.
+        # Note: Do not pass through bidi get_display() here as PIL draw.text with presentation forms
+        # renders correctly in logical RTL order. Passing get_display reverses the glyph sequence and breaks joiners.
+        return arabic_reshaper.reshape(text_str)
     except Exception as e:
         print(f"[ARABIC RESHAPE WARN] Reshaping failed for '{text_str}': {e}")
         return text_str

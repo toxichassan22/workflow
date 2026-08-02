@@ -4726,7 +4726,15 @@ def api_auto_upload_branding_font():
     with open(filepath, 'wb') as font_file:
         font_file.write(raw)
     stored_path = os.path.relpath(filepath, os.path.dirname(__file__)).replace('\\', '/')
-    for script in detected['scripts']:
+    current_branding = db.get_branding(g.tenant_id) or {}
+    current_family = (current_branding.get('font_family') or '').strip().lower()
+    detected_family = (detected.get('family') or '').strip().lower()
+    target_scripts = list(set(detected.get('scripts', []) + ['arabic', 'latin']))
+    if not current_family or (detected_family and current_family != detected_family):
+        for script in ('arabic', 'latin'):
+            for old_weight in ('light', 'regular', 'medium', 'bold', 'black'):
+                db.delete_tenant_font_selection(g.tenant_id, script, old_weight)
+    for script in target_scripts:
         db.set_tenant_font_selection(
             g.tenant_id,
             script,
@@ -4734,6 +4742,8 @@ def api_auto_upload_branding_font():
             custom_font_path=stored_path,
             custom_font_data=file_data,
         )
+    family_name = detected.get('family') or os.path.splitext(file.filename)[0].replace('_', ' ').strip()
+    db.update_branding(g.tenant_id, font_family=family_name, font_arabic=family_name)
     return jsonify({
         'success': True,
         'detected': detected,

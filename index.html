@@ -4321,6 +4321,12 @@
       const weight = selected.weight || 'regular';
       const matches = (window.tenantAvailableFonts || []).filter(font => font.font_family === selected.font_family);
       const target = matches.length ? matches : [selected];
+      // Replace the previous family completely. The PDF renderer will reuse
+      // the nearest available face when the new family has only one weight.
+      await Promise.all(MANAGED_FONT_WEIGHTS.flatMap(w => [
+        api('DELETE', '/api/branding/fonts/arabic/' + w),
+        api('DELETE', '/api/branding/fonts/latin/' + w)
+      ]));
       for (const font of target) {
         await setTenantFontSelection(font.script, font.weight || weight, font.id, true);
       }

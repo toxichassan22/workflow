@@ -508,6 +508,47 @@ def _managed_font_face(font_data, family, weight):
         return ''
 
 
+_MANAGED_FONT_WEIGHTS = {
+    'light': 300,
+    'regular': 400,
+    'medium': 500,
+    'bold': 700,
+    'black': 900,
+}
+_SCRIPT_UNICODE_RANGES = {
+    'arabic': 'U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF,U+1EE00-1EEFF',
+    'latin': 'U+0000-024F,U+1E00-1EFF,U+2000-206F',
+}
+
+
+def _managed_face_rule(font_data, family, weight, script):
+    """Build one embedded face under a shared export family alias."""
+    rule = _managed_font_face(font_data, family, weight)
+    if not rule:
+        return ''
+    return rule[:-1] + f"unicode-range:{_SCRIPT_UNICODE_RANGES[script]};}}"
+
+
+def _managed_face_rule_from_path(path, family, weight, script):
+    abs_path = resolve_font_path(path)
+    if not abs_path or _is_lfs_pointer(abs_path):
+        return ''
+    ext = os.path.splitext(abs_path)[1].lower()
+    fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff2': 'woff2', '.woff': 'woff'}.get(ext, 'truetype')
+    with open(abs_path, 'rb') as font_file:
+        payload = json.dumps({'data': base64.b64encode(font_file.read()).decode('ascii'), 'format': fmt})
+    return _managed_face_rule(payload, family, weight, script)
+
+
+def _managed_local_face_rule(local_family, family, weight, script):
+    css_weight = _MANAGED_FONT_WEIGHTS.get(weight, 400)
+    unicode_range = _SCRIPT_UNICODE_RANGES[script]
+    return (
+        f"@font-face{{font-family:'{family}';src:local('{local_family}');"
+        f"font-weight:{css_weight};font-style:normal;unicode-range:{unicode_range};}}"
+    )
+
+
 def _managed_font_css(branding, tenant_id, fallback):
     try:
         from db import get_sag_font, get_sag_fonts, get_tenant_font_selection, get_tenant_font_selections
@@ -515,55 +556,66 @@ def _managed_font_css(branding, tenant_id, fallback):
         return None
 
     rules = []
-    families = []
+    import_rules = []
+    imported_google_families = []
     tenant_selections = get_tenant_font_selections(tenant_id) if tenant_id else []
     legacy_family = branding.get('font_family') or ''
     if not tenant_selections and (branding.get('font_file_path') or branding.get('font_file_data')):
         return None
     if not tenant_selections and legacy_family and legacy_family not in {'The Sans Arabic'}:
         return None
-    for script, weights in (('arabic', ('regular', 'light', 'medium', 'bold', 'black')), ('latin', ('regular', 'medium', 'bold'))):
-        family = None
+    export_family = f"tenant-managed-{tenant_id or 'default'}"
+    for script, weights in (('arabic', ('regular', 'light', 'medium', 'bold', 'black')), ('latin', ('regular', 'light', 'medium', 'bold', 'black'))):
+        script_selections = {item['weight']: item for item in tenant_selections if item.get('script') == script}
+        # Once a company selects any face for a script, its available faces form
+        # one family. Missing weights are synthesized from the nearest face.
+        use_defaults = not script_selections
         for weight in weights:
-            selection = get_tenant_font_selection(tenant_id, script, weight) if tenant_id else None
+            selection = script_selections.get(weight)
             font = get_sag_font(selection.get('font_id')) if selection and selection.get('font_id') else None
-            if not selection:
+            if use_defaults and not selection:
                 font = next((item for item in get_sag_fonts(script=script, weight=weight) if item.get('is_default')), None)
             if not selection and not font:
                 continue
             if selection and selection.get('custom_font_data'):
-                selected_family = f"tenant-{script}-{tenant_id or 'default'}"
-                rule = _managed_font_face(selection['custom_font_data'], selected_family, weight)
+                rule = _managed_face_rule(selection['custom_font_data'], export_family, weight, script)
+            elif selection and selection.get('custom_font_path'):
+                rule = _managed_face_rule_from_path(selection['custom_font_path'], export_family, weight, script)
             elif font:
                 selected_family = font.get('font_family') or ('Arial' if script == 'latin' else 'The Sans Arabic')
                 if font.get('file_data'):
-                    rule = _managed_font_face(font['file_data'], selected_family, weight)
+                    rule = _managed_face_rule(font['file_data'], export_family, weight, script)
                 else:
                     source = _resolve_preset_font_source(font.get('source_data') or selected_family)
                     if source and source.get('type') == 'bundled':
                         data = source.get('data')
                         fmt = source.get('format', 'truetype')
-                        mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
-                        css_weight = {'light': 300, 'regular': 400, 'medium': 500, 'bold': 700, 'black': 900}.get(weight, 400)
-                        rule = f"@font-face{{font-family:'{selected_family}';src:url(data:{mime};base64,{data}) format('{fmt}');font-weight:{css_weight};font-style:normal;font-display:swap;}}"
+                        payload = json.dumps({'data': data, 'format': fmt})
+                        rule = _managed_face_rule(payload, export_family, weight, script)
                     elif source and source.get('type') == 'google':
                         rule = "@import url('https://fonts.googleapis.com/css2?family=" + source['encoded'] + ":wght@300;400;500;700;900&display=swap');"
+                        if source['family'] not in imported_google_families:
+                            imported_google_families.append(source['family'])
+                    elif source and source.get('type') == 'system':
+                        rule = _managed_local_face_rule(source['family'], export_family, weight, script)
                     else:
                         rule = ''
             else:
                 rule = ''
-                selected_family = None
             if rule:
-                rules.append(rule)
-                family = family or selected_family
-        if family:
-            families.append(f"'{family}'")
+                if rule.startswith('@import'):
+                    if rule not in import_rules:
+                        import_rules.append(rule)
+                else:
+                    rules.append(rule)
 
-    if not rules or not families:
+    if not rules and not import_rules:
         return None
+    families = [f"'{export_family}'"]
+    families.extend(f"'{family}'" for family in imported_google_families)
     family_list = ', '.join(families) + ', ' + fallback
     rules.append(f'.slide,.slide *{{font-family:{family_list} !important;}}')
-    return '\n'.join(rules), family_list
+    return '\n'.join(import_rules + rules), family_list
 
 
 def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
@@ -579,6 +631,11 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
     if family_only:
         family_list = _font_family_list(chosen)
         return f".slide,.slide *{{font-family:{family_list} !important;}}", family_list
+
+    # Managed per-weight selections take precedence over the legacy one-file setting.
+    managed = _managed_font_css(branding, tenant_id, fallback)
+    if managed:
+        return managed
 
     # 1) Custom font file on disk (uploaded by tenant)
     path = branding.get('font_file_path')
@@ -597,10 +654,6 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
             return _build_font_face_from_data(font_file_data, family, fallback)
         except Exception as e:
             print(f"[FONT] ERROR: failed to use font_file_data: {e}")
-
-    managed = _managed_font_css(branding, tenant_id, fallback)
-    if managed:
-        return managed
 
     # 3) Built-in presets: bundled faces or Google Fonts
     source = _resolve_preset_font_source(chosen)
