@@ -2707,6 +2707,12 @@
         <aside id="tenantProjectSidebar" class="project-form-sidebar" aria-label="أقسام بيانات المشروع"></aside>
         <div id="tenantProjectForm" class="project-form-content"></div>
       </div>
+      <div id="slidePlanProgress" style="display:none;margin:16px auto 0;max-width:400px">
+        <div style="background:#e8eaf0;border-radius:10px;height:10px;overflow:hidden">
+          <div id="slidePlanBar" style="height:100%;width:0;background:#3B6E91;border-radius:10px;transition:width .5s ease,background .3s"></div>
+        </div>
+        <p id="slidePlanStatus" style="text-align:center;margin:8px 0 0;font-size:13px;color:#555"></p>
+      </div>
       <div class="tenant-form-actions"
         style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)">
         <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
@@ -2715,27 +2721,11 @@
         <button class="btn primary" data-permission="create_presentation" onclick="toggleMapStylePanel()"
           style="background:#3B6E91; color:#fff; border:none; padding:8px 16px; border-radius:8px;">إعدادات
           الخرائط</button>
-        <button class="btn primary" onclick="navigateTenantWorkflow('tenantSlidePlanPage')">التالي: توليد الهيكل ←</button>
+        <button id="slidePlanBtn" class="btn primary" data-permission="create_presentation" onclick="generateSlidePlanOnly()"
+          style="background:#3B6E91;color:#fff;border:none;padding:8px 16px;border-radius:8px;">توليد الهيكل</button>
+        <button class="btn primary" onclick="submitTenantProject()">التالي: الصور ←</button>
         <button class="btn danger" onclick="confirmDeleteProject()">حذف المشروع</button>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
-      </div>
-    </section>
-
-    <!-- Slide Plan / Structure Page -->
-    <section id="tenantSlidePlanPage" class="tenant-page">
-      <div class="workflow-stage-layout">
-        <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
-        <div class="workflow-stage-content">
-          <h2 style="margin:0 0 8px">هيكل العرض التقديمي</h2>
-          <p class="tenant-hint" style="margin:0 0 20px">مراجعة الهيكل المقترح قبل توليد الشرائح والصور. يمكنك التعديل أو إعادة التوليد.</p>
-          <div id="slidePlanPageInfo" style="margin-bottom:16px"></div>
-          <div id="slidePlanPageList" style="display:grid;gap:8px;margin-bottom:24px"></div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <button class="btn ghost" onclick="generateSlidePlanOnly()">🔄 إعادة توليد الهيكل</button>
-            <button class="btn primary" onclick="goToTenantMainImage()">التالي: الصور ←</button>
-            <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">← العودة لبيانات المشروع</button>
-          </div>
-        </div>
       </div>
     </section>
 
@@ -3758,7 +3748,6 @@
 
     const TENANT_WORKFLOW_ITEMS = [
       { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
-      { pageId: 'tenantSlidePlanPage', label: 'توليد الهيكل' },
       { pageId: 'tenantMainImagePage', label: 'توليد الصورة الرئيسية' },
       { pageId: 'tenantMoodboardPage', label: 'توليد المود بورد' },
     ];
@@ -3774,15 +3763,6 @@
           showTenantPage('tenantSlidesPage');
         } else {
           toast('قم بتوليد الشرائح التقديمية أولاً');
-        }
-        return;
-      }
-      if (pageId === 'tenantSlidePlanPage') {
-        if (tenantSlidePlan) {
-          renderTenantSlidePlanPage();
-          showTenantPage('tenantSlidePlanPage');
-        } else {
-          generateSlidePlanOnly();
         }
         return;
       }
@@ -6355,60 +6335,45 @@
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
-      showTenantPage('tenantSlidePlanPage');
-      const info = document.getElementById('slidePlanPageInfo');
-      const list = document.getElementById('slidePlanPageList');
-      if (info) info.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:#3B6E91;font-weight:700;font-size:15px;padding:16px 0"><div class="spinner" style="width:22px;height:22px;border-width:3px"></div>جاري توليد الهيكل بالذكاء الاصطناعي...</div>';
-      if (list) list.innerHTML = '';
+      const progressEl = document.getElementById('slidePlanProgress');
+      const barEl = document.getElementById('slidePlanBar');
+      const statusEl = document.getElementById('slidePlanStatus');
+      const btnEl = document.getElementById('slidePlanBtn');
+      if (!progressEl || !barEl || !statusEl || !btnEl) return;
+      progressEl.style.display = 'block';
+      barEl.style.width = '10%';
+      statusEl.textContent = 'جاري تحليل بيانات المشروع...';
+      btnEl.disabled = true;
       try {
-        const response = await fetch('/api/slide-plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectData: tenantProjectData })
-        });
-        const result = await response.json();
-        if (result.success && result.plan) {
+        const result = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
+        if (result.error) {
+          barEl.style.width = '100%';
+          barEl.style.background = '#b71c1c';
+          statusEl.textContent = '❌ ' + result.error;
+          btnEl.disabled = false;
+          return;
+        }
+        barEl.style.width = '50%';
+        statusEl.textContent = 'تم التحليل — جاري إعداد الهيكل...';
+        if (result.plan) {
           tenantSlidePlan = result.plan;
-          renderTenantSlidePlanPage();
+          barEl.style.width = '100%';
+          barEl.style.background = '#2e7d32';
+          statusEl.textContent = '✅ تم توليد الهيكل — ' + (tenantSlidePlan.slides || []).length + ' شرائح';
+          toast('تم توليد الهيكل بنجاح — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
           triggerAutoSaveDraft();
-          toast('تم توليد الهيكل بنجاح');
         } else {
-          if (info) info.innerHTML = '<div style="color:#b71c1c;padding:16px 0">❌ ' + escapeHtml(result.error || 'فشل توليد الهيكل') + '</div>';
+          barEl.style.width = '100%';
+          barEl.style.background = '#b71c1c';
+          statusEl.textContent = '❌ فشل توليد الهيكل';
         }
       } catch (e) {
-        if (info) info.innerHTML = '<div style="color:#b71c1c;padding:16px 0">❌ خطأ في الاتصال بالخادم</div>';
+        barEl.style.width = '100%';
+        barEl.style.background = '#b71c1c';
+        statusEl.textContent = '❌ خطأ في الاتصال بالخادم';
         console.error('generateSlidePlanOnly error:', e);
       }
-    }
-
-    function renderTenantSlidePlanPage() {
-      const plan = tenantSlidePlan;
-      const info = document.getElementById('slidePlanPageInfo');
-      const list = document.getElementById('slidePlanPageList');
-      if (!info || !list) return;
-      if (!plan || !plan.slides) {
-        info.innerHTML = '<div style="padding:16px 0;color:#666">لا يوجد هيكل بعد. اضغط "توليد الهيكل" للبدء.</div>';
-        list.innerHTML = '';
-        return;
-      }
-      info.innerHTML = '<div style="display:flex;gap:16px;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid var(--line);margin-bottom:8px">' +
-        '<span><strong>عدد الشرائح:</strong> ' + plan.slides.length + '</span>' +
-        (plan.proposed_count ? '<span>(مقترح: ' + plan.proposed_count + ')</span>' : '') +
-        '<span><strong>المنطق:</strong> ' + escapeHtml(plan.reasoning || '') + '</span>' +
-        '</div>' +
-        (plan.validation && !plan.validation.isValid ? '<div style="color:#b71c1c;padding:8px 0">⚠️ ' + (plan.validation.issues || []).join(' | ') + '</div>' : '');
-      list.innerHTML = plan.slides.map((s, i) =>
-        '<div class="tenant-slide-plan-card">' +
-        '<div class="num">' + (i + 1) + '</div>' +
-        '<div style="display:grid;gap:8px;flex:1">' +
-        '<input value="' + escapeHtml(s.title || '') + '" onchange="updatePlanSlideTitle(' + i + ', this.value)" placeholder="عنوان الشريحة" style="font-weight:600">' +
-        '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#666">' +
-        '<span>النوع: <strong style="color:#333">' + escapeHtml(slideTypeText(s.type || 'content')) + '</strong></span>' +
-        '<span>النمط: <strong style="color:#333">' + escapeHtml(slideStyleText(s.designStyle || s.design_style || 'cards')) + '</strong></span>' +
-        '</div>' +
-        '</div>' +
-        '</div>'
-      ).join('');
+      btnEl.disabled = false;
     }
 
     function updatePlanSlideTitle(index, title) {
