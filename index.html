@@ -2216,6 +2216,15 @@
         <h4 id="globalLoaderTitle" style="margin:0 0 2px;color:var(--p);font-size:14px;font-weight:700">جاري التحميل...
         </h4>
         <p id="globalLoaderText" style="margin:0;color:var(--muted);font-size:12px;line-height:1.4"></p>
+        <div id="globalLoaderProgress" style="display:none;margin-top:8px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+            <span id="globalLoaderPct" style="font-size:11px;font-weight:700;color:var(--p)">0%</span>
+            <span id="globalLoaderStep" style="font-size:11px;color:var(--muted)"></span>
+          </div>
+          <div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden">
+            <div id="globalLoaderBar" style="height:100%;width:0%;background:var(--p);transition:width .4s ease;border-radius:3px"></div>
+          </div>
+        </div>
       </div>
       <button onclick="hideLoader()"
         style="background:none;border:none;font-size:18px;color:#aaa;cursor:pointer;padding:2px 6px;border-radius:6px;margin-right:4px;"
@@ -3201,14 +3210,36 @@
       setTimeout(() => t.classList.remove('active'), duration);
     }
 
-    function showLoader(title, text) {
+    function showLoader(title, text, pct) {
       document.getElementById('globalLoaderTitle').textContent = title || 'جاري التحميل...';
       document.getElementById('globalLoaderText').textContent = text || '';
+      const prog = document.getElementById('globalLoaderProgress');
+      if (pct !== undefined && pct !== null) {
+        prog.style.display = 'block';
+        document.getElementById('globalLoaderBar').style.width = pct + '%';
+        document.getElementById('globalLoaderPct').textContent = pct + '%';
+        document.getElementById('globalLoaderStep').textContent = text || '';
+      } else {
+        prog.style.display = 'none';
+      }
       document.getElementById('globalLoader').style.display = 'flex';
+    }
+
+    function updateLoaderProgress(pct, stepText) {
+      const bar = document.getElementById('globalLoaderBar');
+      const pctEl = document.getElementById('globalLoaderPct');
+      const stepEl = document.getElementById('globalLoaderStep');
+      const prog = document.getElementById('globalLoaderProgress');
+      if (bar) bar.style.width = pct + '%';
+      if (pctEl) pctEl.textContent = pct + '%';
+      if (stepEl && stepText) stepEl.textContent = stepText;
+      if (prog) prog.style.display = 'block';
     }
 
     function hideLoader() {
       document.getElementById('globalLoader').style.display = 'none';
+      const prog = document.getElementById('globalLoaderProgress');
+      if (prog) prog.style.display = 'none';
     }
 
     //  TENANT UI (Multi-Tenant Frontend)
@@ -3356,6 +3387,11 @@
         tenantProjectData = { ...tenantProjectData, ...fresh };
       }
 
+      const totalSteps = (needImages ? 1 : 0) + (needMaps ? 1 : 0);
+      let currentStep = 0;
+      const basePct = 60;
+      const stepPct = totalSteps > 0 ? Math.round(30 / totalSteps) : 0;
+
       function recordError(res, fallback) {
         tenantCreativeImages.last_error =
           (res && res.error_code === 'NO_API_KEY')
@@ -3368,7 +3404,10 @@
         const staleImages = !hasStoredImages();
         if (!force && !staleImages) {
           console.log('[ASSETS] reusing stored cover/moodboard');
+          currentStep++;
+          updateLoaderProgress(basePct + stepPct * currentStep, 'الصور جاهزة');
         } else {
+          updateLoaderProgress(basePct, 'جاري توليد الصور الإبداعية...');
           const count = (tenantBranding && tenantBranding.moodboard_count) || 4;
           const payload = {
             projectData: tenantProjectData,
@@ -3391,6 +3430,8 @@
           } else {
             recordError(res, 'تعذر الاتصال بالسيرفر أثناء توليد الصور');
           }
+          currentStep++;
+          updateLoaderProgress(basePct + stepPct * currentStep, 'اكتمل توليد الصور');
         }
       }
 
@@ -3398,6 +3439,10 @@
         const staleMaps = !hasStoredMaps();
         if (!force && !staleMaps) {
           console.log('[ASSETS] reusing stored maps');
+          currentStep++;
+          updateLoaderProgress(basePct + stepPct * currentStep, 'الخرائط جاهزة');
+        } else {
+          updateLoaderProgress(basePct + stepPct * currentStep, 'جاري توليد خرائط الموقع...');
         } else {
           const payload = { projectData: slimMapProjectData(tenantProjectData), force: !!force || staleMaps };
           if (tenantPresentationId) payload.presentationId = tenantPresentationId;
@@ -3425,6 +3470,8 @@
           } else {
             recordError(res, 'تعذر الاتصال بالسيرفر أثناء توليد الخرائط');
           }
+          currentStep++;
+          updateLoaderProgress(basePct + stepPct * currentStep, 'اكتمل توليد الخرائط');
         }
       }
 
@@ -6128,15 +6175,21 @@
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
       await saveProjectAsDraft(true);
-      showLoader('جاري إعداد خطة العرض', 'AI يبني الهيكل داخليًا وفق تدريب الشركة');
+      showLoader('جاري إعداد خطة العرض', 'AI يبني الهيكل داخليًا وفق تدريب الشركة', 10);
+      updateLoaderProgress(10, 'حفظ البيانات...');
+      await new Promise(r => setTimeout(r, 300));
+      updateLoaderProgress(20, 'تحليل بيانات المشروع...');
       const data = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
-      hideLoader();
+      updateLoaderProgress(40, 'تم إعداد خطة الشرائح');
+      await new Promise(r => setTimeout(r, 200));
       if (data.success && data.plan) {
         tenantSlidePlan = data.plan;
         tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+        updateLoaderProgress(50, 'جاري توليد الصور والخرائط...');
         triggerAutoSaveDraft();
         await goToTenantMainImage();
       } else {
+        hideLoader();
         toast(data.error || 'فشل إعداد خطة العرض');
       }
     }
@@ -6243,7 +6296,8 @@
       tenantCreativeImages = tenantCreativeImages || {};
       
       if (forceRefresh || !tenantCreativeImages.cover_prompt || !tenantCreativeImages.moodboard_prompts || tenantCreativeImages.moodboard_prompts.length < count) {
-        showLoader('جاري صياغة أوصاف الصور بالذكاء الاصطناعي', 'يقوم محرك GLM 5.1 بتحليل كامل بيانات المشروع لإنشاء أقصى واقعية معمارية ممكنة...');
+        showLoader('جاري صياغة أوصاف الصور بالذكاء الاصطناعي', 'يقوم محرك GLM 5.1 بتحليل بيانات المشروع...', 42);
+        updateLoaderProgress(42, 'تحليل البيانات وتوليد الأوصاف...');
         try {
           const res = await api('POST', '/api/get-image-prompts', {
             projectData: tenantProjectData,
@@ -6501,11 +6555,12 @@
         tenantSlidesData = [];
         activeSlideIndex = 0;
         showTenantPage('tenantSlidesPage');
-        renderTenantSlidesProgress(totalSlides, 0);
+        showLoader('جاري توليد الشرائح', '0 / ' + totalSlides, 55);
 
         for (let i = 0; i < totalSlides; i++) {
           const plan = tenantSlidePlan.slides[i] || {};
-          renderTenantSlidesProgress(totalSlides, i, plan.title || ('شريحة ' + (i + 1)));
+          const slidePct = Math.round(55 + (i / totalSlides) * 40);
+          updateLoaderProgress(slidePct, 'الشريحة ' + (i + 1) + ' من ' + totalSlides + ': ' + (plan.title || ''));
           let generated = null;
           let lastError = '';
 
@@ -6530,12 +6585,12 @@
               console.error('Slide generation error for index', i, 'attempt', attempt, err);
             }
             if (!generated && attempt < 3) {
-              renderTenantSlidesProgress(totalSlides, i, (plan.title || ('شريحة ' + (i + 1))) + ' — إعادة المحاولة ' + (attempt + 1));
+              updateLoaderProgress(slidePct, 'إعادة المحاولة ' + (attempt + 1) + ': ' + (plan.title || ''));
             }
           }
 
           if (!generated) {
-            hideSlideProgress();
+            hideLoader();
             renderTenantSlides();
             toast('توقف التوليد عند الشريحة ' + (i + 1) + ': ' + lastError);
             return;
@@ -6550,17 +6605,19 @@
             metrics: plan.metrics || []
           });
           renderTenantSlides();
-          renderTenantSlidesProgress(totalSlides, i + 1);
         }
 
         if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !s.html.includes('class="slide"'))) {
-          hideSlideProgress();
+          hideLoader();
           toast('لم يكتمل توليد العرض، لذلك لم يتم حفظه.');
           return;
         }
 
-        hideSlideProgress();
+        updateLoaderProgress(98, 'جاري حفظ العرض...');
         await saveTenantPresentation();
+        updateLoaderProgress(100, 'اكتمل!');
+        await new Promise(r => setTimeout(r, 400));
+        hideLoader();
         renderTenantSlides();
         triggerAutoSaveDraft();
         toast('تم توليد كل الشرائح (' + totalSlides + ')');
