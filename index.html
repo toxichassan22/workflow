@@ -4234,8 +4234,9 @@
       const matchedBrandingSel = activeBranding && activeBranding.font_family
         ? selections.find(item => item.font_family && item.font_family.toLowerCase() === activeBranding.font_family.toLowerCase())
         : null;
+      const customSel = selections.find(item => item.custom_font_path != null);
       const currentSelection = matchedBrandingSel
-        || ((currentArabic.font_id || currentArabic.custom_font_path) ? currentArabic : currentLatin);
+        || (customSel ? customSel : ((currentArabic.font_id || currentArabic.custom_font_path) ? currentArabic : currentLatin));
       const uniqueFonts = [];
       available.forEach(font => {
         const existing = uniqueFonts.find(item => item.font_family === font.font_family);
@@ -4249,8 +4250,8 @@
       const customFonts = [];
       selections.forEach(sel => {
         if (sel.custom_font_path && !sel.font_id) {
-          const name = (sel.custom_font_path.split('/').pop() || 'خط مخصص').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ');
-          const already = uniqueFonts.find(f => f.font_family === name);
+          const name = sel.font_family || (sel.custom_font_path.split('/').pop() || 'خط مخصص').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ');
+          const already = uniqueFonts.find(f => f.font_family.toLowerCase() === name.toLowerCase());
           if (!already) {
             customFonts.push({ id: 'custom_' + sel.script + '_' + sel.weight, font_family: name, font_name: name, script: sel.script, weight: sel.weight, is_custom: true });
           }
@@ -4265,8 +4266,8 @@
         '<option value="">استخدام الخط الافتراضي</option>' +
         allFonts.map(font => {
           const isSelected = (currentSelection.font_id && font.id === currentSelection.font_id)
-            || (currentSelection.font_family && font.font_family === currentSelection.font_family)
-            || (font.is_custom && currentSelection.custom_font_path && font.font_family === (currentSelection.custom_font_path.split('/').pop() || '').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' '));
+            || (currentSelection.font_family && font.font_family && font.font_family.toLowerCase() === currentSelection.font_family.toLowerCase())
+            || (font.is_custom && currentSelection.custom_font_path != null);
           return '<option value="' + escapeHtml(font.id) + '"' + (isSelected ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + (font.is_custom ? ' (مرفوع)' : '') + '</option>';
         }).join('') +
         '</select>' +
