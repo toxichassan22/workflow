@@ -6329,30 +6329,31 @@
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
-      showLoader('جاري توليد الهيكل', 'يتم تحليل بيانات المشروع وتوليد خطة الشرائح...', 5);
+      showGenProgress();
+      setGenStep('plan', 'active');
+      setGenPct(5, 'تحليل بيانات المشروع...');
       try {
-        updateLoaderProgress(20, 'يتم التواصل مع الذكاء الاصطناعي...');
         const result = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
         if (result.error) {
-          updateLoaderProgress(100, '❌ ' + result.error);
-          setTimeout(hideLoader, 2500);
+          setGenStep('plan', 'error');
+          toast(result.error);
           return;
         }
-        updateLoaderProgress(70, 'تم التحليل — جاري إعداد الهيكل...');
         if (result.plan) {
           tenantSlidePlan = result.plan;
-          updateLoaderProgress(100, '✅ تم توليد الهيكل — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
+          tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+          setGenStep('plan', 'done');
+          setGenPct(100, 'تم توليد الهيكل — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
           toast('تم توليد الهيكل بنجاح — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
           triggerAutoSaveDraft();
-          setTimeout(hideLoader, 1500);
         } else {
-          updateLoaderProgress(100, '❌ فشل توليد الهيكل');
-          setTimeout(hideLoader, 2500);
+          setGenStep('plan', 'error');
+          toast('فشل توليد الهيكل');
         }
       } catch (e) {
-        updateLoaderProgress(100, '❌ خطأ في الاتصال بالخادم');
+        setGenStep('plan', 'error');
+        toast('خطأ في الاتصال بالخادم');
         console.error('generateSlidePlanOnly error:', e);
-        setTimeout(hideLoader, 2500);
       }
     }
 
@@ -6562,14 +6563,12 @@
       tenantCreativeImages = tenantCreativeImages || {};
       tenantCreativeImages.cover_prompt = prompt;
 
-      showLoader('جاري توليد الصورة الرئيسية', 'يتم التواصل مع الذكاء الاصطناعي لتوليد الصورة...', 10);
+      showLoader('جاري توليد الصورة الرئيسية', 'يتم التواصل مع الذكاء الاصطناعي لتوليد الصورة...');
       try {
-        updateLoaderProgress(50, 'جاري التوليد...');
         const data = await api('POST', '/api/generate-image', {
           prompt: prompt,
           referenceImage: tenantCreativeImages.cover || null
         });
-        updateLoaderProgress(90, 'جاري المعالجة...');
         hideLoader();
         if (data && data.success && data.image) {
           tempCoverImage = data.image;
@@ -6608,14 +6607,12 @@
       tenantCreativeImages.moodboard_prompts = tenantCreativeImages.moodboard_prompts || [];
       tenantCreativeImages.moodboard_prompts[index] = prompt;
 
-      showLoader('جاري توليد صورة المود بورد #' + (index + 1), 'يتم التواصل مع الذكاء الاصطناعي...', 10);
+      showLoader('جاري توليد صورة المود بورد #' + (index + 1), 'يتم التواصل مع الذكاء الاصطناعي...');
       try {
-        updateLoaderProgress(50, 'جاري التوليد...');
         const data = await api('POST', '/api/generate-image', {
           prompt: prompt,
           referenceImage: tenantCreativeImages.cover || null
         });
-        updateLoaderProgress(90, 'جاري المعالجة...');
         hideLoader();
         if (data && data.success && data.image) {
           tempMoodboardImages[index] = data.image;
