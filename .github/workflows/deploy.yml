@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -11,4 +12,4 @@ jobs:
     steps:
       - name: Trigger Server Deployment Webhook
         run: |
-          curl -s -X POST "https://sagdemo.site/api/deploy-webhook?secret=${{ secrets.DEPLOY_WEBHOOK_SECRET }}"
+          curl --fail-with-body --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 15 --max-time 120 -X POST "https://sagdemo.site/api/deploy-webhook?secret=${{ secrets.DEPLOY_WEBHOOK_SECRET }}"
