@@ -4234,9 +4234,8 @@
       const matchedBrandingSel = activeBranding && activeBranding.font_family
         ? selections.find(item => item.font_family && item.font_family.toLowerCase() === activeBranding.font_family.toLowerCase())
         : null;
-      const customSel = selections.find(item => item.custom_font_path != null);
       const currentSelection = matchedBrandingSel
-        || (customSel ? customSel : ((currentArabic.font_id || currentArabic.custom_font_path) ? currentArabic : currentLatin));
+        || ((currentArabic.font_id || currentArabic.custom_font_path) ? currentArabic : currentLatin);
       const uniqueFonts = [];
       available.forEach(font => {
         const existing = uniqueFonts.find(item => item.font_family === font.font_family);
@@ -4266,8 +4265,7 @@
         '<option value="">استخدام الخط الافتراضي</option>' +
         allFonts.map(font => {
           const isSelected = (currentSelection.font_id && font.id === currentSelection.font_id)
-            || (currentSelection.font_family && font.font_family && font.font_family.toLowerCase() === currentSelection.font_family.toLowerCase())
-            || (font.is_custom && currentSelection.custom_font_path != null);
+            || (currentSelection.font_family && font.font_family && font.font_family.toLowerCase() === currentSelection.font_family.toLowerCase());
           return '<option value="' + escapeHtml(font.id) + '"' + (isSelected ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + (font.is_custom ? ' (مرفوع)' : '') + '</option>';
         }).join('') +
         '</select>' +
@@ -4289,8 +4287,14 @@
     async function selectTenantPrimaryFont(fontId) {
       if (fontId === 'custom') return;
       if (fontId.startsWith('custom_')) {
+        const fontData = await api('GET', '/api/branding/fonts');
+        const sels = (fontData && fontData.selections) || [];
+        const customSel = sels.find(s => s.custom_font_path != null);
+        const name = (customSel && customSel.font_family) ? customSel.font_family : 'خط مخصص';
+        await api('PUT', '/api/branding', { font_family: name, font_arabic: name });
         await loadTenantBranding();
         await loadTenantFonts();
+        toast('تم تخصيص الخط للشركة');
         return;
       }
       if (!fontId) {
