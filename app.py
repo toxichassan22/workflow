@@ -4597,18 +4597,65 @@ def api_delete_sag_font(font_id):
     return jsonify({'success': True})
 
 
+def _get_tenant_uploaded_fonts(tenant_id):
+    font_dir = os.path.join(UPLOADS_DIR, str(tenant_id), 'fonts')
+    if not os.path.exists(font_dir):
+        return []
+    fonts = []
+    seen = set()
+    for fname in sorted(os.listdir(font_dir)):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext in ('.ttf', '.otf', '.woff', '.woff2'):
+            stem = os.path.splitext(fname)[0]
+            family = re.sub(r'_(light|regular|medium|bold|black)$', '', stem, flags=re.I).replace('_', ' ').strip()
+            if family and family.lower() not in seen:
+                seen.add(family.lower())
+                rel_path = os.path.relpath(os.path.join(font_dir, fname), os.path.dirname(__file__)).replace('\\', '/')
+                fonts.append({
+                    'id': f'custom_file_{len(fonts)+1}',
+                    'font_family': family,
+                    'font_name': family,
+                    'script': 'arabic',
+                    'weight': 'regular',
+                    'is_custom': True,
+                    'custom_font_path': rel_path
+                })
+    return fonts
+
+
 def _public_font_selections(tenant_id):
     hidden = {'custom_font_data'}
-    return [
-        {key: value for key, value in selection.items() if key not in hidden}
-        for selection in db.get_tenant_font_selections(tenant_id)
-    ]
+    selections = db.get_tenant_font_selections(tenant_id)
+    branding = db.get_branding(tenant_id) or {}
+    tenant_family = branding.get('font_family')
+    result = []
+    for selection in selections:
+        item = {key: value for key, value in selection.items() if key not in hidden}
+        if item.get('font_id') and not item.get('font_family'):
+            font = db.get_sag_font(item['font_id'])
+            if font:
+                item['font_family'] = font.get('font_family')
+        elif item.get('custom_font_path') and not item.get('font_family'):
+            if tenant_family:
+                item['font_family'] = tenant_family
+            else:
+                path = item['custom_font_path']
+                name = os.path.splitext(os.path.basename(path))[0]
+                name = re.sub(r'_(light|regular|medium|bold|black)$', '', name, flags=re.I)
+                item['font_family'] = name.replace('_', ' ').strip()
+        result.append(item)
+    return result
 
 
 @app.route('/api/branding/fonts', methods=['GET'])
 @require_auth
 def api_get_branding_fonts():
-    return jsonify({'success': True, 'selections': _public_font_selections(g.tenant_id), 'available': db.get_sag_fonts()})
+    return jsonify({
+        'success': True,
+        'selections': _public_font_selections(g.tenant_id),
+        'available': db.get_sag_fonts(),
+        'custom_uploaded': _get_tenant_uploaded_fonts(g.tenant_id)
+    })
 
 
 @app.route('/api/branding/fonts', methods=['PUT'])
@@ -4618,12 +4665,15 @@ def api_set_branding_font():
     script = (data.get('script') or '').strip().lower()
     weight = (data.get('weight') or '').strip().lower()
     font_id = data.get('font_id') or data.get('fontId')
+    custom_font_path = data.get('custom_font_path')
     if script not in {'arabic', 'latin'} or weight not in {'light', 'regular', 'medium', 'bold', 'black'}:
         return jsonify({'error': 'Invalid script or weight'}), 400
     if font_id and not db.get_sag_font(font_id):
         return jsonify({'error': 'Font not found'}), 404
     if font_id:
         db.set_tenant_font_selection(g.tenant_id, script, weight, font_id=font_id)
+    elif custom_font_path:
+        db.set_tenant_font_selection(g.tenant_id, script, weight, custom_font_path=custom_font_path)
     else:
         db.delete_tenant_font_selection(g.tenant_id, script, weight)
     return jsonify({'success': True, 'selections': _public_font_selections(g.tenant_id)})

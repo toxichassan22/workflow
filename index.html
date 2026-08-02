@@ -4245,17 +4245,23 @@
           uniqueFonts[uniqueFonts.indexOf(existing)] = font;
         }
       });
-      // Add custom (uploaded) fonts from selections that aren't in available
+      const customUploaded = data.custom_uploaded || [];
       const customFonts = [];
+      customUploaded.forEach(c => {
+        if (!uniqueFonts.find(f => f.font_family.toLowerCase() === c.font_family.toLowerCase())) {
+          customFonts.push(c);
+        }
+      });
       selections.forEach(sel => {
         if (sel.custom_font_path && !sel.font_id) {
           const name = sel.font_family || (sel.custom_font_path.split('/').pop() || 'خط مخصص').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ');
-          const already = uniqueFonts.find(f => f.font_family.toLowerCase() === name.toLowerCase());
+          const already = uniqueFonts.find(f => f.font_family.toLowerCase() === name.toLowerCase()) || customFonts.find(f => f.font_family.toLowerCase() === name.toLowerCase());
           if (!already) {
-            customFonts.push({ id: 'custom_' + sel.script + '_' + sel.weight, font_family: name, font_name: name, script: sel.script, weight: sel.weight, is_custom: true });
+            customFonts.push({ id: 'custom_' + sel.script + '_' + sel.weight, font_family: name, font_name: name, script: sel.script, weight: sel.weight, is_custom: true, custom_font_path: sel.custom_font_path });
           }
         }
       });
+      window.tenantCustomFonts = customFonts;
       const allFonts = uniqueFonts.concat(customFonts);
       const summary = selections.length
         ? selections.map(item => (item.script === 'arabic' ? 'عربي' : 'لاتيني') + ' ' + item.weight + (item.custom_font_path ? ' (مرفوع)' : '')).join('، ')
@@ -4287,10 +4293,12 @@
     async function selectTenantPrimaryFont(fontId) {
       if (fontId === 'custom') return;
       if (fontId.startsWith('custom_')) {
-        const fontData = await api('GET', '/api/branding/fonts');
-        const sels = (fontData && fontData.selections) || [];
-        const customSel = sels.find(s => s.custom_font_path != null);
-        const name = (customSel && customSel.font_family) ? customSel.font_family : 'خط مخصص';
+        const allCustom = (window.tenantCustomFonts || []);
+        const targetFont = allCustom.find(f => f.id === fontId);
+        const name = targetFont ? targetFont.font_family : 'خط مخصص';
+        if (targetFont && targetFont.custom_font_path) {
+          await api('PUT', '/api/branding/fonts', { script: targetFont.script || 'arabic', weight: targetFont.weight || 'regular', custom_font_path: targetFont.custom_font_path });
+        }
         await api('PUT', '/api/branding', { font_family: name, font_arabic: name });
         await loadTenantBranding();
         await loadTenantFonts();
