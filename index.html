@@ -751,16 +751,112 @@
       z-index: 99
     }
 
-    @keyframes spin {
-      to {
-        transform: rotate(360deg)
-      }
+    .global-loader-card {
+      background: #fff;
+      border: 1.5px solid var(--p);
+      padding: 14px 18px;
+      border-radius: 16px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.15);
+      width: min(380px, calc(100vw - 48px));
+      box-sizing: border-box;
+      color: #222;
+      position: relative;
+      animation: geFloatIn 0.3s ease-out;
     }
 
-    @keyframes geSpin {
-      to {
-        transform: rotate(360deg);
-      }
+    .global-loader-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .global-loader-heading {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .global-loader-percent {
+      flex-shrink: 0;
+      color: var(--p);
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1.2;
+      direction: ltr;
+    }
+
+    .global-loader-progress {
+      margin-top: 10px;
+    }
+
+    .global-loader-progress-track,
+    .inline-loading-track {
+      height: 8px;
+      background: #e8edf1;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .global-loader-progress-fill,
+    .inline-loading-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--p), var(--s));
+      border-radius: 999px;
+      transition: width 0.45s ease;
+    }
+
+    .global-loader-progress-meta,
+    .inline-loading-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .global-loader-progress-meta span:first-child,
+    .inline-loading-header span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .global-loader-progress-meta span:last-child {
+      flex-shrink: 0;
+      color: var(--p);
+    }
+
+    .global-loader-cancel {
+      background: none;
+      border: none;
+      font-size: 18px;
+      color: #aaa;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 6px;
+      margin: -2px -6px 0 0;
+    }
+
+    .global-loader-cancel:hover {
+      color: var(--p);
+      background: var(--soft);
+    }
+
+    .inline-loading-box {
+      width: min(320px, 100%);
+    }
+
+    .inline-loading-header {
+      margin: 0 0 6px;
+      font-size: 12px;
+    }
+
+    .inline-loading-header strong {
+      flex-shrink: 0;
+      color: var(--p);
+      direction: ltr;
     }
 
     @keyframes chatMsgIn {
@@ -1517,45 +1613,6 @@
       min-width: 60px;
     }
 
-    .typing-indicator {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      direction: ltr;
-    }
-
-    .typing-indicator span {
-      width: 7px;
-      height: 7px;
-      background: var(--p);
-      border-radius: 50%;
-      display: inline-block;
-      animation: typing-bounce 1.4s infinite ease-in-out both;
-    }
-
-    .typing-indicator span:nth-child(1) {
-      animation-delay: -0.32s;
-    }
-
-    .typing-indicator span:nth-child(2) {
-      animation-delay: -0.16s;
-    }
-
-    @keyframes typing-bounce {
-
-      0%,
-      80%,
-      100% {
-        transform: scale(0.2);
-        opacity: 0.4;
-      }
-
-      40% {
-        transform: scale(1);
-        opacity: 1;
-      }
-    }
-
     .tenant-upload-box {
       border: 2px dashed var(--line);
       border-radius: 16px;
@@ -1588,18 +1645,8 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
       color: var(--muted);
       padding: 30px;
-    }
-
-    .tenant-loading .spinner {
-      width: 24px;
-      height: 24px;
-      border: 3px solid var(--line);
-      border-top-color: var(--p);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
     }
 
     @media (max-width: 900px) {
@@ -2207,28 +2254,24 @@
   <!-- Global Loading Indicator (Non-blocking Floating Card) -->
   <div id="globalLoader"
     style="display:none;position:fixed;top:24px;left:24px;z-index:99999;align-items:center;justify-content:flex-start;font-family:inherit">
-    <div
-      style="background:#fff;border:1.5px solid var(--p);padding:14px 18px;border-radius:16px;box-shadow:0 12px 36px rgba(0,0,0,0.15);max-width:380px;display:flex;align-items:center;gap:14px;color:#222;position:relative;animation:geFloatIn 0.3s ease-out;">
-      <div class="spinner"
-        style="width:28px;height:28px;flex-shrink:0;border:3px solid var(--p);border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite;">
+    <div class="global-loader-card">
+      <div class="global-loader-header">
+        <div class="global-loader-heading">
+          <h4 id="globalLoaderTitle" style="margin:0 0 2px;color:var(--p);font-size:14px;font-weight:700">جاري التحميل...</h4>
+          <p id="globalLoaderText" style="margin:0;color:var(--muted);font-size:12px;line-height:1.4"></p>
+        </div>
+        <span id="globalLoaderPct" class="global-loader-percent" aria-live="polite">0%</span>
+        <button onclick="hideLoader()" class="global-loader-cancel" title="إخفاء مؤشر التقدم">×</button>
       </div>
-      <div style="flex:1;">
-        <h4 id="globalLoaderTitle" style="margin:0 0 2px;color:var(--p);font-size:14px;font-weight:700">جاري التحميل...
-        </h4>
-        <p id="globalLoaderText" style="margin:0;color:var(--muted);font-size:12px;line-height:1.4"></p>
-        <div id="globalLoaderProgress" style="display:none;margin-top:8px">
-          <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-            <span id="globalLoaderPct" style="font-size:11px;font-weight:700;color:var(--p)">0%</span>
-            <span id="globalLoaderStep" style="font-size:11px;color:var(--muted)"></span>
-          </div>
-          <div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden">
-            <div id="globalLoaderBar" style="height:100%;width:0%;background:var(--p);transition:width .4s ease;border-radius:3px"></div>
-          </div>
+      <div id="globalLoaderProgress" class="global-loader-progress">
+        <div class="global-loader-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="globalLoaderBar" class="global-loader-progress-fill"></div>
+        </div>
+        <div class="global-loader-progress-meta">
+          <span id="globalLoaderStep" aria-live="polite">جاري التحضير...</span>
+          <span id="globalLoaderEstimate">تقدم تقديري</span>
         </div>
       </div>
-      <button onclick="hideLoader()"
-        style="background:none;border:none;font-size:18px;color:#aaa;cursor:pointer;padding:2px 6px;border-radius:6px;margin-right:4px;"
-        title="إلغاء">×</button>
     </div>
   </div>
 
@@ -3207,7 +3250,6 @@
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <section id="tenantGenerationPage" class="tenant-page">
       <div style="max-width:520px;width:100%;text-align:center;padding:20px 0">
-        <div id="genSpinner" style="margin:0 auto 24px;width:64px;height:64px;border:4px solid #e0e0e0;border-top-color:var(--p);border-radius:50%;animation:spin 1s linear infinite"></div>
         <h2 id="genTitle" style="margin:0 0 8px;font-size:20px;font-weight:700;color:#222">جاري التوليد...</h2>
         <p id="genSubtitle" style="margin:0 0 24px;color:var(--muted);font-size:14px"></p>
 
@@ -3235,36 +3277,131 @@
       setTimeout(() => t.classList.remove('active'), duration);
     }
 
-    function showLoader(title, text, pct) {
-      document.getElementById('globalLoaderTitle').textContent = title || 'جاري التحميل...';
-      document.getElementById('globalLoaderText').textContent = text || '';
-      const prog = document.getElementById('globalLoaderProgress');
-      if (pct !== undefined && pct !== null) {
-        prog.style.display = 'block';
-        document.getElementById('globalLoaderBar').style.width = pct + '%';
-        document.getElementById('globalLoaderPct').textContent = pct + '%';
-        document.getElementById('globalLoaderStep').textContent = text || '';
-      } else {
-        prog.style.display = 'none';
-      }
-      document.getElementById('globalLoader').style.display = 'flex';
+    let loaderProgressTimer = null;
+    let loaderHideTimer = null;
+    let loaderProgressValue = 0;
+    let loaderProgressStartValue = 0;
+    const inlineLoaderTimers = new WeakMap();
+
+    function clampLoaderProgress(pct) {
+      const value = Number(pct);
+      return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 0;
     }
 
-    function updateLoaderProgress(pct, stepText) {
+    function renderLoaderProgress(pct, stepText) {
+      const value = clampLoaderProgress(pct);
       const bar = document.getElementById('globalLoaderBar');
       const pctEl = document.getElementById('globalLoaderPct');
       const stepEl = document.getElementById('globalLoaderStep');
-      const prog = document.getElementById('globalLoaderProgress');
-      if (bar) bar.style.width = pct + '%';
-      if (pctEl) pctEl.textContent = pct + '%';
-      if (stepEl && stepText) stepEl.textContent = stepText;
-      if (prog) prog.style.display = 'block';
+      const track = bar ? bar.parentElement : null;
+      loaderProgressValue = value;
+      if (bar) bar.style.width = value + '%';
+      if (pctEl) pctEl.textContent = value + '%';
+      if (stepEl && stepText !== undefined && stepText !== null) stepEl.textContent = stepText || '';
+      if (track) track.setAttribute('aria-valuenow', String(value));
     }
 
-    function hideLoader() {
-      document.getElementById('globalLoader').style.display = 'none';
+    function stopLoaderProgressTimer() {
+      if (loaderProgressTimer) {
+        clearInterval(loaderProgressTimer);
+        loaderProgressTimer = null;
+      }
+    }
+
+    function startLoaderProgressTimer() {
+      stopLoaderProgressTimer();
+      const startedAt = Date.now();
+      loaderProgressStartValue = loaderProgressValue;
+      loaderProgressTimer = setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        const estimated = Math.min(92, loaderProgressStartValue + Math.max(1, Math.floor(elapsed / 900)));
+        if (estimated > loaderProgressValue) renderLoaderProgress(estimated);
+      }, 700);
+    }
+
+    function showLoader(title, text, pct) {
+      const loader = document.getElementById('globalLoader');
+      if (!loader) return;
+      clearTimeout(loaderHideTimer);
+      document.getElementById('globalLoaderTitle').textContent = title || 'جاري التحميل...';
+      document.getElementById('globalLoaderText').textContent = text || '';
+      document.getElementById('globalLoaderProgress').style.display = 'block';
+      renderLoaderProgress(pct === undefined || pct === null ? 5 : pct, text || 'جاري التحضير...');
+      loader.style.display = 'flex';
+      startLoaderProgressTimer();
+    }
+
+    function updateLoaderProgress(pct, stepText) {
       const prog = document.getElementById('globalLoaderProgress');
-      if (prog) prog.style.display = 'none';
+      if (prog) prog.style.display = 'block';
+      renderLoaderProgress(pct, stepText);
+    }
+
+    function hideLoader(completionText) {
+      const loader = document.getElementById('globalLoader');
+      if (!loader || loader.style.display === 'none') return;
+      stopLoaderProgressTimer();
+      renderLoaderProgress(100, completionText || 'اكتمل');
+      const textEl = document.getElementById('globalLoaderText');
+      if (textEl) textEl.textContent = completionText || 'اكتمل التحميل';
+      clearTimeout(loaderHideTimer);
+      loaderHideTimer = setTimeout(() => {
+        loader.style.display = 'none';
+        renderLoaderProgress(0, 'جاري التحضير...');
+      }, 420);
+    }
+
+    async function readBlobWithProgress(response, startPct, endPct) {
+      const total = Number(response.headers.get('content-length') || 0);
+      if (!response.body || !total) {
+        updateLoaderProgress(endPct - 2, 'جاري تجهيز الملف للتحميل...');
+        return response.blob();
+      }
+      const reader = response.body.getReader();
+      const chunks = [];
+      let received = 0;
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+        chunks.push(result.value);
+        received += result.value.byteLength;
+        const ratio = Math.min(1, received / total);
+        const pct = startPct + Math.round(ratio * (endPct - startPct));
+        updateLoaderProgress(pct, 'جاري تحميل الملف (' + pct + '%)...');
+      }
+      return new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
+    }
+
+    function showInlineLoader(container, text) {
+      if (!container) return;
+      const previousTimer = inlineLoaderTimers.get(container);
+      if (previousTimer) clearInterval(previousTimer);
+      const label = String(text || 'جاري التحميل...')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+      container.innerHTML =
+        '<div class="inline-loading-box">' +
+        '<div class="inline-loading-header"><span>' + label + '</span><strong data-inline-loader-pct>5%</strong></div>' +
+        '<div class="inline-loading-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="5">' +
+        '<div class="inline-loading-fill" data-inline-loader-bar style="width:5%"></div>' +
+        '</div></div>';
+      const bar = container.querySelector('[data-inline-loader-bar]');
+      const pctEl = container.querySelector('[data-inline-loader-pct]');
+      let pct = 5;
+      const timer = setInterval(() => {
+        if (!bar || !bar.isConnected || !container.contains(bar)) {
+          clearInterval(timer);
+          return;
+        }
+        pct = Math.min(92, pct + (pct < 60 ? 7 : 3));
+        bar.style.width = pct + '%';
+        bar.parentElement.setAttribute('aria-valuenow', String(pct));
+        if (pctEl) pctEl.textContent = pct + '%';
+      }, 450);
+      inlineLoaderTimers.set(container, timer);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -3486,8 +3623,16 @@
 
       const totalSteps = (needImages ? 1 : 0) + (needMaps ? 1 : 0);
       let currentStep = 0;
-      const basePct = 60;
-      const stepPct = totalSteps > 0 ? Math.round(30 / totalSteps) : 0;
+      const generationPageActive = document.getElementById('tenantGenerationPage')?.classList.contains('active');
+      const globalLoader = document.getElementById('globalLoader');
+      const ownsGlobalLoader = totalSteps > 0 && !generationPageActive && globalLoader && globalLoader.style.display !== 'flex';
+      if (ownsGlobalLoader) {
+        const task = needImages && needMaps ? 'جاري تجهيز الصور والخرائط...' : (needImages ? 'جاري توليد الصور...' : 'جاري توليد خرائط الموقع...');
+        showLoader('جاري تجهيز أصول العرض', task, 5);
+      }
+      const basePct = ownsGlobalLoader ? 5 : 60;
+      const progressSpan = ownsGlobalLoader ? 87 : 30;
+      const stepPct = totalSteps > 0 ? Math.round(progressSpan / totalSteps) : 0;
 
       function recordError(res, fallback) {
         tenantCreativeImages.last_error =
@@ -3578,6 +3723,7 @@
       }
 
       triggerAutoSaveDraft();
+      if (ownsGlobalLoader) hideLoader();
       return tenantCreativeImages;
     }
 
@@ -7486,7 +7632,7 @@
         indicator = document.createElement('div');
         indicator.id = 'tenantChatTypingIndicator';
         indicator.className = 'tenant-chat-message assistant typing';
-        indicator.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+        showInlineLoader(indicator, 'جاري تنفيذ التعديل...');
         messagesDiv.appendChild(indicator);
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
       }
@@ -7676,7 +7822,7 @@
       showTenantPage('tenantPresentationsPage');
       const list = document.getElementById('tenantPresentationsList');
       if (!list) return;
-      list.innerHTML = '<div class="tenant-loading"><div class="spinner"></div>جاري التحميل...</div>';
+      showInlineLoader(list, 'جاري التحميل...');
 
       const [presData, expData, draftsData] = await Promise.all([
         api('GET', '/api/presentations'),
@@ -8115,30 +8261,39 @@
         presentationId: tenantPresentationId,
         projectName: projectName
       };
-      showLoader('جاري تصدير الملف', 'الصيغة: ' + format.toUpperCase());
-      const data = await api('POST', '/api/export', payload);
-      hideLoader();
-      if (data.success && data.url) {
-        const token = getTenantToken();
-        try {
-          const resp = await fetch(data.url, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
-          if (!resp.ok) throw new Error('Download failed');
-          const blob = await resp.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = blobUrl;
-          a.download = data.url.split('/').pop() || ('presentation.' + format);
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(blobUrl);
-          toast('جاري تحميل الملف');
-        } catch (e) {
-          window.open(data.url, '_blank');
-          toast('جاري تحميل الملف');
+      let data = null;
+      showLoader('جاري تصدير الملف', 'الصيغة: ' + format.toUpperCase(), 8);
+      try {
+        data = await api('POST', '/api/export', payload);
+        if (!data.success || !data.url) {
+          toast(data.error || 'فشل التصدير');
+          return;
         }
-      } else {
-        toast(data.error || 'فشل التصدير');
+        updateLoaderProgress(82, 'تم إنشاء الملف، جاري بدء التحميل...');
+        const token = getTenantToken();
+        const resp = await fetch(data.url, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
+        if (!resp.ok) throw new Error('Download failed');
+        const blob = await readBlobWithProgress(resp, 84, 98);
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = data.url.split('/').pop() || ('presentation.' + format);
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+        updateLoaderProgress(100, 'اكتمل تحميل الملف');
+        toast('تم تحميل الملف');
+      } catch (e) {
+        console.warn('Export download:', e);
+        if (data && data.url) {
+          window.open(data.url, '_blank');
+          toast('تم إنشاء الملف، افتح نافذة التحميل');
+        } else {
+          toast('تعذر إكمال التصدير');
+        }
+      } finally {
+        hideLoader();
       }
     }
 
@@ -8162,7 +8317,7 @@
       showTenantPage('tenantAdminPage');
       const list = document.getElementById('sagTenantsList');
       const statsEl = document.getElementById('sagAdminStats');
-      list.innerHTML = '<div class="tenant-loading"><div class="spinner"></div>جاري التحميل...</div>';
+      showInlineLoader(list, 'جاري التحميل...');
       statsEl.innerHTML = '';
       const [tenantsData, statsData] = await Promise.all([api('GET', '/api/admin/tenants'), api('GET', '/api/admin/stats')]);
       sagAllTenants = (tenantsData.success && tenantsData.tenants) ? tenantsData.tenants : [];
@@ -8499,7 +8654,7 @@
 
     async function loadTrainingList() {
       const list = document.getElementById('trainingList');
-      if (list) list.innerHTML = '<div class="tenant-loading"><div class="spinner"></div>جاري التحميل...</div>';
+      if (list) showInlineLoader(list, 'جاري التحميل...');
       const data = await api('GET', '/api/training');
       const entries = (data.success && data.entries) ? data.entries : [];
       if (list) {
@@ -8924,7 +9079,7 @@
     async function loadApprovalsList() {
       const list = document.getElementById('approvalsList');
       if (!list) return;
-      list.innerHTML = '<div class="tenant-loading"><div class="spinner"></div>جاري التحميل...</div>';
+      showInlineLoader(list, 'جاري التحميل...');
       const data = await api('GET', '/api/approvals');
       const approvals = (data.success && data.approvals) ? data.approvals : [];
       if (!approvals.length) { list.innerHTML = '<p class="tenant-hint">لا توجد عروض في انتظار التعميد</p>'; return; }
@@ -8958,7 +9113,7 @@
       showTenantPage('tenantUsersPage');
       const list = document.getElementById('tenantUsersList');
       if (!list) return;
-      list.innerHTML = '<div class="tenant-loading"><div class="spinner"></div>جاري التحميل...</div>';
+      showInlineLoader(list, 'جاري التحميل...');
       const data = await api('GET', '/api/users');
       if (!data.success || !data.users) { list.innerHTML = '<p>لا يوجد موظفين</p>'; return; }
       if (!data.users.length) { list.innerHTML = '<p class="tenant-hint">لم تتم إضافة موظفين بعد.</p>'; return; }
@@ -9097,7 +9252,7 @@
       const email = document.getElementById('inviteEmail').value.trim();
       if (!email) { toast('أدخل بريد الموظف'); return; }
       const result = document.getElementById('inviteResult');
-      result.innerHTML = '<div class="tenant-loading"><div class="spinner"></div>جاري الإرسال...</div>';
+      showInlineLoader(result, 'جاري الإرسال...');
       const data = await api('POST', '/api/invites', { email });
       if (data.success) {
         const fullUrl = window.location.origin + data.inviteUrl;
