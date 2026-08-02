@@ -4216,6 +4216,12 @@
       const selections = data.selections || [];
       const available = data.available || [];
       window.tenantAvailableFonts = available;
+      selections.forEach(sel => {
+        if (sel.font_id && !sel.font_family) {
+          const matched = available.find(f => f.id === sel.font_id);
+          if (matched) sel.font_family = matched.font_family;
+        }
+      });
       const currentArabic = selections.find(item => item.script === 'arabic' && item.weight === 'regular')
         || selections.find(item => item.script === 'arabic')
         || {};
@@ -4251,9 +4257,9 @@
         '<select id="tenantPrimaryFontSelect" onchange="selectTenantPrimaryFont(this.value)" style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">' +
         '<option value="">استخدام الخط الافتراضي</option>' +
         allFonts.map(font => {
-          const isSelected = currentSelection.font_family
-            ? font.font_family === currentSelection.font_family
-            : (font.is_custom && currentSelection.custom_font_path && font.font_family === (currentSelection.custom_font_path.split('/').pop() || '').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' '));
+          const isSelected = (currentSelection.font_id && font.id === currentSelection.font_id)
+            || (currentSelection.font_family && font.font_family === currentSelection.font_family)
+            || (font.is_custom && currentSelection.custom_font_path && font.font_family === (currentSelection.custom_font_path.split('/').pop() || '').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' '));
           return '<option value="' + escapeHtml(font.id) + '"' + (isSelected ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + (font.is_custom ? ' (مرفوع)' : '') + '</option>';
         }).join('') +
         '</select>' +
