@@ -1186,6 +1186,220 @@
       text-align: right;
     }
 
+    .slide-toolbar {
+      background: #3B6E91;
+      color: #fff;
+      border-radius: 12px;
+      padding: 10px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    .slide-toolbar-title {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+      text-align: right;
+    }
+
+    .slide-toolbar-title > div {
+      min-width: 0;
+    }
+
+    .slide-toolbar-title h2 {
+      margin: 0;
+      font-size: 18px;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .slide-toolbar-title span {
+      display: block;
+      margin-top: 2px;
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .slide-toolbar-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      margin: 0;
+      flex-wrap: wrap;
+    }
+
+    .slide-toolbar-btn {
+      min-height: 36px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .slide-toolbar-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.55);
+      color: #fff;
+    }
+
+    .slide-toolbar-btn.slide-toolbar-primary {
+      background: #fff;
+      border-color: #fff;
+      color: #3B6E91;
+    }
+
+    .slide-toolbar-btn.slide-toolbar-primary:hover {
+      background: #f0f7ff;
+      color: #254B66;
+    }
+
+    .slide-toolbar-btn.slide-toolbar-approve {
+      background: #2e7d32;
+      border-color: #2e7d32;
+      color: #fff;
+    }
+
+    .slide-toolbar-btn.slide-toolbar-approve:hover {
+      background: #256b29;
+      border-color: #256b29;
+    }
+
+    .slide-toolbar-dropdown .tenant-dropdown-menu {
+      min-width: 230px;
+      top: calc(100% + 8px);
+      padding: 8px;
+      z-index: 1000;
+    }
+
+    .slide-toolbar-dropdown .tenant-dropdown-menu .btn {
+      min-height: 34px;
+      padding: 8px 10px;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+
+    .slide-toolbar-menu-divider {
+      height: 1px;
+      margin: 4px 0;
+      background: var(--line);
+    }
+
+    .slide-toolbar-back {
+      border: 0;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.88);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      padding: 6px 0;
+    }
+
+    .slide-toolbar-back:hover {
+      color: #fff;
+      text-decoration: underline;
+    }
+
+    .presentation-font-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.5);
+    }
+
+    .presentation-font-card {
+      width: min(460px, 100%);
+      background: #fff;
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 14px 44px rgba(0, 0, 0, 0.2);
+    }
+
+    .presentation-font-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .presentation-font-head h3 {
+      margin: 0;
+      color: #3B6E91;
+      font-size: 18px;
+    }
+
+    .presentation-font-close {
+      border: 0;
+      background: transparent;
+      color: #777;
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+      padding: 0 4px;
+    }
+
+    .presentation-font-card label {
+      display: block;
+      margin-bottom: 6px;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .presentation-font-card select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d7e0e7;
+      border-radius: 9px;
+      background: #fff;
+      color: #1f2937;
+      font: inherit;
+    }
+
+    .presentation-font-card .tenant-hint {
+      margin: 8px 0 0;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 700px) {
+      .slide-toolbar {
+        align-items: stretch;
+      }
+
+      .slide-toolbar-title,
+      .slide-toolbar-actions {
+        width: 100%;
+      }
+
+      .slide-toolbar-actions > .btn,
+      .slide-toolbar-actions > .tenant-dropdown {
+        flex: 1 1 auto;
+      }
+
+      .slide-toolbar-actions > .tenant-dropdown > .btn {
+        width: 100%;
+      }
+    }
+
     .tenant-brand {
       display: flex;
       align-items: center;
@@ -2833,42 +3047,46 @@
     <!-- Slides Preview -->
     <section id="tenantSlidesPage" class="tenant-page">
       <!-- Toolbar at the top -->
-      <div class="ge-topbar"
-        style="background:#3B6E91; color:#fff; border-radius:12px; padding:10px 16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08);">
-        <div style="display:flex; flex-direction:column; text-align:right;">
-          <h2 style="margin:0; font-size:18px; color:#fff; font-weight:700;">معاينة وتعديل الشرائح</h2>
-          <span id="slidesEditorInfo" style="font-size:12px; color:rgba(255,255,255,0.85); margin-top:2px;"></span>
+      <div class="ge-topbar slide-toolbar">
+        <div class="slide-toolbar-title">
+          <div>
+            <h2>معاينة وتعديل الشرائح</h2>
+            <span id="slidesEditorInfo"></span>
+          </div>
+          <button type="button" class="slide-toolbar-back" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
         </div>
-        <div class="tenant-btns" style="display:flex; gap:8px; margin:0; flex-wrap:wrap;">
-          <button class="btn primary" onclick="saveExistingPresentation()"
-            style="background:#fff; color:#3B6E91; border:none; padding:8px 16px; font-weight:700; border-radius:8px;">حفظ
-            التعديلات</button>
-          <button class="btn primary" data-permission="create_presentation" onclick="toggleMapStylePanel()"
-            style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">إعدادات
-            الخرائط</button>
-          <button class="btn primary" data-permission="create_presentation"
-            onclick="ensureProjectAssets({force:true, needImages:false}).then(()=>toast('تم إعادة توليد الخرائط'))"
-            style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">إعادة
-            توليد الخرائط</button>
-          <button class="btn primary" data-permission="create_presentation"
-            onclick="ensureProjectAssets({force:true, needMaps:false}).then(()=>toast('تم إعادة توليد الصور'))"
-            style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">إعادة
-            توليد الصور</button>
-          <button class="btn primary" onclick="requestPresentationApproval(tenantPresentationId)"
-            id="btnRequestApproval"
-            style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">طلب
-            تعميد</button>
-          <button class="btn primary tenant-admin-only" data-permission="export_files"
-            onclick="exportTenantSlides('pptx')"
-            style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">تصدير
-            PPTX</button>
-          <button class="btn primary tenant-admin-only" data-permission="export_files"
-            onclick="exportTenantSlides('pdf')"
-            style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 16px; border-radius:8px;">تصدير
-            PDF</button>
-          <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')"
-            style="color:#fff; padding:8px 16px; border-radius:8px; border:none; background:transparent;">عودة
-            للرئيسية</button>
+        <div class="tenant-btns slide-toolbar-actions">
+          <button type="button" class="btn slide-toolbar-btn slide-toolbar-approve"
+            onclick="requestPresentationApproval(tenantPresentationId)" id="btnRequestApproval">تعميد</button>
+          <button type="button" class="btn slide-toolbar-btn slide-toolbar-primary"
+            onclick="saveProjectAsDraft()">حفظ كمسودة</button>
+
+          <div class="tenant-dropdown slide-toolbar-dropdown" data-permission="create_presentation">
+            <button type="button" class="btn slide-toolbar-btn" onclick="toggleTenantDropdown(this)" aria-haspopup="true">
+              إعدادات العرض <span aria-hidden="true">⌄</span>
+            </button>
+            <div class="tenant-dropdown-menu">
+              <button type="button" class="btn ghost" data-permission="company_settings"
+                onclick="openPresentationFontSettings(); closeTenantDropdown()">نوع الخط</button>
+              <button type="button" class="btn ghost"
+                onclick="toggleMapStylePanel(); closeTenantDropdown()">نوع الخرائط</button>
+              <div class="slide-toolbar-menu-divider"></div>
+              <button type="button" class="btn ghost"
+                onclick="closeTenantDropdown(); if(tenantPresentationId){ regeneratePresentationMaps(); } else { ensureProjectAssets({force:true, needImages:false}).then(()=>toast('تم إعادة توليد الخرائط')); }">إعادة توليد الخرائط</button>
+              <button type="button" class="btn ghost"
+                onclick="closeTenantDropdown(); ensureProjectAssets({force:true, needMaps:false}).then(()=>toast('تم إعادة توليد الصور'))">إعادة توليد الصور</button>
+            </div>
+          </div>
+
+          <div class="tenant-dropdown slide-toolbar-dropdown tenant-admin-only" data-permission="export_files">
+            <button type="button" class="btn slide-toolbar-btn" onclick="toggleTenantDropdown(this)" aria-haspopup="true">
+              تصدير <span aria-hidden="true">⌄</span>
+            </button>
+            <div class="tenant-dropdown-menu">
+              <button type="button" class="btn ghost" onclick="exportTenantSlides('pdf'); closeTenantDropdown()">تصدير PDF</button>
+              <button type="button" class="btn ghost" onclick="exportTenantSlides('pptx'); closeTenantDropdown()">تصدير PPTX</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3003,6 +3221,26 @@
           </div>
         </div>
       </div>
+
+    <div id="presentationFontSettingsPanel" class="presentation-font-overlay"
+      onclick="if(event.target === this) closePresentationFontSettings()">
+      <div class="presentation-font-card" role="dialog" aria-modal="true" aria-labelledby="presentationFontSettingsTitle"
+        onclick="event.stopPropagation()">
+        <div class="presentation-font-head">
+          <div>
+            <h3 id="presentationFontSettingsTitle">نوع خط العرض</h3>
+            <p class="tenant-hint">اختار الخط الذي سيظهر في الشرائح والتصدير.</p>
+          </div>
+          <button type="button" class="presentation-font-close" onclick="closePresentationFontSettings()"
+            aria-label="إغلاق">×</button>
+        </div>
+        <label for="presentationFontSelect">الخط المستخدم</label>
+        <select id="presentationFontSelect" onchange="selectPresentationFont(this.value)" disabled>
+          <option value="">جاري تحميل الخطوط...</option>
+        </select>
+        <p class="tenant-hint">يمكنك إدارة الأوزان ورفع خط مخصص من إعدادات الشركة.</p>
+      </div>
+    </div>
 
     <!-- Presentations -->
     <section id="tenantPresentationsPage" class="tenant-page">
@@ -7701,6 +7939,47 @@
       renderTenantDesignerChat();
       triggerAutoSaveDraft();
       if (tenantPresentationId && !reply.saved) await saveExistingPresentation();
+    }
+
+    async function openPresentationFontSettings() {
+      const panel = document.getElementById('presentationFontSettingsPanel');
+      const select = document.getElementById('presentationFontSelect');
+      if (!panel || !select) return;
+      panel.style.display = 'flex';
+      select.disabled = true;
+      select.innerHTML = '<option value="">جاري تحميل الخطوط...</option>';
+      try {
+        await loadTenantFonts();
+        const source = document.getElementById('tenantPrimaryFontSelect');
+        if (!source || !source.options.length) throw new Error('Font list unavailable');
+        select.innerHTML = Array.from(source.options).map(option => option.outerHTML).join('');
+        select.value = source.value || '';
+        select.disabled = false;
+      } catch (error) {
+        console.warn('[PRESENTATION FONT] load failed:', error);
+        select.innerHTML = '<option value="">تعذر تحميل الخطوط</option>';
+      }
+    }
+
+    function closePresentationFontSettings() {
+      const panel = document.getElementById('presentationFontSettingsPanel');
+      if (panel) panel.style.display = 'none';
+    }
+
+    async function selectPresentationFont(fontId) {
+      const select = document.getElementById('presentationFontSelect');
+      if (!select || select.disabled) return;
+      select.disabled = true;
+      try {
+        await selectTenantPrimaryFont(fontId);
+        if (typeof renderTenantSlides === 'function') renderTenantSlides();
+        toast('تم تحديث خط العرض');
+      } catch (error) {
+        console.error('[PRESENTATION FONT] save failed:', error);
+        toast('تعذر تحديث خط العرض');
+      } finally {
+        select.disabled = false;
+      }
     }
 
     function toggleMapStylePanel() {
