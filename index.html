@@ -4236,6 +4236,18 @@
           uniqueFonts[uniqueFonts.indexOf(existing)] = font;
         }
       });
+      // Add custom (uploaded) fonts from selections that aren't in available
+      const customFonts = [];
+      selections.forEach(sel => {
+        if (sel.custom_font_path && !sel.font_id) {
+          const name = (sel.custom_font_path.split('/').pop() || 'خط مخصص').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ');
+          const already = uniqueFonts.find(f => f.font_family === name);
+          if (!already) {
+            customFonts.push({ id: 'custom_' + sel.script + '_' + sel.weight, font_family: name, font_name: name, script: sel.script, weight: sel.weight, is_custom: true });
+          }
+        }
+      });
+      const allFonts = uniqueFonts.concat(customFonts);
       const summary = selections.length
         ? selections.map(item => (item.script === 'arabic' ? 'عربي' : 'لاتيني') + ' ' + item.weight + (item.custom_font_path ? ' (مرفوع)' : '')).join('، ')
         : 'سيتم استخدام الخط الافتراضي';
@@ -4247,7 +4259,7 @@
         '<select id="tenantPrimaryFontSelect" onchange="selectTenantPrimaryFont(this.value)" style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">' +
         '<option value="">استخدام الخط الافتراضي</option>' +
         customOption +
-        uniqueFonts.map(font => '<option value="' + escapeHtml(font.id) + '"' + (currentSelection.font_family && font.font_family === currentSelection.font_family ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + '</option>').join('') +
+        allFonts.map(font => '<option value="' + escapeHtml(font.id) + '"' + (currentSelection.font_family && font.font_family === currentSelection.font_family ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + (font.is_custom ? ' (مرفوع)' : '') + '</option>').join('') +
         '</select>' +
         '<label id="tenantAutoFontDropzone" style="display:flex;align-items:center;justify-content:center;min-height:72px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--muted);text-align:center;padding:12px;">اسحب ملف الخط هنا أو اضغط لاختياره<input id="tenantAutoFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="uploadTenantFontAutomatically(this)"></label>' +
         '<span style="font-size:12px;color:var(--muted);">' + escapeHtml(summary) + '</span>' +
@@ -4266,6 +4278,11 @@
 
     async function selectTenantPrimaryFont(fontId) {
       if (fontId === 'custom') return;
+      if (fontId.startsWith('custom_')) {
+        await loadTenantBranding();
+        await loadTenantFonts();
+        return;
+      }
       if (!fontId) {
         const weights = ['light', 'regular', 'medium', 'bold', 'black'];
         await Promise.all(weights.flatMap(w => [
