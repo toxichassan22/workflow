@@ -2707,12 +2707,6 @@
         <aside id="tenantProjectSidebar" class="project-form-sidebar" aria-label="أقسام بيانات المشروع"></aside>
         <div id="tenantProjectForm" class="project-form-content"></div>
       </div>
-      <div id="slidePlanProgress" style="display:none;margin:16px auto 0;max-width:400px">
-        <div style="background:#e8eaf0;border-radius:10px;height:10px;overflow:hidden">
-          <div id="slidePlanBar" style="height:100%;width:0;background:#3B6E91;border-radius:10px;transition:width .5s ease,background .3s"></div>
-        </div>
-        <p id="slidePlanStatus" style="text-align:center;margin:8px 0 0;font-size:13px;color:#555"></p>
-      </div>
       <div class="tenant-form-actions"
         style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)">
         <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
@@ -2721,7 +2715,7 @@
         <button class="btn primary" data-permission="create_presentation" onclick="toggleMapStylePanel()"
           style="background:#3B6E91; color:#fff; border:none; padding:8px 16px; border-radius:8px;">إعدادات
           الخرائط</button>
-        <button id="slidePlanBtn" class="btn primary" data-permission="create_presentation" onclick="generateSlidePlanOnly()"
+        <button class="btn primary" data-permission="create_presentation" onclick="generateSlidePlanOnly()"
           style="background:#3B6E91;color:#fff;border:none;padding:8px 16px;border-radius:8px;">توليد الهيكل</button>
         <button class="btn primary" onclick="submitTenantProject()">التالي: الصور ←</button>
         <button class="btn danger" onclick="confirmDeleteProject()">حذف المشروع</button>
@@ -6335,45 +6329,31 @@
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
-      const progressEl = document.getElementById('slidePlanProgress');
-      const barEl = document.getElementById('slidePlanBar');
-      const statusEl = document.getElementById('slidePlanStatus');
-      const btnEl = document.getElementById('slidePlanBtn');
-      if (!progressEl || !barEl || !statusEl || !btnEl) return;
-      progressEl.style.display = 'block';
-      barEl.style.width = '10%';
-      statusEl.textContent = 'جاري تحليل بيانات المشروع...';
-      btnEl.disabled = true;
+      showLoader('جاري توليد الهيكل', 'يتم تحليل بيانات المشروع وتوليد خطة الشرائح...', 5);
       try {
+        updateLoaderProgress(20, 'يتم التواصل مع الذكاء الاصطناعي...');
         const result = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
         if (result.error) {
-          barEl.style.width = '100%';
-          barEl.style.background = '#b71c1c';
-          statusEl.textContent = '❌ ' + result.error;
-          btnEl.disabled = false;
+          updateLoaderProgress(100, '❌ ' + result.error);
+          setTimeout(hideLoader, 2500);
           return;
         }
-        barEl.style.width = '50%';
-        statusEl.textContent = 'تم التحليل — جاري إعداد الهيكل...';
+        updateLoaderProgress(70, 'تم التحليل — جاري إعداد الهيكل...');
         if (result.plan) {
           tenantSlidePlan = result.plan;
-          barEl.style.width = '100%';
-          barEl.style.background = '#2e7d32';
-          statusEl.textContent = '✅ تم توليد الهيكل — ' + (tenantSlidePlan.slides || []).length + ' شرائح';
+          updateLoaderProgress(100, '✅ تم توليد الهيكل — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
           toast('تم توليد الهيكل بنجاح — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
           triggerAutoSaveDraft();
+          setTimeout(hideLoader, 1500);
         } else {
-          barEl.style.width = '100%';
-          barEl.style.background = '#b71c1c';
-          statusEl.textContent = '❌ فشل توليد الهيكل';
+          updateLoaderProgress(100, '❌ فشل توليد الهيكل');
+          setTimeout(hideLoader, 2500);
         }
       } catch (e) {
-        barEl.style.width = '100%';
-        barEl.style.background = '#b71c1c';
-        statusEl.textContent = '❌ خطأ في الاتصال بالخادم';
+        updateLoaderProgress(100, '❌ خطأ في الاتصال بالخادم');
         console.error('generateSlidePlanOnly error:', e);
+        setTimeout(hideLoader, 2500);
       }
-      btnEl.disabled = false;
     }
 
     function updatePlanSlideTitle(index, title) {
@@ -6582,12 +6562,14 @@
       tenantCreativeImages = tenantCreativeImages || {};
       tenantCreativeImages.cover_prompt = prompt;
 
-      showLoader('جاري توليد الصورة الرئيسية', 'يتم التواصل مع الذكاء الاصطناعي لتوليد الصورة...');
+      showLoader('جاري توليد الصورة الرئيسية', 'يتم التواصل مع الذكاء الاصطناعي لتوليد الصورة...', 10);
       try {
+        updateLoaderProgress(50, 'جاري التوليد...');
         const data = await api('POST', '/api/generate-image', {
           prompt: prompt,
           referenceImage: tenantCreativeImages.cover || null
         });
+        updateLoaderProgress(90, 'جاري المعالجة...');
         hideLoader();
         if (data && data.success && data.image) {
           tempCoverImage = data.image;
@@ -6626,12 +6608,14 @@
       tenantCreativeImages.moodboard_prompts = tenantCreativeImages.moodboard_prompts || [];
       tenantCreativeImages.moodboard_prompts[index] = prompt;
 
-      showLoader('جاري توليد صورة المود بورد #' + (index + 1), 'يتم التواصل مع الذكاء الاصطناعي...');
+      showLoader('جاري توليد صورة المود بورد #' + (index + 1), 'يتم التواصل مع الذكاء الاصطناعي...', 10);
       try {
+        updateLoaderProgress(50, 'جاري التوليد...');
         const data = await api('POST', '/api/generate-image', {
           prompt: prompt,
           referenceImage: tenantCreativeImages.cover || null
         });
+        updateLoaderProgress(90, 'جاري المعالجة...');
         hideLoader();
         if (data && data.success && data.image) {
           tempMoodboardImages[index] = data.image;
