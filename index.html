@@ -4325,10 +4325,12 @@
       form.append('font', input.files[0]);
       const data = await api('POST', '/api/branding/fonts/auto-upload', form, true);
       if (!data.success) { toast(data.error || 'فشل رفع الخط'); return; }
+      const detected = data.detected || {};
+      const familyName = detected.family || (input.files[0].name.split('/').pop() || 'خط مخصص').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ');
+      await api('PUT', '/api/branding', { font_family: familyName, font_arabic: familyName });
       await loadTenantBranding();
       await loadTenantFonts();
-      const detected = data.detected || {};
-      toast('تم التعرف على الخط تلقائيًا: ' + (detected.family || input.files[0].name) + ' — ' + (detected.weight || 'regular'));
+      toast('تم التعرف على الخط تلقائيًا: ' + familyName + ' — ' + (detected.weight || 'regular'));
     }
 
     async function setTenantFontSelection(script, weight, fontId, skipReload) {
@@ -4348,6 +4350,8 @@
       form.append('font', input.files[0]);
       const data = await api('POST', '/api/branding/fonts/upload', form, true);
       if (!data.success) { toast(data.error || 'فشل رفع الخط'); return; }
+      const familyName = (input.files[0].name.split('/').pop() || 'خط مخصص').replace(/\.[^.]+$/, '').replace(/_(light|regular|medium|bold|black)$/i, '').replace(/_/g, ' ');
+      await api('PUT', '/api/branding', { font_family: familyName, font_arabic: familyName });
       await loadTenantBranding();
       await loadTenantFonts();
       toast('تم رفع خط الشركة');
