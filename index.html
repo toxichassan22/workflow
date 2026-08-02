@@ -6352,16 +6352,9 @@
     }
 
     async function generateSlidePlanOnly() {
-      if (!isTenantFieldSectionApproved()) {
-        toast('يجب اعتماد جميع الأقسام أولاً');
-        showTenantPage('tenantProjectPage');
-        return;
-      }
-      const data = collectTenantProjectData();
-      if (!data || !data.project_name) {
-        toast('يرجى إدخال اسم المشروع أولاً');
-        return;
-      }
+      const formData = await collectTenantFormData();
+      tenantProjectData = { ...tenantProjectData, ...formData };
+      if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
       showTenantPage('tenantSlidePlanPage');
       const info = document.getElementById('slidePlanPageInfo');
       const list = document.getElementById('slidePlanPageList');
@@ -6371,11 +6364,11 @@
         const response = await fetch('/api/slide-plan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
+          body: JSON.stringify({ projectData: tenantProjectData })
         });
         const result = await response.json();
-        if (result.slide_plan) {
-          tenantSlidePlan = result.slide_plan;
+        if (result.success && result.plan) {
+          tenantSlidePlan = result.plan;
           renderTenantSlidePlanPage();
           triggerAutoSaveDraft();
           toast('تم توليد الهيكل بنجاح');
