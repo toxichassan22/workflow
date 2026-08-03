@@ -4642,11 +4642,10 @@
       applyRolePermissions();
       await loadTenantBranding();
       showTenantApp();
-      // SAG super admin goes to admin panel, others restore their last page.
-      if (tenantUser.isAdmin) {
-        openTenantAdmin();
-      } else if (!(await restoreTenantNavigation())) {
-        showTenantPage('tenantDashboardPage');
+      // Restore the last page for every role; SAG super admin falls back to the admin panel.
+      if (!(await restoreTenantNavigation())) {
+        if (tenantUser.isAdmin) openTenantAdmin();
+        else showTenantPage('tenantDashboardPage');
       }
     }
 
