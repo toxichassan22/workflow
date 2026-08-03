@@ -3748,7 +3748,7 @@
     let tenantProjectMode = 'new';
     let tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
 
-    function mapsSignature(d) {
+    function mapsSignature(d, highlightSite = true) {
       d = d || tenantProjectData || {};
       const projectStyles = d.map_styles || {};
       return JSON.stringify({
@@ -3765,7 +3765,8 @@
           projectStyles.landmarks || (tenantBranding || {}).map_style_landmarks,
           projectStyles.access || (tenantBranding || {}).map_style_access,
           projectStyles.catchment || (tenantBranding || {}).map_style_catchment
-        ]
+        ],
+        highlightSite: highlightSite !== false
       });
     }
 
@@ -3779,10 +3780,10 @@
       });
     }
 
-    function hasStoredMaps() {
+    function hasStoredMaps(highlightSite = true) {
       const c = tenantCreativeImages || {};
       const mp = c.map_placeholders || {};
-      return Object.values(mp).some(Boolean) && c.maps_signature === mapsSignature();
+      return Object.values(mp).some(Boolean) && c.maps_signature === mapsSignature(tenantProjectData, highlightSite);
     }
 
     function hasStoredImages() {
@@ -3862,7 +3863,7 @@
       return changed;
     }
 
-    async function ensureProjectAssets({ force = false, needImages = true, needMaps = true, includeCover = true } = {}) {
+    async function ensureProjectAssets({ force = false, needImages = true, needMaps = true, includeCover = true, highlightSite = true } = {}) {
       tenantCreativeImages = tenantCreativeImages || { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
       if (!tenantProjectData) tenantProjectData = {};
       // Collect map style panel overrides (map_styles is not in #tenantProjectForm)
@@ -3936,14 +3937,18 @@
       }
 
       if (needMaps) {
-        const staleMaps = !hasStoredMaps();
+        const staleMaps = !hasStoredMaps(highlightSite);
         if (!force && !staleMaps) {
           console.log('[ASSETS] reusing stored maps');
           currentStep++;
           updateLoaderProgress(basePct + stepPct * currentStep, 'الخرائط جاهزة');
         } else {
           updateLoaderProgress(basePct + stepPct * currentStep, 'جاري توليد خرائط الموقع...');
-          const payload = { projectData: slimMapProjectData(tenantProjectData), force: !!force || staleMaps };
+          const payload = {
+            projectData: slimMapProjectData(tenantProjectData),
+            force: !!force || staleMaps,
+            highlightSite: highlightSite !== false
+          };
           if (tenantPresentationId) payload.presentationId = tenantPresentationId;
           const payloadKB = (JSON.stringify(payload).length / 1024).toFixed(1);
           const fieldSizes = Object.entries(payload.projectData)
@@ -3962,7 +3967,7 @@
             tenantCreativeImages.map_lat = res.lat || tenantCreativeImages.map_lat;
             tenantCreativeImages.map_lng = res.lng || tenantCreativeImages.map_lng;
             tenantCreativeImages.map_zooms = res.zooms || tenantCreativeImages.map_zooms;
-            tenantCreativeImages.maps_signature = mapsSignature();
+            tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData, highlightSite);
             if (replaceCurrentSlideMapAssets(res.placeholders)) renderTenantSlides();
             tenantCreativeImages.last_error = null;
             tenantCreativeImages.last_warning = res.warning || null;
@@ -6630,7 +6635,7 @@
       }
     }
 
-    async function previewProjectMap() {
+    async function previewProjectMap({ force = false, highlightSite = true } = {}) {
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       const lat = tenantProjectData.location_lat || '';
@@ -6639,7 +6644,7 @@
 
       showLoader('جاري توليد معاينة الخريطة', '');
       try {
-        await ensureProjectAssets({ needImages: false, needMaps: true });
+        await ensureProjectAssets({ force, needImages: false, needMaps: true, highlightSite });
       } catch (err) {
         toast('حدث خطأ أثناء الاتصال بالسيرفر');
         return;
@@ -6750,19 +6755,21 @@
       await analyzeTenantSite();
     }
 
-    function clearTenantPolygon(confirmAll = false) {
+    async function clearTenantPolygon(confirmAll = false) {
       const hasPoints = tenantMapPolygonPoints.length || tenantMapDraftPolygonPoints.length;
       if (confirmAll && hasPoints && !confirm('سيتم مسح كل نقاط الحدود المرسومة والمعتمدة. هل تريد المتابعة؟')) return;
       tenantMapPolygonPoints = [];
       tenantMapDraftPolygonPoints = [];
       tenantMapPolygonMode = false;
+      tenantProjectData.location_polygon = '';
       syncTenantLocationPolygon();
       renderTenantMapPolygonOverlay();
       updateTenantPolygonControls();
       triggerAutoSaveDraft();
       const hint = document.getElementById('mapPreviewHint');
       if (hint) hint.textContent = 'فعّل رسم حدود الموقع ثم أضف النقاط. لن يبدأ تحليل المبنى حتى تضغط «اعتماد الحدود وتحليل الموقع».';
-      toast('تم مسح الحدود المرسومة.');
+      if (tenantMapPreviewState) await previewProjectMap({ force: true, highlightSite: false });
+      toast('تم مسح الحدود المرسومة وإزالة التمييز من الخريطة.');
     }
 
     function syncTenantLocationPolygon() {

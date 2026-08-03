@@ -1835,7 +1835,7 @@ def _get_cached_map_images(tenant_id, presentation_id):
     }
 
 
-def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None):
+def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):
     """
     Generate all map images needed for a project.
     Returns dict of placeholder -> file_path.
@@ -1927,7 +1927,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     polygon_coords = None
     poly_data = project_data.get('location_polygon')
     user_polygon_used = False
-    if poly_data:
+    if highlight_site and poly_data:
         try:
             if isinstance(poly_data, str):
                 polygon_coords = []
@@ -1944,7 +1944,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             print(f"[POLYGON PARSE ERROR] {e}")
 
     # Try to auto-detect a building/compound polygon from OSM
-    if not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
+    if highlight_site and not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
         cache_key = f"{lat:.6f},{lng:.6f}"
         if cache_key in _osm_polygon_cache:
             osm_poly = _osm_polygon_cache[cache_key]
@@ -2128,7 +2128,8 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 if active_mt == 'satellite':
                     _apply_sepia_tone(overview_path, intensity=0.35)
                     _apply_map_overlay(overview_path, dark_factor=0.12)
-                _draw_site_highlight(overview_path, lat, lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
+                if highlight_site:
+                    _draw_site_highlight(overview_path, lat, lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _overlay_markers(overview_path, lat, lng, overview_zoom, overview_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(overview_path, position='top-right')
@@ -2156,7 +2157,8 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 if active_mt == 'satellite':
                     _apply_sepia_tone(landmarks_path, intensity=0.35)
                     _apply_map_overlay(landmarks_path, dark_factor=0.20)
-                _draw_site_highlight(landmarks_path, lat, lng, landmarks_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
+                if highlight_site:
+                    _draw_site_highlight(landmarks_path, lat, lng, landmarks_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _overlay_markers(landmarks_path, lat, lng, landmarks_zoom, landmarks_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(landmarks_path, position='top-right')
@@ -2184,7 +2186,8 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 if active_mt == 'satellite':
                     _apply_sepia_tone(access_path, intensity=0.35)
                     _apply_map_overlay(access_path, dark_factor=0.10)
-                _draw_site_highlight(access_path, lat, lng, access_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
+                if highlight_site:
+                    _draw_site_highlight(access_path, lat, lng, access_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _draw_access_roads(
                     access_path,
                     lat,

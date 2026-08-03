@@ -3229,8 +3229,16 @@ def api_generate_map_images():
     project_data = clean_project_data(data.get('projectData', {}))
     presentation_id = data.get('presentationId')
     force = bool(data.get('force'))
+    highlight_site = data.get('highlightSite', True) is not False
     branding = db.get_branding(g.tenant_id) or {}
-    result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=presentation_id, force=force, branding=branding)
+    result = maps_service.generate_all_map_images(
+        project_data,
+        g.tenant_id,
+        presentation_id=presentation_id,
+        force=force,
+        branding=branding,
+        highlight_site=highlight_site,
+    )
     if result.get('error'):
         return jsonify({'success': False, 'error': result['error']}), 200
     # Convert absolute paths to public URLs
