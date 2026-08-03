@@ -3984,6 +3984,7 @@
     let tenantChatSlideScope = 'auto';
     let tenantMapPreviewState = null;
     let tenantMapPolygonPoints = [];
+    let tenantMapDraftPolygonPoints = [];
     let tenantMapPolygonMode = false;
 
     function getTenantToken() { return tenantToken || localStorage.getItem(T_TOKEN_KEY); }
@@ -5649,6 +5650,7 @@
       tenantChatSlideIndex = 0;
       tenantMapPreviewState = null;
       tenantMapPolygonPoints = [];
+      tenantMapDraftPolygonPoints = [];
       tenantMapPolygonMode = false;
       tenantProjectSectionStatuses = {};
       tenantProjectDraftApproval = null;
@@ -6100,17 +6102,17 @@
         previewDiv.innerHTML = `
           <label>معاينة الموقع</label>
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-            <button type="button" class="btn primary" onclick="analyzeTenantSite()">تحليل الموقع وملء البيانات</button>
+            <button type="button" class="btn ghost" id="toggleTenantPolygonButton" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>
+            <button type="button" class="btn ghost" id="removeLastTenantPolygonPointButton" onclick="removeLastTenantPolygonPoint()" disabled>تراجع عن آخر نقطة</button>
+            <button type="button" class="btn primary" id="confirmTenantPolygonButton" onclick="confirmTenantPolygon()" disabled>اعتماد الحدود وتحليل الموقع</button>
+            <button type="button" class="btn ghost danger" onclick="clearTenantPolygon(true)">مسح الكل</button>
             <button type="button" class="btn ghost" onclick="previewProjectMap()">عرض الخريطة</button>
-            <button type="button" class="btn ghost" onclick="fetchNearbyLandmarks()">اقتراح المعالم</button>
-            <button type="button" class="btn ghost" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>
-            <button type="button" class="btn ghost" onclick="clearTenantPolygon()">مسح الحدود</button>
           </div>
           <div id="mapPreviewImage" style="display:none;max-width:100%;border-radius:8px;overflow:hidden;border:1px solid #ddd;position:relative;">
             <img src="" alt="Map preview" style="width:100%;display:block;cursor:crosshair;" onclick="setTenantMapPointFromClick(event)" />
             <svg id="mapPolygonOverlay" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>
           </div>
-          <p id="mapPreviewHint" class="tenant-hint" style="margin:8px 0 0;display:none">اضغط على الموضع الصحيح داخل الخريطة لضبط إحداثيات المشروع بدقة قبل إنشاء العرض.</p>
+          <p id="mapPreviewHint" class="tenant-hint" style="margin:8px 0 0;display:none">فعّل رسم حدود الموقع ثم أضف النقاط. لن يبدأ تحليل المبنى حتى تضغط «اعتماد الحدود وتحليل الموقع».</p>
           <input id="tenantLocationPolygon" type="hidden" data-key="location_polygon" data-type="text" value="">
           <div id="landmarksPreview" style="margin-top:10px;display:none;"></div>
         `;
@@ -6136,6 +6138,7 @@
 
       const initialSection = projectSections.find(section => section.dataset.section === tenantActiveProjectSection) || projectSections[0];
       if (initialSection) showSection(initialSection.dataset.section);
+      updateTenantPolygonControls();
     }
 
     // S3: Components Table
@@ -6684,10 +6687,10 @@
       const nextLng = tenantMapPreviewState.lng + (x * img.naturalWidth) * 360 / world;
       const nextLat = (Math.atan(Math.sinh(Math.PI * (1 - 2 * nextY))) * 180 / Math.PI);
       if (tenantMapPolygonMode) {
-        tenantMapPolygonPoints.push([nextLat, nextLng]);
-        syncTenantLocationPolygon();
+        tenantMapDraftPolygonPoints.push([nextLat, nextLng]);
         renderTenantMapPolygonOverlay();
-        toast('تمت إضافة نقطة حدود ' + tenantMapPolygonPoints.length + '. أضف 3 نقاط على الأقل ثم أعد عرض الخريطة للتحقق.');
+        updateTenantPolygonControls();
+        toast('تمت إضافة نقطة مؤقتة ' + tenantMapDraftPolygonPoints.length + '. اضغط اعتماد الحدود عند الانتهاء.');
         return;
       }
       const latInput = document.querySelector('#tenantProjectForm [data-key="location_lat"]');
@@ -6697,26 +6700,69 @@
       toast('تم ضبط نقطة المشروع. اضغط «عرض الخريطة» للتحقق من موضع التمييز.');
     }
 
-    function toggleTenantPolygonMode() {
-      if (!tenantMapPreviewState) { toast('اعرض الخريطة أولاً ثم ارسم حدود الموقع.'); return; }
-      tenantMapPolygonMode = !tenantMapPolygonMode;
-      const hint = document.getElementById('mapPreviewHint');
-      if (hint) {
-        hint.textContent = tenantMapPolygonMode
-          ? 'وضع رسم الحدود مُفعّل: اضغط على زوايا أرض المشروع بالترتيب. اضغط الزر مرة أخرى للعودة لتحديد النقطة.'
-          : 'وضع تحديد النقطة مُفعّل: اضغط على الموضع الصحيح لضبط إحداثيات المشروع.';
-      }
-      toast(tenantMapPolygonMode ? 'ابدأ بتحديد زوايا حدود الموقع.' : 'تم إنهاء رسم الحدود.');
+    function updateTenantPolygonControls() {
+      const toggleButton = document.getElementById('toggleTenantPolygonButton');
+      const undoButton = document.getElementById('removeLastTenantPolygonPointButton');
+      const confirmButton = document.getElementById('confirmTenantPolygonButton');
+      const activePoints = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
+      if (toggleButton) toggleButton.textContent = tenantMapPolygonMode ? 'إلغاء الرسم' : 'رسم حدود الموقع';
+      if (undoButton) undoButton.disabled = !activePoints.length;
+      if (confirmButton) confirmButton.disabled = !tenantMapPolygonMode || tenantMapDraftPolygonPoints.length < 3;
     }
 
-    function clearTenantPolygon() {
-      tenantMapPolygonPoints = [];
+    function toggleTenantPolygonMode() {
+      if (!tenantMapPreviewState) { toast('اعرض الخريطة أولاً ثم ارسم حدود الموقع.'); return; }
+      if (tenantMapPolygonMode) {
+        if (tenantMapDraftPolygonPoints.length && !confirm('سيتم إلغاء الرسم الحالي دون تغيير الحدود المعتمدة. هل تريد المتابعة؟')) return;
+        tenantMapDraftPolygonPoints = [];
+        tenantMapPolygonMode = false;
+        renderTenantMapPolygonOverlay();
+        updateTenantPolygonControls();
+        const hint = document.getElementById('mapPreviewHint');
+        if (hint) hint.textContent = 'تم إلغاء الرسم الحالي. الحدود المعتمدة لم تتغير.';
+        toast('تم إلغاء الرسم الحالي.');
+        return;
+      }
+      tenantMapDraftPolygonPoints = [];
+      tenantMapPolygonMode = true;
+      renderTenantMapPolygonOverlay();
+      updateTenantPolygonControls();
+      const hint = document.getElementById('mapPreviewHint');
+      if (hint) hint.textContent = 'أضف 3 نقاط أو أكثر. لن يبدأ تحليل المبنى حتى تضغط «اعتماد الحدود وتحليل الموقع».';
+      toast('ابدأ رسم الحدود الجديدة.');
+    }
+
+    async function confirmTenantPolygon() {
+      if (!tenantMapPolygonMode) {
+        toast('فعّل رسم حدود الموقع أولاً.');
+        return;
+      }
+      if (tenantMapDraftPolygonPoints.length < 3) {
+        toast('أضف 3 نقاط على الأقل قبل اعتماد الحدود.');
+        return;
+      }
+      tenantMapPolygonPoints = tenantMapDraftPolygonPoints.map(point => [point[0], point[1]]);
+      tenantMapDraftPolygonPoints = [];
       tenantMapPolygonMode = false;
       syncTenantLocationPolygon();
       renderTenantMapPolygonOverlay();
+      updateTenantPolygonControls();
+      await analyzeTenantSite();
+    }
+
+    function clearTenantPolygon(confirmAll = false) {
+      const hasPoints = tenantMapPolygonPoints.length || tenantMapDraftPolygonPoints.length;
+      if (confirmAll && hasPoints && !confirm('سيتم مسح كل نقاط الحدود المرسومة والمعتمدة. هل تريد المتابعة؟')) return;
+      tenantMapPolygonPoints = [];
+      tenantMapDraftPolygonPoints = [];
+      tenantMapPolygonMode = false;
+      syncTenantLocationPolygon();
+      renderTenantMapPolygonOverlay();
+      updateTenantPolygonControls();
+      triggerAutoSaveDraft();
       const hint = document.getElementById('mapPreviewHint');
-      if (hint) hint.textContent = 'اضغط على الموضع الصحيح داخل الخريطة لضبط إحداثيات المشروع بدقة قبل إنشاء العرض.';
-      toast('تم مسح حدود الموقع المرسومة.');
+      if (hint) hint.textContent = 'فعّل رسم حدود الموقع ثم أضف النقاط. لن يبدأ تحليل المبنى حتى تضغط «اعتماد الحدود وتحليل الموقع».';
+      toast('تم مسح الحدود المرسومة.');
     }
 
     function syncTenantLocationPolygon() {
@@ -6728,7 +6774,8 @@
     function renderTenantMapPolygonOverlay() {
       const overlay = document.getElementById('mapPolygonOverlay');
       const img = document.querySelector('#mapPreviewImage img');
-      if (!overlay || !img || !tenantMapPreviewState || !tenantMapPolygonPoints.length || !img.naturalWidth || !img.naturalHeight) {
+      const polygonPoints = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
+      if (!overlay || !img || !tenantMapPreviewState || !polygonPoints.length || !img.naturalWidth || !img.naturalHeight) {
         if (overlay) overlay.innerHTML = '';
         return;
       }
@@ -6736,7 +6783,7 @@
       const world = 256 * Math.pow(2, state.zoom) * 2;
       const centerLatRad = state.lat * Math.PI / 180;
       const centerY = (1 - Math.log(Math.tan(centerLatRad) + 1 / Math.cos(centerLatRad)) / Math.PI) / 2;
-      const points = tenantMapPolygonPoints.map(point => {
+      const points = polygonPoints.map(point => {
         const lngOffset = (point[1] - state.lng) * world / 360;
         const pointLatRad = point[0] * Math.PI / 180;
         const pointY = (1 - Math.log(Math.tan(pointLatRad) + 1 / Math.cos(pointLatRad)) / Math.PI) / 2;
@@ -6744,8 +6791,39 @@
         return ((0.5 + lngOffset / img.naturalWidth) * 100).toFixed(3) + ',' + ((0.5 + yOffset / img.naturalHeight) * 100).toFixed(3);
       });
       const line = points.length > 2 ? points.concat(points[0]).join(' ') : points.join(' ');
-      overlay.innerHTML = '<polyline points="' + line + '" fill="' + (points.length > 2 ? 'rgba(107,28,35,.24)' : 'none') + '" stroke="#6B1C23" stroke-width="0.55"></polyline>' +
-        points.map(point => '<circle cx="' + point.split(',')[0] + '" cy="' + point.split(',')[1] + '" r="0.8" fill="#fff" stroke="#6B1C23" stroke-width="0.45"></circle>').join('');
+      const pointMarkup = points.map((point, index) => {
+        const [x, y] = point.split(',');
+        return '<circle cx="' + x + '%" cy="' + y + '%" r="1.5" fill="#fff" stroke="#6B1C23" stroke-width="0.45" pointer-events="all" data-polygon-index="' + index + '">' +
+          '<title>النقطة ' + (index + 1) + ' — اضغط لحذفها</title></circle>' +
+          '<text x="' + x + '%" y="' + y + '%" dy="-2.2" text-anchor="middle" font-size="3" font-weight="700" fill="#6B1C23" pointer-events="none">' + (index + 1) + '</text>';
+      }).join('');
+      overlay.innerHTML = '<polyline points="' + line + '" fill="' + (points.length > 2 ? 'rgba(107,28,35,.24)' : 'none') + '" stroke="#6B1C23" stroke-width="0.55" pointer-events="none"></polyline>' + pointMarkup;
+      overlay.querySelectorAll('[data-polygon-index]').forEach(point => {
+        point.addEventListener('click', event => {
+          event.stopPropagation();
+          removeTenantPolygonPoint(Number(point.dataset.polygonIndex));
+        });
+      });
+    }
+
+    function removeTenantPolygonPoint(index) {
+      const points = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
+      if (!Number.isInteger(index) || index < 0 || index >= points.length) return;
+      points.splice(index, 1);
+      if (!tenantMapPolygonMode) syncTenantLocationPolygon();
+      renderTenantMapPolygonOverlay();
+      updateTenantPolygonControls();
+      if (!tenantMapPolygonMode) triggerAutoSaveDraft();
+      toast('تم حذف النقطة رقم ' + (index + 1));
+    }
+
+    function removeLastTenantPolygonPoint() {
+      const points = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
+      if (!points.length) {
+        toast('لا توجد نقاط مرسومة');
+        return;
+      }
+      removeTenantPolygonPoint(points.length - 1);
     }
 
     async function fetchNearbyLandmarks() {
@@ -8373,6 +8451,7 @@
       tempMoodboardImages = {};
       tenantMapPreviewState = null;
       tenantMapPolygonPoints = [];
+      tenantMapDraftPolygonPoints = [];
       tenantMapPolygonMode = false;
       tenantActiveProjectSection = null;
       const ci = tenantProjectData.tenantCreativeImages || {};
@@ -8500,6 +8579,7 @@
         tenantChatSlideIndex = 0;
         tenantMapPreviewState = null;
         tenantMapPolygonPoints = [];
+        tenantMapDraftPolygonPoints = [];
         tenantMapPolygonMode = false;
         tenantActiveProjectSection = null;
         tempCoverImage = null;
