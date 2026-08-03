@@ -713,22 +713,27 @@
     }
 
     .msg {
+      display: block;
+      width: fit-content;
+      max-width: 82%;
       padding: 10px 12px;
       margin: 8px 0;
       border-radius: 14px;
-      max-width: 82%
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
     }
 
     .msg.user {
       background: var(--p);
       color: #fff;
-      margin-right: auto
+      margin-right: auto;
     }
 
     .msg.ai {
       background: #fff;
       border: 1px solid var(--line);
-      color: #333
+      color: #333;
+      margin-left: auto;
     }
 
     .small {
@@ -4008,6 +4013,8 @@
 
     function handleApiResponse(res) {
       return res.json().catch(() => ({})).then(data => {
+        data = data && typeof data === 'object' ? data : {};
+        if (!res.ok && !data.error) data.error = 'فشل الطلب (HTTP ' + res.status + ')';
         if (res.status === 401) {
           removeTenantToken();
           showAuthPage();
@@ -9121,14 +9128,21 @@
       // Show typing indicator
       trainingChatHistory.push({ role: 'ai', text: '⏳ جاري التفكير والتنفيذ...', _typing: true });
       renderTrainingChat();
-      const data = await api('POST', '/api/training-chat', {
-        message: text,
-        history: trainingChatHistory.filter(m => !m._typing).slice(0, -1),
-        workspace: buildAgentWorkspacePayload()
-      });
-      // Remove typing indicator
-      trainingChatHistory = trainingChatHistory.filter(m => !m._typing);
-      if (data.success) {
+
+      let data;
+      try {
+        data = await api('POST', '/api/training-chat', {
+          message: text,
+          history: trainingChatHistory.filter(m => !m._typing).slice(0, -1),
+          workspace: buildAgentWorkspacePayload()
+        });
+      } catch (error) {
+        data = { success: false, error: error.message || 'تعذر الاتصال بخادم التدريب.' };
+      } finally {
+        trainingChatHistory = trainingChatHistory.filter(m => !m._typing);
+      }
+
+      if (data && data.success) {
         const msg = { role: 'ai', text: data.reply || 'تم استلام رسالتك.' };
         if (data.actions && data.actions.length) {
           msg.actions = data.actions;
@@ -9146,7 +9160,7 @@
           }
         }
       } else {
-        trainingChatHistory.push({ role: 'ai', text: data.error || 'فشل الرد.' });
+        trainingChatHistory.push({ role: 'ai', text: (data && data.error) || 'فشل الرد.' });
         saveCurrentSessionState('training', trainingChatHistory);
       }
       renderTrainingChat();
@@ -9508,9 +9522,21 @@
         saveCurrentSessionState('ai_rules', aiRulesChatHistory);
         aiRulesChatHistory.push({ role: 'ai', text: '⏳ جاري التفكير والتنفيذ...', _typing: true });
         renderAIRulesChat();
-        const data = await api('POST', '/api/training-chat', { message: text, history: aiRulesChatHistory.filter(m => !m._typing).slice(0, -1), workspace: buildAgentWorkspacePayload() });
-        aiRulesChatHistory = aiRulesChatHistory.filter(m => !m._typing);
-        if (data.success) {
+
+        let data;
+        try {
+          data = await api('POST', '/api/training-chat', {
+            message: text,
+            history: aiRulesChatHistory.filter(m => !m._typing).slice(0, -1),
+            workspace: buildAgentWorkspacePayload()
+          });
+        } catch (error) {
+          data = { success: false, error: error.message || 'تعذر الاتصال بخادم التدريب.' };
+        } finally {
+          aiRulesChatHistory = aiRulesChatHistory.filter(m => !m._typing);
+        }
+
+        if (data && data.success) {
           const msg = { role: 'ai', text: data.reply || 'تم استلام رسالتك.' };
           if (data.actions && data.actions.length) {
             msg.actions = data.actions;
@@ -9527,7 +9553,7 @@
             }
           }
         } else {
-          aiRulesChatHistory.push({ role: 'ai', text: data.error || 'فشل الرد.' });
+          aiRulesChatHistory.push({ role: 'ai', text: (data && data.error) || 'فشل الرد.' });
           saveCurrentSessionState('ai_rules', aiRulesChatHistory);
         }
         renderAIRulesChat();
