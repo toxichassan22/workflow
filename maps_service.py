@@ -1975,12 +1975,9 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             d_lng = max_lng - min_lng
             max_dim = max(d_lat, d_lng)
             if max_dim > 0:
-                # Target: polygon max dimension occupies ~25% of the 1280px screen
-                # At zoom z, 360 degrees = 256 * 2^z pixels, so 1 degree = 256*2^z/360 px
-                # We want max_dim degrees = 0.25 * 1280 px = 320px
-                # 320 = max_dim * 256 * 2^z / 360
-                # 2^z = 320 * 360 / (max_dim * 256) = 450 / max_dim
-                suggested_zoom = int(math.log2(450.0 / max_dim))
+                # Fit the selected boundary to roughly 60% of the map width with padding.
+                target_pixels = 1280 * 2 * 0.60
+                suggested_zoom = math.ceil(math.log2((target_pixels * 360) / (max_dim * 256 * 2)))
                 overview_zoom = max(13, min(19, suggested_zoom))
                 
                 # Make other zoom levels relative to overview_zoom
@@ -1990,6 +1987,11 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 print(f"[DYNAMIC ZOOM] Adjusted zoom levels based on polygon: overview={overview_zoom}, landmarks={landmarks_zoom}, access={access_zoom}, catchment={catchment_zoom}")
         except Exception as ez:
             print(f"[DYNAMIC ZOOM ERROR] {ez}")
+
+    map_center_lat, map_center_lng = lat, lng
+    if polygon_coords and len(polygon_coords) >= 3:
+        map_center_lat = (min(point[0] for point in polygon_coords) + max(point[0] for point in polygon_coords)) / 2
+        map_center_lng = (min(point[1] for point in polygon_coords) + max(point[1] for point in polygon_coords)) / 2
 
     result['zooms'] = {
         'overview': overview_zoom,
@@ -2123,14 +2125,14 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
             overview_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            overview_res = get_static_map(lat, lng, zoom=overview_zoom, size=(1280, 720), output_path=overview_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WITH_LABELS_STYLES))
+            overview_res = get_static_map(map_center_lat, map_center_lng, zoom=overview_zoom, size=(1280, 720), output_path=overview_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WITH_LABELS_STYLES))
             if overview_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(overview_path, intensity=0.35)
                     _apply_map_overlay(overview_path, dark_factor=0.12)
                 if highlight_site:
-                    _draw_site_highlight(overview_path, lat, lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
-                _overlay_markers(overview_path, lat, lng, overview_zoom, overview_markers, size=(1280, 720))
+                    _draw_site_highlight(overview_path, map_center_lat, map_center_lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
+                _overlay_markers(overview_path, map_center_lat, map_center_lng, overview_zoom, overview_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(overview_path, position='top-right')
                 if draw_inset:
@@ -2152,14 +2154,14 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
             landmarks_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            lm_res = get_static_map(lat, lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES))
+            lm_res = get_static_map(map_center_lat, map_center_lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES))
             if lm_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(landmarks_path, intensity=0.35)
                     _apply_map_overlay(landmarks_path, dark_factor=0.20)
                 if highlight_site:
-                    _draw_site_highlight(landmarks_path, lat, lng, landmarks_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
-                _overlay_markers(landmarks_path, lat, lng, landmarks_zoom, landmarks_markers, size=(1280, 720))
+                    _draw_site_highlight(landmarks_path, map_center_lat, map_center_lng, landmarks_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
+                _overlay_markers(landmarks_path, map_center_lat, map_center_lng, landmarks_zoom, landmarks_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(landmarks_path, position='top-right')
                 if draw_inset:
@@ -2181,17 +2183,17 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
             access_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            access_res = get_static_map(lat, lng, zoom=access_zoom, size=(1280, 720), output_path=access_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_CLEAN_STYLES))
+            access_res = get_static_map(map_center_lat, map_center_lng, zoom=access_zoom, size=(1280, 720), output_path=access_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_CLEAN_STYLES))
             if access_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(access_path, intensity=0.35)
                     _apply_map_overlay(access_path, dark_factor=0.10)
                 if highlight_site:
-                    _draw_site_highlight(access_path, lat, lng, access_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
+                    _draw_site_highlight(access_path, map_center_lat, map_center_lng, access_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _draw_access_roads(
                     access_path,
-                    lat,
-                    lng,
+                    map_center_lat,
+                    map_center_lng,
                     access_zoom,
                     scale=2,
                     project_data=project_data,
@@ -2199,7 +2201,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                     origin_lat=marker_lat,
                     origin_lng=marker_lng,
                 )
-                _overlay_markers(access_path, lat, lng, access_zoom, access_markers, size=(1280, 720))
+                _overlay_markers(access_path, map_center_lat, map_center_lng, access_zoom, access_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(access_path, position='top-right')
                 result['placeholders'][placeholder] = access_path
