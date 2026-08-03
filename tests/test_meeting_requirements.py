@@ -159,6 +159,31 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertIsNone(coords)
 
+    def test_site_analysis_prefers_google_link_over_stale_coordinates(self):
+        client = self.app.test_client()
+        map_result = {'placeholders': {}, 'zooms': {'overview': 17}}
+        with patch.object(self.application_module.maps_service, 'extract_coords_from_maps_link', return_value={'lat': 25.123456, 'lng': 47.654321}), \
+                patch.object(self.application_module.maps_service, 'get_nearby_landmarks', return_value={'success': True, 'landmarks': []}), \
+                patch.object(self.application_module.maps_service, 'get_drive_matrix', return_value=[]), \
+                patch.object(self.application_module.maps_service, 'discover_nearby_roads', return_value=[]), \
+                patch.object(self.application_module.maps_service, '_fetch_osm_polygon', return_value=None), \
+                patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value=map_result) as generate_maps:
+            response = client.post('/api/analyze-site', headers=self._headers(self.token_a), json={
+                'projectData': {
+                    'location_lat': '24.000000',
+                    'location_lng': '46.000000',
+                    'location_address': 'https://www.google.com/maps/@25.123456,47.654321,17z'
+                }
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertEqual(payload['fields']['location_lat'], 25.123456)
+        self.assertEqual(payload['fields']['location_lng'], 47.654321)
+        generated_project = generate_maps.call_args.args[0]
+        self.assertEqual(generated_project['location_lat'], 25.123456)
+        self.assertEqual(generated_project['location_lng'], 47.654321)
+
     def test_site_analysis_fills_google_site_fields_without_touching_unknown_fields(self):
         client = self.app.test_client()
         nearby = [{'name': 'معلم قريب', 'lat': 24.001, 'lng': 46.001, 'distance_text': '1 كم'}]

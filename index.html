@@ -2003,6 +2003,19 @@
       border-color: var(--p);
     }
 
+    .project-section-nav-item.workflow-sidebar-action {
+      justify-content: center;
+      background: var(--p);
+      color: #fff;
+      border-color: var(--p);
+      font-weight: 700;
+    }
+
+    .project-section-nav-item.workflow-sidebar-action:hover {
+      background: var(--pd);
+      border-color: var(--pd);
+    }
+
     .project-section-nav-label {
       min-width: 0;
       overflow: hidden;
@@ -2974,13 +2987,6 @@
         style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)">
         <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
         <button class="btn ghost" onclick="fillSampleProjectData()">تعبئة بيانات تجريبية</button>
-        <button class="btn ghost" onclick="approveAllSections()">اعتماد كل الأقسام</button>
-        <button class="btn primary" data-permission="create_presentation" onclick="toggleMapStylePanel()"
-          style="background:#3B6E91; color:#fff; border:none; padding:8px 16px; border-radius:8px;">إعدادات
-          الخرائط</button>
-        <button class="btn primary" data-permission="create_presentation" onclick="generateSlidePlanOnly()"
-          style="background:#3B6E91;color:#fff;border:none;padding:8px 16px;border-radius:8px;">توليد الهيكل</button>
-        <button class="btn primary" onclick="submitTenantProject()">التالي: الصور ←</button>
         <button class="btn danger" onclick="confirmDeleteProject()">حذف المشروع</button>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
       </div>
@@ -4215,6 +4221,15 @@
       title.className = 'project-form-sidebar-title';
       title.textContent = includeProject ? 'أقسام العرض' : 'التوليد والتصميم';
       sidebar.appendChild(title);
+
+      if (!includeProject && hasPermission('create_presentation')) {
+        const planButton = document.createElement('button');
+        planButton.type = 'button';
+        planButton.className = 'project-section-nav-item workflow-sidebar-action';
+        planButton.textContent = tenantSlidePlan ? 'تحديث الهيكل' : 'توليد الهيكل';
+        planButton.addEventListener('click', () => generateSlidePlanOnly());
+        sidebar.appendChild(planButton);
+      }
 
       const items = [...TENANT_WORKFLOW_ITEMS];
       if (tenantSlidesData && tenantSlidesData.length && !items.some(i => i.pageId === 'tenantSlidesPage')) {
@@ -6042,17 +6057,29 @@
             div.appendChild(btn);
             // Auto site-analysis: pasting a maps link (or leaving the field with a
             // fresh address) fills roads/landmarks/catchment tables automatically.
+            const resetCoordinatesForChangedAddress = () => {
+              const val = addressInput.value.trim();
+              if (window._lastAnalyzedAddress && window._lastAnalyzedAddress !== val) {
+                if (latInput) latInput.value = '';
+                if (lngInput) lngInput.value = '';
+                tenantProjectData.location_lat = '';
+                tenantProjectData.location_lng = '';
+                tenantMapPreviewState = null;
+              }
+            };
             addressInput.addEventListener('paste', () => {
               clearTimeout(window._autoAnalyzeTimer);
               window._autoAnalyzeTimer = setTimeout(() => {
                 const val = addressInput.value.trim();
                 if (!val) return;
+                resetCoordinatesForChangedAddress();
                 if (/^https?:\/\//i.test(val) || val.length > 10) analyzeTenantSite();
               }, 700);
             });
             addressInput.addEventListener('blur', () => {
               const val = addressInput.value.trim();
               if (!val) return;
+              resetCoordinatesForChangedAddress();
               const hasCoords = latInput && latInput.value.trim() && lngInput && lngInput.value.trim();
               const alreadyAnalyzed = window._lastAnalyzedAddress === val && hasCoords;
               if (!alreadyAnalyzed) analyzeTenantSite();
@@ -6557,6 +6584,15 @@
           return;
         }
         const fields = data.fields || {};
+        const mapHint = document.getElementById('mapPreviewHint');
+        if (mapHint && Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
+          const sourceLabel = data.source === 'maps_link' ? 'رابط Google Maps' : 'بيانات الموقع';
+          const boundaryLabel = data.boundary && data.boundary.status === 'verified_building'
+            ? 'تم العثور على حدود مبنى مطابقة.'
+            : 'الدائرة هالة للنقطة وليست حدود الأرض؛ استخدم رسم حدود الموقع لتحديدها بدقة.';
+          mapHint.textContent = 'تم تحديد النقطة من ' + sourceLabel + ': ' + Number(data.lat).toFixed(6) + ', ' + Number(data.lng).toFixed(6) + '. ' + boundaryLabel;
+          mapHint.style.display = 'block';
+        }
         tenantProjectData = { ...tenantProjectData, ...fields };
         Object.entries(fields).forEach(([key, value]) => {
           const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');

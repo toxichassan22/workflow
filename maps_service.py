@@ -195,7 +195,7 @@ def extract_coords_from_maps_link(url):
     if not url:
         return None
     
-    url = url.strip()
+    url = requests.utils.unquote(url.strip())
     if not url.startswith('http'):
         return None
     
@@ -210,28 +210,28 @@ def extract_coords_from_maps_link(url):
     
     # Step 2: Try to extract coordinates from the resolved URL
     # Pattern 1: !3d(lat)!4d(lng) (exact place coordinates, more reliable than @ map center)
-    lat_match = re.search(r'!3d(-?\d+\.\d+)', url)
-    lng_match = re.search(r'!4d(-?\d+\.\d+)', url)
+    lat_match = re.search(r'!3d(-?\d+(?:\.\d+)?)', url)
+    lng_match = re.search(r'!4d(-?\d+(?:\.\d+)?)', url)
     if lat_match and lng_match:
         return {'lat': float(lat_match.group(1)), 'lng': float(lng_match.group(1))}
 
     # Pattern 2: /@lat,lng,zoom (map view center, fallback only)
-    match = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)(?:,\d+(?:\.\d+)?z)?', url)
+    match = re.search(r'@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:,\d+(?:\.\d+)?z)?', url)
     if match:
         return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
     
     # Pattern 3: q=lat,lng or query=lat,lng (query parameter)
-    match = re.search(r'[?&](?:q|query)=(-?\d+\.\d+),(-?\d+\.\d+)', url)
+    match = re.search(r'[?&](?:q|query)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)', url)
     if match:
         return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
     
     # Pattern 4: center=lat,lng (center parameter)
-    match = re.search(r'center=(-?\d+\.\d+),(-?\d+\.\d+)', url)
+    match = re.search(r'center=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)', url)
     if match:
         return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
     
     # Pattern 5: ll=lat,lng (ll parameter)
-    match = re.search(r'll=(-?\d+\.\d+),(-?\d+\.\d+)', url)
+    match = re.search(r'll=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)', url)
     if match:
         return {'lat': float(match.group(1)), 'lng': float(match.group(2))}
     
@@ -1148,14 +1148,11 @@ def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m
             overlay_draw.polygon(pixel_points, fill=fill_color, outline=border_color, width=5)
             overlay_draw.polygon(pixel_points, fill=None, outline=(255, 255, 255, 160), width=3)
         else:
-            # Priority 3: Compact site radius highlight when no building polygon exists
-            circle_radius_m = 60
-            edge_lat = center_lat + (circle_radius_m / 111320.0)
-            dx, _ = _latlng_to_pixel_offset(edge_lat, center_lng, center_lat, center_lng, zoom, scale=scale)
-            min_r = 12 if zoom <= 13 else (16 if zoom == 14 else 24)
-            r = max(abs(dx), min_r)
-            overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill_color, outline=border_color, width=3)
-            overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=None, outline=(255, 255, 255, 160), width=2)
+            # Priority 3: Compact exact-point halo when no building polygon exists
+            r = 14 if zoom >= 16 else 10
+            overlay_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(160, 50, 50, 45), outline=border_color, width=3)
+            overlay_draw.line([(cx - r - 5, cy), (cx + r + 5, cy)], fill=(255, 255, 255, 180), width=2)
+            overlay_draw.line([(cx, cy - r - 5), (cx, cy + r + 5)], fill=(255, 255, 255, 180), width=2)
 
         img = Image.alpha_composite(img, overlay)
         img.save(image_path, 'PNG')
@@ -1851,34 +1848,32 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
     if limit_error:
         return limit_error
 
-    lat = _extract_coordinate(
-        project_data.get('location_lat') or project_data.get('locationLat') or
-        project_data.get('latitude') or project_data.get('lat')
+    address = project_data.get('location_address') or project_data.get('location', '')
+    maps_link = (
+        (address if str(address).startswith('http') else '') or
+        project_data.get('location_maps_link') or project_data.get('maps_link')
     )
-    lng = _extract_coordinate(
-        project_data.get('location_lng') or project_data.get('locationLng') or
-        project_data.get('longitude') or project_data.get('lng')
-    )
-
-    # If coordinates are missing, fallback to maps link extraction
-    if lat is None or lng is None:
-        maps_link = (
-            project_data.get('location_maps_link') or project_data.get('maps_link') or
-            (project_data.get('location_address') if str(project_data.get('location_address', '')).startswith('http') else '')
+    linked_coords = extract_coords_from_maps_link(maps_link) if maps_link else None
+    if linked_coords:
+        lat = linked_coords['lat']
+        lng = linked_coords['lng']
+    elif maps_link:
+        return {'error': 'تعذر استخراج الإحداثيات من رابط Google Maps'}
+    else:
+        lat = _extract_coordinate(
+            project_data.get('location_lat') or project_data.get('locationLat') or
+            project_data.get('latitude') or project_data.get('lat')
         )
-        linked_coords = extract_coords_from_maps_link(maps_link) if maps_link else None
-        if linked_coords:
-            lat = linked_coords['lat']
-            lng = linked_coords['lng']
+        lng = _extract_coordinate(
+            project_data.get('location_lng') or project_data.get('locationLng') or
+            project_data.get('longitude') or project_data.get('lng')
+        )
 
-    # Final fallback: geocode address text if not a URL
-    if lat is None or lng is None:
-        address = project_data.get('location_address') or project_data.get('location', '')
-        if address and not address.startswith('http'):
-            geo = geocode_address(address, tenant_id=tenant_id)
-            if geo.get('success'):
-                lat = geo['lat']
-                lng = geo['lng']
+    if (lat is None or lng is None) and address and not str(address).startswith('http'):
+        geo = geocode_address(address, tenant_id=tenant_id)
+        if geo.get('success'):
+            lat = geo['lat']
+            lng = geo['lng']
 
     if lat is None or lng is None:
         return {'error': 'لم يتم العثور على موقع أو إحداثيات للمشروع. يرجى إدخال عنوان المشروع أو رابط Google Maps في البيانات.'}
@@ -2003,15 +1998,8 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
         'catchment': catchment_zoom,
     }
 
-    # Compute polygon centroid for site marker placement
-    # When a polygon exists, place the pin at its centroid so it sits ON the highlight
+    # Keep the site pin anchored to the source coordinates.
     marker_lat, marker_lng = lat, lng
-    if polygon_coords and len(polygon_coords) >= 3:
-        try:
-            marker_lat = sum(pt[0] for pt in polygon_coords) / len(polygon_coords)
-            marker_lng = sum(pt[1] for pt in polygon_coords) / len(polygon_coords)
-        except Exception:
-            marker_lat, marker_lng = lat, lng
 
     # Parse UI element flags (compass, inset map)
     draw_compass = project_data.get('draw_compass', True)

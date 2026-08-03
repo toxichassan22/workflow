@@ -3034,24 +3034,27 @@ def api_analyze_site():
     project_data = clean_project_data(data.get('projectData', {}))
     branding = db.get_branding(g.tenant_id) or {}
 
-    lat = maps_service._extract_coordinate(
-        project_data.get('location_lat') or project_data.get('locationLat') or
-        project_data.get('latitude') or project_data.get('lat')
-    )
-    lng = maps_service._extract_coordinate(
-        project_data.get('location_lng') or project_data.get('locationLng') or
-        project_data.get('longitude') or project_data.get('lng')
-    )
     address = project_data.get('location_address') or project_data.get('location') or ''
-    source = 'existing_coordinates'
-
-    if lat is None or lng is None:
-        link = address if isinstance(address, str) and address.startswith('http') else project_data.get('location_maps_link') or project_data.get('maps_link')
-        coords = maps_service.extract_coords_from_maps_link(link) if link else None
-        if coords:
-            lat, lng = coords['lat'], coords['lng']
-            source = 'maps_link'
-        elif address and not str(address).startswith('http'):
+    link = address if isinstance(address, str) and address.startswith('http') else (
+        project_data.get('location_maps_link') or project_data.get('maps_link')
+    )
+    coords = maps_service.extract_coords_from_maps_link(link) if link else None
+    if coords:
+        lat, lng = coords['lat'], coords['lng']
+        source = 'maps_link'
+    elif link:
+        return jsonify({'success': False, 'error': 'تعذر استخراج الإحداثيات من رابط Google Maps'}), 400
+    else:
+        lat = maps_service._extract_coordinate(
+            project_data.get('location_lat') or project_data.get('locationLat') or
+            project_data.get('latitude') or project_data.get('lat')
+        )
+        lng = maps_service._extract_coordinate(
+            project_data.get('location_lng') or project_data.get('locationLng') or
+            project_data.get('longitude') or project_data.get('lng')
+        )
+        source = 'existing_coordinates'
+        if (lat is None or lng is None) and address and not str(address).startswith('http'):
             geo = maps_service.geocode_address(address, tenant_id=g.tenant_id)
             if geo.get('success'):
                 lat, lng = geo['lat'], geo['lng']
