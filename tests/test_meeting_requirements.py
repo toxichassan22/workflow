@@ -288,6 +288,11 @@ class MeetingRequirementsTests(unittest.TestCase):
                 patch.object(self.application_module.maps_service, 'get_drive_matrix', return_value=[{'distance_text': '1.2 كم', 'duration_min': 5}]), \
                 patch.object(self.application_module.maps_service, 'discover_nearby_roads', return_value=[{'name': 'طريق تجريبي', 'lat': 24.0, 'lng': 46.0}]), \
                 patch.object(self.application_module.maps_service, '_fetch_osm_polygon', return_value=[(23.999, 45.999), (23.999, 46.001), (24.001, 46.001), (24.001, 45.999)]), \
+                patch.object(self.application_module.maps_service, 'detect_curated_city', return_value=None), \
+                patch.object(self.application_module.maps_service, 'get_curated_city_landmarks', return_value=[]), \
+                patch.object(self.application_module.maps_service, 'get_nearest_category_landmarks', return_value=[]), \
+                patch.object(self.application_module.maps_service, 'reverse_geocode_location', return_value={'formatted_address': 'Riyadh, Saudi Arabia'}), \
+                patch.object(self.application_module.population_service, 'get_population_density', return_value={'available': False}), \
                 patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={'placeholders': {}, 'zooms': {'overview': 17}}):
             response = client.post('/api/analyze-site', headers=self._headers(self.token_a), json={
                 'projectData': {'location_lat': '24.0', 'location_lng': '46.0', 'location_address': 'https://www.google.com/maps/@24.0,46.0,17z'}
@@ -314,16 +319,23 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_site_analysis_endpoint_returns_ai_text_without_large_creative_payload(self):
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_zai_chat', return_value={
+        enriched = {
+            'location_detail': 'Riyadh, Saudi Arabia',
+            'main_roads': 'شارع تجريبي رئيسي',
+            'secondary_roads': 'شارع فرعي قريب - 1 كم',
+            'nearby_landmarks': 'معلم قريب — تعليمي — 5 كم — 8 دقائق',
+            'city_landmarks': 'معالم مدينة جدة',
+            'population_density': '4500 نسمة/كم²',
+        }
+        with patch.object(self.application_module, '_collect_site_fields', return_value=(enriched, [], [], [], [], [], None)), \
+                patch.object(self.application_module, 'call_zai_chat', return_value={
             'choices': [{'message': {'content': 'تحليل عربي مختصر للموقع'}}]
         }) as call_ai:
             response = client.post('/api/site-analysis', headers=self._headers(self.token_a), json={
                 'projectData': {
                     'location_lat': 24.0,
                     'location_lng': 46.0,
-                    'location_detail': 'Riyadh, Saudi Arabia',
                     'project_idea': 'فندق بوتيك لرجال الأعمال والسياح',
-                    'population_density': '5000 نسمة/كم²',
                     'nearby_landmarks': 'معلم قريب — تعليمي — 5 كم — 8 دقائق',
                     'tenantCreativeImages': {'cover': 'data:image/png;base64,' + ('A' * 20000)},
                 }
@@ -335,7 +347,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('tenantCreativeImages', prompt)
         self.assertIn('معلم قريب', prompt)
         self.assertIn('فندق بوتيك', prompt)
-        self.assertIn('5000 نسمة/كم²', prompt)
+        self.assertIn('4500 نسمة/كم²', prompt)
+        self.assertIn('شارع تجريبي رئيسي', prompt)
         self.assertIn('الكثافة السكانية', prompt)
         self.assertIn('البنية التحتية', prompt)
         self.assertIn('فرص الاستثمار', prompt)

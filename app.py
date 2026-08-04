@@ -3101,44 +3101,12 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
         return None
 
 
-@app.route('/api/analyze-site', methods=['POST'])
-@require_permission('create_presentation')
-def api_analyze_site():
-    """Analyze site fields from Google data and generate the map assets once."""
-    data = request.json or {}
-    project_data = clean_project_data(data.get('projectData', {}))
-    branding = db.get_branding(g.tenant_id) or {}
+def _collect_site_fields(project_data, tenant_id, lat, lng):
+    """Gather site fields (landmarks, roads, population, polygon) from Google/BigQuery data.
 
-    address = project_data.get('location_address') or project_data.get('location') or ''
-    link = address if isinstance(address, str) and address.startswith('http') else (
-        project_data.get('location_maps_link') or project_data.get('maps_link')
-    )
-    if not isinstance(link, str) or not link.startswith('http'):
-        return jsonify({'success': False, 'error': 'موقع المشروع يجب أن يكون رابط Google Maps'}), 400
-    coords = maps_service.extract_coords_from_maps_link(link)
-    if coords:
-        lat, lng = coords['lat'], coords['lng']
-        source = 'maps_link'
-    elif link:
-        return jsonify({'success': False, 'error': 'تعذر استخراج الإحداثيات من رابط Google Maps'}), 400
-    else:
-        lat = maps_service._extract_coordinate(
-            project_data.get('location_lat') or project_data.get('locationLat') or
-            project_data.get('latitude') or project_data.get('lat')
-        )
-        lng = maps_service._extract_coordinate(
-            project_data.get('location_lng') or project_data.get('locationLng') or
-            project_data.get('longitude') or project_data.get('lng')
-        )
-        source = 'existing_coordinates'
-        if (lat is None or lng is None) and address and not str(address).startswith('http'):
-            geo = maps_service.geocode_address(address, tenant_id=g.tenant_id)
-            if geo.get('success'):
-                lat, lng = geo['lat'], geo['lng']
-                source = 'geocoding'
-
-    if lat is None or lng is None:
-        return jsonify({'success': False, 'error': 'أدخل رابط Google Maps أو عنوان الموقع أولاً'}), 400
+    Does not generate map images.  Used by analyze-site and site-analysis so they
+    share the same data sources.
+    """
 
     def landmark_lines(items, matrix=None):
         matrix = matrix or []
@@ -3188,18 +3156,18 @@ def api_analyze_site():
     nearby_items = nearby.get('landmarks', []) if nearby.get('success') else []
     nearby_matrix = []
 
-    curated_city = maps_service.detect_curated_city(lat, lng, tenant_id=g.tenant_id)
+    curated_city = maps_service.detect_curated_city(lat, lng, tenant_id=tenant_id)
     if curated_city:
-        city_items = maps_service.get_curated_city_landmarks(lat=lat, lng=lng, city=curated_city, tenant_id=g.tenant_id)
+        city_items = maps_service.get_curated_city_landmarks(lat=lat, lng=lng, city=curated_city, tenant_id=tenant_id)
     else:
         city = maps_service.get_nearby_landmarks(lat, lng, radius=5000, max_results=20, include_all=True)
         city_items = city.get('landmarks', []) if city.get('success') else []
         existing_city_names = {item.get('name', '').casefold() for item in city_items}
         city_items.extend(
-            item for item in maps_service.get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=g.tenant_id)
+            item for item in maps_service.get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=tenant_id)
             if item.get('name', '').casefold() not in existing_city_names
         )
-    roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=g.tenant_id, max_results=6)
+    roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=tenant_id, max_results=6)
     enrich_road_metrics(roads)
 
     polygon = None
@@ -3219,7 +3187,7 @@ def api_analyze_site():
         polygon = maps_service._fetch_osm_polygon(lat, lng, radius_m=180)
 
     population = population_service.get_population_density(lat, lng)
-    location_details = maps_service.reverse_geocode_location(lat, lng, tenant_id=g.tenant_id, language='en')
+    location_details = maps_service.reverse_geocode_location(lat, lng, tenant_id=tenant_id, language='en')
     fields = {
         'location_lat': lat,
         'location_detail': location_details.get('formatted_address', ''),
@@ -3238,10 +3206,8 @@ def api_analyze_site():
     if road_names:
         fields['main_roads'] = '\n'.join(road_names)
 
-    # Secondary (immediate) roads: probe at ~60-80 m so we capture the streets
-    # right next to the plot, excluding anything already listed as a main road.
     secondary_roads = maps_service.discover_nearby_roads(
-        lat, lng, tenant_id=g.tenant_id, max_results=4, lat_step=0.0006, lng_step=0.0008
+        lat, lng, tenant_id=tenant_id, max_results=4, lat_step=0.0006, lng_step=0.0008
     )
     secondary_names = []
     filtered_secondary_roads = []
@@ -3255,8 +3221,6 @@ def api_analyze_site():
         fields['main_roads'] = '\n'.join(road_names)
         fields['secondary_roads'] = road_lines(filtered_secondary_roads)
 
-    # Catchment areas: city-scale landmarks with real drive times, serialized in
-    # the structured table format the UI edits ("name — distance — duration").
     city_matrix = maps_service.get_drive_matrix((lat, lng), city_items) if city_items else []
     for index, item in enumerate(city_items):
         if index < len(city_matrix) and isinstance(city_matrix[index], dict):
@@ -3284,6 +3248,52 @@ def api_analyze_site():
 
     if polygon:
         fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
+
+    return fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon
+
+
+@app.route('/api/analyze-site', methods=['POST'])
+@require_permission('create_presentation')
+def api_analyze_site():
+    """Analyze site fields from Google data and generate the map assets once."""
+    data = request.json or {}
+    project_data = clean_project_data(data.get('projectData', {}))
+    branding = db.get_branding(g.tenant_id) or {}
+
+    address = project_data.get('location_address') or project_data.get('location') or ''
+    link = address if isinstance(address, str) and address.startswith('http') else (
+        project_data.get('location_maps_link') or project_data.get('maps_link')
+    )
+    if not isinstance(link, str) or not link.startswith('http'):
+        return jsonify({'success': False, 'error': 'موقع المشروع يجب أن يكون رابط Google Maps'}), 400
+    coords = maps_service.extract_coords_from_maps_link(link)
+    if coords:
+        lat, lng = coords['lat'], coords['lng']
+        source = 'maps_link'
+    elif link:
+        return jsonify({'success': False, 'error': 'تعذر استخراج الإحداثيات من رابط Google Maps'}), 400
+    else:
+        lat = maps_service._extract_coordinate(
+            project_data.get('location_lat') or project_data.get('locationLat') or
+            project_data.get('latitude') or project_data.get('lat')
+        )
+        lng = maps_service._extract_coordinate(
+            project_data.get('location_lng') or project_data.get('locationLng') or
+            project_data.get('longitude') or project_data.get('lng')
+        )
+        source = 'existing_coordinates'
+        if (lat is None or lng is None) and address and not str(address).startswith('http'):
+            geo = maps_service.geocode_address(address, tenant_id=g.tenant_id)
+            if geo.get('success'):
+                lat, lng = geo['lat'], geo['lng']
+                source = 'geocoding'
+
+    if lat is None or lng is None:
+        return jsonify({'success': False, 'error': 'أدخل رابط Google Maps أو عنوان الموقع أولاً'}), 400
+
+    fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon = _collect_site_fields(
+        project_data, g.tenant_id, lat, lng
+    )
 
     analyzed_project = {
         **project_data,
@@ -3371,6 +3381,31 @@ def api_site_analysis():
     }
     if not project_data.get('location_lat') or not project_data.get('location_lng'):
         return jsonify({'success': False, 'error': 'بيانات الموقع والإحداثيات مطلوبة أولًا'}), 400
+
+    lat = maps_service._extract_coordinate(project_data.get('location_lat'))
+    lng = maps_service._extract_coordinate(project_data.get('location_lng'))
+    if lat is None or lng is None:
+        return jsonify({'success': False, 'error': 'بيانات الموقع والإحداثيات مطلوبة أولًا'}), 400
+
+    enriched_fields = {}
+    needs_enrichment = any(
+        project_data.get(key) in (None, '', [], {})
+        for key in (
+            'location_detail', 'main_roads', 'secondary_roads', 'nearby_landmarks',
+            'city_landmarks', 'catchment_areas', 'population_density', 'location_polygon',
+        )
+    )
+    if needs_enrichment:
+        try:
+            enriched_fields, *_ = _collect_site_fields(raw_project_data, g.tenant_id, lat, lng)
+        except Exception as error:
+            print(f'[SITE DATA ENRICHMENT ERROR] {error}')
+            enriched_fields = {}
+
+    for key in analysis_keys:
+        if enriched_fields.get(key) not in (None, '', [], {}) and project_data.get(key) in (None, '', [], {}):
+            project_data[key] = enriched_fields[key]
+
     prompt = f"""اكتب تحليلًا عربيًا احترافيًا لموقع مشروع عقاري اعتمادًا على البيانات التالية فقط.
 
 المطلوب:
