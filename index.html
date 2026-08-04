@@ -7112,19 +7112,24 @@
         return ((0.5 + lngOffset / img.naturalWidth) * 100).toFixed(3) + ',' + ((0.5 + yOffset / img.naturalHeight) * 100).toFixed(3);
       });
       const line = points.length > 2 ? points.concat(points[0]).join(' ') : points.join(' ');
-      const pointMarkup = points.map((point, index) => {
-        const [x, y] = point.split(',');
-        return '<circle cx="' + x + '%" cy="' + y + '%" r="1.5" fill="#fff" stroke="#6B1C23" stroke-width="0.45" pointer-events="all" data-polygon-index="' + index + '">' +
-          '<title>النقطة ' + (index + 1) + ' — اضغط لحذفها</title></circle>' +
-          '<text x="' + x + '%" y="' + y + '%" dy="-2.2" text-anchor="middle" font-size="3" font-weight="700" fill="#6B1C23" pointer-events="none">' + (index + 1) + '</text>';
-      }).join('');
+      let pointMarkup = '';
+      if (tenantMapPolygonMode) {
+        pointMarkup = points.map((point, index) => {
+          const [x, y] = point.split(',');
+          return '<circle cx="' + x + '%" cy="' + y + '%" r="1.5" fill="#fff" stroke="#6B1C23" stroke-width="0.45" pointer-events="all" data-polygon-index="' + index + '">' +
+            '<title>النقطة ' + (index + 1) + ' — اضغط لحذفها</title></circle>' +
+            '<text x="' + x + '%" y="' + y + '%" dy="-2.2" text-anchor="middle" font-size="3" font-weight="700" fill="#6B1C23" pointer-events="none">' + (index + 1) + '</text>';
+        }).join('');
+      }
       overlay.innerHTML = '<polyline points="' + line + '" fill="' + (points.length > 2 ? 'rgba(107,28,35,.24)' : 'none') + '" stroke="#6B1C23" stroke-width="0.55" pointer-events="none"></polyline>' + pointMarkup;
-      overlay.querySelectorAll('[data-polygon-index]').forEach(point => {
-        point.addEventListener('click', event => {
-          event.stopPropagation();
-          removeTenantPolygonPoint(Number(point.dataset.polygonIndex));
+      if (tenantMapPolygonMode) {
+        overlay.querySelectorAll('[data-polygon-index]').forEach(point => {
+          point.addEventListener('click', event => {
+            event.stopPropagation();
+            removeTenantPolygonPoint(Number(point.dataset.polygonIndex));
+          });
         });
-      });
+      }
     }
 
     function removeTenantPolygonPoint(index) {
