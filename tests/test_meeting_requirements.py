@@ -322,6 +322,8 @@ class MeetingRequirementsTests(unittest.TestCase):
                     'location_lat': 24.0,
                     'location_lng': 46.0,
                     'location_detail': 'Riyadh, Saudi Arabia',
+                    'project_idea': 'فندق بوتيك لرجال الأعمال والسياح',
+                    'population_density': '5000 نسمة/كم²',
                     'nearby_landmarks': 'معلم قريب — تعليمي — 5 كم — 8 دقائق',
                     'tenantCreativeImages': {'cover': 'data:image/png;base64,' + ('A' * 20000)},
                 }
@@ -332,6 +334,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         prompt = call_ai.call_args.args[1]
         self.assertNotIn('tenantCreativeImages', prompt)
         self.assertIn('معلم قريب', prompt)
+        self.assertIn('فندق بوتيك', prompt)
+        self.assertIn('5000 نسمة/كم²', prompt)
 
     def test_site_analysis_falls_back_to_openrouter_when_primary_ai_response_fails(self):
         client = self.app.test_client()
