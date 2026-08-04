@@ -3763,7 +3763,7 @@
 
     function shouldHighlightTenantSite() {
       const source = tenantProjectData && tenantProjectData.location_polygon_source;
-      return source !== 'manual' && source !== 'none';
+      return source !== 'none';
     }
 
     function hasStoredMaps(highlightSite) {
@@ -6947,7 +6947,7 @@
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
         triggerAutoSaveDraft();
         await previewProjectMap({
-          highlightSite: tenantProjectData.location_polygon_source !== 'manual'
+          highlightSite: tenantProjectData.location_polygon_source !== 'none'
         });
         renderTenantMapPolygonOverlay();
         applyTenantPolygonZoom();
@@ -7182,9 +7182,9 @@
       const previewBox = document.getElementById('mapPreviewImage');
       const image = previewBox?.querySelector('img');
       const overlay = document.getElementById('mapPolygonOverlay');
-      const points = tenantMapPolygonPoints;
+      const points = tenantMapDraftPolygonPoints;
       const state = tenantMapPreviewState;
-      if (tenantProjectData.location_polygon_source !== 'manual' && !tenantMapPolygonMode) {
+      if (!tenantMapPolygonMode) {
         resetTenantMapZoom();
         return;
       }
@@ -7262,13 +7262,13 @@
       syncTenantLocationPolygon();
       renderTenantMapPolygonOverlay();
       updateTenantPolygonControls();
-      await previewProjectMap({ force: true, highlightSite: false });
+      await previewProjectMap({ force: true, highlightSite: true });
       renderTenantMapPolygonOverlay();
       applyTenantPolygonZoom();
       triggerAutoSaveDraft();
       const hint = document.getElementById('mapPreviewHint');
-      if (hint) hint.textContent = 'تم اعتماد الحدود اليدوية وإعادة توليد الخريطة بدون حدود تلقائية.';
-      toast('تم اعتماد الحدود اليدوية وإزالة الحدود التلقائية من الخريطة.');
+      if (hint) hint.textContent = 'تم اعتماد الحدود اليدوية وإعادة توليد الخريطة مع تثبيت الـ highlight.';
+      toast('تم اعتماد الحدود اليدوية وتثبيت الـ highlight داخل الخريطة.');
     }
 
     async function clearTenantPolygon(confirmAll = false) {
@@ -7301,8 +7301,8 @@
       const overlay = document.getElementById('mapPolygonOverlay');
       const img = document.querySelector('#mapPreviewImage img');
       const polygonPoints = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
-      const manualBoundary = tenantMapPolygonMode || tenantProjectData.location_polygon_source === 'manual';
-      if (!manualBoundary || tenantSelectedMapType !== 'overview' || !overlay || !img || !tenantMapPreviewState || !polygonPoints.length || !img.naturalWidth || !img.naturalHeight) {
+      const drawingBoundary = tenantMapPolygonMode;
+      if (!drawingBoundary || tenantSelectedMapType !== 'overview' || !overlay || !img || !tenantMapPreviewState || !polygonPoints.length || !img.naturalWidth || !img.naturalHeight) {
         if (overlay) overlay.innerHTML = '';
         return;
       }
