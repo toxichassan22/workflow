@@ -7627,18 +7627,16 @@
     }
 
     async function generateSlidePlanOnly() {
-      const formData = await collectTenantFormData();
-      tenantProjectData = { ...tenantProjectData, ...formData };
-      if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
-      await saveProjectAsDraft(true);
-      showGenProgress();
-      setGenStep('plan', 'active');
-      setGenPct(5, 'تحليل بيانات المشروع...');
+      showLoader('جاري إعداد خطة الشرائح', 'جاري حفظ البيانات وتحليل المشروع...', 5);
       try {
+        const formData = await collectTenantFormData();
+        tenantProjectData = { ...tenantProjectData, ...formData };
+        if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
+        updateLoaderProgress(25, 'جاري حفظ بيانات المشروع...');
+        await saveProjectAsDraft(true);
+        updateLoaderProgress(35, 'جاري إرسال بيانات المشروع إلى AI...');
         const result = await requestTenantSlidePlan(tenantProjectData);
         if (result.error) {
-          setGenStep('plan', 'error');
-          setGenPct(5, result.error);
           console.error('[SLIDE PLAN]', result);
           toast(result.error);
           return;
@@ -7646,18 +7644,18 @@
         if (result.plan) {
           tenantSlidePlan = result.plan;
           tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-          setGenStep('plan', 'done');
-          setGenPct(100, 'تم توليد الهيكل — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
-          toast('تم توليد الهيكل بنجاح — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
+          updateLoaderProgress(95, 'تم إعداد الهيكل، جاري حفظه...');
           await saveProjectAsDraft(true);
+          updateLoaderProgress(100, 'تم توليد الهيكل — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
+          toast('تم توليد الهيكل بنجاح — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
         } else {
-          setGenStep('plan', 'error');
           toast('فشل توليد الهيكل');
         }
       } catch (e) {
-        setGenStep('plan', 'error');
-        toast('خطأ في الاتصال بالخادم');
         console.error('generateSlidePlanOnly error:', e);
+        toast(e?.message || 'خطأ في الاتصال بالخادم');
+      } finally {
+        hideLoader();
       }
     }
 
