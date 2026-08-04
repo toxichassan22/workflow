@@ -206,6 +206,19 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(hydrated['tenantCreativeImages']['map_lat'], 24.1)
         self.assertEqual(hydrated['tenantCreativeImages']['map_lng'], 46.2)
 
+    def test_full_map_generation_always_requests_all_four_views(self):
+        client = self.app.test_client()
+        with patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={
+            'placeholders': {}, 'landmarks': [], 'landmarks_matrix': [], 'zooms': {}
+        }) as generate_maps:
+            response = client.post('/api/generate-map-images', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'maps-draft'}
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        generated_project = generate_maps.call_args.args[0]
+        self.assertEqual(generated_project['enabled_maps'], ['overview', 'landmarks', 'access', 'catchment'])
+
     def test_site_analysis_fills_google_site_fields_without_touching_unknown_fields(self):
         client = self.app.test_client()
         nearby = [{'name': 'معلم قريب', 'lat': 24.001, 'lng': 46.001, 'distance_text': '1 كم'}]
@@ -226,6 +239,44 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('معلم المدينة', fields['city_landmarks'])
         self.assertIn('location_polygon', fields)
         self.assertNotIn('land_area', fields)
+
+    def test_site_analysis_endpoint_returns_ai_text_without_large_creative_payload(self):
+        client = self.app.test_client()
+        with patch.object(self.application_module, 'call_zai_chat', return_value={
+            'choices': [{'message': {'content': 'تحليل عربي مختصر للموقع'}}]
+        }) as call_ai:
+            response = client.post('/api/site-analysis', headers=self._headers(self.token_a), json={
+                'projectData': {
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'location_detail': 'Riyadh, Saudi Arabia',
+                    'nearby_landmarks': 'معلم قريب — تعليمي — 5 كم — 8 دقائق',
+                    'tenantCreativeImages': {'cover': 'data:image/png;base64,' + ('A' * 20000)},
+                }
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['analysis'], 'تحليل عربي مختصر للموقع')
+        prompt = call_ai.call_args.args[1]
+        self.assertNotIn('tenantCreativeImages', prompt)
+        self.assertIn('معلم قريب', prompt)
+
+    def test_project_draft_preserves_selected_landmark_details(self):
+        client = self.app.test_client()
+        details = [{
+            'name': 'معلم مختار', 'category': 'تعليمي', 'lat': 24.01, 'lng': 46.01,
+            'distance_km': 4.2, 'duration_minutes': 7,
+        }]
+        saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {
+                'nearby_landmarks': 'معلم مختار — تعليمي — 4.2 كم — 7 دقائق',
+                'nearby_landmarks_data': details,
+            }
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        loaded = client.get('/api/project-draft', headers=self._headers(self.token_a))
+        self.assertEqual(loaded.status_code, 200, loaded.get_json())
+        self.assertEqual(loaded.get_json()['draft']['draft_data']['nearby_landmarks_data'], details)
 
     def test_custom_sections_can_be_renamed_and_fields_require_a_tenant_section(self):
         client = self.app.test_client()

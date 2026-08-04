@@ -276,9 +276,14 @@ def extract_chat_content(response, label="GLM"):
     if 'choices' not in response or not response['choices']:
         raise Exception(f"{label} returned no choices. Response: {json.dumps(response, ensure_ascii=False)[:500]}")
     msg = response['choices'][0].get('message', {}).get('content', '')
+    if isinstance(msg, list):
+        msg = ' '.join(
+            part.get('text', '') if isinstance(part, dict) else str(part)
+            for part in msg
+        )
     if not msg:
         raise Exception(f"{label} returned empty content")
-    return msg
+    return str(msg)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Call Image API (OpenRouter - Gemini)
@@ -3258,6 +3263,7 @@ def api_analyze_site():
         'location_lat': lat,
         'location_lng': lng,
         'calculate_landmark_driving': False,
+        'enabled_maps': ['overview', 'landmarks', 'access', 'catchment'],
     }
     map_result = maps_service.generate_all_map_images(
         analyzed_project,
@@ -3321,7 +3327,18 @@ def api_analyze_site():
 @require_permission('create_presentation')
 def api_site_analysis():
     data = request.json or {}
-    project_data = clean_project_data(data.get('projectData', {}))
+    raw_project_data = clean_project_data(data.get('projectData', {}))
+    analysis_keys = (
+        'project_name', 'project_type', 'location_address', 'location_maps_link', 'maps_link',
+        'location_detail', 'location_lat', 'location_lng', 'main_roads', 'secondary_roads',
+        'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks', 'catchment_areas',
+        'population_density', 'population_density_source', 'location_polygon'
+    )
+    project_data = {
+        key: raw_project_data.get(key)
+        for key in analysis_keys
+        if raw_project_data.get(key) not in (None, '', [], {})
+    }
     if not project_data.get('location_lat') or not project_data.get('location_lng'):
         return jsonify({'success': False, 'error': 'بيانات الموقع والإحداثيات مطلوبة أولًا'}), 400
     prompt = f"""اكتب تحليلًا عربيًا احترافيًا لموقع مشروع عقاري اعتمادًا على البيانات التالية فقط.
@@ -3390,6 +3407,7 @@ def api_generate_map_images():
     """Generate all map images for a project and return placeholders."""
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
+    project_data['enabled_maps'] = ['overview', 'landmarks', 'access', 'catchment']
     presentation_id = data.get('presentationId')
     force = bool(data.get('force'))
     highlight_site = data.get('highlightSite', True) is not False
@@ -3432,6 +3450,7 @@ def api_regenerate_presentation_maps(pres_id):
         return jsonify({'error': 'Presentation not found'}), 404
 
     project_data = json.loads(pres['project_data']) if pres.get('project_data') else {}
+    project_data['enabled_maps'] = ['overview', 'landmarks', 'access', 'catchment']
     branding = db.get_branding(g.tenant_id) or {}
     # Accept per-map style overrides from request body
     req_data = request.json or {}
@@ -3698,13 +3717,20 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
     creative = project_data.get('tenantCreativeImages')
     if not isinstance(creative, dict):
         creative = {}
-    placeholders = {}
-    map_zooms = {}
+    placeholders = dict(creative.get('map_placeholders') or {})
+    map_zooms = dict(creative.get('map_zooms') or {})
+    seen_types = set()
+    seen_placeholders = set()
     for record in records:
         path = record.get('file_path')
         placeholder = record.get('placeholder')
+        image_type = record.get('image_type') or ''
         if not path or not placeholder or not os.path.exists(path):
             continue
+        if image_type in seen_types or placeholder in seen_placeholders:
+            continue
+        seen_types.add(image_type)
+        seen_placeholders.add(placeholder)
         try:
             rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
         except ValueError:
@@ -3718,9 +3744,11 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
             creative['map_lat'] = metadata['lat']
         if creative.get('map_lng') is None and metadata.get('lng') is not None:
             creative['map_lng'] = metadata['lng']
-        image_type = record.get('image_type') or ''
         if metadata.get('zoom') is not None:
-            map_zooms[image_type] = metadata['zoom']
+            base_type = image_type
+            if base_type.endswith('_satellite') or base_type.endswith('_roadmap'):
+                base_type = base_type.rsplit('_', 1)[0]
+            map_zooms.setdefault(base_type, metadata['zoom'])
         if metadata.get('landmarks_matrix') and not creative.get('map_landmarks'):
             creative['map_landmarks'] = metadata['landmarks_matrix']
     creative['map_placeholders'] = placeholders
