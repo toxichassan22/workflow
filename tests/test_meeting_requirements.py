@@ -282,6 +282,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('location_polygon', fields)
         self.assertNotIn('land_area', fields)
 
+    def test_slide_plan_falls_back_when_ai_provider_is_unavailable(self):
+        client = self.app.test_client()
+        with patch.object(self.application_module, 'call_zai_chat_parallel', side_effect=RuntimeError('AI unavailable')):
+            response = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
+                'projectData': {'project_name': 'مشروع تجريبي', 'project_type': 'سكني'}
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()['success'])
+        self.assertTrue(response.get_json()['plan']['slides'])
+
     def test_site_analysis_endpoint_returns_ai_text_without_large_creative_payload(self):
         client = self.app.test_client()
         with patch.object(self.application_module, 'call_zai_chat', return_value={
