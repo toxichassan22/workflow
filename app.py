@@ -3896,6 +3896,7 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         creative = {}
     placeholders = {}
     map_zooms = {}
+    map_highlight_site = None
     seen_types = set()
     seen_placeholders = set()
     for record in records:
@@ -3930,8 +3931,12 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
             map_zooms.setdefault(base_type, metadata['zoom'])
         if metadata.get('landmarks_matrix') and not creative.get('map_landmarks'):
             creative['map_landmarks'] = metadata['landmarks_matrix']
+        if map_highlight_site is None and metadata.get('highlight_site') is not None:
+            map_highlight_site = bool(metadata.get('highlight_site'))
     creative['map_placeholders'] = placeholders
     creative['maps_persisted'] = bool(placeholders)
+    if map_highlight_site is not None:
+        creative['map_highlight_site'] = map_highlight_site
     if map_zooms:
         creative['map_zooms'] = map_zooms
     project_data['tenantCreativeImages'] = creative

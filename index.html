@@ -3761,7 +3761,13 @@
       });
     }
 
-    function hasStoredMaps(highlightSite = true) {
+    function shouldHighlightTenantSite() {
+      const source = tenantProjectData && tenantProjectData.location_polygon_source;
+      return source !== 'manual' && source !== 'none';
+    }
+
+    function hasStoredMaps(highlightSite) {
+      const expectedHighlight = highlightSite === undefined ? shouldHighlightTenantSite() : highlightSite !== false;
       const c = tenantCreativeImages || {};
       const mp = c.map_placeholders || {};
       const hasView = keys => keys.some(key => Boolean(mp[key]));
@@ -3770,7 +3776,8 @@
         hasView(['##MAP_ACCESS##', '##MAP_ACCESS_SATELLITE##', '##MAP_ACCESS_ROADMAP##']) &&
         hasView(['##MAP_CATCHMENT##', '##MAP_CATCHMENT_SATELLITE##', '##MAP_CATCHMENT_ROADMAP##']);
       if (!complete) return false;
-      return c.maps_persisted || c.maps_signature === mapsSignature(tenantProjectData, highlightSite);
+      return c.map_highlight_site === expectedHighlight &&
+        (c.maps_persisted || c.maps_signature === mapsSignature(tenantProjectData, expectedHighlight));
     }
 
     function hasStoredImages() {
@@ -3850,7 +3857,8 @@
       return changed;
     }
 
-    async function ensureProjectAssets({ force = false, needImages = true, needMaps = true, includeCover = true, highlightSite = true } = {}) {
+    async function ensureProjectAssets({ force = false, needImages = true, needMaps = true, includeCover = true, highlightSite } = {}) {
+      if (highlightSite === undefined) highlightSite = shouldHighlightTenantSite();
       tenantCreativeImages = tenantCreativeImages || { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
       if (!tenantProjectData) tenantProjectData = {};
       if (!tenantProjectData.draftId) tenantProjectData.draftId = crypto.randomUUID();
@@ -3970,6 +3978,7 @@
             };
             tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData, highlightSite);
             tenantCreativeImages.maps_persisted = true;
+            tenantCreativeImages.map_highlight_site = highlightSite !== false;
             if (replaceCurrentSlideMapAssets(res.placeholders)) renderTenantSlides();
             tenantCreativeImages.last_error = null;
             tenantCreativeImages.last_warning = res.warning || null;
@@ -7044,7 +7053,7 @@
           projectData: payload,
           mapType,
           presentationId: tenantPresentationId,
-          highlightSite: true
+          highlightSite: shouldHighlightTenantSite()
         });
         if (!data.success) {
           toast(data.error || 'تعذر إعادة توليد الخريطة');
@@ -7053,6 +7062,7 @@
         tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
         tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
         tenantCreativeImages.maps_persisted = true;
+        tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
         tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
         await saveMapPreviewState();
@@ -7067,13 +7077,16 @@
 
     async function previewProjectMap(options = {}) {
       if (tenantMapPreviewRequest) return tenantMapPreviewRequest;
-      tenantMapPreviewRequest = previewProjectMapOnce(options).finally(() => {
+      const normalizedOptions = { ...options };
+      if (normalizedOptions.highlightSite === undefined) normalizedOptions.highlightSite = shouldHighlightTenantSite();
+      tenantMapPreviewRequest = previewProjectMapOnce(normalizedOptions).finally(() => {
         tenantMapPreviewRequest = null;
       });
       return tenantMapPreviewRequest;
     }
 
-    async function previewProjectMapOnce({ force = false, highlightSite = true } = {}) {
+    async function previewProjectMapOnce({ force = false, highlightSite } = {}) {
+      if (highlightSite === undefined) highlightSite = shouldHighlightTenantSite();
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       const lat = tenantProjectData.location_lat || '';
