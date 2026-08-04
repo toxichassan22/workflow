@@ -3333,6 +3333,11 @@ def api_analyze_site():
     fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon, diagnostics = _collect_site_fields(
         project_data, g.tenant_id, lat, lng
     )
+    fields['location_polygon_source'] = (
+        'manual' if project_data.get('location_polygon_source') == 'manual'
+        else 'auto' if fields.get('location_polygon')
+        else 'none'
+    )
 
     analyzed_project = {
         **project_data,

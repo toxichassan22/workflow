@@ -360,6 +360,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('5 دقيقة', fields['nearby_landmarks'])
         self.assertIn('معلم المدينة', fields['city_landmarks'])
         self.assertIn('location_polygon', fields)
+        self.assertEqual(fields['location_polygon_source'], 'auto')
         self.assertNotIn('land_area', fields)
 
     def test_slide_plan_falls_back_when_ai_provider_is_unavailable(self):
