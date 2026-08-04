@@ -184,17 +184,39 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(generated_project['location_lat'], 25.123456)
         self.assertEqual(generated_project['location_lng'], 47.654321)
 
+    def test_saved_map_assets_hydrate_by_draft_id(self):
+        map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='.png', delete=False)
+        map_path = map_file.name
+        self.addCleanup(lambda: os.path.exists(map_path) and os.unlink(map_path))
+        map_file.write(b'png')
+        map_file.close()
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a,
+                'overview',
+                map_path,
+                '##MAP_OVERVIEW##',
+                presentation_id='draft_draft-map',
+                metadata={'lat': 24.1, 'lng': 46.2, 'zoom': 17}
+            )
+            hydrated = self.application_module._merge_persisted_map_assets(
+                {'project_name': 'Saved'}, self.tenant_a, draft_id='draft-map'
+            )
+        self.assertEqual(os.path.basename(hydrated['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##']), os.path.basename(map_path))
+        self.assertEqual(hydrated['tenantCreativeImages']['map_lat'], 24.1)
+        self.assertEqual(hydrated['tenantCreativeImages']['map_lng'], 46.2)
+
     def test_site_analysis_fills_google_site_fields_without_touching_unknown_fields(self):
         client = self.app.test_client()
         nearby = [{'name': 'معلم قريب', 'lat': 24.001, 'lng': 46.001, 'distance_text': '1 كم'}]
         city = [{'name': 'معلم المدينة', 'lat': 24.02, 'lng': 46.02}]
-        with patch.object(self.application_module.maps_service, 'get_nearby_landmarks', side_effect=lambda *args, **kwargs: {'success': True, 'landmarks': nearby if kwargs.get('radius') == 1000 else city}), \
+        with patch.object(self.application_module.maps_service, 'get_nearby_landmarks', side_effect=lambda *args, **kwargs: {'success': True, 'landmarks': nearby if kwargs.get('radius') == 20000 else city}), \
                 patch.object(self.application_module.maps_service, 'get_drive_matrix', return_value=[{'distance_text': '1.2 كم', 'duration_min': 5}]), \
                 patch.object(self.application_module.maps_service, 'discover_nearby_roads', return_value=[{'name': 'طريق تجريبي', 'lat': 24.0, 'lng': 46.0}]), \
                 patch.object(self.application_module.maps_service, '_fetch_osm_polygon', return_value=[(23.999, 45.999), (23.999, 46.001), (24.001, 46.001), (24.001, 45.999)]), \
                 patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={'placeholders': {}, 'zooms': {'overview': 17}}):
             response = client.post('/api/analyze-site', headers=self._headers(self.token_a), json={
-                'projectData': {'location_lat': '24.0', 'location_lng': '46.0', 'location_address': 'Test site'}
+                'projectData': {'location_lat': '24.0', 'location_lng': '46.0', 'location_address': 'https://www.google.com/maps/@24.0,46.0,17z'}
             })
 
         self.assertEqual(response.status_code, 200, response.get_json())

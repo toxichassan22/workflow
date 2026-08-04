@@ -20,6 +20,7 @@ load_dotenv()
 import db
 import auth
 import maps_service
+import population_service
 import slide_engine
 from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
 from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules, extract_slide_elements
@@ -2254,11 +2255,6 @@ def api_add_field():
     section_key = section_key.strip()
     valid_section_keys = {'general'} | {section['key'] for section in db.get_all_sections(g.tenant_id)}
     if section_key not in valid_section_keys:
-        # If the user or AI suggests a new custom section, create it automatically.
-        if section_key and section_key not in {s['key'] for s in db.FIELD_SECTIONS}:
-            db.add_custom_section(g.tenant_id, section_key, section_key.replace('_', ' ').title())
-            valid_section_keys.add(section_key)
-    if section_key not in valid_section_keys:
         return jsonify({'error': 'Invalid sectionKey for this company'}), 400
 
     raw_opts = (
@@ -2662,6 +2658,61 @@ from slide_engine import (
 )
 
 
+def _ensure_required_location_slides(plan, project_data):
+    if not isinstance(plan, dict) or not isinstance(plan.get('slides'), list):
+        return plan
+    slides = plan['slides']
+    existing_types = {slide.get('type') for slide in slides if isinstance(slide, dict)}
+    required = []
+    if project_data.get('location_lat') and project_data.get('location_lng'):
+        required.append({
+            'title': 'الموقع الاستراتيجي والإحداثيات',
+            'type': 'site_specs',
+            'design_style': 'table',
+            'requires_image': False,
+            'content_density': 'medium',
+            'bullets': [],
+            'content_source': 'location_detail',
+        })
+        for slide_type, title, source in (
+            ('map_overview', 'خريطة الأرض والموقع', 'location_polygon'),
+            ('map_access', 'خريطة الطرق الرئيسية', 'main_roads'),
+            ('map_catchment', 'خريطة المنطقة ونطاق التأثير', 'catchment_areas'),
+            ('map_landmarks', 'خريطة المعالم القريبة', 'nearby_landmarks'),
+        ):
+            if project_data.get(source) or slide_type == 'map_overview':
+                required.append({
+                    'title': title,
+                    'type': slide_type,
+                    'design_style': 'map',
+                    'requires_image': True,
+                    'content_density': 'medium',
+                    'bullets': [],
+                    'content_source': source,
+                })
+        required.append({
+            'title': 'تحليل AI للموقع',
+            'type': 'content',
+            'design_style': 'text',
+            'requires_image': False,
+            'content_density': 'medium',
+            'bullets': ['طبيعة الموقع وموقعه الاستراتيجي', 'الاتصال بالطرق والمعالم المحيطة', 'المزايا المستندة إلى بيانات الموقع'],
+            'content_source': 'site_analysis',
+        })
+    if not required:
+        return plan
+    insert_at = 2 if len(slides) >= 2 else len(slides)
+    for item in required:
+        if item['type'] in existing_types:
+            continue
+        slides.insert(insert_at, item)
+        insert_at += 1
+        existing_types.add(item['type'])
+    plan['slides'] = slides
+    plan['proposed_count'] = len(slides)
+    return plan
+
+
 @app.route('/api/slide-plan', methods=['POST'])
 @require_permission('create_presentation')
 def api_slide_plan():
@@ -2734,6 +2785,8 @@ def api_slide_plan():
         print(f"[SLIDE-PLAN FALLBACK] Using fallback plan after {max_attempts} attempts. Last error: {last_error}")
         plan = build_fallback_plan(effective_branding)
 
+    plan = _ensure_required_location_slides(plan, project_data)
+
     # Enforce min and max slide counts strictly on generated plan
     slides = plan.get('slides', [])
 
@@ -2798,9 +2851,11 @@ def api_geocode():
     maps_link = data.get('maps_link', '').strip()
 
     if not address and not maps_link:
-        return jsonify({'error': 'العنوان أو رابط قوقل ماب مطلوب لتحديد الإحداثيات'}), 400
+        return jsonify({'error': 'رابط Google Maps مطلوب لتحديد موقع المشروع'}), 400
 
     query = maps_link or address
+    if not query.startswith('http'):
+        return jsonify({'error': 'موقع المشروع يجب أن يكون رابط Google Maps'}), 400
 
     if query.startswith('http'):
         coords = maps_service.extract_coords_from_maps_link(query)
@@ -2814,18 +2869,7 @@ def api_geocode():
                 'source': 'maps_link'
             })
 
-    text_target = address if (address and not address.startswith('http')) else (maps_link if not maps_link.startswith('http') else '')
-    if not text_target and address:
-        text_target = address
-
-    if text_target:
-        result = maps_service.geocode_address(text_target)
-        if result.get('success'):
-            result['source'] = 'geocode_address'
-            return jsonify(result)
-        return jsonify({'success': False, 'error': result.get('error') or 'لم نتمكن من العثور على الإحداثيات لهذا العنوان'})
-
-    return jsonify({'success': False, 'error': 'ما قدرنا نحدد الموقع من هذا الرابط أو العنوان — جربي كتابة العنوان النصي أو استخدام رابط قوقل ماب مباشر'})
+    return jsonify({'success': False, 'error': 'رابط Google Maps غير صالح أو لا يحتوي على إحداثيات'})
 
 
 @app.route('/api/debug-osm-polygon', methods=['GET'])
@@ -2856,10 +2900,10 @@ def api_nearby_landmarks():
     data = request.json or {}
     lat = data.get('lat')
     lng = data.get('lng')
-    radius = data.get('radius', 1500)
+    radius = data.get('radius', 20000)
     if lat is None or lng is None:
         return jsonify({'error': 'lat and lng are required'}), 400
-    result = maps_service.get_nearby_landmarks(float(lat), float(lng), int(radius))
+    result = maps_service.get_nearby_landmarks(float(lat), float(lng), int(radius), max_results=int(data.get('maxResults', 20)), include_all=True)
     return jsonify(result)
 
 
@@ -2890,16 +2934,19 @@ def api_preview_map_data():
     if lat is None or lng is None:
         return jsonify({'success': False, 'error': 'لم يتم العثور على إحداثيات للموقع'}), 400
 
-    landmark_radius_m = 1000
+    landmark_radius_m = 20000
+    selected_landmarks = data.get('selectedLandmarks')
     custom_text = project_data.get('nearby_landmarks') or project_data.get('landmarks_text')
-    landmarks = maps_service._parse_landmarks_text(custom_text) if isinstance(custom_text, str) else (custom_text or [])
+    landmarks = selected_landmarks if isinstance(selected_landmarks, list) else (
+        maps_service._parse_landmarks_text(custom_text) if isinstance(custom_text, str) else (custom_text or [])
+    )
 
     if not landmarks:
-        places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=6)
+        places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True)
         if places.get('success'):
             landmarks = places['landmarks']
 
-    location_context = project_data.get('location_address') or project_data.get('location', '')
+    location_context = project_data.get('location_detail') or project_data.get('location_address') or project_data.get('location', '')
     for lm in landmarks:
         if lm.get('lat') is None or lm.get('lng') is None:
             query = f"{lm['name']}, {location_context}" if location_context else lm['name']
@@ -2918,11 +2965,11 @@ def api_preview_map_data():
         lm['distance_meters'] = round(dist_m)
         filtered_landmarks.append(lm)
 
-    landmarks = sorted(filtered_landmarks, key=lambda item: item.get('distance_meters', float('inf')))[:6]
+    landmarks = sorted(filtered_landmarks, key=lambda item: item.get('distance_meters', float('inf')))
 
     geocoded = [lm for lm in landmarks if lm.get('lat') is not None and lm.get('lng') is not None]
     matrix = []
-    if geocoded:
+    if data.get('calculateDriving') and geocoded:
         matrix = maps_service.get_drive_matrix((lat, lng), geocoded)
         for i, lm in enumerate(geocoded):
             if i < len(matrix) and matrix[i]:
@@ -3038,7 +3085,9 @@ def api_analyze_site():
     link = address if isinstance(address, str) and address.startswith('http') else (
         project_data.get('location_maps_link') or project_data.get('maps_link')
     )
-    coords = maps_service.extract_coords_from_maps_link(link) if link else None
+    if not isinstance(link, str) or not link.startswith('http'):
+        return jsonify({'success': False, 'error': 'موقع المشروع يجب أن يكون رابط Google Maps'}), 400
+    coords = maps_service.extract_coords_from_maps_link(link)
     if coords:
         lat, lng = coords['lat'], coords['lng']
         source = 'maps_link'
@@ -3073,7 +3122,10 @@ def api_analyze_site():
             drive = matrix[index] if index < len(matrix) and isinstance(matrix[index], dict) else {}
             distance = drive.get('distance_text') or item.get('distance_text')
             duration = drive.get('duration_min') or item.get('duration_minutes')
+            category = item.get('category')
             details = []
+            if category:
+                details.append(str(category))
             if distance:
                 details.append(str(distance))
             if duration:
@@ -3081,17 +3133,41 @@ def api_analyze_site():
             lines.append(f"{name} - {' - '.join(details)}" if details else name)
         return '\n'.join(lines)
 
-    nearby = maps_service.get_nearby_landmarks(lat, lng, radius=1000, max_results=6)
-    nearby_items = nearby.get('landmarks', []) if nearby.get('success') else []
-    nearby_matrix = maps_service.get_drive_matrix((lat, lng), nearby_items) if nearby_items else []
-    for index, item in enumerate(nearby_items):
-        if index < len(nearby_matrix) and nearby_matrix[index].get('duration_min') is not None:
-            item['duration_minutes'] = nearby_matrix[index].get('duration_min')
-            item['distance_text'] = nearby_matrix[index].get('distance_text')
+    def road_lines(items):
+        lines = []
+        for item in items or []:
+            name = item.get('name') or 'طريق وصول'
+            distance = item.get('distance_text')
+            duration = item.get('duration_minutes') or item.get('duration_min')
+            details = [value for value in (distance, f'{duration} دقيقة' if duration else None) if value]
+            lines.append(f"{name} - {' - '.join(details)}" if details else name)
+        return '\n'.join(lines)
 
-    city = maps_service.get_nearby_landmarks(lat, lng, radius=5000, max_results=6)
-    city_items = city.get('landmarks', []) if city.get('success') else []
+    def enrich_road_metrics(items):
+        if not items or all(item.get('distance_text') and item.get('duration_minutes') for item in items):
+            return
+        matrix = maps_service.get_drive_matrix((lat, lng), items)
+        for index, item in enumerate(items):
+            if index >= len(matrix) or not isinstance(matrix[index], dict):
+                continue
+            entry = matrix[index]
+            item['distance_text'] = entry.get('distance_text') or item.get('distance_text')
+            item['distance_km'] = entry.get('distance_km') or item.get('distance_km')
+            item['duration_min'] = entry.get('duration_min') or item.get('duration_min')
+            item['duration_minutes'] = entry.get('duration_min') or item.get('duration_minutes')
+
+    nearby = maps_service.get_nearby_landmarks(lat, lng, radius=20000, max_results=20, include_all=True)
+    nearby_items = nearby.get('landmarks', []) if nearby.get('success') else []
+    nearby_matrix = []
+
+    curated_city = maps_service.detect_curated_city(lat, lng, tenant_id=g.tenant_id)
+    if curated_city:
+        city_items = maps_service.get_curated_city_landmarks(lat=lat, lng=lng, city=curated_city, tenant_id=g.tenant_id)
+    else:
+        city = maps_service.get_nearby_landmarks(lat, lng, radius=5000, max_results=20, include_all=True)
+        city_items = city.get('landmarks', []) if city.get('success') else []
     roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=g.tenant_id, max_results=6)
+    enrich_road_metrics(roads)
 
     polygon = None
     raw_polygon = project_data.get('location_polygon')
@@ -3109,12 +3185,18 @@ def api_analyze_site():
     if not polygon:
         polygon = maps_service._fetch_osm_polygon(lat, lng, radius_m=180)
 
+    population = population_service.get_population_density(lat, lng)
+    location_details = maps_service.reverse_geocode_location(lat, lng, tenant_id=g.tenant_id, language='en')
     fields = {
         'location_lat': lat,
+        'location_detail': location_details.get('formatted_address', ''),
         'location_lng': lng,
         'nearby_landmarks': landmark_lines(nearby_items, nearby_matrix),
         'city_landmarks': landmark_lines(city_items),
     }
+    if population.get('available'):
+        fields['population_density'] = f"{population['value']} {population.get('unit', 'نسمة/كم²')}"
+        fields['population_density_source'] = population.get('source')
     road_names = []
     for road in roads:
         name = road.get('name')
@@ -3129,12 +3211,16 @@ def api_analyze_site():
         lat, lng, tenant_id=g.tenant_id, max_results=4, lat_step=0.0006, lng_step=0.0008
     )
     secondary_names = []
+    filtered_secondary_roads = []
     for road in secondary_roads:
         name = road.get('name')
         if name and name not in road_names and name not in secondary_names:
             secondary_names.append(name)
-    if secondary_names:
-        fields['secondary_roads'] = '\n'.join(secondary_names)
+            filtered_secondary_roads.append(road)
+    if filtered_secondary_roads:
+        enrich_road_metrics(filtered_secondary_roads)
+        fields['main_roads'] = '\n'.join(road_names)
+        fields['secondary_roads'] = road_lines(filtered_secondary_roads)
 
     # Catchment areas: city-scale landmarks with real drive times, serialized in
     # the structured table format the UI edits ("name — distance — duration").
@@ -3145,24 +3231,34 @@ def api_analyze_site():
                 item['duration_minutes'] = city_matrix[index].get('duration_min')
             if city_matrix[index].get('distance_text'):
                 item['distance_text'] = city_matrix[index].get('distance_text')
+    fields['city_landmarks'] = landmark_lines(city_items, city_matrix)
     catchment_lines = []
     for item in city_items:
         name = item.get('name')
         duration = item.get('duration_minutes')
-        if not name or duration is None:
+        if not name:
             continue
         parts = [name]
+        if item.get('category'):
+            parts.append(str(item['category']))
         if item.get('distance_text'):
             parts.append(str(item['distance_text']))
-        parts.append(f'{duration} دقائق')
+        if duration is not None:
+            parts.append(f'{duration} دقائق')
         catchment_lines.append(' — '.join(parts))
     if catchment_lines:
-        fields['catchment_areas'] = '\n'.join(catchment_lines[:6])
+        fields['catchment_areas'] = '\n'.join(catchment_lines)
 
     if polygon:
         fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
 
-    analyzed_project = {**project_data, **fields, 'location_lat': lat, 'location_lng': lng}
+    analyzed_project = {
+        **project_data,
+        **fields,
+        'location_lat': lat,
+        'location_lng': lng,
+        'calculate_landmark_driving': False,
+    }
     map_result = maps_service.generate_all_map_images(
         analyzed_project,
         g.tenant_id,
@@ -3219,6 +3315,73 @@ def api_analyze_site():
         },
         'warning': map_result.get('error'),
     })
+
+
+@app.route('/api/site-analysis', methods=['POST'])
+@require_permission('create_presentation')
+def api_site_analysis():
+    data = request.json or {}
+    project_data = clean_project_data(data.get('projectData', {}))
+    if not project_data.get('location_lat') or not project_data.get('location_lng'):
+        return jsonify({'success': False, 'error': 'بيانات الموقع والإحداثيات مطلوبة أولًا'}), 400
+    prompt = f"""اكتب تحليلًا عربيًا احترافيًا لموقع مشروع عقاري اعتمادًا على البيانات التالية فقط.
+
+المطلوب:
+- اكتب من 120 إلى 180 كلمة في فقرتين أو ثلاث.
+- اذكر طبيعة الموقع، الإحداثيات أو العنوان، طرق الوصول، المعالم القريبة وأنواعها، والمسافات/أوقات القيادة إن وجدت.
+- اذكر نطاق التأثير أو المناطق المهمة فقط إذا كانت موجودة في البيانات.
+- لا تخترع كثافة سكانية أو أرقامًا أو مزايا غير موجودة.
+- لا تستخدم عناوين أو نقاط تعداد؛ أعد نصًا عربيًا جاهزًا للعرض.
+
+بيانات المشروع والموقع:
+{json.dumps(project_data, ensure_ascii=False, indent=2)}"""
+    try:
+        response = call_zai_chat(
+            'أنت محلل مواقع عقارية دقيق. أخرج تحليلًا عربيًا متوسط الطول دون اختلاق معلومات.',
+            prompt,
+            max_tokens=1200,
+        )
+        analysis = extract_chat_content(response, 'SITE-ANALYSIS').strip()
+        return jsonify({'success': True, 'analysis': analysis})
+    except Exception as error:
+        print(f'[SITE ANALYSIS AI ERROR] {error}')
+        return jsonify({'success': False, 'error': str(error)}), 500
+
+
+@app.route('/api/generate-map-image', methods=['POST'])
+@require_auth
+def api_generate_single_map_image():
+    data = request.json or {}
+    map_type = str(data.get('mapType') or '').strip().lower()
+    if map_type not in {'overview', 'landmarks', 'access', 'catchment'}:
+        return jsonify({'success': False, 'error': 'نوع خريطة غير صالح'}), 400
+    project_data = clean_project_data(data.get('projectData', {}))
+    presentation_id = data.get('presentationId')
+    draft_id = project_data.get('draftId') or project_data.get('draft_id')
+    effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None)
+    if not effective_id:
+        return jsonify({'success': False, 'error': 'معرّف العرض أو المسودة مطلوب'}), 400
+    for image_type in (map_type, f'{map_type}_satellite', f'{map_type}_roadmap'):
+        db.delete_map_images(g.tenant_id, presentation_id=effective_id, image_type=image_type)
+    project_data['enabled_maps'] = [map_type]
+    branding = db.get_branding(g.tenant_id) or {}
+    result = maps_service.generate_all_map_images(
+        project_data,
+        g.tenant_id,
+        presentation_id=presentation_id,
+        draft_id=draft_id,
+        force=False,
+        branding=branding,
+        highlight_site=data.get('highlightSite', True) is not False,
+    )
+    if result.get('error'):
+        return jsonify({'success': False, 'error': result['error']}), 400
+    placeholders = {}
+    for placeholder, path in result.get('placeholders', {}).items():
+        if path and os.path.exists(path):
+            rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
+            placeholders[placeholder] = '/' + rel_path
+    return jsonify({'success': True, 'mapType': map_type, 'placeholders': placeholders, 'zooms': result.get('zooms', {})})
 
 
 @app.route('/api/generate-map-images', methods=['POST'])
@@ -3526,6 +3689,48 @@ def api_generate_slides():
         return jsonify({'error': str(e)}), 500
 
 
+def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, draft_id=None):
+    if not isinstance(project_data, dict):
+        return project_data or {}
+    records = db.get_map_images(tenant_id, presentation_id=presentation_id, draft_id=draft_id)
+    if not records:
+        return project_data
+    creative = project_data.get('tenantCreativeImages')
+    if not isinstance(creative, dict):
+        creative = {}
+    placeholders = {}
+    map_zooms = {}
+    for record in records:
+        path = record.get('file_path')
+        placeholder = record.get('placeholder')
+        if not path or not placeholder or not os.path.exists(path):
+            continue
+        try:
+            rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
+        except ValueError:
+            rel_path = 'uploads/maps/' + os.path.basename(path)
+        placeholders[placeholder] = '/' + rel_path
+        try:
+            metadata = json.loads(record.get('metadata_json') or '{}')
+        except (TypeError, ValueError):
+            metadata = {}
+        if creative.get('map_lat') is None and metadata.get('lat') is not None:
+            creative['map_lat'] = metadata['lat']
+        if creative.get('map_lng') is None and metadata.get('lng') is not None:
+            creative['map_lng'] = metadata['lng']
+        image_type = record.get('image_type') or ''
+        if metadata.get('zoom') is not None:
+            map_zooms[image_type] = metadata['zoom']
+        if metadata.get('landmarks_matrix') and not creative.get('map_landmarks'):
+            creative['map_landmarks'] = metadata['landmarks_matrix']
+    creative['map_placeholders'] = placeholders
+    creative['maps_persisted'] = bool(placeholders)
+    if map_zooms:
+        creative['map_zooms'] = map_zooms
+    project_data['tenantCreativeImages'] = creative
+    return project_data
+
+
 @app.route('/api/presentations', methods=['GET'])
 @require_permission('view_presentations')
 def api_get_presentations():
@@ -3582,6 +3787,7 @@ def api_get_presentation(pres_id):
         return jsonify({'error': 'Presentation not found'}), 404
 
     pres['projectData'] = json.loads(pres['project_data']) if pres.get('project_data') else {}
+    pres['projectData'] = _merge_persisted_map_assets(pres['projectData'], g.tenant_id, presentation_id=pres_id)
     slides = json.loads(pres['slides_data']) if pres.get('slides_data') else []
     branding = db.get_branding(g.tenant_id) or {}
     for s in slides:
@@ -3646,6 +3852,9 @@ def api_get_project_draft():
     draft = db.get_project_draft(g.tenant_id, _project_draft_actor_id())
     if not draft:
         return jsonify({'success': True, 'draft': None})
+    draft['draft_data'] = _merge_persisted_map_assets(
+        draft.get('draft_data') or {}, g.tenant_id, draft_id=draft.get('id')
+    )
     return jsonify({'success': True, 'draft': draft})
 
 
@@ -3686,6 +3895,9 @@ def api_get_project_draft_by_id(draft_id):
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
     if not draft:
         return jsonify({'error': 'Draft not found'}), 404
+    draft['draft_data'] = _merge_persisted_map_assets(
+        draft.get('draft_data') or {}, g.tenant_id, draft_id=draft_id
+    )
     return jsonify({'success': True, 'draft': draft})
 
 

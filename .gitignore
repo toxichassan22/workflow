@@ -35,3 +35,5 @@ examples/
 mirror/
 *.db
 how\ to\ push\ on\ server.md
+.temp.نقاش.md
+BigQuery API.json

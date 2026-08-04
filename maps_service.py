@@ -13,6 +13,7 @@ import requests
 import re
 import hashlib
 import shutil
+from urllib.parse import urlparse
 
 # Force UTF-8 stdout so Arabic/unicode OSM tag names don't crash on Windows cp1252
 try:
@@ -33,6 +34,20 @@ MAPS_DIR = os.path.join(os.path.dirname(__file__), 'uploads', 'maps')
 os.makedirs(MAPS_DIR, exist_ok=True)
 
 FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
+CITY_LANDMARKS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'city_landmarks.json')
+
+
+def _load_city_landmarks():
+    try:
+        with open(CITY_LANDMARKS_PATH, 'r', encoding='utf-8') as source:
+            data = json.load(source)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError) as error:
+        print(f'[CITY LANDMARKS] failed to load curated data: {error}')
+        return {}
+
+
+CURATED_CITY_LANDMARKS = _load_city_landmarks()
 
 
 def _get_arabic_font(size=14):
@@ -305,6 +320,101 @@ def geocode_address(address, tenant_id=None):
         return {'error': f"Geocoding request failed: {str(e)}"}
 
 
+CITY_ALIASES = {
+    'جدة': 'جدة', 'jeddah': 'جدة',
+    'مكة': 'مكة', 'مكة المكرمة': 'مكة', 'mecca': 'مكة', 'makkah': 'مكة',
+    'الرياض': 'الرياض', 'riyadh': 'الرياض',
+}
+
+
+def _normalize_city_name(value):
+    normalized = re.sub(r'\s+', ' ', str(value or '').strip().casefold())
+    return CITY_ALIASES.get(normalized)
+
+
+def reverse_geocode_location(lat, lng, tenant_id=None, language='en'):
+    if not _has_api_key():
+        return {}
+    try:
+        response = requests.get(
+            'https://maps.googleapis.com/maps/api/geocode/json',
+            params={'latlng': f'{lat},{lng}', 'key': _get_api_key(), 'language': language, 'region': 'SA'},
+            timeout=15,
+        )
+        payload = response.json()
+        if payload.get('status') != 'OK' or not payload.get('results'):
+            return {}
+        result = payload['results'][0]
+        if tenant_id:
+            _record_maps_call(tenant_id)
+        return {
+            'formatted_address': result.get('formatted_address', ''),
+            'place_id': result.get('place_id'),
+            'address_components': result.get('address_components', []),
+        }
+    except Exception as error:
+        print(f'[REVERSE GEOCODE] failed: {error}')
+        return {}
+
+
+def detect_curated_city(lat, lng, tenant_id=None):
+    location = reverse_geocode_location(lat, lng, tenant_id=tenant_id, language='en')
+    if not location:
+        return None
+    try:
+        candidates = []
+        for result in [location]:
+            candidates.append(result.get('formatted_address', ''))
+            for component in result.get('address_components', []):
+                if set(component.get('types', [])) & {'locality', 'postal_town', 'administrative_area_level_2'}:
+                    candidates.extend([component.get('long_name', ''), component.get('short_name', '')])
+        for candidate in candidates:
+            lowered = str(candidate).casefold()
+            for alias, canonical in CITY_ALIASES.items():
+                if alias in lowered:
+                    return canonical
+    except Exception as error:
+        print(f'[CITY DETECTION] failed: {error}')
+    return None
+
+
+def get_curated_city_landmarks(city, lat, lng, tenant_id=None):
+    entries = CURATED_CITY_LANDMARKS.get(city, [])
+    if not entries:
+        return []
+    landmarks = []
+    seen = set()
+    for entry in entries:
+        name = str(entry.get('name') or '').strip()
+        if not name or name.casefold() in seen:
+            continue
+        seen.add(name.casefold())
+        geo = geocode_address(f'{name}, {city}, Saudi Arabia', tenant_id=tenant_id)
+        if not geo.get('success'):
+            continue
+        item = {
+            'name': name,
+            'category': entry.get('category') or 'معلم رئيسي',
+            'lat': geo.get('lat'),
+            'lng': geo.get('lng'),
+            'types': [],
+            'source': 'curated',
+            'city': city,
+        }
+        item['distance_meters'] = round(_distance_meters(lat, lng, item['lat'], item['lng']))
+        landmarks.append(item)
+    destinations = [item for item in landmarks if item.get('lat') is not None and item.get('lng') is not None]
+    matrix = get_drive_matrix((lat, lng), destinations) if destinations else []
+    for index, item in enumerate(destinations):
+        if index >= len(matrix):
+            break
+        entry = matrix[index]
+        item['distance_km'] = entry.get('distance_km')
+        item['distance_text'] = entry.get('distance_text')
+        item['duration_minutes'] = entry.get('duration_min')
+    return landmarks
+
+
 def _download_image(url, params, output_path):
     """Download image from Google Maps Static API and save to disk."""
     try:
@@ -547,7 +657,24 @@ def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, siz
         return False
 
 
-def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
+def classify_landmark_category(types):
+    types = set(types or [])
+    categories = (
+        ('ترفيهي', {'amusement_park', 'aquarium', 'zoo', 'park', 'garden', 'sports_complex', 'golf_course', 'swimming_pool', 'movie_theater', 'performing_arts_theater', 'concert_hall', 'event_venue'}),
+        ('تعليمي', {'school', 'university', 'library', 'preschool', 'primary_school', 'secondary_school'}),
+        ('صحي', {'hospital', 'doctor', 'dentist', 'pharmacy', 'veterinary_care'}),
+        ('تجاري', {'shopping_mall', 'department_store', 'supermarket', 'market', 'store'}),
+        ('ديني', {'mosque', 'church', 'hindu_temple', 'synagogue', 'place_of_worship'}),
+        ('ثقافي/سياحي', {'tourist_attraction', 'landmark', 'historical_landmark', 'museum', 'art_gallery'}),
+        ('حكومي/خدمي', {'city_hall', 'government_office', 'embassy', 'police', 'fire_station'}),
+    )
+    for label, matched_types in categories:
+        if types & matched_types:
+            return label
+    return 'اجتماعي/خدمي'
+
+
+def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, include_all=False):
     """Find nearby landmarks using Places API (New).
     Filters out irrelevant place types like gas stations, parking, ATMs, etc."""
     if not _has_api_key():
@@ -614,9 +741,9 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
             loc = p.get('location', {})
             p_types = set(p.get('types', []))
             
-            if p_types & IRRELEVANT_TYPES:
+            if not include_all and p_types & IRRELEVANT_TYPES:
                 continue
-            
+
             is_preferred = bool(p_types & PREFERRED_TYPES)
             place_lat = loc.get('latitude')
             place_lng = loc.get('longitude')
@@ -634,6 +761,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8):
                 'lng': place_lng,
                 'place_id': p.get('id'),
                 'types': p.get('types', []),
+                'category': classify_landmark_category(p.get('types', [])),
                 'rating': p.get('rating', 0),
                 'preferred': is_preferred,
                 'distance_meters': round(distance_meters),
@@ -673,7 +801,18 @@ def get_driving_times(origin_lat, origin_lng, destinations):
 
 
 def get_drive_matrix(origin, destinations):
-    """Return [{name, distance_km, duration_min}] for driving from origin to each destination.
+    """Return driving metrics in chunks so large curated landmark lists remain supported."""
+    if not destinations:
+        return []
+    chunk_size = 25
+    combined = []
+    for start in range(0, len(destinations), chunk_size):
+        combined.extend(_get_drive_matrix_chunk(origin, destinations[start:start + chunk_size]))
+    return combined
+
+
+def _get_drive_matrix_chunk(origin, destinations):
+    """Return [{name, distance_km, duration_min}] for one driving matrix request.
 
     origin may be (lat, lng) or a dict with lat/lng keys.
     """
@@ -1537,7 +1676,18 @@ def _google_directions_route(origin_lat, origin_lng, destination_lat, destinatio
             return None
         if tenant_id:
             _record_maps_call(tenant_id)
-        return {'coords': coordinates, 'summary': route.get('summary', '')}
+        leg = (route.get('legs') or [{}])[0]
+        distance = leg.get('distance') or {}
+        duration = leg.get('duration_in_traffic') or leg.get('duration') or {}
+        distance_meters = distance.get('value')
+        duration_seconds = duration.get('value')
+        return {
+            'coords': coordinates,
+            'summary': route.get('summary', ''),
+            'distance_meters': distance_meters,
+            'distance_km': round(distance_meters / 1000.0, 1) if distance_meters is not None else None,
+            'duration_min': math.ceil(duration_seconds / 60) if duration_seconds is not None else None,
+        }
     except Exception as error:
         print(f"[GOOGLE DIRECTIONS ERROR] {error}")
         return None
@@ -1593,11 +1743,22 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
             name = _google_reverse_geocode_road(dest_lat, dest_lng, tenant_id=tenant_id) or name
         name = name or 'طريق قريب'
         key = (snapped or {}).get('place_id') or name.casefold()
+        distance_meters = route.get('distance_meters')
+        if distance_meters is None:
+            distance_meters = round(_distance_meters(route_origin_lat, route_origin_lng, dest_lat, dest_lng))
+        distance_km = route.get('distance_km')
+        if distance_km is None:
+            distance_km = round(distance_meters / 1000.0, 1)
+        duration_min = route.get('duration_min')
         return {
             'name': name,
             'lat': dest_lat,
             'lng': dest_lng,
-            'distance_meters': round(_distance_meters(route_origin_lat, route_origin_lng, dest_lat, dest_lng)),
+            'distance_meters': distance_meters,
+            'distance_km': distance_km,
+            'distance_text': f'{distance_km} كم',
+            'duration_min': duration_min,
+            'duration_minutes': duration_min,
             'place_id': key,
         }
 
@@ -1885,7 +2046,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
         except Exception:
             enabled_maps = None
     if not isinstance(enabled_maps, list):
-        enabled_maps = ['overview', 'landmarks', 'access', 'catchment', 'streetview']
+        enabled_maps = ['overview', 'landmarks', 'access', 'catchment']
 
     # Pre-parse landmark/catchment data so the cache check only requires what will actually be generated
     landmarks = _parse_landmarks_text(project_data.get('nearby_landmarks', ''))
@@ -2045,24 +2206,29 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
         for key in ('overview', 'landmarks', 'access', 'catchment'):
             if not map_styles_raw.get(key):
                 map_styles_raw[key] = branding.get(f'map_style_{key}') or default_map_type
-    VALID_MAPTYPES = {'satellite', 'roadmap', 'terrain', 'hybrid', 'both'}
+    VALID_MAPTYPES = {'auto', 'satellite', 'roadmap', 'terrain', 'hybrid', 'both'}
     map_styles = {}
     for key in ('overview', 'landmarks', 'access', 'catchment'):
         val = map_styles_raw.get(key) or default_map_type
-        map_styles[key] = val if val in VALID_MAPTYPES else default_map_type
+        if val not in VALID_MAPTYPES:
+            val = 'auto'
+        map_styles[key] = 'roadmap' if val == 'auto' and key == 'access' else 'satellite' if val == 'auto' else val
 
     # Landmarks were pre-parsed before the cache check.
-    landmark_radius_m = 1000
-    # If no structured landmarks, fetch verified nearby places from Google only.
+    city_landmarks = _parse_landmarks_text(project_data.get('city_landmarks', ''))
+    if city_landmarks:
+        existing_names = {item.get('name', '').casefold() for item in landmarks}
+        landmarks.extend(item for item in city_landmarks if item.get('name', '').casefold() not in existing_names)
+    landmark_radius_m = 20000
     if not landmarks:
-        places = get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=6)
+        places = get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True)
         if places.get('success'):
             landmarks = places['landmarks']
             _record_maps_call(tenant_id)
 
     # Geocode text-entered landmarks against the actual project location first,
     # rather than accepting a same-named landmark in another city.
-    location_context = project_data.get('location_address') or project_data.get('location', '')
+    location_context = project_data.get('location_detail') or project_data.get('location_address') or project_data.get('location', '')
     for lm in landmarks:
         if lm.get('lat') is None or lm.get('lng') is None:
             query = f"{lm['name']}, {location_context}" if location_context else lm['name']
@@ -2081,11 +2247,11 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             continue
         lm['distance_meters'] = round(distance_meters)
         filtered_landmarks.append(lm)
-    landmarks = sorted(filtered_landmarks, key=lambda item: item.get('distance_meters', float('inf')))[:6]
+    landmarks = sorted(filtered_landmarks, key=lambda item: item.get('distance_meters', float('inf')))
 
-    # Get driving times and distances for landmarks with coordinates
+    # Get driving times and distances only when the project explicitly requests them.
     geocoded_landmarks = [lm for lm in landmarks if lm.get('lat') is not None and lm.get('lng') is not None]
-    if geocoded_landmarks:
+    if geocoded_landmarks and project_data.get('calculate_landmark_driving', True) is not False:
         matrix = get_drive_matrix((lat, lng), geocoded_landmarks)
         if matrix:
             for i, lm in enumerate(geocoded_landmarks):
@@ -2143,7 +2309,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_landmarks (closer zoom)
-    if 'landmarks' in enabled_maps and landmarks:
+    if 'landmarks' in enabled_maps:
         landmarks_markers = _build_markers(marker_lat, marker_lng, landmarks)
         landmarks_mt = map_styles['landmarks']
         if landmarks_mt == 'both':
@@ -2313,12 +2479,18 @@ def _parse_landmarks_text(text):
         if dist_match:
             clean_name = clean_name.replace(dist_match.group(0), '')
 
+        category = ''
+        category_match = re.search(r'(?:^|\s)[—\-]\s*(ترفيهي|تعليمي|صحي|تجاري|ديني(?: ومركزي)?|ثقافي/سياحي|حكومي/خدمي|اجتماعي/خدمي)\s*(?:[—\-]|$)', clean_name)
+        if category_match:
+            category = category_match.group(1)
+            clean_name = clean_name.replace(category_match.group(0), ' ')
         clean_name = re.sub(r'[\-\(\)\,\،\s—–]+', ' ', clean_name).strip()
         if not clean_name:
             clean_name = line
 
         landmarks.append({
             'name': clean_name,
+            'category': category,
             'duration_minutes': duration,
             'distance_km': distance,
             'distance_text': f"{distance} كم" if distance is not None else None,
