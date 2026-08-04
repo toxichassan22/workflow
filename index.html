@@ -6266,7 +6266,7 @@
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
             <button type="button" class="btn ghost" id="toggleTenantPolygonButton" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>
             <button type="button" class="btn ghost" id="removeLastTenantPolygonPointButton" onclick="removeLastTenantPolygonPoint()" disabled>تراجع عن آخر نقطة</button>
-            <button type="button" class="btn primary" id="confirmTenantPolygonButton" onclick="confirmTenantPolygon()" disabled>اعتماد الحدود وتحليل الموقع</button>
+            <button type="button" class="btn primary" id="confirmTenantPolygonButton" onclick="confirmTenantPolygon()" disabled>اعتماد حدود الأرض</button>
             <button type="button" class="btn ghost danger" onclick="clearTenantPolygon(true)">مسح الكل</button>
           </div>
           <div id="mapPreviewImage" style="display:none;max-width:100%;border-radius:8px;overflow:hidden;border:1px solid #ddd;position:relative;">
@@ -6274,7 +6274,7 @@
             <svg id="mapPolygonOverlay" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>
           </div>
           <div id="mapPreviewGallery" class="tenant-map-preview-gallery" style="display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;"></div>
-          <p id="mapPreviewHint" class="tenant-hint" style="margin:8px 0 0;display:none">فعّل رسم حدود الموقع ثم أضف النقاط. لن يبدأ تحليل المبنى حتى تضغط «اعتماد الحدود وتحليل الموقع».</p>
+          <p id="mapPreviewHint" class="tenant-hint" style="margin:8px 0 0;display:none">فعّل رسم حدود الموقع ثم أضف النقاط. اعتماد الحدود يثبت الـ highlight والـ zoom محليًا فقط؛ استخدم «تحليل رابط الموقع» لجلب بيانات الموقع.</p>
           <input id="tenantLocationPolygon" type="hidden" data-key="location_polygon" data-type="text" value="">
           <div id="landmarksPreview" style="margin-top:10px;display:none;"></div>
         `;
@@ -7119,7 +7119,7 @@
       renderTenantMapPolygonOverlay();
       updateTenantPolygonControls();
       const hint = document.getElementById('mapPreviewHint');
-      if (hint) hint.textContent = 'أضف 3 نقاط أو أكثر. لن يبدأ تحليل المبنى حتى تضغط «اعتماد الحدود وتحليل الموقع».';
+      if (hint) hint.textContent = 'أضف 3 نقاط أو أكثر. سيتم اعتماد الحدود وتكبير الخريطة محليًا دون إعادة جلب بيانات الموقع.';
       toast('ابدأ رسم الحدود الجديدة.');
     }
 
@@ -7139,7 +7139,10 @@
       renderTenantMapPolygonOverlay();
       updateTenantPolygonControls();
       applyTenantPolygonZoom();
-      await analyzeTenantSite();
+      triggerAutoSaveDraft();
+      const hint = document.getElementById('mapPreviewHint');
+      if (hint) hint.textContent = 'تم اعتماد حدود الأرض وتكبير الخريطة محليًا. لم يتم إعادة جلب بيانات الموقع.';
+      toast('تم اعتماد حدود الأرض وتثبيت الـ highlight والـ zoom دون طلب بيانات جديدة.');
     }
 
     async function clearTenantPolygon(confirmAll = false) {
@@ -7155,15 +7158,16 @@
       updateTenantPolygonControls();
       triggerAutoSaveDraft();
       const hint = document.getElementById('mapPreviewHint');
-      if (hint) hint.textContent = 'فعّل رسم حدود الموقع ثم أضف النقاط. لن يبدأ تحليل المبنى حتى تضغط «اعتماد الحدود وتحليل الموقع».';
+      if (hint) hint.textContent = 'فعّل رسم حدود الموقع ثم أضف النقاط. اعتماد الحدود يثبت الـ highlight والـ zoom محليًا فقط؛ استخدم «تحليل رابط الموقع» لجلب بيانات الموقع.';
       if (tenantMapPreviewState) await previewProjectMap({ force: true, highlightSite: false });
       toast('تم مسح الحدود المرسومة وإزالة التمييز من الخريطة.');
     }
 
     function syncTenantLocationPolygon() {
       const input = document.getElementById('tenantLocationPolygon');
-      if (!input) return;
-      input.value = tenantMapPolygonPoints.map(point => point[0].toFixed(6) + ',' + point[1].toFixed(6)).join(';');
+      const value = tenantMapPolygonPoints.map(point => point[0].toFixed(6) + ',' + point[1].toFixed(6)).join(';');
+      tenantProjectData.location_polygon = value;
+      if (input) input.value = value;
     }
 
     function renderTenantMapPolygonOverlay() {
