@@ -336,6 +336,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('معلم قريب', prompt)
         self.assertIn('فندق بوتيك', prompt)
         self.assertIn('5000 نسمة/كم²', prompt)
+        self.assertIn('الكثافة السكانية', prompt)
+        self.assertIn('البنية التحتية', prompt)
+        self.assertIn('فرص الاستثمار', prompt)
+        self.assertIn('المعالم القريبة ومعالم المدينة', prompt)
 
     def test_site_analysis_falls_back_to_openrouter_when_primary_ai_response_fails(self):
         client = self.app.test_client()
