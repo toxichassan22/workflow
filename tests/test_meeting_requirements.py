@@ -6,6 +6,7 @@ The suite uses a temporary SQLite database and never calls Google or an AI API.
 import os
 import sys
 import tempfile
+import json
 import unittest
 import io
 from pathlib import Path
@@ -218,6 +219,42 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         generated_project = generate_maps.call_args.args[0]
         self.assertEqual(generated_project['enabled_maps'], ['overview', 'landmarks', 'access', 'catchment'])
+
+    def test_presentation_map_regeneration_uses_current_project_data(self):
+        with self.app.app_context():
+            pres_id = db.create_presentation(
+                self.tenant_a,
+                'Old location',
+                project_data={
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'tenantCreativeImages': {
+                        'map_placeholders': {'##MAP_OVERVIEW##': '/old-map.png'},
+                        'map_zooms': {'overview': 17},
+                        'maps_persisted': True,
+                    },
+                },
+                slides_data=[],
+            )
+        client = self.app.test_client()
+        with patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={
+            'placeholders': {}, 'landmarks': [], 'landmarks_matrix': [], 'zooms': {}, 'lat': 25.0, 'lng': 47.0
+        }) as generate_maps:
+            response = client.post(
+                f'/api/presentations/{pres_id}/regenerate-maps',
+                headers=self._headers(self.token_a),
+                json={'projectData': {'location_lat': 25.0, 'location_lng': 47.0}}
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        generated_project = generate_maps.call_args.args[0]
+        self.assertEqual(generated_project['location_lat'], 25.0)
+        self.assertEqual(generated_project['location_lng'], 47.0)
+        with self.app.app_context():
+            stored = db.get_presentation(pres_id, tenant_id=self.tenant_a)
+        stored_data = json.loads(stored['project_data'])
+        self.assertEqual(stored_data['location_lat'], 25.0)
+        self.assertEqual(stored_data['tenantCreativeImages']['map_placeholders'], {})
 
     def test_site_analysis_fills_google_site_fields_without_touching_unknown_fields(self):
         client = self.app.test_client()

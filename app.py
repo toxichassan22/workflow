@@ -3449,11 +3449,28 @@ def api_regenerate_presentation_maps(pres_id):
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404
 
-    project_data = json.loads(pres['project_data']) if pres.get('project_data') else {}
+    req_data = request.json or {}
+    stored_project_data = json.loads(pres['project_data']) if pres.get('project_data') else {}
+    submitted_project_data = req_data.get('projectData')
+    if isinstance(submitted_project_data, dict):
+        project_data = {**stored_project_data, **clean_project_data(submitted_project_data)}
+        existing_creative = project_data.get('tenantCreativeImages')
+        if isinstance(existing_creative, dict):
+            project_data['tenantCreativeImages'] = {
+                **existing_creative,
+                'map_placeholders': {},
+                'map_zooms': {},
+                'map_landmarks': [],
+                'map_lat': None,
+                'map_lng': None,
+                'map_approvals': {},
+                'maps_persisted': False,
+                'maps_signature': None,
+            }
+    else:
+        project_data = stored_project_data
     project_data['enabled_maps'] = ['overview', 'landmarks', 'access', 'catchment']
     branding = db.get_branding(g.tenant_id) or {}
-    # Accept per-map style overrides from request body
-    req_data = request.json or {}
     if req_data.get('map_styles'):
         project_data['map_styles'] = req_data['map_styles']
     result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=pres_id, force=True, branding=branding)
@@ -3488,6 +3505,8 @@ def api_regenerate_presentation_maps(pres_id):
             db.update_presentation(pres_id, project_data=project_data, slides_data=slides_data)
         else:
             db.update_presentation(pres_id, project_data=project_data)
+    else:
+        db.update_presentation(pres_id, project_data=project_data)
 
     return jsonify({
         'success': True,
