@@ -2794,8 +2794,8 @@ def api_slide_plan():
                 "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية.",
                 prompt,
                 max_tokens=4000,
-                attempts=2,
-                timeout=60
+                attempts=1,
+                timeout=20
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
             plan = parse_slide_plan(content, effective_branding, project_data)

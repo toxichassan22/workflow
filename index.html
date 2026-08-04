@@ -4126,6 +4126,14 @@
       }
     }
 
+    let tenantSlidePlanRequest = null;
+    function requestTenantSlidePlan(projectData) {
+      if (tenantSlidePlanRequest) return tenantSlidePlanRequest;
+      tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', { projectData })
+        .finally(() => { tenantSlidePlanRequest = null; });
+      return tenantSlidePlanRequest;
+    }
+
     const TENANT_NAVIGATION_CONTEXT_PAGES = new Set([
       'tenantProjectPage',
       'tenantMainImagePage',
@@ -7541,15 +7549,18 @@
       if (!tenantSlidePlan) {
         setGenStep('plan', 'active');
         setGenPct(5, 'تحليل بيانات المشروع...');
-        const data = await apiWithTimeout('POST', '/api/slide-plan', { projectData: tenantProjectData });
+        const data = await requestTenantSlidePlan(tenantProjectData);
         if (data.success && data.plan) {
           tenantSlidePlan = data.plan;
           setGenStep('plan', 'done');
           setGenPct(20, 'تم إعداد خطة الشرائح');
           triggerAutoSaveDraft();
         } else {
+          const errorMessage = data.error || 'تعذر إعداد خطة الشرائح';
           setGenStep('plan', 'error');
-          toast(data.error || 'تعذر إعداد خطة الشرائح');
+          setGenPct(5, errorMessage);
+          console.error('[SLIDE PLAN]', data);
+          toast(errorMessage);
           return;
         }
       }
@@ -7569,7 +7580,7 @@
       setGenPct(3, 'حفظ البيانات...');
       await saveProjectAsDraft(true);
       setGenPct(8, 'تحليل بيانات المشروع...');
-      const data = await apiWithTimeout('POST', '/api/slide-plan', { projectData: tenantProjectData });
+      const data = await requestTenantSlidePlan(tenantProjectData);
       if (data.success && data.plan) {
         tenantSlidePlan = data.plan;
         tenantProjectData.tenantSlidePlan = tenantSlidePlan;
@@ -7578,8 +7589,11 @@
         triggerAutoSaveDraft();
         await goToTenantMainImage();
       } else {
+        const errorMessage = data.error || 'فشل إعداد خطة العرض';
         setGenStep('plan', 'error');
-        toast(data.error || 'فشل إعداد خطة العرض');
+        setGenPct(8, errorMessage);
+        console.error('[SLIDE PLAN]', data);
+        toast(errorMessage);
       }
     }
 
@@ -7621,9 +7635,11 @@
       setGenStep('plan', 'active');
       setGenPct(5, 'تحليل بيانات المشروع...');
       try {
-        const result = await apiWithTimeout('POST', '/api/slide-plan', { projectData: tenantProjectData });
+        const result = await requestTenantSlidePlan(tenantProjectData);
         if (result.error) {
           setGenStep('plan', 'error');
+          setGenPct(5, result.error);
+          console.error('[SLIDE PLAN]', result);
           toast(result.error);
           return;
         }
@@ -7690,7 +7706,7 @@
     async function regenerateTenantSlidePlan() {
       if (!tenantProjectData) return;
       showLoader('جاري إعادة الاقتراح', 'AI يعيد تحليل بيانات المشروع');
-      const data = await apiWithTimeout('POST', '/api/slide-plan', { projectData: tenantProjectData });
+      const data = await requestTenantSlidePlan(tenantProjectData);
       hideLoader();
       if (data.success && data.plan) {
         tenantSlidePlan = data.plan;
