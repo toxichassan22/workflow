@@ -3392,12 +3392,17 @@ def api_site_analysis():
         project_data.get(key) in (None, '', [], {})
         for key in (
             'location_detail', 'main_roads', 'secondary_roads', 'nearby_landmarks',
-            'city_landmarks', 'catchment_areas', 'population_density', 'location_polygon',
+            'nearby_landmarks_data', 'city_landmarks', 'catchment_areas', 'population_density',
+            'location_polygon',
         )
     )
+    filled_fields = {}
     if needs_enrichment:
         try:
-            enriched_fields, *_ = _collect_site_fields(raw_project_data, g.tenant_id, lat, lng)
+            enrichment_result = _collect_site_fields(raw_project_data, g.tenant_id, lat, lng)
+            enriched_fields, nearby_items, *_ = enrichment_result
+            if not project_data.get('nearby_landmarks_data') and nearby_items:
+                enriched_fields['nearby_landmarks_data'] = nearby_items
         except Exception as error:
             print(f'[SITE DATA ENRICHMENT ERROR] {error}')
             enriched_fields = {}
@@ -3405,6 +3410,7 @@ def api_site_analysis():
     for key in analysis_keys:
         if enriched_fields.get(key) not in (None, '', [], {}) and project_data.get(key) in (None, '', [], {}):
             project_data[key] = enriched_fields[key]
+            filled_fields[key] = enriched_fields[key]
 
     prompt = f"""اكتب تحليلًا عربيًا احترافيًا لموقع مشروع عقاري اعتمادًا على البيانات التالية فقط.
 
@@ -3443,7 +3449,7 @@ def api_site_analysis():
                 model='google/gemini-2.5-flash'
             )
             analysis = extract_chat_content(fallback, 'SITE-ANALYSIS-FALLBACK').strip()
-        return jsonify({'success': True, 'analysis': analysis})
+        return jsonify({'success': True, 'analysis': analysis, 'fields': filled_fields})
     except Exception as error:
         print(f'[SITE ANALYSIS AI ERROR] {error}')
         return jsonify({

@@ -343,6 +343,8 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()['analysis'], 'تحليل عربي مختصر للموقع')
+        self.assertEqual(response.get_json()['fields']['population_density'], '4500 نسمة/كم²')
+        self.assertEqual(response.get_json()['fields']['main_roads'], 'شارع تجريبي رئيسي')
         prompt = call_ai.call_args.args[1]
         self.assertNotIn('tenantCreativeImages', prompt)
         self.assertIn('معلم قريب', prompt)

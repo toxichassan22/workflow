@@ -6795,7 +6795,14 @@
         updateLoaderProgress(35, 'جاري إرسال بيانات الموقع إلى GLM...');
         const data = await api('POST', '/api/site-analysis', { projectData: analysisProjectData });
         if (data.success && data.analysis) {
-          updateLoaderProgress(90, 'تم استلام تحليل الموقع...');
+          const filledFields = data.fields && typeof data.fields === 'object' ? data.fields : {};
+          tenantProjectData = { ...tenantProjectData, ...filledFields };
+          Object.entries(filledFields).forEach(([key, value]) => {
+            const fieldInput = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+            if (fieldInput && value !== null && value !== undefined) fieldInput.value = value;
+          });
+          refreshLocationTables();
+          updateLoaderProgress(90, 'تم استلام التحليل والبيانات المكملة...');
           tenantProjectData.site_analysis = data.analysis;
           tenantProjectData.site_analysis_approved = false;
           input.value = data.analysis;
