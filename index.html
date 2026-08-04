@@ -7350,7 +7350,7 @@
 
       const box = document.getElementById('landmarksPreview');
       if (!box) return;
-      const list = data.landmarks_matrix || data.landmarks || [];
+      const list = data.landmarks || data.landmarks_matrix || [];
       if (data.success && list && list.length) {
         const itemsHtml = list.map((l, i) => {
           const dist = l.distance_km ? `${l.distance_km} كم` : (l.distance_text || '');
@@ -7369,12 +7369,13 @@
         `;
         box.style.display = 'block';
         window._lastPreviewedLandmarks = list;
+        applyPreviewedLandmarksToForm(false);
       } else {
         toast(data.error || 'لم يُعثر على معالم قريبة');
       }
     }
 
-    function applyPreviewedLandmarksToForm() {
+    function applyPreviewedLandmarksToForm(showToast = true) {
       const list = window._lastPreviewedLandmarks || [];
       if (!list.length) return;
       const text = list.map(l => {
@@ -7394,7 +7395,7 @@
         input.value = text;
         setLocationTableValue('nearby_landmarks', text);
         triggerAutoSaveDraft();
-        toast('تم اعتماد وتحديث قائمة المعالم والقيادة في الفورم وحفظها للمسودة');
+        if (showToast) toast('تم اعتماد وتحديث قائمة المعالم والقيادة في الفورم وحفظها للمسودة');
       }
     }
 
