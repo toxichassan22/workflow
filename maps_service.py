@@ -141,11 +141,11 @@ SATELLITE_WIDE_STYLES = [
 # Professional maroon color palette matching reference examples
 MARKER_COLOR_SITE = '#6B1C23'      # Dark maroon for site pin
 MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
-SITE_FILL_COLOR = (160, 50, 50, 130)    # More visible semi-transparent red fill
+SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
 ACCESS_ROADS_RENDER_VERSION = 'v2'
-MAP_HIGHLIGHT_RENDER_VERSION = 'overview-only-v1'
+MAP_HIGHLIGHT_RENDER_VERSION = 'overview-context-v2'
 _MAP_GENERATION_LOCKS = {}
 _MAP_GENERATION_LOCKS_GUARD = threading.Lock()
 
@@ -2138,6 +2138,31 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
     }
 
 
+def _calculate_map_zooms(polygon_coords):
+    """Choose presentation-friendly zoom levels for a polygon and its context."""
+    zooms = {'overview': 17, 'landmarks': 16, 'access': 18, 'catchment': 12}
+    if not polygon_coords or len(polygon_coords) < 3:
+        return zooms
+    try:
+        lats = [point[0] for point in polygon_coords]
+        lngs = [point[1] for point in polygon_coords]
+        max_dim = max(max(lats) - min(lats), max(lngs) - min(lngs))
+        if max_dim <= 0:
+            return zooms
+        target_pixels = 1280 * 2 * 0.45
+        suggested_zoom = math.floor(math.log2((target_pixels * 360) / (max_dim * 256 * 2))) - 1
+        overview_zoom = max(13, min(17, suggested_zoom))
+        zooms.update({
+            'overview': overview_zoom,
+            'landmarks': max(14, overview_zoom - 1),
+            'access': max(15, overview_zoom + 1),
+            'catchment': max(12, overview_zoom - 2),
+        })
+    except (TypeError, ValueError, OverflowError) as error:
+        print(f'[DYNAMIC ZOOM ERROR] {error}')
+    return zooms
+
+
 def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None) or (project_data or {}).get('draft_id') or (project_data or {}).get('draftId') or 'unscoped'
     lock_key = (str(tenant_id), str(effective_id))
@@ -2266,35 +2291,18 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
     auto_detected = not user_polygon_used
 
-    # Compute dynamic zoom levels based on polygon size (if present)
-    # Use a plot-level fallback when no boundary is found so the marker is not lost in a city-wide view
-    overview_zoom = 17
-    landmarks_zoom = 16
-    access_zoom = 18
-    catchment_zoom = 12
+    # Compute presentation-friendly zoom levels from the selected boundary.
+    zooms = _calculate_map_zooms(polygon_coords)
+    overview_zoom = zooms['overview']
+    landmarks_zoom = zooms['landmarks']
+    access_zoom = zooms['access']
+    catchment_zoom = zooms['catchment']
 
     if polygon_coords and len(polygon_coords) >= 3:
-        try:
-            lats = [pt[0] for pt in polygon_coords]
-            lngs = [pt[1] for pt in polygon_coords]
-            min_lat, max_lat = min(lats), max(lats)
-            min_lng, max_lng = min(lngs), max(lngs)
-            d_lat = max_lat - min_lat
-            d_lng = max_lng - min_lng
-            max_dim = max(d_lat, d_lng)
-            if max_dim > 0:
-                # Fit the selected boundary to roughly 60% of the map width with padding.
-                target_pixels = 1280 * 2 * 0.60
-                suggested_zoom = math.ceil(math.log2((target_pixels * 360) / (max_dim * 256 * 2)))
-                overview_zoom = max(13, min(19, suggested_zoom))
-                
-                # Make other zoom levels relative to overview_zoom
-                landmarks_zoom = max(14, overview_zoom - 1)
-                access_zoom = max(15, overview_zoom + 1)
-                catchment_zoom = max(12, overview_zoom - 2)
-                print(f"[DYNAMIC ZOOM] Adjusted zoom levels based on polygon: overview={overview_zoom}, landmarks={landmarks_zoom}, access={access_zoom}, catchment={catchment_zoom}")
-        except Exception as ez:
-            print(f"[DYNAMIC ZOOM ERROR] {ez}")
+        print(
+            f"[DYNAMIC ZOOM] overview={overview_zoom}, landmarks={landmarks_zoom}, "
+            f"access={access_zoom}, catchment={catchment_zoom}"
+        )
 
     map_center_lat, map_center_lng = lat, lng
     if polygon_coords and len(polygon_coords) >= 3:

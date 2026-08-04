@@ -56,6 +56,17 @@ class MeetingRequirementsTests(unittest.TestCase):
     def _headers(token):
         return {'Authorization': f'Bearer {token}'}
 
+    def test_map_zoom_caps_overview_and_preserves_context(self):
+        zooms = self.application_module.maps_service._calculate_map_zooms([
+            (21.63200, 39.10500),
+            (21.63201, 39.10501),
+            (21.63200, 39.10501),
+        ])
+
+        self.assertLessEqual(zooms['overview'], 17)
+        self.assertEqual(zooms['landmarks'], max(14, zooms['overview'] - 1))
+        self.assertEqual(zooms['access'], max(15, zooms['overview'] + 1))
+
     def test_google_places_errors_are_explicit_instead_of_empty_success(self):
         response = Mock(status_code=403)
         response.json.return_value = {
