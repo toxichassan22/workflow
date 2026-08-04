@@ -6796,6 +6796,9 @@
         const data = await api('POST', '/api/site-analysis', { projectData: analysisProjectData });
         if (data.success && data.analysis) {
           const filledFields = data.fields && typeof data.fields === 'object' ? data.fields : {};
+          if (Array.isArray(data.warnings) && data.warnings.length) {
+            toast('اكتمل التحليل، لكن تعذر جلب بعض المعالم: ' + data.warnings.join(' | '));
+          }
           tenantProjectData = { ...tenantProjectData, ...filledFields };
           Object.entries(filledFields).forEach(([key, value]) => {
             const fieldInput = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
@@ -6899,9 +6902,12 @@
         await previewProjectMap();
         renderTenantMapPolygonOverlay();
         applyTenantPolygonZoom();
-        toast(data.boundary && data.boundary.status === 'verified_building'
-          ? 'تم تحليل الموقع وتعبئة البيانات والخرائط بنجاح'
-          : 'تم تحليل الموقع. راجع الحدود وارسمها يدويًا إذا لزم الأمر');
+        const landmarkWarning = data.landmarksWarning || data.cityLandmarksWarning;
+        toast(landmarkWarning
+          ? 'تم تحليل الموقع، لكن تعذر جلب المعالم: ' + landmarkWarning
+          : (data.boundary && data.boundary.status === 'verified_building'
+            ? 'تم تحليل الموقع وتعبئة البيانات والخرائط بنجاح'
+            : 'تم تحليل الموقع. راجع الحدود وارسمها يدويًا إذا لزم الأمر'));
       } catch (error) {
         console.error('[SITE ANALYSIS]', error);
         toast('حدث خطأ أثناء تحليل الموقع');

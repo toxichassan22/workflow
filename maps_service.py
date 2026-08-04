@@ -187,7 +187,11 @@ def _has_api_key():
 
 
 def _api_key_error():
-    return {'error': 'Google Maps API key not configured'}
+    return {
+        'success': False,
+        'error': 'Google Maps API key not configured',
+        'error_code': 'GOOGLE_MAPS_API_KEY_MISSING',
+    }
 
 
 def _distance_meters(lat_a, lng_a, lat_b, lng_b):
@@ -804,9 +808,38 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
 
     try:
         response = requests.post(url, headers=headers, json=body, timeout=15)
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+
+        if response.status_code >= 400:
+            provider_error = data.get('error') if isinstance(data, dict) else {}
+            if isinstance(provider_error, dict):
+                message = provider_error.get('message') or 'Unknown Google Places error'
+                provider_status = provider_error.get('status')
+            else:
+                message = str(provider_error or 'Unknown Google Places error')
+                provider_status = None
+            safe_error = {
+                'success': False,
+                'error': f'Google Places API HTTP {response.status_code}: {message}',
+                'error_code': 'GOOGLE_PLACES_HTTP_ERROR',
+                'provider_status': provider_status,
+                'http_status': response.status_code,
+            }
+            print(f"[GOOGLE PLACES ERROR] http={response.status_code} status={provider_status or 'unknown'} message={message}")
+            return safe_error
+
         if 'places' not in data:
-            return {'error': f"Places API error: {data}", 'details': data}
+            message = 'Google Places returned an invalid response without places'
+            print(f'[GOOGLE PLACES ERROR] http={response.status_code} message={message}')
+            return {
+                'success': False,
+                'error': message,
+                'error_code': 'GOOGLE_PLACES_INVALID_RESPONSE',
+                'http_status': response.status_code,
+            }
 
         places = []
         for p in data.get('places', []):
@@ -843,8 +876,27 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
         places = places[:max_results]
         
         return {'success': True, 'landmarks': places}
+    except requests.exceptions.Timeout:
+        print('[GOOGLE PLACES ERROR] request timed out after 15 seconds')
+        return {
+            'success': False,
+            'error': 'انتهت مهلة Google Places أثناء جلب المعالم القريبة',
+            'error_code': 'GOOGLE_PLACES_TIMEOUT',
+        }
+    except requests.exceptions.RequestException as e:
+        print(f'[GOOGLE PLACES ERROR] request failed: {e}')
+        return {
+            'success': False,
+            'error': f'تعذر الاتصال بخدمة Google Places: {str(e)}',
+            'error_code': 'GOOGLE_PLACES_REQUEST_ERROR',
+        }
     except Exception as e:
-        return {'error': f"Places request failed: {str(e)}"}
+        print(f'[GOOGLE PLACES ERROR] unexpected failure: {e}')
+        return {
+            'success': False,
+            'error': f'فشل طلب Google Places: {str(e)}',
+            'error_code': 'GOOGLE_PLACES_UNEXPECTED_ERROR',
+        }
 
 
 def get_driving_times(origin_lat, origin_lng, destinations):

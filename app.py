@@ -2930,7 +2930,8 @@ def api_nearby_landmarks():
     if lat is None or lng is None:
         return jsonify({'error': 'lat and lng are required'}), 400
     result = maps_service.get_nearby_landmarks(float(lat), float(lng), int(radius), max_results=int(data.get('maxResults', 20)), include_all=True)
-    return jsonify(result)
+    status = 502 if result.get('error') and not result.get('success') else 200
+    return jsonify(result), status
 
 
 @app.route('/api/preview-map-data', methods=['POST'])
@@ -2966,11 +2967,17 @@ def api_preview_map_data():
     landmarks = selected_landmarks if isinstance(selected_landmarks, list) else (
         maps_service._parse_landmarks_text(custom_text) if isinstance(custom_text, str) else (custom_text or [])
     )
+    landmarks_error = None
+    landmarks_warning = None
 
     if not landmarks:
         places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True)
         if places.get('success'):
             landmarks = places['landmarks']
+            if not landmarks:
+                landmarks_warning = 'لم تُرجع Google Places أي معالم ضمن نطاق 20 كم من الموقع'
+        else:
+            landmarks_error = places.get('error') or 'تعذر جلب المعالم من Google Places'
 
     location_context = project_data.get('location_detail') or project_data.get('location_address') or project_data.get('location', '')
     for lm in landmarks:
@@ -3009,6 +3016,16 @@ def api_preview_map_data():
     catchment_text = project_data.get('catchment_areas') or project_data.get('catchment_zones')
     zones = maps_service._parse_catchment_zones(catchment_text) if isinstance(catchment_text, str) else catchment_text
 
+    if landmarks_error:
+        return jsonify({
+            'success': False,
+            'error': landmarks_error,
+            'error_code': 'NEARBY_LANDMARKS_UNAVAILABLE',
+            'lat': lat,
+            'lng': lng,
+            'landmarks': [],
+        }), 502
+
     return jsonify({
         'success': True,
         'lat': lat,
@@ -3016,6 +3033,7 @@ def api_preview_map_data():
         'landmarks': landmarks,
         'landmarks_matrix': matrix or landmarks,
         'catchment_zones': zones,
+        'warning': landmarks_warning,
     })
 
 
@@ -3154,19 +3172,26 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
 
     nearby = maps_service.get_nearby_landmarks(lat, lng, radius=20000, max_results=20, include_all=True)
     nearby_items = nearby.get('landmarks', []) if nearby.get('success') else []
+    nearby_error = nearby.get('error') if not nearby.get('success') else None
+    nearby_warning = 'لم تُرجع Google Places أي معالم ضمن نطاق 20 كم من الموقع' if nearby.get('success') and not nearby_items else None
     nearby_matrix = []
 
     curated_city = maps_service.detect_curated_city(lat, lng, tenant_id=tenant_id)
+    city_error = None
+    city_warning = None
     if curated_city:
         city_items = maps_service.get_curated_city_landmarks(lat=lat, lng=lng, city=curated_city, tenant_id=tenant_id)
     else:
         city = maps_service.get_nearby_landmarks(lat, lng, radius=5000, max_results=20, include_all=True)
         city_items = city.get('landmarks', []) if city.get('success') else []
+        city_error = city.get('error') if not city.get('success') else None
         existing_city_names = {item.get('name', '').casefold() for item in city_items}
         city_items.extend(
             item for item in maps_service.get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=tenant_id)
             if item.get('name', '').casefold() not in existing_city_names
         )
+    if not city_items and not city_error:
+        city_warning = 'لم تُرجع Google Places أي معالم للمدينة ضمن النطاق المحدد'
     roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=tenant_id, max_results=6)
     enrich_road_metrics(roads)
 
@@ -3249,7 +3274,13 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     if polygon:
         fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
 
-    return fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon
+    diagnostics = {
+        'nearby_landmarks_error': nearby_error,
+        'nearby_landmarks_warning': nearby_warning,
+        'city_landmarks_error': city_error,
+        'city_landmarks_warning': city_warning,
+    }
+    return fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon, diagnostics
 
 
 @app.route('/api/analyze-site', methods=['POST'])
@@ -3291,7 +3322,7 @@ def api_analyze_site():
     if lat is None or lng is None:
         return jsonify({'success': False, 'error': 'أدخل رابط Google Maps أو عنوان الموقع أولاً'}), 400
 
-    fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon = _collect_site_fields(
+    fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon, diagnostics = _collect_site_fields(
         project_data, g.tenant_id, lat, lng
     )
 
@@ -3358,6 +3389,8 @@ def api_analyze_site():
             'manual_edit_available': True,
         },
         'warning': map_result.get('error'),
+        'landmarksWarning': diagnostics.get('nearby_landmarks_error') or diagnostics.get('nearby_landmarks_warning'),
+        'cityLandmarksWarning': diagnostics.get('city_landmarks_error') or diagnostics.get('city_landmarks_warning'),
     })
 
 
@@ -3388,6 +3421,7 @@ def api_site_analysis():
         return jsonify({'success': False, 'error': 'بيانات الموقع والإحداثيات مطلوبة أولًا'}), 400
 
     enriched_fields = {}
+    enrichment_diagnostics = {}
     needs_enrichment = any(
         project_data.get(key) in (None, '', [], {})
         for key in (
@@ -3400,7 +3434,8 @@ def api_site_analysis():
     if needs_enrichment:
         try:
             enrichment_result = _collect_site_fields(raw_project_data, g.tenant_id, lat, lng)
-            enriched_fields, nearby_items, *_ = enrichment_result
+            enriched_fields, nearby_items, *_rest, enrichment_diagnostics = enrichment_result
+            enrichment_diagnostics = enrichment_diagnostics or {}
             if not project_data.get('nearby_landmarks_data') and nearby_items:
                 enriched_fields['nearby_landmarks_data'] = nearby_items
         except Exception as error:
@@ -3449,7 +3484,18 @@ def api_site_analysis():
                 model='google/gemini-2.5-flash'
             )
             analysis = extract_chat_content(fallback, 'SITE-ANALYSIS-FALLBACK').strip()
-        return jsonify({'success': True, 'analysis': analysis, 'fields': filled_fields})
+        warnings = [value for value in (
+            enrichment_diagnostics.get('nearby_landmarks_error'),
+            enrichment_diagnostics.get('nearby_landmarks_warning'),
+            enrichment_diagnostics.get('city_landmarks_error'),
+            enrichment_diagnostics.get('city_landmarks_warning'),
+        ) if value]
+        return jsonify({
+            'success': True,
+            'analysis': analysis,
+            'fields': filled_fields,
+            'warnings': warnings,
+        })
     except Exception as error:
         print(f'[SITE ANALYSIS AI ERROR] {error}')
         return jsonify({

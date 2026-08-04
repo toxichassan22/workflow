@@ -56,6 +56,33 @@ class MeetingRequirementsTests(unittest.TestCase):
     def _headers(token):
         return {'Authorization': f'Bearer {token}'}
 
+    def test_google_places_errors_are_explicit_instead_of_empty_success(self):
+        response = Mock(status_code=403)
+        response.json.return_value = {
+            'error': {'status': 'PERMISSION_DENIED', 'message': 'Places API (New) is not enabled'}
+        }
+        with patch.object(self.application_module.maps_service.requests, 'post', return_value=response):
+            result = self.application_module.maps_service.get_nearby_landmarks(24.0, 46.0)
+
+        self.assertFalse(result['success'])
+        self.assertEqual(result['error_code'], 'GOOGLE_PLACES_HTTP_ERROR')
+        self.assertIn('Places API (New) is not enabled', result['error'])
+
+    def test_preview_map_data_surfaces_google_places_errors(self):
+        client = self.app.test_client()
+        with patch.object(self.application_module.maps_service, 'get_nearby_landmarks', return_value={
+            'success': False,
+            'error': 'Google Places API HTTP 403: Places API (New) is not enabled',
+            'error_code': 'GOOGLE_PLACES_HTTP_ERROR',
+        }):
+            response = client.post('/api/preview-map-data', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0}
+            })
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json()['error_code'], 'NEARBY_LANDMARKS_UNAVAILABLE')
+        self.assertIn('Places API (New) is not enabled', response.get_json()['error'])
+
     def test_nearest_category_landmarks_return_real_names(self):
         places = [
             {'name': 'مول حقيقي', 'types': ['shopping_mall'], 'lat': 24.01, 'lng': 46.01, 'distance_meters': 1000},
