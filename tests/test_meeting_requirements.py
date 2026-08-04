@@ -345,6 +345,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         fields = response.get_json()['fields']
         self.assertEqual(fields['main_roads'], 'طريق تجريبي')
         self.assertIn('معلم قريب', fields['nearby_landmarks'])
+        self.assertIn('1.2 كم', fields['nearby_landmarks'])
+        self.assertIn('5 دقيقة', fields['nearby_landmarks'])
         self.assertIn('معلم المدينة', fields['city_landmarks'])
         self.assertIn('location_polygon', fields)
         self.assertNotIn('land_area', fields)

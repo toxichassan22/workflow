@@ -3174,7 +3174,15 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     nearby_items = nearby.get('landmarks', []) if nearby.get('success') else []
     nearby_error = nearby.get('error') if not nearby.get('success') else None
     nearby_warning = 'لم تُرجع Google Places أي معالم ضمن نطاق 20 كم من الموقع' if nearby.get('success') and not nearby_items else None
-    nearby_matrix = []
+    nearby_matrix = maps_service.get_drive_matrix((lat, lng), nearby_items) if nearby_items else []
+    for index, item in enumerate(nearby_items):
+        if index >= len(nearby_matrix) or not isinstance(nearby_matrix[index], dict):
+            continue
+        entry = nearby_matrix[index]
+        item['distance_km'] = entry.get('distance_km') or item.get('distance_km')
+        item['distance_text'] = entry.get('distance_text') or item.get('distance_text')
+        item['duration_min'] = entry.get('duration_min') or item.get('duration_min')
+        item['duration_minutes'] = entry.get('duration_min') or item.get('duration_minutes')
 
     curated_city = maps_service.detect_curated_city(lat, lng, tenant_id=tenant_id)
     city_error = None

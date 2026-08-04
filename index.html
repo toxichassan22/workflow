@@ -7024,7 +7024,7 @@
         const formData = await collectTenantFormData();
         tenantProjectData = { ...tenantProjectData, ...formData };
         if (!tenantProjectData.draftId) tenantProjectData.draftId = crypto.randomUUID();
-        const payload = slimMapPayload(tenantProjectData);
+        const payload = slimMapProjectData(tenantProjectData);
         payload.enabled_maps = [mapType];
         payload.draftId = tenantProjectData.draftId;
         const data = await api('POST', '/api/generate-map-image', {
