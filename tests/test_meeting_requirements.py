@@ -206,6 +206,21 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertIsNone(coords)
 
+    def test_site_analysis_can_defer_map_generation(self):
+        client = self.app.test_client()
+        fields = {'location_lat': 25.1, 'location_lng': 47.6, 'nearby_landmarks': 'معلم'}
+        with patch.object(self.application_module.maps_service, 'extract_coords_from_maps_link', return_value={'lat': 25.1, 'lng': 47.6}), \
+                patch.object(self.application_module, '_collect_site_fields', return_value=(fields, [], [], [], [], [], None, {})), \
+                patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps:
+            response = client.post('/api/analyze-site', headers=self._headers(self.token_a), json={
+                'projectData': {'location_address': 'https://www.google.com/maps/@25.1,47.6,17z'},
+                'generateMaps': False,
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()['mapsDeferred'])
+        generate_maps.assert_not_called()
+
     def test_site_analysis_prefers_google_link_over_stale_coordinates(self):
         client = self.app.test_client()
         map_result = {'placeholders': {}, 'zooms': {'overview': 17}}
@@ -220,7 +235,8 @@ class MeetingRequirementsTests(unittest.TestCase):
                     'location_lat': '24.000000',
                     'location_lng': '46.000000',
                     'location_address': 'https://www.google.com/maps/@25.123456,47.654321,17z'
-                }
+                },
+                'generateMaps': True,
             })
 
         self.assertEqual(response.status_code, 200, response.get_json())

@@ -3946,7 +3946,13 @@
           console.log('[MAPS] payload size: ' + payloadKB + ' KB | biggest fields:', fieldSizes);
           let res = null;
           try {
-            res = await api('POST', '/api/generate-map-images', payload);
+            res = await apiWithTimeout(
+              'POST',
+              '/api/generate-map-images',
+              payload,
+              105000,
+              'انتهت مهلة توليد الخرائط. تم حفظ بيانات الموقع، ويمكن إعادة توليد الخرائط لاحقًا.'
+            );
           } catch (e) {
             res = (e && (e.body || e.response || e.data || e.message)) || null;
           }
@@ -4064,7 +4070,7 @@
     const CHUNK_WIRE_LIMIT = 24 * 1024;
     const CHUNK_PART_BYTES = 12 * 1024;
 
-    async function chunkedPost(method, path, wire, isGzip, headers) {
+    async function chunkedPost(method, path, wire, isGzip, headers, signal) {
       const buf = typeof wire === 'string' ? new TextEncoder().encode(wire) : new Uint8Array(wire);
       const id = crypto.randomUUID();
       const total = Math.ceil(buf.length / CHUNK_PART_BYTES);
@@ -4078,6 +4084,7 @@
           method: 'POST',
           headers: chunkHeaders,
           body: JSON.stringify({ id, idx: i, total, data: btoa(bin) }),
+          signal,
         });
         if (!res.ok) return { error: 'Chunk upload failed (' + res.status + ')' };
       }
@@ -4086,21 +4093,22 @@
         method,
         headers: chunkHeaders,
         body: JSON.stringify({ __chunked_body: { id, total, gzip: isGzip } }),
+        signal,
       });
     }
 
-    async function api(method, path, body, isFile) {
+    async function api(method, path, body, isFile, requestOptions = {}) {
       const token = getTenantToken();
       const headers = {};
       if (token) headers['Authorization'] = 'Bearer ' + token;
       if (!isFile && body && typeof body !== 'undefined') headers['Content-Type'] = 'application/json';
-      const opts = { method, headers };
+      const opts = { method, headers, signal: requestOptions.signal };
       if (body && !isFile) {
         const wire = await gzipIfLarge(JSON.stringify(body), headers);
         const isGzip = headers['Content-Encoding'] === 'gzip';
         const wireSize = typeof wire === 'string' ? wire.length : wire.byteLength;
         if (wireSize > CHUNK_WIRE_LIMIT) {
-          return chunkedPost(method, path, wire, isGzip, headers)
+          return chunkedPost(method, path, wire, isGzip, headers, requestOptions.signal)
             .then(handleApiResponse)
             .catch(e => ({ error: 'Network error: ' + e.message }));
         }
@@ -4111,16 +4119,24 @@
       return fetch(path, opts).then(handleApiResponse).catch(e => ({ error: 'Network error: ' + e.message }));
     }
 
-    async function apiWithTimeout(method, path, body, timeoutMs = 75000) {
+    async function apiWithTimeout(method, path, body, timeoutMs = 75000, timeoutMessage = 'انتهت مهلة الطلب؛ أعد المحاولة لاحقًا.') {
+      const controller = new AbortController();
       let timer;
       const timeoutResponse = new Promise(resolve => {
-        timer = setTimeout(() => resolve({
-          success: false,
-          error: 'انتهت مهلة إعداد خطة الشرائح. تحقق من خدمة AI ثم أعد المحاولة.'
-        }), timeoutMs);
+        timer = setTimeout(() => {
+          controller.abort();
+          resolve({
+            success: false,
+            error: timeoutMessage,
+            error_code: 'CLIENT_REQUEST_TIMEOUT'
+          });
+        }, timeoutMs);
       });
       try {
-        return await Promise.race([api(method, path, body), timeoutResponse]);
+        return await Promise.race([
+          api(method, path, body, false, { signal: controller.signal }),
+          timeoutResponse
+        ]);
       } finally {
         clearTimeout(timer);
       }
@@ -6837,7 +6853,17 @@
       toast('تم اعتماد تحليل الموقع');
     }
 
+    let tenantSiteAnalysisRequest = null;
+
     async function analyzeTenantSite() {
+      if (tenantSiteAnalysisRequest) return tenantSiteAnalysisRequest;
+      tenantSiteAnalysisRequest = analyzeTenantSiteOnce().finally(() => {
+        tenantSiteAnalysisRequest = null;
+      });
+      return tenantSiteAnalysisRequest;
+    }
+
+    async function analyzeTenantSiteOnce() {
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.draftId) tenantProjectData.draftId = crypto.randomUUID();
@@ -6853,11 +6879,12 @@
       }
       showLoader('جاري تحليل الموقع', 'يتم جلب الطرق والمعالم والخرائط من Google Maps...');
       try {
-        const data = await api('POST', '/api/analyze-site', {
+        const data = await apiWithTimeout('POST', '/api/analyze-site', {
           projectData: tenantProjectData,
           presentationId: tenantPresentationId,
-          force: true
-        });
+          force: true,
+          generateMaps: false
+        }, 90000, 'انتهت مهلة تحليل بيانات الموقع؛ لم يتم توليد الخرائط بعد.');
         if (!data || !data.success) {
           toast((data && data.error) || 'تعذر تحليل الموقع');
           return;
@@ -7023,7 +7050,17 @@
       }
     }
 
-    async function previewProjectMap({ force = false, highlightSite = true } = {}) {
+    let tenantMapPreviewRequest = null;
+
+    async function previewProjectMap(options = {}) {
+      if (tenantMapPreviewRequest) return tenantMapPreviewRequest;
+      tenantMapPreviewRequest = previewProjectMapOnce(options).finally(() => {
+        tenantMapPreviewRequest = null;
+      });
+      return tenantMapPreviewRequest;
+    }
+
+    async function previewProjectMapOnce({ force = false, highlightSite = true } = {}) {
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       const lat = tenantProjectData.location_lat || '';
@@ -7064,7 +7101,7 @@
         renderMapPreviewGallery();
         window.__lastMapPlaceholders = placeholders;
       } else {
-        toast('تعذر توليد معاينة الخريطة');
+        toast(tenantCreativeImages.last_error || 'تعذر توليد معاينة الخريطة');
       }
     }
 

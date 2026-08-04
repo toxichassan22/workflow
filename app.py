@@ -3334,37 +3334,41 @@ def api_analyze_site():
         'calculate_landmark_driving': False,
         'enabled_maps': ['overview', 'landmarks', 'access', 'catchment'],
     }
-    map_result = maps_service.generate_all_map_images(
-        analyzed_project,
-        g.tenant_id,
-        presentation_id=data.get('presentationId'),
-        force=data.get('force', True) is not False,
-        branding=branding,
-    )
+    generate_maps = data.get('generateMaps') is True
+    estimate_boundary = data.get('estimateBoundary') is True
+    map_result = {'placeholders': {}, 'zooms': {}, 'error': None}
     estimated_polygon = None
-    if not polygon:
-        overview_path = (
-            map_result.get('placeholders', {}).get('##MAP_OVERVIEW##')
-            or map_result.get('placeholders', {}).get('##MAP_OVERVIEW_SATELLITE##')
-            or map_result.get('placeholders', {}).get('##MAP_OVERVIEW_ROADMAP##')
+    if generate_maps:
+        map_result = maps_service.generate_all_map_images(
+            analyzed_project,
+            g.tenant_id,
+            presentation_id=data.get('presentationId'),
+            force=data.get('force', True) is not False,
+            branding=branding,
         )
-        estimated_polygon = _estimate_site_polygon_from_satellite(
-            overview_path,
-            lat,
-            lng,
-            int((map_result.get('zooms') or {}).get('overview') or 17),
-        ) if overview_path else None
-        if estimated_polygon:
-            polygon = estimated_polygon
-            fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
-            analyzed_project = {**analyzed_project, 'location_polygon': fields['location_polygon']}
-            map_result = maps_service.generate_all_map_images(
-                analyzed_project,
-                g.tenant_id,
-                presentation_id=data.get('presentationId'),
-                force=True,
-                branding=branding,
+        if estimate_boundary and not polygon:
+            overview_path = (
+                map_result.get('placeholders', {}).get('##MAP_OVERVIEW##')
+                or map_result.get('placeholders', {}).get('##MAP_OVERVIEW_SATELLITE##')
+                or map_result.get('placeholders', {}).get('##MAP_OVERVIEW_ROADMAP##')
             )
+            estimated_polygon = _estimate_site_polygon_from_satellite(
+                overview_path,
+                lat,
+                lng,
+                int((map_result.get('zooms') or {}).get('overview') or 17),
+            ) if overview_path else None
+            if estimated_polygon:
+                polygon = estimated_polygon
+                fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
+                analyzed_project = {**analyzed_project, 'location_polygon': fields['location_polygon']}
+                map_result = maps_service.generate_all_map_images(
+                    analyzed_project,
+                    g.tenant_id,
+                    presentation_id=data.get('presentationId'),
+                    force=True,
+                    branding=branding,
+                )
     placeholders = {}
     for placeholder, path in map_result.get('placeholders', {}).items():
         if path and os.path.exists(path):
@@ -3375,6 +3379,7 @@ def api_analyze_site():
         'success': True,
         'fields': fields,
         'mapPlaceholders': placeholders,
+        'mapsDeferred': not generate_maps,
         'landmarks': nearby_items,
         'landmarksMatrix': nearby_matrix,
         'cityLandmarks': city_items,
