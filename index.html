@@ -6919,7 +6919,7 @@
       const image = previewBox?.querySelector('img');
       if (!url || !previewBox || !image) return;
       image.onload = () => { renderTenantMapPolygonOverlay(); applyTenantPolygonZoom(); };
-      image.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+      image.src = url;
       image.alt = view.title;
       previewBox.style.display = 'block';
       const lat = Number(tenantCreativeImages.map_lat || tenantProjectData.location_lat);
@@ -7003,8 +7003,9 @@
         || Object.values(placeholders).find(v => v);
 
       if (mapUrl && img) {
+        tenantSelectedMapType = 'overview';
         img.onload = () => { renderTenantMapPolygonOverlay(); applyTenantPolygonZoom(); };
-        img.src = mapUrl + (mapUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+        img.src = mapUrl;
         if (previewBox) previewBox.style.display = 'block';
         const hint = document.getElementById('mapPreviewHint');
         if (hint) hint.style.display = 'block';
@@ -7074,6 +7075,10 @@
       const overlay = document.getElementById('mapPolygonOverlay');
       const points = tenantMapPolygonPoints;
       const state = tenantMapPreviewState;
+      if (tenantSelectedMapType !== 'overview') {
+        resetTenantMapZoom();
+        return;
+      }
       if (!image || !state || points.length < 3 || !image.naturalWidth || !image.naturalHeight) return;
       const world = 256 * Math.pow(2, state.zoom) * 2;
       const centerLatRad = state.lat * Math.PI / 180;
@@ -7103,6 +7108,11 @@
 
     function toggleTenantPolygonMode() {
       if (!tenantMapPreviewState) { toast('انتظر تحميل معاينة الخرائط أولًا ثم ارسم حدود الموقع.'); return; }
+      if (tenantSelectedMapType !== 'overview') {
+        selectMapPreviewView('overview');
+        toast('رسم حدود الأرض متاح على خريطة الأرض / المبنى فقط.');
+        return;
+      }
       if (tenantMapPolygonMode) {
         if (tenantMapDraftPolygonPoints.length && !confirm('سيتم إلغاء الرسم الحالي دون تغيير الحدود المعتمدة. هل تريد المتابعة؟')) return;
         tenantMapDraftPolygonPoints = [];
@@ -7174,7 +7184,7 @@
       const overlay = document.getElementById('mapPolygonOverlay');
       const img = document.querySelector('#mapPreviewImage img');
       const polygonPoints = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
-      if (!overlay || !img || !tenantMapPreviewState || !polygonPoints.length || !img.naturalWidth || !img.naturalHeight) {
+      if (tenantSelectedMapType !== 'overview' || !overlay || !img || !tenantMapPreviewState || !polygonPoints.length || !img.naturalWidth || !img.naturalHeight) {
         if (overlay) overlay.innerHTML = '';
         return;
       }

@@ -3736,8 +3736,8 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
     creative = project_data.get('tenantCreativeImages')
     if not isinstance(creative, dict):
         creative = {}
-    placeholders = dict(creative.get('map_placeholders') or {})
-    map_zooms = dict(creative.get('map_zooms') or {})
+    placeholders = {}
+    map_zooms = {}
     seen_types = set()
     seen_placeholders = set()
     for record in records:
@@ -3745,6 +3745,12 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         placeholder = record.get('placeholder')
         image_type = record.get('image_type') or ''
         if not path or not placeholder or not os.path.exists(path):
+            continue
+        try:
+            metadata = json.loads(record.get('metadata_json') or '{}')
+        except (TypeError, ValueError):
+            metadata = {}
+        if metadata.get('map_highlight_version') != maps_service.MAP_HIGHLIGHT_RENDER_VERSION:
             continue
         if image_type in seen_types or placeholder in seen_placeholders:
             continue
@@ -3755,10 +3761,6 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         except ValueError:
             rel_path = 'uploads/maps/' + os.path.basename(path)
         placeholders[placeholder] = '/' + rel_path
-        try:
-            metadata = json.loads(record.get('metadata_json') or '{}')
-        except (TypeError, ValueError):
-            metadata = {}
         if creative.get('map_lat') is None and metadata.get('lat') is not None:
             creative['map_lat'] = metadata['lat']
         if creative.get('map_lng') is None and metadata.get('lng') is not None:

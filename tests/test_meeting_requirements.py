@@ -198,7 +198,12 @@ class MeetingRequirementsTests(unittest.TestCase):
                 map_path,
                 '##MAP_OVERVIEW##',
                 presentation_id='draft_draft-map',
-                metadata={'lat': 24.1, 'lng': 46.2, 'zoom': 17}
+                metadata={
+                    'lat': 24.1,
+                    'lng': 46.2,
+                    'zoom': 17,
+                    'map_highlight_version': self.application_module.maps_service.MAP_HIGHLIGHT_RENDER_VERSION,
+                }
             )
             hydrated = self.application_module._merge_persisted_map_assets(
                 {'project_name': 'Saved'}, self.tenant_a, draft_id='draft-map'

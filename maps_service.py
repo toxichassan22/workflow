@@ -144,6 +144,7 @@ SITE_FILL_COLOR = (160, 50, 50, 130)    # More visible semi-transparent red fill
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
 ACCESS_ROADS_RENDER_VERSION = 'v2'
+MAP_HIGHLIGHT_RENDER_VERSION = 'overview-only-v1'
 
 # Rate limiting: max calls per tenant per window (default 60 calls / 10 minutes)
 MAPS_RATE_LIMIT = int(os.environ.get('MAPS_RATE_LIMIT', 60))
@@ -1973,6 +1974,11 @@ def _get_cached_map_images(tenant_id, presentation_id):
         for image_type in found_types
     ):
         return None
+    if any(
+        metadata_by_type.get(image_type, {}).get('map_highlight_version') != MAP_HIGHLIGHT_RENDER_VERSION
+        for image_type in found_types
+    ):
+        return None
     found_base = {t.split('_')[0] for t in found_types}
     meta = next((m for t, m in metadata_by_type.items() if t.startswith('overview')), None)
     if meta is None:
@@ -2302,7 +2308,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = overview_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_landmarks (closer zoom)
     if 'landmarks' in enabled_maps:
@@ -2321,8 +2327,6 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 if active_mt == 'satellite':
                     _apply_sepia_tone(landmarks_path, intensity=0.35)
                     _apply_map_overlay(landmarks_path, dark_factor=0.20)
-                if highlight_site:
-                    _draw_site_highlight(landmarks_path, map_center_lat, map_center_lng, landmarks_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _overlay_markers(landmarks_path, map_center_lat, map_center_lng, landmarks_zoom, landmarks_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(landmarks_path, position='top-right')
@@ -2331,7 +2335,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = landmarks_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_access
     if 'access' in enabled_maps:
@@ -2350,8 +2354,6 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 if active_mt == 'satellite':
                     _apply_sepia_tone(access_path, intensity=0.35)
                     _apply_map_overlay(access_path, dark_factor=0.10)
-                if highlight_site:
-                    _draw_site_highlight(access_path, map_center_lat, map_center_lng, access_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _draw_access_roads(
                     access_path,
                     map_center_lat,
@@ -2380,6 +2382,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                         'lng': lng,
                         'zoom': access_zoom,
                         'access_roads_version': ACCESS_ROADS_RENDER_VERSION,
+                        'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
                         'landmarks_matrix': result.get('landmarks_matrix') or [],
                     },
                 )
@@ -2416,7 +2419,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
                 result['placeholders'][placeholder] = catchment_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     return result
 
