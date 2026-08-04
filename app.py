@@ -165,6 +165,15 @@ print(f"[CONFIG] JWT_SECRET: {auth.JWT_SECRET_SOURCE.upper()}")
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Call GLM (ZAI API or OpenRouter fallback)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _has_chat_choices(response):
+    return (
+        isinstance(response, dict)
+        and 'error' not in response
+        and isinstance(response.get('choices'), list)
+        and bool(response['choices'])
+    )
+
+
 def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None):
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
@@ -212,18 +221,20 @@ def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000)
             }
             response = requests.post(f"{ZAI_BASE}/chat/completions", headers=headers, json=payload, timeout=300)
             data = response.json()
-            if 'error' not in data and 'choices' in data:
+            if _has_chat_choices(data):
                 return data
-            print(f"[ZAI QUOTA/BALANCE ERROR] {json.dumps(data.get('error', {}), ensure_ascii=False)}. Falling back to OpenRouter...")
+            error_data = data.get('error', {}) if isinstance(data, dict) else data
+            print(f"[ZAI QUOTA/BALANCE ERROR] {json.dumps(error_data, ensure_ascii=False)}. Falling back to OpenRouter...")
         except Exception as exc:
             print(f"[ZAI EXCEPTION] {exc}. Falling back to OpenRouter...")
 
     if OPENROUTER_KEY:
         res = call_openrouter_chat(system_prompt, user_content, temperature, max_tokens)
-        if 'error' not in res and 'choices' in res:
+        if _has_chat_choices(res):
             return res
         # Fallback to alternate OpenRouter model if specific model fails
-        print(f"[OPENROUTER PRIMARY ERROR] {json.dumps(res.get('error', {}), ensure_ascii=False)}. Trying fallback model...")
+        error_data = res.get('error', {}) if isinstance(res, dict) else res
+        print(f"[OPENROUTER PRIMARY ERROR] {json.dumps(error_data, ensure_ascii=False)}. Trying fallback model...")
         return call_openrouter_chat(system_prompt, user_content, temperature, max_tokens, model="google/gemini-2.5-flash")
 
     return {"error": {"message": "ZAI API has insufficient balance and OPENROUTER_KEY is not available."}}
@@ -266,6 +277,8 @@ def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tok
 def extract_chat_content(response, label="GLM"):
     """Safely extract text content from ZAI/GLM API response.
     Raises a descriptive exception if the response is malformed."""
+    if not isinstance(response, dict):
+        raise Exception(f"{label} returned an invalid response")
     if 'error' in response:
         err = response['error']
         if isinstance(err, dict):
@@ -273,9 +286,11 @@ def extract_chat_content(response, label="GLM"):
         else:
             msg = str(err)
         raise Exception(f"{label} API error: {msg}")
-    if 'choices' not in response or not response['choices']:
+    if 'choices' not in response or not isinstance(response['choices'], list) or not response['choices']:
         raise Exception(f"{label} returned no choices. Response: {json.dumps(response, ensure_ascii=False)[:500]}")
-    msg = response['choices'][0].get('message', {}).get('content', '')
+    choice = response['choices'][0] if isinstance(response['choices'][0], dict) else {}
+    message = choice.get('message') if isinstance(choice.get('message'), dict) else {}
+    msg = message.get('content', '')
     if isinstance(msg, list):
         msg = ' '.join(
             part.get('text', '') if isinstance(part, dict) else str(part)
@@ -3352,17 +3367,30 @@ def api_site_analysis():
 
 بيانات المشروع والموقع:
 {json.dumps(project_data, ensure_ascii=False, indent=2)}"""
+    system_prompt = 'أنت محلل مواقع عقارية دقيق. أخرج تحليلًا عربيًا متوسط الطول دون اختلاق معلومات.'
     try:
-        response = call_zai_chat(
-            'أنت محلل مواقع عقارية دقيق. أخرج تحليلًا عربيًا متوسط الطول دون اختلاق معلومات.',
-            prompt,
-            max_tokens=1200,
-        )
-        analysis = extract_chat_content(response, 'SITE-ANALYSIS').strip()
+        try:
+            response = call_zai_chat(system_prompt, prompt, max_tokens=1200)
+            analysis = extract_chat_content(response, 'SITE-ANALYSIS').strip()
+        except Exception as primary_error:
+            if not OPENROUTER_KEY:
+                raise
+            print(f'[SITE ANALYSIS PRIMARY ERROR] {primary_error}. Trying direct OpenRouter fallback...')
+            fallback = call_openrouter_chat(
+                system_prompt,
+                prompt,
+                max_tokens=1200,
+                model='google/gemini-2.5-flash'
+            )
+            analysis = extract_chat_content(fallback, 'SITE-ANALYSIS-FALLBACK').strip()
         return jsonify({'success': True, 'analysis': analysis})
     except Exception as error:
         print(f'[SITE ANALYSIS AI ERROR] {error}')
-        return jsonify({'success': False, 'error': str(error)}), 500
+        return jsonify({
+            'success': False,
+            'error': 'تعذر تشغيل خدمة تحليل AI للموقع: ' + str(error),
+            'error_code': 'SITE_ANALYSIS_AI_UNAVAILABLE'
+        }), 503
 
 
 @app.route('/api/generate-map-image', methods=['POST'])

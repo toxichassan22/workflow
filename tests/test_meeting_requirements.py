@@ -303,6 +303,21 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('tenantCreativeImages', prompt)
         self.assertIn('معلم قريب', prompt)
 
+    def test_site_analysis_falls_back_to_openrouter_when_primary_ai_response_fails(self):
+        client = self.app.test_client()
+        with patch.object(self.application_module, 'call_zai_chat', side_effect=RuntimeError('primary AI unavailable')), \
+                patch.object(self.application_module, 'OPENROUTER_KEY', 'test-openrouter-key'), \
+                patch.object(self.application_module, 'call_openrouter_chat', return_value={
+                    'choices': [{'message': {'content': 'تحليل من النموذج الاحتياطي'}}]
+                }) as fallback:
+            response = client.post('/api/site-analysis', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0}
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['analysis'], 'تحليل من النموذج الاحتياطي')
+        self.assertEqual(fallback.call_args.kwargs['model'], 'google/gemini-2.5-flash')
+
     def test_project_draft_preserves_selected_landmark_details(self):
         client = self.app.test_client()
         details = [{
