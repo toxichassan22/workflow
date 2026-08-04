@@ -2070,7 +2070,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         return False
 
 
-def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expected_lng=None):
+def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expected_lng=None, expected_highlight_site=None):
     """Return existing map images for a tenant/presentation if any exist."""
     from db import get_map_images
     existing = get_map_images(tenant_id, presentation_id=presentation_id)
@@ -2099,6 +2099,11 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
         return None
     if any(
         metadata_by_type.get(image_type, {}).get('map_highlight_version') != MAP_HIGHLIGHT_RENDER_VERSION
+        for image_type in found_types
+    ):
+        return None
+    if expected_highlight_site is not None and any(
+        metadata_by_type.get(image_type, {}).get('highlight_site') is not bool(expected_highlight_site)
         for image_type in found_types
     ):
         return None
@@ -2238,7 +2243,13 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
             return False
 
     if not force and effective_pres_id:
-        cached = _get_cached_map_images(tenant_id, effective_pres_id, expected_lat=lat, expected_lng=lng)
+        cached = _get_cached_map_images(
+            tenant_id,
+            effective_pres_id,
+            expected_lat=lat,
+            expected_lng=lng,
+            expected_highlight_site=highlight_site,
+        )
         if cached and _close(cached.get('lat'), lat) and _close(cached.get('lng'), lng):
             found_base = cached.get('found_base') or set()
             required_base = {t for t in enabled_maps if t not in ('streetview',)}
@@ -2461,7 +2472,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 result['placeholders'][placeholder] = overview_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_landmarks (closer zoom)
     if 'landmarks' in enabled_maps:
@@ -2488,7 +2499,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 result['placeholders'][placeholder] = landmarks_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_access
     if 'access' in enabled_maps:
@@ -2536,6 +2547,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                         'zoom': access_zoom,
                         'access_roads_version': ACCESS_ROADS_RENDER_VERSION,
                         'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
+                        'highlight_site': bool(highlight_site),
                         'landmarks_matrix': result.get('landmarks_matrix') or [],
                     },
                 )
@@ -2572,7 +2584,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 result['placeholders'][placeholder] = catchment_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     return result
 
