@@ -6785,6 +6785,7 @@
         triggerAutoSaveDraft();
         await previewProjectMap();
         renderTenantMapPolygonOverlay();
+        applyTenantPolygonZoom();
         toast(data.boundary && data.boundary.status === 'verified_building'
           ? 'تم تحليل الموقع وتعبئة البيانات والخرائط بنجاح'
           : 'تم تحليل الموقع. راجع الحدود وارسمها يدويًا إذا لزم الأمر');
@@ -6844,6 +6845,7 @@
       const previewBox = document.getElementById('mapPreviewImage');
       const image = previewBox?.querySelector('img');
       if (!url || !previewBox || !image) return;
+      image.onload = () => { renderTenantMapPolygonOverlay(); applyTenantPolygonZoom(); };
       image.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
       image.alt = view.title;
       previewBox.style.display = 'block';
@@ -6927,7 +6929,7 @@
         || Object.values(placeholders).find(v => v);
 
       if (mapUrl && img) {
-        img.onload = () => renderTenantMapPolygonOverlay();
+        img.onload = () => { renderTenantMapPolygonOverlay(); applyTenantPolygonZoom(); };
         img.src = mapUrl + (mapUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
         if (previewBox) previewBox.style.display = 'block';
         const hint = document.getElementById('mapPreviewHint');
@@ -6982,6 +6984,49 @@
       if (confirmButton) confirmButton.disabled = !tenantMapPolygonMode || tenantMapDraftPolygonPoints.length < 3;
     }
 
+    function resetTenantMapZoom() {
+      const previewBox = document.getElementById('mapPreviewImage');
+      const image = previewBox?.querySelector('img');
+      const overlay = document.getElementById('mapPolygonOverlay');
+      [image, overlay].filter(Boolean).forEach(element => {
+        element.style.transform = '';
+        element.style.transformOrigin = '';
+      });
+    }
+
+    function applyTenantPolygonZoom() {
+      const previewBox = document.getElementById('mapPreviewImage');
+      const image = previewBox?.querySelector('img');
+      const overlay = document.getElementById('mapPolygonOverlay');
+      const points = tenantMapPolygonPoints;
+      const state = tenantMapPreviewState;
+      if (!image || !state || points.length < 3 || !image.naturalWidth || !image.naturalHeight) return;
+      const world = 256 * Math.pow(2, state.zoom) * 2;
+      const centerLatRad = state.lat * Math.PI / 180;
+      const centerY = (1 - Math.log(Math.tan(centerLatRad) + 1 / Math.cos(centerLatRad)) / Math.PI) / 2;
+      const coords = points.map(point => {
+        const x = 50 + ((point[1] - state.lng) * world / 360) / image.naturalWidth * 100;
+        const pointLatRad = point[0] * Math.PI / 180;
+        const pointY = (1 - Math.log(Math.tan(pointLatRad) + 1 / Math.cos(pointLatRad)) / Math.PI) / 2;
+        const y = 50 + ((pointY - centerY) * world) / image.naturalHeight * 100;
+        return { x, y };
+      });
+      const minX = Math.min(...coords.map(point => point.x));
+      const maxX = Math.max(...coords.map(point => point.x));
+      const minY = Math.min(...coords.map(point => point.y));
+      const maxY = Math.max(...coords.map(point => point.y));
+      const width = Math.max(maxX - minX, 1);
+      const height = Math.max(maxY - minY, 1);
+      const scale = Math.min(4, Math.max(1.35, Math.min(72 / width, 72 / height)));
+      const originX = (minX + maxX) / 2;
+      const originY = (minY + maxY) / 2;
+      [image, overlay].filter(Boolean).forEach(element => {
+        element.style.transformOrigin = originX + '% ' + originY + '%';
+        element.style.transform = 'scale(' + scale + ')';
+        element.style.transition = 'transform 260ms ease';
+      });
+    }
+
     function toggleTenantPolygonMode() {
       if (!tenantMapPreviewState) { toast('انتظر تحميل معاينة الخرائط أولًا ثم ارسم حدود الموقع.'); return; }
       if (tenantMapPolygonMode) {
@@ -7019,6 +7064,7 @@
       syncTenantLocationPolygon();
       renderTenantMapPolygonOverlay();
       updateTenantPolygonControls();
+      applyTenantPolygonZoom();
       await analyzeTenantSite();
     }
 
@@ -7031,6 +7077,7 @@
       tenantProjectData.location_polygon = '';
       syncTenantLocationPolygon();
       renderTenantMapPolygonOverlay();
+      resetTenantMapZoom();
       updateTenantPolygonControls();
       triggerAutoSaveDraft();
       const hint = document.getElementById('mapPreviewHint');
@@ -7086,6 +7133,10 @@
       points.splice(index, 1);
       if (!tenantMapPolygonMode) syncTenantLocationPolygon();
       renderTenantMapPolygonOverlay();
+      if (!tenantMapPolygonMode) {
+        if (tenantMapPolygonPoints.length < 3) resetTenantMapZoom();
+        else applyTenantPolygonZoom();
+      }
       updateTenantPolygonControls();
       if (!tenantMapPolygonMode) triggerAutoSaveDraft();
       toast('تم حذف النقطة رقم ' + (index + 1));
