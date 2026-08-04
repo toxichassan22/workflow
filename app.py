@@ -174,7 +174,7 @@ def _has_chat_choices(response):
     )
 
 
-def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None):
+def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300):
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
@@ -194,14 +194,19 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
         "max_tokens": max_tokens
     }
     try:
-        response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=300)
+        response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
         return response.json()
     except Exception as exc:
         return {"error": {"message": str(exc)}}
 
 
-def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000):
+def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300):
     """Call GLM (ZAI API) with automatic fallback to OpenRouter when ZAI fails or runs out of balance."""
+    deadline = time.monotonic() + max(1.0, float(timeout))
+
+    def remaining_timeout():
+        return max(1, min(float(timeout), deadline - time.monotonic()))
+
     if not GLM_USE_OPENROUTER and ZAI_KEY:
         try:
             headers = {
@@ -219,7 +224,7 @@ def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000)
                 "max_tokens": max_tokens,
                 "thinking": {"type": "disabled"}
             }
-            response = requests.post(f"{ZAI_BASE}/chat/completions", headers=headers, json=payload, timeout=300)
+            response = requests.post(f"{ZAI_BASE}/chat/completions", headers=headers, json=payload, timeout=remaining_timeout())
             data = response.json()
             if _has_chat_choices(data):
                 return data
@@ -229,18 +234,18 @@ def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000)
             print(f"[ZAI EXCEPTION] {exc}. Falling back to OpenRouter...")
 
     if OPENROUTER_KEY:
-        res = call_openrouter_chat(system_prompt, user_content, temperature, max_tokens)
+        res = call_openrouter_chat(system_prompt, user_content, temperature, max_tokens, timeout=remaining_timeout())
         if _has_chat_choices(res):
             return res
         # Fallback to alternate OpenRouter model if specific model fails
         error_data = res.get('error', {}) if isinstance(res, dict) else res
         print(f"[OPENROUTER PRIMARY ERROR] {json.dumps(error_data, ensure_ascii=False)}. Trying fallback model...")
-        return call_openrouter_chat(system_prompt, user_content, temperature, max_tokens, model="google/gemini-2.5-flash")
+        return call_openrouter_chat(system_prompt, user_content, temperature, max_tokens, model="google/gemini-2.5-flash", timeout=remaining_timeout())
 
     return {"error": {"message": "ZAI API has insufficient balance and OPENROUTER_KEY is not available."}}
 
 
-def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2):
+def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300):
     """
     Race multiple identical GLM calls in parallel and return the first valid response.
     Helps when a single model invocation is slow or returns malformed/empty content.
@@ -249,27 +254,27 @@ def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tok
 
     def _attempt():
         try:
-            resp = call_zai_chat(system_prompt, user_content, temperature, max_tokens)
-            if 'error' in resp:
+            resp = call_zai_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout)
+            if not _has_chat_choices(resp):
                 return None
-            choices = resp.get('choices')
-            if not choices:
-                return None
-            content = choices[0].get('message', {}).get('content', '')
-            if not content:
-                return None
-            return resp
+            content = extract_chat_content(resp, 'GLM-PARALLEL')
+            return resp if content.strip() else None
         except Exception as e:
             print(f"[GLM PARALLEL] attempt failed: {e}")
             return None
 
-    with ThreadPoolExecutor(max_workers=attempts) as executor:
-        futures = [executor.submit(_attempt) for _ in range(attempts)]
+    executor = ThreadPoolExecutor(max_workers=max(1, attempts))
+    futures = [executor.submit(_attempt) for _ in range(max(1, attempts))]
+    try:
         for future in as_completed(futures):
             result = future.result()
             if result:
+                for pending in futures:
+                    pending.cancel()
                 print(f"[GLM PARALLEL] Valid response received after racing {attempts} calls")
                 return result
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
     raise Exception(f"All {attempts} parallel GLM attempts failed")
 
@@ -2782,14 +2787,15 @@ def api_slide_plan():
 
     plan = None
     last_error = None
-    max_attempts = 3
+    max_attempts = 1
     for attempt in range(1, max_attempts + 1):
         try:
             response = call_zai_chat_parallel(
                 "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية.",
                 prompt,
                 max_tokens=4000,
-                attempts=2
+                attempts=2,
+                timeout=60
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
             plan = parse_slide_plan(content, effective_branding, project_data)

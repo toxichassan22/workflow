@@ -4111,6 +4111,21 @@
       return fetch(path, opts).then(handleApiResponse).catch(e => ({ error: 'Network error: ' + e.message }));
     }
 
+    async function apiWithTimeout(method, path, body, timeoutMs = 75000) {
+      let timer;
+      const timeoutResponse = new Promise(resolve => {
+        timer = setTimeout(() => resolve({
+          success: false,
+          error: 'انتهت مهلة إعداد خطة الشرائح. تحقق من خدمة AI ثم أعد المحاولة.'
+        }), timeoutMs);
+      });
+      try {
+        return await Promise.race([api(method, path, body), timeoutResponse]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     const TENANT_NAVIGATION_CONTEXT_PAGES = new Set([
       'tenantProjectPage',
       'tenantMainImagePage',
@@ -7526,7 +7541,7 @@
       if (!tenantSlidePlan) {
         setGenStep('plan', 'active');
         setGenPct(5, 'تحليل بيانات المشروع...');
-        const data = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
+        const data = await apiWithTimeout('POST', '/api/slide-plan', { projectData: tenantProjectData });
         if (data.success && data.plan) {
           tenantSlidePlan = data.plan;
           setGenStep('plan', 'done');
@@ -7554,7 +7569,7 @@
       setGenPct(3, 'حفظ البيانات...');
       await saveProjectAsDraft(true);
       setGenPct(8, 'تحليل بيانات المشروع...');
-      const data = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
+      const data = await apiWithTimeout('POST', '/api/slide-plan', { projectData: tenantProjectData });
       if (data.success && data.plan) {
         tenantSlidePlan = data.plan;
         tenantProjectData.tenantSlidePlan = tenantSlidePlan;
@@ -7606,7 +7621,7 @@
       setGenStep('plan', 'active');
       setGenPct(5, 'تحليل بيانات المشروع...');
       try {
-        const result = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
+        const result = await apiWithTimeout('POST', '/api/slide-plan', { projectData: tenantProjectData });
         if (result.error) {
           setGenStep('plan', 'error');
           toast(result.error);
@@ -7675,7 +7690,7 @@
     async function regenerateTenantSlidePlan() {
       if (!tenantProjectData) return;
       showLoader('جاري إعادة الاقتراح', 'AI يعيد تحليل بيانات المشروع');
-      const data = await api('POST', '/api/slide-plan', { projectData: tenantProjectData });
+      const data = await apiWithTimeout('POST', '/api/slide-plan', { projectData: tenantProjectData });
       hideLoader();
       if (data.success && data.plan) {
         tenantSlidePlan = data.plan;

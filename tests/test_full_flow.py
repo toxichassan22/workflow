@@ -10,7 +10,7 @@ import db
 from app import app as flask_app
 
 
-def mock_call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000):
+def mock_call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300):
     if max_tokens == 4000:
         return {
             'choices': [
