@@ -13,6 +13,7 @@ import requests
 import re
 import hashlib
 import shutil
+import threading
 from urllib.parse import urlparse
 
 # Force UTF-8 stdout so Arabic/unicode OSM tag names don't crash on Windows cp1252
@@ -145,6 +146,8 @@ SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
 ACCESS_ROADS_RENDER_VERSION = 'v2'
 MAP_HIGHLIGHT_RENDER_VERSION = 'overview-only-v1'
+_MAP_GENERATION_LOCKS = {}
+_MAP_GENERATION_LOCKS_GUARD = threading.Lock()
 
 # Rate limiting: max calls per tenant per window (default 60 calls / 10 minutes)
 MAPS_RATE_LIMIT = int(os.environ.get('MAPS_RATE_LIMIT', 60))
@@ -326,6 +329,7 @@ CITY_ALIASES = {
     'مكة': 'مكة', 'مكة المكرمة': 'مكة', 'mecca': 'مكة', 'makkah': 'مكة',
     'الرياض': 'الرياض', 'riyadh': 'الرياض',
 }
+_CURATED_GEOCODE_CACHE = {}
 
 
 def _normalize_city_name(value):
@@ -379,21 +383,73 @@ def detect_curated_city(lat, lng, tenant_id=None):
     return None
 
 
+def get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=None):
+    places = get_nearby_landmarks(
+        lat,
+        lng,
+        radius=radius,
+        max_results=20,
+        include_all=True,
+        included_types=['shopping_mall', 'university', 'hospital'],
+    )
+    if not places.get('success'):
+        return []
+    category_specs = (
+        ('shopping_mall', 'التسوق'),
+        ('university', 'التعليم'),
+        ('hospital', 'الصحة'),
+    )
+    selected = []
+    seen_categories = set()
+    for place in places.get('landmarks', []):
+        types = set(place.get('types') or [])
+        matched = next(((type_name, label) for type_name, label in category_specs if type_name in types), None)
+        if not matched or matched[0] in seen_categories:
+            continue
+        seen_categories.add(matched[0])
+        selected.append({
+            **place,
+            'category': matched[1],
+            'source': 'nearest_category',
+        })
+    matrix = get_drive_matrix((lat, lng), selected) if selected else []
+    for index, item in enumerate(selected):
+        if index >= len(matrix) or not isinstance(matrix[index], dict):
+            continue
+        item['distance_km'] = matrix[index].get('distance_km')
+        item['distance_text'] = matrix[index].get('distance_text')
+        item['duration_minutes'] = matrix[index].get('duration_min')
+    return selected
+
+
 def get_curated_city_landmarks(city, lat, lng, tenant_id=None):
     entries = CURATED_CITY_LANDMARKS.get(city, [])
     if not entries:
         return []
     landmarks = []
     seen = set()
+    entries_to_resolve = []
     for entry in entries:
         name = str(entry.get('name') or '').strip()
-        if not name or name.casefold() in seen:
+        lowered_name = name.casefold()
+        if any(marker in lowered_name for marker in ('أقرب مركز تجاري', 'أقرب جامعة', 'أقرب مستشفى')):
             continue
-        seen.add(name.casefold())
-        geo = geocode_address(f'{name}, {city}, Saudi Arabia', tenant_id=tenant_id)
+        if not name or lowered_name in seen:
+            continue
+        seen.add(lowered_name)
+        entries_to_resolve.append((name, entry))
+
+    def resolve_entry(item):
+        name, entry = item
+        cache_key = (city, name.casefold())
+        geo = _CURATED_GEOCODE_CACHE.get(cache_key)
+        if geo is None:
+            geo = geocode_address(f'{name}, {city}, Saudi Arabia', tenant_id=tenant_id)
+            if geo.get('success'):
+                _CURATED_GEOCODE_CACHE[cache_key] = geo
         if not geo.get('success'):
-            continue
-        item = {
+            return None
+        return {
             'name': name,
             'category': entry.get('category') or 'معلم رئيسي',
             'lat': geo.get('lat'),
@@ -402,7 +458,20 @@ def get_curated_city_landmarks(city, lat, lng, tenant_id=None):
             'source': 'curated',
             'city': city,
         }
+
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        resolved_entries = list(executor.map(resolve_entry, entries_to_resolve))
+    for item in resolved_entries:
+        if not item or item.get('lat') is None or item.get('lng') is None:
+            continue
         item['distance_meters'] = round(_distance_meters(lat, lng, item['lat'], item['lng']))
+        landmarks.append(item)
+    for item in get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=tenant_id):
+        key = item.get('name', '').casefold()
+        if key in seen:
+            continue
+        seen.add(key)
         landmarks.append(item)
     destinations = [item for item in landmarks if item.get('lat') is not None and item.get('lng') is not None]
     matrix = get_drive_matrix((lat, lng), destinations) if destinations else []
@@ -675,7 +744,7 @@ def classify_landmark_category(types):
     return 'اجتماعي/خدمي'
 
 
-def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, include_all=False):
+def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, include_all=False, included_types=None):
     """Find nearby landmarks using Places API (New).
     Filters out irrelevant place types like gas stations, parking, ATMs, etc."""
     if not _has_api_key():
@@ -730,6 +799,8 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
         },
         'maxResultCount': min(max_results * 3, 20),
     }
+    if included_types:
+        body['includedTypes'] = list(included_types)
 
     try:
         response = requests.post(url, headers=headers, json=body, timeout=15)
@@ -1947,7 +2018,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         return False
 
 
-def _get_cached_map_images(tenant_id, presentation_id):
+def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expected_lng=None):
     """Return existing map images for a tenant/presentation if any exist."""
     from db import get_map_images
     existing = get_map_images(tenant_id, presentation_id=presentation_id)
@@ -1979,6 +2050,19 @@ def _get_cached_map_images(tenant_id, presentation_id):
         for image_type in found_types
     ):
         return None
+    locations = set()
+    for metadata in metadata_by_type.values():
+        try:
+            if metadata.get('lat') is not None and metadata.get('lng') is not None:
+                locations.add((round(float(metadata.get('lat')), 6), round(float(metadata.get('lng')), 6)))
+        except (TypeError, ValueError):
+            return None
+    if len(locations) > 1:
+        return None
+    if expected_lat is not None and expected_lng is not None and locations:
+        cached_lat, cached_lng = next(iter(locations))
+        if abs(cached_lat - float(expected_lat)) >= 1e-5 or abs(cached_lng - float(expected_lng)) >= 1e-5:
+            return None
     found_base = {t.split('_')[0] for t in found_types}
     meta = next((m for t, m in metadata_by_type.items() if t.startswith('overview')), None)
     if meta is None:
@@ -2003,6 +2087,15 @@ def _get_cached_map_images(tenant_id, presentation_id):
 
 
 def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):
+    effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None) or (project_data or {}).get('draft_id') or (project_data or {}).get('draftId') or 'unscoped'
+    lock_key = (str(tenant_id), str(effective_id))
+    with _MAP_GENERATION_LOCKS_GUARD:
+        lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
+    with lock:
+        return _generate_all_map_images(project_data, tenant_id, presentation_id, force, branding, draft_id, highlight_site)
+
+
+def _generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):
     """
     Generate all map images needed for a project.
     Returns dict of placeholder -> file_path.
@@ -2068,7 +2161,7 @@ def generate_all_map_images(project_data, tenant_id, presentation_id=None, force
             return False
 
     if not force and effective_pres_id:
-        cached = _get_cached_map_images(tenant_id, effective_pres_id)
+        cached = _get_cached_map_images(tenant_id, effective_pres_id, expected_lat=lat, expected_lng=lng)
         if cached and _close(cached.get('lat'), lat) and _close(cached.get('lng'), lng):
             found_base = cached.get('found_base') or set()
             required_base = {t for t in enabled_maps if t not in ('streetview',)}

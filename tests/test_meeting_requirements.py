@@ -56,6 +56,25 @@ class MeetingRequirementsTests(unittest.TestCase):
     def _headers(token):
         return {'Authorization': f'Bearer {token}'}
 
+    def test_nearest_category_landmarks_return_real_names(self):
+        places = [
+            {'name': 'مول حقيقي', 'types': ['shopping_mall'], 'lat': 24.01, 'lng': 46.01, 'distance_meters': 1000},
+            {'name': 'جامعة حقيقية', 'types': ['university'], 'lat': 24.02, 'lng': 46.02, 'distance_meters': 2000},
+            {'name': 'مستشفى حقيقي', 'types': ['hospital'], 'lat': 24.03, 'lng': 46.03, 'distance_meters': 3000},
+        ]
+        with patch.object(self.application_module.maps_service, 'get_nearby_landmarks', return_value={
+            'success': True, 'landmarks': places
+        }), patch.object(self.application_module.maps_service, 'get_drive_matrix', return_value=[
+            {'distance_km': 1.0, 'distance_text': '1 كم', 'duration_min': 3},
+            {'distance_km': 2.0, 'distance_text': '2 كم', 'duration_min': 5},
+            {'distance_km': 3.0, 'distance_text': '3 كم', 'duration_min': 7},
+        ]):
+            result = self.application_module.maps_service.get_nearest_category_landmarks(24.0, 46.0)
+
+        self.assertEqual([item['name'] for item in result], ['مول حقيقي', 'جامعة حقيقية', 'مستشفى حقيقي'])
+        self.assertEqual([item['category'] for item in result], ['التسوق', 'التعليم', 'الصحة'])
+        self.assertEqual(result[1]['duration_minutes'], 5)
+
     def test_fresh_database_has_meeting_columns(self):
         """Fresh initialization no longer executes multiple DDL statements incorrectly."""
         with self.app.app_context():

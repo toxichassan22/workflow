@@ -578,6 +578,7 @@ DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}
 PREBUILT_FIELDS = [
     {'key': 'project_name', 'label': 'اسم المشروع', 'type': 'text', 'required': True, 'section_key': 'basic', 'ai_hint': 'اسم المشروع الرئيسي', 'sort_order': 1},
     {'key': 'project_type', 'label': 'نوع المشروع', 'type': 'select', 'options': ['سكني', 'تجاري', 'صناعي', 'سياحي', 'زراعي', 'مختلط'], 'section_key': 'basic', 'ai_hint': 'نوع المشروع العقاري', 'sort_order': 2},
+    {'key': 'project_idea', 'label': 'فكرة المشروع', 'type': 'textarea', 'section_key': 'basic', 'ai_hint': 'الفكرة الأساسية للمشروع، مكوناته، قيمته، والجمهور المستهدف', 'sort_order': 3},
     {'key': 'location_address', 'label': 'رابط موقع المشروع في Google Maps', 'type': 'text', 'section_key': 'location', 'ai_hint': 'رابط Google Maps مباشر لموقع المشروع', 'sort_order': 3},
     {'key': 'location_lat', 'label': 'خط العرض (Latitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط العرض للموقع (إختياري)', 'sort_order': 4},
     {'key': 'location_lng', 'label': 'خط الطول (Longitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط الطول للموقع (إختياري)', 'sort_order': 5},

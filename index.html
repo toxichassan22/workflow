@@ -6662,7 +6662,15 @@
       }, 700);
     }
 
-    async function saveProjectAsDraft(silent = false) {
+    let draftSaveChain = Promise.resolve();
+
+    function saveProjectAsDraft(silent = false) {
+      const task = () => saveProjectAsDraftNow(silent);
+      draftSaveChain = draftSaveChain.catch(() => undefined).then(task);
+      return draftSaveChain;
+    }
+
+    async function saveProjectAsDraftNow(silent = false) {
       try {
         Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
         const data = await collectTenantFormData();
@@ -6769,10 +6777,12 @@
         return;
       }
       const analysisKeys = [
-        'project_name', 'project_type', 'location_address', 'location_maps_link', 'maps_link',
-        'location_detail', 'location_lat', 'location_lng', 'main_roads', 'secondary_roads',
-        'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks', 'catchment_areas',
-        'population_density', 'population_density_source', 'location_polygon'
+        'project_name', 'project_type', 'project_idea', 'description', 'project_description',
+        'project_features', 'investment_opportunities', 'target_audience', 'location_address',
+        'location_maps_link', 'maps_link', 'location_detail', 'location_lat', 'location_lng',
+        'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
+        'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
+        'land_area', 'built_area', 'building_system', 'infrastructure', 'location_polygon'
       ];
       const analysisProjectData = {};
       analysisKeys.forEach(key => {
@@ -7294,7 +7304,9 @@
           toast(data.error || 'تعذر جلب معلومات المعالم');
           return;
         }
-        tenantNearbyLandmarks = data.landmarks || selectedLandmarks;
+        tenantNearbyLandmarks = Array.isArray(data.landmarks) && data.landmarks.length
+          ? data.landmarks
+          : selectedLandmarks;
         const lines = tenantNearbyLandmarks.map(item => {
           const parts = [item.name || 'معلم'];
           if (item.category) parts.push(item.category);

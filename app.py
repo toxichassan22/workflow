@@ -2984,6 +2984,8 @@ def api_preview_map_data():
     filtered_landmarks = []
     for lm in landmarks:
         if lm.get('lat') is None or lm.get('lng') is None:
+            lm['location_status'] = 'unresolved'
+            filtered_landmarks.append(lm)
             continue
         dist_m = maps_service._distance_meters(lat, lng, lm['lat'], lm['lng'])
         if dist_m < 50 or dist_m > landmark_radius_m:
@@ -3192,6 +3194,11 @@ def api_analyze_site():
     else:
         city = maps_service.get_nearby_landmarks(lat, lng, radius=5000, max_results=20, include_all=True)
         city_items = city.get('landmarks', []) if city.get('success') else []
+        existing_city_names = {item.get('name', '').casefold() for item in city_items}
+        city_items.extend(
+            item for item in maps_service.get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=g.tenant_id)
+            if item.get('name', '').casefold() not in existing_city_names
+        )
     roads = maps_service.discover_nearby_roads(lat, lng, tenant_id=g.tenant_id, max_results=6)
     enrich_road_metrics(roads)
 
@@ -3350,10 +3357,12 @@ def api_site_analysis():
     data = request.json or {}
     raw_project_data = clean_project_data(data.get('projectData', {}))
     analysis_keys = (
-        'project_name', 'project_type', 'location_address', 'location_maps_link', 'maps_link',
-        'location_detail', 'location_lat', 'location_lng', 'main_roads', 'secondary_roads',
-        'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks', 'catchment_areas',
-        'population_density', 'population_density_source', 'location_polygon'
+        'project_name', 'project_type', 'project_idea', 'description', 'project_description',
+        'project_features', 'investment_opportunities', 'target_audience', 'location_address',
+        'location_maps_link', 'maps_link', 'location_detail', 'location_lat', 'location_lng',
+        'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
+        'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
+        'land_area', 'built_area', 'building_system', 'infrastructure', 'location_polygon'
     )
     project_data = {
         key: raw_project_data.get(key)
@@ -3365,9 +3374,11 @@ def api_site_analysis():
     prompt = f"""اكتب تحليلًا عربيًا احترافيًا لموقع مشروع عقاري اعتمادًا على البيانات التالية فقط.
 
 المطلوب:
-- اكتب من 120 إلى 180 كلمة في فقرتين أو ثلاث.
-- اذكر طبيعة الموقع، الإحداثيات أو العنوان، طرق الوصول، المعالم القريبة وأنواعها، والمسافات/أوقات القيادة إن وجدت.
-- اذكر نطاق التأثير أو المناطق المهمة فقط إذا كانت موجودة في البيانات.
+- اكتب من 160 إلى 230 كلمة في فقرتين أو ثلاث.
+- ابدأ بوصف طبيعة الموقع وموقعه الاستراتيجي وعلاقته بالمدينة والمحيط العمراني، وليس بسرد المسافات فقط.
+- اربط صلاحية الموقع بنوع المشروع وفكرته والجمهور المستهدف، واذكر فرص الاستخدام أو الاستثمار المناسبة إذا كانت مدعومة بالبيانات.
+- استخدم بيانات الكثافة السكانية، العنوان التفصيلي، الطرق، البنية التحتية، المعالم القريبة، معالم المدينة، ونطاق التأثير إذا كانت متاحة.
+- استخدم المسافات وأوقات القيادة كدليل داخل التحليل، وليس كموضوع التحليل الوحيد.
 - لا تخترع كثافة سكانية أو أرقامًا أو مزايا غير موجودة.
 - لا تستخدم عناوين أو نقاط تعداد؛ أعد نصًا عربيًا جاهزًا للعرض.
 
