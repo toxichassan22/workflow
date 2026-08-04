@@ -3981,7 +3981,7 @@
         }
       }
 
-      triggerAutoSaveDraft();
+      await saveProjectAsDraft(true);
       if (ownsGlobalLoader) hideLoader();
       return tenantCreativeImages;
     }
@@ -5727,7 +5727,11 @@
       if (source.location_lat && source.location_lng && storedMaps) {
         selectMapPreviewView('overview');
       } else if (source.location_lat && source.location_lng) {
-        previewProjectMap();
+        const hint = document.getElementById('mapPreviewHint');
+        if (hint) {
+          hint.textContent = 'لا توجد خرائط محفوظة لهذه المسودة. اضغط «تحليل الموقع» أو «توليد الخريطة» عند الحاجة.';
+          hint.style.display = 'block';
+        }
       }
       window._lastAnalyzedAddress = (source.location_address || '').trim();
     }
