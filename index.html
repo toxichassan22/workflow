@@ -2660,12 +2660,331 @@
       }
     }
 
-    /* keep header action buttons from sitting flush against the rail */
-    body.tgr-on .tenant-topbar,
-    body.tgr-on .ge-topbar {
-      padding-right: 12px;
+    /* ==========================================================================
+       THE VIEW Financial Study Model - Complete 1:1 CSS Styling Engine
+       ========================================================================== */
+    .project-form-content #section-financial-calc.tenant-form-section.active,
+    #tenantProjectForm #section-financial-calc.active,
+    #section-financial-calc.active,
+    #section-financial-calc {
+      --p: #123B6D;
+      --pd: #082646;
+      --blue: #5d9ac8;
+      --g: #a7a9ac;
+      --bg: #f4f7fa;
+      --card: #fff;
+      --txt: #252525;
+      --muted: #6f7780;
+      --line: #e8ded6;
+      --soft: #fbf7f4;
+      --taupe: #a9847a;
+      --beige: #d7c6ae;
+      --green: #0d7b55;
+      --orange: #a65b00;
+      --shadow: 0 18px 45px rgba(72,30,12,.10);
+      --r: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, Arial, sans-serif !important;
+      color: #252525 !important;
+      line-height: 1.65 !important;
+      display: block !important;
+      grid-template-columns: none !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      background: #fff !important;
+      border: 1px solid #e8ded6 !important;
+      border-radius: 20px !important;
+      padding: 28px !important;
+      box-shadow: 0 18px 45px rgba(72,30,12,.10) !important;
+      margin: 0 auto 24px !important;
     }
-
+    .project-form-content #section-financial-calc.tenant-form-section:not(.active) {
+      display: none !important;
+    }
+    #section-financial-calc .tenant-section-title {
+      font-size: 28px !important;
+      color: #123B6D !important;
+      margin: 0 0 6px !important;
+      font-weight: 900 !important;
+      display: block !important;
+      width: 100% !important;
+    }
+    #section-financial-calc .hint {
+      color: #6f7780 !important;
+      margin: 6px 0 20px !important;
+      font-size: 14.5px !important;
+      display: block !important;
+      width: 100% !important;
+      line-height: 1.6 !important;
+    }
+    #section-financial-calc .finance-block {
+      border: 1px solid #e8ded6 !important;
+      border-radius: 18px !important;
+      padding: 22px !important;
+      background: #fffdfb !important;
+      margin: 20px 0 !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+      display: block !important;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.02) !important;
+    }
+    #section-financial-calc .finance-block h3 {
+      margin: 0 0 16px !important;
+      color: #111111 !important;
+      font-size: 20px !important;
+      font-weight: 800 !important;
+      border-bottom: 2px solid #eef5fb !important;
+      padding-bottom: 8px !important;
+    }
+    #section-financial-calc .grid {
+      display: grid !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 16px !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+    }
+    #section-financial-calc .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+    #section-financial-calc .grid.four {
+      grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    }
+    #section-financial-calc .full {
+      grid-column: 1 / -1 !important;
+    }
+    #section-financial-calc .grid > div {
+      min-width: 0 !important;
+    }
+    #section-financial-calc label {
+      display: block !important;
+      font-size: 13px !important;
+      color: #5b5652 !important;
+      font-weight: 900 !important;
+      margin-bottom: 6px !important;
+      white-space: normal !important;
+      line-height: 1.4 !important;
+    }
+    #section-financial-calc input,
+    #section-financial-calc textarea,
+    #section-financial-calc select {
+      width: 100% !important;
+      min-width: 0 !important;
+      border: 1px solid #e8ded6 !important;
+      border-radius: 13px !important;
+      background: #ffffff !important;
+      padding: 12px 14px !important;
+      font-size: 15px !important;
+      outline: none !important;
+      font-family: inherit !important;
+      box-sizing: border-box !important;
+      color: #252525 !important;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease !important;
+    }
+    #section-financial-calc textarea {
+      min-height: 96px !important;
+      resize: vertical !important;
+    }
+    #section-financial-calc input:focus,
+    #section-financial-calc textarea:focus,
+    #section-financial-calc select:focus {
+      border-color: #123B6D !important;
+      box-shadow: 0 0 0 3px rgba(18,59,109,.12) !important;
+    }
+    #section-financial-calc .help {
+      display: block !important;
+      margin-top: 6px !important;
+      font-size: 11.5px !important;
+      color: #777777 !important;
+      background: #fbf7f4 !important;
+      border: 1px solid #efe5dd !important;
+      border-radius: 10px !important;
+      padding: 6px 8px !important;
+      line-height: 1.4 !important;
+    }
+    #section-financial-calc .help.input::before {
+      content: "مدخل: " !important;
+      font-weight: 900 !important;
+      color: #123B6D !important;
+    }
+    #section-financial-calc .help.calc::before {
+      content: "محسوب: " !important;
+      font-weight: 900 !important;
+      color: #0d7b55 !important;
+    }
+    #section-financial-calc .help.formula::before {
+      content: "الفورمولا: " !important;
+      font-weight: 900 !important;
+      color: #1e5b92 !important;
+    }
+    #section-financial-calc .table-wrap {
+      overflow-x: auto !important;
+      border: 1px solid #e8ded6 !important;
+      border-radius: 16px !important;
+      background: #ffffff !important;
+      margin-top: 12px !important;
+      width: 100% !important;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.02) !important;
+    }
+    #section-financial-calc table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      min-width: 950px !important;
+    }
+    #section-financial-calc th {
+      background: #123B6D !important;
+      color: #ffffff !important;
+      padding: 12px 10px !important;
+      font-size: 13px !important;
+      font-weight: 700 !important;
+      white-space: nowrap !important;
+      text-align: right !important;
+    }
+    #section-financial-calc td {
+      border-bottom: 1px solid #e8ded6 !important;
+      padding: 10px 8px !important;
+      vertical-align: top !important;
+      text-align: right !important;
+      font-size: 14px !important;
+    }
+    #section-financial-calc td input,
+    #section-financial-calc td select {
+      padding: 8px 10px !important;
+      border-radius: 10px !important;
+      border: 1px solid #e8ded6 !important;
+      font-size: 13.5px !important;
+    }
+    #section-financial-calc .table-wrap input { min-width: 145px !important; }
+    #section-financial-calc .table-wrap input[type="text"] { min-width: 175px !important; }
+    #section-financial-calc .table-wrap select { min-width: 175px !important; }
+    #section-financial-calc .row-actions {
+      display: flex !important;
+      gap: 5px !important;
+      align-items: center !important;
+      justify-content: center !important;
+      white-space: nowrap !important;
+    }
+    #section-financial-calc .row-actions .btn { padding: 6px 9px !important; }
+    #section-financial-calc .compact-table { min-width: 620px !important; }
+    #section-financial-calc .calculation-note {
+      background: #edf5fb !important;
+      border-right: 4px solid #123B6D !important;
+      padding: 10px 12px !important;
+      border-radius: 12px !important;
+      color: #36546d !important;
+      font-size: 12px !important;
+      margin: 10px 0 !important;
+    }
+    #section-financial-calc .numeric-input {
+      direction: ltr !important;
+      text-align: right !important;
+      font-variant-numeric: tabular-nums !important;
+    }
+    #section-financial-calc .readonly-highlight {
+      background: #eef5fb !important;
+      color: #082646 !important;
+      font-weight: 900 !important;
+    }
+    #section-financial-calc .cards {
+      display: grid !important;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+      gap: 14px !important;
+      margin-top: 16px !important;
+      width: 100% !important;
+    }
+    #section-financial-calc .metric {
+      background: #fbf7f4 !important;
+      border: 1px solid #e8ded6 !important;
+      border-radius: 16px !important;
+      padding: 16px !important;
+      transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+    }
+    #section-financial-calc .metric:hover {
+      transform: translateY(-2px) !important;
+      box-shadow: 0 6px 18px rgba(18,59,109,0.06) !important;
+    }
+    #section-financial-calc .metric span {
+      display: block !important;
+      color: #6f7780 !important;
+      font-size: 12px !important;
+      font-weight: 800 !important;
+      margin-bottom: 4px !important;
+    }
+    #section-financial-calc .metric strong {
+      display: block !important;
+      font-size: 22px !important;
+      color: #123B6D !important;
+      font-weight: 900 !important;
+    }
+    #section-financial-calc .btn {
+      border: 0 !important;
+      border-radius: 14px !important;
+      padding: 12px 18px !important;
+      font-weight: 800 !important;
+      cursor: pointer !important;
+      background: #eee !important;
+      color: #222 !important;
+      font-family: inherit !important;
+      font-size: 13.5px !important;
+      transition: filter 0.15s !important;
+    }
+    #section-financial-calc .btn:hover {
+      filter: brightness(0.95) !important;
+    }
+    #section-financial-calc .btn.primary { background: #123B6D !important; color: #fff !important; }
+    #section-financial-calc .btn.ghost { background: #fbf7f4 !important; border: 1px solid #e8ded6 !important; color: #433 !important; }
+    #section-financial-calc .btn.danger { background: #fff1f1 !important; color: #8b0e0e !important; border: 1px solid #ffd0d0 !important; }
+    #section-financial-calc .btn.green { background: #0d7b55 !important; color: #fff !important; }
+    #section-financial-calc .btn.small { padding: 8px 12px !important; border-radius: 11px !important; font-size: 12px !important; }
+    #section-financial-calc .section-switch {
+      background: #eef5fb !important;
+      border: 1px solid #c9dceb !important;
+      border-radius: 14px !important;
+      padding: 14px !important;
+      margin-bottom: 14px !important;
+    }
+    #section-financial-calc .section-switch label {
+      color: #082646 !important;
+      font-weight: 800 !important;
+    }
+    #section-financial-calc .validation-panel {
+      margin-top: 12px !important;
+      padding: 12px 14px !important;
+      border-radius: 13px !important;
+      font-weight: 800 !important;
+      background: #edf7f3 !important;
+      border: 1px solid #b9e1d1 !important;
+      color: #126247 !important;
+    }
+    #section-financial-calc .validation-panel.error {
+      background: #fff0f0 !important;
+      border-color: #efb3b3 !important;
+      color: #9c1d1d !important;
+    }
+    #section-financial-calc .sensitivity-base-value {
+      display: block !important;
+      min-width: 150px !important;
+      padding: 9px 10px !important;
+      border-radius: 10px !important;
+      background: #eaf2fb !important;
+      color: #082646 !important;
+      font-weight: 900 !important;
+      text-align: center !important;
+    }
+    #section-financial-calc .formula-tag {
+      display: inline-flex !important;
+      border-radius: 999px !important;
+      background: #eef6ff !important;
+      color: #1e5b92 !important;
+      font-weight: 900 !important;
+      font-size: 11px !important;
+      padding: 4px 9px !important;
+      margin: 0 0 8px !important;
+    }
+    #section-financial-calc .cf-sales { background: #f4fbf7 !important; }
+    #section-financial-calc .cf-rental { background: #f4f8fc !important; }
+    #section-financial-calc .cf-grace { background: #fff8f4 !important; }
+    #section-financial-calc .cf-fund { background: #faf4fc !important; }
+    #section-financial-calc .cf-finance { background: #fffdf4 !important; }
   </style>
   <style id="zai-global-styles"></style>
 </head>
