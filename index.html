@@ -2256,6 +2256,22 @@
       grid-column: 1 / -1;
     }
 
+    /* Absolute override for #section-financial-calc layout */
+    .project-form-content #section-financial-calc.tenant-form-section.active,
+    #tenantProjectForm #section-financial-calc.active,
+    #section-financial-calc.active,
+    #section-financial-calc {
+      display: block !important;
+      grid-template-columns: none !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+    }
+    .project-form-content #section-financial-calc.tenant-form-section:not(.active) {
+      display: none !important;
+    }
+
+
     .workflow-stage-layout {
       display: grid;
       grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
