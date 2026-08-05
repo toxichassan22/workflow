@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>منصة العروض التقديمية | مولّد عروض المشاريع</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'></text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
@@ -3004,16 +3004,16 @@
               <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
                 <button class="btn primary" onclick="generateTenantMainImageFromPrompt()"
                   style="background:#3B6E91;color:#fff;border:none;padding:10px 20px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;">
-                  🎨 توليد الصورة
+                   توليد الصورة
                 </button>
                 <button id="approveMainImageBtn" class="btn primary" onclick="approveTenantMainImage()"
                   style="background:#2e7d32;color:#fff;border:none;padding:10px 20px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;">
-                  ✅ إعتماد الصورة الرئيسية
+                   إعتماد الصورة الرئيسية
                 </button>
                 <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ صفحة الصورة كمسودة</button>
                 <button class="btn ghost" onclick="refreshImagePromptsWithGLM()"
                   style="border:1px solid #cbd5e1;padding:10px 16px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;font-size:12px;margin-right:auto;">
-                  🤖 إعادة صياغة الوصف بـ GLM 5.1
+                   إعادة صياغة الوصف بـ GLM 5.1
                 </button>
               </div>
             </div>
@@ -3021,7 +3021,7 @@
 
           <div class="tenant-btns" style="display:flex;gap:12px;justify-content:space-between;">
             <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">⬅ عودة لبيانات المشروع</button>
-            <button class="btn primary" onclick="goToTenantMoodboard()">التالي: صور المود بورد ➔</button>
+            <button class="btn primary" onclick="goToTenantMoodboard()">التالي: صور المود بورد </button>
           </div>
         </div>
       </div>
@@ -3040,7 +3040,7 @@
           <div class="tenant-btns" style="display:flex;gap:12px;justify-content:space-between;margin-top:20px;">
             <button class="btn ghost" onclick="goToTenantMainImage()">⬅ عودة للصورة الرئيسية</button>
             <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ صفحة المود بورد كمسودة</button>
-            <button class="btn primary" onclick="generateTenantSlides()">🚀 توليد العرض والتصميم</button>
+            <button class="btn primary" onclick="generateTenantSlides()"> توليد العرض والتصميم</button>
           </div>
         </div>
       </div>
@@ -3065,7 +3065,7 @@
 
           <div class="tenant-dropdown slide-toolbar-dropdown" data-permission="create_presentation">
             <button type="button" class="btn slide-toolbar-btn" onclick="toggleTenantDropdown(this)" aria-haspopup="true">
-              إعدادات العرض <span aria-hidden="true">⌄</span>
+              إعدادات العرض <span aria-hidden="true"></span>
             </button>
             <div class="tenant-dropdown-menu">
               <button type="button" class="btn ghost" data-permission="company_settings"
@@ -3082,7 +3082,7 @@
 
           <div class="tenant-dropdown slide-toolbar-dropdown tenant-admin-only" data-permission="export_files">
             <button type="button" class="btn slide-toolbar-btn" onclick="toggleTenantDropdown(this)" aria-haspopup="true">
-              تصدير <span aria-hidden="true">⌄</span>
+              تصدير <span aria-hidden="true"></span>
             </button>
             <div class="tenant-dropdown-menu">
               <button type="button" class="btn ghost" onclick="exportTenantSlides('pdf'); closeTenantDropdown()">تصدير PDF</button>
@@ -3139,7 +3139,7 @@
     </section>
 
     <!-- Tenant Global Rail — fixed right sidebar for workflow navigation & inputs -->
-    <aside id="tenantGlobalRail" class="tgr" aria-label="شريط التنقل العام">
+    <aside id="tenantGlobalRail" class="tgr" style="display:none !important;" aria-label="شريط التنقل العام">
       <div class="tgr-head">
         <button class="tgr-toggle" onclick="toggleGlobalRail()" title="طي/فتح الشريط">طي</button>
         <div class="tgr-tabs">
@@ -4261,8 +4261,9 @@
 
     const TENANT_WORKFLOW_ITEMS = [
       { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
-      { pageId: 'tenantMainImagePage', label: 'توليد الصورة الرئيسية' },
-      { pageId: 'tenantMoodboardPage', label: 'توليد المود بورد' },
+      { pageId: 'tenantMainImagePage', label: 'الصورة الرئيسية' },
+      { pageId: 'tenantMoodboardPage', label: 'المود بورد' },
+      { pageId: 'tenantSlidesPage', label: 'صفحة التصميم والمعاينة' }
     ];
 
     async function navigateTenantWorkflow(pageId) {
@@ -4271,12 +4272,8 @@
         return;
       }
       if (pageId === 'tenantSlidesPage') {
-        if (tenantSlidesData && tenantSlidesData.length) {
-          renderTenantSlides();
-          showTenantPage('tenantSlidesPage');
-        } else {
-          toast('قم بتوليد الشرائح التقديمية أولاً');
-        }
+        if (typeof renderTenantSlides === 'function') renderTenantSlides();
+        showTenantPage('tenantSlidesPage');
         return;
       }
       if (pageId === 'tenantMainImagePage') {
@@ -4309,9 +4306,6 @@
       }
 
       const items = [...TENANT_WORKFLOW_ITEMS];
-      if (tenantSlidesData && tenantSlidesData.length && !items.some(i => i.pageId === 'tenantSlidesPage')) {
-        items.push({ pageId: 'tenantSlidesPage', label: 'الشرائح التقديمية' });
-      }
 
       items
         .filter(item => includeProject || item.pageId !== 'tenantProjectPage')
@@ -6143,8 +6137,9 @@
       let lngInput = null;
       let locationSection = null;
 
-      const sectionOrder = tenantFieldSections.map(s => s.key).concat(['general']);
+      const sectionOrder = ['basic', 'land_croquis', 'location'];
       sectionOrder.forEach(sectionKey => {
+
         const sectionFields = grouped[sectionKey];
         if (!sectionFields || !sectionFields.length) return;
         if (sectionKey !== 'general' && !tenantAllowedFieldSections[sectionKey]) return; // hide unauthorized section
@@ -6201,6 +6196,11 @@
                 input.appendChild(option);
               }
             });
+          } else if (f.fieldType === 'pdf' || f.fieldType === 'file' || f.fieldKey === 'croquis_file' || f.fieldKey === 'building_permit_file') {
+            input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp';
+            input.dataset.filetype = 'pdf';
           } else if (f.fieldType === 'image') {
             input = document.createElement('input');
             input.type = 'file';
@@ -6262,6 +6262,78 @@
             });
           }
           div.appendChild(input);
+          if (f.fieldType === 'select') {
+            const otherInput = document.createElement('input');
+            otherInput.type = 'text';
+            otherInput.placeholder = 'اكتب التحديد المخصص بالتفصيل...';
+            otherInput.style.cssText = 'margin-top:10px;display:none;width:100%;padding:10px 14px;border:1px solid #3b6e91;border-radius:10px;background:#f8fafc;font-family:inherit;font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,0.05);';
+            otherInput.dataset.key = f.fieldKey + '_other';
+            otherInput.dataset.type = 'text';
+            if (tenantProjectData && tenantProjectData[f.fieldKey + '_other']) {
+              otherInput.value = tenantProjectData[f.fieldKey + '_other'];
+            }
+            const checkOther = () => {
+              const val = (input.value || '').trim();
+              const isOther = val === 'أخرى' || val.startsWith('أخرى');
+              otherInput.style.display = isOther ? 'block' : 'none';
+              if (isOther && f.isRequired) otherInput.required = true;
+              else otherInput.required = false;
+            };
+            input.addEventListener('change', checkOther);
+            input.addEventListener('input', checkOther);
+            otherInput.addEventListener('input', () => {
+              if (tenantProjectData) tenantProjectData[f.fieldKey + '_other'] = otherInput.value;
+              if (typeof triggerAutoSaveDraft === 'function') triggerAutoSaveDraft();
+            });
+            div.appendChild(otherInput);
+            checkOther();
+          }
+
+          if (f.fieldKey === 'croquis_file') {
+            const extractBtn = document.createElement('button');
+            extractBtn.type = 'button';
+            extractBtn.className = 'btn primary small';
+            extractBtn.textContent = ' قراءة واستخراج بيانات الكروكي بالذكاء الاصطناعي';
+            extractBtn.style.cssText = 'margin-top:8px;';
+            extractBtn.onclick = () => extractTenantCroquisData('croquis_file');
+            div.appendChild(extractBtn);
+          }
+
+          if (f.fieldKey === 'building_permit_file') {
+            const extractBtn = document.createElement('button');
+            extractBtn.type = 'button';
+            extractBtn.className = 'btn primary small';
+            extractBtn.textContent = ' قراءة واستخراج رخصة البناء والاشتراطات بالذكاء الاصطناعي';
+            extractBtn.style.cssText = 'margin-top:8px;';
+            extractBtn.onclick = () => extractTenantCroquisData('building_permit_file');
+            div.appendChild(extractBtn);
+          }
+
+          if (f.fieldKey === 'croquis_expiry_date') {
+            const statusBadge = document.createElement('div');
+            statusBadge.id = 'croquisExpiryBadge';
+            statusBadge.style.cssText = 'display:none; margin-top:6px; font-weight:bold; font-size:0.85rem; padding:4px 8px; border-radius:4px; text-align:right;';
+            function updateExpiryStatus() {
+              if (!input.value) { statusBadge.style.display = 'none'; return; }
+              const expDate = new Date(input.value);
+              const today = new Date();
+              today.setHours(0,0,0,0);
+              statusBadge.style.display = 'block';
+              if (expDate < today) {
+                statusBadge.style.background = '#ffebee';
+                statusBadge.style.color = '#c62828';
+                statusBadge.textContent = 'تنبيه: الكروكي منتهي الصلاحية';
+              } else {
+                statusBadge.style.background = '#e8f5e9';
+                statusBadge.style.color = '#2e7d32';
+                statusBadge.textContent = 'الكروكي ساري الصلاحية';
+              }
+            }
+            input.addEventListener('change', updateExpiryStatus);
+            input.addEventListener('input', updateExpiryStatus);
+            div.appendChild(statusBadge);
+            setTimeout(updateExpiryStatus, 150);
+          }
 
           // Add geocode button and auto-geocode on blur
           if (f.fieldKey === 'location_address' && addressInput) {
@@ -6682,7 +6754,7 @@
       if (badge) {
         badge.style.background = '#fef3c7';
         badge.style.color = '#92400e';
-        badge.innerHTML = '⏳ جاري الحفظ تلقائياً...';
+        badge.innerHTML = ' جاري الحفظ تلقائياً...';
       }
       clearTimeout(autoSaveDraftTimer);
       autoSaveDraftTimer = setTimeout(() => {
@@ -6795,6 +6867,71 @@
       } else {
         toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر أو عنوان نصي');
       }
+    }
+
+    async function extractTenantCroquisData(targetKey = 'croquis_file') {
+      const fileInput = document.querySelector('#tenantProjectForm [data-key="' + targetKey + '"]');
+      let fileData = tenantProjectData[targetKey] || '';
+      if (fileInput && fileInput.files && fileInput.files[0]) {
+        fileData = await fileToDataUri(fileInput.files[0]);
+      }
+      if (!fileData) {
+        const labelText = targetKey === 'building_permit_file' ? 'صورة/ملف رخصة البناء' : 'صورة/ملف الكروكي';
+        toast('يرجى اختيار ' + labelText + ' أولاً');
+        return;
+      }
+      const titleText = targetKey === 'building_permit_file' ? 'تحليل رخصة البناء والاشتراطات' : 'تحليل واستخراج بيانات الكروكي';
+      showLoader(titleText, 'جاري قراءة وتدقيق الاشتراطات والمساحات بالذكاء الاصطناعي...', 10);
+      try {
+        updateLoaderProgress(40, 'جاري تحليل الأبعاد والاشتراطات الهندسية والرسمية...');
+        const res = await api('POST', '/api/extract-croquis', { fileData: fileData });
+        if (res.success && res.extractedData) {
+          const data = res.extractedData;
+          Object.entries(data).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && v !== '') {
+              tenantProjectData[k] = v;
+              const inp = document.querySelector('#tenantProjectForm [data-key="' + k + '"]');
+              if (inp) inp.value = v;
+            }
+          });
+          updateLoaderProgress(100, 'تم استخراج البيانات بنجاح! راجع البيانات ثم اعتمدها.');
+          toast('تم استخراج بيانات الكروكي بنجاح. يرجى مراجعتها واعتمادها.');
+          triggerAutoSaveDraft();
+        } else {
+          toast(res.error || 'تعذر استخراج البيانات من الكروكي');
+        }
+      } catch (err) {
+        toast('حدث خطأ أثناء قراءة الكروكي: ' + (err.message || err));
+      } finally {
+        hideLoader('اكتمل استخراج البيانات');
+      }
+    }
+
+    function toggleApproveCroquisData() {
+      const inputs = document.querySelectorAll('#tenantProjectForm [data-section="land_croquis"] input, #tenantProjectForm [data-section="land_croquis"] select, #tenantProjectForm [data-section="land_croquis"] textarea');
+      const btn = document.getElementById('approveCroquisBtn');
+      if (!btn) return;
+      const isApproved = btn.classList.contains('approved');
+      if (!isApproved) {
+        inputs.forEach(inp => {
+          if (inp.dataset.key !== 'approved_financial_area') {
+            inp.disabled = true;
+          }
+        });
+        btn.classList.add('approved');
+        btn.style.background = '#2e7d32';
+        btn.textContent = 'تم الاعتماد (اضغط لفتح التعديل)';
+        tenantProjectData.croquis_approved = true;
+        toast('تم اعتماد بيانات الأرض والكروكي وقفل النسخة المعتمدة');
+      } else {
+        inputs.forEach(inp => inp.disabled = false);
+        btn.classList.remove('approved');
+        btn.style.background = '';
+        btn.textContent = 'اعتماد وقفل البيانات المعتمدة';
+        tenantProjectData.croquis_approved = false;
+        toast('تم فتح التعديل على بيانات الأرض والكروكي');
+      }
+      triggerAutoSaveDraft();
     }
 
     async function generateTenantSiteAnalysis() {
@@ -7455,7 +7592,7 @@
         }).join('');
 
         box.innerHTML = `
-          <div style="margin-bottom:8px;"><strong>📍 المعالم والمواقع المحسوبة للقيادة:</strong></div>
+          <div style="margin-bottom:8px;"><strong> المعالم والمواقع المحسوبة للقيادة:</strong></div>
           ${itemsHtml}
           <button type="button" class="btn secondary sm" style="margin-top:10px;" onclick="applyPreviewedLandmarksToForm()">اعتماد المعالم للفورم</button>
         `;
@@ -7641,9 +7778,9 @@
         const key = input.dataset.key;
         if (!key) continue;
         const type = input.dataset.type;
-        if (type === 'image') {
+        if (type === 'image' || type === 'pdf' || type === 'file') {
           if (input.files && input.files[0]) result[key] = await fileToDataUri(input.files[0]);
-          else result[key] = '';
+          else result[key] = tenantProjectData[key] || '';
         } else if (type === 'number') {
           result[key] = Number(input.value) || 0;
         } else {
@@ -7895,8 +8032,8 @@
 
       if (imgToDisplay) {
         const badge = tempCoverImage
-          ? '<div style="position:absolute;top:10px;right:10px;background:#f59e0b;color:#fff;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;z-index:2;">⏳ معاينة مؤقتة (اضغط إعتماد الصورة للحفظ)</div>'
-          : '<div style="position:absolute;top:10px;right:10px;background:#10b981;color:#fff;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;z-index:2;">✅ مُعتمدة ومحفوظة</div>';
+          ? '<div style="position:absolute;top:10px;right:10px;background:#f59e0b;color:#fff;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;z-index:2;"> معاينة مؤقتة (اضغط إعتماد الصورة للحفظ)</div>'
+          : '<div style="position:absolute;top:10px;right:10px;background:#10b981;color:#fff;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;z-index:2;"> مُعتمدة ومحفوظة</div>';
         
         preview.innerHTML = badge + '<img src="' + escapeHtml(imgToDisplay) + '" alt="الصورة الرئيسية للمشروع" style="width:100%;max-height:400px;object-fit:cover;border-radius:12px;">';
       } else {
@@ -7923,9 +8060,9 @@
         
         let badgeHtml = '<span style="background:#94a3b8;color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;">غير مُولدة</span>';
         if (tempImg) {
-          badgeHtml = '<span style="background:#f59e0b;color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;">⏳ معاينة مؤقتة</span>';
+          badgeHtml = '<span style="background:#f59e0b;color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;"> معاينة مؤقتة</span>';
         } else if (approvedImg) {
-          badgeHtml = '<span style="background:#10b981;color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;">✅ مُعتمدة</span>';
+          badgeHtml = '<span style="background:#10b981;color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;"> مُعتمدة</span>';
         }
 
         const imgBox = displayImg
@@ -7943,8 +8080,8 @@
             '<textarea id="tenantMoodboardPrompt_' + i + '" rows="2" oninput="tenantCreativeImages.moodboard_prompts=tenantCreativeImages.moodboard_prompts||[];tenantCreativeImages.moodboard_prompts[' + i + ']=this.value;triggerAutoSaveDraft()" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px;font-family:inherit;font-size:12px;margin-bottom:10px;resize:vertical;">' + escapeHtml(promptVal) + '</textarea>' +
           '</div>' +
           '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">' +
-            '<button class="btn primary" onclick="generateTenantMoodboardSingleImage(' + i + ')" style="flex:1;background:#3B6E91;color:#fff;border:none;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;">🎨 توليد الصورة</button>' +
-            '<button class="btn primary" onclick="approveTenantMoodboardSingleImage(' + i + ')" style="flex:1;background:#2e7d32;color:#fff;border:none;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;">✅ إعتماد</button>' +
+            '<button class="btn primary" onclick="generateTenantMoodboardSingleImage(' + i + ')" style="flex:1;background:#3B6E91;color:#fff;border:none;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;"> توليد الصورة</button>' +
+            '<button class="btn primary" onclick="approveTenantMoodboardSingleImage(' + i + ')" style="flex:1;background:#2e7d32;color:#fff;border:none;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;"> إعتماد</button>' +
           '</div>' +
         '</div>';
       }).join('');
@@ -9883,7 +10020,7 @@
       trainingChatHistory.push({ role: 'user', text });
       saveCurrentSessionState('training', trainingChatHistory);
       // Show typing indicator
-      trainingChatHistory.push({ role: 'ai', text: '⏳ جاري التفكير والتنفيذ...', _typing: true });
+      trainingChatHistory.push({ role: 'ai', text: ' جاري التفكير والتنفيذ...', _typing: true });
       renderTrainingChat();
 
       let data;
@@ -10277,7 +10414,7 @@
         if (input) input.value = '';
         aiRulesChatHistory.push({ role: 'user', text });
         saveCurrentSessionState('ai_rules', aiRulesChatHistory);
-        aiRulesChatHistory.push({ role: 'ai', text: '⏳ جاري التفكير والتنفيذ...', _typing: true });
+        aiRulesChatHistory.push({ role: 'ai', text: ' جاري التفكير والتنفيذ...', _typing: true });
         renderAIRulesChat();
 
         let data;

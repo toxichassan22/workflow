@@ -567,49 +567,50 @@ def update_branding(tenant_id, **fields):
 
 FIELD_SECTIONS = [
     {'key': 'basic', 'label': 'معلومات أساسية'},
+    {'key': 'land_croquis', 'label': 'الأرض والكروكي'},
     {'key': 'location', 'label': 'الموقع والخرائط'},
-    {'key': 'financial', 'label': 'البيانات المالية'},
-    {'key': 'project', 'label': 'تفاصيل المشروع'},
-    {'key': 'swot', 'label': 'تحليل SWOT'},
 ]
 
 DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}
 
 PREBUILT_FIELDS = [
     {'key': 'project_name', 'label': 'اسم المشروع', 'type': 'text', 'required': True, 'section_key': 'basic', 'ai_hint': 'اسم المشروع الرئيسي', 'sort_order': 1},
-    {'key': 'project_type', 'label': 'نوع المشروع', 'type': 'select', 'options': ['سكني', 'تجاري', 'صناعي', 'سياحي', 'زراعي', 'مختلط'], 'section_key': 'basic', 'ai_hint': 'نوع المشروع العقاري', 'sort_order': 2},
-    {'key': 'project_idea', 'label': 'فكرة المشروع', 'type': 'textarea', 'section_key': 'basic', 'ai_hint': 'الفكرة الأساسية للمشروع، مكوناته، قيمته، والجمهور المستهدف', 'sort_order': 3},
-    {'key': 'location_address', 'label': 'رابط موقع المشروع في Google Maps', 'type': 'text', 'section_key': 'location', 'ai_hint': 'رابط Google Maps مباشر لموقع المشروع', 'sort_order': 3},
-    {'key': 'location_lat', 'label': 'خط العرض (Latitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط العرض للموقع (إختياري)', 'sort_order': 4},
-    {'key': 'location_lng', 'label': 'خط الطول (Longitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط الطول للموقع (إختياري)', 'sort_order': 5},
-    {'key': 'plot_number', 'label': 'رقم المخطط / القطعة', 'type': 'text', 'section_key': 'location', 'ai_hint': 'رقم المخطط أو القطعة', 'sort_order': 6},
-    {'key': 'land_area', 'label': 'مساحة الأرض', 'type': 'text', 'section_key': 'location', 'ai_hint': 'مساحة الأرض بالمتر المربع', 'sort_order': 8},
-    {'key': 'built_area', 'label': 'مساحة البناء', 'type': 'text', 'section_key': 'location', 'ai_hint': 'مساحة البناء بالمتر المربع', 'sort_order': 9},
-    {'key': 'building_system', 'label': 'نظام البناء', 'type': 'text', 'section_key': 'location', 'ai_hint': 'نظام البناء والارتفاعات المسموح بها', 'sort_order': 10},
-    {'key': 'infrastructure', 'label': 'البنية التحتية', 'type': 'text', 'section_key': 'location', 'ai_hint': 'مياه، كهرباء، اتصالات، إلخ', 'sort_order': 11},
-    {'key': 'main_roads', 'label': 'الطرق الرئيسية المحيطة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'أسماء الطرق الرئيسية المحيطة بالمشروع وتمثل طرق الوصول إليه', 'sort_order': 12},
-    {'key': 'secondary_roads', 'label': 'طرق الوصول الفرعية', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'المداخل وطرق الوصول الفرعية مع المسافة ومدة القيادة', 'sort_order': 13},
-    {'key': 'nearby_landmarks', 'label': 'أهم المعالم القريبة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'قائمة المعالم القريبة مع أوقات القيادة (مثلاً: ميدان السارية - 1 دقيقة)', 'sort_order': 14},
-    {'key': 'city_landmarks', 'label': 'المعالم الرئيسية في المدينة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'أهم المعالم الرئيسية في المدينة والمناطق المحيطة', 'sort_order': 15},
-    {'key': 'catchment_areas', 'label': 'مناطق نطاق التأثير', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'المناطق الرئيسية والثانوية المتأثرة بالمشروع', 'sort_order': 15},
-    {'key': 'budget', 'label': 'الميزانية الإجمالية', 'type': 'text', 'section_key': 'financial', 'ai_hint': 'الميزانية الإجمالية للمشروع', 'sort_order': 15},
-    {'key': 'target_audience', 'label': 'الجمهور المستهدف', 'type': 'textarea', 'section_key': 'financial', 'ai_hint': 'الفئة المستهدفة من العرض', 'sort_order': 16},
-    {'key': 'roi', 'label': 'العائد المتوقع على الاستثمار', 'type': 'text', 'section_key': 'financial', 'ai_hint': 'نسبة العائد على الاستثمار ROI', 'sort_order': 17},
-    {'key': 'noi', 'label': 'صافي الدخل التشغيلي', 'type': 'text', 'section_key': 'financial', 'ai_hint': 'صافي الدخل التشغيلي NOI', 'sort_order': 18},
-    {'key': 'payback_period', 'label': 'مدة الاسترداد', 'type': 'text', 'section_key': 'financial', 'ai_hint': 'مدة استرداد رأس المال', 'sort_order': 19},
-    {'key': 'revenue_assumptions', 'label': 'افتراضات الإيرادات', 'type': 'textarea', 'section_key': 'financial', 'ai_hint': 'افتراضات الإيرادات السنوية', 'sort_order': 20},
-    {'key': 'cost_assumptions', 'label': 'افتراضات التكاليف', 'type': 'textarea', 'section_key': 'financial', 'ai_hint': 'افتراضات التكاليف التشغيلية', 'sort_order': 21},
-    {'key': 'exit_strategy', 'label': 'استراتيجية التخارج', 'type': 'textarea', 'section_key': 'financial', 'ai_hint': 'استراتيجية الخروج من الاستثمار', 'sort_order': 22},
-    {'key': 'timeline', 'label': 'الجدول الزمني', 'type': 'textarea', 'section_key': 'project', 'ai_hint': 'مراحل المشروع والمدد الزمنية', 'sort_order': 23},
-    {'key': 'description', 'label': 'وصف المشروع', 'type': 'textarea', 'section_key': 'project', 'ai_hint': 'وصف تفصيلي للمشروع', 'sort_order': 24},
-    {'key': 'project_features', 'label': 'مميزات المشروع', 'type': 'textarea', 'section_key': 'project', 'ai_hint': 'مميزات المشروع الرئيسية', 'sort_order': 25},
-    {'key': 'components', 'label': 'مكونات المشروع', 'type': 'textarea', 'section_key': 'project', 'ai_hint': 'مكونات المشروع والمساحات', 'sort_order': 26},
-    {'key': 'risks', 'label': 'المخاطر والافتراضات', 'type': 'textarea', 'section_key': 'project', 'ai_hint': 'المخاطر المحتملة وطرق التخفيف', 'sort_order': 27},
-    {'key': 'investment_opportunities', 'label': 'فرص الاستثمار', 'type': 'textarea', 'section_key': 'project', 'ai_hint': 'فرص الاستثمار ونقاط القوة', 'sort_order': 28},
-    {'key': 'swot_strengths', 'label': 'نقاط القوة (SWOT)', 'type': 'textarea', 'section_key': 'swot', 'ai_hint': 'نقاط قوة المشروع', 'sort_order': 29},
-    {'key': 'swot_weaknesses', 'label': 'نقاط الضعف (SWOT)', 'type': 'textarea', 'section_key': 'swot', 'ai_hint': 'نقاط ضعف المشروع', 'sort_order': 30},
-    {'key': 'swot_opportunities', 'label': 'الفرص (SWOT)', 'type': 'textarea', 'section_key': 'swot', 'ai_hint': 'الفرص المتاحة للمشروع', 'sort_order': 31},
-    {'key': 'swot_threats', 'label': 'التحديات (SWOT)', 'type': 'textarea', 'section_key': 'swot', 'ai_hint': 'التحديات والمخاطر الخارجية', 'sort_order': 32},
+    {'key': 'project_type', 'label': 'نوع المشروع', 'type': 'select', 'options': ['مختلط', 'سكني', 'تجاري', 'إداري', 'فندقي', 'ترفيهي', 'صناعي', 'لوجستي', 'طبي', 'تعليمي', 'سيارات وترفيه', 'أخرى'], 'required': True, 'section_key': 'basic', 'ai_hint': 'نوع المشروع العقاري', 'sort_order': 2},
+    {'key': 'project_idea', 'label': 'فكرة المشروع', 'type': 'textarea', 'required': True, 'section_key': 'basic', 'ai_hint': 'الفكرة الأساسية للمشروع ومكوناته والهدف', 'sort_order': 3},
+    {'key': 'project_goal', 'label': 'الهدف من المشروع', 'type': 'textarea', 'required': True, 'section_key': 'basic', 'ai_hint': 'الهدف الرئيسي من تطوير المشروع', 'sort_order': 4},
+    {'key': 'target_audience', 'label': 'الفئات المستهدفة', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'الفئة والجمهور المستهدف من المشروع', 'sort_order': 5},
+    {'key': 'project_stage', 'label': 'مرحلة المشروع الحالية', 'type': 'select', 'options': ['فكرة أولية', 'فرصة استثمارية', 'دراسة جدوى', 'تصميم', 'تحت التنفيذ', 'قائم لإعادة التطوير', 'أخرى'], 'required': False, 'section_key': 'basic', 'ai_hint': 'المرحلة الحالية التي يمر بها المشروع', 'sort_order': 6},
+    {'key': 'initial_features', 'label': 'مميزات أولية للمشروع', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'المميزات التنافسية الأولية للمشروع', 'sort_order': 7},
+    {'key': 'initial_strengths', 'label': 'فرص استثمار ونقاط قوة أولية', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'فرص الاستثمار ونقاط القوة المبدئية', 'sort_order': 8},
+    {'key': 'project_logo', 'label': 'شعار المشروع (Logo)', 'type': 'image', 'required': False, 'section_key': 'basic', 'ai_hint': 'صورة شعار المشروع', 'sort_order': 9},
+    {'key': 'croquis_file', 'label': 'رفع صورة الكروكي أو المخطط المساحي (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملف أو صورة الكروكي أو المخطط المساحي بصيغة صورة أو PDF', 'sort_order': 10},
+    {'key': 'building_permit_file', 'label': 'رفع صورة رخصة البناء أو المستندات (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'صورة أو ملف رخصة البناء أو مستند الاشتراطات بصيغة صورة أو PDF', 'sort_order': 11},
+    {'key': 'plot_number_croquis', 'label': 'رقم القطعة والمخطط', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم قطعة الأرض ورقم المخطط', 'sort_order': 12},
+    {'key': 'deed_number', 'label': 'رقم الصك أو المرجع', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم صك الملكية أو المرجع الرسمي', 'sort_order': 13},
+    {'key': 'croquis_land_area', 'label': 'مساحة الأرض حسب الكروكي (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة الإجمالية للأرض بالمتر المربع حسب الكروكي', 'sort_order': 14},
+    {'key': 'approved_financial_area', 'label': 'المساحة المعتمدة للدراسة المالية (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة المعتمدة بعد أي استقطاعات لنقلها للمالية (لا يغيرها AI)', 'sort_order': 15},
+    {'key': 'boundary_lengths', 'label': 'أطوال الأضلاع وحدود الأرض', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أطوال أضلاع الحدود (شمال، جنوب، شرق، غرب)', 'sort_order': 16},
+    {'key': 'north_direction', 'label': 'اتجاه الشمال والاتجاهات', 'type': 'select', 'options': ['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرقي', 'شمال غربي', 'جنوب شرقي', 'جنوب غربي', 'أخرى'], 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الاتجاهات الجغرافية للأرض', 'sort_order': 17},
+    {'key': 'surrounding_streets', 'label': 'الشوارع المحيطة وعروضها', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أسماء الشوارع المحيطة وعرض كل شارع بالمتر', 'sort_order': 18},
+    {'key': 'facades_count', 'label': 'عدد الواجهات', 'type': 'number', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد واجهات القطعة على الشوارع (رقم خالص: 1, 2, 3, 4)', 'sort_order': 19},
+    {'key': 'building_ratio_setbacks', 'label': 'نسبة البناء والتغطية والارتدادات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'نسبة التغطية المسموحة والارتدادات النظامية', 'sort_order': 20},
+    {'key': 'max_floors_height', 'label': 'الارتفاع أو عدد الأدوار المسموح', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد الأدوار المسموح بها أو الحد الأقصى للارتفاع بالمتر', 'sort_order': 21},
+    {'key': 'allowed_uses_restrictions', 'label': 'الاستخدامات المسموحة والقيود التنظيمية', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الأنشطة والاستخدامات المسموحة والاشتراطات الخاصة', 'sort_order': 22},
+    {'key': 'croquis_expiry_date', 'label': 'تاريخ إصدار وانتهاء صلاحية الكروكي', 'type': 'date', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'تاريخ الصلاحية وتنبيهات الانتهاء', 'sort_order': 23},
+    {'key': 'land_and_building_summary', 'label': 'ملخص بيانات الأرض والاشتراطات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملخص واسترسال تحليلي شامل لبيانات الأرض واشتراطات البناء التنظيمية والفرص والأنشطة المسموحة', 'sort_order': 24},
+    {'key': 'location_address', 'label': 'رابط موقع المشروع في Google Maps', 'type': 'text', 'section_key': 'location', 'ai_hint': 'رابط Google Maps مباشر لموقع المشروع', 'sort_order': 30},
+    {'key': 'location_lat', 'label': 'خط العرض (Latitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط العرض للموقع (إختياري)', 'sort_order': 31},
+    {'key': 'location_lng', 'label': 'خط الطول (Longitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط الطول للموقع (إختياري)', 'sort_order': 32},
+    {'key': 'plot_number', 'label': 'رقم المخطط / القطعة', 'type': 'text', 'section_key': 'location', 'ai_hint': 'رقم المخطط أو القطعة', 'sort_order': 33},
+    {'key': 'land_area', 'label': 'مساحة الأرض', 'type': 'text', 'section_key': 'location', 'ai_hint': 'مساحة الأرض بالمتر المربع', 'sort_order': 34},
+    {'key': 'built_area', 'label': 'مساحة البناء', 'type': 'text', 'section_key': 'location', 'ai_hint': 'مساحة البناء بالمتر المربع', 'sort_order': 35},
+    {'key': 'building_system', 'label': 'نظام البناء', 'type': 'text', 'section_key': 'location', 'ai_hint': 'نظام البناء والارتفاعات المسموح بها', 'sort_order': 36},
+    {'key': 'infrastructure', 'label': 'البنية التحتية', 'type': 'text', 'section_key': 'location', 'ai_hint': 'مياه، كهرباء، اتصالات، إلخ', 'sort_order': 37},
+    {'key': 'main_roads', 'label': 'الطرق الرئيسية المحيطة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'أسماء الطرق الرئيسية المحيطة بالمشروع وتمثل طرق الوصول إليه', 'sort_order': 38},
+    {'key': 'secondary_roads', 'label': 'طرق الوصول الفرعية', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'المداخل وطرق الوصول الفرعية مع المسافة ومدة القيادة', 'sort_order': 39},
+    {'key': 'nearby_landmarks', 'label': 'أهم المعالم القريبة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'قائمة المعالم القريبة مع أوقات القيادة (مثلاً: ميدان السارية - 1 دقيقة)', 'sort_order': 40},
+    {'key': 'city_landmarks', 'label': 'المعالم الرئيسية في المدينة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'أهم المعالم الرئيسية في المدينة والمناطق المحيطة', 'sort_order': 41},
+    {'key': 'catchment_areas', 'label': 'مناطق نطاق التأثير', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'المناطق الرئيسية والثانوية المتأثرة بالمشروع', 'sort_order': 42},
 ]
 
 
@@ -630,25 +631,31 @@ def _seed_default_fields(conn, tenant_id):
 
 
 def _migrate_location_fields(conn):
-    """Add missing pre-built location fields to existing tenants."""
+    """Add missing pre-built location fields to existing tenants and update prebuilt options."""
     existing_tenants = [row['id'] for row in conn.execute('SELECT id FROM tenants').fetchall()]
     for tenant_id in existing_tenants:
-        existing_keys = {
-            row['field_key'] for row in
-            conn.execute('SELECT field_key FROM tenant_input_fields WHERE tenant_id = ?', (tenant_id,)).fetchall()
+        existing_rows = {
+            row['field_key']: row for row in
+            conn.execute('SELECT id, field_key, section_key, field_options FROM tenant_input_fields WHERE tenant_id = ?', (tenant_id,)).fetchall()
         }
         for f in PREBUILT_FIELDS:
-            if f['key'] in existing_keys:
+            opts_json = json.dumps(f.get('options', []), ensure_ascii=False) if f.get('options') else None
+            if f['key'] in existing_rows:
+                row_id = existing_rows[f['key']]['id']
+                conn.execute(
+                    'UPDATE tenant_input_fields SET field_options = ?, section_key = ?, field_label = ?, field_type = ?, sort_order = ?, is_active = 1 WHERE id = ?',
+                    (opts_json, f.get('section_key', 'general'), f['label'], f['type'], f.get('sort_order', 0), row_id)
+                )
                 continue
             field_id = str(uuid.uuid4())
             conn.execute(
-                'INSERT INTO tenant_input_fields (id, tenant_id, field_key, field_label, field_type, field_options, section_key, is_required, is_active, is_custom, sort_order, ai_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)',
+                'INSERT INTO tenant_input_fields (id, tenant_id, field_key, field_label, field_type, field_options, section_key, is_required, is_active, is_custom, sort_order, ai_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)',
                 (
                     field_id, tenant_id, f['key'], f['label'], f['type'],
-                    json.dumps(f.get('options', []), ensure_ascii=False) if f.get('options') else None,
+                    opts_json,
                     f.get('section_key', 'general'),
                     1 if f.get('required') else 0,
-                    1, f.get('sort_order', 0), f.get('ai_hint', '')
+                    f.get('sort_order', 0), f.get('ai_hint', '')
                 )
             )
             print(f'[DB] Migration: added field {f["key"]} to tenant {tenant_id}')

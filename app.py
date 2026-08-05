@@ -149,7 +149,7 @@ GLM_USE_OPENROUTER = os.environ.get("GLM_USE_OPENROUTER", "false").lower() in ("
 if ZAI_KEY and OPENROUTER_KEY and GLM_USE_OPENROUTER and os.environ.get("FORCE_OPENROUTER", "false").lower() not in ("1", "true", "yes"):
     GLM_USE_OPENROUTER = False
     print("[CONFIG] Both keys found; preferring ZAI for GLM calls. Set FORCE_OPENROUTER=1 to override.")
-IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
+IMAGE_MODEL = "google/gemini-3.6-flash"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 
 if not os.path.exists(OUTPUT_DIR):
@@ -1411,7 +1411,7 @@ def api_ai_edit_slide():
         )
         html = resolve_designer_chat_placeholders(html, project_data, presentation_id, tenant_id)
         
-        return jsonify({'success': True, 'data': {'action': 'edit', 'html': html, 'response': 'تم تعديل الشريحة ✓'}})
+        return jsonify({'success': True, 'data': {'action': 'edit', 'html': html, 'response': 'تم تعديل الشريحة '}})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -1893,7 +1893,7 @@ def api_designer_chat():
     branding = db.get_branding(g.tenant_id) or {}
     training_context = db.get_training_context(g.tenant_id) or ''
     summary = [{'index': i + 1, 'title': s.get('title', '') if isinstance(s, dict) else ''} for i, s in enumerate(slides)]
-    all_note = "\n⚠️ تنبيه هام جداً: المستخدم طلب صراحة تعديل جميع الشرائح دون استثناء! يجب أن تعيد target='all' في الأداة edit_slides." if is_all_slides_request else ""
+    all_note = "\n️ تنبيه هام جداً: المستخدم طلب صراحة تعديل جميع الشرائح دون استثناء! يجب أن تعيد target='all' في الأداة edit_slides." if is_all_slides_request else ""
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
 أنت وكيل تصميم عروض متميز ذكي يفهم كافة اللهجات العربية، المترادفات، الأرقام، وأوامر إضافة وتحديث الخرائط والتنسيقات.
@@ -3733,7 +3733,7 @@ def api_generate_slide_single():
     landmarks_note = ''
     if landmarks_matrix:
         landmarks_note = (
-            "⚠️ إرشادات هامة لعرض المعالم:\n"
+            "️ إرشادات هامة لعرض المعالم:\n"
             "يجب عرض المسافة والوقت معاً لكل معلم بدون استثناء بالصيغة التاعية: (اسم المعلم - المسافة بالكم - الوقت بالدقائق)، مثل: 'ميدان السارية (1.5 كم - 5 دقائق)'.\n"
             "استخدم البيانات الموثقة التالية كما هي وممنوع تعديل الأرقام:\n" +
             json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
@@ -3757,7 +3757,7 @@ def api_generate_slide_single():
 - استخدم ##LOGO## للشعار، ##IMAGE_COVER## لصورة الغلاف، ##MOODBOARD_IMAGE_N## لصور المود بورد
 - للخرائط: ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##
 - لصور الموقع: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
-- ⛔ ممنوع base64 أو روابط صور خارجية
+-  ممنوع base64 أو روابط صور خارجية
 """
 
     def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
@@ -4647,6 +4647,343 @@ def api_update_custom_section(section_key):
         return jsonify({'error': 'لا توجد تغييرات'}), 400
     db.update_custom_section(g.tenant_id, section_key, **updates)
     return jsonify({'success': True})
+
+
+def convert_pdf_base64_to_images(pdf_data_uri, max_pages=5):
+    """Convert base64 PDF into clean, high-resolution page images for Vision AI."""
+    import base64
+    import fitz
+    images = []
+    text_content = ""
+    try:
+        raw_b64 = pdf_data_uri.split(',', 1)[1] if ',' in pdf_data_uri else pdf_data_uri
+        pdf_bytes = base64.b64decode(raw_b64)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        for i in range(min(len(doc), max_pages)):
+            page = doc[i]
+            page_text = page.get_text() or ""
+            if page_text.strip():
+                text_content += f"\n--- الصفحة {i+1} ---\n" + page_text.strip()
+            
+            # High-DPI rasterization (dpi=180 renders 1 clean image per page)
+            pix = page.get_pixmap(dpi=180)
+            png_bytes = pix.tobytes("png")
+            img_b64 = base64.b64encode(png_bytes).decode('utf-8')
+            images.append(f"data:image/png;base64,{img_b64}")
+
+    except Exception as err:
+        print(f"[PDF CONVERT ERROR] {err}")
+    return images, text_content
+
+
+def _get_chat_response_text(res):
+    """Safely extract string content from OpenAI/GLM/OpenRouter chat response dict."""
+    if not isinstance(res, dict):
+        return str(res) if res else ""
+    if 'choices' in res and isinstance(res['choices'], list) and res['choices']:
+        choice = res['choices'][0]
+        if isinstance(choice, dict):
+            msg = choice.get('message', {})
+            if isinstance(msg, dict):
+                return msg.get('content', '') or ""
+            return str(choice.get('text', ''))
+    return ""
+
+
+def parse_json_object(text):
+    """Extract and parse any JSON dict from text string."""
+    if not text or not isinstance(text, str):
+        return {}
+    text = text.strip()
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    cb = re.search(r'```(?:json)?\s*\n?([\s\S]*?)```', text)
+    if cb:
+        try:
+            parsed = json.loads(cb.group(1).strip())
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    start = text.find('{')
+    if start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if esc:
+                esc = False
+                continue
+            if c == '\\' and in_str:
+                esc = True
+                continue
+            if c == '"' and not esc:
+                in_str = not in_str
+                continue
+            if not in_str:
+                if c == '{':
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            parsed = json.loads(text[start:i+1])
+                            if isinstance(parsed, dict):
+                                return parsed
+                        except Exception:
+                            pass
+                        break
+    return {}
+
+
+def normalize_croquis_fields(resp_json, text_content=""):
+    """Normalize extracted croquis fields, map select dropdown values, filter invalid placeholders, and apply text regex fallbacks."""
+    if not isinstance(resp_json, dict):
+        resp_json = {}
+        
+    invalid_phrases = {'غير مدون', 'غير مذكور', 'غير موضح', 'غير متاح', 'غير محدد', 'لا يوجد', 'n/a', 'none', 'null', 'غير مدونة'}
+    cleaned_json = {}
+    for k, v in resp_json.items():
+        if isinstance(v, str):
+            v_clean = v.strip()
+            if any(p in v_clean.lower() for p in invalid_phrases) and len(v_clean) < 20:
+                continue
+            cleaned_json[k] = v_clean
+        elif v is not None:
+            cleaned_json[k] = str(v)
+    resp_json = cleaned_json
+
+    full_text = text_content + " " + json.dumps(resp_json, ensure_ascii=False)
+
+    # 1. Deed number fallback
+    if not resp_json.get('deed_number'):
+        deed_match = re.search(r'(?:صك|الصك|مرجع|المرجع|وثيقة)\s*(?:رقم)?\s*[:\s]*([0-9]{8,14})', full_text)
+        if deed_match:
+            resp_json['deed_number'] = deed_match.group(1)
+
+    # 2. Plot / plan number fallback
+    if not resp_json.get('plot_number_croquis'):
+        plot_match = re.search(r'(?:قطعة|قطعه|مخطط)\s*(?:رقم)?\s*[:\s]*([0-9/\-\sA-Za-z]+)', full_text)
+        if plot_match:
+            resp_json['plot_number_croquis'] = plot_match.group(1).strip()
+
+    # 3. Land area fallback (Targeting "بموجب التنظيم")
+    if not resp_json.get('croquis_land_area'):
+        area_match = re.search(r'(?:بموجب التنظيم|المساحة بموجب التنظيم|المساحة التنظيمية|مساحة الأرض|المساحة الإجمالية|مساحة المخطط)\s*[:\s]*([0-9,.]+)', full_text)
+        if area_match:
+            resp_json['croquis_land_area'] = area_match.group(1).replace(',', '')
+
+    if resp_json.get('croquis_land_area') and not resp_json.get('approved_financial_area'):
+        resp_json['approved_financial_area'] = resp_json['croquis_land_area']
+
+    # 4. Facades count normalization & fallback (Pure Number: 1, 2, 3, 4)
+    fac = str(resp_json.get('facades_count', '')).strip()
+    if '4' in fac or 'بلك' in fac or 'أربع' in fac:
+        resp_json['facades_count'] = '4'
+    elif '3' in fac or 'ثلاث' in fac:
+        resp_json['facades_count'] = '3'
+    elif '2' in fac or 'زاوية' in fac or 'زاوي' in fac or 'شارعين' in fac or 'واجهتين' in fac or 'واجهتان' in fac:
+        resp_json['facades_count'] = '2'
+    elif '1' in fac or 'واجهة واحدة' in fac or 'شارع واحد' in fac or 'واجهة' in fac:
+        resp_json['facades_count'] = '1'
+    elif not resp_json.get('facades_count'):
+        if re.search(r'(?:بلك كامل|4 واجهات|أربعة شوارع)', full_text):
+            resp_json['facades_count'] = '4'
+        elif re.search(r'(?:3 واجهات|ثلاثة شوارع|3 شوارع)', full_text):
+            resp_json['facades_count'] = '3'
+        elif re.search(r'(?:زاوية|زاوي|شارعين|واجهتين|واجهتان|2 واجهة)', full_text):
+            resp_json['facades_count'] = '2'
+        elif re.search(r'(?:واجهة واحدة|شارع واحد|1 واجهة|شارع)', full_text):
+            resp_json['facades_count'] = '1'
+
+    # 5. Floors / Max height fallback
+    if not resp_json.get('max_floors_height'):
+        floor_match = re.search(r'(?:أدوار|دور|ارتفاع|الأدوار)\s*[:\s]*([^\n,.]+)', full_text)
+        if floor_match:
+            resp_json['max_floors_height'] = floor_match.group(1).strip()
+
+    # 6. North direction normalization
+    nd = str(resp_json.get('north_direction', '')).strip()
+    if 'شمال شرقي' in nd: resp_json['north_direction'] = 'شمال شرقي'
+    elif 'شمال غربي' in nd: resp_json['north_direction'] = 'شمال غربي'
+    elif 'جنوب شرقي' in nd: resp_json['north_direction'] = 'جنوب شرقي'
+    elif 'جنوب غربي' in nd: resp_json['north_direction'] = 'جنوب غربي'
+    elif 'شمال' in nd: resp_json['north_direction'] = 'شمال'
+    elif 'جنوب' in nd: resp_json['north_direction'] = 'جنوب'
+    elif 'شرق' in nd: resp_json['north_direction'] = 'شرق'
+    elif 'غرب' in nd: resp_json['north_direction'] = 'غرب'
+
+    # 7. Apply Aliases across all keys
+    aliases = {
+        'plot_number_croquis': ['plot_number', 'plot_and_plan_number'],
+        'croquis_land_area': ['land_area', 'approved_financial_area'],
+        'deed_number': ['deed_or_reference_number'],
+        'boundary_lengths': ['boundary_dimensions'],
+        'surrounding_streets': ['surrounding_streets_widths'],
+        'building_ratio_setbacks': ['building_coverage_setbacks'],
+        'max_floors_height': ['height_or_floors_allowed'],
+        'croquis_expiry_date': ['croquis_validity_dates']
+    }
+    # 8. Clean and generate Land & Building Summary (Rich Deep Elaboration)
+    summary_text = str(resp_json.get('land_and_building_summary', '')).replace('{}', '').strip()
+
+    if not summary_text or len(summary_text) < 150 or '{}' in summary_text:
+        plot_num = resp_json.get('plot_number_croquis') or 'غير مدون'
+        deed_num = resp_json.get('deed_number') or 'غير مدون'
+        area = resp_json.get('croquis_land_area') or 'غير محددة'
+        approved_area = resp_json.get('approved_financial_area') or area
+        facades = resp_json.get('facades_count') or '1'
+        streets = resp_json.get('surrounding_streets') or 'محددة بالرسم التنظيمي'
+        bounds = resp_json.get('boundary_lengths') or 'محددة بالكروكي'
+        ratios = resp_json.get('building_ratio_setbacks') or 'وفق اشتراطات المخطط المحلي لأمانة جدة 1447/2025'
+        floors = resp_json.get('max_floors_height') or 'وفق ضوابط المخطط المحلي وتأثير المرور'
+        uses = resp_json.get('allowed_uses_restrictions') or 'استخدامات مسموحة وفق اللائحة التنفيذية'
+        expiry = resp_json.get('croquis_expiry_date') or 'ساري'
+
+        summary_parts = [
+            f"1. التوصيف العام والتوثيق الرسمي:\n"
+            f"يتمثل العقار في قطعة الأرض الواقعة ضمن المخطط رقم ({plot_num}) والموثقة بالمرجع/الصك رقم ({deed_num}). يُعد هذا المستند الكروكي التنظيمي المعتمد من أمانة محافظة جدة كأساس لتصميم وتطوير المشروع وتحديد الصلاحية الاستثمارية والهندسية.",
+
+            f"2. المساحة والحدود والأبعاد التنظيمية:\n"
+            f"تبلغ المساحة الإجمالية الصافية للأرض بموجب التنظيم {area} م²، وهي ذاتها المساحة الاعتيادية المعتمدة للدراسة المالية والهندسية ({approved_area} م²). تحيط بالأرض الحدود والأبعاد التالية: ({bounds}). تمنح هذه الأبعاد الأرض مرونة عالية في التشكيل المعماري واستغلال الارتدادات النظامية.",
+
+            f"3. الواجهات والمحاور والشوارع المحيطة:\n"
+            f"يتميز موقع الأرض بالوقوع على عدد ({facades}) واجهة، وتطل على المحاور والشوارع التالية: ({streets}). يتيح هذا الموقع إمكانية فتح المداخل والمخارج بكفاءة وتوفير سهولة وصول حركة المرور وخدمات مواقف السيارات وفق اشتراطات الأمانة.",
+
+            f"4. اشتراطات البناء ونسب التغطية والارتدادات:\n"
+            f"تخضع الأرض لنظام البناء التنظيمي المعتمد وفق اللائحة التنفيذية لأمانة محافظة جدة (1447هـ / 2025م): {ratios}. ويشمل ذلك تحديد نسبة التغطية المسموحة على مستوى الأرضي والأدوار المتكررة ومعامل مسطح البناء (FAR) والالتزام بالارتدادات الأمامية والجانبية والخلفية.",
+
+            f"5. الارتفاعات وعدد الأدوار المسموح بها:\n"
+            f"الحد الأقصى للارتفاع وعدد الأدوار المسموح به للمشروع: {floors}. يُراعى في ذلك الالتزام بالعمق التنظيمي ومعايير التأثير المروري وحقوق المطلات المجاورة والارتفاع الكلي المسموح به رسمياً.",
+
+            f"6. الاستخدامات والأنشطة المسموحة والقيود التنظيمية:\n"
+            f"نطاق الاستخدامات والأنشطة المسموحة على الأرض: {uses}. مع التأكيد على الالتزام بكافة الاشتراطات الفنية والأمنية وبيئة السلامة ومواقف السيارات وتاريخ صلاحية المستند ({expiry})."
+        ]
+        summary_text = "\n\n".join(summary_parts)
+
+    resp_json['land_and_building_summary'] = summary_text.replace('{}', '').strip()
+
+    return resp_json
+
+
+def search_jeddah_official_regulations_pdf(query_text=""):
+    """Search official Jeddah Local Plan and Executive Regulations 1447/2025 PDFs for matching regulation text."""
+    try:
+        import fitz
+        pdf_paths = [
+            os.path.join(r'd:\workflow', 'Document_LocalPlan_1447.pdf'),
+            os.path.join(r'd:\workflow', 'ExecutiveRegulations-1447-2025-2.pdf')
+        ]
+        results = []
+        keywords = ['الكورنيش', 'المحيطة', 'المحاور التجارية', 'س ع', 'ت ح', 'فيلات', 'العمائر', 'الارتدادات', 'نسبة البناء']
+        if query_text:
+            tokens = [t.strip() for t in query_text.split() if len(t.strip()) > 3]
+            keywords = list(set(keywords + tokens[:5]))
+
+        for pdf_path in pdf_paths:
+            if not os.path.exists(pdf_path):
+                continue
+            doc = fitz.open(pdf_path)
+            matched_pages = 0
+            for page_idx in range(len(doc)):
+                page_text = doc[page_idx].get_text()
+                if any(kw in page_text for kw in keywords):
+                    doc_basename = os.path.basename(pdf_path)
+                    results.append(f"--- مرجع لائحة أمانة جدة الرسمية 1447هـ/2025م ({doc_basename} - صفحة {page_idx + 1}) ---\n{page_text[:1000]}")
+                    matched_pages += 1
+                    if matched_pages >= 2:
+                        break
+        return "\n\n".join(results[:4])
+    except Exception as e:
+        print(f"[JEDDAH REGULATION PDF SEARCH ERROR] {e}")
+        return ""
+
+
+@app.route('/api/extract-croquis', methods=['POST'])
+@require_auth
+def api_extract_croquis():
+    """Extract engineering and land details from uploaded croquis PDF or image using Vision AI."""
+    import traceback
+    try:
+        data = request.json or {}
+        file_data = data.get('fileData') or data.get('croquis_file') or ''
+        if not file_data:
+            return jsonify({'success': False, 'error': 'يرجى رفع ملف الكروكي أو المخطط المساحي أولاً'})
+
+        extracted_images = []
+        extracted_text = ""
+
+        if 'application/pdf' in file_data or file_data.startswith('data:application/pdf'):
+            extracted_images, extracted_text = convert_pdf_base64_to_images(file_data)
+            if not extracted_images and not extracted_text:
+                return jsonify({'success': False, 'error': 'تعذر قراءة ملف الـ PDF، يرجى التأكد من صحة الملف'})
+        else:
+            extracted_images = [file_data]
+
+        jeddah_pdf_context = search_jeddah_official_regulations_pdf(extracted_text)
+
+        system_prompt = (
+            "أنت مهندس مساح وخبير عقاري متخصص في تدقيق المخططات والكروكيات التنظيمية ورخص البناء والصكوك اللائحية الرسمية لمحافظة جدة وباقي المناطق.\n"
+            "اقرأ المستند والصورة المرفقة ومرجع لوائح وأنظمة أمانة جدة المرفق بعناية واستخرج البيانات الهندسية واشتراطات أمانة جدة والمخطط المحلي 1447هـ / 2025م بصيغة JSON حصراً:\n"
+            "```json\n"
+            "{\n"
+            '  "plot_number_croquis": "رقم القطعة ورقم المخطط المكتوب بالصورة",\n'
+            '  "deed_number": "رقم الصك أو المرجع المكتوب بالصورة",\n'
+            '  "croquis_land_area": "مساحة الأرض بالمتر المربع المكتوبة في الجدول تحت خانة (بموجب التنظيم) أو المساحة الإجمالية (مثال: 850.50)",\n'
+            '  "approved_financial_area": "انقل نفس رقم المساحة المكتوب تحت خانة بموجب التنظيم",\n'
+            '  "boundary_lengths": "أطوال أضلاع الحدود بالأمتار (الشمال، الجنوب، الشرق، الغرب)",\n'
+            '  "north_direction": "اتجاه الأرض أو الشمال المكتوب بالرسم أو الجدول (اختر بدقة: شمال / جنوب / شرق / غرب / شمال شرقي / شمال غربي / جنوب شرقي / جنوب غربي)",\n'
+            '  "surrounding_streets": "أسماء الشوارع المحيطة وعروضها بالأمتار",\n'
+            '  "facades_count": "عدد الواجهات المكتوبة كعدد خالص فقط (مثال: 1 أو 2 أو 3 أو 4)",\n'
+            '  "building_ratio_setbacks": "تلخيص دقيق لنسب البناء والتغطية والارتدادات المسموحة المكتوبة أو وفق أنظمة وضوابط البناء للمخطط المحلي بمحافظة جدة 1447هـ/2025م",\n'
+            '  "max_floors_height": "الارتفاع أو عدد الأدوار المسموح بها المكتوب بالصورة أو وفق المخطط المحلي لجدة 1447هـ/2025م",\n'
+            '  "allowed_uses_restrictions": "ملخص دقيق للأنشطة والاستخدامات والقيود التنظيمية المسموحة بدون افتراضات غير موثقة",\n'
+            '  "croquis_expiry_date": "تاريخ الصلاحية YYYY-MM-DD إن وجد بالصورة",\n'
+            '  "land_and_building_summary": "اكتب ملخصاً وتدقيقاً استرسالياً شاملاً ومفصلاً لبيانات الأرض، الشوارع، الواجهات، الصك، والاشتراطات والأنشطة المسموحة وفق المخطط المحلي واللائحة التنفيذية لأمانة جدة 1447/2025 بدون اختصار (استرسل وتحدث بحرية)"\n'
+            "}\n"
+            "```\n"
+            "تنبيهات هامة للاستخراج:\n"
+            "1. استخرج مساحة الأرض دائماً من الخانة المدونة باسم (بموجب التنظيم) أو (المساحة التنظيمية) أو (المساحة الإجمالية).\n"
+            "2. استخرج الاتجاهات (شمال، جنوب، شرق، غرب) المكتوبة بالجدول أو الرسم.\n"
+            "3. في حقل (land_and_building_summary)، استرسل واكتب تحليلاً وشرحاً مفصلاً لكافة تفاصيل واشتراطات الأرض والتنظيم بالاستعانة بلائحة جدة 1447/2025.\n"
+            "4. إذا كان أي حقل مفقوداً تماماً ولم تتمكن من قراءته بالصورة، اترك قيمته كنص فارغ ''."
+        )
+
+        raw_resp = ""
+        if OPENROUTER_KEY and extracted_images:
+            user_content = [
+                {"type": "text", "text": f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"}
+            ]
+            for img in extracted_images:
+                user_content.append({"type": "image_url", "image_url": {"url": img}})
+            res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=3000, model="google/gemini-3.6-flash")
+            raw_resp = _get_chat_response_text(res)
+
+        if not raw_resp and ZAI_KEY:
+            user_content = f"اقرأ واستخرج بيانات الكروكي ورقم الصك والواجهات والأدوار بصيغة JSON:\n{extracted_text}"
+            res = call_zai_chat(system_prompt, user_content, temperature=0.1)
+            raw_resp = _get_chat_response_text(res)
+
+        resp_json = parse_json_object(raw_resp) if raw_resp else {}
+        resp_json = normalize_croquis_fields(resp_json, extracted_text + "\n" + raw_resp)
+
+        # Check if there are actual non-empty values extracted
+        has_non_empty_values = any(str(v).strip() for k, v in resp_json.items() if k != 'approved_financial_area')
+
+        if not resp_json or not has_non_empty_values:
+            print(f"[CROQUIS DEBUG RAW RESP]\n{raw_resp}")
+            return jsonify({'success': False, 'error': f'لم يتم التوصل لبيانات مؤكدة في الصورة أو المستند المرفق. يرجى التأكد من وضوح الصورة.'})
+
+        return jsonify({'success': True, 'extractedData': resp_json, 'rawText': raw_resp})
+    except Exception as exc:
+        err_msg = traceback.format_exc()
+        print(f"[EXTRACT CROQUIS ERROR]\n{err_msg}")
+        return jsonify({'success': False, 'error': f'حدث خطأ في قراءة ملف الكروكي: {str(exc)}'})
 
 
 @app.route('/api/field-sections/custom/<section_key>', methods=['DELETE'])
@@ -5828,7 +6165,7 @@ def api_training_chat():
 لا تنفذ التوليد أو التعديل أو التصدير إذا لم تتوفر مساحة عمل صالحة. نفذ الأدوات بالترتيب: inspect ثم التنفيذ ثم validate ثم save/export عند طلب المستخدم.
 
 ## قواعد مهمة وحاسمة:
-1. ⚠️ الفرق بين "الشرائح" (Slides) و "حقول الإدخال" (Input Fields):
+1. ️ الفرق بين "الشرائح" (Slides) و "حقول الإدخال" (Input Fields):
    - عندما يطلب المستخدم إضافة أو وصف أو تعديل **شريحة** (مثل: "شريحة للجداول"، "شريحة للدراسات"، "شريحة الخريطة"، "أضف شريحة كذا")، فهذا يخص **العرض التقديمي والشرائح** فقط. **يُمنع منعاً باتاً** استخدام أدوات إنشاء أو تعديل الحقول (`add_field` / `update_field`)!
    - تُنشأ وتعدل الحقول (`add_field`/`update_field`) **فقط وفقط** إذا طلب المستخدم صراحة كلمة "حقل" أو "حقل إدخال جديد" أو "تعديل حقل" في استمارة البيانات!
 2. عند الاستفسار: أجب بدقة بناءً على حالة النظام الفعلية أعلاه.
@@ -5864,7 +6201,7 @@ def api_training_chat():
                         'tool': 'update_branding',
                         'params': {'moodboard_count': num}
                     })
-                    reply = f"تم التعديل! 🎨 عدد صور المود بورد تم تغييره إلى **{num} صور**. الآن كل عرض تقديمي سيتم إنشاؤه سيضم {num} صور في شريحة المود بورد."
+                    reply = f"تم التعديل!  عدد صور المود بورد تم تغييره إلى **{num} صور**. الآن كل عرض تقديمي سيتم إنشاؤه سيضم {num} صور في شريحة المود بورد."
             except ValueError:
                 pass
 
@@ -5878,7 +6215,7 @@ def api_training_chat():
                         'tool': 'update_branding',
                         'params': {'default_slide_count': num, 'min_slides': max(1, num - 2), 'max_slides': min(50, num + 3)}
                     })
-                    reply = f"تم التعديل! 📊 عدد الشرائح الافتراضي تم تغييره إلى **{num} شرائح**. الحد الأدنى: {max(1, num - 2)}، الحد الأقصى: {min(50, num + 3)}."
+                    reply = f"تم التعديل!  عدد الشرائح الافتراضي تم تغييره إلى **{num} شرائح**. الحد الأدنى: {max(1, num - 2)}، الحد الأقصى: {min(50, num + 3)}."
             except ValueError:
                 pass
 
@@ -5919,7 +6256,7 @@ def api_training_chat():
                     'params': color_params
                 })
                 desc = ', '.join([f"{k}: {v}" for k, v in color_params.items()])
-                reply = f"تم التعديل! 🎨 تم تحديث ألوان الهوية البصرية للشركة: ({desc})."
+                reply = f"تم التعديل!  تم تحديث ألوان الهوية البصرية للشركة: ({desc})."
 
         # 4. Revert / Reset colors intent ("رجع الألوان", "استرجع الألوان", "الألوان القديمة", "الألوان الافتراضية")
         if not parsed_actions and any(kw in message for kw in ['رجع الالوان', 'رجع الألوان', 'الالوان القديمه', 'الألوان القديمة', 'الالوان السابقة', 'الألوان السابقة', 'استرجاع الالوان', 'استرجاع الألوان', 'الالوان الافتراضية', 'الألوان الافتراضية', 'القديمة', 'القديمه']):
@@ -5934,7 +6271,7 @@ def api_training_chat():
                 'tool': 'update_branding',
                 'params': default_colors
             })
-            reply = "تم استرجاع الألوان القديمة والافتراضية للهوية البصرية بنجاح! 🎨 (Primary: #3B6E91, Secondary: #254B66)."
+            reply = "تم استرجاع الألوان القديمة والافتراضية للهوية البصرية بنجاح!  (Primary: #3B6E91, Secondary: #254B66)."
 
         # 5. Font intent ("غيّر الخط إلى X" / "استخدم خط X" / "رجّع الخط الافتراضي")
         font_words = {'خط', 'الخط', 'خطوط', 'الخطوط', 'بالخط', 'فونت', 'الفونت'}
@@ -5950,10 +6287,10 @@ def api_training_chat():
                     break
             if font_hit:
                 parsed_actions.append({'tool': 'set_font', 'params': {'font_query': font_hit['font_name']}})
-                reply = f"تم تخصيص خط الشركة إلى **{font_hit['font_name']}**. 🔤"
+                reply = f"تم تخصيص خط الشركة إلى **{font_hit['font_name']}**. "
             elif any(kw in message for kw in ['الخط الافتراضي', 'رجع الخط', 'رجّع الخط', 'استرجاع الخط']):
                 parsed_actions.append({'tool': 'set_font', 'params': {'font_query': 'default'}})
-                reply = 'تم الرجوع للخط الافتراضي للشركة. 🔤'
+                reply = 'تم الرجوع للخط الافتراضي للشركة. '
 
     for action in parsed_actions:
         try:
@@ -5980,7 +6317,7 @@ def api_training_chat():
     clean_reply = re.sub(r'\n{3,}', '\n\n', clean_reply).strip()
 
     if not clean_reply and actions_executed:
-        clean_reply = '✅ تم تنفيذ الإجراء بنجاح.'
+        clean_reply = ' تم تنفيذ الإجراء بنجاح.'
 
     return jsonify({
         'success': True,
@@ -6005,7 +6342,7 @@ def _build_agent_system_state(tenant_id):
 
     field_lines = []
     for f in active_fields[:40]:
-        req = '✅ إلزامي' if f.get('is_required') else '⬜ اختياري'
+        req = ' إلزامي' if f.get('is_required') else '⬜ اختياري'
         custom = ' (مخصص)' if f.get('is_custom') else ' (أساسي)'
         field_lines.append(f"  • {f['field_label']} [{f['field_key']}] — نوع: {f['field_type']}, قسم: {f.get('section_key', 'general')}, {req}{custom}")
 
@@ -6015,7 +6352,7 @@ def _build_agent_system_state(tenant_id):
 
     user_lines = []
     for u in users:
-        status = '🟢 نشط' if u.get('is_active') else '🔴 معطل'
+        status = ' نشط' if u.get('is_active') else ' معطل'
         user_lines.append(f"  • {u['name']} ({u['email']}) — دور: {u['role']}, {status}")
 
     section_lines = []
@@ -6056,11 +6393,11 @@ def _build_agent_system_state(tenant_id):
         default_tag = ' (افتراضي النظام)' if f.get('is_default') else ''
         available_font_lines.append(f"  • {f.get('font_name')} ({script_label}){default_tag}")
 
-    return f"""### 🏢 معلومات الشركة:
+    return f"""###  معلومات الشركة:
 - اسم الشركة: {branding.get('company_name', 'غير محدد')}
 - الشعار النصي: {branding.get('tagline', 'غير محدد')}
 
-### 🎨 الهوية البصرية:
+###  الهوية البصرية:
 - اللون الرئيسي: {branding.get('primary_color', '#3B6E91')}
 - اللون الثانوي: {branding.get('secondary_color', '#254B66')}
 - لون التمييز: {branding.get('accent_color', '#6DA3C3')}
@@ -6075,13 +6412,13 @@ def _build_agent_system_state(tenant_id):
 - الفوتر: {'مفعل' if branding.get('footer_enabled') else 'معطل'} (ارتفاع {branding.get('footer_height', 36)}px)
 - اللوجو: {'موجود' if branding.get('logo_path') else 'غير مرفوع'}
 
-### 🔤 الخطوط:
+###  الخطوط:
 - التخصيص الحالي: {'الخط الافتراضي (لم يتم تخصيص خط)' if not current_font_lines else ''}
 {chr(10).join(current_font_lines) if current_font_lines else ''}
 - الخطوط المتاحة للتخصيص ({len(seen_families)} خط):
 {chr(10).join(available_font_lines) if available_font_lines else '  لا توجد خطوط مركزية — يمكن للأدمن رفع خط مخصص من صفحة الإعدادات.'}
 
-### 📊 إعدادات الشرائح والصور:
+###  إعدادات الشرائح والصور:
 - عدد الشرائح الافتراضي: {branding.get('default_slide_count', 16)}
 - الحد الأدنى: {branding.get('min_slides', 8)}
 - الحد الأقصى: {branding.get('max_slides', 30)}
@@ -6089,25 +6426,25 @@ def _build_agent_system_state(tenant_id):
 - المود بورد: {'مفعل' if branding.get('moodboard_enabled') else 'معطل'}
 - صورة الغلاف: {'مفعلة' if branding.get('cover_image_enabled') else 'معطلة'}
 
-### 📋 حقول الإدخال النشطة ({len(active_fields)} حقل):
+###  حقول الإدخال النشطة ({len(active_fields)} حقل):
 {chr(10).join(field_lines) if field_lines else '  لا توجد حقول نشطة.'}
 
-### 🚫 حقول معطلة ({len(inactive_fields)}):
+###  حقول معطلة ({len(inactive_fields)}):
 {chr(10).join(inactive_field_lines) if inactive_field_lines else '  لا توجد حقول معطلة.'}
 
-### 📁 أقسام البيانات ({len(sections)} قسم):
+###  أقسام البيانات ({len(sections)} قسم):
 {chr(10).join(section_lines) if section_lines else '  لا توجد أقسام.'}
 
-### 👥 الموظفين ({len(users)} موظف):
+###  الموظفين ({len(users)} موظف):
 {chr(10).join(user_lines) if user_lines else '  لا يوجد موظفين.'}
 
-### 📄 العروض التقديمية:
+###  العروض التقديمية:
 {pres_summary}
 
-### 🧠 سجلات التدريب ({len(active_training)} سجل نشط):
+###  سجلات التدريب ({len(active_training)} سجل نشط):
 {chr(10).join(training_lines) if training_lines else '  لا توجد سجلات تدريب.'}
 
-### 📐 قوالب الشرائح المخصصة ({len(templates)} قالب):
+###  قوالب الشرائح المخصصة ({len(templates)} قالب):
 {chr(10).join([f"  • {t.get('slide_name', t.get('slide_type', '?'))}" for t in templates[:10]]) if templates else '  لا توجد قوالب مخصصة.'}
 """
 
