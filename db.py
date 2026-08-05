@@ -666,32 +666,32 @@ def ensure_tenant_prebuilt_fields_active(tenant_id):
     """Dynamically ensure all prebuilt fields are active and migrated for the tenant on every request."""
     if not tenant_id:
         return
-    with get_db() as conn:
-        existing_rows = {
-            row['field_key']: row for row in
-            conn.execute('SELECT id, field_key, section_key, field_options FROM tenant_input_fields WHERE tenant_id = ?', (tenant_id,)).fetchall()
-        }
-        for f in PREBUILT_FIELDS:
-            opts_json = json.dumps(f.get('options', []), ensure_ascii=False) if f.get('options') else None
-            if f['key'] in existing_rows:
-                row_id = existing_rows[f['key']]['id']
-                conn.execute(
-                    'UPDATE tenant_input_fields SET field_options = ?, section_key = ?, field_label = ?, field_type = ?, sort_order = ?, is_active = 1 WHERE id = ?',
-                    (opts_json, f.get('section_key', 'general'), f['label'], f['type'], f.get('sort_order', 0), row_id)
+    conn = get_db()
+    existing_rows = {
+        row['field_key']: row for row in
+        conn.execute('SELECT id, field_key, section_key, field_options FROM tenant_input_fields WHERE tenant_id = ?', (tenant_id,)).fetchall()
+    }
+    for f in PREBUILT_FIELDS:
+        opts_json = json.dumps(f.get('options', []), ensure_ascii=False) if f.get('options') else None
+        if f['key'] in existing_rows:
+            row_id = existing_rows[f['key']]['id']
+            conn.execute(
+                'UPDATE tenant_input_fields SET field_options = ?, section_key = ?, field_label = ?, field_type = ?, sort_order = ?, is_active = 1 WHERE id = ?',
+                (opts_json, f.get('section_key', 'general'), f['label'], f['type'], f.get('sort_order', 0), row_id)
+            )
+        else:
+            field_id = str(uuid.uuid4())
+            conn.execute(
+                'INSERT INTO tenant_input_fields (id, tenant_id, field_key, field_label, field_type, field_options, section_key, is_required, is_active, is_custom, sort_order, ai_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)',
+                (
+                    field_id, tenant_id, f['key'], f['label'], f['type'],
+                    opts_json,
+                    f.get('section_key', 'general'),
+                    1 if f.get('required') else 0,
+                    f.get('sort_order', 0), f.get('ai_hint', '')
                 )
-            else:
-                field_id = str(uuid.uuid4())
-                conn.execute(
-                    'INSERT INTO tenant_input_fields (id, tenant_id, field_key, field_label, field_type, field_options, section_key, is_required, is_active, is_custom, sort_order, ai_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)',
-                    (
-                        field_id, tenant_id, f['key'], f['label'], f['type'],
-                        opts_json,
-                        f.get('section_key', 'general'),
-                        1 if f.get('required') else 0,
-                        f.get('sort_order', 0), f.get('ai_hint', '')
-                    )
-                )
-        conn.commit()
+            )
+    conn.commit()
 
 
 def _migrate_font_system(conn):
