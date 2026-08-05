@@ -2203,6 +2203,7 @@ def api_branding_font_css():
 @require_auth
 def api_get_fields():
     """Get all input fields for the current tenant."""
+    db.ensure_tenant_prebuilt_fields_active(g.tenant_id)
     active_only = request.args.get('all') != '1'
     fields = db.get_fields(g.tenant_id, active_only=active_only)
     result = []
