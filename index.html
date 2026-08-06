@@ -4232,6 +4232,7 @@
     let tenantPresentationId = null;
     let tenantProjectMode = 'new';
     let tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
+    let tenantArchiveCache = null;
 
     function mapsSignature(d, highlightSite = true) {
       d = d || tenantProjectData || {};
@@ -4737,7 +4738,28 @@
       document.getElementById('tenantAppPage').classList.add('active');
     }
 
-    function showTenantPage(pageId) {
+    const TENANT_PAGE_ROUTES = {
+      tenantDashboardPage: '/app/dashboard',
+      tenantProjectPage: '/app/projects/new',
+      tenantMainImagePage: '/app/projects/generation/cover',
+      tenantMoodboardPage: '/app/projects/generation/moodboard',
+      tenantGenerationPage: '/app/projects/generation',
+      tenantSlidesPage: '/app/presentations/current',
+      tenantPresentationsPage: '/app/presentations',
+      tenantSettingsPage: '/app/settings',
+      tenantFieldsPage: '/app/settings/fields',
+      tenantUsersPage: '/app/settings/users',
+      tenantTrainingPage: '/app/settings/training',
+      tenantAIRulesPage: '/app/settings/ai-rules',
+      tenantApprovalsPage: '/app/approvals',
+      tenantAdminPage: '/app/admin'
+    };
+    const TENANT_ROUTE_PAGES = Object.fromEntries(Object.entries(TENANT_PAGE_ROUTES).map(([page, route]) => [route, page]));
+
+    function showTenantPage(pageId, fromHistory = false) {
+      if (!fromHistory && TENANT_PAGE_ROUTES[pageId] && window.location.pathname !== TENANT_PAGE_ROUTES[pageId]) {
+        window.history.pushState({ tenantPage: pageId }, '', TENANT_PAGE_ROUTES[pageId]);
+      }
       document.querySelectorAll('.tenant-page').forEach(el => el.classList.remove('active'));
       const el = document.getElementById(pageId);
       if (el) el.classList.add('active');
@@ -4765,6 +4787,12 @@
       refreshGlobalRail();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+
+    window.addEventListener('popstate', () => {
+      const pageId = TENANT_ROUTE_PAGES[window.location.pathname];
+      if (pageId && tenantToken) showTenantPage(pageId, true);
+      else if (tenantToken && window.location.pathname.startsWith('/app/')) showTenantPage('tenantDashboardPage', true);
+    });
 
     const TENANT_WORKFLOW_ITEMS = [
       { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
@@ -6189,6 +6217,9 @@
         tenantNearbyLandmarks = source.nearby_landmarks_data;
       }
       tenantProjectData = { ...tenantProjectData, ...source };
+      if (source.land_documents_analysis && Array.isArray(source.land_documents_analysis.parcels)) {
+        renderExtractedParcels(source.land_documents_analysis.parcels);
+      }
 
       form.querySelectorAll('[data-key]').forEach(input => {
         const key = input.dataset.key;
@@ -6706,11 +6737,12 @@
                 input.appendChild(option);
               }
             });
-          } else if (f.fieldType === 'pdf' || f.fieldType === 'file' || f.fieldKey === 'croquis_file' || f.fieldKey === 'building_permit_file') {
+          } else if (f.fieldType === 'pdf' || f.fieldType === 'file' || f.fieldKey === 'land_image_file' || f.fieldKey === 'croquis_file' || f.fieldKey === 'building_permit_file' || f.fieldKey === 'regulation_reference_file') {
             input = document.createElement('input');
             input.type = 'file';
             input.accept = 'image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp';
             input.dataset.filetype = 'pdf';
+            input.dataset.projectFileType = f.fieldKey === 'land_image_file' ? 'land_image' : f.fieldKey === 'building_permit_file' ? 'building_license' : f.fieldKey === 'regulation_reference_file' ? 'regulation_reference' : 'croquis';
           } else if (f.fieldType === 'image') {
             input = document.createElement('input');
             input.type = 'file';
@@ -6863,30 +6895,36 @@
                 if (lngInput) lngInput.value = '';
                 tenantProjectData.location_lat = '';
                 tenantProjectData.location_lng = '';
+                tenantProjectData.location_coordinates_confirmed = false;
+                tenantProjectData.location_coordinates_source = '';
                 invalidateTenantMapAssets();
               }
             };
             addressInput.addEventListener('paste', () => {
               clearTimeout(window._autoAnalyzeTimer);
               window._autoAnalyzeTimer = setTimeout(() => {
-                const val = addressInput.value.trim();
-                if (!val) return;
-                resetCoordinatesForChangedAddress();
-                if (isGoogleMapsUrl(val)) analyzeTenantSite();
-              }, 700);
+                if (addressInput.value.trim()) resetCoordinatesForChangedAddress();
+              }, 250);
             });
             addressInput.addEventListener('blur', () => {
-              const val = addressInput.value.trim();
-              if (!val) return;
-              resetCoordinatesForChangedAddress();
-              const hasCoords = latInput && latInput.value.trim() && lngInput && lngInput.value.trim();
-              const alreadyAnalyzed = window._lastAnalyzedAddress === val && hasCoords;
-              if (!alreadyAnalyzed && isGoogleMapsUrl(val)) analyzeTenantSite();
+              if (addressInput.value.trim()) resetCoordinatesForChangedAddress();
             });
           }
 
           sectionDiv.appendChild(div);
         });
+
+        if (sectionKey === 'land_croquis') {
+          const landAnalysisActions = document.createElement('div');
+          landAnalysisActions.className = 'tenant-field full';
+          landAnalysisActions.style.cssText = 'margin-top:12px;padding-top:12px;border-top:1px solid var(--line);';
+          landAnalysisActions.innerHTML = '<button type="button" class="btn primary" id="analyzeLandDocumentsButton">تحليل ملفات الأرض والكروكي والرخصة معًا</button>' +
+            '<p class="tenant-hint" style="margin:6px 0 0">ترفع صورة الأرض والكروكي والرخصة وملف الاشتراطات أولًا بشكل آمن، ثم يحللها الذكاء الاصطناعي معًا ويعرض كل قطعة واتجاهاتها للمراجعة.</p>' +
+            '<input type="hidden" data-key="land_documents_analysis" data-type="text" id="landDocumentsAnalysisData">' +
+            '<div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>';
+          landAnalysisActions.querySelector('#analyzeLandDocumentsButton').addEventListener('click', () => extractTenantCroquisData('croquis_file'));
+          sectionDiv.appendChild(landAnalysisActions);
+        }
 
         form.appendChild(sectionDiv);
       });
@@ -6897,7 +6935,12 @@
         previewDiv.className = 'tenant-field full';
         previewDiv.id = 'tenantMapPreview';
         previewDiv.innerHTML = `
-          <label>معاينة الموقع</label>
+          <label>معاينة الموقع والإحداثيات</label>
+          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
+            <button type="button" class="btn ghost" id="confirmTenantCoordinatesButton" onclick="confirmTenantCoordinates()">اعتماد الإحداثيات</button>
+            <span id="tenantCoordinatesStatus" class="tenant-hint">الإحداثيات تحتاج مراجعة واعتماد</span>
+          </div>
+          <input type="hidden" id="tenantCoordinatesConfirmed" data-key="location_coordinates_confirmed" data-type="text" value="">
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
             <button type="button" class="btn ghost" id="toggleTenantPolygonButton" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>
             <button type="button" class="btn ghost" id="removeLastTenantPolygonPointButton" onclick="removeLastTenantPolygonPoint()" disabled>تراجع عن آخر نقطة</button>
@@ -7410,7 +7453,7 @@
         </div>
 
         <div class="finance-block" style="text-align:center;padding:20px">
-          <button type="button" class="btn primary" style="font-size:15px;padding:12px 30px" onclick="printFinancialStudy()">تصدير وطباعة الدراسة المالية الكاملة (PDF)</button>
+          <button type="button" class="btn primary" style="font-size:15px;padding:12px 30px" onclick="exportFinancialStudyPdf()">تصدير الدراسة المالية المنظمة (PDF)</button>
         </div>
 
         <input type="hidden" data-key="financial_calc_data" data-type="text" id="financialCalcData">
@@ -8148,6 +8191,95 @@
       calculateAll();
     }
 
+    function collectFinancialStudyModel() {
+      calculateAll();
+      const root = document.getElementById('section-financial-calc');
+      const inputs = {};
+      const isActive = el => !el.disabled && !el.closest('.conditional-off,.dynamic-off,.off-cell');
+      root?.querySelectorAll('input[id],select[id],textarea[id]').forEach(el => {
+        if (!isActive(el)) return;
+        inputs[el.id] = el.type === 'checkbox' ? !!el.checked : (el.value ?? '');
+      });
+      const tables = {};
+      root?.querySelectorAll('table[id]').forEach(table => {
+        const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+        tables[table.id] = Array.from(table.querySelectorAll('tbody tr')).map(tr => {
+          const row = {};
+          Array.from(tr.cells).forEach((cell, index) => {
+            if (index >= headers.length) return;
+            const control = cell.querySelector('input,select,textarea');
+            row[headers[index] || ('column_' + index)] = control
+              ? (control.tagName === 'SELECT' ? (control.selectedOptions?.[0]?.textContent || control.value) : control.value)
+              : cell.textContent.trim();
+          });
+          return row;
+        }).filter(row => Object.values(row).some(value => String(value ?? '').trim() !== ''));
+      });
+      return {
+        inputs,
+        tables,
+        projection: window.__financialProjection || {},
+        financialCalcData: (() => {
+          try { return JSON.parse(document.getElementById('financialCalcData')?.value || '{}'); } catch (e) { return {}; }
+        })()
+      };
+    }
+
+    function focusFinancialValidation(validation) {
+      const first = Array.isArray(validation) ? validation[0] : null;
+      if (!first?.field) return;
+      const target = document.getElementById(first.field) || document.querySelector('[data-field="' + first.field + '"]');
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target?.focus?.();
+    }
+
+    async function validateFinancialStudyBeforeProceed() {
+      if (!document.getElementById('section-financial-calc')) return true;
+      const response = await api('POST', '/api/financial-study/validate', { financialModel: collectFinancialStudyModel() });
+      if (response?.success) return true;
+      focusFinancialValidation(response?.validation);
+      toast(response?.validation?.[0]?.message || 'استكمل المدخلات المالية المطلوبة أولًا');
+      return false;
+    }
+
+    async function exportFinancialStudyPdf() {
+      const model = collectFinancialStudyModel();
+      const projectName = String(tenantProjectData?.project_name || tenantProjectData?.projectName || 'الدراسة المالية').trim();
+      showLoader('جاري إنشاء الدراسة المالية', 'جاري التحقق من المدخلات وبناء ملف PDF منظم...', 8);
+      try {
+        const response = await api('POST', '/api/financial-study/export', {
+          projectName,
+          presentationId: tenantPresentationId || null,
+          draftId: tenantProjectData?.draftId || null,
+          financialModel: model
+        });
+        if (!response?.success || !response.url) {
+          focusFinancialValidation(response?.validation);
+          toast(response?.error || 'لا يمكن تصدير الدراسة المالية');
+          return;
+        }
+        updateLoaderProgress(80, 'تم إنشاء الملف، جاري تحميله...');
+        const token = getTenantToken();
+        const download = await fetch(response.url, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+        if (!download.ok) throw new Error('Download failed');
+        const blob = await download.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = response.url.split('/').pop() || 'financial-study.pdf';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(blobUrl);
+        updateLoaderProgress(100, 'اكتمل تحميل الدراسة المالية');
+        toast('تم تصدير الدراسة المالية وحفظها في سجل التصديرات');
+      } catch (error) {
+        toast('تعذر تصدير الدراسة المالية: ' + (error?.message || 'خطأ في الاتصال'));
+      } finally {
+        hideLoader();
+      }
+    }
+
     function printFinancialStudy(){
       calculateAll();
       if(window.__financialProjection?.areaState&&!window.__financialProjection.areaState.valid){toast('لا يمكن الطباعة: مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض');return}
@@ -8598,6 +8730,7 @@
             badge.style.color = '#166534';
             badge.innerHTML = 'مُمزامن تلقائياً (' + timeStr + ')';
           }
+          tenantArchiveCache = null;
           if (!silent) toast('تم حفظ المسودة على الخادم');
         } else {
           if (badge) {
@@ -8646,41 +8779,80 @@
     }
 
     async function extractTenantCroquisData(targetKey = 'croquis_file') {
-      const fileInput = document.querySelector('#tenantProjectForm [data-key="' + targetKey + '"]');
-      let fileData = tenantProjectData[targetKey] || '';
-      if (fileInput && fileInput.files && fileInput.files[0]) {
-        fileData = await fileToDataUri(fileInput.files[0]);
+      const keys = ['land_image_file', 'croquis_file', 'building_permit_file', 'regulation_reference_file'];
+      const documents = [];
+      for (const key of keys) {
+        const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+        if (!input?.files?.[0] && !tenantProjectData[key + '_file_id']) continue;
+        const fileId = await uploadTenantProjectFileInput(input, key);
+        if (fileId) {
+          documents.push({
+            key: input?.dataset?.projectFileType || key,
+            fileId,
+            filename: input?.files?.[0]?.name || tenantProjectData[key + '_file_meta']?.originalName || key,
+            mimeType: input?.files?.[0]?.type || tenantProjectData[key + '_file_meta']?.mimeType || ''
+          });
+        }
       }
-      if (!fileData) {
-        const labelText = targetKey === 'building_permit_file' ? 'صورة/ملف رخصة البناء' : 'صورة/ملف الكروكي';
+      if (!documents.length) {
+        const labelText = targetKey === 'building_permit_file' ? 'صورة/ملف رخصة البناء' : 'ملفات الأرض والكروكي والرخصة';
         toast('يرجى اختيار ' + labelText + ' أولاً');
         return;
       }
-      const titleText = targetKey === 'building_permit_file' ? 'تحليل رخصة البناء والاشتراطات' : 'تحليل واستخراج بيانات الكروكي';
-      showLoader(titleText, 'جاري قراءة وتدقيق الاشتراطات والمساحات بالذكاء الاصطناعي...', 10);
+      showLoader('تحليل ملفات الأرض والكروكي والرخصة', 'جاري تحليل الملفات معًا واكتشاف القطع والاتجاهات...', 10);
       try {
-        updateLoaderProgress(40, 'جاري تحليل الأبعاد والاشتراطات الهندسية والرسمية...');
-        const res = await api('POST', '/api/extract-croquis', { fileData: fileData });
+        updateLoaderProgress(35, 'جاري إرسال الملفات المحفوظة إلى الذكاء الاصطناعي...');
+        const res = await api('POST', '/api/extract-croquis', { documents, draftId: tenantProjectData.draftId });
         if (res.success && res.extractedData) {
           const data = res.extractedData;
           Object.entries(data).forEach(([k, v]) => {
             if (v !== undefined && v !== null && v !== '') {
               tenantProjectData[k] = v;
               const inp = document.querySelector('#tenantProjectForm [data-key="' + k + '"]');
-              if (inp) inp.value = v;
+              if (inp && typeof v !== 'object') inp.value = v;
             }
           });
-          updateLoaderProgress(100, 'تم استخراج البيانات بنجاح! راجع البيانات ثم اعتمدها.');
-          toast('تم استخراج بيانات الكروكي بنجاح. يرجى مراجعتها واعتمادها.');
+          tenantProjectData.land_documents_analysis = data;
+          tenantProjectData.land_documents_analysis_status = 'needs_review';
+          renderExtractedParcels(data.parcels || []);
+          updateLoaderProgress(100, 'تم تحليل الملفات معًا. راجع كل قطعة والاتجاهات ثم اعتمد البيانات.');
+          toast('تم تحليل ملفات الأرض والكروكي والرخصة معًا. راجع النتائج قبل الاعتماد.');
           triggerAutoSaveDraft();
         } else {
-          toast(res.error || 'تعذر استخراج البيانات من الكروكي');
+          toast(res.error || 'تعذر تحليل ملفات الأرض والكروكي والرخصة');
         }
       } catch (err) {
-        toast('حدث خطأ أثناء قراءة الكروكي: ' + (err.message || err));
+        toast('حدث خطأ أثناء تحليل الملفات: ' + (err.message || err));
       } finally {
-        hideLoader('اكتمل استخراج البيانات');
+        hideLoader('اكتمل تحليل ملفات الأرض');
       }
+    }
+
+    function renderExtractedParcels(parcels) {
+      const host = document.getElementById('landDocumentsAnalysisPreview');
+      if (!host) return;
+      const analysisInput = document.getElementById('landDocumentsAnalysisData');
+      if (!Array.isArray(parcels) || !parcels.length) {
+        host.innerHTML = '<p class="tenant-hint">لم يتم اكتشاف قطع أرض مؤكدة.</p>';
+        if (analysisInput) analysisInput.value = '';
+        host.style.display = 'block';
+        return;
+      }
+      if (analysisInput) analysisInput.value = JSON.stringify({ parcels });
+      const directionLabels = { north: 'شمال', south: 'جنوب', east: 'شرق', west: 'غرب' };
+      host.innerHTML = '<h4 style="margin:0 0 10px;color:var(--p)">القطع المكتشفة — راجع كل قطعة على حدة</h4>' + parcels.map((parcel, index) => {
+        const directions = parcel.directions || {};
+        const rows = Object.entries(directionLabels).map(([key, label]) => {
+          const value = directions[key] || {};
+          return '<tr><th>' + label + '</th><td>' + escapeHtml(value.street_name || value.uses || 'غير محدد') + '</td><td>' + escapeHtml(value.street_width_m ?? '—') + '</td><td>' + escapeHtml(value.boundary_length_m ?? '—') + '</td></tr>';
+        }).join('');
+        return '<details open style="border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0;background:#fff">' +
+          '<summary style="font-weight:700;cursor:pointer">' + escapeHtml(parcel.parcel_id || ('P-' + (index + 1))) + ' — قطعة ' + escapeHtml(parcel.plot_number || 'غير محدد') + ' — مساحة ' + escapeHtml(parcel.area_sqm ?? 'غير محددة') + ' م²</summary>' +
+          '<div style="overflow:auto;margin-top:8px"><table class="location-table"><thead><tr><th>الاتجاه</th><th>الشارع/الاستخدام</th><th>عرض الشارع</th><th>طول الحد</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+          '<p class="tenant-hint" style="margin:8px 0 0">الإحداثيات: ' + escapeHtml(parcel.coordinates?.lat ?? '—') + ', ' + escapeHtml(parcel.coordinates?.lng ?? '—') + ' (' + escapeHtml(parcel.coordinates?.source || 'غير معتمدة') + ') | المصدر: ' + escapeHtml((parcel.sources || []).join('، ') || 'يحتاج مراجعة') + ' | الثقة: ' + escapeHtml(JSON.stringify(parcel.confidence || {})) + '</p>' +
+          '</details>';
+      }).join('');
+      host.style.display = 'block';
     }
 
     function toggleApproveCroquisData() {
@@ -8782,6 +8954,24 @@
 
     let tenantSiteAnalysisRequest = null;
 
+    function confirmTenantCoordinates() {
+      const lat = Number(tenantProjectData?.location_lat);
+      const lng = Number(tenantProjectData?.location_lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        toast('حدد الإحداثيات أولًا من رابط Google Maps أو بالإدخال اليدوي');
+        return;
+      }
+      tenantProjectData.location_coordinates_confirmed = true;
+      tenantProjectData.location_coordinates_source = tenantProjectData.location_coordinates_source || 'google_maps_link';
+      const hidden = document.getElementById('tenantCoordinatesConfirmed');
+      if (hidden) hidden.value = 'true';
+      const status = document.getElementById('tenantCoordinatesStatus');
+      if (status) status.textContent = 'تم اعتماد الإحداثيات: ' + lat.toFixed(6) + ', ' + lng.toFixed(6);
+      const button = document.getElementById('confirmTenantCoordinatesButton');
+      if (button) { button.textContent = 'تم اعتماد الإحداثيات'; button.classList.add('success'); }
+      triggerAutoSaveDraft();
+    }
+
     async function analyzeTenantSite() {
       if (tenantSiteAnalysisRequest) return tenantSiteAnalysisRequest;
       tenantSiteAnalysisRequest = analyzeTenantSiteOnce().finally(() => {
@@ -8829,6 +9019,8 @@
           mapHint.style.display = 'block';
         }
         tenantProjectData = { ...tenantProjectData, ...fields };
+        tenantProjectData.location_coordinates_confirmed = false;
+        tenantProjectData.location_coordinates_source = data.source || 'site_analysis';
         Object.entries(fields).forEach(([key, value]) => {
           const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
           if (input && value !== null && value !== undefined) input.value = value;
@@ -9547,6 +9739,29 @@
       toast(filled > 0 ? 'تم تعبئة ' + filled + ' حقل + جداول تجريبية — بيانات مجمع الواحة السكني، حي النرجس، الرياض' : 'لا توجد حقول مطابقة');
     }
 
+    async function uploadTenantProjectFileInput(input, key) {
+      const file = input?.files?.[0];
+      const fileType = input?.dataset?.projectFileType;
+      if (!file || !fileType) return tenantProjectData[key + '_file_id'] || null;
+      const signature = [file.name, file.size, file.lastModified, fileType].join(':');
+      if (input.dataset.uploadSignature === signature && input.dataset.projectFileId) {
+        return input.dataset.projectFileId;
+      }
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      formData.append('fileType', fileType);
+      if (tenantProjectData?.draftId) formData.append('draftId', tenantProjectData.draftId);
+      const response = await api('POST', '/api/project-files', formData, true);
+      if (!response?.success || !response.file?.id) {
+        throw new Error(response?.error || 'تعذر حفظ ملف المشروع');
+      }
+      input.dataset.uploadSignature = signature;
+      input.dataset.projectFileId = response.file.id;
+      tenantProjectData[key + '_file_id'] = response.file.id;
+      tenantProjectData[key + '_file_meta'] = response.file;
+      return response.file.id;
+    }
+
     async function collectTenantFormData() {
       const result = {};
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
@@ -9555,8 +9770,14 @@
         if (!key) continue;
         const type = input.dataset.type;
         if (type === 'image' || type === 'pdf' || type === 'file') {
-          if (input.files && input.files[0]) result[key] = await fileToDataUri(input.files[0]);
-          else result[key] = tenantProjectData[key] || '';
+          if (input.files && input.files[0]) {
+            const fileId = await uploadTenantProjectFileInput(input, key);
+            result[key + '_file_id'] = fileId || '';
+            result[key] = tenantProjectData[key] || '';
+          } else {
+            result[key] = tenantProjectData[key] || '';
+            if (tenantProjectData[key + '_file_id']) result[key + '_file_id'] = tenantProjectData[key + '_file_id'];
+          }
         } else if (type === 'number') {
           result[key] = Number(input.value) || 0;
         } else {
@@ -9572,6 +9793,7 @@
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+      if (!(await validateFinancialStudyBeforeProceed())) return;
       
       // Auto-save draft
       await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
@@ -9605,6 +9827,7 @@
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+      if (!(await validateFinancialStudyBeforeProceed())) return;
 
       showGenProgress();
       setGenStep('plan', 'active');
@@ -9992,6 +10215,7 @@
           const freshData = await collectTenantFormData();
           tenantProjectData = { ...tenantProjectData, ...freshData };
         }
+        if (!(await validateFinancialStudyBeforeProceed())) return;
 
         // Show generation page if not already visible
         if (!document.getElementById('tenantGenerationPage').classList.contains('active')) {
@@ -11028,7 +11252,12 @@
       showTenantPage('tenantPresentationsPage');
       const list = document.getElementById('tenantPresentationsList');
       if (!list) return;
-      showInlineLoader(list, 'جاري التحميل...');
+      const cacheKey = (tenantUser && (tenantUser.id || tenantUser.tenantId)) || 'tenant';
+      if (tenantArchiveCache && tenantArchiveCache.key === cacheKey && Date.now() - tenantArchiveCache.timestamp < 15000) {
+        list.innerHTML = tenantArchiveCache.html;
+        return;
+      }
+      showInlineLoader(list, 'جاري تحميل الملخص...');
 
       const [presData, expData, draftsData] = await Promise.all([
         api('GET', '/api/presentations'),
@@ -11052,8 +11281,7 @@
       if (drafts.length) {
         html += '<h3 style="margin:16px 0 8px;color:var(--p);font-size:16px;border-bottom:2px solid var(--p);padding-bottom:6px">مسودات المشاريع المحفوظة (' + drafts.length + ')</h3>';
         html += drafts.map(d => {
-          const dData = d.draft_data || d.draftData || {};
-          const title = dData.project_name || dData.name || 'مسودة مشروع بدون عنوان';
+          const title = d.title || 'مسودة مشروع بدون عنوان';
           const statusText = d.status === 'pending_approval' ? 'في انتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
           const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
           return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid #cbd5e1;margin-bottom:12px;">' +
@@ -11089,6 +11317,7 @@
       }
 
       list.innerHTML = html;
+      tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html };
     }
 
     async function openProjectDraftById(draftId) {
@@ -11176,6 +11405,7 @@
       if (!confirm('هل أنت تأكد من حذف هذه المسودة؟')) return;
       const resp = await api('DELETE', '/api/project-draft/' + encodeURIComponent(draftId));
       if (resp.success) {
+        tenantArchiveCache = null;
         toast('تم حذف المسودة');
         openTenantPresentations();
       } else {

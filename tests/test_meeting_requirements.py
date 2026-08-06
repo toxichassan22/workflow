@@ -232,6 +232,126 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(response.get_json()['mapsDeferred'])
         generate_maps.assert_not_called()
 
+    def test_project_draft_list_returns_metadata_without_payload(self):
+        client = self.app.test_client()
+        response = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {
+                'project_name': 'مسودة خفيفة',
+                'tenantSlidesData': [{'html': 'x' * 5000}],
+                'tenantCreativeImages': {'map_placeholders': {'##MAP_OVERVIEW##': '/map.png'}},
+            }
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        listed = client.get('/api/project-drafts', headers=self._headers(self.token_a))
+        self.assertEqual(listed.status_code, 200, listed.get_json())
+        draft = next(item for item in listed.get_json()['drafts'] if item['title'] == 'مسودة خفيفة')
+        self.assertNotIn('draft_data', draft)
+        self.assertTrue(draft['has_slides'])
+        self.assertTrue(draft['has_maps'])
+        self.assertGreater(draft['data_bytes'], 5000)
+
+    def test_missing_map_asset_does_not_regenerate_on_static_request(self):
+        client = self.app.test_client()
+        with patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps:
+            response = client.get('/uploads/maps/missing-map.png')
+        self.assertEqual(response.status_code, 404)
+        generate_maps.assert_not_called()
+
+    def test_generate_slides_does_not_generate_maps_implicitly(self):
+        client = self.app.test_client()
+        generated = ['<div class="slide" style="width:1280px;height:720px">ok</div>']
+        with patch.object(self.application_module, 'generate_all_slides', return_value=generated), \
+                patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps:
+            response = client.post('/api/generate-slides', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0},
+                'slidePlan': {'slides': [{'title': 'خريطة', 'type': 'map_overview'}]},
+                'images': {},
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        generate_maps.assert_not_called()
+
+    def test_project_file_upload_is_tenant_scoped_and_stored_by_hash(self):
+        client = self.app.test_client()
+        response = client.post('/api/project-files', headers=self._headers(self.token_a), data={
+            'fileType': 'croquis',
+            'draftId': 'draft-file-test',
+            'file': (io.BytesIO(b'%PDF-1.4 test document'), 'parcel.pdf'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(response.status_code, 201, response.get_json())
+        file_id = response.get_json()['file']['id']
+        with self.app.app_context():
+            stored = db.get_project_file(self.tenant_a, file_id)
+            other = db.get_project_file(self.tenant_b, file_id)
+        self.assertIsNotNone(stored)
+        self.assertIsNone(other)
+        self.assertEqual(stored['file_type'], 'croquis')
+        self.assertTrue(os.path.basename(stored['storage_path']).startswith(stored['sha256']))
+
+    def test_financial_validation_requires_only_enabled_optional_inputs(self):
+        errors = self.application_module.validate_financial_model({
+            'inputs': {
+                'unitRevenueMode': 'nonRevenue', 'developmentYears': 1,
+                'landArea': 1000, 'builtUpAreaAbove': 500,
+                'financeEnabled': 'no', 'fundEnabled': 'no', 'externalEnabled': 'no',
+                'exitEnabled': 'no',
+            },
+            'tables': {},
+        })
+        self.assertEqual(errors, [])
+        errors = self.application_module.validate_financial_model({
+            'inputs': {
+                'unitRevenueMode': 'nonRevenue', 'developmentYears': 1,
+                'landArea': 1000, 'builtUpAreaAbove': 500,
+                'financeEnabled': 'yes', 'fundEnabled': 'no', 'externalEnabled': 'no',
+                'exitEnabled': 'no',
+            },
+            'tables': {},
+        })
+        self.assertTrue(any(item['field'] == 'annualFinanceRate' for item in errors))
+        self.assertTrue(any(item['field'] == 'financeDrawTable' for item in errors))
+
+    def test_financial_export_uses_server_validator_and_skips_disabled_sections(self):
+        model = {
+            'inputs': {
+                'unitRevenueMode': 'nonRevenue', 'developmentYears': 1,
+                'landArea': 1000, 'builtUpAreaAbove': 500,
+                'financeEnabled': 'no', 'fundEnabled': 'no',
+                'fundFeesEnabled': 'no', 'externalEnabled': 'no',
+                'exitEnabled': 'no',
+            },
+            'tables': {}, 'projection': {'projectCost': 10}
+        }
+        with self.app.app_context():
+            html = self.application_module.build_financial_report_html('مشروع مالي', model, {}, self.tenant_a)
+        self.assertNotIn('8. التمويل', html)
+        self.assertNotIn('9. الصندوق وأتعابه', html)
+        self.assertIn('12. النتائج المالية', html)
+        client = self.app.test_client()
+        with patch.object(self.application_module, 'generate_financial_pdf') as generate_pdf:
+            response = client.post('/api/financial-study/export', headers=self._headers(self.token_a), json={
+                'projectName': 'مشروع مالي', 'financialModel': model
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()['success'])
+        generate_pdf.assert_called_once()
+
+    def test_land_document_normalizer_keeps_each_parcel_and_four_directions(self):
+        result = self.application_module._normalize_land_document_result({
+            'parcels': [{
+                'parcel_id': 'P-7',
+                'plot_number': '7',
+                'directions': {'north': {'street_name': 'طريق شمالي'}}
+            }, {
+                'parcel_id': 'P-8',
+                'plot_number': '8',
+                'directions': {'غرب': {'street_name': 'شارع غربي'}}
+            }]
+        })
+        self.assertEqual([item['parcel_id'] for item in result['parcels']], ['P-7', 'P-8'])
+        self.assertEqual(result['parcels'][0]['directions']['north']['street_name'], 'طريق شمالي')
+        self.assertIn('west', result['parcels'][1]['directions'])
+        self.assertIn('east', result['parcels'][0]['directions'])
+
     def test_site_analysis_prefers_google_link_over_stale_coordinates(self):
         client = self.app.test_client()
         map_result = {'placeholders': {}, 'zooms': {'overview': 17}}

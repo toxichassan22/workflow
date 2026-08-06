@@ -53,6 +53,8 @@ def init_db():
         _cleanup_accidental_map_fields(conn)
         _migrate_branding_columns(conn)
         _migrate_map_images_presentation_fk(conn)
+        _migrate_project_draft_columns(conn)
+        _migrate_project_file_table(conn)
         _migrate_location_fields(conn)
         _migrate_font_system(conn)
 
@@ -301,9 +303,14 @@ def _create_tables(conn):
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         user_id TEXT,
+        title TEXT,
         draft_data TEXT,
         section_statuses TEXT,
         status TEXT DEFAULT 'draft',
+        revision INTEGER DEFAULT 1,
+        data_bytes INTEGER DEFAULT 0,
+        has_slides INTEGER DEFAULT 0,
+        has_maps INTEGER DEFAULT 0,
         requested_by TEXT,
         requested_by_name TEXT,
         requested_at TEXT,
@@ -345,6 +352,23 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_mapimages_tenant ON map_images(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_mapimages_pres ON map_images(presentation_id);
     CREATE INDEX IF NOT EXISTS idx_mapimages_type ON map_images(image_type);
+
+    CREATE TABLE IF NOT EXISTS project_files (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        draft_id TEXT,
+        project_id TEXT,
+        file_type TEXT NOT NULL,
+        original_name TEXT,
+        storage_path TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER DEFAULT 0,
+        sha256 TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_files_tenant ON project_files(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_project_files_draft ON project_files(tenant_id, draft_id);
+    CREATE INDEX IF NOT EXISTS idx_project_files_hash ON project_files(tenant_id, sha256);
     """)
 
     branding_cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenant_branding)').fetchall()]
@@ -394,20 +418,25 @@ def _create_tables(conn):
     # Migration: normalize historical company-admin drafts and add approval audit fields.
     # Company-admin JWTs intentionally have no user_id, so NULL cannot be used as the
     # draft owner (SQL NULL never equals NULL). A stable tenant-scoped actor fixes that.
-    conn.execute("UPDATE project_drafts SET user_id = 'tenant-admin:' || tenant_id WHERE user_id IS NULL")
-    draft_cols = [row['name'] for row in conn.execute('PRAGMA table_info(project_drafts)').fetchall()]
-    for column, definition in (
-        ('requested_by', 'TEXT'),
-        ('requested_by_name', 'TEXT'),
-        ('requested_at', 'TEXT'),
-        ('reviewed_by', 'TEXT'),
-        ('reviewed_by_name', 'TEXT'),
-        ('review_note', 'TEXT'),
-        ('reviewed_at', 'TEXT'),
-    ):
-        if column not in draft_cols:
-            conn.execute(f'ALTER TABLE project_drafts ADD COLUMN {column} {definition}')
-            print(f'[DB] Migration: added {column} column to project_drafts')
+    draft_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='project_drafts'"
+    ).fetchone()
+    draft_cols = [row['name'] for row in conn.execute('PRAGMA table_info(project_drafts)').fetchall()] if draft_table else []
+    if draft_table:
+        conn.execute("UPDATE project_drafts SET user_id = 'tenant-admin:' || tenant_id WHERE user_id IS NULL")
+    if draft_table:
+        for column, definition in (
+            ('requested_by', 'TEXT'),
+            ('requested_by_name', 'TEXT'),
+            ('requested_at', 'TEXT'),
+            ('reviewed_by', 'TEXT'),
+            ('reviewed_by_name', 'TEXT'),
+            ('review_note', 'TEXT'),
+            ('reviewed_at', 'TEXT'),
+        ):
+            if column not in draft_cols:
+                conn.execute(f'ALTER TABLE project_drafts ADD COLUMN {column} {definition}')
+                print(f'[DB] Migration: added {column} column to project_drafts')
 
 
 def _seed_admin(conn):
@@ -583,21 +612,23 @@ PREBUILT_FIELDS = [
     {'key': 'initial_features', 'label': 'مميزات أولية للمشروع', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'المميزات التنافسية الأولية للمشروع', 'sort_order': 7},
     {'key': 'initial_strengths', 'label': 'فرص استثمار ونقاط قوة أولية', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'فرص الاستثمار ونقاط القوة المبدئية', 'sort_order': 8},
     {'key': 'project_logo', 'label': 'شعار المشروع (Logo)', 'type': 'image', 'required': False, 'section_key': 'basic', 'ai_hint': 'صورة شعار المشروع', 'sort_order': 9},
-    {'key': 'croquis_file', 'label': 'رفع صورة الكروكي أو المخطط المساحي (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملف أو صورة الكروكي أو المخطط المساحي بصيغة صورة أو PDF', 'sort_order': 10},
-    {'key': 'building_permit_file', 'label': 'رفع صورة رخصة البناء أو المستندات (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'صورة أو ملف رخصة البناء أو مستند الاشتراطات بصيغة صورة أو PDF', 'sort_order': 11},
-    {'key': 'plot_number_croquis', 'label': 'رقم القطعة والمخطط', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم قطعة الأرض ورقم المخطط', 'sort_order': 12},
-    {'key': 'deed_number', 'label': 'رقم الصك أو المرجع', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم صك الملكية أو المرجع الرسمي', 'sort_order': 13},
-    {'key': 'croquis_land_area', 'label': 'مساحة الأرض حسب الكروكي (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة الإجمالية للأرض بالمتر المربع حسب الكروكي', 'sort_order': 14},
-    {'key': 'approved_financial_area', 'label': 'المساحة المعتمدة للدراسة المالية (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة المعتمدة بعد أي استقطاعات لنقلها للمالية (لا يغيرها AI)', 'sort_order': 15},
-    {'key': 'boundary_lengths', 'label': 'أطوال الأضلاع وحدود الأرض', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أطوال أضلاع الحدود (شمال، جنوب، شرق، غرب)', 'sort_order': 16},
-    {'key': 'north_direction', 'label': 'اتجاه الشمال والاتجاهات', 'type': 'select', 'options': ['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرقي', 'شمال غربي', 'جنوب شرقي', 'جنوب غربي', 'أخرى'], 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الاتجاهات الجغرافية للأرض', 'sort_order': 17},
-    {'key': 'surrounding_streets', 'label': 'الشوارع المحيطة وعروضها', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أسماء الشوارع المحيطة وعرض كل شارع بالمتر', 'sort_order': 18},
-    {'key': 'facades_count', 'label': 'عدد الواجهات', 'type': 'number', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد واجهات القطعة على الشوارع (رقم خالص: 1, 2, 3, 4)', 'sort_order': 19},
-    {'key': 'building_ratio_setbacks', 'label': 'نسبة البناء والتغطية والارتدادات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'نسبة التغطية المسموحة والارتدادات النظامية', 'sort_order': 20},
-    {'key': 'max_floors_height', 'label': 'الارتفاع أو عدد الأدوار المسموح', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد الأدوار المسموح بها أو الحد الأقصى للارتفاع بالمتر', 'sort_order': 21},
-    {'key': 'allowed_uses_restrictions', 'label': 'الاستخدامات المسموحة والقيود التنظيمية', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الأنشطة والاستخدامات المسموحة والاشتراطات الخاصة', 'sort_order': 22},
-    {'key': 'croquis_expiry_date', 'label': 'تاريخ إصدار وانتهاء صلاحية الكروكي', 'type': 'date', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'تاريخ الصلاحية وتنبيهات الانتهاء', 'sort_order': 23},
-    {'key': 'land_and_building_summary', 'label': 'ملخص بيانات الأرض والاشتراطات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملخص واسترسال تحليلي شامل لبيانات الأرض واشتراطات البناء التنظيمية والفرص والأنشطة المسموحة', 'sort_order': 24},
+    {'key': 'land_image_file', 'label': 'رفع صورة الأرض أو الموقع', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'صورة جوية أو ميدانية للأرض أو الموقع', 'sort_order': 10},
+    {'key': 'croquis_file', 'label': 'رفع صورة الكروكي أو المخطط المساحي (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملف أو صورة الكروكي أو المخطط المساحي بصيغة صورة أو PDF', 'sort_order': 11},
+    {'key': 'building_permit_file', 'label': 'رفع صورة رخصة البناء أو المستندات (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'صورة أو ملف رخصة البناء أو مستند الاشتراطات بصيغة صورة أو PDF', 'sort_order': 12},
+    {'key': 'regulation_reference_file', 'label': 'رفع ملف الاشتراطات أو جدول التنظيم (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الاشتراطات الرسمية أو جدول التنظيم المرتبط بالمشروع', 'sort_order': 13},
+    {'key': 'plot_number_croquis', 'label': 'رقم القطعة والمخطط', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم قطعة الأرض ورقم المخطط', 'sort_order': 14},
+    {'key': 'deed_number', 'label': 'رقم الصك أو المرجع', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم صك الملكية أو المرجع الرسمي', 'sort_order': 15},
+    {'key': 'croquis_land_area', 'label': 'مساحة الأرض حسب الكروكي (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة الإجمالية للأرض بالمتر المربع حسب الكروكي', 'sort_order': 16},
+    {'key': 'approved_financial_area', 'label': 'المساحة المعتمدة للدراسة المالية (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة المعتمدة بعد أي استقطاعات لنقلها للمالية (لا يغيرها AI)', 'sort_order': 17},
+    {'key': 'boundary_lengths', 'label': 'أطوال الأضلاع وحدود الأرض', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أطوال أضلاع الحدود (شمال، جنوب، شرق، غرب)', 'sort_order': 18},
+    {'key': 'north_direction', 'label': 'اتجاه الشمال والاتجاهات', 'type': 'select', 'options': ['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرقي', 'شمال غربي', 'جنوب شرقي', 'جنوب غربي', 'أخرى'], 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الاتجاهات الجغرافية للأرض', 'sort_order': 19},
+    {'key': 'surrounding_streets', 'label': 'الشوارع المحيطة وعروضها', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أسماء الشوارع المحيطة وعرض كل شارع بالمتر', 'sort_order': 20},
+    {'key': 'facades_count', 'label': 'عدد الواجهات', 'type': 'number', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد واجهات القطعة على الشوارع (رقم خالص: 1, 2, 3, 4)', 'sort_order': 21},
+    {'key': 'building_ratio_setbacks', 'label': 'نسبة البناء والتغطية والارتدادات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'نسبة التغطية المسموحة والارتدادات النظامية', 'sort_order': 22},
+    {'key': 'max_floors_height', 'label': 'الارتفاع أو عدد الأدوار المسموح', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد الأدوار المسموح بها أو الحد الأقصى للارتفاع بالمتر', 'sort_order': 23},
+    {'key': 'allowed_uses_restrictions', 'label': 'الاستخدامات المسموحة والقيود التنظيمية', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الأنشطة والاستخدامات المسموحة والاشتراطات الخاصة', 'sort_order': 24},
+    {'key': 'croquis_expiry_date', 'label': 'تاريخ إصدار وانتهاء صلاحية الكروكي', 'type': 'date', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'تاريخ الصلاحية وتنبيهات الانتهاء', 'sort_order': 25},
+    {'key': 'land_and_building_summary', 'label': 'ملخص بيانات الأرض والاشتراطات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملخص واسترسال تحليلي شامل لبيانات الأرض واشتراطات البناء التنظيمية والفرص والأنشطة المسموحة', 'sort_order': 26},
     {'key': 'location_address', 'label': 'رابط موقع المشروع في Google Maps', 'type': 'text', 'section_key': 'location', 'ai_hint': 'رابط Google Maps مباشر لموقع المشروع', 'sort_order': 30},
     {'key': 'location_lat', 'label': 'خط العرض (Latitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط العرض للموقع (إختياري)', 'sort_order': 31},
     {'key': 'location_lng', 'label': 'خط الطول (Longitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط الطول للموقع (إختياري)', 'sort_order': 32},
@@ -1019,6 +1050,61 @@ def _migrate_map_images_presentation_fk(conn):
         print("[DB MIGRATION] map_images presentation_id foreign key removed")
     except Exception as e:
         print(f"[DB MIGRATION ERR] {e}")
+
+
+def _migrate_project_draft_columns(conn):
+    """Add lightweight list metadata to historical project drafts."""
+    try:
+        cursor = conn.execute("PRAGMA table_info(project_drafts)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        migrations = {
+            'title': "ALTER TABLE project_drafts ADD COLUMN title TEXT",
+            'revision': "ALTER TABLE project_drafts ADD COLUMN revision INTEGER DEFAULT 1",
+            'data_bytes': "ALTER TABLE project_drafts ADD COLUMN data_bytes INTEGER DEFAULT 0",
+            'has_slides': "ALTER TABLE project_drafts ADD COLUMN has_slides INTEGER DEFAULT 0",
+            'has_maps': "ALTER TABLE project_drafts ADD COLUMN has_maps INTEGER DEFAULT 0",
+        }
+        for column, sql in migrations.items():
+            if column not in existing_cols:
+                conn.execute(sql)
+                print(f"[DB MIGRATION] Added project draft column: {column}")
+        conn.execute("""
+            UPDATE project_drafts
+            SET title = COALESCE(NULLIF(title, ''), 'مسودة مشروع بدون عنوان'),
+                revision = COALESCE(revision, 1),
+                data_bytes = CASE WHEN COALESCE(data_bytes, 0) = 0 THEN length(COALESCE(draft_data, '')) ELSE data_bytes END,
+                has_slides = CASE WHEN COALESCE(draft_data, '') LIKE '%tenantSlidesData%' THEN 1 ELSE COALESCE(has_slides, 0) END,
+                has_maps = CASE WHEN COALESCE(draft_data, '') LIKE '%map_placeholders%' THEN 1 ELSE COALESCE(has_maps, 0) END
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"[DB DRAFT MIGRATION ERR] {e}")
+
+
+def _migrate_project_file_table(conn):
+    """Create the project file registry for document uploads on older databases."""
+    try:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS project_files (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                draft_id TEXT,
+                project_id TEXT,
+                file_type TEXT NOT NULL,
+                original_name TEXT,
+                storage_path TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                file_size INTEGER DEFAULT 0,
+                sha256 TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_project_files_tenant ON project_files(tenant_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_project_files_draft ON project_files(tenant_id, draft_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_project_files_hash ON project_files(tenant_id, sha256)')
+        conn.commit()
+    except Exception as e:
+        print(f"[DB FILE MIGRATION ERR] {e}")
 
 
 def _migrate_branding_columns(conn):
@@ -2033,6 +2119,11 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     save_data.pop('draftId', None)
     save_data.pop('draft_id', None)
     draft_json = json.dumps(save_data, ensure_ascii=False)
+    title = str(save_data.get('project_name') or save_data.get('projectName') or save_data.get('name') or 'مسودة مشروع بدون عنوان').strip()[:200]
+    creative = save_data.get('tenantCreativeImages') if isinstance(save_data.get('tenantCreativeImages'), dict) else {}
+    has_slides = 1 if isinstance(save_data.get('tenantSlidesData'), list) and save_data.get('tenantSlidesData') else 0
+    has_maps = 1 if isinstance(creative.get('map_placeholders'), dict) and any(creative.get('map_placeholders').values()) else 0
+    data_bytes = len(draft_json.encode('utf-8'))
 
     if existing:
         old_statuses = _json_object(existing['section_statuses'])
@@ -2064,8 +2155,12 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
             clear_approval = False
 
         conn.execute(
-            'UPDATE project_drafts SET draft_data = ?, section_statuses = ?, status = ?, updated_at = ? WHERE id = ?',
-            (draft_json, statuses_json, next_status, now, existing['id'])
+            '''UPDATE project_drafts
+               SET title = ?, draft_data = ?, section_statuses = ?, status = ?,
+                   revision = COALESCE(revision, 0) + 1, data_bytes = ?,
+                   has_slides = ?, has_maps = ?, updated_at = ?
+               WHERE id = ?''',
+            (title, draft_json, statuses_json, next_status, data_bytes, has_slides, has_maps, now, existing['id'])
         )
         if clear_approval:
             _clear_draft_approval_fields(conn, existing['id'])
@@ -2075,10 +2170,11 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     statuses = section_statuses if isinstance(section_statuses, dict) else {}
     conn.execute(
         '''INSERT INTO project_drafts
-           (id, tenant_id, user_id, draft_data, section_statuses, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-        (draft_id, tenant_id, user_id, draft_json, json.dumps(statuses, ensure_ascii=False),
-         requested_status, now, now)
+           (id, tenant_id, user_id, title, draft_data, section_statuses, status,
+            revision, data_bytes, has_slides, has_maps, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (draft_id, tenant_id, user_id, title, draft_json, json.dumps(statuses, ensure_ascii=False),
+         requested_status, 1, data_bytes, has_slides, has_maps, now, now)
     )
     conn.commit()
     return draft_id
@@ -2094,8 +2190,35 @@ def get_project_draft(tenant_id, user_id):
     return _hydrate_project_draft(row)
 
 
+def get_all_project_draft_summaries(tenant_id, limit=50, offset=0):
+    """Return lightweight draft metadata without hydrating project payloads."""
+    conn = get_db()
+    limit = max(1, min(int(limit or 50), 200))
+    offset = max(0, int(offset or 0))
+    rows = conn.execute(
+        '''SELECT id, tenant_id, user_id, title, section_statuses, status, revision,
+                  data_bytes, has_slides, has_maps, requested_by, requested_by_name,
+                  requested_at, reviewed_by, reviewed_by_name, review_note, reviewed_at,
+                  created_at, updated_at
+           FROM project_drafts
+           WHERE tenant_id = ?
+           ORDER BY updated_at DESC
+           LIMIT ? OFFSET ?''',
+        (tenant_id, limit, offset)
+    ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item['section_statuses'] = _json_object(item.get('section_statuses'))
+        item['title'] = item.get('title') or 'مسودة مشروع بدون عنوان'
+        item['has_slides'] = bool(item.get('has_slides'))
+        item['has_maps'] = bool(item.get('has_maps'))
+        result.append(item)
+    return result
+
+
 def get_all_project_drafts(tenant_id):
-    """Get all saved project drafts for a tenant."""
+    """Get all saved project drafts for a tenant, including full payloads."""
     conn = get_db()
     rows = conn.execute(
         'SELECT * FROM project_drafts WHERE tenant_id = ? ORDER BY updated_at DESC',
@@ -2243,6 +2366,52 @@ def get_ai_rules_log(tenant_id, limit=50):
         (tenant_id, limit)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Project File Storage
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_project_file(tenant_id, file_type, original_name, storage_path, mime_type, file_size, sha256,
+                        draft_id=None, project_id=None):
+    conn = get_db()
+    file_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO project_files
+           (id, tenant_id, draft_id, project_id, file_type, original_name, storage_path,
+            mime_type, file_size, sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (file_id, tenant_id, draft_id, project_id, file_type, original_name, storage_path,
+         mime_type, int(file_size or 0), sha256)
+    )
+    conn.commit()
+    return file_id
+
+
+def get_project_file(tenant_id, file_id):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM project_files WHERE id = ? AND tenant_id = ?',
+        (file_id, tenant_id)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_project_files(tenant_id, draft_id=None, project_id=None, file_type=None):
+    conn = get_db()
+    query = 'SELECT * FROM project_files WHERE tenant_id = ?'
+    params = [tenant_id]
+    if draft_id:
+        query += ' AND draft_id = ?'
+        params.append(draft_id)
+    if project_id:
+        query += ' AND project_id = ?'
+        params.append(project_id)
+    if file_type:
+        query += ' AND file_type = ?'
+        params.append(file_type)
+    query += ' ORDER BY created_at DESC, rowid DESC'
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

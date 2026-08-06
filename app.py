@@ -7,6 +7,7 @@ from datetime import datetime
 import re
 import base64
 import hashlib
+import html as html_lib
 import requests
 import uuid as _uuid
 
@@ -23,7 +24,7 @@ import maps_service
 import population_service
 import slide_engine
 from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
-from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules, extract_slide_elements
+from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules, extract_slide_elements, build_font_css
 
 app = Flask(__name__, static_folder=None)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
@@ -1572,26 +1573,8 @@ def resolve_designer_chat_placeholders(html_out, project_data, presentation_id, 
             if placeholder not in map_placeholders:
                 map_placeholders[placeholder] = f"/{rel_path}"
                 
-    # If some maps are missing and we have coordinates, generate/ensure them
-    def extract_coord(val):
-        if val is None: return None
-        try: return float(val)
-        except: return None
-        
-    lat = extract_coord(project_data.get('location_lat'))
-    lng = extract_coord(project_data.get('location_lng'))
-    if lat is not None and lng is not None:
-        needed = ['##MAP_OVERVIEW##', '##MAP_LANDMARKS##', '##MAP_ACCESS##', '##MAP_CATCHMENT##']
-        if not map_placeholders or any(p not in map_placeholders for p in needed):
-            try:
-                map_result = maps_service.generate_all_map_images(project_data, tenant_id, presentation_id=presentation_id)
-                if map_result.get('placeholders'):
-                    for placeholder, path in map_result['placeholders'].items():
-                        if path and os.path.exists(path):
-                            rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
-                            map_placeholders[placeholder] = f"/{rel_path}"
-            except Exception as ge:
-                print(f"[DESIGNER-CHAT MAP GEN ERROR] {ge}")
+    # Missing maps remain placeholders. Map generation belongs to the explicit
+    # map workflow, never to a chat/edit request.
 
     # 2. Replace map placeholders in HTML
     for placeholder, url in map_placeholders.items():
@@ -3297,7 +3280,7 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
 @app.route('/api/analyze-site', methods=['POST'])
 @require_permission('create_presentation')
 def api_analyze_site():
-    """Analyze site fields from Google data and generate the map assets once."""
+    """Resolve and enrich site data; map image generation is opt-in only."""
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
     branding = db.get_branding(g.tenant_id) or {}
@@ -3702,27 +3685,20 @@ def api_generate_slide_single():
     if not branding:
         return jsonify({'error': 'Branding not configured'}), 400
 
-    # Build map placeholders if needed
+    # Map generation is explicit. A single-slide request may reuse supplied
+    # persisted assets, but it must never trigger a hidden Google/OSM call.
     map_placeholders = {}
-    need_maps = (slide_index == 0 or 'map' in slides[slide_index].get('type', ''))
     has_maps = isinstance(images, dict) and isinstance(images.get('map_placeholders'), dict) and bool(images.get('map_placeholders'))
-    if need_maps and not has_maps:
-        map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=data.get('presentationId'), force=False, branding=branding)
-        if map_result.get('placeholders'):
-            if not isinstance(images, dict):
-                images = {'cover': None, 'moodboard': []}
-            for placeholder, path in map_result['placeholders'].items():
-                if path and os.path.exists(path):
-                    rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
-                    map_placeholders[placeholder] = f"/{rel_path}"
-                else:
-                    map_placeholders[placeholder] = None
-            images['map_placeholders'] = map_placeholders
-            images['map_landmarks'] = map_result.get('landmarks', [])
-            project_data['_resolved_location'] = {'lat': map_result['lat'], 'lng': map_result['lng']}
-    elif has_maps:
-        map_placeholders = images.get('map_placeholders', {})
-        project_data['_resolved_location'] = {'lat': project_data.get('_resolved_location', {}).get('lat'), 'lng': project_data.get('_resolved_location', {}).get('lng')}
+    if has_maps:
+        map_placeholders = {key: value for key, value in images.get('map_placeholders', {}).items() if value}
+        resolved_location = project_data.get('_resolved_location')
+        if not isinstance(resolved_location, dict):
+            resolved_location = {}
+        if project_data.get('location_lat') and project_data.get('location_lng'):
+            project_data['_resolved_location'] = {
+                'lat': resolved_location.get('lat') or project_data.get('location_lat'),
+                'lng': resolved_location.get('lng') or project_data.get('location_lng'),
+            }
 
     images_info = _get_images_info(images)
     training_context = db.get_training_context(g.tenant_id)
@@ -3830,26 +3806,15 @@ def api_generate_slides():
     if not slide_plan or 'slides' not in slide_plan:
         return jsonify({'error': 'slidePlan with slides array is required'}), 400
 
-    # Generate map images if project has location data (use cache unless missing)
-    map_result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=presentation_id, force=False, branding=branding)
+    # Map generation is explicit. Reuse only placeholders already supplied by the
+    # caller or persisted by a previous, user-triggered map generation.
     map_placeholders = {}
-    if map_result.get('placeholders'):
-        if not isinstance(images, dict):
-            images = {'cover': images[0] if isinstance(images, list) and images else None, 'moodboard': []}
-        # Convert absolute file paths to public URLs for HTML replacement
-        for placeholder, path in map_result['placeholders'].items():
-            if path and os.path.exists(path):
-                rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
-                map_placeholders[placeholder] = f"/{rel_path}"
-            else:
-                map_placeholders[placeholder] = None
-        images['map_placeholders'] = map_placeholders
-        images['map_landmarks'] = map_result.get('landmarks', [])
-        # Add coordinates back into project data for the AI
-        project_data['_resolved_location'] = {
-            'lat': map_result['lat'],
-            'lng': map_result['lng'],
-        }
+    if isinstance(images, dict):
+        supplied_placeholders = images.get('map_placeholders')
+        if isinstance(supplied_placeholders, dict):
+            map_placeholders = {key: value for key, value in supplied_placeholders.items() if value}
+    elif isinstance(images, list):
+        images = {'cover': images[0] if images else None, 'moodboard': []}
 
     images_info = _get_images_info(images)
 
@@ -4098,9 +4063,14 @@ def api_save_project_draft():
 @app.route('/api/project-drafts', methods=['GET'])
 @require_auth
 def api_get_all_project_drafts():
-    """Get all saved project drafts for the tenant."""
-    drafts = db.get_all_project_drafts(g.tenant_id)
-    return jsonify({'success': True, 'drafts': drafts})
+    """Get lightweight saved-project metadata for the tenant."""
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'limit and offset must be integers'}), 400
+    drafts = db.get_all_project_draft_summaries(g.tenant_id, limit=limit, offset=offset)
+    return jsonify({'success': True, 'drafts': drafts, 'limit': max(1, min(limit, 200)), 'offset': max(0, offset)})
 
 
 @app.route('/api/project-draft/<draft_id>', methods=['GET'])
@@ -4192,6 +4162,250 @@ def api_review_project_draft():
         return jsonify({'error': 'Pending draft approval not found'}), 404
     return jsonify({'success': True})
 
+
+
+def _financial_inputs(model):
+    if not isinstance(model, dict):
+        return {}
+    inputs = model.get('inputs')
+    return inputs if isinstance(inputs, dict) else model
+
+
+def _financial_has_value(value):
+    return value is not None and not (isinstance(value, str) and not value.strip())
+
+
+def validate_financial_model(model):
+    """Validate only fields activated by the financial model switches."""
+    inputs = _financial_inputs(model)
+    tables = model.get('tables', {}) if isinstance(model, dict) and isinstance(model.get('tables'), dict) else {}
+    errors = []
+
+    def required(key, label=None):
+        if not _financial_has_value(inputs.get(key)):
+            errors.append({'field': key, 'message': f'{label or key} مطلوب عند تفعيل هذا الخيار'})
+
+    mode = inputs.get('unitRevenueMode') or 'mixed'
+    sales_on = mode in {'sale', 'mixed'}
+    rental_on = mode in {'rental', 'mixed'}
+    if sales_on:
+        required('salesStartYear', 'سنة بدء البيع')
+        required('salesYears', 'عدد سنوات البيع')
+    if rental_on:
+        required('operationYears', 'عدد سنوات التشغيل')
+
+    required('developmentYears', 'مدة التطوير')
+    required('landArea', 'مساحة الأرض')
+    required('builtUpAreaAbove', 'مسطحات البناء فوق الأرض')
+
+    if inputs.get('financeEnabled') == 'yes':
+        for key, label in (
+            ('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'),
+            ('financeArrangementFeeRate', 'رسوم ترتيب التمويل'),
+            ('financeInterestMethod', 'طريقة احتساب الفائدة'), ('annualFinanceRate', 'معدل الفائدة'),
+            ('financeDrawYears', 'سنوات سحب التمويل'),
+            ('financeRepaymentStartYear', 'سنة بدء السداد'),
+            ('financeRepaymentYears', 'سنوات السداد'),
+        ):
+            required(key, label)
+        draw_rows = tables.get('financeDrawTable') or []
+        repayment_rows = tables.get('financeRepaymentTable') or []
+        if not draw_rows:
+            errors.append({'field': 'financeDrawTable', 'message': 'خطة سحب التمويل مطلوبة عند تفعيل التمويل'})
+        if not repayment_rows:
+            errors.append({'field': 'financeRepaymentTable', 'message': 'خطة سداد التمويل مطلوبة عند تفعيل التمويل'})
+
+    fund_on = inputs.get('fundEnabled') == 'yes'
+    fees_on = fund_on and inputs.get('fundFeesEnabled') == 'yes'
+    if fees_on:
+        required('fundFeeBase', 'أساس أتعاب الصندوق')
+        for key, label in (
+            ('fundFeeStartYear', 'بداية احتساب أتعاب الصندوق'),
+            ('fundFeeEndYear', 'نهاية احتساب أتعاب الصندوق'),
+            ('fundFeeFrequency', 'دورية السداد'), ('fundFeeTiming', 'توقيت السداد'),
+            ('fundFeeGrowthRate', 'نسبة نمو الأتعاب'),
+        ):
+            required(key, label)
+        base = inputs.get('fundFeeBase')
+        if base in {'fundCapital', 'investedCapital'}:
+            required('fundCapitalInput', 'رأس مال الصندوق')
+        elif base == 'nav':
+            required('fundNavInput', 'صافي قيمة الأصول')
+        elif base == 'fixed':
+            required('fundFixedAnnualFee', 'الأتعاب السنوية الثابتة')
+
+        if inputs.get('fundExitFeeEnabled') == 'yes':
+            required('fundExitFeeBase', 'أساس أتعاب التخارج')
+            if inputs.get('fundExitFeeBase') == 'fixed':
+                required('fundExitFixedFee', 'مبلغ أتعاب التخارج')
+            else:
+                required('fundExitFeeRate', 'نسبة أتعاب التخارج')
+        if inputs.get('performanceFeeEnabled') == 'yes':
+            for key, label in (
+                ('hurdleRate', 'الحد الأدنى للعائد'), ('hurdleMethod', 'طريقة الحد الأدنى'),
+                ('performanceFeeRate', 'نسبة حافز الأداء'), ('performanceFeeBase', 'أساس حافز الأداء'),
+                ('performanceCrystallizationYear', 'سنة احتساب حافز الأداء'),
+            ):
+                required(key, label)
+            if inputs.get('catchupEnabled') == 'yes':
+                required('catchupRate', 'نسبة Catch-up')
+        additional_fees = tables.get('fundAdditionalFeesTable') or []
+        for index, row in enumerate(additional_fees):
+            if not isinstance(row, dict):
+                continue
+            if _financial_has_value(row.get('name')) and not _financial_has_value(row.get('value')):
+                errors.append({'field': f'fundAdditionalFeesTable[{index}].value', 'message': 'قيمة الأتعاب الإضافية مطلوبة'})
+
+    if rental_on and inputs.get('graceEnabled') == 'yes':
+        for key, label in (
+            ('graceMethod', 'طريقة فترة السماح'), ('graceScope', 'نطاق فترة السماح'),
+            ('graceStartYear', 'سنة بداية السماح'), ('graceDurationMonths', 'مدة السماح'),
+            ('graceDiscountRate', 'نسبة الخصم'),
+        ):
+            required(key, label)
+        if inputs.get('graceScope') == 'selectedRevenue':
+            required('graceRevenueId', 'الإيراد المشمول بالسماح')
+        if inputs.get('graceMethod') == 'schedule' and not tables.get('graceScheduleTable'):
+            errors.append({'field': 'graceScheduleTable', 'message': 'جدول خصومات فترة السماح مطلوب'})
+
+    if inputs.get('externalEnabled') == 'yes' and not tables.get('externalTable'):
+        errors.append({'field': 'externalTable', 'message': 'أضف بندًا خارجيًا واحدًا على الأقل'})
+
+    if inputs.get('exitEnabled') == 'yes':
+        if sales_on and inputs.get('saleExitMethod') not in (None, '', 'none'):
+            required('saleExitYear', 'سنة التخارج البيعي')
+        if rental_on and inputs.get('exitMethod') not in (None, '', 'none'):
+            required('operatingExitYear', 'سنة التخارج التشغيلي')
+            required('exitInput', 'مدخل التخارج التشغيلي')
+
+    projection = model.get('projection') if isinstance(model, dict) else None
+    if isinstance(projection, dict) and isinstance(projection.get('areaState'), dict) and projection['areaState'].get('valid') is False:
+        errors.append({'field': 'componentsTable', 'message': 'مجموع مساحات مكونات المشروع يتجاوز مسطحات البناء فوق الأرض'})
+    return errors
+
+
+def _financial_report_escape(value):
+    if value is None or value == '':
+        return '—'
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, ensure_ascii=False)
+    return html_lib.escape(str(value))
+
+
+def _financial_report_rows(rows):
+    visible = [(label, value) for label, value in rows if value not in (None, '', [], {})]
+    if not visible:
+        return '<p class="empty">لا توجد قيم مطبقة في هذا القسم.</p>'
+    return '<table class="summary-table"><tbody>' + ''.join(
+        f'<tr><th>{_financial_report_escape(label)}</th><td>{_financial_report_escape(value)}</td></tr>'
+        for label, value in visible
+    ) + '</tbody></table>'
+
+
+def _financial_report_table(rows):
+    if not isinstance(rows, list) or not rows:
+        return '<p class="empty">لا توجد بنود مدخلة في هذا الجدول.</p>'
+    keys = []
+    for row in rows:
+        if isinstance(row, dict):
+            for key in row:
+                if key not in keys:
+                    keys.append(key)
+    if not keys:
+        return '<p class="empty">لا توجد بنود مدخلة في هذا الجدول.</p>'
+    headers = ''.join(f'<th>{_financial_report_escape(key)}</th>' for key in keys)
+    body = ''.join('<tr>' + ''.join(f'<td>{_financial_report_escape(row.get(key))}</td>' for key in keys) + '</tr>'
+                   for row in rows if isinstance(row, dict))
+    return f'<table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table>'
+
+
+def build_financial_report_html(project_name, model, branding, tenant_id):
+    inputs = _financial_inputs(model)
+    tables = model.get('tables', {}) if isinstance(model, dict) and isinstance(model.get('tables'), dict) else {}
+    projection = model.get('projection', {}) if isinstance(model, dict) and isinstance(model.get('projection'), dict) else {}
+    primary = (branding or {}).get('primary_color') or '#123B6D'
+    secondary = (branding or {}).get('secondary_color') or '#082646'
+    accent = (branding or {}).get('accent_color') or '#C4A35A'
+    font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
+    font_css = (font_css or '').replace('.slide', '.financial-report')
+    rows = lambda keys: _financial_report_rows([(label, inputs.get(key)) for key, label in keys])
+    sections = []
+    sections.append(f'<section class="cover"><div class="eyebrow">دراسة مالية</div><h1>{_financial_report_escape(project_name)}</h1><h2>التقرير المالي المنظم</h2><p>تم إنشاء التقرير من النسخة المعتمدة للمدخلات والافتراضات.</p></section>')
+    sections.append('<section><h2>1. ملخص المشروع</h2>' + rows([('unitRevenueMode', 'طبيعة الإيرادات'), ('developmentYears', 'مدة التطوير'), ('operationYears', 'سنوات التشغيل'), ('landArea', 'مساحة الأرض')]) + '</section>')
+    sections.append('<section><h2>2. الأرض والمساحات</h2>' + rows([('landArea', 'مساحة الأرض'), ('coverageRate', 'نسبة التغطية'), ('floorCount', 'عدد الطوابق'), ('builtUpAreaAbove', 'مسطحات البناء فوق الأرض'), ('basementArea', 'مساحة البدرومات'), ('landValueMethod', 'طريقة احتساب قيمة الأرض'), ('landStatus', 'حالة الأرض')]) + '</section>')
+    for number, title, table_key in (
+        ('3', 'مكونات المشروع', 'componentsTable'), ('4', 'بنود الإيرادات', 'revenueTable'),
+        ('5', 'تكاليف المشروع', 'costTable'), ('6', 'مراحل التطوير', 'scheduleTable'),
+        ('7', 'المصروفات التشغيلية', 'opexTable'),
+    ):
+        sections.append(f'<section><h2>{number}. {title}</h2>{_financial_report_table(tables.get(table_key))}</section>')
+    if inputs.get('financeEnabled') == 'yes':
+        sections.append('<section><h2>8. التمويل</h2>' + rows([('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'), ('annualFinanceRate', 'معدل الفائدة'), ('financeInterestMethod', 'طريقة الفائدة'), ('financeDrawYears', 'سنوات السحب'), ('financeRepaymentYears', 'سنوات السداد')]) + _financial_report_table(tables.get('financeDrawTable')) + _financial_report_table(tables.get('financeRepaymentTable')) + '</section>')
+    if inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes':
+        sections.append('<section><h2>9. الصندوق وأتعابه</h2>' + rows([('fundFeeBase', 'أساس الأتعاب'), ('fundCapitalInput', 'رأس مال الصندوق'), ('fundManagementRate', 'نسبة الإدارة'), ('fundFeeStartYear', 'بداية الاحتساب'), ('fundFeeEndYear', 'نهاية الاحتساب')]) + _financial_report_table(tables.get('fundAdditionalFeesTable')) + '</section>')
+    if inputs.get('externalEnabled') == 'yes':
+        sections.append('<section><h2>10. البنود الخارجية</h2>' + _financial_report_table(tables.get('externalTable')) + '</section>')
+    if inputs.get('exitEnabled') == 'yes':
+        sections.append('<section><h2>11. التخارج</h2>' + rows([('saleExitMethod', 'التخارج البيعي'), ('saleExitYear', 'سنة التخارج البيعي'), ('exitMethod', 'التخارج التشغيلي'), ('operatingExitYear', 'سنة التخارج التشغيلي'), ('exitInput', 'مدخل التخارج')]) + '</section>')
+    projection_rows = [(key, value) for key, value in projection.items() if key not in {'projected', 'cashflows', 'projectCashflows', 'modeFlags', 'areaState'}]
+    sections.append('<section><h2>12. النتائج المالية</h2>' + _financial_report_rows(projection_rows) + _financial_report_table(tables.get('cashflowTable')) + '</section>')
+    return f'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+{font_css}
+@page {{ size: A4 landscape; margin: 12mm; }}
+* {{ box-sizing:border-box; }} body {{ margin:0; color:#252525; background:#fff; font-family:{font_family}; direction:rtl; line-height:1.5; }}
+.financial-report {{ max-width:1120px; margin:0 auto; }} section {{ break-inside:avoid; margin:0 0 16px; }}
+.cover {{ min-height:175mm; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; border:2px solid {primary}; padding:30px; page-break-after:always; }}
+.eyebrow {{ color:{accent}; font-weight:700; }} h1 {{ color:{secondary}; font-size:32px; margin:18px 0 6px; }} h2 {{ color:{primary}; font-size:20px; border-bottom:2px solid {primary}; padding-bottom:6px; }}
+table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px; }} th,td {{ border:1px solid #d9d1cb; padding:6px; text-align:right; vertical-align:top; }} thead th {{ background:{primary}; color:#fff; }} .summary-table th {{ width:34%; background:#EAF2F8; color:{secondary}; }} .summary-table td {{ font-weight:700; }} .empty {{ color:#777; border:1px dashed #ccc; padding:10px; }}
+</style></head><body><main class="financial-report">{''.join(sections)}</main></body></html>'''
+
+
+def generate_financial_pdf(html, output_path):
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'])
+        try:
+            page = browser.new_page()
+            page.set_content(html, wait_until='load')
+            page.evaluate('() => document.fonts.ready')
+            page.pdf(path=str(output_path), format='A4', landscape=True, print_background=True,
+                     margin={'top': '12mm', 'right': '12mm', 'bottom': '12mm', 'left': '12mm'})
+        finally:
+            browser.close()
+
+
+@app.route('/api/financial-study/validate', methods=['POST'])
+@require_permission('create_presentation')
+def api_validate_financial_study():
+    data = request.json or {}
+    errors = validate_financial_model(data.get('financialModel') or data.get('model') or {})
+    return jsonify({'success': not errors, 'validation': errors})
+
+
+@app.route('/api/financial-study/export', methods=['POST'])
+@require_permission('export_files')
+def api_export_financial_study():
+    data = request.json or {}
+    model = data.get('financialModel') or data.get('model') or {}
+    errors = validate_financial_model(model)
+    if errors:
+        return jsonify({'success': False, 'error': 'لا يمكن تصدير الدراسة قبل استكمال المدخلات المطلوبة', 'validation': errors}), 400
+    project_name = str(data.get('projectName') or 'الدراسة المالية').strip()[:120] or 'الدراسة المالية'
+    tenant_output_dir = os.path.join(OUTPUT_DIR, g.tenant_id)
+    os.makedirs(tenant_output_dir, exist_ok=True)
+    safe_name = ''.join(c for c in project_name if c.isalnum() or c in '-_ ')[:50].strip() or 'financial-study'
+    output_path = os.path.join(tenant_output_dir, f'{safe_name}_{int(time.time())}_financial.pdf')
+    try:
+        branding = db.get_branding(g.tenant_id) or {}
+        report_html = build_financial_report_html(project_name, model, branding, g.tenant_id)
+        generate_financial_pdf(report_html, output_path)
+        export_id = db.create_export(data.get('presentationId'), g.tenant_id, 'financial_pdf', output_path)
+        return jsonify({'success': True, 'exportId': export_id, 'format': 'financial_pdf', 'url': f'/api/exports/{export_id}/download'})
+    except Exception as error:
+        print(f'[FINANCIAL PDF ERROR] {error}')
+        if os.path.exists(output_path):
+            os.unlink(output_path)
+        return jsonify({'success': False, 'error': 'تعذر إنشاء ملف الدراسة المالية'}), 500
 
 
 @app.route('/api/export', methods=['POST'])
@@ -4805,42 +5019,32 @@ def normalize_croquis_fields(resp_json, text_content=""):
         'max_floors_height': ['height_or_floors_allowed'],
         'croquis_expiry_date': ['croquis_validity_dates']
     }
-    # 8. Clean and generate Land & Building Summary (Rich Deep Elaboration)
+    # 8. Apply aliases and build a source-faithful summary. Missing values stay
+    # explicitly unknown; never invent a city, regulation, area, or validity.
+    for canonical, alternatives in aliases.items():
+        if resp_json.get(canonical) in (None, ''):
+            for alternative in alternatives:
+                if resp_json.get(alternative) not in (None, ''):
+                    resp_json[canonical] = resp_json[alternative]
+                    break
+
     summary_text = str(resp_json.get('land_and_building_summary', '')).replace('{}', '').strip()
-
-    if not summary_text or len(summary_text) < 150 or '{}' in summary_text:
-        plot_num = resp_json.get('plot_number_croquis') or 'غير مدون'
-        deed_num = resp_json.get('deed_number') or 'غير مدون'
-        area = resp_json.get('croquis_land_area') or 'غير محددة'
-        approved_area = resp_json.get('approved_financial_area') or area
-        facades = resp_json.get('facades_count') or '1'
-        streets = resp_json.get('surrounding_streets') or 'محددة بالرسم التنظيمي'
-        bounds = resp_json.get('boundary_lengths') or 'محددة بالكروكي'
-        ratios = resp_json.get('building_ratio_setbacks') or 'وفق اشتراطات المخطط المحلي لأمانة جدة 1447/2025'
-        floors = resp_json.get('max_floors_height') or 'وفق ضوابط المخطط المحلي وتأثير المرور'
-        uses = resp_json.get('allowed_uses_restrictions') or 'استخدامات مسموحة وفق اللائحة التنفيذية'
-        expiry = resp_json.get('croquis_expiry_date') or 'ساري'
-
-        summary_parts = [
-            f"1. التوصيف العام والتوثيق الرسمي:\n"
-            f"يتمثل العقار في قطعة الأرض الواقعة ضمن المخطط رقم ({plot_num}) والموثقة بالمرجع/الصك رقم ({deed_num}). يُعد هذا المستند الكروكي التنظيمي المعتمد من أمانة محافظة جدة كأساس لتصميم وتطوير المشروع وتحديد الصلاحية الاستثمارية والهندسية.",
-
-            f"2. المساحة والحدود والأبعاد التنظيمية:\n"
-            f"تبلغ المساحة الإجمالية الصافية للأرض بموجب التنظيم {area} م²، وهي ذاتها المساحة الاعتيادية المعتمدة للدراسة المالية والهندسية ({approved_area} م²). تحيط بالأرض الحدود والأبعاد التالية: ({bounds}). تمنح هذه الأبعاد الأرض مرونة عالية في التشكيل المعماري واستغلال الارتدادات النظامية.",
-
-            f"3. الواجهات والمحاور والشوارع المحيطة:\n"
-            f"يتميز موقع الأرض بالوقوع على عدد ({facades}) واجهة، وتطل على المحاور والشوارع التالية: ({streets}). يتيح هذا الموقع إمكانية فتح المداخل والمخارج بكفاءة وتوفير سهولة وصول حركة المرور وخدمات مواقف السيارات وفق اشتراطات الأمانة.",
-
-            f"4. اشتراطات البناء ونسب التغطية والارتدادات:\n"
-            f"تخضع الأرض لنظام البناء التنظيمي المعتمد وفق اللائحة التنفيذية لأمانة محافظة جدة (1447هـ / 2025م): {ratios}. ويشمل ذلك تحديد نسبة التغطية المسموحة على مستوى الأرضي والأدوار المتكررة ومعامل مسطح البناء (FAR) والالتزام بالارتدادات الأمامية والجانبية والخلفية.",
-
-            f"5. الارتفاعات وعدد الأدوار المسموح بها:\n"
-            f"الحد الأقصى للارتفاع وعدد الأدوار المسموح به للمشروع: {floors}. يُراعى في ذلك الالتزام بالعمق التنظيمي ومعايير التأثير المروري وحقوق المطلات المجاورة والارتفاع الكلي المسموح به رسمياً.",
-
-            f"6. الاستخدامات والأنشطة المسموحة والقيود التنظيمية:\n"
-            f"نطاق الاستخدامات والأنشطة المسموحة على الأرض: {uses}. مع التأكيد على الالتزام بكافة الاشتراطات الفنية والأمنية وبيئة السلامة ومواقف السيارات وتاريخ صلاحية المستند ({expiry})."
-        ]
-        summary_text = "\n\n".join(summary_parts)
+    if not summary_text:
+        labels = (
+            ('رقم القطعة/المخطط', resp_json.get('plot_number_croquis')),
+            ('رقم الصك/المرجع', resp_json.get('deed_number')),
+            ('المساحة التنظيمية م²', resp_json.get('croquis_land_area')),
+            ('المساحة المعتمدة للدراسة م²', resp_json.get('approved_financial_area')),
+            ('الحدود والأبعاد', resp_json.get('boundary_lengths')),
+            ('الاتجاهات', resp_json.get('directions') or resp_json.get('north_direction')),
+            ('الشوارع والواجهات', resp_json.get('surrounding_streets')),
+            ('نسب البناء والارتدادات', resp_json.get('building_ratio_setbacks')),
+            ('الارتفاع/الأدوار', resp_json.get('max_floors_height')),
+            ('الاستخدامات والقيود', resp_json.get('allowed_uses_restrictions')),
+            ('صلاحية المستند', resp_json.get('croquis_expiry_date')),
+        )
+        available = [f'{label}: {value}' for label, value in labels if value not in (None, '', [], {})]
+        summary_text = ' | '.join(available) if available else 'لم يتم استخراج بيانات مؤكدة؛ تحتاج الوثائق إلى مراجعة يدوية.'
 
     resp_json['land_and_building_summary'] = summary_text.replace('{}', '').strip()
 
@@ -4852,8 +5056,8 @@ def search_jeddah_official_regulations_pdf(query_text=""):
     try:
         import fitz
         pdf_paths = [
-            os.path.join(r'd:\workflow', 'Document_LocalPlan_1447.pdf'),
-            os.path.join(r'd:\workflow', 'ExecutiveRegulations-1447-2025-2.pdf')
+            os.path.join(os.path.dirname(__file__), 'Document_LocalPlan_1447.pdf'),
+            os.path.join(os.path.dirname(__file__), 'ExecutiveRegulations-1447-2025-2.pdf')
         ]
         results = []
         keywords = ['الكورنيش', 'المحيطة', 'المحاور التجارية', 'س ع', 'ت ح', 'فيلات', 'العمائر', 'الارتدادات', 'نسبة البناء']
@@ -4880,75 +5084,207 @@ def search_jeddah_official_regulations_pdf(query_text=""):
         return ""
 
 
+def _normalize_land_document_result(resp_json, text_content=''):
+    """Normalize multi-parcel document output while keeping legacy flat fields compatible."""
+    if not isinstance(resp_json, dict):
+        resp_json = {}
+    raw_parcels = resp_json.get('parcels')
+    if not isinstance(raw_parcels, list) or not raw_parcels:
+        legacy = normalize_croquis_fields(resp_json, text_content)
+        directions = legacy.get('directions') if isinstance(legacy.get('directions'), dict) else {}
+        parcel = {
+            'parcel_id': 'P-1',
+            'plot_number': legacy.get('plot_number_croquis', ''),
+            'plan_number': '',
+            'deed_number': legacy.get('deed_number', ''),
+            'area_sqm': legacy.get('croquis_land_area'),
+            'approved_financial_area_sqm': legacy.get('approved_financial_area'),
+            'facades_count': legacy.get('facades_count'),
+            'directions': directions,
+            'north_direction': legacy.get('north_direction', ''),
+            'setbacks': legacy.get('building_ratio_setbacks', ''),
+            'building_ratio': legacy.get('building_ratio_setbacks', ''),
+            'max_floors_height': legacy.get('max_floors_height', ''),
+            'allowed_uses_restrictions': legacy.get('allowed_uses_restrictions', ''),
+            'expiry_date': legacy.get('croquis_expiry_date', ''),
+            'coordinates': {'lat': None, 'lng': None, 'source': '', 'confidence': ''},
+            'confidence': {},
+            'sources': [],
+            'summary': legacy.get('land_and_building_summary', ''),
+        }
+        result = dict(legacy)
+        result['parcels'] = [parcel]
+        result['conflicts'] = []
+        result['document_summary'] = result.get('land_and_building_summary', '')
+        return result
+
+    direction_aliases = {
+        'n': 'north', 'north': 'north', 'شمال': 'north',
+        's': 'south', 'south': 'south', 'جنوب': 'south',
+        'e': 'east', 'east': 'east', 'شرق': 'east',
+        'w': 'west', 'west': 'west', 'غرب': 'west',
+    }
+    normalized_parcels = []
+    for index, raw in enumerate(raw_parcels):
+        if not isinstance(raw, dict):
+            continue
+        directions = {}
+        raw_directions = raw.get('directions') if isinstance(raw.get('directions'), dict) else {}
+        for key, value in raw_directions.items():
+            direction = direction_aliases.get(str(key).strip().casefold())
+            if not direction:
+                continue
+            directions[direction] = value if isinstance(value, dict) else {'notes': str(value)}
+        for direction in ('north', 'south', 'east', 'west'):
+            directions.setdefault(direction, {})
+        parcel = dict(raw)
+        parcel['parcel_id'] = str(raw.get('parcel_id') or raw.get('parcelId') or f'P-{index + 1}')
+        parcel['directions'] = directions
+        coords = raw.get('coordinates') if isinstance(raw.get('coordinates'), dict) else {}
+        parcel['coordinates'] = {
+            'lat': coords.get('lat'), 'lng': coords.get('lng'),
+            'source': coords.get('source', ''), 'confidence': coords.get('confidence', '')
+        }
+        parcel['sources'] = raw.get('sources') if isinstance(raw.get('sources'), list) else []
+        parcel['confidence'] = raw.get('confidence') if isinstance(raw.get('confidence'), dict) else {}
+        normalized_parcels.append(parcel)
+
+    if not normalized_parcels:
+        return _normalize_land_document_result({}, text_content)
+    result = dict(resp_json)
+    result['parcels'] = normalized_parcels
+    result['conflicts'] = resp_json.get('conflicts') if isinstance(resp_json.get('conflicts'), list) else []
+    result['document_summary'] = str(resp_json.get('document_summary') or '').strip()
+    result['land_and_building_summary'] = str(resp_json.get('land_and_building_summary') or '').strip()
+    first = normalized_parcels[0]
+    legacy_map = {
+        'plot_number_croquis': first.get('plot_number', ''),
+        'deed_number': first.get('deed_number', ''),
+        'croquis_land_area': first.get('area_sqm'),
+        'approved_financial_area': first.get('approved_financial_area_sqm'),
+        'facades_count': first.get('facades_count'),
+        'north_direction': first.get('north_direction', ''),
+        'building_ratio_setbacks': first.get('building_ratio') or first.get('setbacks', ''),
+        'max_floors_height': first.get('max_floors_height', ''),
+        'allowed_uses_restrictions': first.get('allowed_uses_restrictions', ''),
+        'croquis_expiry_date': first.get('expiry_date', ''),
+    }
+    for key, value in legacy_map.items():
+        if value not in (None, ''):
+            result.setdefault(key, value)
+    return result
+
+
 @app.route('/api/extract-croquis', methods=['POST'])
 @require_auth
 def api_extract_croquis():
-    """Extract engineering and land details from uploaded croquis PDF or image using Vision AI."""
+    """Extract one or more land documents together using vision AI."""
     import traceback
     try:
         data = request.json or {}
-        file_data = data.get('fileData') or data.get('croquis_file') or ''
-        if not file_data:
-            return jsonify({'success': False, 'error': 'يرجى رفع ملف الكروكي أو المخطط المساحي أولاً'})
-
-        is_pdf = 'application/pdf' in file_data
+        legacy_file_data = data.get('fileData') or data.get('croquis_file') or ''
+        if not data.get('documents') and not legacy_file_data:
+            return jsonify({'success': False, 'error': 'يرجى رفع صورة الأرض أو الكروكي أو الرخصة أولاً'}), 400
 
         jeddah_pdf_context = search_jeddah_official_regulations_pdf()
 
+        documents = []
+        raw_documents = data.get('documents')
+        if isinstance(raw_documents, list) and len(raw_documents) > 10:
+            return jsonify({'success': False, 'error': 'الحد الأقصى لتحليل الملفات معًا هو 10 ملفات'}), 400
+        if isinstance(raw_documents, list):
+            for index, item in enumerate(raw_documents):
+                if not isinstance(item, dict):
+                    continue
+                file_data = item.get('fileData') or item.get('data') or ''
+                file_id = item.get('fileId')
+                if not file_data and file_id:
+                    stored = db.get_project_file(g.tenant_id, str(file_id))
+                    if stored and stored.get('storage_path') and os.path.isfile(stored['storage_path']):
+                        with open(stored['storage_path'], 'rb') as source:
+                            encoded = base64.b64encode(source.read()).decode('ascii')
+                        file_data = f"data:{stored.get('mime_type') or 'application/octet-stream'};base64,{encoded}"
+                if not file_data:
+                    continue
+                documents.append({
+                    'key': str(item.get('key') or item.get('fileType') or f'document_{index + 1}'),
+                    'filename': os.path.basename(str(item.get('filename') or item.get('originalName') or f'document_{index + 1}')),
+                    'fileData': file_data,
+                    'mimeType': item.get('mimeType') or ('application/pdf' if 'application/pdf' in file_data else 'image/*'),
+                })
+        if not documents:
+            file_data = data.get('fileData') or data.get('croquis_file') or ''
+            if file_data:
+                documents = [{
+                    'key': 'croquis',
+                    'filename': 'croquis.pdf' if 'application/pdf' in file_data else 'croquis-image',
+                    'fileData': file_data,
+                    'mimeType': 'application/pdf' if 'application/pdf' in file_data else 'image/*',
+                }]
+        if not documents:
+            return jsonify({'success': False, 'error': 'يرجى رفع صورة الأرض أو الكروكي أو الرخصة أولاً'}), 400
+
         system_prompt = (
-            "أنت مهندس مساح وخبير عقاري متخصص في تدقيق المخططات والكروكيات التنظيمية ورخص البناء والصكوك اللائحية الرسمية لمحافظة جدة وباقي المناطق.\n"
-            "اقرأ المستند والصورة المرفقة ومرجع لوائح وأنظمة أمانة جدة المرفق بعناية واستخرج البيانات الهندسية واشتراطات أمانة جدة والمخطط المحلي 1447هـ / 2025م بصيغة JSON حصراً:\n"
-            "```json\n"
+            "أنت مهندس مساح وخبير عقاري ومدقق مستندات تنظيمية. حلل كل الملفات المرفقة معًا، مع الحفاظ على هوية كل ملف ومصدر كل معلومة.\n"
+            "أعد JSON فقط بدون Markdown. لا تخترع قيمة غير مقروءة؛ استخدم null أو نصًا فارغًا، وسجل التعارضات بدل اختيار قيمة من نفسك.\n"
+            "إذا وجدت أكثر من قطعة أرض، أعد كل قطعة داخل parcels منفصلة ولا تدمج مساحاتها أو حدودها.\n"
+            "استخرج جدول الاتجاهات الأربعة بشكل مستقل من الكروكي أو جدول التنظيم.\n"
+            "الصيغة المطلوبة:\n"
             "{\n"
-            '  "plot_number_croquis": "رقم القطعة ورقم المخطط المكتوب بالصورة",\n'
-            '  "deed_number": "رقم الصك أو المرجع المكتوب بالصورة",\n'
-            '  "croquis_land_area": "مساحة الأرض بالمتر المربع المكتوبة في الجدول تحت خانة (بموجب التنظيم) أو المساحة الإجمالية (مثال: 850.50)",\n'
-            '  "approved_financial_area": "انقل نفس رقم المساحة المكتوب تحت خانة بموجب التنظيم",\n'
-            '  "boundary_lengths": "أطوال أضلاع الحدود بالأمتار (الشمال، الجنوب، الشرق، الغرب)",\n'
-            '  "north_direction": "اتجاه الأرض أو الشمال المكتوب بالرسم أو الجدول (اختر بدقة: شمال / جنوب / شرق / غرب / شمال شرقي / شمال غربي / جنوب شرقي / جنوب غربي)",\n'
-            '  "surrounding_streets": "أسماء الشوارع المحيطة وعروضها بالأمتار",\n'
-            '  "facades_count": "عدد الواجهات المكتوبة كعدد خالص فقط (مثال: 1 أو 2 أو 3 أو 4)",\n'
-            '  "building_ratio_setbacks": "تلخيص دقيق لنسب البناء والتغطية والارتدادات المسموحة المكتوبة أو وفق أنظمة وضوابط البناء للمخطط المحلي بمحافظة جدة 1447هـ/2025م",\n'
-            '  "max_floors_height": "الارتفاع أو عدد الأدوار المسموح بها المكتوب بالصورة أو وفق المخطط المحلي لجدة 1447هـ/2025م",\n'
-            '  "allowed_uses_restrictions": "ملخص دقيق للأنشطة والاستخدامات والقيود التنظيمية المسموحة بدون افتراضات غير موثقة",\n'
-            '  "croquis_expiry_date": "تاريخ الصلاحية YYYY-MM-DD إن وجد بالصورة",\n'
-            '  "land_and_building_summary": "اكتب ملخصاً وتدقيقاً استرسالياً شاملاً ومفصلاً لبيانات الأرض، الشوارع، الواجهات، الصك، والاشتراطات والأنشطة المسموحة وفق المخطط المحلي واللائحة التنفيذية لأمانة جدة 1447/2025 بدون اختصار (استرسل وتحدث بحرية)"\n'
+            '  "parcels": [{\n'
+            '    "parcel_id": "P-1", "plot_number": "", "plan_number": "", "deed_number": "",\n'
+            '    "area_sqm": null, "approved_financial_area_sqm": null, "facades_count": null,\n'
+            '    "directions": {\n'
+            '      "north": {"street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": ""},\n'
+            '      "south": {"street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": ""},\n'
+            '      "east": {"street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": ""},\n'
+            '      "west": {"street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": ""}\n'
+            '    },\n'
+            '    "north_direction": "", "setbacks": "", "building_ratio": "", "max_floors_height": "",\n'
+            '    "allowed_uses_restrictions": "", "expiry_date": "",\n'
+            '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
+            '    "confidence": {}, "sources": [], "summary": ""\n'
+            '  }],\n'
+            '  "conflicts": [], "document_summary": "", "land_and_building_summary": ""\n'
             "}\n"
-            "```\n"
-            "تنبيهات هامة للاستخراج:\n"
-            "1. استخرج مساحة الأرض دائماً من الخانة المدونة باسم (بموجب التنظيم) أو (المساحة التنظيمية) أو (المساحة الإجمالية).\n"
-            "2. استخرج الاتجاهات (شمال، جنوب، شرق، غرب) المكتوبة بالجدول أو الرسم.\n"
-            "3. في حقل (land_and_building_summary)، استرسل واكتب تحليلاً وشرحاً مفصلاً لكافة تفاصيل واشتراطات الأرض والتنظيم بالاستعانة بلائحة جدة 1447/2025.\n"
-            "4. إذا كان أي حقل مفقوداً تماماً ولم تتمكن من قراءته بالصورة، اترك قيمته كنص فارغ ''."
+            "ملاحظات: المساحة المعتمدة للدراسة تؤخذ فقط من القيمة المكتوبة صراحة تحت (بموجب التنظيم) أو ما يعادلها.\n"
+            "لا تنسب اشتراطات إلى مدينة أو أمانة إلا إذا كانت المدينة ومصدر اللائحة واضحين في الملفات أو في المرجع المرفق."
         )
 
         raw_resp = ""
         if OPENROUTER_KEY:
-            user_content = [
-                {"type": "text", "text": f"اقرأ الملف المرفق كما هو بنفسك واستخرج منه الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}"}
-            ]
-            if is_pdf:
-                user_content.append({"type": "file", "file": {"filename": "croquis.pdf", "file_data": file_data}})
-            else:
-                user_content.append({"type": "image_url", "image_url": {"url": file_data, "detail": "high"}})
-            
+            user_content = [{
+                "type": "text",
+                "text": "حلل الملفات التالية معًا، واكتب مفتاح key كمصدر سياقي لكل ملف.\n"
+                        f"مقتطفات مرجع اللوائح المتاحة:\n{jeddah_pdf_context}\n\n"
+                        + "\n".join(f"- {doc['key']}: {doc['filename']} ({doc['mimeType']})" for doc in documents)
+            }]
+            for doc in documents:
+                doc_data = doc['fileData']
+                if 'application/pdf' in doc_data or doc['mimeType'] == 'application/pdf':
+                    user_content.append({"type": "file", "file": {"filename": doc['filename'], "file_data": doc_data}})
+                else:
+                    user_content.append({"type": "image_url", "image_url": {"url": doc_data, "detail": "high"}})
+
             try:
-                res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=3500, model="google/gemini-3.6-flash")
-                print(f"[EXTRACT CROQUIS FULL GEMINI RESPONSE]\n{json.dumps(res, ensure_ascii=False, indent=2)}")
+                res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=5000, model="google/gemini-3.6-flash")
                 if _has_chat_choices(res):
                     raw_resp = _get_chat_response_text(res)
-                    print(f"[EXTRACT CROQUIS RAW TEXT]\n{raw_resp}")
-                    print("[EXTRACT CROQUIS SUCCESS] Extracted croquis using google/gemini-3.6-flash on OpenRouter")
+                    print(f"[EXTRACT LAND DOCUMENTS] analyzed {len(documents)} document(s)")
                 else:
-                    print(f"[EXTRACT CROQUIS GEMINI 3.6 ERROR] {res}")
+                    print(f"[EXTRACT LAND DOCUMENTS ERROR] {res.get('error') if isinstance(res, dict) else res}")
             except Exception as model_err:
-                print(f"[EXTRACT CROQUIS EXCEPTION] google/gemini-3.6-flash failed: {model_err}")
+                print(f"[EXTRACT LAND DOCUMENTS EXCEPTION] {model_err}")
 
         resp_json = parse_json_object(raw_resp) if raw_resp else {}
-        resp_json = normalize_croquis_fields(resp_json, raw_resp)
+        resp_json = _normalize_land_document_result(resp_json, raw_resp)
 
         # Check if there are actual non-empty values extracted
-        has_non_empty_values = any(str(v).strip() for k, v in resp_json.items() if k != 'approved_financial_area')
+        parcels = resp_json.get('parcels') if isinstance(resp_json, dict) else []
+        has_non_empty_values = bool(raw_resp.strip()) and bool(parcels) and any(
+            any(value not in (None, '', [], {}) for key, value in parcel.items() if key not in {'parcel_id', 'directions', 'coordinates', 'confidence', 'sources'})
+            for parcel in parcels if isinstance(parcel, dict)
+        )
 
         if not resp_json or not has_non_empty_values:
             print(f"[CROQUIS DEBUG RAW RESP]\n{raw_resp}")
@@ -5162,6 +5498,100 @@ def _save_tenant_image(uploaded_file, base_name):
     file_path = os.path.join(tenant_dir, f'{base_name}{normalized_extension}')
     uploaded_file.save(file_path)
     return file_path, normalized_extension
+
+
+PROJECT_FILE_EXTENSIONS = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp', '.pdf': 'application/pdf'
+}
+PROJECT_FILE_TYPES = {'land_image', 'croquis', 'building_license', 'regulation_reference'}
+PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
+
+
+def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=None):
+    if file_type not in PROJECT_FILE_TYPES:
+        raise ValueError('Invalid project file type')
+    original_name = os.path.basename(uploaded_file.filename or '').strip() or 'document'
+    extension = os.path.splitext(original_name)[1].lower()
+    mime_type = PROJECT_FILE_EXTENSIONS.get(extension)
+    if not mime_type:
+        raise ValueError('Only PNG, JPG, JPEG, WEBP, and PDF files are supported')
+
+    document_dir = os.path.join(UPLOADS_DIR, str(g.tenant_id), 'project-documents')
+    os.makedirs(document_dir, exist_ok=True)
+    temp_path = os.path.join(document_dir, f'.upload-{_uuid.uuid4().hex}.tmp')
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        with open(temp_path, 'wb') as output:
+            while True:
+                chunk = uploaded_file.stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > PROJECT_FILE_MAX_BYTES:
+                    raise ValueError('Project files must be 30 MB or smaller')
+                digest.update(chunk)
+                output.write(chunk)
+
+        with open(temp_path, 'rb') as source:
+            signature = source.read(8)
+        if mime_type == 'application/pdf' and not signature.startswith(b'%PDF'):
+            raise ValueError('Invalid PDF file')
+        if mime_type.startswith('image/'):
+            try:
+                from PIL import Image, UnidentifiedImageError
+                with Image.open(temp_path) as image:
+                    image.verify()
+            except (UnidentifiedImageError, OSError):
+                raise ValueError('Invalid image file')
+
+        sha256 = digest.hexdigest()
+        final_name = f'{sha256}{extension}'
+        final_path = os.path.join(document_dir, final_name)
+        if not os.path.exists(final_path):
+            os.replace(temp_path, final_path)
+        else:
+            os.unlink(temp_path)
+        try:
+            relative_path = os.path.relpath(final_path, os.path.dirname(__file__)).replace('\\', '/')
+        except ValueError:
+            relative_path = f'uploads/{g.tenant_id}/project-documents/{final_name}'
+        file_id = db.create_project_file(
+            g.tenant_id, file_type, original_name, final_path, mime_type, total, sha256,
+            draft_id=draft_id, project_id=project_id
+        )
+        return {
+            'id': file_id,
+            'fileType': file_type,
+            'originalName': original_name,
+            'mimeType': mime_type,
+            'fileSize': total,
+            'sha256': sha256,
+            'path': relative_path,
+        }
+    except Exception:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
+
+
+@app.route('/api/project-files', methods=['POST'])
+@require_permission('create_presentation')
+def api_upload_project_file():
+    uploaded_file = request.files.get('file')
+    if not uploaded_file or not uploaded_file.filename:
+        return jsonify({'success': False, 'error': 'No project file provided'}), 400
+    file_type = (request.form.get('fileType') or '').strip().lower()
+    draft_id = (request.form.get('draftId') or '').strip() or None
+    project_id = (request.form.get('projectId') or '').strip() or None
+    try:
+        result = _store_project_upload(uploaded_file, file_type, draft_id=draft_id, project_id=project_id)
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    except OSError as error:
+        return jsonify({'success': False, 'error': f'Could not store project file: {error}'}), 500
+    return jsonify({'success': True, 'file': result}), 201
 
 
 @app.route('/api/upload/logo', methods=['POST'])
@@ -5606,6 +6036,8 @@ def api_analyze_reference():
 
 @app.route('/tenant-assets/<tenant_id>/logo')
 def serve_tenant_logo(tenant_id):
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', str(tenant_id or '')):
+        return jsonify({'error': 'Logo not found'}), 404
     tenant_dir = os.path.join(UPLOADS_DIR, tenant_id)
     if os.path.isdir(tenant_dir):
         for extension in ALLOWED_IMAGE_EXTENSIONS:
@@ -5627,15 +6059,19 @@ def serve_tenant_logo(tenant_id):
 @app.route('/tenant-assets/<tenant_id>/fonts/<filename>')
 def serve_tenant_font(tenant_id, filename):
     """Serve uploaded tenant font files."""
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', str(tenant_id or '')):
+        return jsonify({'error': 'Font not found'}), 404
     safe_name = os.path.basename(filename)
     if '..' in safe_name or safe_name.startswith('.') or not safe_name:
+        return jsonify({'error': 'Invalid font filename'}), 400
+    ext = os.path.splitext(safe_name)[1].lower()
+    mime_map = {'.ttf': 'font/ttf', '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2'}
+    mimetype = mime_map.get(ext)
+    if not mimetype:
         return jsonify({'error': 'Invalid font filename'}), 400
     font_path = os.path.join(UPLOADS_DIR, str(tenant_id), 'fonts', safe_name)
     if not os.path.isfile(font_path):
         return jsonify({'error': 'Font not found'}), 404
-    ext = os.path.splitext(safe_name)[1].lower()
-    mime_map = {'.ttf': 'font/ttf', '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2'}
-    mimetype = mime_map.get(ext, 'application/octet-stream')
     resp = send_file(font_path, mimetype=mimetype)
     resp.headers['Cache-Control'] = 'public, max-age=86400'
     return resp
@@ -7476,6 +7912,13 @@ def index():
     resp.headers['Expires'] = '0'
     return resp
 
+
+@app.route('/app/<path:page>')
+def tenant_app_page(page):
+    """Serve the SPA shell for bookmarkable tenant workspace pages."""
+    return index()
+
+
 @app.route('/invite/<token>')
 def invite_page(token):
     resp = send_from_directory(os.path.dirname(__file__), 'index.html')
@@ -7488,56 +7931,14 @@ def invite_page(token):
 def static_assets(path):
     return send_from_directory(os.path.join(os.path.dirname(__file__), 'assets'), path)
 
-_regenerating_map_presentations = set()
-
 @app.route('/uploads/maps/<path:path>')
 def static_map_uploads(path):
-    """Map renderings are presentation assets and may be served publicly. Auto-regenerate if missing from ephemeral disk."""
+    """Serve persisted map assets; generation is available only via explicit APIs."""
     maps_dir = os.path.join(UPLOADS_DIR, 'maps')
     full_path = os.path.join(maps_dir, path)
-    if not os.path.exists(full_path):
-        filename = os.path.basename(path)
-        try:
-            conn = db.get_db()
-            row = conn.execute(
-                "SELECT tenant_id, presentation_id, placeholder FROM map_images WHERE file_path LIKE ? ORDER BY created_at DESC LIMIT 1",
-                (f"%{filename}%",)
-            ).fetchone()
-            if row and row['presentation_id']:
-                pres_id = row['presentation_id']
-                tenant_id = row['tenant_id']
-                placeholder_name = row['placeholder']
-                if pres_id not in _regenerating_map_presentations:
-                    _regenerating_map_presentations.add(pres_id)
-                    try:
-                        pres = db.get_presentation(pres_id, tenant_id=tenant_id)
-                        if pres and pres.get('project_data'):
-                            pdata = json.loads(pres['project_data']) if isinstance(pres['project_data'], str) else pres['project_data']
-                            branding = db.get_branding(tenant_id) or {}
-                            map_res = maps_service.generate_all_map_images(pdata, tenant_id, presentation_id=pres_id, force=True, branding=branding)
-                            if map_res.get('placeholders') and pres.get('slides_data'):
-                                slides = json.loads(pres['slides_data']) if isinstance(pres['slides_data'], str) else pres['slides_data']
-                                slides_json = json.dumps(slides, ensure_ascii=False)
-                                for placeholder, ppath in map_res['placeholders'].items():
-                                    if ppath and os.path.exists(ppath):
-                                        rel_p = '/' + os.path.relpath(ppath, os.path.dirname(__file__)).replace('\\', '/')
-                                        ptype = placeholder.replace('##MAP_', '').replace('##STREET_VIEW_', 'streetview_').replace('##', '').lower()
-                                        pattern = r'/uploads/maps/[^/]+_[^/]+_' + ptype + r'_[^/]+\.png'
-                                        slides_json = re.sub(pattern, lambda m, rp=rel_p: rp, slides_json)
-                                updated_slides = json.loads(slides_json)
-                                db.update_presentation(pres_id, tenant_id=tenant_id, slides_data=updated_slides)
-
-                                new_path = map_res['placeholders'].get(placeholder_name)
-                                if new_path and os.path.exists(new_path):
-                                    return send_from_directory(os.path.dirname(new_path), os.path.basename(new_path))
-                    finally:
-                        _regenerating_map_presentations.discard(pres_id)
-        except Exception as e:
-            print(f"[AUTO MAP REGEN ERROR] {e}")
-
-    if os.path.exists(full_path):
+    if os.path.isfile(full_path):
         return send_from_directory(maps_dir, path)
-    return jsonify({'error': 'Map image not found'}), 404
+    return jsonify({'error': 'Map image not found', 'error_code': 'MAP_ASSET_MISSING'}), 404
 
 
 @app.route('/uploads/creative/<tenant_id>/<path:filename>')
