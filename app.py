@@ -4993,38 +4993,31 @@ def api_extract_croquis():
         )
 
         raw_resp = ""
-        # 1. Try Official Google Gemini Native API (100% identical to gemini.com) if GEMINI_API_KEY is configured
-        if GEMINI_API_KEY and file_data:
-            try:
-                user_text = f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"
-                raw_resp = call_gemini_official_native_api(system_prompt, user_text, file_data_uri=file_data, model="gemini-2.5-pro")
-                if not raw_resp:
-                    raw_resp = call_gemini_official_native_api(system_prompt, user_text, file_data_uri=file_data, model="gemini-2.5-flash")
-                if raw_resp:
-                    print(f"[EXTRACT CROQUIS SUCCESS] Extracted croquis using Official Google Gemini Native API!")
-            except Exception as gemini_err:
-                print(f"[EXTRACT CROQUIS GEMINI NATIVE ERROR] {gemini_err}")
-
-        # 2. Fallback to OpenRouter Models (openai/gpt-5.6-luna, openai/gpt-4o, google/gemini-3.6-flash) with 300 DPI & detail: high
-        if not raw_resp and OPENROUTER_KEY and extracted_images:
+        # EXCLUSIVELY use google/gemini-3.6-flash via OpenRouter for vision extractions
+        if OPENROUTER_KEY and extracted_images:
             user_content = [
                 {"type": "text", "text": f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"}
             ]
             for img in extracted_images:
                 user_content.append({"type": "image_url", "image_url": {"url": img, "detail": "high"}})
             
-            models_to_try = ["openai/gpt-5.6-luna", "openai/gpt-4o", "google/gemini-3.6-flash"]
-            for model_name in models_to_try:
-                try:
-                    res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=3500, model=model_name)
-                    if _has_chat_choices(res):
-                        raw_resp = _get_chat_response_text(res)
-                        print(f"[EXTRACT CROQUIS SUCCESS] Extracted croquis using Vision AI model: {model_name}")
-                        break
-                    else:
-                        print(f"[EXTRACT CROQUIS RETRY] Model {model_name} response error: {res}. Trying next model...")
-                except Exception as model_err:
-                    print(f"[EXTRACT CROQUIS EXCEPTION] Model {model_name} failed: {model_err}")
+            try:
+                res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=3500, model="google/gemini-3.6-flash")
+                if _has_chat_choices(res):
+                    raw_resp = _get_chat_response_text(res)
+                    print("[EXTRACT CROQUIS SUCCESS] Extracted croquis using google/gemini-3.6-flash")
+                else:
+                    print(f"[EXTRACT CROQUIS GEMINI 3.6 ERROR] {res}")
+            except Exception as model_err:
+                print(f"[EXTRACT CROQUIS EXCEPTION] google/gemini-3.6-flash failed: {model_err}")
+
+        # Secondary Native Gemini API fallback if configured
+        if not raw_resp and GEMINI_API_KEY and file_data:
+            try:
+                user_text = f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"
+                raw_resp = call_gemini_official_native_api(system_prompt, user_text, file_data_uri=file_data, model="gemini-2.5-flash")
+            except Exception as gemini_err:
+                print(f"[EXTRACT CROQUIS GEMINI NATIVE ERROR] {gemini_err}")
 
         if not raw_resp and ZAI_KEY:
             user_content = f"اقرأ واستخرج بيانات الكروكي ورقم الصك والواجهات والأدوار بصيغة JSON:\n{extracted_text}"
