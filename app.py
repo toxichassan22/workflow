@@ -4652,68 +4652,6 @@ def api_update_custom_section(section_key):
     return jsonify({'success': True})
 
 
-def convert_pdf_base64_to_images(pdf_data_uri, max_pages=5):
-    """Convert base64 PDF into clean, ultra-high-resolution (300 DPI) page images for Vision AI."""
-    import base64
-    import fitz
-    images = []
-    text_content = ""
-    try:
-        raw_b64 = pdf_data_uri.split(',', 1)[1] if ',' in pdf_data_uri else pdf_data_uri
-        pdf_bytes = base64.b64decode(raw_b64)
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        for i in range(min(len(doc), max_pages)):
-            page = doc[i]
-            page_text = page.get_text() or ""
-            if page_text.strip():
-                text_content += f"\n--- الصفحة {i+1} ---\n" + page_text.strip()
-            
-            # Ultra High-DPI rasterization (dpi=300 renders ultra-crisp engineering drawings and numbers)
-            pix = page.get_pixmap(dpi=300)
-            png_bytes = pix.tobytes("png")
-            img_b64 = base64.b64encode(png_bytes).decode('utf-8')
-            images.append(f"data:image/png;base64,{img_b64}")
-
-    except Exception as err:
-        print(f"[PDF CONVERT ERROR] {err}")
-    return images, text_content
-
-
-def call_gemini_official_native_api(system_prompt, user_text, file_data_uri=None, model="gemini-2.5-pro"):
-    """Call Google's Official Native Gemini API with raw binary PDF/Image data."""
-    if not GEMINI_API_KEY:
-        return None
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
-    parts = [{"text": system_prompt + "\n\n" + user_text}]
-    if file_data_uri:
-        mime_type = "application/pdf" if ('application/pdf' in file_data_uri or file_data_uri.startswith('data:application/pdf')) else "image/png"
-        raw_b64 = file_data_uri.split(',', 1)[1] if ',' in file_data_uri else file_data_uri
-        parts.append({
-            "inline_data": {
-                "mime_type": mime_type,
-                "data": raw_b64
-            }
-        })
-    payload = {
-        "contents": [{"parts": parts}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4000}
-    }
-    headers = {"Content-Type": "application/json"}
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=120)
-        data = res.json()
-        if 'candidates' in data and data['candidates']:
-            cand = data['candidates'][0]
-            parts_out = cand.get('content', {}).get('parts', [])
-            txt = "".join([p.get('text', '') for p in parts_out if 'text' in p])
-            if txt:
-                return txt
-        print(f"[GEMINI NATIVE API RESPONSE ERROR] {data}")
-    except Exception as exc:
-        print(f"[GEMINI OFFICIAL NATIVE API EXCEPTION] {exc}")
-    return None
-
-
 def _get_chat_response_text(res):
     """Safely extract string content from OpenAI/GLM/OpenRouter chat response dict."""
     if not isinstance(res, dict):
@@ -4953,17 +4891,9 @@ def api_extract_croquis():
         if not file_data:
             return jsonify({'success': False, 'error': 'يرجى رفع ملف الكروكي أو المخطط المساحي أولاً'})
 
-        extracted_images = []
-        extracted_text = ""
+        is_pdf = 'application/pdf' in file_data
 
-        if 'application/pdf' in file_data or file_data.startswith('data:application/pdf'):
-            extracted_images, extracted_text = convert_pdf_base64_to_images(file_data)
-            if not extracted_images and not extracted_text:
-                return jsonify({'success': False, 'error': 'تعذر قراءة ملف الـ PDF، يرجى التأكد من صحة الملف'})
-        else:
-            extracted_images = [file_data]
-
-        jeddah_pdf_context = search_jeddah_official_regulations_pdf(extracted_text)
+        jeddah_pdf_context = search_jeddah_official_regulations_pdf()
 
         system_prompt = (
             "أنت مهندس مساح وخبير عقاري متخصص في تدقيق المخططات والكروكيات التنظيمية ورخص البناء والصكوك اللائحية الرسمية لمحافظة جدة وباقي المناطق.\n"
@@ -4993,41 +4923,29 @@ def api_extract_croquis():
         )
 
         raw_resp = ""
-        # 1. Primary Native Official Google Gemini API if GEMINI_API_KEY is configured
-        if GEMINI_API_KEY and file_data:
-            try:
-                user_text = f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"
-                raw_resp = call_gemini_official_native_api(system_prompt, user_text, file_data_uri=file_data, model="gemini-2.5-flash")
-                if raw_resp:
-                    print("[EXTRACT CROQUIS SUCCESS] Extracted croquis using Native Official Google Gemini API!")
-            except Exception as gemini_err:
-                print(f"[EXTRACT CROQUIS GEMINI NATIVE ERROR] {gemini_err}")
-
-        # 2. Secondary OpenRouter google/gemini-3.6-flash fallback (with 300 DPI & detail: high)
-        if not raw_resp and OPENROUTER_KEY and extracted_images:
+        if OPENROUTER_KEY:
             user_content = [
-                {"type": "text", "text": f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"}
+                {"type": "text", "text": f"اقرأ الملف المرفق كما هو بنفسك واستخرج منه الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}"}
             ]
-            for img in extracted_images:
-                user_content.append({"type": "image_url", "image_url": {"url": img, "detail": "high"}})
+            if is_pdf:
+                user_content.append({"type": "file", "file": {"filename": "croquis.pdf", "file_data": file_data}})
+            else:
+                user_content.append({"type": "image_url", "image_url": {"url": file_data, "detail": "high"}})
             
             try:
                 res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=3500, model="google/gemini-3.6-flash")
+                print(f"[EXTRACT CROQUIS FULL GEMINI RESPONSE]\n{json.dumps(res, ensure_ascii=False, indent=2)}")
                 if _has_chat_choices(res):
                     raw_resp = _get_chat_response_text(res)
+                    print(f"[EXTRACT CROQUIS RAW TEXT]\n{raw_resp}")
                     print("[EXTRACT CROQUIS SUCCESS] Extracted croquis using google/gemini-3.6-flash on OpenRouter")
                 else:
                     print(f"[EXTRACT CROQUIS GEMINI 3.6 ERROR] {res}")
             except Exception as model_err:
                 print(f"[EXTRACT CROQUIS EXCEPTION] google/gemini-3.6-flash failed: {model_err}")
 
-        if not raw_resp and ZAI_KEY:
-            user_content = f"اقرأ واستخرج بيانات الكروكي ورقم الصك والواجهات والأدوار بصيغة JSON:\n{extracted_text}"
-            res = call_zai_chat(system_prompt, user_content, temperature=0.1)
-            raw_resp = _get_chat_response_text(res)
-
         resp_json = parse_json_object(raw_resp) if raw_resp else {}
-        resp_json = normalize_croquis_fields(resp_json, extracted_text + "\n" + raw_resp)
+        resp_json = normalize_croquis_fields(resp_json, raw_resp)
 
         # Check if there are actual non-empty values extracted
         has_non_empty_values = any(str(v).strip() for k, v in resp_json.items() if k != 'approved_financial_area')
