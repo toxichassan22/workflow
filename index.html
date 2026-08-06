@@ -4686,22 +4686,29 @@
       }
     }
 
-    function saveTenantNavigationState(pageId) {
-      if (!pageId || pageId === 'tenantAuthPage') return;
+    function buildTenantNavigationState(pageId, overrides = {}) {
       const hasProjectContext = TENANT_NAVIGATION_CONTEXT_PAGES.has(pageId);
-      const state = {
+      return {
         pageId,
         tenantId: tenantUser && (tenantUser.id || tenantUser.tenantId) || null,
         mode: hasProjectContext ? (tenantProjectMode || (tenantPresentationId ? 'presentation' : 'draft')) : null,
         presentationId: hasProjectContext ? (tenantPresentationId || null) : null,
         draftId: hasProjectContext && tenantProjectData ? (tenantProjectData.draftId || null) : null,
-        activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null
+        activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null,
+        railTab: localStorage.getItem('tgrTab') || 'nav',
+        ...overrides
       };
+    }
+
+    function saveTenantNavigationState(pageId, overrides = {}) {
+      if (!pageId || pageId === 'tenantAuthPage') return;
+      const state = buildTenantNavigationState(pageId, overrides);
       try {
         localStorage.setItem(T_NAVIGATION_KEY, JSON.stringify(state));
       } catch (e) {
         console.warn('[NAVIGATION] Could not save state:', e);
       }
+      return state;
     }
 
     function clearTenantNavigationState() {
@@ -4756,10 +4763,38 @@
     };
     const TENANT_ROUTE_PAGES = Object.fromEntries(Object.entries(TENANT_PAGE_ROUTES).map(([page, route]) => [route, page]));
 
-    function showTenantPage(pageId, fromHistory = false) {
-      if (!fromHistory && TENANT_PAGE_ROUTES[pageId] && window.location.pathname !== TENANT_PAGE_ROUTES[pageId]) {
-        window.history.pushState({ tenantPage: pageId }, '', TENANT_PAGE_ROUTES[pageId]);
+    function getBrowserNavigationState() {
+      const query = new URLSearchParams(window.location.search);
+      const state = history.state && typeof history.state === 'object' ? history.state : {};
+      return {
+        ...state,
+        activeSection: state.activeSection || query.get('section') || null,
+        railTab: state.railTab || query.get('rail') || localStorage.getItem('tgrTab') || 'nav'
+      };
+    }
+
+    function tenantNavigationUrl(pageId, state) {
+      const route = TENANT_PAGE_ROUTES[pageId] || window.location.pathname;
+      const query = new URLSearchParams();
+      if (pageId === 'tenantProjectPage' && state.activeSection) query.set('section', state.activeSection);
+      if (state.railTab === 'inputs') query.set('rail', 'inputs');
+      const queryString = query.toString();
+      return queryString ? route + '?' + queryString : route;
+    }
+
+    function syncTenantBrowserHistory(pageId, overrides = {}, replace = false) {
+      const state = buildTenantNavigationState(pageId, overrides);
+      const url = tenantNavigationUrl(pageId, state);
+      const current = window.location.pathname + window.location.search;
+      if (replace || current !== url) {
+        const method = replace ? 'replaceState' : 'pushState';
+        window.history[method](state, '', url);
       }
+      saveTenantNavigationState(pageId, overrides);
+    }
+
+    function showTenantPage(pageId, fromHistory = false) {
+      if (!fromHistory && TENANT_PAGE_ROUTES[pageId]) syncTenantBrowserHistory(pageId);
       document.querySelectorAll('.tenant-page').forEach(el => el.classList.remove('active'));
       const el = document.getElementById(pageId);
       if (el) el.classList.add('active');
@@ -4774,6 +4809,11 @@
       }
 
       saveTenantNavigationState(pageId);
+      if (fromHistory) {
+        const browserState = getBrowserNavigationState();
+        if (browserState.railTab) setGlobalRailTab(browserState.railTab, true);
+        if (pageId === 'tenantProjectPage' && browserState.activeSection) showSection(browserState.activeSection, true);
+      }
 
       if (pageId === 'tenantDashboardPage') {
         loadDashboard();
@@ -4916,7 +4956,8 @@
       refreshGlobalRail();
     }
 
-    function setGlobalRailTab(tab) {
+    function setGlobalRailTab(tab, fromHistory = false) {
+      tab = tab === 'inputs' ? 'inputs' : 'nav';
       document.querySelectorAll('[data-tgr-tab]').forEach(b =>
         b.classList.toggle('active', b.getAttribute('data-tgr-tab') === tab));
       const navBody = document.getElementById('tgrNav');
@@ -4925,6 +4966,10 @@
       if (inputsBody) inputsBody.classList.toggle('tgr-hidden', tab !== 'inputs');
       if (tab === 'inputs') renderGlobalRailInputs();
       localStorage.setItem('tgrTab', tab);
+      if (!fromHistory) {
+        const pageId = tgrCurrentPageId() || 'tenantDashboardPage';
+        syncTenantBrowserHistory(pageId, { railTab: tab });
+      }
     }
 
     function toggleGlobalRail() {
@@ -4997,7 +5042,7 @@
         const det = el.closest('details');
         if (det) det.open = true;
         const sec = el.closest('.tenant-form-section');
-        if (sec && sec.style.display === 'none') sec.style.display = 'block';
+        if (sec && sec.dataset.section) showSection(sec.dataset.section);
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.focus({ preventScroll: true });
         el.style.outline = '2px solid #C4A35A';
@@ -5025,7 +5070,7 @@
           if (b && b.dataset.field) tgrGoField(b.dataset.field);
         });
       }
-      setGlobalRailTab(localStorage.getItem('tgrTab') || 'nav');
+      setGlobalRailTab(localStorage.getItem('tgrTab') || 'nav', true);
       refreshGlobalRail();
       if (!window._tgrResizeBound) {
         window.addEventListener('resize', tgrRefit);
@@ -5167,7 +5212,7 @@
           if (state.pageId === 'tenantGenerationPage') showGenProgress();
           else if (state.pageId !== 'tenantSlidesPage') {
             await navigateTenantWorkflow(state.pageId);
-            if (state.pageId === 'tenantProjectPage' && state.activeSection) showSection(state.activeSection);
+            if (state.pageId === 'tenantProjectPage' && state.activeSection) showSection(state.activeSection, true);
           }
           return true;
         }
@@ -5188,7 +5233,7 @@
           tenantActiveProjectSection = state.activeSection || tenantActiveProjectSection;
           if (state.pageId === 'tenantProjectPage') {
             showTenantPage(state.pageId);
-            if (tenantActiveProjectSection) showSection(tenantActiveProjectSection);
+            if (tenantActiveProjectSection) showSection(tenantActiveProjectSection, true);
           } else if (state.pageId === 'tenantGenerationPage') {
             showGenProgress();
           } else {
@@ -6218,8 +6263,9 @@
       }
       tenantProjectData = { ...tenantProjectData, ...source };
       if (source.land_documents_analysis && Array.isArray(source.land_documents_analysis.parcels)) {
-        renderExtractedParcels(source.land_documents_analysis.parcels);
+        renderExtractedParcels(source.land_documents_analysis.parcels, source.land_documents_analysis);
       }
+      renderSurveyCoordinates(source.survey_coordinates || source.land_documents_analysis?.survey_coordinates || []);
 
       form.querySelectorAll('[data-key]').forEach(input => {
         const key = input.dataset.key;
@@ -6737,12 +6783,25 @@
                 input.appendChild(option);
               }
             });
-          } else if (f.fieldType === 'pdf' || f.fieldType === 'file' || f.fieldKey === 'land_image_file' || f.fieldKey === 'croquis_file' || f.fieldKey === 'building_permit_file' || f.fieldKey === 'regulation_reference_file') {
+          } else if (f.fieldType === 'pdf' || f.fieldType === 'file' || f.fieldKey === 'land_documents_files') {
             input = document.createElement('input');
             input.type = 'file';
+            input.multiple = f.fieldKey === 'land_documents_files';
+            input.maxLength = 2;
             input.accept = 'image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp';
             input.dataset.filetype = 'pdf';
-            input.dataset.projectFileType = f.fieldKey === 'land_image_file' ? 'land_image' : f.fieldKey === 'building_permit_file' ? 'building_license' : f.fieldKey === 'regulation_reference_file' ? 'regulation_reference' : 'croquis';
+            input.dataset.projectFileType = 'land_document';
+            if (f.fieldKey === 'land_documents_files') {
+              input.addEventListener('change', () => {
+                if (input.files.length > 2) {
+                  const transfer = new DataTransfer();
+                  Array.from(input.files).slice(0, 2).forEach(file => transfer.items.add(file));
+                  input.files = transfer.files;
+                  toast('يمكن رفع ملفين فقط: الرخصة والكروكي');
+                }
+                triggerAutoSaveDraft();
+              });
+            }
           } else if (f.fieldType === 'image') {
             input = document.createElement('input');
             input.type = 'file';
@@ -6831,26 +6890,6 @@
             checkOther();
           }
 
-          if (f.fieldKey === 'croquis_file') {
-            const extractBtn = document.createElement('button');
-            extractBtn.type = 'button';
-            extractBtn.className = 'btn primary small';
-            extractBtn.textContent = ' قراءة واستخراج بيانات الكروكي بالذكاء الاصطناعي';
-            extractBtn.style.cssText = 'margin-top:8px;';
-            extractBtn.onclick = () => extractTenantCroquisData('croquis_file');
-            div.appendChild(extractBtn);
-          }
-
-          if (f.fieldKey === 'building_permit_file') {
-            const extractBtn = document.createElement('button');
-            extractBtn.type = 'button';
-            extractBtn.className = 'btn primary small';
-            extractBtn.textContent = ' قراءة واستخراج رخصة البناء والاشتراطات بالذكاء الاصطناعي';
-            extractBtn.style.cssText = 'margin-top:8px;';
-            extractBtn.onclick = () => extractTenantCroquisData('building_permit_file');
-            div.appendChild(extractBtn);
-          }
-
           if (f.fieldKey === 'croquis_expiry_date') {
             const statusBadge = document.createElement('div');
             statusBadge.id = 'croquisExpiryBadge';
@@ -6886,29 +6925,7 @@
             btn.style.marginTop = '8px';
             btn.onclick = () => analyzeTenantSite();
             div.appendChild(btn);
-            // Auto site-analysis: pasting a maps link (or leaving the field with a
-            // fresh address) fills roads/landmarks/catchment tables automatically.
-            const resetCoordinatesForChangedAddress = () => {
-              const val = addressInput.value.trim();
-              if (window._lastAnalyzedAddress && window._lastAnalyzedAddress !== val) {
-                if (latInput) latInput.value = '';
-                if (lngInput) lngInput.value = '';
-                tenantProjectData.location_lat = '';
-                tenantProjectData.location_lng = '';
-                tenantProjectData.location_coordinates_confirmed = false;
-                tenantProjectData.location_coordinates_source = '';
-                invalidateTenantMapAssets();
-              }
-            };
-            addressInput.addEventListener('paste', () => {
-              clearTimeout(window._autoAnalyzeTimer);
-              window._autoAnalyzeTimer = setTimeout(() => {
-                if (addressInput.value.trim()) resetCoordinatesForChangedAddress();
-              }, 250);
-            });
-            addressInput.addEventListener('blur', () => {
-              if (addressInput.value.trim()) resetCoordinatesForChangedAddress();
-            });
+
           }
 
           sectionDiv.appendChild(div);
@@ -6918,11 +6935,13 @@
           const landAnalysisActions = document.createElement('div');
           landAnalysisActions.className = 'tenant-field full';
           landAnalysisActions.style.cssText = 'margin-top:12px;padding-top:12px;border-top:1px solid var(--line);';
-          landAnalysisActions.innerHTML = '<button type="button" class="btn primary" id="analyzeLandDocumentsButton">تحليل ملفات الأرض والكروكي والرخصة معًا</button>' +
-            '<p class="tenant-hint" style="margin:6px 0 0">ترفع صورة الأرض والكروكي والرخصة وملف الاشتراطات أولًا بشكل آمن، ثم يحللها الذكاء الاصطناعي معًا ويعرض كل قطعة واتجاهاتها للمراجعة.</p>' +
+          landAnalysisActions.innerHTML = '<button type="button" class="btn primary" id="analyzeLandDocumentsButton">تحليل الرخصة والكروكي معًا</button>' +
+            '<p class="tenant-hint" style="margin:6px 0 0">ارفع ملفين كحد أقصى داخل الخانة: ملف رخصة البناء وملف الكروكي. سيتم تحليل الملفين في طلب AI واحد، مع إعطاء الأولوية لأي جدول تنظيم موجود داخل المستندات.</p>' +
             '<input type="hidden" data-key="land_documents_analysis" data-type="text" id="landDocumentsAnalysisData">' +
-            '<div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>';
-          landAnalysisActions.querySelector('#analyzeLandDocumentsButton').addEventListener('click', () => extractTenantCroquisData('croquis_file'));
+            '<input type="hidden" data-key="survey_coordinates" data-type="text" id="surveyCoordinatesData">' +
+            '<div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>' +
+            '<div id="surveyCoordinatesPanel" style="margin-top:12px"></div>';
+          landAnalysisActions.querySelector('#analyzeLandDocumentsButton').addEventListener('click', () => extractTenantCroquisData('land_documents_files'));
           sectionDiv.appendChild(landAnalysisActions);
         }
 
@@ -6977,8 +6996,9 @@
       form.addEventListener('change', triggerAutoSaveDraft);
 
       const initialSection = projectSections.find(section => section.dataset.section === tenantActiveProjectSection) || projectSections[0];
-      if (initialSection) showSection(initialSection.dataset.section);
+      if (initialSection) showSection(initialSection.dataset.section, true);
       updateTenantPolygonControls();
+      renderSurveyCoordinates(tenantProjectData.survey_coordinates || []);
     }
 
     // S3: Components Table
@@ -7835,17 +7855,55 @@
     function graceYearFraction(year){if(val('graceEnabled')!=='yes')return 0;const start=(Math.max(1,Math.round(num('graceStartYear')||1))-1)*12,end=start+Math.max(0,num('graceDurationMonths')),ys=(year-1)*12,ye=year*12;return Math.max(0,Math.min(ye,end)-Math.max(ys,start))/12}
     function addGraceScheduleRow(d={}){const tb=document.querySelector('#graceScheduleTable tbody');if(!tb)return;const tr=document.createElement('tr');tr.innerHTML=`<td data-field="year"><input type="number" min="1" value="${d.year??1}"></td><td data-field="amount"><input type="number" min="0" value="${d.amount??0}"></td><td>${rowActionsHtml()}</td>`;tb.appendChild(tr);tr.querySelectorAll('input').forEach(x=>x.addEventListener('input',calculateAll));enhanceNumericInputs(tr)}
     function collectGraceSchedule(){return [...document.querySelectorAll('#graceScheduleTable tbody tr')].map(tr=>({year:parseNumber(tr.querySelector('[data-field="year"] input')?.value)||1,amount:Math.max(0,parseNumber(tr.querySelector('[data-field="amount"] input')?.value))}))}
+    function setConditionalVisibility(target, visible) {
+      const element = typeof target === 'string' ? document.getElementById(target) : target;
+      if (!element) return;
+      element.classList.toggle('conditional-off', !visible);
+      element.hidden = !visible;
+      element.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    }
+
+    function setConditionalSelector(selector, visible) {
+      document.querySelectorAll(selector).forEach(element => setConditionalVisibility(element, visible));
+    }
+
     function applyConditionalVisibility(flags){
-      const show=(id,on)=>document.getElementById(id)?.classList.toggle('conditional-off',!on);show('salesStartYearWrap',flags.sales);show('salesYearsWrap',flags.sales);show('operationYearsWrap',flags.rental);show('operationStartYearWrap',flags.rental);show('rentalRevenueDetails',flags.rental);show('graceBlock',flags.rental);show('graceDetails',flags.rental&&val('graceEnabled')==='yes');show('graceRevenueWrap',flags.rental&&val('graceEnabled')==='yes'&&val('graceScope')==='selectedRevenue');show('graceScheduleWrap',flags.rental&&val('graceEnabled')==='yes'&&val('graceMethod')==='schedule');show('developerBonusBlock',flags.sales);show('developerBonusDetails',flags.sales&&val('developerBonusEnabled')==='yes');show('externalDetails',val('externalEnabled')==='yes');
-      const financeOn=val('financeEnabled')==='yes';document.querySelectorAll('#financeBlock .grid.four>div:not(:first-child),#financeBlock h4,#financeBlock .table-wrap,#financeBlock p.help').forEach(el=>el.classList.toggle('conditional-off',!financeOn));
-      const fundOn=val('fundEnabled')==='yes',feesOn=fundOn&&val('fundFeesEnabled')==='yes';document.querySelectorAll('#fundBlock .grid.four>div:not(:first-child),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button').forEach(el=>el.classList.toggle('conditional-off',!fundOn));document.querySelectorAll('#fundBlock .grid.four>div:nth-child(n+3),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button').forEach(el=>el.classList.toggle('conditional-off',!feesOn));
-      const exitOn=val('exitEnabled')==='yes';document.querySelectorAll('#exitBlock .grid.four>div:not(:first-child)').forEach(el=>el.classList.toggle('conditional-off',!exitOn));
-      document.querySelectorAll('.cf-sales').forEach(el=>el.classList.toggle('conditional-off',!flags.sales));document.querySelectorAll('.cf-rental').forEach(el=>el.classList.toggle('conditional-off',!flags.rental));document.querySelectorAll('.cf-finance').forEach(el=>el.classList.toggle('conditional-off',!financeOn));document.querySelectorAll('.cf-fund').forEach(el=>el.classList.toggle('conditional-off',!feesOn));document.querySelectorAll('.cf-grace').forEach(el=>el.classList.toggle('conditional-off',!(flags.rental&&val('graceEnabled')==='yes')));
-      ['resSaleRevenue','resSaleExitGross','resSaleExit'].forEach(id=>document.getElementById(id)?.closest('.metric')?.classList.toggle('conditional-off',!flags.sales));
-      ['resRevenueY1','resNOIY1','resFullOccupancyRevenue','resFullOccupancyOpex','resFullOccupancyNOI','resOperatingExitGross','resOperatingExit'].forEach(id=>document.getElementById(id)?.closest('.metric')?.classList.toggle('conditional-off',!flags.rental));
-      ['resFinanceCost','resCashEquity','resEquityRequired','resIRR','resEquityPayback'].forEach(id=>document.getElementById(id)?.closest('.metric')?.classList.toggle('conditional-off',!financeOn));
-      document.getElementById('resFundFees')?.closest('.metric')?.classList.toggle('conditional-off',!feesOn);
-      ['resSaleExitGross','resSaleExit','resOperatingExitGross','resOperatingExit','resTerminal'].forEach(id=>document.getElementById(id)?.closest('.metric')?.classList.toggle('conditional-off',!exitOn));
+      const graceOn = flags.rental && val('graceEnabled') === 'yes';
+      const selectedGraceRevenue = graceOn && val('graceScope') === 'selectedRevenue';
+      const scheduledGrace = graceOn && val('graceMethod') === 'schedule';
+      const financeOn = val('financeEnabled') === 'yes';
+      const fundOn = val('fundEnabled') === 'yes';
+      const feesOn = fundOn && val('fundFeesEnabled') === 'yes';
+      const exitOn = val('exitEnabled') === 'yes';
+
+      setConditionalVisibility('salesStartYearWrap', flags.sales);
+      setConditionalVisibility('salesYearsWrap', flags.sales);
+      setConditionalVisibility('operationYearsWrap', flags.rental);
+      setConditionalVisibility('operationStartYearWrap', flags.rental);
+      setConditionalVisibility('rentalRevenueDetails', flags.rental);
+      setConditionalVisibility('graceBlock', flags.rental);
+      setConditionalVisibility('graceDetails', graceOn);
+      setConditionalVisibility('graceRevenueWrap', selectedGraceRevenue);
+      setConditionalVisibility('graceScheduleWrap', scheduledGrace);
+      setConditionalVisibility('developerBonusBlock', flags.sales);
+      setConditionalVisibility('developerBonusDetails', flags.sales && val('developerBonusEnabled') === 'yes');
+      setConditionalVisibility('externalDetails', val('externalEnabled') === 'yes');
+
+      setConditionalSelector('#financeBlock .grid.four>div:not(:first-child),#financeBlock h4,#financeBlock .table-wrap,#financeBlock p.help', financeOn);
+      setConditionalSelector('#fundBlock .grid.four>div:not(:first-child),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', fundOn);
+      setConditionalSelector('#fundBlock .grid.four>div:nth-child(n+3),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', feesOn);
+      setConditionalSelector('#exitBlock .grid.four>div:not(:first-child)', exitOn);
+      setConditionalSelector('.cf-sales', flags.sales);
+      setConditionalSelector('.cf-rental', flags.rental);
+      setConditionalSelector('.cf-finance', financeOn);
+      setConditionalSelector('.cf-fund', feesOn);
+      setConditionalSelector('.cf-grace', graceOn);
+
+      ['resSaleRevenue','resSaleExitGross','resSaleExit'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), flags.sales));
+      ['resRevenueY1','resNOIY1','resFullOccupancyRevenue','resFullOccupancyOpex','resFullOccupancyNOI','resOperatingExitGross','resOperatingExit'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), flags.rental));
+      ['resFinanceCost','resCashEquity','resEquityRequired','resIRR','resEquityPayback'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), financeOn));
+      setConditionalVisibility(document.getElementById('resFundFees')?.closest('.metric'), feesOn);
+      ['resSaleExitGross','resSaleExit','resOperatingExitGross','resOperatingExit','resTerminal'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), exitOn));
     }
     function reorderResultCards(){
       const container=document.getElementById('resultsCards');if(!container)return;
@@ -7855,9 +7913,10 @@
     }
 
     function calculateAll(){
+      const modeFlags=projectModeFlags();
+      applyConditionalVisibility(modeFlags);
       updateDynamicFields();
       updateGraceRevenueOptions();
-      const modeFlags=projectModeFlags();
       const developmentYears=Math.max(1,Math.min(20,Math.round(num('developmentYears')||1)));
       const operationYears=modeFlags.rental?Math.max(1,Math.min(40,Math.round(num('operationYears')||10))):0;
       if(modeFlags.rental&&document.querySelectorAll('#occupancyRampTable tbody tr').length!==operationYears)syncOccupancyRamp();
@@ -8633,7 +8692,7 @@
       appendWorkflowNavigation(sidebar, 'tenantProjectPage', false);
     }
 
-    function showSection(sectionKey) {
+    function showSection(sectionKey, fromHistory = false) {
       const sections = Array.from(document.querySelectorAll('#tenantProjectForm .tenant-form-section[data-section]'));
       const target = sections.find(section => section.dataset.section === sectionKey);
       if (!target) return;
@@ -8645,7 +8704,11 @@
         button.setAttribute('aria-current', active ? 'page' : 'false');
       });
       tenantActiveProjectSection = sectionKey;
-      saveTenantNavigationState('tenantProjectPage');
+      if (tgrCurrentPageId() === 'tenantProjectPage') {
+        syncTenantBrowserHistory('tenantProjectPage', { activeSection: sectionKey }, fromHistory);
+      } else {
+        saveTenantNavigationState('tenantProjectPage', { activeSection: sectionKey });
+      }
     }
 
     // Keep for backward compatibility with older callers.
@@ -8778,28 +8841,25 @@
       }
     }
 
-    async function extractTenantCroquisData(targetKey = 'croquis_file') {
-      const keys = ['land_image_file', 'croquis_file', 'building_permit_file', 'regulation_reference_file'];
-      const documents = [];
-      for (const key of keys) {
-        const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-        if (!input?.files?.[0] && !tenantProjectData[key + '_file_id']) continue;
-        const fileId = await uploadTenantProjectFileInput(input, key);
-        if (fileId) {
-          documents.push({
-            key: input?.dataset?.projectFileType || key,
-            fileId,
-            filename: input?.files?.[0]?.name || tenantProjectData[key + '_file_meta']?.originalName || key,
-            mimeType: input?.files?.[0]?.type || tenantProjectData[key + '_file_meta']?.mimeType || ''
-          });
-        }
+    async function extractTenantCroquisData(targetKey = 'land_documents_files') {
+      const input = document.querySelector('#tenantProjectForm [data-key="land_documents_files"]');
+      const files = Array.from(input?.files || []).slice(0, 2);
+      let uploaded = [];
+      if (files.length) uploaded = await uploadTenantProjectFileInput(input, targetKey);
+      if (!files.length && Array.isArray(tenantProjectData[targetKey + '_file_meta'])) {
+        uploaded = tenantProjectData[targetKey + '_file_meta'];
       }
+      const documents = (Array.isArray(uploaded) ? uploaded : []).map((file, index) => ({
+        key: 'land_document',
+        fileId: file.id,
+        filename: files[index]?.name || file.originalName || ('مستند ' + (index + 1)),
+        mimeType: files[index]?.type || file.mimeType || ''
+      })).filter(document => document.fileId);
       if (!documents.length) {
-        const labelText = targetKey === 'building_permit_file' ? 'صورة/ملف رخصة البناء' : 'ملفات الأرض والكروكي والرخصة';
-        toast('يرجى اختيار ' + labelText + ' أولاً');
+        toast('يرجى رفع ملفي رخصة البناء والكروكي داخل الخانة أولًا');
         return;
       }
-      showLoader('تحليل ملفات الأرض والكروكي والرخصة', 'جاري تحليل الملفات معًا واكتشاف القطع والاتجاهات...', 10);
+      showLoader('تحليل الرخصة والكروكي معًا', 'جاري تحليل الملفين واستخراج التنظيم والاتجاهات والإحداثيات...', 10);
       try {
         updateLoaderProgress(35, 'جاري إرسال الملفات المحفوظة إلى الذكاء الاصطناعي...');
         const res = await api('POST', '/api/extract-croquis', { documents, draftId: tenantProjectData.draftId });
@@ -8814,7 +8874,9 @@
           });
           tenantProjectData.land_documents_analysis = data;
           tenantProjectData.land_documents_analysis_status = 'needs_review';
-          renderExtractedParcels(data.parcels || []);
+          tenantProjectData.survey_coordinates = data.survey_coordinates || [];
+          renderExtractedParcels(data.parcels || [], data);
+          renderSurveyCoordinates(data.survey_coordinates || []);
           updateLoaderProgress(100, 'تم تحليل الملفات معًا. راجع كل قطعة والاتجاهات ثم اعتمد البيانات.');
           toast('تم تحليل ملفات الأرض والكروكي والرخصة معًا. راجع النتائج قبل الاعتماد.');
           triggerAutoSaveDraft();
@@ -8828,7 +8890,7 @@
       }
     }
 
-    function renderExtractedParcels(parcels) {
+    function renderExtractedParcels(parcels, analysis = {}) {
       const host = document.getElementById('landDocumentsAnalysisPreview');
       if (!host) return;
       const analysisInput = document.getElementById('landDocumentsAnalysisData');
@@ -8838,9 +8900,17 @@
         host.style.display = 'block';
         return;
       }
-      if (analysisInput) analysisInput.value = JSON.stringify({ parcels });
+      if (analysisInput) analysisInput.value = JSON.stringify({
+        parcels,
+        conflicts: analysis.conflicts || [],
+        source_priority: analysis.source_priority || []
+      });
       const directionLabels = { north: 'شمال', south: 'جنوب', east: 'شرق', west: 'غرب' };
-      host.innerHTML = '<h4 style="margin:0 0 10px;color:var(--p)">القطع المكتشفة — راجع كل قطعة على حدة</h4>' + parcels.map((parcel, index) => {
+      const conflicts = Array.isArray(analysis.conflicts) ? analysis.conflicts : [];
+      const conflictMarkup = conflicts.length
+        ? '<div style="background:#fff4e5;border:1px solid #ffd69b;color:#7a4a00;border-radius:8px;padding:8px;margin-bottom:10px">تعارضات تحتاج مراجعة: ' + escapeHtml(conflicts.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join(' | ')) + '</div>'
+        : '';
+      host.innerHTML = conflictMarkup + '<h4 style="margin:0 0 10px;color:var(--p)">القطع المكتشفة — راجع كل قطعة على حدة</h4>' + parcels.map((parcel, index) => {
         const directions = parcel.directions || {};
         const rows = Object.entries(directionLabels).map(([key, label]) => {
           const value = directions[key] || {};
@@ -8853,6 +8923,54 @@
           '</details>';
       }).join('');
       host.style.display = 'block';
+    }
+
+    function collectSurveyCoordinates() {
+      return Array.from(document.querySelectorAll('#surveyCoordinatesPanel tbody tr')).map(row => ({
+        parcel_id: row.querySelector('[data-coordinate-field="parcel_id"]')?.value?.trim() || '',
+        point: row.querySelector('[data-coordinate-field="point"]')?.value?.trim() || '',
+        eastings: row.querySelector('[data-coordinate-field="eastings"]')?.value?.trim() || '',
+        northings: row.querySelector('[data-coordinate-field="northings"]')?.value?.trim() || '',
+        source: row.querySelector('[data-coordinate-field="source"]')?.value?.trim() || 'regulation_table'
+      })).filter(row => row.parcel_id || row.point || row.eastings || row.northings);
+    }
+
+    function syncSurveyCoordinates() {
+      const rows = collectSurveyCoordinates();
+      tenantProjectData.survey_coordinates = rows;
+      const hidden = document.getElementById('surveyCoordinatesData');
+      if (hidden) hidden.value = JSON.stringify(rows);
+      triggerAutoSaveDraft();
+    }
+
+    function renderSurveyCoordinates(rows) {
+      const panel = document.getElementById('surveyCoordinatesPanel');
+      if (!panel) return;
+      const normalized = Array.isArray(rows) ? rows : [];
+      panel.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
+        '<strong style="color:var(--p)">إحداثيات التنظيم المساحية</strong>' +
+        '<button type="button" class="btn ghost small" id="addSurveyCoordinateButton">إضافة نقطة</button></div>' +
+        '<p class="tenant-hint" style="margin:0 0 8px">يتم استخراجها من جدول التنظيم بأولوية أعلى من أي جدول آخر. الأعمدة كما في المستند: القطعة، النقطة، الشرقيات، الشماليات.</p>' +
+        '<div style="overflow:auto"><table class="location-table" style="width:100%"><thead><tr><th>القطعة</th><th>النقطة</th><th>الشرقيات</th><th>الشماليات</th><th>المصدر</th><th></th></tr></thead><tbody></tbody></table></div>';
+      const tbody = panel.querySelector('tbody');
+      const addRow = row => {
+        const tr = document.createElement('tr');
+        const cell = (field, value, placeholder) => '<td><input type="text" data-coordinate-field="' + field + '" value="' + escapeHtml(value ?? '') + '" placeholder="' + placeholder + '" style="width:100%;min-width:110px"></td>';
+        tr.innerHTML = cell('parcel_id', row?.parcel_id || row?.parcelId || '', 'P-1') +
+          cell('point', row?.point || row?.point_number || '', '1') +
+          cell('eastings', row?.eastings ?? row?.easting ?? '', '510180.849') +
+          cell('northings', row?.northings ?? row?.northing ?? '', '2939234.840') +
+          cell('source', row?.source || 'regulation_table', 'جدول التنظيم') +
+          '<td><button type="button" class="btn danger small" data-remove-coordinate>حذف</button></td>';
+        tr.querySelectorAll('input').forEach(input => input.addEventListener('input', syncSurveyCoordinates));
+        tr.querySelector('[data-remove-coordinate]').addEventListener('click', () => { tr.remove(); syncSurveyCoordinates(); });
+        tbody.appendChild(tr);
+      };
+      normalized.forEach(addRow);
+      panel.querySelector('#addSurveyCoordinateButton').addEventListener('click', () => addRow({ parcel_id: normalized[0]?.parcel_id || 'P-1', source: 'regulation_table' }));
+      const hidden = document.getElementById('surveyCoordinatesData');
+      if (hidden) hidden.value = JSON.stringify(normalized);
+      tenantProjectData.survey_coordinates = normalized;
     }
 
     function toggleApproveCroquisData() {
@@ -9740,26 +9858,49 @@
     }
 
     async function uploadTenantProjectFileInput(input, key) {
-      const file = input?.files?.[0];
+      const files = Array.from(input?.files || []).slice(0, input?.multiple ? 2 : 1);
       const fileType = input?.dataset?.projectFileType;
-      if (!file || !fileType) return tenantProjectData[key + '_file_id'] || null;
-      const signature = [file.name, file.size, file.lastModified, fileType].join(':');
-      if (input.dataset.uploadSignature === signature && input.dataset.projectFileId) {
-        return input.dataset.projectFileId;
+      if (!files.length || !fileType) {
+        return tenantProjectData[key + (input?.multiple ? '_file_ids' : '_file_id')] || null;
       }
-      const formData = new FormData();
-      formData.append('file', file, file.name);
-      formData.append('fileType', fileType);
-      if (tenantProjectData?.draftId) formData.append('draftId', tenantProjectData.draftId);
-      const response = await api('POST', '/api/project-files', formData, true);
-      if (!response?.success || !response.file?.id) {
-        throw new Error(response?.error || 'تعذر حفظ ملف المشروع');
+      const uploaded = [];
+      let multiCache = {};
+      if (input.multiple) {
+        try { multiCache = JSON.parse(input.dataset.uploadSignatures || '{}') || {}; } catch (e) { multiCache = {}; }
       }
-      input.dataset.uploadSignature = signature;
-      input.dataset.projectFileId = response.file.id;
-      tenantProjectData[key + '_file_id'] = response.file.id;
-      tenantProjectData[key + '_file_meta'] = response.file;
-      return response.file.id;
+      for (const file of files) {
+        const signature = [file.name, file.size, file.lastModified, fileType].join(':');
+        const cachedId = input.multiple ? multiCache[signature] : input.dataset.projectFileId;
+        if (cachedId) {
+          uploaded.push({ id: cachedId, originalName: file.name, mimeType: file.type });
+          continue;
+        }
+        const formData = new FormData();
+        formData.append('file', file, file.name);
+        formData.append('fileType', fileType);
+        if (tenantProjectData?.draftId) formData.append('draftId', tenantProjectData.draftId);
+        const response = await api('POST', '/api/project-files', formData, true);
+        if (!response?.success || !response.file?.id) {
+          throw new Error(response?.error || 'تعذر حفظ ملف المشروع');
+        }
+        uploaded.push(response.file);
+        if (input.multiple) {
+          multiCache[signature] = response.file.id;
+          input.dataset.uploadSignatures = JSON.stringify(multiCache);
+        } else {
+          input.dataset.uploadSignature = signature;
+          input.dataset.projectFileId = response.file.id;
+        }
+      }
+      const ids = uploaded.map(file => file.id);
+      if (input.multiple) {
+        tenantProjectData[key + '_file_ids'] = ids;
+        tenantProjectData[key + '_file_meta'] = uploaded;
+        return uploaded;
+      }
+      tenantProjectData[key + '_file_id'] = ids[0];
+      tenantProjectData[key + '_file_meta'] = uploaded[0];
+      return uploaded[0];
     }
 
     async function collectTenantFormData() {
@@ -9771,12 +9912,24 @@
         const type = input.dataset.type;
         if (type === 'image' || type === 'pdf' || type === 'file') {
           if (input.files && input.files[0]) {
-            const fileId = await uploadTenantProjectFileInput(input, key);
-            result[key + '_file_id'] = fileId || '';
+            const uploaded = await uploadTenantProjectFileInput(input, key);
+            if (input.multiple) {
+              result[key + '_file_ids'] = Array.isArray(uploaded) ? uploaded.map(file => file.id) : [];
+              result[key + '_file_meta'] = Array.isArray(uploaded) ? uploaded : [];
+            } else {
+              result[key + '_file_id'] = uploaded?.id || uploaded || '';
+              result[key + '_file_meta'] = uploaded || null;
+            }
             result[key] = tenantProjectData[key] || '';
           } else {
             result[key] = tenantProjectData[key] || '';
-            if (tenantProjectData[key + '_file_id']) result[key + '_file_id'] = tenantProjectData[key + '_file_id'];
+            if (input.multiple && tenantProjectData[key + '_file_ids']) {
+              result[key + '_file_ids'] = tenantProjectData[key + '_file_ids'];
+              result[key + '_file_meta'] = tenantProjectData[key + '_file_meta'] || [];
+            } else if (tenantProjectData[key + '_file_id']) {
+              result[key + '_file_id'] = tenantProjectData[key + '_file_id'];
+              result[key + '_file_meta'] = tenantProjectData[key + '_file_meta'] || null;
+            }
           }
         } else if (type === 'number') {
           result[key] = Number(input.value) || 0;

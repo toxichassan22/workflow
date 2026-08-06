@@ -5092,6 +5092,17 @@ def _normalize_land_document_result(resp_json, text_content=''):
     if not isinstance(raw_parcels, list) or not raw_parcels:
         legacy = normalize_croquis_fields(resp_json, text_content)
         directions = legacy.get('directions') if isinstance(legacy.get('directions'), dict) else {}
+        raw_coordinates = resp_json.get('survey_coordinates') or resp_json.get('coordinates_table') or []
+        survey_coordinates = [
+            {
+                'parcel_id': 'P-1',
+                'point': str(item.get('point') or item.get('point_number') or ''),
+                'eastings': str(item.get('eastings') or item.get('easting') or item.get('الشرقيات') or ''),
+                'northings': str(item.get('northings') or item.get('northing') or item.get('الشماليات') or ''),
+                'source': str(item.get('source') or 'regulation_table')
+            }
+            for item in raw_coordinates if isinstance(item, dict)
+        ]
         parcel = {
             'parcel_id': 'P-1',
             'plot_number': legacy.get('plot_number_croquis', ''),
@@ -5108,12 +5119,15 @@ def _normalize_land_document_result(resp_json, text_content=''):
             'allowed_uses_restrictions': legacy.get('allowed_uses_restrictions', ''),
             'expiry_date': legacy.get('croquis_expiry_date', ''),
             'coordinates': {'lat': None, 'lng': None, 'source': '', 'confidence': ''},
+            'survey_coordinates': survey_coordinates,
             'confidence': {},
             'sources': [],
             'summary': legacy.get('land_and_building_summary', ''),
         }
         result = dict(legacy)
         result['parcels'] = [parcel]
+        result['survey_coordinates'] = survey_coordinates
+        result['source_priority'] = ['regulation_table', 'official_regulation', 'croquis', 'building_license']
         result['conflicts'] = []
         result['document_summary'] = result.get('land_and_building_summary', '')
         return result
@@ -5139,6 +5153,17 @@ def _normalize_land_document_result(resp_json, text_content=''):
             directions.setdefault(direction, {})
         parcel = dict(raw)
         parcel['parcel_id'] = str(raw.get('parcel_id') or raw.get('parcelId') or f'P-{index + 1}')
+        coordinate_rows = raw.get('survey_coordinates') or raw.get('coordinates_table') or []
+        parcel['survey_coordinates'] = [
+            {
+                'parcel_id': parcel['parcel_id'],
+                'point': str(item.get('point') or item.get('point_number') or ''),
+                'eastings': str(item.get('eastings') or item.get('easting') or item.get('الشرقيات') or ''),
+                'northings': str(item.get('northings') or item.get('northing') or item.get('الشماليات') or ''),
+                'source': str(item.get('source') or 'regulation_table')
+            }
+            for item in coordinate_rows if isinstance(item, dict)
+        ]
         parcel['directions'] = directions
         coords = raw.get('coordinates') if isinstance(raw.get('coordinates'), dict) else {}
         parcel['coordinates'] = {
@@ -5153,6 +5178,18 @@ def _normalize_land_document_result(resp_json, text_content=''):
         return _normalize_land_document_result({}, text_content)
     result = dict(resp_json)
     result['parcels'] = normalized_parcels
+    aggregate_coordinates = [row for parcel in normalized_parcels for row in parcel.get('survey_coordinates', [])]
+    top_coordinates = resp_json.get('survey_coordinates') or resp_json.get('coordinates_table') or []
+    if not aggregate_coordinates and isinstance(top_coordinates, list):
+        aggregate_coordinates = [{
+            'parcel_id': str(item.get('parcel_id') or item.get('parcelId') or normalized_parcels[0]['parcel_id']),
+            'point': str(item.get('point') or item.get('point_number') or ''),
+            'eastings': str(item.get('eastings') or item.get('easting') or item.get('الشرقيات') or ''),
+            'northings': str(item.get('northings') or item.get('northing') or item.get('الشماليات') or ''),
+            'source': str(item.get('source') or 'regulation_table')
+        } for item in top_coordinates if isinstance(item, dict)]
+    result['survey_coordinates'] = aggregate_coordinates
+    result['source_priority'] = ['regulation_table', 'official_regulation', 'croquis', 'building_license']
     result['conflicts'] = resp_json.get('conflicts') if isinstance(resp_json.get('conflicts'), list) else []
     result['document_summary'] = str(resp_json.get('document_summary') or '').strip()
     result['land_and_building_summary'] = str(resp_json.get('land_and_building_summary') or '').strip()
@@ -5227,8 +5264,10 @@ def api_extract_croquis():
         system_prompt = (
             "أنت مهندس مساح وخبير عقاري ومدقق مستندات تنظيمية. حلل كل الملفات المرفقة معًا، مع الحفاظ على هوية كل ملف ومصدر كل معلومة.\n"
             "أعد JSON فقط بدون Markdown. لا تخترع قيمة غير مقروءة؛ استخدم null أو نصًا فارغًا، وسجل التعارضات بدل اختيار قيمة من نفسك.\n"
+            "أولوية المصادر إلزامية: جدول التنظيم الرسمي أولًا، ثم أي مرجع تنظيمي رسمي، ثم الكروكي، ثم رخصة البناء. إذا ظهرت جداول متعددة للإحداثيات أو الاتجاهات، استخدم جدول التنظيم واربط كل قيمة بـ source=regulation_table، وسجل البدائل والتعارضات في conflicts.\n"
             "إذا وجدت أكثر من قطعة أرض، أعد كل قطعة داخل parcels منفصلة ولا تدمج مساحاتها أو حدودها.\n"
-            "استخرج جدول الاتجاهات الأربعة بشكل مستقل من الكروكي أو جدول التنظيم.\n"
+            "استخرج جدول الاتجاهات الأربعة بشكل مستقل من جدول التنظيم أولًا، وليس من وصف عام في الرخصة أو الكروكي.\n"
+            "استخرج جدول الإحداثيات المساحية كما هو: رقم القطعة، رقم النقطة، الشرقيات، الشماليات، بدون تحويل إلى latitude/longitude.\n"
             "الصيغة المطلوبة:\n"
             "{\n"
             '  "parcels": [{\n'
@@ -5243,8 +5282,10 @@ def api_extract_croquis():
             '    "north_direction": "", "setbacks": "", "building_ratio": "", "max_floors_height": "",\n'
             '    "allowed_uses_restrictions": "", "expiry_date": "",\n'
             '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
+            '    "survey_coordinates": [{"point": "", "eastings": "", "northings": "", "source": "regulation_table"}],\n'
             '    "confidence": {}, "sources": [], "summary": ""\n'
             '  }],\n'
+            '  "survey_coordinates": [], "source_priority": ["regulation_table", "official_regulation", "croquis", "building_license"],\n'
             '  "conflicts": [], "document_summary": "", "land_and_building_summary": ""\n'
             "}\n"
             "ملاحظات: المساحة المعتمدة للدراسة تؤخذ فقط من القيمة المكتوبة صراحة تحت (بموجب التنظيم) أو ما يعادلها.\n"
@@ -5255,7 +5296,7 @@ def api_extract_croquis():
         if OPENROUTER_KEY:
             user_content = [{
                 "type": "text",
-                "text": "حلل الملفات التالية معًا، واكتب مفتاح key كمصدر سياقي لكل ملف.\n"
+                "text": "حلل الملفات التالية معًا، واكتب مفتاح key كمصدر سياقي لكل ملف. أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude.\n"
                         f"مقتطفات مرجع اللوائح المتاحة:\n{jeddah_pdf_context}\n\n"
                         + "\n".join(f"- {doc['key']}: {doc['filename']} ({doc['mimeType']})" for doc in documents)
             }]
@@ -5504,7 +5545,7 @@ PROJECT_FILE_EXTENSIONS = {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
     '.webp': 'image/webp', '.pdf': 'application/pdf'
 }
-PROJECT_FILE_TYPES = {'land_image', 'croquis', 'building_license', 'regulation_reference'}
+PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license', 'regulation_reference'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
 
 

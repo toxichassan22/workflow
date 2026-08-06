@@ -232,6 +232,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(response.get_json()['mapsDeferred'])
         generate_maps.assert_not_called()
 
+    def test_land_document_form_uses_one_multi_file_field(self):
+        fields = self.app.test_client().get('/api/fields', headers=self._headers(self.token_a)).get_json()['fields']
+        keys = {field['fieldKey'] for field in fields}
+        self.assertIn('land_documents_files', keys)
+        self.assertNotIn('land_image_file', keys)
+        self.assertNotIn('regulation_reference_file', keys)
+        self.assertNotIn('croquis_file', keys)
+        self.assertNotIn('building_permit_file', keys)
+
     def test_project_draft_list_returns_metadata_without_payload(self):
         client = self.app.test_client()
         response = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
@@ -287,6 +296,27 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(stored['file_type'], 'croquis')
         self.assertTrue(os.path.basename(stored['storage_path']).startswith(stored['sha256']))
 
+    def test_browser_history_tracks_pages_sections_and_internal_tabs(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function syncTenantBrowserHistory', index_source)
+        self.assertIn('function showSection(sectionKey, fromHistory = false)', index_source)
+        self.assertIn('function setGlobalRailTab(tab, fromHistory = false)', index_source)
+        self.assertIn("syncTenantBrowserHistory('tenantProjectPage', { activeSection: sectionKey }, fromHistory)", index_source)
+        self.assertIn("window.history[method](state, '', url)", index_source)
+
+    def test_location_analysis_runs_only_from_explicit_button(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("btn.onclick = () => analyzeTenantSite();", index_source)
+        self.assertNotIn("addressInput.addEventListener('paste'", index_source)
+        self.assertNotIn("addressInput.addEventListener('blur'", index_source)
+
+    def test_financial_visibility_has_native_hidden_guard_for_optional_sections(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('element.hidden = !visible', index_source)
+        self.assertIn("setConditionalVisibility('graceDetails', graceOn)", index_source)
+        self.assertIn("setConditionalVisibility('graceScheduleWrap', scheduledGrace)", index_source)
+        self.assertIn('const modeFlags=projectModeFlags();', index_source)
+
     def test_financial_validation_requires_only_enabled_optional_inputs(self):
         errors = self.application_module.validate_financial_model({
             'inputs': {
@@ -340,7 +370,8 @@ class MeetingRequirementsTests(unittest.TestCase):
             'parcels': [{
                 'parcel_id': 'P-7',
                 'plot_number': '7',
-                'directions': {'north': {'street_name': 'طريق شمالي'}}
+                'directions': {'north': {'street_name': 'طريق شمالي', 'source': 'regulation_table'}},
+                'survey_coordinates': [{'point': '1', 'eastings': '510180.849', 'northings': '2939234.840'}]
             }, {
                 'parcel_id': 'P-8',
                 'plot_number': '8',
@@ -351,6 +382,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(result['parcels'][0]['directions']['north']['street_name'], 'طريق شمالي')
         self.assertIn('west', result['parcels'][1]['directions'])
         self.assertIn('east', result['parcels'][0]['directions'])
+        self.assertEqual(result['survey_coordinates'][0]['source'], 'regulation_table')
+        self.assertEqual(result['survey_coordinates'][0]['eastings'], '510180.849')
 
     def test_site_analysis_prefers_google_link_over_stale_coordinates(self):
         client = self.app.test_client()

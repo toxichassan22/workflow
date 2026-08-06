@@ -602,6 +602,8 @@ FIELD_SECTIONS = [
 
 DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}
 
+REMOVED_PREBUILT_FIELDS = {'land_image_file', 'regulation_reference_file', 'croquis_file', 'building_permit_file'}
+
 PREBUILT_FIELDS = [
     {'key': 'project_name', 'label': 'اسم المشروع', 'type': 'text', 'required': True, 'section_key': 'basic', 'ai_hint': 'اسم المشروع الرئيسي', 'sort_order': 1},
     {'key': 'project_type', 'label': 'نوع المشروع', 'type': 'select', 'options': ['مختلط', 'سكني', 'تجاري', 'إداري', 'فندقي', 'ترفيهي', 'صناعي', 'لوجستي', 'طبي', 'تعليمي', 'سيارات وترفيه', 'أخرى'], 'required': True, 'section_key': 'basic', 'ai_hint': 'نوع المشروع العقاري', 'sort_order': 2},
@@ -612,23 +614,20 @@ PREBUILT_FIELDS = [
     {'key': 'initial_features', 'label': 'مميزات أولية للمشروع', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'المميزات التنافسية الأولية للمشروع', 'sort_order': 7},
     {'key': 'initial_strengths', 'label': 'فرص استثمار ونقاط قوة أولية', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'فرص الاستثمار ونقاط القوة المبدئية', 'sort_order': 8},
     {'key': 'project_logo', 'label': 'شعار المشروع (Logo)', 'type': 'image', 'required': False, 'section_key': 'basic', 'ai_hint': 'صورة شعار المشروع', 'sort_order': 9},
-    {'key': 'land_image_file', 'label': 'رفع صورة الأرض أو الموقع', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'صورة جوية أو ميدانية للأرض أو الموقع', 'sort_order': 10},
-    {'key': 'croquis_file', 'label': 'رفع صورة الكروكي أو المخطط المساحي (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملف أو صورة الكروكي أو المخطط المساحي بصيغة صورة أو PDF', 'sort_order': 11},
-    {'key': 'building_permit_file', 'label': 'رفع صورة رخصة البناء أو المستندات (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'صورة أو ملف رخصة البناء أو مستند الاشتراطات بصيغة صورة أو PDF', 'sort_order': 12},
-    {'key': 'regulation_reference_file', 'label': 'رفع ملف الاشتراطات أو جدول التنظيم (PNG / JPG / PDF)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الاشتراطات الرسمية أو جدول التنظيم المرتبط بالمشروع', 'sort_order': 13},
-    {'key': 'plot_number_croquis', 'label': 'رقم القطعة والمخطط', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم قطعة الأرض ورقم المخطط', 'sort_order': 14},
-    {'key': 'deed_number', 'label': 'رقم الصك أو المرجع', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم صك الملكية أو المرجع الرسمي', 'sort_order': 15},
-    {'key': 'croquis_land_area', 'label': 'مساحة الأرض حسب الكروكي (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة الإجمالية للأرض بالمتر المربع حسب الكروكي', 'sort_order': 16},
-    {'key': 'approved_financial_area', 'label': 'المساحة المعتمدة للدراسة المالية (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة المعتمدة بعد أي استقطاعات لنقلها للمالية (لا يغيرها AI)', 'sort_order': 17},
-    {'key': 'boundary_lengths', 'label': 'أطوال الأضلاع وحدود الأرض', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أطوال أضلاع الحدود (شمال، جنوب، شرق، غرب)', 'sort_order': 18},
-    {'key': 'north_direction', 'label': 'اتجاه الشمال والاتجاهات', 'type': 'select', 'options': ['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرقي', 'شمال غربي', 'جنوب شرقي', 'جنوب غربي', 'أخرى'], 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الاتجاهات الجغرافية للأرض', 'sort_order': 19},
-    {'key': 'surrounding_streets', 'label': 'الشوارع المحيطة وعروضها', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أسماء الشوارع المحيطة وعرض كل شارع بالمتر', 'sort_order': 20},
-    {'key': 'facades_count', 'label': 'عدد الواجهات', 'type': 'number', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد واجهات القطعة على الشوارع (رقم خالص: 1, 2, 3, 4)', 'sort_order': 21},
-    {'key': 'building_ratio_setbacks', 'label': 'نسبة البناء والتغطية والارتدادات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'نسبة التغطية المسموحة والارتدادات النظامية', 'sort_order': 22},
-    {'key': 'max_floors_height', 'label': 'الارتفاع أو عدد الأدوار المسموح', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد الأدوار المسموح بها أو الحد الأقصى للارتفاع بالمتر', 'sort_order': 23},
-    {'key': 'allowed_uses_restrictions', 'label': 'الاستخدامات المسموحة والقيود التنظيمية', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الأنشطة والاستخدامات المسموحة والاشتراطات الخاصة', 'sort_order': 24},
-    {'key': 'croquis_expiry_date', 'label': 'تاريخ إصدار وانتهاء صلاحية الكروكي', 'type': 'date', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'تاريخ الصلاحية وتنبيهات الانتهاء', 'sort_order': 25},
-    {'key': 'land_and_building_summary', 'label': 'ملخص بيانات الأرض والاشتراطات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملخص واسترسال تحليلي شامل لبيانات الأرض واشتراطات البناء التنظيمية والفرص والأنشطة المسموحة', 'sort_order': 26},
+    {'key': 'land_documents_files', 'label': 'رفع رخصة البناء والكروكي أو المستندات (ملفان كحد أقصى)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ارفع ملف رخصة البناء وملف الكروكي معًا ليتم تحليلهما في طلب AI واحد', 'sort_order': 10},
+    {'key': 'plot_number_croquis', 'label': 'رقم القطعة والمخطط', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم قطعة الأرض ورقم المخطط', 'sort_order': 11},
+    {'key': 'deed_number', 'label': 'رقم الصك أو المرجع', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم صك الملكية أو المرجع الرسمي', 'sort_order': 12},
+    {'key': 'croquis_land_area', 'label': 'مساحة الأرض حسب الكروكي (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة الإجمالية للأرض بالمتر المربع حسب الكروكي', 'sort_order': 13},
+    {'key': 'approved_financial_area', 'label': 'المساحة المعتمدة للدراسة المالية (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة المعتمدة بعد أي استقطاعات لنقلها للمالية (لا يغيرها AI)', 'sort_order': 14},
+    {'key': 'boundary_lengths', 'label': 'أطوال الأضلاع وحدود الأرض', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أطوال أضلاع الحدود (شمال، جنوب، شرق، غرب)', 'sort_order': 15},
+    {'key': 'north_direction', 'label': 'اتجاه الشمال والاتجاهات', 'type': 'select', 'options': ['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرقي', 'شمال غربي', 'جنوب شرقي', 'جنوب غربي', 'أخرى'], 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الاتجاهات الجغرافية للأرض', 'sort_order': 16},
+    {'key': 'surrounding_streets', 'label': 'الشوارع المحيطة وعروضها', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أسماء الشوارع المحيطة وعرض كل شارع بالمتر', 'sort_order': 17},
+    {'key': 'facades_count', 'label': 'عدد الواجهات', 'type': 'number', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد واجهات القطعة على الشوارع (رقم خالص: 1, 2, 3, 4)', 'sort_order': 18},
+    {'key': 'building_ratio_setbacks', 'label': 'نسبة البناء والتغطية والارتدادات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'نسبة التغطية المسموحة والارتدادات النظامية', 'sort_order': 19},
+    {'key': 'max_floors_height', 'label': 'الارتفاع أو عدد الأدوار المسموح', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد الأدوار المسموح بها أو الحد الأقصى للارتفاع بالمتر', 'sort_order': 20},
+    {'key': 'allowed_uses_restrictions', 'label': 'الاستخدامات المسموحة والقيود التنظيمية', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الأنشطة والاستخدامات المسموحة والاشتراطات الخاصة', 'sort_order': 21},
+    {'key': 'croquis_expiry_date', 'label': 'تاريخ إصدار وانتهاء صلاحية الكروكي', 'type': 'date', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'تاريخ الصلاحية وتنبيهات الانتهاء', 'sort_order': 22},
+    {'key': 'land_and_building_summary', 'label': 'ملخص بيانات الأرض والاشتراطات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملخص واسترسال تحليلي شامل لبيانات الأرض واشتراطات البناء التنظيمية والفرص والأنشطة المسموحة', 'sort_order': 23},
     {'key': 'location_address', 'label': 'رابط موقع المشروع في Google Maps', 'type': 'text', 'section_key': 'location', 'ai_hint': 'رابط Google Maps مباشر لموقع المشروع', 'sort_order': 30},
     {'key': 'location_lat', 'label': 'خط العرض (Latitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط العرض للموقع (إختياري)', 'sort_order': 31},
     {'key': 'location_lng', 'label': 'خط الطول (Longitude)', 'type': 'text', 'section_key': 'location', 'ai_hint': 'خط الطول للموقع (إختياري)', 'sort_order': 32},
@@ -669,6 +668,12 @@ def _migrate_location_fields(conn):
             row['field_key']: row for row in
             conn.execute('SELECT id, field_key, section_key, field_options FROM tenant_input_fields WHERE tenant_id = ?', (tenant_id,)).fetchall()
         }
+        if REMOVED_PREBUILT_FIELDS:
+            placeholders = ','.join('?' for _ in REMOVED_PREBUILT_FIELDS)
+            conn.execute(
+                f'UPDATE tenant_input_fields SET is_active = 0 WHERE tenant_id = ? AND field_key IN ({placeholders})',
+                [tenant_id, *sorted(REMOVED_PREBUILT_FIELDS)]
+            )
         for f in PREBUILT_FIELDS:
             opts_json = json.dumps(f.get('options', []), ensure_ascii=False) if f.get('options') else None
             if f['key'] in existing_rows:
@@ -702,6 +707,12 @@ def ensure_tenant_prebuilt_fields_active(tenant_id):
         row['field_key']: row for row in
         conn.execute('SELECT id, field_key, section_key, field_options FROM tenant_input_fields WHERE tenant_id = ?', (tenant_id,)).fetchall()
     }
+    if REMOVED_PREBUILT_FIELDS:
+        placeholders = ','.join('?' for _ in REMOVED_PREBUILT_FIELDS)
+        conn.execute(
+            f'UPDATE tenant_input_fields SET is_active = 0 WHERE tenant_id = ? AND field_key IN ({placeholders})',
+            [tenant_id, *sorted(REMOVED_PREBUILT_FIELDS)]
+        )
     for f in PREBUILT_FIELDS:
         opts_json = json.dumps(f.get('options', []), ensure_ascii=False) if f.get('options') else None
         if f['key'] in existing_rows:
