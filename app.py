@@ -4962,8 +4962,20 @@ def api_extract_croquis():
             ]
             for img in extracted_images:
                 user_content.append({"type": "image_url", "image_url": {"url": img}})
-            res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=3000, model="google/gemini-3.6-flash")
-            raw_resp = _get_chat_response_text(res)
+            
+            # Primary vision AI model: openai/gpt-5.6-luna with automatic fallback to openai/gpt-4o and google/gemini-3.6-flash
+            models_to_try = ["openai/gpt-5.6-luna", "openai/gpt-4o", "google/gemini-3.6-flash"]
+            for model_name in models_to_try:
+                try:
+                    res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=3500, model=model_name)
+                    if _has_chat_choices(res):
+                        raw_resp = _get_chat_response_text(res)
+                        print(f"[EXTRACT CROQUIS SUCCESS] Extracted croquis using Vision AI model: {model_name}")
+                        break
+                    else:
+                        print(f"[EXTRACT CROQUIS RETRY] Model {model_name} response error: {res}. Trying next model...")
+                except Exception as model_err:
+                    print(f"[EXTRACT CROQUIS EXCEPTION] Model {model_name} failed: {model_err}")
 
         if not raw_resp and ZAI_KEY:
             user_content = f"اقرأ واستخرج بيانات الكروكي ورقم الصك والواجهات والأدوار بصيغة JSON:\n{extracted_text}"
