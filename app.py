@@ -4993,8 +4993,18 @@ def api_extract_croquis():
         )
 
         raw_resp = ""
-        # EXCLUSIVELY use google/gemini-3.6-flash via OpenRouter for vision extractions
-        if OPENROUTER_KEY and extracted_images:
+        # 1. Primary Native Official Google Gemini API if GEMINI_API_KEY is configured
+        if GEMINI_API_KEY and file_data:
+            try:
+                user_text = f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"
+                raw_resp = call_gemini_official_native_api(system_prompt, user_text, file_data_uri=file_data, model="gemini-2.5-flash")
+                if raw_resp:
+                    print("[EXTRACT CROQUIS SUCCESS] Extracted croquis using Native Official Google Gemini API!")
+            except Exception as gemini_err:
+                print(f"[EXTRACT CROQUIS GEMINI NATIVE ERROR] {gemini_err}")
+
+        # 2. Secondary OpenRouter google/gemini-3.6-flash fallback (with 300 DPI & detail: high)
+        if not raw_resp and OPENROUTER_KEY and extracted_images:
             user_content = [
                 {"type": "text", "text": f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"}
             ]
@@ -5005,19 +5015,11 @@ def api_extract_croquis():
                 res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=3500, model="google/gemini-3.6-flash")
                 if _has_chat_choices(res):
                     raw_resp = _get_chat_response_text(res)
-                    print("[EXTRACT CROQUIS SUCCESS] Extracted croquis using google/gemini-3.6-flash")
+                    print("[EXTRACT CROQUIS SUCCESS] Extracted croquis using google/gemini-3.6-flash on OpenRouter")
                 else:
                     print(f"[EXTRACT CROQUIS GEMINI 3.6 ERROR] {res}")
             except Exception as model_err:
                 print(f"[EXTRACT CROQUIS EXCEPTION] google/gemini-3.6-flash failed: {model_err}")
-
-        # Secondary Native Gemini API fallback if configured
-        if not raw_resp and GEMINI_API_KEY and file_data:
-            try:
-                user_text = f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"
-                raw_resp = call_gemini_official_native_api(system_prompt, user_text, file_data_uri=file_data, model="gemini-2.5-flash")
-            except Exception as gemini_err:
-                print(f"[EXTRACT CROQUIS GEMINI NATIVE ERROR] {gemini_err}")
 
         if not raw_resp and ZAI_KEY:
             user_content = f"اقرأ واستخرج بيانات الكروكي ورقم الصك والواجهات والأدوار بصيغة JSON:\n{extracted_text}"
