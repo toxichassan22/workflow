@@ -7036,6 +7036,13 @@
     function parseNumber(value){const cleaned=String(value??'').replace(/,/g,'').replace(/\s/g,'').trim();const n=Number(cleaned);return Number.isFinite(n)?n:0}
     function num(id){return parseNumber(document.getElementById(id)?.value)}
     function val(id){return document.getElementById(id)?.value||''}
+    function reportFieldValue(id){
+      const el=document.getElementById(id);
+      if(!el)return '—';
+      if(el.tagName==='SELECT')return el.selectedOptions?.[0]?.textContent?.trim()||'—';
+      const value=String(el.value??'').trim();
+      return value||'—';
+    }
     function lines(id){return val(id).split('\n').map(x=>x.trim()).filter(Boolean)}
     function rowActionsHtml(){return `<div class="row-actions"><button type="button" class="btn ghost small" onclick="moveRow(this,-1)" title="تحريك لأعلى">↑</button><button type="button" class="btn ghost small" onclick="moveRow(this,1)" title="تحريك لأسفل">↓</button><button type="button" class="btn danger small" onclick="this.closest('tr').remove();calculateAll()">حذف</button></div>`}
     function moveRow(button,direction){const row=button.closest('tr'),body=row?.parentElement;if(!row||!body)return;const target=direction<0?row.previousElementSibling:row.nextElementSibling;if(!target)return;if(direction<0)body.insertBefore(row,target);else body.insertBefore(target,row);updateRevenueComponentOptions();calculateAll()}
