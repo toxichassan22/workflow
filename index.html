@@ -7043,6 +7043,44 @@
       const value=String(el.value??'').trim();
       return value||'—';
     }
+    function escapeReportHtml(value){
+      return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+    function reportMetricValue(id){
+      const el=document.getElementById(id);
+      return el?.textContent?.trim()||el?.value?.trim()||'—';
+    }
+    function reportValueIsZero(value){const text=String(value??'').replace(/,/g,'').trim();const numeric=text.replace(/[^0-9.\-]/g,'');return numeric!==''&&Number(numeric)===0}
+    function reportRows(items){
+      const visible=items.filter(([,value])=>!reportValueIsZero(value));
+      return visible.length?`<table class="summary-table"><tbody>${visible.map(([label,value])=>`<tr><th>${escapeReportHtml(label)}</th><td>${escapeReportHtml(value)}</td></tr>`).join('')}</tbody></table>`:'<p class="empty">لا توجد قيم مطبقة في هذا القسم.</p>';
+    }
+    function reportTableSnapshot(tableId,dropLastColumn=true,removeZeroRows=false){
+      const source=document.getElementById(tableId);
+      if(!source||!source.querySelector('tbody tr'))return '<p class="empty">لا توجد بنود مدخلة في هذا الجدول.</p>';
+      const table=source.cloneNode(true);
+      table.removeAttribute('id');
+      table.querySelectorAll('tr.hidden').forEach(row=>row.remove());
+      table.querySelectorAll('.conditional-off').forEach(node=>node.remove());
+      table.querySelectorAll('input').forEach(input=>{
+        const span=document.createElement('span');
+        span.textContent=input.value?.trim()||'—';
+        input.replaceWith(span);
+      });
+      table.querySelectorAll('select').forEach(select=>{
+        const span=document.createElement('span');
+        span.textContent=select.selectedOptions?.[0]?.textContent?.trim()||'—';
+        select.replaceWith(span);
+      });
+      table.querySelectorAll('button,.help,.custom-formula-row').forEach(node=>node.remove());
+      table.querySelectorAll('.off-cell').forEach(cell=>{if(!cell.textContent.trim())cell.textContent='—'});
+      if(dropLastColumn){
+        table.querySelectorAll('tr').forEach(row=>{if(row.cells.length)row.deleteCell(row.cells.length-1)});
+      }
+      if(removeZeroRows)table.querySelectorAll('tbody tr').forEach(row=>{const last=row.cells[row.cells.length-1];if(last&&reportValueIsZero(last.textContent))row.remove()});
+      table.querySelectorAll('[style]').forEach(node=>node.removeAttribute('style'));
+      return table.outerHTML;
+    }
     function lines(id){return val(id).split('\n').map(x=>x.trim()).filter(Boolean)}
     function rowActionsHtml(){return `<div class="row-actions"><button type="button" class="btn ghost small" onclick="moveRow(this,-1)" title="تحريك لأعلى">↑</button><button type="button" class="btn ghost small" onclick="moveRow(this,1)" title="تحريك لأسفل">↓</button><button type="button" class="btn danger small" onclick="this.closest('tr').remove();calculateAll()">حذف</button></div>`}
     function moveRow(button,direction){const row=button.closest('tr'),body=row?.parentElement;if(!row||!body)return;const target=direction<0?row.previousElementSibling:row.nextElementSibling;if(!target)return;if(direction<0)body.insertBefore(row,target);else body.insertBefore(target,row);updateRevenueComponentOptions();calculateAll()}
@@ -7369,6 +7407,10 @@
           <div class="sensitivity-picker"><div><label>المتغير المراد اختباره</label><select id="sensitivityVariableSelect"><option value="salePrice">سعر بيع الوحدات</option><option value="rentalRate">أسعار الإيجار والتأجير</option><option value="occupancy">الوصول للإشغال المستهدف</option><option value="executionCost">تكلفة التنفيذ</option><option value="developmentYears">مدة التطوير</option><option value="financeRate">معدل التمويل</option><option value="opex">المصروفات التشغيلية</option><option value="capRate">معدل الرسملة عند التخارج</option><option value="fixedExit">قيمة التخارج الثابتة</option></select></div><button type="button" class="btn ghost" onclick="addSensitivityVariable()">+ إضافة المتغير</button></div>
           <div class="table-wrap"><table id="sensitivityAssumptionsTable"><thead><tr><th>المتغير</th><th>متحفظ</th><th>أساسي من الدراسة</th><th>متفائل</th><th>طريقة التطبيق</th><th>ترتيب / حذف</th></tr></thead><tbody></tbody></table></div>
           <div class="table-wrap"><table id="sensitivityTable"><thead><tr><th>السيناريو</th><th>إجمالي الإيرادات</th><th>NOI عند الوصول 100% للإشغال المستهدف</th><th>إجمالي تكلفة الاستثمار</th><th>صافي الربح</th><th>قيمة التخارج</th><th>ROI كامل الدورة</th><th>Project IRR كامل الدورة</th><th>Equity IRR كامل الدورة</th><th>فترة الاسترداد</th><th>إجمالي حقوق الملكية</th></tr></thead><tbody></tbody></table></div>
+        </div>
+
+        <div class="finance-block" style="text-align:center;padding:20px">
+          <button type="button" class="btn primary" style="font-size:15px;padding:12px 30px" onclick="printFinancialStudy()">تصدير وطباعة الدراسة المالية الكاملة (PDF)</button>
         </div>
 
         <input type="hidden" data-key="financial_calc_data" data-type="text" id="financialCalcData">
@@ -8078,6 +8120,214 @@
 
     function recalcFinancials() {
       calculateAll();
+    }
+
+    function printFinancialStudy(){
+      calculateAll();
+      if(window.__financialProjection?.areaState&&!window.__financialProjection.areaState.valid){toast('لا يمكن الطباعة: مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض');return}
+      triggerAutoSaveDraft();
+      const pd=(typeof tenantProjectData!=='undefined'&&tenantProjectData)||{};
+      const projectName=String(pd.project_name||pd.projectName||val('projectName')||'المشروع').trim();
+      const safeTitle=projectName.replace(/[\\/:*?"<>|]+/g,'-');
+      const generatedAt=new Date().toLocaleDateString('ar-SA',{year:'numeric',month:'long',day:'numeric'});
+      const reportWindow=window.open('','financialStudyReport','width=1280,height=900');
+      if(!reportWindow){toast('يرجى السماح بالنوافذ المنبثقة لطباعة التقرير');return}
+
+      const projectSummary=reportRows([
+        ['اسم المشروع',projectName],
+        ['نوع المشروع',pd.project_type||reportFieldValue('projectType')],
+        ['المدينة',pd.city||reportFieldValue('city')],
+        ['الموقع',pd.location_address||pd.location||reportFieldValue('location')],
+        ['المطور / المالك',pd.developer||reportFieldValue('developer')],
+        ['تاريخ إعداد التقرير',generatedAt]
+      ]);
+      const areaSummary=reportRows([
+        ['مدة تطوير المشروع',reportFieldValue('developmentYears')+' سنة'],
+        ['عدد سنوات التشغيل',reportFieldValue('operationYears')+' سنة'],
+        ['سنة بدء بيع الوحدات',reportFieldValue('salesStartYear')],
+        ['عدد سنوات بيع الوحدات',reportFieldValue('salesYears')+' سنة'],
+        ['سنة بدء التشغيل',reportFieldValue('operationStartYear')],
+        ['مساحة الأرض',reportFieldValue('landArea')+' م²'],
+        ['نسبة التغطية',reportFieldValue('coverageRate')+'%'],
+        ['عدد الطوابق',reportFieldValue('floorCount')],
+        ['مسطحات البناء فوق الأرض',reportFieldValue('builtUpAreaAbove')+' م²'],
+        ['مساحة البدرومات',reportFieldValue('basementArea')+' م²'],
+        ['إجمالي مسطحات البناء',reportFieldValue('totalBuiltUpArea')+' م²'],
+        ['المساحة المغطاة',reportFieldValue('coveredArea')+' م²'],
+        ['المساحات المفتوحة',reportFieldValue('openArea')+' م²'],
+        ['حالة الأرض',reportFieldValue('landStatus')],
+        ['معالجة الأرض في التدفقات',reportFieldValue('landContributionType')],
+        ['سنة تسجيل الأرض',reportFieldValue('landContributionYear')],
+        ['قيمة الأرض المحسوبة',reportFieldValue('landValue')],
+        ['إيجار الأرض السنوي',reportFieldValue('annualLandRent')]
+      ]);
+      const costSummary=reportRows([
+        ['إجمالي تكلفة التنفيذ',reportFieldValue('executionCostTotal')],
+        ['إجمالي التصميم والدراسات',reportFieldValue('designCostTotal')],
+        ['إجمالي رسوم الخدمات',reportFieldValue('servicesCostTotal')],
+        ['إجمالي الدعاية والإعلان',reportFieldValue('advertisingCostTotal')],
+        ['نسبة المطور',reportFieldValue('developerRate')+'%'],
+        ['أساس احتساب أتعاب المطور',reportFieldValue('developerBase')],
+        ['قيمة أساس المطور',reportFieldValue('developerBaseAmount')],
+        ['إجمالي أتعاب المطور',reportFieldValue('developerCostValue')],
+        ['قيمة الأرض داخل التكلفة',reportFieldValue('landCostIncluded')]
+      ]);
+      const financeSummary=reportRows([
+        ['استخدام تمويل',reportFieldValue('financeEnabled')],
+        ['أساس احتساب التمويل',reportFieldValue('financeBase')],
+        ['نسبة التمويل من تكلفة المشروع',reportFieldValue('financingRate')+'%'],
+        ['طريقة احتساب الفائدة',reportFieldValue('financeInterestMethod')],
+        ['عدد سنوات سحب التمويل',reportFieldValue('financeDrawYears')+' سنة'],
+        ['سنة بدء سداد التمويل',reportFieldValue('financeRepaymentStartYear')],
+        ['عدد سنوات سداد التمويل',reportFieldValue('financeRepaymentYears')+' سنة'],
+        ['معدل الفائدة السنوي',reportFieldValue('annualFinanceRate')+'%'],
+        ['رسوم ترتيب التمويل',reportFieldValue('financeArrangementFeeRate')+'%'],
+        ['قيمة أساس التمويل',reportFieldValue('financeBaseAmount')],
+        ['قيمة التسهيل التمويلي',reportFieldValue('facilityAmount')],
+        ['قيمة رسوم ترتيب التمويل',reportFieldValue('arrangementFeeTotal')],
+        ['إجمالي فوائد التمويل',reportFieldValue('financeInterestTotal')],
+        ['مساهمة الأرض العينية',reportFieldValue('landEquityContribution')],
+        ['الضخ النقدي المطلوب',reportFieldValue('cashEquityRequired')],
+        ['إجمالي حقوق الملكية',reportFieldValue('equityRequired')]
+      ]);
+      const fundSummary=reportRows([
+        ['تطبيق أتعاب إدارة الصندوق',reportFieldValue('fundFeesEnabled')],
+        ['أساس احتساب الأتعاب',reportFieldValue('fundFeeBase')],
+        ['رأس مال الصندوق',reportFieldValue('fundCapitalInput')],
+        ['نسبة أتعاب الإدارة السنوية',reportFieldValue('fundManagementRate')+'%'],
+        ['فترة احتساب أتعاب الإدارة',`من السنة ${reportFieldValue('fundFeeStartYear')} إلى السنة ${reportFieldValue('fundFeeEndYear')}`],
+        ['دورية السداد',reportFieldValue('fundFeeFrequency')],
+        ['توقيت السداد',reportFieldValue('fundFeeTiming')],
+        ['إجمالي أتعاب الإدارة',reportFieldValue('fundManagementFeesTotal')],
+        ['إجمالي حافز الأداء',reportFieldValue('performanceFeeTotal')],
+        ['إجمالي تكاليف الصندوق',reportFieldValue('fundFeesTotal')]
+      ]);
+      const bonusSummary=reportRows([
+        ['نسبة المطور من الزيادة في سعر البيع',reportFieldValue('developerUpliftShare')+'%'],
+        ['آلية التطبيق','تطبق تعاقديًا فقط على فرق الزيادة عند البيع أعلى من السعر أو القيمة المستهدفة، ولا تدخل تلقائيًا ضمن أرقام الدراسة.']
+      ]);
+      const resultSummary=reportRows([
+        ['تكلفة المشروع قبل التمويل',reportMetricValue('resProjectCostBeforeFinance')],
+        ['إجمالي تكلفة المشروع شامل التمويل',reportMetricValue('resProjectCost')],
+        ['إجمالي إيرادات البيع',reportMetricValue('resSaleRevenue')],
+        ['إيراد أول سنة تشغيل',reportMetricValue('resRevenueY1')],
+        ['NOI أول سنة تشغيل',reportMetricValue('resNOIY1')],
+        ['إيرادات التشغيل عند الوصول إلى 100% من الإشغال المستهدف',reportMetricValue('resFullOccupancyRevenue')],
+        ['المصروفات عند الوصول إلى 100% من الإشغال المستهدف',reportMetricValue('resFullOccupancyOpex')],
+        ['NOI عند الوصول إلى 100% من الإشغال المستهدف',reportMetricValue('resFullOccupancyNOI')],
+        ['إجمالي التخارج البيعي قبل التكاليف',reportMetricValue('resSaleExitGross')],
+        ['صافي التخارج البيعي',reportMetricValue('resSaleExit')],
+        ['إجمالي التخارج التشغيلي قبل التكاليف',reportMetricValue('resOperatingExitGross')],
+        ['صافي التخارج التشغيلي',reportMetricValue('resOperatingExit')],
+        ['إجمالي صافي التخارج',reportMetricValue('resTerminal')],
+        ['أتعاب المطور',reportMetricValue('resDevCost')],
+        ['إجمالي تكلفة التمويل',reportMetricValue('resFinanceCost')],
+        ['إجمالي تكاليف الصندوق',reportMetricValue('resFundFees')],
+        ['إجمالي تكلفة الاستثمار',reportMetricValue('resTotalInvestmentCost')],
+        ['فترة احتساب ROI',document.getElementById('resROIScope').textContent],
+        ['ROI للفترة المختارة',reportMetricValue('resROI')],
+        ['فترة احتساب IRR',document.getElementById('resProjectIRRScope').textContent],
+        ['IRR المشروع قبل التمويل',reportMetricValue('resProjectIRR')],
+        ['IRR حقوق الملكية بعد التمويل',reportMetricValue('resIRR')],
+        ['فترة استرداد المشروع',reportMetricValue('resPayback')],
+        ['فترة استرداد حقوق الملكية',reportMetricValue('resEquityPayback')],
+        ['مساهمة الأرض العينية',reportMetricValue('resLandEquity')],
+        ['الضخ النقدي المطلوب',reportMetricValue('resCashEquity')],
+        ['إجمالي حقوق الملكية',reportMetricValue('resEquityRequired')]
+      ]);
+      const reportFlags=projectModeFlags();
+      const graceReportSection=reportFlags.rental&&val('graceEnabled')==='yes'?`<section class="section"><h3>5. فترة السماح</h3>${reportRows([['طريقة الاحتساب',reportFieldValue('graceMethod')],['نطاق السماح',reportFieldValue('graceScope')],['بداية السماح',reportFieldValue('graceStartYear')],['مدة السماح بالأشهر',reportFieldValue('graceDurationMonths')],['إجمالي الخصم',reportFieldValue('graceTotalDiscount')]])}${val('graceMethod')==='schedule'?reportTableSnapshot('graceScheduleTable',true,true):''}</section>`:'';
+      const financeReportSection=val('financeEnabled')==='yes'?`<section class="section"><h3>8. هيكل تمويل</h3>${financeSummary}<h4>خطة سحب التمويل</h4>${reportTableSnapshot('financeDrawTable',false)}<h4>خطة سداد أصل التمويل</h4>${reportTableSnapshot('financeRepaymentTable',false)}<h4>حركة رصيد التمويل السنوية</h4>${reportTableSnapshot('debtScheduleTable',false)}</section>`:'';
+      const fundReportSection=val('fundEnabled')==='yes'&&val('fundFeesEnabled')==='yes'?`<section class="section page-break"><h3>9. أتعاب إدارة الصندوق</h3>${fundSummary}<h4>الأتعاب الإضافية الاختيارية</h4>${reportTableSnapshot('fundAdditionalFeesTable',true,true)}<h4>جدول أتعاب الصندوق السنوي</h4>${reportTableSnapshot('fundFeeScheduleTable',false)}</section>`:'';
+      const bonusReportSection=reportFlags.sales&&val('developerBonusEnabled')==='yes'?`<section class="section"><h3>10. علاوة حسن أداء المطور</h3>${bonusSummary}</section>`:'';
+      const externalReportSection=val('externalEnabled')==='yes'?`<section class="section"><h3>11. البنود الخارجية المرنة</h3>${reportTableSnapshot('externalTable',true,true)}</section>`:'';
+      const exitReportSection=val('exitEnabled')==='yes'?`<section class="section"><h3>15. التخارج والافتراضات المالية</h3>${reportRows([['طريقة التخارج البيعي',reportFieldValue('saleExitMethod')],['سنة التخارج البيعي',reportFieldValue('saleExitYear')],['طريقة التخارج التأجيري',reportFieldValue('exitMethod')],['سنة التخارج التأجيري',reportFieldValue('operatingExitYear')],['مدخل التخارج التأجيري',reportFieldValue('exitInput')],['تكاليف التخارج التأجيري',reportFieldValue('operatingExitCostRate')+'%']])}</section>`:'';
+      const ideaText=pd.project_idea||pd.project_description||pd.description||val('idea')||'تقرير مالي مبني على المدخلات والافتراضات المسجلة في النموذج.';
+
+      reportWindow.document.open();
+      reportWindow.document.write(`<!doctype html>
+      <html lang="ar" dir="rtl"><head><meta charset="utf-8">
+      <title>${escapeReportHtml(safeTitle)} - الدراسة المالية</title>
+      <style>
+      @page{size:A4 landscape;margin:10mm}
+      *{box-sizing:border-box}
+      body{margin:0;color:#252525;background:#fff;font-family:Tahoma,Arial,sans-serif;direction:rtl;line-height:1.45}
+      .report{max-width:1120px;margin:0 auto;padding:18px}
+      .cover{min-height:175mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border:2px solid #123B6D;padding:30px;page-break-after:always}
+      .cover .eyebrow{color:#123B6D;font-size:14px;font-weight:700;letter-spacing:.5px}
+      .cover h1{font-size:34px;margin:18px 0 6px;color:#082646}
+      .cover h2{font-size:24px;margin:0;color:#123B6D}
+      .cover p{font-size:15px;color:#666;max-width:760px}
+      .print-actions{position:sticky;top:0;z-index:5;background:#fff;padding:10px 0;text-align:left;border-bottom:1px solid #ddd}
+      .print-actions button{border:0;border-radius:8px;background:#123B6D;color:#fff;padding:10px 18px;font-family:inherit;font-weight:700;cursor:pointer}
+      .section{margin:0 0 20px;break-inside:avoid}
+      .conditional-off{display:none!important}
+      .page-break{break-before:page}
+      h3{font-size:19px;color:#123B6D;margin:0 0 10px;padding-bottom:7px;border-bottom:2px solid #123B6D}
+      h4{font-size:14px;color:#082646;margin:14px 0 7px}
+      table{width:100%;border-collapse:collapse;margin:0 0 14px;font-size:9px;direction:rtl}
+      thead{display:table-header-group}
+      tr{break-inside:avoid}
+      th,td{border:1px solid #d9d1cb;padding:6px;text-align:right;vertical-align:top;white-space:normal}
+      thead th{background:#123B6D!important;color:#fff!important;font-weight:700;text-align:center}
+      tbody tr:nth-child(even) td{background:#fbf7f4}
+      .summary-table{font-size:11px}
+      .summary-table th{width:34%;background:#EAF2F8;color:#082646}
+      .summary-table td{font-weight:700}
+      .empty{color:#777;border:1px dashed #ccc;padding:12px}
+      .note{background:#F4F8FC;border-right:4px solid #123B6D;padding:10px 12px;font-size:10px;color:#555}
+      footer{margin-top:20px;padding-top:10px;border-top:1px solid #ddd;color:#777;font-size:9px;display:flex;justify-content:space-between}
+      @media print{
+        .print-actions{display:none}
+        .report{max-width:none;padding:0}
+        body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      }
+      </style></head><body>
+      <div class="report">
+        <div class="print-actions"><button onclick="window.print()">طباعة / حفظ PDF</button></div>
+        <section class="cover">
+          <div class="eyebrow">دراسة مالية استرشادية</div>
+          <h1>${escapeReportHtml(projectName)}</h1>
+          <h2>التقرير المالي الكامل</h2>
+          <p>${escapeReportHtml(ideaText)}</p>
+          <p>${escapeReportHtml(generatedAt)}</p>
+        </section>
+        <section class="section"><h3>1. بيانات المشروع</h3>${projectSummary}</section>
+        <section class="section"><h3>2. مدة المشروع والأرض ومساحات البناء</h3>${areaSummary}</section>
+        <section class="section page-break"><h3>3. مكونات المشروع</h3>${reportTableSnapshot('componentsTable',true)}</section>
+        <section class="section"><h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable',true,true)}<h4>نسبة الوصول السنوية إلى الإشغال المستهدف</h4>${reportTableSnapshot('occupancyRampTable',false)}</section>
+        ${graceReportSection}
+        <section class="section page-break"><h3>5. تكاليف المشروع وأتعاب المطور</h3>${costSummary}<h4>تفاصيل بنود التكلفة</h4>${reportTableSnapshot('costTable',true,true)}</section>
+        <section class="section"><h3>6. مراحل التطوير ودفعات المطور</h3>${reportTableSnapshot('scheduleTable',true)}</section>
+        <section class="section page-break"><h3>7. المصروفات التشغيلية</h3>${reportTableSnapshot('opexTable',true,true)}</section>
+        ${financeReportSection}
+        ${fundReportSection}
+        ${bonusReportSection}
+        ${externalReportSection}
+        <section class="section page-break"><h3>12. ملخص النتائج المالية</h3>${resultSummary}</section>
+        <section class="section page-break"><h3>13. التدفقات النقدية السنوية</h3>${reportTableSnapshot('cashflowTable',false)}</section>
+        <section class="section page-break"><h3>14. تحليل الحساسية</h3><h4>افتراضات السيناريوهات</h4>${reportTableSnapshot('sensitivityAssumptionsTable',false)}<h4>النتائج المقارنة</h4>${reportTableSnapshot('sensitivityTable',false)}</section>
+        ${exitReportSection}
+        <section class="section conditional-off"><h3>15. التخارج والافتراضات المالية</h3>${reportRows([
+          ['طريقة التخارج البيعي',reportFieldValue('saleExitMethod')],
+          ['سنة التخارج البيعي',reportFieldValue('saleExitYear')],
+          ['المساحة البيعية المتبقية',reportFieldValue('saleExitRemainingArea')+' م²'],
+          ['سعر بيع متر التخارج',reportFieldValue('saleExitPricePerM2')],
+          ['قيمة التخارج البيعي الثابتة',reportFieldValue('saleExitFixedValue')],
+          ['تكاليف التخارج البيعي',reportFieldValue('saleExitCostRate')+'%'],
+          ['طريقة التخارج التشغيلي',reportFieldValue('exitMethod')],
+          ['سنة التخارج التشغيلي',reportFieldValue('operatingExitYear')],
+          ['مدخل التخارج التشغيلي',reportFieldValue('exitInput')],
+          ['تكاليف التخارج التشغيلي',reportFieldValue('operatingExitCostRate')+'%'],
+          ['سداد رصيد التمويل عند التخارج',reportFieldValue('settleDebtAtExit')],
+          ['فترة احتساب ROI',document.getElementById('resROIScope').textContent],
+          ['فترة احتساب IRR',document.getElementById('resProjectIRRScope').textContent]
+        ])}${document.getElementById('analysisWarnings').textContent?`<div class="note">${escapeReportHtml(document.getElementById('analysisWarnings').textContent)}</div>`:''}<div class="note">هذا التقرير استرشادي ومبني على المدخلات المسجلة وقت الطباعة. أي تعديل على المدخلات أو الافتراضات يؤدي إلى تحديث النتائج والتدفقات النقدية تلقائيًا.</div></section>
+        <footer><span>${escapeReportHtml(projectName)}</span><span>الدراسة المالية - ${escapeReportHtml(generatedAt)}</span></footer>
+      </div></body></html>`);
+      reportWindow.document.close();
+      toast('تم تجهيز التقرير؛ اختر حفظ كملف PDF من نافذة الطباعة');
+      setTimeout(()=>{reportWindow.focus();reportWindow.print()},650);
     }
 
     const sensitivityRegistry={
