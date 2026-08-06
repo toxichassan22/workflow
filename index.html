@@ -2465,6 +2465,133 @@
       margin-top: 8px;
     }
 
+    .land-documents-actions {
+      margin-top: 12px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #f8fbfd;
+      direction: rtl;
+    }
+
+    .land-documents-actions .land-documents-action-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .land-documents-actions .land-documents-action-btn {
+      min-width: 250px;
+      white-space: nowrap;
+    }
+
+    .land-documents-actions .land-documents-hint {
+      margin: 8px 0 0;
+      color: #526b7d;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .survey-coordinates-panel {
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid #cbdce7;
+      border-radius: 14px;
+      background: #fff;
+      direction: rtl;
+    }
+
+    .survey-coordinates-panel .survey-coordinates-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+
+    .survey-coordinates-panel .survey-coordinates-title {
+      color: var(--p);
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .survey-coordinates-panel .survey-coordinates-hint {
+      margin: 0 0 10px;
+      color: #526b7d;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .survey-coordinates-table-wrap {
+      overflow-x: auto;
+      border: 1px solid #d8e2e9;
+      border-radius: 10px;
+    }
+
+    .survey-coordinates-table {
+      width: 100%;
+      min-width: 700px;
+      table-layout: fixed;
+      border-collapse: collapse;
+      direction: rtl;
+    }
+
+    .survey-coordinates-table th,
+    .survey-coordinates-table td {
+      padding: 9px 8px;
+      border-bottom: 1px solid #e5edf2;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    .survey-coordinates-table th {
+      background: #397494;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .survey-coordinates-table th:nth-child(1),
+    .survey-coordinates-table td:nth-child(1) { width: 14%; }
+    .survey-coordinates-table th:nth-child(2),
+    .survey-coordinates-table td:nth-child(2) { width: 14%; }
+    .survey-coordinates-table th:nth-child(3),
+    .survey-coordinates-table td:nth-child(3),
+    .survey-coordinates-table th:nth-child(4),
+    .survey-coordinates-table td:nth-child(4) { width: 22%; }
+    .survey-coordinates-table th:nth-child(5),
+    .survey-coordinates-table td:nth-child(5) { width: 18%; }
+    .survey-coordinates-table th:nth-child(6),
+    .survey-coordinates-table td:nth-child(6) { width: 10%; }
+
+    .survey-coordinates-table input {
+      width: 100%;
+      min-width: 0;
+      padding: 8px 6px;
+      border: 1px solid #cbdce7;
+      border-radius: 8px;
+      box-sizing: border-box;
+      text-align: center;
+      direction: ltr;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .survey-coordinates-table input[data-coordinate-field="source"] {
+      direction: rtl;
+      font-variant-numeric: normal;
+    }
+
+    .survey-coordinates-empty {
+      padding: 14px;
+      color: #718797;
+      text-align: center;
+      font-size: 12px;
+    }
+
     .location-table-hint {
       font-size: 11px;
       color: var(--muted);
@@ -6792,6 +6919,10 @@
             input.dataset.filetype = 'pdf';
             input.dataset.projectFileType = 'land_document';
             if (f.fieldKey === 'land_documents_files') {
+              const uploadStatus = document.createElement('div');
+              uploadStatus.id = 'landDocumentsUploadStatus';
+              uploadStatus.style.cssText = 'margin-top:8px;';
+              div.appendChild(uploadStatus);
               input.addEventListener('change', () => {
                 if (input.files.length > 2) {
                   const transfer = new DataTransfer();
@@ -6799,8 +6930,10 @@
                   input.files = transfer.files;
                   toast('يمكن رفع ملفين فقط: الرخصة والكروكي');
                 }
+                renderLandDocumentsUploadState(Array.from(input.files).map(file => ({ originalName: file.name, fileSize: file.size, status: 'pending' })));
                 triggerAutoSaveDraft();
               });
+              renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
             }
           } else if (f.fieldType === 'image') {
             input = document.createElement('input');
@@ -6933,14 +7066,13 @@
 
         if (sectionKey === 'land_croquis') {
           const landAnalysisActions = document.createElement('div');
-          landAnalysisActions.className = 'tenant-field full';
-          landAnalysisActions.style.cssText = 'margin-top:12px;padding-top:12px;border-top:1px solid var(--line);';
-          landAnalysisActions.innerHTML = '<button type="button" class="btn primary" id="analyzeLandDocumentsButton">تحليل الرخصة والكروكي معًا</button>' +
-            '<p class="tenant-hint" style="margin:6px 0 0">ارفع ملفين كحد أقصى داخل الخانة: ملف رخصة البناء وملف الكروكي. سيتم تحليل الملفين في طلب AI واحد، مع إعطاء الأولوية لأي جدول تنظيم موجود داخل المستندات.</p>' +
+          landAnalysisActions.className = 'tenant-field full land-documents-actions';
+          landAnalysisActions.innerHTML = '<div class="land-documents-action-row"><button type="button" class="btn primary land-documents-action-btn" id="analyzeLandDocumentsButton">تحليل الرخصة والكروكي معًا</button></div>' +
+            '<p class="land-documents-hint">ارفع ملفين كحد أقصى داخل الخانة: ملف رخصة البناء وملف الكروكي. سيتم تحليل الملفين في طلب AI واحد، مع إعطاء الأولوية لأي جدول تنظيم موجود داخل المستندات.</p>' +
             '<input type="hidden" data-key="land_documents_analysis" data-type="text" id="landDocumentsAnalysisData">' +
             '<input type="hidden" data-key="survey_coordinates" data-type="text" id="surveyCoordinatesData">' +
             '<div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>' +
-            '<div id="surveyCoordinatesPanel" style="margin-top:12px"></div>';
+            '<div id="surveyCoordinatesPanel"></div>';
           landAnalysisActions.querySelector('#analyzeLandDocumentsButton').addEventListener('click', () => extractTenantCroquisData('land_documents_files'));
           sectionDiv.appendChild(landAnalysisActions);
         }
@@ -6999,6 +7131,7 @@
       if (initialSection) showSection(initialSection.dataset.section, true);
       updateTenantPolygonControls();
       renderSurveyCoordinates(tenantProjectData.survey_coordinates || []);
+      renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
     }
 
     // S3: Components Table
@@ -8947,13 +9080,17 @@
       const panel = document.getElementById('surveyCoordinatesPanel');
       if (!panel) return;
       const normalized = Array.isArray(rows) ? rows : [];
-      panel.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
-        '<strong style="color:var(--p)">إحداثيات التنظيم المساحية</strong>' +
+      panel.innerHTML = '<div class="survey-coordinates-head">' +
+        '<strong class="survey-coordinates-title">إحداثيات التنظيم المساحية</strong>' +
         '<button type="button" class="btn ghost small" id="addSurveyCoordinateButton">إضافة نقطة</button></div>' +
-        '<p class="tenant-hint" style="margin:0 0 8px">يتم استخراجها من جدول التنظيم بأولوية أعلى من أي جدول آخر. الأعمدة كما في المستند: القطعة، النقطة، الشرقيات، الشماليات.</p>' +
-        '<div style="overflow:auto"><table class="location-table" style="width:100%"><thead><tr><th>القطعة</th><th>النقطة</th><th>الشرقيات</th><th>الشماليات</th><th>المصدر</th><th></th></tr></thead><tbody></tbody></table></div>';
+        '<p class="survey-coordinates-hint">تُستخرج من جدول التنظيم بأولوية أعلى من أي جدول آخر. الأعمدة مطابقة للمستند: رقم القطعة، رقم النقطة، الشرقيات، الشماليات.</p>' +
+        '<div class="survey-coordinates-table-wrap"><table class="survey-coordinates-table"><thead><tr><th>رقم القطعة</th><th>رقم النقطة</th><th>الشرقيات</th><th>الشماليات</th><th>المصدر</th><th>إجراء</th></tr></thead><tbody></tbody></table></div>';
       const tbody = panel.querySelector('tbody');
+      if (!normalized.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="survey-coordinates-empty">سيظهر جدول الإحداثيات بعد تحليل المستندات أو يمكنك إضافة نقطة يدويًا.</td></tr>';
+      }
       const addRow = row => {
+        tbody.querySelector('.survey-coordinates-empty')?.closest('tr')?.remove();
         const tr = document.createElement('tr');
         const cell = (field, value, placeholder) => '<td><input type="text" data-coordinate-field="' + field + '" value="' + escapeHtml(value ?? '') + '" placeholder="' + placeholder + '" style="width:100%;min-width:110px"></td>';
         tr.innerHTML = cell('parcel_id', row?.parcel_id || row?.parcelId || '', 'P-1') +
@@ -9857,6 +9994,25 @@
       toast(filled > 0 ? 'تم تعبئة ' + filled + ' حقل + جداول تجريبية — بيانات مجمع الواحة السكني، حي النرجس، الرياض' : 'لا توجد حقول مطابقة');
     }
 
+    function renderLandDocumentsUploadState(files) {
+      const host = document.getElementById('landDocumentsUploadStatus');
+      if (!host) return;
+      const items = Array.isArray(files) ? files.filter(Boolean) : [];
+      if (!items.length) {
+        host.innerHTML = '<div class="tenant-hint">لم يتم حفظ ملفات على السيرفر بعد. اختر ملف الرخصة وملف الكروكي.</div>';
+        return;
+      }
+      host.innerHTML = '<div style="border:1px solid #b9e1d1;background:#edf7f3;border-radius:8px;padding:8px">' +
+        '<strong style="color:#126247">الملفات محفوظة على السيرفر</strong>' +
+        '<div style="margin-top:5px;display:grid;gap:4px">' + items.map(file => {
+          const size = Number(file.fileSize || file.size || 0);
+          const sizeText = size ? ' — ' + (size / 1024 / 1024).toFixed(2) + ' MB' : '';
+          const status = file.status === 'pending' ? 'جاري الحفظ تلقائيًا' : 'محفوظ';
+          return '<span>✓ ' + escapeHtml(file.originalName || file.name || 'ملف مستند') + escapeHtml(sizeText) + ' — ' + status + '</span>';
+        }).join('') + '</div>' +
+        '<small style="display:block;margin-top:5px;color:#36546d">بعد تحديث الصفحة سيظل هذا السجل ظاهرًا؛ اختيار الملفات نفسه لا يعادله المتصفح لأسباب أمنية.</small></div>';
+    }
+
     async function uploadTenantProjectFileInput(input, key) {
       const files = Array.from(input?.files || []).slice(0, input?.multiple ? 2 : 1);
       const fileType = input?.dataset?.projectFileType;
@@ -9896,6 +10052,7 @@
       if (input.multiple) {
         tenantProjectData[key + '_file_ids'] = ids;
         tenantProjectData[key + '_file_meta'] = uploaded;
+        if (key === 'land_documents_files') renderLandDocumentsUploadState(uploaded);
         return uploaded;
       }
       tenantProjectData[key + '_file_id'] = ids[0];

@@ -307,6 +307,19 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(stored['file_type'], 'croquis')
         self.assertTrue(os.path.basename(stored['storage_path']).startswith(stored['sha256']))
 
+    def test_uploaded_land_documents_are_restored_as_server_metadata_after_refresh(self):
+        client = self.app.test_client()
+        metadata = [{'id': 'file-a', 'originalName': 'permit.pdf', 'fileSize': 1024}]
+        saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {'land_documents_files_file_ids': ['file-a'], 'land_documents_files_file_meta': metadata}
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        loaded = client.get('/api/project-draft', headers=self._headers(self.token_a))
+        self.assertEqual(loaded.status_code, 200, loaded.get_json())
+        draft_data = loaded.get_json()['draft']['draft_data']
+        self.assertEqual(draft_data['land_documents_files_file_ids'], ['file-a'])
+        self.assertEqual(draft_data['land_documents_files_file_meta'], metadata)
+
     def test_browser_history_tracks_pages_sections_and_internal_tabs(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('function syncTenantBrowserHistory', index_source)
