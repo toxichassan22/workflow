@@ -140,6 +140,7 @@ db.init_db()
 # strip(): a stray \r (CRLF endings) or spaces in .env would corrupt auth headers
 ZAI_KEY = (os.environ.get("ZAI_KEY") or "").strip() or None
 OPENROUTER_KEY = (os.environ.get("OPENROUTER_KEY") or "").strip() or None
+GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip() or None
 ZAI_BASE = 'https://api.z.ai/api/paas/v4'
 OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
 GLM_MODEL = "glm-5.1"
@@ -158,6 +159,7 @@ if not os.path.exists(OUTPUT_DIR):
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY')
 print(f"[CONFIG] ZAI_KEY: {'SET' if ZAI_KEY else 'MISSING'}")
 print(f"[CONFIG] OPENROUTER_KEY: {'SET' if OPENROUTER_KEY else 'MISSING'}")
+print(f"[CONFIG] GEMINI_API_KEY: {'SET' if GEMINI_API_KEY else 'MISSING'}")
 print(f"[CONFIG] GLM_USE_OPENROUTER: {GLM_USE_OPENROUTER}")
 print(f"[CONFIG] GOOGLE_MAPS_API_KEY: {'SET' if GOOGLE_MAPS_API_KEY else 'MISSING'}")
 print(f"[CONFIG] JWT_SECRET: {auth.JWT_SECRET_SOURCE.upper()}")
@@ -4651,7 +4653,7 @@ def api_update_custom_section(section_key):
 
 
 def convert_pdf_base64_to_images(pdf_data_uri, max_pages=5):
-    """Convert base64 PDF into clean, high-resolution page images for Vision AI."""
+    """Convert base64 PDF into clean, ultra-high-resolution (300 DPI) page images for Vision AI."""
     import base64
     import fitz
     images = []
@@ -4666,8 +4668,8 @@ def convert_pdf_base64_to_images(pdf_data_uri, max_pages=5):
             if page_text.strip():
                 text_content += f"\n--- الصفحة {i+1} ---\n" + page_text.strip()
             
-            # High-DPI rasterization (dpi=180 renders 1 clean image per page)
-            pix = page.get_pixmap(dpi=180)
+            # Ultra High-DPI rasterization (dpi=300 renders ultra-crisp engineering drawings and numbers)
+            pix = page.get_pixmap(dpi=300)
             png_bytes = pix.tobytes("png")
             img_b64 = base64.b64encode(png_bytes).decode('utf-8')
             images.append(f"data:image/png;base64,{img_b64}")
@@ -4675,6 +4677,41 @@ def convert_pdf_base64_to_images(pdf_data_uri, max_pages=5):
     except Exception as err:
         print(f"[PDF CONVERT ERROR] {err}")
     return images, text_content
+
+
+def call_gemini_official_native_api(system_prompt, user_text, file_data_uri=None, model="gemini-2.5-pro"):
+    """Call Google's Official Native Gemini API with raw binary PDF/Image data."""
+    if not GEMINI_API_KEY:
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+    parts = [{"text": system_prompt + "\n\n" + user_text}]
+    if file_data_uri:
+        mime_type = "application/pdf" if ('application/pdf' in file_data_uri or file_data_uri.startswith('data:application/pdf')) else "image/png"
+        raw_b64 = file_data_uri.split(',', 1)[1] if ',' in file_data_uri else file_data_uri
+        parts.append({
+            "inline_data": {
+                "mime_type": mime_type,
+                "data": raw_b64
+            }
+        })
+    payload = {
+        "contents": [{"parts": parts}],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4000}
+    }
+    headers = {"Content-Type": "application/json"}
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=120)
+        data = res.json()
+        if 'candidates' in data and data['candidates']:
+            cand = data['candidates'][0]
+            parts_out = cand.get('content', {}).get('parts', [])
+            txt = "".join([p.get('text', '') for p in parts_out if 'text' in p])
+            if txt:
+                return txt
+        print(f"[GEMINI NATIVE API RESPONSE ERROR] {data}")
+    except Exception as exc:
+        print(f"[GEMINI OFFICIAL NATIVE API EXCEPTION] {exc}")
+    return None
 
 
 def _get_chat_response_text(res):
@@ -4956,14 +4993,26 @@ def api_extract_croquis():
         )
 
         raw_resp = ""
-        if OPENROUTER_KEY and extracted_images:
+        # 1. Try Official Google Gemini Native API (100% identical to gemini.com) if GEMINI_API_KEY is configured
+        if GEMINI_API_KEY and file_data:
+            try:
+                user_text = f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"
+                raw_resp = call_gemini_official_native_api(system_prompt, user_text, file_data_uri=file_data, model="gemini-2.5-pro")
+                if not raw_resp:
+                    raw_resp = call_gemini_official_native_api(system_prompt, user_text, file_data_uri=file_data, model="gemini-2.5-flash")
+                if raw_resp:
+                    print(f"[EXTRACT CROQUIS SUCCESS] Extracted croquis using Official Google Gemini Native API!")
+            except Exception as gemini_err:
+                print(f"[EXTRACT CROQUIS GEMINI NATIVE ERROR] {gemini_err}")
+
+        # 2. Fallback to OpenRouter Models (openai/gpt-5.6-luna, openai/gpt-4o, google/gemini-3.6-flash) with 300 DPI & detail: high
+        if not raw_resp and OPENROUTER_KEY and extracted_images:
             user_content = [
                 {"type": "text", "text": f"اقرأ مستند الكروكي والصورة المرفقة واستخرج الأرقام والمساحات والواجهات والصك والاشتراطات بصيغة JSON.\nمقتطفات من وثيقة أنظمة وضوابط بناء أمانة جدة 1447هـ/2025م:\n{jeddah_pdf_context}\nالنص المستخرج من المستند إن وجد:\n{extracted_text}"}
             ]
             for img in extracted_images:
-                user_content.append({"type": "image_url", "image_url": {"url": img}})
+                user_content.append({"type": "image_url", "image_url": {"url": img, "detail": "high"}})
             
-            # Primary vision AI model: openai/gpt-5.6-luna with automatic fallback to openai/gpt-4o and google/gemini-3.6-flash
             models_to_try = ["openai/gpt-5.6-luna", "openai/gpt-4o", "google/gemini-3.6-flash"]
             for model_name in models_to_try:
                 try:
