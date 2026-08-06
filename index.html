@@ -7794,10 +7794,15 @@
     function collectGraceSchedule(){return [...document.querySelectorAll('#graceScheduleTable tbody tr')].map(tr=>({year:parseNumber(tr.querySelector('[data-field="year"] input')?.value)||1,amount:Math.max(0,parseNumber(tr.querySelector('[data-field="amount"] input')?.value))}))}
     function applyConditionalVisibility(flags){
       const show=(id,on)=>document.getElementById(id)?.classList.toggle('conditional-off',!on);show('salesStartYearWrap',flags.sales);show('salesYearsWrap',flags.sales);show('operationYearsWrap',flags.rental);show('operationStartYearWrap',flags.rental);show('rentalRevenueDetails',flags.rental);show('graceBlock',flags.rental);show('graceDetails',flags.rental&&val('graceEnabled')==='yes');show('graceRevenueWrap',flags.rental&&val('graceEnabled')==='yes'&&val('graceScope')==='selectedRevenue');show('graceScheduleWrap',flags.rental&&val('graceEnabled')==='yes'&&val('graceMethod')==='schedule');show('developerBonusBlock',flags.sales);show('developerBonusDetails',flags.sales&&val('developerBonusEnabled')==='yes');show('externalDetails',val('externalEnabled')==='yes');
-      const financeOn=val('financeEnabled')==='yes';document.querySelectorAll('#financeBlock .grid.four>div:not(:first-child),#financeBlock h4,#financeBlock .table-wrap').forEach(el=>el.classList.toggle('conditional-off',!financeOn));
-      const fundOn=val('fundEnabled')==='yes',feesOn=fundOn&&val('fundFeesEnabled')!=='no';document.querySelectorAll('#fundBlock .grid.four>div:not(:first-child),#fundBlock h4,#fundBlock .table-wrap').forEach(el=>el.classList.toggle('conditional-off',!fundOn));
+      const financeOn=val('financeEnabled')==='yes';document.querySelectorAll('#financeBlock .grid.four>div:not(:first-child),#financeBlock h4,#financeBlock .table-wrap,#financeBlock p.help').forEach(el=>el.classList.toggle('conditional-off',!financeOn));
+      const fundOn=val('fundEnabled')==='yes',feesOn=fundOn&&val('fundFeesEnabled')==='yes';document.querySelectorAll('#fundBlock .grid.four>div:not(:first-child),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button').forEach(el=>el.classList.toggle('conditional-off',!fundOn));document.querySelectorAll('#fundBlock .grid.four>div:nth-child(n+3),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button').forEach(el=>el.classList.toggle('conditional-off',!feesOn));
       const exitOn=val('exitEnabled')==='yes';document.querySelectorAll('#exitBlock .grid.four>div:not(:first-child)').forEach(el=>el.classList.toggle('conditional-off',!exitOn));
       document.querySelectorAll('.cf-sales').forEach(el=>el.classList.toggle('conditional-off',!flags.sales));document.querySelectorAll('.cf-rental').forEach(el=>el.classList.toggle('conditional-off',!flags.rental));document.querySelectorAll('.cf-finance').forEach(el=>el.classList.toggle('conditional-off',!financeOn));document.querySelectorAll('.cf-fund').forEach(el=>el.classList.toggle('conditional-off',!feesOn));document.querySelectorAll('.cf-grace').forEach(el=>el.classList.toggle('conditional-off',!(flags.rental&&val('graceEnabled')==='yes')));
+      ['resSaleRevenue','resSaleExitGross','resSaleExit'].forEach(id=>document.getElementById(id)?.closest('.metric')?.classList.toggle('conditional-off',!flags.sales));
+      ['resRevenueY1','resNOIY1','resFullOccupancyRevenue','resFullOccupancyOpex','resFullOccupancyNOI','resOperatingExitGross','resOperatingExit'].forEach(id=>document.getElementById(id)?.closest('.metric')?.classList.toggle('conditional-off',!flags.rental));
+      ['resFinanceCost','resCashEquity','resEquityRequired','resIRR','resEquityPayback'].forEach(id=>document.getElementById(id)?.closest('.metric')?.classList.toggle('conditional-off',!financeOn));
+      document.getElementById('resFundFees')?.closest('.metric')?.classList.toggle('conditional-off',!feesOn);
+      ['resSaleExitGross','resSaleExit','resOperatingExitGross','resOperatingExit','resTerminal'].forEach(id=>document.getElementById(id)?.closest('.metric')?.classList.toggle('conditional-off',!exitOn));
     }
     function reorderResultCards(){
       const container=document.getElementById('resultsCards');if(!container)return;
@@ -8019,6 +8024,17 @@
       const projectIrr=irr([initialProjectLandFlow,...irrRows.map(r=>r.unleveredForIrr)]), irrVal=irr([initialEquityLandFlow,...irrRows.map(r=>r.equityFlowForIrr)]);
       const roiInflows=roiRows.reduce((sum,r)=>sum+r.saleRevenue+r.operatingRevenue+r.terminal,0), roiOutflows=roiRows.reduce((sum,r)=>sum+r.projectOutflow+r.opex+r.landRent+r.financeFee+r.financeInterest+r.fundFeesAnnual,0);
       const roi=roiOutflows>0?(roiInflows-roiOutflows)/roiOutflows:null, roiScope=periodLabel(roiEndYear,developmentYears,totalYears), irrScope=periodLabel(irrEndYear,developmentYears,totalYears);
+      const warnings=[];
+      if(saleExitMethod!=='none'&&saleExitYear>roiEndYear)warnings.push(`التخارج البيعي في السنة ${saleExitYear} خارج فترة ROI، ولذلك لا يدخل في ROI.`);
+      if(exitMethod!=='none'&&operatingExitYear>roiEndYear)warnings.push(`التخارج التشغيلي في السنة ${operatingExitYear} خارج فترة ROI، ولذلك لا يدخل في ROI.`);
+      if(saleExitMethod!=='none'&&saleExitYear>irrEndYear)warnings.push(`التخارج البيعي في السنة ${saleExitYear} خارج فترة IRR المختارة.`);
+      if(exitMethod!=='none'&&operatingExitYear>irrEndYear)warnings.push(`التخارج التشغيلي في السنة ${operatingExitYear} خارج فترة IRR المختارة.`);
+      if(exitMethod==='capRate'&&operatingExitYear<operationStartYear)warnings.push('سنة التخارج التشغيلي تسبق بدء التشغيل؛ لا يوجد NOI صالح لتطبيق معدل الرسملة.');
+      if(landCostIncluded>0&&landContributionType==='none')warnings.push('قيمة الأرض داخلة في تكلفة المشروع لكنها مستبعدة من التدفقات؛ قد يؤدي ذلك إلى تضخيم مؤشرات العائد.');
+      if(projectIrr===null)warnings.push('لا يمكن حساب Project IRR خلال الفترة المختارة لعدم وجود تدفقات موجبة وسالبة صالحة.');
+      if(irrVal===null)warnings.push('لا يمكن حساب Equity IRR خلال الفترة المختارة لعدم وجود تدفقات موجبة وسالبة صالحة.');
+      const warningBox=document.getElementById('analysisWarnings');
+      if(warningBox){warningBox.textContent=warnings.join(' ');warningBox.classList.toggle('show',warnings.length>0);}
 
       const setTxt = (id, txt) => { const el = document.getElementById(id); if(el) el.textContent = txt; };
       const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
@@ -8083,7 +8099,8 @@
       setVal('fundFeesTotal', money(totalFundFees));
       setVal('graceTotalDiscount', money(totalGraceDiscount));
 
-      validateComponentAreas();
+      const areaState=validateComponentAreas();
+      if(!areaState.valid&&warningBox){warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض.');warningBox.textContent=warnings.join(' ');warningBox.classList.add('show')}
 
       const tb=document.querySelector('#cashflowTable tbody');
       if(tb){
@@ -8105,8 +8122,17 @@
         const studyInput=tr.querySelector('[data-field="studyYear"] input');if(studyInput)studyInput.value=money(developmentYears+index+1);
       });
 
+      window.__financialProjection={
+        projectCost,projectCostWithFinance,adjustedProjectCost,totalFundFees,totalFundManagementFees,totalAdditionalFundFees,fundExitFeeTotal,performanceFeeTotal,revenueY1,opexY1,noiY1,fullOccupancyRevenue,fullOccupancyOpex,fullOccupancyNOI,terminal,saleExitGross,operatingExitGross,totalExitCosts,saleExitValue,operatingExitValue,saleExitYear,operatingExitYear,roi,roiPeriod,roiEndYear,irrPeriod,irrEndYear,irr:irrVal,projectIrr,payback,equityPayback,totalOperatingCF,finalCF,
+        projected,cashflows:equityCashflows,projectCashflows,leasable,developerCost,landRent,
+        saleRevenueTotal,saleAreaTotal,facilityAmount,arrangementFee,totalFinanceInterest,totalFinanceCost,
+        financeBase,financeBaseAmount,financeDrawYears,financeInterestMethod,financePlan:financePlan.map(({year,drawPct})=>({year,drawPct})),
+        financeRepaymentStartYear,financeRepaymentYears,financeRepaymentPlan:financeRepaymentPlan.map(({year,repaymentPct})=>({year,repaymentPct})),
+        landEquityContribution,cashEquityRequired:totalCashEquity,equityRequired:totalEquityRequired,totalEquityDistributions,developmentYears,operationYears,totalYears,operationStartYear,salesStartYear,salesYears,totalGraceDiscount,modeFlags,areaState
+      };
       applyConditionalVisibility(modeFlags);
       reorderResultCards();
+      if(!window.__sensitivityRunning)renderSensitivity();
 
       // Save complete model data into hidden input for autosave & server sync
       const hidden = document.getElementById('financialCalcData');
