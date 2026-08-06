@@ -13,3 +13,22 @@ jobs:
       - name: Trigger Server Deployment Webhook
         run: |
           curl --fail-with-body --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 15 --max-time 120 -X POST "https://sagdemo.site/api/deploy-webhook?secret=${{ secrets.DEPLOY_WEBHOOK_SECRET }}"
+
+      - name: Verify deployed commit
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          expected_short="${EXPECTED_COMMIT:0:7}"
+          for attempt in $(seq 1 36); do
+            health="$(curl --fail --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 20 -H 'Cache-Control: no-cache' "https://sagdemo.site/health?deploy_check=${EXPECTED_COMMIT}")"
+            deployed="$(printf '%s' "$health" | jq -r '.deployed_commit // .commit // "unknown"')"
+            echo "Deployment check ${attempt}/36: deployed=${deployed} expected=${EXPECTED_COMMIT}"
+            if [ "$deployed" = "$EXPECTED_COMMIT" ] || [[ "$deployed" == "$expected_short"* ]]; then
+              echo "Verified deployed commit ${deployed}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Hosting did not report expected commit ${EXPECTED_COMMIT}"
+          exit 1

@@ -8,8 +8,10 @@ set -e
 export PATH="$HOME/bin:$PATH"
 
 APP_DIR="/home/sagdemo/proposal-generator"
+REPO_DIR="/home/sagdemo/workflow.git"
 WEB_ROOT="/home/sagdemo/public_html"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"
+DEPLOYMENT_MARKER="$APP_DIR/.deployed_commit"
 WATCHDOG_LOG="$APP_DIR/watchdog.log"
 HEALTH_PATH="/health"
 
@@ -37,14 +39,25 @@ log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$WATCHDOG_LOG"
 }
 
+write_deployment_marker() {
+  local deployed_commit
+  deployed_commit=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)
+  if [ -z "$deployed_commit" ]; then
+    return 0
+  fi
+  printf '{"commit":"%s","deployed_at":"%s","source":"github"}\n' \
+    "$deployed_commit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$DEPLOYMENT_MARKER"
+}
+
 # Already healthy on the live port? (bypassed if --force is passed)
 # The "commit" marker proves the responder is OUR app, not a neighbor's app that
 # happens to answer /health on the same port.
-if [ "$1" != "--force" ] && curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null | grep -q '"commit"'; then
+if [ "$1" != "--force" ] && curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null | grep -q '"deployed_commit"'; then
   log "OK: gunicorn already healthy on port $PORT"
   exit 0
 fi
 
+write_deployment_marker
 log "WARN: health check failed on port $PORT; restarting..."
 
 # Stop any old gunicorn, preferring the configured port

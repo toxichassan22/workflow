@@ -113,6 +113,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual([item['category'] for item in result], ['التسوق', 'التعليم', 'الصحة'])
         self.assertEqual(result[1]['duration_minutes'], 5)
 
+    def test_health_reports_deployment_marker(self):
+        marker = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        marker.write(json.dumps({'commit': '492d856c7fa', 'deployed_at': '2026-08-06T22:45:00Z', 'source': 'github'}))
+        marker.close()
+        self.addCleanup(lambda: os.path.exists(marker.name) and os.unlink(marker.name))
+        with patch.object(self.application_module, 'DEPLOYMENT_MARKER_PATH', marker.name):
+            payload = self.app.test_client().get('/health').get_json()
+        self.assertEqual(payload['commit'], '492d856')
+        self.assertEqual(payload['deployed_commit'], '492d856c7fa')
+        self.assertEqual(payload['deployment_source'], 'github')
+
     def test_fresh_database_has_meeting_columns(self):
         """Fresh initialization no longer executes multiple DDL statements incorrectly."""
         with self.app.app_context():

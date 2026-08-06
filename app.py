@@ -8,6 +8,7 @@ import re
 import base64
 import hashlib
 import html as html_lib
+import subprocess
 import requests
 import uuid as _uuid
 
@@ -153,6 +154,7 @@ if ZAI_KEY and OPENROUTER_KEY and GLM_USE_OPENROUTER and os.environ.get("FORCE_O
     print("[CONFIG] Both keys found; preferring ZAI for GLM calls. Set FORCE_OPENROUTER=1 to override.")
 IMAGE_MODEL = "google/gemini-3.6-flash"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
+DEPLOYMENT_MARKER_PATH = os.path.join(os.path.dirname(__file__), '.deployed_commit')
 
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -8037,14 +8039,59 @@ def favicon():
     return ('', 204)
 
 
-@app.route('/health')
-def health():
-    commit_hash = 'unknown'
+def _read_deployment_metadata():
+    metadata = {'commit': 'unknown', 'deployed_commit': 'unknown', 'deployed_at': None, 'source': 'git'}
     try:
-        commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd=os.path.dirname(__file__)).decode().strip()
+        with open(DEPLOYMENT_MARKER_PATH, 'r', encoding='utf-8') as marker:
+            raw = marker.read().strip()
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    metadata.update({key: value for key, value in parsed.items() if value is not None})
+                else:
+                    metadata['deployed_commit'] = raw
+            except (TypeError, ValueError):
+                metadata['deployed_commit'] = raw
+            if metadata.get('source') == 'git':
+                metadata['source'] = 'deployment_marker'
+    except OSError:
+        pass
+
+    stored_deployed_commit = metadata.get('deployed_commit')
+    if not stored_deployed_commit or stored_deployed_commit == 'unknown':
+        stored_deployed_commit = metadata.get('commit')
+    deployed_commit = str(stored_deployed_commit or 'unknown')
+    metadata['deployed_commit'] = deployed_commit
+    if deployed_commit != 'unknown':
+        metadata['commit'] = deployed_commit[:7]
+        return metadata
+    try:
+        commit_hash = subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            cwd=os.path.dirname(__file__),
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        if commit_hash:
+            metadata['commit'] = commit_hash
+            metadata['deployed_commit'] = commit_hash
     except Exception:
         pass
-    return jsonify({'status': 'ok', 'commit': commit_hash, 'model': GLM_MODEL, 'image_model': IMAGE_MODEL})
+    return metadata
+
+
+@app.route('/health')
+def health():
+    metadata = _read_deployment_metadata()
+    return jsonify({
+        'status': 'ok',
+        'commit': metadata.get('commit', 'unknown'),
+        'deployed_commit': metadata.get('deployed_commit', 'unknown'),
+        'deployed_at': metadata.get('deployed_at'),
+        'deployment_source': metadata.get('source'),
+        'model': GLM_MODEL,
+        'image_model': IMAGE_MODEL,
+    })
 
 @app.route('/preview')
 def preview():

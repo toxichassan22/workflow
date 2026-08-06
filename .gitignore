@@ -25,6 +25,7 @@ __pycache__/
 .codetb-cache/
 
 .jwt_secret
+.deployed_commit
 uploads/
 exports/*.pdf
 exports/*.pptx

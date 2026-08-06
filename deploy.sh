@@ -22,6 +22,7 @@ git lfs pull || true
 echo "===== 2. Sync to app directory ====="
 mkdir -p "$APP_DIR"
 rsync -av \
+  --exclude='.deployed_commit' \
   --exclude='app.db' \
   --exclude='data.db' \
   --exclude='.env' \
