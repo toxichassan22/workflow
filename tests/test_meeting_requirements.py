@@ -253,6 +253,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('building_permit_file', keys)
         self.assertNotIn('north_direction', keys)
 
+    def test_direction_and_coordinate_tables_are_separate_ai_outputs(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('surveyCoordinatesPanel', index_source)
+        self.assertIn('surveyDirectionsPanel', index_source)
+        self.assertNotIn('addSurveyCoordinateButton', index_source)
+        self.assertIn('data-key="survey_coordinates"', index_source)
+        self.assertIn('data-key="directions_table"', index_source)
+        self.assertIn('regulation_text', index_source)
+
     def test_project_draft_list_returns_metadata_without_payload(self):
         client = self.app.test_client()
         response = client.post('/api/project-draft', headers=self._headers(self.token_a), json={

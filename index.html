@@ -2554,15 +2554,13 @@
     }
 
     .survey-coordinates-table th:nth-child(1),
-    .survey-coordinates-table td:nth-child(1) { width: 14%; }
+    .survey-coordinates-table td:nth-child(1),
     .survey-coordinates-table th:nth-child(2),
-    .survey-coordinates-table td:nth-child(2) { width: 14%; }
+    .survey-coordinates-table td:nth-child(2) { width: 16%; }
     .survey-coordinates-table th:nth-child(3),
     .survey-coordinates-table td:nth-child(3),
     .survey-coordinates-table th:nth-child(4),
-    .survey-coordinates-table td:nth-child(4) { width: 22%; }
-    .survey-coordinates-table th:nth-child(5),
-    .survey-coordinates-table td:nth-child(5) { width: 14%; }
+    .survey-coordinates-table td:nth-child(4) { width: 34%; }
 
     .survey-coordinates-table input {
       width: 100%;
@@ -7133,13 +7131,20 @@
           landAnalysisActions.className = 'tenant-field full land-documents-actions';
           landAnalysisActions.innerHTML = '<div class="land-documents-action-row"><button type="button" class="btn primary land-documents-action-btn" id="analyzeLandDocumentsButton">تحليل الرخصة والكروكي معًا</button></div>' +
             '<input type="hidden" data-key="land_documents_analysis" data-type="text" id="landDocumentsAnalysisData">' +
-            '<input type="hidden" data-key="survey_coordinates" data-type="text" id="surveyCoordinatesData">' +
-            '<input type="hidden" data-key="directions_table" data-type="text" id="directionsTableData">' +
-            '<div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>' +
-            '<div id="surveyCoordinatesPanel"></div>' +
-            '<div id="surveyDirectionsPanel" class="survey-directions-panel"></div>';
+            '<div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>';
           landAnalysisActions.querySelector('#analyzeLandDocumentsButton').addEventListener('click', () => extractTenantCroquisData('land_documents_files'));
+
+          const coordinatesField = document.createElement('div');
+          coordinatesField.className = 'tenant-field full';
+          coordinatesField.innerHTML = '<input type="hidden" data-key="survey_coordinates" data-type="text" id="surveyCoordinatesData"><div id="surveyCoordinatesPanel"></div>';
+
+          const directionsField = document.createElement('div');
+          directionsField.className = 'tenant-field full';
+          directionsField.innerHTML = '<input type="hidden" data-key="directions_table" data-type="text" id="directionsTableData"><div id="surveyDirectionsPanel" class="survey-directions-panel"></div>';
+
           sectionDiv.appendChild(landAnalysisActions);
+          sectionDiv.appendChild(coordinatesField);
+          sectionDiv.appendChild(directionsField);
         }
 
         form.appendChild(sectionDiv);
@@ -9160,12 +9165,11 @@
       if (!panel) return;
       const normalized = Array.isArray(rows) ? rows : [];
       panel.innerHTML = '<div class="survey-coordinates-head">' +
-        '<strong class="survey-coordinates-title">جدول الإحداثيات</strong>' +
-        '<button type="button" class="btn ghost small" id="addSurveyCoordinateButton">إضافة نقطة</button></div>' +
-        '<div class="survey-coordinates-table-wrap"><table class="survey-coordinates-table"><thead><tr><th>رقم القطعة</th><th>رقم النقطة</th><th>الشرقيات</th><th>الشماليات</th><th>إجراء</th></tr></thead><tbody></tbody></table></div>';
+        '<strong class="survey-coordinates-title">جدول الإحداثيات</strong></div>' +
+        '<div class="survey-coordinates-table-wrap"><table class="survey-coordinates-table"><thead><tr><th>رقم القطعة</th><th>رقم النقطة</th><th>الشرقيات</th><th>الشماليات</th></tr></thead><tbody></tbody></table></div>';
       const tbody = panel.querySelector('tbody');
       if (!normalized.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="survey-coordinates-empty">سيظهر جدول الإحداثيات بعد تحليل المستندات أو يمكنك إضافة نقطة يدويًا.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="survey-coordinates-empty">سيظهر جدول الإحداثيات بعد تحليل المستندات.</td></tr>';
       }
       const addRow = row => {
         tbody.querySelector('.survey-coordinates-empty')?.closest('tr')?.remove();
@@ -9174,14 +9178,11 @@
         tr.innerHTML = cell('parcel_id', row?.parcel_id || row?.parcelId || '', 'P-1') +
           cell('point', row?.point || row?.point_number || '', '1') +
           cell('eastings', row?.eastings ?? row?.easting ?? '', '510180.849') +
-          cell('northings', row?.northings ?? row?.northing ?? '', '2939234.840') +
-          '<td><button type="button" class="btn danger small" data-remove-coordinate>حذف</button></td>';
+          cell('northings', row?.northings ?? row?.northing ?? '', '2939234.840');
         tr.querySelectorAll('input').forEach(input => input.addEventListener('input', syncSurveyCoordinates));
-        tr.querySelector('[data-remove-coordinate]').addEventListener('click', () => { tr.remove(); syncSurveyCoordinates(); });
         tbody.appendChild(tr);
       };
       normalized.forEach(addRow);
-      panel.querySelector('#addSurveyCoordinateButton').addEventListener('click', () => addRow({ parcel_id: normalized[0]?.parcel_id || 'P-1', source: 'regulation_table' }));
       const hidden = document.getElementById('surveyCoordinatesData');
       if (hidden) hidden.value = JSON.stringify(normalized);
       tenantProjectData.survey_coordinates = normalized;
