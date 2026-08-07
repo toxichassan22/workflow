@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ar" dir="rtl">
 
 <head>
@@ -6467,7 +6467,7 @@
       tenantProjectData = { ...tenantProjectData, ...source };
       // Stored as a JSON string in a hidden input, so it must be parsed before use.
       const storedAnalysis = parseStoredLandTable(source.land_documents_analysis) || {};
-      renderLandDocumentConflicts(storedAnalysis);
+      storeLandDocumentAnalysis(storedAnalysis);
       renderSurveyCoordinates(source.survey_coordinates || storedAnalysis.survey_coordinates || []);
       renderSurveyDirections(source.directions_table || storedAnalysis.directions_table || storedAnalysis.parcels?.[0]?.directions || {});
       renderLandDocumentsUploadState(source.land_documents_files_file_meta || []);
@@ -7144,12 +7144,27 @@
             statusBadge.id = 'croquisExpiryBadge';
             statusBadge.style.cssText = 'display:none; margin-top:6px; font-weight:bold; font-size:0.85rem; padding:4px 8px; border-radius:4px; text-align:right;';
             function updateExpiryStatus() {
-              if (!input.value) { statusBadge.style.display = 'none'; return; }
-              const expDate = new Date(input.value);
-              const today = new Date();
-              today.setHours(0,0,0,0);
+              const raw = (input.value || '').trim();
+              if (!raw) { statusBadge.style.display = 'none'; return; }
               statusBadge.style.display = 'block';
-              if (expDate < today) {
+              const parsed = parseDocumentDate(raw);
+              if (parsed.calendar === 'hijri') {
+                // Hijri cannot be compared against the system clock without a converter,
+                // so state the calendar instead of guessing a validity verdict.
+                statusBadge.style.background = '#eef4fd';
+                statusBadge.style.color = '#1f4e8a';
+                statusBadge.textContent = 'تاريخ هجري (' + parsed.normalized + ') — تحقق من الصلاحية يدويًا';
+                return;
+              }
+              if (!parsed.date) {
+                statusBadge.style.background = '#fff4e5';
+                statusBadge.style.color = '#7a4a00';
+                statusBadge.textContent = 'صيغة التاريخ غير مفهومة — اكتبها مثل 1446/03/12 أو 2025-09-30';
+                return;
+              }
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              if (parsed.date < today) {
                 statusBadge.style.background = '#ffebee';
                 statusBadge.style.color = '#c62828';
                 statusBadge.textContent = 'تنبيه: الكروكي منتهي الصلاحية';
@@ -9135,6 +9150,18 @@
         })
         .filter(Boolean)
         .join(' | ');
+      // The field is labelled "نسبة البناء والتغطية والارتدادات", so all three parts have to be
+      // shown. Taking `building_ratio || setbacks` used to reduce it to a bare "60%".
+      const buildingRulesText = [
+        ['نسبة البناء', parcel.building_ratio],
+        ['نسبة التغطية', parcel.coverage_ratio],
+        ['معامل مسطح البناء (FAR)', parcel.floor_area_ratio],
+        ['عدد الأدوار بموجب الجدول', parcel.table_floors],
+        ['الارتدادات', parcel.setbacks]
+      ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
+        .map(([label, value]) => label + ': ' + String(value).trim())
+        .join('\n');
+
       const parcelFields = {
         plot_number_croquis: parcel.plot_number,
         plan_number: parcel.plan_number,
@@ -9147,7 +9174,7 @@
         boundary_lengths: parcel.boundary_lengths || boundariesText,
         surrounding_streets: parcel.surrounding_streets || streetsText,
         north_direction: parcel.north_direction,
-        building_ratio_setbacks: parcel.building_ratio || parcel.setbacks,
+        building_ratio_setbacks: buildingRulesText,
         max_floors_height: parcel.max_floors_height,
         allowed_uses_restrictions: parcel.allowed_uses_restrictions,
         croquis_expiry_date: parcel.expiry_date,
@@ -9215,10 +9242,10 @@
           }
           tenantProjectData.survey_coordinates = data.survey_coordinates || [];
           tenantProjectData.directions_table = extractedFields.directions_table || data.directions_table || data.parcels?.[0]?.directions || {};
-          renderLandDocumentConflicts(data);
+          storeLandDocumentAnalysis(data);
           renderSurveyCoordinates(data.survey_coordinates || []);
           renderSurveyDirections(tenantProjectData.directions_table);
-          updateLoaderProgress(100, 'تم تحليل الملفات معًا. راجع الحقول والاتجاهات والتعارضات ثم اعتمد البيانات.');
+          updateLoaderProgress(100, 'تم تحليل الملفات معًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.');
           toast('تم تحليل ملفات الأرض والكروكي والرخصة معًا. راجع النتائج قبل الاعتماد.');
           triggerAutoSaveDraft();
         } else {
@@ -9231,68 +9258,42 @@
       }
     }
 
-    // Arabic labels for the field names the model reports conflicts against, so the review
-    // panel never shows a raw key (or raw JSON) to the user.
-    const LAND_CONFLICT_FIELD_LABELS = {
-      survey_coordinates: 'جدول الإحداثيات',
-      directions_table: 'جدول الاتجاهات',
-      boundary_lengths: 'أطوال الأضلاع والحدود',
-      boundary_lengths_natural_vs_regulation: 'أطوال الحدود: الطبيعة مقابل التنظيم',
-      plot_number: 'رقم القطعة',
-      plot_number_croquis: 'رقم القطعة',
-      plan_number: 'رقم المخطط',
-      subdivision_number: 'رقم القسم',
-      deed_number: 'رقم الصك',
-      deed_date: 'تاريخ الصك',
-      area_sqm: 'مساحة الأرض',
-      croquis_land_area: 'مساحة الأرض حسب الكروكي',
-      facades_count: 'عدد الواجهات',
-      facades_directions: 'اتجاهات الواجهات',
-      building_ratio: 'نسبة البناء والتغطية',
-      building_ratio_setbacks: 'نسبة البناء والتغطية والارتدادات',
-      setbacks: 'الارتدادات',
-      max_floors_height: 'الارتفاع أو عدد الأدوار',
-      allowed_uses_restrictions: 'الاستخدامات المسموحة والقيود',
-      zoning_code: 'كود التنظيم',
-      expiry_date: 'تاريخ انتهاء الصلاحية',
-      croquis_expiry_date: 'تاريخ انتهاء صلاحية الكروكي'
-    };
-
-    const LAND_CONFLICT_SEVERITY = {
-      high: { label: 'حرج', background: '#fdeaea', border: '#f5b5b5', color: '#8a1f1f' },
-      medium: { label: 'يحتاج مراجعة', background: '#fff4e5', border: '#ffd69b', color: '#7a4a00' },
-      low: { label: 'ملاحظة', background: '#eef4fd', border: '#c3d7f5', color: '#1f4e8a' }
-    };
-
-    function normalizeLandConflict(item) {
-      if (typeof item === 'string') return { title: '', description: item, field: '', severity: 'medium', values: [], resolution: '' };
-      if (!item || typeof item !== 'object') return null;
-      const values = Array.isArray(item.values) ? item.values : (item.values ? [item.values] : []);
-      return {
-        field: String(item.field || item.key || ''),
-        title: String(item.title || ''),
-        description: String(item.description || item.message || item.note || ''),
-        severity: ['high', 'medium', 'low'].includes(item.severity) ? item.severity : 'medium',
-        values: values.map(value => typeof value === 'object' ? Object.values(value).join(' / ') : String(value)),
-        resolution: String(item.resolution || item.decision || '')
-      };
+    // Saudi land documents carry Hijri dates far more often than Gregorian ones, and a Hijri
+    // year (~1446) cannot be fed to Date(). Detect the calendar from the year instead of
+    // assuming, so the UI can show the value rather than silently dropping it.
+    function parseDocumentDate(value) {
+      const raw = String(value || '').trim();
+      const result = { raw, normalized: raw, calendar: 'unknown', date: null };
+      if (!raw) return result;
+      const parts = raw.match(/(\d{1,4})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{1,4})/);
+      if (!parts) return result;
+      let [, a, b, c] = parts;
+      // Either the first or the last group is the year, whichever has 4 digits.
+      let year, month, day;
+      if (a.length === 4) { year = +a; month = +b; day = +c; }
+      else if (c.length === 4) { year = +c; month = +b; day = +a; }
+      else { year = +c; month = +b; day = +a; }
+      if (!year || !month || month > 12 || !day || day > 31) return result;
+      const pad = number => String(number).padStart(2, '0');
+      result.normalized = year + '/' + pad(month) + '/' + pad(day);
+      if (year >= 1300 && year <= 1500) {
+        result.calendar = 'hijri';
+        return result;
+      }
+      result.calendar = 'gregorian';
+      const parsed = new Date(year, month - 1, day);
+      if (!Number.isNaN(parsed.getTime())) {
+        parsed.setHours(0, 0, 0, 0);
+        result.date = parsed;
+      }
+      return result;
     }
 
-    function focusLandField(fieldKey) {
-      const target = document.querySelector('#tenantProjectForm [data-key="' + fieldKey + '"]');
-      if (!target) return;
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      target.style.transition = 'box-shadow .3s';
-      target.style.boxShadow = '0 0 0 3px rgba(255,169,64,.75)';
-      setTimeout(() => { target.style.boxShadow = ''; }, 2200);
-      if (typeof target.focus === 'function') target.focus({ preventScroll: true });
-    }
-
-    function renderLandDocumentConflicts(analysis = {}) {
-      const host = document.getElementById('landDocumentsAnalysisPreview');
-      if (!host) return;
+    // The analysis payload is persisted but never displayed: the directions table falls back to
+    // `parcels[0].directions` when the saved table is empty, and collectTenantFormData() only
+    // reads DOM inputs, so dropping this hidden field would lose the analysis on reload.
+    function storeLandDocumentAnalysis(analysis = {}) {
       const analysisInput = document.getElementById('landDocumentsAnalysisData');
-      // The analysis payload still has to be persisted: the directions table falls back to it.
       if (analysisInput) {
         analysisInput.value = (Array.isArray(analysis.parcels) && analysis.parcels.length)
           ? JSON.stringify({
@@ -9302,33 +9303,11 @@
             })
           : '';
       }
-      const conflicts = (Array.isArray(analysis.conflicts) ? analysis.conflicts : [])
-        .map(normalizeLandConflict)
-        .filter(item => item && (item.description || item.title));
-      if (!conflicts.length) {
+      const host = document.getElementById('landDocumentsAnalysisPreview');
+      if (host) {
         host.innerHTML = '';
         host.style.display = 'none';
-        return;
       }
-      host.innerHTML = '<h4 style="margin:0 0 8px;color:var(--p)">تعارضات تحتاج مراجعتك (' + conflicts.length + ')</h4>' +
-        '<div style="display:grid;gap:8px">' + conflicts.map(conflict => {
-          const tone = LAND_CONFLICT_SEVERITY[conflict.severity];
-          const fieldLabel = LAND_CONFLICT_FIELD_LABELS[conflict.field] || conflict.field;
-          const heading = conflict.title || fieldLabel || 'تعارض في البيانات';
-          const jumpKey = conflict.field && document.querySelector('#tenantProjectForm [data-key="' + conflict.field + '"]')
-            ? conflict.field : '';
-          return '<div style="background:' + tone.background + ';border:1px solid ' + tone.border + ';color:' + tone.color + ';border-radius:10px;padding:10px">' +
-            '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
-            '<strong>' + escapeHtml(heading) + '</strong>' +
-            '<span style="font-size:.75rem;border:1px solid ' + tone.border + ';border-radius:999px;padding:2px 8px">' + tone.label + '</span></div>' +
-            (fieldLabel && conflict.title ? '<div style="font-size:.8rem;opacity:.85;margin-top:4px">الحقل: ' + escapeHtml(fieldLabel) + '</div>' : '') +
-            '<p style="margin:6px 0 0;line-height:1.7">' + escapeHtml(conflict.description) + '</p>' +
-            (conflict.values.length ? '<div style="margin-top:6px;font-size:.85rem">القيم المتعارضة: ' + escapeHtml(conflict.values.join('  ↔  ')) + '</div>' : '') +
-            (conflict.resolution ? '<div style="margin-top:6px;font-size:.85rem">المعتمد: ' + escapeHtml(conflict.resolution) + '</div>' : '') +
-            (jumpKey ? '<button type="button" class="btn ghost" style="margin-top:8px;padding:4px 10px;font-size:.8rem" onclick="focusLandField(\'' + jumpKey + '\')">انتقل إلى الحقل</button>' : '') +
-            '</div>';
-        }).join('') + '</div>';
-      host.style.display = 'block';
     }
 
     function collectSurveyCoordinates() {

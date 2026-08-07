@@ -61,6 +61,21 @@ assertion deliberately, not reflexively.
   array, so the legacy branch (which calls `normalize_croquis_fields`) does **not** run; per-parcel
   scalar cleanup lives in `_normalize_parcel_scalar_fields()`. Add new normalizers to both paths.
 - `approved_financial_area` is **client-entered only**. AI output must never populate it.
+- **Never give a land field `type: 'date'`.** These documents are dated in Hijri (`1446/03/12`) and
+  `<input type="date">` accepts only ISO Gregorian, so it discards the value silently and the box
+  looks empty. `croquis_expiry_date` and `deed_date` are `text`; use `parseDocumentDate()` (JS) or
+  `_find_document_date()` (Python, handles Arabic-Indic digits and both day/year-first orders).
+- A **facade is only a boundary that fronts a street** — every plot has four boundaries, so listing
+  four compass points is meaningless. `facade_directions_from_streets()` filters neighbour
+  boundaries and also derives `facades_count` when the model leaves it blank.
+- `building_ratio_setbacks` is a **composite** field (ratio + coverage + FAR + floors + setbacks).
+  It used to be `building_ratio || setbacks`, which collapsed it to a bare "60%".
+- The land analysis has **no visible review panel** (conflicts and the parcels table were removed on
+  request), but `storeLandDocumentAnalysis()` must keep writing the hidden
+  `landDocumentsAnalysisData` input — the directions table falls back to `parcels[0].directions`,
+  and `collectTenantFormData()` only persists DOM inputs. `conflicts` are still requested from the
+  model so it records disagreements instead of silently picking a value; they surface in the
+  narrative summary.
 
 ## Regulation PDFs (الاشتراطات)
 

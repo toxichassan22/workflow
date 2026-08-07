@@ -4980,8 +4980,40 @@ def normalize_facades_count(value, fallback_text=''):
     return ''
 
 
+FACADE_SIDE_LABELS = (('north', 'شمالية'), ('south', 'جنوبية'), ('east', 'شرقية'), ('west', 'غربية'))
+
+# A boundary that abuts another plot is not a facade, however the cell is worded.
+FACADE_NEIGHBOUR_HINTS = ('جار', 'مجاور', 'قطعة', 'قطعه', 'ملك', 'أرض فضاء', 'حد القطعة')
+FACADE_STREET_HINTS = ('شارع', 'طريق', 'ممر', 'كورنيش', 'ميدان', 'دوار', 'واجهة')
+
+
+def facade_directions_from_streets(directions):
+    """Return only the sides that actually front a street.
+
+    A plot always has four boundaries, so listing all four compass points says nothing. What
+    matters is which sides are facades — i.e. border a street rather than a neighbour.
+    """
+    found = []
+    for side, label in FACADE_SIDE_LABELS:
+        info = (directions or {}).get(side)
+        if not isinstance(info, dict):
+            continue
+        text = ' '.join(
+            str(info.get(key) or '') for key in ('street_name', 'uses', 'regulation_text')
+        )
+        width = info.get('street_width_m')
+        has_width = width not in (None, '', 0, '0', '0.0')
+        mentions_street = any(hint in text for hint in FACADE_STREET_HINTS)
+        # "قطعة رقم 12" or "أرض مجاورة" means a neighbour, unless a street is named too.
+        if any(hint in text for hint in FACADE_NEIGHBOUR_HINTS) and not mentions_street:
+            continue
+        if mentions_street or has_width:
+            found.append(label)
+    return '، '.join(found)
+
+
 def normalize_facade_directions(*values):
-    """Collect the cardinal directions mentioned for the plot facades, in a stable order."""
+    """Fallback for the legacy path: scan free text for cardinal directions."""
     haystack = ' '.join(str(value) for value in values if value)
     labels = (
         ('شمالية', ('شمالي', 'شمالية', 'الشمال', 'شمال')),
@@ -5394,12 +5426,14 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
 
     raw_facades = parcel.get('facades_count')
     parcel['facades_count'] = normalize_facades_count(raw_facades, fallback_text)
-    if not parcel.get('facades_directions'):
-        streets = ' '.join(
-            str((parcel.get('directions') or {}).get(side, {}).get('street_name') or '')
-            for side in ('north', 'south', 'east', 'west')
-        )
-        parcel['facades_directions'] = normalize_facade_directions(raw_facades, streets)
+    # Derive the facades from the directions table: only sides bordering a street count.
+    street_sides = facade_directions_from_streets(parcel.get('directions'))
+    if street_sides:
+        parcel['facades_directions'] = street_sides
+        if not parcel['facades_count']:
+            parcel['facades_count'] = str(len(street_sides.split('،')))
+    elif not parcel.get('facades_directions'):
+        parcel['facades_directions'] = ''
 
     parcel['north_direction'] = normalize_north_direction(parcel.get('north_direction'))
 
@@ -5410,13 +5444,50 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
             parcel['deed_number'] = deed_match.group(1)
 
     if not parcel.get('deed_date'):
-        date_match = re.search(
-            r'(?:تاريخ\s*(?:الصك|صك|الإصدار|الاصدار))\s*[:\s]*'
-            r'(\d{1,4}[/\-]\d{1,2}[/\-]\d{1,4})', fallback_text)
-        if date_match:
-            parcel['deed_date'] = date_match.group(1)
+        parcel['deed_date'] = _find_document_date(fallback_text)
+
+    if not parcel.get('plan_number'):
+        plan_match = re.search(
+            r'(?:رقم\s*)?(?:المخطط|مخطط)\s*(?:رقم)?\s*[:\s]*'
+            r'([0-9\u0660-\u0669]{1,5}\s*/\s*[\u0621-\u064A0-9]{1,6}(?:\s*/\s*[\u0621-\u064A0-9]{1,6})?)',
+            fallback_text)
+        if plan_match:
+            parcel['plan_number'] = re.sub(r'\s*', '', plan_match.group(1))
 
     return parcel
+
+
+# Deed dates are usually Hijri and written in many shapes: "وتاريخ 1446/03/12هـ",
+# "بتاريخ 12/03/1446", "تاريخ الصك 1446-03-12". Capture the date nearest a date keyword.
+_DOCUMENT_DATE_PATTERNS = (
+    r'(?:تاريخ\s*(?:الصك|صك|الإصدار|الاصدار|الاصدر))\s*[:\s]*([0-9\u0660-\u0669]{1,4}[/\-.][0-9\u0660-\u0669]{1,2}[/\-.][0-9\u0660-\u0669]{1,4})',
+    r'(?:و?بتاريخ|و?تاريخ)\s*[:\s]*([0-9\u0660-\u0669]{1,4}[/\-.][0-9\u0660-\u0669]{1,2}[/\-.][0-9\u0660-\u0669]{1,4})',
+    r'([0-9\u0660-\u0669]{1,4}[/\-.][0-9\u0660-\u0669]{1,2}[/\-.][0-9\u0660-\u0669]{1,4})\s*(?:هـ|هجري|هجرية)',
+)
+
+_ARABIC_INDIC_DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
+
+
+def _find_document_date(text):
+    """Return the first date that looks like an issue date, normalised to Y/M/D."""
+    for pattern in _DOCUMENT_DATE_PATTERNS:
+        match = re.search(pattern, text or '')
+        if not match:
+            continue
+        raw = match.group(1).translate(_ARABIC_INDIC_DIGITS)
+        parts = re.split(r'[/\-.]', raw)
+        if len(parts) != 3:
+            continue
+        # Whichever end holds the 4-digit group is the year.
+        if len(parts[0]) == 4:
+            year, month, day = parts
+        else:
+            day, month, year = parts
+        try:
+            return f'{int(year)}/{int(month):02d}/{int(day):02d}'
+        except ValueError:
+            continue
+    return ''
 
 
 def _normalize_land_document_result(resp_json, text_content=''):
@@ -5630,14 +5701,15 @@ def api_extract_croquis():
             '      "east": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"},\n'
             '      "west": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"}\n'
             '    },\n'
-            '    "north_direction": "", "setbacks": "", "building_ratio": "", "max_floors_height": "",\n'
+            '    "north_direction": "", "setbacks": "", "building_ratio": "", "coverage_ratio": "",\n'
+            '    "floor_area_ratio": "", "table_floors": "", "max_floors_height": "",\n'
             '    "allowed_uses_restrictions": "", "expiry_date": "", "zoning_code": "",\n'
             '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
             '    "survey_coordinates": [{"point": "", "eastings": "", "northings": "", "source": "regulation_table"}],\n'
             '    "confidence": {}, "sources": [], "summary": ""\n'
             '  }],\n'
             '  "survey_coordinates": [], "source_priority": ["regulation_table", "official_regulation", "croquis", "building_license"],\n'
-            '  "conflicts": [{"field": "", "title": "", "description": "", "severity": "high|medium|low", "values": [], "resolution": ""}],\n'
+            '  "conflicts": [{"field": "", "description": ""}],\n'
             '  "land_and_building_summary": ""\n'
             "}\n"
             "قواعد إلزامية لأرقام الهوية — لا تخلط بينها أبدًا:\n"
@@ -5648,18 +5720,33 @@ def api_extract_croquis():
             "قواعد إلزامية للصك:\n"
             "- deed_number: رقم الصك رقميًا فقط.\n"
             "- deed_date: تاريخ إصدار الصك كما هو مكتوب (هجري أو ميلادي) بصيغة YYYY/MM/DD، وبيّن نوع التقويم في summary. لا تخلطه مع تاريخ الكروكي أو تاريخ الرخصة (expiry_date).\n"
-            "قواعد إلزامية للواجهات:\n"
-            "- facades_count: رقم صحيح فقط (1 أو 2 أو 3 أو 4). يُمنع منعًا تامًا كتابة أي كلمة اتجاه هنا.\n"
-            "- facades_directions: أسماء اتجاهات الواجهات نصًا (مثل: شمالية، غربية) وهي المكان الوحيد المسموح لكلمات الاتجاهات.\n"
+            "قواعد إلزامية للواجهات — الواجهة هي الحد المطل على شارع فقط:\n"
+            "- لكل قطعة أربعة حدود دائمًا، لكن الواجهات هي الحدود المطلة على شوارع وحدها. "
+            "الحد المجاور لقطعة أو جار ليس واجهة.\n"
+            "- facades_count: عدد الحدود المطلة على شوارع فقط، رقم صحيح (1 إلى 4). "
+            "يُمنع منعًا تامًا كتابة أي كلمة اتجاه هنا.\n"
+            "- facades_directions: اتجاهات تلك الواجهات فقط (مثل: شمالية، غربية). "
+            "لا تكتب الاتجاهات الأربعة كلها إلا إذا كانت القطعة فعلًا مطلة على أربعة شوارع.\n"
+            "- في directions املأ street_name و street_width_m للحدود المطلة على شوارع، "
+            "واذكر في uses أن الحد يجاور قطعة/جار للحدود غير المطلة على شارع.\n"
             "قواعد منع التكرار:\n"
             "- لا تكرر نفس المعلومة في أكثر من حقل. setbacks للارتدادات فقط، building_ratio لنسبة البناء والتغطية فقط.\n"
             "- أطوال الحدود وأسماء الشوارع تُكتب داخل directions فقط، ولا تُعاد في summary كقائمة.\n"
-            "قواعد الاشتراطات:\n"
+            "قواعد الاشتراطات — ممنوع إعادة رقم مجرد:\n"
             "- zoning_code: كود التنظيم/الاستخدام كما هو في الرخصة أو جدول التنظيم (مثل ت ر1، س ف، ت خ) إن وُجد.\n"
-            "- building_ratio و max_floors_height و allowed_uses_restrictions تُستخرج من نص اللائحة المرفق ومن جداول التنظيم، واذكر رقم الصفحة أو اسم الجدول في summary.\n"
+            "- building_ratio: لا تكتب «60%» وحدها. اكتب جملة كاملة: النسبة، وعلى أي دور تُطبَّق، ومصدرها.\n"
+            "  مثال: «60% من مساحة الأرض للدور الأرضي بموجب جدول أنظمة البناء — اشتراطات1 صفحة 50».\n"
+            "- coverage_ratio: نسبة التغطية إن ذُكرت منفصلة عن نسبة البناء، وإلا اتركها فارغة ولا تكرر نسبة البناء فيها.\n"
+            "- floor_area_ratio: معامل مسطح البناء (FAR) رقمًا مع مصدره إن وُجد في الجدول.\n"
+            "- table_floors: عدد الأدوار المقابل لمساحة هذه الأرض في جدول التنظيم، مع ذكر شريحة المساحة المستخدمة.\n"
+            "  مثال: «8 أدوار لشريحة 3000–5000 م² على محور تجاري رئيسي — اشتراطات1 صفحة 50».\n"
+            "- setbacks: الارتدادات الأربعة كل واحد برقمه بالمتر (أمامي/خلفي/جانبي أيمن/جانبي أيسر). "
+            "إن لم تجدها في اللائحة فاكتب «غير محددة في المرجع المتاح» ولا تخترع أرقامًا.\n"
+            "- استخدم مساحة الأرض المستخرجة لاختيار الشريحة الصحيحة من جدول التنظيم؛ الجداول مفتاحها مساحة الأرض ونوع المحور/المنطقة.\n"
             "- لا تنسب اشتراطات إلى مدينة أو أمانة إلا إذا كانت المدينة ومصدر اللائحة واضحين في الملفات أو في المرجع المرفق.\n"
-            "قواعد التعارضات (conflicts):\n"
-            "- كل تعارض كائن منفصل: field باسم الحقل المتأثر، title عنوان قصير جدًا (٣-٦ كلمات)، description شرح بجملة أو جملتين، severity، values بالقيم المتعارضة، resolution بالقيمة التي اعتمدتها وسببها.\n"
+            "قواعد التعارضات (conflicts) — لا تُعرض للمستخدم مباشرة:\n"
+            "- عند اختلاف قيمة بين مستندين، سجّل التعارض هنا بجملة واحدة بدل اختيار قيمة من نفسك بصمت.\n"
+            "- الشرح المفصّل للتعارض وأثره يُكتب داخل land_and_building_summary في فقرة المخاطر.\n"
             "- إذا لا توجد تعارضات أعد قائمة فارغة.\n"
             "قواعد الملخص (land_and_building_summary):\n"
             "- نص عربي مسترسل من ٤ إلى ٦ فقرات (٢٥٠ كلمة على الأقل) وليس قائمة حقول مفصولة بشرطات.\n"

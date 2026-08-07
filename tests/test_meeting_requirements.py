@@ -316,21 +316,25 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(json.loads(draft_data['survey_coordinates'])[0]['eastings'], '510180.849')
         self.assertEqual(json.loads(draft_data['directions_table'])[0]['direction'], 'north')
 
-    def test_land_conflicts_are_rendered_readably_without_raw_json(self):
-        """The review panel showed JSON.stringify output; it must now be labelled cards."""
+    def test_land_analysis_is_persisted_but_not_shown_as_a_review_panel(self):
+        """The conflicts/parcels panels were removed; the payload must still be saved because
+        the directions table falls back to parcels[0].directions on reload."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn('function renderLandDocumentConflicts(', index_source)
-        self.assertIn('LAND_CONFLICT_FIELD_LABELS', index_source)
-        self.assertIn("survey_coordinates: 'جدول الإحداثيات'", index_source)
-        self.assertIn('function focusLandField(', index_source)
-        # The unexplained parcels table is gone and raw JSON is no longer printed.
-        self.assertNotIn('renderExtractedParcels', index_source)
-        self.assertNotIn('القطع المكتشفة', index_source)
-        self.assertNotIn('typeof item === \'string\' ? item : JSON.stringify(item)', index_source)
-        self.assertNotIn('escapeHtml(JSON.stringify(parcel.confidence', index_source)
-        # The analysis payload is still persisted; the directions table falls back to it.
+        self.assertIn('function storeLandDocumentAnalysis(', index_source)
         self.assertIn('landDocumentsAnalysisData', index_source)
         self.assertIn('parseStoredLandTable(source.land_documents_analysis)', index_source)
+        # No visible review UI, and no raw JSON dumped at the user.
+        self.assertNotIn('renderExtractedParcels', index_source)
+        self.assertNotIn('renderLandDocumentConflicts', index_source)
+        self.assertNotIn('القطع المكتشفة', index_source)
+        self.assertNotIn('تعارضات تحتاج مراجعتك', index_source)
+        self.assertNotIn('typeof item === \'string\' ? item : JSON.stringify(item)', index_source)
+        self.assertNotIn('escapeHtml(JSON.stringify(parcel.confidence', index_source)
+        # Conflicts are still requested so the model records disagreements instead of
+        # silently picking a value, and they surface through the narrative summary.
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('"conflicts": [{"field": "", "description": ""}]', app_source)
+        self.assertNotIn('"severity": "high|medium|low"', app_source)
 
     def test_project_draft_list_returns_metadata_without_payload(self):
         client = self.app.test_client()
@@ -581,7 +585,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         }, 'صك رقم 260629004505 وتاريخ الصك 1446/03/12 لقطعة رقم 9991')
         parcel = result['parcels'][0]
 
-        self.assertEqual(parcel['facades_count'], '')
+        # "جنوبية" is rejected as a count, then the count is rebuilt from the one street side.
+        self.assertEqual(parcel['facades_count'], '1')
         self.assertEqual(parcel['facades_directions'], 'جنوبية')
         self.assertEqual(parcel['north_direction'], 'شمال غربي')
         # Placeholder wording is dropped, then the regex fallback fills the real values.
@@ -592,6 +597,51 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('approved_financial_area', result)
         self.assertEqual(result['land_and_building_summary'], 'ملخص تفصيلي مسترسل عن الأرض والاشتراطات.')
 
+    def test_hijri_dates_are_extracted_and_never_fed_to_a_date_input(self):
+        """Saudi deeds are dated in Hijri; <input type="date"> silently drops those values."""
+        find = self.application_module._find_document_date
+        self.assertEqual(find('صك رقم 260629004505 وتاريخ 1446/03/12هـ'), '1446/03/12')
+        self.assertEqual(find('تاريخ الصك 1446-03-12'), '1446/03/12')
+        self.assertEqual(find('بتاريخ 12/03/1446 قطعة رقم أ'), '1446/03/12')
+        self.assertEqual(find('وتاريخ ١٤٤٦/٠٣/١٢ هـ'), '1446/03/12')
+        self.assertEqual(find('صادر بتاريخ 2025/09/30'), '2025/09/30')
+        self.assertEqual(find('لا يوجد تاريخ هنا'), '')
+
+        # The croquis validity field must be text so Hijri values survive.
+        expiry = next(f for f in db.PREBUILT_FIELDS if f['key'] == 'croquis_expiry_date')
+        self.assertEqual(expiry['type'], 'text')
+        self.assertEqual(next(f for f in db.PREBUILT_FIELDS if f['key'] == 'deed_date')['type'], 'text')
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function parseDocumentDate(value)', index_source)
+        self.assertIn("result.calendar = 'hijri'", index_source)
+        self.assertNotIn('const expDate = new Date(input.value);', index_source)
+
+    def test_plan_number_falls_back_to_the_document_text(self):
+        module = self.application_module
+        for text, expected in (
+            ('المخطط رقم 3/س/125', '3/س/125'),
+            ('رقم المخطط: 1406/ب', '1406/ب'),
+            ('مخطط خاص بدون رقم', ''),
+        ):
+            parcel = {'plan_number': ''}
+            module._normalize_parcel_scalar_fields(parcel, text)
+            self.assertEqual(parcel['plan_number'], expected, text)
+
+    def test_building_rules_keep_ratio_coverage_and_setbacks_together(self):
+        """`building_ratio || setbacks` collapsed the field to a bare "60%"."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertNotIn('building_ratio_setbacks: parcel.building_ratio || parcel.setbacks', index_source)
+        self.assertIn('building_ratio_setbacks: buildingRulesText', index_source)
+        for label in ('نسبة البناء', 'نسبة التغطية', 'معامل مسطح البناء (FAR)', 'الارتدادات'):
+            self.assertIn("['" + label + "'", index_source)
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('"coverage_ratio": ""', app_source)
+        self.assertIn('"floor_area_ratio": ""', app_source)
+        self.assertIn('لا تكتب «60%» وحدها', app_source)
+        self.assertIn('غير محددة في المرجع المتاح', app_source)
+
     def test_facade_count_accepts_real_counts_and_rejects_directions(self):
         normalize = self.application_module.normalize_facades_count
         self.assertEqual(normalize(4), '4')
@@ -599,9 +649,25 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(normalize('بلك كامل'), '4')
         self.assertEqual(normalize('شمالية وغربية'), '')
         self.assertEqual(normalize('', 'الأرض زاوية على شارعين'), '2')
-        self.assertEqual(
-            self.application_module.normalize_facade_directions('شمالية', 'شارع غربي'),
-            'شمالية، غربية')
+
+    def test_facades_are_only_the_sides_that_front_a_street(self):
+        """All plots have four boundaries, so naming four directions says nothing. Only the
+        boundaries that border a street are facades."""
+        module = self.application_module
+        directions = {
+            'north': {'street_name': 'شارع الأمير ماجد', 'street_width_m': 30},
+            'south': {'street_name': 'قطعة رقم 12', 'uses': 'جار'},
+            'east': {'street_name': '', 'street_width_m': 15},
+            'west': {'street_name': 'أرض مجاورة'},
+        }
+        self.assertEqual(module.facade_directions_from_streets(directions), 'شمالية، شرقية')
+        self.assertEqual(module.facade_directions_from_streets({}), '')
+
+        # The count is derived from those sides when the model leaves it blank.
+        parcel = {'facades_count': '', 'directions': directions}
+        module._normalize_parcel_scalar_fields(parcel, '')
+        self.assertEqual(parcel['facades_directions'], 'شمالية، شرقية')
+        self.assertEqual(parcel['facades_count'], '2')
 
     def test_land_prompt_forbids_ai_written_approved_area_and_demands_narrative(self):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
@@ -609,9 +675,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('"subdivision_number": ""', source)
         self.assertIn('"deed_date": ""', source)
         self.assertIn('"facades_directions": ""', source)
-        self.assertIn('رقم صحيح فقط (1 أو 2 أو 3 أو 4)', source)
+        self.assertIn('عدد الحدود المطلة على شوارع فقط', source)
         self.assertIn('٢٥٠ كلمة على الأقل', source)
-        self.assertIn('"severity": "high|medium|low"', source)
 
     def test_regulation_lookup_skips_index_pages_and_strips_page_furniture(self):
         module = self.application_module
