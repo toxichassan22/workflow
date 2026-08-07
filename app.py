@@ -5376,6 +5376,7 @@ def api_extract_croquis():
         )
 
         raw_resp = ""
+        response_finish_reason = None
         vision_warnings = []
         document_processing = []
         if OPENROUTER_KEY:
@@ -5410,17 +5411,31 @@ def api_extract_croquis():
             }] + vision_parts
 
             try:
-                res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=5000, model="google/gemini-3.6-flash")
+                res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=12000, model="google/gemini-3.6-flash")
                 if _has_chat_choices(res):
                     raw_resp = _get_chat_response_text(res)
-                    print(f"[EXTRACT LAND DOCUMENTS] analyzed {len(documents)} document(s)")
+                    choices = res.get('choices') if isinstance(res, dict) else []
+                    response_finish_reason = choices[0].get('finish_reason') if choices and isinstance(choices[0], dict) else None
+                    print(f"[EXTRACT LAND DOCUMENTS] analyzed {len(documents)} document(s), finish_reason={response_finish_reason}")
                 else:
                     print(f"[EXTRACT LAND DOCUMENTS ERROR] {res.get('error') if isinstance(res, dict) else res}")
             except Exception as model_err:
                 print(f"[EXTRACT LAND DOCUMENTS EXCEPTION] {model_err}")
 
-        resp_json = parse_json_object(raw_resp) if raw_resp else {}
-        resp_json = _normalize_land_document_result(resp_json, raw_resp)
+        if response_finish_reason == 'length':
+            return jsonify({
+                'success': False,
+                'error': 'استجابة الذكاء الاصطناعي كانت طويلة ومقطوعة. لم يتم اعتماد أي بيانات جزئية؛ أعد المحاولة لتوليد JSON كامل.',
+                'documentProcessing': document_processing
+            }), 502
+        parsed_response = parse_json_object(raw_resp) if raw_resp else {}
+        if raw_resp.strip() and not parsed_response:
+            return jsonify({
+                'success': False,
+                'error': 'استجابة الذكاء الاصطناعي غير مكتملة أو ليست JSON صالحًا. لم يتم اعتماد أي بيانات جزئية.',
+                'documentProcessing': document_processing
+            }), 502
+        resp_json = _normalize_land_document_result(parsed_response, raw_resp)
         if vision_warnings:
             resp_json['warnings'] = vision_warnings
         resp_json['document_processing'] = document_processing

@@ -131,6 +131,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertFalse(any(part.get('type') == 'file' for part in parts))
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertNotIn('أُرسل الملف الأصلي كحل احتياطي', app_source)
+        self.assertIn('finish_reason == \'length\'', app_source)
+        self.assertIn('max_tokens=12000', app_source)
 
     def test_health_reports_deployment_marker(self):
         marker = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
