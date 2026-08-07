@@ -9066,6 +9066,55 @@
       }
     }
 
+    function buildExtractedLandFieldData(data) {
+      const fields = { ...(data || {}) };
+      const parcel = Array.isArray(data?.parcels) ? data.parcels[0] : null;
+      if (!parcel) return fields;
+
+      const directions = parcel.directions && typeof parcel.directions === 'object' ? parcel.directions : {};
+      const directionRows = normalizeSurveyDirections(directions);
+      const directionText = directionRows
+        .filter(row => row.regulation_text)
+        .map(row => row.label + ': ' + row.regulation_text)
+        .join(' | ');
+      const streetsText = directionRows
+        .map(row => {
+          const direction = directions[row.direction] || {};
+          const street = direction.street_name || direction.uses || '';
+          const width = direction.street_width_m ? ' (' + direction.street_width_m + 'م)' : '';
+          return street ? row.label + ': ' + street + width : '';
+        })
+        .filter(Boolean)
+        .join(' | ');
+      const boundariesText = directionRows
+        .map(row => {
+          const direction = directions[row.direction] || {};
+          return direction.boundary_length_m ? row.label + ': ' + direction.boundary_length_m + 'م' : '';
+        })
+        .filter(Boolean)
+        .join(' | ');
+      const parcelFields = {
+        plot_number_croquis: parcel.plot_number,
+        deed_number: parcel.deed_number,
+        croquis_land_area: parcel.area_sqm,
+        approved_financial_area: parcel.approved_financial_area_sqm,
+        facades_count: parcel.facades_count,
+        boundary_lengths: parcel.boundary_lengths || boundariesText,
+        surrounding_streets: parcel.surrounding_streets || streetsText,
+        north_direction: parcel.north_direction,
+        building_ratio_setbacks: parcel.building_ratio || parcel.setbacks,
+        max_floors_height: parcel.max_floors_height,
+        allowed_uses_restrictions: parcel.allowed_uses_restrictions,
+        croquis_expiry_date: parcel.expiry_date,
+        land_and_building_summary: parcel.summary,
+        directions_table: data.directions_table || directionRows
+      };
+      Object.entries(parcelFields).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') fields[key] = value;
+      });
+      return fields;
+    }
+
     async function extractTenantCroquisData(targetKey = 'land_documents_files') {
       const input = document.querySelector('#tenantProjectForm [data-key="land_documents_files"]');
       const files = Array.from(input?.files || []).slice(0, 2);
@@ -9090,7 +9139,8 @@
         const res = await api('POST', '/api/extract-croquis', { documents, draftId: tenantProjectData.draftId });
         if (res.success && res.extractedData) {
           const data = res.extractedData;
-          Object.entries(data).forEach(([k, v]) => {
+          const extractedFields = buildExtractedLandFieldData(data);
+          Object.entries(extractedFields).forEach(([k, v]) => {
             if (v !== undefined && v !== null && v !== '') {
               tenantProjectData[k] = v;
               const inp = document.querySelector('#tenantProjectForm [data-key="' + k + '"]');
@@ -9100,7 +9150,7 @@
           tenantProjectData.land_documents_analysis = data;
           tenantProjectData.land_documents_analysis_status = 'needs_review';
           tenantProjectData.survey_coordinates = data.survey_coordinates || [];
-          tenantProjectData.directions_table = data.directions_table || data.parcels?.[0]?.directions || {};
+          tenantProjectData.directions_table = extractedFields.directions_table || data.directions_table || data.parcels?.[0]?.directions || {};
           renderExtractedParcels(data.parcels || [], data);
           renderSurveyCoordinates(data.survey_coordinates || []);
           renderSurveyDirections(tenantProjectData.directions_table);
@@ -10157,8 +10207,7 @@
           const sizeText = size ? ' — ' + (size / 1024 / 1024).toFixed(2) + ' MB' : '';
           const status = file.status === 'pending' ? 'جاري الحفظ تلقائيًا' : 'محفوظ';
           return '<span>✓ ' + escapeHtml(file.originalName || file.name || 'ملف مستند') + escapeHtml(sizeText) + ' — ' + status + '</span>';
-        }).join('') + '</div>' +
-        '<small style="display:block;margin-top:5px;color:#36546d">بعد تحديث الصفحة سيظل هذا السجل ظاهرًا؛ اختيار الملفات نفسه لا يعادله المتصفح لأسباب أمنية.</small></div>';
+        }).join('') + '</div></div>';
     }
 
     async function uploadTenantProjectFileInput(input, key) {
