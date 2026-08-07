@@ -260,6 +260,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('addSurveyCoordinateButton', index_source)
         self.assertIn('data-key="survey_coordinates"', index_source)
         self.assertIn('data-key="directions_table"', index_source)
+        self.assertIn("f.fieldKey === 'land_documents_files'", index_source)
+        self.assertIn("analyzeButton.textContent = 'تحليل الرخصة والكروكي معًا'", index_source)
+        self.assertNotIn('analyzeLandDocumentsButton', index_source)
         self.assertIn('regulation_text', index_source)
 
     def test_project_draft_list_returns_metadata_without_payload(self):

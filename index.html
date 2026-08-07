@@ -6937,6 +6937,7 @@
           const label = document.createElement('label');
           label.textContent = tenantProjectFieldLabel(f) + (f.isRequired ? ' *' : '');
           let input;
+          let uploadStatus = null;
           if (f.fieldType === 'textarea') {
             input = document.createElement('textarea');
           } else if (f.fieldType === 'select') {
@@ -6981,10 +6982,9 @@
             input.dataset.filetype = 'pdf';
             input.dataset.projectFileType = 'land_document';
             if (f.fieldKey === 'land_documents_files') {
-              const uploadStatus = document.createElement('div');
+              uploadStatus = document.createElement('div');
               uploadStatus.id = 'landDocumentsUploadStatus';
               uploadStatus.style.cssText = 'margin-top:8px;';
-              div.appendChild(uploadStatus);
               input.addEventListener('change', () => {
                 if (input.files.length > 2) {
                   const transfer = new DataTransfer();
@@ -7058,6 +7058,19 @@
             });
           }
           div.appendChild(input);
+          if (f.fieldKey === 'land_documents_files') {
+            if (uploadStatus) {
+              div.appendChild(uploadStatus);
+              renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
+            }
+            const analyzeButton = document.createElement('button');
+            analyzeButton.type = 'button';
+            analyzeButton.className = 'btn primary small land-documents-action-btn';
+            analyzeButton.textContent = 'تحليل الرخصة والكروكي معًا';
+            analyzeButton.style.cssText = 'margin-top:10px;width:100%;';
+            analyzeButton.onclick = () => extractTenantCroquisData('land_documents_files');
+            div.appendChild(analyzeButton);
+          }
           if (f.fieldType === 'select') {
             const otherInput = document.createElement('input');
             otherInput.type = 'text';
@@ -7127,12 +7140,9 @@
         });
 
         if (sectionKey === 'land_croquis') {
-          const landAnalysisActions = document.createElement('div');
-          landAnalysisActions.className = 'tenant-field full land-documents-actions';
-          landAnalysisActions.innerHTML = '<div class="land-documents-action-row"><button type="button" class="btn primary land-documents-action-btn" id="analyzeLandDocumentsButton">تحليل الرخصة والكروكي معًا</button></div>' +
-            '<input type="hidden" data-key="land_documents_analysis" data-type="text" id="landDocumentsAnalysisData">' +
-            '<div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>';
-          landAnalysisActions.querySelector('#analyzeLandDocumentsButton').addEventListener('click', () => extractTenantCroquisData('land_documents_files'));
+          const analysisResultsField = document.createElement('div');
+          analysisResultsField.className = 'tenant-field full';
+          analysisResultsField.innerHTML = '<input type="hidden" data-key="land_documents_analysis" data-type="text" id="landDocumentsAnalysisData"><div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>';
 
           const coordinatesField = document.createElement('div');
           coordinatesField.className = 'tenant-field full';
@@ -7142,7 +7152,7 @@
           directionsField.className = 'tenant-field full';
           directionsField.innerHTML = '<input type="hidden" data-key="directions_table" data-type="text" id="directionsTableData"><div id="surveyDirectionsPanel" class="survey-directions-panel"></div>';
 
-          sectionDiv.appendChild(landAnalysisActions);
+          sectionDiv.appendChild(analysisResultsField);
           sectionDiv.appendChild(coordinatesField);
           sectionDiv.appendChild(directionsField);
         }
