@@ -251,6 +251,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('regulation_reference_file', keys)
         self.assertNotIn('croquis_file', keys)
         self.assertNotIn('building_permit_file', keys)
+        self.assertNotIn('north_direction', keys)
 
     def test_project_draft_list_returns_metadata_without_payload(self):
         client = self.app.test_client()

@@ -602,7 +602,7 @@ FIELD_SECTIONS = [
 
 DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}
 
-REMOVED_PREBUILT_FIELDS = {'land_image_file', 'regulation_reference_file', 'croquis_file', 'building_permit_file'}
+REMOVED_PREBUILT_FIELDS = {'land_image_file', 'regulation_reference_file', 'croquis_file', 'building_permit_file', 'north_direction'}
 
 PREBUILT_FIELDS = [
     {'key': 'project_name', 'label': 'اسم المشروع', 'type': 'text', 'required': True, 'section_key': 'basic', 'ai_hint': 'اسم المشروع الرئيسي', 'sort_order': 1},
@@ -620,7 +620,6 @@ PREBUILT_FIELDS = [
     {'key': 'croquis_land_area', 'label': 'مساحة الأرض حسب الكروكي (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة الإجمالية للأرض بالمتر المربع حسب الكروكي', 'sort_order': 13},
     {'key': 'approved_financial_area', 'label': 'المساحة المعتمدة للدراسة المالية (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة المعتمدة بعد أي استقطاعات لنقلها للمالية (لا يغيرها AI)', 'sort_order': 14},
     {'key': 'boundary_lengths', 'label': 'أطوال الأضلاع وحدود الأرض', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أطوال أضلاع الحدود (شمال، جنوب، شرق، غرب)', 'sort_order': 15},
-    {'key': 'north_direction', 'label': 'اتجاه الشمال والاتجاهات', 'type': 'select', 'options': ['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرقي', 'شمال غربي', 'جنوب شرقي', 'جنوب غربي', 'أخرى'], 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الاتجاهات الجغرافية للأرض', 'sort_order': 16},
     {'key': 'surrounding_streets', 'label': 'الشوارع المحيطة وعروضها', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'أسماء الشوارع المحيطة وعرض كل شارع بالمتر', 'sort_order': 17},
     {'key': 'facades_count', 'label': 'عدد الواجهات', 'type': 'number', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد واجهات القطعة على الشوارع (رقم خالص: 1, 2, 3, 4)', 'sort_order': 18},
     {'key': 'building_ratio_setbacks', 'label': 'نسبة البناء والتغطية والارتدادات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'نسبة التغطية المسموحة والارتدادات النظامية', 'sort_order': 19},

@@ -2583,6 +2583,80 @@
       font-size: 12px;
     }
 
+    .survey-directions-panel {
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid #cbdce7;
+      border-radius: 14px;
+      background: #fff;
+      direction: rtl;
+    }
+
+    .survey-directions-title {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--p);
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .survey-directions-table-wrap {
+      overflow-x: auto;
+      border: 1px solid #d8e2e9;
+      border-radius: 10px;
+    }
+
+    .survey-directions-table {
+      width: 100%;
+      min-width: 760px;
+      table-layout: fixed;
+      border-collapse: collapse;
+      direction: rtl;
+    }
+
+    .survey-directions-table th,
+    .survey-directions-table td {
+      padding: 9px 8px;
+      border-bottom: 1px solid #e5edf2;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    .survey-directions-table th {
+      background: #397494;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .survey-directions-table th:nth-child(1),
+    .survey-directions-table td:nth-child(1) { width: 14%; }
+    .survey-directions-table th:nth-child(2),
+    .survey-directions-table td:nth-child(2) { width: 34%; }
+    .survey-directions-table th:nth-child(3),
+    .survey-directions-table td:nth-child(3),
+    .survey-directions-table th:nth-child(4),
+    .survey-directions-table td:nth-child(4) { width: 20%; }
+    .survey-directions-table th:nth-child(5),
+    .survey-directions-table td:nth-child(5) { width: 12%; }
+
+    .survey-directions-table input {
+      width: 100%;
+      min-width: 0;
+      padding: 8px 6px;
+      border: 1px solid #cbdce7;
+      border-radius: 8px;
+      box-sizing: border-box;
+      text-align: right;
+    }
+
+    .survey-directions-table td:first-child {
+      color: var(--p);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
     .location-table-hint {
       font-size: 11px;
       color: var(--muted);
@@ -6384,6 +6458,7 @@
         renderExtractedParcels(source.land_documents_analysis.parcels, source.land_documents_analysis);
       }
       renderSurveyCoordinates(source.survey_coordinates || source.land_documents_analysis?.survey_coordinates || []);
+      renderSurveyDirections(source.directions_table || source.land_documents_analysis?.directions_table || source.land_documents_analysis?.parcels?.[0]?.directions || {});
 
       form.querySelectorAll('[data-key]').forEach(input => {
         const key = input.dataset.key;
@@ -7061,8 +7136,10 @@
           landAnalysisActions.innerHTML = '<div class="land-documents-action-row"><button type="button" class="btn primary land-documents-action-btn" id="analyzeLandDocumentsButton">تحليل الرخصة والكروكي معًا</button></div>' +
             '<input type="hidden" data-key="land_documents_analysis" data-type="text" id="landDocumentsAnalysisData">' +
             '<input type="hidden" data-key="survey_coordinates" data-type="text" id="surveyCoordinatesData">' +
+            '<input type="hidden" data-key="directions_table" data-type="text" id="directionsTableData">' +
             '<div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>' +
-            '<div id="surveyCoordinatesPanel"></div>';
+            '<div id="surveyCoordinatesPanel"></div>' +
+            '<div id="surveyDirectionsPanel" class="survey-directions-panel"></div>';
           landAnalysisActions.querySelector('#analyzeLandDocumentsButton').addEventListener('click', () => extractTenantCroquisData('land_documents_files'));
           sectionDiv.appendChild(landAnalysisActions);
         }
@@ -7121,6 +7198,7 @@
       if (initialSection) showSection(initialSection.dataset.section, true);
       updateTenantPolygonControls();
       renderSurveyCoordinates(tenantProjectData.survey_coordinates || []);
+      renderSurveyDirections(tenantProjectData.directions_table || {});
       renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
     }
 
@@ -9009,8 +9087,10 @@
           tenantProjectData.land_documents_analysis = data;
           tenantProjectData.land_documents_analysis_status = 'needs_review';
           tenantProjectData.survey_coordinates = data.survey_coordinates || [];
+          tenantProjectData.directions_table = data.directions_table || data.parcels?.[0]?.directions || {};
           renderExtractedParcels(data.parcels || [], data);
           renderSurveyCoordinates(data.survey_coordinates || []);
+          renderSurveyDirections(tenantProjectData.directions_table);
           updateLoaderProgress(100, 'تم تحليل الملفات معًا. راجع كل قطعة والاتجاهات ثم اعتمد البيانات.');
           toast('تم تحليل ملفات الأرض والكروكي والرخصة معًا. راجع النتائج قبل الاعتماد.');
           triggerAutoSaveDraft();
@@ -9107,6 +9187,70 @@
       const hidden = document.getElementById('surveyCoordinatesData');
       if (hidden) hidden.value = JSON.stringify(normalized);
       tenantProjectData.survey_coordinates = normalized;
+    }
+
+    function normalizeSurveyDirections(value) {
+      const labels = { north: 'شمال', south: 'جنوب', east: 'شرق', west: 'غرب' };
+      const aliases = { 'شمال': 'north', 'جنوب': 'south', 'شرق': 'east', 'غرب': 'west' };
+      const rows = Array.isArray(value) ? value : Object.entries(value || {}).map(([direction, data]) => ({ direction, ...(data || {}) }));
+      const byDirection = Object.fromEntries(rows.map(row => {
+        const key = String(row.direction || row.key || '').toLowerCase();
+        return [aliases[key] || key, row];
+      }));
+      return Object.entries(labels).map(([direction, label]) => {
+        const row = byDirection[direction] || {};
+        return {
+          direction,
+          label,
+          street_name: row.street_name || row.street || row.boundary || '',
+          street_width_m: row.street_width_m ?? row.width_m ?? '',
+          boundary_length_m: row.boundary_length_m ?? row.length_m ?? '',
+          uses: row.uses || row.notes || ''
+        };
+      });
+    }
+
+    function collectSurveyDirections() {
+      return Array.from(document.querySelectorAll('#surveyDirectionsPanel tbody tr')).map(row => ({
+        direction: row.dataset.direction || '',
+        street_name: row.querySelector('[data-direction-field="street_name"]')?.value?.trim() || '',
+        street_width_m: row.querySelector('[data-direction-field="street_width_m"]')?.value?.trim() || '',
+        boundary_length_m: row.querySelector('[data-direction-field="boundary_length_m"]')?.value?.trim() || '',
+        uses: row.querySelector('[data-direction-field="uses"]')?.value?.trim() || '',
+        source: 'regulation_table'
+      }));
+    }
+
+    function syncSurveyDirections() {
+      const rows = collectSurveyDirections();
+      tenantProjectData.directions_table = rows;
+      const hidden = document.getElementById('directionsTableData');
+      if (hidden) hidden.value = JSON.stringify(rows);
+      triggerAutoSaveDraft();
+    }
+
+    function renderSurveyDirections(value) {
+      const panel = document.getElementById('surveyDirectionsPanel');
+      if (!panel) return;
+      const rows = normalizeSurveyDirections(value);
+      panel.innerHTML = '<strong class="survey-directions-title">جدول الاتجاهات</strong>' +
+        '<div class="survey-directions-table-wrap"><table class="survey-directions-table"><thead><tr><th>الاتجاه</th><th>الشارع / الحد</th><th>عرض الشارع</th><th>طول الحد</th><th>ملاحظات</th></tr></thead><tbody></tbody></table></div>';
+      const tbody = panel.querySelector('tbody');
+      rows.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.dataset.direction = row.direction;
+        const cell = (field, value, placeholder) => '<td><input type="text" data-direction-field="' + field + '" value="' + escapeHtml(value ?? '') + '" placeholder="' + placeholder + '"></td>';
+        tr.innerHTML = '<td>' + escapeHtml(row.label) + '</td>' +
+          cell('street_name', row.street_name, 'اسم الشارع أو الحد') +
+          cell('street_width_m', row.street_width_m, 'م') +
+          cell('boundary_length_m', row.boundary_length_m, 'م') +
+          cell('uses', row.uses, 'ملاحظة');
+        tr.querySelectorAll('input').forEach(input => input.addEventListener('input', syncSurveyDirections));
+        tbody.appendChild(tr);
+      });
+      const hidden = document.getElementById('directionsTableData');
+      if (hidden) hidden.value = JSON.stringify(rows);
+      tenantProjectData.directions_table = rows;
     }
 
     function toggleApproveCroquisData() {
