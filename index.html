@@ -2608,7 +2608,7 @@
 
     .survey-directions-table {
       width: 100%;
-      min-width: 760px;
+      min-width: 560px;
       table-layout: fixed;
       border-collapse: collapse;
       direction: rtl;
@@ -2618,7 +2618,7 @@
     .survey-directions-table td {
       padding: 9px 8px;
       border-bottom: 1px solid #e5edf2;
-      text-align: center;
+      text-align: right;
       vertical-align: middle;
     }
 
@@ -2630,25 +2630,23 @@
       white-space: nowrap;
     }
 
-    .survey-directions-table th:nth-child(1),
-    .survey-directions-table td:nth-child(1) { width: 14%; }
-    .survey-directions-table th:nth-child(2),
-    .survey-directions-table td:nth-child(2) { width: 34%; }
-    .survey-directions-table th:nth-child(3),
-    .survey-directions-table td:nth-child(3),
-    .survey-directions-table th:nth-child(4),
-    .survey-directions-table td:nth-child(4) { width: 20%; }
-    .survey-directions-table th:nth-child(5),
-    .survey-directions-table td:nth-child(5) { width: 12%; }
+    .survey-directions-table th:first-child,
+    .survey-directions-table td:first-child { width: 18%; text-align: center; }
+    .survey-directions-table th:last-child,
+    .survey-directions-table td:last-child { width: 82%; }
 
-    .survey-directions-table input {
+    .survey-directions-table textarea {
       width: 100%;
+      min-height: 54px;
       min-width: 0;
-      padding: 8px 6px;
+      padding: 8px 10px;
       border: 1px solid #cbdce7;
       border-radius: 8px;
       box-sizing: border-box;
+      resize: vertical;
       text-align: right;
+      line-height: 1.6;
+      font-family: inherit;
     }
 
     .survey-directions-table td:first-child {
@@ -9199,13 +9197,16 @@
       }));
       return Object.entries(labels).map(([direction, label]) => {
         const row = byDirection[direction] || {};
+        const regulationText = row.regulation_text || row.regulation || row.text || '';
+        const fallbackText = [
+          row.boundary_length_m ?? row.length_m ? 'بطول ' + (row.boundary_length_m ?? row.length_m) + 'م' : '',
+          row.street_name || row.street || row.boundary || '',
+          row.uses || row.notes || ''
+        ].filter(Boolean).join(' — ');
         return {
           direction,
           label,
-          street_name: row.street_name || row.street || row.boundary || '',
-          street_width_m: row.street_width_m ?? row.width_m ?? '',
-          boundary_length_m: row.boundary_length_m ?? row.length_m ?? '',
-          uses: row.uses || row.notes || ''
+          regulation_text: regulationText || fallbackText
         };
       });
     }
@@ -9213,10 +9214,7 @@
     function collectSurveyDirections() {
       return Array.from(document.querySelectorAll('#surveyDirectionsPanel tbody tr')).map(row => ({
         direction: row.dataset.direction || '',
-        street_name: row.querySelector('[data-direction-field="street_name"]')?.value?.trim() || '',
-        street_width_m: row.querySelector('[data-direction-field="street_width_m"]')?.value?.trim() || '',
-        boundary_length_m: row.querySelector('[data-direction-field="boundary_length_m"]')?.value?.trim() || '',
-        uses: row.querySelector('[data-direction-field="uses"]')?.value?.trim() || '',
+        regulation_text: row.querySelector('[data-direction-field="regulation_text"]')?.value?.trim() || '',
         source: 'regulation_table'
       }));
     }
@@ -9234,18 +9232,14 @@
       if (!panel) return;
       const rows = normalizeSurveyDirections(value);
       panel.innerHTML = '<strong class="survey-directions-title">جدول الاتجاهات</strong>' +
-        '<div class="survey-directions-table-wrap"><table class="survey-directions-table"><thead><tr><th>الاتجاه</th><th>الشارع / الحد</th><th>عرض الشارع</th><th>طول الحد</th><th>ملاحظات</th></tr></thead><tbody></tbody></table></div>';
+        '<div class="survey-directions-table-wrap"><table class="survey-directions-table"><thead><tr><th>الاتجاه</th><th>بموجب التنظيم</th></tr></thead><tbody></tbody></table></div>';
       const tbody = panel.querySelector('tbody');
       rows.forEach(row => {
         const tr = document.createElement('tr');
         tr.dataset.direction = row.direction;
-        const cell = (field, value, placeholder) => '<td><input type="text" data-direction-field="' + field + '" value="' + escapeHtml(value ?? '') + '" placeholder="' + placeholder + '"></td>';
         tr.innerHTML = '<td>' + escapeHtml(row.label) + '</td>' +
-          cell('street_name', row.street_name, 'اسم الشارع أو الحد') +
-          cell('street_width_m', row.street_width_m, 'م') +
-          cell('boundary_length_m', row.boundary_length_m, 'م') +
-          cell('uses', row.uses, 'ملاحظة');
-        tr.querySelectorAll('input').forEach(input => input.addEventListener('input', syncSurveyDirections));
+          '<td><textarea data-direction-field="regulation_text" rows="2" placeholder="بطول ... يحده ...">' + escapeHtml(row.regulation_text || '') + '</textarea></td>';
+        tr.querySelector('textarea').addEventListener('input', syncSurveyDirections);
         tbody.appendChild(tr);
       });
       const hidden = document.getElementById('directionsTableData');
