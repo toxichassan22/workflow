@@ -4,6 +4,7 @@ The suite uses a temporary SQLite database and never calls Google or an AI API.
 """
 
 import os
+import re
 import sys
 import tempfile
 import json
@@ -501,6 +502,36 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const modeFlags=projectModeFlags();', index_source)
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
+
+    def test_components_live_only_inside_the_financial_study(self):
+        """The standalone components section duplicated id="componentsTable", and duplicate ids
+        make querySelector return only the first — so the financial readers were bound to the
+        wizard table and its mismatched columns."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        # Exactly one element may own the id.
+        self.assertEqual(len(re.findall(r'id="componentsTable"', index_source)), 1)
+
+        # The standalone section and its helpers are gone.
+        for gone in ('addComponentsTable', 'addComponentRow', 'recalcComponents',
+                     'componentsTableBody', 'components_table_data', 'section-components'):
+            self.assertNotIn(gone, index_source, f'{gone} should have been removed')
+
+        # The financial study still owns the richer table and its readers.
+        self.assertIn('<table id="componentsTable">', index_source)
+        self.assertIn('function addComponent(d={})', index_source)
+        self.assertIn('function getComponentRowsData()', index_source)
+        self.assertIn('function validateComponentAreas()', index_source)
+        self.assertIn("data-field=\"investmentModel\"", index_source)
+
+        # Renamed section.
+        self.assertIn("createProjectSectionHeader('section-financial-calc', 'الدراسة المالية والمؤشرات')",
+                      index_source)
+        self.assertNotIn('الدراسة المالية المبسطة', index_source)
+
+        # The backend still reports on the financial components table.
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn("('3', 'مكونات المشروع', 'componentsTable')", app_source)
 
     def test_financial_validation_requires_only_enabled_optional_inputs(self):
         errors = self.application_module.validate_financial_model({

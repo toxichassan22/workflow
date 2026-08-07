@@ -6488,14 +6488,6 @@
         }
       });
 
-      const componentRows = parseStoredProjectTable(source.components_table_data);
-      const componentsBody = document.getElementById('componentsTableBody');
-      if (componentsBody && componentRows.length) {
-        componentsBody.innerHTML = '';
-        componentRows.forEach(row => addComponentRow(row));
-      }
-      if (componentsBody) recalcComponents();
-
       const timelineRows = parseStoredProjectTable(source.timeline_table_data || source.timelineRows);
       const timelineBody = document.getElementById('timelineTableBody');
       if (timelineBody && timelineRows.length) {
@@ -7246,11 +7238,8 @@
         (locationSection || form).appendChild(previewDiv);
       }
 
-      // S3: Add Components Table (العناصر/المساحة المبنية/المساحة التأجيرية/الإيجار)
-      addComponentsTable(form);
-      // S4: Add Financial Calculations Table
+      // Components are part of the financial study; there is no separate section for them.
       addFinancialCalculations(form);
-      // S5: Add Timeline Table
       addTimelineTable(form);
       const projectSections = Array.from(form.querySelectorAll('.tenant-form-section[data-section]'));
       populateProjectSidebar(projectSections);
@@ -7273,95 +7262,12 @@
     }
 
     // S3: Components Table
-    function addComponentsTable(form) {
-      const div = document.createElement('div');
-      div.className = 'tenant-form-section';
-      div.id = 'section-components';
-      div.dataset.section = 'section-components';
-      div.innerHTML = `
-        <h3 class="tenant-section-title">جدول المكونات والعناصر</h3>
-        <div class="fin-table-wrap">
-          <table class="fin-table" id="componentsTable">
-            <thead>
-              <tr>
-                <th style="width:30px">#</th>
-                <th>العنصر</th>
-                <th>العدد</th>
-                <th>المساحة المبنية (م²)</th>
-                <th>المساحة التأجيرية (م²)</th>
-                <th>الإيجار/المتر/سنة (ر.س)</th>
-                <th style="width:40px"></th>
-              </tr>
-            </thead>
-            <tbody id="componentsTableBody"></tbody>
-            <tfoot>
-              <tr class="total-row">
-                <td colspan="3" style="text-align:center;font-weight:800">الإجمالي</td>
-                <td id="totalBuiltArea">0</td>
-                <td id="totalRentalArea">0</td>
-                <td id="totalAnnualRevenue">0</td>
-                <td></td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        <button type="button" class="btn ghost small" style="margin-top:10px" onclick="addComponentRow()">+ إضافة عنصر</button>
-        <input type="hidden" data-key="components_table_data" data-type="text" id="componentsTableData">
-      `;
-      div.querySelector('.tenant-section-title')?.replaceWith(
-        createProjectSectionHeader('section-components', 'جدول المكونات والعناصر')
-      );
-      form.appendChild(div);
-      addComponentRow(); // Start with one empty row
-    }
-
-    function addComponentRow(data = {}) {
-      const tbody = document.getElementById('componentsTableBody');
-      if (!tbody) return;
-      const idx = tbody.rows.length + 1;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td style="text-align:center;color:#888">${idx}</td>
-        <td><input type="text" placeholder="مثال: فيلا standalone" class="comp-name" value="${data.name || ''}"></td>
-        <td><input type="number" placeholder="0" class="comp-count" value="${data.count || ''}" onchange="recalcComponents()"></td>
-        <td><input type="number" placeholder="0" class="comp-built" value="${data.builtArea || ''}" onchange="recalcComponents()"></td>
-        <td><input type="number" placeholder="0" class="comp-rental" value="${data.rentalArea || ''}" onchange="recalcComponents()"></td>
-        <td><input type="number" placeholder="0" class="comp-price" value="${data.pricePerSqm || ''}" onchange="recalcComponents()"></td>
-        <td><button type="button" class="btn danger small" onclick="this.closest('tr').remove();recalcComponents()" style="padding:4px 8px;font-size:11px">×</button></td>
-      `;
-      tbody.appendChild(tr);
-      recalcComponents();
-    }
-
-    function recalcComponents() {
-      let totalBuilt = 0, totalRental = 0, totalRevenue = 0;
-      document.querySelectorAll('#componentsTableBody tr').forEach(tr => {
-        const count = parseFloat(tr.querySelector('.comp-count')?.value) || 0;
-        const built = parseFloat(tr.querySelector('.comp-built')?.value) || 0;
-        const rental = parseFloat(tr.querySelector('.comp-rental')?.value) || 0;
-        const price = parseFloat(tr.querySelector('.comp-price')?.value) || 0;
-        totalBuilt += count * built;
-        totalRental += count * rental;
-        totalRevenue += count * rental * price;
-      });
-      const fmt = n => n.toLocaleString('ar-SA');
-      document.getElementById('totalBuiltArea').textContent = fmt(totalBuilt);
-      document.getElementById('totalRentalArea').textContent = fmt(totalRental);
-      document.getElementById('totalAnnualRevenue').textContent = fmt(totalRevenue);
-      // Save to hidden input
-      const data = [];
-      document.querySelectorAll('#componentsTableBody tr').forEach(tr => {
-        data.push({
-          name: tr.querySelector('.comp-name')?.value || '',
-          count: tr.querySelector('.comp-count')?.value || '',
-          builtArea: tr.querySelector('.comp-built')?.value || '',
-          rentalArea: tr.querySelector('.comp-rental')?.value || '',
-          pricePerSqm: tr.querySelector('.comp-price')?.value || ''
-        });
-      });
-      const hidden = document.getElementById('componentsTableData');
-      if (hidden) hidden.value = JSON.stringify(data);
-    }
+    // The standalone "جدول المكونات والعناصر" section was removed: the financial study already
+    // owns a richer components table (use type, units, unit area, built vs revenue area,
+    // investment model). Worse, both tables claimed the same DOM id, and duplicate ids make
+    // querySelector return only the first — so every financial reader (addComponent,
+    // getComponentRowsData, validateComponentAreas) was operating on the wizard table and its
+    // mismatched columns. Keeping a single table removes that whole class of bug.
 
     // S4: Financial Study Model (Extracted from THE-VIEW-Financial-Model-FINAL-v2.html)
     const nf = new Intl.NumberFormat('en-US');
@@ -7439,8 +7345,8 @@
       div.id = 'section-financial-calc';
       div.dataset.section = 'section-financial-calc';
       div.innerHTML = `
-        <h3 class="tenant-section-title">الدراسة المالية المبسطة</h3>
-        <p class="hint">نموذج موحد يجمع الوحدات البيعية والوحدات المؤجرة يوميًا وشهريًا وسنويًا، ويوزع التكاليف والمبيعات والتمويل على سنوات المشروع تلقائيًا.</p>
+        <h3 class="tenant-section-title">الدراسة المالية والمؤشرات</h3>
+        <p class="hint">نموذج موحد يجمع مكونات المشروع والوحدات البيعية والوحدات المؤجرة يوميًا وشهريًا وسنويًا، ويوزع التكاليف والمبيعات والتمويل على سنوات المشروع تلقائيًا.</p>
 
         <div class="finance-block" id="unitNatureBlock">
           <h3>1. طبيعة وحدات المشروع</h3>
@@ -7751,7 +7657,7 @@
       `;
 
       div.querySelector('.tenant-section-title')?.replaceWith(
-        createProjectSectionHeader('section-financial-calc', 'الدراسة المالية المبسطة والمؤشرات')
+        createProjectSectionHeader('section-financial-calc', 'الدراسة المالية والمؤشرات')
       );
       form.appendChild(div);
 
@@ -10279,22 +10185,7 @@
         filled++;
       });
 
-      // Fill components table
-      const componentsData = [
-        { name: 'فيلا Standalone', count: '40', builtArea: '450', rentalArea: '380', pricePerSqm: '850' },
-        { name: 'فيلا Townhouse', count: '50', builtArea: '380', rentalArea: '320', pricePerSqm: '700' },
-        { name: 'فيلا Duplex', count: '30', builtArea: '320', rentalArea: '270', pricePerSqm: '600' },
-        { name: 'مرافق ترفيهية', count: '1', builtArea: '5000', rentalArea: '0', pricePerSqm: '0' },
-        { name: 'مسبح أولمبي', count: '1', builtArea: '2000', rentalArea: '0', pricePerSqm: '0' },
-        { name: 'نادي صحي', count: '1', builtArea: '1500', rentalArea: '0', pricePerSqm: '0' },
-      ];
-      const tbody = document.getElementById('componentsTableBody');
-      if (tbody) {
-        tbody.innerHTML = '';
-        componentsData.forEach(d => addComponentRow(d));
-        recalcComponents();
-        filled += componentsData.length;
-      }
+      // Components now live only inside the financial study, which seeds its own default rows.
 
       // Trigger financial recalc
       const finCalcDone = typeof recalcFinancials === 'function';
