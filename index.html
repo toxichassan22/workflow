@@ -9149,6 +9149,9 @@
           });
           tenantProjectData.land_documents_analysis = data;
           tenantProjectData.land_documents_analysis_status = 'needs_review';
+          if (Array.isArray(data.warnings) && data.warnings.length) {
+            toast('اكتمل التحليل مع ملاحظات: ' + data.warnings.join(' | '));
+          }
           tenantProjectData.survey_coordinates = data.survey_coordinates || [];
           tenantProjectData.directions_table = extractedFields.directions_table || data.directions_table || data.parcels?.[0]?.directions || {};
           renderExtractedParcels(data.parcels || [], data);

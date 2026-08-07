@@ -113,6 +113,22 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual([item['category'] for item in result], ['التسوق', 'التعليم', 'الصحة'])
         self.assertEqual(result[1]['duration_minutes'], 5)
 
+    def test_pdf_documents_are_rendered_to_vision_images_without_text_extraction(self):
+        import fitz
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 72), 'Visual table sample')
+        pdf_data = document.tobytes()
+        document.close()
+        data_uri = 'data:application/pdf;base64,' + __import__('base64').b64encode(pdf_data).decode('ascii')
+        parts, warnings, page_count = self.application_module._prepare_document_vision_parts({
+            'filename': 'scan.pdf', 'mimeType': 'application/pdf', 'fileData': data_uri
+        })
+        self.assertEqual(page_count, 1)
+        self.assertEqual(warnings, [])
+        self.assertTrue(any(part.get('type') == 'image_url' for part in parts))
+        self.assertFalse(any(part.get('type') == 'file' for part in parts))
+
     def test_health_reports_deployment_marker(self):
         marker = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
         marker.write(json.dumps({'commit': '492d856c7fa', 'deployed_at': '2026-08-06T22:45:00Z', 'source': 'github'}))

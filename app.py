@@ -5085,6 +5085,82 @@ def search_jeddah_official_regulations_pdf(query_text=""):
         print(f"[JEDDAH REGULATION PDF SEARCH ERROR] {e}")
         return ""
 
+PDF_VISION_DPI = int(os.environ.get('PDF_VISION_DPI', '300'))
+PDF_VISION_MAX_PAGES = int(os.environ.get('PDF_VISION_MAX_PAGES', '20'))
+
+
+def _decode_data_uri(data_uri):
+    if not isinstance(data_uri, str) or not data_uri.strip():
+        return None
+    payload = data_uri.split(',', 1)[1] if ',' in data_uri else data_uri
+    try:
+        return base64.b64decode(payload, validate=False)
+    except (TypeError, ValueError):
+        return None
+
+
+def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pages=PDF_VISION_MAX_PAGES):
+    """Render PDF pages to image data URIs for vision models without OCR/text extraction."""
+    pdf_bytes = _decode_data_uri(file_data)
+    if not pdf_bytes:
+        raise ValueError(f'Unable to decode PDF: {filename}')
+    try:
+        import fitz
+    except ImportError as exc:
+        raise RuntimeError('PyMuPDF is required for visual PDF analysis') from exc
+
+    pages = []
+    truncated = False
+    document = fitz.open(stream=pdf_bytes, filetype='pdf')
+    try:
+        page_count = len(document)
+        limit = min(page_count, max(1, int(max_pages)))
+        truncated = page_count > limit
+        scale = max(1.0, float(dpi) / 72.0)
+        matrix = fitz.Matrix(scale, scale)
+        for page_index in range(limit):
+            pixmap = document[page_index].get_pixmap(matrix=matrix, alpha=False)
+            encoded = base64.b64encode(pixmap.tobytes('png')).decode('ascii')
+            pages.append({
+                'page_number': page_index + 1,
+                'image_data': f'data:image/png;base64,{encoded}'
+            })
+    finally:
+        document.close()
+
+    return pages, page_count, truncated
+
+
+def _prepare_document_vision_parts(document):
+    """Prepare image parts for a document while preserving source/page metadata."""
+    file_data = document.get('fileData') or ''
+    filename = document.get('filename') or 'document'
+    mime_type = str(document.get('mimeType') or '').lower()
+    if 'application/pdf' not in mime_type and not file_data.startswith('data:application/pdf'):
+        return [{
+            'type': 'image_url',
+            'image_url': {'url': file_data, 'detail': 'high'}
+        }], [], 1
+
+    pages, page_count, truncated = _render_pdf_pages_for_vision(file_data, filename)
+    warnings = []
+    if truncated:
+        warnings.append(f'{filename}: تم تحليل أول {len(pages)} صفحة من أصل {page_count}')
+    parts = [
+        {
+            'type': 'text',
+            'text': f'مصدر الصفحة: {filename} — الصفحة {page["page_number"]} من {page_count}'
+        }
+        for page in pages
+    ]
+    expanded = []
+    for page, text_part in zip(pages, parts):
+        expanded.extend([
+            text_part,
+            {'type': 'image_url', 'image_url': {'url': page['image_data'], 'detail': 'high'}}
+        ])
+    return expanded, warnings, page_count
+
 
 def _normalize_land_document_result(resp_json, text_content=''):
     """Normalize multi-parcel document output while keeping legacy flat fields compatible."""
@@ -5295,19 +5371,28 @@ def api_extract_croquis():
         )
 
         raw_resp = ""
+        vision_warnings = []
         if OPENROUTER_KEY:
+            vision_parts = []
+            document_descriptions = []
+            for doc in documents:
+                try:
+                    parts, warnings, page_count = _prepare_document_vision_parts(doc)
+                    vision_parts.extend(parts)
+                    vision_warnings.extend(warnings)
+                    document_descriptions.append(f"- {doc['key']}: {doc['filename']} ({doc['mimeType']}, {page_count} صفحة/صورة)")
+                except Exception as render_error:
+                    print(f"[EXTRACT LAND DOCUMENTS RENDER ERROR] {doc['filename']}: {render_error}")
+                    vision_warnings.append(f"{doc['filename']}: تعذر تجهيز الصفحات بصريًا؛ أُرسل الملف الأصلي كحل احتياطي")
+                    vision_parts.append({"type": "file", "file": {"filename": doc['filename'], "file_data": doc['fileData']}})
+                    document_descriptions.append(f"- {doc['key']}: {doc['filename']} ({doc['mimeType']})")
+
             user_content = [{
                 "type": "text",
-                "text": "حلل الملفات التالية معًا، واكتب مفتاح key كمصدر سياقي لكل ملف. أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude.\n"
+                "text": "حلل الملفات التالية معًا بصريًا. ملفات PDF أُرسلت على هيئة صور صفحات عالية الدقة؛ لا تعتمد على OCR أو نص مستخرج، واقرأ الجداول من الصورة نفسها. أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude.\n"
                         f"مقتطفات مرجع اللوائح المتاحة:\n{jeddah_pdf_context}\n\n"
-                        + "\n".join(f"- {doc['key']}: {doc['filename']} ({doc['mimeType']})" for doc in documents)
-            }]
-            for doc in documents:
-                doc_data = doc['fileData']
-                if 'application/pdf' in doc_data or doc['mimeType'] == 'application/pdf':
-                    user_content.append({"type": "file", "file": {"filename": doc['filename'], "file_data": doc_data}})
-                else:
-                    user_content.append({"type": "image_url", "image_url": {"url": doc_data, "detail": "high"}})
+                        + "\n".join(document_descriptions)
+            }] + vision_parts
 
             try:
                 res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=5000, model="google/gemini-3.6-flash")
@@ -5321,6 +5406,8 @@ def api_extract_croquis():
 
         resp_json = parse_json_object(raw_resp) if raw_resp else {}
         resp_json = _normalize_land_document_result(resp_json, raw_resp)
+        if vision_warnings:
+            resp_json['warnings'] = vision_warnings
 
         # Check if there are actual non-empty values extracted
         parcels = resp_json.get('parcels') if isinstance(resp_json, dict) else []
