@@ -77,6 +77,25 @@ assertion deliberately, not reflexively.
   model so it records disagreements instead of silently picking a value; they surface in the
   narrative summary.
 
+## Token budget for the land analysis
+
+`max_tokens` cannot simply be raised: **OpenRouter reserves the whole cap against the account
+balance**, so an over-large value is refused with `402 "You requested up to N tokens, but can only
+afford M"` — the call returns no content at all, even though the real answer would have been short.
+Too low a cap truncates the JSON instead, and a truncated response is discarded whole
+(partial parcel data is worse than none). Both ends therefore look identical to the user: every
+field keeps its old value, i.e. "re-analysis did nothing".
+
+`_call_land_analysis_model()` negotiates this: it starts at `LAND_ANALYSIS_MAX_TOKENS` (12000,
+verified affordable) and walks the cap down when the provider quotes an affordable figure.
+`LAND_ANALYSIS_MIN_TOKENS`, `LAND_ANALYSIS_MODEL` are also env-overridable. Failures return a named
+`failureReason` (`truncated` / `invalid_json` / `insufficient_credit` / `empty_response`) plus the
+raw `providerError`, and the frontend states that no field was updated. Keep it that way — a silent
+rejection is indistinguishable from a broken button.
+
+When enlarging the prompt's expected output, re-check the truncation risk: Arabic costs roughly
+two to three tokens per word, and the coordinates table can add dozens of rows.
+
 ## Regulation PDFs (الاشتراطات)
 
 - Expected files in the repo root: `اشتراطات1.pdf` (executive regulations, 199 p) and

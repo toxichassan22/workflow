@@ -132,9 +132,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertNotIn('أُرسل الملف الأصلي كحل احتياطي', app_source)
         self.assertIn('finish_reason == \'length\'', app_source)
-        # The cap moved to LAND_ANALYSIS_MAX_TOKENS: 12000 truncated the enriched prompt, and a
-        # truncated response is discarded entirely, which looked like a silent no-op.
-        self.assertIn('max_tokens=LAND_ANALYSIS_MAX_TOKENS', app_source)
+        # The cap is negotiated in _call_land_analysis_model: too low truncates the JSON, too high
+        # is refused outright because the provider reserves max_tokens against the balance.
+        self.assertIn('_call_land_analysis_model(\n', app_source)
+        self.assertIn('LAND_ANALYSIS_MAX_TOKENS)', app_source)
 
     def test_health_reports_deployment_marker(self):
         marker = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
@@ -674,14 +675,9 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_truncated_analysis_is_rejected_with_an_explicit_reason(self):
         """A rejected extraction changes no field, so it must not look like a silent no-op."""
         module = self.application_module
-        # The cap has to be generous: the prompt asks for a multi-paragraph Arabic narrative,
-        # sourced building rules and a full coordinates table.
-        self.assertGreaterEqual(module.LAND_ANALYSIS_MAX_TOKENS, 24000)
-
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
-        self.assertIn('max_tokens=LAND_ANALYSIS_MAX_TOKENS', source)
-        self.assertNotIn('max_tokens=12000', source)
-        for reason in ('truncated', 'empty_response', 'invalid_json'):
+        self.assertIn('_call_land_analysis_model(', source)
+        for reason in ('truncated', 'invalid_json', 'insufficient_credit'):
             self.assertIn(f"'failureReason': '{reason}'", source)
         self.assertIn('ولهذا لم تتغير البيانات', source)
 
@@ -690,6 +686,42 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('res.failureReason', index_source)
         self.assertIn("' حقلًا. راجع النتائج قبل الاعتماد.'", index_source)
 
+    def test_land_analysis_lowers_the_cap_when_the_provider_cannot_afford_it(self):
+        """OpenRouter reserves max_tokens against the balance, so an over-large cap is refused
+        with 402 even when the real answer would be short."""
+        module = self.application_module
+        # A default the account can actually pay for; the retry only ever walks the cap down.
+        self.assertLessEqual(module.LAND_ANALYSIS_MAX_TOKENS, 16000)
+
+        refusal = {'error': {'code': 402, 'message': (
+            'This request requires more credits, or fewer max_tokens. '
+            'You requested up to 60000 tokens, but can only afford 25898')}}
+        success = {'choices': [{'message': {'content': '{"ok":1}'}, 'finish_reason': 'stop'}]}
+        caps = []
+
+        def fake_call(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300):
+            caps.append(max_tokens)
+            return refusal if max_tokens > 25898 else success
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_call):
+            res, cap, error = module._call_land_analysis_model('s', 'u', 60000)
+        self.assertTrue(module._has_chat_choices(res))
+        self.assertEqual(error, '')
+        self.assertEqual(caps[0], 60000)
+        self.assertLessEqual(caps[1], 25898)
+        self.assertLess(cap, 60000)
+
+        # A failure that is not about credit must be reported, not retried in a loop.
+        with patch.object(module, 'call_openrouter_chat',
+                          return_value={'error': {'message': 'model not found'}}) as once:
+            _, _, error = module._call_land_analysis_model('s', 'u', 12000)
+        self.assertEqual(once.call_count, 1)
+        self.assertIn('model not found', error)
+
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('رصيد OpenRouter لا يكفي', source)
+        self.assertIn("'providerError': model_error", source)
+
     def test_land_prompt_forbids_ai_written_approved_area_and_demands_narrative(self):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertNotIn('"approved_financial_area_sqm": null', source)
@@ -697,7 +729,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('"deed_date": ""', source)
         self.assertIn('"facades_directions": ""', source)
         self.assertIn('عدد الحدود المطلة على شوارع فقط', source)
-        self.assertIn('٢٥٠ كلمة على الأقل', source)
+        # Trimmed from 250 words: the longer narrative pushed the JSON past the token cap, and a
+        # truncated response is discarded whole.
+        self.assertIn('١٨٠ كلمة على الأقل', source)
+        self.assertIn('وليس قائمة حقول مفصولة بشرطات', source)
 
     def test_regulation_lookup_skips_index_pages_and_strips_page_furniture(self):
         module = self.application_module

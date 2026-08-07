@@ -5328,7 +5328,50 @@ PDF_VISION_MAX_PAGES = int(os.environ.get('PDF_VISION_MAX_PAGES', '20'))
 # The land prompt asks for a multi-paragraph Arabic narrative, sourced building rules and a full
 # coordinates table. Arabic costs roughly 2-3 tokens per word, so a low cap truncates the JSON and
 # the whole extraction is then rejected, which looks to the user like "nothing changed".
-LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '32000'))
+# The ceiling cannot simply be raised either: OpenRouter *reserves* max_tokens against the account
+# balance, so an over-large cap is refused with 402 even when the real answer would be short.
+# _call_land_analysis_model() walks the cap back down when that happens.
+LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '12000'))
+LAND_ANALYSIS_MIN_TOKENS = int(os.environ.get('LAND_ANALYSIS_MIN_TOKENS', '6000'))
+LAND_ANALYSIS_MODEL = os.environ.get('LAND_ANALYSIS_MODEL', 'google/gemini-3.6-flash')
+
+_AFFORDABLE_TOKENS_RE = re.compile(r'can only afford\s+(\d+)')
+
+
+def _chat_error_message(res):
+    """Human-readable provider error, so a failure is never reported as a mystery."""
+    if not isinstance(res, dict):
+        return str(res)[:400]
+    error = res.get('error')
+    if isinstance(error, dict):
+        return str(error.get('message') or error)[:400]
+    return str(error or 'unknown provider error')[:400]
+
+
+def _call_land_analysis_model(system_prompt, user_content, max_tokens):
+    """Call the vision model, lowering the reserved cap when the provider cannot afford it.
+
+    Returns ``(response, used_cap, error_message)``.
+    """
+    cap = max(LAND_ANALYSIS_MIN_TOKENS, int(max_tokens))
+    message = ''
+    res = None
+    for _ in range(3):
+        res = call_openrouter_chat(system_prompt, user_content, temperature=0.1,
+                                   max_tokens=cap, model=LAND_ANALYSIS_MODEL)
+        if _has_chat_choices(res):
+            return res, cap, ''
+        message = _chat_error_message(res)
+        affordable = _AFFORDABLE_TOKENS_RE.search(message)
+        if not affordable:
+            break
+        # Leave a margin: the quoted allowance shrinks as the prompt itself consumes credit.
+        retry_cap = max(LAND_ANALYSIS_MIN_TOKENS, int(int(affordable.group(1)) * 0.85))
+        if retry_cap >= cap:
+            break
+        print(f'[LAND ANALYSIS] provider refused max_tokens={cap}; retrying with {retry_cap}')
+        cap = retry_cap
+    return res, cap, message
 
 
 def _decode_data_uri(data_uri):
@@ -5753,7 +5796,8 @@ def api_extract_croquis():
             "- الشرح المفصّل للتعارض وأثره يُكتب داخل land_and_building_summary في فقرة المخاطر.\n"
             "- إذا لا توجد تعارضات أعد قائمة فارغة.\n"
             "قواعد الملخص (land_and_building_summary):\n"
-            "- نص عربي مسترسل من ٤ إلى ٦ فقرات (٢٥٠ كلمة على الأقل) وليس قائمة حقول مفصولة بشرطات.\n"
+            "- نص عربي مسترسل من ٣ إلى ٥ فقرات (١٨٠ كلمة على الأقل) وليس قائمة حقول مفصولة بشرطات.\n"
+            "- لا تُعد سرد الأرقام التي وردت في الحقول؛ اربطها وحلّلها باختصار.\n"
             "- يغطي بالترتيب: (١) هوية القطعة وموقعها وصكها، (٢) المساحات والحدود والاتجاهات والواجهات، (٣) اشتراطات البناء مع مصدرها من اللائحة، (٤) الاستخدامات المسموحة والقيود، (٥) الفرص التطويرية المستنبطة من الاشتراطات، (٦) المخاطر والتعارضات وما يحتاج مراجعة.\n"
             "- اذكر صراحة أي معلومة غير متوفرة بدل تخطيها بصمت.\n"
             "ملاحظة: لا تُخرج حقل المساحة المعتمدة للدراسة المالية إطلاقًا؛ العميل هو من يحددها."
@@ -5761,6 +5805,7 @@ def api_extract_croquis():
 
         raw_resp = ""
         response_finish_reason = None
+        model_error = ''
         vision_warnings = []
         document_processing = []
         if OPENROUTER_KEY:
@@ -5822,17 +5867,19 @@ def api_extract_croquis():
             }] + regulation_parts + vision_parts
 
             try:
-                res = call_openrouter_chat(system_prompt, user_content, temperature=0.1,
-                                           max_tokens=LAND_ANALYSIS_MAX_TOKENS,
-                                           model="google/gemini-3.6-flash")
+                res, used_cap, provider_error = _call_land_analysis_model(
+                    system_prompt, user_content, LAND_ANALYSIS_MAX_TOKENS)
                 if _has_chat_choices(res):
                     raw_resp = _get_chat_response_text(res)
                     choices = res.get('choices') if isinstance(res, dict) else []
                     response_finish_reason = choices[0].get('finish_reason') if choices and isinstance(choices[0], dict) else None
-                    print(f"[EXTRACT LAND DOCUMENTS] analyzed {len(documents)} document(s), finish_reason={response_finish_reason}")
+                    print(f"[EXTRACT LAND DOCUMENTS] analyzed {len(documents)} document(s), "
+                          f"cap={used_cap}, finish_reason={response_finish_reason}, chars={len(raw_resp)}")
                 else:
-                    print(f"[EXTRACT LAND DOCUMENTS ERROR] {res.get('error') if isinstance(res, dict) else res}")
+                    model_error = provider_error
+                    print(f"[EXTRACT LAND DOCUMENTS ERROR] cap={used_cap} {provider_error}")
             except Exception as model_err:
+                model_error = str(model_err)
                 print(f"[EXTRACT LAND DOCUMENTS EXCEPTION] {model_err}")
 
         # Partial JSON is never accepted: half a parcel is worse than no parcel. But the failure
@@ -5848,10 +5895,22 @@ def api_extract_croquis():
                 'documentProcessing': document_processing
             }), 502
         if not raw_resp.strip():
+            # Report what the provider actually said. "Check your API keys" was misleading when the
+            # real cause was an insufficient credit balance for the reserved max_tokens.
+            insufficient_credit = 'afford' in model_error or 'credit' in model_error.lower()
+            if insufficient_credit:
+                message = ('رصيد OpenRouter لا يكفي لهذا الطلب، فلم يُعتمد أي حقل ولم تتغير البيانات. '
+                           'أضف رصيدًا أو قلّل LAND_ANALYSIS_MAX_TOKENS.')
+            elif model_error:
+                message = f'لم يرد الذكاء الاصطناعي بأي محتوى فلم تتغير البيانات. سبب المزوّد: {model_error}'
+            else:
+                message = ('لم يرد الذكاء الاصطناعي بأي محتوى، فلم تتغير البيانات. '
+                           'تأكد من مفاتيح API ثم أعد المحاولة.')
             return jsonify({
                 'success': False,
-                'error': 'لم يرد الذكاء الاصطناعي بأي محتوى، فلم تتغير البيانات. تأكد من مفاتيح API ثم أعد المحاولة.',
-                'failureReason': 'empty_response',
+                'error': message,
+                'failureReason': 'insufficient_credit' if insufficient_credit else 'empty_response',
+                'providerError': model_error,
                 'documentProcessing': document_processing
             }), 502
         parsed_response = parse_json_object(raw_resp)
