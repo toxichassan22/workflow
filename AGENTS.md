@@ -1,0 +1,77 @@
+# AGENTS.md
+
+Project notes for automated agents working on this repo (Manafe — real-estate proposal generator).
+
+## Stack
+
+- Backend: Flask, single file `app.py` (~7.4k lines). DB layer in `db.py` (SQLite locally, Postgres via `DATABASE_URL`).
+- Frontend: one single-page app, `index.html` (~13.7k lines). All JS lives in **one inline `<script>` block** starting at line ~4195, so every function shares one scope.
+- PDF handling: PyMuPDF (`fitz`). AI: OpenRouter / Z.ai (GLM) — see `.env`.
+
+## Verification
+
+There is no pytest; the suites use `unittest` and must be run as **modules from the repo root** (`tests/` is not an importable package, so `unittest discover` fails).
+
+```powershell
+# Main suite (50 tests) — run this for any land/croquis/draft/AI change
+D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_meeting_requirements
+
+# Other suites
+D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_location_data_parsing
+D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_project_draft_isolation
+D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_export_slide_sanitization
+D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_font_workflows
+```
+
+`tests.test_full_flow` contains no unittest cases (reports "Ran 0 tests") — that is expected.
+
+Python syntax check:
+```powershell
+D:\workflow\.venv\Scripts\python.exe -c "import ast; [ast.parse(open(f,encoding='utf-8').read(), f) for f in ('app.py','db.py','slide_engine.py','maps_service.py')]"
+```
+
+Frontend JS syntax check (extract the inline script and run `node --check`):
+```powershell
+$lines = Get-Content D:\workflow\index.html
+$close = (Select-String -Path D:\workflow\index.html -Pattern '</script>' -SimpleMatch | Select-Object -Last 1).LineNumber
+$lines[4195..($close-2)] -join "`n" | Set-Content "$env:TEMP\wf_check.js" -Encoding UTF8
+node --check "$env:TEMP\wf_check.js"
+```
+
+Note: many tests assert against **literal source strings** in `index.html` / `app.py`. Renaming a
+function or changing prompt wording can fail a test even when behaviour is correct — update the
+assertion deliberately, not reflexively.
+
+## Land / croquis subsystem gotchas
+
+- **Form fields are defined in `db.py` `PREBUILT_FIELDS`**, not in HTML. `_migrate_location_fields`
+  and `ensure_tenant_prebuilt_fields_active` re-sync label/type/section/sort_order for every tenant
+  on each request, so editing `PREBUILT_FIELDS` is enough to roll out a field change.
+  To retire a field add it to `REMOVED_PREBUILT_FIELDS`.
+- `TENANT_PROJECT_HIDDEN_FIELDS` (index.html) hides `plot_number`, `land_area`, `built_area`,
+  `building_system`, `infrastructure`, … from the project form. They are **not dead** — they carry
+  data into the slide templates (`slide_engine.py`). Do not delete them.
+- `collectTenantFormData()` only reads DOM inputs with `data-key`. Anything kept solely in the
+  `tenantProjectData` JS object is **not persisted** to the draft. That is why the land analysis is
+  mirrored into the hidden `landDocumentsAnalysisData` input.
+- The coordinates/directions tables are stored as **JSON strings** in hidden inputs. Always parse
+  with `parseStoredLandTable()` before rendering, and never write render output back when parsing
+  fails — that previously wiped saved rows on every reload.
+- `_normalize_land_document_result()` has two branches. The model normally returns a `parcels`
+  array, so the legacy branch (which calls `normalize_croquis_fields`) does **not** run; per-parcel
+  scalar cleanup lives in `_normalize_parcel_scalar_fields()`. Add new normalizers to both paths.
+- `approved_financial_area` is **client-entered only**. AI output must never populate it.
+
+## Regulation PDFs (الاشتراطات)
+
+- Expected files in the repo root: `اشتراطات1.pdf` (executive regulations, 199 p) and
+  `اشتراطات2.pdf` (building regulations, 142 p). Names are listed in `REGULATION_PDF_NAMES`.
+- Text extraction quality differs sharply: **اشتراطات1 prose is legible**, اشتراطات2 prose loses
+  letters (`المعلومات` → `المعلوما`), and **tables in both extract in reversed character order**.
+  Hence the hybrid approach in `search_official_regulations_pdf()` /
+  `render_regulation_table_pages()`: prose goes to the model as text, table pages go as images.
+- Keyword search on these PDFs is unreliable — terms starting with `الا` (`الارتفاع`,
+  `الارتدادات`, `نسبة التغطية`) match **zero** pages because of broken lam-alef ligatures. Match on
+  bare roots (`ارتداد`, `تغطية`) instead.
+- Index / list-of-figures pages match many keywords but contain no rules; `_is_regulation_index_page`
+  filters them out.

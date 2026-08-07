@@ -286,6 +286,52 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('analyzeLandDocumentsButton', index_source)
         self.assertIn('regulation_text', index_source)
 
+    def test_land_tables_survive_draft_round_trip_without_being_wiped(self):
+        """The coordinate/direction tables live in hidden inputs as JSON strings, so the
+        renderers must parse them back instead of replacing stored rows with empty ones."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function parseStoredLandTable(value)', index_source)
+        self.assertIn('const parsed = parseStoredLandTable(rows);', index_source)
+        self.assertIn('if (hadValue && parsed === null) return;', index_source)
+        self.assertIn('if (hadValue && parseStoredLandTable(value) === null) return;', index_source)
+        # The destructive forms that silently dropped JSON strings must be gone.
+        self.assertNotIn('const normalized = Array.isArray(rows) ? rows : [];', index_source)
+        self.assertNotIn('Object.entries(value || {}).map(([direction, data])', index_source)
+
+        client = self.app.test_client()
+        coordinates = json.dumps(
+            [{'parcel_id': 'P-1', 'point': '1', 'eastings': '510180.849',
+              'northings': '2939234.840', 'source': 'regulation_table'}],
+            ensure_ascii=False)
+        directions = json.dumps(
+            [{'direction': 'north', 'regulation_text': 'بطول 80.32م يحده شارع',
+              'source': 'regulation_table'}],
+            ensure_ascii=False)
+        saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {'survey_coordinates': coordinates, 'directions_table': directions}
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        loaded = client.get('/api/project-draft', headers=self._headers(self.token_a))
+        draft_data = loaded.get_json()['draft']['draft_data']
+        self.assertEqual(json.loads(draft_data['survey_coordinates'])[0]['eastings'], '510180.849')
+        self.assertEqual(json.loads(draft_data['directions_table'])[0]['direction'], 'north')
+
+    def test_land_conflicts_are_rendered_readably_without_raw_json(self):
+        """The review panel showed JSON.stringify output; it must now be labelled cards."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function renderLandDocumentConflicts(', index_source)
+        self.assertIn('LAND_CONFLICT_FIELD_LABELS', index_source)
+        self.assertIn("survey_coordinates: 'جدول الإحداثيات'", index_source)
+        self.assertIn('function focusLandField(', index_source)
+        # The unexplained parcels table is gone and raw JSON is no longer printed.
+        self.assertNotIn('renderExtractedParcels', index_source)
+        self.assertNotIn('القطع المكتشفة', index_source)
+        self.assertNotIn('typeof item === \'string\' ? item : JSON.stringify(item)', index_source)
+        self.assertNotIn('escapeHtml(JSON.stringify(parcel.confidence', index_source)
+        # The analysis payload is still persisted; the directions table falls back to it.
+        self.assertIn('landDocumentsAnalysisData', index_source)
+        self.assertIn('parseStoredLandTable(source.land_documents_analysis)', index_source)
+
     def test_project_draft_list_returns_metadata_without_payload(self):
         client = self.app.test_client()
         response = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
@@ -340,6 +386,78 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIsNone(other)
         self.assertEqual(stored['file_type'], 'croquis')
         self.assertTrue(os.path.basename(stored['storage_path']).startswith(stored['sha256']))
+
+    def test_project_file_preview_is_tenant_scoped_and_served_inline(self):
+        """Uploaded deeds/site plans must be viewable in the app, but only by their tenant."""
+        client = self.app.test_client()
+        created = client.post('/api/project-files', headers=self._headers(self.token_a), data={
+            'fileType': 'land_document',
+            'file': (io.BytesIO(b'%PDF-1.4 preview me'), 'krooki.pdf'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(created.status_code, 201, created.get_json())
+        file_id = created.get_json()['file']['id']
+
+        served = client.get(f'/api/project-files/{file_id}', headers=self._headers(self.token_a))
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served.mimetype, 'application/pdf')
+        self.assertIn(b'%PDF', served.data)
+        # Inline so it can render in an iframe, and never sniffed into another type.
+        self.assertNotIn('attachment', served.headers.get('Content-Disposition', ''))
+        self.assertEqual(served.headers.get('X-Content-Type-Options'), 'nosniff')
+
+        self.assertEqual(
+            client.get(f'/api/project-files/{file_id}', headers=self._headers(self.token_b)).status_code,
+            404)
+        self.assertIn(client.get(f'/api/project-files/{file_id}').status_code, (401, 403))
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('async function openProjectFilePreview(', index_source)
+        self.assertIn("'/api/project-files/' + encodeURIComponent(fileId)", index_source)
+        self.assertIn('onclick="openProjectFilePreview(', index_source)
+
+    def test_land_photos_are_optional_images_with_per_photo_descriptions(self):
+        client = self.app.test_client()
+        fields = client.get('/api/fields', headers=self._headers(self.token_a)).get_json()['fields']
+        photo_field = next(field for field in fields if field['fieldKey'] == 'land_photos')
+        self.assertFalse(photo_field['isRequired'])
+        self.assertEqual(photo_field['sectionKey'], 'land_croquis')
+
+        # PDFs are rejected for this slot because the UI renders them as thumbnails.
+        rejected = client.post('/api/project-files', headers=self._headers(self.token_a), data={
+            'fileType': 'land_image',
+            'file': (io.BytesIO(b'%PDF-1.4 not a photo'), 'plan.pdf'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(rejected.status_code, 400, rejected.get_json())
+
+        descriptions = [
+            {'id': 'photo-1', 'originalName': 'front.jpg', 'description': 'الواجهة الشمالية'},
+            {'id': 'photo-2', 'originalName': 'street.jpg', 'description': 'الشارع الغربي'},
+        ]
+        saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {'land_photos_file_ids': ['photo-1', 'photo-2'],
+                          'land_photos_file_meta': descriptions}
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        draft_data = client.get('/api/project-draft', headers=self._headers(self.token_a)).get_json()['draft']['draft_data']
+        self.assertEqual(draft_data['land_photos_file_meta'][0]['description'], 'الواجهة الشمالية')
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('const LAND_PHOTOS_MAX = 4;', index_source)
+        self.assertIn('function renderLandPhotos(', index_source)
+        self.assertIn("input.dataset.projectFileType = 'land_image'", index_source)
+        self.assertIn('function removeLandPhoto(', index_source)
+        # Autosave re-uploads must not clear captions the client already typed.
+        self.assertIn('previous?.description ? { ...file, description: previous.description } : file', index_source)
+
+    def test_new_land_fields_split_identifiers_and_add_deed_date(self):
+        fields = self.app.test_client().get('/api/fields', headers=self._headers(self.token_a)).get_json()['fields']
+        by_key = {field['fieldKey']: field for field in fields}
+        for key in ('plan_number', 'subdivision_number', 'deed_date', 'facades_directions', 'land_photos'):
+            self.assertIn(key, by_key)
+            self.assertEqual(by_key[key]['sectionKey'], 'land_croquis')
+        # The plot number is no longer a combined "plot + plan" box.
+        self.assertEqual(by_key['plot_number_croquis']['fieldLabel'], 'رقم القطعة')
+        self.assertEqual(by_key['deed_date']['fieldLabel'], 'تاريخ الصك')
 
     def test_uploaded_land_documents_are_restored_as_server_metadata_after_refresh(self):
         client = self.app.test_client()
@@ -444,6 +562,108 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('east', result['parcels'][0]['directions'])
         self.assertEqual(result['survey_coordinates'][0]['source'], 'regulation_table')
         self.assertEqual(result['survey_coordinates'][0]['eastings'], '510180.849')
+
+    def test_parcel_path_normalizes_facades_deed_and_blocks_approved_area(self):
+        """The scalar normalizers must run on the ``parcels`` path, not only on the legacy one."""
+        result = self.application_module._normalize_land_document_result({
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'plot_number': '9991',
+                'plan_number': '3/س/125',
+                # A direction word must never survive in the numeric facade field.
+                'facades_count': 'جنوبية',
+                'north_direction': 'يميل قليلًا نحو الشمال الغربي',
+                'deed_number': 'غير مذكور',
+                'approved_financial_area_sqm': 4321,
+                'directions': {'south': {'street_name': 'شارع جنوبي'}},
+            }],
+            'land_and_building_summary': 'ملخص تفصيلي مسترسل عن الأرض والاشتراطات.',
+        }, 'صك رقم 260629004505 وتاريخ الصك 1446/03/12 لقطعة رقم 9991')
+        parcel = result['parcels'][0]
+
+        self.assertEqual(parcel['facades_count'], '')
+        self.assertEqual(parcel['facades_directions'], 'جنوبية')
+        self.assertEqual(parcel['north_direction'], 'شمال غربي')
+        # Placeholder wording is dropped, then the regex fallback fills the real values.
+        self.assertEqual(parcel['deed_number'], '260629004505')
+        self.assertEqual(parcel['deed_date'], '1446/03/12')
+        self.assertEqual(result['plan_number'], '3/س/125')
+        # The approved financial-study area is the client's input and must never be returned.
+        self.assertNotIn('approved_financial_area', result)
+        self.assertEqual(result['land_and_building_summary'], 'ملخص تفصيلي مسترسل عن الأرض والاشتراطات.')
+
+    def test_facade_count_accepts_real_counts_and_rejects_directions(self):
+        normalize = self.application_module.normalize_facades_count
+        self.assertEqual(normalize(4), '4')
+        self.assertEqual(normalize('واجهتين'), '2')
+        self.assertEqual(normalize('بلك كامل'), '4')
+        self.assertEqual(normalize('شمالية وغربية'), '')
+        self.assertEqual(normalize('', 'الأرض زاوية على شارعين'), '2')
+        self.assertEqual(
+            self.application_module.normalize_facade_directions('شمالية', 'شارع غربي'),
+            'شمالية، غربية')
+
+    def test_land_prompt_forbids_ai_written_approved_area_and_demands_narrative(self):
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertNotIn('"approved_financial_area_sqm": null', source)
+        self.assertIn('"subdivision_number": ""', source)
+        self.assertIn('"deed_date": ""', source)
+        self.assertIn('"facades_directions": ""', source)
+        self.assertIn('رقم صحيح فقط (1 أو 2 أو 3 أو 4)', source)
+        self.assertIn('٢٥٠ كلمة على الأقل', source)
+        self.assertIn('"severity": "high|medium|low"', source)
+
+    def test_regulation_lookup_skips_index_pages_and_strips_page_furniture(self):
+        module = self.application_module
+        index_page = 'نسبة البناء ' + ('.' * 30) + ' 36\nالارتدادات ' + ('.' * 30) + ' 37\nالتغطية ' + ('.' * 30) + ' 38'
+        self.assertTrue(module._is_regulation_index_page(index_page))
+        self.assertTrue(module._is_regulation_index_page(''))
+        self.assertFalse(module._is_regulation_index_page('نسبة البناء هي النسبة المئوية لمساحة الحد الأقصى'))
+
+        noisy = 'المخطط المحلي لمحافظة جدة1447 هـ\nم ص 25 من197\nنسبة البناء 60%'
+        cleaned = module._clean_regulation_text(noisy)
+        self.assertIn('نسبة البناء 60%', cleaned)
+        self.assertNotIn('من197', cleaned)
+
+        # Pages carrying the conditions must outrank generic prose.
+        self.assertGreater(
+            module._score_regulation_page('نسبة البناء 60% وعدد الطوابق 5 وارتداد أمامي', []),
+            module._score_regulation_page('مقدمة عامة عن الوثيقة', []))
+
+    def test_regulation_lookup_reports_missing_files_instead_of_failing_silently(self):
+        module = self.application_module
+        with patch.object(module, 'regulation_pdf_paths', return_value=[]):
+            context, table_pages, warnings = module.search_official_regulations_pdf('ت ر1')
+        self.assertEqual(context, '')
+        self.assertEqual(table_pages, [])
+        self.assertTrue(warnings, 'a missing regulation file must surface a warning')
+        self.assertIn('اشتراطات1.pdf', warnings[0])
+
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        # The stale hardcoded filenames are gone, along with the first-two-pages-then-break scan.
+        self.assertNotIn('Document_LocalPlan_1447.pdf', source)
+        self.assertNotIn('ExecutiveRegulations-1447-2025-2.pdf', source)
+        self.assertNotIn('search_jeddah_official_regulations_pdf', source)
+        # Client documents stay vision-only; the regulation arrives as trusted text + table images.
+        self.assertIn('لديك نوعان من المدخلات', source)
+        self.assertIn('نص هذا الجدول يُستخرج بترتيب معكوس', source)
+        self.assertIn('لم يتوفر مرجع لائحة الأمانة في هذا الطلب', source)
+
+    @unittest.skipUnless((ROOT / 'اشتراطات1.pdf').exists(), 'regulation PDFs not present')
+    def test_regulation_lookup_returns_real_condition_pages(self):
+        context, table_pages, warnings = self.application_module.search_official_regulations_pdf('ت ر1 تجاري سكني')
+        self.assertEqual(warnings, [])
+        # Far more usable text than the old 4 KB of index pages, and none of the furniture.
+        self.assertGreater(len(context), 6000)
+        self.assertNotIn('من197', context)
+        self.assertNotIn('......', context)
+        self.assertIn('نسبة البناء', context)
+        # Zoning tables extract in reversed order, so they must ride along as images.
+        self.assertTrue(table_pages)
+        parts, render_warnings = self.application_module.render_regulation_table_pages(table_pages[:2])
+        self.assertEqual(render_warnings, [])
+        self.assertEqual(len(parts), 4)
+        self.assertTrue(parts[1]['image_url']['url'].startswith('data:image/png;base64,'))
 
     def test_site_analysis_prefers_google_link_over_stale_coordinates(self):
         client = self.app.test_client()

@@ -6442,6 +6442,21 @@
       }
     }
 
+    // Land tables (survey coordinates / directions) are persisted as JSON strings inside
+    // hidden inputs, but the AI hands them over as arrays/objects. Returns null when the
+    // value cannot be understood so callers can skip rendering instead of wiping stored rows.
+    function parseStoredLandTable(value) {
+      if (Array.isArray(value) || (value && typeof value === 'object')) return value;
+      if (typeof value !== 'string' || !value.trim()) return null;
+      try {
+        const parsed = JSON.parse(value);
+        return (Array.isArray(parsed) || (parsed && typeof parsed === 'object')) ? parsed : null;
+      } catch (e) {
+        console.warn('[LAND TABLE] could not parse stored value; keeping existing rows', e);
+        return null;
+      }
+    }
+
     function hydrateTenantProjectForm(data) {
       const form = document.getElementById('tenantProjectForm');
       if (!form) return;
@@ -6450,11 +6465,13 @@
         tenantNearbyLandmarks = source.nearby_landmarks_data;
       }
       tenantProjectData = { ...tenantProjectData, ...source };
-      if (source.land_documents_analysis && Array.isArray(source.land_documents_analysis.parcels)) {
-        renderExtractedParcels(source.land_documents_analysis.parcels, source.land_documents_analysis);
-      }
-      renderSurveyCoordinates(source.survey_coordinates || source.land_documents_analysis?.survey_coordinates || []);
-      renderSurveyDirections(source.directions_table || source.land_documents_analysis?.directions_table || source.land_documents_analysis?.parcels?.[0]?.directions || {});
+      // Stored as a JSON string in a hidden input, so it must be parsed before use.
+      const storedAnalysis = parseStoredLandTable(source.land_documents_analysis) || {};
+      renderLandDocumentConflicts(storedAnalysis);
+      renderSurveyCoordinates(source.survey_coordinates || storedAnalysis.survey_coordinates || []);
+      renderSurveyDirections(source.directions_table || storedAnalysis.directions_table || storedAnalysis.parcels?.[0]?.directions || {});
+      renderLandDocumentsUploadState(source.land_documents_files_file_meta || []);
+      renderLandPhotos(source.land_photos_file_meta || []);
 
       form.querySelectorAll('[data-key]').forEach(input => {
         const key = input.dataset.key;
@@ -6973,6 +6990,26 @@
                 input.appendChild(option);
               }
             });
+          } else if (f.fieldKey === 'land_photos') {
+            // Client-supplied photos of the plot: up to 4, images only, each with a caption.
+            input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            input.accept = 'image/*,.jpg,.jpeg,.png,.webp';
+            input.dataset.filetype = 'file';
+            input.dataset.projectFileType = 'land_image';
+            uploadStatus = document.createElement('div');
+            uploadStatus.id = 'landPhotosUploadStatus';
+            uploadStatus.style.cssText = 'margin-top:8px;';
+            input.addEventListener('change', () => {
+              if (input.files.length > LAND_PHOTOS_MAX) {
+                const transfer = new DataTransfer();
+                Array.from(input.files).slice(0, LAND_PHOTOS_MAX).forEach(file => transfer.items.add(file));
+                input.files = transfer.files;
+                toast('يمكن رفع ' + LAND_PHOTOS_MAX + ' صور كحد أقصى للأرض');
+              }
+              uploadLandPhotos(input);
+            });
           } else if (f.fieldType === 'pdf' || f.fieldType === 'file' || f.fieldKey === 'land_documents_files') {
             input = document.createElement('input');
             input.type = 'file';
@@ -7070,6 +7107,10 @@
             analyzeButton.style.cssText = 'margin-top:10px;width:100%;';
             analyzeButton.onclick = () => extractTenantCroquisData('land_documents_files');
             div.appendChild(analyzeButton);
+          }
+          if (f.fieldKey === 'land_photos' && uploadStatus) {
+            div.appendChild(uploadStatus);
+            renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
           }
           if (f.fieldType === 'select') {
             const otherInput = document.createElement('input');
@@ -7213,6 +7254,7 @@
       renderSurveyCoordinates(tenantProjectData.survey_coordinates || []);
       renderSurveyDirections(tenantProjectData.directions_table || {});
       renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
+      renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
     }
 
     // S3: Components Table
@@ -9095,10 +9137,13 @@
         .join(' | ');
       const parcelFields = {
         plot_number_croquis: parcel.plot_number,
+        plan_number: parcel.plan_number,
+        subdivision_number: parcel.subdivision_number,
         deed_number: parcel.deed_number,
+        deed_date: parcel.deed_date,
         croquis_land_area: parcel.area_sqm,
-        approved_financial_area: parcel.approved_financial_area_sqm,
         facades_count: parcel.facades_count,
+        facades_directions: parcel.facades_directions,
         boundary_lengths: parcel.boundary_lengths || boundariesText,
         surrounding_streets: parcel.surrounding_streets || streetsText,
         north_direction: parcel.north_direction,
@@ -9106,12 +9151,17 @@
         max_floors_height: parcel.max_floors_height,
         allowed_uses_restrictions: parcel.allowed_uses_restrictions,
         croquis_expiry_date: parcel.expiry_date,
-        land_and_building_summary: parcel.summary,
+        // The whole-document summary is the detailed narrative; parcel.summary is only a
+        // per-parcel note and must never replace it.
+        land_and_building_summary: data.land_and_building_summary || parcel.summary,
         directions_table: data.directions_table || directionRows
       };
       Object.entries(parcelFields).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') fields[key] = value;
       });
+      // The approved financial-study area belongs to the client only.
+      delete fields.approved_financial_area;
+      delete fields.approved_financial_area_sqm;
       return fields;
     }
 
@@ -9136,7 +9186,14 @@
       showLoader('تحليل الرخصة والكروكي معًا', 'جاري تحليل الملفين واستخراج التنظيم والاتجاهات والإحداثيات...', 10);
       try {
         updateLoaderProgress(35, 'جاري إرسال الملفات المحفوظة إلى الذكاء الاصطناعي...');
-        const res = await api('POST', '/api/extract-croquis', { documents, draftId: tenantProjectData.draftId });
+        // Hints that let the backend rank the right regulation pages for this plot.
+        const res = await api('POST', '/api/extract-croquis', {
+          documents,
+          draftId: tenantProjectData.draftId,
+          projectType: tenantProjectData.project_type || '',
+          zoningCode: tenantProjectData.zoning_code || '',
+          landUse: tenantProjectData.allowed_uses_restrictions || ''
+        });
         if (res.success && res.extractedData) {
           const data = res.extractedData;
           const documentProcessing = res.documentProcessing || data.document_processing || [];
@@ -9158,10 +9215,10 @@
           }
           tenantProjectData.survey_coordinates = data.survey_coordinates || [];
           tenantProjectData.directions_table = extractedFields.directions_table || data.directions_table || data.parcels?.[0]?.directions || {};
-          renderExtractedParcels(data.parcels || [], data);
+          renderLandDocumentConflicts(data);
           renderSurveyCoordinates(data.survey_coordinates || []);
           renderSurveyDirections(tenantProjectData.directions_table);
-          updateLoaderProgress(100, 'تم تحليل الملفات معًا. راجع كل قطعة والاتجاهات ثم اعتمد البيانات.');
+          updateLoaderProgress(100, 'تم تحليل الملفات معًا. راجع الحقول والاتجاهات والتعارضات ثم اعتمد البيانات.');
           toast('تم تحليل ملفات الأرض والكروكي والرخصة معًا. راجع النتائج قبل الاعتماد.');
           triggerAutoSaveDraft();
         } else {
@@ -9174,38 +9231,103 @@
       }
     }
 
-    function renderExtractedParcels(parcels, analysis = {}) {
+    // Arabic labels for the field names the model reports conflicts against, so the review
+    // panel never shows a raw key (or raw JSON) to the user.
+    const LAND_CONFLICT_FIELD_LABELS = {
+      survey_coordinates: 'جدول الإحداثيات',
+      directions_table: 'جدول الاتجاهات',
+      boundary_lengths: 'أطوال الأضلاع والحدود',
+      boundary_lengths_natural_vs_regulation: 'أطوال الحدود: الطبيعة مقابل التنظيم',
+      plot_number: 'رقم القطعة',
+      plot_number_croquis: 'رقم القطعة',
+      plan_number: 'رقم المخطط',
+      subdivision_number: 'رقم القسم',
+      deed_number: 'رقم الصك',
+      deed_date: 'تاريخ الصك',
+      area_sqm: 'مساحة الأرض',
+      croquis_land_area: 'مساحة الأرض حسب الكروكي',
+      facades_count: 'عدد الواجهات',
+      facades_directions: 'اتجاهات الواجهات',
+      building_ratio: 'نسبة البناء والتغطية',
+      building_ratio_setbacks: 'نسبة البناء والتغطية والارتدادات',
+      setbacks: 'الارتدادات',
+      max_floors_height: 'الارتفاع أو عدد الأدوار',
+      allowed_uses_restrictions: 'الاستخدامات المسموحة والقيود',
+      zoning_code: 'كود التنظيم',
+      expiry_date: 'تاريخ انتهاء الصلاحية',
+      croquis_expiry_date: 'تاريخ انتهاء صلاحية الكروكي'
+    };
+
+    const LAND_CONFLICT_SEVERITY = {
+      high: { label: 'حرج', background: '#fdeaea', border: '#f5b5b5', color: '#8a1f1f' },
+      medium: { label: 'يحتاج مراجعة', background: '#fff4e5', border: '#ffd69b', color: '#7a4a00' },
+      low: { label: 'ملاحظة', background: '#eef4fd', border: '#c3d7f5', color: '#1f4e8a' }
+    };
+
+    function normalizeLandConflict(item) {
+      if (typeof item === 'string') return { title: '', description: item, field: '', severity: 'medium', values: [], resolution: '' };
+      if (!item || typeof item !== 'object') return null;
+      const values = Array.isArray(item.values) ? item.values : (item.values ? [item.values] : []);
+      return {
+        field: String(item.field || item.key || ''),
+        title: String(item.title || ''),
+        description: String(item.description || item.message || item.note || ''),
+        severity: ['high', 'medium', 'low'].includes(item.severity) ? item.severity : 'medium',
+        values: values.map(value => typeof value === 'object' ? Object.values(value).join(' / ') : String(value)),
+        resolution: String(item.resolution || item.decision || '')
+      };
+    }
+
+    function focusLandField(fieldKey) {
+      const target = document.querySelector('#tenantProjectForm [data-key="' + fieldKey + '"]');
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.style.transition = 'box-shadow .3s';
+      target.style.boxShadow = '0 0 0 3px rgba(255,169,64,.75)';
+      setTimeout(() => { target.style.boxShadow = ''; }, 2200);
+      if (typeof target.focus === 'function') target.focus({ preventScroll: true });
+    }
+
+    function renderLandDocumentConflicts(analysis = {}) {
       const host = document.getElementById('landDocumentsAnalysisPreview');
       if (!host) return;
       const analysisInput = document.getElementById('landDocumentsAnalysisData');
-      if (!Array.isArray(parcels) || !parcels.length) {
-        host.innerHTML = '<p class="tenant-hint">لم يتم اكتشاف قطع أرض مؤكدة.</p>';
-        if (analysisInput) analysisInput.value = '';
-        host.style.display = 'block';
+      // The analysis payload still has to be persisted: the directions table falls back to it.
+      if (analysisInput) {
+        analysisInput.value = (Array.isArray(analysis.parcels) && analysis.parcels.length)
+          ? JSON.stringify({
+              parcels: analysis.parcels,
+              conflicts: analysis.conflicts || [],
+              source_priority: analysis.source_priority || []
+            })
+          : '';
+      }
+      const conflicts = (Array.isArray(analysis.conflicts) ? analysis.conflicts : [])
+        .map(normalizeLandConflict)
+        .filter(item => item && (item.description || item.title));
+      if (!conflicts.length) {
+        host.innerHTML = '';
+        host.style.display = 'none';
         return;
       }
-      if (analysisInput) analysisInput.value = JSON.stringify({
-        parcels,
-        conflicts: analysis.conflicts || [],
-        source_priority: analysis.source_priority || []
-      });
-      const directionLabels = { north: 'شمال', south: 'جنوب', east: 'شرق', west: 'غرب' };
-      const conflicts = Array.isArray(analysis.conflicts) ? analysis.conflicts : [];
-      const conflictMarkup = conflicts.length
-        ? '<div style="background:#fff4e5;border:1px solid #ffd69b;color:#7a4a00;border-radius:8px;padding:8px;margin-bottom:10px">تعارضات تحتاج مراجعة: ' + escapeHtml(conflicts.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join(' | ')) + '</div>'
-        : '';
-      host.innerHTML = conflictMarkup + '<h4 style="margin:0 0 10px;color:var(--p)">القطع المكتشفة — راجع كل قطعة على حدة</h4>' + parcels.map((parcel, index) => {
-        const directions = parcel.directions || {};
-        const rows = Object.entries(directionLabels).map(([key, label]) => {
-          const value = directions[key] || {};
-          return '<tr><th>' + label + '</th><td>' + escapeHtml(value.street_name || value.uses || 'غير محدد') + '</td><td>' + escapeHtml(value.street_width_m ?? '—') + '</td><td>' + escapeHtml(value.boundary_length_m ?? '—') + '</td></tr>';
-        }).join('');
-        return '<details open style="border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0;background:#fff">' +
-          '<summary style="font-weight:700;cursor:pointer">' + escapeHtml(parcel.parcel_id || ('P-' + (index + 1))) + ' — قطعة ' + escapeHtml(parcel.plot_number || 'غير محدد') + ' — مساحة ' + escapeHtml(parcel.area_sqm ?? 'غير محددة') + ' م²</summary>' +
-          '<div style="overflow:auto;margin-top:8px"><table class="location-table"><thead><tr><th>الاتجاه</th><th>الشارع/الاستخدام</th><th>عرض الشارع</th><th>طول الحد</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-          '<p class="tenant-hint" style="margin:8px 0 0">الإحداثيات: ' + escapeHtml(parcel.coordinates?.lat ?? '—') + ', ' + escapeHtml(parcel.coordinates?.lng ?? '—') + ' (' + escapeHtml(parcel.coordinates?.source || 'غير معتمدة') + ') | المصدر: ' + escapeHtml((parcel.sources || []).join('، ') || 'يحتاج مراجعة') + ' | الثقة: ' + escapeHtml(JSON.stringify(parcel.confidence || {})) + '</p>' +
-          '</details>';
-      }).join('');
+      host.innerHTML = '<h4 style="margin:0 0 8px;color:var(--p)">تعارضات تحتاج مراجعتك (' + conflicts.length + ')</h4>' +
+        '<div style="display:grid;gap:8px">' + conflicts.map(conflict => {
+          const tone = LAND_CONFLICT_SEVERITY[conflict.severity];
+          const fieldLabel = LAND_CONFLICT_FIELD_LABELS[conflict.field] || conflict.field;
+          const heading = conflict.title || fieldLabel || 'تعارض في البيانات';
+          const jumpKey = conflict.field && document.querySelector('#tenantProjectForm [data-key="' + conflict.field + '"]')
+            ? conflict.field : '';
+          return '<div style="background:' + tone.background + ';border:1px solid ' + tone.border + ';color:' + tone.color + ';border-radius:10px;padding:10px">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+            '<strong>' + escapeHtml(heading) + '</strong>' +
+            '<span style="font-size:.75rem;border:1px solid ' + tone.border + ';border-radius:999px;padding:2px 8px">' + tone.label + '</span></div>' +
+            (fieldLabel && conflict.title ? '<div style="font-size:.8rem;opacity:.85;margin-top:4px">الحقل: ' + escapeHtml(fieldLabel) + '</div>' : '') +
+            '<p style="margin:6px 0 0;line-height:1.7">' + escapeHtml(conflict.description) + '</p>' +
+            (conflict.values.length ? '<div style="margin-top:6px;font-size:.85rem">القيم المتعارضة: ' + escapeHtml(conflict.values.join('  ↔  ')) + '</div>' : '') +
+            (conflict.resolution ? '<div style="margin-top:6px;font-size:.85rem">المعتمد: ' + escapeHtml(conflict.resolution) + '</div>' : '') +
+            (jumpKey ? '<button type="button" class="btn ghost" style="margin-top:8px;padding:4px 10px;font-size:.8rem" onclick="focusLandField(\'' + jumpKey + '\')">انتقل إلى الحقل</button>' : '') +
+            '</div>';
+        }).join('') + '</div>';
       host.style.display = 'block';
     }
 
@@ -9230,7 +9352,10 @@
     function renderSurveyCoordinates(rows) {
       const panel = document.getElementById('surveyCoordinatesPanel');
       if (!panel) return;
-      const normalized = Array.isArray(rows) ? rows : [];
+      const parsed = parseStoredLandTable(rows);
+      const hadValue = rows !== null && rows !== undefined && rows !== '';
+      if (hadValue && parsed === null) return;
+      const normalized = Array.isArray(parsed) ? parsed : [];
       panel.innerHTML = '<div class="survey-coordinates-head">' +
         '<strong class="survey-coordinates-title">جدول الإحداثيات</strong></div>' +
         '<div class="survey-coordinates-table-wrap"><table class="survey-coordinates-table"><thead><tr><th>رقم القطعة</th><th>رقم النقطة</th><th>الشرقيات</th><th>الشماليات</th></tr></thead><tbody></tbody></table></div>';
@@ -9258,7 +9383,8 @@
     function normalizeSurveyDirections(value) {
       const labels = { north: 'شمال', south: 'جنوب', east: 'شرق', west: 'غرب' };
       const aliases = { 'شمال': 'north', 'جنوب': 'south', 'شرق': 'east', 'غرب': 'west' };
-      const rows = Array.isArray(value) ? value : Object.entries(value || {}).map(([direction, data]) => ({ direction, ...(data || {}) }));
+      const parsed = parseStoredLandTable(value);
+      const rows = Array.isArray(parsed) ? parsed : Object.entries(parsed || {}).map(([direction, data]) => ({ direction, ...(data || {}) }));
       const byDirection = Object.fromEntries(rows.map(row => {
         const key = String(row.direction || row.key || '').toLowerCase();
         return [aliases[key] || key, row];
@@ -9298,6 +9424,8 @@
     function renderSurveyDirections(value) {
       const panel = document.getElementById('surveyDirectionsPanel');
       if (!panel) return;
+      const hadValue = value !== null && value !== undefined && value !== '';
+      if (hadValue && parseStoredLandTable(value) === null) return;
       const rows = normalizeSurveyDirections(value);
       panel.innerHTML = '<strong class="survey-directions-title">جدول الاتجاهات</strong>' +
         '<div class="survey-directions-table-wrap"><table class="survey-directions-table"><thead><tr><th>الاتجاه</th><th>بموجب التنظيم</th></tr></thead><tbody></tbody></table></div>';
@@ -10199,6 +10327,168 @@
       toast(filled > 0 ? 'تم تعبئة ' + filled + ' حقل + جداول تجريبية — بيانات مجمع الواحة السكني، حي النرجس، الرياض' : 'لا توجد حقول مطابقة');
     }
 
+    // Object URLs for previewed documents, keyed by file id so repeat opens stay cheap.
+    const projectFileObjectUrls = new Map();
+
+    async function getProjectFileObjectUrl(fileId) {
+      if (projectFileObjectUrls.has(fileId)) return projectFileObjectUrls.get(fileId);
+      const token = getTenantToken();
+      const response = await fetch('/api/project-files/' + encodeURIComponent(fileId), {
+        headers: token ? { Authorization: 'Bearer ' + token } : {}
+      });
+      if (!response.ok) {
+        let message = 'تعذر تحميل الملف من السيرفر';
+        try { message = (await response.json())?.error || message; } catch (e) {}
+        throw new Error(message);
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      projectFileObjectUrls.set(fileId, objectUrl);
+      return objectUrl;
+    }
+
+    function closeProjectFilePreview() {
+      document.getElementById('projectFilePreviewModal')?.remove();
+    }
+
+    async function openProjectFilePreview(fileId, fileName, mimeType) {
+      if (!fileId) {
+        toast('لم يُحفظ هذا الملف على السيرفر بعد — انتظر اكتمال الحفظ ثم أعد المحاولة');
+        return;
+      }
+      closeProjectFilePreview();
+      const modal = document.createElement('div');
+      modal.id = 'projectFilePreviewModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:20px;max-width:1000px;width:100%;max-height:90vh;display:flex;flex-direction:column;gap:12px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px">' +
+        '<h3 style="margin:0;font-size:1rem">' + escapeHtml(fileName || 'معاينة المستند') + '</h3>' +
+        '<div style="display:flex;gap:8px">' +
+        '<button class="btn ghost" id="projectFileDownloadBtn">تنزيل</button>' +
+        '<button class="btn ghost" onclick="closeProjectFilePreview()">إغلاق</button></div></div>' +
+        '<div id="projectFilePreviewBody" style="flex:1;min-height:320px;overflow:auto;background:#f6f7f9;border-radius:12px;display:flex;align-items:center;justify-content:center">' +
+        '<span class="tenant-hint">جاري تحميل الملف...</span></div></div>';
+      modal.addEventListener('click', event => { if (event.target === modal) closeProjectFilePreview(); });
+      document.body.appendChild(modal);
+
+      const body = modal.querySelector('#projectFilePreviewBody');
+      try {
+        const objectUrl = await getProjectFileObjectUrl(fileId);
+        const isPdf = String(mimeType || '').includes('pdf') || /\.pdf$/i.test(fileName || '');
+        body.innerHTML = isPdf
+          ? '<iframe src="' + objectUrl + '" style="width:100%;height:74vh;border:0;border-radius:12px"></iframe>'
+          : '<img src="' + objectUrl + '" alt="' + escapeHtml(fileName || '') + '" style="max-width:100%;max-height:74vh;display:block;border-radius:12px">';
+        const download = modal.querySelector('#projectFileDownloadBtn');
+        if (download) download.onclick = () => {
+          const link = document.createElement('a');
+          link.href = objectUrl;
+          link.download = fileName || 'document';
+          link.click();
+        };
+      } catch (error) {
+        body.innerHTML = '<span class="tenant-hint">' + escapeHtml(error.message || 'تعذر عرض الملف') + '</span>';
+      }
+    }
+
+    const LAND_PHOTOS_MAX = 4;
+
+    // Thumbnails render through the authenticated preview route, so each card needs a blob URL.
+    async function attachProjectFileThumbnail(imageElement, fileId) {
+      if (!imageElement || !fileId) return;
+      try {
+        imageElement.src = await getProjectFileObjectUrl(fileId);
+      } catch (error) {
+        imageElement.replaceWith(Object.assign(document.createElement('span'), {
+          className: 'tenant-hint', textContent: 'تعذر تحميل الصورة'
+        }));
+      }
+    }
+
+    function syncLandPhotoDescriptions() {
+      const meta = Array.isArray(tenantProjectData.land_photos_file_meta)
+        ? tenantProjectData.land_photos_file_meta : [];
+      document.querySelectorAll('#landPhotosUploadStatus [data-land-photo-id]').forEach(field => {
+        const entry = meta.find(item => item && item.id === field.dataset.landPhotoId);
+        if (entry) entry.description = field.value.trim();
+      });
+      tenantProjectData.land_photos_file_meta = meta;
+      triggerAutoSaveDraft();
+    }
+
+    function removeLandPhoto(fileId) {
+      tenantProjectData.land_photos_file_meta = (tenantProjectData.land_photos_file_meta || [])
+        .filter(item => item && item.id !== fileId);
+      tenantProjectData.land_photos_file_ids = (tenantProjectData.land_photos_file_meta || [])
+        .map(item => item.id);
+      const input = document.querySelector('#tenantProjectForm [data-key="land_photos"]');
+      if (input) {
+        input.value = '';
+        delete input.dataset.uploadSignatures;
+      }
+      renderLandPhotos(tenantProjectData.land_photos_file_meta);
+      triggerAutoSaveDraft();
+    }
+
+    function renderLandPhotos(photos) {
+      const host = document.getElementById('landPhotosUploadStatus');
+      if (!host) return;
+      const items = (Array.isArray(photos) ? photos : []).filter(Boolean).slice(0, LAND_PHOTOS_MAX);
+      if (!items.length) {
+        host.innerHTML = '<div class="tenant-hint">اختياري: ارفع حتى ' + LAND_PHOTOS_MAX +
+          ' صور للأرض واكتب وصفًا لكل صورة.</div>';
+        return;
+      }
+      host.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">' +
+        items.map(photo => {
+          const name = photo.originalName || photo.name || 'صورة الأرض';
+          const pending = photo.status === 'pending' || !photo.id;
+          const safeId = String(photo.id || '').replace(/'/g, "\\'");
+          return '<div style="border:1px solid var(--line);border-radius:10px;padding:8px;background:#fff;display:flex;flex-direction:column;gap:6px">' +
+            '<div style="height:120px;border-radius:8px;overflow:hidden;background:#f2f4f7;display:flex;align-items:center;justify-content:center">' +
+            (pending
+              ? '<span class="tenant-hint">جاري الحفظ...</span>'
+              : '<img data-land-photo-thumb="' + safeId + '" alt="' + escapeHtml(name) + '" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in">') +
+            '</div>' +
+            '<span style="font-size:.78rem;word-break:break-word">' + escapeHtml(name) + '</span>' +
+            '<textarea data-land-photo-id="' + safeId + '" rows="2" placeholder="وصف الصورة (اختياري)" ' +
+            'style="width:100%;font-family:inherit;font-size:.8rem">' + escapeHtml(photo.description || '') + '</textarea>' +
+            (pending ? '' : '<div style="display:flex;gap:6px">' +
+              '<button type="button" class="btn ghost" style="flex:1;padding:4px 8px;font-size:.75rem" onclick="openProjectFilePreview(\'' + safeId + '\',\'' + name.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\',\'image/*\')">تكبير</button>' +
+              '<button type="button" class="btn ghost danger" style="flex:1;padding:4px 8px;font-size:.75rem" onclick="removeLandPhoto(\'' + safeId + '\')">حذف</button></div>') +
+            '</div>';
+        }).join('') + '</div>';
+      host.querySelectorAll('textarea[data-land-photo-id]').forEach(field => {
+        field.addEventListener('change', syncLandPhotoDescriptions);
+      });
+      host.querySelectorAll('img[data-land-photo-thumb]').forEach(image => {
+        const fileId = image.dataset.landPhotoThumb;
+        attachProjectFileThumbnail(image, fileId);
+        image.addEventListener('click', () => openProjectFilePreview(fileId, image.alt, 'image/*'));
+      });
+    }
+
+    async function uploadLandPhotos(input) {
+      const chosen = Array.from(input?.files || []).slice(0, LAND_PHOTOS_MAX);
+      if (!chosen.length) return;
+      renderLandPhotos(chosen.map(file => ({ originalName: file.name, status: 'pending' })));
+      try {
+        const uploaded = await uploadTenantProjectFileInput(input, 'land_photos');
+        const previous = Array.isArray(tenantProjectData.land_photos_file_meta)
+          ? tenantProjectData.land_photos_file_meta : [];
+        // Keep any caption the user already typed for a re-selected photo.
+        const merged = (Array.isArray(uploaded) ? uploaded : []).slice(0, LAND_PHOTOS_MAX).map(file => ({
+          ...file,
+          description: previous.find(item => item && item.id === file.id)?.description || ''
+        }));
+        tenantProjectData.land_photos_file_meta = merged;
+        tenantProjectData.land_photos_file_ids = merged.map(file => file.id);
+        renderLandPhotos(merged);
+        triggerAutoSaveDraft();
+      } catch (error) {
+        toast('تعذر رفع صور الأرض: ' + (error.message || error));
+        renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
+      }
+    }
+
     function renderLandDocumentsUploadState(files) {
       const host = document.getElementById('landDocumentsUploadStatus');
       if (!host) return;
@@ -10207,18 +10497,32 @@
         host.innerHTML = '<div class="tenant-hint">لم يتم حفظ ملفات على السيرفر بعد. اختر ملف الرخصة وملف الكروكي.</div>';
         return;
       }
-      host.innerHTML = '<div style="border:1px solid #b9e1d1;background:#edf7f3;border-radius:8px;padding:8px">' +
+      host.innerHTML = '<div style="border:1px solid #b9e1d1;background:#edf7f3;border-radius:8px;padding:10px">' +
         '<strong style="color:#126247">الملفات محفوظة على السيرفر</strong>' +
-        '<div style="margin-top:5px;display:grid;gap:4px">' + items.map(file => {
+        '<div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">' +
+        items.map(file => {
+          const name = file.originalName || file.name || 'ملف مستند';
           const size = Number(file.fileSize || file.size || 0);
-          const sizeText = size ? ' — ' + (size / 1024 / 1024).toFixed(2) + ' MB' : '';
-          const status = file.status === 'pending' ? 'جاري الحفظ تلقائيًا' : 'محفوظ';
-          return '<span>✓ ' + escapeHtml(file.originalName || file.name || 'ملف مستند') + escapeHtml(sizeText) + ' — ' + status + '</span>';
+          const sizeText = size ? (size / 1024 / 1024).toFixed(2) + ' MB' : '';
+          const pending = file.status === 'pending' || !file.id;
+          const isPdf = String(file.mimeType || '').includes('pdf') || /\.pdf$/i.test(name);
+          const args = "'" + String(file.id || '').replace(/'/g, "\\'") + "','" +
+            name.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "','" +
+            String(file.mimeType || '').replace(/'/g, "\\'") + "'";
+          return '<div style="border:1px solid #b9e1d1;background:#fff;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px">' +
+            '<div style="display:flex;align-items:center;gap:8px">' +
+            '<span style="font-size:1.3rem">' + (isPdf ? '📄' : '🖼️') + '</span>' +
+            '<span style="font-weight:600;word-break:break-word;flex:1">' + escapeHtml(name) + '</span></div>' +
+            '<span class="tenant-hint" style="margin:0">' + escapeHtml(sizeText) +
+            (sizeText && !pending ? ' — ' : '') + (pending ? 'جاري الحفظ تلقائيًا' : 'محفوظ') + '</span>' +
+            (pending ? '' : '<button type="button" class="btn ghost" style="padding:6px 10px" onclick="openProjectFilePreview(' + args + ')">معاينة الملف</button>') +
+            '</div>';
         }).join('') + '</div></div>';
     }
 
     async function uploadTenantProjectFileInput(input, key) {
-      const files = Array.from(input?.files || []).slice(0, input?.multiple ? 2 : 1);
+      const multiLimit = key === 'land_photos' ? LAND_PHOTOS_MAX : 2;
+      const files = Array.from(input?.files || []).slice(0, input?.multiple ? multiLimit : 1);
       const fileType = input?.dataset?.projectFileType;
       if (!files.length || !fileType) {
         return tenantProjectData[key + (input?.multiple ? '_file_ids' : '_file_id')] || null;
@@ -10254,10 +10558,18 @@
       }
       const ids = uploaded.map(file => file.id);
       if (input.multiple) {
+        // Re-uploads return fresh metadata, so any caption already typed has to be carried over.
+        const previousMeta = Array.isArray(tenantProjectData[key + '_file_meta'])
+          ? tenantProjectData[key + '_file_meta'] : [];
+        const merged = uploaded.map(file => {
+          const previous = previousMeta.find(item => item && item.id === file.id);
+          return previous?.description ? { ...file, description: previous.description } : file;
+        });
         tenantProjectData[key + '_file_ids'] = ids;
-        tenantProjectData[key + '_file_meta'] = uploaded;
-        if (key === 'land_documents_files') renderLandDocumentsUploadState(uploaded);
-        return uploaded;
+        tenantProjectData[key + '_file_meta'] = merged;
+        if (key === 'land_documents_files') renderLandDocumentsUploadState(merged);
+        if (key === 'land_photos') renderLandPhotos(merged);
+        return merged;
       }
       tenantProjectData[key + '_file_id'] = ids[0];
       tenantProjectData[key + '_file_meta'] = uploaded[0];

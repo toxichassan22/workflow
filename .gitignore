@@ -38,3 +38,11 @@ mirror/
 how\ to\ push\ on\ server.md
 .temp.نقاش.md
 BigQuery API.json
+
+# Client-supplied documents (deeds, site plans). Never commit: they contain
+# real owner names, addresses and deed numbers.
+userfiles/
+
+# Duplicate, lower-quality extraction of the same Jeddah building regulations as
+# اشتراطات1.pdf. Kept locally only; regulation_pdf_paths() skips it when absent.
+اشتراطات2.pdf

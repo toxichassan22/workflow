@@ -4933,22 +4933,109 @@ def parse_json_object(text):
     return {}
 
 
+PLACEHOLDER_VALUE_PHRASES = (
+    'غير مدون', 'غير مذكور', 'غير موضح', 'غير متاح', 'غير محدد',
+    'لا يوجد', 'n/a', 'none', 'null', 'غير مدونة',
+)
+
+# Cardinal/ordinal wording that belongs in the facade *directions* field, never in the count.
+FACADE_DIRECTION_WORDS = ('شمال', 'جنوب', 'شرق', 'غرب', 'قبلي', 'بحري')
+
+FACADE_COUNT_PATTERNS = (
+    ('4', ('بلك كامل', 'بلك', 'أربع', 'اربع', '4 واجهات', 'أربعة شوارع', 'اربعة شوارع')),
+    ('3', ('ثلاث', '3 واجهات', 'ثلاثة شوارع', '3 شوارع')),
+    ('2', ('زاوية', 'زاوي', 'شارعين', 'واجهتين', 'واجهتان', '2 واجهة')),
+    ('1', ('واجهة واحدة', 'شارع واحد', '1 واجهة')),
+)
+
+
+def is_placeholder_value(value):
+    """True for short "not stated" answers that must not be stored as real data."""
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    return bool(text) and len(text) < 20 and any(
+        phrase in text.lower() for phrase in PLACEHOLDER_VALUE_PHRASES
+    )
+
+
+def normalize_facades_count(value, fallback_text=''):
+    """Coerce the facade count to a bare 1-4.
+
+    The form field is numeric, so a direction word ("جنوبية") is rejected outright instead
+    of being written into the field; the caller keeps the wording in facades_directions.
+    """
+    text = '' if value is None else str(value).strip()
+    digits = re.findall(r'[1-4]', text)
+    if digits:
+        return digits[0]
+    for count, patterns in FACADE_COUNT_PATTERNS:
+        if any(pattern in text for pattern in patterns):
+            return count
+    if text and not any(word in text for word in FACADE_DIRECTION_WORDS):
+        return ''
+    for count, patterns in FACADE_COUNT_PATTERNS:
+        if any(pattern in fallback_text for pattern in patterns):
+            return count
+    return ''
+
+
+def normalize_facade_directions(*values):
+    """Collect the cardinal directions mentioned for the plot facades, in a stable order."""
+    haystack = ' '.join(str(value) for value in values if value)
+    labels = (
+        ('شمالية', ('شمالي', 'شمالية', 'الشمال', 'شمال')),
+        ('جنوبية', ('جنوبي', 'جنوبية', 'الجنوب', 'جنوب')),
+        ('شرقية', ('شرقي', 'شرقية', 'الشرق', 'شرق')),
+        ('غربية', ('غربي', 'غربية', 'الغرب', 'غرب')),
+    )
+    found = [label for label, needles in labels if any(needle in haystack for needle in needles)]
+    return '، '.join(found)
+
+
+def normalize_north_direction(value):
+    """Snap a free-text bearing onto one of the eight compass labels.
+
+    Matches on the bare roots so wording like "الشمال الغربي" still resolves to a compound
+    direction instead of collapsing to "شمال".
+    """
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    north, south = 'شمال' in text, 'جنوب' in text
+    east, west = 'شرق' in text, 'غرب' in text
+    for present, label in (
+        (north and east, 'شمال شرقي'), (north and west, 'شمال غربي'),
+        (south and east, 'جنوب شرقي'), (south and west, 'جنوب غربي'),
+        (north, 'شمال'), (south, 'جنوب'), (east, 'شرق'), (west, 'غرب'),
+    ):
+        if present:
+            return label
+    return text
+
+
+def strip_placeholder_values(payload):
+    """Drop placeholder strings while leaving nested tables (dicts/lists) untouched."""
+    cleaned = {}
+    for key, value in (payload or {}).items():
+        if isinstance(value, str):
+            text = value.strip()
+            if is_placeholder_value(text):
+                continue
+            cleaned[key] = text
+        elif isinstance(value, (dict, list)):
+            cleaned[key] = value
+        elif value is not None:
+            cleaned[key] = str(value)
+    return cleaned
+
+
 def normalize_croquis_fields(resp_json, text_content=""):
     """Normalize extracted croquis fields, map select dropdown values, filter invalid placeholders, and apply text regex fallbacks."""
     if not isinstance(resp_json, dict):
         resp_json = {}
-        
-    invalid_phrases = {'غير مدون', 'غير مذكور', 'غير موضح', 'غير متاح', 'غير محدد', 'لا يوجد', 'n/a', 'none', 'null', 'غير مدونة'}
-    cleaned_json = {}
-    for k, v in resp_json.items():
-        if isinstance(v, str):
-            v_clean = v.strip()
-            if any(p in v_clean.lower() for p in invalid_phrases) and len(v_clean) < 20:
-                continue
-            cleaned_json[k] = v_clean
-        elif v is not None:
-            cleaned_json[k] = str(v)
-    resp_json = cleaned_json
+
+    resp_json = strip_placeholder_values(resp_json)
 
     full_text = text_content + " " + json.dumps(resp_json, ensure_ascii=False)
 
@@ -4970,28 +5057,18 @@ def normalize_croquis_fields(resp_json, text_content=""):
         if area_match:
             resp_json['croquis_land_area'] = area_match.group(1).replace(',', '')
 
-    if resp_json.get('croquis_land_area') and not resp_json.get('approved_financial_area'):
-        resp_json['approved_financial_area'] = resp_json['croquis_land_area']
+    # The approved financial-study area is a client decision (it may include deductions),
+    # so AI output is never allowed to populate or overwrite it.
+    resp_json.pop('approved_financial_area', None)
+    resp_json.pop('approved_financial_area_sqm', None)
 
     # 4. Facades count normalization & fallback (Pure Number: 1, 2, 3, 4)
-    fac = str(resp_json.get('facades_count', '')).strip()
-    if '4' in fac or 'بلك' in fac or 'أربع' in fac:
-        resp_json['facades_count'] = '4'
-    elif '3' in fac or 'ثلاث' in fac:
-        resp_json['facades_count'] = '3'
-    elif '2' in fac or 'زاوية' in fac or 'زاوي' in fac or 'شارعين' in fac or 'واجهتين' in fac or 'واجهتان' in fac:
-        resp_json['facades_count'] = '2'
-    elif '1' in fac or 'واجهة واحدة' in fac or 'شارع واحد' in fac or 'واجهة' in fac:
-        resp_json['facades_count'] = '1'
-    elif not resp_json.get('facades_count'):
-        if re.search(r'(?:بلك كامل|4 واجهات|أربعة شوارع)', full_text):
-            resp_json['facades_count'] = '4'
-        elif re.search(r'(?:3 واجهات|ثلاثة شوارع|3 شوارع)', full_text):
-            resp_json['facades_count'] = '3'
-        elif re.search(r'(?:زاوية|زاوي|شارعين|واجهتين|واجهتان|2 واجهة)', full_text):
-            resp_json['facades_count'] = '2'
-        elif re.search(r'(?:واجهة واحدة|شارع واحد|1 واجهة|شارع)', full_text):
-            resp_json['facades_count'] = '1'
+    raw_facades = resp_json.get('facades_count', '')
+    resp_json['facades_count'] = normalize_facades_count(raw_facades, full_text)
+    if not resp_json.get('facades_directions'):
+        directions_text = normalize_facade_directions(raw_facades, resp_json.get('surrounding_streets'))
+        if directions_text:
+            resp_json['facades_directions'] = directions_text
 
     # 5. Floors / Max height fallback
     if not resp_json.get('max_floors_height'):
@@ -5000,21 +5077,16 @@ def normalize_croquis_fields(resp_json, text_content=""):
             resp_json['max_floors_height'] = floor_match.group(1).strip()
 
     # 6. North direction normalization
-    nd = str(resp_json.get('north_direction', '')).strip()
-    if 'شمال شرقي' in nd: resp_json['north_direction'] = 'شمال شرقي'
-    elif 'شمال غربي' in nd: resp_json['north_direction'] = 'شمال غربي'
-    elif 'جنوب شرقي' in nd: resp_json['north_direction'] = 'جنوب شرقي'
-    elif 'جنوب غربي' in nd: resp_json['north_direction'] = 'جنوب غربي'
-    elif 'شمال' in nd: resp_json['north_direction'] = 'شمال'
-    elif 'جنوب' in nd: resp_json['north_direction'] = 'جنوب'
-    elif 'شرق' in nd: resp_json['north_direction'] = 'شرق'
-    elif 'غرب' in nd: resp_json['north_direction'] = 'غرب'
+    resp_json['north_direction'] = normalize_north_direction(resp_json.get('north_direction'))
 
     # 7. Apply Aliases across all keys
     aliases = {
         'plot_number_croquis': ['plot_number', 'plot_and_plan_number'],
-        'croquis_land_area': ['land_area', 'approved_financial_area'],
+        'croquis_land_area': ['land_area'],
         'deed_number': ['deed_or_reference_number'],
+        'deed_date': ['deed_issue_date', 'deed_date_hijri'],
+        'plan_number': ['plan_no', 'subdivision_plan_number'],
+        'subdivision_number': ['section_number', 'part_number'],
         'boundary_lengths': ['boundary_dimensions'],
         'surrounding_streets': ['surrounding_streets_widths'],
         'building_ratio_setbacks': ['building_coverage_setbacks'],
@@ -5033,10 +5105,12 @@ def normalize_croquis_fields(resp_json, text_content=""):
     summary_text = str(resp_json.get('land_and_building_summary', '')).replace('{}', '').strip()
     if not summary_text:
         labels = (
-            ('رقم القطعة/المخطط', resp_json.get('plot_number_croquis')),
+            ('رقم القطعة', resp_json.get('plot_number_croquis')),
+            ('رقم المخطط', resp_json.get('plan_number')),
+            ('رقم القسم', resp_json.get('subdivision_number')),
             ('رقم الصك/المرجع', resp_json.get('deed_number')),
+            ('تاريخ الصك', resp_json.get('deed_date')),
             ('المساحة التنظيمية م²', resp_json.get('croquis_land_area')),
-            ('المساحة المعتمدة للدراسة م²', resp_json.get('approved_financial_area')),
             ('الحدود والأبعاد', resp_json.get('boundary_lengths')),
             ('الاتجاهات', resp_json.get('directions') or resp_json.get('north_direction')),
             ('الشوارع والواجهات', resp_json.get('surrounding_streets')),
@@ -5053,37 +5127,169 @@ def normalize_croquis_fields(resp_json, text_content=""):
     return resp_json
 
 
-def search_jeddah_official_regulations_pdf(query_text=""):
-    """Search official Jeddah Local Plan and Executive Regulations 1447/2025 PDFs for matching regulation text."""
+REGULATION_PDF_NAMES = ('اشتراطات1.pdf', 'اشتراطات2.pdf')
+REGULATION_SNIPPET_CHARS = int(os.environ.get('REGULATION_SNIPPET_CHARS', '2600'))
+REGULATION_MAX_SNIPPETS = int(os.environ.get('REGULATION_MAX_SNIPPETS', '6'))
+REGULATION_MAX_TABLE_PAGES = int(os.environ.get('REGULATION_MAX_TABLE_PAGES', '6'))
+
+# Terms that mark a page as carrying the conditions we need. Arabic extracted from these PDFs
+# loses the lam-alef ligature and some letters, so the roots are matched without "ال".
+REGULATION_TOPIC_TERMS = (
+    ('نسبة البناء', 6), ('مسطح البناء', 4), ('معامل مسطح', 4),
+    ('ارتداد', 6), ('تغطية', 4), ('عدد الطوابق', 5), ('الطوابق', 3),
+    ('ارتفاع', 3), ('استعمال', 2), ('استخدام', 2),
+    ('محاور التجارية', 3), ('سكني', 2), ('تجاري', 2),
+)
+
+# Repeated page furniture in these documents; it wastes the snippet budget.
+_REGULATION_NOISE = re.compile(
+    r'(المخطط المحلي لمحافظة\s*جدة\s*1447[^\n]*|أنظمة وضوابط البناء\s*1447[^\n]*|'
+    r'الالئحة التنفيذية[^\n]*|م\s*ص\s*\d+\s*من\s*\d+|\.{6,})'
+)
+
+
+def _clean_regulation_text(text):
+    """Strip repeated headers/footers and dotted index rows from an extracted page."""
+    cleaned = _REGULATION_NOISE.sub(' ', text or '')
+    return re.sub(r'[ \t]*\n[ \t]*', '\n', re.sub(r'[ \t]{2,}', ' ', cleaned)).strip()
+
+
+def _is_regulation_index_page(text):
+    """Index / list-of-figures pages match many keywords but contain no actual rules."""
+    if not text:
+        return True
+    if len(re.findall(r'\.{6,}', text)) >= 3:
+        return True
+    return len(re.findall(r'\(\s*شكل رقم\s*\d+', text)) >= 3
+
+
+def _score_regulation_page(text, query_tokens):
+    score = sum(weight for term, weight in REGULATION_TOPIC_TERMS if term in text)
+    for token in query_tokens:
+        if token and token in text:
+            score += 8
+    if re.search(r'\d{2}\s*%', text):
+        score += 5
+    return score
+
+
+def regulation_pdf_paths():
+    """Absolute paths of the municipality regulation PDFs that exist on disk."""
+    base = os.path.dirname(__file__)
+    return [os.path.join(base, name) for name in REGULATION_PDF_NAMES
+            if os.path.isfile(os.path.join(base, name))]
+
+
+def search_official_regulations_pdf(query_text=""):
+    """Rank regulation pages by relevance and return the strongest excerpts.
+
+    Returns ``(context_text, table_pages, warnings)`` where ``table_pages`` lists pages whose
+    tables must be sent as images: table text extracts in reversed visual order, so only the
+    vision model can read them reliably.
+    """
+    warnings = []
+    pdf_paths = regulation_pdf_paths()
+    if not pdf_paths:
+        message = ('ملفات الاشتراطات غير موجودة على السيرفر: '
+                   + '، '.join(REGULATION_PDF_NAMES))
+        print(f'[REGULATION PDF] {message}')
+        return '', [], [message]
+
     try:
         import fitz
-        pdf_paths = [
-            os.path.join(os.path.dirname(__file__), 'Document_LocalPlan_1447.pdf'),
-            os.path.join(os.path.dirname(__file__), 'ExecutiveRegulations-1447-2025-2.pdf')
-        ]
-        results = []
-        keywords = ['الكورنيش', 'المحيطة', 'المحاور التجارية', 'س ع', 'ت ح', 'فيلات', 'العمائر', 'الارتدادات', 'نسبة البناء']
-        if query_text:
-            tokens = [t.strip() for t in query_text.split() if len(t.strip()) > 3]
-            keywords = list(set(keywords + tokens[:5]))
+    except ImportError:
+        return '', [], ['PyMuPDF غير متاح؛ تعذر قراءة ملفات الاشتراطات']
 
-        for pdf_path in pdf_paths:
-            if not os.path.exists(pdf_path):
-                continue
-            doc = fitz.open(pdf_path)
-            matched_pages = 0
-            for page_idx in range(len(doc)):
-                page_text = doc[page_idx].get_text()
-                if any(kw in page_text for kw in keywords):
-                    doc_basename = os.path.basename(pdf_path)
-                    results.append(f"--- مرجع لائحة أمانة جدة الرسمية 1447هـ/2025م ({doc_basename} - صفحة {page_idx + 1}) ---\n{page_text[:1000]}")
-                    matched_pages += 1
-                    if matched_pages >= 2:
-                        break
-        return "\n\n".join(results[:4])
-    except Exception as e:
-        print(f"[JEDDAH REGULATION PDF SEARCH ERROR] {e}")
-        return ""
+    query_tokens = [token.strip() for token in str(query_text or '').split() if len(token.strip()) > 2][:8]
+    scored, table_pages = [], []
+    for pdf_path in pdf_paths:
+        name = os.path.basename(pdf_path)
+        try:
+            document = fitz.open(pdf_path)
+        except Exception as error:
+            warnings.append(f'تعذر فتح {name}: {error}')
+            continue
+        try:
+            for index in range(len(document)):
+                page = document[index]
+                raw = page.get_text()
+                if _is_regulation_index_page(raw):
+                    continue
+                cleaned = _clean_regulation_text(raw)
+                if len(cleaned) < 120:
+                    continue
+                score = _score_regulation_page(cleaned, query_tokens)
+                if score <= 0:
+                    continue
+                has_table = False
+                try:
+                    has_table = bool(page.find_tables().tables)
+                except Exception:
+                    has_table = False
+                scored.append({
+                    'name': name, 'path': pdf_path, 'page': index + 1,
+                    'score': score + (6 if has_table else 0),
+                    'text': cleaned[:REGULATION_SNIPPET_CHARS], 'has_table': has_table,
+                })
+        finally:
+            document.close()
+
+    scored.sort(key=lambda item: item['score'], reverse=True)
+    top = scored[:REGULATION_MAX_SNIPPETS]
+    if not top:
+        warnings.append('لم يتم العثور على صفحات اشتراطات مطابقة في ملفات الأمانة')
+
+    for item in top:
+        if item['has_table'] and len(table_pages) < REGULATION_MAX_TABLE_PAGES:
+            table_pages.append({'path': item['path'], 'name': item['name'], 'page': item['page']})
+
+    context = '\n\n'.join(
+        f"--- مرجع لائحة أمانة محافظة جدة 1447هـ/2025م ({item['name']} — صفحة {item['page']}) ---\n{item['text']}"
+        for item in top
+    )
+    return context, table_pages, warnings
+
+
+def render_regulation_table_pages(table_pages, dpi=200):
+    """Render the ranked regulation table pages to images for the vision model."""
+    if not table_pages:
+        return [], []
+    try:
+        import fitz
+    except ImportError:
+        return [], ['PyMuPDF غير متاح؛ تعذر تصوير جداول الاشتراطات']
+
+    parts, warnings = [], []
+    scale = max(1.0, float(dpi) / 72.0)
+    matrix = fitz.Matrix(scale, scale)
+    by_path = {}
+    for entry in table_pages:
+        by_path.setdefault(entry['path'], []).append(entry)
+    for path, entries in by_path.items():
+        try:
+            document = fitz.open(path)
+        except Exception as error:
+            warnings.append(f"تعذر تصوير جداول {entries[0]['name']}: {error}")
+            continue
+        try:
+            for entry in entries:
+                index = entry['page'] - 1
+                if index < 0 or index >= len(document):
+                    continue
+                pixmap = document[index].get_pixmap(matrix=matrix, alpha=False)
+                encoded = base64.b64encode(pixmap.tobytes('png')).decode('ascii')
+                parts.append({
+                    'type': 'text',
+                    'text': (f"جدول تنظيم من لائحة الأمانة: {entry['name']} — صفحة {entry['page']}. "
+                             "اقرأ الأرقام من الصورة؛ نص هذا الجدول يُستخرج بترتيب معكوس فلا تعتمد عليه.")
+                })
+                parts.append({
+                    'type': 'image_url',
+                    'image_url': {'url': f'data:image/png;base64,{encoded}', 'detail': 'high'}
+                })
+        finally:
+            document.close()
+    return parts, warnings
 
 PDF_VISION_DPI = int(os.environ.get('PDF_VISION_DPI', '300'))
 PDF_VISION_MAX_PAGES = int(os.environ.get('PDF_VISION_MAX_PAGES', '20'))
@@ -5167,6 +5373,52 @@ def _prepare_document_vision_parts(document):
     return expanded, warnings, page_count, 'pdf_rendered'
 
 
+PARCEL_PLACEHOLDER_KEYS = (
+    'plot_number', 'plan_number', 'subdivision_number', 'deed_number', 'deed_date',
+    'north_direction', 'setbacks', 'building_ratio', 'max_floors_height',
+    'allowed_uses_restrictions', 'expiry_date', 'summary',
+)
+
+
+def _normalize_parcel_scalar_fields(parcel, text_content=''):
+    """Apply the shared scalar normalizers to a single parcel.
+
+    Historically these rules only ran when the model skipped the ``parcels`` array, so the
+    regex fallbacks and the numeric facade coercion never executed on the real code path.
+    """
+    for key in PARCEL_PLACEHOLDER_KEYS:
+        if is_placeholder_value(parcel.get(key)):
+            parcel[key] = ''
+
+    fallback_text = f"{text_content} {json.dumps(parcel, ensure_ascii=False, default=str)}"
+
+    raw_facades = parcel.get('facades_count')
+    parcel['facades_count'] = normalize_facades_count(raw_facades, fallback_text)
+    if not parcel.get('facades_directions'):
+        streets = ' '.join(
+            str((parcel.get('directions') or {}).get(side, {}).get('street_name') or '')
+            for side in ('north', 'south', 'east', 'west')
+        )
+        parcel['facades_directions'] = normalize_facade_directions(raw_facades, streets)
+
+    parcel['north_direction'] = normalize_north_direction(parcel.get('north_direction'))
+
+    if not parcel.get('deed_number'):
+        deed_match = re.search(
+            r'(?:صك|الصك|مرجع|المرجع|وثيقة)\s*(?:رقم)?\s*[:\s]*([0-9]{8,14})', fallback_text)
+        if deed_match:
+            parcel['deed_number'] = deed_match.group(1)
+
+    if not parcel.get('deed_date'):
+        date_match = re.search(
+            r'(?:تاريخ\s*(?:الصك|صك|الإصدار|الاصدار))\s*[:\s]*'
+            r'(\d{1,4}[/\-]\d{1,2}[/\-]\d{1,4})', fallback_text)
+        if date_match:
+            parcel['deed_date'] = date_match.group(1)
+
+    return parcel
+
+
 def _normalize_land_document_result(resp_json, text_content=''):
     """Normalize multi-parcel document output while keeping legacy flat fields compatible."""
     if not isinstance(resp_json, dict):
@@ -5189,11 +5441,14 @@ def _normalize_land_document_result(resp_json, text_content=''):
         parcel = {
             'parcel_id': 'P-1',
             'plot_number': legacy.get('plot_number_croquis', ''),
-            'plan_number': '',
+            'plan_number': legacy.get('plan_number', ''),
+            'subdivision_number': legacy.get('subdivision_number', ''),
             'deed_number': legacy.get('deed_number', ''),
+            'deed_date': legacy.get('deed_date', ''),
             'area_sqm': legacy.get('croquis_land_area'),
-            'approved_financial_area_sqm': legacy.get('approved_financial_area'),
+            'approved_financial_area_sqm': None,
             'facades_count': legacy.get('facades_count'),
+            'facades_directions': legacy.get('facades_directions', ''),
             'directions': directions,
             'north_direction': legacy.get('north_direction', ''),
             'setbacks': legacy.get('building_ratio_setbacks', ''),
@@ -5255,6 +5510,7 @@ def _normalize_land_document_result(resp_json, text_content=''):
         }
         parcel['sources'] = raw.get('sources') if isinstance(raw.get('sources'), list) else []
         parcel['confidence'] = raw.get('confidence') if isinstance(raw.get('confidence'), dict) else {}
+        _normalize_parcel_scalar_fields(parcel, text_content)
         normalized_parcels.append(parcel)
 
     if not normalized_parcels:
@@ -5274,15 +5530,22 @@ def _normalize_land_document_result(resp_json, text_content=''):
     result['survey_coordinates'] = aggregate_coordinates
     result['source_priority'] = ['regulation_table', 'official_regulation', 'croquis', 'building_license']
     result['conflicts'] = resp_json.get('conflicts') if isinstance(resp_json.get('conflicts'), list) else []
-    result['document_summary'] = str(resp_json.get('document_summary') or '').strip()
-    result['land_and_building_summary'] = str(resp_json.get('land_and_building_summary') or '').strip()
+    # One canonical narrative: keep document_summary as a mirror for older stored drafts.
+    summary = str(resp_json.get('land_and_building_summary') or resp_json.get('document_summary') or '').strip()
+    if not summary:
+        summary = str(normalized_parcels[0].get('summary') or '').strip()
+    result['land_and_building_summary'] = summary
+    result['document_summary'] = summary
     first = normalized_parcels[0]
     legacy_map = {
         'plot_number_croquis': first.get('plot_number', ''),
+        'plan_number': first.get('plan_number', ''),
+        'subdivision_number': first.get('subdivision_number', ''),
         'deed_number': first.get('deed_number', ''),
+        'deed_date': first.get('deed_date', ''),
         'croquis_land_area': first.get('area_sqm'),
-        'approved_financial_area': first.get('approved_financial_area_sqm'),
         'facades_count': first.get('facades_count'),
+        'facades_directions': first.get('facades_directions', ''),
         'north_direction': first.get('north_direction', ''),
         'building_ratio_setbacks': first.get('building_ratio') or first.get('setbacks', ''),
         'max_floors_height': first.get('max_floors_height', ''),
@@ -5306,7 +5569,11 @@ def api_extract_croquis():
         if not data.get('documents') and not legacy_file_data:
             return jsonify({'success': False, 'error': 'يرجى رفع صورة الأرض أو الكروكي أو الرخصة أولاً'}), 400
 
-        jeddah_pdf_context = search_jeddah_official_regulations_pdf()
+        # The regulation lookup is keyed on the plot itself, so it runs after the documents are
+        # prepared (see below) — this only records what the client already knows about the site.
+        regulation_query = ' '.join(str(data.get(key) or '') for key in (
+            'zoningCode', 'zoning_code', 'projectType', 'city', 'landUse'
+        )).strip()
 
         documents = []
         raw_documents = data.get('documents')
@@ -5354,8 +5621,9 @@ def api_extract_croquis():
             "الصيغة المطلوبة:\n"
             "{\n"
             '  "parcels": [{\n'
-            '    "parcel_id": "P-1", "plot_number": "", "plan_number": "", "deed_number": "",\n'
-            '    "area_sqm": null, "approved_financial_area_sqm": null, "facades_count": null,\n'
+            '    "parcel_id": "P-1", "plot_number": "", "plan_number": "", "subdivision_number": "",\n'
+            '    "deed_number": "", "deed_date": "", "area_sqm": null,\n'
+            '    "facades_count": null, "facades_directions": "",\n'
             '    "directions": {\n'
             '      "north": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"},\n'
             '      "south": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"},\n'
@@ -5363,16 +5631,41 @@ def api_extract_croquis():
             '      "west": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"}\n'
             '    },\n'
             '    "north_direction": "", "setbacks": "", "building_ratio": "", "max_floors_height": "",\n'
-            '    "allowed_uses_restrictions": "", "expiry_date": "",\n'
+            '    "allowed_uses_restrictions": "", "expiry_date": "", "zoning_code": "",\n'
             '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
             '    "survey_coordinates": [{"point": "", "eastings": "", "northings": "", "source": "regulation_table"}],\n'
             '    "confidence": {}, "sources": [], "summary": ""\n'
             '  }],\n'
             '  "survey_coordinates": [], "source_priority": ["regulation_table", "official_regulation", "croquis", "building_license"],\n'
-            '  "conflicts": [], "document_summary": "", "land_and_building_summary": ""\n'
+            '  "conflicts": [{"field": "", "title": "", "description": "", "severity": "high|medium|low", "values": [], "resolution": ""}],\n'
+            '  "land_and_building_summary": ""\n'
             "}\n"
-            "ملاحظات: المساحة المعتمدة للدراسة تؤخذ فقط من القيمة المكتوبة صراحة تحت (بموجب التنظيم) أو ما يعادلها.\n"
-            "لا تنسب اشتراطات إلى مدينة أو أمانة إلا إذا كانت المدينة ومصدر اللائحة واضحين في الملفات أو في المرجع المرفق."
+            "قواعد إلزامية لأرقام الهوية — لا تخلط بينها أبدًا:\n"
+            "- plot_number: رقم قطعة الأرض وحده (مثل 9991). لا تضع فيه رقم المخطط ولا رقم القسم ولا كلمة (قطعة).\n"
+            "- plan_number: رقم المخطط وحده (مثل 3/س/125).\n"
+            "- subdivision_number: رقم القسم أو الجزء إن وُجد فقط، وإلا اتركه فارغًا. لا تضعه في plot_number.\n"
+            "- إذا كان المستند يذكر رقمًا واحدًا فقط ولم يوضح نوعه، اتركه في الحقل المؤكد فقط وسجّل الغموض في conflicts.\n"
+            "قواعد إلزامية للصك:\n"
+            "- deed_number: رقم الصك رقميًا فقط.\n"
+            "- deed_date: تاريخ إصدار الصك كما هو مكتوب (هجري أو ميلادي) بصيغة YYYY/MM/DD، وبيّن نوع التقويم في summary. لا تخلطه مع تاريخ الكروكي أو تاريخ الرخصة (expiry_date).\n"
+            "قواعد إلزامية للواجهات:\n"
+            "- facades_count: رقم صحيح فقط (1 أو 2 أو 3 أو 4). يُمنع منعًا تامًا كتابة أي كلمة اتجاه هنا.\n"
+            "- facades_directions: أسماء اتجاهات الواجهات نصًا (مثل: شمالية، غربية) وهي المكان الوحيد المسموح لكلمات الاتجاهات.\n"
+            "قواعد منع التكرار:\n"
+            "- لا تكرر نفس المعلومة في أكثر من حقل. setbacks للارتدادات فقط، building_ratio لنسبة البناء والتغطية فقط.\n"
+            "- أطوال الحدود وأسماء الشوارع تُكتب داخل directions فقط، ولا تُعاد في summary كقائمة.\n"
+            "قواعد الاشتراطات:\n"
+            "- zoning_code: كود التنظيم/الاستخدام كما هو في الرخصة أو جدول التنظيم (مثل ت ر1، س ف، ت خ) إن وُجد.\n"
+            "- building_ratio و max_floors_height و allowed_uses_restrictions تُستخرج من نص اللائحة المرفق ومن جداول التنظيم، واذكر رقم الصفحة أو اسم الجدول في summary.\n"
+            "- لا تنسب اشتراطات إلى مدينة أو أمانة إلا إذا كانت المدينة ومصدر اللائحة واضحين في الملفات أو في المرجع المرفق.\n"
+            "قواعد التعارضات (conflicts):\n"
+            "- كل تعارض كائن منفصل: field باسم الحقل المتأثر، title عنوان قصير جدًا (٣-٦ كلمات)، description شرح بجملة أو جملتين، severity، values بالقيم المتعارضة، resolution بالقيمة التي اعتمدتها وسببها.\n"
+            "- إذا لا توجد تعارضات أعد قائمة فارغة.\n"
+            "قواعد الملخص (land_and_building_summary):\n"
+            "- نص عربي مسترسل من ٤ إلى ٦ فقرات (٢٥٠ كلمة على الأقل) وليس قائمة حقول مفصولة بشرطات.\n"
+            "- يغطي بالترتيب: (١) هوية القطعة وموقعها وصكها، (٢) المساحات والحدود والاتجاهات والواجهات، (٣) اشتراطات البناء مع مصدرها من اللائحة، (٤) الاستخدامات المسموحة والقيود، (٥) الفرص التطويرية المستنبطة من الاشتراطات، (٦) المخاطر والتعارضات وما يحتاج مراجعة.\n"
+            "- اذكر صراحة أي معلومة غير متوفرة بدل تخطيها بصمت.\n"
+            "ملاحظة: لا تُخرج حقل المساحة المعتمدة للدراسة المالية إطلاقًا؛ العميل هو من يحددها."
         )
 
         raw_resp = ""
@@ -5403,12 +5696,39 @@ def api_extract_croquis():
                         'details': str(render_error)
                     }), 422
 
+            regulation_context, regulation_table_pages, regulation_warnings = \
+                search_official_regulations_pdf(regulation_query)
+            regulation_parts, render_warnings = render_regulation_table_pages(regulation_table_pages)
+            vision_warnings.extend(regulation_warnings)
+            vision_warnings.extend(render_warnings)
+            if regulation_context:
+                print(f'[REGULATION PDF] {len(regulation_context)} chars, '
+                      f'{len(regulation_table_pages)} table page(s) attached')
+
+            # Two clearly separated kinds of input: the client's own documents are images that
+            # must be read visually, while the municipality regulation arrives as reference text
+            # plus images of its tables (whose text extracts in reversed order).
+            instructions = (
+                "لديك نوعان من المدخلات، لا تخلط بينهما:\n"
+                "١) مستندات العميل (الصك/الكروكي/الرخصة): مُرسلة صورًا عالية الدقة. اقرأها بصريًا فقط "
+                "ولا تعتمد على OCR أو نص مستخرج، واقرأ جداولها من الصورة نفسها.\n"
+                "٢) مرجع لائحة الأمانة: نص رسمي مقتطف موثوق أدناه، مع صور لصفحات جداول التنظيم. "
+                "استخدم هذا المرجع وحده لاستنباط نسبة البناء والتغطية والارتدادات والارتفاع وعدد الأدوار "
+                "والاستخدامات المسموحة، واذكر رقم الصفحة التي اعتمدت عليها.\n"
+                "أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. "
+                "لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude.\n"
+            )
+            regulation_block = (
+                f"مقتطفات مرجع لائحة الأمانة (نص رسمي موثوق):\n{regulation_context}\n\n"
+                if regulation_context else
+                "تنبيه: لم يتوفر مرجع لائحة الأمانة في هذا الطلب. لا تخترع اشتراطات، "
+                "واكتب في الحقول التنظيمية أنها تحتاج مرجع اللائحة، وسجّل ذلك في conflicts.\n\n"
+            )
             user_content = [{
                 "type": "text",
-                "text": "حلل الملفات التالية معًا بصريًا. ملفات PDF أُرسلت على هيئة صور صفحات عالية الدقة؛ لا تعتمد على OCR أو نص مستخرج، واقرأ الجداول من الصورة نفسها. أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude.\n"
-                        f"مقتطفات مرجع اللوائح المتاحة:\n{jeddah_pdf_context}\n\n"
-                        + "\n".join(document_descriptions)
-            }] + vision_parts
+                "text": instructions + regulation_block
+                        + "مستندات العميل المرفقة:\n" + "\n".join(document_descriptions)
+            }] + regulation_parts + vision_parts
 
             try:
                 res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=12000, model="google/gemini-3.6-flash")
@@ -5677,6 +5997,9 @@ def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=No
     mime_type = PROJECT_FILE_EXTENSIONS.get(extension)
     if not mime_type:
         raise ValueError('Only PNG, JPG, JPEG, WEBP, and PDF files are supported')
+    # Land photos are shown in <img> thumbnails, so a PDF there would never render.
+    if file_type == 'land_image' and not mime_type.startswith('image/'):
+        raise ValueError('صور الأرض يجب أن تكون صورًا (PNG أو JPG أو WEBP)')
 
     document_dir = os.path.join(UPLOADS_DIR, str(g.tenant_id), 'project-documents')
     os.makedirs(document_dir, exist_ok=True)
@@ -5753,6 +6076,42 @@ def api_upload_project_file():
     except OSError as error:
         return jsonify({'success': False, 'error': f'Could not store project file: {error}'}), 500
     return jsonify({'success': True, 'file': result}), 201
+
+
+@app.route('/api/project-files/<file_id>', methods=['GET'])
+@require_auth
+def api_get_project_file(file_id):
+    """Stream a previously uploaded project document back so the client can preview it.
+
+    Uploads are only reachable through this route: the record is looked up inside the
+    caller's tenant, and the stored path must resolve inside that tenant's upload folder.
+    """
+    stored = db.get_project_file(g.tenant_id, str(file_id))
+    if not stored or not stored.get('storage_path'):
+        return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+
+    tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(g.tenant_id)))
+    storage_path = os.path.realpath(stored['storage_path'])
+    if os.path.commonpath([tenant_root, storage_path]) != tenant_root:
+        print(f"[PROJECT FILE] rejected out-of-tenant path for {file_id}")
+        return jsonify({'success': False, 'error': 'مسار الملف غير مسموح'}), 403
+    if not os.path.isfile(storage_path):
+        return jsonify({'success': False, 'error': 'الملف غير متاح على السيرفر'}), 404
+
+    mime_type = stored.get('mime_type') or 'application/octet-stream'
+    # PDFs and images render inline; anything else downloads instead of executing.
+    inline = mime_type == 'application/pdf' or mime_type.startswith('image/')
+    response = send_file(
+        storage_path,
+        mimetype=mime_type,
+        as_attachment=not inline,
+        download_name=stored.get('original_name') or os.path.basename(storage_path),
+        conditional=True,
+    )
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Content-Security-Policy'] = "default-src 'none'; object-src 'none'"
+    response.headers['Cache-Control'] = 'private, max-age=300'
+    return response
 
 
 @app.route('/api/upload/logo', methods=['POST'])
