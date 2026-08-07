@@ -340,6 +340,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("setConditionalVisibility('graceDetails', graceOn)", index_source)
         self.assertIn("setConditionalVisibility('graceScheduleWrap', scheduledGrace)", index_source)
         self.assertIn('const modeFlags=projectModeFlags();', index_source)
+        self.assertIn('targetCarry=profit*carryRate', index_source)
+        self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
     def test_financial_validation_requires_only_enabled_optional_inputs(self):
         errors = self.application_module.validate_financial_model({

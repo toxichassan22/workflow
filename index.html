@@ -1531,6 +1531,8 @@
       padding: 12px;
       font-size: 15px;
       outline: none;
+    }
+
     /* THE VIEW Financial Model Styles - Complete Scoped Copy from THE-VIEW-Financial-Model-FINAL-v2.html */
     .project-form-content #section-financial-calc.tenant-form-section.active,
     #section-financial-calc.tenant-form-section.active,
@@ -1684,7 +1686,10 @@
     #section-financial-calc .custom-formula-row { margin-top: 8px !important; padding-top: 8px !important; border-top: 1px dashed rgba(0,0,0,.12) !important; }
     #section-financial-calc .custom-formula-row input { font-family: ui-monospace, Menlo, Consolas, monospace !important; direction: ltr !important; text-align: left !important; }
     #section-financial-calc .formula-error { color: #a9472b !important; }
-    #section-financial-calc .conditional-off { display: none !important; }
+    #section-financial-calc .conditional-off,
+    #section-financial-calc .grid[hidden],
+    #section-financial-calc .finance-block[hidden] { display: none !important; }
+    #section-financial-calc [hidden] { display: none !important; }
     #section-financial-calc .validation-panel { margin-top: 12px !important; padding: 12px 14px !important; border-radius: 13px !important; font-weight: 800 !important; background: #edf7f3 !important; border: 1px solid #b9e1d1 !important; color: #126247 !important; }
     #section-financial-calc .validation-panel.error { background: #fff0f0 !important; border-color: #efb3b3 !important; color: #9c1d1d !important; }
     #section-financial-calc .finance-block.area-invalid { border-color: #d34242 !important; box-shadow: 0 0 0 3px rgba(211,66,66,.08) !important; }
@@ -2518,13 +2523,6 @@
       font-weight: 800;
     }
 
-    .survey-coordinates-panel .survey-coordinates-hint {
-      margin: 0 0 10px;
-      color: #526b7d;
-      font-size: 12px;
-      line-height: 1.7;
-    }
-
     .survey-coordinates-table-wrap {
       overflow-x: auto;
       border: 1px solid #d8e2e9;
@@ -2564,9 +2562,7 @@
     .survey-coordinates-table th:nth-child(4),
     .survey-coordinates-table td:nth-child(4) { width: 22%; }
     .survey-coordinates-table th:nth-child(5),
-    .survey-coordinates-table td:nth-child(5) { width: 18%; }
-    .survey-coordinates-table th:nth-child(6),
-    .survey-coordinates-table td:nth-child(6) { width: 10%; }
+    .survey-coordinates-table td:nth-child(5) { width: 14%; }
 
     .survey-coordinates-table input {
       width: 100%;
@@ -2578,11 +2574,6 @@
       text-align: center;
       direction: ltr;
       font-variant-numeric: tabular-nums;
-    }
-
-    .survey-coordinates-table input[data-coordinate-field="source"] {
-      direction: rtl;
-      font-variant-numeric: normal;
     }
 
     .survey-coordinates-empty {
@@ -7068,7 +7059,6 @@
           const landAnalysisActions = document.createElement('div');
           landAnalysisActions.className = 'tenant-field full land-documents-actions';
           landAnalysisActions.innerHTML = '<div class="land-documents-action-row"><button type="button" class="btn primary land-documents-action-btn" id="analyzeLandDocumentsButton">تحليل الرخصة والكروكي معًا</button></div>' +
-            '<p class="land-documents-hint">ارفع ملفين كحد أقصى داخل الخانة: ملف رخصة البناء وملف الكروكي. سيتم تحليل الملفين في طلب AI واحد، مع إعطاء الأولوية لأي جدول تنظيم موجود داخل المستندات.</p>' +
             '<input type="hidden" data-key="land_documents_analysis" data-type="text" id="landDocumentsAnalysisData">' +
             '<input type="hidden" data-key="survey_coordinates" data-type="text" id="surveyCoordinatesData">' +
             '<div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>' +
@@ -7483,7 +7473,7 @@
 
         <div class="finance-block" id="fundBlock">
           <h3>10. الصندوق وأتعاب إدارة الصندوق</h3>
-          <div class="grid four">
+          <div class="grid four" id="fundMainGrid">
             <div><label>وجود صندوق للمشروع؟</label><select id="fundEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
             <div><label>تطبيق أتعاب إدارة الصندوق</label><select id="fundFeesEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
             <div><label>أساس احتساب الأتعاب</label><select id="fundFeeBase" onchange="calculateAll()"><option value="fundCapital">رأس مال الصندوق</option><option value="investedCapital">رأس المال المستثمر فعليًا</option><option value="nav">صافي قيمة الأصول</option><option value="projectCost">إجمالي تكلفة المشروع</option><option value="fixed">مبلغ ثابت</option></select></div>
@@ -7502,20 +7492,20 @@
           <div class="table-wrap"><table id="fundAdditionalFeesTable"><thead><tr><th>اسم الأتعاب</th><th>طريقة الحساب</th><th>المبلغ / النسبة</th><th>سنة البداية</th><th>سنة النهاية</th><th>التكرار</th><th>الإجمالي المحسوب</th><th>ترتيب / حذف</th></tr></thead><tbody></tbody></table></div>
           <br><button type="button" class="btn ghost" onclick="addFundAdditionalFee()">+ إضافة أتعاب اختيارية</button>
           <h4>أتعاب التخارج وحافز الأداء</h4>
-          <div class="grid four">
-            <div><label>تطبيق أتعاب التخارج</label><select id="fundExitFeeEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
-            <div><label>أساس احتساب أتعاب التخارج</label><select id="fundExitFeeBase" onchange="calculateAll()"><option value="saleValue">قيمة البيع</option><option value="profits">الأرباح</option><option value="fixed">مبلغ ثابت</option></select></div>
+          <div class="grid four" id="fundExitPerformanceGrid">
+            <div id="fundExitFeeEnabledWrap"><label>تطبيق أتعاب التخارج</label><select id="fundExitFeeEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
+            <div id="fundExitFeeBaseWrap"><label>أساس احتساب أتعاب التخارج</label><select id="fundExitFeeBase" onchange="calculateAll()"><option value="saleValue">قيمة البيع</option><option value="profits">الأرباح</option><option value="fixed">مبلغ ثابت</option></select></div>
             <div id="fundExitFeeRateWrap"><label>نسبة أتعاب التخارج %</label><input id="fundExitFeeRate" type="number" value="0" oninput="calculateAll()"></div>
             <div id="fundExitFixedFeeWrap"><label>مبلغ أتعاب التخارج الثابت</label><input id="fundExitFixedFee" type="number" value="0" oninput="calculateAll()"></div>
-            <div><label>تطبيق حافز أداء</label><select id="performanceFeeEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
-            <div><label>الحد الأدنى للعائد Hurdle Rate %</label><input id="hurdleRate" type="number" value="8" oninput="calculateAll()"></div>
-            <div><label>طريقة احتساب الحد الأدنى</label><select id="hurdleMethod" onchange="calculateAll()"><option value="compound">تراكمي مركب</option><option value="simple">بسيط</option></select></div>
-            <div><label>نسبة حافز الأداء %</label><input id="performanceFeeRate" type="number" value="20" oninput="calculateAll()"></div>
-            <div><label>أساس الاحتساب</label><select id="performanceFeeBase" onchange="calculateAll()"><option value="aboveHurdle">الأرباح فوق الحد الأدنى</option><option value="projectProfit">أرباح المشروع</option></select></div>
-            <div><label>تطبيق Catch-up</label><select id="catchupEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
-            <div><label>نسبة الاستدراك %</label><input id="catchupRate" type="number" value="100" oninput="calculateAll()"></div>
-            <div><label>سنة احتساب حافز الأداء</label><input id="performanceCrystallizationYear" type="number" min="1" value="10" oninput="calculateAll()"></div>
-            <div><label>إجمالي حافز الأداء المحسوب</label><input id="performanceFeeTotal" readonly></div>
+            <div id="performanceFeeEnabledWrap"><label>تطبيق حافز أداء</label><select id="performanceFeeEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
+            <div id="hurdleRateWrap"><label>الحد الأدنى للعائد Hurdle Rate %</label><input id="hurdleRate" type="number" value="8" oninput="calculateAll()"></div>
+            <div id="hurdleMethodWrap"><label>طريقة احتساب الحد الأدنى</label><select id="hurdleMethod" onchange="calculateAll()"><option value="compound">تراكمي مركب</option><option value="simple">بسيط</option></select></div>
+            <div id="performanceFeeRateWrap"><label>نسبة حافز الأداء %</label><input id="performanceFeeRate" type="number" value="20" oninput="calculateAll()"></div>
+            <div id="performanceFeeBaseWrap"><label>أساس الاحتساب</label><select id="performanceFeeBase" onchange="calculateAll()"><option value="aboveHurdle">الأرباح فوق الحد الأدنى</option><option value="projectProfit">أرباح المشروع</option></select></div>
+            <div id="catchupEnabledWrap"><label>تطبيق Catch-up</label><select id="catchupEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
+            <div id="catchupRateWrap"><label>نسبة الاستدراك %</label><input id="catchupRate" type="number" value="100" oninput="calculateAll()"></div>
+            <div id="performanceCrystallizationYearWrap"><label>سنة احتساب حافز الأداء</label><input id="performanceCrystallizationYear" type="number" min="1" value="10" oninput="calculateAll()"></div>
+            <div id="performanceFeeTotalWrap"><label>إجمالي حافز الأداء المحسوب</label><input id="performanceFeeTotal" readonly></div>
             <div><label>إجمالي تكاليف الصندوق</label><input id="fundFeesTotal" readonly></div>
           </div>
           <h4>جدول أتعاب الصندوق السنوي</h4>
@@ -8007,6 +7997,9 @@
       const financeOn = val('financeEnabled') === 'yes';
       const fundOn = val('fundEnabled') === 'yes';
       const feesOn = fundOn && val('fundFeesEnabled') === 'yes';
+      const fundExitEnabled = feesOn && val('fundExitFeeEnabled') === 'yes';
+      const performanceEnabled = feesOn && val('performanceFeeEnabled') === 'yes';
+      const catchupEnabled = performanceEnabled && val('catchupEnabled') === 'yes';
       const exitOn = val('exitEnabled') === 'yes';
 
       setConditionalVisibility('salesStartYearWrap', flags.sales);
@@ -8025,6 +8018,14 @@
       setConditionalSelector('#financeBlock .grid.four>div:not(:first-child),#financeBlock h4,#financeBlock .table-wrap,#financeBlock p.help', financeOn);
       setConditionalSelector('#fundBlock .grid.four>div:not(:first-child),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', fundOn);
       setConditionalSelector('#fundBlock .grid.four>div:nth-child(n+3),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', feesOn);
+      setConditionalVisibility('fundExitPerformanceGrid', feesOn);
+      setConditionalVisibility('fundExitFeeEnabledWrap', feesOn);
+      setConditionalVisibility('fundExitFeeBaseWrap', fundExitEnabled);
+      setConditionalVisibility('fundExitFeeRateWrap', fundExitEnabled && val('fundExitFeeBase') !== 'fixed');
+      setConditionalVisibility('fundExitFixedFeeWrap', fundExitEnabled && val('fundExitFeeBase') === 'fixed');
+      setConditionalVisibility('performanceFeeEnabledWrap', feesOn);
+      ['hurdleRateWrap','hurdleMethodWrap','performanceFeeRateWrap','performanceFeeBaseWrap','catchupEnabledWrap','performanceCrystallizationYearWrap','performanceFeeTotalWrap'].forEach(id => setConditionalVisibility(id, performanceEnabled));
+      setConditionalVisibility('catchupRateWrap', catchupEnabled);
       setConditionalSelector('#exitBlock .grid.four>div:not(:first-child)', exitOn);
       setConditionalSelector('.cf-sales', flags.sales);
       setConditionalSelector('.cf-rental', flags.rental);
@@ -8239,7 +8240,7 @@
         fundExitFeeTotal+=fundExitFee;
 
         const beforePerformance=beforeFundExitFee-fundExitFee;cumulativeBeforePerformance+=beforePerformance;
-        let performanceFee=0;if(performanceFeeOn&&year===performanceCrystallizationYear){const profit=Math.max(0,cumulativeBeforePerformance), capitalBase=Math.max(fundCapitalInput,cumulativeInvestedCapital+landInKindContribution), hurdle=Math.max(0,num('hurdleRate'))/100, yearsHeld=Math.max(1,performanceCrystallizationYear), hurdleAmount=val('hurdleMethod')==='simple'?capitalBase*hurdle*yearsHeld:capitalBase*(Math.pow(1+hurdle,yearsHeld)-1), excess=Math.max(0,profit-hurdleAmount), carryRate=Math.max(0,Math.min(100,num('performanceFeeRate')))/100, performanceBase=val('performanceFeeBase')==='projectProfit'?profit:excess;performanceFee=performanceBase*carryRate;}
+        let performanceFee=0;if(performanceFeeOn&&year===performanceCrystallizationYear){const profit=Math.max(0,cumulativeBeforePerformance), capitalBase=Math.max(fundCapitalInput,cumulativeInvestedCapital+landInKindContribution), hurdle=Math.max(0,num('hurdleRate'))/100, yearsHeld=Math.max(1,performanceCrystallizationYear), hurdleAmount=val('hurdleMethod')==='simple'?capitalBase*hurdle*yearsHeld:capitalBase*(Math.pow(1+hurdle,yearsHeld)-1), excess=Math.max(0,profit-hurdleAmount), carryRate=Math.max(0,Math.min(100,num('performanceFeeRate')))/100, performanceBase=val('performanceFeeBase')==='projectProfit'?profit:excess;performanceFee=performanceBase*carryRate;if(val('catchupEnabled')==='yes'&&val('performanceFeeBase')==='aboveHurdle'){const targetCarry=profit*carryRate,catchupGap=Math.max(0,targetCarry-performanceFee);performanceFee+=Math.min(catchupGap,excess*Math.max(0,Math.min(100,num('catchupRate')))/100);}}
         performanceFeeTotal+=performanceFee;
 
         const fundFeesAnnual=fundManagementFee+additionalFundFees+fundExitFee+performanceFee, final=beforePerformance-performanceFee, cashFlowExcludingInKind=final, unleveredForIrr=unlevered, cashBeforeEquity=cashReserve+cashFlowExcludingInKind, cashEquityInjection=Math.max(0,-cashBeforeEquity);
@@ -9081,10 +9082,9 @@
       if (!panel) return;
       const normalized = Array.isArray(rows) ? rows : [];
       panel.innerHTML = '<div class="survey-coordinates-head">' +
-        '<strong class="survey-coordinates-title">إحداثيات التنظيم المساحية</strong>' +
+        '<strong class="survey-coordinates-title">جدول الإحداثيات</strong>' +
         '<button type="button" class="btn ghost small" id="addSurveyCoordinateButton">إضافة نقطة</button></div>' +
-        '<p class="survey-coordinates-hint">تُستخرج من جدول التنظيم بأولوية أعلى من أي جدول آخر. الأعمدة مطابقة للمستند: رقم القطعة، رقم النقطة، الشرقيات، الشماليات.</p>' +
-        '<div class="survey-coordinates-table-wrap"><table class="survey-coordinates-table"><thead><tr><th>رقم القطعة</th><th>رقم النقطة</th><th>الشرقيات</th><th>الشماليات</th><th>المصدر</th><th>إجراء</th></tr></thead><tbody></tbody></table></div>';
+        '<div class="survey-coordinates-table-wrap"><table class="survey-coordinates-table"><thead><tr><th>رقم القطعة</th><th>رقم النقطة</th><th>الشرقيات</th><th>الشماليات</th><th>إجراء</th></tr></thead><tbody></tbody></table></div>';
       const tbody = panel.querySelector('tbody');
       if (!normalized.length) {
         tbody.innerHTML = '<tr><td colspan="6" class="survey-coordinates-empty">سيظهر جدول الإحداثيات بعد تحليل المستندات أو يمكنك إضافة نقطة يدويًا.</td></tr>';
@@ -9097,7 +9097,6 @@
           cell('point', row?.point || row?.point_number || '', '1') +
           cell('eastings', row?.eastings ?? row?.easting ?? '', '510180.849') +
           cell('northings', row?.northings ?? row?.northing ?? '', '2939234.840') +
-          cell('source', row?.source || 'regulation_table', 'جدول التنظيم') +
           '<td><button type="button" class="btn danger small" data-remove-coordinate>حذف</button></td>';
         tr.querySelectorAll('input').forEach(input => input.addEventListener('input', syncSurveyCoordinates));
         tr.querySelector('[data-remove-coordinate]').addEventListener('click', () => { tr.remove(); syncSurveyCoordinates(); });
