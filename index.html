@@ -9245,13 +9245,21 @@
           storeLandDocumentAnalysis(data);
           renderSurveyCoordinates(data.survey_coordinates || []);
           renderSurveyDirections(tenantProjectData.directions_table);
-          updateLoaderProgress(100, 'تم تحليل الملفات معًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.');
-          toast('تم تحليل ملفات الأرض والكروكي والرخصة معًا. راجع النتائج قبل الاعتماد.');
+          const appliedCount = Object.values(extractedFields)
+            .filter(value => value !== undefined && value !== null && value !== '' && typeof value !== 'object').length;
+          updateLoaderProgress(100, 'تم تحليل الملفات وتحديث ' + appliedCount + ' حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.');
+          toast('تم التحليل وتحديث ' + appliedCount + ' حقلًا. راجع النتائج قبل الاعتماد.');
           triggerAutoSaveDraft();
         } else {
-          toast(res.error || 'تعذر تحليل ملفات الأرض والكروكي والرخصة');
+          // A rejected extraction leaves every field untouched, so say that explicitly —
+          // otherwise it is indistinguishable from "re-analysis did nothing".
+          const reason = res.error || 'تعذر تحليل ملفات الأرض والكروكي والرخصة';
+          updateLoaderProgress(100, 'لم يتم تحديث أي حقل: ' + reason);
+          toast(reason);
+          console.warn('[LAND ANALYSIS] rejected', res.failureReason || 'unknown', res);
         }
       } catch (err) {
+        updateLoaderProgress(100, 'فشل التحليل ولم يتغير أي حقل.');
         toast('حدث خطأ أثناء تحليل الملفات: ' + (err.message || err));
       } finally {
         hideLoader('اكتمل تحليل ملفات الأرض');

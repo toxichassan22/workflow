@@ -5325,6 +5325,10 @@ def render_regulation_table_pages(table_pages, dpi=200):
 
 PDF_VISION_DPI = int(os.environ.get('PDF_VISION_DPI', '300'))
 PDF_VISION_MAX_PAGES = int(os.environ.get('PDF_VISION_MAX_PAGES', '20'))
+# The land prompt asks for a multi-paragraph Arabic narrative, sourced building rules and a full
+# coordinates table. Arabic costs roughly 2-3 tokens per word, so a low cap truncates the JSON and
+# the whole extraction is then rejected, which looks to the user like "nothing changed".
+LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '32000'))
 
 
 def _decode_data_uri(data_uri):
@@ -5818,7 +5822,9 @@ def api_extract_croquis():
             }] + regulation_parts + vision_parts
 
             try:
-                res = call_openrouter_chat(system_prompt, user_content, temperature=0.1, max_tokens=12000, model="google/gemini-3.6-flash")
+                res = call_openrouter_chat(system_prompt, user_content, temperature=0.1,
+                                           max_tokens=LAND_ANALYSIS_MAX_TOKENS,
+                                           model="google/gemini-3.6-flash")
                 if _has_chat_choices(res):
                     raw_resp = _get_chat_response_text(res)
                     choices = res.get('choices') if isinstance(res, dict) else []
@@ -5829,17 +5835,32 @@ def api_extract_croquis():
             except Exception as model_err:
                 print(f"[EXTRACT LAND DOCUMENTS EXCEPTION] {model_err}")
 
+        # Partial JSON is never accepted: half a parcel is worse than no parcel. But the failure
+        # must say so plainly, otherwise a rejected re-analysis just looks like "nothing changed".
         if response_finish_reason == 'length':
+            print(f"[EXTRACT LAND DOCUMENTS TRUNCATED] {len(raw_resp)} chars at cap {LAND_ANALYSIS_MAX_TOKENS}")
             return jsonify({
                 'success': False,
-                'error': 'استجابة الذكاء الاصطناعي كانت طويلة ومقطوعة. لم يتم اعتماد أي بيانات جزئية؛ أعد المحاولة لتوليد JSON كامل.',
+                'error': (f'انقطعت استجابة الذكاء الاصطناعي عند الحد الأقصى ({LAND_ANALYSIS_MAX_TOKENS} رمز) '
+                          'فلم يُعتمد أي حقل، ولهذا لم تتغير البيانات. أعد المحاولة، '
+                          'أو ارفع LAND_ANALYSIS_MAX_TOKENS إن تكرر ذلك.'),
+                'failureReason': 'truncated',
                 'documentProcessing': document_processing
             }), 502
-        parsed_response = parse_json_object(raw_resp) if raw_resp else {}
-        if raw_resp.strip() and not parsed_response:
+        if not raw_resp.strip():
             return jsonify({
                 'success': False,
-                'error': 'استجابة الذكاء الاصطناعي غير مكتملة أو ليست JSON صالحًا. لم يتم اعتماد أي بيانات جزئية.',
+                'error': 'لم يرد الذكاء الاصطناعي بأي محتوى، فلم تتغير البيانات. تأكد من مفاتيح API ثم أعد المحاولة.',
+                'failureReason': 'empty_response',
+                'documentProcessing': document_processing
+            }), 502
+        parsed_response = parse_json_object(raw_resp)
+        if not parsed_response:
+            print(f"[EXTRACT LAND DOCUMENTS UNPARSEABLE] first 400 chars: {raw_resp[:400]}")
+            return jsonify({
+                'success': False,
+                'error': 'استجابة الذكاء الاصطناعي ليست JSON صالحًا، فلم يُعتمد أي حقل ولم تتغير البيانات.',
+                'failureReason': 'invalid_json',
                 'documentProcessing': document_processing
             }), 502
         resp_json = _normalize_land_document_result(parsed_response, raw_resp)

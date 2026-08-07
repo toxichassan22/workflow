@@ -132,7 +132,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertNotIn('أُرسل الملف الأصلي كحل احتياطي', app_source)
         self.assertIn('finish_reason == \'length\'', app_source)
-        self.assertIn('max_tokens=12000', app_source)
+        # The cap moved to LAND_ANALYSIS_MAX_TOKENS: 12000 truncated the enriched prompt, and a
+        # truncated response is discarded entirely, which looked like a silent no-op.
+        self.assertIn('max_tokens=LAND_ANALYSIS_MAX_TOKENS', app_source)
 
     def test_health_reports_deployment_marker(self):
         marker = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
@@ -668,6 +670,25 @@ class MeetingRequirementsTests(unittest.TestCase):
         module._normalize_parcel_scalar_fields(parcel, '')
         self.assertEqual(parcel['facades_directions'], 'شمالية، شرقية')
         self.assertEqual(parcel['facades_count'], '2')
+
+    def test_truncated_analysis_is_rejected_with_an_explicit_reason(self):
+        """A rejected extraction changes no field, so it must not look like a silent no-op."""
+        module = self.application_module
+        # The cap has to be generous: the prompt asks for a multi-paragraph Arabic narrative,
+        # sourced building rules and a full coordinates table.
+        self.assertGreaterEqual(module.LAND_ANALYSIS_MAX_TOKENS, 24000)
+
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('max_tokens=LAND_ANALYSIS_MAX_TOKENS', source)
+        self.assertNotIn('max_tokens=12000', source)
+        for reason in ('truncated', 'empty_response', 'invalid_json'):
+            self.assertIn(f"'failureReason': '{reason}'", source)
+        self.assertIn('ولهذا لم تتغير البيانات', source)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("'لم يتم تحديث أي حقل: ' + reason", index_source)
+        self.assertIn('res.failureReason', index_source)
+        self.assertIn("' حقلًا. راجع النتائج قبل الاعتماد.'", index_source)
 
     def test_land_prompt_forbids_ai_written_approved_area_and_demands_narrative(self):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
