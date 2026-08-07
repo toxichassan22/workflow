@@ -9139,6 +9139,10 @@
         const res = await api('POST', '/api/extract-croquis', { documents, draftId: tenantProjectData.draftId });
         if (res.success && res.extractedData) {
           const data = res.extractedData;
+          const documentProcessing = res.documentProcessing || data.document_processing || [];
+          tenantProjectData.land_document_processing = documentProcessing;
+          const renderedPdfCount = documentProcessing.filter(item => item.mode === 'pdf_rendered').length;
+          if (renderedPdfCount) toast('تم تجهيز ' + renderedPdfCount + ' ملف PDF بصريًا وإرساله إلى AI كصور صفحات.');
           const extractedFields = buildExtractedLandFieldData(data);
           Object.entries(extractedFields).forEach(([k, v]) => {
             if (v !== undefined && v !== null && v !== '') {

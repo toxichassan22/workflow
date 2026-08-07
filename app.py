@@ -5136,11 +5136,16 @@ def _prepare_document_vision_parts(document):
     file_data = document.get('fileData') or ''
     filename = document.get('filename') or 'document'
     mime_type = str(document.get('mimeType') or '').lower()
-    if 'application/pdf' not in mime_type and not file_data.startswith('data:application/pdf'):
+    is_pdf = (
+        'application/pdf' in mime_type
+        or file_data.startswith('data:application/pdf')
+        or filename.lower().endswith('.pdf')
+    )
+    if not is_pdf:
         return [{
             'type': 'image_url',
             'image_url': {'url': file_data, 'detail': 'high'}
-        }], [], 1
+        }], [], 1, 'image_direct'
 
     pages, page_count, truncated = _render_pdf_pages_for_vision(file_data, filename)
     warnings = []
@@ -5159,7 +5164,7 @@ def _prepare_document_vision_parts(document):
             text_part,
             {'type': 'image_url', 'image_url': {'url': page['image_data'], 'detail': 'high'}}
         ])
-    return expanded, warnings, page_count
+    return expanded, warnings, page_count, 'pdf_rendered'
 
 
 def _normalize_land_document_result(resp_json, text_content=''):
@@ -5372,20 +5377,30 @@ def api_extract_croquis():
 
         raw_resp = ""
         vision_warnings = []
+        document_processing = []
         if OPENROUTER_KEY:
             vision_parts = []
             document_descriptions = []
             for doc in documents:
                 try:
-                    parts, warnings, page_count = _prepare_document_vision_parts(doc)
+                    parts, warnings, page_count, mode = _prepare_document_vision_parts(doc)
                     vision_parts.extend(parts)
                     vision_warnings.extend(warnings)
-                    document_descriptions.append(f"- {doc['key']}: {doc['filename']} ({doc['mimeType']}, {page_count} صفحة/صورة)")
+                    document_processing.append({
+                        'filename': doc['filename'],
+                        'mode': mode,
+                        'page_count': page_count,
+                        'dpi': PDF_VISION_DPI if mode == 'pdf_rendered' else None
+                    })
+                    document_descriptions.append(f"- {doc['key']}: {doc['filename']} ({mode}, {page_count} صفحة/صورة)")
                 except Exception as render_error:
                     print(f"[EXTRACT LAND DOCUMENTS RENDER ERROR] {doc['filename']}: {render_error}")
-                    vision_warnings.append(f"{doc['filename']}: تعذر تجهيز الصفحات بصريًا؛ أُرسل الملف الأصلي كحل احتياطي")
-                    vision_parts.append({"type": "file", "file": {"filename": doc['filename'], "file_data": doc['fileData']}})
-                    document_descriptions.append(f"- {doc['key']}: {doc['filename']} ({doc['mimeType']})")
+                    return jsonify({
+                        'success': False,
+                        'error': f'تعذر تجهيز المستند بصريًا: {doc["filename"]}. لم يتم إرسال PDF كملف عادي حتى لا ينتج AI بيانات غير دقيقة.',
+                        'documentProcessing': document_processing,
+                        'details': str(render_error)
+                    }), 422
 
             user_content = [{
                 "type": "text",
@@ -5408,6 +5423,7 @@ def api_extract_croquis():
         resp_json = _normalize_land_document_result(resp_json, raw_resp)
         if vision_warnings:
             resp_json['warnings'] = vision_warnings
+        resp_json['document_processing'] = document_processing
 
         # Check if there are actual non-empty values extracted
         parcels = resp_json.get('parcels') if isinstance(resp_json, dict) else []
@@ -5420,7 +5436,7 @@ def api_extract_croquis():
             print(f"[CROQUIS DEBUG RAW RESP]\n{raw_resp}")
             return jsonify({'success': False, 'error': f'لم يتم التوصل لبيانات مؤكدة في الصورة أو المستند المرفق. يرجى التأكد من وضوح الصورة.'})
 
-        return jsonify({'success': True, 'extractedData': resp_json, 'rawText': raw_resp})
+        return jsonify({'success': True, 'extractedData': resp_json, 'rawText': raw_resp, 'documentProcessing': document_processing})
     except Exception as exc:
         err_msg = traceback.format_exc()
         print(f"[EXTRACT CROQUIS ERROR]\n{err_msg}")

@@ -121,13 +121,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         pdf_data = document.tobytes()
         document.close()
         data_uri = 'data:application/pdf;base64,' + __import__('base64').b64encode(pdf_data).decode('ascii')
-        parts, warnings, page_count = self.application_module._prepare_document_vision_parts({
+        parts, warnings, page_count, mode = self.application_module._prepare_document_vision_parts({
             'filename': 'scan.pdf', 'mimeType': 'application/pdf', 'fileData': data_uri
         })
         self.assertEqual(page_count, 1)
         self.assertEqual(warnings, [])
+        self.assertEqual(mode, 'pdf_rendered')
         self.assertTrue(any(part.get('type') == 'image_url' for part in parts))
         self.assertFalse(any(part.get('type') == 'file' for part in parts))
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertNotIn('أُرسل الملف الأصلي كحل احتياطي', app_source)
 
     def test_health_reports_deployment_marker(self):
         marker = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
