@@ -701,6 +701,21 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('import emoji_icons', slide_source)
         self.assertIn('def _strip_presentation_icons(html)', slide_source)
 
+    def test_team_settings_page_gates_entities_behind_categories(self):
+        """The page used to show both forms at once, including eight fields for an entity form whose
+        category picker was empty, so it could not be submitted."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        self.assertIn('id="teamEntityFormCard"', index_source)
+        self.assertIn('id="teamEntityBlocked"', index_source)
+        self.assertIn('if (card) card.hidden = !hasCategories;', index_source)
+        self.assertIn('if (blocked) blocked.hidden = hasCategories;', index_source)
+
+        # Numbered steps, and no placeholder option standing in for a real category.
+        self.assertIn('١. الأقسام', index_source)
+        self.assertIn('٢. الجهات', index_source)
+        self.assertNotIn('أضف قسمًا أولاً</option>', index_source)
+
     def test_team_categories_are_company_defined_with_their_own_capacity(self):
         """Nothing about the categories is fixed in code: the company names each one and decides
         whether it holds a single entity or several."""

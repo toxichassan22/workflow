@@ -3552,8 +3552,8 @@
       </div>
 
       <div style="background:#fbf7f4;border:1px solid #e8ded6;border-radius:16px;padding:18px;margin-bottom:20px">
-        <h3 style="margin:0 0 4px;font-size:15px">أقسام فريق العمل</h3>
-        <p class="tenant-hint" style="margin:0 0 12px">سمِّ القسم وحدّد عدد الجهات المسموح فيه.</p>
+        <h3 style="margin:0 0 4px;font-size:15px">١. الأقسام</h3>
+        <p class="tenant-hint" style="margin:0 0 12px">مثل: مطور عقاري، مكتب هندسي، مقاول.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
           <div class="tenant-field" style="flex:1;min-width:220px">
             <label>اسم القسم</label>
@@ -3571,9 +3571,14 @@
         <div id="tenantTeamCategoryList" style="margin-top:12px"></div>
       </div>
 
-      <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
-        <h3 style="margin:0 0 4px;font-size:15px">إضافة جهة</h3>
-        <p class="tenant-hint" style="margin:0 0 12px">اختر القسم الذي تنتمي إليه الجهة. أضف الأقسام أولاً من الأعلى.</p>
+      <!-- Hidden until a category exists: its category picker would be empty, so showing eight
+           fields for something that cannot be submitted only confuses. -->
+      <p id="teamEntityBlocked" class="tenant-hint" hidden
+        style="background:#fff8e6;border:1px solid #e8d9a8;border-radius:12px;padding:12px 14px;margin-bottom:20px">
+        أضف قسمًا أولًا، ثم ستظهر خانات إضافة الجهات.</p>
+
+      <div id="teamEntityFormCard" style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
+        <h3 style="margin:0 0 12px;font-size:15px">٢. الجهات</h3>
         <div class="tenant-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
           <div class="tenant-field">
             <label>القسم</label>
@@ -6279,14 +6284,19 @@
     }
 
     function renderTeamCategoryOptions() {
+      // The entity form is only reachable once there is somewhere to put the entity.
+      const hasCategories = tenantTeamCategories.length > 0;
+      const card = document.getElementById('teamEntityFormCard');
+      const blocked = document.getElementById('teamEntityBlocked');
+      if (card) card.hidden = !hasCategories;
+      if (blocked) blocked.hidden = hasCategories;
+
       const select = document.getElementById('teamEntityCategory');
       if (!select) return;
       const current = select.value;
-      select.innerHTML = tenantTeamCategories.length
-        ? tenantTeamCategories.map(category =>
-            '<option value="' + escapeHtml(category.id) + '">' + escapeHtml(category.label) +
-            (category.allowMultiple ? '' : ' (جهة واحدة)') + '</option>').join('')
-        : '<option value="">أضف قسمًا أولاً</option>';
+      select.innerHTML = tenantTeamCategories.map(category =>
+        '<option value="' + escapeHtml(category.id) + '">' + escapeHtml(category.label) +
+        (category.allowMultiple ? '' : ' (جهة واحدة)') + '</option>').join('');
       if (current) select.value = current;
     }
 
@@ -6440,7 +6450,9 @@
       const host = document.getElementById('tenantTeamList');
       if (!host) return;
       if (!tenantTeamEntities.length) {
-        host.innerHTML = '<p class="tenant-hint">لا توجد جهات مسجّلة بعد.</p>';
+        // With no categories the blocked note above already says what to do.
+        host.innerHTML = tenantTeamCategories.length
+          ? '<p class="tenant-hint">لا توجد جهات مسجّلة بعد.</p>' : '';
         return;
       }
       const groups = new Map();
