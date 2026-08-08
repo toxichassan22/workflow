@@ -8535,7 +8535,10 @@
     }
     function validateComponentAreas(){
       const limit=Math.max(0,num('builtUpAreaAbove'));const used=[...document.querySelectorAll('#componentsTable tbody tr')].reduce((s,tr)=>s+Math.max(0,parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value)),0);const remaining=limit-used,valid=used<=limit+.01;
-      const panel=document.getElementById('componentAreaValidation');if(panel){panel.classList.toggle('error',!valid);panel.innerHTML=valid?`تم تخصيص <b>${money(used)}</b> م² من أصل <b>${money(limit)}</b> م² — المتبقي <b>${money(remaining)}</b> م².`:`خطأ: مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء بمقدار <b>${money(-remaining)}</b> م².`}
+      const panel=document.getElementById('componentAreaValidation');if(panel){panel.classList.toggle('error',!valid);panel.innerHTML=valid?`تم تخصيص <b>${money(used)}</b> م² من أصل <b>${money(limit)}</b> م² — المتبقي <b>${money(remaining)}</b> م².`:`خطأ: مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض بمقدار <b>${money(-remaining)}</b> م². عدّل المساحات قبل اعتماد النتائج أو التصدير.`}
+      // The .area-invalid rule already exists in the stylesheet; without this toggle the block
+      // never got its red border, so the only cue was the text panel.
+      document.querySelector('#componentsTable')?.closest('.finance-block')?.classList.toggle('area-invalid',!valid);
       return {valid,used,limit,remaining};
     }
     function updateGraceRevenueOptions(){const select=document.getElementById('graceRevenueId');if(!select)return;const current=select.value;const rows=[...document.querySelectorAll('#revenueTable tbody tr')].filter(tr=>tr.querySelector('[data-field="method"] select')?.value!=='areaSale');select.innerHTML=rows.map((tr,i)=>`<option value="${tr.dataset.revenueKey}">${tr.querySelector('[data-field="name"] input')?.value||`إيراد ${i+1}`}</option>`).join('');if(rows.some(tr=>tr.dataset.revenueKey===current))select.value=current}
