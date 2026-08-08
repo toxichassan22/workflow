@@ -759,6 +759,36 @@ class MeetingRequirementsTests(unittest.TestCase):
                      'submitTeamCategory', 'teamEntityBlocked', 'team-categories'):
             self.assertNotIn(gone, index_source, f'{gone} should have been removed')
 
+    def test_openrouter_empty_body_is_reported_not_parsed(self):
+        """An empty or unparseable response body must not leak a raw JSONDecodeError to the user.
+        The previous flow exposed 'Expecting value: line 1 column 1 (char 0)' as the providerError."""
+        from unittest.mock import patch, Mock
+
+        def make_response(status, text, json_side_effect=None):
+            r = Mock()
+            r.status_code = status
+            r.text = text
+            if json_side_effect:
+                r.json.side_effect = json_side_effect
+            else:
+                r.json.return_value = {'error': {'message': 'some provider error'}}
+            return r
+
+        empty = make_response(200, '')
+        bad_json = make_response(200, 'not json', json_side_effect=ValueError('Expecting value: line 1 column 1 (char 0)'))
+        http_error = make_response(503, '{"error":{"message":"Service Unavailable"}}')
+
+        with patch('app.requests.post', side_effect=[empty, bad_json, http_error]):
+            for response, expected in ((empty, '200'), (bad_json, '200'), (http_error, '503')):
+                result = self.application_module.call_openrouter_chat(
+                    'system', 'user', max_tokens=100, timeout=5)
+                self.assertIn('error', result, f'status {response.status_code}')
+                self.assertNotIn('Expecting value', result['error'].get('message', ''),
+                                 f'raw JSONDecodeError leaked for status {response.status_code}')
+                self.assertNotIn('line 1 column 1', result['error'].get('message', ''))
+                self.assertIn(expected, result['error'].get('message', ''),
+                              f'status code not in message for status {response.status_code}')
+
     def test_app_never_answers_502(self):
         """The hosting edge fabricates 502s of its own for large bodies, so an app that also answers
         502 makes "the proxy broke" and "the AI failed" impossible to tell apart."""

@@ -235,8 +235,31 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
     }
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
-        return response.json()
+        text = response.text or ''
+        if not text.strip():
+            print(f"[OPENROUTER EMPTY BODY] status={response.status_code} model={model_name} cap={max_tokens}")
+            return {"error": {"message": f"مزوّد الذكاء الاصطناعي رد بجسم فارغ (HTTP {response.status_code})"}}
+        try:
+            data = response.json()
+        except Exception as json_err:
+            print(f"[OPENROUTER UNPARSEABLE] status={response.status_code} model={model_name} json_err={json_err} body={text[:200]!r}")
+            return {"error": {"message": f"استجابة المزوّد ليست JSON صالحًا (HTTP {response.status_code})"}}
+        if response.status_code >= 400:
+            error = data.get('error', {}) if isinstance(data, dict) else data
+            print(f"[OPENROUTER HTTP ERROR] status={response.status_code} model={model_name} error={error}")
+            if isinstance(error, dict) and 'message' in error:
+                error['message'] = f"[{response.status_code}] {error['message']}"
+                return {"error": error}
+            return {"error": error if isinstance(error, dict) else {"message": f"[{response.status_code}] {error}"}}
+        return data
+    except requests.exceptions.Timeout:
+        print(f"[OPENROUTER TIMEOUT] model={model_name} cap={max_tokens} timeout={timeout}")
+        return {"error": {"message": f"انتهت مهلة الاتصال بالمزوّد ({timeout} ثانية)"}}
+    except requests.exceptions.ConnectionError as exc:
+        print(f"[OPENROUTER CONNECTION] model={model_name} {exc}")
+        return {"error": {"message": "انقطع الاتصال بالمزوّد قبل اكتمال الطلب"}}
     except Exception as exc:
+        print(f"[OPENROUTER EXCEPTION] model={model_name} {exc}")
         return {"error": {"message": str(exc)}}
 
 
@@ -265,11 +288,30 @@ def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000,
                 "thinking": {"type": "disabled"}
             }
             response = requests.post(f"{ZAI_BASE}/chat/completions", headers=headers, json=payload, timeout=remaining_timeout())
-            data = response.json()
+            text = response.text or ''
+            if not text.strip():
+                print(f"[ZAI EMPTY BODY] status={response.status_code} model={GLM_MODEL} cap={max_tokens}")
+                return {"error": {"message": f"زدثري (ZAI) رد بجسم فارغ (HTTP {response.status_code})"}}
+            try:
+                data = response.json()
+            except Exception as json_err:
+                print(f"[ZAI UNPARSEABLE] status={response.status_code} model={GLM_MODEL} json_err={json_err} body={text[:200]!r}")
+                return {"error": {"message": "استجابة ZAI ليست JSON صالحًا"}}
+            if response.status_code >= 400:
+                error_data = data.get('error', {}) if isinstance(data, dict) else data
+                print(f"[ZAI HTTP ERROR] status={response.status_code} model={GLM_MODEL} error={error_data}")
+                if isinstance(error_data, dict) and 'message' in error_data:
+                    error_data['message'] = f"[{response.status_code}] {error_data['message']}"
+                    return {"error": error_data}
+                return {"error": error_data if isinstance(error_data, dict) else {"message": f"[{response.status_code}] {error_data}"}}
             if _has_chat_choices(data):
                 return data
             error_data = data.get('error', {}) if isinstance(data, dict) else data
             print(f"[ZAI QUOTA/BALANCE ERROR] {json.dumps(error_data, ensure_ascii=False)}. Falling back to OpenRouter...")
+        except requests.exceptions.Timeout:
+            print(f"[ZAI TIMEOUT] model={GLM_MODEL} cap={max_tokens}")
+        except requests.exceptions.ConnectionError as exc:
+            print(f"[ZAI CONNECTION] model={GLM_MODEL} {exc}")
         except Exception as exc:
             print(f"[ZAI EXCEPTION] {exc}. Falling back to OpenRouter...")
 
@@ -5498,6 +5540,7 @@ PDF_VISION_MAX_PAGES = int(os.environ.get('PDF_VISION_MAX_PAGES', '20'))
 # _call_land_analysis_model() walks the cap back down when that happens.
 LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '12000'))
 LAND_ANALYSIS_MIN_TOKENS = int(os.environ.get('LAND_ANALYSIS_MIN_TOKENS', '6000'))
+# Vision-capable model on OpenRouter. Default chosen for vision support; override via env.
 LAND_ANALYSIS_MODEL = os.environ.get('LAND_ANALYSIS_MODEL', 'google/gemini-3.6-flash')
 
 _AFFORDABLE_TOKENS_RE = re.compile(r'can only afford\s+(\d+)')
