@@ -5017,9 +5017,18 @@
     }
 
     window.addEventListener('popstate', () => {
-      const pageId = TENANT_ROUTE_PAGES[window.location.pathname];
-      if (pageId && tenantToken) showTenantPage(pageId, true);
-      else if (tenantToken && window.location.pathname.startsWith('/app/')) showTenantPage('tenantDashboardPage', true);
+      if (!tenantToken) return;
+      const path = window.location.pathname;
+      const pageId = TENANT_ROUTE_PAGES[path];
+      if (pageId) {
+        showTenantPage(pageId, true);
+        return;
+      }
+      // "/" and any unmapped path used to fall through here, leaving the view on the old page
+      // while the address bar said something else — so the next Back left the site entirely.
+      // Land on the dashboard and put a real route back in the bar instead.
+      showTenantPage('tenantDashboardPage', true);
+      syncTenantBrowserHistory('tenantDashboardPage', {}, true);
     });
 
     const TENANT_WORKFLOW_ITEMS = [
@@ -5496,10 +5505,26 @@
       applyRolePermissions();
       await loadTenantBranding();
       showTenantApp();
-      // Restore the last page for every role; SAG super admin falls back to the admin panel.
-      if (!(await restoreTenantNavigation())) {
+      // A path the user actually asked for wins over the last-visited page, so deep links and
+      // refreshes land where the URL says instead of somewhere remembered in localStorage.
+      const requestedPage = TENANT_ROUTE_PAGES[window.location.pathname];
+      if (requestedPage) {
+        showTenantPage(requestedPage, true);
+        const requestedSection = new URLSearchParams(window.location.search).get('section');
+        if (requestedPage === 'tenantProjectPage' && requestedSection) {
+          await restoreTenantNavigation();
+          showSection(requestedSection, true);
+        }
+      } else if (!(await restoreTenantNavigation())) {
+        // Restore the last page for every role; SAG super admin falls back to the admin panel.
         if (tenantUser.isAdmin) openTenantAdmin();
         else showTenantPage('tenantDashboardPage');
+      }
+      // The bare domain is not a page. Rewrite it to the real route of whatever is on screen so
+      // every part of the app has an address, and Back has somewhere to return to.
+      if (window.location.pathname === '/') {
+        const current = tgrCurrentPageId();
+        if (current && TENANT_PAGE_ROUTES[current]) syncTenantBrowserHistory(current, {}, true);
       }
     }
 
@@ -8957,22 +8982,40 @@
 
     function setupSidebarObserver() { }
 
-    let autoSaveDraftTimer = null;
+    // Drafts are saved only when the user asks for it. Autosave used to fire on any input and on
+    // several render helpers, so merely opening a new project wrote a row to the server.
+    let tenantDraftDirty = false;
 
-    function triggerAutoSaveDraft() {
+    function setDraftDirty(dirty) {
+      tenantDraftDirty = !!dirty;
       const badge = document.getElementById('draftSyncBadge');
       if (badge) {
-        badge.style.background = '#fef3c7';
-        badge.style.color = '#92400e';
-        badge.innerHTML = ' جاري الحفظ تلقائياً...';
+        if (tenantDraftDirty) {
+          badge.style.background = '#fef3c7';
+          badge.style.color = '#92400e';
+          badge.innerHTML = 'تغييرات غير محفوظة — اضغط «حفظ كمسودة»';
+        } else {
+          badge.style.background = '#edf7f3';
+          badge.style.color = '#126247';
+          badge.innerHTML = 'محفوظ';
+        }
       }
-      clearTimeout(autoSaveDraftTimer);
-      autoSaveDraftTimer = setTimeout(() => {
-        saveProjectAsDraft(true);
-        const ib = document.getElementById('tgrInputs');
-        if (ib && !ib.classList.contains('tgr-hidden')) renderGlobalRailInputs();
-      }, 700);
+      const ib = document.getElementById('tgrInputs');
+      if (ib && !ib.classList.contains('tgr-hidden')) renderGlobalRailInputs();
     }
+
+    // Kept under the old name because ~40 call sites use it; it now only flags unsaved work.
+    function triggerAutoSaveDraft() {
+      setDraftDirty(true);
+    }
+
+    // Nothing is saved silently any more, so warn before the tab is closed with pending edits.
+    window.addEventListener('beforeunload', event => {
+      if (!tenantDraftDirty) return;
+      event.preventDefault();
+      event.returnValue = '';
+      return '';
+    });
 
     let draftSaveChain = Promise.resolve();
 
@@ -9026,11 +9069,12 @@
         if (resp.draftId) tenantProjectData.draftId = resp.draftId;
         const badge = document.getElementById('draftSyncBadge');
         if (resp.success) {
+          tenantDraftDirty = false;
           if (badge) {
             const timeStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
             badge.style.background = '#dcfce7';
             badge.style.color = '#166534';
-            badge.innerHTML = 'مُمزامن تلقائياً (' + timeStr + ')';
+            badge.innerHTML = 'محفوظ (' + timeStr + ')';
           }
           tenantArchiveCache = null;
           if (!silent) toast('تم حفظ المسودة على الخادم');
@@ -9038,7 +9082,7 @@
           if (badge) {
             badge.style.background = '#fee2e2';
             badge.style.color = '#991b1b';
-            badge.innerHTML = 'فشل الحفظ التلقائي';
+            badge.innerHTML = 'فشل الحفظ — التغييرات ما زالت غير محفوظة';
           }
           if (!silent) toast(resp.error || 'فشل حفظ المسودة');
         }
@@ -9047,16 +9091,27 @@
         if (badge) {
           badge.style.background = '#fee2e2';
           badge.style.color = '#991b1b';
-          badge.innerHTML = 'خطأ في الاتصال';
+          badge.innerHTML = 'خطأ في الاتصال — التغييرات غير محفوظة';
         }
       }
     }
 
-    function confirmDeleteProject() {
+    async function confirmDeleteProject() {
       if (confirm('هل أنتِ متأكدة من حذف بيانات المشروع؟ هذا الإجراء لا يمكن التراجع عنه.')) {
+        // The draft id has to be sent: DELETE /api/project-draft has no handler, so the old
+        // call returned 405 and the draft stayed on the server while the form looked emptied.
+        const draftId = tenantProjectData?.draftId;
+        const resp = draftId
+          ? await api('DELETE', '/api/project-draft/' + encodeURIComponent(draftId))
+          : { success: true };
+        if (!resp?.success) {
+          toast(resp?.error || 'تعذر حذف المسودة من الخادم');
+          return;
+        }
         document.getElementById('tenantProjectForm').innerHTML = '';
-        localStorage.removeItem('projectDraft');
-        api('DELETE', '/api/project-draft');
+        tenantDraftDirty = false;
+        tenantArchiveCache = null;
+        clearTenantNavigationState();
         toast('تم حذف بيانات المشروع');
         showTenantPage('tenantDashboardPage');
       }

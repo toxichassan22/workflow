@@ -8600,8 +8600,9 @@ def index():
     return resp
 
 
+@app.route('/app', methods=['GET'])
 @app.route('/app/<path:page>')
-def tenant_app_page(page):
+def tenant_app_page(page=''):
     """Serve the SPA shell for bookmarkable tenant workspace pages."""
     return index()
 
@@ -8613,6 +8614,21 @@ def invite_page(token):
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
     return resp
+
+
+# Reserved prefixes must keep their own 404s; everything else is a client-side route and has to
+# return the SPA shell, otherwise reloading or sharing a deep link drops the user on an error page.
+SPA_RESERVED_PREFIXES = ('api/', 'uploads/', 'assets/', 'tenant-assets/', 'outputs/', 'static/')
+
+
+@app.errorhandler(404)
+def spa_fallback(error):
+    path = (request.path or '/').lstrip('/')
+    if request.method not in ('GET', 'HEAD') or path.startswith(SPA_RESERVED_PREFIXES):
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    if 'text/html' not in (request.headers.get('Accept') or ''):
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    return index()
 
 @app.route('/assets/<path:path>')
 def static_assets(path):

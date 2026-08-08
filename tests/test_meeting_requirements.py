@@ -503,6 +503,64 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_drafts_are_saved_only_on_request(self):
+        """Autosave fired on any input and from several render helpers, so merely opening a new
+        project wrote a row to the server."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        # The debounced background save is gone; the old name only flags unsaved work now.
+        # (Explicit checkpoint saves before slide/presentation generation stay: the backend needs
+        # the draft to exist, and they only run on a deliberate user action.)
+        self.assertNotIn('autoSaveDraftTimer', index_source)
+        self.assertNotIn('جاري الحفظ تلقائياً', index_source)
+        self.assertIn('function triggerAutoSaveDraft() {\n      setDraftDirty(true);\n    }', index_source)
+        self.assertIn('function setDraftDirty(dirty)', index_source)
+        self.assertIn('تغييرات غير محفوظة', index_source)
+
+        # Losing unsaved work silently is worse than a prompt.
+        self.assertIn("window.addEventListener('beforeunload'", index_source)
+        self.assertIn('if (!tenantDraftDirty) return;', index_source)
+
+        # A successful save clears the flag.
+        self.assertIn('tenantDraftDirty = false;', index_source)
+
+        # Deleting a draft addressed a route that does not exist, so it silently failed.
+        self.assertNotIn("api('DELETE', '/api/project-draft');", index_source)
+        self.assertIn("api('DELETE', '/api/project-draft/' + encodeURIComponent(draftId))", index_source)
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertNotIn("@app.route('/api/project-draft', methods=['DELETE'])", app_source)
+
+    def test_deep_links_serve_the_spa_instead_of_a_404(self):
+        """Reloading or sharing a client-side route must not drop the user on an error page."""
+        client = self.app.test_client()
+        html_headers = {'Accept': 'text/html'}
+        for path in ('/', '/app', '/app/dashboard', '/app/projects/new',
+                     '/app/settings/users', '/projects/123/financial'):
+            response = client.get(path, headers=html_headers)
+            self.assertEqual(response.status_code, 200, f'{path} should serve the SPA shell')
+
+        # Reserved prefixes must keep real 404s rather than returning HTML.
+        for path in ('/api/does-not-exist', '/uploads/missing.png', '/assets/missing.js'):
+            self.assertEqual(client.get(path, headers=html_headers).status_code, 404, path)
+        # Non-GET and non-HTML requests must not be answered with the shell either.
+        self.assertEqual(client.post('/definitely-not-a-route').status_code, 404)
+        self.assertEqual(client.get('/definitely-not-a-route').status_code, 404)
+
+    def test_back_navigation_never_leaves_the_app(self):
+        """"/" and unmapped paths fell through popstate, so the view and the URL disagreed and the
+        next Back exited the site."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertNotIn(
+            "else if (tenantToken && window.location.pathname.startsWith('/app/')) showTenantPage('tenantDashboardPage', true);",
+            index_source)
+        self.assertIn("showTenantPage('tenantDashboardPage', true);\n      syncTenantBrowserHistory('tenantDashboardPage', {}, true);",
+                      index_source)
+        # A requested path wins over the remembered page, and "/" is rewritten to a real route.
+        self.assertIn('const requestedPage = TENANT_ROUTE_PAGES[window.location.pathname];', index_source)
+        self.assertIn("if (window.location.pathname === '/') {", index_source)
+        self.assertIn('if (current && TENANT_PAGE_ROUTES[current]) syncTenantBrowserHistory(current, {}, true);',
+                      index_source)
+
     def test_timeline_is_the_only_source_of_dev_duration_and_stages(self):
         """The financial study mirrors the timeline read-only so the two cannot disagree."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')

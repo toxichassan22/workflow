@@ -77,6 +77,26 @@ assertion deliberately, not reflexively.
   model so it records disagreements instead of silently picking a value; they surface in the
   narrative summary.
 
+## Drafts and routing
+
+- **Drafts are never autosaved.** `triggerAutoSaveDraft()` keeps its name (~40 call sites) but only
+  sets the dirty flag via `setDraftDirty()`; a `beforeunload` handler warns about unsaved work.
+  Saving happens through `saveProjectAsDraft()` (the "حفظ كمسودة" buttons) and at a few explicit
+  checkpoints before slide/presentation generation, which must stay because the backend associates
+  generated assets with an existing `draftId`.
+- Deleting a draft must address `DELETE /api/project-draft/<draft_id>`. There is no
+  collection-level DELETE route; the old `DELETE /api/project-draft` call returned 405 and left the
+  draft on the server while the form looked emptied.
+- `get_project_draft()` returns the **newest** row for `(tenant_id, user_id)`, while
+  `/api/project-drafts` lists them all. A user can therefore own several draft rows and only the
+  latest is auto-restored — that is what "a draft vanished" usually means. Which draft auto-opens
+  also depends on `T_NAVIGATION_KEY` in localStorage, so it differs per device.
+- **Routing:** client routes live in `TENANT_PAGE_ROUTES` (`/app/...`). `@app.errorhandler(404)`
+  serves the SPA shell for HTML GETs so refreshing or sharing a deep link works;
+  `SPA_RESERVED_PREFIXES` keeps real 404s for `api/`, `uploads/`, `assets/` etc. `popstate` must
+  handle `/` and unmapped paths — leaving them unhandled desynced the view from the address bar and
+  made the next Back exit the site. On boot, `/` is rewritten to the current page's real route.
+
 ## Timeline drives the financial study
 
 The project timeline is the single source of truth for two things the financial study displays:
