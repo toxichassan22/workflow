@@ -1577,6 +1577,10 @@ class MeetingRequirementsTests(unittest.TestCase):
                     'location_lat': 24.0,
                     'location_lng': 46.0,
                     'project_idea': 'فندق بوتيك لرجال الأعمال والسياح',
+                    'project_goal': 'إنشاء وجهة ضيافة عملية للمسافرين من رجال الأعمال',
+                    'project_stage': 'دراسة جدوى',
+                    'initial_features': 'ردهة أعمال ومرافق اجتماعات',
+                    'initial_strengths': 'قرب الموقع من المطار ومحور تجاري رئيسي',
                     'nearby_landmarks': 'معلم قريب — تعليمي — 5 كم — 8 دقائق',
                     'tenantCreativeImages': {'cover': 'data:image/png;base64,' + ('A' * 20000)},
                 }
@@ -1592,10 +1596,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('فندق بوتيك', prompt)
         self.assertIn('4500 نسمة/كم²', prompt)
         self.assertIn('شارع تجريبي رئيسي', prompt)
+        self.assertIn('إنشاء وجهة ضيافة عملية', prompt)
+        self.assertIn('دراسة جدوى', prompt)
+        self.assertIn('ردهة أعمال ومرافق اجتماعات', prompt)
+        self.assertIn('قرب الموقع من المطار', prompt)
         self.assertIn('الكثافة السكانية', prompt)
         self.assertIn('البنية التحتية', prompt)
         self.assertIn('فرص الاستثمار', prompt)
         self.assertIn('المعالم القريبة ومعالم المدينة', prompt)
+        self.assertEqual(call_ai.call_args.kwargs['reasoning_effort'], 'max')
+        self.assertEqual(call_ai.call_args.kwargs['max_tokens'], self.application_module.SITE_ANALYSIS_MAX_TOKENS)
 
     def test_site_analysis_falls_back_to_openrouter_when_primary_ai_response_fails(self):
         client = self.app.test_client()

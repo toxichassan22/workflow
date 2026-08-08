@@ -180,14 +180,15 @@ OPENROUTER_KEY = (os.environ.get("OPENROUTER_KEY") or "").strip() or None
 GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip() or None
 ZAI_BASE = 'https://api.z.ai/api/paas/v4'
 OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
-GLM_MODEL = "glm-5.1"
-GLM_OPENROUTER_MODEL = "z-ai/glm-5.1"
+GLM_MODEL = "glm-5.2"
+GLM_OPENROUTER_MODEL = "z-ai/glm-5.2"
 GLM_USE_OPENROUTER = os.environ.get("GLM_USE_OPENROUTER", "false").lower() in ("1", "true", "yes")
 # Prefer ZAI when its key is loaded; require explicit FORCE_OPENROUTER=1 to keep OpenRouter.
 if ZAI_KEY and OPENROUTER_KEY and GLM_USE_OPENROUTER and os.environ.get("FORCE_OPENROUTER", "false").lower() not in ("1", "true", "yes"):
     GLM_USE_OPENROUTER = False
     print("[CONFIG] Both keys found; preferring ZAI for GLM calls. Set FORCE_OPENROUTER=1 to override.")
 IMAGE_MODEL = "google/gemini-3.6-flash"
+SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 DEPLOYMENT_MARKER_PATH = os.path.join(os.path.dirname(__file__), '.deployed_commit')
 
@@ -263,7 +264,8 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
         return {"error": {"message": str(exc)}}
 
 
-def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300):
+def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
+                  reasoning_effort=None):
     """Call GLM (ZAI API) with automatic fallback to OpenRouter when ZAI fails or runs out of balance."""
     deadline = time.monotonic() + max(1.0, float(timeout))
 
@@ -285,8 +287,10 @@ def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000,
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
-                "thinking": {"type": "disabled"}
+                "thinking": {"type": "enabled" if reasoning_effort else "disabled"}
             }
+            if reasoning_effort:
+                payload["reasoning_effort"] = reasoning_effort
             response = requests.post(f"{ZAI_BASE}/chat/completions", headers=headers, json=payload, timeout=remaining_timeout())
             text = response.text or ''
             if not text.strip():
@@ -3487,6 +3491,7 @@ def api_site_analysis():
     raw_project_data = clean_project_data(data.get('projectData', {}))
     analysis_keys = (
         'project_name', 'project_type', 'project_idea', 'description', 'project_description',
+        'project_goal', 'project_stage', 'initial_features', 'initial_strengths',
         'project_features', 'investment_opportunities', 'target_audience', 'location_address',
         'location_maps_link', 'maps_link', 'location_detail', 'location_lat', 'location_lng',
         'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
@@ -3533,21 +3538,22 @@ def api_site_analysis():
             project_data[key] = enriched_fields[key]
             filled_fields[key] = enriched_fields[key]
 
-    prompt = f"""اكتب تحليلًا عربيًا احترافيًا لموقع مشروع عقاري اعتمادًا على البيانات التالية فقط.
+    prompt = f"""اكتب تحليلًا عربيًا احترافيًا ومفصلًا لموقع مشروع عقاري اعتمادًا على البيانات التالية فقط.
 
 المطلوب:
-- اكتب تحليلًا عربيًا احترافيًا متصلًا كفقرات، يغطي جميع الفئات التالية الموجودة في البيانات ولا يتخطى أي فئة فيها بيانات.
+- اكتب تحليلًا عربيًا مسترسلًا في فقرات مترابطة، ولا تختصره إلى ملخص سريع أو عبارات عامة.
+- غطِّ جميع الفئات التالية الموجودة في البيانات ولا تتخطى أي فئة فيها بيانات.
 - يجب أن يتضمن التحليل إشارة مختصرة إلى كل ما يلي متاح منه، بالترتيب التالي قدر الإمكان:
-  1. نوع المشروع وفكرته ووصفه والجمهور المستهدف.
-  2. مميزات المشروع وفرص الاستثمار المناسبة.
+  1. نوع المشروع وفكرته ووصفه والهدف منه ومرحلته الحالية والجمهور المستهدف.
+  2. المميزات الأولية ونقاط القوة وفرص الاستثمار المناسبة للمشروع.
   3. طبيعة الموقع وموقعه الاستراتيجي والعنوان التفصيلي والإحداثيات.
   4. الكثافة السكانية ومصدرها إن وجدت.
   5. البنية التحتية والخدمات العامة المتاحة.
   6. الطرق الرئيسية والثانوية وطبيعة الوصول.
   7. المعالم القريبة ومعالم المدينة، مع ذكر المسافات وأوقات القيادة كدليل لا كموضوع رئيسي.
   8. نطاق التأثير ومناطق الالتقاط إن وجدت.
-- اربط كل فئة بصلاحية الموقع لنوع المشروع وفكرته والجمهور المستهدف.
-- استخدم صياغة موجزة ولا تكرر نفس المعلومة أكثر من مرة.
+- اربط كل فئة بصلاحية الموقع لنوع المشروع وفكرته وهدفه ومرحلته والجمهور المستهدف ومميزات المشروع وفرصه.
+- اشرح العلاقة والاستنتاجات بالتفصيل دون تكرار نفس المعلومة.
 - لا تخترع أي معلومة غير موجودة في البيانات.
 - إذا كانت معلومة غير متوفرة، لا تذكرها أبدًا بدلًا من اختلاقها.
 - لا تستخدم عناوين أو نقاط تعداد في النص النهائي؛ أعد تحليلًا عربيًا سلسًا جاهزًا للعرض.
@@ -3557,7 +3563,9 @@ def api_site_analysis():
     system_prompt = 'أنت محلل مواقع عقارية دقيق. أخرج تحليلًا عربيًا سلسًا يغطي كل فئة متاحة من البيانات دون تخطي أي منها، ودون اختلاق معلومات غير موجودة.'
     try:
         try:
-            response = call_zai_chat(system_prompt, prompt, max_tokens=1200)
+            response = call_zai_chat(
+                system_prompt, prompt, max_tokens=SITE_ANALYSIS_MAX_TOKENS,
+                reasoning_effort='max')
             analysis = extract_chat_content(response, 'SITE-ANALYSIS').strip()
         except Exception as primary_error:
             if not OPENROUTER_KEY:
@@ -3566,7 +3574,7 @@ def api_site_analysis():
             fallback = call_openrouter_chat(
                 system_prompt,
                 prompt,
-                max_tokens=1200,
+                max_tokens=SITE_ANALYSIS_MAX_TOKENS,
                 model='google/gemini-2.5-flash'
             )
             analysis = extract_chat_content(fallback, 'SITE-ANALYSIS-FALLBACK').strip()
