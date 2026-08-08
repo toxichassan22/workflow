@@ -7670,6 +7670,7 @@
         if (sectionKey === 'land_croquis') {
           const analysisResultsField = document.createElement('div');
           analysisResultsField.className = 'tenant-field full';
+          analysisResultsField.style.display = 'none';
           analysisResultsField.innerHTML = '<input type="hidden" data-key="land_documents_analysis" data-type="text" id="landDocumentsAnalysisData"><div id="landDocumentsAnalysisPreview" style="display:none;margin-top:10px"></div>';
 
           const coordinatesField = document.createElement('div');
@@ -7971,7 +7972,7 @@
           <div id="timelineStagesWarning" class="validation-panel error" hidden>لا توجد مراحل في الجدول الزمني بعد، فلن تُوزَّع تكاليف التطوير على السنوات.</div>
           <div class="table-wrap">
             <table id="scheduleTable">
-              <thead><tr><th>المرحلة</th><th>سنة التنفيذ</th><th>نسبة تكلفة التطوير %</th><th>نسبة دفعة المطور %</th><th>قيمة تكلفة المرحلة</th><th>قيمة دفعة المطور</th></tr></thead>
+              <thead><tr><th>المرحلة</th><th>نسبة تكلفة التطوير %</th><th>نسبة دفعة المطور %</th><th>قيمة تكلفة المرحلة</th><th>قيمة دفعة المطور</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -8220,9 +8221,8 @@
 
     // The stage name and its year mirror the project timeline and are read-only here; only the
     // two financial percentages belong to this study, so only they stay editable.
-    function addScheduleStage(d={}){const tb=document.querySelector('#scheduleTable tbody');if(!tb)return;const tr=document.createElement('tr');tr.innerHTML=`
+    function addScheduleStage(d={}){const tb=document.querySelector('#scheduleTable tbody');if(!tb)return;const tr=document.createElement('tr');tr.dataset.stageYear=String(d.year??1);tr.innerHTML=`
     <td data-field="name"><input value="${escapeHtml(d.name||'')}" readonly class="readonly-highlight" title="تُعدّل من قسم الجدول الزمني"></td>
-    <td data-field="year"><input type="number" min="1" value="${d.year??1}" readonly class="readonly-highlight" title="تُعدّل من قسم الجدول الزمني"></td>
     <td data-field="costPct"><input type="number" min="0" value="${d.costPct??0}"></td>
     <td data-field="devPct"><input type="number" min="0" value="${d.devPct??0}"></td>
     <td class="row-result stageCost">0</td>
@@ -8476,7 +8476,7 @@
       });
 
       const devYears=Math.max(1,Math.round(num('developmentYears')||1));
-      document.querySelectorAll('#scheduleTable tbody tr [data-field="year"] input').forEach(el=>{el.max=String(devYears);if(parseNumber(el.value||1)>devYears)el.value=devYears;});
+      document.querySelectorAll('#scheduleTable tbody tr').forEach(tr=>{const year=parseNumber(tr.dataset.stageYear||1);if(year>devYears)tr.dataset.stageYear=String(devYears);});
       document.querySelectorAll('#costTable tbody tr').forEach(tr=>{
         const method=tr.querySelector('[data-field="method"] select')?.value;
         const visible={areaCost:{qty:true,price:true,duration:false},unitCost:{qty:true,price:true,duration:false},fixed:{qty:true,price:false,duration:false},percentExecution:{qty:false,price:true,duration:false},monthlyDuration:{qty:false,price:true,duration:true},percentRevenue:{qty:false,price:true,duration:false},custom:{qty:true,price:true,duration:true}}[method] || {};
@@ -8506,7 +8506,7 @@
     function projectModeFlags(){const mode=val('unitRevenueMode')||'mixed';return {mode,sales:mode==='sale'||mode==='mixed',rental:mode==='rental'||mode==='mixed',anyRevenue:mode!=='nonRevenue'}}
     function syncProjectYearBounds(totalYears,developmentYears){
       ['salesStartYear','landContributionYear','saleExitYear','operatingExitYear','roiEndYear','irrEndYear','fundFeeStartYear','fundFeeEndYear','performanceCrystallizationYear','graceStartYear'].forEach(id=>{const el=document.getElementById(id);if(!el)return;el.max=String(totalYears);const n=parseNumber(el.value);if(n>totalYears)el.value=String(totalYears);if(n<1)el.value='1'});
-      document.querySelectorAll('#scheduleTable [data-field="year"] input').forEach(el=>{el.max=String(developmentYears);if(parseNumber(el.value)>developmentYears)el.value=String(developmentYears)});
+      document.querySelectorAll('#scheduleTable tbody tr').forEach(tr=>{const year=parseNumber(tr.dataset.stageYear||1);if(year>developmentYears)tr.dataset.stageYear=String(developmentYears)});
     }
     function validateComponentAreas(){
       const limit=Math.max(0,num('builtUpAreaAbove'));const used=[...document.querySelectorAll('#componentsTable tbody tr')].reduce((s,tr)=>s+Math.max(0,parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value)),0);const remaining=limit-used,valid=used<=limit+.01;
@@ -8708,7 +8708,7 @@
       const financeRepaymentPctTotal=financeRepaymentPlan.reduce((sum,row)=>sum+row.repaymentPct,0);
       financeRepaymentPlan.forEach(row=>{const amount=financeRepaymentPctTotal?facilityAmount*(row.repaymentPct/financeRepaymentPctTotal):0;const c=row.tr.querySelector('.financeRepaymentAmount');if(c)c.textContent=money(amount);});
 
-      const scheduleRows=[...document.querySelectorAll('#scheduleTable tbody tr')].map(tr=>({tr,name:tr.querySelector('[data-field="name"] input')?.value||'مرحلة تطوير',year:Math.max(1,Math.min(developmentYears,Math.round(parseNumber(tr.querySelector('[data-field="year"] input')?.value)||1))),costPct:Math.max(0,parseNumber(tr.querySelector('[data-field="costPct"] input')?.value)),devPct:Math.max(0,parseNumber(tr.querySelector('[data-field="devPct"] input')?.value))}));
+      const scheduleRows=[...document.querySelectorAll('#scheduleTable tbody tr')].map(tr=>({tr,name:tr.querySelector('[data-field="name"] input')?.value||'مرحلة تطوير',year:Math.max(1,Math.min(developmentYears,Math.round(parseNumber(tr.dataset.stageYear)||1))),costPct:Math.max(0,parseNumber(tr.querySelector('[data-field="costPct"] input')?.value)),devPct:Math.max(0,parseNumber(tr.querySelector('[data-field="devPct"] input')?.value))}));
       const costPctTotal=scheduleRows.reduce((s,r)=>s+r.costPct,0), devPctTotal=scheduleRows.reduce((s,r)=>s+r.devPct,0), developmentCostBase=costTotal+externalCost;
       scheduleRows.forEach(r=>{const stageCost=costPctTotal?developmentCostBase*(r.costPct/costPctTotal):0, stageDev=devPctTotal?developerCost*(r.devPct/devPctTotal):0;const c1=r.tr.querySelector('.stageCost'),c2=r.tr.querySelector('.stageDevPayment');if(c1)c1.textContent=money(stageCost);if(c2)c2.textContent=money(stageDev);});
 
@@ -9281,7 +9281,7 @@
         quarter => '<option value="' + quarter + '"' + (chosen === quarter ? ' selected' : '') + '>' + quarter + '</option>'
       )).join('');
       const attr = value => escapeHtml(value === undefined || value === null ? '' : String(value));
-      return '<td><input type="text" class="tl-name" value="' + attr(data.name) + '" placeholder="اسم المرحلة" onchange="saveTimelineData()"></td>' +
+      return '<td><input type="text" class="tl-name" value="' + attr(data.name) + '" placeholder="مثال: التصميم والتراخيص" onchange="saveTimelineData()"></td>' +
         '<td><input type="number" class="tl-year" value="' + attr(data.year) + '" placeholder="السنة" onchange="saveTimelineData()"></td>' +
         '<td><select class="tl-quarter" style="min-width:78px" onchange="saveTimelineData()">' + options + '</select></td>' +
         '<td><input type="number" class="tl-duration" value="' + attr(data.duration) + '" placeholder="0" style="width:78px" onchange="saveTimelineData()"></td>' +
@@ -9302,6 +9302,16 @@
     function addTimelineRow(data = {}) {
       const tbody = document.getElementById('timelineTableBody');
       if (!tbody) return null;
+      if (arguments.length === 0 && tbody.rows.length) {
+        const incompleteRow = Array.from(tbody.rows).find(row =>
+          !(row.querySelector('.tl-name')?.value || '').trim());
+        if (incompleteRow) {
+          const nameInput = incompleteRow.querySelector('.tl-name');
+          toast('أكمل اسم المرحلة الحالية أولًا قبل إضافة مرحلة جديدة');
+          nameInput?.focus();
+          return null;
+        }
+      }
       const tr = document.createElement('tr');
       tr.innerHTML = timelineRowHtml(data);
       tbody.appendChild(tr);
@@ -9701,6 +9711,17 @@
 
     async function extractTenantCroquisData(targetKey = 'land_documents_files') {
       const input = document.querySelector('#tenantProjectForm [data-key="land_documents_files"]');
+      const projectContextKeys = [
+        'project_name', 'project_type', 'project_idea', 'project_goal', 'target_audience',
+        'project_stage', 'initial_features', 'initial_strengths', 'zoning_code',
+        'allowed_uses_restrictions'
+      ];
+      const projectContext = {};
+      projectContextKeys.forEach(key => {
+        const field = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+        projectContext[key] = String(field ? field.value || '' : tenantProjectData[key] || '').trim();
+      });
+      tenantProjectData = { ...tenantProjectData, ...projectContext };
       const files = Array.from(input?.files || []).slice(0, 2);
       let uploaded = [];
       if (files.length) uploaded = await uploadTenantProjectFileInput(input, targetKey);
@@ -9724,9 +9745,17 @@
         const res = await api('POST', '/api/extract-croquis', {
           documents,
           draftId: tenantProjectData.draftId,
-          projectType: tenantProjectData.project_type || '',
-          zoningCode: tenantProjectData.zoning_code || '',
-          landUse: tenantProjectData.allowed_uses_restrictions || ''
+          projectName: projectContext.project_name,
+          projectType: projectContext.project_type,
+          city: tenantProjectData.city || '',
+          projectIdea: projectContext.project_idea,
+          projectGoal: projectContext.project_goal,
+          targetAudience: projectContext.target_audience,
+          projectStage: projectContext.project_stage,
+          initialFeatures: projectContext.initial_features,
+          initialStrengths: projectContext.initial_strengths,
+          zoningCode: projectContext.zoning_code,
+          landUse: projectContext.allowed_uses_restrictions
         });
         if (res.success && res.extractedData) {
           const data = res.extractedData;

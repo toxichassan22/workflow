@@ -5420,11 +5420,11 @@ def regulation_pdf_paths():
 
 
 def search_official_regulations_pdf(query_text=""):
-    """Rank regulation pages by relevance and return the strongest excerpts.
+    """Return the complete cleaned prose and the strongest regulation table pages.
 
-    Returns ``(context_text, table_pages, warnings)`` where ``table_pages`` lists pages whose
-    tables must be sent as images: table text extracts in reversed visual order, so only the
-    vision model can read them reliably.
+    Returns ``(context_text, table_pages, warnings)``. Prose is cheap to send as text, while
+    table text extracts in reversed visual order, so only the relevant table pages are sent as
+    images for reliable numeric reading.
     """
     warnings = []
     pdf_paths = regulation_pdf_paths()
@@ -5440,7 +5440,7 @@ def search_official_regulations_pdf(query_text=""):
         return '', [], ['PyMuPDF غير متاح؛ تعذر قراءة ملفات الاشتراطات']
 
     query_tokens = [token.strip() for token in str(query_text or '').split() if len(token.strip()) > 2][:8]
-    scored, table_pages = [], []
+    scored, table_pages, full_text_parts = [], [], []
     for pdf_path in pdf_paths:
         name = os.path.basename(pdf_path)
         try:
@@ -5457,6 +5457,8 @@ def search_official_regulations_pdf(query_text=""):
                 cleaned = _clean_regulation_text(raw)
                 if len(cleaned) < 120:
                     continue
+                full_text_parts.append(
+                    f"--- نص لائحة الأمانة: {name} — صفحة {index + 1} ---\n{cleaned}")
                 score = _score_regulation_page(cleaned, query_tokens)
                 if score <= 0:
                     continue
@@ -5482,10 +5484,12 @@ def search_official_regulations_pdf(query_text=""):
         if item['has_table'] and len(table_pages) < REGULATION_MAX_TABLE_PAGES:
             table_pages.append({'path': item['path'], 'name': item['name'], 'page': item['page']})
 
-    context = '\n\n'.join(
-        f"--- مرجع لائحة أمانة محافظة جدة 1447هـ/2025م ({item['name']} — صفحة {item['page']}) ---\n{item['text']}"
-        for item in top
-    )
+    context = '\n\n'.join(full_text_parts)
+    if not context:
+        context = '\n\n'.join(
+            f"--- مرجع لائحة أمانة محافظة جدة 1447هـ/2025م ({item['name']} — صفحة {item['page']}) ---\n{item['text']}"
+            for item in top
+        )
     return context, table_pages, warnings
 
 
@@ -5944,6 +5948,21 @@ def api_extract_croquis():
         regulation_query = ' '.join(str(data.get(key) or '') for key in (
             'zoningCode', 'zoning_code', 'projectType', 'city', 'landUse'
         )).strip()
+        project_context_fields = (
+            ('اسم المشروع', 'projectName'),
+            ('نوع المشروع', 'projectType'),
+            ('المدينة', 'city'),
+            ('فكرة المشروع', 'projectIdea'),
+            ('الهدف من المشروع', 'projectGoal'),
+            ('الفئات المستهدفة', 'targetAudience'),
+            ('مرحلة المشروع الحالية', 'projectStage'),
+            ('مميزات أولية للمشروع', 'initialFeatures'),
+            ('فرص استثمار ونقاط قوة أولية', 'initialStrengths'),
+        )
+        project_context_block = '\n'.join(
+            f'- {label}: {str(data.get(key) or "").strip() or "غير مدخل"}'
+            for label, key in project_context_fields
+        )
 
         documents = []
         raw_documents = data.get('documents')
@@ -6016,10 +6035,15 @@ def api_extract_croquis():
             "- plan_number: رقم المخطط وحده (مثل 3/س/125).\n"
             "- subdivision_number: رقم القسم أو الجزء إن وُجد فقط، وإلا اتركه فارغًا. لا تضعه في plot_number.\n"
             "- إذا كان المستند يذكر رقمًا واحدًا فقط ولم يوضح نوعه، اتركه في الحقل المؤكد فقط وسجّل الغموض في conflicts.\n"
-            "قواعد إلزامية للصك:\n"
-            "- deed_number: رقم الصك رقميًا فقط.\n"
-            "- deed_date: تاريخ إصدار الصك كما هو مكتوب (هجري أو ميلادي) بصيغة YYYY/MM/DD، وبيّن نوع التقويم في summary. لا تخلطه مع تاريخ الكروكي أو تاريخ الرخصة.\n"
-            "قواعد إلزامية للواجهات — الواجهة هي الحد المطل على شارع فقط:\n"
+             "قواعد إلزامية للصك:\n"
+             "- deed_number: رقم الصك رقميًا فقط.\n"
+             "- deed_date: تاريخ إصدار الصك كما هو مكتوب (هجري أو ميلادي) بصيغة YYYY/MM/DD، وبيّن نوع التقويم في summary. لا تخلطه مع تاريخ الكروكي أو تاريخ الرخصة.\n"
+             "قاعدة حاسمة لمساحة الأرض حسب الكروكي (area_sqm / croquis_land_area):\n"
+             "- أخرج فقط المساحة المكتوبة في جدول التنظيم بجوار عبارة «بموجب التنظيم» لكل قطعة. هذه هي مساحة الأرض المعتمدة لهذا الحقل.\n"
+             "- إذا وُجدت مساحات متعددة مثل مساحة الصك، أو المساحة المقاسة على الطبيعة، أو الرفع المساحي، أو مساحة حدود مختلفة، فلا تستخدم أيًا منها بدل مساحة «بموجب التنظيم».\n"
+             "- استخدم مساحة «بموجب التنظيم» وحدها لاختيار شريحة جدول الاشتراطات، وسجّل أي مساحة أخرى في conflicts أو summary كمعلومة متعارضة فقط.\n"
+             "- إذا لم تكن مساحة «بموجب التنظيم» مقروءة بوضوح، اترك area_sqm فارغًا وسجّل ذلك في conflicts، ولا تخمّن أو تحسب مساحة بديلة.\n"
+             "قواعد إلزامية للواجهات — الواجهة هي الحد المطل على شارع فقط:\n"
             "- لكل قطعة أربعة حدود دائمًا، لكن الواجهات هي الحدود المطلة على شوارع وحدها. "
             "الحد المجاور لقطعة أو جار ليس واجهة.\n"
             "- facades_count: عدد الحدود المطلة على شوارع فقط، رقم صحيح (1 إلى 4). "
@@ -6051,6 +6075,7 @@ def api_extract_croquis():
             "- نص عربي مسترسل من ٣ إلى ٥ فقرات (١٨٠ كلمة على الأقل) وليس قائمة حقول مفصولة بشرطات.\n"
             "- لا تُعد سرد الأرقام التي وردت في الحقول؛ اربطها وحلّلها باختصار.\n"
             "- يغطي بالترتيب: (١) هوية القطعة وموقعها وصكها، (٢) المساحات والحدود والاتجاهات والواجهات، (٣) اشتراطات البناء مع مصدرها من اللائحة، (٤) الاستخدامات المسموحة والقيود، (٥) الفرص التطويرية المستنبطة من الاشتراطات، (٦) المخاطر والتعارضات وما يحتاج مراجعة.\n"
+            "- اربط الفرص التطويرية وملاءمة الاشتراطات بفكرة المشروع وهدفه وفئاته ومرحلته ومميزاته وفرصه المدخلة، ولا تستبدلها بتحليل عام منفصل عن المشروع.\n"
             "- اذكر صراحة أي معلومة غير متوفرة بدل تخطيها بصمت.\n"
             "ملاحظة: لا تُخرج حقل المساحة المعتمدة للدراسة المالية إطلاقًا؛ العميل هو من يحددها."
         )
@@ -6102,21 +6127,25 @@ def api_extract_croquis():
                 "لديك نوعان من المدخلات، لا تخلط بينهما:\n"
                 "١) مستندات العميل (الصك/الكروكي/الرخصة): مُرسلة صورًا عالية الدقة. اقرأها بصريًا فقط "
                 "ولا تعتمد على OCR أو نص مستخرج، واقرأ جداولها من الصورة نفسها.\n"
-                "٢) مرجع لائحة الأمانة: نص رسمي مقتطف موثوق أدناه، مع صور لصفحات جداول التنظيم. "
-                "استخدم هذا المرجع وحده لاستنباط نسبة البناء والتغطية والارتدادات والارتفاع وعدد الأدوار "
-                "والاستخدامات المسموحة، واذكر رقم الصفحة التي اعتمدت عليها.\n"
+                "٢) مرجع لائحة الأمانة: النص المستخرج الكامل أدناه للبحث وقراءة المواد النثرية، مع صور "
+                "لصفحات جداول التنظيم. استخدم المرجع وحده لاستنباط نسبة البناء والتغطية والارتدادات "
+                "والارتفاع وعدد الأدوار والاستخدامات المسموحة، وخذ أرقام الجداول من الصور واذكر رقم الصفحة.\n"
                 "أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. "
                 "لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude.\n"
             )
             regulation_block = (
-                f"مقتطفات مرجع لائحة الأمانة (نص رسمي موثوق):\n{regulation_context}\n\n"
+                f"النص المستخرج الكامل لمرجع لائحة الأمانة (استخدم نص الجداول للبحث فقط، والصور للأرقام):\n{regulation_context}\n\n"
                 if regulation_context else
                 "تنبيه: لم يتوفر مرجع لائحة الأمانة في هذا الطلب. لا تخترع اشتراطات، "
                 "واكتب في الحقول التنظيمية أنها تحتاج مرجع اللائحة، وسجّل ذلك في conflicts.\n\n"
             )
             user_content = [{
                 "type": "text",
-                "text": instructions + regulation_block
+                "text": instructions
+                        + "بيانات المعلومات الأساسية ورؤية المشروع التي أدخلها العميل:\n"
+                        + project_context_block + "\n\n"
+                        + "استخدم هذه البيانات كسياق فعلي لربط الملخص بالمشروع، ولا تنسبها إلى الصك أو الكروكي أو اللائحة. إذا كانت قيمة غير مدخلة فلا تخترع بديلًا عامًا لها.\n\n"
+                        + regulation_block
                         + "مستندات العميل المرفقة:\n" + "\n".join(document_descriptions)
             }] + regulation_parts + vision_parts
 
