@@ -1340,6 +1340,18 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('رصيد OpenRouter لا يكفي', source)
         self.assertIn("'providerError': model_error", source)
 
+    def test_land_analysis_retries_an_empty_provider_response(self):
+        module = self.application_module
+        empty = {'error': {'message': 'مزوّد الذكاء الاصطناعي رد بجسم فارغ (HTTP 200)'}}
+        success = {'choices': [{'message': {'content': '{}'}, 'finish_reason': 'stop'}]}
+        with patch.object(module, 'call_openrouter_chat', side_effect=[empty, success]) as call, \
+                patch.object(module.time, 'sleep'):
+            res, cap, error = module._call_land_analysis_model('s', 'u', 16000)
+        self.assertTrue(module._has_chat_choices(res))
+        self.assertEqual(cap, 16000)
+        self.assertEqual(error, '')
+        self.assertEqual(call.call_count, 2)
+
     def test_land_prompt_forbids_ai_written_approved_area_and_demands_narrative(self):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertNotIn('"approved_financial_area_sqm": null', source)

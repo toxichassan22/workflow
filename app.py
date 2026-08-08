@@ -5549,6 +5549,7 @@ LAND_ANALYSIS_MODEL = os.environ.get('LAND_ANALYSIS_MODEL', 'google/gemini-3.6-f
 
 _AFFORDABLE_TOKENS_RE = re.compile(r'can only afford\s+(\d+)')
 _TRANSIENT_PROVIDER_RE = re.compile(r'\(HTTP 5\d\d\)')
+_EMPTY_PROVIDER_RE = re.compile(r'جسم فارغ \(HTTP \d+\)')
 
 
 def _chat_error_message(res):
@@ -5593,8 +5594,8 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens):
             print(f'[LAND ANALYSIS] provider refused max_tokens={cap}; retrying with {retry_cap}')
             cap = retry_cap
             continue
-        if _TRANSIENT_PROVIDER_RE.search(message) and attempt < 2:
-            print(f'[LAND ANALYSIS] transient provider failure; retrying: {message}')
+        if (_TRANSIENT_PROVIDER_RE.search(message) or _EMPTY_PROVIDER_RE.search(message)) and attempt < 2:
+            print(f'[LAND ANALYSIS] transient provider response; retrying: {message}')
             time.sleep(2)
             continue
         break
