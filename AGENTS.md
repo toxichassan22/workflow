@@ -78,6 +78,27 @@ assertion deliberately, not reflexively.
   model so it records disagreements instead of silently picking a value; they surface in the
   narrative summary.
 
+## Project team (فريق العمل)
+
+Two layers, deliberately:
+
+- **Company library** — `tenant_team_entities`, managed at `/app/settings/team`, shared by every
+  project file. `developer` and `engineering_office` are singletons (`TEAM_SINGLETON_CATEGORIES`);
+  the API returns 409 on a second one. Any other category is open-ended and must supply its own
+  `category_label`.
+- **Per-file choices** — one `team_selection` key in `draft_data`:
+  `{excluded: [libraryId], roles: {libraryId: text}, local: [{localId, ...six fields}]}`.
+  Excluding an entity or overriding its role affects only that file; `local` entities exist only in
+  that file. Nothing here writes back to the library.
+
+Logos reuse `project_files` with `file_type='team_logo'`, so they inherit tenant scoping and the
+authenticated `GET /api/project-files/<id>` preview route. `team_logo` is in
+`PROJECT_IMAGE_ONLY_TYPES` because it renders in an `<img>`.
+
+Section order is `basic → team → land_croquis → location → timeline → financial`. The first three
+come from the `sectionOrder` loop, so the team section is inserted with `insertBefore` rather than
+appended.
+
 ## Drafts and routing
 
 - **Drafts are never autosaved.** `triggerAutoSaveDraft()` keeps its name (~40 call sites) but only

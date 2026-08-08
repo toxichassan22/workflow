@@ -557,6 +557,47 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(client.delete('/api/team-entities/' + entity['id'],
                                        headers=self._headers(self.token_a)).status_code, 404)
 
+    def test_project_team_section_scopes_choices_to_one_file(self):
+        """A file may drop a library entity, override its role, or add an entity of its own —
+        none of which may leak into other projects."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        self.assertIn("div.dataset.section = 'section-team'", index_source)
+        self.assertIn("createProjectSectionHeader('section-team', 'فريق العمل')", index_source)
+        self.assertIn('data-key="team_selection"', index_source)
+
+        # Team is the second section, right after the basic information.
+        self.assertIn('addTeamSection(form, form.querySelector(\'.tenant-form-section[data-section="basic"]\')?.nextSibling)',
+                      index_source)
+
+        # The three per-file behaviours.
+        self.assertIn('function toggleTeamEntityInFile(entityId)', index_source)
+        self.assertIn('function setProjectTeamRole(entityId, role)', index_source)
+        self.assertIn('function addLocalTeamEntity()', index_source)
+        self.assertIn('function removeLocalTeamEntity(localId)', index_source)
+        # Project-only entities get the full field set, including a logo upload.
+        self.assertIn('function updateLocalTeamEntity(localId, key, value)', index_source)
+        self.assertIn('function uploadLocalTeamLogo(localId, input)', index_source)
+        self.assertNotIn("prompt('اسم الجهة')", index_source)
+
+        # The whole per-file choice set round-trips through the draft.
+        client = self.app.test_client()
+        selection = {
+            'excluded': ['library-entity-1'],
+            'roles': {'library-entity-2': 'المشرف على التنفيذ'},
+            'local': [{'localId': 'local-1', 'categoryLabel': 'مقاول',
+                       'name': 'شركة التنفيذ', 'role': 'المقاول الرئيسي'}],
+        }
+        saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {'team_selection': json.dumps(selection, ensure_ascii=False)}
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        draft_data = client.get('/api/project-draft', headers=self._headers(self.token_a)).get_json()['draft']['draft_data']
+        restored = json.loads(draft_data['team_selection'])
+        self.assertEqual(restored['excluded'], ['library-entity-1'])
+        self.assertEqual(restored['roles']['library-entity-2'], 'المشرف على التنفيذ')
+        self.assertEqual(restored['local'][0]['name'], 'شركة التنفيذ')
+
     def test_team_logos_must_be_images(self):
         client = self.app.test_client()
         rejected = client.post('/api/project-files', headers=self._headers(self.token_a), data={
