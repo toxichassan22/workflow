@@ -5067,7 +5067,10 @@
     }
 
     window.addEventListener('popstate', () => {
-      if (!tenantToken) return;
+      // The bare `tenantToken` variable is null on every page load: the session is restored from
+      // localStorage through getTenantToken(). Guarding on the variable made Back change the
+      // address bar and leave the screen untouched.
+      if (!getTenantToken()) return;
       const path = window.location.pathname;
       const pageId = TENANT_ROUTE_PAGES[path];
       if (pageId) {

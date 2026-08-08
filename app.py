@@ -32,6 +32,41 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 app.teardown_appcontext(db.close_db)
 
 
+# Text responses go out uncompressed, and the SPA shell alone is ~740KB on every single load.
+# Compressing here rather than adding a dependency keeps the deploy unchanged.
+COMPRESSIBLE_TYPES = {
+    'text/html', 'text/css', 'text/plain', 'text/javascript',
+    'application/javascript', 'application/json', 'image/svg+xml',
+}
+COMPRESS_MIN_BYTES = 1024
+
+
+@app.after_request
+def compress_response(response):
+    if response.status_code < 200 or response.status_code >= 300:
+        return response
+    if response.headers.get('Content-Encoding'):
+        return response
+    if (response.content_type or '').split(';')[0].strip() not in COMPRESSIBLE_TYPES:
+        return response
+    if 'gzip' not in (request.headers.get('Accept-Encoding') or '').lower():
+        return response
+    try:
+        # File responses stream by default; reading them here is what allows compression.
+        response.direct_passthrough = False
+        body = response.get_data()
+        if len(body) < COMPRESS_MIN_BYTES:
+            return response
+        import gzip as _gzip
+        response.set_data(_gzip.compress(body, 6))
+        response.headers['Content-Encoding'] = 'gzip'
+        response.headers['Content-Length'] = str(len(response.get_data()))
+        response.headers.add('Vary', 'Accept-Encoding')
+    except Exception:
+        app.logger.warning('Could not compress response', exc_info=True)
+    return response
+
+
 @app.before_request
 def decompress_gzip_request_body():
     # The client gzips large JSON bodies because the hosting proxy corrupts
@@ -8724,9 +8759,13 @@ def api_approval_status(pres_id):
 @app.route('/')
 def index():
     resp = send_from_directory(os.path.dirname(__file__), 'index.html')
-    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    resp.headers['Pragma'] = 'no-cache'
-    resp.headers['Expires'] = '0'
+    # "no-cache" means revalidate before use, which is what a SPA shell needs so a deploy is picked
+    # up immediately. It was "no-store" as well, which forbids keeping a copy at all and forced the
+    # full ~740KB down the wire on every single load. With the ETag that send_from_directory sets,
+    # an unchanged shell now answers 304 with no body.
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers.pop('Pragma', None)
+    resp.headers.pop('Expires', None)
     return resp
 
 

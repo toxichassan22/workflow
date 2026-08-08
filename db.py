@@ -182,6 +182,8 @@ def _create_tables(conn):
     );
 
     CREATE INDEX IF NOT EXISTS idx_fields_tenant ON tenant_input_fields(tenant_id);
+    -- get_fields() filters on is_active and orders by sort_order on every form load.
+    CREATE INDEX IF NOT EXISTS idx_fields_tenant_active ON tenant_input_fields(tenant_id, is_active, sort_order);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_fields_tenant_key ON tenant_input_fields(tenant_id, field_key);
     CREATE INDEX IF NOT EXISTS idx_presentations_tenant ON presentations(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_exports_tenant ON exports(tenant_id);
@@ -344,6 +346,11 @@ def _create_tables(conn):
     );
     CREATE INDEX IF NOT EXISTS idx_drafts_tenant ON project_drafts(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_drafts_user ON project_drafts(user_id);
+    -- The hot lookup is "newest draft for this actor", which the single-column indexes above
+    -- cannot serve: they find the tenant's rows but still sort every one of them.
+    CREATE INDEX IF NOT EXISTS idx_drafts_actor_recent ON project_drafts(tenant_id, user_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_drafts_tenant_recent ON project_drafts(tenant_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_drafts_tenant_status ON project_drafts(tenant_id, status);
 
     CREATE TABLE IF NOT EXISTS ai_rules_log (
         id TEXT PRIMARY KEY,
@@ -724,41 +731,72 @@ def _migrate_location_fields(conn):
 
 
 def ensure_tenant_prebuilt_fields_active(tenant_id):
-    """Dynamically ensure all prebuilt fields are active and migrated for the tenant on every request."""
+    """Re-sync the prebuilt field definitions onto a tenant.
+
+    This runs on every /api/fields call, which is every time the project form opens. It used to
+    issue one UPDATE per prebuilt field unconditionally — 39 writes and a commit on every load,
+    none of which changed anything in the normal case. It now compares first and writes only what
+    actually differs, so a steady-state call performs a single SELECT and no transaction at all.
+    """
     if not tenant_id:
         return
     conn = get_db()
     existing_rows = {
         row['field_key']: row for row in
-        conn.execute('SELECT id, field_key, section_key, field_options FROM tenant_input_fields WHERE tenant_id = ?', (tenant_id,)).fetchall()
-    }
-    if REMOVED_PREBUILT_FIELDS:
-        placeholders = ','.join('?' for _ in REMOVED_PREBUILT_FIELDS)
         conn.execute(
-            f'UPDATE tenant_input_fields SET is_active = 0 WHERE tenant_id = ? AND field_key IN ({placeholders})',
-            [tenant_id, *sorted(REMOVED_PREBUILT_FIELDS)]
-        )
+            'SELECT id, field_key, field_label, field_type, field_options, section_key, sort_order,'
+            ' is_active FROM tenant_input_fields WHERE tenant_id = ?', (tenant_id,)
+        ).fetchall()
+    }
+    dirty = False
+
+    if REMOVED_PREBUILT_FIELDS:
+        stale = [key for key in sorted(REMOVED_PREBUILT_FIELDS)
+                 if key in existing_rows and existing_rows[key]['is_active']]
+        if stale:
+            placeholders = ','.join('?' for _ in stale)
+            conn.execute(
+                f'UPDATE tenant_input_fields SET is_active = 0 WHERE tenant_id = ? AND field_key IN ({placeholders})',
+                [tenant_id, *stale]
+            )
+            dirty = True
+
     for f in PREBUILT_FIELDS:
         opts_json = json.dumps(f.get('options', []), ensure_ascii=False) if f.get('options') else None
-        if f['key'] in existing_rows:
-            row_id = existing_rows[f['key']]['id']
-            conn.execute(
-                'UPDATE tenant_input_fields SET field_options = ?, section_key = ?, field_label = ?, field_type = ?, sort_order = ?, is_active = 1 WHERE id = ?',
-                (opts_json, f.get('section_key', 'general'), f['label'], f['type'], f.get('sort_order', 0), row_id)
-            )
-        else:
-            field_id = str(uuid.uuid4())
+        section = f.get('section_key', 'general')
+        order = f.get('sort_order', 0)
+        row = existing_rows.get(f['key'])
+        if row is None:
             conn.execute(
                 'INSERT INTO tenant_input_fields (id, tenant_id, field_key, field_label, field_type, field_options, section_key, is_required, is_active, is_custom, sort_order, ai_hint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)',
                 (
-                    field_id, tenant_id, f['key'], f['label'], f['type'],
-                    opts_json,
-                    f.get('section_key', 'general'),
+                    str(uuid.uuid4()), tenant_id, f['key'], f['label'], f['type'],
+                    opts_json, section,
                     1 if f.get('required') else 0,
-                    f.get('sort_order', 0), f.get('ai_hint', '')
+                    order, f.get('ai_hint', '')
                 )
             )
-    conn.commit()
+            print(f'[DB] Migration: added field {f["key"]} to tenant {tenant_id}')
+            dirty = True
+            continue
+        unchanged = (
+            row['field_label'] == f['label']
+            and row['field_type'] == f['type']
+            and (row['field_options'] or None) == opts_json
+            and row['section_key'] == section
+            and (row['sort_order'] or 0) == order
+            and row['is_active']
+        )
+        if unchanged:
+            continue
+        conn.execute(
+            'UPDATE tenant_input_fields SET field_options = ?, section_key = ?, field_label = ?, field_type = ?, sort_order = ?, is_active = 1 WHERE id = ?',
+            (opts_json, section, f['label'], f['type'], order, row['id'])
+        )
+        dirty = True
+
+    if dirty:
+        conn.commit()
 
 
 def _migrate_font_system(conn):

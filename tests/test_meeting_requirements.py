@@ -758,6 +758,64 @@ class MeetingRequirementsTests(unittest.TestCase):
                      'submitTeamCategory', 'teamEntityBlocked', 'team-categories'):
             self.assertNotIn(gone, index_source, f'{gone} should have been removed')
 
+    def test_shell_is_compressed_and_revalidates_instead_of_redownloading(self):
+        """The SPA shell is ~740KB and was sent with no-store and no compression, so every load
+        pulled all of it down again."""
+        client = self.app.test_client()
+        plain = client.get('/', headers={'Accept': 'text/html'})
+        gzipped = client.get('/', headers={'Accept': 'text/html', 'Accept-Encoding': 'gzip'})
+
+        self.assertEqual(gzipped.headers.get('Content-Encoding'), 'gzip')
+        self.assertLess(len(gzipped.data), len(plain.data) / 2, 'compression should at least halve it')
+        self.assertIn('Accept-Encoding', gzipped.headers.get('Vary', ''))
+
+        # no-store forbids keeping a copy at all; no-cache keeps one and revalidates.
+        self.assertEqual(plain.headers.get('Cache-Control'), 'no-cache')
+        self.assertNotIn('no-store', plain.headers.get('Cache-Control', ''))
+        etag = plain.headers.get('ETag')
+        self.assertTrue(etag)
+        revalidated = client.get('/', headers={'Accept': 'text/html', 'If-None-Match': etag})
+        self.assertEqual(revalidated.status_code, 304)
+        self.assertEqual(len(revalidated.data), 0)
+
+        # JSON is compressed too, and a short body is left alone.
+        listed = client.get('/api/team-entities', headers={
+            **self._headers(self.token_a), 'Accept-Encoding': 'gzip'})
+        self.assertEqual(listed.status_code, 200)
+        self.assertIsNone(listed.headers.get('Content-Encoding'),
+                          'a tiny payload is not worth compressing')
+
+    def test_prebuilt_field_sync_writes_only_on_change(self):
+        """It ran one UPDATE per prebuilt field on every /api/fields call — 39 writes and a commit
+        per project-form load, none of which changed anything in the normal case."""
+        source = (ROOT / 'db.py').read_text(encoding='utf-8')
+        self.assertIn('if unchanged:', source)
+        self.assertIn('if dirty:', source)
+
+        client = self.app.test_client()
+        first = client.get('/api/fields', headers=self._headers(self.token_a))
+        self.assertEqual(first.status_code, 200)
+
+        # Second identical call must not write anything.
+        writes = []
+        real_execute = db.get_db
+
+        with self.app.app_context():
+            conn = db.get_db()
+            original = conn.execute
+
+            def spy(sql, *args):
+                if not sql.lstrip().upper().startswith('SELECT'):
+                    writes.append(sql.split()[0].upper())
+                return original(sql, *args)
+
+            conn.execute = spy
+            try:
+                db.ensure_tenant_prebuilt_fields_active(self.tenant_a)
+            finally:
+                conn.execute = original
+        self.assertEqual(writes, [], f'steady-state sync must not write, got {writes}')
+
     def test_new_tables_are_created_on_an_existing_database(self):
         """_create_tables used to return early when `tenants` existed, so every table added after
         the first deploy was missing forever on existing installs, surfacing as a 500 from

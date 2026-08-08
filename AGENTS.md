@@ -132,6 +132,21 @@ Section order is `basic → team → land_croquis → location → timeline → 
 come from the `sectionOrder` loop, so the team section is inserted with `insertBefore` rather than
 appended.
 
+## Performance rules
+
+- `compress_response()` gzips text responses (`app.py`). The SPA shell is ~740KB uncompressed and
+  ~156KB gzipped. It reads file responses by clearing `direct_passthrough`.
+- The shell is served `Cache-Control: no-cache` — revalidate, **not** `no-store`. `no-store`
+  forbids keeping a copy at all and re-downloaded all 740KB on every load; with the ETag from
+  `send_from_directory` an unchanged shell now answers 304 with no body.
+- `ensure_tenant_prebuilt_fields_active()` runs on every `/api/fields` call. It **must compare
+  before writing** — it used to issue 39 UPDATEs plus a commit per project-form load. Keep the
+  `unchanged` check and the `dirty` flag.
+- Draft lists must use `get_all_project_draft_summaries()`, never `get_all_project_drafts()`:
+  `draft_data` holds slide HTML and base64 images.
+- Hot lookups are "newest draft for this actor" and "active fields ordered by sort_order"; both
+  have composite indexes. A single-column index on `tenant_id` still sorts every row.
+
 ## Drafts and routing
 
 - **Drafts are never autosaved.** `triggerAutoSaveDraft()` keeps its name (~40 call sites) but only
