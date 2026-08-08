@@ -6100,6 +6100,9 @@
       triggerAutoSaveDraft();
     }
 
+    let editingProjectLocalTeamId = null;
+    let projectLocalTeamDraft = null;
+
     function addTeamSection(form, before) {
       const div = document.createElement('div');
       div.className = 'tenant-form-section';
@@ -6155,46 +6158,79 @@
           }).join('') + '</div>'
         : '<p class="tenant-hint">لا توجد جهات في إعدادات الشركة.</p>';
 
-      // Project-only entities are edited in place: they need the same six fields as the library,
-      // including a logo, which a prompt() cannot collect.
-      localHost.innerHTML = state.local.length
+      const localCards = state.local.map(entity =>
+        projectLocalTeamDraft && String(entity.localId) === String(editingProjectLocalTeamId)
+          ? renderProjectLocalTeamForm(projectLocalTeamDraft)
+          : renderProjectLocalTeamCard(entity));
+      if (projectLocalTeamDraft && !state.local.some(entity =>
+        String(entity.localId) === String(editingProjectLocalTeamId))) {
+        localCards.push(renderProjectLocalTeamForm(projectLocalTeamDraft));
+      }
+      localHost.innerHTML = localCards.length
         ? '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px">' +
-          state.local.map(entity => {
-            const safeId = String(entity.localId).replace(/'/g, "\\'");
-            const field = (key, label, type) =>
-              '<label style="display:block;font-size:.78rem;margin-top:7px">' + label + '</label>' +
-              (type === 'textarea'
-                ? '<textarea rows="2" style="width:100%" onchange="updateLocalTeamEntity(\'' + safeId + '\',\'' + key + '\',this.value)">' + escapeHtml(entity[key] || '') + '</textarea>'
-                : '<input type="' + type + '" value="' + escapeHtml(entity[key] || '') + '" style="width:100%" onchange="updateLocalTeamEntity(\'' + safeId + '\',\'' + key + '\',this.value)">');
-            return '<div style="border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff">' +
-              '<div style="display:flex;gap:10px;align-items:center;margin-bottom:4px">' +
-              (entity.logoFileId
-                ? '<img data-team-logo="' + escapeHtml(entity.logoFileId) + '" alt="" style="width:46px;height:46px;object-fit:contain;border-radius:9px;background:#f6f7f9;flex:none">'
-                : teamMonogramHtml(entity.name, 46)) +
-              '<strong style="flex:1;word-break:break-word">' +
-              escapeHtml(entity.name || 'جهة جديدة') + '</strong></div>' +
-              field('name', 'اسم الجهة', 'text') +
-              field('experienceYears', 'سنوات الخبرة', 'number') +
-              field('role', 'دور الجهة في المشروع', 'text') +
-              field('brief', 'نبذة عن الجهة', 'textarea') +
-              field('notableProjects', 'أبرز المشاريع', 'textarea') +
-              '<label style="display:block;font-size:.78rem;margin-top:7px">شعار الجهة</label>' +
-              '<input type="file" accept="image/*,.jpg,.jpeg,.png,.webp" style="width:100%" ' +
-              'onchange="uploadLocalTeamLogo(\'' + safeId + '\', this)">' +
-              '<button type="button" class="btn ghost danger" style="width:100%;margin-top:10px;padding:5px 8px;font-size:.78rem" ' +
-              'onclick="removeLocalTeamEntity(\'' + safeId + '\')">حذف من هذا المشروع</button></div>';
-          }).join('') + '</div>'
+          localCards.join('') + '</div>'
         : '';
       // Without any project-only entity the heading would sit above nothing but the add button.
       const localTitle = document.getElementById('projectTeamLocalTitle');
-      if (localTitle) localTitle.hidden = !state.local.length;
+      if (localTitle) localTitle.hidden = !(state.local.length || projectLocalTeamDraft);
 
       document.querySelectorAll('#section-team img[data-team-logo]').forEach(image => {
         attachProjectFileThumbnail(image, image.dataset.teamLogo);
       });
     }
 
+    function renderProjectLocalTeamForm(entity) {
+      const safeId = String(entity.localId).replace(/'/g, "\\'");
+      const field = (key, label, type) =>
+        '<label style="display:block;font-size:.78rem;margin-top:7px">' + label + '</label>' +
+        (type === 'textarea'
+          ? '<textarea rows="2" style="width:100%" onchange="updateLocalTeamEntity(\'' + safeId + '\',\'' + key + '\',this.value)">' + escapeHtml(entity[key] || '') + '</textarea>'
+          : '<input type="' + type + '" value="' + escapeHtml(entity[key] || '') + '" style="width:100%" onchange="updateLocalTeamEntity(\'' + safeId + '\',\'' + key + '\',this.value)">');
+      return '<div style="border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff">' +
+        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:4px">' +
+        (entity.logoFileId
+          ? '<img data-team-logo="' + escapeHtml(entity.logoFileId) + '" alt="" style="width:46px;height:46px;object-fit:contain;border-radius:9px;background:#f6f7f9;flex:none">'
+          : teamMonogramHtml(entity.name, 46)) +
+        '<strong style="flex:1;word-break:break-word">' +
+        escapeHtml(entity.name || 'جهة جديدة') + '</strong></div>' +
+        field('name', 'اسم الجهة', 'text') +
+        field('experienceYears', 'سنوات الخبرة', 'number') +
+        field('role', 'دور الجهة في المشروع', 'text') +
+        field('brief', 'نبذة عن الجهة', 'textarea') +
+        field('notableProjects', 'أبرز المشاريع', 'textarea') +
+        '<label style="display:block;font-size:.78rem;margin-top:7px">شعار الجهة</label>' +
+        '<input type="file" accept="image/*,.jpg,.jpeg,.png,.webp" style="width:100%" ' +
+        'onchange="uploadLocalTeamLogo(\'' + safeId + '\', this)">' +
+        '<div style="display:flex;gap:8px;margin-top:10px">' +
+        '<button type="button" class="btn primary" style="flex:1;padding:5px 8px;font-size:.78rem" ' +
+        'onclick="saveLocalTeamEntity(\'' + safeId + '\')">حفظ</button>' +
+        '<button type="button" class="btn ghost" style="flex:1;padding:5px 8px;font-size:.78rem" ' +
+        'onclick="cancelLocalTeamEntity(\'' + safeId + '\')">إلغاء</button></div></div>';
+    }
+
+    function renderProjectLocalTeamCard(entity) {
+      const safeId = String(entity.localId).replace(/'/g, "\\'");
+      return '<div style="border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff">' +
+        '<div style="display:flex;gap:10px;align-items:center">' +
+        (entity.logoFileId
+          ? '<img data-team-logo="' + escapeHtml(entity.logoFileId) + '" alt="" style="width:46px;height:46px;object-fit:contain;border-radius:9px;background:#f6f7f9;flex:none">'
+          : teamMonogramHtml(entity.name, 46)) +
+        '<strong style="flex:1;word-break:break-word">' + escapeHtml(entity.name || 'جهة جديدة') + '</strong></div>' +
+        '<label style="display:block;font-size:.8rem;margin-top:8px">دور الجهة في المشروع</label>' +
+        '<input type="text" value="' + escapeHtml(entity.role || '') + '" placeholder="دور الجهة" style="width:100%" ' +
+        'onchange="updateLocalTeamEntity(\'' + safeId + '\',\'role\',this.value)">' +
+        '<div style="display:flex;gap:8px;margin-top:8px">' +
+        '<button type="button" class="btn ghost" style="flex:1;padding:5px 8px;font-size:.78rem" ' +
+        'onclick="editLocalTeamEntity(\'' + safeId + '\')">تعديل</button>' +
+        '<button type="button" class="btn ghost danger" style="flex:1;padding:5px 8px;font-size:.78rem" ' +
+        'onclick="removeLocalTeamEntity(\'' + safeId + '\')">حذف</button></div></div>';
+    }
+
     function updateLocalTeamEntity(localId, key, value) {
+      if (projectLocalTeamDraft && String(projectLocalTeamDraft.localId) === String(localId)) {
+        projectLocalTeamDraft[key] = String(value || '').trim();
+        return;
+      }
       const state = getProjectTeamState();
       const entity = state.local.find(item => String(item.localId) === String(localId));
       if (!entity) return;
@@ -6212,7 +6248,11 @@
         if (tenantProjectData?.draftId) formData.append('draftId', tenantProjectData.draftId);
         const response = await api('POST', '/api/project-files', formData, true);
         if (!response?.success || !response.file?.id) throw new Error(response?.error || 'تعذر رفع الشعار');
-        updateLocalTeamEntity(localId, 'logoFileId', response.file.id);
+        if (projectLocalTeamDraft && String(projectLocalTeamDraft.localId) === String(localId)) {
+          projectLocalTeamDraft.logoFileId = response.file.id;
+        } else {
+          updateLocalTeamEntity(localId, 'logoFileId', response.file.id);
+        }
         renderProjectTeam();
       } catch (error) {
         toast(error.message || 'تعذر رفع شعار الجهة');
@@ -6238,17 +6278,59 @@
     }
 
     function addLocalTeamEntity() {
-      const state = getProjectTeamState();
-      state.local = state.local.concat({
-        localId: 'local-' + crypto.randomUUID(),
+      if (projectLocalTeamDraft) {
+        toast('احفظ المطور الحالي أولاً');
+        return;
+      }
+      editingProjectLocalTeamId = 'local-' + crypto.randomUUID();
+      projectLocalTeamDraft = {
+        localId: editingProjectLocalTeamId,
         name: '',
         logoFileId: '',
         brief: '',
         experienceYears: '',
         notableProjects: '',
         role: '',
+      };
+      renderProjectTeam();
+    }
+
+    function saveLocalTeamEntity(localId) {
+      if (!projectLocalTeamDraft || String(projectLocalTeamDraft.localId) !== String(localId)) return;
+      const draft = { ...projectLocalTeamDraft };
+      ['name', 'experienceYears', 'role', 'brief', 'notableProjects'].forEach(key => {
+        draft[key] = String(draft[key] || '').trim();
       });
+      if (!draft.name) {
+        toast('اسم الجهة مطلوب');
+        return;
+      }
+      const state = getProjectTeamState();
+      const existingIndex = state.local.findIndex(entity => String(entity.localId) === String(localId));
+      if (existingIndex >= 0) state.local[existingIndex] = draft;
+      else state.local = state.local.concat(draft);
       setProjectTeamState(state);
+      editingProjectLocalTeamId = null;
+      projectLocalTeamDraft = null;
+      renderProjectTeam();
+    }
+
+    function editLocalTeamEntity(localId) {
+      if (projectLocalTeamDraft) {
+        toast('احفظ المطور الحالي أولاً');
+        return;
+      }
+      const entity = getProjectTeamState().local.find(item => String(item.localId) === String(localId));
+      if (!entity) return;
+      editingProjectLocalTeamId = String(localId);
+      projectLocalTeamDraft = { ...entity };
+      renderProjectTeam();
+    }
+
+    function cancelLocalTeamEntity(localId) {
+      if (!projectLocalTeamDraft || String(projectLocalTeamDraft.localId) !== String(localId)) return;
+      editingProjectLocalTeamId = null;
+      projectLocalTeamDraft = null;
       renderProjectTeam();
     }
 
@@ -6256,6 +6338,10 @@
       const state = getProjectTeamState();
       state.local = state.local.filter(entity => String(entity.localId) !== String(localId));
       setProjectTeamState(state);
+      if (projectLocalTeamDraft && String(projectLocalTeamDraft.localId) === String(localId)) {
+        editingProjectLocalTeamId = null;
+        projectLocalTeamDraft = null;
+      }
       renderProjectTeam();
     }
 
@@ -6900,6 +6986,8 @@
     function hydrateTenantProjectForm(data) {
       const form = document.getElementById('tenantProjectForm');
       if (!form) return;
+      editingProjectLocalTeamId = null;
+      projectLocalTeamDraft = null;
       const source = data || {};
       if (Array.isArray(source.nearby_landmarks_data)) {
         tenantNearbyLandmarks = source.nearby_landmarks_data;
