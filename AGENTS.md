@@ -195,8 +195,9 @@ Too low a cap truncates the JSON instead, and a truncated response is discarded 
 (partial parcel data is worse than none). Both ends therefore look identical to the user: every
 field keeps its old value, i.e. "re-analysis did nothing".
 
-`_call_land_analysis_model()` negotiates this: it starts at `LAND_ANALYSIS_MAX_TOKENS` (12000,
-verified affordable) and walks the cap down when the provider quotes an affordable figure.
+`_call_land_analysis_model()` starts at `LAND_ANALYSIS_MAX_TOKENS` (16000), retries a truncated
+response once with a higher cap up to `LAND_ANALYSIS_TRUNCATION_CEILING`, and walks the cap down
+when the provider quotes an affordable figure.
 `LAND_ANALYSIS_MIN_TOKENS`, `LAND_ANALYSIS_MODEL` are also env-overridable. Failures return a named
 `failureReason` (`truncated` / `invalid_json` / `insufficient_credit` / `empty_response`) plus the
 raw `providerError`, and the frontend states that no field was updated. Keep it that way — a silent

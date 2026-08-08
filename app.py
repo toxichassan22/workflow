@@ -5541,8 +5541,9 @@ PDF_VISION_MAX_TOTAL_BYTES = int(os.environ.get('PDF_VISION_MAX_TOTAL_BYTES', st
 # The ceiling cannot simply be raised either: OpenRouter *reserves* max_tokens against the account
 # balance, so an over-large cap is refused with 402 even when the real answer would be short.
 # _call_land_analysis_model() walks the cap back down when that happens.
-LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '12000'))
+LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '16000'))
 LAND_ANALYSIS_MIN_TOKENS = int(os.environ.get('LAND_ANALYSIS_MIN_TOKENS', '6000'))
+LAND_ANALYSIS_TRUNCATION_CEILING = int(os.environ.get('LAND_ANALYSIS_TRUNCATION_CEILING', '20000'))
 # Vision-capable model on OpenRouter. Default chosen for vision support; override via env.
 LAND_ANALYSIS_MODEL = os.environ.get('LAND_ANALYSIS_MODEL', 'google/gemini-3.6-flash')
 
@@ -5564,7 +5565,8 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens):
     """Call the vision model, lowering the reserved cap when the provider cannot afford it.
 
     Gateway failures (HTTP 5xx) are usually transient, so they are retried with the same cap
-    before being surfaced. Returns ``(response, used_cap, error_message)``.
+    before being surfaced. A response truncated at the cap is retried once with a higher cap,
+    bounded by ``LAND_ANALYSIS_TRUNCATION_CEILING``. Returns ``(response, used_cap, error_message)``.
     """
     cap = max(LAND_ANALYSIS_MIN_TOKENS, int(max_tokens))
     message = ''
@@ -5573,6 +5575,13 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens):
         res = call_openrouter_chat(system_prompt, user_content, temperature=0.1,
                                    max_tokens=cap, model=LAND_ANALYSIS_MODEL)
         if _has_chat_choices(res):
+            choices = res.get('choices') or []
+            finish_reason = choices[0].get('finish_reason') if choices and isinstance(choices[0], dict) else None
+            higher_cap = min(LAND_ANALYSIS_TRUNCATION_CEILING, int(cap * 1.35))
+            if finish_reason == 'length' and higher_cap > cap and attempt < 2:
+                print(f'[LAND ANALYSIS] response truncated at cap={cap}; retrying with {higher_cap}')
+                cap = higher_cap
+                continue
             return res, cap, ''
         message = _chat_error_message(res)
         affordable = _AFFORDABLE_TOKENS_RE.search(message)
@@ -6129,10 +6138,10 @@ def api_extract_croquis():
         # Partial JSON is never accepted: half a parcel is worse than no parcel. But the failure
         # must say so plainly, otherwise a rejected re-analysis just looks like "nothing changed".
         if response_finish_reason == 'length':
-            print(f"[EXTRACT LAND DOCUMENTS TRUNCATED] {len(raw_resp)} chars at cap {LAND_ANALYSIS_MAX_TOKENS}")
+            print(f"[EXTRACT LAND DOCUMENTS TRUNCATED] {len(raw_resp)} chars at cap {used_cap}")
             return jsonify({
                 'success': False,
-                'error': (f'انقطعت استجابة الذكاء الاصطناعي عند الحد الأقصى ({LAND_ANALYSIS_MAX_TOKENS} رمز) '
+                'error': (f'انقطعت استجابة الذكاء الاصطناعي عند الحد الأقصى ({used_cap} رمز) '
                           'فلم يُعتمد أي حقل، ولهذا لم تتغير البيانات. أعد المحاولة، '
                           'أو ارفع LAND_ANALYSIS_MAX_TOKENS إن تكرر ذلك.'),
                 'failureReason': 'truncated',
