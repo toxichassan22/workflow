@@ -503,6 +503,44 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_empty_places_result_is_not_reported_as_a_provider_error(self):
+        """Places API (New) answers a valid search that matches nothing with HTTP 200 and "{}".
+        Calling that an error turned a quiet area into "invalid response" and hid the caller's own
+        "no landmarks found" message, which is only reachable on success."""
+        import maps_service
+
+        class _Response:
+            status_code = 200
+            def json(self):
+                return {}
+
+        with patch.object(maps_service, '_has_api_key', return_value=True), \
+             patch.object(maps_service, '_get_api_key', return_value='k'), \
+             patch.object(maps_service.requests, 'post', return_value=_Response()):
+            result = maps_service.get_nearby_landmarks(21.5, 39.2, radius=20000)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(result['landmarks'], [])
+        self.assertIsNone(result.get('error_code'))
+
+        # A genuinely malformed 200 body is still an error.
+        class _Garbage(_Response):
+            def json(self):
+                return {'unexpected': 'shape'}
+
+        with patch.object(maps_service, '_has_api_key', return_value=True), \
+             patch.object(maps_service, '_get_api_key', return_value='k'), \
+             patch.object(maps_service.requests, 'post', return_value=_Garbage()):
+            broken = maps_service.get_nearby_landmarks(21.5, 39.2, radius=20000)
+        self.assertFalse(broken['success'])
+        self.assertEqual(broken['error_code'], 'GOOGLE_PLACES_INVALID_RESPONSE')
+
+        # The reason must survive on screen, not only in a toast that disappears.
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('id="siteAnalysisWarnings"', index_source)
+        self.assertIn('const reasons = [data.landmarksWarning, data.cityLandmarksWarning].filter(Boolean);',
+                      index_source)
+        self.assertIn('تعذر جلب المعالم — التفصيل أسفل الخريطة', index_source)
+
     def test_financial_pdf_has_no_raw_identifiers_or_json(self):
         """Section 12 used to dump the whole projection object, so schedule arrays landed in the
         client PDF as raw JSON under English keys, and table headers printed internal names."""

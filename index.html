@@ -7742,6 +7742,7 @@
           <div id="mapPreviewGallery" class="tenant-map-preview-gallery" style="display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;"></div>
           <p id="mapPreviewHint" class="tenant-hint" style="margin:8px 0 0;display:none">فعّل رسم حدود الموقع ثم أضف النقاط. اعتماد الحدود يثبت الـ highlight والـ zoom محليًا فقط؛ استخدم «تحليل رابط الموقع» لجلب بيانات الموقع.</p>
           <input id="tenantLocationPolygon" type="hidden" data-key="location_polygon" data-type="text" value="">
+          <div id="siteAnalysisWarnings" hidden style="margin-top:10px;padding:11px 13px;border-radius:12px;background:#fff0f0;border:1px solid #efb3b3;color:#9c1d1d;font-weight:700;font-size:13px;line-height:1.6"></div>
           <div id="landmarksPreview" style="margin-top:10px;display:none;"></div>
         `;
         (locationSection || form).appendChild(previewDiv);
@@ -10149,9 +10150,19 @@
         });
         renderTenantMapPolygonOverlay();
         applyTenantPolygonZoom();
-        const landmarkWarning = data.landmarksWarning || data.cityLandmarksWarning;
-        toast(landmarkWarning
-          ? 'تم تحليل الموقع، لكن تعذر جلب المعالم: ' + landmarkWarning
+        // The reason used to live only in a toast that vanished in about two seconds, which made
+        // the failure impossible to read, let alone report. Keep it on screen instead.
+        const reasons = [data.landmarksWarning, data.cityLandmarksWarning].filter(Boolean);
+        const warningBox = document.getElementById('siteAnalysisWarnings');
+        if (warningBox) {
+          warningBox.hidden = !reasons.length;
+          warningBox.innerHTML = reasons.length
+            ? '<div>تعذر جلب المعالم:</div>' + reasons.map(reason =>
+                '<div style="margin-top:4px">• ' + escapeHtml(String(reason)) + '</div>').join('')
+            : '';
+        }
+        toast(reasons.length
+          ? 'تم تحليل الموقع، لكن تعذر جلب المعالم — التفصيل أسفل الخريطة'
           : (data.boundary && data.boundary.status === 'verified_building'
             ? 'تم تحليل الموقع وتعبئة البيانات والخرائط بنجاح'
             : 'تم تحليل الموقع. راجع الحدود وارسمها يدويًا إذا لزم الأمر'));

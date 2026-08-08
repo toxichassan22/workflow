@@ -831,15 +831,21 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
             print(f"[GOOGLE PLACES ERROR] http={response.status_code} status={provider_status or 'unknown'} message={message}")
             return safe_error
 
+        # Places API (New) answers a valid search that matches nothing with HTTP 200 and an empty
+        # body, "{}", omitting the places key entirely. Treating that as a provider error turned a
+        # quiet area into "invalid response" and hid the caller's own "no landmarks found" message,
+        # which is only reachable on success. Any non-2xx case already returned above.
         if 'places' not in data:
-            message = 'Google Places returned an invalid response without places'
-            print(f'[GOOGLE PLACES ERROR] http={response.status_code} message={message}')
-            return {
-                'success': False,
-                'error': message,
-                'error_code': 'GOOGLE_PLACES_INVALID_RESPONSE',
-                'http_status': response.status_code,
-            }
+            if not isinstance(data, dict) or data:
+                message = 'Google Places returned an unexpected response without places'
+                print(f'[GOOGLE PLACES ERROR] http={response.status_code} message={message}')
+                return {
+                    'success': False,
+                    'error': message,
+                    'error_code': 'GOOGLE_PLACES_INVALID_RESPONSE',
+                    'http_status': response.status_code,
+                }
+            return {'success': True, 'landmarks': []}
 
         places = []
         for p in data.get('places', []):
