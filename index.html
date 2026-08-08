@@ -1705,11 +1705,14 @@
     #section-financial-calc .btn.danger { background: #fff1f1 !important; color: #8b0e0e !important; border: 1px solid #ffd0d0 !important; }
     #section-financial-calc .btn.green { background: var(--green) !important; color: #fff !important; }
     #section-financial-calc .btn.small { padding: 8px 12px !important; border-radius: 11px !important; font-size: 12px !important; }
-    #section-financial-calc .cf-sales { background: #f4fbf7 !important; }
-    #section-financial-calc .cf-rental { background: #f4f8fc !important; }
-    #section-financial-calc .cf-grace { background: #fff8f4 !important; }
-    #section-financial-calc .cf-fund { background: #faf4fc !important; }
-    #section-financial-calc .cf-finance { background: #fffdf4 !important; }    #section-financial-calc .cf-finance { background: #fffdf4; }
+    /* Scoped to td: the same cf-* classes also sit on the <th> so whole columns can be hidden by
+       project mode, and an unscoped class rule outranks "#section-financial-calc th" on
+       specificity, which left those headers pale with white text on them. */
+    #section-financial-calc td.cf-sales { background: #f4fbf7 !important; }
+    #section-financial-calc td.cf-rental { background: #f4f8fc !important; }
+    #section-financial-calc td.cf-grace { background: #fff8f4 !important; }
+    #section-financial-calc td.cf-fund { background: #faf4fc !important; }
+    #section-financial-calc td.cf-finance { background: #fffdf4 !important; }
 
     .tenant-field textarea {
       min-height: 90px;
@@ -3168,11 +3171,12 @@
       padding: 4px 9px !important;
       margin: 0 0 8px !important;
     }
-    #section-financial-calc .cf-sales { background: #f4fbf7 !important; }
-    #section-financial-calc .cf-rental { background: #f4f8fc !important; }
-    #section-financial-calc .cf-grace { background: #fff8f4 !important; }
-    #section-financial-calc .cf-fund { background: #faf4fc !important; }
-    #section-financial-calc .cf-finance { background: #fffdf4 !important; }
+    /* td-scoped for the same reason as the earlier copy of these rules. */
+    #section-financial-calc td.cf-sales { background: #f4fbf7 !important; }
+    #section-financial-calc td.cf-rental { background: #f4f8fc !important; }
+    #section-financial-calc td.cf-grace { background: #fff8f4 !important; }
+    #section-financial-calc td.cf-fund { background: #faf4fc !important; }
+    #section-financial-calc td.cf-finance { background: #fffdf4 !important; }
   </style>
   <style id="zai-global-styles"></style>
 </head>

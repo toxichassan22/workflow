@@ -503,6 +503,25 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_cashflow_column_tints_do_not_override_the_table_header(self):
+        """The cf-* classes also sit on the <th> so whole columns can be hidden by project mode.
+        An unscoped class rule outranks "#section-financial-calc th" on specificity, which left
+        those headers tinted with white text on them."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        for group in ('sales', 'rental', 'grace', 'fund', 'finance'):
+            self.assertNotIn(f'#section-financial-calc .cf-{group} {{', index_source,
+                             f'.cf-{group} must be scoped to td')
+            self.assertIn(f'#section-financial-calc td.cf-{group} {{', index_source)
+        # The classes must stay on the headers: column visibility depends on them.
+        self.assertIn('<th class="cf-sales">', index_source)
+        self.assertIn("setConditionalSelector('.cf-sales', flags.sales)", index_source)
+        # Any other class placed on a th must be scoped for both th and td, as lt-* already is.
+        header_classes = set(re.findall(r'<th[^>]*class="([^"]+)"', index_source))
+        self.assertEqual(header_classes,
+                         {'cf-sales', 'cf-rental', 'cf-grace', 'cf-fund', 'cf-finance',
+                          'lt-dist', 'lt-dur', 'lt-actions'},
+                         'a new class on a <th> needs its background rule scoped to td')
+
     def test_ui_contains_no_emojis_or_icon_glyphs(self):
         """Product rule: the app ships no emojis and no icon glyphs, including arrows used as
         button labels. Generated slides are covered separately by the icon stripper."""
