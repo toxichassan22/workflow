@@ -503,6 +503,52 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_financial_pdf_has_no_raw_identifiers_or_json(self):
+        """Section 12 used to dump the whole projection object, so schedule arrays landed in the
+        client PDF as raw JSON under English keys, and table headers printed internal names."""
+        model = {
+            'inputs': {'unitRevenueMode': 'mixed', 'developmentYears': 4, 'landArea': 7000,
+                       'builtUpAreaAbove': 60000, 'financeEnabled': 'yes', 'fundEnabled': 'no',
+                       'fundFeesEnabled': 'no', 'externalEnabled': 'no', 'exitEnabled': 'no'},
+            'tables': {
+                'financeDrawTable': [{'year': 1, 'drawPct': 25}],
+                'financeRepaymentTable': [{'year': 5, 'repaymentPct': 10}],
+                'scheduleTable': [{'name': 'الأساسات', 'year': 1, 'costPct': 30, 'devPct': 30}],
+                'cashflowTable': [{'year': 1, 'phase': 'تطوير', 'saleRevenue': 0, 'opex': 100,
+                                   'final': -500, 'cumulative': -500}],
+            },
+            'projection': {
+                'projectCost': 500000000, 'roi': 0.42, 'projectIrr': 0.18, 'equityIrr': 0.22,
+                # These two are what leaked as JSON; they belong to section 8 as tables.
+                'financePlan': [{'year': 4, 'drawPct': 25}],
+                'financeRepaymentPlan': [{'year': 8, 'repaymentPct': 10}],
+                'projected': [1, 2], 'cashflows': [4, 5], 'modeFlags': {'sales': True},
+                'areaState': {'valid': True},
+                # Echoed inputs already shown in sections 1 and 2.
+                'landArea': 7000, 'developerRate': 10,
+            },
+        }
+        with self.app.app_context():
+            html = self.application_module.build_financial_report_html('مشروع', model, {}, self.tenant_a)
+
+        # No structured value may be stringified into a row.
+        self.assertNotIn('financePlan', html)
+        self.assertNotIn('financeRepaymentPlan', html)
+        self.assertNotIn('"drawPct"', html)
+        self.assertNotIn('[{', html)
+
+        # No internal identifier may be used as a visible header.
+        self.assertEqual(sorted(set(re.findall(r'<th>([A-Za-z]\w*)</th>', html))), [])
+
+        # Curated Arabic results, and the schedules still render as real tables in section 8.
+        self.assertIn('12. النتائج المالية', html)
+        self.assertIn('إجمالي تكلفة المشروع', html)
+        self.assertIn('معدل العائد الداخلي للمشروع', html)
+        self.assertIn('نسبة السحب %', html)
+        self.assertIn('صافي تدفق المشروع', html)
+        # Echoed inputs are no longer repeated in the results summary.
+        self.assertNotIn('developerRate', html)
+
     def test_cashflow_column_tints_do_not_override_the_table_header(self):
         """The cf-* classes also sit on the <th> so whole columns can be hidden by project mode.
         An unscoped class rule outranks "#section-financial-calc th" on specificity, which left

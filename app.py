@@ -4293,18 +4293,87 @@ def _financial_report_escape(value):
     if value is None or value == '':
         return '—'
     if isinstance(value, (dict, list)):
-        value = json.dumps(value, ensure_ascii=False)
+        # A JSON dump used to be emitted here, which put raw [{"year":4,...}] into the client PDF.
+        # Structured values belong in their own table, never in a label/value row.
+        return '—'
     return html_lib.escape(str(value))
 
 
+# Section 12 is a results summary, so it lists chosen metrics with Arabic labels instead of dumping
+# the whole projection object, which also carried echoed inputs and raw schedule arrays.
+FINANCIAL_RESULT_LABELS = (
+    ('projectCost', 'إجمالي تكلفة المشروع'),
+    ('projectCostWithFinance', 'التكلفة شاملة التمويل'),
+    ('adjustedProjectCost', 'إجمالي تكلفة الاستثمار'),
+    ('developerCost', 'أتعاب المطور'),
+    ('landRent', 'إيجار الأرض السنوي'),
+    ('saleRevenueTotal', 'إجمالي إيرادات البيع'),
+    ('revenueY1', 'إيرادات السنة الأولى'),
+    ('opexY1', 'مصروفات السنة الأولى'),
+    ('noiY1', 'صافي الدخل التشغيلي — السنة الأولى'),
+    ('fullOccupancyRevenue', 'الإيرادات عند الإشغال المستهدف'),
+    ('fullOccupancyNOI', 'صافي الدخل التشغيلي عند الإشغال المستهدف'),
+    ('totalGraceDiscount', 'إجمالي خصم فترة السماح'),
+    ('facilityAmount', 'قيمة التسهيل التمويلي'),
+    ('arrangementFee', 'رسوم ترتيب التمويل'),
+    ('totalFinanceInterest', 'إجمالي فوائد التمويل'),
+    ('totalFinanceCost', 'إجمالي كلفة التمويل'),
+    ('totalFundFees', 'إجمالي أتعاب الصندوق'),
+    ('saleExitValue', 'صافي التخارج البيعي'),
+    ('operatingExitValue', 'صافي التخارج التشغيلي'),
+    ('terminal', 'إجمالي قيمة التخارج'),
+    ('landEquityContribution', 'مساهمة الأرض العينية'),
+    ('totalCashEquity', 'حقوق الملكية النقدية'),
+    ('totalEquityRequired', 'إجمالي حقوق الملكية المطلوبة'),
+    ('totalEquityDistributions', 'إجمالي التوزيعات'),
+    ('roi', 'العائد على الاستثمار'),
+    ('projectIrr', 'معدل العائد الداخلي للمشروع'),
+    ('equityIrr', 'معدل العائد على حقوق الملكية'),
+    ('payback', 'فترة استرداد رأس المال'),
+    ('equityPayback', 'فترة استرداد حقوق الملكية'),
+)
+
+
 def _financial_report_rows(rows):
-    visible = [(label, value) for label, value in rows if value not in (None, '', [], {})]
+    # Structured values are dropped rather than stringified: they have their own tables.
+    visible = [(label, value) for label, value in rows
+               if value not in (None, '', [], {}) and not isinstance(value, (dict, list))]
     if not visible:
         return '<p class="empty">لا توجد قيم مطبقة في هذا القسم.</p>'
     return '<table class="summary-table"><tbody>' + ''.join(
         f'<tr><th>{_financial_report_escape(label)}</th><td>{_financial_report_escape(value)}</td></tr>'
         for label, value in visible
     ) + '</tbody></table>'
+
+
+# Table columns arrive keyed by their internal name, which used to be printed as-is, so the client
+# PDF showed headers like "costPct" and "saleRevenue". Unknown keys still fall back to the raw name
+# so a new column shows up rather than silently vanishing.
+FINANCIAL_COLUMN_LABELS = {
+    'name': 'البند', 'useType': 'نوع الاستخدام', 'units': 'عدد الوحدات',
+    'unitArea': 'مساحة الوحدة م²', 'builtArea': 'المساحة المبنية م²',
+    'revenueArea': 'المساحة البيعية/التأجيرية م²', 'investmentModel': 'نموذج الاستفادة',
+    'component': 'المكون المرتبط', 'qtySource': 'مصدر الكمية', 'method': 'طريقة الحساب',
+    'qty': 'الكمية / المساحة', 'price': 'السعر / النسبة', 'period': 'الفترة',
+    'occupancy': 'الإشغال المستهدف %', 'class': 'التصنيف', 'duration': 'المدة',
+    'year': 'السنة', 'costPct': 'نسبة تكلفة التطوير %', 'devPct': 'نسبة دفعة المطور %',
+    'drawPct': 'نسبة السحب %', 'repaymentPct': 'نسبة السداد %',
+    'value': 'المبلغ / النسبة', 'startYear': 'سنة البداية', 'endYear': 'سنة النهاية',
+    'recurrence': 'التكرار', 'type': 'نوع البند', 'base': 'القيمة الأساسية', 'growth': 'النمو %',
+    'amount': 'القيمة', 'phase': 'المرحلة', 'occupancyReach': 'الوصول للإشغال %',
+    'saleRevenue': 'المبيعات', 'operatingRevenue': 'إيرادات التأجير',
+    'graceDiscount': 'خصم فترة السماح', 'developmentCost': 'تكلفة التطوير',
+    'developerPayment': 'دفعة المطور', 'opex': 'المصروفات', 'landRent': 'إيجار الأرض',
+    'fundFeesAnnual': 'أتعاب الصندوق', 'financeDraw': 'سحب التمويل',
+    'financeInterest': 'فائدة التمويل', 'financeFee': 'رسوم التمويل',
+    'financeRepayment': 'سداد أصل التمويل', 'final': 'صافي تدفق المشروع',
+    'cumulative': 'الرصيد التراكمي', 'cashReserve': 'السيولة',
+    'openingDebt': 'الرصيد الافتتاحي', 'closingDebt': 'الرصيد الختامي',
+    'fundManagementFee': 'أتعاب الإدارة', 'additionalFundFees': 'الأتعاب الإضافية',
+    'fundExitFee': 'أتعاب التخارج', 'performanceFee': 'حافز الأداء',
+    'operationYear': 'سنة التشغيل', 'studyYear': 'السنة في الدراسة', 'reachPct': 'نسبة الوصول %',
+    'terminal': 'قيمة التخارج',
+}
 
 
 def _financial_report_table(rows):
@@ -4318,7 +4387,8 @@ def _financial_report_table(rows):
                     keys.append(key)
     if not keys:
         return '<p class="empty">لا توجد بنود مدخلة في هذا الجدول.</p>'
-    headers = ''.join(f'<th>{_financial_report_escape(key)}</th>' for key in keys)
+    headers = ''.join(
+        f'<th>{_financial_report_escape(FINANCIAL_COLUMN_LABELS.get(key, key))}</th>' for key in keys)
     body = ''.join('<tr>' + ''.join(f'<td>{_financial_report_escape(row.get(key))}</td>' for key in keys) + '</tr>'
                    for row in rows if isinstance(row, dict))
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table>'
@@ -4352,7 +4422,7 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
         sections.append('<section><h2>10. البنود الخارجية</h2>' + _financial_report_table(tables.get('externalTable')) + '</section>')
     if inputs.get('exitEnabled') == 'yes':
         sections.append('<section><h2>11. التخارج</h2>' + rows([('saleExitMethod', 'التخارج البيعي'), ('saleExitYear', 'سنة التخارج البيعي'), ('exitMethod', 'التخارج التشغيلي'), ('operatingExitYear', 'سنة التخارج التشغيلي'), ('exitInput', 'مدخل التخارج')]) + '</section>')
-    projection_rows = [(key, value) for key, value in projection.items() if key not in {'projected', 'cashflows', 'projectCashflows', 'modeFlags', 'areaState'}]
+    projection_rows = [(label, projection.get(key)) for key, label in FINANCIAL_RESULT_LABELS]
     sections.append('<section><h2>12. النتائج المالية</h2>' + _financial_report_rows(projection_rows) + _financial_report_table(tables.get('cashflowTable')) + '</section>')
     return f'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
 {font_css}
