@@ -701,96 +701,91 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('import emoji_icons', slide_source)
         self.assertIn('def _strip_presentation_icons(html)', slide_source)
 
-    def test_team_settings_page_gates_entities_behind_categories(self):
-        """The page used to show both forms at once, including eight fields for an entity form whose
-        category picker was empty, so it could not be submitted."""
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-
-        self.assertIn('id="teamEntityFormCard"', index_source)
-        self.assertIn('id="teamEntityBlocked"', index_source)
-        self.assertIn('if (card) card.hidden = !hasCategories;', index_source)
-        self.assertIn('if (blocked) blocked.hidden = hasCategories;', index_source)
-
-        # Numbered steps, and no placeholder option standing in for a real category.
-        self.assertIn('١. الأقسام', index_source)
-        self.assertIn('٢. الجهات', index_source)
-        self.assertNotIn('أضف قسمًا أولاً</option>', index_source)
-
-    def test_team_categories_are_company_defined_with_their_own_capacity(self):
-        """Nothing about the categories is fixed in code: the company names each one and decides
-        whether it holds a single entity or several."""
+    def test_team_library_is_a_flat_list_of_entities(self):
+        """Categories were removed: each entity already states what it does in its role field, so
+        the extra layer only added a step and a way to fail."""
         client = self.app.test_client()
         headers = self._headers(self.token_a)
 
-        # No presets ship with the app.
         listed = client.get('/api/team-entities', headers=headers)
         self.assertEqual(listed.status_code, 200, listed.get_json())
         self.assertEqual(listed.get_json()['entities'], [])
-        self.assertEqual(listed.get_json()['categories'], [])
-        for removed in ('TEAM_SINGLETON_CATEGORIES', 'TEAM_CATEGORY_LABELS'):
+        self.assertNotIn('categories', listed.get_json())
+
+        for removed in ('TEAM_SINGLETON_CATEGORIES', 'TEAM_CATEGORY_LABELS', 'TEAM_CATEGORY_FIELDS',
+                        'get_team_categories', 'create_team_category', 'team_category_is_full'):
             self.assertFalse(hasattr(db, removed), f'{removed} must no longer exist')
-
-        single = client.post('/api/team-categories', headers=headers, json={
-            'label': 'المطور العقاري', 'allowMultiple': False})
-        self.assertEqual(single.status_code, 201, single.get_json())
-        single_id = single.get_json()['category']['id']
-        self.assertFalse(single.get_json()['category']['allowMultiple'])
-
-        many = client.post('/api/team-categories', headers=headers, json={'label': 'استشاريون'})
-        self.assertEqual(many.status_code, 201, many.get_json())
-        many_id = many.get_json()['category']['id']
-        self.assertTrue(many.get_json()['category']['allowMultiple'])
-
+        # The category endpoints are gone with them.
         self.assertEqual(client.post('/api/team-categories', headers=headers,
-                                     json={'label': 'استشاريون'}).status_code, 409)
-        self.assertEqual(client.post('/api/team-categories', headers=headers,
-                                     json={'label': '  '}).status_code, 400)
+                                     json={'label': 'x'}).status_code, 404)
 
         created = client.post('/api/team-entities', headers=headers, json={
-            'categoryId': single_id, 'name': 'منافع الاقتصادية للعقار',
-            'experienceYears': '15', 'role': 'مطور المشروع'})
+            'name': 'منافع الاقتصادية للعقار', 'experienceYears': '15',
+            'role': 'مطور المشروع', 'brief': 'مطور عقاري سعودي',
+            'notableProjects': 'برج الأمير\nمجمع الواحة'})
         self.assertEqual(created.status_code, 201, created.get_json())
         entity = created.get_json()['entity']
-        self.assertEqual(entity['categoryLabel'], 'المطور العقاري')
+        self.assertEqual(entity['role'], 'مطور المشروع')
+        self.assertEqual(entity['experienceYears'], '15')
+        self.assertNotIn('categoryId', entity)
 
-        # A single-entity category refuses a second entity; a multi one accepts many.
+        # A name is required; a dangling logo id is refused rather than stored.
+        self.assertEqual(client.post('/api/team-entities', headers=headers,
+                                     json={'name': '  '}).status_code, 400)
         self.assertEqual(client.post('/api/team-entities', headers=headers, json={
-            'categoryId': single_id, 'name': 'مطور آخر'}).status_code, 409)
-        for name in ('مكتب المساحة', 'شركة الإشراف'):
-            self.assertEqual(client.post('/api/team-entities', headers=headers, json={
-                'categoryId': many_id, 'name': name}).status_code, 201)
+            'name': 'شعار مفقود', 'logoFileId': 'nope'}).status_code, 400)
 
-        # An entity needs a real category, and a dangling logo id is refused.
-        self.assertEqual(client.post('/api/team-entities', headers=headers, json={
-            'name': 'بلا قسم'}).status_code, 400)
-        self.assertEqual(client.post('/api/team-entities', headers=headers, json={
-            'categoryId': 'nope', 'name': 'قسم وهمي'}).status_code, 400)
-        self.assertEqual(client.post('/api/team-entities', headers=headers, json={
-            'categoryId': many_id, 'name': 'شعار مفقود', 'logoFileId': 'nope'}).status_code, 400)
+        # No cap on how many entities exist.
+        for name in ('مكتب هندسي', 'مقاول', 'استشاري'):
+            self.assertEqual(client.post('/api/team-entities', headers=headers,
+                                         json={'name': name}).status_code, 201)
+        self.assertEqual(len(client.get('/api/team-entities', headers=headers).get_json()['entities']), 4)
 
-        # Narrowing a populated category would orphan entities, so it is refused.
-        self.assertEqual(client.put('/api/team-categories/' + many_id, headers=headers,
-                                    json={'allowMultiple': False}).status_code, 409)
-
-        # Everything is tenant-scoped.
-        other = client.get('/api/team-entities', headers=self._headers(self.token_b)).get_json()
-        self.assertEqual(other['entities'], [])
-        self.assertEqual(other['categories'], [])
-        self.assertEqual(len(client.get('/api/team-entities', headers=headers).get_json()['entities']), 3)
+        # Tenant-scoped.
+        self.assertEqual(client.get('/api/team-entities', headers=self._headers(self.token_b)).get_json()['entities'], [])
 
         updated = client.put('/api/team-entities/' + entity['id'], headers=headers,
-                             json={'categoryId': single_id, 'name': 'منافع', 'role': 'المطور والمشغل'})
+                             json={'name': 'منافع', 'role': 'المطور والمشغل'})
         self.assertEqual(updated.status_code, 200, updated.get_json())
         self.assertEqual(updated.get_json()['entity']['role'], 'المطور والمشغل')
 
-        # Deleting a category detaches its entities instead of destroying them.
-        self.assertEqual(client.delete('/api/team-categories/' + many_id, headers=headers).status_code, 200)
-        remaining = client.get('/api/team-entities', headers=headers).get_json()['entities']
-        self.assertEqual(len(remaining), 3)
-        self.assertEqual([item['categoryLabel'] for item in remaining].count(''), 2)
-
         self.assertEqual(client.delete('/api/team-entities/' + entity['id'], headers=headers).status_code, 200)
         self.assertEqual(client.delete('/api/team-entities/' + entity['id'], headers=headers).status_code, 404)
+
+        # No category UI survives in the settings page.
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        for gone in ('teamCategoryLabel', 'teamEntityCategory', 'tenantTeamCategories',
+                     'submitTeamCategory', 'teamEntityBlocked', 'team-categories'):
+            self.assertNotIn(gone, index_source, f'{gone} should have been removed')
+
+    def test_new_tables_are_created_on_an_existing_database(self):
+        """_create_tables used to return early when `tenants` existed, so every table added after
+        the first deploy was missing forever on existing installs, surfacing as a 500 from
+        whichever endpoint touched it."""
+        import sqlite3
+        import tempfile
+
+        source = (ROOT / 'db.py').read_text(encoding='utf-8')
+        self.assertNotIn("if cur and cur.fetchone():\n            return", source)
+
+        path = os.path.join(tempfile.mkdtemp(), 'existing.db')
+        original = db.DB_PATH
+        try:
+            db.DB_PATH = path
+            db.init_db()
+            conn = sqlite3.connect(path)
+            conn.execute('DROP TABLE IF EXISTS tenant_team_entities')
+            conn.commit()
+            conn.close()
+
+            db.init_db()  # what a deploy does
+            conn = sqlite3.connect(path)
+            names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            conn.close()
+            self.assertIn('tenant_team_entities', names,
+                          'a missing table must be recreated on an existing database')
+        finally:
+            db.DB_PATH = original
 
     def test_project_team_section_scopes_choices_to_one_file(self):
         """A file may drop a library entity, override its role, or add an entity of its own —

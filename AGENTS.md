@@ -28,12 +28,18 @@ the very next line then stripped. Do not wire it back in.
 - Frontend: one single-page app, `index.html` (~13.7k lines). All JS lives in **one inline `<script>` block** starting at line ~4195, so every function shares one scope.
 - PDF handling: PyMuPDF (`fitz`). AI: OpenRouter / Z.ai (GLM) — see `.env`.
 
-## Schema gotcha
+## Schema gotchas
 
 `_create_tables()` runs one big SQL script and the fallback runner splits statements on `;`.
 **Never put a semicolon inside a `--` comment in that script** — the text after it is parsed as SQL,
 the script aborts part-way, and every table declared below it is silently missing. The failure
 surfaces far away as `no such table: <something unrelated>`.
+
+It used to `return` early when the `tenants` table already existed, which meant the schema only ran
+on a brand-new database and **every table added after the first deploy was missing forever on
+existing installs** — a 500 from whichever endpoint touched it, with a healthy-looking app
+otherwise. Every statement is `IF NOT EXISTS`, so it now runs unconditionally. Do not reintroduce
+that guard; `test_new_tables_are_created_on_an_existing_database` covers it.
 
 ## Verification
 
@@ -109,12 +115,10 @@ assertion deliberately, not reflexively.
 
 Two layers, deliberately:
 
-- **Company library** — `tenant_team_categories` + `tenant_team_entities`, managed at
-  `/app/settings/team`, shared by every project file. **No category is defined in code.** The
-  company names each category and sets `allow_multiple` on it, so "one entity only" is a property of
-  the category, not a hard-coded rule. Adding a second entity to a single-entity category returns
-  409, and narrowing a category that already holds several also returns 409 rather than orphaning
-  them. Deleting a category detaches its entities (`category_id = NULL`) instead of deleting them.
+- **Company library** — `tenant_team_entities`, managed at `/app/settings/team`, shared by every
+  project file. A **flat list**, deliberately: there is no category layer. One was built and then
+  removed because each entity already states what it does in its `role` field, so categories only
+  added a required first step and a way to fail. Do not reintroduce them.
 - **Per-file choices** — one `team_selection` key in `draft_data`:
   `{excluded: [libraryId], roles: {libraryId: text}, local: [{localId, ...six fields}]}`.
   Excluding an entity or overriding its role affects only that file; `local` entities exist only in

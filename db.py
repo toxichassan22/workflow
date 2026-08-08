@@ -69,14 +69,14 @@ def init_db():
 
 
 def _create_tables(conn):
-    """Create all database tables and run migrations if tables don't exist yet."""
-    try:
-        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tenants'")
-        if cur and cur.fetchone():
-            return
-    except Exception:
-        pass
+    """Create any missing table.
 
+    This used to return early when the ``tenants`` table already existed, which meant the schema
+    below only ever ran on a brand-new database. Every table added after the first deploy was
+    therefore missing forever on existing installs, and the failure surfaced far away as a 500 from
+    whichever endpoint touched it. Every statement is ``IF NOT EXISTS``, so running it every time is
+    both safe and the only way new tables arrive.
+    """
     conn.executescript("""
     CREATE TABLE IF NOT EXISTS tenants (
         id TEXT PRIMARY KEY,
@@ -235,19 +235,8 @@ def _create_tables(conn):
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_custom_sections_key ON tenant_custom_sections(tenant_id, section_key);
 
-    -- Company-wide project-team library. Nothing about the categories is fixed in code: the
-    -- company names them and decides whether each one holds a single entity or several.
-    CREATE TABLE IF NOT EXISTS tenant_team_categories (
-        id TEXT PRIMARY KEY,
-        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        label TEXT NOT NULL,
-        allow_multiple INTEGER DEFAULT 1,
-        sort_order INTEGER DEFAULT 100,
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_tenant_team_categories_tenant ON tenant_team_categories(tenant_id, sort_order);
-
+    -- Company-wide project-team library. A flat list: each entity says what it does in its own
+    -- role field, so a separate category layer earned nothing.
     -- Entities defined here appear in every project file. A draft can exclude one, or add
     -- project-only entities of its own.
     -- The logo reuses project_files (tenant-scoped storage plus the authenticated preview route).
@@ -255,7 +244,6 @@ def _create_tables(conn):
     CREATE TABLE IF NOT EXISTS tenant_team_entities (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        category_id TEXT,
         name TEXT NOT NULL,
         logo_file_id TEXT,
         brief TEXT,
@@ -432,39 +420,6 @@ def _create_tables(conn):
 
     # Migration: ensure new pre-built location fields exist for all tenants
     _migrate_location_fields(conn)
-
-    # Migration: team categories moved from a hard-coded string on the entity to a company-owned
-    # row, because the company also decides whether a category holds one entity or several.
-    team_cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenant_team_entities)').fetchall()]
-    if 'category_id' not in team_cols:
-        conn.execute('ALTER TABLE tenant_team_entities ADD COLUMN category_id TEXT')
-        print('[DB] Migration: added category_id column to tenant_team_entities')
-    if 'category' in team_cols:
-        # Turn each distinct legacy category into a real category row and repoint its entities.
-        legacy = conn.execute(
-            'SELECT DISTINCT tenant_id, category, category_label FROM tenant_team_entities '
-            'WHERE category IS NOT NULL AND (category_id IS NULL OR category_id = "")'
-        ).fetchall()
-        for row in legacy:
-            label = (row['category_label'] or row['category'] or 'أخرى').strip() or 'أخرى'
-            existing = conn.execute(
-                'SELECT id FROM tenant_team_categories WHERE tenant_id = ? AND label = ?',
-                (row['tenant_id'], label)
-            ).fetchone()
-            category_id = existing['id'] if existing else str(uuid.uuid4())
-            if not existing:
-                conn.execute(
-                    'INSERT INTO tenant_team_categories (id, tenant_id, label, allow_multiple, sort_order) '
-                    'VALUES (?, ?, ?, ?, ?)',
-                    (category_id, row['tenant_id'], label, 1, 100)
-                )
-            conn.execute(
-                'UPDATE tenant_team_entities SET category_id = ? '
-                'WHERE tenant_id = ? AND category = ? AND (category_id IS NULL OR category_id = "")',
-                (category_id, row['tenant_id'], row['category'])
-            )
-        if legacy:
-            print(f'[DB] Migration: converted {len(legacy)} legacy team categories to rows')
 
     # Migration: add image_path and image_analysis columns to tenant_training_data
     training_cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenant_training_data)').fetchall()]
@@ -1774,107 +1729,15 @@ def delete_custom_section(tenant_id, section_key):
 # Project team library (فريق العمل)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# Nothing here is fixed in code: the company names every category and decides its capacity.
-TEAM_ENTITY_FIELDS = ('category_id', 'name', 'logo_file_id', 'brief',
+TEAM_ENTITY_FIELDS = ('name', 'logo_file_id', 'brief',
                       'experience_years', 'notable_projects', 'role', 'sort_order')
-TEAM_CATEGORY_FIELDS = ('label', 'allow_multiple', 'sort_order')
 
 
-def _row_to_team_category(row):
+def _row_to_team_entity(row):
     if not row:
         return None
     return {
         'id': row['id'],
-        'label': row['label'] or '',
-        'allowMultiple': bool(row['allow_multiple']),
-        'sortOrder': row['sort_order'] if row['sort_order'] is not None else 100,
-    }
-
-
-def get_team_categories(tenant_id):
-    conn = get_db()
-    rows = conn.execute(
-        'SELECT * FROM tenant_team_categories WHERE tenant_id = ? ORDER BY sort_order, created_at',
-        (tenant_id,)
-    ).fetchall()
-    return [_row_to_team_category(row) for row in rows]
-
-
-def get_team_category(tenant_id, category_id):
-    conn = get_db()
-    row = conn.execute(
-        'SELECT * FROM tenant_team_categories WHERE tenant_id = ? AND id = ?',
-        (tenant_id, category_id)
-    ).fetchone()
-    return _row_to_team_category(row)
-
-
-def create_team_category(tenant_id, label, allow_multiple=True, sort_order=100):
-    conn = get_db()
-    category_id = str(uuid.uuid4())
-    conn.execute(
-        'INSERT INTO tenant_team_categories (id, tenant_id, label, allow_multiple, sort_order) '
-        'VALUES (?, ?, ?, ?, ?)',
-        (category_id, tenant_id, label, 1 if allow_multiple else 0, sort_order)
-    )
-    conn.commit()
-    return category_id
-
-
-def update_team_category(tenant_id, category_id, **updates):
-    allowed = {key: value for key, value in updates.items() if key in TEAM_CATEGORY_FIELDS}
-    if not allowed:
-        return False
-    if 'allow_multiple' in allowed:
-        allowed['allow_multiple'] = 1 if allowed['allow_multiple'] else 0
-    conn = get_db()
-    assignments = ', '.join(f'{key} = ?' for key in allowed)
-    cursor = conn.execute(
-        f'UPDATE tenant_team_categories SET {assignments}, updated_at = ? WHERE tenant_id = ? AND id = ?',
-        (*allowed.values(), datetime.now().isoformat(), tenant_id, category_id)
-    )
-    conn.commit()
-    return cursor.rowcount > 0
-
-
-def delete_team_category(tenant_id, category_id):
-    """Delete a category. Its entities are detached rather than destroyed."""
-    conn = get_db()
-    conn.execute(
-        'UPDATE tenant_team_entities SET category_id = NULL WHERE tenant_id = ? AND category_id = ?',
-        (tenant_id, category_id)
-    )
-    cursor = conn.execute(
-        'DELETE FROM tenant_team_categories WHERE tenant_id = ? AND id = ?',
-        (tenant_id, category_id)
-    )
-    conn.commit()
-    return cursor.rowcount > 0
-
-
-def team_category_is_full(tenant_id, category_id, exclude_id=None):
-    """True when a single-entity category already holds one."""
-    category = get_team_category(tenant_id, category_id)
-    if not category or category['allowMultiple']:
-        return False
-    conn = get_db()
-    query = 'SELECT id FROM tenant_team_entities WHERE tenant_id = ? AND category_id = ?'
-    params = [tenant_id, category_id]
-    if exclude_id:
-        query += ' AND id != ?'
-        params.append(exclude_id)
-    return conn.execute(query, params).fetchone() is not None
-
-
-def _row_to_team_entity(row, category_labels=None):
-    if not row:
-        return None
-    category_id = row['category_id'] or ''
-    labels = category_labels if category_labels is not None else {}
-    return {
-        'id': row['id'],
-        'categoryId': category_id,
-        'categoryLabel': labels.get(category_id, ''),
         'name': row['name'] or '',
         'logoFileId': row['logo_file_id'] or '',
         'brief': row['brief'] or '',
@@ -1886,38 +1749,33 @@ def _row_to_team_entity(row, category_labels=None):
 
 
 def get_team_entities(tenant_id):
-    """Company-wide team entities, ordered by their category then their own order."""
+    """Company-wide team entities as a flat list, in the order they were added."""
     conn = get_db()
-    labels = {item['id']: item['label'] for item in get_team_categories(tenant_id)}
     rows = conn.execute(
-        '''SELECT e.* FROM tenant_team_entities e
-           LEFT JOIN tenant_team_categories c ON c.id = e.category_id
-           WHERE e.tenant_id = ?
-           ORDER BY COALESCE(c.sort_order, 999), e.sort_order, e.created_at''',
+        'SELECT * FROM tenant_team_entities WHERE tenant_id = ? ORDER BY sort_order, created_at',
         (tenant_id,)
     ).fetchall()
-    return [_row_to_team_entity(row, labels) for row in rows]
+    return [_row_to_team_entity(row) for row in rows]
 
 
 def get_team_entity(tenant_id, entity_id):
     conn = get_db()
-    labels = {item['id']: item['label'] for item in get_team_categories(tenant_id)}
     row = conn.execute(
         'SELECT * FROM tenant_team_entities WHERE tenant_id = ? AND id = ?',
         (tenant_id, entity_id)
     ).fetchone()
-    return _row_to_team_entity(row, labels)
+    return _row_to_team_entity(row)
 
 
-def create_team_entity(tenant_id, category_id, name, **fields):
+def create_team_entity(tenant_id, name, **fields):
     conn = get_db()
     entity_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO tenant_team_entities
-           (id, tenant_id, category_id, name, logo_file_id, brief,
+           (id, tenant_id, name, logo_file_id, brief,
             experience_years, notable_projects, role, sort_order)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (entity_id, tenant_id, category_id or None, name,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (entity_id, tenant_id, name,
          fields.get('logo_file_id') or None, fields.get('brief') or '',
          str(fields.get('experience_years') or ''), fields.get('notable_projects') or '',
          fields.get('role') or '', fields.get('sort_order') or 100)

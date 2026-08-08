@@ -3551,39 +3551,9 @@
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
 
-      <div style="background:#fbf7f4;border:1px solid #e8ded6;border-radius:16px;padding:18px;margin-bottom:20px">
-        <h3 style="margin:0 0 4px;font-size:15px">١. الأقسام</h3>
-        <p class="tenant-hint" style="margin:0 0 12px">مثل: مطور عقاري، مكتب هندسي، مقاول.</p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
-          <div class="tenant-field" style="flex:1;min-width:220px">
-            <label>اسم القسم</label>
-            <input type="text" id="teamCategoryLabel" placeholder="اكتب اسم القسم كما تريده">
-          </div>
-          <div class="tenant-field" style="min-width:200px">
-            <label>عدد الجهات المسموح</label>
-            <select id="teamCategoryAllowMultiple">
-              <option value="yes">أكثر من جهة</option>
-              <option value="no">جهة واحدة فقط</option>
-            </select>
-          </div>
-          <button class="btn primary" onclick="submitTeamCategory()">إضافة القسم</button>
-        </div>
-        <div id="tenantTeamCategoryList" style="margin-top:12px"></div>
-      </div>
-
-      <!-- Hidden until a category exists: its category picker would be empty, so showing eight
-           fields for something that cannot be submitted only confuses. -->
-      <p id="teamEntityBlocked" class="tenant-hint" hidden
-        style="background:#fff8e6;border:1px solid #e8d9a8;border-radius:12px;padding:12px 14px;margin-bottom:20px">
-        أضف قسمًا أولًا، ثم ستظهر خانات إضافة الجهات.</p>
-
-      <div id="teamEntityFormCard" style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
-        <h3 style="margin:0 0 12px;font-size:15px">٢. الجهات</h3>
+      <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
+        <h3 style="margin:0 0 12px;font-size:15px">إضافة جهة</h3>
         <div class="tenant-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
-          <div class="tenant-field">
-            <label>القسم</label>
-            <select id="teamEntityCategory"></select>
-          </div>
           <div class="tenant-field"><label>اسم الجهة</label><input type="text" id="teamEntityName"
               placeholder="اسم الشركة أو المكتب"></div>
           <div class="tenant-field"><label>سنوات الخبرة</label><input type="number" id="teamEntityExperience" min="0"
@@ -6138,7 +6108,7 @@
                 ? '<img data-team-logo="' + escapeHtml(entity.logoFileId) + '" alt="" style="width:46px;height:46px;object-fit:contain;border-radius:9px;background:#f6f7f9;flex:none">'
                 : teamMonogramHtml(entity.name, 46)) +
               '<div style="flex:1;min-width:0"><strong style="word-break:break-word">' + escapeHtml(entity.name) + '</strong>' +
-              '<div class="tenant-hint" style="margin:2px 0 0">' + escapeHtml(entity.categoryLabel || '') + '</div></div></div>' +
+              '</div></div>' +
               '<label style="display:block;font-size:.8rem;margin-top:8px">دور الجهة في هذا المشروع</label>' +
               '<input type="text" value="' + escapeHtml(role) + '" ' + (excluded ? 'disabled ' : '') +
               'placeholder="' + escapeHtml(entity.role || 'دور الجهة') + '" style="width:100%" ' +
@@ -6169,12 +6139,6 @@
               '<strong style="flex:1;word-break:break-word">' +
               escapeHtml(entity.name || 'جهة جديدة') + '</strong></div>' +
               field('name', 'اسم الجهة', 'text') +
-              // Free text rather than the library's dropdown: a project-only party is usually a
-              // contractor or consultant, not the developer or engineering office.
-              '<label style="display:block;font-size:.78rem;margin-top:7px">نوع الجهة (القسم)</label>' +
-              '<input type="text" value="' + escapeHtml(entity.categoryLabel || '') +
-              '" placeholder="مثال: مقاول، استشاري، مكتب مساحة" style="width:100%" ' +
-              'onchange="updateLocalTeamEntity(\'' + safeId + '\',\'categoryLabel\',this.value)">' +
               field('experienceYears', 'سنوات الخبرة', 'number') +
               field('role', 'دور الجهة في المشروع', 'text') +
               field('brief', 'نبذة عن الجهة', 'textarea') +
@@ -6242,8 +6206,6 @@
       const state = getProjectTeamState();
       state.local = state.local.concat({
         localId: 'local-' + crypto.randomUUID(),
-        category: 'other',
-        categoryLabel: '',
         name: '',
         logoFileId: '',
         brief: '',
@@ -6264,7 +6226,6 @@
 
     // ── Project team library (فريق العمل) ─────────────────────────────────────
     let tenantTeamEntities = [];
-    let tenantTeamCategories = [];
     let editingTeamEntityId = null;
 
     async function openTenantTeam() {
@@ -6276,83 +6237,8 @@
     async function loadTenantTeamEntities() {
       const data = await api('GET', '/api/team-entities');
       tenantTeamEntities = data.success ? (data.entities || []) : [];
-      tenantTeamCategories = data.success ? (data.categories || []) : [];
-      renderTenantTeamCategoryList();
-      renderTeamCategoryOptions();
       renderTenantTeamList();
       return tenantTeamEntities;
-    }
-
-    function renderTeamCategoryOptions() {
-      // The entity form is only reachable once there is somewhere to put the entity.
-      const hasCategories = tenantTeamCategories.length > 0;
-      const card = document.getElementById('teamEntityFormCard');
-      const blocked = document.getElementById('teamEntityBlocked');
-      if (card) card.hidden = !hasCategories;
-      if (blocked) blocked.hidden = hasCategories;
-
-      const select = document.getElementById('teamEntityCategory');
-      if (!select) return;
-      const current = select.value;
-      select.innerHTML = tenantTeamCategories.map(category =>
-        '<option value="' + escapeHtml(category.id) + '">' + escapeHtml(category.label) +
-        (category.allowMultiple ? '' : ' (جهة واحدة)') + '</option>').join('');
-      if (current) select.value = current;
-    }
-
-    function renderTenantTeamCategoryList() {
-      const host = document.getElementById('tenantTeamCategoryList');
-      if (!host) return;
-      if (!tenantTeamCategories.length) {
-        host.innerHTML = '<p class="tenant-hint" style="margin:0">لا توجد أقسام بعد.</p>';
-        return;
-      }
-      host.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px">' + tenantTeamCategories.map(category => {
-        const count = tenantTeamEntities.filter(entity => entity.categoryId === category.id).length;
-        const safeId = String(category.id).replace(/'/g, "\\'");
-        return '<div style="border:1px solid #d9dee5;border-radius:10px;padding:8px 10px;background:#fff;display:flex;gap:8px;align-items:center">' +
-          '<strong style="font-size:.85rem">' + escapeHtml(category.label) + '</strong>' +
-          '<span class="tenant-hint" style="margin:0;font-size:.75rem">' +
-          (category.allowMultiple ? 'أكثر من جهة' : 'جهة واحدة') + ' — ' + count + '</span>' +
-          '<button type="button" class="btn ghost" style="padding:3px 8px;font-size:.72rem" ' +
-          'onclick="toggleTeamCategoryCapacity(\'' + safeId + '\')">' +
-          (category.allowMultiple ? 'اجعله جهة واحدة' : 'اسمح بأكثر') + '</button>' +
-          '<button type="button" class="btn ghost danger" style="padding:3px 8px;font-size:.72rem" ' +
-          'onclick="deleteTeamCategory(\'' + safeId + '\')">حذف</button></div>';
-      }).join('') + '</div>';
-    }
-
-    async function submitTeamCategory() {
-      const label = (document.getElementById('teamCategoryLabel')?.value || '').trim();
-      if (!label) { toast('اكتب اسم القسم'); return; }
-      const allowMultiple = document.getElementById('teamCategoryAllowMultiple')?.value !== 'no';
-      const response = await api('POST', '/api/team-categories', { label, allowMultiple });
-      if (!response?.success) { toast(response?.error || 'تعذر إضافة القسم'); return; }
-      document.getElementById('teamCategoryLabel').value = '';
-      toast('تم إضافة القسم');
-      await loadTenantTeamEntities();
-    }
-
-    async function toggleTeamCategoryCapacity(categoryId) {
-      const category = tenantTeamCategories.find(item => item.id === categoryId);
-      if (!category) return;
-      const response = await api('PUT', '/api/team-categories/' + encodeURIComponent(categoryId),
-                                 { allowMultiple: !category.allowMultiple });
-      if (!response?.success) { toast(response?.error || 'تعذر تعديل القسم'); return; }
-      await loadTenantTeamEntities();
-    }
-
-    async function deleteTeamCategory(categoryId) {
-      const category = tenantTeamCategories.find(item => item.id === categoryId);
-      const count = tenantTeamEntities.filter(entity => entity.categoryId === categoryId).length;
-      const warning = count
-        ? '\nستبقى ' + count + ' جهة موجودة لكن بلا قسم.'
-        : '';
-      if (!confirm('حذف قسم «' + (category?.label || '') + '»؟' + warning)) return;
-      const response = await api('DELETE', '/api/team-categories/' + encodeURIComponent(categoryId));
-      if (!response?.success) { toast(response?.error || 'تعذر حذف القسم'); return; }
-      toast('تم حذف القسم');
-      await loadTenantTeamEntities();
     }
 
     function resetTeamEntityForm() {
@@ -6386,7 +6272,6 @@
 
     async function submitTeamEntity() {
       const payload = {
-        categoryId: document.getElementById('teamEntityCategory')?.value || '',
         name: (document.getElementById('teamEntityName')?.value || '').trim(),
         experienceYears: (document.getElementById('teamEntityExperience')?.value || '').trim(),
         role: (document.getElementById('teamEntityRole')?.value || '').trim(),
@@ -6394,7 +6279,6 @@
         notableProjects: (document.getElementById('teamEntityProjects')?.value || '').trim(),
       };
       if (!payload.name) { toast('اسم الجهة مطلوب'); return; }
-      if (!payload.categoryId) { toast('أضف قسمًا أولاً ثم اختره'); return; }
 
       showLoader('حفظ الجهة', 'جاري الحفظ...', 20);
       try {
@@ -6423,8 +6307,6 @@
       const entity = tenantTeamEntities.find(item => item.id === entityId);
       if (!entity) return;
       editingTeamEntityId = entityId;
-      renderTeamCategoryOptions();
-      document.getElementById('teamEntityCategory').value = entity.categoryId || '';
       document.getElementById('teamEntityName').value = entity.name || '';
       document.getElementById('teamEntityExperience').value = entity.experienceYears || '';
       document.getElementById('teamEntityRole').value = entity.role || '';
@@ -6450,22 +6332,12 @@
       const host = document.getElementById('tenantTeamList');
       if (!host) return;
       if (!tenantTeamEntities.length) {
-        // With no categories the blocked note above already says what to do.
-        host.innerHTML = tenantTeamCategories.length
-          ? '<p class="tenant-hint">لا توجد جهات مسجّلة بعد.</p>' : '';
+        host.innerHTML = '<p class="tenant-hint">لا توجد جهات مسجّلة بعد.</p>';
         return;
       }
-      const groups = new Map();
-      tenantTeamEntities.forEach(entity => {
-        const key = entity.categoryLabel || 'بلا قسم';
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(entity);
-      });
-      host.innerHTML = Array.from(groups.entries()).map(([label, entities]) =>
-        '<h3 style="margin:18px 0 8px;color:var(--p);font-size:15px">' + escapeHtml(label) + '</h3>' +
+      host.innerHTML = '<h3 style="margin:18px 0 8px;color:var(--p);font-size:15px">الجهات المسجّلة</h3>' +
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">' +
-        entities.map(entity => teamEntityCardHtml(entity, true)).join('') + '</div>'
-      ).join('');
+        tenantTeamEntities.map(entity => teamEntityCardHtml(entity, true)).join('') + '</div>';
       host.querySelectorAll('img[data-team-logo]').forEach(image => {
         attachProjectFileThumbnail(image, image.dataset.teamLogo);
       });
