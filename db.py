@@ -235,6 +235,26 @@ def _create_tables(conn):
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_custom_sections_key ON tenant_custom_sections(tenant_id, section_key);
 
+    -- Company-wide project-team library. Entities defined here appear in every project file;
+    -- each draft can exclude one or add project-only entities of its own.
+    -- The logo reuses project_files (tenant-scoped storage + the authenticated preview route).
+    CREATE TABLE IF NOT EXISTS tenant_team_entities (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        category TEXT NOT NULL,
+        category_label TEXT,
+        name TEXT NOT NULL,
+        logo_file_id TEXT,
+        brief TEXT,
+        experience_years TEXT,
+        notable_projects TEXT,
+        role TEXT,
+        sort_order INTEGER DEFAULT 100,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_tenant_team_entities_tenant ON tenant_team_entities(tenant_id, sort_order);
+
     CREATE TABLE IF NOT EXISTS presentation_versions (
         id TEXT PRIMARY KEY,
         presentation_id TEXT NOT NULL REFERENCES presentations(id) ON DELETE CASCADE,
@@ -1700,6 +1720,117 @@ def delete_custom_section(tenant_id, section_key):
     cursor = conn.execute(
         'DELETE FROM tenant_custom_sections WHERE tenant_id = ? AND section_key = ?',
         (tenant_id, section_key)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Project team library (فريق العمل)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# The developer and the engineering office are single-entity roles; anything else is open-ended.
+TEAM_SINGLETON_CATEGORIES = ('developer', 'engineering_office')
+TEAM_CATEGORY_LABELS = {
+    'developer': 'المطور العقاري',
+    'engineering_office': 'المكتب الهندسي',
+}
+TEAM_ENTITY_FIELDS = ('category', 'category_label', 'name', 'logo_file_id', 'brief',
+                      'experience_years', 'notable_projects', 'role', 'sort_order')
+
+
+def _row_to_team_entity(row):
+    if not row:
+        return None
+    category = row['category']
+    return {
+        'id': row['id'],
+        'category': category,
+        'categoryLabel': row['category_label'] or TEAM_CATEGORY_LABELS.get(category, category),
+        'name': row['name'] or '',
+        'logoFileId': row['logo_file_id'] or '',
+        'brief': row['brief'] or '',
+        'experienceYears': row['experience_years'] or '',
+        'notableProjects': row['notable_projects'] or '',
+        'role': row['role'] or '',
+        'sortOrder': row['sort_order'] if row['sort_order'] is not None else 100,
+    }
+
+
+def get_team_entities(tenant_id):
+    """Company-wide team entities, ordered so the developer and engineering office lead."""
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT * FROM tenant_team_entities WHERE tenant_id = ? ORDER BY sort_order, created_at',
+        (tenant_id,)
+    ).fetchall()
+    return [_row_to_team_entity(row) for row in rows]
+
+
+def get_team_entity(tenant_id, entity_id):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM tenant_team_entities WHERE tenant_id = ? AND id = ?',
+        (tenant_id, entity_id)
+    ).fetchone()
+    return _row_to_team_entity(row)
+
+
+def team_category_is_taken(tenant_id, category, exclude_id=None):
+    """True when a singleton category already has an entity."""
+    if category not in TEAM_SINGLETON_CATEGORIES:
+        return False
+    conn = get_db()
+    if exclude_id:
+        row = conn.execute(
+            'SELECT id FROM tenant_team_entities WHERE tenant_id = ? AND category = ? AND id != ?',
+            (tenant_id, category, exclude_id)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            'SELECT id FROM tenant_team_entities WHERE tenant_id = ? AND category = ?',
+            (tenant_id, category)
+        ).fetchone()
+    return row is not None
+
+
+def create_team_entity(tenant_id, category, name, **fields):
+    conn = get_db()
+    entity_id = str(uuid.uuid4())
+    default_order = {'developer': 10, 'engineering_office': 20}.get(category, 100)
+    conn.execute(
+        '''INSERT INTO tenant_team_entities
+           (id, tenant_id, category, category_label, name, logo_file_id, brief,
+            experience_years, notable_projects, role, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (entity_id, tenant_id, category, fields.get('category_label') or None, name,
+         fields.get('logo_file_id') or None, fields.get('brief') or '',
+         str(fields.get('experience_years') or ''), fields.get('notable_projects') or '',
+         fields.get('role') or '', fields.get('sort_order') or default_order)
+    )
+    conn.commit()
+    return entity_id
+
+
+def update_team_entity(tenant_id, entity_id, **updates):
+    allowed = {key: value for key, value in updates.items() if key in TEAM_ENTITY_FIELDS}
+    if not allowed:
+        return False
+    conn = get_db()
+    assignments = ', '.join(f'{key} = ?' for key in allowed)
+    cursor = conn.execute(
+        f'UPDATE tenant_team_entities SET {assignments}, updated_at = ? WHERE tenant_id = ? AND id = ?',
+        (*allowed.values(), datetime.now().isoformat(), tenant_id, entity_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def delete_team_entity(tenant_id, entity_id):
+    conn = get_db()
+    cursor = conn.execute(
+        'DELETE FROM tenant_team_entities WHERE tenant_id = ? AND id = ?',
+        (tenant_id, entity_id)
     )
     conn.commit()
     return cursor.rowcount > 0

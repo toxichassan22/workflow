@@ -3277,6 +3277,8 @@
               onclick="openTenantSettings(); closeTenantDropdown()">إعدادات الشركة</button>
             <button class="btn ghost" data-permission="custom_fields"
               onclick="openTenantFields(); closeTenantDropdown()">الحقول</button>
+            <button class="btn ghost" data-permission="company_settings"
+              onclick="openTenantTeam(); closeTenantDropdown()">فريق العمل</button>
             <button class="btn ghost" data-permission="manage_users"
               onclick="openTenantUsers(); closeTenantDropdown()">الموظفون</button>
             <button class="btn ghost" data-permission="ai_rules"
@@ -3528,6 +3530,57 @@
     </section>
 
     <!-- Dynamic Fields -->
+    <section id="tenantTeamPage" class="tenant-page">
+      <div
+        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div>
+          <h2>فريق العمل</h2>
+          <p class="tenant-hint">الجهات المسجّلة هنا تظهر في كل ملفات المشاريع. داخل أي مشروع يمكن استبعاد جهة من ذلك
+            الملف وحده، أو إضافة جهة تخصّه فقط.</p>
+        </div>
+        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
+      </div>
+
+      <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
+        <h3 style="margin:0 0 4px;font-size:15px">إضافة جهة</h3>
+        <p class="tenant-hint" style="margin:0 0 12px">المطور العقاري والمكتب الهندسي جهة واحدة لكل منهما. لأي دور آخر
+          اختر «أخرى» واكتب اسم القسم.</p>
+        <div class="tenant-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+          <div class="tenant-field">
+            <label>القسم</label>
+            <select id="teamEntityCategory" onchange="onTeamCategoryChange()">
+              <option value="developer">المطور العقاري</option>
+              <option value="engineering_office">المكتب الهندسي</option>
+              <option value="other">أخرى</option>
+            </select>
+          </div>
+          <div class="tenant-field" id="teamEntityCategoryLabelWrap" style="display:none">
+            <label>اسم القسم</label>
+            <input type="text" id="teamEntityCategoryLabel" placeholder="مثال: استشاري، مقاول، مكتب مساحة">
+          </div>
+          <div class="tenant-field"><label>اسم الجهة</label><input type="text" id="teamEntityName"
+              placeholder="اسم الشركة أو المكتب"></div>
+          <div class="tenant-field"><label>سنوات الخبرة</label><input type="number" id="teamEntityExperience" min="0"
+              placeholder="0"></div>
+          <div class="tenant-field"><label>دور الجهة في المشروع</label><input type="text" id="teamEntityRole"
+              placeholder="مثال: مطور المشروع"></div>
+          <div class="tenant-field"><label>شعار الجهة</label><input type="file" id="teamEntityLogo"
+              accept="image/*,.jpg,.jpeg,.png,.webp"></div>
+          <div class="tenant-field full"><label>نبذة عن الجهة</label><textarea id="teamEntityBrief" rows="3"
+              placeholder="نبذة تعريفية عن الجهة"></textarea></div>
+          <div class="tenant-field full"><label>أبرز المشاريع</label><textarea id="teamEntityProjects" rows="3"
+              placeholder="مشروع في كل سطر"></textarea></div>
+        </div>
+        <div class="tenant-btns" style="margin-top:12px">
+          <button class="btn primary" id="teamEntitySaveBtn" onclick="submitTeamEntity()">إضافة الجهة</button>
+          <button class="btn ghost" id="teamEntityCancelBtn" style="display:none"
+            onclick="resetTeamEntityForm()">إلغاء التعديل</button>
+        </div>
+      </div>
+
+      <div id="tenantTeamList"></div>
+    </section>
+
     <section id="tenantFieldsPage" class="tenant-page">
       <div
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
@@ -4942,6 +4995,7 @@
       tenantSlidesPage: '/app/presentations/current',
       tenantPresentationsPage: '/app/presentations',
       tenantSettingsPage: '/app/settings',
+      tenantTeamPage: '/app/settings/team',
       tenantFieldsPage: '/app/settings/fields',
       tenantUsersPage: '/app/settings/users',
       tenantTrainingPage: '/app/settings/training',
@@ -5985,6 +6039,177 @@
       } else {
         toast(data.error || 'فشل التحليل');
       }
+    }
+
+    // ── Project team library (فريق العمل) ─────────────────────────────────────
+    let tenantTeamEntities = [];
+    let editingTeamEntityId = null;
+
+    async function openTenantTeam() {
+      showTenantPage('tenantTeamPage');
+      resetTeamEntityForm();
+      await loadTenantTeamEntities();
+    }
+
+    async function loadTenantTeamEntities() {
+      const data = await api('GET', '/api/team-entities');
+      tenantTeamEntities = data.success ? (data.entities || []) : [];
+      renderTenantTeamList();
+      return tenantTeamEntities;
+    }
+
+    function onTeamCategoryChange() {
+      const category = document.getElementById('teamEntityCategory')?.value;
+      const wrap = document.getElementById('teamEntityCategoryLabelWrap');
+      if (wrap) wrap.style.display = category === 'other' ? 'block' : 'none';
+    }
+
+    function resetTeamEntityForm() {
+      editingTeamEntityId = null;
+      ['teamEntityName', 'teamEntityExperience', 'teamEntityRole', 'teamEntityCategoryLabel',
+       'teamEntityBrief', 'teamEntityProjects'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+      const category = document.getElementById('teamEntityCategory');
+      if (category) category.value = 'developer';
+      const logo = document.getElementById('teamEntityLogo');
+      if (logo) logo.value = '';
+      onTeamCategoryChange();
+      const saveBtn = document.getElementById('teamEntitySaveBtn');
+      if (saveBtn) saveBtn.textContent = 'إضافة الجهة';
+      const cancelBtn = document.getElementById('teamEntityCancelBtn');
+      if (cancelBtn) cancelBtn.style.display = 'none';
+    }
+
+    async function uploadTeamLogo() {
+      const input = document.getElementById('teamEntityLogo');
+      const file = input?.files?.[0];
+      if (!file) return '';
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      formData.append('fileType', 'team_logo');
+      const response = await api('POST', '/api/project-files', formData, true);
+      if (!response?.success || !response.file?.id) {
+        throw new Error(response?.error || 'تعذر رفع شعار الجهة');
+      }
+      return response.file.id;
+    }
+
+    async function submitTeamEntity() {
+      const category = document.getElementById('teamEntityCategory')?.value || 'other';
+      const payload = {
+        category,
+        categoryLabel: category === 'other'
+          ? (document.getElementById('teamEntityCategoryLabel')?.value || '').trim() : '',
+        name: (document.getElementById('teamEntityName')?.value || '').trim(),
+        experienceYears: (document.getElementById('teamEntityExperience')?.value || '').trim(),
+        role: (document.getElementById('teamEntityRole')?.value || '').trim(),
+        brief: (document.getElementById('teamEntityBrief')?.value || '').trim(),
+        notableProjects: (document.getElementById('teamEntityProjects')?.value || '').trim(),
+      };
+      if (!payload.name) { toast('اسم الجهة مطلوب'); return; }
+      if (category === 'other' && !payload.categoryLabel) { toast('اكتب اسم القسم'); return; }
+
+      showLoader('حفظ الجهة', 'جاري الحفظ...', 20);
+      try {
+        const logoId = await uploadTeamLogo();
+        if (logoId) payload.logoFileId = logoId;
+        // Editing without picking a new logo keeps the stored one.
+        if (!logoId && editingTeamEntityId) {
+          const current = tenantTeamEntities.find(item => item.id === editingTeamEntityId);
+          if (current?.logoFileId) payload.logoFileId = current.logoFileId;
+        }
+        const response = editingTeamEntityId
+          ? await api('PUT', '/api/team-entities/' + encodeURIComponent(editingTeamEntityId), payload)
+          : await api('POST', '/api/team-entities', payload);
+        if (!response?.success) { toast(response?.error || 'تعذر حفظ الجهة'); return; }
+        toast(editingTeamEntityId ? 'تم تحديث الجهة' : 'تم إضافة الجهة');
+        resetTeamEntityForm();
+        await loadTenantTeamEntities();
+      } catch (error) {
+        toast(error.message || 'تعذر حفظ الجهة');
+      } finally {
+        hideLoader();
+      }
+    }
+
+    function editTeamEntity(entityId) {
+      const entity = tenantTeamEntities.find(item => item.id === entityId);
+      if (!entity) return;
+      editingTeamEntityId = entityId;
+      const isKnown = entity.category === 'developer' || entity.category === 'engineering_office';
+      document.getElementById('teamEntityCategory').value = isKnown ? entity.category : 'other';
+      onTeamCategoryChange();
+      if (!isKnown) document.getElementById('teamEntityCategoryLabel').value = entity.categoryLabel || '';
+      document.getElementById('teamEntityName').value = entity.name || '';
+      document.getElementById('teamEntityExperience').value = entity.experienceYears || '';
+      document.getElementById('teamEntityRole').value = entity.role || '';
+      document.getElementById('teamEntityBrief').value = entity.brief || '';
+      document.getElementById('teamEntityProjects').value = entity.notableProjects || '';
+      document.getElementById('teamEntityLogo').value = '';
+      document.getElementById('teamEntitySaveBtn').textContent = 'حفظ التعديل';
+      document.getElementById('teamEntityCancelBtn').style.display = 'inline-block';
+      document.getElementById('tenantTeamPage')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function deleteTeamEntity(entityId) {
+      const entity = tenantTeamEntities.find(item => item.id === entityId);
+      if (!confirm('حذف «' + (entity?.name || 'الجهة') + '» من كل المشاريع؟')) return;
+      const response = await api('DELETE', '/api/team-entities/' + encodeURIComponent(entityId));
+      if (!response?.success) { toast(response?.error || 'تعذر حذف الجهة'); return; }
+      toast('تم حذف الجهة');
+      if (editingTeamEntityId === entityId) resetTeamEntityForm();
+      await loadTenantTeamEntities();
+    }
+
+    function renderTenantTeamList() {
+      const host = document.getElementById('tenantTeamList');
+      if (!host) return;
+      if (!tenantTeamEntities.length) {
+        host.innerHTML = '<p class="tenant-hint">لا توجد جهات مسجّلة بعد. أضف المطور العقاري والمكتب الهندسي ليظهرا في كل المشاريع.</p>';
+        return;
+      }
+      const groups = new Map();
+      tenantTeamEntities.forEach(entity => {
+        const key = entity.categoryLabel || entity.category;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(entity);
+      });
+      host.innerHTML = Array.from(groups.entries()).map(([label, entities]) =>
+        '<h3 style="margin:18px 0 8px;color:var(--p);font-size:15px">' + escapeHtml(label) + '</h3>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">' +
+        entities.map(entity => teamEntityCardHtml(entity, true)).join('') + '</div>'
+      ).join('');
+      host.querySelectorAll('img[data-team-logo]').forEach(image => {
+        attachProjectFileThumbnail(image, image.dataset.teamLogo);
+      });
+    }
+
+    // Shared by the settings library and the in-project section.
+    function teamEntityCardHtml(entity, withLibraryActions) {
+      const safeId = String(entity.id || entity.localId || '').replace(/'/g, "\\'");
+      const logo = entity.logoFileId
+        ? '<img data-team-logo="' + escapeHtml(entity.logoFileId) + '" alt="' + escapeHtml(entity.name || '') +
+          '" style="width:52px;height:52px;object-fit:contain;border-radius:10px;background:#f6f7f9;flex:none">'
+        : '<div style="width:52px;height:52px;border-radius:10px;background:#f2f4f7;display:flex;align-items:center;justify-content:center;flex:none;font-size:1.1rem">🏢</div>';
+      const detail = (label, value) => value
+        ? '<div style="font-size:.82rem;margin-top:5px"><strong>' + label + ':</strong> ' + escapeHtml(value) + '</div>'
+        : '';
+      return '<div style="border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff">' +
+        '<div style="display:flex;gap:10px;align-items:center">' + logo +
+        '<div style="flex:1;min-width:0"><strong style="word-break:break-word">' + escapeHtml(entity.name || '') + '</strong>' +
+        (entity.role ? '<div class="tenant-hint" style="margin:2px 0 0">' + escapeHtml(entity.role) + '</div>' : '') +
+        '</div></div>' +
+        detail('سنوات الخبرة', entity.experienceYears) +
+        detail('نبذة', entity.brief) +
+        detail('أبرز المشاريع', entity.notableProjects) +
+        (withLibraryActions
+          ? '<div style="display:flex;gap:6px;margin-top:10px">' +
+            '<button type="button" class="btn ghost" style="flex:1;padding:5px 8px;font-size:.78rem" onclick="editTeamEntity(\'' + safeId + '\')">تعديل</button>' +
+            '<button type="button" class="btn ghost danger" style="flex:1;padding:5px 8px;font-size:.78rem" onclick="deleteTeamEntity(\'' + safeId + '\')">حذف</button></div>'
+          : '') +
+        '</div>';
     }
 
     // Custom fields

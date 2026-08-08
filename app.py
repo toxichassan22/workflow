@@ -4813,6 +4813,83 @@ def api_get_field_sections():
     return jsonify({'success': True, 'available': available, 'allowed': allowed})
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Project team library (فريق العمل)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _team_entity_payload(data):
+    """Normalise a team-entity request body; returns (fields, error)."""
+    name = str(data.get('name') or '').strip()
+    if not name:
+        return None, 'اسم الجهة مطلوب'
+    category = str(data.get('category') or '').strip() or 'other'
+    label = str(data.get('categoryLabel') or '').strip()
+    if category not in db.TEAM_CATEGORY_LABELS and not label:
+        return None, 'اسم القسم مطلوب للجهات الأخرى'
+    logo_file_id = str(data.get('logoFileId') or '').strip()
+    if logo_file_id and not db.get_project_file(g.tenant_id, logo_file_id):
+        return None, 'شعار الجهة غير موجود'
+    return {
+        'category': category,
+        'category_label': label or db.TEAM_CATEGORY_LABELS.get(category, ''),
+        'name': name,
+        'logo_file_id': logo_file_id,
+        'brief': str(data.get('brief') or '').strip(),
+        'experience_years': str(data.get('experienceYears') or '').strip(),
+        'notable_projects': str(data.get('notableProjects') or '').strip(),
+        'role': str(data.get('role') or '').strip(),
+    }, None
+
+
+@app.route('/api/team-entities', methods=['GET'])
+@require_auth
+def api_list_team_entities():
+    """Company-wide team library; every project file starts from this list."""
+    return jsonify({
+        'success': True,
+        'entities': db.get_team_entities(g.tenant_id),
+        'singletonCategories': list(db.TEAM_SINGLETON_CATEGORIES),
+        'categoryLabels': db.TEAM_CATEGORY_LABELS,
+    })
+
+
+@app.route('/api/team-entities', methods=['POST'])
+@require_permission('company_settings')
+def api_create_team_entity():
+    fields, error = _team_entity_payload(request.json or {})
+    if error:
+        return jsonify({'success': False, 'error': error}), 400
+    if db.team_category_is_taken(g.tenant_id, fields['category']):
+        label = db.TEAM_CATEGORY_LABELS.get(fields['category'], fields['category'])
+        return jsonify({'success': False,
+                        'error': f'{label} مُسجَّل مسبقًا — عدّل الجهة الحالية بدل إضافة أخرى'}), 409
+    entity_id = db.create_team_entity(g.tenant_id, fields.pop('category'), fields.pop('name'), **fields)
+    return jsonify({'success': True, 'entity': db.get_team_entity(g.tenant_id, entity_id)}), 201
+
+
+@app.route('/api/team-entities/<entity_id>', methods=['PUT'])
+@require_permission('company_settings')
+def api_update_team_entity(entity_id):
+    if not db.get_team_entity(g.tenant_id, entity_id):
+        return jsonify({'success': False, 'error': 'الجهة غير موجودة'}), 404
+    fields, error = _team_entity_payload(request.json or {})
+    if error:
+        return jsonify({'success': False, 'error': error}), 400
+    if db.team_category_is_taken(g.tenant_id, fields['category'], exclude_id=entity_id):
+        label = db.TEAM_CATEGORY_LABELS.get(fields['category'], fields['category'])
+        return jsonify({'success': False, 'error': f'{label} مُسجَّل مسبقًا لجهة أخرى'}), 409
+    db.update_team_entity(g.tenant_id, entity_id, **fields)
+    return jsonify({'success': True, 'entity': db.get_team_entity(g.tenant_id, entity_id)})
+
+
+@app.route('/api/team-entities/<entity_id>', methods=['DELETE'])
+@require_permission('company_settings')
+def api_delete_team_entity(entity_id):
+    if not db.delete_team_entity(g.tenant_id, entity_id):
+        return jsonify({'success': False, 'error': 'الجهة غير موجودة'}), 404
+    return jsonify({'success': True})
+
+
 @app.route('/api/field-sections/custom', methods=['POST'])
 @require_permission('custom_fields')
 def api_add_custom_section():
@@ -6152,7 +6229,10 @@ PROJECT_FILE_EXTENSIONS = {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
     '.webp': 'image/webp', '.pdf': 'application/pdf'
 }
-PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license', 'regulation_reference'}
+PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license',
+                      'regulation_reference', 'team_logo'}
+# Types that must be real images: they are rendered in <img> thumbnails, where a PDF shows nothing.
+PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
 
 
@@ -6164,9 +6244,8 @@ def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=No
     mime_type = PROJECT_FILE_EXTENSIONS.get(extension)
     if not mime_type:
         raise ValueError('Only PNG, JPG, JPEG, WEBP, and PDF files are supported')
-    # Land photos are shown in <img> thumbnails, so a PDF there would never render.
-    if file_type == 'land_image' and not mime_type.startswith('image/'):
-        raise ValueError('صور الأرض يجب أن تكون صورًا (PNG أو JPG أو WEBP)')
+    if file_type in PROJECT_IMAGE_ONLY_TYPES and not mime_type.startswith('image/'):
+        raise ValueError('هذا الحقل يقبل الصور فقط (PNG أو JPG أو WEBP)')
 
     document_dir = os.path.join(UPLOADS_DIR, str(g.tenant_id), 'project-documents')
     os.makedirs(document_dir, exist_ok=True)

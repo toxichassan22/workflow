@@ -503,6 +503,70 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_team_library_is_company_wide_and_singleton_roles_are_enforced(self):
+        """The developer and the engineering office are one entity each; anything else is open."""
+        client = self.app.test_client()
+
+        listed = client.get('/api/team-entities', headers=self._headers(self.token_a))
+        self.assertEqual(listed.status_code, 200, listed.get_json())
+        self.assertEqual(listed.get_json()['entities'], [])
+        self.assertEqual(sorted(listed.get_json()['singletonCategories']),
+                         ['developer', 'engineering_office'])
+
+        created = client.post('/api/team-entities', headers=self._headers(self.token_a), json={
+            'category': 'developer', 'name': 'منافع الاقتصادية للعقار',
+            'brief': 'مطور عقاري سعودي', 'experienceYears': '15',
+            'notableProjects': 'برج الأمير\nمجمع الواحة', 'role': 'مطور المشروع',
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        entity = created.get_json()['entity']
+        self.assertEqual(entity['categoryLabel'], 'المطور العقاري')
+        self.assertEqual(entity['experienceYears'], '15')
+
+        # A second developer is refused; the existing one must be edited instead.
+        duplicate = client.post('/api/team-entities', headers=self._headers(self.token_a), json={
+            'category': 'developer', 'name': 'مطور آخر'})
+        self.assertEqual(duplicate.status_code, 409, duplicate.get_json())
+
+        # "Other" categories are open-ended but need their own label.
+        unlabelled = client.post('/api/team-entities', headers=self._headers(self.token_a), json={
+            'category': 'other', 'name': 'شركة بلا قسم'})
+        self.assertEqual(unlabelled.status_code, 400, unlabelled.get_json())
+        for name in ('مكتب المساحة', 'شركة الإشراف'):
+            extra = client.post('/api/team-entities', headers=self._headers(self.token_a), json={
+                'category': 'consultant', 'categoryLabel': 'استشاريون', 'name': name})
+            self.assertEqual(extra.status_code, 201, extra.get_json())
+
+        # A missing logo reference is rejected rather than stored as a dangling id.
+        bad_logo = client.post('/api/team-entities', headers=self._headers(self.token_a), json={
+            'category': 'engineering_office', 'name': 'مكتب هندسي', 'logoFileId': 'nope'})
+        self.assertEqual(bad_logo.status_code, 400, bad_logo.get_json())
+
+        # The library is tenant-scoped.
+        self.assertEqual(client.get('/api/team-entities', headers=self._headers(self.token_b)).get_json()['entities'], [])
+        self.assertEqual(len(client.get('/api/team-entities', headers=self._headers(self.token_a)).get_json()['entities']), 3)
+
+        updated = client.put('/api/team-entities/' + entity['id'],
+                             headers=self._headers(self.token_a),
+                             json={'category': 'developer', 'name': 'منافع', 'role': 'المطور والمشغل'})
+        self.assertEqual(updated.status_code, 200, updated.get_json())
+        self.assertEqual(updated.get_json()['entity']['role'], 'المطور والمشغل')
+
+        self.assertEqual(client.delete('/api/team-entities/' + entity['id'],
+                                       headers=self._headers(self.token_a)).status_code, 200)
+        self.assertEqual(client.delete('/api/team-entities/' + entity['id'],
+                                       headers=self._headers(self.token_a)).status_code, 404)
+
+    def test_team_logos_must_be_images(self):
+        client = self.app.test_client()
+        rejected = client.post('/api/project-files', headers=self._headers(self.token_a), data={
+            'fileType': 'team_logo',
+            'file': (io.BytesIO(b'%PDF-1.4 not a logo'), 'logo.pdf'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(rejected.status_code, 400, rejected.get_json())
+        self.assertIn('team_logo', self.application_module.PROJECT_FILE_TYPES)
+        self.assertIn('team_logo', self.application_module.PROJECT_IMAGE_ONLY_TYPES)
+
     def test_drafts_are_saved_only_on_request(self):
         """Autosave fired on any input and from several render helpers, so merely opening a new
         project wrote a row to the server."""

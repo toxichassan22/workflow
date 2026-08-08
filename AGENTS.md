@@ -30,11 +30,12 @@ Python syntax check:
 D:\workflow\.venv\Scripts\python.exe -c "import ast; [ast.parse(open(f,encoding='utf-8').read(), f) for f in ('app.py','db.py','slide_engine.py','maps_service.py')]"
 ```
 
-Frontend JS syntax check (extract the inline script and run `node --check`):
+Frontend JS syntax check (extract the inline script and run `node --check`). Locate the block
+dynamically — its start line moves whenever markup is added above it:
 ```powershell
-$lines = Get-Content D:\workflow\index.html
+$open = (Select-String -Path D:\workflow\index.html -Pattern '^\s*<script>\s*$' | Select-Object -Last 1).LineNumber
 $close = (Select-String -Path D:\workflow\index.html -Pattern '</script>' -SimpleMatch | Select-Object -Last 1).LineNumber
-$lines[4195..($close-2)] -join "`n" | Set-Content "$env:TEMP\wf_check.js" -Encoding UTF8
+(Get-Content D:\workflow\index.html)[$open..($close-2)] -join "`n" | Set-Content "$env:TEMP\wf_check.js" -Encoding UTF8
 node --check "$env:TEMP\wf_check.js"
 ```
 
