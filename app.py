@@ -5532,6 +5532,9 @@ def render_regulation_table_pages(table_pages, dpi=200):
 
 PDF_VISION_DPI = int(os.environ.get('PDF_VISION_DPI', '300'))
 PDF_VISION_MAX_PAGES = int(os.environ.get('PDF_VISION_MAX_PAGES', '20'))
+PDF_VISION_MAX_EDGE = int(os.environ.get('PDF_VISION_MAX_EDGE', '2000'))
+PDF_VISION_JPEG_QUALITY = int(os.environ.get('PDF_VISION_JPEG_QUALITY', '85'))
+PDF_VISION_MAX_TOTAL_BYTES = int(os.environ.get('PDF_VISION_MAX_TOTAL_BYTES', str(12 * 1024 * 1024)))
 # The land prompt asks for a multi-paragraph Arabic narrative, sourced building rules and a full
 # coordinates table. Arabic costs roughly 2-3 tokens per word, so a low cap truncates the JSON and
 # the whole extraction is then rejected, which looks to the user like "nothing changed".
@@ -5544,6 +5547,7 @@ LAND_ANALYSIS_MIN_TOKENS = int(os.environ.get('LAND_ANALYSIS_MIN_TOKENS', '6000'
 LAND_ANALYSIS_MODEL = os.environ.get('LAND_ANALYSIS_MODEL', 'google/gemini-3.6-flash')
 
 _AFFORDABLE_TOKENS_RE = re.compile(r'can only afford\s+(\d+)')
+_TRANSIENT_PROVIDER_RE = re.compile(r'\(HTTP 5\d\d\)')
 
 
 def _chat_error_message(res):
@@ -5559,26 +5563,32 @@ def _chat_error_message(res):
 def _call_land_analysis_model(system_prompt, user_content, max_tokens):
     """Call the vision model, lowering the reserved cap when the provider cannot afford it.
 
-    Returns ``(response, used_cap, error_message)``.
+    Gateway failures (HTTP 5xx) are usually transient, so they are retried with the same cap
+    before being surfaced. Returns ``(response, used_cap, error_message)``.
     """
     cap = max(LAND_ANALYSIS_MIN_TOKENS, int(max_tokens))
     message = ''
     res = None
-    for _ in range(3):
+    for attempt in range(3):
         res = call_openrouter_chat(system_prompt, user_content, temperature=0.1,
                                    max_tokens=cap, model=LAND_ANALYSIS_MODEL)
         if _has_chat_choices(res):
             return res, cap, ''
         message = _chat_error_message(res)
         affordable = _AFFORDABLE_TOKENS_RE.search(message)
-        if not affordable:
-            break
-        # Leave a margin: the quoted allowance shrinks as the prompt itself consumes credit.
-        retry_cap = max(LAND_ANALYSIS_MIN_TOKENS, int(int(affordable.group(1)) * 0.85))
-        if retry_cap >= cap:
-            break
-        print(f'[LAND ANALYSIS] provider refused max_tokens={cap}; retrying with {retry_cap}')
-        cap = retry_cap
+        if affordable:
+            # Leave a margin: the quoted allowance shrinks as the prompt itself consumes credit.
+            retry_cap = max(LAND_ANALYSIS_MIN_TOKENS, int(int(affordable.group(1)) * 0.85))
+            if retry_cap >= cap:
+                break
+            print(f'[LAND ANALYSIS] provider refused max_tokens={cap}; retrying with {retry_cap}')
+            cap = retry_cap
+            continue
+        if _TRANSIENT_PROVIDER_RE.search(message) and attempt < 2:
+            print(f'[LAND ANALYSIS] transient provider failure; retrying: {message}')
+            time.sleep(2)
+            continue
+        break
     return res, cap, message
 
 
@@ -5592,8 +5602,16 @@ def _decode_data_uri(data_uri):
         return None
 
 
-def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pages=PDF_VISION_MAX_PAGES):
-    """Render PDF pages to image data URIs for vision models without OCR/text extraction."""
+def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pages=PDF_VISION_MAX_PAGES,
+                                 budget=PDF_VISION_MAX_TOTAL_BYTES):
+    """Render PDF pages to image data URIs for vision models without OCR/text extraction.
+
+    Raw 300 DPI PNG pages made multi-page deed books into a request so large that the
+    provider's proxy dropped it with a bare non-JSON 502. Each page is therefore capped to
+    ``PDF_VISION_MAX_EDGE`` pixels on its long side and encoded as JPEG, and when a document
+    still exceeds its byte budget the whole document is re-rendered down a ladder of smaller
+    edge caps and qualities until it fits.
+    """
     pdf_bytes = _decode_data_uri(file_data)
     if not pdf_bytes:
         raise ValueError(f'Unable to decode PDF: {filename}')
@@ -5604,27 +5622,45 @@ def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pa
 
     pages = []
     truncated = False
+    dpi_scale = max(1.0, float(dpi) / 72.0)
+    ladder = (
+        (PDF_VISION_MAX_EDGE, PDF_VISION_JPEG_QUALITY),
+        (int(PDF_VISION_MAX_EDGE * 0.75), 80),
+        (int(PDF_VISION_MAX_EDGE * 0.55), 72),
+    )
     document = fitz.open(stream=pdf_bytes, filetype='pdf')
     try:
         page_count = len(document)
         limit = min(page_count, max(1, int(max_pages)))
         truncated = page_count > limit
-        scale = max(1.0, float(dpi) / 72.0)
-        matrix = fitz.Matrix(scale, scale)
-        for page_index in range(limit):
-            pixmap = document[page_index].get_pixmap(matrix=matrix, alpha=False)
-            encoded = base64.b64encode(pixmap.tobytes('png')).decode('ascii')
-            pages.append({
-                'page_number': page_index + 1,
-                'image_data': f'data:image/png;base64,{encoded}'
-            })
+        for edge_cap, quality in ladder:
+            pages = []
+            total = 0
+            for page_index in range(limit):
+                rect = document[page_index].rect
+                scale = min(dpi_scale, float(edge_cap) / max(rect.width, rect.height, 1.0))
+                pixmap = document[page_index].get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                try:
+                    blob = pixmap.tobytes('jpeg', jpg_quality=quality)
+                    mime = 'image/jpeg'
+                except Exception:
+                    blob = pixmap.tobytes('png')
+                    mime = 'image/png'
+                encoded = base64.b64encode(blob).decode('ascii')
+                total += len(encoded)
+                pages.append({
+                    'page_number': page_index + 1,
+                    'image_data': f'data:{mime};base64,{encoded}'
+                })
+            if total <= max(1, int(budget)):
+                break
     finally:
         document.close()
 
     return pages, page_count, truncated
 
 
-def _prepare_document_vision_parts(document):
+def _prepare_document_vision_parts(document, budget=PDF_VISION_MAX_TOTAL_BYTES):
     """Prepare image parts for a document while preserving source/page metadata."""
     file_data = document.get('fileData') or ''
     filename = document.get('filename') or 'document'
@@ -5640,7 +5676,7 @@ def _prepare_document_vision_parts(document):
             'image_url': {'url': file_data, 'detail': 'high'}
         }], [], 1, 'image_direct'
 
-    pages, page_count, truncated = _render_pdf_pages_for_vision(file_data, filename)
+    pages, page_count, truncated = _render_pdf_pages_for_vision(file_data, filename, budget=budget)
     warnings = []
     if truncated:
         warnings.append(f'{filename}: تم تحليل أول {len(pages)} صفحة من أصل {page_count}')
@@ -6017,9 +6053,11 @@ def api_extract_croquis():
         if OPENROUTER_KEY:
             vision_parts = []
             document_descriptions = []
+            per_document_budget = PDF_VISION_MAX_TOTAL_BYTES // max(1, len(documents))
             for doc in documents:
                 try:
-                    parts, warnings, page_count, mode = _prepare_document_vision_parts(doc)
+                    parts, warnings, page_count, mode = _prepare_document_vision_parts(
+                        doc, budget=per_document_budget)
                     vision_parts.extend(parts)
                     vision_warnings.extend(warnings)
                     document_processing.append({
