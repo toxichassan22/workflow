@@ -668,7 +668,8 @@ FIELD_SECTIONS = [
 
 DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}
 
-REMOVED_PREBUILT_FIELDS = {'land_image_file', 'regulation_reference_file', 'croquis_file', 'building_permit_file', 'north_direction'}
+REMOVED_PREBUILT_FIELDS = {'land_image_file', 'regulation_reference_file', 'croquis_file',
+                           'building_permit_file', 'north_direction', 'croquis_expiry_date'}
 
 PREBUILT_FIELDS = [
     {'key': 'project_name', 'label': 'اسم المشروع', 'type': 'text', 'required': True, 'section_key': 'basic', 'ai_hint': 'اسم المشروع الرئيسي', 'sort_order': 1},
@@ -695,8 +696,6 @@ PREBUILT_FIELDS = [
     {'key': 'building_ratio_setbacks', 'label': 'نسبة البناء والتغطية والارتدادات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'نسبة التغطية المسموحة والارتدادات النظامية من لائحة الأمانة', 'sort_order': 22},
     {'key': 'max_floors_height', 'label': 'الارتفاع أو عدد الأدوار المسموح', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'عدد الأدوار المسموح بها أو الحد الأقصى للارتفاع بالمتر', 'sort_order': 23},
     {'key': 'allowed_uses_restrictions', 'label': 'الاستخدامات المسموحة والقيود التنظيمية', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'الأنشطة والاستخدامات المسموحة والاشتراطات الخاصة', 'sort_order': 24},
-    # Text, not date: <input type="date"> silently discards Hijri values like 1446/03/12.
-    {'key': 'croquis_expiry_date', 'label': 'تاريخ إصدار وانتهاء صلاحية الكروكي (هجري أو ميلادي)', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'تاريخ الصلاحية كما هو مكتوب في المستند، هجري أو ميلادي', 'sort_order': 25},
     {'key': 'land_photos', 'label': 'صور الأرض (حتى 4 صور — اختياري)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'صور فوتوغرافية للأرض من العميل مع وصف لكل صورة (لا يحللها AI)', 'sort_order': 26},
     {'key': 'land_and_building_summary', 'label': 'ملخص بيانات الأرض والاشتراطات', 'type': 'textarea', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ملخص واسترسال تحليلي شامل لبيانات الأرض واشتراطات البناء التنظيمية والفرص والأنشطة المسموحة', 'sort_order': 27},
     {'key': 'location_address', 'label': 'رابط موقع المشروع في Google Maps', 'type': 'text', 'section_key': 'location', 'ai_hint': 'رابط Google Maps مباشر لموقع المشروع', 'sort_order': 30},

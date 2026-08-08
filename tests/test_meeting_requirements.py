@@ -503,6 +503,30 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_croquis_expiry_date_field_is_retired(self):
+        """Retiring a prebuilt field means REMOVED_PREBUILT_FIELDS, so existing tenants lose it too,
+        and the model must stop being asked for a value nothing will display."""
+        self.assertIn('croquis_expiry_date', db.REMOVED_PREBUILT_FIELDS)
+        self.assertNotIn('croquis_expiry_date', {field['key'] for field in db.PREBUILT_FIELDS})
+
+        # Gone from the tenant's active field list, not just from the defaults.
+        client = self.app.test_client()
+        fields = client.get('/api/fields', headers=self._headers(self.token_a)).get_json()
+        keys = {item['fieldKey'] for item in (fields.get('fields') or [])}
+        self.assertNotIn('croquis_expiry_date', keys)
+
+        # The extraction prompt, the alias map, the summary row and the parcel mapping are clean,
+        # so no tokens are spent on it and no orphan value is stored.
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertNotIn('croquis_expiry_date', app_source)
+        self.assertNotIn('expiry_date', app_source)
+        self.assertNotIn("'croquis_validity_dates'", app_source)
+
+        # The validity badge and its date parsing went with the field.
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertNotIn('croquis_expiry_date', index_source)
+        self.assertNotIn('croquisExpiryBadge', index_source)
+
     def test_land_documents_upload_on_selection_not_on_save(self):
         """The upload used to run inside collectTenantFormData, which only executed from the
         autosave. Once autosave was removed the files sat on "saving" forever and the analyse
@@ -1089,15 +1113,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(find('صادر بتاريخ 2025/09/30'), '2025/09/30')
         self.assertEqual(find('لا يوجد تاريخ هنا'), '')
 
-        # The croquis validity field must be text so Hijri values survive.
-        expiry = next(f for f in db.PREBUILT_FIELDS if f['key'] == 'croquis_expiry_date')
-        self.assertEqual(expiry['type'], 'text')
+        # deed_date must stay text so Hijri values survive; <input type="date"> would drop them.
+        # (croquis_expiry_date was retired, and the client-side date parser went with its badge.)
         self.assertEqual(next(f for f in db.PREBUILT_FIELDS if f['key'] == 'deed_date')['type'], 'text')
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn('function parseDocumentDate(value)', index_source)
-        self.assertIn("result.calendar = 'hijri'", index_source)
         self.assertNotIn('const expDate = new Date(input.value);', index_source)
+        self.assertNotIn('parseDocumentDate', index_source)
 
     def test_plan_number_falls_back_to_the_document_text(self):
         module = self.application_module

@@ -7639,47 +7639,6 @@
             checkOther();
           }
 
-          if (f.fieldKey === 'croquis_expiry_date') {
-            const statusBadge = document.createElement('div');
-            statusBadge.id = 'croquisExpiryBadge';
-            statusBadge.style.cssText = 'display:none; margin-top:6px; font-weight:bold; font-size:0.85rem; padding:4px 8px; border-radius:4px; text-align:right;';
-            function updateExpiryStatus() {
-              const raw = (input.value || '').trim();
-              if (!raw) { statusBadge.style.display = 'none'; return; }
-              statusBadge.style.display = 'block';
-              const parsed = parseDocumentDate(raw);
-              if (parsed.calendar === 'hijri') {
-                // Hijri cannot be compared against the system clock without a converter,
-                // so state the calendar instead of guessing a validity verdict.
-                statusBadge.style.background = '#eef4fd';
-                statusBadge.style.color = '#1f4e8a';
-                statusBadge.textContent = 'تاريخ هجري (' + parsed.normalized + ') — تحقق من الصلاحية يدويًا';
-                return;
-              }
-              if (!parsed.date) {
-                statusBadge.style.background = '#fff4e5';
-                statusBadge.style.color = '#7a4a00';
-                statusBadge.textContent = 'صيغة التاريخ غير مفهومة — اكتبها مثل 1446/03/12 أو 2025-09-30';
-                return;
-              }
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              if (parsed.date < today) {
-                statusBadge.style.background = '#ffebee';
-                statusBadge.style.color = '#c62828';
-                statusBadge.textContent = 'تنبيه: الكروكي منتهي الصلاحية';
-              } else {
-                statusBadge.style.background = '#e8f5e9';
-                statusBadge.style.color = '#2e7d32';
-                statusBadge.textContent = 'الكروكي ساري الصلاحية';
-              }
-            }
-            input.addEventListener('change', updateExpiryStatus);
-            input.addEventListener('input', updateExpiryStatus);
-            div.appendChild(statusBadge);
-            setTimeout(updateExpiryStatus, 150);
-          }
-
           // Add geocode button and auto-geocode on blur
           if (f.fieldKey === 'location_address' && addressInput) {
             const btn = document.createElement('button');
@@ -9695,7 +9654,6 @@
         building_ratio_setbacks: buildingRulesText,
         max_floors_height: parcel.max_floors_height,
         allowed_uses_restrictions: parcel.allowed_uses_restrictions,
-        croquis_expiry_date: parcel.expiry_date,
         // The whole-document summary is the detailed narrative; parcel.summary is only a
         // per-parcel note and must never replace it.
         land_and_building_summary: data.land_and_building_summary || parcel.summary,
@@ -9782,37 +9740,6 @@
       } finally {
         hideLoader('اكتمل تحليل ملفات الأرض');
       }
-    }
-
-    // Saudi land documents carry Hijri dates far more often than Gregorian ones, and a Hijri
-    // year (~1446) cannot be fed to Date(). Detect the calendar from the year instead of
-    // assuming, so the UI can show the value rather than silently dropping it.
-    function parseDocumentDate(value) {
-      const raw = String(value || '').trim();
-      const result = { raw, normalized: raw, calendar: 'unknown', date: null };
-      if (!raw) return result;
-      const parts = raw.match(/(\d{1,4})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{1,4})/);
-      if (!parts) return result;
-      let [, a, b, c] = parts;
-      // Either the first or the last group is the year, whichever has 4 digits.
-      let year, month, day;
-      if (a.length === 4) { year = +a; month = +b; day = +c; }
-      else if (c.length === 4) { year = +c; month = +b; day = +a; }
-      else { year = +c; month = +b; day = +a; }
-      if (!year || !month || month > 12 || !day || day > 31) return result;
-      const pad = number => String(number).padStart(2, '0');
-      result.normalized = year + '/' + pad(month) + '/' + pad(day);
-      if (year >= 1300 && year <= 1500) {
-        result.calendar = 'hijri';
-        return result;
-      }
-      result.calendar = 'gregorian';
-      const parsed = new Date(year, month - 1, day);
-      if (!Number.isNaN(parsed.getTime())) {
-        parsed.setHours(0, 0, 0, 0);
-        result.date = parsed;
-      }
-      return result;
     }
 
     // The analysis payload is persisted but never displayed: the directions table falls back to

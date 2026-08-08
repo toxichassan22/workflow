@@ -5333,7 +5333,6 @@ def normalize_croquis_fields(resp_json, text_content=""):
         'surrounding_streets': ['surrounding_streets_widths'],
         'building_ratio_setbacks': ['building_coverage_setbacks'],
         'max_floors_height': ['height_or_floors_allowed'],
-        'croquis_expiry_date': ['croquis_validity_dates']
     }
     # 8. Apply aliases and build a source-faithful summary. Missing values stay
     # explicitly unknown; never invent a city, regulation, area, or validity.
@@ -5359,7 +5358,6 @@ def normalize_croquis_fields(resp_json, text_content=""):
             ('نسب البناء والارتدادات', resp_json.get('building_ratio_setbacks')),
             ('الارتفاع/الأدوار', resp_json.get('max_floors_height')),
             ('الاستخدامات والقيود', resp_json.get('allowed_uses_restrictions')),
-            ('صلاحية المستند', resp_json.get('croquis_expiry_date')),
         )
         available = [f'{label}: {value}' for label, value in labels if value not in (None, '', [], {})]
         summary_text = ' | '.join(available) if available else 'لم يتم استخراج بيانات مؤكدة؛ تحتاج الوثائق إلى مراجعة يدوية.'
@@ -5665,7 +5663,7 @@ def _prepare_document_vision_parts(document):
 PARCEL_PLACEHOLDER_KEYS = (
     'plot_number', 'plan_number', 'subdivision_number', 'deed_number', 'deed_date',
     'north_direction', 'setbacks', 'building_ratio', 'max_floors_height',
-    'allowed_uses_restrictions', 'expiry_date', 'summary',
+    'allowed_uses_restrictions', 'summary',
 )
 
 
@@ -5783,8 +5781,7 @@ def _normalize_land_document_result(resp_json, text_content=''):
             'building_ratio': legacy.get('building_ratio_setbacks', ''),
             'max_floors_height': legacy.get('max_floors_height', ''),
             'allowed_uses_restrictions': legacy.get('allowed_uses_restrictions', ''),
-            'expiry_date': legacy.get('croquis_expiry_date', ''),
-            'coordinates': {'lat': None, 'lng': None, 'source': '', 'confidence': ''},
+                'coordinates': {'lat': None, 'lng': None, 'source': '', 'confidence': ''},
             'survey_coordinates': survey_coordinates,
             'confidence': {},
             'sources': [],
@@ -5878,7 +5875,6 @@ def _normalize_land_document_result(resp_json, text_content=''):
         'building_ratio_setbacks': first.get('building_ratio') or first.get('setbacks', ''),
         'max_floors_height': first.get('max_floors_height', ''),
         'allowed_uses_restrictions': first.get('allowed_uses_restrictions', ''),
-        'croquis_expiry_date': first.get('expiry_date', ''),
     }
     for key, value in legacy_map.items():
         if value not in (None, ''):
@@ -5960,7 +5956,7 @@ def api_extract_croquis():
             '    },\n'
             '    "north_direction": "", "setbacks": "", "building_ratio": "", "coverage_ratio": "",\n'
             '    "floor_area_ratio": "", "table_floors": "", "max_floors_height": "",\n'
-            '    "allowed_uses_restrictions": "", "expiry_date": "", "zoning_code": "",\n'
+            '    "allowed_uses_restrictions": "", "zoning_code": "",\n'
             '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
             '    "survey_coordinates": [{"point": "", "eastings": "", "northings": "", "source": "regulation_table"}],\n'
             '    "confidence": {}, "sources": [], "summary": ""\n'
@@ -5976,7 +5972,7 @@ def api_extract_croquis():
             "- إذا كان المستند يذكر رقمًا واحدًا فقط ولم يوضح نوعه، اتركه في الحقل المؤكد فقط وسجّل الغموض في conflicts.\n"
             "قواعد إلزامية للصك:\n"
             "- deed_number: رقم الصك رقميًا فقط.\n"
-            "- deed_date: تاريخ إصدار الصك كما هو مكتوب (هجري أو ميلادي) بصيغة YYYY/MM/DD، وبيّن نوع التقويم في summary. لا تخلطه مع تاريخ الكروكي أو تاريخ الرخصة (expiry_date).\n"
+            "- deed_date: تاريخ إصدار الصك كما هو مكتوب (هجري أو ميلادي) بصيغة YYYY/MM/DD، وبيّن نوع التقويم في summary. لا تخلطه مع تاريخ الكروكي أو تاريخ الرخصة.\n"
             "قواعد إلزامية للواجهات — الواجهة هي الحد المطل على شارع فقط:\n"
             "- لكل قطعة أربعة حدود دائمًا، لكن الواجهات هي الحدود المطلة على شوارع وحدها. "
             "الحد المجاور لقطعة أو جار ليس واجهة.\n"
