@@ -28,6 +28,13 @@ the very next line then stripped. Do not wire it back in.
 - Frontend: one single-page app, `index.html` (~13.7k lines). All JS lives in **one inline `<script>` block** starting at line ~4195, so every function shares one scope.
 - PDF handling: PyMuPDF (`fitz`). AI: OpenRouter / Z.ai (GLM) — see `.env`.
 
+## Schema gotcha
+
+`_create_tables()` runs one big SQL script and the fallback runner splits statements on `;`.
+**Never put a semicolon inside a `--` comment in that script** — the text after it is parsed as SQL,
+the script aborts part-way, and every table declared below it is silently missing. The failure
+surfaces far away as `no such table: <something unrelated>`.
+
 ## Verification
 
 There is no pytest; the suites use `unittest` and must be run as **modules from the repo root** (`tests/` is not an importable package, so `unittest discover` fails).
@@ -102,10 +109,12 @@ assertion deliberately, not reflexively.
 
 Two layers, deliberately:
 
-- **Company library** — `tenant_team_entities`, managed at `/app/settings/team`, shared by every
-  project file. `developer` and `engineering_office` are singletons (`TEAM_SINGLETON_CATEGORIES`);
-  the API returns 409 on a second one. Any other category is open-ended and must supply its own
-  `category_label`.
+- **Company library** — `tenant_team_categories` + `tenant_team_entities`, managed at
+  `/app/settings/team`, shared by every project file. **No category is defined in code.** The
+  company names each category and sets `allow_multiple` on it, so "one entity only" is a property of
+  the category, not a hard-coded rule. Adding a second entity to a single-entity category returns
+  409, and narrowing a category that already holds several also returns 409 rather than orphaning
+  them. Deleting a category detaches its entities (`category_id = NULL`) instead of deleting them.
 - **Per-file choices** — one `team_selection` key in `draft_data`:
   `{excluded: [libraryId], roles: {libraryId: text}, local: [{localId, ...six fields}]}`.
   Excluding an entity or overriding its role affects only that file; `local` entities exist only in

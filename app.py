@@ -4825,16 +4825,16 @@ def _team_entity_payload(data):
     name = str(data.get('name') or '').strip()
     if not name:
         return None, 'اسم الجهة مطلوب'
-    category = str(data.get('category') or '').strip() or 'other'
-    label = str(data.get('categoryLabel') or '').strip()
-    if category not in db.TEAM_CATEGORY_LABELS and not label:
-        return None, 'اسم القسم مطلوب للجهات الأخرى'
+    category_id = str(data.get('categoryId') or '').strip()
+    if not category_id:
+        return None, 'اختر القسم الذي تنتمي إليه الجهة'
+    if not db.get_team_category(g.tenant_id, category_id):
+        return None, 'القسم غير موجود'
     logo_file_id = str(data.get('logoFileId') or '').strip()
     if logo_file_id and not db.get_project_file(g.tenant_id, logo_file_id):
         return None, 'شعار الجهة غير موجود'
     return {
-        'category': category,
-        'category_label': label or db.TEAM_CATEGORY_LABELS.get(category, ''),
+        'category_id': category_id,
         'name': name,
         'logo_file_id': logo_file_id,
         'brief': str(data.get('brief') or '').strip(),
@@ -4844,6 +4844,66 @@ def _team_entity_payload(data):
     }, None
 
 
+@app.route('/api/team-categories', methods=['GET'])
+@require_auth
+def api_list_team_categories():
+    return jsonify({'success': True, 'categories': db.get_team_categories(g.tenant_id)})
+
+
+@app.route('/api/team-categories', methods=['POST'])
+@require_permission('company_settings')
+def api_create_team_category():
+    """Categories are entirely company-defined; nothing is preset in code."""
+    data = request.json or {}
+    label = str(data.get('label') or '').strip()
+    if not label:
+        return jsonify({'success': False, 'error': 'اسم القسم مطلوب'}), 400
+    if any(item['label'] == label for item in db.get_team_categories(g.tenant_id)):
+        return jsonify({'success': False, 'error': 'قسم بهذا الاسم موجود مسبقًا'}), 409
+    category_id = db.create_team_category(
+        g.tenant_id, label,
+        allow_multiple=data.get('allowMultiple', True) is not False,
+        sort_order=int(data.get('sortOrder') or 100),
+    )
+    return jsonify({'success': True, 'category': db.get_team_category(g.tenant_id, category_id)}), 201
+
+
+@app.route('/api/team-categories/<category_id>', methods=['PUT'])
+@require_permission('company_settings')
+def api_update_team_category(category_id):
+    if not db.get_team_category(g.tenant_id, category_id):
+        return jsonify({'success': False, 'error': 'القسم غير موجود'}), 404
+    data = request.json or {}
+    updates = {}
+    if 'label' in data:
+        label = str(data.get('label') or '').strip()
+        if not label:
+            return jsonify({'success': False, 'error': 'اسم القسم مطلوب'}), 400
+        updates['label'] = label
+    if 'allowMultiple' in data:
+        allow = data.get('allowMultiple') is not False
+        # Narrowing a populated category to one entity would silently orphan the rest.
+        if not allow:
+            entities = [item for item in db.get_team_entities(g.tenant_id)
+                        if item['categoryId'] == category_id]
+            if len(entities) > 1:
+                return jsonify({'success': False,
+                                'error': f'القسم يحتوي {len(entities)} جهات — احذف الزائد قبل تحديده بجهة واحدة'}), 409
+        updates['allow_multiple'] = allow
+    if 'sortOrder' in data:
+        updates['sort_order'] = int(data.get('sortOrder') or 100)
+    db.update_team_category(g.tenant_id, category_id, **updates)
+    return jsonify({'success': True, 'category': db.get_team_category(g.tenant_id, category_id)})
+
+
+@app.route('/api/team-categories/<category_id>', methods=['DELETE'])
+@require_permission('company_settings')
+def api_delete_team_category(category_id):
+    if not db.delete_team_category(g.tenant_id, category_id):
+        return jsonify({'success': False, 'error': 'القسم غير موجود'}), 404
+    return jsonify({'success': True})
+
+
 @app.route('/api/team-entities', methods=['GET'])
 @require_auth
 def api_list_team_entities():
@@ -4851,8 +4911,7 @@ def api_list_team_entities():
     return jsonify({
         'success': True,
         'entities': db.get_team_entities(g.tenant_id),
-        'singletonCategories': list(db.TEAM_SINGLETON_CATEGORIES),
-        'categoryLabels': db.TEAM_CATEGORY_LABELS,
+        'categories': db.get_team_categories(g.tenant_id),
     })
 
 
@@ -4862,11 +4921,12 @@ def api_create_team_entity():
     fields, error = _team_entity_payload(request.json or {})
     if error:
         return jsonify({'success': False, 'error': error}), 400
-    if db.team_category_is_taken(g.tenant_id, fields['category']):
-        label = db.TEAM_CATEGORY_LABELS.get(fields['category'], fields['category'])
+    if db.team_category_is_full(g.tenant_id, fields['category_id']):
+        label = (db.get_team_category(g.tenant_id, fields['category_id']) or {}).get('label', 'القسم')
         return jsonify({'success': False,
-                        'error': f'{label} مُسجَّل مسبقًا — عدّل الجهة الحالية بدل إضافة أخرى'}), 409
-    entity_id = db.create_team_entity(g.tenant_id, fields.pop('category'), fields.pop('name'), **fields)
+                        'error': f'«{label}» محدَّد بجهة واحدة — عدّل الجهة الحالية أو اسمح بأكثر من جهة'}), 409
+    entity_id = db.create_team_entity(
+        g.tenant_id, fields.pop('category_id'), fields.pop('name'), **fields)
     return jsonify({'success': True, 'entity': db.get_team_entity(g.tenant_id, entity_id)}), 201
 
 
@@ -4878,9 +4938,9 @@ def api_update_team_entity(entity_id):
     fields, error = _team_entity_payload(request.json or {})
     if error:
         return jsonify({'success': False, 'error': error}), 400
-    if db.team_category_is_taken(g.tenant_id, fields['category'], exclude_id=entity_id):
-        label = db.TEAM_CATEGORY_LABELS.get(fields['category'], fields['category'])
-        return jsonify({'success': False, 'error': f'{label} مُسجَّل مسبقًا لجهة أخرى'}), 409
+    if db.team_category_is_full(g.tenant_id, fields['category_id'], exclude_id=entity_id):
+        label = (db.get_team_category(g.tenant_id, fields['category_id']) or {}).get('label', 'القسم')
+        return jsonify({'success': False, 'error': f'«{label}» محدَّد بجهة واحدة مشغولة بجهة أخرى'}), 409
     db.update_team_entity(g.tenant_id, entity_id, **fields)
     return jsonify({'success': True, 'entity': db.get_team_entity(g.tenant_id, entity_id)})
 
