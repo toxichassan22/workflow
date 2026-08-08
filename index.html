@@ -4807,6 +4807,11 @@
     }
 
     function handleApiResponse(res) {
+      // chunkedPost can bail out with a plain {error} instead of a Response. Calling .json() on it
+      // threw, and the generic network-error catch replaced the real reason with "Network error".
+      if (!res || typeof res.json !== 'function') {
+        return Promise.resolve(res && typeof res === 'object' ? res : { error: 'فشل الطلب' });
+      }
       return res.json().catch(() => ({})).then(data => {
         data = data && typeof data === 'object' ? data : {};
         if (!res.ok && !data.error) data.error = 'فشل الطلب (HTTP ' + res.status + ')';
@@ -4825,24 +4830,52 @@
     const CHUNK_WIRE_LIMIT = 24 * 1024;
     const CHUNK_PART_BYTES = 12 * 1024;
 
-    async function chunkedPost(method, path, wire, isGzip, headers, signal) {
+    // The server stores each chunk as its own {idx}.part file, so arrival order does not matter.
+    // Sending them one at a time meant a few hundred sequential round trips for a draft carrying
+    // slides and images, which is most of why saving felt like nothing was happening.
+    const CHUNK_CONCURRENCY = 6;
+
+    async function chunkedPost(method, path, wire, isGzip, headers, signal, onProgress) {
       const buf = typeof wire === 'string' ? new TextEncoder().encode(wire) : new Uint8Array(wire);
       const id = crypto.randomUUID();
       const total = Math.ceil(buf.length / CHUNK_PART_BYTES);
       const chunkHeaders = Object.assign({}, headers);
       delete chunkHeaders['Content-Encoding'];
-      for (let i = 0; i < total; i++) {
-        const part = buf.subarray(i * CHUNK_PART_BYTES, (i + 1) * CHUNK_PART_BYTES);
+      if (total > 1024) {
+        // The server refuses more than 1024 parts; say so rather than failing on chunk 1025.
+        return { error: 'حجم البيانات أكبر من الحد المسموح للحفظ (' + (buf.length / 1048576).toFixed(1) + ' م.ب)' };
+      }
+
+      let sent = 0;
+      let failure = null;
+      const sendChunk = async index => {
+        const part = buf.subarray(index * CHUNK_PART_BYTES, (index + 1) * CHUNK_PART_BYTES);
         let bin = '';
         for (let j = 0; j < part.length; j++) bin += String.fromCharCode(part[j]);
         const res = await fetch('/api/body-chunk', {
           method: 'POST',
           headers: chunkHeaders,
-          body: JSON.stringify({ id, idx: i, total, data: btoa(bin) }),
+          body: JSON.stringify({ id, idx: index, total, data: btoa(bin) }),
           signal,
         });
-        if (!res.ok) return { error: 'Chunk upload failed (' + res.status + ')' };
-      }
+        if (!res.ok) throw new Error('Chunk upload failed (' + res.status + ')');
+        sent += 1;
+        if (onProgress) onProgress(sent, total);
+      };
+
+      let next = 0;
+      const workers = Array.from({ length: Math.min(CHUNK_CONCURRENCY, total) }, async () => {
+        while (next < total && !failure) {
+          const index = next++;
+          try {
+            await sendChunk(index);
+          } catch (error) {
+            failure = error;
+          }
+        }
+      });
+      await Promise.all(workers);
+      if (failure) return { error: failure.message || 'Chunk upload failed' };
       console.log('[API] chunked body: ' + (buf.length / 1024).toFixed(1) + 'KB in ' + total + ' chunks');
       return fetch(path, {
         method,
@@ -4863,7 +4896,8 @@
         const isGzip = headers['Content-Encoding'] === 'gzip';
         const wireSize = typeof wire === 'string' ? wire.length : wire.byteLength;
         if (wireSize > CHUNK_WIRE_LIMIT) {
-          return chunkedPost(method, path, wire, isGzip, headers, requestOptions.signal)
+          return chunkedPost(method, path, wire, isGzip, headers, requestOptions.signal,
+                             requestOptions.onProgress)
             .then(handleApiResponse)
             .catch(e => ({ error: 'Network error: ' + e.message }));
         }
@@ -9423,9 +9457,25 @@
             status: tenantSlidesData.length ? 'draft' : 'empty'
           }
         };
-        const resp = await api('POST', '/api/project-draft', { draftData: data, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' });
-        if (resp.draftId) tenantProjectData.draftId = resp.draftId;
+        // Saving can now be megabytes (slides + images), so it uses parallel chunked uploads.
+        // Show progress in the badge so a large save does not look like nothing is happening.
         const badge = document.getElementById('draftSyncBadge');
+        if (badge) {
+          badge.style.background = '#eef5fb';
+          badge.style.color = '#123B6D';
+          badge.innerHTML = 'جاري الحفظ...';
+        }
+        const onProgress = badge ? (sent, total) => {
+          const pct = Math.round(100 * sent / total);
+          badge.style.background = '#eef5fb';
+          badge.style.color = '#123B6D';
+          badge.innerHTML = 'جاري الحفظ... ' + pct + '%';
+        } : null;
+
+        const resp = await api('POST', '/api/project-draft',
+          { draftData: data, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' },
+          false, { onProgress });
+        if (resp.draftId) tenantProjectData.draftId = resp.draftId;
         if (resp.success) {
           tenantDraftDirty = false;
           if (badge) {
@@ -9445,12 +9495,16 @@
           if (!silent) toast(resp.error || 'فشل حفظ المسودة');
         }
       } catch (e) {
+        // This used to paint a badge and stop. collectTenantFormData can throw on a failed file
+        // upload, so a save could fail with no message anywhere and no entry in the console.
+        console.error('[DRAFT SAVE]', e);
         const badge = document.getElementById('draftSyncBadge');
         if (badge) {
           badge.style.background = '#fee2e2';
           badge.style.color = '#991b1b';
-          badge.innerHTML = 'خطأ في الاتصال — التغييرات غير محفوظة';
+          badge.innerHTML = 'لم يتم الحفظ — التغييرات غير محفوظة';
         }
+        if (!silent) toast('تعذر حفظ المسودة: ' + (e?.message || e));
       }
     }
 
