@@ -7256,9 +7256,11 @@
         (locationSection || form).appendChild(previewDiv);
       }
 
-      // Components are part of the financial study; there is no separate section for them.
-      addFinancialCalculations(form);
+      // Append order defines the sidebar order. The timeline comes before the financial study
+      // because it feeds it (development duration and the stage list), so it has to be filled
+      // first. Components are part of the financial study; there is no separate section for them.
       addTimelineTable(form);
+      addFinancialCalculations(form);
       const projectSections = Array.from(form.querySelectorAll('.tenant-form-section[data-section]'));
       populateProjectSidebar(projectSections);
       const initialStatuses = {};

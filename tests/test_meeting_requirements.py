@@ -596,6 +596,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         # The stage table lost its actions column, so the report must stop dropping the last one.
         self.assertIn("reportTableSnapshot('scheduleTable',false)", index_source)
 
+        # Sidebar order comes from append order: the timeline feeds the financial study, so it
+        # must be filled first and therefore listed first.
+        timeline_at = index_source.index('addTimelineTable(form);')
+        financial_at = index_source.index('addFinancialCalculations(form);')
+        self.assertLess(timeline_at, financial_at,
+                        'the timeline section must be appended before the financial study')
+
     def test_timeline_starts_blank_with_a_quarter_picker_and_row_delete(self):
         """Phases are client data, so the table must not seed invented stages."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
