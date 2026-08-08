@@ -2257,9 +2257,16 @@
       font-size: 18px;
     }
 
+    /* A section is a two-column grid for .tenant-field cells. Anything that is not a field —
+       tables, headings, warning panels, action buttons — must span both columns, otherwise it
+       sits in one cell and leaves an unexplained empty column beside it. */
     .project-form-content .tenant-form-section>.fin-table-wrap,
     .project-form-content .tenant-form-section>.tenant-grid,
     .project-form-content .tenant-form-section>h4,
+    .project-form-content .tenant-form-section>p,
+    .project-form-content .tenant-form-section>button,
+    .project-form-content .tenant-form-section>.validation-panel,
+    .project-form-content .tenant-form-section>.calculation-note,
     .project-form-content .tenant-form-section>div[id^="financialIndicators"] {
       grid-column: 1 / -1;
     }
@@ -6089,15 +6096,19 @@
       div.id = 'section-team';
       div.dataset.section = 'section-team';
       div.appendChild(createProjectSectionHeader('section-team', 'فريق العمل'));
+      // An active section is a two-column grid meant for form fields, so plain children land in
+      // half-width cells and leave a dead column beside them. One full-width wrapper keeps the
+      // internal layout here instead of leaking into the grid.
       const body = document.createElement('div');
+      body.style.gridColumn = '1 / -1';
       body.innerHTML = `
         <div id="projectTeamLibrary"></div>
-        <h4 style="margin:18px 0 8px;color:var(--p);font-size:14px">جهات خاصة بهذا المشروع</h4>
+        <h4 id="projectTeamLocalTitle" style="margin:18px 0 8px;color:var(--p);font-size:14px">جهات خاصة بهذا المشروع</h4>
         <div id="projectTeamLocal"></div>
         <button type="button" class="btn ghost small" style="margin-top:10px" onclick="addLocalTeamEntity()">+ إضافة جهة لهذا المشروع</button>
         <input type="hidden" data-key="team_selection" data-type="text" id="projectTeamData">
       `;
-      while (body.firstChild) div.appendChild(body.firstChild);
+      div.appendChild(body);
       if (before) form.insertBefore(div, before);
       else form.appendChild(div);
     }
@@ -6170,6 +6181,9 @@
               'onclick="removeLocalTeamEntity(\'' + safeId + '\')">حذف من هذا المشروع</button></div>';
           }).join('') + '</div>'
         : '';
+      // Without any project-only entity the heading would sit above nothing but the add button.
+      const localTitle = document.getElementById('projectTeamLocalTitle');
+      if (localTitle) localTitle.hidden = !state.local.length;
 
       document.querySelectorAll('#section-team img[data-team-logo]').forEach(image => {
         attachProjectFileThumbnail(image, image.dataset.teamLogo);
