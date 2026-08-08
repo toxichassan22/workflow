@@ -91,7 +91,8 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'projectData': {'location_lat': 24.0, 'location_lng': 46.0}
             })
 
-        self.assertEqual(response.status_code, 502)
+        # 503, not 502: the edge fabricates its own 502s, so the app must stay out of that status.
+        self.assertEqual(response.status_code, 503)
         self.assertEqual(response.get_json()['error_code'], 'NEARBY_LANDMARKS_UNAVAILABLE')
         self.assertIn('Places API (New) is not enabled', response.get_json()['error'])
 
@@ -757,6 +758,24 @@ class MeetingRequirementsTests(unittest.TestCase):
         for gone in ('teamCategoryLabel', 'teamEntityCategory', 'tenantTeamCategories',
                      'submitTeamCategory', 'teamEntityBlocked', 'team-categories'):
             self.assertNotIn(gone, index_source, f'{gone} should have been removed')
+
+    def test_app_never_answers_502(self):
+        """The hosting edge fabricates 502s of its own for large bodies, so an app that also answers
+        502 makes "the proxy broke" and "the AI failed" impossible to tell apart."""
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertNotIn('), 502', app_source,
+                         '502 must be left to the proxy; use 503 for an upstream dependency')
+        # The handled cases keep saying what happened, just under their own status.
+        self.assertIn("'failureReason': 'truncated',", app_source)
+        self.assertIn("'failureReason': 'invalid_json',", app_source)
+        self.assertIn('), 503', app_source)
+
+        # The land-analysis reason must survive on screen, not only in a toast.
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function showLandAnalysisFailure(reason, providerError)', index_source)
+        self.assertIn('showLandAnalysisFailure(reason, res.providerError);', index_source)
+        self.assertIn('clearLandAnalysisFailure();', index_source)
+        self.assertIn('لم يتم تحديث أي حقل — التفصيل أسفل خانة الملفات', index_source)
 
     def test_shell_is_compressed_and_revalidates_instead_of_redownloading(self):
         """The SPA shell is ~740KB and was sent with no-store and no compression, so every load

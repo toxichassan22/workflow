@@ -2074,7 +2074,7 @@ def api_designer_chat():
 
         validation = _validate_workspace_data({'slidesData': slides})
         if not validation['valid']:
-            return jsonify({'success': False, 'error': 'تم رفض التعديل لأن العرض يحتوي على شرائح غير صالحة', 'validation': validation}), 502
+            return jsonify({'success': False, 'error': 'تم رفض التعديل لأن العرض يحتوي على شرائح غير صالحة', 'validation': validation}), 422
         if presentation_id:
             db.update_presentation(presentation_id, slides_data=slides, slide_count=len(slides), status='edited')
         response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
@@ -2083,7 +2083,7 @@ def api_designer_chat():
         return jsonify({'success': True, 'data': {'action': 'workspace_update', 'response': response_text, 'slidesData': slides, 'creativeImages': creative_images, 'actions': executed, 'validation': validation}})
     except Exception as exc:
         print(f'[DESIGNER-CHAT ERROR] {exc}')
-        return jsonify({'success': False, 'error': str(exc)}), 502
+        return jsonify({'success': False, 'error': str(exc)}), 500
 
 
 @app.route('/api/files', methods=['GET'])
@@ -3050,7 +3050,7 @@ def api_preview_map_data():
             'lat': lat,
             'lng': lng,
             'landmarks': [],
-        }), 502
+        }), 503
 
     return jsonify({
         'success': True,
@@ -3797,7 +3797,7 @@ def api_generate_slide_single():
             'error': f'تعذر توليد الشريحة {slide_index + 1}: {title}',
             'slideIndex': slide_index,
             'totalSlides': total,
-        }), 502
+        }), 503
 
     html = finalize_slide_html(
         html,
@@ -6056,7 +6056,7 @@ def api_extract_croquis():
                           'أو ارفع LAND_ANALYSIS_MAX_TOKENS إن تكرر ذلك.'),
                 'failureReason': 'truncated',
                 'documentProcessing': document_processing
-            }), 502
+            }), 503
         if not raw_resp.strip():
             # Report what the provider actually said. "Check your API keys" was misleading when the
             # real cause was an insufficient credit balance for the reserved max_tokens.
@@ -6075,7 +6075,7 @@ def api_extract_croquis():
                 'failureReason': 'insufficient_credit' if insufficient_credit else 'empty_response',
                 'providerError': model_error,
                 'documentProcessing': document_processing
-            }), 502
+            }), 503
         parsed_response = parse_json_object(raw_resp)
         if not parsed_response:
             print(f"[EXTRACT LAND DOCUMENTS UNPARSEABLE] first 400 chars: {raw_resp[:400]}")
@@ -6084,7 +6084,7 @@ def api_extract_croquis():
                 'error': 'استجابة الذكاء الاصطناعي ليست JSON صالحًا، فلم يُعتمد أي حقل ولم تتغير البيانات.',
                 'failureReason': 'invalid_json',
                 'documentProcessing': document_processing
-            }), 502
+            }), 503
         resp_json = _normalize_land_document_result(parsed_response, raw_resp)
         if vision_warnings:
             resp_json['warnings'] = vision_warnings

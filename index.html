@@ -9618,13 +9618,17 @@
             .filter(value => value !== undefined && value !== null && value !== '' && typeof value !== 'object').length;
           updateLoaderProgress(100, 'تم تحليل الملفات وتحديث ' + appliedCount + ' حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.');
           toast('تم التحليل وتحديث ' + appliedCount + ' حقلًا. راجع النتائج قبل الاعتماد.');
+          clearLandAnalysisFailure();
           triggerAutoSaveDraft();
         } else {
           // A rejected extraction leaves every field untouched, so say that explicitly —
-          // otherwise it is indistinguishable from "re-analysis did nothing".
+          // otherwise it is indistinguishable from "re-analysis did nothing". The reason goes on
+          // screen and stays there: in a toast it cleared itself before it could be read, which is
+          // why these failures were only ever visible in the browser console.
           const reason = res.error || 'تعذر تحليل ملفات الأرض والكروكي والرخصة';
+          showLandAnalysisFailure(reason, res.providerError);
           updateLoaderProgress(100, 'لم يتم تحديث أي حقل: ' + reason);
-          toast(reason);
+          toast('لم يتم تحديث أي حقل — التفصيل أسفل خانة الملفات');
           console.warn('[LAND ANALYSIS] rejected', res.failureReason || 'unknown', res);
         }
       } catch (err) {
@@ -10840,6 +10844,31 @@
               String(file.id || '').replace(/'/g, "\\'") + '\')">حذف</button></div>') +
             '</div>';
         }).join('') + '</div></div>';
+    }
+
+    // The panel lives next to the upload box so the reason sits where the retry button is.
+    function showLandAnalysisFailure(reason, providerError) {
+      const host = document.getElementById('landDocumentsUploadStatus');
+      if (!host) return;
+      let panel = document.getElementById('landAnalysisFailure');
+      if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'landAnalysisFailure';
+        panel.style.cssText = 'margin-top:10px;padding:11px 13px;border-radius:12px;background:#fff0f0;' +
+          'border:1px solid #efb3b3;color:#9c1d1d;font-weight:700;font-size:13px;line-height:1.6';
+        host.insertAdjacentElement('afterend', panel);
+      }
+      panel.hidden = false;
+      panel.innerHTML = escapeHtml(String(reason || '')) +
+        (providerError && providerError !== reason
+          ? '<div style="margin-top:6px;font-weight:400;font-size:12px">' +
+            escapeHtml(String(providerError)) + '</div>'
+          : '');
+    }
+
+    function clearLandAnalysisFailure() {
+      const panel = document.getElementById('landAnalysisFailure');
+      if (panel) panel.hidden = true;
     }
 
     // Uploading is its own explicit action, triggered by choosing a file. It used to happen only
