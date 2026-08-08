@@ -6498,6 +6498,8 @@
       }
 
       refreshLocationTables();
+      // Mirror the restored timeline into the financial study before recalculating.
+      if (typeof syncFinancialFromTimeline === 'function') syncFinancialFromTimeline();
       if (typeof calculateAll === 'function') {
         try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
       }
@@ -7347,7 +7349,7 @@
         <div class="finance-block">
           <h3>2. مدة المشروع والأرض ومساحات البناء</h3>
           <div class="grid four">
-            <div><label>مدة تطوير المشروع (سنة)</label><input id="developmentYears" type="number" min="1" value="4" oninput="calculateAll()"><span class="help input">بعد اكتمالها تبدأ الإيرادات التشغيلية.</span></div>
+            <div><label>مدة تطوير المشروع (سنة)</label><input id="developmentYears" type="number" min="1" value="4" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «عدد السنوات» في قسم الجدول الزمني — عدّلها من هناك.</span></div>
             <div id="salesStartYearWrap"><label>سنة بدء بيع الوحدات</label><input id="salesStartYear" type="number" min="1" value="1" oninput="calculateAll()"><span class="help input">يظهر للمشروع البيعي أو المختلط.</span></div>
             <div id="salesYearsWrap"><label>عدد سنوات بيع الوحدات</label><input id="salesYears" type="number" min="1" value="4" oninput="calculateAll()"><span class="help input">توزع المبيعات على هذه السنوات.</span></div>
             <div id="operationYearsWrap"><label>عدد سنوات التشغيل</label><input id="operationYears" type="number" min="1" value="10" oninput="calculateAll()"><span class="help input">يظهر للمشروع التأجيري أو المختلط.</span></div>
@@ -7472,13 +7474,14 @@
         <div class="finance-block">
           <h3>7. مراحل التطوير ودفعات المطور</h3>
           <p class="hint">هذا الجدول يوزع تكاليف التطوير ودفعات المطور على السنوات المستخدمة في التدفقات النقدية.</p>
+          <div class="calculation-note">المراحل وسنواتها مأخوذة من قسم <strong>الجدول الزمني للمشروع</strong> ولا تُعدّل هنا. لإضافة مرحلة أو حذفها أو تغيير سنتها، عدّل الجدول الزمني. النسبتان أدناه فقط تُدخلان هنا.</div>
+          <div id="timelineStagesWarning" class="validation-panel error" hidden>لا توجد مراحل في الجدول الزمني بعد، فلن تُوزَّع تكاليف التطوير على السنوات. أضف المراحل من قسم الجدول الزمني.</div>
           <div class="table-wrap">
             <table id="scheduleTable">
-              <thead><tr><th>المرحلة</th><th>سنة التنفيذ</th><th>نسبة تكلفة التطوير %</th><th>نسبة دفعة المطور %</th><th>قيمة تكلفة المرحلة</th><th>قيمة دفعة المطور</th><th>ترتيب / حذف</th></tr></thead>
+              <thead><tr><th>المرحلة</th><th>سنة التنفيذ</th><th>نسبة تكلفة التطوير %</th><th>نسبة دفعة المطور %</th><th>قيمة تكلفة المرحلة</th><th>قيمة دفعة المطور</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
-          <br><button type="button" class="btn ghost" onclick="addScheduleStage()">+ إضافة مرحلة</button>
         </div>
 
         <div class="finance-block">
@@ -7668,11 +7671,8 @@
           addCost({ name: 'تنفيذ الفندق', class: 'execution', method: 'fixed', qty: 224100000, price: 0, duration: 1 });
           addCost({ name: 'التصميم والدراسات', class: 'design', method: 'fixed', qty: 30000000, price: 0, duration: 1 });
         }
-        if (!document.querySelector('#scheduleTable tbody tr')) {
-          addScheduleStage({ name: 'التصميم والتراخيص والأعمال المبكرة', year: 1, costPct: 25, devPct: 25 });
-          addScheduleStage({ name: 'الأساسات والهيكل الإنشائي', year: 2, costPct: 35, devPct: 35 });
-          addScheduleStage({ name: 'التشطيبات والتجهيز والتشغيل', year: 3, costPct: 40, devPct: 40 });
-        }
+        // Development stages are mirrored from the project timeline, not seeded here.
+        syncFinancialFromTimeline();
         if (!document.querySelector('#opexTable tbody tr')) {
           addOpex({ name: 'المصروفات التشغيلية', method: 'percentRevenue', qty: 0, price: 60 });
         }
@@ -7725,16 +7725,17 @@
     updateDynamicFields();
       if(!window.__batchLoading)calculateAll()}
 
+    // The stage name and its year mirror the project timeline and are read-only here; only the
+    // two financial percentages belong to this study, so only they stay editable.
     function addScheduleStage(d={}){const tb=document.querySelector('#scheduleTable tbody');if(!tb)return;const tr=document.createElement('tr');tr.innerHTML=`
-    <td data-field="name"><input value="${d.name||''}" placeholder="مثال: الهيكل الإنشائي"></td>
-    <td data-field="year"><input type="number" min="1" value="${d.year??1}"></td>
+    <td data-field="name"><input value="${escapeHtml(d.name||'')}" readonly class="readonly-highlight" title="تُعدّل من قسم الجدول الزمني"></td>
+    <td data-field="year"><input type="number" min="1" value="${d.year??1}" readonly class="readonly-highlight" title="تُعدّل من قسم الجدول الزمني"></td>
     <td data-field="costPct"><input type="number" min="0" value="${d.costPct??0}"></td>
     <td data-field="devPct"><input type="number" min="0" value="${d.devPct??0}"></td>
     <td class="row-result stageCost">0</td>
-    <td class="row-result stageDevPayment">0</td>
-    <td>${rowActionsHtml()}</td>`;
+    <td class="row-result stageDevPayment">0</td>`;
     tb.appendChild(tr);
-    tr.querySelectorAll('input').forEach(x=>x.addEventListener('input',calculateAll));
+    tr.querySelectorAll('input:not([readonly])').forEach(x=>x.addEventListener('input',calculateAll));
     enhanceNumericInputs(tr);
       if(!window.__batchLoading)calculateAll()}
 
@@ -8694,7 +8695,7 @@
         <section class="section"><h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable',true,true)}<h4>نسبة الوصول السنوية إلى الإشغال المستهدف</h4>${reportTableSnapshot('occupancyRampTable',false)}</section>
         ${graceReportSection}
         <section class="section page-break"><h3>5. تكاليف المشروع وأتعاب المطور</h3>${costSummary}<h4>تفاصيل بنود التكلفة</h4>${reportTableSnapshot('costTable',true,true)}</section>
-        <section class="section"><h3>6. مراحل التطوير ودفعات المطور</h3>${reportTableSnapshot('scheduleTable',true)}</section>
+        <section class="section"><h3>6. مراحل التطوير ودفعات المطور</h3>${reportTableSnapshot('scheduleTable',false)}</section>
         <section class="section page-break"><h3>7. المصروفات التشغيلية</h3>${reportTableSnapshot('opexTable',true,true)}</section>
         ${financeReportSection}
         ${fundReportSection}
@@ -8799,6 +8800,8 @@
       const tbody = document.getElementById('timelineTableBody');
       if (!tbody) return;
       if (!tbody.rows.length) addTimelineRow();
+      // Start year / number of years feed the financial study, so re-mirror them on every change.
+      syncFinancialFromTimeline();
     }
 
     function addTimelineRow(data = {}) {
@@ -8820,19 +8823,76 @@
       saveTimelineData();
     }
 
-    function saveTimelineData() {
-      const data = [];
-      document.querySelectorAll('#timelineTableBody tr').forEach(tr => {
-        data.push({
-          name: tr.querySelector('.tl-name')?.value || '',
-          year: tr.querySelector('.tl-year')?.value || '',
-          quarter: tr.querySelector('.tl-quarter')?.value || '',
-          duration: tr.querySelector('.tl-duration')?.value || '',
-          notes: tr.querySelector('.tl-notes')?.value || ''
+    function collectTimelineRows() {
+      return Array.from(document.querySelectorAll('#timelineTableBody tr')).map(tr => ({
+        name: tr.querySelector('.tl-name')?.value || '',
+        year: tr.querySelector('.tl-year')?.value || '',
+        quarter: tr.querySelector('.tl-quarter')?.value || '',
+        duration: tr.querySelector('.tl-duration')?.value || '',
+        notes: tr.querySelector('.tl-notes')?.value || ''
+      }));
+    }
+
+    // The timeline is the single source of truth for the development duration and the stage list;
+    // the financial study mirrors them read-only so the two can never disagree.
+    function syncFinancialFromTimeline() {
+      const scheduleBody = document.querySelector('#scheduleTable tbody');
+      const devYearsInput = document.getElementById('developmentYears');
+      if (!scheduleBody && !devYearsInput) return;
+
+      const timelineYears = parseInt(document.getElementById('tlYears')?.value, 10);
+      const startYear = parseInt(document.getElementById('tlStartYear')?.value, 10);
+      const namedStages = collectTimelineRows().filter(row => row.name.trim());
+
+      if (devYearsInput && Number.isFinite(timelineYears) && timelineYears > 0) {
+        devYearsInput.value = String(timelineYears);
+      }
+      const devYears = Math.max(1, parseInt(devYearsInput?.value, 10) || 1);
+
+      const warning = document.getElementById('timelineStagesWarning');
+      if (warning) warning.hidden = namedStages.length > 0;
+      if (!scheduleBody) return;
+
+      // Percentages are this study's own data, so carry them over by stage name on every rebuild.
+      const previous = new Map();
+      scheduleBody.querySelectorAll('tr').forEach(tr => {
+        const name = (tr.querySelector('[data-field="name"] input')?.value || '').trim();
+        if (!name) return;
+        previous.set(name, {
+          costPct: tr.querySelector('[data-field="costPct"] input')?.value ?? 0,
+          devPct: tr.querySelector('[data-field="devPct"] input')?.value ?? 0
         });
       });
+
+      const wasBatching = window.__batchLoading;
+      window.__batchLoading = true;
+      scheduleBody.innerHTML = '';
+      namedStages.forEach(row => {
+        const name = row.name.trim();
+        const calendarYear = parseInt(row.year, 10);
+        // Timeline years are calendar years; the cashflow uses years relative to project start.
+        const relative = (Number.isFinite(calendarYear) && Number.isFinite(startYear))
+          ? calendarYear - startYear + 1
+          : 1;
+        const kept = previous.get(name) || {};
+        addScheduleStage({
+          name,
+          year: Math.max(1, Math.min(devYears, relative || 1)),
+          costPct: kept.costPct ?? 0,
+          devPct: kept.devPct ?? 0
+        });
+      });
+      window.__batchLoading = wasBatching;
+      if (!wasBatching && typeof calculateAll === 'function') {
+        try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
+      }
+    }
+
+    function saveTimelineData() {
+      const data = collectTimelineRows();
       const hidden = document.getElementById('timelineTableData');
       if (hidden) hidden.value = JSON.stringify(data);
+      syncFinancialFromTimeline();
       if (typeof triggerAutoSaveDraft === 'function') triggerAutoSaveDraft();
     }
 

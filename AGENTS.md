@@ -77,6 +77,25 @@ assertion deliberately, not reflexively.
   model so it records disagreements instead of silently picking a value; they surface in the
   narrative summary.
 
+## Timeline drives the financial study
+
+The project timeline is the single source of truth for two things the financial study displays:
+
+- `developmentYears` ("مدة تطوير المشروع") mirrors the timeline's `tlYears` ("عدد السنوات").
+- The `scheduleTable` stage list (name + year) mirrors the named timeline phases.
+
+Both are rendered `readonly` in the financial study; only `costPct` and `devPct` are editable there,
+and they are carried across a rebuild by matching on stage name. `syncFinancialFromTimeline()` does
+the mirroring and is called from `recalcTimeline()`, `saveTimelineData()`, the financial seeding
+block and draft hydration. Timeline years are **calendar** years while the cashflow uses years
+**relative** to project start, so the conversion is `calendarYear - tlStartYear + 1`, clamped to
+`[1, developmentYears]`.
+
+An empty timeline is allowed but surfaces `#timelineStagesWarning`, because with no stages the
+development cost never reaches the cashflow. Note that `scheduleTable` no longer has an actions
+column, so `reportTableSnapshot('scheduleTable', false)` must keep `false` or the PDF drops the
+developer-payment column.
+
 ## Token budget for the land analysis
 
 `max_tokens` cannot simply be raised: **OpenRouter reserves the whole cap against the account

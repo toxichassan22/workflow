@@ -503,6 +503,41 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_timeline_is_the_only_source_of_dev_duration_and_stages(self):
+        """The financial study mirrors the timeline read-only so the two cannot disagree."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        self.assertIn('function syncFinancialFromTimeline()', index_source)
+
+        # Development duration is taken from the timeline's year count and is not editable here.
+        self.assertIn('id="developmentYears" type="number" min="1" value="4" readonly', index_source)
+        self.assertNotIn('id="developmentYears" type="number" min="1" value="4" oninput', index_source)
+        self.assertIn("مأخوذة من «عدد السنوات» في قسم الجدول الزمني", index_source)
+
+        # Stage name and year are locked; only the two percentages remain editable.
+        self.assertIn('<td data-field="name"><input value="${escapeHtml(d.name||\'\')}" readonly', index_source)
+        self.assertIn('<td data-field="year"><input type="number" min="1" value="${d.year??1}" readonly', index_source)
+        self.assertIn("tr.querySelectorAll('input:not([readonly])')", index_source)
+
+        # No way to add or delete a stage from the financial study.
+        self.assertNotIn('onclick="addScheduleStage()"', index_source)
+        self.assertIn('المراحل وسنواتها مأخوذة من قسم', index_source)
+
+        # Seeded stages are gone; the timeline drives the list.
+        self.assertNotIn('التصميم والتراخيص والأعمال المبكرة', index_source)
+        self.assertNotIn('الأساسات والهيكل الإنشائي', index_source)
+
+        # Calendar year -> relative cashflow year, and the percentages survive a rebuild.
+        self.assertIn('calendarYear - startYear + 1', index_source)
+        self.assertIn('previous.get(name) || {}', index_source)
+
+        # Empty timeline warns rather than silently zeroing the cost distribution.
+        self.assertIn('id="timelineStagesWarning"', index_source)
+        self.assertIn('warning.hidden = namedStages.length > 0', index_source)
+
+        # The stage table lost its actions column, so the report must stop dropping the last one.
+        self.assertIn("reportTableSnapshot('scheduleTable',false)", index_source)
+
     def test_timeline_starts_blank_with_a_quarter_picker_and_row_delete(self):
         """Phases are client data, so the table must not seed invented stages."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
