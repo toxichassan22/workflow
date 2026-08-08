@@ -6492,16 +6492,7 @@
       const timelineBody = document.getElementById('timelineTableBody');
       if (timelineBody && timelineRows.length) {
         timelineBody.innerHTML = '';
-        timelineRows.forEach(row => {
-          addTimelineRow();
-          const tr = timelineBody.lastElementChild;
-          if (!tr) return;
-          tr.querySelector('.tl-name').value = row.name || '';
-          tr.querySelector('.tl-year').value = row.year || '';
-          tr.querySelector('.tl-quarter').value = row.quarter || '';
-          tr.querySelector('.tl-duration').value = row.duration || '';
-          tr.querySelector('.tl-notes').value = row.notes || '';
-        });
+        timelineRows.forEach(row => addTimelineRow(row));
         const timelineInput = document.getElementById('timelineTableData');
         if (timelineInput) timelineInput.value = JSON.stringify(timelineRows);
       }
@@ -8770,7 +8761,7 @@
         </div>
         <div class="fin-table-wrap">
           <table class="fin-table" id="timelineTable">
-            <thead><tr><th>المرحلة</th><th>السنة</th><th>الربع</th><th>المدة (أشهر)</th><th>الملاحظات</th></tr></thead>
+            <thead><tr><th>المرحلة</th><th>السنة</th><th>الربع</th><th>المدة (أشهر)</th><th>الملاحظات</th><th style="width:46px"></th></tr></thead>
             <tbody id="timelineTableBody"></tbody>
           </table>
         </div>
@@ -8784,49 +8775,49 @@
       recalcTimeline();
     }
 
-    function recalcTimeline() {
-      const startYear = parseInt(document.getElementById('tlStartYear')?.value) || 2026;
-      const years = parseInt(document.getElementById('tlYears')?.value) || 3;
-      const tbody = document.getElementById('timelineTableBody');
-      if (!tbody || tbody.rows.length > 0) return; // Don't regenerate if rows exist
-      const phases = [
-        { name: 'الحصول على التراخيص', q: 'Q1', dur: 3 },
-        { name: 'أعمال البنية التحتية', q: 'Q2', dur: 6 },
-        { name: 'البناء (المرحلة الأولى)', q: 'Q4', dur: 9 },
-        { name: 'البناء (المرحلة الثانية)', q: 'Q2', dur: 9 },
-        { name: 'التشطيبات النهائية', q: 'Q1', dur: 4 },
-        { name: 'التسليم والتشغيل', q: 'Q2', dur: 3 },
-      ];
-      let currentQ = 1;
-      let currentYear = startYear;
-      phases.forEach(p => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td><input type="text" class="tl-name" value="${p.name}" onchange="saveTimelineData()"></td>
-          <td><input type="number" class="tl-year" value="${currentYear}" onchange="saveTimelineData()"></td>
-          <td><input type="text" class="tl-quarter" value="Q${currentQ}" style="width:60px" onchange="saveTimelineData()"></td>
-          <td><input type="number" class="tl-duration" value="${p.dur}" style="width:60px" onchange="saveTimelineData()"></td>
-          <td><input type="text" class="tl-notes" placeholder="ملاحظات" onchange="saveTimelineData()"></td>
-        `;
-        tbody.appendChild(tr);
-        currentQ += Math.ceil(p.dur / 3);
-        if (currentQ > 4) { currentQ -= 4; currentYear++; }
-      });
-      saveTimelineData();
+    const TIMELINE_QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
+
+    // One builder for every path (blank row, "add phase", and draft hydration) so the columns
+    // cannot drift apart between them.
+    function timelineRowHtml(data = {}) {
+      const chosen = String(data.quarter || '').trim();
+      const options = ['<option value="">—</option>'].concat(TIMELINE_QUARTERS.map(
+        quarter => '<option value="' + quarter + '"' + (chosen === quarter ? ' selected' : '') + '>' + quarter + '</option>'
+      )).join('');
+      const attr = value => escapeHtml(value === undefined || value === null ? '' : String(value));
+      return '<td><input type="text" class="tl-name" value="' + attr(data.name) + '" placeholder="اسم المرحلة" onchange="saveTimelineData()"></td>' +
+        '<td><input type="number" class="tl-year" value="' + attr(data.year) + '" placeholder="السنة" onchange="saveTimelineData()"></td>' +
+        '<td><select class="tl-quarter" style="min-width:78px" onchange="saveTimelineData()">' + options + '</select></td>' +
+        '<td><input type="number" class="tl-duration" value="' + attr(data.duration) + '" placeholder="0" style="width:78px" onchange="saveTimelineData()"></td>' +
+        '<td><input type="text" class="tl-notes" value="' + attr(data.notes) + '" placeholder="ملاحظات" onchange="saveTimelineData()"></td>' +
+        '<td><button type="button" class="btn danger small" style="padding:4px 9px;font-size:11px" onclick="removeTimelineRow(this)" title="حذف المرحلة">×</button></td>';
     }
 
-    function addTimelineRow() {
+    // Phases are entered by the client, so the table starts blank instead of seeding invented
+    // stages that would otherwise be mistaken for real project data.
+    function recalcTimeline() {
       const tbody = document.getElementById('timelineTableBody');
       if (!tbody) return;
+      if (!tbody.rows.length) addTimelineRow();
+    }
+
+    function addTimelineRow(data = {}) {
+      const tbody = document.getElementById('timelineTableBody');
+      if (!tbody) return null;
       const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><input type="text" class="tl-name" value="" placeholder="اسم المرحلة" onchange="saveTimelineData()"></td>
-        <td><input type="number" class="tl-year" value="" onchange="saveTimelineData()"></td>
-        <td><input type="text" class="tl-quarter" value="" style="width:60px" onchange="saveTimelineData()"></td>
-        <td><input type="number" class="tl-duration" value="" style="width:60px" onchange="saveTimelineData()"></td>
-        <td><input type="text" class="tl-notes" placeholder="ملاحظات" onchange="saveTimelineData()"></td>
-      `;
+      tr.innerHTML = timelineRowHtml(data);
       tbody.appendChild(tr);
+      return tr;
+    }
+
+    function removeTimelineRow(button) {
+      const row = button?.closest('tr');
+      const tbody = document.getElementById('timelineTableBody');
+      if (!row || !tbody) return;
+      row.remove();
+      // Always leave one editable row so the table never becomes unusable.
+      if (!tbody.rows.length) addTimelineRow();
+      saveTimelineData();
     }
 
     function saveTimelineData() {
@@ -10191,9 +10182,8 @@
       const finCalcDone = typeof recalcFinancials === 'function';
       if (finCalcDone) { recalcFinancials(); filled += 7; }
 
-      // Trigger timeline calc
-      const tlDone = typeof recalcTimeline === 'function';
-      if (tlDone) { recalcTimeline(); filled += 4; }
+      // The timeline is client-entered, so sample data only ensures an empty row exists.
+      if (typeof recalcTimeline === 'function') recalcTimeline();
 
       // Sync the location tables (roads / landmarks / catchment) with the sample text
       refreshLocationTables();

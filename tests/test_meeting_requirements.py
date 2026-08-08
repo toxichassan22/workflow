@@ -503,6 +503,43 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_timeline_starts_blank_with_a_quarter_picker_and_row_delete(self):
+        """Phases are client data, so the table must not seed invented stages."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        # The seeding table and its quarter-advancing loop are gone. (The unrelated `timeline`
+        # sample *text* field may still mention phase names; only the table must not seed rows.)
+        self.assertNotIn("{ name: 'الحصول على التراخيص', q: 'Q1', dur: 3 }", index_source)
+        self.assertNotIn('currentQ += Math.ceil', index_source)
+        self.assertNotIn("value=\"Q${currentQ}\"", index_source)
+
+        # The quarter is a picker, not a free-text box.
+        self.assertIn("const TIMELINE_QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];", index_source)
+        self.assertIn('<select class="tl-quarter"', index_source)
+        self.assertNotIn('class="tl-quarter" value=', index_source)
+
+        # Rows can be deleted, and one editable row always survives.
+        self.assertIn('function removeTimelineRow(button)', index_source)
+        self.assertIn('onclick="removeTimelineRow(this)"', index_source)
+        self.assertIn('if (!tbody.rows.length) addTimelineRow();', index_source)
+
+        # A single shared builder feeds the blank row, the add button and draft hydration.
+        self.assertIn('function timelineRowHtml(data = {})', index_source)
+        self.assertIn('timelineRows.forEach(row => addTimelineRow(row));', index_source)
+
+        # Saved phases still round-trip through the draft.
+        client = self.app.test_client()
+        rows = [{'name': 'التراخيص', 'year': '2027', 'quarter': 'Q3',
+                 'duration': '5', 'notes': 'بانتظار الأمانة'}]
+        saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {'timeline_table_data': json.dumps(rows, ensure_ascii=False)}
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        draft_data = client.get('/api/project-draft', headers=self._headers(self.token_a)).get_json()['draft']['draft_data']
+        restored = json.loads(draft_data['timeline_table_data'])[0]
+        self.assertEqual(restored['quarter'], 'Q3')
+        self.assertEqual(restored['notes'], 'بانتظار الأمانة')
+
     def test_components_live_only_inside_the_financial_study(self):
         """The standalone components section duplicated id="componentsTable", and duplicate ids
         make querySelector return only the first — so the financial readers were bound to the
