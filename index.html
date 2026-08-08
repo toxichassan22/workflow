@@ -11014,9 +11014,33 @@
             '<span style="font-weight:600;word-break:break-word;flex:1">' + escapeHtml(name) + '</span></div>' +
             '<span class="tenant-hint" style="margin:0">' + escapeHtml(sizeText) +
             (sizeText && !pending ? ' — ' : '') + (pending ? 'جاري الحفظ تلقائيًا' : 'محفوظ') + '</span>' +
-            (pending ? '' : '<button type="button" class="btn ghost" style="padding:6px 10px" onclick="openProjectFilePreview(' + args + ')">معاينة الملف</button>') +
+            (pending ? '' :
+              '<div style="display:flex;gap:6px">' +
+              '<button type="button" class="btn ghost" style="flex:1;padding:6px 10px" onclick="openProjectFilePreview(' + args + ')">معاينة الملف</button>' +
+              '<button type="button" class="btn ghost danger" style="flex:none;padding:6px 12px" onclick="removeLandDocument(\'' +
+              String(file.id || '').replace(/'/g, "\\'") + '\')">حذف</button></div>') +
             '</div>';
         }).join('') + '</div></div>';
+    }
+
+    // Detaches the document from this draft the same way removeLandPhoto does. The stored file is
+    // left in place because an older draft revision may still reference it, and the analysis reads
+    // this metadata list, so a detached file is no longer sent to the model.
+    function removeLandDocument(fileId) {
+      const meta = (tenantProjectData.land_documents_files_file_meta || [])
+        .filter(item => item && item.id !== fileId);
+      tenantProjectData.land_documents_files_file_meta = meta;
+      tenantProjectData.land_documents_files_file_ids = meta.map(item => item.id);
+      // The file input keeps its own upload signatures; clearing them lets the same file be
+      // re-selected after a mistake instead of being skipped as already uploaded.
+      const input = document.querySelector('#tenantProjectForm [data-key="land_documents_files"]');
+      if (input) {
+        input.value = '';
+        delete input.dataset.uploadSignatures;
+      }
+      renderLandDocumentsUploadState(meta);
+      triggerAutoSaveDraft();
+      toast(meta.length ? 'تم حذف الملف من هذا المشروع' : 'تم حذف الملفات — ارفع الرخصة والكروكي من جديد');
     }
 
     async function uploadTenantProjectFileInput(input, key) {

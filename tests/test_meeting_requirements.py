@@ -503,6 +503,27 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_uploaded_land_documents_can_be_removed(self):
+        """A wrongly uploaded deed or croquis had no way out: the card offered preview only."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        self.assertIn('function removeLandDocument(fileId)', index_source)
+        self.assertIn("onclick=\"removeLandDocument(\\'", index_source)
+
+        # Both the metadata list and the id list must be updated, because the analysis reads the
+        # metadata list to decide which files to send to the model.
+        self.assertIn('tenantProjectData.land_documents_files_file_meta = meta;', index_source)
+        self.assertIn('tenantProjectData.land_documents_files_file_ids = meta.map(item => item.id);',
+                      index_source)
+
+        # Clearing the cached signatures lets the same file be re-selected after a mistake.
+        self.assertIn("document.querySelector('#tenantProjectForm [data-key=\"land_documents_files\"]')",
+                      index_source)
+        self.assertIn('delete input.dataset.uploadSignatures;', index_source)
+
+        # Removing a file must re-render, and persist the change.
+        self.assertIn('renderLandDocumentsUploadState(meta);', index_source)
+
     def test_empty_places_result_is_not_reported_as_a_provider_error(self):
         """Places API (New) answers a valid search that matches nothing with HTTP 200 and "{}".
         Calling that an error turned a quiet area into "invalid response" and hid the caller's own
