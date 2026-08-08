@@ -406,7 +406,7 @@ def build_design_rules(branding):
 ## أبعاد الشريحة وقواعد الاحتواء الصارمة (ممنوع التداخل أو التجاوز إطلاقاً)
 - الأبعاد الكلية: {slide_w}px عرض × {slide_h}px ارتفاع.
 - أقصى ارتفاع للمحتوى داخل الشريحة: {slide_h - header_h - footer_h - 20}px صافي بين الهيدر والفوتر.
-- ⚠️ قانون عدم الخروج عن الحدود: يجب أن يتناسب كل محتوى الشريحة تماماً داخل هذا الارتفاع دون أن يقطع أي جزء منه.
+- قانون عدم الخروج عن الحدود: يجب أن يتناسب كل محتوى الشريحة تماماً داخل هذا الارتفاع دون أن يقطع أي جزء منه.
 
 ## الخطوط والأحجام المحددة للتناسب
 font-family: {font}
@@ -438,7 +438,7 @@ position:absolute;bottom:0;right:0;left:0;height:{footer_h}px;background:{primar
     content_bottom = footer_h if footer_enabled else 0
     rules += f"""
 ## منطقة المحتوى والتخطيط
-top:{content_top}px → bottom:{content_bottom}px. padding: 16px 36px.
+top:{content_top}px إلى bottom:{content_bottom}px. padding: 16px 36px.
 - إذا زاد عدد البطاقات أو العناصر عن 4، استخدم شبكة متعددة الأعمدة (grid 2x2 أو 3x2 مع gap:10px) أو توزيع أفقياً لضمان ملاءمة المحتوى كاملاً داخل الارتفاع المتاح.
 
 ## البطاقات (Cards) — نمط {card_style}
@@ -468,8 +468,8 @@ top:{content_top}px → bottom:{content_bottom}px. padding: 16px 36px.
 - خريطة نطاق التأثير: ##MAP_CATCHMENT## (background-image)
 - صور Street View: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
 - شعار الشركة: ##LOGO## (height:40px في الهيدر، height:80px في الغلاف والختام)
-- ⛔ ممنوع رسم أي دوائر أو دبابيس أو مؤشرات موقع HTML فوق الخرائط (##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##) لأن هذه الصور تحتوي بالفعل على علامات موقع احترافية ومضلعات تحديد وبوصلة وخرائط مصغرة مرسومة مباشرة بدقة عالية.
-- ⛔ ممنوع base64 أو روابط صور خارجية — استخدم الـ placeholders فقط
+- ممنوع رسم أي دوائر أو دبابيس أو مؤشرات موقع HTML فوق الخرائط (##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##) لأن هذه الصور تحتوي بالفعل على علامات موقع احترافية ومضلعات تحديد وبوصلة وخرائط مصغرة مرسومة مباشرة بدقة عالية.
+- ممنوع base64 أو روابط صور خارجية — استخدم الـ placeholders فقط
 
 ## اسم الشركة في الفوتر
 {company_name}

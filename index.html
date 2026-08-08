@@ -3675,7 +3675,7 @@
         </div>
 
         <div style="margin-top:12px">
-          <button class="btn ghost" type="button" onclick="toggleNewFieldAdvanced()">إعدادات إضافية ▼</button>
+          <button class="btn ghost" type="button" onclick="toggleNewFieldAdvanced()">إعدادات إضافية</button>
           <div id="newFieldAdvanced" class="tenant-grid" style="display:none;margin-top:12px">
             <div class="tenant-field">
               <label>نص توضيحي داخل الحقل (اختياري)</label>
@@ -3768,7 +3768,7 @@
           </div>
 
           <div class="tenant-btns" style="display:flex;gap:12px;justify-content:space-between;">
-            <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">⬅ عودة لبيانات المشروع</button>
+            <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">عودة لبيانات المشروع</button>
             <button class="btn primary" onclick="goToTenantMoodboard()">التالي: صور المود بورد </button>
           </div>
         </div>
@@ -3786,7 +3786,7 @@
           <div id="tenantMoodboardPreview" class="tenant-moodboard-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:20px;margin-bottom:24px;"></div>
           
           <div class="tenant-btns" style="display:flex;gap:12px;justify-content:space-between;margin-top:20px;">
-            <button class="btn ghost" onclick="goToTenantMainImage()">⬅ عودة للصورة الرئيسية</button>
+            <button class="btn ghost" onclick="goToTenantMainImage()">عودة للصورة الرئيسية</button>
             <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ صفحة المود بورد كمسودة</button>
             <button class="btn primary" onclick="generateTenantSlides()"> توليد العرض والتصميم</button>
           </div>
@@ -6041,6 +6041,14 @@
       }
     }
 
+    // A text monogram stands in for a missing logo: the product carries no icons or emojis.
+    function teamMonogramHtml(name, size) {
+      const letter = String(name || '').trim().charAt(0) || '—';
+      return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:10px;background:#f2f4f7;' +
+        'display:flex;align-items:center;justify-content:center;flex:none;font-weight:900;color:#6f7780;' +
+        'font-size:' + Math.round(size / 2.4) + 'px">' + escapeHtml(letter) + '</div>';
+    }
+
     // ── فريق العمل inside a project file ──────────────────────────────────────
     // The company library is shared by every file. A file may drop a library entity, override the
     // role it plays here, or add an entity that belongs to this project alone. All three live in
@@ -6100,7 +6108,7 @@
               '<div style="display:flex;gap:10px;align-items:center">' +
               (entity.logoFileId
                 ? '<img data-team-logo="' + escapeHtml(entity.logoFileId) + '" alt="" style="width:46px;height:46px;object-fit:contain;border-radius:9px;background:#f6f7f9;flex:none">'
-                : '<div style="width:46px;height:46px;border-radius:9px;background:#f2f4f7;display:flex;align-items:center;justify-content:center;flex:none">🏢</div>') +
+                : teamMonogramHtml(entity.name, 46)) +
               '<div style="flex:1;min-width:0"><strong style="word-break:break-word">' + escapeHtml(entity.name) + '</strong>' +
               '<div class="tenant-hint" style="margin:2px 0 0">' + escapeHtml(entity.categoryLabel || '') + '</div></div></div>' +
               '<label style="display:block;font-size:.8rem;margin-top:8px">دور الجهة في هذا المشروع</label>' +
@@ -6129,7 +6137,7 @@
               '<div style="display:flex;gap:10px;align-items:center">' +
               (entity.logoFileId
                 ? '<img data-team-logo="' + escapeHtml(entity.logoFileId) + '" alt="" style="width:46px;height:46px;object-fit:contain;border-radius:9px;background:#f6f7f9;flex:none">'
-                : '<div style="width:46px;height:46px;border-radius:9px;background:#f2f4f7;display:flex;align-items:center;justify-content:center;flex:none">🏢</div>') +
+                : teamMonogramHtml(entity.name, 46)) +
               '<div style="flex:1"><input type="text" value="' + escapeHtml(entity.categoryLabel || '') + '" placeholder="القسم" style="width:100%" ' +
               'onchange="updateLocalTeamEntity(\'' + safeId + '\',\'categoryLabel\',this.value)"></div></div>' +
               field('name', 'اسم الجهة', 'text') +
@@ -6368,7 +6376,7 @@
       const logo = entity.logoFileId
         ? '<img data-team-logo="' + escapeHtml(entity.logoFileId) + '" alt="' + escapeHtml(entity.name || '') +
           '" style="width:52px;height:52px;object-fit:contain;border-radius:10px;background:#f6f7f9;flex:none">'
-        : '<div style="width:52px;height:52px;border-radius:10px;background:#f2f4f7;display:flex;align-items:center;justify-content:center;flex:none;font-size:1.1rem">🏢</div>';
+        : teamMonogramHtml(entity.name, 52);
       const detail = (label, value) => value
         ? '<div style="font-size:.82rem;margin-top:5px"><strong>' + label + ':</strong> ' + escapeHtml(value) + '</div>'
         : '';
@@ -7748,7 +7756,7 @@
       return table.outerHTML;
     }
     function lines(id){return val(id).split('\n').map(x=>x.trim()).filter(Boolean)}
-    function rowActionsHtml(){return `<div class="row-actions"><button type="button" class="btn ghost small" onclick="moveRow(this,-1)" title="تحريك لأعلى">↑</button><button type="button" class="btn ghost small" onclick="moveRow(this,1)" title="تحريك لأسفل">↓</button><button type="button" class="btn danger small" onclick="this.closest('tr').remove();calculateAll()">حذف</button></div>`}
+    function rowActionsHtml(){return `<div class="row-actions"><button type="button" class="btn ghost small" onclick="moveRow(this,-1)" title="تحريك لأعلى">أعلى</button><button type="button" class="btn ghost small" onclick="moveRow(this,1)" title="تحريك لأسفل">أسفل</button><button type="button" class="btn danger small" onclick="this.closest('tr').remove();calculateAll()">حذف</button></div>`}
     function moveRow(button,direction){const row=button.closest('tr'),body=row?.parentElement;if(!row||!body)return;const target=direction<0?row.previousElementSibling:row.nextElementSibling;if(!target)return;if(direction<0)body.insertBefore(row,target);else body.insertBefore(target,row);updateRevenueComponentOptions();calculateAll()}
     function autoSizeField(input){if(!input?.closest('.table-wrap'))return;const length=Math.max(10,String(input.value||input.placeholder||'').length);input.style.width=Math.min(320,Math.max(145,length*9+34))+'px'}
     function formatNumericInput(input){const n=parseNumber(input.value);input.value=input.value.trim()===''?'':nf.format(n);autoSizeField(input)}
@@ -10902,7 +10910,8 @@
             String(file.mimeType || '').replace(/'/g, "\\'") + "'";
           return '<div style="border:1px solid #b9e1d1;background:#fff;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px">' +
             '<div style="display:flex;align-items:center;gap:8px">' +
-            '<span style="font-size:1.3rem">' + (isPdf ? '📄' : '🖼️') + '</span>' +
+            '<span style="font-size:.7rem;font-weight:900;color:#6f7780;border:1px solid #d9dee5;' +
+            'border-radius:6px;padding:2px 6px;flex:none">' + (isPdf ? 'PDF' : 'صورة') + '</span>' +
             '<span style="font-weight:600;word-break:break-word;flex:1">' + escapeHtml(name) + '</span></div>' +
             '<span class="tenant-hint" style="margin:0">' + escapeHtml(sizeText) +
             (sizeText && !pending ? ' — ' : '') + (pending ? 'جاري الحفظ تلقائيًا' : 'محفوظ') + '</span>' +
@@ -11917,8 +11926,8 @@
         thumb.className = 'ge-thumb' + (i === activeSlideIndex ? ' active' : '');
         thumb.onclick = () => selectTenantSlide(i);
 
-        const moveUpBtn = i > 0 ? '<button type="button" class="ge-thumb-move" title="تحريك لأعلى" aria-label="تحريك لأعلى" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i - 1) + ')">↑</button>' : '';
-        const moveDownBtn = i < tenantSlidesData.length - 1 ? '<button type="button" class="ge-thumb-move" title="تحريك لأسفل" aria-label="تحريك لأسفل" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i + 1) + ')">↓</button>' : '';
+        const moveUpBtn = i > 0 ? '<button type="button" class="ge-thumb-move" title="تحريك لأعلى" aria-label="تحريك لأعلى" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i - 1) + ')">أعلى</button>' : '';
+        const moveDownBtn = i < tenantSlidesData.length - 1 ? '<button type="button" class="ge-thumb-move" title="تحريك لأسفل" aria-label="تحريك لأسفل" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i + 1) + ')">أسفل</button>' : '';
         const deleteBtn = hasPermission('create_presentation') && tenantSlidesData.length > 1
           ? '<button type="button" class="ge-thumb-delete" title="حذف الشريحة" aria-label="حذف الشريحة" onclick="event.stopPropagation(); deleteSlide(' + i + ')">حذف</button>'
           : '';
@@ -13151,7 +13160,7 @@
               html += '<div style="margin-top:4px;font-size:11px;opacity:0.8;">';
               Object.entries(a.changes).forEach(([k, v]) => {
                 if (v && typeof v === 'object' && 'old' in v) {
-                  html += '<div>' + escapeHtml(k) + ': <s>' + escapeHtml(String(v.old || '—')) + '</s> → <strong>' + escapeHtml(String(v.new)) + '</strong></div>';
+                  html += '<div>' + escapeHtml(k) + ': <s>' + escapeHtml(String(v.old || '—')) + '</s> إلى <strong>' + escapeHtml(String(v.new)) + '</strong></div>';
                 }
               });
               html += '</div>';
@@ -13565,7 +13574,7 @@
               content += '<div style="margin-top:4px;font-size:11px;opacity:0.8;">';
               Object.entries(a.changes).forEach(([k, v]) => {
                 if (v && typeof v === 'object' && 'old' in v) {
-                  content += '<div>' + escapeHtml(k) + ': <s>' + escapeHtml(String(v.old || '—')) + '</s> → <strong>' + escapeHtml(String(v.new)) + '</strong></div>';
+                  content += '<div>' + escapeHtml(k) + ': <s>' + escapeHtml(String(v.old || '—')) + '</s> إلى <strong>' + escapeHtml(String(v.new)) + '</strong></div>';
                 }
               });
               content += '</div>';

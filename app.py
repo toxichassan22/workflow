@@ -1485,7 +1485,10 @@ def api_generate_bullets():
     try:
         response = call_zai_chat(prompt, "اكتب النقاط.", max_tokens=1000)
         content = extract_chat_content(response, "BULLETS")
-        bullets = [line.strip().lstrip('•-●* ') for line in content.split('\n') if line.strip() and len(line.strip()) > 3]
+        # Bullet glyphs are stripped from the model's output; written as escapes so the source
+        # itself stays free of icon characters.
+        bullet_chars = '\u2022-\u25cf* '
+        bullets = [line.strip().lstrip(bullet_chars) for line in content.split('\n') if line.strip() and len(line.strip()) > 3]
         return jsonify({'success': True, 'bullets': bullets[:5]})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1880,7 +1883,7 @@ def api_designer_chat():
     branding = db.get_branding(g.tenant_id) or {}
     training_context = db.get_training_context(g.tenant_id) or ''
     summary = [{'index': i + 1, 'title': s.get('title', '') if isinstance(s, dict) else ''} for i, s in enumerate(slides)]
-    all_note = "\n️ تنبيه هام جداً: المستخدم طلب صراحة تعديل جميع الشرائح دون استثناء! يجب أن تعيد target='all' في الأداة edit_slides." if is_all_slides_request else ""
+    all_note = "\n تنبيه هام جداً: المستخدم طلب صراحة تعديل جميع الشرائح دون استثناء! يجب أن تعيد target='all' في الأداة edit_slides." if is_all_slides_request else ""
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
 أنت وكيل تصميم عروض متميز ذكي يفهم كافة اللهجات العربية، المترادفات، الأرقام، وأوامر إضافة وتحديث الخرائط والتنسيقات.
@@ -3714,7 +3717,7 @@ def api_generate_slide_single():
     landmarks_note = ''
     if landmarks_matrix:
         landmarks_note = (
-            "️ إرشادات هامة لعرض المعالم:\n"
+            " إرشادات هامة لعرض المعالم:\n"
             "يجب عرض المسافة والوقت معاً لكل معلم بدون استثناء بالصيغة التاعية: (اسم المعلم - المسافة بالكم - الوقت بالدقائق)، مثل: 'ميدان السارية (1.5 كم - 5 دقائق)'.\n"
             "استخدم البيانات الموثقة التالية كما هي وممنوع تعديل الأرقام:\n" +
             json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
@@ -4002,11 +4005,11 @@ def api_update_presentation(pres_id):
         # Build detailed log entry
         details_parts = []
         if 'title' in updates and updates['title'] != pres.get('title'):
-            details_parts.append(f'العنوان: "{pres.get("title","")}" → "{updates["title"]}"')
+            details_parts.append(f'العنوان: "{pres.get("title","")}" إلى "{updates["title"]}"')
         new_count = len(updates['slides_data']) if isinstance(updates['slides_data'], list) else 0
         old_count = len(current_slides) if isinstance(current_slides, list) else 0
         if new_count != old_count:
-            details_parts.append(f'عدد الشرائح: {old_count} → {new_count}')
+            details_parts.append(f'عدد الشرائح: {old_count} إلى {new_count}')
         if not details_parts:
             details_parts.append('تعديل المحتوى')
         db.log_edit(pres_id, g.user_id, g.user_name or 'System', 'edit', ' | '.join(details_parts))
@@ -7342,7 +7345,7 @@ def api_training_chat():
 لا تنفذ التوليد أو التعديل أو التصدير إذا لم تتوفر مساحة عمل صالحة. نفذ الأدوات بالترتيب: inspect ثم التنفيذ ثم validate ثم save/export عند طلب المستخدم.
 
 ## قواعد مهمة وحاسمة:
-1. ️ الفرق بين "الشرائح" (Slides) و "حقول الإدخال" (Input Fields):
+1.  الفرق بين "الشرائح" (Slides) و "حقول الإدخال" (Input Fields):
    - عندما يطلب المستخدم إضافة أو وصف أو تعديل **شريحة** (مثل: "شريحة للجداول"، "شريحة للدراسات"، "شريحة الخريطة"، "أضف شريحة كذا")، فهذا يخص **العرض التقديمي والشرائح** فقط. **يُمنع منعاً باتاً** استخدام أدوات إنشاء أو تعديل الحقول (`add_field` / `update_field`)!
    - تُنشأ وتعدل الحقول (`add_field`/`update_field`) **فقط وفقط** إذا طلب المستخدم صراحة كلمة "حقل" أو "حقل إدخال جديد" أو "تعديل حقل" في استمارة البيانات!
 2. عند الاستفسار: أجب بدقة بناءً على حالة النظام الفعلية أعلاه.
@@ -7474,7 +7477,7 @@ def api_training_chat():
             result = _execute_agent_action(g.tenant_id, action, reply_text=reply, workspace=workspace)
             actions_executed.append(result)
             # Chain workspace mutations so sequential tools in the same reply
-            # (update_workspace → generate_slide_plan → generate_workspace) see updates.
+            # (update_workspace إلى generate_slide_plan إلى generate_workspace) see updates.
             rdata = result.get('data') if isinstance(result, dict) else None
             if isinstance(rdata, dict):
                 if isinstance(rdata.get('projectData'), dict):
@@ -7483,7 +7486,7 @@ def api_training_chat():
                     workspace['slidePlan'] = rdata['slidePlan']
                 if isinstance(rdata.get('slidesData'), list):
                     workspace['slidesData'] = rdata['slidesData']
-            print(f'[SUPER-AGENT] Executed: {action.get("tool")} → {result.get("status")}')
+            print(f'[SUPER-AGENT] Executed: {action.get("tool")} إلى {result.get("status")}')
         except Exception as ex:
             print(f'[SUPER-AGENT] Action execution error: {ex}')
             actions_executed.append({'status': 'error', 'message': str(ex)})
@@ -7519,7 +7522,7 @@ def _build_agent_system_state(tenant_id):
 
     field_lines = []
     for f in active_fields[:40]:
-        req = ' إلزامي' if f.get('is_required') else '⬜ اختياري'
+        req = ' إلزامي' if f.get('is_required') else 'اختياري'
         custom = ' (مخصص)' if f.get('is_custom') else ' (أساسي)'
         field_lines.append(f"  • {f['field_label']} [{f['field_key']}] — نوع: {f['field_type']}, قسم: {f.get('section_key', 'general')}, {req}{custom}")
 

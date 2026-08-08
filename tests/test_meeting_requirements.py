@@ -503,6 +503,36 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_ui_contains_no_emojis_or_icon_glyphs(self):
+        """Product rule: the app ships no emojis and no icon glyphs, including arrows used as
+        button labels. Generated slides are covered separately by the icon stripper."""
+        pictographs = re.compile(
+            '[\u2190-\u21ff\u2300-\u23ff\u25a0-\u27bf\u2b00-\u2bff\ufe0f'
+            '\U0001f000-\U0001faff]'
+        )
+        # index.html is the whole UI; the prompt files tell the model what to produce, so an emoji
+        # there teaches it to emit one.
+        for name in ('index.html', 'slide_engine.py', 'design_templates.py', 'app.py'):
+            source = (ROOT / name).read_text(encoding='utf-8')
+            found = sorted({match.group() for match in pictographs.finditer(source)})
+            self.assertEqual(found, [], f'{name} still contains icon glyphs: {found}')
+
+        # No icon libraries, and the only inline SVG is the map polygon overlay.
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        for library in ('font-awesome', 'fontawesome', 'material-icons', 'bootstrap-icons', 'lucide'):
+            self.assertNotIn(library, index_source.lower(), f'{library} must not be used')
+        self.assertEqual(index_source.count('<svg'), 2, 'only the favicon and the map overlay may use SVG')
+        self.assertIn('id="mapPolygonOverlay"', index_source)
+
+        # Missing logos fall back to a text monogram rather than a building glyph.
+        self.assertIn('function teamMonogramHtml(name, size)', index_source)
+
+        # The emoji-to-SVG converter is gone: it created icons the next line deleted.
+        slide_source = (ROOT / 'slide_engine.py').read_text(encoding='utf-8')
+        self.assertNotIn('_replace_emojis_with_svg', slide_source)
+        self.assertNotIn('import emoji_icons', slide_source)
+        self.assertIn('def _strip_presentation_icons(html)', slide_source)
+
     def test_team_library_is_company_wide_and_singleton_roles_are_enforced(self):
         """The developer and the engineering office are one entity each; anything else is open."""
         client = self.app.test_client()

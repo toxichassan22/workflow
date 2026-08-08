@@ -9,7 +9,8 @@ import re
 import concurrent.futures
 from design_templates import build_design_rules, extract_slide_elements
 import db
-import emoji_icons
+# emoji_icons is intentionally not imported: it converted emojis into inline SVG icons, which the
+# icon stripper then removed. The product rule is that no icon is ever generated.
 
 _ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
 
@@ -23,7 +24,7 @@ CONTENT_DISTRIBUTION_RULES = """
 2. **الحد الأدنى للمحتوى:** كل شريحة محتوى يجب أن تحتوي على:
    - عنوان واضح
    - 3-6 نقاط أساسية (bullets) أو 2-4 بطاقات (cards) أو 3-5 أرقام (metrics)
-   - ⛔ ممنوع تماماً شريحة بكلمة أو كلمتين فقط (فارغة بصرياً)
+   - ممنوع تماماً شريحة بكلمة أو كلمتين فقط (فارغة بصرياً)
 3. **الحد الأقصى للمحتوى:** لا تزدحم شريحة بأكثر من:
    - 6 bullets
    - 4 بطاقات
@@ -38,7 +39,7 @@ CONTENT_DISTRIBUTION_RULES = """
    - شرائح محتوى (N) — العدد يحدده المحتوى
 7. **تنوع التصميم:** لا تجعل شريحتين متتاليتين بنفس نمط التصميم (مثلاً لا تجعل شريحتين متتاليتين كلتيهما bullets)
 8. **الشرائح الثابتة:** الغلاف (1)، الفهرس (2)، المود بورد (قبل الأخيرة)، الختام (الأخيرة)
-9. **شرائح تحليل الموقع:** إذا وُجدت بيانات موقع (location_lat/lng) أو (location_address)، أضف شرائح map_overview → map_landmarks → map_access → site_specs → site_photos → map_catchment متسلسلة بعد الفهرس
+9. **شرائح تحليل الموقع:** إذا وُجدت بيانات موقع (location_lat/lng) أو (location_address)، أضف شرائح map_overview إلى map_landmarks إلى map_access إلى site_specs إلى site_photos إلى map_catchment متسلسلة بعد الفهرس
 """
 
 
@@ -1014,29 +1015,19 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
     return html
 
 
-def _replace_emojis_with_svg(html):
-    """Replace emoji characters inside HTML text nodes with relevant inline SVG icons."""
-    if not html:
-        return html
-    def _node_repl(match):
-        # Preserve the tag delimiters and replace every emoji in the text node.
-        return '>' + emoji_icons.replace_emojis_in_text(match.group(1)) + '<'
-    # Only replace inside text nodes (between > and <), not inside tag definitions.
-    return re.sub(r'>([^<]*?)<', _node_repl, html)
-
-
 def _strip_presentation_icons(html):
-    """Remove generated icon markup and emoji while retaining company logo images and inline icons."""
+    """Remove all icon markup and emoji, keeping company logo images.
+
+    Emojis used to be converted into inline SVG icons first, which the SVG removal below then
+    deleted anyway. The product rule is that no icon is ever produced, so they are simply stripped.
+    """
     if not html:
         return html
-    def _remove_svg(match):
-        return ''
-    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', _remove_svg, html, flags=re.IGNORECASE)
+    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', '', html, flags=re.IGNORECASE)
     html = re.sub(
         r'<(?:i|span|div)\b[^>]*(?:class|id)=["\'][^"\']*(?:icon|emoji|lucide|fa-|material-icons)[^"\']*["\'][^>]*>[\s\S]*?</(?:i|span|div)\s*>',
         '', html, flags=re.IGNORECASE
     )
-    # Any remaining emojis are stripped, but ideally _replace_emojis_with_svg handled them first.
     return _ICON_RE.sub('', html)
 
 
@@ -1047,8 +1038,7 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     slide_type is the semantic type (cover, index, content, closing, ...).
     slide_num / total_slides are used for page numbers and cover/closing detection.
     """
-    # Replace emojis with inline SVGs, then strip external SVG/icon fonts.
-    html = _replace_emojis_with_svg(html)
+    # No icons are ever produced: strip any SVG, icon markup and emoji the model emitted.
     html = _strip_presentation_icons(html)
 
     # Enforce image/placeholder rules.
@@ -1159,7 +1149,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
     landmarks_note = ''
     if landmarks_matrix:
         landmarks_note = (
-            "⚠️ إرشادات هامة لعرض المعالم:\n"
+            "إرشادات هامة لعرض المعالم:\n"
             "يجب عرض المسافة والوقت معاً لكل معلم بدون استثناء بالصيغة التاعية: (اسم المعلم - المسافة بالكم - الوقت بالدقائق)، مثل: 'ميدان السارية (1.5 كم - 5 دقائق)'.\n"
             "استخدم البيانات الموثقة التالية كما هي وممنوع تعديل الأرقام:\n" +
             json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
@@ -1183,7 +1173,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
 - استخدم ##LOGO## للشعار، ##IMAGE_COVER## لصورة الغلاف، ##MOODBOARD_IMAGE_N## لصور المود بورد
 - للخرائط: ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##
 - لصور الموقع: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
-- ⛔ ممنوع base64 أو روابط صور خارجية
+- ممنوع base64 أو روابط صور خارجية
 """
 
     results = [None] * total

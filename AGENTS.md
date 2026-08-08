@@ -2,6 +2,26 @@
 
 Project notes for automated agents working on this repo (Manafe — real-estate proposal generator).
 
+## No icons, no emojis — anywhere
+
+This is a hard product rule, not a preference. **Never add an emoji or an icon** to this project:
+
+- No emoji characters in UI strings, buttons, labels, placeholders, toasts, table cells, comments,
+  commit messages, or generated slide/PDF content.
+- No icon glyphs used as labels either — arrows (`↑ ↓ → ←`), check marks, bullets-as-symbols. Use
+  Arabic words: `أعلى`, `أسفل`, `حذف`, `معاينة`.
+- No icon libraries or icon fonts (Font Awesome, Material Icons, Lucide, Feather, Bootstrap Icons).
+- No decorative inline `<svg>`. SVG is allowed only for genuine data rendering — currently just
+  `#mapPolygonOverlay`, which draws the plot boundary.
+- Use a text monogram (first letter) or a short text label where a placeholder image is missing.
+
+`slide_engine._strip_presentation_icons()` enforces this on generated slides, and
+`test_ui_contains_no_emojis_or_icon_glyphs` enforces it on `index.html`. If either fails, remove the
+glyph — do not relax the check.
+
+`emoji_icons.py` exists but is deliberately unused: it turned emojis into inline SVG icons, which
+the very next line then stripped. Do not wire it back in.
+
 ## Stack
 
 - Backend: Flask, single file `app.py` (~7.4k lines). DB layer in `db.py` (SQLite locally, Postgres via `DATABASE_URL`).
