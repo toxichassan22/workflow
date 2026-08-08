@@ -503,6 +503,26 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('targetCarry=profit*carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
+    def test_land_documents_upload_on_selection_not_on_save(self):
+        """The upload used to run inside collectTenantFormData, which only executed from the
+        autosave. Once autosave was removed the files sat on "saving" forever and the analyse
+        button saw no file ids to send."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        # Choosing a file must upload it, the way land photos already did.
+        self.assertIn('uploadLandDocuments(input);', index_source)
+        self.assertIn('async function uploadLandDocuments(input)', index_source)
+        self.assertIn("uploadTenantProjectFileInput(input, 'land_documents_files')", index_source)
+
+        # The old change handler only drew placeholders and waited for a save that never came.
+        self.assertNotIn(
+            "renderLandDocumentsUploadState(Array.from(input.files).map(file => ({ originalName: file.name, fileSize: file.size, status: 'pending' })));\n                triggerAutoSaveDraft();",
+            index_source)
+
+        # And the card must not claim an autosave that no longer exists.
+        self.assertNotIn('جاري الحفظ تلقائيًا', index_source)
+        self.assertIn("'جاري الرفع...'", index_source)
+
     def test_uploaded_land_documents_can_be_removed(self):
         """A wrongly uploaded deed or croquis had no way out: the card offered preview only."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')

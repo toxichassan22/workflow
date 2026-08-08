@@ -7530,8 +7530,7 @@
                   input.files = transfer.files;
                   toast('يمكن رفع ملفين فقط: الرخصة والكروكي');
                 }
-                renderLandDocumentsUploadState(Array.from(input.files).map(file => ({ originalName: file.name, fileSize: file.size, status: 'pending' })));
-                triggerAutoSaveDraft();
+                uploadLandDocuments(input);
               });
               renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
             }
@@ -11013,7 +11012,7 @@
             'border-radius:6px;padding:2px 6px;flex:none">' + (isPdf ? 'PDF' : 'صورة') + '</span>' +
             '<span style="font-weight:600;word-break:break-word;flex:1">' + escapeHtml(name) + '</span></div>' +
             '<span class="tenant-hint" style="margin:0">' + escapeHtml(sizeText) +
-            (sizeText && !pending ? ' — ' : '') + (pending ? 'جاري الحفظ تلقائيًا' : 'محفوظ') + '</span>' +
+            (sizeText ? ' — ' : '') + (pending ? 'جاري الرفع...' : 'محفوظ') + '</span>' +
             (pending ? '' :
               '<div style="display:flex;gap:6px">' +
               '<button type="button" class="btn ghost" style="flex:1;padding:6px 10px" onclick="openProjectFilePreview(' + args + ')">معاينة الملف</button>' +
@@ -11021,6 +11020,25 @@
               String(file.id || '').replace(/'/g, "\\'") + '\')">حذف</button></div>') +
             '</div>';
         }).join('') + '</div></div>';
+    }
+
+    // Uploading is its own explicit action, triggered by choosing a file. It used to happen only
+    // inside collectTenantFormData, which ran from the autosave, so once autosave was removed the
+    // files sat on "saving" forever and the analyse button saw no ids to send.
+    async function uploadLandDocuments(input) {
+      const chosen = Array.from(input?.files || []).slice(0, 2);
+      if (!chosen.length) return;
+      renderLandDocumentsUploadState(chosen.map(file => ({
+        originalName: file.name, fileSize: file.size, status: 'pending'
+      })));
+      try {
+        const uploaded = await uploadTenantProjectFileInput(input, 'land_documents_files');
+        renderLandDocumentsUploadState(Array.isArray(uploaded) ? uploaded : []);
+        triggerAutoSaveDraft();
+      } catch (error) {
+        toast('تعذر رفع الملفات: ' + (error.message || error));
+        renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
+      }
     }
 
     // Detaches the document from this draft the same way removeLandPhoto does. The stored file is
