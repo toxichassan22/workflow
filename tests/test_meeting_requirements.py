@@ -845,6 +845,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('onclick="removeTimelineRow(this)"', index_source)
         self.assertIn('if (!tbody.rows.length) addTimelineRow();', index_source)
 
+        # The slide title/subtitle fields are gone: nothing consumed them, so they invited the user
+        # to fill in a heading that reached neither the slides nor the PDF.
+        self.assertNotIn('timeline_slide_title', index_source)
+        self.assertNotIn('timeline_slide_subtitle', index_source)
+
+        # A missing start year used to collapse every stage into year 1 with no visible cause.
+        self.assertIn('id="timelineStartYearWarning"', index_source)
+        self.assertIn('startYearWarning.hidden = Number.isFinite(startYear) || !namedStages.length;',
+                      index_source)
+
         # A single shared builder feeds the blank row, the add button and draft hydration.
         self.assertIn('function timelineRowHtml(data = {})', index_source)
         self.assertIn('timelineRows.forEach(row => addTimelineRow(row));', index_source)

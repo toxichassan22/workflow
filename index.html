@@ -9282,9 +9282,9 @@
         <div class="tenant-grid" style="grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:12px">
           <div class="tenant-field"><label>سنة البداية</label><input type="number" id="tlStartYear" data-key="timeline_start_year" data-type="number" value="2026" onchange="recalcTimeline()"></div>
           <div class="tenant-field"><label>عدد السنوات</label><input type="number" id="tlYears" data-key="timeline_years" data-type="number" value="3" onchange="recalcTimeline()"></div>
-          <div class="tenant-field full"><label>عنوان الشريحة</label><input type="text" data-key="timeline_slide_title" data-type="text" value="الجدول الزمني للمشروع" placeholder="الجدول الزمني للمشروع"></div>
-          <div class="tenant-field full"><label>عنوان فرعي</label><input type="text" data-key="timeline_slide_subtitle" data-type="text" placeholder="مراحل التنفيذ والتوزيع الزمني"></div>
         </div>
+        <div id="timelineStartYearWarning" class="validation-panel error" hidden>اكتب «سنة البداية» أولًا: بدونها لا يمكن
+          تحويل سنوات المراحل إلى سنوات الدراسة المالية، وستُحسب كلها في السنة الأولى.</div>
         <div class="fin-table-wrap">
           <table class="fin-table" id="timelineTable">
             <thead><tr><th>المرحلة</th><th>السنة</th><th>الربع</th><th>المدة (أشهر)</th><th>الملاحظات</th><th style="width:46px"></th></tr></thead>
@@ -9376,6 +9376,12 @@
 
       const warning = document.getElementById('timelineStagesWarning');
       if (warning) warning.hidden = namedStages.length > 0;
+      // Without a start year the calendar-to-relative conversion below cannot run, and every stage
+      // silently collapses into year 1 — wrong numbers with no visible cause.
+      const startYearWarning = document.getElementById('timelineStartYearWarning');
+      if (startYearWarning) {
+        startYearWarning.hidden = Number.isFinite(startYear) || !namedStages.length;
+      }
       if (!scheduleBody) return;
 
       // Percentages are this study's own data, so carry them over by stage name on every rebuild.
@@ -10774,8 +10780,6 @@
         /* ── Timeline fields ────────────────────── */
         timeline_start_year: '2026',
         timeline_years: '3',
-        timeline_slide_title: 'الجدول الزمني للمشروع',
-        timeline_slide_subtitle: 'مراحل التنفيذ من التراخيص إلى التسليم',
       };
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
       let filled = 0;
