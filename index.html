@@ -3539,16 +3539,14 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
         <div>
           <h2>فريق العمل</h2>
-          <p class="tenant-hint">الجهات المسجّلة هنا تظهر في كل ملفات المشاريع. داخل أي مشروع يمكن استبعاد جهة من ذلك
-            الملف وحده، أو إضافة جهة تخصّه فقط.</p>
+          <p class="tenant-hint">الجهات المسجّلة هنا تظهر في كل المشاريع.</p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
 
       <div style="background:#fbf7f4;border:1px solid #e8ded6;border-radius:16px;padding:18px;margin-bottom:20px">
         <h3 style="margin:0 0 4px;font-size:15px">أقسام فريق العمل</h3>
-        <p class="tenant-hint" style="margin:0 0 12px">أنت من يحدد الأقسام واسم كل قسم. حدّد لكل قسم هل يقبل جهة واحدة
-          فقط أم أكثر من جهة.</p>
+        <p class="tenant-hint" style="margin:0 0 12px">سمِّ القسم وحدّد عدد الجهات المسموح فيه.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
           <div class="tenant-field" style="flex:1;min-width:220px">
             <label>اسم القسم</label>
@@ -6093,12 +6091,8 @@
       div.appendChild(createProjectSectionHeader('section-team', 'فريق العمل'));
       const body = document.createElement('div');
       body.innerHTML = `
-        <p class="tenant-hint">الجهات المسجّلة في إعدادات الشركة تظهر هنا في كل مشروع. استبعد أي جهة من هذا الملف
-          دون التأثير على باقي المشاريع، أو أضف جهة تخصّ هذا المشروع وحده.</p>
         <div id="projectTeamLibrary"></div>
-        <h4 style="margin:18px 0 4px;color:var(--p);font-size:14px">جهات خاصة بهذا المشروع</h4>
-        <p class="tenant-hint" style="margin:0 0 8px">أطراف تشارك في هذا المشروع وحده — مقاول أو استشاري أو مكتب
-          مساحة مثلًا. لن تظهر في المشاريع الأخرى، ولن تُضاف إلى مكتبة الشركة.</p>
+        <h4 style="margin:18px 0 8px;color:var(--p);font-size:14px">جهات خاصة بهذا المشروع</h4>
         <div id="projectTeamLocal"></div>
         <button type="button" class="btn ghost small" style="margin-top:10px" onclick="addLocalTeamEntity()">+ إضافة جهة لهذا المشروع</button>
         <input type="hidden" data-key="team_selection" data-type="text" id="projectTeamData">
@@ -6138,7 +6132,7 @@
               'onclick="toggleTeamEntityInFile(\'' + safeId + '\')">' +
               (excluded ? 'إعادة الجهة إلى هذا الملف' : 'استبعاد من هذا الملف') + '</button></div>';
           }).join('') + '</div>'
-        : '<p class="tenant-hint">لا توجد جهات في إعدادات الشركة. أضفها من صفحة «فريق العمل» في الإعدادات لتظهر في كل المشاريع.</p>';
+        : '<p class="tenant-hint">لا توجد جهات في إعدادات الشركة.</p>';
 
       // Project-only entities are edited in place: they need the same six fields as the library,
       // including a logo, which a prompt() cannot collect.
@@ -6175,7 +6169,7 @@
               '<button type="button" class="btn ghost danger" style="width:100%;margin-top:10px;padding:5px 8px;font-size:.78rem" ' +
               'onclick="removeLocalTeamEntity(\'' + safeId + '\')">حذف من هذا المشروع</button></div>';
           }).join('') + '</div>'
-        : '<p class="tenant-hint">لا توجد جهات مخصّصة لهذا المشروع.</p>';
+        : '';
 
       document.querySelectorAll('#section-team img[data-team-logo]').forEach(image => {
         attachProjectFileThumbnail(image, image.dataset.teamLogo);
@@ -6432,7 +6426,7 @@
       const host = document.getElementById('tenantTeamList');
       if (!host) return;
       if (!tenantTeamEntities.length) {
-        host.innerHTML = '<p class="tenant-hint">لا توجد جهات مسجّلة بعد. أضف المطور العقاري والمكتب الهندسي ليظهرا في كل المشاريع.</p>';
+        host.innerHTML = '<p class="tenant-hint">لا توجد جهات مسجّلة بعد.</p>';
         return;
       }
       const groups = new Map();
@@ -7954,9 +7948,8 @@
 
         <div class="finance-block">
           <h3>7. مراحل التطوير ودفعات المطور</h3>
-          <p class="hint">هذا الجدول يوزع تكاليف التطوير ودفعات المطور على السنوات المستخدمة في التدفقات النقدية.</p>
-          <div class="calculation-note">المراحل وسنواتها مأخوذة من قسم <strong>الجدول الزمني للمشروع</strong> ولا تُعدّل هنا. لإضافة مرحلة أو حذفها أو تغيير سنتها، عدّل الجدول الزمني. النسبتان أدناه فقط تُدخلان هنا.</div>
-          <div id="timelineStagesWarning" class="validation-panel error" hidden>لا توجد مراحل في الجدول الزمني بعد، فلن تُوزَّع تكاليف التطوير على السنوات. أضف المراحل من قسم الجدول الزمني.</div>
+          <p class="hint">المراحل وسنواتها تُعدّل من قسم الجدول الزمني. النسبتان فقط تُدخلان هنا.</p>
+          <div id="timelineStagesWarning" class="validation-panel error" hidden>لا توجد مراحل في الجدول الزمني بعد، فلن تُوزَّع تكاليف التطوير على السنوات.</div>
           <div class="table-wrap">
             <table id="scheduleTable">
               <thead><tr><th>المرحلة</th><th>سنة التنفيذ</th><th>نسبة تكلفة التطوير %</th><th>نسبة دفعة المطور %</th><th>قيمة تكلفة المرحلة</th><th>قيمة دفعة المطور</th></tr></thead>
@@ -9242,8 +9235,7 @@
           <div class="tenant-field"><label>سنة البداية</label><input type="number" id="tlStartYear" data-key="timeline_start_year" data-type="number" value="2026" onchange="recalcTimeline()"></div>
           <div class="tenant-field"><label>عدد السنوات</label><input type="number" id="tlYears" data-key="timeline_years" data-type="number" value="3" onchange="recalcTimeline()"></div>
         </div>
-        <div id="timelineStartYearWarning" class="validation-panel error" hidden>اكتب «سنة البداية» أولًا: بدونها لا يمكن
-          تحويل سنوات المراحل إلى سنوات الدراسة المالية، وستُحسب كلها في السنة الأولى.</div>
+        <div id="timelineStartYearWarning" class="validation-panel error" hidden>اكتب «سنة البداية» — بدونها تُحسب كل المراحل في السنة الأولى.</div>
         <div class="fin-table-wrap">
           <table class="fin-table" id="timelineTable">
             <thead><tr><th>المرحلة</th><th>السنة</th><th>الربع</th><th>المدة (أشهر)</th><th>الملاحظات</th><th style="width:46px"></th></tr></thead>

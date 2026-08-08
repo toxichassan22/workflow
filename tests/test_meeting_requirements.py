@@ -904,7 +904,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         # No way to add or delete a stage from the financial study.
         self.assertNotIn('onclick="addScheduleStage()"', index_source)
-        self.assertIn('المراحل وسنواتها مأخوذة من قسم', index_source)
+        self.assertIn('المراحل وسنواتها تُعدّل من قسم الجدول الزمني', index_source)
 
         # Seeded stages are gone; the timeline drives the list.
         self.assertNotIn('التصميم والتراخيص والأعمال المبكرة', index_source)
