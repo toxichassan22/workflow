@@ -9439,6 +9439,13 @@
         button.appendChild(statusLabel);
         sidebar.appendChild(button);
       });
+
+      const conceptual2dButton = document.createElement('button');
+      conceptual2dButton.type = 'button';
+      conceptual2dButton.className = 'project-section-nav-item';
+      conceptual2dButton.textContent = 'المخططات التصورية 2D';
+      sidebar.appendChild(conceptual2dButton);
+
       appendWorkflowNavigation(sidebar, 'tenantProjectPage', false);
     }
 
