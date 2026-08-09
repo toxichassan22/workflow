@@ -7728,6 +7728,14 @@
       // first. Components are part of the financial study; there is no separate section for them.
       addTimelineTable(form);
       addFinancialCalculations(form);
+
+      const conceptual2dSection = document.createElement('div');
+      conceptual2dSection.className = 'tenant-form-section';
+      conceptual2dSection.id = 'section-conceptual-2d';
+      conceptual2dSection.dataset.section = 'section-conceptual-2d';
+      conceptual2dSection.appendChild(createProjectSectionHeader('section-conceptual-2d', 'المخططات التصورية 2D'));
+      form.appendChild(conceptual2dSection);
+
       const projectSections = Array.from(form.querySelectorAll('.tenant-form-section[data-section]'));
       populateProjectSidebar(projectSections);
       const initialStatuses = {};
@@ -9439,12 +9447,6 @@
         button.appendChild(statusLabel);
         sidebar.appendChild(button);
       });
-
-      const conceptual2dButton = document.createElement('button');
-      conceptual2dButton.type = 'button';
-      conceptual2dButton.className = 'project-section-nav-item';
-      conceptual2dButton.textContent = 'المخططات التصورية 2D';
-      sidebar.appendChild(conceptual2dButton);
 
       appendWorkflowNavigation(sidebar, 'tenantProjectPage', false);
     }
