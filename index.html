@@ -10162,6 +10162,7 @@
     }
 
     function showSection(sectionKey, fromHistory = false) {
+      if (tenantFloorDesignEmbedded && sectionKey !== 'section-conceptual-2d') exitTenantFloorDesignPage();
       if (sectionKey === 'section-conceptual-2d') {
         openTenantFloorDesignPage(fromHistory);
         return;
