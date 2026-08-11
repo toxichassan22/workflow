@@ -3345,8 +3345,8 @@
     .tenant-floor-design-analysis-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .tenant-floor-design-analysis-section { display: grid; gap: 6px; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
     .tenant-floor-design-analysis-section strong { color: var(--p); font-size: 12px; }
-    .tenant-floor-design-analysis-section ul { margin: 0; padding: 0 18px 0 0; color: var(--muted); font-size: 11px; }
-    .tenant-floor-design-analysis-section li { margin: 3px 0; }
+    .tenant-floor-design-analysis-section ul { margin: 0; padding: 0 18px 0 0; color: var(--muted); font-size: 11px; line-height: 1.75; }
+    .tenant-floor-design-analysis-section li { margin: 3px 0; overflow-wrap: anywhere; white-space: normal; }
     .tenant-floor-design-readiness { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
     .tenant-floor-design-readiness h4 { margin: 0; color: var(--p); font-size: 16px; }
     .tenant-floor-design-readiness p { margin: 0; color: var(--muted); font-size: 12px; }
@@ -8557,6 +8557,44 @@
       return { draftId: tenantProjectData?.draftId || null, projectData, floorDesignState: tenantFloorDesignState };
     }
 
+    function formatTenantFloorDesignAnalysisValue(value) {
+      if (value === null || value === undefined || value === '') return '';
+      if (Array.isArray(value)) {
+        if (value.every(item => Number.isInteger(Number(item)))) return formatTenantFloorDesignNumbers(value);
+        return value.map(item => formatTenantFloorDesignAnalysisValue(item)).filter(Boolean).join('، ');
+      }
+      if (typeof value !== 'object') return String(value);
+      const labels = { floorNumbers: 'الأدوار', floorCount: 'عدد الأدوار', listedFloorRange: 'نطاق الأدوار', components: 'المكونات', description: 'الوصف', note: 'ملاحظة', warning: 'تحذير', impact: 'الأثر', drawing_impact: 'أثره على الرسم', item: 'البند', value: 'القيمة', source: 'المصدر' };
+      return Object.entries(value).map(([key, item]) => {
+        if (key === 'classification' || key === 'group_id' || key === 'id') return '';
+        const label = labels[key] || key;
+        const formatted = formatTenantFloorDesignAnalysisValue(item);
+        return formatted ? `${label}: ${formatted}` : '';
+      }).filter(Boolean).join('، ');
+    }
+
+    function formatTenantFloorDesignAnalysisItem(value) {
+      if (typeof value === 'string') return value;
+      if (!value || typeof value !== 'object') return formatTenantFloorDesignAnalysisValue(value);
+      const classificationLabels = { constraint: 'قيد إلزامي', drawing_impact: 'أثر على الرسم', warning: 'تحذير', note: 'ملاحظة' };
+      const prefix = classificationLabels[value.classification] || '';
+      const item = value.item || value.label || value.name || '';
+      const rawValue = value.value !== undefined ? value.value : '';
+      const parts = [];
+      if (prefix) parts.push(prefix);
+      if (item && rawValue !== '') parts.push(`${item}: ${formatTenantFloorDesignAnalysisValue(rawValue)}`);
+      else if (item) parts.push(item);
+      if (value.description) parts.push(`الوصف: ${formatTenantFloorDesignAnalysisValue(value.description)}`);
+      if (value.drawing_impact) parts.push(`الأثر على الرسم: ${formatTenantFloorDesignAnalysisValue(value.drawing_impact)}`);
+      if (value.impact) parts.push(`الأثر: ${formatTenantFloorDesignAnalysisValue(value.impact)}`);
+      if (value.warning) parts.push(`التحذير: ${formatTenantFloorDesignAnalysisValue(value.warning)}`);
+      if (value.note) parts.push(`ملاحظة: ${formatTenantFloorDesignAnalysisValue(value.note)}`);
+      if (value.floorNumbers) parts.push(`الأدوار: ${formatTenantFloorDesignAnalysisValue(value.floorNumbers)}`);
+      if (value.floorCount !== undefined) parts.push(`عدد الأدوار: ${value.floorCount}`);
+      if (value.components) parts.push(`المكونات: ${formatTenantFloorDesignAnalysisValue(value.components)}`);
+      return parts.length ? parts.join(' — ') : formatTenantFloorDesignAnalysisValue(value);
+    }
+
     function renderTenantFloorDesignAnalysisResult() {
       const result = tenantFloorDesignState?.analysis;
       const host = document.getElementById('tenantFloorDesignAnalysisResult');
@@ -8575,7 +8613,7 @@
         ['التحذيرات', result.warnings],
         ['الافتراضات', result.assumptions]
       ].filter(([, values]) => Array.isArray(values) && values.length);
-      sections.innerHTML = entries.map(([label, values]) => `<div class="tenant-floor-design-analysis-section"><strong>${escapeHtml(label)}</strong><ul>${values.map(value => `<li>${escapeHtml(typeof value === 'string' ? value : JSON.stringify(value))}</li>`).join('')}</ul></div>`).join('');
+      sections.innerHTML = entries.map(([label, values]) => `<div class="tenant-floor-design-analysis-section"><strong>${escapeHtml(label)}</strong><ul>${values.map(value => `<li>${escapeHtml(formatTenantFloorDesignAnalysisItem(value))}</li>`).join('')}</ul></div>`).join('');
     }
 
     function approveTenantFloorDesignAnalysis() {
