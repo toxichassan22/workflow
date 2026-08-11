@@ -6029,7 +6029,8 @@ def _extract_land_site_facts(parsed, request_data=None):
     request_data = request_data if isinstance(request_data, dict) else {}
     facts = {}
     for key in ('area_sqm', 'croquis_land_area', 'zoning_code', 'land_use', 'city',
-                'project_type', 'axis_type', 'building_type', 'plot_number'):
+                'project_type', 'axis_type', 'building_type', 'plot_number',
+                'location_address', 'location_lat', 'location_lng'):
         value = source.get(key)
         if value in (None, ''):
             value = request_data.get(key)
@@ -6879,6 +6880,25 @@ def api_extract_croquis():
     import traceback
     try:
         data = request.json or {}
+        location_address = str(
+            data.get('locationAddress') or data.get('location_address') or ''
+        ).strip()
+        try:
+            location_lat = float(data.get('locationLat') or data.get('location_lat'))
+            location_lng = float(data.get('locationLng') or data.get('location_lng'))
+        except (TypeError, ValueError):
+            location_lat = location_lng = None
+        if (
+            not location_address.startswith('http')
+            or location_lat is None or location_lng is None
+            or not (-90 <= location_lat <= 90)
+            or not (-180 <= location_lng <= 180)
+        ):
+            return jsonify({
+                'success': False,
+                'error': 'رابط Google Maps صالح وإحداثيات الموقع مطلوبان قبل بدء تحليل الأرض والكروكي',
+                'failureReason': 'location_required',
+            }), 400
         legacy_file_data = data.get('fileData') or data.get('croquis_file') or ''
         if not data.get('documents') and not legacy_file_data:
             return jsonify({'success': False, 'error': 'يرجى رفع صورة الأرض أو الكروكي أو الرخصة أولاً'}), 400
@@ -7078,11 +7098,15 @@ def api_extract_croquis():
                 'land_use': data.get('landUse') or data.get('allowed_uses_restrictions') or '',
                 'city': data.get('city') or '',
                 'project_type': data.get('projectType') or '',
+                'location_address': data.get('locationAddress') or data.get('location_address') or '',
+                'location_lat': data.get('locationLat') or data.get('location_lat') or '',
+                'location_lng': data.get('locationLng') or data.get('location_lng') or '',
             }
             facts_prompt = (
                 "أنت مستخرج حقائق أولي من صور مستندات الأرض والكروكي. أعد JSON فقط بهذا الشكل: "
                 '{"site_facts":{"plot_number":"","area_sqm":null,"zoning_code":"",'
-                '"land_use":"","city":"","project_type":"","axis_type":"","building_type":""},'
+                '"land_use":"","city":"","project_type":"","axis_type":"","building_type":"",'
+                '"location_address":"","location_lat":null,"location_lng":null},'
                 '"uncertainties":[]} '
                 "اقرأ الصور فقط ولا تستخدم أي لائحة أو تخمين. area_sqm يجب أن تكون مساحة «بموجب التنظيم» إن ظهرت، "
                 "وإذا لم تكن واضحة اتركها null. هذا استخراج تمهيدي لا يكتب الملخص النهائي."

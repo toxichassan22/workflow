@@ -4799,6 +4799,7 @@
     let tenantProjectMode = 'new';
     let tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
     let tenantArchiveCache = null;
+    let tenantLocationGeocodeRequest = null;
 
     function mapsSignature(d, highlightSite = true) {
       d = d || tenantProjectData || {};
@@ -7423,6 +7424,7 @@
           input.value = String(value);
         }
       });
+      syncLocationAddressMirror(source.location_address || tenantProjectData.location_address || '');
 
       const timelineRows = parseStoredProjectTable(source.timeline_table_data || source.timelineRows);
       const timelineBody = document.getElementById('timelineTableBody');
@@ -7829,6 +7831,28 @@
       return field.fieldLabel;
     }
 
+    function syncLocationAddressMirror(value) {
+      const mirror = document.getElementById('locationAddressMirror');
+      if (mirror) mirror.value = String(value || '');
+      const status = document.getElementById('locationAddressMirrorStatus');
+      if (status) status.textContent = value ? 'يتم تعديل الرابط من قسم الأرض والكروكي فقط.' : 'أدخل الرابط من قسم الأرض والكروكي.';
+    }
+
+    async function geocodeTenantLocationLink(input, latInput, lngInput, force = false) {
+      const value = String(input?.value || '').trim();
+      tenantProjectData.location_address = value;
+      syncLocationAddressMirror(value);
+      if (!value) return false;
+      if (!isGoogleMapsUrl(value)) {
+        toast('أدخل رابط Google Maps صحيحًا لموقع الأرض');
+        return false;
+      }
+      if (tenantLocationGeocodeRequest) return tenantLocationGeocodeRequest;
+      tenantLocationGeocodeRequest = geocodeProjectAddress(input, latInput, lngInput, force)
+        .finally(() => { tenantLocationGeocodeRequest = null; });
+      return tenantLocationGeocodeRequest;
+    }
+
     function renderTenantProjectForm(fields) {
       const form = document.getElementById('tenantProjectForm');
       if (!form) return;
@@ -7993,8 +8017,27 @@
             input.type = 'url';
             input.inputMode = 'url';
             input.required = true;
-            label.textContent = 'رابط موقع المشروع في Google Maps *';
+            label.textContent = 'رابط موقع الأرض في Google Maps *';
             input.placeholder = 'https://maps.google.com/...';
+            input.addEventListener('input', () => {
+              const value = input.value.trim();
+              const previous = String(tenantProjectData.location_address || '').trim();
+              tenantProjectData.location_address = value;
+              syncLocationAddressMirror(value);
+              if (previous && previous !== value) {
+                tenantProjectData.location_lat = '';
+                tenantProjectData.location_lng = '';
+                tenantProjectData.location_coordinates_confirmed = false;
+                if (latInput) latInput.value = '';
+                if (lngInput) lngInput.value = '';
+                invalidateTenantMapAssets();
+              }
+            });
+            input.addEventListener('blur', () => {
+              geocodeTenantLocationLink(input, latInput, lngInput, false).catch(error => {
+                console.warn('[LOCATION LINK] geocoding failed', error);
+              });
+            });
           }
           if (f.fieldKey === 'location_lat') { latInput = input; locationSection = sectionDiv; }
           if (f.fieldKey === 'location_lng') { lngInput = input; locationSection = sectionDiv; }
@@ -8080,6 +8123,29 @@
 
           sectionDiv.appendChild(div);
         });
+
+        if (sectionKey === 'location') {
+          const mirrorField = document.createElement('div');
+          mirrorField.className = 'tenant-field full';
+          const mirrorLabel = document.createElement('label');
+          mirrorLabel.textContent = 'رابط موقع الأرض في Google Maps';
+          const mirrorInput = document.createElement('input');
+          mirrorInput.id = 'locationAddressMirror';
+          mirrorInput.type = 'url';
+          mirrorInput.readOnly = true;
+          mirrorInput.tabIndex = -1;
+          mirrorInput.value = String(tenantProjectData.location_address || '');
+          mirrorInput.style.cssText = 'background:#f4f7fa;color:var(--muted);cursor:not-allowed;';
+          const mirrorStatus = document.createElement('div');
+          mirrorStatus.id = 'locationAddressMirrorStatus';
+          mirrorStatus.className = 'tenant-hint';
+          mirrorStatus.style.margin = '6px 0 0';
+          mirrorField.appendChild(mirrorLabel);
+          mirrorField.appendChild(mirrorInput);
+          mirrorField.appendChild(mirrorStatus);
+          sectionDiv.appendChild(mirrorField);
+          syncLocationAddressMirror(tenantProjectData.location_address || '');
+        }
 
         if (sectionKey === 'land_croquis') {
           const analysisResultsField = document.createElement('div');
@@ -10953,8 +11019,8 @@
 
     async function geocodeProjectAddress(addressInput, latInput, lngInput, force = false) {
       const val = addressInput ? addressInput.value.trim() : '';
-      if (!force && latInput && latInput.value.trim() && lngInput && lngInput.value.trim()) { return; }
-      if (!val) { toast('أدخل عنوان الموقع أو رابط قوقل ماب أولاً'); return; }
+      if (!force && latInput && latInput.value.trim() && lngInput && lngInput.value.trim()) return true;
+      if (!val) { toast('أدخل عنوان الموقع أو رابط قوقل ماب أولاً'); return false; }
       showLoader('جاري تحديد الإحداثيات', '');
       const payload = { address: val, maps_link: val };
       const data = await api('POST', '/api/geocode', payload);
@@ -10962,11 +11028,17 @@
       if (data.success && data.lat && data.lng) {
         if (latInput) latInput.value = data.lat;
         if (lngInput) lngInput.value = data.lng;
+        tenantProjectData.location_address = val;
+        tenantProjectData.location_lat = data.lat;
+        tenantProjectData.location_lng = data.lng;
+        tenantProjectData.location_coordinates_confirmed = false;
+        syncLocationAddressMirror(val);
         const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || val);
         toast('تم تحديد الموقع: ' + msg);
-      } else {
-        toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر أو عنوان نصي');
+        return true;
       }
+      toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر أو عنوان نصي');
+      return false;
     }
 
     function buildExtractedLandFieldData(data) {
@@ -11108,7 +11180,7 @@
       const projectContextKeys = [
         'project_name', 'project_type', 'project_idea', 'project_goal', 'target_audience',
         'project_stage', 'initial_features', 'initial_strengths', 'zoning_code',
-        'allowed_uses_restrictions'
+        'allowed_uses_restrictions', 'location_address', 'location_lat', 'location_lng'
       ];
       const projectContext = {};
       projectContextKeys.forEach(key => {
@@ -11129,7 +11201,22 @@
         mimeType: files[index]?.type || file.mimeType || ''
       })).filter(document => document.fileId);
       if (!documents.length) {
-        toast('يرجى رفع ملفي رخصة البناء والكروكي داخل الخانة أولًا');
+        toast('يرجى رفع الكروكي، والرخصة إذا كانت متوفرة، داخل الخانة أولًا');
+        return;
+      }
+      const locationInput = document.querySelector('#tenantProjectForm [data-key="location_address"]');
+      const locationLatInput = document.querySelector('#tenantProjectForm [data-key="location_lat"]');
+      const locationLngInput = document.querySelector('#tenantProjectForm [data-key="location_lng"]');
+      const locationLink = String(locationInput?.value || tenantProjectData.location_address || '').trim();
+      if (!isGoogleMapsUrl(locationLink)) {
+        toast('اكتب رابط Google Maps صحيحًا في قسم الأرض والكروكي قبل بدء التحليل');
+        return;
+      }
+      const locationReady = await geocodeTenantLocationLink(
+        locationInput, locationLatInput, locationLngInput, false
+      );
+      if (!locationReady || !locationLatInput?.value || !locationLngInput?.value) {
+        toast('تعذر استخراج إحداثيات الموقع من رابط Google Maps؛ لم يبدأ تحليل الاشتراطات');
         return;
       }
       clearLandAnalysisFailure();
@@ -11151,7 +11238,10 @@
           initialFeatures: projectContext.initial_features,
           initialStrengths: projectContext.initial_strengths,
           zoningCode: projectContext.zoning_code,
-          landUse: projectContext.allowed_uses_restrictions
+          landUse: projectContext.allowed_uses_restrictions,
+          locationAddress: projectContext.location_address,
+          locationLat: projectContext.location_lat,
+          locationLng: projectContext.location_lng
         });
         if (res.success && res.extractedData) {
           const data = res.extractedData;

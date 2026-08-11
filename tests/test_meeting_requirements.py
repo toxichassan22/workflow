@@ -289,6 +289,9 @@ class MeetingRequirementsTests(unittest.TestCase):
                 patch.object(self.application_module, '_call_land_analysis_model', return_value=(provider_response, 9000, '')):
             response = self.app.test_client().post('/api/extract-croquis', headers=self._headers(self.token_a), json={
                 'fileData': 'data:image/png;base64,test',
+                'locationAddress': 'https://www.google.com/maps/@24.0,46.0,17z',
+                'locationLat': 24.0,
+                'locationLng': 46.0,
             })
 
         self.assertEqual(response.status_code, 200, response.get_json())
@@ -296,6 +299,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(diagnostics['coordinates_rows'], 1)
         self.assertEqual(diagnostics['directions_with_values'], 4)
         self.assertEqual(diagnostics['status'], 'complete')
+
+    def test_extract_croquis_requires_resolved_google_location(self):
+        response = self.app.test_client().post('/api/extract-croquis', headers=self._headers(self.token_a), json={
+            'fileData': 'data:image/png;base64,test',
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['failureReason'], 'location_required')
 
     def test_land_analysis_pipeline_reads_both_regulation_sources_before_final_merge(self):
         final_payload = {
@@ -342,6 +352,9 @@ class MeetingRequirementsTests(unittest.TestCase):
                 patch.object(self.application_module, '_call_land_analysis_model', side_effect=stage_responses) as calls:
             response = self.app.test_client().post('/api/extract-croquis', headers=self._headers(self.token_a), json={
                 'fileData': 'data:image/png;base64,test',
+                'locationAddress': 'https://www.google.com/maps/@24.0,46.0,17z',
+                'locationLat': 24.0,
+                'locationLng': 46.0,
             })
 
         self.assertEqual(response.status_code, 200, response.get_json())
@@ -723,9 +736,15 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertIn(key, by_key)
             self.assertEqual(by_key[key]['sectionKey'], 'land_croquis')
         self.assertNotIn('subdivision_number', by_key)
+        self.assertEqual(by_key['location_address']['sectionKey'], 'land_croquis')
+        self.assertTrue(by_key['location_address']['isRequired'])
         # The plot number is no longer a combined "plot + plan" box.
         self.assertEqual(by_key['plot_number_croquis']['fieldLabel'], 'رقم القطعة')
         self.assertEqual(by_key['deed_date']['fieldLabel'], 'تاريخ الصك')
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('locationAddressMirror', index_source)
+        self.assertIn('geocodeTenantLocationLink', index_source)
+        self.assertIn('locationLat: projectContext.location_lat', index_source)
 
     def test_uploaded_land_documents_are_restored_as_server_metadata_after_refresh(self):
         client = self.app.test_client()
