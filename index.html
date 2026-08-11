@@ -3293,6 +3293,31 @@
     .tenant-floor-design-drawer-body textarea, .tenant-floor-design-drawer-body select { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; font: inherit; }
     .tenant-floor-design-chat-message { padding: 9px 10px; border-radius: 9px; background: #f7fafc; color: var(--muted); font-size: 12px; }
     .tenant-floor-design-chat-message.user { background: #e1f1ef; color: var(--txt, #252525); }
+    .tenant-floor-design-stage-home { display: grid; gap: 16px; padding-top: 14px; }
+    .tenant-floor-design-stage-intro { max-width: 760px; margin: 0 auto; color: var(--muted); font-size: 13px; text-align: center; }
+    .tenant-floor-design-stage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .tenant-floor-design-stage-card { display: grid; align-content: start; gap: 8px; min-height: 170px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: #fff; color: var(--txt, #252525); text-align: right; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+    .tenant-floor-design-stage-card:hover:not(:disabled) { border-color: var(--p); box-shadow: 0 8px 20px rgba(24,53,74,.08); transform: translateY(-2px); }
+    .tenant-floor-design-stage-card:disabled { cursor: not-allowed; opacity: .58; }
+    .tenant-floor-design-stage-card.active { border-color: var(--p); }
+    .tenant-floor-design-stage-number { color: var(--p); font-size: 12px; font-weight: 800; }
+    .tenant-floor-design-stage-card h3 { margin: 0; color: var(--p); font-size: 18px; }
+    .tenant-floor-design-stage-card p { margin: 0; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-stage-status { justify-self: start; margin-top: auto; padding: 4px 9px; border-radius: 999px; background: #f7fafc; color: var(--muted); font-size: 10px; }
+    .tenant-floor-design-stage-status.locked { background: #f3f3f3; color: #8a8a8a; }
+    .tenant-floor-design-stage-view[hidden] { display: none !important; }
+    .tenant-floor-design-stage-view { display: grid; gap: 14px; padding-top: 14px; }
+    .tenant-floor-design-stage-view-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+    .tenant-floor-design-stage-view-head h3 { margin: 0 0 3px; color: var(--p); font-size: 19px; }
+    .tenant-floor-design-stage-view-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-stage-view-head button { flex: 0 0 auto; }
+    .tenant-floor-design-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .tenant-floor-design-source-card { display: grid; gap: 5px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .tenant-floor-design-source-card strong { color: var(--p); font-size: 13px; }
+    .tenant-floor-design-source-card span { color: var(--muted); font-size: 11px; }
+    .tenant-floor-design-analysis-panel { min-height: 260px; padding: 22px; border: 1px dashed #b9cbd1; border-radius: 12px; background: #f7fafc; color: var(--muted); text-align: center; }
+    .tenant-floor-design-analysis-panel strong { display: block; margin-bottom: 6px; color: var(--p); font-size: 16px; }
+    .tenant-floor-design-stage-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 
     @media (max-width: 800px) {
       .tenant-floor-design-page { padding: 14px !important; }
@@ -3303,6 +3328,7 @@
       .tenant-floor-design-image-frame { min-height: 260px; }
     }
     @media (max-width: 520px) {
+      .tenant-floor-design-stage-grid, .tenant-floor-design-source-grid { grid-template-columns: 1fr; }
       .tenant-floor-design-setup-grid { grid-template-columns: 1fr; }
       .tenant-floor-design-field.full { grid-column: auto; }
       .tenant-floor-design-setup-card { padding: 20px; }
@@ -3860,6 +3886,58 @@
       <div id="tenantFloorDesignSectionHeader"></div>
       <p id="tenantFloorDesignStatus" class="tenant-hint">حدد الأدوار المتشابهة ثم ولّد صورة واحدة لكل مجموعة باستخدام Nano Banana.</p>
 
+      <div id="tenantFloorDesignStageHome" class="tenant-floor-design-stage-home" data-floor-design-stage-view="home">
+        <p class="tenant-floor-design-stage-intro">مساحة العمل مقسمة إلى مراحل واضحة حتى لا تظهر كل التعليمات والأدوات مرة واحدة.</p>
+        <div class="tenant-floor-design-stage-grid">
+          <button type="button" class="tenant-floor-design-stage-card" data-floor-design-stage-target="organization">
+            <span class="tenant-floor-design-stage-number">المرحلة الأولى</span>
+            <h3>تنظيم الأدوار والمكونات</h3>
+            <p>تقسيم الأدوار المتشابهة وربط مكونات الدراسة المالية بكل مجموعة.</p>
+            <span class="tenant-floor-design-stage-status">لم يبدأ</span>
+          </button>
+          <button type="button" class="tenant-floor-design-stage-card" data-floor-design-stage-target="analysis">
+            <span class="tenant-floor-design-stage-number">المرحلة الثانية</span>
+            <h3>تحليل البيانات والاشتراطات</h3>
+            <p>مراجعة ما فهمه AI من الأرض والكروكي والاشتراطات والمكونات والمساحات.</p>
+            <span class="tenant-floor-design-stage-status">لم يبدأ</span>
+          </button>
+          <button type="button" class="tenant-floor-design-stage-card" data-floor-design-stage-target="drawings">
+            <span class="tenant-floor-design-stage-number">المرحلة الثالثة</span>
+            <h3>المخططات 2D</h3>
+            <p>توليد Prompt وصورة لكل مجموعة، ثم تعديلها واعتمادها.</p>
+            <span class="tenant-floor-design-stage-status">لم يبدأ</span>
+          </button>
+          <button type="button" class="tenant-floor-design-stage-card" disabled>
+            <span class="tenant-floor-design-stage-number">المرحلة الرابعة</span>
+            <h3>الإيزومتريك والمخططات</h3>
+            <p>هذه المرحلة تحت الإنشاء إلى أن يكتمل تدريب النموذج عليها.</p>
+            <span class="tenant-floor-design-stage-status locked">تحت الإنشاء</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="tenantFloorDesignStageOrganization" class="tenant-floor-design-stage-view" data-floor-design-stage-view="organization" hidden>
+        <div class="tenant-floor-design-stage-view-head"><div><h3>تنظيم الأدوار والمكونات</h3><p>هذه المرحلة ستقرأ عدد الأدوار والمكونات من الأقسام السابقة، بدون تكرار إدخالها هنا.</p></div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل التصميم</button></div>
+        <div class="tenant-floor-design-source-grid">
+          <div class="tenant-floor-design-source-card"><strong>الأدوار المعتمدة</strong><span>تأتي من قسم الأرض والكروكي</span></div>
+          <div class="tenant-floor-design-source-card"><strong>مكونات المشروع</strong><span>تأتي من جدول مكونات الدراسة المالية</span></div>
+          <div class="tenant-floor-design-source-card"><strong>البدروم</strong><span>يظهر إجباريًا عند وجود مساحة بدرومات</span></div>
+        </div>
+        <div class="tenant-floor-design-analysis-panel"><strong>بانتظار بيانات الأدوار</strong><span>بعد اكتمال مصدر البيانات ستظهر هنا مجموعات مثل 1-10 و1/3/5 وتخصيص مكونات كل مجموعة.</span></div>
+        <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" id="tenantFloorDesignGroupSetupButton" disabled>تنظيم تشابه الأدوار</button></div>
+      </div>
+
+      <div id="tenantFloorDesignStageAnalysis" class="tenant-floor-design-stage-view" data-floor-design-stage-view="analysis" hidden>
+        <div class="tenant-floor-design-stage-view-head"><div><h3>تحليل البيانات والاشتراطات</h3><p>يعرض AI ما تم فهمه قبل السماح ببدء توليد المخططات.</p></div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل التصميم</button></div>
+        <div class="tenant-floor-design-source-grid">
+          <div class="tenant-floor-design-source-card"><strong>الأرض والكروكي</strong><span>الحدود، الاتجاهات، الارتدادات، المواقف والمداخل.</span></div>
+          <div class="tenant-floor-design-source-card"><strong>الدراسة المالية</strong><span>المكونات، الوحدات، المساحات، والبدروم.</span></div>
+          <div class="tenant-floor-design-source-card"><strong>صور الأرض والمراجع</strong><span>صور العميل وأي مراجع مرتبطة بالمشروع.</span></div>
+        </div>
+        <div class="tenant-floor-design-analysis-panel"><strong>التحليل سيظهر هنا</strong><span>هذه واجهة Frontend فقط حاليًا. سيتم عرض نتيجة AI في بطاقات قابلة للمراجعة والاعتماد.</span></div>
+        <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" disabled>بدء تحليل البيانات</button></div>
+      </div>
+
       <div id="tenantFloorDesignSetup" class="tenant-floor-design-setup" hidden>
         <div class="tenant-floor-design-setup-card">
           <h3>بانتظار بيانات الأدوار</h3>
@@ -3868,7 +3946,7 @@
         </div>
       </div>
 
-      <div id="tenantFloorDesignWorkspace" class="tenant-floor-design-workspace" hidden>
+      <div id="tenantFloorDesignWorkspace" class="tenant-floor-design-workspace" data-floor-design-stage-view="drawings" hidden>
         <aside class="tenant-floor-design-sidebar" aria-label="مجموعات تصميم الطوابق">
           <div class="tenant-floor-design-sidebar-head"><h3>مجموعات التصميم</h3><span id="tenantFloorDesignGroupCount">0 مجموعات</span></div>
           <input id="tenantFloorDesignSearch" class="tenant-floor-design-search" type="search" placeholder="ابحث عن مجموعة أو دور">
@@ -3879,7 +3957,7 @@
           </div>
           <div class="tenant-floor-design-progress"><div class="tenant-floor-design-progress-head"><span>تقدم التصميم</span><strong id="tenantFloorDesignProgressLabel">0 من 0</strong></div><div class="tenant-floor-design-progress-track"><div id="tenantFloorDesignProgressValue" class="tenant-floor-design-progress-value"></div></div></div>
           <div id="tenantFloorDesignGroupList" class="tenant-floor-design-group-list"></div>
-          <div class="tenant-floor-design-sidebar-actions"><button type="button" class="btn ghost" id="tenantFloorDesignGroupSetupButton" disabled>تنظيم تشابه الأدوار</button></div>
+          <div class="tenant-floor-design-sidebar-actions"><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('organization')">تنظيم الأدوار من المرحلة الأولى</button></div>
         </aside>
 
         <main class="tenant-floor-design-canvas" aria-label="مساحة تصميم مجموعة الطوابق">
@@ -3901,6 +3979,11 @@
           <section class="tenant-floor-design-candidates"><h4>نتائج المجموعة</h4><p id="tenantFloorDesignCandidatesEmpty" class="tenant-floor-design-candidate-empty">لا توجد نتائج بعد. ابدأ توليد صورة لهذه المجموعة.</p></section>
           <div class="tenant-floor-design-footer"><p id="tenantFloorDesignActionStatus">حدد الأدوار من زر تنظيم تشابه الأدوار لبدء مجموعة جديدة.</p><div class="tenant-floor-design-footer-actions"><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(-1)">السابق</button><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(1)">التالي</button><button type="button" class="btn primary" id="tenantFloorDesignGenerateButton" onclick="generateTenantFloorDesignImage()" disabled>توليد الصورة</button><button type="button" class="btn primary" id="tenantFloorDesignApproveButton" onclick="approveTenantFloorDesignImage()" disabled>اعتماد الصورة</button></div></div>
         </main>
+      </div>
+
+      <div id="tenantFloorDesignStageIsometric" class="tenant-floor-design-stage-view" data-floor-design-stage-view="isometric" hidden>
+        <div class="tenant-floor-design-stage-view-head"><div><h3>الإيزومتريك والمخططات</h3><p>مرحلة مستقبلية للتصميم الإيزومتريك وتوليد المخططات المرتبطة به.</p></div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل التصميم</button></div>
+        <div class="tenant-floor-design-analysis-panel"><strong>المرحلة تحت الإنشاء</strong><span>سيتم تفعيلها بعد اكتمال تدريب النموذج واعتماد تجربة المخططات 2D.</span></div>
       </div>
 
       <div id="tenantFloorGroupModal" class="tenant-floor-design-modal" hidden>
@@ -4653,6 +4736,7 @@
     let tenantFloorDesignActiveGroupId = null;
     let tenantFloorDesignDraftMembers = [];
     let tenantFloorDesignFilter = 'all';
+    let tenantFloorDesignStage = 'home';
     let tenantFloorDesignEmbedded = false;
     let tenantFloorDesignOpening = false;
     let tenantProjectSectionStatuses = {};
@@ -8263,6 +8347,15 @@
       openTenantFloorGroupModal('');
     }
 
+    function showTenantFloorDesignStage(stage) {
+      const allowed = new Set(['home', 'organization', 'analysis', 'drawings', 'isometric']);
+      tenantFloorDesignStage = allowed.has(stage) ? stage : 'home';
+      document.querySelectorAll('#tenantFloorDesignPage [data-floor-design-stage-view]').forEach(view => {
+        view.hidden = view.dataset.floorDesignStageView !== tenantFloorDesignStage;
+      });
+      if (tenantFloorDesignStage === 'drawings') renderTenantFloorDesignActiveGroup();
+    }
+
     function mountTenantFloorDesignSectionHeader() {
       const host = document.getElementById('tenantFloorDesignSectionHeader');
       const source = document.querySelector('#section-conceptual-2d .tenant-section-title');
@@ -8275,9 +8368,8 @@
       tenantFloorDesignState = null;
       tenantFloorDesignActiveGroupId = null;
       document.getElementById('tenantFloorDesignSetup').hidden = true;
-      document.getElementById('tenantFloorDesignWorkspace').hidden = false;
       document.getElementById('tenantFloorDesignStatus').textContent = 'واجهة Frontend بانتظار بيانات الأدوار';
-      renderTenantFloorDesignActiveGroup();
+      showTenantFloorDesignStage('home');
     }
 
     function setTenantFloorDesignSidebarActive(active) {
@@ -8488,6 +8580,7 @@
     function bindTenantFloorDesignEvents() {
       if (document.body.dataset.floorDesignBound === '1') return;
       document.body.dataset.floorDesignBound = '1';
+      document.querySelectorAll('[data-floor-design-stage-target]').forEach(button => button.addEventListener('click', () => showTenantFloorDesignStage(button.dataset.floorDesignStageTarget)));
       document.getElementById('tenantFloorDesignSearch')?.addEventListener('input', renderTenantFloorDesignGroupList);
       document.querySelectorAll('[data-floor-design-filter]').forEach(button => button.addEventListener('click', () => {
         tenantFloorDesignFilter = button.dataset.floorDesignFilter;
