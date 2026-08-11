@@ -1832,6 +1832,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("tenantFloorDesignPage: '/app/projects/floor-design'", index_source)
         self.assertIn("floor_visual_design", index_source)
         self.assertIn("formatTenantFloorDesignNumbers", index_source)
+        self.assertIn("const data = { ...tenantProjectData, ...(await collectTenantFormData()) }", index_source)
+        self.assertIn('collectFinancialDynamicRows', index_source)
+        self.assertIn('hydrateFinancialStudyModel', index_source)
         self.assertIn('requireTenantApprovedBuildInputs', index_source)
         self.assertIn("APPROVED_BUILD_INPUTS_REQUIRED", (ROOT / 'app.py').read_text(encoding='utf-8'))
 

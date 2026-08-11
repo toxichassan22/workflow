@@ -7282,6 +7282,65 @@
       }
     }
 
+    function parseFinancialStudySnapshot(raw) {
+      if (!raw) return null;
+      if (typeof raw === 'object') return raw;
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function setFinancialSnapshotInput(id, value) {
+      const input = document.getElementById(id);
+      if (!input || value === undefined || value === null) return;
+      if (input.type === 'checkbox') {
+        input.checked = value === true || value === 'true' || value === 'yes' || value === 'نعم';
+        return;
+      }
+      if (input.tagName === 'SELECT') {
+        const option = [...input.options].find(item => item.value === String(value) || item.textContent.trim() === String(value).trim());
+        if (option) input.value = option.value;
+        return;
+      }
+      input.value = String(value);
+    }
+
+    function hydrateFinancialTableRows(tableId, rows, addRow) {
+      const body = document.querySelector('#' + tableId + ' tbody');
+      if (!body || !Array.isArray(rows) || typeof addRow !== 'function') return;
+      body.innerHTML = '';
+      rows.forEach(row => addRow(row));
+    }
+
+    function hydrateFinancialStudyModel(raw) {
+      const snapshot = parseFinancialStudySnapshot(raw);
+      if (!snapshot) return;
+      Object.entries(snapshot.inputs || {}).forEach(([id, value]) => setFinancialSnapshotInput(id, value));
+      const rows = snapshot.dynamicRows || {};
+      window.__batchLoading = true;
+      try {
+        hydrateFinancialTableRows('componentsTable', rows.components, addComponent);
+        hydrateFinancialTableRows('revenueTable', rows.revenue, addRevenue);
+        hydrateFinancialTableRows('scheduleTable', rows.schedule, addScheduleStage);
+        hydrateFinancialTableRows('financeDrawTable', rows.financeDraw, addFinanceDrawYear);
+        hydrateFinancialTableRows('financeRepaymentTable', rows.financeRepayment, addFinanceRepaymentYear);
+        hydrateFinancialTableRows('fundAdditionalFeesTable', rows.fundAdditionalFees, addFundAdditionalFee);
+        hydrateFinancialTableRows('occupancyRampTable', rows.occupancyRamp, addOccupancyRampYear);
+        hydrateFinancialTableRows('costTable', rows.costs, addCost);
+        hydrateFinancialTableRows('opexTable', rows.opex, addOpex);
+        hydrateFinancialTableRows('externalTable', rows.external, addExternal);
+        hydrateFinancialTableRows('graceScheduleTable', rows.graceSchedule, addGraceScheduleRow);
+      } finally {
+        window.__batchLoading = false;
+      }
+      updateRevenueComponentOptions();
+      updateDynamicFields();
+      calculateAll();
+    }
+
     function hydrateTenantProjectForm(data) {
       const form = document.getElementById('tenantProjectForm');
       if (!form) return;
@@ -7327,6 +7386,7 @@
         const timelineInput = document.getElementById('timelineTableData');
         if (timelineInput) timelineInput.value = JSON.stringify(timelineRows);
       }
+      hydrateFinancialStudyModel(source.financial_study_model);
 
       refreshLocationTables();
       // Mirror the restored timeline into the financial study before recalculating.
@@ -9058,27 +9118,8 @@
       );
       form.appendChild(div);
 
-      // Add default initial rows if empty
       setTimeout(() => {
-        if (!document.querySelector('#componentsTable tbody tr')) {
-          addComponent({ id: 'view-residential', name: 'الشقق السكنية الفاخرة', useType: 'residential', units: 230, unitArea: 150, builtArea: 34500, revenueArea: 34500, investmentModel: 'sale' });
-          addComponent({ id: 'view-hotel', name: 'الفندق خمس نجوم', useType: 'hospitality', units: 200, unitArea: 55, builtArea: 11000, revenueArea: 200, investmentModel: 'dailyRent' });
-          addComponent({ id: 'view-fnb', name: 'المطاعم والخدمات', useType: 'retail', units: 8, unitArea: 300, builtArea: 2400, revenueArea: 2400, investmentModel: 'annualRent' });
-        }
-        if (!document.querySelector('#revenueTable tbody tr')) {
-          addRevenue({ name: 'بيع الشقق السكنية', componentId: 'view-residential', qtySource: 'componentRevenueArea', method: 'areaSale', qty: 34500, price: 30000, occupancy: 100 });
-          addRevenue({ name: 'إيرادات الغرف الفندقية', componentId: 'view-hotel', qtySource: 'componentUnits', method: 'dailyRent', qty: 200, price: 1800, occupancy: 70 });
-        }
-        if (!document.querySelector('#costTable tbody tr')) {
-          addCost({ name: 'تنفيذ المكون السكني', class: 'execution', method: 'fixed', qty: 189750000, price: 0, duration: 1 });
-          addCost({ name: 'تنفيذ الفندق', class: 'execution', method: 'fixed', qty: 224100000, price: 0, duration: 1 });
-          addCost({ name: 'التصميم والدراسات', class: 'design', method: 'fixed', qty: 30000000, price: 0, duration: 1 });
-        }
-        // Development stages are mirrored from the project timeline, not seeded here.
         syncFinancialFromTimeline();
-        if (!document.querySelector('#opexTable tbody tr')) {
-          addOpex({ name: 'المصروفات التشغيلية', method: 'percentRevenue', qty: 0, price: 60 });
-        }
         calculateAll();
       }, 50);
     }
@@ -9311,10 +9352,11 @@
         const unitArea=parseNumber(tr.querySelector('[data-field="unitArea"] input')?.value);
         const builtArea=parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value);
         const revenueArea=parseNumber(tr.querySelector('[data-field="revenueArea"] input')?.value);
+        const useType=tr.querySelector('[data-field="useType"] select')?.value||'retail';
         const investmentModel=tr.querySelector('[data-field="investmentModel"] select')?.value||'nonRevenue';
         const leasable=['dailyRent','monthlyRent','annualRent','operating'].includes(investmentModel);
         const id=tr.dataset.componentKey||(tr.dataset.componentKey='p_'+Date.now()+'_'+Math.random().toString(16).slice(2));
-        return {idx,id,name,units,unitArea,builtArea,revenueArea,totalArea:revenueArea,investmentModel,leasable};
+        return {idx,id,name,useType,units,unitArea,builtArea,revenueArea,totalArea:revenueArea,investmentModel,leasable};
       });
     }
     function updateRevenueComponentOptions(){
@@ -9835,6 +9877,39 @@
       calculateAll();
     }
 
+    function collectFinancialDataRows(tableId) {
+      const table = document.getElementById(tableId);
+      if (!table) return [];
+      return [...table.querySelectorAll('tbody tr')].map(row => {
+        const result = {};
+        row.querySelectorAll('[data-field]').forEach(cell => {
+          const control = cell.querySelector('input,select,textarea');
+          if (!control) return;
+          result[cell.dataset.field] = control.type === 'checkbox' ? Boolean(control.checked) : control.value;
+        });
+        if (tableId === 'scheduleTable') result.year = row.dataset.stageYear || result.year || 1;
+        if (tableId === 'revenueTable') result.componentId = row.dataset.componentId || result.component || '';
+        if (Object.values(result).some(value => String(value ?? '').trim() !== '')) return result;
+        return null;
+      }).filter(Boolean);
+    }
+
+    function collectFinancialDynamicRows() {
+      return {
+        components: typeof getComponentRowsData === 'function' ? getComponentRowsData() : [],
+        revenue: collectFinancialDataRows('revenueTable'),
+        schedule: collectFinancialDataRows('scheduleTable'),
+        financeDraw: collectFinancialDataRows('financeDrawTable'),
+        financeRepayment: collectFinancialDataRows('financeRepaymentTable'),
+        fundAdditionalFees: collectFinancialDataRows('fundAdditionalFeesTable'),
+        occupancyRamp: collectFinancialDataRows('occupancyRampTable'),
+        costs: collectFinancialDataRows('costTable'),
+        opex: collectFinancialDataRows('opexTable'),
+        external: collectFinancialDataRows('externalTable'),
+        graceSchedule: collectFinancialDataRows('graceScheduleTable')
+      };
+    }
+
     function collectFinancialStudyModel() {
       calculateAll();
       const root = document.getElementById('section-financial-calc');
@@ -9863,6 +9938,7 @@
         inputs,
         tables,
         projection: window.__financialProjection || {},
+        dynamicRows: collectFinancialDynamicRows(),
         financialCalcData: (() => {
           try { return JSON.parse(document.getElementById('financialCalcData')?.value || '{}'); } catch (e) { return {}; }
         })()
@@ -10429,7 +10505,10 @@
     async function saveProjectAsDraftNow(silent = false) {
       try {
         Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
-        const data = await collectTenantFormData();
+        const data = { ...tenantProjectData, ...(await collectTenantFormData()) };
+        if (document.getElementById('section-financial-calc') && typeof collectFinancialStudyModel === 'function') {
+          data.financial_study_model = collectFinancialStudyModel();
+        }
         data.draftId = tenantProjectData.draftId || crypto.randomUUID();
         tenantProjectData.draftId = data.draftId;
         data.nearby_landmarks_data = Array.isArray(tenantNearbyLandmarks) ? tenantNearbyLandmarks : parseLocationFieldText('nearby_landmarks', data.nearby_landmarks);
