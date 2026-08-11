@@ -1354,7 +1354,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         success = {'choices': [{'message': {'content': '{"ok":1}'}, 'finish_reason': 'stop'}]}
         caps = []
 
-        def fake_call(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300):
+        def fake_call(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None):
             caps.append(max_tokens)
             return refusal if max_tokens > 25898 else success
 
@@ -1866,7 +1866,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('LUNA_TEXT_MODEL = "openai/gpt-5.6-luna-pro"', source)
         self.assertIn('FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"', source)
         self.assertIn('FLOOR_DESIGN_IMAGE_HARD_NEGATIVE', source)
+        self.assertIn("response_format={'type': 'json_object'}", source)
         self.assertIn('أي كتابة أو أرقام أو حروف', source)
+        self.assertEqual(self.application_module._get_chat_response_text({'choices': [{'message': {'content': [{'type': 'text', 'text': '{"ok":true}'}]}}]}), '{"ok":true}')
         payload = {
             'projectData': {
                 'project_name': 'اختبار مخطط 2D',

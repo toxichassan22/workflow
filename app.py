@@ -221,7 +221,7 @@ def _has_chat_choices(response):
     )
 
 
-def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None):
+def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None):
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
@@ -243,6 +243,8 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
         payload["temperature"] = temperature
     if reasoning_effort:
         payload["reasoning_effort"] = reasoning_effort
+    if response_format:
+        payload["response_format"] = response_format
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
         text = response.text or ''
@@ -5369,7 +5371,15 @@ def _get_chat_response_text(res):
         if isinstance(choice, dict):
             msg = choice.get('message', {})
             if isinstance(msg, dict):
-                return msg.get('content', '') or ""
+                content = msg.get('content', '') or ''
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    return ''.join(
+                        str(part.get('text') or part.get('content') or '') if isinstance(part, dict) else str(part)
+                        for part in content
+                    )
+                return str(content)
             return str(choice.get('text', ''))
     return ""
 
@@ -5882,7 +5892,8 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens):
     res = None
     for attempt in range(3):
         res = call_openrouter_chat(system_prompt, user_content, temperature=None,
-                                   max_tokens=cap, model=LAND_ANALYSIS_MODEL)
+                                   max_tokens=cap, model=LAND_ANALYSIS_MODEL,
+                                   response_format={'type': 'json_object'})
         if _has_chat_choices(res):
             choices = res.get('choices') or []
             finish_reason = choices[0].get('finish_reason') if choices and isinstance(choices[0], dict) else None
