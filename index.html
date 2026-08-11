@@ -3350,7 +3350,9 @@
     .tenant-floor-design-organization-group { display: grid; grid-template-columns: minmax(100px, .35fr) minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #f7fafc; }
     .tenant-floor-design-organization-group strong { color: var(--p); font-size: 13px; }
     .tenant-floor-design-organization-group p { margin: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .tenant-floor-design-organization-group-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .tenant-floor-design-organization-group button { padding: 6px 10px; }
+    .tenant-floor-design-organization-group button.danger { border-color: #efc9c5; color: #a94d45; }
     .tenant-floor-design-organization-empty { padding: 12px; border: 1px dashed #b9cbd1; border-radius: 9px; color: var(--muted); font-size: 12px; text-align: center; }
 
     @media (max-width: 800px) {
@@ -8538,8 +8540,23 @@
         host.innerHTML = '<div class="tenant-floor-design-organization-empty">لم يتم حفظ أي مجموعة بعد. ابدأ بتخصيص الأدوار.</div>';
         return;
       }
-      host.innerHTML = groups.map(group => `<div class="tenant-floor-design-organization-group"><strong>${escapeHtml(formatTenantFloorDesignNumbers(group.floorNumbers))} — ${escapeHtml(group.name)}</strong><p>${escapeHtml(group.prompt || 'لا يوجد وصف بعد')}</p><button type="button" class="btn ghost" data-edit-floor-group="${escapeHtml(group.id)}">تعديل</button></div>`).join('');
+      host.innerHTML = groups.map(group => `<div class="tenant-floor-design-organization-group"><strong>${escapeHtml(formatTenantFloorDesignNumbers(group.floorNumbers))} — ${escapeHtml(group.name)}</strong><p>${escapeHtml(group.prompt || 'لا يوجد وصف بعد')}</p><div class="tenant-floor-design-organization-group-actions"><button type="button" class="btn ghost" data-edit-floor-group="${escapeHtml(group.id)}">تعديل</button><button type="button" class="btn ghost danger" data-delete-floor-group="${escapeHtml(group.id)}">حذف</button></div></div>`).join('');
       host.querySelectorAll('[data-edit-floor-group]').forEach(button => button.addEventListener('click', () => openTenantFloorGroupModal(button.dataset.editFloorGroup)));
+      host.querySelectorAll('[data-delete-floor-group]').forEach(button => button.addEventListener('click', () => deleteTenantFloorDesignGroup(button.dataset.deleteFloorGroup)));
+    }
+
+    function deleteTenantFloorDesignGroup(groupId) {
+      if (!tenantFloorDesignState) return;
+      const group = tenantFloorDesignState.groups.find(item => item.id === groupId);
+      if (!group) return;
+      if (!confirm('هل تريد حذف مجموعة «' + group.name + '»؟ ستعود أدوارها إلى الأدوار المتاحة للتخصيص.')) return;
+      tenantFloorDesignState.groups = tenantFloorDesignState.groups.filter(item => item.id !== groupId);
+      if (tenantFloorDesignActiveGroupId === groupId) tenantFloorDesignActiveGroupId = tenantFloorDesignAllGroups()[0]?.id || null;
+      const modal = document.getElementById('tenantFloorGroupModal');
+      if (modal?.dataset.editingGroupId === groupId) closeTenantFloorGroupModal();
+      markTenantFloorDesignDirty();
+      renderTenantFloorDesignReadiness();
+      renderTenantFloorDesignActiveGroup();
     }
 
     function renderTenantFloorDesignReadiness() {
