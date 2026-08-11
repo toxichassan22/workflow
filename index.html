@@ -1125,11 +1125,19 @@
 
     .tenant-app {
       display: none;
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 30px 22px;
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 24px clamp(16px, 2.5vw, 32px);
       min-height: 100vh;
+      box-sizing: border-box;
       font-family: 'The Sans Arabic', Tahoma, Arial, sans-serif;
+    }
+
+    .tenant-app > .tenant-topbar,
+    .tenant-app > .tenant-page {
+      width: 100%;
+      max-width: none;
     }
 
     .tenant-app.active {
@@ -2129,8 +2137,8 @@
   <style>
     .project-form-layout {
       display: grid;
-      grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
-      gap: 20px;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      gap: 24px;
       align-items: start;
     }
 
@@ -2289,8 +2297,8 @@
 
     .workflow-stage-layout {
       display: grid;
-      grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
-      gap: 20px;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      gap: 24px;
       align-items: start;
     }
 
@@ -2829,21 +2837,24 @@
 
     /* shift main content so the rail does not overlap */
     body.tgr-on .tenant-app {
+      width: calc(100% - 288px);
+      max-width: none;
       margin-right: 288px;
-      margin-left: auto;
-      max-width: min(1180px, calc(100% - 288px));
-      transition: margin .18s ease;
+      margin-left: 0;
+      transition: width .18s ease, margin .18s ease;
     }
 
     body.tgr-on.tgr-collapsed .tenant-app {
+      width: calc(100% - 46px);
+      max-width: none;
       margin-right: 46px;
-      max-width: min(1180px, calc(100% - 46px));
     }
 
     @media (max-width: 1200px) {
       body.tgr-on .tenant-app {
+        width: calc(100% - 46px);
+        max-width: none;
         margin-right: 46px;
-        max-width: min(1180px, calc(100% - 46px));
       }
     }
 
