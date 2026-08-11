@@ -188,6 +188,12 @@ print(f"[CONFIG] Primary text/design model: {LUNA_TEXT_MODEL}")
 IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
 FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"
 FLOOR_DESIGN_TEXT_MODEL = LUNA_TEXT_MODEL
+FLOOR_DESIGN_IMAGE_HARD_NEGATIVE = (
+    'ABSOLUTE OUTPUT RULE: generate only the clean 2D architectural geometry. '
+    'Do not render any written text, letters, numbers, labels, titles, dimensions, measurements, '
+    'legends, tables, annotations, arrows, compass, scale bar, logos, watermark, notes, or UI. '
+    'No text of any kind may appear inside the image.'
+)
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 DEPLOYMENT_MARKER_PATH = os.path.join(os.path.dirname(__file__), '.deployed_commit')
@@ -538,7 +544,7 @@ def call_openrouter_image_generation(prompt, model, reference=None):
         return None, 'NO_API_KEY'
     payload = {
         'model': model,
-        'prompt': prompt,
+        'prompt': f'{prompt}\n\n{FLOOR_DESIGN_IMAGE_HARD_NEGATIVE}',
         'aspect_ratio': '16:9',
         'n': 1,
     }
@@ -1446,6 +1452,8 @@ def api_generate_floor_design_prompt():
         'أنت Luna، كاتب Prompts معماري صارم. أخرج JSON فقط بالشكل '
         '{"prompt":"","negative_prompt":""}. استخدم القيود النظامية والبيانات فقط. '
         'اكتب Prompt واضحًا لمخطط 2D علوي، بدون أثاث أو منظور أو زخرفة، مع حدود الوحدات والـ Core والمداخل والممرات. '
+        'ممنوع منعًا باتًا أن تظهر أي كتابة أو أرقام أو حروف أو Labels أو عنوان أو أبعاد أو جدول أو Legend أو بوصلة أو أسهم أو علامة مائية داخل الصورة. '
+        'الصورة يجب أن تحتوي على الرسم الهندسي والخطوط والحدود فقط، بدون أي نص مرئي. '
         'لا تغيّر عدد الأدوار أو مكونات المجموعة. إذا تعارضت تعليمات العميل مع قيد نظامي، حافظ على القيد وسجّل التعارض داخل prompt.'
     )
     user_prompt = 'بيانات التحليل المعتمد:\n' + _floor_design_json_prompt(analysis) + '\n\nبيانات المشروع والمجموعة:\n' + _floor_design_json_prompt({'payload': payload, 'group': group})

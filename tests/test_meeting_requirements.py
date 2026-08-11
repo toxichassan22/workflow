@@ -1865,6 +1865,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn('LUNA_TEXT_MODEL = "openai/gpt-5.6-luna-pro"', source)
         self.assertIn('FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"', source)
+        self.assertIn('FLOOR_DESIGN_IMAGE_HARD_NEGATIVE', source)
+        self.assertIn('أي كتابة أو أرقام أو حروف', source)
         payload = {
             'projectData': {
                 'project_name': 'اختبار مخطط 2D',
