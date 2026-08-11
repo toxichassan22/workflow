@@ -187,7 +187,7 @@ GLM_USE_OPENROUTER = os.environ.get("GLM_USE_OPENROUTER", "false").lower() in ("
 if ZAI_KEY and OPENROUTER_KEY and GLM_USE_OPENROUTER and os.environ.get("FORCE_OPENROUTER", "false").lower() not in ("1", "true", "yes"):
     GLM_USE_OPENROUTER = False
     print("[CONFIG] Both keys found; preferring ZAI for GLM calls. Set FORCE_OPENROUTER=1 to override.")
-IMAGE_MODEL = "google/gemini-3.6-flash"
+IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 DEPLOYMENT_MARKER_PATH = os.path.join(os.path.dirname(__file__), '.deployed_commit')
@@ -1238,6 +1238,32 @@ def api_generate_image_single():
             return jsonify({'success': False, 'error': 'تعذر توليد الصورة — تحقق من مفتاح OpenRouter ورصيده', 'error_code': 'IMAGE_FAILED'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/floor-design/generate', methods=['POST'])
+@require_auth
+def api_generate_floor_design_image():
+    data = request.get_json(silent=True) or {}
+    prompt = data.get('prompt')
+    reference = data.get('referenceImage')
+    if not isinstance(prompt, str) or not prompt.strip():
+        return jsonify({'success': False, 'error': 'وصف التصميم مطلوب', 'error_code': 'PROMPT_REQUIRED'}), 400
+    prompt = prompt.strip()[:12000]
+    if reference is not None:
+        if not isinstance(reference, str) or len(reference) > 20 * 1024 * 1024:
+            return jsonify({'success': False, 'error': 'الصورة المرجعية غير صالحة أو كبيرة جدًا', 'error_code': 'REFERENCE_INVALID'}), 400
+        if not (reference.startswith('data:image/') or reference.startswith('/uploads/creative/')):
+            return jsonify({'success': False, 'error': 'نوع الصورة المرجعية غير مسموح', 'error_code': 'REFERENCE_INVALID'}), 400
+    try:
+        image = call_image_api_with_reference(reference, prompt) if reference else call_image_api(prompt)
+        if not image:
+            if not OPENROUTER_KEY:
+                return jsonify({'success': False, 'error': 'مفتاح توليد الصور غير مُعدّ', 'error_code': 'NO_API_KEY'}), 503
+            return jsonify({'success': False, 'error': 'تعذر توليد صورة التصميم', 'error_code': 'IMAGE_FAILED'}), 503
+        return jsonify({'success': True, 'image': persist_generated_image(image, g.tenant_id)})
+    except Exception:
+        app.logger.exception('Floor design image generation failed')
+        return jsonify({'success': False, 'error': 'حدث خطأ أثناء توليد صورة التصميم', 'error_code': 'IMAGE_FAILED'}), 503
 
 
 @app.route('/api/get-image-prompts', methods=['POST'])

@@ -3184,6 +3184,121 @@
     #section-financial-calc td.cf-grace { background: #fff8f4 !important; }
     #section-financial-calc td.cf-fund { background: #faf4fc !important; }
     #section-financial-calc td.cf-finance { background: #fffdf4 !important; }
+
+    .tenant-floor-design-page { padding: 22px !important; background: #fbfaf7 !important; }
+    .tenant-floor-design-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+    .tenant-floor-design-header h2 { margin: 0 0 5px !important; }
+    .tenant-floor-design-header p { margin: 0; color: var(--muted); font-size: 13px; }
+    .tenant-floor-design-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .tenant-floor-design-status { color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-setup { display: grid; place-items: center; min-height: 480px; padding: 20px; }
+    .tenant-floor-design-setup[hidden], .tenant-floor-design-workspace[hidden], .tenant-floor-design-modal[hidden], .tenant-floor-design-drawer[hidden] { display: none !important; }
+    .tenant-floor-design-setup-card { width: min(680px, 100%); padding: 30px; border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: var(--shadow); }
+    .tenant-floor-design-setup-card h3 { margin: 0 0 7px; color: var(--p); font-size: 22px; }
+    .tenant-floor-design-setup-card > p { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+    .tenant-floor-design-setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .tenant-floor-design-field { display: grid; gap: 5px; }
+    .tenant-floor-design-field.full { grid-column: 1 / -1; }
+    .tenant-floor-design-field label { color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-field input, .tenant-floor-design-field textarea, .tenant-floor-design-field select { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; background: #fff; color: var(--txt, #252525); font: inherit; }
+    .tenant-floor-design-note { margin: 16px 0 0; padding: 10px 12px; border: 1px solid #c5dfdc; border-radius: 9px; background: #e1f1ef; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-error { min-height: 19px; margin: 10px 0 0; color: #a94d45; font-size: 12px; }
+    .tenant-floor-design-setup-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+    .tenant-floor-design-workspace { display: grid; grid-template-columns: minmax(225px, 275px) minmax(0, 1fr); gap: 16px; min-height: 680px; }
+    .tenant-floor-design-sidebar { display: flex; flex-direction: column; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+    .tenant-floor-design-sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+    .tenant-floor-design-sidebar-head h3 { margin: 0; color: var(--p); }
+    .tenant-floor-design-sidebar-head span { color: var(--muted); font-size: 11px; }
+    .tenant-floor-design-search { width: 100%; min-height: 38px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; font: inherit; }
+    .tenant-floor-design-filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 12px; }
+    .tenant-floor-design-filter { min-height: 32px; padding: 5px 3px; border: 1px solid var(--line); border-radius: 7px; background: #f7fafc; color: var(--muted); font-size: 10px; cursor: pointer; }
+    .tenant-floor-design-filter.active { border-color: var(--p); background: #e8f4fa; color: var(--p); font-weight: 700; }
+    .tenant-floor-design-progress { display: grid; gap: 6px; margin-bottom: 12px; padding: 10px; border: 1px solid #c5dfdc; border-radius: 9px; background: #e1f1ef; }
+    .tenant-floor-design-progress-head { display: flex; justify-content: space-between; gap: 8px; color: var(--p); font-size: 11px; font-weight: 700; }
+    .tenant-floor-design-progress-track { height: 6px; overflow: hidden; border-radius: 99px; background: rgba(23, 123, 125, .15); }
+    .tenant-floor-design-progress-value { width: 0; height: 100%; border-radius: inherit; background: #177b7d; transition: width 180ms ease; }
+    .tenant-floor-design-group-list { display: grid; gap: 5px; overflow: auto; min-height: 0; }
+    .tenant-floor-design-group-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; min-height: 62px; padding: 8px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--txt, #252525); text-align: start; cursor: pointer; }
+    .tenant-floor-design-group-row:hover { border-color: var(--line); background: #f7fafc; }
+    .tenant-floor-design-group-row.active { border-color: #acd8d4; background: #e1f1ef; }
+    .tenant-floor-design-group-range { display: block; color: var(--p); font-size: 15px; font-weight: 800; }
+    .tenant-floor-design-group-name { display: block; overflow: hidden; margin-top: 2px; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .tenant-floor-design-group-meta { display: block; overflow: hidden; margin-top: 2px; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .tenant-floor-design-group-status { color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .tenant-floor-design-group-status.approved { color: #347658; }
+    .tenant-floor-design-group-status.review { color: #b96831; }
+    .tenant-floor-design-group-status.generating { color: #177b7d; }
+    .tenant-floor-design-sidebar-actions { display: grid; gap: 7px; margin-top: 10px; }
+    .tenant-floor-design-canvas { display: grid; align-content: start; gap: 14px; min-width: 0; }
+    .tenant-floor-design-canvas-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .tenant-floor-design-canvas-head h3 { margin: 0 0 3px; color: var(--p); font-size: 20px; }
+    .tenant-floor-design-canvas-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-canvas-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+    .tenant-floor-design-context { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+    .tenant-floor-design-context-card { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+    .tenant-floor-design-context-card span { display: block; color: var(--muted); font-size: 10px; }
+    .tenant-floor-design-context-card strong { display: block; overflow: hidden; margin-top: 2px; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .tenant-floor-design-image-card, .tenant-floor-design-candidates { border: 1px solid var(--line); border-radius: 13px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.03); }
+    .tenant-floor-design-image-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+    .tenant-floor-design-image-head strong { font-size: 13px; }
+    .tenant-floor-design-badge { display: inline-flex; min-height: 25px; align-items: center; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: #f7fafc; color: var(--muted); font-size: 10px; }
+    .tenant-floor-design-badge.approved { border-color: #b8dec7; background: #e4f1e8; color: #347658; }
+    .tenant-floor-design-badge.review { border-color: #efc9a7; background: #faeadc; color: #b96831; }
+    .tenant-floor-design-image-frame { display: grid; place-items: center; min-height: 360px; background: #edf2f2; }
+    .tenant-floor-design-image-frame img { display: block; width: 100%; max-height: 560px; object-fit: contain; aspect-ratio: 16 / 10; }
+    .tenant-floor-design-image-empty { padding: 50px 20px; color: var(--muted); font-size: 13px; text-align: center; }
+    .tenant-floor-design-image-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
+    .tenant-floor-design-image-caption p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+    .tenant-floor-design-candidates { padding: 14px; }
+    .tenant-floor-design-candidates h4 { margin: 0 0 10px; color: var(--p); font-size: 13px; }
+    .tenant-floor-design-candidate-empty { margin: 0; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .tenant-floor-design-footer p { margin: 0; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-footer-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+    .tenant-floor-design-modal { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(24,53,74,.35); }
+    .tenant-floor-design-modal-card { width: min(760px, 100%); max-height: 90vh; overflow: auto; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: 0 20px 60px rgba(24,53,74,.2); }
+    .tenant-floor-design-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+    .tenant-floor-design-modal-head h3 { margin: 0; color: var(--p); }
+    .tenant-floor-design-modal-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-modal-body { display: grid; gap: 14px; padding-top: 16px; }
+    .tenant-floor-design-chip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; max-height: 250px; overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #f7fafc; }
+    .tenant-floor-design-chip { min-height: 34px; padding: 5px 3px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--txt, #252525); font-size: 11px; cursor: pointer; }
+    .tenant-floor-design-chip.selected { border-color: var(--p); background: #e8f4fa; color: var(--p); font-weight: 800; }
+    .tenant-floor-design-chip.assigned { background: #edf0f1; color: var(--muted); }
+    .tenant-floor-design-modal-preview { padding: 10px 12px; border: 1px solid #c5dfdc; border-radius: 9px; background: #e1f1ef; }
+    .tenant-floor-design-modal-preview span { display: block; color: var(--muted); font-size: 10px; }
+    .tenant-floor-design-modal-preview strong { display: block; margin-top: 2px; color: var(--p); font-size: 17px; }
+    .tenant-floor-design-modal-footer { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+    .tenant-floor-design-drawer-backdrop { position: fixed; z-index: 70; inset: 0; background: rgba(24,53,74,.25); }
+    .tenant-floor-design-drawer-backdrop[hidden] { display: none !important; }
+    .tenant-floor-design-drawer { position: fixed; z-index: 71; top: 0; bottom: 0; inset-inline-end: 0; width: min(420px, 92vw); overflow: auto; padding: 22px; background: #fff; box-shadow: 0 0 34px rgba(24,53,74,.18); }
+    .tenant-floor-design-drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+    .tenant-floor-design-drawer-head h3 { margin: 0; color: var(--p); }
+    .tenant-floor-design-drawer-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-drawer-body { display: grid; gap: 13px; padding-top: 16px; }
+    .tenant-floor-design-drawer-body textarea, .tenant-floor-design-drawer-body select { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; font: inherit; }
+    .tenant-floor-design-chat-message { padding: 9px 10px; border-radius: 9px; background: #f7fafc; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-chat-message.user { background: #e1f1ef; color: var(--txt, #252525); }
+
+    @media (max-width: 800px) {
+      .tenant-floor-design-page { padding: 14px !important; }
+      .tenant-floor-design-workspace { grid-template-columns: 1fr; }
+      .tenant-floor-design-sidebar { min-height: 260px; }
+      .tenant-floor-design-group-list { max-height: 260px; }
+      .tenant-floor-design-context { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .tenant-floor-design-image-frame { min-height: 260px; }
+    }
+    @media (max-width: 520px) {
+      .tenant-floor-design-setup-grid { grid-template-columns: 1fr; }
+      .tenant-floor-design-field.full { grid-column: auto; }
+      .tenant-floor-design-setup-card { padding: 20px; }
+      .tenant-floor-design-canvas-head { align-items: stretch; flex-direction: column; }
+      .tenant-floor-design-canvas-actions, .tenant-floor-design-canvas-actions button { width: 100%; }
+      .tenant-floor-design-canvas-actions button { flex: 1; }
+      .tenant-floor-design-footer { align-items: stretch; flex-direction: column; }
+      .tenant-floor-design-footer-actions, .tenant-floor-design-footer-actions button { width: 100%; }
+      .tenant-floor-design-footer-actions button { flex: 1; }
+    }
   </style>
   <style id="zai-global-styles"></style>
 </head>
@@ -3722,6 +3837,79 @@
         <button class="btn danger" onclick="confirmDeleteProject()">حذف المشروع</button>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
       </div>
+    </section>
+
+    <section id="tenantFloorDesignPage" class="tenant-page tenant-floor-design-page">
+      <div class="tenant-floor-design-header">
+        <div>
+          <h2>تصميم صور الطوابق</h2>
+          <p>حدد الأدوار المتشابهة ثم ولّد صورة واحدة لكل مجموعة باستخدام Nano Banana.</p>
+        </div>
+        <div class="tenant-floor-design-actions">
+          <span id="tenantFloorDesignStatus" class="tenant-floor-design-status">لم يبدأ التصميم</span>
+          <button type="button" class="btn ghost" onclick="showTenantPage('tenantProjectPage')">العودة لبيانات المشروع</button>
+          <button type="button" class="btn primary" onclick="saveTenantFloorDesign()">حفظ التصميم</button>
+        </div>
+      </div>
+
+      <div id="tenantFloorDesignSetup" class="tenant-floor-design-setup">
+        <div class="tenant-floor-design-setup-card">
+          <h3>ابدأ ببيانات هذا المشروع</h3>
+          <p>لن يتم إنشاء أدوار أو مجموعات تلقائيًا. أدخل عدد الأدوار، ثم حدد بنفسك أي الأدوار تمثل نموذجًا واحدًا.</p>
+          <div class="tenant-floor-design-setup-grid">
+            <div class="tenant-floor-design-field"><label for="tenantFloorDesignCount">عدد الأدوار</label><input id="tenantFloorDesignCount" type="number" min="1" max="200" placeholder="يُقرأ من الدراسة المالية عند توفره"></div>
+            <div class="tenant-floor-design-field"><label for="tenantFloorDesignFirstFloor">رقم أول دور</label><input id="tenantFloorDesignFirstFloor" type="number" min="0" max="200" placeholder="مثال: 1"></div>
+          </div>
+          <p class="tenant-floor-design-note">المجموعة المتتالية تظهر مثل 1-10، والمجموعة المتفرقة تظهر مثل 1/3/5. كل مجموعة تحتاج صورة واحدة فقط.</p>
+          <p id="tenantFloorDesignSetupError" class="tenant-floor-design-error" aria-live="polite"></p>
+          <div class="tenant-floor-design-setup-actions"><button type="button" class="btn primary" onclick="startTenantFloorDesign()">بدء تنظيم الأدوار</button></div>
+        </div>
+      </div>
+
+      <div id="tenantFloorDesignWorkspace" class="tenant-floor-design-workspace" hidden>
+        <aside class="tenant-floor-design-sidebar" aria-label="مجموعات تصميم الطوابق">
+          <div class="tenant-floor-design-sidebar-head"><h3>مجموعات التصميم</h3><span id="tenantFloorDesignGroupCount">0 مجموعات</span></div>
+          <input id="tenantFloorDesignSearch" class="tenant-floor-design-search" type="search" placeholder="ابحث عن مجموعة أو دور">
+          <div class="tenant-floor-design-filters" role="group" aria-label="فلترة مجموعات التصميم">
+            <button type="button" class="tenant-floor-design-filter active" data-floor-design-filter="all">الكل</button>
+            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="review">مراجعة</button>
+            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="approved">معتمد</button>
+          </div>
+          <div class="tenant-floor-design-progress"><div class="tenant-floor-design-progress-head"><span>تقدم التصميم</span><strong id="tenantFloorDesignProgressLabel">0 من 0</strong></div><div class="tenant-floor-design-progress-track"><div id="tenantFloorDesignProgressValue" class="tenant-floor-design-progress-value"></div></div></div>
+          <div id="tenantFloorDesignGroupList" class="tenant-floor-design-group-list"></div>
+          <div class="tenant-floor-design-sidebar-actions"><button type="button" class="btn ghost" onclick="openTenantFloorGroupModal()">تنظيم تشابه الأدوار</button><button type="button" class="btn ghost" onclick="resetTenantFloorDesign()">إعادة تعريف الأدوار</button></div>
+        </aside>
+
+        <main class="tenant-floor-design-canvas" aria-label="مساحة تصميم مجموعة الطوابق">
+          <div class="tenant-floor-design-canvas-head">
+            <div><h3 id="tenantFloorDesignTitle">لم يبدأ تصميم الأدوار</h3><p id="tenantFloorDesignSubtitle">أنشئ أول مجموعة لتظهر مساحة الصورة.</p></div>
+            <div class="tenant-floor-design-canvas-actions"><button type="button" class="btn ghost" id="tenantFloorDesignSettingsButton" onclick="openTenantFloorDesignDrawer('settings')">تخصيص المجموعة</button><button type="button" class="btn ghost" id="tenantFloorDesignChatButton" onclick="openTenantFloorDesignDrawer('chat')">محادثة التعديل</button></div>
+          </div>
+          <div class="tenant-floor-design-context">
+            <div class="tenant-floor-design-context-card"><span>الأدوار التابعة</span><strong id="tenantFloorDesignMembers">غير محدد</strong></div>
+            <div class="tenant-floor-design-context-card"><span>اسم المجموعة</span><strong id="tenantFloorDesignGroupName">لا توجد مجموعة</strong></div>
+            <div class="tenant-floor-design-context-card"><span>حالة الصورة</span><strong id="tenantFloorDesignGroupStatus">لم يبدأ</strong></div>
+            <div class="tenant-floor-design-context-card"><span>الصور المطلوبة</span><strong id="tenantFloorDesignImageCount">لا توجد صور</strong></div>
+          </div>
+          <section class="tenant-floor-design-image-card">
+            <div class="tenant-floor-design-image-head"><strong>التصور المختار للمجموعة</strong><span id="tenantFloorDesignBadge" class="tenant-floor-design-badge">لم تبدأ</span></div>
+            <div id="tenantFloorDesignImageFrame" class="tenant-floor-design-image-frame"><div id="tenantFloorDesignImageEmpty" class="tenant-floor-design-image-empty">لم يتم توليد صورة لهذه المجموعة بعد.</div><img id="tenantFloorDesignImage" alt="التصور البصري للمجموعة" hidden></div>
+            <div class="tenant-floor-design-image-caption"><div><strong id="tenantFloorDesignImageTitle">لا توجد نتيجة مختارة</strong><p>ستظهر هنا صورة واحدة تمثل كل الأدوار داخل المجموعة.</p></div><button type="button" class="btn ghost" id="tenantFloorDesignPreviewButton" onclick="previewTenantFloorDesignImage()" disabled>معاينة كاملة</button></div>
+          </section>
+          <section class="tenant-floor-design-candidates"><h4>نتائج المجموعة</h4><p id="tenantFloorDesignCandidatesEmpty" class="tenant-floor-design-candidate-empty">لا توجد نتائج بعد. ابدأ توليد صورة لهذه المجموعة.</p></section>
+          <div class="tenant-floor-design-footer"><p id="tenantFloorDesignActionStatus">حدد الأدوار من زر تنظيم تشابه الأدوار لبدء مجموعة جديدة.</p><div class="tenant-floor-design-footer-actions"><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(-1)">السابق</button><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(1)">التالي</button><button type="button" class="btn primary" id="tenantFloorDesignGenerateButton" onclick="generateTenantFloorDesignImage()" disabled>توليد الصورة</button><button type="button" class="btn primary" id="tenantFloorDesignApproveButton" onclick="approveTenantFloorDesignImage()" disabled>اعتماد الصورة</button></div></div>
+        </main>
+      </div>
+
+      <div id="tenantFloorGroupModal" class="tenant-floor-design-modal" hidden>
+        <div class="tenant-floor-design-modal-card" role="dialog" aria-modal="true" aria-labelledby="tenantFloorGroupModalTitle">
+          <div class="tenant-floor-design-modal-head"><div><h3 id="tenantFloorGroupModalTitle">تنظيم تشابه الأدوار</h3><p>حدد الأدوار التي تمثل نفس النموذج البصري.</p></div><button type="button" class="btn ghost" onclick="closeTenantFloorGroupModal()">إغلاق</button></div>
+          <div class="tenant-floor-design-modal-body"><div class="tenant-floor-design-field"><label for="tenantFloorGroupName">اسم المجموعة</label><input id="tenantFloorGroupName" type="text" placeholder="مثال: الأدوار السكنية المتكررة"></div><div class="tenant-floor-design-field"><label>حدد الأدوار المتشابهة</label><div id="tenantFloorGroupGrid" class="tenant-floor-design-chip-grid"></div></div><div class="tenant-floor-design-modal-preview"><span>الصيغة التي ستظهر في الشريط</span><strong id="tenantFloorGroupRangePreview">لم تحدد أدوارًا بعد</strong></div><div class="tenant-floor-design-modal-footer"><button type="button" class="btn ghost" onclick="closeTenantFloorGroupModal()">إلغاء</button><button type="button" class="btn primary" onclick="saveTenantFloorGroup()">حفظ المجموعة</button></div></div>
+        </div>
+      </div>
+      <div id="tenantFloorDesignDrawerBackdrop" class="tenant-floor-design-drawer-backdrop" hidden onclick="closeTenantFloorDesignDrawer()"></div>
+      <aside id="tenantFloorDesignSettingsDrawer" class="tenant-floor-design-drawer" hidden aria-label="تخصيص مجموعة الطوابق"><div class="tenant-floor-design-drawer-head"><div><h3>تخصيص المجموعة</h3><p id="tenantFloorDesignSettingsLabel">المجموعة الحالية</p></div><button type="button" class="btn ghost" onclick="closeTenantFloorDesignDrawer()">إغلاق</button></div><div class="tenant-floor-design-drawer-body"><div class="tenant-floor-design-field"><label for="tenantFloorDesignBrief">تعليمات العميل لهذه المجموعة</label><textarea id="tenantFloorDesignBrief" rows="6" placeholder="اكتب ما يجب الحفاظ عليه أو تغييره في الصورة."></textarea></div><div class="tenant-floor-design-field"><label for="tenantFloorDesignStyle">الأسلوب البصري</label><select id="tenantFloorDesignStyle"><option value="">غير محدد</option><option>معاصر هادئ</option><option>فاخر</option><option>عملي وواضح</option><option>مستوحى من الهوية المحلية</option></select></div><button type="button" class="btn primary" onclick="saveTenantFloorDesignCustomization()">حفظ تخصيص المجموعة</button></div></aside>
+      <aside id="tenantFloorDesignChatDrawer" class="tenant-floor-design-drawer" hidden aria-label="محادثة تعديل مجموعة الطوابق"><div class="tenant-floor-design-drawer-head"><div><h3>محادثة التعديل</h3><p id="tenantFloorDesignChatLabel">المجموعة الحالية</p></div><button type="button" class="btn ghost" onclick="closeTenantFloorDesignDrawer()">إغلاق</button></div><div class="tenant-floor-design-drawer-body"><div id="tenantFloorDesignChatThread"><div class="tenant-floor-design-chat-message">اكتب تعديلًا واضحًا على الصورة الحالية لهذه المجموعة.</div></div><textarea id="tenantFloorDesignChatInput" rows="5" placeholder="اكتب التعديل المطلوب"></textarea><button type="button" class="btn primary" onclick="sendTenantFloorDesignChat()">إرسال التعديل</button></div></aside>
     </section>
 
     <!-- Cover image generation -->
@@ -4459,6 +4647,10 @@
     let editingTenantFieldId = null;
     let tenantAllowedFieldSections = {};
     let tenantProjectData = {};
+    let tenantFloorDesignState = null;
+    let tenantFloorDesignActiveGroupId = null;
+    let tenantFloorDesignDraftMembers = [];
+    let tenantFloorDesignFilter = 'all';
     let tenantProjectSectionStatuses = {};
     let tenantProjectDraftApproval = null;
     let tenantActiveProjectSection = null;
@@ -4939,6 +5131,7 @@
 
     const TENANT_NAVIGATION_CONTEXT_PAGES = new Set([
       'tenantProjectPage',
+      'tenantFloorDesignPage',
       'tenantMainImagePage',
       'tenantMoodboardPage',
       'tenantSlidesPage',
@@ -5017,6 +5210,7 @@
     const TENANT_PAGE_ROUTES = {
       tenantDashboardPage: '/app/dashboard',
       tenantProjectPage: '/app/projects/new',
+      tenantFloorDesignPage: '/app/projects/floor-design',
       tenantMainImagePage: '/app/projects/generation/cover',
       tenantMoodboardPage: '/app/projects/generation/moodboard',
       tenantGenerationPage: '/app/projects/generation',
@@ -5118,6 +5312,7 @@
 
     const TENANT_WORKFLOW_ITEMS = [
       { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
+      { pageId: 'tenantFloorDesignPage', label: 'تصميم صور الطوابق' },
       { pageId: 'tenantMainImagePage', label: 'الصورة الرئيسية' },
       { pageId: 'tenantMoodboardPage', label: 'المود بورد' },
       { pageId: 'tenantSlidesPage', label: 'صفحة التصميم والمعاينة' }
@@ -5127,6 +5322,9 @@
       if (pageId === 'tenantProjectPage') {
         showTenantPage(pageId);
         return;
+      }
+      if (pageId === 'tenantFloorDesignPage') {
+        return openTenantFloorDesignPage();
       }
       if (pageId === 'tenantSlidesPage') {
         if (typeof renderTenantSlides === 'function') renderTenantSlides();
@@ -5188,6 +5386,7 @@
     /* ===== Tenant Global Rail ===== */
     const TGR_STAGES = [
       { id: 'tenantProjectPage', label: 'بيانات المشروع' },
+      { id: 'tenantFloorDesignPage', label: 'تصميم صور الطوابق' },
       { id: 'tenantMainImagePage', label: 'الصورة الرئيسية' },
       { id: 'tenantMoodboardPage', label: 'المود بورد'},
       { id: 'tenantSlidesPage', label: 'معاينة الشرائح' }
@@ -5506,7 +5705,7 @@
               await startTenantProject();
               if (state.pageId === 'tenantProjectPage') return true;
               if (state.pageId === 'tenantGenerationPage') showGenProgress();
-              else showTenantPage(state.pageId);
+              else await navigateTenantWorkflow(state.pageId);
               return true;
             }
             clearTenantNavigationState();
@@ -5528,7 +5727,7 @@
           await startTenantProject();
           if (state.pageId === 'tenantProjectPage') return true;
           if (state.pageId === 'tenantGenerationPage') showGenProgress();
-          else showTenantPage(state.pageId);
+          else await navigateTenantWorkflow(state.pageId);
           return true;
         }
 
@@ -6993,6 +7192,9 @@
         tenantNearbyLandmarks = source.nearby_landmarks_data;
       }
       tenantProjectData = { ...tenantProjectData, ...source };
+      tenantFloorDesignState = normalizeTenantFloorDesignState(source.floor_visual_design);
+      tenantFloorDesignActiveGroupId = null;
+      tenantFloorDesignDraftMembers = [];
       // Stored as a JSON string in a hidden input, so it must be parsed before use.
       const storedAnalysis = parseStoredLandTable(source.land_documents_analysis) || {};
       storeLandDocumentAnalysis(storedAnalysis);
@@ -7068,6 +7270,10 @@
       tenantPresentationId = null;
       tenantProjectMode = 'new';
       tenantProjectData = { draftId: crypto.randomUUID() };
+      tenantFloorDesignState = null;
+      tenantFloorDesignActiveGroupId = null;
+      tenantFloorDesignDraftMembers = [];
+      tenantFloorDesignFilter = 'all';
       tenantSlidesData = [];
       tenantSlidePlan = null;
       tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
@@ -7755,6 +7961,463 @@
       renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
       renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
       renderProjectTeam();
+    }
+
+    const TENANT_FLOOR_DESIGN_STATUS_LABELS = {
+      approved: 'معتمد',
+      review: 'يحتاج مراجعة',
+      generating: 'قيد التوليد',
+      pending: 'لم يبدأ',
+      unassigned: 'غير منظمة'
+    };
+
+    function normalizeTenantFloorDesignState(raw) {
+      let value = raw;
+      if (typeof value === 'string') {
+        try { value = JSON.parse(value); } catch (error) { return null; }
+      }
+      if (!value || typeof value !== 'object') return null;
+      const floorCount = Math.max(0, Math.min(200, Math.floor(Number(value.floorCount) || 0)));
+      const firstFloor = Math.max(0, Math.min(200, Math.floor(Number(value.firstFloor) || 0)));
+      if (!floorCount) return null;
+      const groups = Array.isArray(value.groups) ? value.groups.map((group, index) => ({
+        id: String(group?.id || `floor-group-${index + 1}`),
+        name: String(group?.name || `مجموعة ${index + 1}`).trim().slice(0, 160),
+        floorNumbers: [...new Set((Array.isArray(group?.floorNumbers) ? group.floorNumbers : []).map(Number).filter(number => Number.isInteger(number) && number >= firstFloor && number < firstFloor + floorCount))].sort((first, second) => first - second),
+        type: String(group?.type || 'غير محدد').slice(0, 80),
+        status: ['approved', 'review', 'generating', 'pending'].includes(group?.status) ? group.status : 'pending',
+        imageUrl: typeof group?.imageUrl === 'string' ? group.imageUrl : '',
+        approvedImageUrl: typeof group?.approvedImageUrl === 'string' ? group.approvedImageUrl : '',
+        prompt: typeof group?.prompt === 'string' ? group.prompt.slice(0, 12000) : '',
+        style: typeof group?.style === 'string' ? group.style.slice(0, 120) : '',
+        chat: Array.isArray(group?.chat) ? group.chat.filter(item => item && typeof item.text === 'string').slice(-40).map(item => ({ role: item.role === 'assistant' ? 'assistant' : 'user', text: item.text.slice(0, 4000) })) : []
+      })).filter(group => group.floorNumbers.length).filter(group => group.name) : [];
+      return { version: 1, floorCount, firstFloor, groups };
+    }
+
+    function tenantFloorDesignSource() {
+      let financial = {};
+      const stored = tenantProjectData.financial_calc_data;
+      if (typeof stored === 'string') {
+        try { financial = JSON.parse(stored) || {}; } catch (error) { financial = {}; }
+      } else if (stored && typeof stored === 'object') {
+        financial = stored;
+      }
+      const count = Number(financial.floorCount || document.getElementById('floorCount')?.value || 0);
+      return { floorCount: Number.isInteger(count) && count > 0 ? count : 0, firstFloor: 1 };
+    }
+
+    function tenantFloorDesignNumbers() {
+      if (!tenantFloorDesignState) return [];
+      return Array.from({ length: tenantFloorDesignState.floorCount }, (_, index) => tenantFloorDesignState.firstFloor + index);
+    }
+
+    function formatTenantFloorDesignNumbers(numbers) {
+      const sorted = [...new Set((numbers || []).map(Number).filter(Number.isInteger))].sort((first, second) => first - second);
+      const tokens = [];
+      let start = null;
+      let previous = null;
+      sorted.forEach(number => {
+        if (start == null) {
+          start = number;
+          previous = number;
+          return;
+        }
+        if (number === previous + 1) {
+          previous = number;
+          return;
+        }
+        tokens.push(start === previous ? String(start) : `${start}-${previous}`);
+        start = number;
+        previous = number;
+      });
+      if (start != null) tokens.push(start === previous ? String(start) : `${start}-${previous}`);
+      return tokens.join('/');
+    }
+
+    function tenantFloorDesignUnassignedNumbers() {
+      if (!tenantFloorDesignState) return [];
+      const assigned = new Set(tenantFloorDesignState.groups.flatMap(group => group.floorNumbers));
+      return tenantFloorDesignNumbers().filter(number => !assigned.has(number));
+    }
+
+    function tenantFloorDesignAllGroups() {
+      if (!tenantFloorDesignState) return [];
+      const groups = [...tenantFloorDesignState.groups];
+      const unassigned = tenantFloorDesignUnassignedNumbers();
+      if (unassigned.length) groups.push({ id: 'unassigned', name: 'أدوار غير منظمة', floorNumbers: unassigned, type: 'تحتاج تصنيفًا', status: 'unassigned', imageUrl: '', approvedImageUrl: '', prompt: '', style: '', chat: [], unassigned: true });
+      return groups;
+    }
+
+    function tenantFloorDesignActiveGroup() {
+      const groups = tenantFloorDesignAllGroups();
+      return groups.find(group => group.id === tenantFloorDesignActiveGroupId) || groups[0] || null;
+    }
+
+    function markTenantFloorDesignDirty() {
+      if (!tenantFloorDesignState) return;
+      tenantProjectData.floor_visual_design = tenantFloorDesignState;
+      setDraftDirty(true);
+    }
+
+    function updateTenantFloorDesignProgress() {
+      const groups = tenantFloorDesignState?.groups || [];
+      const approved = groups.filter(group => group.status === 'approved').reduce((total, group) => total + group.floorNumbers.length, 0);
+      const count = tenantFloorDesignState?.floorCount || 0;
+      const percentage = count ? Math.round(approved / count * 100) : 0;
+      const progressLabel = document.getElementById('tenantFloorDesignProgressLabel');
+      const progressValue = document.getElementById('tenantFloorDesignProgressValue');
+      if (progressLabel) progressLabel.textContent = `${approved} من ${count}`;
+      if (progressValue) progressValue.style.width = `${percentage}%`;
+    }
+
+    function renderTenantFloorDesignGroupList() {
+      const host = document.getElementById('tenantFloorDesignGroupList');
+      if (!host) return;
+      const groups = tenantFloorDesignAllGroups();
+      const search = String(document.getElementById('tenantFloorDesignSearch')?.value || '').trim().toLowerCase();
+      const visible = groups.filter(group => {
+        const range = formatTenantFloorDesignNumbers(group.floorNumbers);
+        const matchesSearch = !search || `${range} ${group.name} ${group.type}`.toLowerCase().includes(search);
+        const matchesFilter = tenantFloorDesignFilter === 'all' || group.status === tenantFloorDesignFilter;
+        return matchesSearch && matchesFilter;
+      });
+      host.innerHTML = visible.length ? visible.map(group => {
+        const status = TENANT_FLOOR_DESIGN_STATUS_LABELS[group.status] || 'لم يبدأ';
+        return `<button type="button" class="tenant-floor-design-group-row${group.id === tenantFloorDesignActiveGroupId ? ' active' : ''}" data-floor-design-group-id="${escapeHtml(group.id)}"><span><span class="tenant-floor-design-group-range">${escapeHtml(formatTenantFloorDesignNumbers(group.floorNumbers))}</span><span class="tenant-floor-design-group-name">${escapeHtml(group.name)}</span><span class="tenant-floor-design-group-meta">${group.unassigned ? 'حددها في مجموعة' : `${group.floorNumbers.length} أدوار، صورة واحدة`}</span></span><span class="tenant-floor-design-group-status ${group.status}">${escapeHtml(status)}</span></button>`;
+      }).join('') : '<p class="tenant-hint">لا توجد مجموعات مطابقة للبحث.</p>';
+      host.querySelectorAll('[data-floor-design-group-id]').forEach(button => button.addEventListener('click', () => selectTenantFloorDesignGroup(button.dataset.floorDesignGroupId)));
+      const countLabel = document.getElementById('tenantFloorDesignGroupCount');
+      if (countLabel) countLabel.textContent = `${visible.length} من ${groups.length} مجموعات`;
+      updateTenantFloorDesignProgress();
+    }
+
+    function renderTenantFloorDesignActiveGroup() {
+      const group = tenantFloorDesignActiveGroup();
+      const title = document.getElementById('tenantFloorDesignTitle');
+      const subtitle = document.getElementById('tenantFloorDesignSubtitle');
+      const badge = document.getElementById('tenantFloorDesignBadge');
+      const image = document.getElementById('tenantFloorDesignImage');
+      const empty = document.getElementById('tenantFloorDesignImageEmpty');
+      const generate = document.getElementById('tenantFloorDesignGenerateButton');
+      const approve = document.getElementById('tenantFloorDesignApproveButton');
+      const settings = document.getElementById('tenantFloorDesignSettingsButton');
+      const chat = document.getElementById('tenantFloorDesignChatButton');
+      const preview = document.getElementById('tenantFloorDesignPreviewButton');
+      const pageStatus = document.getElementById('tenantFloorDesignStatus');
+      if (pageStatus && tenantFloorDesignState) pageStatus.textContent = `${tenantFloorDesignState.groups.length} مجموعات، ${tenantFloorDesignState.floorCount} أدوار`;
+      if (!group) {
+        title.textContent = 'لم يبدأ تصميم الأدوار';
+        subtitle.textContent = 'أنشئ أول مجموعة لتظهر مساحة الصورة.';
+        document.getElementById('tenantFloorDesignMembers').textContent = 'غير محدد';
+        document.getElementById('tenantFloorDesignGroupName').textContent = 'لا توجد مجموعة';
+        document.getElementById('tenantFloorDesignGroupStatus').textContent = 'لم يبدأ';
+        document.getElementById('tenantFloorDesignImageCount').textContent = 'لا توجد صور';
+        badge.textContent = 'لم تبدأ';
+        badge.className = 'tenant-floor-design-badge';
+        image.hidden = true;
+        empty.hidden = false;
+        empty.textContent = 'أنشئ مجموعة أدوار حتى تبدأ مساحة التصميم.';
+        document.getElementById('tenantFloorDesignImageTitle').textContent = 'لا توجد نتيجة مختارة';
+        document.getElementById('tenantFloorDesignCandidatesEmpty').textContent = 'لا توجد مجموعة نشطة بعد.';
+        generate.disabled = true;
+        approve.disabled = true;
+        settings.disabled = true;
+        chat.disabled = true;
+        preview.disabled = true;
+        document.getElementById('tenantFloorDesignActionStatus').textContent = 'أدخل عدد الأدوار ثم أنشئ أول مجموعة.';
+        renderTenantFloorDesignGroupList();
+        return;
+      }
+      const status = TENANT_FLOOR_DESIGN_STATUS_LABELS[group.status] || 'لم يبدأ';
+      const range = formatTenantFloorDesignNumbers(group.floorNumbers);
+      const imageUrl = group.approvedImageUrl || group.imageUrl || '';
+      title.textContent = group.unassigned ? 'نظم الأدوار غير المصنفة' : `الأدوار ${range}`;
+      subtitle.textContent = group.unassigned ? 'حدد أدوارًا متشابهة لإنشاء مجموعة وصورة واحدة لها.' : `${group.name}، صورة واحدة تمثل ${group.floorNumbers.length} أدوار.`;
+      document.getElementById('tenantFloorDesignMembers').textContent = range || 'غير محدد';
+      document.getElementById('tenantFloorDesignGroupName').textContent = group.name;
+      document.getElementById('tenantFloorDesignGroupStatus').textContent = status;
+      document.getElementById('tenantFloorDesignImageCount').textContent = imageUrl ? 'صورة واحدة' : 'لم تولد بعد';
+      document.getElementById('tenantFloorDesignSettingsLabel').textContent = `${group.name} (${range})`;
+      document.getElementById('tenantFloorDesignChatLabel').textContent = `${group.name} (${range})`;
+      badge.textContent = status;
+      badge.className = `tenant-floor-design-badge${group.status === 'approved' ? ' approved' : group.status === 'review' ? ' review' : ''}`;
+      if (imageUrl) {
+        image.src = imageUrl;
+        image.alt = `التصور البصري لمجموعة الأدوار ${range}`;
+        image.hidden = false;
+        empty.hidden = true;
+        document.getElementById('tenantFloorDesignImageTitle').textContent = `الصورة المعتمدة للمجموعة ${range}`;
+      } else {
+        image.hidden = true;
+        empty.hidden = false;
+        empty.textContent = group.unassigned ? 'هذه الأدوار لم تدخل في مجموعة بعد.' : 'لم يتم توليد صورة لهذه المجموعة بعد.';
+        document.getElementById('tenantFloorDesignImageTitle').textContent = 'لا توجد نتيجة مختارة';
+      }
+      document.getElementById('tenantFloorDesignCandidatesEmpty').textContent = group.unassigned ? 'صنّف الأدوار أولًا، ثم ابدأ توليد الصورة.' : 'هذه الصفحة تولد صورة واحدة لكل مجموعة.';
+      generate.disabled = Boolean(group.unassigned);
+      approve.disabled = Boolean(group.unassigned || !group.imageUrl);
+      settings.disabled = Boolean(group.unassigned);
+      chat.disabled = Boolean(group.unassigned);
+      preview.disabled = !imageUrl;
+      document.getElementById('tenantFloorDesignActionStatus').textContent = group.unassigned ? 'حدد الأدوار من زر تنظيم تشابه الأدوار لبدء مجموعة جديدة.' : group.status === 'approved' ? 'تم اعتماد صورة واحدة لهذه المجموعة.' : 'راجع الصورة ثم اعتمدها أو أعد التوليد.';
+      renderTenantFloorDesignChat(group);
+      renderTenantFloorDesignGroupList();
+    }
+
+    function selectTenantFloorDesignGroup(groupId) {
+      tenantFloorDesignActiveGroupId = groupId;
+      if (groupId === 'unassigned') openTenantFloorGroupModal('');
+      renderTenantFloorDesignActiveGroup();
+    }
+
+    function renderTenantFloorGroupGrid() {
+      const host = document.getElementById('tenantFloorGroupGrid');
+      const editingId = document.getElementById('tenantFloorGroupModal').dataset.editingGroupId || '';
+      const assigned = new Set((tenantFloorDesignState?.groups || []).filter(group => group.id !== editingId).flatMap(group => group.floorNumbers));
+      host.innerHTML = tenantFloorDesignNumbers().map(number => {
+        const selected = tenantFloorDesignDraftMembers.includes(number);
+        const locked = assigned.has(number);
+        const display = String(number).padStart(2, '0');
+        return `<button type="button" class="tenant-floor-design-chip${selected ? ' selected' : ''}${locked ? ' assigned' : ''}" data-floor-design-number="${number}"${locked ? ' disabled' : ''}>${display}</button>`;
+      }).join('');
+      host.querySelectorAll('[data-floor-design-number]:not(:disabled)').forEach(button => button.addEventListener('click', () => {
+        const number = Number(button.dataset.floorDesignNumber);
+        tenantFloorDesignDraftMembers = tenantFloorDesignDraftMembers.includes(number) ? tenantFloorDesignDraftMembers.filter(item => item !== number) : [...tenantFloorDesignDraftMembers, number].sort((first, second) => first - second);
+        renderTenantFloorGroupGrid();
+        document.getElementById('tenantFloorGroupRangePreview').textContent = formatTenantFloorDesignNumbers(tenantFloorDesignDraftMembers) || 'لم تحدد أدوارًا بعد';
+      }));
+    }
+
+    function openTenantFloorGroupModal(editingId = '') {
+      if (!tenantFloorDesignState) return;
+      const group = tenantFloorDesignState.groups.find(item => item.id === editingId);
+      const modal = document.getElementById('tenantFloorGroupModal');
+      modal.dataset.editingGroupId = editingId || '';
+      tenantFloorDesignDraftMembers = group ? [...group.floorNumbers] : [];
+      document.getElementById('tenantFloorGroupName').value = group?.name || '';
+      document.getElementById('tenantFloorGroupRangePreview').textContent = formatTenantFloorDesignNumbers(tenantFloorDesignDraftMembers) || 'لم تحدد أدوارًا بعد';
+      renderTenantFloorGroupGrid();
+      modal.hidden = false;
+    }
+
+    function closeTenantFloorGroupModal() {
+      const modal = document.getElementById('tenantFloorGroupModal');
+      modal.hidden = true;
+      delete modal.dataset.editingGroupId;
+    }
+
+    function saveTenantFloorGroup() {
+      if (!tenantFloorDesignState) return;
+      const name = document.getElementById('tenantFloorGroupName').value.trim();
+      const editingId = document.getElementById('tenantFloorGroupModal').dataset.editingGroupId || '';
+      if (!name) { toast('اكتب اسم المجموعة'); return; }
+      if (!tenantFloorDesignDraftMembers.length) { toast('حدد دورًا واحدًا على الأقل'); return; }
+      const editing = tenantFloorDesignState.groups.find(group => group.id === editingId);
+      tenantFloorDesignState.groups.forEach(group => {
+        if (group.id !== editingId) group.floorNumbers = group.floorNumbers.filter(number => !tenantFloorDesignDraftMembers.includes(number));
+      });
+      const nextId = editing?.id || `floor-group-${crypto.randomUUID()}`;
+      if (editing) {
+        editing.name = name;
+        editing.floorNumbers = [...tenantFloorDesignDraftMembers];
+        editing.status = 'pending';
+      } else {
+        tenantFloorDesignState.groups.push({ id: nextId, name, floorNumbers: [...tenantFloorDesignDraftMembers], type: 'غير محدد', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: '', style: '', chat: [] });
+      }
+      tenantFloorDesignState.groups = tenantFloorDesignState.groups.filter(group => group.floorNumbers.length);
+      tenantFloorDesignActiveGroupId = nextId;
+      markTenantFloorDesignDirty();
+      closeTenantFloorGroupModal();
+      renderTenantFloorDesignActiveGroup();
+    }
+
+    function startTenantFloorDesign() {
+      const countInput = document.getElementById('tenantFloorDesignCount');
+      const firstInput = document.getElementById('tenantFloorDesignFirstFloor');
+      const error = document.getElementById('tenantFloorDesignSetupError');
+      const count = Number(countInput.value);
+      const firstFloor = Number(firstInput.value);
+      if (!Number.isInteger(count) || count < 1 || count > 200) { error.textContent = 'اكتب عدد أدوار صحيحًا بين 1 و200.'; return; }
+      if (!Number.isInteger(firstFloor) || firstFloor < 0 || firstFloor > 200) { error.textContent = 'اكتب رقم أول دور صحيحًا.'; return; }
+      error.textContent = '';
+      const financialFloorCount = document.getElementById('floorCount');
+      if (financialFloorCount) {
+        financialFloorCount.value = String(count);
+        if (typeof calculateAll === 'function') calculateAll();
+      }
+      tenantFloorDesignState = { version: 1, floorCount: count, firstFloor, groups: [] };
+      tenantFloorDesignActiveGroupId = 'unassigned';
+      markTenantFloorDesignDirty();
+      document.getElementById('tenantFloorDesignSetup').hidden = true;
+      document.getElementById('tenantFloorDesignWorkspace').hidden = false;
+      renderTenantFloorDesignActiveGroup();
+      openTenantFloorGroupModal('');
+    }
+
+    function initializeTenantFloorDesign() {
+      tenantFloorDesignState = normalizeTenantFloorDesignState(tenantFloorDesignState || tenantProjectData.floor_visual_design);
+      bindTenantFloorDesignEvents();
+      const source = tenantFloorDesignSource();
+      const setup = document.getElementById('tenantFloorDesignSetup');
+      const workspace = document.getElementById('tenantFloorDesignWorkspace');
+      if (!tenantFloorDesignState) {
+        document.getElementById('tenantFloorDesignCount').value = source.floorCount || '';
+        document.getElementById('tenantFloorDesignFirstFloor').value = source.firstFloor || '';
+        setup.hidden = false;
+        workspace.hidden = true;
+        document.getElementById('tenantFloorDesignStatus').textContent = source.floorCount ? 'عدد الأدوار مقروء من الدراسة المالية' : 'أدخل عدد الأدوار للبدء';
+      } else {
+        if (!tenantFloorDesignActiveGroupId) tenantFloorDesignActiveGroupId = tenantFloorDesignAllGroups()[0]?.id || 'unassigned';
+        setup.hidden = true;
+        workspace.hidden = false;
+        document.getElementById('tenantFloorDesignStatus').textContent = `${tenantFloorDesignState.groups.length} مجموعات، ${tenantFloorDesignState.floorCount} أدوار`;
+        renderTenantFloorDesignActiveGroup();
+      }
+    }
+
+    function openTenantFloorDesignPage(fromHistory = false) {
+      showTenantPage('tenantFloorDesignPage', fromHistory);
+      initializeTenantFloorDesign();
+    }
+
+    function resetTenantFloorDesign() {
+      tenantFloorDesignState = null;
+      tenantFloorDesignActiveGroupId = null;
+      tenantProjectData.floor_visual_design = null;
+      setDraftDirty(true);
+      initializeTenantFloorDesign();
+    }
+
+    function moveTenantFloorDesignGroup(offset) {
+      const groups = tenantFloorDesignAllGroups();
+      const currentIndex = groups.findIndex(group => group.id === tenantFloorDesignActiveGroupId);
+      const next = groups[Math.max(0, Math.min(groups.length - 1, currentIndex + offset))];
+      if (next) selectTenantFloorDesignGroup(next.id);
+    }
+
+    function buildTenantFloorDesignPrompt(group) {
+      const project = tenantProjectData || {};
+      const range = formatTenantFloorDesignNumbers(group.floorNumbers);
+      const context = [
+        `اسم المشروع: ${project.project_name || project.projectName || 'مشروع عقاري'}`,
+        `نوع المشروع: ${project.project_type || project.projectType || 'غير محدد'}`,
+        `فكرة المشروع: ${project.project_idea || ''}`,
+        `هدف المشروع: ${project.project_goal || ''}`,
+        `الموقع: ${project.location_address || project.location_detail || ''}`,
+        `مجموعة الأدوار: ${range}`,
+        `تعليمات العميل للمجموعة: ${group.prompt || ''}`,
+        `الأسلوب البصري: ${group.style || 'غير محدد'}`
+      ].filter(Boolean).join('\n');
+      return `أنشئ تصورًا بصريًا معماريًا ثنائي الأبعاد واضحًا لمجموعة الأدوار التالية في مشروع عقاري. الصورة تمثل نموذجًا بصريًا واحدًا لكل الأدوار المحددة، وليست مخطط CAD قابلًا للتحرير. حافظ على هوية المشروع، أظهر توزيع الفراغات والعلاقات المعمارية بوضوح، ولا تضف نصوصًا عشوائية أو شعارات أو علامة مائية.\n\n${context}`;
+    }
+
+    async function generateTenantFloorDesignImage() {
+      const group = tenantFloorDesignActiveGroup();
+      if (!group || group.unassigned) return;
+      group.status = 'generating';
+      renderTenantFloorDesignActiveGroup();
+      try {
+        const response = await api('POST', '/api/floor-design/generate', { prompt: buildTenantFloorDesignPrompt(group), referenceImage: group.referenceImage || null });
+        if (!response?.success || !response.image) throw new Error(response?.error || 'تعذر توليد الصورة');
+        group.imageUrl = response.image;
+        group.approvedImageUrl = '';
+        group.status = 'review';
+        markTenantFloorDesignDirty();
+        toast('تم توليد صورة المجموعة. راجعها ثم اعتمدها.');
+      } catch (error) {
+        group.status = 'pending';
+        toast(error?.message || 'تعذر توليد صورة المجموعة');
+      }
+      renderTenantFloorDesignActiveGroup();
+    }
+
+    function approveTenantFloorDesignImage() {
+      const group = tenantFloorDesignActiveGroup();
+      if (!group?.imageUrl) return;
+      group.approvedImageUrl = group.imageUrl;
+      group.status = 'approved';
+      markTenantFloorDesignDirty();
+      renderTenantFloorDesignActiveGroup();
+      toast('تم اعتماد صورة المجموعة. اضغط حفظ التصميم لحفظها في المسودة.');
+    }
+
+    function previewTenantFloorDesignImage() {
+      const group = tenantFloorDesignActiveGroup();
+      const image = group?.approvedImageUrl || group?.imageUrl;
+      if (image) window.open(image, '_blank', 'noopener');
+    }
+
+    function renderTenantFloorDesignChat(group) {
+      const thread = document.getElementById('tenantFloorDesignChatThread');
+      if (!thread) return;
+      const messages = group?.chat || [];
+      thread.innerHTML = '<div class="tenant-floor-design-chat-message">اكتب تعديلًا واضحًا على الصورة الحالية لهذه المجموعة.</div>' + messages.map(item => `<div class="tenant-floor-design-chat-message ${item.role === 'user' ? 'user' : ''}">${escapeHtml(item.text)}</div>`).join('');
+    }
+
+    function openTenantFloorDesignDrawer(kind) {
+      const group = tenantFloorDesignActiveGroup();
+      if (!group || group.unassigned) return;
+      const settings = document.getElementById('tenantFloorDesignSettingsDrawer');
+      const chat = document.getElementById('tenantFloorDesignChatDrawer');
+      document.getElementById('tenantFloorDesignDrawerBackdrop').hidden = false;
+      settings.hidden = kind !== 'settings';
+      chat.hidden = kind !== 'chat';
+      if (kind === 'settings') {
+        document.getElementById('tenantFloorDesignBrief').value = group.prompt || '';
+        document.getElementById('tenantFloorDesignStyle').value = group.style || '';
+      } else {
+        renderTenantFloorDesignChat(group);
+      }
+    }
+
+    function closeTenantFloorDesignDrawer() {
+      document.getElementById('tenantFloorDesignSettingsDrawer').hidden = true;
+      document.getElementById('tenantFloorDesignChatDrawer').hidden = true;
+      document.getElementById('tenantFloorDesignDrawerBackdrop').hidden = true;
+    }
+
+    function saveTenantFloorDesignCustomization() {
+      const group = tenantFloorDesignActiveGroup();
+      if (!group || group.unassigned) return;
+      group.prompt = document.getElementById('tenantFloorDesignBrief').value.trim().slice(0, 12000);
+      group.style = document.getElementById('tenantFloorDesignStyle').value;
+      markTenantFloorDesignDirty();
+      closeTenantFloorDesignDrawer();
+      toast('تم حفظ تخصيص المجموعة محليًا.');
+    }
+
+    function sendTenantFloorDesignChat() {
+      const group = tenantFloorDesignActiveGroup();
+      const input = document.getElementById('tenantFloorDesignChatInput');
+      const text = input.value.trim();
+      if (!group || group.unassigned || !text) return;
+      group.chat = Array.isArray(group.chat) ? group.chat : [];
+      group.chat.push({ role: 'user', text });
+      group.prompt = text.slice(0, 12000);
+      input.value = '';
+      markTenantFloorDesignDirty();
+      renderTenantFloorDesignChat(group);
+      toast('تم حفظ تعليمات التعديل للمجموعة. استخدم توليد الصورة لتطبيقها.');
+    }
+
+    function bindTenantFloorDesignEvents() {
+      if (document.body.dataset.floorDesignBound === '1') return;
+      document.body.dataset.floorDesignBound = '1';
+      document.getElementById('tenantFloorDesignSearch')?.addEventListener('input', renderTenantFloorDesignGroupList);
+      document.querySelectorAll('[data-floor-design-filter]').forEach(button => button.addEventListener('click', () => {
+        tenantFloorDesignFilter = button.dataset.floorDesignFilter;
+        document.querySelectorAll('[data-floor-design-filter]').forEach(item => item.classList.toggle('active', item === button));
+        renderTenantFloorDesignGroupList();
+      }));
+      document.getElementById('tenantFloorGroupModal')?.addEventListener('click', event => {
+        if (event.target.id === 'tenantFloorGroupModal') closeTenantFloorGroupModal();
+      });
+    }
+
+    async function saveTenantFloorDesign() {
+      if (!tenantFloorDesignState) { toast('أدخل عدد الأدوار وأنشئ مجموعة أولًا'); return; }
+      await saveProjectAsDraft();
     }
 
     // S3: Components Table
@@ -9452,6 +10115,10 @@
     }
 
     function showSection(sectionKey, fromHistory = false) {
+      if (sectionKey === 'section-conceptual-2d') {
+        openTenantFloorDesignPage(fromHistory);
+        return;
+      }
       const sections = Array.from(document.querySelectorAll('#tenantProjectForm .tenant-form-section[data-section]'));
       const target = sections.find(section => section.dataset.section === sectionKey);
       if (!target) return;
@@ -9531,6 +10198,10 @@
           data.calculate_landmark_driving = !!tenantProjectData.calculate_landmark_driving;
         }
         data.tenantSlidePlan = tenantSlidePlan;
+        if (tenantFloorDesignState) {
+          data.floor_visual_design = tenantFloorDesignState;
+          tenantProjectData.floor_visual_design = tenantFloorDesignState;
+        }
         data.tenantCreativeImages = tenantCreativeImages;
         data.tenantSlidesData = tenantSlidesData;
         data.site_analysis_approved = !!tenantProjectData.site_analysis_approved;

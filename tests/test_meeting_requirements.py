@@ -977,7 +977,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         client = self.app.test_client()
         html_headers = {'Accept': 'text/html'}
         for path in ('/', '/app', '/app/dashboard', '/app/projects/new',
-                     '/app/settings/users', '/projects/123/financial'):
+                     '/app/projects/floor-design', '/app/settings/users', '/projects/123/financial'):
             response = client.get(path, headers=html_headers)
             self.assertEqual(response.status_code, 200, f'{path} should serve the SPA shell')
 
@@ -1789,6 +1789,49 @@ class MeetingRequirementsTests(unittest.TestCase):
         maps_source = Path('maps_service.py').read_text(encoding='utf-8')
         self.assertNotIn('router.project-osrm.org', maps_source)
         self.assertIn('maps.googleapis.com/maps/api/directions/json', maps_source)
+
+    def test_floor_design_state_is_saved_as_tenant_draft_data(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("tenantFloorDesignPage: '/app/projects/floor-design'", index_source)
+        self.assertIn("floor_visual_design", index_source)
+        self.assertIn("formatTenantFloorDesignNumbers", index_source)
+
+        state = {
+            'version': 1,
+            'floorCount': 5,
+            'firstFloor': 1,
+            'groups': [{
+                'id': 'group-1',
+                'name': 'مجموعة اختبار',
+                'floorNumbers': [1, 3, 5],
+                'status': 'pending',
+                'imageUrl': '',
+                'approvedImageUrl': '',
+            }],
+        }
+        client = self.app.test_client()
+        saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {'project_name': 'اختبار التصميم المصور', 'floor_visual_design': state}
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        loaded = client.get('/api/project-draft', headers=self._headers(self.token_a))
+        self.assertEqual(loaded.status_code, 200, loaded.get_json())
+        self.assertEqual(loaded.get_json()['draft']['draft_data']['floor_visual_design']['groups'][0]['floorNumbers'], [1, 3, 5])
+
+    def test_floor_design_generation_requires_auth_and_valid_prompt(self):
+        client = self.app.test_client()
+        unauthenticated = client.post('/api/floor-design/generate', json={'prompt': 'تصميم'})
+        self.assertEqual(unauthenticated.status_code, 401)
+
+        missing_prompt = client.post('/api/floor-design/generate', headers=self._headers(self.token_a), json={})
+        self.assertEqual(missing_prompt.status_code, 400, missing_prompt.get_json())
+        self.assertEqual(missing_prompt.get_json()['error_code'], 'PROMPT_REQUIRED')
+
+        invalid_reference = client.post('/api/floor-design/generate', headers=self._headers(self.token_a), json={
+            'prompt': 'تصميم دور نموذجي', 'referenceImage': 'https://example.com/image.png'
+        })
+        self.assertEqual(invalid_reference.status_code, 400, invalid_reference.get_json())
+        self.assertEqual(invalid_reference.get_json()['error_code'], 'REFERENCE_INVALID')
 
 
 if __name__ == '__main__':
