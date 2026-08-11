@@ -10431,9 +10431,11 @@
       Object.entries(parcelFields).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') fields[key] = value;
       });
-      // The approved financial-study area belongs to the client only.
+      // Client-entered decisions must never be populated by document analysis.
       delete fields.approved_financial_area;
       delete fields.approved_financial_area_sqm;
+      delete fields.approved_floor_count;
+      delete fields.approved_floors;
       return fields;
     }
 
@@ -10674,7 +10676,7 @@
       const isApproved = btn.classList.contains('approved');
       if (!isApproved) {
         inputs.forEach(inp => {
-          if (inp.dataset.key !== 'approved_financial_area') {
+          if (!['approved_financial_area', 'approved_floor_count'].includes(inp.dataset.key)) {
             inp.disabled = true;
           }
         });
@@ -10724,11 +10726,13 @@
         const data = await api('POST', '/api/site-analysis', { projectData: analysisProjectData });
         if (data.success && data.analysis) {
           const filledFields = data.fields && typeof data.fields === 'object' ? data.fields : {};
+          const clientOnlyFields = new Set(['approved_financial_area', 'approved_financial_area_sqm', 'approved_floor_count', 'approved_floors']);
+          const safeFilledFields = Object.fromEntries(Object.entries(filledFields).filter(([key]) => !clientOnlyFields.has(key)));
           if (Array.isArray(data.warnings) && data.warnings.length) {
             toast('اكتمل التحليل، لكن تعذر جلب بعض المعالم: ' + data.warnings.join(' | '));
           }
-          tenantProjectData = { ...tenantProjectData, ...filledFields };
-          Object.entries(filledFields).forEach(([key, value]) => {
+          tenantProjectData = { ...tenantProjectData, ...safeFilledFields };
+          Object.entries(safeFilledFields).forEach(([key, value]) => {
             const fieldInput = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
             if (fieldInput && value !== null && value !== undefined) fieldInput.value = value;
           });

@@ -279,6 +279,26 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('building_permit_file', keys)
         self.assertNotIn('north_direction', keys)
 
+    def test_approved_floor_count_is_client_entered_and_distinct_from_allowed_floors(self):
+        fields = self.app.test_client().get('/api/fields', headers=self._headers(self.token_a)).get_json()['fields']
+        field = next(item for item in fields if item['fieldKey'] == 'approved_floor_count')
+        self.assertEqual(field['fieldLabel'], 'الأدوار المعتمدة')
+        self.assertEqual(field['fieldType'], 'number')
+        self.assertFalse(field['isRequired'])
+
+        result = self.application_module._normalize_land_document_result({
+            'parcels': [{'parcel_id': 'P-1', 'approved_floor_count': 7, 'max_floors_height': '12 دور'}]
+        })
+        self.assertNotIn('approved_floor_count', result)
+        self.assertNotIn('approved_floor_count', result['parcels'][0])
+        self.assertEqual(result['parcels'][0]['max_floors_height'], '12 دور')
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("resp_json.pop('approved_floor_count', None)", app_source)
+        self.assertIn("delete fields.approved_floor_count", index_source)
+        self.assertIn("'approved_floor_count'", index_source)
+
     def test_direction_and_coordinate_tables_are_separate_ai_outputs(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('surveyCoordinatesPanel', index_source)

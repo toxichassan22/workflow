@@ -5332,10 +5332,11 @@ def normalize_croquis_fields(resp_json, text_content=""):
         if area_match:
             resp_json['croquis_land_area'] = area_match.group(1).replace(',', '')
 
-    # The approved financial-study area is a client decision (it may include deductions),
-    # so AI output is never allowed to populate or overwrite it.
+    # These values are client decisions, so AI output is never allowed to populate or overwrite them.
     resp_json.pop('approved_financial_area', None)
     resp_json.pop('approved_financial_area_sqm', None)
+    resp_json.pop('approved_floor_count', None)
+    resp_json.pop('approved_floors', None)
 
     # 4. Facades count normalization & fallback (Pure Number: 1, 2, 3, 4)
     raw_facades = resp_json.get('facades_count', '')
@@ -5757,6 +5758,8 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
     Historically these rules only ran when the model skipped the ``parcels`` array, so the
     regex fallbacks and the numeric facade coercion never executed on the real code path.
     """
+    parcel.pop('approved_floor_count', None)
+    parcel.pop('approved_floors', None)
     for key in PARCEL_PLACEHOLDER_KEYS:
         if is_placeholder_value(parcel.get(key)):
             parcel[key] = ''
@@ -5925,6 +5928,8 @@ def _normalize_land_document_result(resp_json, text_content=''):
     if not normalized_parcels:
         return _normalize_land_document_result({}, text_content)
     result = dict(resp_json)
+    result.pop('approved_floor_count', None)
+    result.pop('approved_floors', None)
     result['parcels'] = normalized_parcels
     aggregate_coordinates = [row for parcel in normalized_parcels for row in parcel.get('survey_coordinates', [])]
     top_coordinates = resp_json.get('survey_coordinates') or resp_json.get('coordinates_table') or []
