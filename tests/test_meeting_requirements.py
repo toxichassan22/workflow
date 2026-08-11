@@ -283,8 +283,9 @@ class MeetingRequirementsTests(unittest.TestCase):
                     [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,test', 'detail': 'high'}}],
                     [], 1, 'image_direct'
                 )), \
-                patch.object(self.application_module, 'search_official_regulations_pdf', return_value=('', [], [])), \
-                patch.object(self.application_module, 'render_regulation_table_pages', return_value=([], [])), \
+                patch.object(self.application_module, 'search_official_regulations_evidence', return_value=(
+                    {'context': '', 'documents': [], 'table_pages': []}, []
+                )), \
                 patch.object(self.application_module, '_call_land_analysis_model', return_value=(provider_response, 9000, '')):
             response = self.app.test_client().post('/api/extract-croquis', headers=self._headers(self.token_a), json={
                 'fileData': 'data:image/png;base64,test',
@@ -295,6 +296,60 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(diagnostics['coordinates_rows'], 1)
         self.assertEqual(diagnostics['directions_with_values'], 4)
         self.assertEqual(diagnostics['status'], 'complete')
+
+    def test_land_analysis_pipeline_reads_both_regulation_sources_before_final_merge(self):
+        final_payload = {
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'plot_number': '9',
+                'area_sqm': 3000,
+                'survey_coordinates': [{
+                    'point': '1', 'eastings': '511085.849', 'northings': '2392264.840'
+                }],
+                'directions': {},
+            }],
+            'conflicts': [],
+        }
+        stage_responses = [
+            {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps({
+                'site_facts': {'area_sqm': 3000, 'land_use': 'سكني', 'zoning_code': 'ت ر1'}
+            }, ensure_ascii=False)}}]},
+            {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps({
+                'evidence': [{'field': 'allowed_uses_restrictions', 'value': 'سكني', 'page': 12}]
+            }, ensure_ascii=False)}}]},
+            {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps({
+                'evidence': [{'field': 'building_ratio', 'value': '60%', 'page': 44}]
+            }, ensure_ascii=False)}}]},
+            {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(final_payload, ensure_ascii=False)}}]},
+        ]
+        stage_responses = [(response, 9000, '') for response in stage_responses]
+        evidence_package = {
+            'context': 'لا يُستخدم هذا الحقل في الدمج النهائي',
+            'documents': [
+                {'name': 'اشتراطات1.pdf', 'context': 'دليل الملف الأول', 'text_pages': [12], 'table_pages': []},
+                {'name': 'اشتراطات2.pdf', 'context': 'دليل الملف الثاني', 'text_pages': [44], 'table_pages': []},
+            ],
+            'table_pages': [],
+        }
+        with patch.object(self.application_module, 'OPENROUTER_KEY', 'test-key'), \
+                patch.object(self.application_module, '_prepare_document_vision_parts', return_value=(
+                    [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,test', 'detail': 'high'}}],
+                    [], 1, 'image_direct'
+                )), \
+                patch.object(self.application_module, 'search_official_regulations_evidence', return_value=(
+                    evidence_package, []
+                )), \
+                patch.object(self.application_module, '_call_land_analysis_model', side_effect=stage_responses) as calls:
+            response = self.app.test_client().post('/api/extract-croquis', headers=self._headers(self.token_a), json={
+                'fileData': 'data:image/png;base64,test',
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(calls.call_count, 4)
+        final_user_content = json.dumps(calls.call_args_list[-1].args[1], ensure_ascii=False)
+        self.assertIn('اشتراطات1.pdf', final_user_content)
+        self.assertIn('اشتراطات2.pdf', final_user_content)
+        self.assertNotIn('لا يُستخدم هذا الحقل في الدمج النهائي', final_user_content)
 
     def test_health_reports_deployment_marker(self):
         marker = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
@@ -664,9 +719,10 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_new_land_fields_split_identifiers_and_add_deed_date(self):
         fields = self.app.test_client().get('/api/fields', headers=self._headers(self.token_a)).get_json()['fields']
         by_key = {field['fieldKey']: field for field in fields}
-        for key in ('plan_number', 'subdivision_number', 'deed_date', 'facades_directions', 'land_photos'):
+        for key in ('plan_number', 'deed_date', 'facades_directions', 'land_photos'):
             self.assertIn(key, by_key)
             self.assertEqual(by_key[key]['sectionKey'], 'land_croquis')
+        self.assertNotIn('subdivision_number', by_key)
         # The plot number is no longer a combined "plot + plan" box.
         self.assertEqual(by_key['plot_number_croquis']['fieldLabel'], 'رقم القطعة')
         self.assertEqual(by_key['deed_date']['fieldLabel'], 'تاريخ الصك')
@@ -1601,7 +1657,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Client documents stay vision-only; the regulation arrives as trusted text + table images.
         self.assertIn('لديك نوعان من المدخلات', source)
         self.assertIn('نص هذا الجدول يُستخرج بترتيب معكوس', source)
-        self.assertIn('لم يتوفر مرجع لائحة الأمانة في هذا الطلب', source)
+        self.assertIn('لم تتوفر أدلة اشتراطات منتقاة من الملفين', source)
 
     @unittest.skipUnless((ROOT / 'اشتراطات1.pdf').exists(), 'regulation PDFs not present')
     def test_regulation_lookup_returns_real_condition_pages(self):
@@ -1618,6 +1674,35 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(render_warnings, [])
         self.assertEqual(len(parts), 4)
         self.assertTrue(parts[1]['image_url']['url'].startswith('data:image/png;base64,'))
+
+    def test_regulation_evidence_keeps_both_files_separate_and_bounded(self):
+        module = self.application_module
+        records = [
+            {
+                'name': 'اشتراطات1.pdf', 'path': 'one.pdf', 'page': 12,
+                'text': 'نسبة البناء والاستخدامات والمواقف سكني', 'has_table': True,
+            },
+            {
+                'name': 'اشتراطات2.pdf', 'path': 'two.pdf', 'page': 44,
+                'text': 'ارتداد وتغطية وعدد الطوابق وارتفاع مسطح البناء', 'has_table': True,
+            },
+            {
+                'name': 'اشتراطات1.pdf', 'path': 'one.pdf', 'page': 13,
+                'text': 'مقدمة عامة عن الوثيقة', 'has_table': False,
+            },
+        ]
+        with patch.object(module, '_build_regulation_page_index', return_value=records), \
+                patch.object(module, 'REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE', 1), \
+                patch.object(module, 'REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE', 1):
+            package, warnings = module.search_official_regulations_evidence(
+                'سكني', {'area_sqm': 3000, 'land_use': 'سكني'}
+            )
+
+        self.assertEqual(warnings, [])
+        self.assertEqual([item['name'] for item in package['documents']], ['اشتراطات1.pdf', 'اشتراطات2.pdf'])
+        self.assertEqual([item['table_pages'] for item in package['documents']], [[12], [44]])
+        self.assertEqual({item['name'] for item in package['table_pages']}, {'اشتراطات1.pdf', 'اشتراطات2.pdf'})
+        self.assertLessEqual(len(package['context']), 2 * module.REGULATION_EVIDENCE_MAX_CHARS_PER_FILE)
 
     def test_site_analysis_prefers_google_link_over_stale_coordinates(self):
         client = self.app.test_client()

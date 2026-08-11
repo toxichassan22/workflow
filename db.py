@@ -631,7 +631,8 @@ FIELD_SECTIONS = [
 DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}
 
 REMOVED_PREBUILT_FIELDS = {'land_image_file', 'regulation_reference_file', 'croquis_file',
-                           'building_permit_file', 'north_direction', 'croquis_expiry_date'}
+                           'building_permit_file', 'north_direction', 'croquis_expiry_date',
+                           'subdivision_number'}
 
 PREBUILT_FIELDS = [
     {'key': 'project_name', 'label': 'اسم المشروع', 'type': 'text', 'required': True, 'section_key': 'basic', 'ai_hint': 'اسم المشروع الرئيسي', 'sort_order': 1},
@@ -646,7 +647,6 @@ PREBUILT_FIELDS = [
     {'key': 'land_documents_files', 'label': 'رفع رخصة البناء والكروكي أو المستندات (ملفان كحد أقصى)', 'type': 'file', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'ارفع ملف رخصة البناء وملف الكروكي معًا ليتم تحليلهما في طلب AI واحد', 'sort_order': 10},
     {'key': 'plot_number_croquis', 'label': 'رقم القطعة', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم قطعة الأرض وحده بدون رقم المخطط أو القسم', 'sort_order': 11},
     {'key': 'plan_number', 'label': 'رقم المخطط', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم المخطط وحده كما هو في الصك أو الكروكي', 'sort_order': 12},
-    {'key': 'subdivision_number', 'label': 'رقم القسم أو الجزء (إن وجد)', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم القسم أو الجزء إن ذُكر صراحة، ويُترك فارغًا إن لم يوجد', 'sort_order': 13},
     {'key': 'deed_number', 'label': 'رقم الصك أو المرجع', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'رقم صك الملكية أو المرجع الرسمي', 'sort_order': 14},
     {'key': 'deed_date', 'label': 'تاريخ الصك', 'type': 'text', 'required': False, 'section_key': 'land_croquis', 'ai_hint': 'تاريخ إصدار الصك كما هو مكتوب (هجري أو ميلادي) — ليس تاريخ الكروكي', 'sort_order': 15},
     {'key': 'croquis_land_area', 'label': 'مساحة الأرض حسب الكروكي (م²)', 'type': 'number', 'required': True, 'section_key': 'land_croquis', 'ai_hint': 'المساحة الإجمالية للأرض بالمتر المربع حسب الكروكي', 'sort_order': 16},

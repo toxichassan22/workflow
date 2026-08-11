@@ -5684,6 +5684,17 @@ REGULATION_PDF_NAMES = ('اشتراطات1.pdf', 'اشتراطات2.pdf')
 REGULATION_SNIPPET_CHARS = int(os.environ.get('REGULATION_SNIPPET_CHARS', '2600'))
 REGULATION_MAX_SNIPPETS = int(os.environ.get('REGULATION_MAX_SNIPPETS', '6'))
 REGULATION_MAX_TABLE_PAGES = int(os.environ.get('REGULATION_MAX_TABLE_PAGES', '6'))
+REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE = int(os.environ.get('REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE', '4'))
+REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE = int(os.environ.get('REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE', '3'))
+REGULATION_EVIDENCE_MAX_CHARS_PER_FILE = int(os.environ.get('REGULATION_EVIDENCE_MAX_CHARS_PER_FILE', '12000'))
+REGULATION_EVIDENCE_TABLE_DPI = int(os.environ.get('REGULATION_EVIDENCE_TABLE_DPI', '180'))
+LAND_FACTS_MAX_TOKENS = int(os.environ.get('LAND_FACTS_MAX_TOKENS', '2500'))
+LAND_FACTS_MIN_TOKENS = int(os.environ.get('LAND_FACTS_MIN_TOKENS', '1200'))
+REGULATION_EVIDENCE_MAX_TOKENS = int(os.environ.get('REGULATION_EVIDENCE_MAX_TOKENS', '4000'))
+REGULATION_EVIDENCE_MIN_TOKENS = int(os.environ.get('REGULATION_EVIDENCE_MIN_TOKENS', '1500'))
+
+_REGULATION_PAGE_INDEX = None
+_REGULATION_PAGE_INDEX_SIGNATURE = None
 
 # Terms that mark a page as carrying the conditions we need. Arabic extracted from these PDFs
 # loses the lam-alef ligature and some letters, so the roots are matched without "ال".
@@ -5691,6 +5702,7 @@ REGULATION_TOPIC_TERMS = (
     ('نسبة البناء', 6), ('مسطح البناء', 4), ('معامل مسطح', 4),
     ('ارتداد', 6), ('تغطية', 4), ('عدد الطوابق', 5), ('الطوابق', 3),
     ('ارتفاع', 3), ('استعمال', 2), ('استخدام', 2),
+    ('مواقف', 4), ('مدخل', 3), ('مخرج', 3), ('تحميل', 3), ('خدمات', 2),
     ('محاور التجارية', 3), ('سكني', 2), ('تجاري', 2),
 )
 
@@ -5734,33 +5746,41 @@ def regulation_pdf_paths():
 
 
 def search_official_regulations_pdf(query_text=""):
-    """Return the complete cleaned prose and the strongest regulation table pages.
+    """Return a bounded, source-separated regulation evidence packet for older callers."""
+    package, warnings = search_official_regulations_evidence(query_text, {})
+    return package.get('context', ''), package.get('table_pages', []), warnings
 
-    Returns ``(context_text, table_pages, warnings)``. Prose is cheap to send as text, while
-    table text extracts in reversed visual order, so only the relevant table pages are sent as
-    images for reliable numeric reading.
-    """
-    warnings = []
-    pdf_paths = regulation_pdf_paths()
-    if not pdf_paths:
-        message = ('ملفات الاشتراطات غير موجودة على السيرفر: '
-                   + '، '.join(REGULATION_PDF_NAMES))
-        print(f'[REGULATION PDF] {message}')
-        return '', [], [message]
 
+def _regulation_index_signature(paths):
+    signature = []
+    for path in paths:
+        try:
+            stat = os.stat(path)
+            signature.append((path, stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            signature.append((path, None, None))
+    return tuple(signature)
+
+
+def _build_regulation_page_index():
+    global _REGULATION_PAGE_INDEX, _REGULATION_PAGE_INDEX_SIGNATURE
+    paths = regulation_pdf_paths()
+    signature = _regulation_index_signature(paths)
+    if _REGULATION_PAGE_INDEX_SIGNATURE == signature and _REGULATION_PAGE_INDEX is not None:
+        return _REGULATION_PAGE_INDEX
     try:
         import fitz
     except ImportError:
-        return '', [], ['PyMuPDF غير متاح؛ تعذر قراءة ملفات الاشتراطات']
+        _REGULATION_PAGE_INDEX = []
+        _REGULATION_PAGE_INDEX_SIGNATURE = signature
+        return []
 
-    query_tokens = [token.strip() for token in str(query_text or '').split() if len(token.strip()) > 2][:8]
-    scored, table_pages, full_text_parts = [], [], []
-    for pdf_path in pdf_paths:
-        name = os.path.basename(pdf_path)
+    records = []
+    for path in paths:
+        name = os.path.basename(path)
         try:
-            document = fitz.open(pdf_path)
-        except Exception as error:
-            warnings.append(f'تعذر فتح {name}: {error}')
+            document = fitz.open(path)
+        except Exception:
             continue
         try:
             for index in range(len(document)):
@@ -5771,40 +5791,92 @@ def search_official_regulations_pdf(query_text=""):
                 cleaned = _clean_regulation_text(raw)
                 if len(cleaned) < 120:
                     continue
-                full_text_parts.append(
-                    f"--- نص لائحة الأمانة: {name} — صفحة {index + 1} ---\n{cleaned}")
-                score = _score_regulation_page(cleaned, query_tokens)
-                if score <= 0:
-                    continue
-                has_table = False
                 try:
                     has_table = bool(page.find_tables().tables)
                 except Exception:
                     has_table = False
-                scored.append({
-                    'name': name, 'path': pdf_path, 'page': index + 1,
-                    'score': score + (6 if has_table else 0),
-                    'text': cleaned[:REGULATION_SNIPPET_CHARS], 'has_table': has_table,
+                records.append({
+                    'name': name,
+                    'path': path,
+                    'page': index + 1,
+                    'text': cleaned,
+                    'has_table': has_table,
                 })
         finally:
             document.close()
+    _REGULATION_PAGE_INDEX = records
+    _REGULATION_PAGE_INDEX_SIGNATURE = signature
+    return records
 
-    scored.sort(key=lambda item: item['score'], reverse=True)
-    top = scored[:REGULATION_MAX_SNIPPETS]
-    if not top:
-        warnings.append('لم يتم العثور على صفحات اشتراطات مطابقة في ملفات الأمانة')
 
-    for item in top:
-        if item['has_table'] and len(table_pages) < REGULATION_MAX_TABLE_PAGES:
-            table_pages.append({'path': item['path'], 'name': item['name'], 'page': item['page']})
+def _regulation_search_tokens(query_text='', site_facts=None):
+    values = [str(query_text or '')]
+    if isinstance(site_facts, dict):
+        values.extend(str(site_facts.get(key) or '') for key in (
+            'area_sqm', 'croquis_land_area', 'zoning_code', 'land_use', 'city',
+            'project_type', 'axis_type', 'building_type', 'plot_number'
+        ))
+    blob = ' '.join(values)
+    tokens = re.findall(r'[0-9A-Za-z\u0600-\u06FF/%.-]{3,}', blob)
+    return list(dict.fromkeys(token.casefold() for token in tokens))[:24]
 
-    context = '\n\n'.join(full_text_parts)
-    if not context:
-        context = '\n\n'.join(
-            f"--- مرجع لائحة أمانة محافظة جدة 1447هـ/2025م ({item['name']} — صفحة {item['page']}) ---\n{item['text']}"
-            for item in top
+
+def search_official_regulations_evidence(query_text='', site_facts=None):
+    records = _build_regulation_page_index()
+    if not records:
+        return {'context': '', 'documents': [], 'table_pages': []}, [
+            'ملفات الاشتراطات غير موجودة أو لا تحتوي صفحات قابلة للبحث: '
+            + '، '.join(REGULATION_PDF_NAMES)
+        ]
+    query_tokens = _regulation_search_tokens(query_text, site_facts)
+    warnings = []
+    documents = []
+    table_pages = []
+    for name in REGULATION_PDF_NAMES:
+        file_records = [record for record in records if record['name'] == name]
+        scored = sorted(
+            (
+                {
+                    **record,
+                    'score': _score_regulation_page(record['text'], query_tokens)
+                }
+                for record in file_records
+            ),
+            key=lambda record: (-record['score'], record['page'])
         )
-    return context, table_pages, warnings
+        matched = [record for record in scored if record['score'] > 0]
+        text_records = matched[:max(0, REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE)]
+        table_records = [record for record in matched if record['has_table']][:max(0, REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE)]
+        if not text_records:
+            warnings.append(f'لم يتم العثور على صفحات مطابقة في {name}')
+        context_parts = []
+        remaining = max(0, REGULATION_EVIDENCE_MAX_CHARS_PER_FILE)
+        for record in text_records:
+            if remaining <= 0:
+                break
+            snippet = record['text'][:min(REGULATION_SNIPPET_CHARS, remaining)]
+            context_parts.append(
+                f"--- {name} — صفحة {record['page']} — score={record['score']} ---\n{snippet}"
+            )
+            remaining -= len(snippet)
+        for record in table_records:
+            table_pages.append({
+                'path': record['path'],
+                'name': name,
+                'page': record['page'],
+                'score': record['score'],
+            })
+        documents.append({
+            'name': name,
+            'context': '\n\n'.join(context_parts),
+            'text_pages': [record['page'] for record in text_records],
+            'table_pages': [record['page'] for record in table_records],
+        })
+    return {
+        'context': '\n\n'.join(document['context'] for document in documents if document['context']),
+        'documents': documents,
+        'table_pages': table_pages,
+    }, warnings
 
 
 def render_regulation_table_pages(table_pages, dpi=200):
@@ -5890,14 +5962,16 @@ def _chat_error_message(res):
     return str(error or 'unknown provider error')[:400]
 
 
-def _call_land_analysis_model(system_prompt, user_content, max_tokens):
+def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_tokens=None, truncation_ceiling=None):
     """Call the vision model, lowering the reserved cap when the provider cannot afford it.
 
     Gateway failures (HTTP 5xx) are usually transient, so they are retried with the same cap
     before being surfaced. A response truncated at the cap is retried once with a higher cap,
     bounded by ``LAND_ANALYSIS_TRUNCATION_CEILING``. Returns ``(response, used_cap, error_message)``.
     """
-    cap = max(LAND_ANALYSIS_MIN_TOKENS, int(max_tokens))
+    minimum = LAND_ANALYSIS_MIN_TOKENS if min_tokens is None else max(1, int(min_tokens))
+    ceiling = LAND_ANALYSIS_TRUNCATION_CEILING if truncation_ceiling is None else max(1, int(truncation_ceiling))
+    cap = max(minimum, int(max_tokens))
     message = ''
     res = None
     for attempt in range(3):
@@ -5907,7 +5981,7 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens):
         if _has_chat_choices(res):
             choices = res.get('choices') or []
             finish_reason = choices[0].get('finish_reason') if choices and isinstance(choices[0], dict) else None
-            higher_cap = min(LAND_ANALYSIS_TRUNCATION_CEILING, int(cap * 1.35))
+            higher_cap = min(ceiling, int(cap * 1.35))
             if finish_reason == 'length' and higher_cap > cap and attempt < 2:
                 print(f'[LAND ANALYSIS] response truncated at cap={cap}; retrying with {higher_cap}')
                 cap = higher_cap
@@ -5917,7 +5991,7 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens):
         affordable = _AFFORDABLE_TOKENS_RE.search(message)
         if affordable:
             # Leave a margin: the quoted allowance shrinks as the prompt itself consumes credit.
-            retry_cap = max(LAND_ANALYSIS_MIN_TOKENS, int(int(affordable.group(1)) * 0.85))
+            retry_cap = max(minimum, int(int(affordable.group(1)) * 0.85))
             if retry_cap >= cap:
                 break
             print(f'[LAND ANALYSIS] provider refused max_tokens={cap}; retrying with {retry_cap}')
@@ -5929,6 +6003,48 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens):
             continue
         break
     return res, cap, message
+
+
+def _run_land_json_stage(stage_name, system_prompt, user_content, max_tokens, min_tokens, truncation_ceiling):
+    response, used_cap, provider_error = _call_land_analysis_model(
+        system_prompt,
+        user_content,
+        max_tokens,
+        min_tokens=min_tokens,
+        truncation_ceiling=truncation_ceiling,
+    )
+    if not _has_chat_choices(response):
+        return {}, used_cap, provider_error
+    raw = _get_chat_response_text(response)
+    parsed = parse_json_object(raw)
+    if not parsed:
+        return {}, used_cap, 'المرحلة ' + stage_name + ' أعادت JSON فارغًا أو غير صالح'
+    print(f'[LAND ANALYSIS STAGE] {stage_name} cap={used_cap} chars={len(raw)}')
+    return parsed, used_cap, ''
+
+
+def _extract_land_site_facts(parsed, request_data=None):
+    source = parsed.get('site_facts') if isinstance(parsed, dict) else None
+    source = source if isinstance(source, dict) else (parsed if isinstance(parsed, dict) else {})
+    request_data = request_data if isinstance(request_data, dict) else {}
+    facts = {}
+    for key in ('area_sqm', 'croquis_land_area', 'zoning_code', 'land_use', 'city',
+                'project_type', 'axis_type', 'building_type', 'plot_number'):
+        value = source.get(key)
+        if value in (None, ''):
+            value = request_data.get(key)
+        if value not in (None, ''):
+            facts[key] = value
+    return facts
+
+
+def _compact_regulation_evidence(source_name, parsed):
+    if not isinstance(parsed, dict):
+        return {'source_file': source_name, 'evidence': {}}
+    evidence = parsed.get('evidence') or parsed.get('regulation_evidence') or parsed.get('rules')
+    if evidence is None:
+        evidence = parsed
+    return {'source_file': source_name, 'evidence': evidence}
 
 
 def _decode_data_uri(data_uri):
@@ -6923,6 +7039,7 @@ def api_extract_croquis():
         model_error = ''
         vision_warnings = []
         document_processing = []
+        regulation_evidence_metadata = []
         if OPENROUTER_KEY:
             vision_parts = []
             document_descriptions = []
@@ -6956,43 +7073,129 @@ def api_extract_croquis():
                         'details': str(render_error)
                     }), 422
 
-            regulation_context, regulation_table_pages, regulation_warnings = \
-                search_official_regulations_pdf(regulation_query)
-            regulation_parts, render_warnings = render_regulation_table_pages(regulation_table_pages)
-            vision_warnings.extend(regulation_warnings)
-            vision_warnings.extend(render_warnings)
-            if regulation_context:
-                print(f'[REGULATION PDF] {len(regulation_context)} chars, '
-                      f'{len(regulation_table_pages)} table page(s) attached')
+            request_facts = {
+                'zoning_code': data.get('zoningCode') or data.get('zoning_code') or '',
+                'land_use': data.get('landUse') or data.get('allowed_uses_restrictions') or '',
+                'city': data.get('city') or '',
+                'project_type': data.get('projectType') or '',
+            }
+            facts_prompt = (
+                "أنت مستخرج حقائق أولي من صور مستندات الأرض والكروكي. أعد JSON فقط بهذا الشكل: "
+                '{"site_facts":{"plot_number":"","area_sqm":null,"zoning_code":"",'
+                '"land_use":"","city":"","project_type":"","axis_type":"","building_type":""},'
+                '"uncertainties":[]} '
+                "اقرأ الصور فقط ولا تستخدم أي لائحة أو تخمين. area_sqm يجب أن تكون مساحة «بموجب التنظيم» إن ظهرت، "
+                "وإذا لم تكن واضحة اتركها null. هذا استخراج تمهيدي لا يكتب الملخص النهائي."
+            )
+            facts_payload = [{
+                'type': 'text',
+                'text': facts_prompt + '\nالمستندات المرفقة:\n' + '\n'.join(document_descriptions)
+            }] + vision_parts
+            facts_result, facts_cap, facts_error = _run_land_json_stage(
+                'site_facts', facts_prompt, facts_payload,
+                LAND_FACTS_MAX_TOKENS, LAND_FACTS_MIN_TOKENS, LAND_FACTS_MAX_TOKENS * 2
+            )
+            if facts_error:
+                vision_warnings.append('تعذر استخراج حقائق الكروكي الأولية؛ تم استخدام بيانات المشروع المدخلة فقط.')
+                print(f'[LAND ANALYSIS STAGE ERROR] site_facts cap={facts_cap} {facts_error}')
+            site_facts = _extract_land_site_facts(facts_result, request_facts)
+            regulation_query = ' '.join(str(value) for value in site_facts.values() if value not in (None, ''))
+            try:
+                evidence_package, evidence_warnings = search_official_regulations_evidence(
+                    regulation_query, site_facts)
+            except Exception as evidence_error:
+                evidence_package = {'context': '', 'documents': [], 'table_pages': []}
+                evidence_warnings = [f'تعذر تجهيز أدلة الاشتراطات: {evidence_error}']
+            vision_warnings.extend(evidence_warnings)
+            evidence_results = []
+            for source in evidence_package.get('documents', []):
+                source_name = source.get('name') or 'ملف اشتراطات'
+                if not source.get('context') and not source.get('table_pages'):
+                    vision_warnings.append(f'لم توجد صفحات مطابقة في {source_name}؛ لن يتم تخمين اشتراطاته.')
+                    evidence_results.append({
+                        'source_file': source_name,
+                        'evidence': {},
+                        'error': 'لا توجد صفحات مطابقة',
+                    })
+                    continue
+                source_tables = [
+                    entry for entry in evidence_package.get('table_pages', [])
+                    if entry.get('name') == source_name
+                ]
+                regulation_parts, render_warnings = render_regulation_table_pages(
+                    source_tables, dpi=REGULATION_EVIDENCE_TABLE_DPI)
+                vision_warnings.extend(render_warnings)
+                evidence_prompt = (
+                    "أنت مستخرج أدلة تنظيمية من ملف واحد فقط. أعد JSON فقط بهذا الشكل: "
+                    '{"evidence":[{"field":"","value":"","page":0,"quote":""}],'
+                    '"uncertainties":[]} '
+                    f"المصدر الوحيد هو {source_name}. لا تستخدم أي معلومة من ملف آخر. "
+                    "استخرج القواعد التي تنطبق على حقائق الموقع، واذكر رقم الصفحة لكل دليل. "
+                    "أرقام الجداول تُقرأ من الصور المرفقة، والنص المرفق يستخدم للبحث والفهم فقط."
+                )
+                evidence_user = [{
+                    'type': 'text',
+                    'text': evidence_prompt
+                            + '\nحقائق الموقع المستخرجة من الكروكي:\n'
+                            + json.dumps(site_facts, ensure_ascii=False)
+                            + '\nنصوص الصفحات المنتقاة:\n'
+                            + str(source.get('context') or '')
+                }] + regulation_parts
+                evidence_result, evidence_cap, evidence_error = _run_land_json_stage(
+                    source_name, evidence_prompt, evidence_user,
+                    REGULATION_EVIDENCE_MAX_TOKENS, REGULATION_EVIDENCE_MIN_TOKENS,
+                    REGULATION_EVIDENCE_MAX_TOKENS * 2
+                )
+                if evidence_error:
+                    vision_warnings.append(f'تعذر استخراج أدلة {source_name}؛ ستحتاج هذه اللائحة إلى مراجعة.')
+                    evidence_results.append({
+                        'source_file': source_name,
+                        'evidence': {},
+                        'error': evidence_error,
+                    })
+                else:
+                    evidence_results.append(_compact_regulation_evidence(source_name, evidence_result))
+            regulation_evidence_metadata = [
+                {
+                    'name': source.get('name'),
+                    'text_pages': source.get('text_pages', []),
+                    'table_pages': source.get('table_pages', []),
+                }
+                for source in evidence_package.get('documents', [])
+            ]
+            print(
+                f"[REGULATION EVIDENCE] documents={len(regulation_evidence_metadata)} "
+                f"text_chars={sum(len(source.get('context') or '') for source in evidence_package.get('documents', []))} "
+                f"table_pages={len(evidence_package.get('table_pages', []))}"
+            )
 
-            # Two clearly separated kinds of input: the client's own documents are images that
-            # must be read visually, while the municipality regulation arrives as reference text
-            # plus images of its tables (whose text extracts in reversed order).
             instructions = (
                 "لديك نوعان من المدخلات، لا تخلط بينهما:\n"
                 "١) مستندات العميل (الصك/الكروكي/الرخصة): مُرسلة صورًا عالية الدقة. اقرأها بصريًا فقط "
                 "ولا تعتمد على OCR أو نص مستخرج، واقرأ جداولها من الصورة نفسها.\n"
-                "٢) مرجع لائحة الأمانة: النص المستخرج الكامل أدناه للبحث وقراءة المواد النثرية، مع صور "
-                "لصفحات جداول التنظيم. استخدم المرجع وحده لاستنباط نسبة البناء والتغطية والارتدادات "
-                "والارتفاع وعدد الأدوار والاستخدامات المسموحة، وخذ أرقام الجداول من الصور واذكر رقم الصفحة.\n"
+                "٢) أدلة منتقاة من ملفي اشتراطات1 واشتراطات2: أُرسلت نصوص صفحات محددة وصور جداول محددة فقط. "
+                "استخدم كل مصدر حسب اسمه ورقم صفحته، ولا تخترع قاعدة من صفحة أو ملف غير موجود في الأدلة.\n"
                 "أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. "
                 "لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude.\n"
             )
             regulation_block = (
-                f"النص المستخرج الكامل لمرجع لائحة الأمانة (استخدم نص الجداول للبحث فقط، والصور للأرقام):\n{regulation_context}\n\n"
-                if regulation_context else
-                "تنبيه: لم يتوفر مرجع لائحة الأمانة في هذا الطلب. لا تخترع اشتراطات، "
-                "واكتب في الحقول التنظيمية أنها تحتاج مرجع اللائحة، وسجّل ذلك في conflicts.\n\n"
+                "أدلة الاشتراطات المنتقاة من الملفين، وكل دليل مرتبط بمصدره:\n"
+                + json.dumps(evidence_results, ensure_ascii=False)
+                + "\n\n"
+                if evidence_results else
+                "تنبيه: لم تتوفر أدلة اشتراطات منتقاة من الملفين. لا تخترع اشتراطات، وسجّل ذلك في conflicts.\n\n"
             )
             user_content = [{
                 "type": "text",
                 "text": instructions
                         + "بيانات المعلومات الأساسية ورؤية المشروع التي أدخلها العميل:\n"
                         + project_context_block + "\n\n"
-                        + "استخدم هذه البيانات كسياق فعلي لربط الملخص بالمشروع، ولا تنسبها إلى الصك أو الكروكي أو اللائحة. إذا كانت قيمة غير مدخلة فلا تخترع بديلًا عامًا لها.\n\n"
+                        + "حقائق الموقع الأولية المستخرجة من الكروكي:\n"
+                        + json.dumps(site_facts, ensure_ascii=False) + "\n\n"
+                        + "استخدم هذه البيانات كسياق فعلي لربط الملخص بالمشروع، ولا تنسبها إلى الصك أو الكروكي أو اللائحة إذا لم يذكر مصدرها.\n\n"
                         + regulation_block
                         + "مستندات العميل المرفقة:\n" + "\n".join(document_descriptions)
-            }] + regulation_parts + vision_parts
+            }] + vision_parts
 
             try:
                 res, used_cap, provider_error = _call_land_analysis_model(
@@ -7054,6 +7257,7 @@ def api_extract_croquis():
         if vision_warnings:
             resp_json['warnings'] = vision_warnings
         resp_json['document_processing'] = document_processing
+        resp_json['regulation_evidence'] = regulation_evidence_metadata
         extraction_diagnostics = _build_land_extraction_diagnostics(resp_json, document_processing)
         resp_json['extraction_diagnostics'] = extraction_diagnostics
         print(
