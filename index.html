@@ -3956,7 +3956,7 @@
           <div><h4>المطلوب قبل بدء التحليل</h4><p id="tenantFloorDesignAnalysisSummary">جاري مراجعة البيانات...</p></div>
           <div id="tenantFloorDesignAnalysisMissingList" class="tenant-floor-design-readiness-list"></div>
         </div>
-        <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" id="tenantFloorDesignStartAnalysisButton" onclick="startTenantFloorAnalysis()" disabled>بدء تحليل البيانات</button></div>
+        <div class="tenant-floor-design-stage-actions"><span class="tenant-hint">سيتم تفعيل التحليل في مرحلة لاحقة.</span><button type="button" class="btn primary" id="tenantFloorDesignStartAnalysisButton" disabled>بدء تحليل البيانات</button></div>
       </div>
 
       <div id="tenantFloorDesignSetup" class="tenant-floor-design-setup" hidden>
@@ -8490,13 +8490,13 @@
       if (!readiness.basement.valid && readiness.basement.required) missing.push('مساحة البدروم');
       if (!tenantFloorDesignState?.groups?.length) missing.push('تنظيم مجموعات الأدوار');
       if (!missing.length) {
-        summary.textContent = 'كل البيانات المطلوبة مكتملة ويمكن بدء التحليل.';
+        summary.textContent = 'كل البيانات المطلوبة مكتملة، وسيتم تفعيل التحليل في مرحلة لاحقة.';
         list.innerHTML = '<div class="tenant-floor-design-readiness-row"><strong>حالة البيانات</strong><span class="complete">مكتملة</span></div>';
       } else {
         summary.textContent = 'استكمل البيانات التالية قبل بدء تحليل AI:';
         list.innerHTML = missing.map(item => `<div class="tenant-floor-design-readiness-row"><strong>${escapeHtml(item)}</strong><span class="missing">ناقص</span></div>`).join('');
       }
-      button.disabled = missing.length > 0;
+      button.disabled = true;
     }
 
     function startTenantFloorAnalysis() {
