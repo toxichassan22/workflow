@@ -3185,6 +3185,9 @@
     #section-financial-calc td.cf-fund { background: #faf4fc !important; }
     #section-financial-calc td.cf-finance { background: #fffdf4 !important; }
 
+    #tenantFloorDesignMount:not([hidden]) { display: block; margin-top: 20px; }
+    #tenantFloorDesignMount .tenant-floor-design-page { display: block !important; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+    #tenantProjectPage.tenant-floor-design-project-mode > .tenant-form-actions { position: sticky; z-index: 5; bottom: 10px; background: rgba(255,255,255,.96); box-shadow: 0 -4px 14px rgba(24,53,74,.08); }
     .tenant-floor-design-page { padding: 22px !important; background: #fbfaf7 !important; }
     .tenant-floor-design-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
     .tenant-floor-design-header h2 { margin: 0 0 5px !important; }
@@ -3828,7 +3831,10 @@
       </div>
       <div class="project-form-layout">
         <aside id="tenantProjectSidebar" class="project-form-sidebar" aria-label="أقسام بيانات المشروع"></aside>
-        <div id="tenantProjectForm" class="project-form-content"></div>
+        <div class="project-form-content">
+          <div id="tenantProjectForm"></div>
+          <div id="tenantFloorDesignMount" hidden></div>
+        </div>
       </div>
       <div class="tenant-form-actions"
         style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)">
@@ -3847,22 +3853,16 @@
         </div>
         <div class="tenant-floor-design-actions">
           <span id="tenantFloorDesignStatus" class="tenant-floor-design-status">لم يبدأ التصميم</span>
-          <button type="button" class="btn ghost" onclick="showTenantPage('tenantProjectPage')">العودة لبيانات المشروع</button>
-          <button type="button" class="btn primary" onclick="saveTenantFloorDesign()">حفظ التصميم</button>
+          <button type="button" class="btn ghost" id="tenantFloorDesignBackButton" onclick="showTenantPage('tenantProjectPage')">العودة لبيانات المشروع</button>
+
         </div>
       </div>
 
-      <div id="tenantFloorDesignSetup" class="tenant-floor-design-setup">
+      <div id="tenantFloorDesignSetup" class="tenant-floor-design-setup" hidden>
         <div class="tenant-floor-design-setup-card">
-          <h3>ابدأ ببيانات هذا المشروع</h3>
-          <p>لن يتم إنشاء أدوار أو مجموعات تلقائيًا. أدخل عدد الأدوار، ثم حدد بنفسك أي الأدوار تمثل نموذجًا واحدًا.</p>
-          <div class="tenant-floor-design-setup-grid">
-            <div class="tenant-floor-design-field"><label for="tenantFloorDesignCount">عدد الأدوار</label><input id="tenantFloorDesignCount" type="number" min="1" max="200" placeholder="يُقرأ من الدراسة المالية عند توفره"></div>
-            <div class="tenant-floor-design-field"><label for="tenantFloorDesignFirstFloor">رقم أول دور</label><input id="tenantFloorDesignFirstFloor" type="number" min="0" max="200" placeholder="مثال: 1"></div>
-          </div>
-          <p class="tenant-floor-design-note">المجموعة المتتالية تظهر مثل 1-10، والمجموعة المتفرقة تظهر مثل 1/3/5. كل مجموعة تحتاج صورة واحدة فقط.</p>
-          <p id="tenantFloorDesignSetupError" class="tenant-floor-design-error" aria-live="polite"></p>
-          <div class="tenant-floor-design-setup-actions"><button type="button" class="btn primary" onclick="startTenantFloorDesign()">بدء تنظيم الأدوار</button></div>
+          <h3>بانتظار بيانات الأدوار</h3>
+          <p>عدد الأدوار وتقسيماتها ستأتي من قسم بيانات المشروع المخصص لها. هذه الصفحة تعرض تجربة التصميم فقط.</p>
+          <p class="tenant-floor-design-note">بعد وصول بيانات الأدوار، ستظهر هنا مجموعات مثل 1-10 أو 1/3/5 بدون إدخالها مرة أخرى.</p>
         </div>
       </div>
 
@@ -3877,7 +3877,7 @@
           </div>
           <div class="tenant-floor-design-progress"><div class="tenant-floor-design-progress-head"><span>تقدم التصميم</span><strong id="tenantFloorDesignProgressLabel">0 من 0</strong></div><div class="tenant-floor-design-progress-track"><div id="tenantFloorDesignProgressValue" class="tenant-floor-design-progress-value"></div></div></div>
           <div id="tenantFloorDesignGroupList" class="tenant-floor-design-group-list"></div>
-          <div class="tenant-floor-design-sidebar-actions"><button type="button" class="btn ghost" onclick="openTenantFloorGroupModal()">تنظيم تشابه الأدوار</button><button type="button" class="btn ghost" onclick="resetTenantFloorDesign()">إعادة تعريف الأدوار</button></div>
+          <div class="tenant-floor-design-sidebar-actions"><button type="button" class="btn ghost" id="tenantFloorDesignGroupSetupButton" disabled>تنظيم تشابه الأدوار</button></div>
         </aside>
 
         <main class="tenant-floor-design-canvas" aria-label="مساحة تصميم مجموعة الطوابق">
@@ -4651,6 +4651,8 @@
     let tenantFloorDesignActiveGroupId = null;
     let tenantFloorDesignDraftMembers = [];
     let tenantFloorDesignFilter = 'all';
+    let tenantFloorDesignEmbedded = false;
+    let tenantFloorDesignOpening = false;
     let tenantProjectSectionStatuses = {};
     let tenantProjectDraftApproval = null;
     let tenantActiveProjectSection = null;
@@ -5258,6 +5260,7 @@
     }
 
     function showTenantPage(pageId, fromHistory = false) {
+      if (pageId === 'tenantProjectPage' && tenantFloorDesignEmbedded) exitTenantFloorDesignPage();
       if (!fromHistory && TENANT_PAGE_ROUTES[pageId]) syncTenantBrowserHistory(pageId);
       document.querySelectorAll('.tenant-page').forEach(el => el.classList.remove('active'));
       const el = document.getElementById(pageId);
@@ -5276,7 +5279,7 @@
       if (fromHistory) {
         const browserState = getBrowserNavigationState();
         if (browserState.railTab) setGlobalRailTab(browserState.railTab, true);
-        if (pageId === 'tenantProjectPage' && browserState.activeSection) showSection(browserState.activeSection, true);
+        if (pageId === 'tenantProjectPage' && browserState.activeSection && !tenantFloorDesignOpening) showSection(browserState.activeSection, true);
       }
 
       if (pageId === 'tenantDashboardPage') {
@@ -5300,7 +5303,8 @@
       const path = window.location.pathname;
       const pageId = TENANT_ROUTE_PAGES[path];
       if (pageId) {
-        showTenantPage(pageId, true);
+        if (pageId === 'tenantFloorDesignPage') openTenantFloorDesignPage(true);
+        else showTenantPage(pageId, true);
         return;
       }
       // "/" and any unmapped path used to fall through here, leaving the view on the old page
@@ -5406,6 +5410,7 @@
     ];
 
     function tgrCurrentPageId() {
+      if (tenantFloorDesignEmbedded) return 'tenantFloorDesignPage';
       const el = document.querySelector('.tenant-page.active') ||
                  Array.from(document.querySelectorAll('.tenant-page')).find(p => p.offsetParent !== null);
       return el ? el.id : null;
@@ -5793,7 +5798,8 @@
       // refreshes land where the URL says instead of somewhere remembered in localStorage.
       const requestedPage = TENANT_ROUTE_PAGES[window.location.pathname];
       if (requestedPage) {
-        showTenantPage(requestedPage, true);
+        if (requestedPage === 'tenantFloorDesignPage') await openTenantFloorDesignPage(true);
+        else showTenantPage(requestedPage, true);
         const requestedSection = new URLSearchParams(window.location.search).get('section');
         if (requestedPage === 'tenantProjectPage' && requestedSection) {
           await restoreTenantNavigation();
@@ -8256,28 +8262,58 @@
     }
 
     function initializeTenantFloorDesign() {
-      tenantFloorDesignState = normalizeTenantFloorDesignState(tenantFloorDesignState || tenantProjectData.floor_visual_design);
       bindTenantFloorDesignEvents();
-      const source = tenantFloorDesignSource();
-      const setup = document.getElementById('tenantFloorDesignSetup');
-      const workspace = document.getElementById('tenantFloorDesignWorkspace');
-      if (!tenantFloorDesignState) {
-        document.getElementById('tenantFloorDesignCount').value = source.floorCount || '';
-        document.getElementById('tenantFloorDesignFirstFloor').value = source.firstFloor || '';
-        setup.hidden = false;
-        workspace.hidden = true;
-        document.getElementById('tenantFloorDesignStatus').textContent = source.floorCount ? 'عدد الأدوار مقروء من الدراسة المالية' : 'أدخل عدد الأدوار للبدء';
-      } else {
-        if (!tenantFloorDesignActiveGroupId) tenantFloorDesignActiveGroupId = tenantFloorDesignAllGroups()[0]?.id || 'unassigned';
-        setup.hidden = true;
-        workspace.hidden = false;
-        document.getElementById('tenantFloorDesignStatus').textContent = `${tenantFloorDesignState.groups.length} مجموعات، ${tenantFloorDesignState.floorCount} أدوار`;
-        renderTenantFloorDesignActiveGroup();
-      }
+      tenantFloorDesignState = null;
+      tenantFloorDesignActiveGroupId = null;
+      document.getElementById('tenantFloorDesignSetup').hidden = true;
+      document.getElementById('tenantFloorDesignWorkspace').hidden = false;
+      document.getElementById('tenantFloorDesignStatus').textContent = 'واجهة Frontend بانتظار بيانات الأدوار';
+      renderTenantFloorDesignActiveGroup();
     }
 
-    function openTenantFloorDesignPage(fromHistory = false) {
-      showTenantPage('tenantFloorDesignPage', fromHistory);
+    function setTenantFloorDesignSidebarActive(active) {
+      document.querySelectorAll('#tenantProjectSidebar [data-section-key]').forEach(button => {
+        const isActive = active && button.dataset.sectionKey === 'section-conceptual-2d';
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-current', isActive ? 'page' : 'false');
+      });
+    }
+
+    function exitTenantFloorDesignPage() {
+      const page = document.getElementById('tenantFloorDesignPage');
+      const mount = document.getElementById('tenantFloorDesignMount');
+      const form = document.getElementById('tenantProjectForm');
+      const projectPage = document.getElementById('tenantProjectPage');
+      if (form) form.hidden = false;
+      if (mount) mount.hidden = true;
+      projectPage?.classList.remove('tenant-floor-design-project-mode');
+      if (page) page.classList.remove('active', 'tenant-floor-design-embedded');
+      document.getElementById('tenantFloorDesignBackButton')?.style.removeProperty('display');
+      document.getElementById('tenantFloorDesignSaveButton')?.style.removeProperty('display');
+      tenantFloorDesignEmbedded = false;
+      setTenantFloorDesignSidebarActive(false);
+    }
+
+    async function openTenantFloorDesignPage(fromHistory = false) {
+      if (!tenantProjectData?.draftId) await startTenantProject();
+      tenantFloorDesignOpening = true;
+      showTenantPage('tenantProjectPage', true);
+      tenantFloorDesignOpening = false;
+      const page = document.getElementById('tenantFloorDesignPage');
+      const mount = document.getElementById('tenantFloorDesignMount');
+      const form = document.getElementById('tenantProjectForm');
+      const projectPage = document.getElementById('tenantProjectPage');
+      if (page && mount) mount.appendChild(page);
+      if (mount) mount.hidden = false;
+      if (form) form.hidden = true;
+      projectPage?.classList.add('tenant-floor-design-project-mode');
+      if (page) page.classList.add('active', 'tenant-floor-design-embedded');
+      document.getElementById('tenantFloorDesignBackButton')?.style.setProperty('display', 'none');
+      document.getElementById('tenantFloorDesignSaveButton')?.style.removeProperty('display');
+      tenantFloorDesignEmbedded = true;
+      setTenantFloorDesignSidebarActive(true);
+      if (!fromHistory) syncTenantBrowserHistory('tenantFloorDesignPage');
+      else if (window.location.pathname !== TENANT_PAGE_ROUTES.tenantFloorDesignPage) syncTenantBrowserHistory('tenantFloorDesignPage', {}, true);
       initializeTenantFloorDesign();
     }
 
