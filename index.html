@@ -8640,6 +8640,13 @@
     }
 
     async function openTenantFloorDesignPage(fromHistory = false) {
+      if (!tenantProjectData?.draftId) {
+        const navigation = getTenantNavigationState();
+        const currentTenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
+        if (navigation?.draftId && (!navigation.tenantId || navigation.tenantId === currentTenantId)) {
+          await openProjectDraftById(navigation.draftId);
+        }
+      }
       if (!tenantProjectData?.draftId) await startTenantProject();
       tenantFloorDesignOpening = true;
       showTenantPage('tenantProjectPage', true);
