@@ -3319,6 +3319,15 @@
     .tenant-floor-design-analysis-panel { min-height: 260px; padding: 22px; border: 1px dashed #b9cbd1; border-radius: 12px; background: #f7fafc; color: var(--muted); text-align: center; }
     .tenant-floor-design-analysis-panel strong { display: block; margin-bottom: 6px; color: var(--p); font-size: 16px; }
     .tenant-floor-design-stage-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    .tenant-floor-design-readiness { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .tenant-floor-design-readiness h4 { margin: 0; color: var(--p); font-size: 16px; }
+    .tenant-floor-design-readiness p { margin: 0; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-readiness-list { display: grid; gap: 6px; }
+    .tenant-floor-design-readiness-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f7fafc; font-size: 12px; }
+    .tenant-floor-design-readiness-row strong { font-weight: 700; }
+    .tenant-floor-design-readiness-row .complete { color: #347658; }
+    .tenant-floor-design-readiness-row .missing { color: #b96831; }
+    .tenant-floor-design-readiness-row .not-needed { color: var(--muted); }
 
     @media (max-width: 800px) {
       .tenant-floor-design-page { padding: 14px !important; }
@@ -3918,14 +3927,12 @@
       </div>
 
       <div id="tenantFloorDesignStageOrganization" class="tenant-floor-design-stage-view" data-floor-design-stage-view="organization" hidden>
-        <div class="tenant-floor-design-stage-view-head"><div><h3>تنظيم الأدوار والمكونات</h3><p>هذه المرحلة ستقرأ عدد الأدوار والمكونات من الأقسام السابقة، بدون تكرار إدخالها هنا.</p></div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل التصميم</button></div>
-        <div class="tenant-floor-design-source-grid">
-          <div class="tenant-floor-design-source-card"><strong>الأدوار المعتمدة</strong><span>تأتي من قسم الأرض والكروكي</span></div>
-          <div class="tenant-floor-design-source-card"><strong>مكونات المشروع</strong><span>تأتي من جدول مكونات الدراسة المالية</span></div>
-          <div class="tenant-floor-design-source-card"><strong>البدروم</strong><span>يظهر إجباريًا عند وجود مساحة بدرومات</span></div>
+        <div class="tenant-floor-design-stage-view-head"><div><h3>تنظيم الأدوار والمكونات</h3><p>راجع اكتمال البيانات أولًا، ثم ابدأ تخصيص مجموعات الأدوار ومكونات كل مجموعة.</p></div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل التصميم</button></div>
+        <div class="tenant-floor-design-readiness">
+          <div><h4>قبل بدء التخصيص</h4><p>لا نكرر إدخال البيانات هنا. يتم قراءتها من قسم الأرض والكروكي والدراسة المالية.</p></div>
+          <div id="tenantFloorDesignReadinessList" class="tenant-floor-design-readiness-list"></div>
         </div>
-        <div class="tenant-floor-design-analysis-panel"><strong>بانتظار بيانات الأدوار</strong><span>بعد اكتمال مصدر البيانات ستظهر هنا مجموعات مثل 1-10 و1/3/5 وتخصيص مكونات كل مجموعة.</span></div>
-        <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" id="tenantFloorDesignGroupSetupButton" disabled>تنظيم تشابه الأدوار</button></div>
+        <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" id="tenantFloorDesignStartButton" onclick="startTenantFloorOrganization()" disabled>بدء تخصيص الأدوار</button></div>
       </div>
 
       <div id="tenantFloorDesignStageAnalysis" class="tenant-floor-design-stage-view" data-floor-design-stage-view="analysis" hidden>
@@ -3935,7 +3942,7 @@
           <div class="tenant-floor-design-source-card"><strong>الدراسة المالية</strong><span>المكونات، الوحدات، المساحات، والبدروم.</span></div>
           <div class="tenant-floor-design-source-card"><strong>صور الأرض والمراجع</strong><span>صور العميل وأي مراجع مرتبطة بالمشروع.</span></div>
         </div>
-        <div class="tenant-floor-design-analysis-panel"><strong>التحليل سيظهر هنا</strong><span>هذه واجهة Frontend فقط حاليًا. سيتم عرض نتيجة AI في بطاقات قابلة للمراجعة والاعتماد.</span></div>
+        <div class="tenant-floor-design-analysis-panel"><strong>التحليل سيظهر هنا</strong><span>سيظهر هنا تحليل البيانات في بطاقات قابلة للمراجعة والاعتماد.</span></div>
         <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" disabled>بدء تحليل البيانات</button></div>
       </div>
 
@@ -8348,12 +8355,65 @@
       openTenantFloorGroupModal('');
     }
 
+    function readTenantFloorDesignNumber(key, fallback = 0) {
+      const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+      const raw = String(input?.value ?? tenantProjectData?.[key] ?? '').replace(/,/g, '').trim();
+      const number = Number(raw);
+      return Number.isFinite(number) ? number : fallback;
+    }
+
+    function tenantFloorDesignReadiness() {
+      const approvedFloors = readTenantFloorDesignNumber('approved_floor_count');
+      const approvedArea = readTenantFloorDesignNumber('approved_financial_area');
+      const components = typeof getComponentRowsData === 'function' ? getComponentRowsData() : [];
+      const basement = readTenantFloorDesignNumberFromElement('basementArea');
+      return {
+        approvedFloors: { valid: Number.isInteger(approvedFloors) && approvedFloors > 0, value: approvedFloors },
+        approvedArea: { valid: approvedArea > 0, value: approvedArea },
+        components: { valid: components.length > 0, value: components.length },
+        basement: { valid: basement > 0, value: basement, required: basement > 0 }
+      };
+    }
+
+    function readTenantFloorDesignNumberFromElement(id) {
+      const raw = String(document.getElementById(id)?.value || '').replace(/,/g, '').trim();
+      const number = Number(raw);
+      return Number.isFinite(number) ? number : 0;
+    }
+
+    function renderTenantFloorDesignReadiness() {
+      const host = document.getElementById('tenantFloorDesignReadinessList');
+      const button = document.getElementById('tenantFloorDesignStartButton');
+      if (!host || !button) return;
+      const readiness = tenantFloorDesignReadiness();
+      const rows = [
+        ['الأدوار المعتمدة', readiness.approvedFloors.valid, readiness.approvedFloors.valid ? `${readiness.approvedFloors.value} دور` : 'أدخلها في قسم الأرض والكروكي'],
+        ['المساحة المعتمدة للدراسة المالية', readiness.approvedArea.valid, readiness.approvedArea.valid ? `${readiness.approvedArea.value} م²` : 'أدخلها في قسم الأرض والكروكي'],
+        ['مكونات المشروع', readiness.components.valid, readiness.components.valid ? `${readiness.components.value} مكونات` : 'أضف مكونات من الدراسة المالية'],
+        ['البدروم', readiness.basement.required ? readiness.basement.valid : true, readiness.basement.required ? `${readiness.basement.value} م²` : 'غير مطلوب']
+      ];
+      host.innerHTML = rows.map(([label, valid, detail]) => `<div class="tenant-floor-design-readiness-row"><strong>${escapeHtml(label)}</strong><span class="${valid ? (detail === 'غير مطلوب' ? 'not-needed' : 'complete') : 'missing'}">${escapeHtml(valid ? 'مكتمل — ' + detail : 'ناقص — ' + detail)}</span></div>`).join('');
+      button.disabled = !rows.every(([, valid]) => valid);
+    }
+
+    function startTenantFloorOrganization() {
+      const readiness = tenantFloorDesignReadiness();
+      if (!readiness.approvedFloors.valid || !readiness.approvedArea.valid || !readiness.components.valid) {
+        toast('استكمل الأدوار والمساحة والمكونات أولًا');
+        return;
+      }
+      tenantFloorDesignState = { version: 1, floorCount: readiness.approvedFloors.value, firstFloor: 1, groups: [] };
+      tenantFloorDesignActiveGroupId = 'unassigned';
+      openTenantFloorGroupModal('');
+    }
+
     function showTenantFloorDesignStage(stage) {
       const allowed = new Set(['home', 'organization', 'analysis', 'drawings', 'isometric']);
       tenantFloorDesignStage = allowed.has(stage) ? stage : 'home';
       document.querySelectorAll('#tenantFloorDesignPage [data-floor-design-stage-view]').forEach(view => {
         view.hidden = view.dataset.floorDesignStageView !== tenantFloorDesignStage;
       });
+      if (tenantFloorDesignStage === 'organization') renderTenantFloorDesignReadiness();
       if (tenantFloorDesignStage === 'drawings') renderTenantFloorDesignActiveGroup();
     }
 
@@ -8369,7 +8429,7 @@
       tenantFloorDesignState = null;
       tenantFloorDesignActiveGroupId = null;
       document.getElementById('tenantFloorDesignSetup').hidden = true;
-      document.getElementById('tenantFloorDesignStatus').textContent = 'واجهة Frontend بانتظار بيانات الأدوار';
+      document.getElementById('tenantFloorDesignStatus').textContent = 'اختر مرحلة للبدء';
       showTenantFloorDesignStage('home');
     }
 
