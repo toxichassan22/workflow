@@ -8522,8 +8522,8 @@
     function initializeTenantFloorDesign() {
       mountTenantFloorDesignSectionHeader();
       bindTenantFloorDesignEvents();
-      tenantFloorDesignState = null;
-      tenantFloorDesignActiveGroupId = null;
+      tenantFloorDesignState = normalizeTenantFloorDesignState(tenantFloorDesignState || tenantProjectData.floor_visual_design);
+      tenantFloorDesignActiveGroupId = tenantFloorDesignState?.groups?.[0]?.id || null;
       document.getElementById('tenantFloorDesignSetup').hidden = true;
       document.getElementById('tenantFloorDesignStatus').textContent = 'اختر مرحلة للبدء';
       showTenantFloorDesignStage('home');
