@@ -11061,23 +11061,27 @@
           return ['regulation_text', 'street_name', 'street_width_m', 'boundary_length_m', 'uses', 'notes']
             .some(key => String(value[key] ?? '').trim());
         }).length;
-      const documents = Array.isArray(analysis?.document_processing)
-        ? analysis.document_processing
-        : (Array.isArray(diagnostics.document_processing) ? diagnostics.document_processing : []);
-      const rotations = documents.flatMap(item => Array.isArray(item?.page_rotations) ? item.page_rotations : [])
-        .filter(item => Number(item?.rotation));
-      const tileCount = Number.isFinite(Number(diagnostics.tile_count))
-        ? Number(diagnostics.tile_count)
-        : documents.reduce((sum, item) => sum + Number(item?.tile_count || 0), 0);
       const missingTables = Array.isArray(diagnostics.missing_tables) ? diagnostics.missing_tables : [];
       const conflicts = Array.isArray(analysis?.conflicts) ? analysis.conflicts : [];
       const conflictTexts = conflicts.map(item => {
         if (typeof item === 'string') return item;
         return item?.description || item?.field || '';
-      }).map(value => String(value).trim()).filter(Boolean).slice(0, 3);
-      const hasAnyResult = Boolean(coordinateRows || directionRows || conflictTexts.length || documents.length);
+      }).map(value => String(value).trim()).filter(Boolean);
+      const uncertaintyMarkers = [
+        'غير مقروء', 'غير مقروءة', 'غير واضح', 'غير واضحة', 'غير متوفر', 'غير محدد',
+        'غير مؤكد', 'غير مكتمل', 'لم تُقرأ', 'لم يقرأ', 'لم يتم', 'يتعذر', 'تعذر',
+        'ناقص', 'مفقود', 'يحتاج مراجعة', 'بحاجة إلى مراجعة'
+      ];
+      const uncertainConflicts = conflictTexts.filter(text =>
+        uncertaintyMarkers.some(marker => text.includes(marker))
+      ).slice(0, 3);
+      const issueTexts = [...missingTables.map(table => 'لم تُقرأ بيانات ' + table)];
+      if (!coordinateRows) issueTexts.push('جدول إحداثيات التنظيم فارغ أو غير مقروء');
+      else if (completeCoordinateRows < coordinateRows) issueTexts.push('بعض صفوف الإحداثيات ناقصة أو غير واضحة');
+      if (directionRows < 4) issueTexts.push('جدول الاتجاهات بموجب التنظيم ناقص أو غير واضح');
+      issueTexts.push(...uncertainConflicts);
       let panel = document.getElementById('landAnalysisDiagnostics');
-      if (!hasAnyResult) {
+      if (!issueTexts.length) {
         if (panel) panel.hidden = true;
         return;
       }
@@ -11086,29 +11090,12 @@
         panel.id = 'landAnalysisDiagnostics';
         host.insertAdjacentElement('afterend', panel);
       }
-      const complete = !missingTables.length && coordinateRows > 0 && directionRows === 4;
       panel.hidden = false;
       panel.style.cssText = 'margin-top:10px;padding:11px 13px;border-radius:12px;' +
-        (complete ? 'background:#edf7f3;border:1px solid #b9e1d1;color:#126247;' :
-          'background:#fff8e8;border:1px solid #ead39a;color:#755b12;') +
+        'background:#fff8e8;border:1px solid #ead39a;color:#755b12;' +
         'font-size:13px;line-height:1.7';
-      const status = complete ? 'تمت قراءة جدولي التنظيم' : 'اكتمل التحليل مع جدول يحتاج مراجعة';
-      const lines = [
-        '<strong>' + status + '</strong>',
-        '<div>الإحداثيات: ' + coordinateRows + ' صفوف، منها ' + completeCoordinateRows + ' صفوف مكتملة.</div>',
-        '<div>الاتجاهات بموجب التنظيم: ' + directionRows + ' من 4 اتجاهات.</div>',
-        '<div>القصاصات عالية الدقة: ' + tileCount + ' قصاصة.</div>'
-      ];
-      if (rotations.length) {
-        lines.push('<div>تصحيح اتجاه الصفحات: ' + rotations.map(item => 'صفحة ' + item.page + ' إلى ' + item.rotation + ' درجة').join('، ') + '.</div>');
-      }
-      if (missingTables.length) {
-        lines.push('<div style="font-weight:700">لم تُقرأ: ' + escapeHtml(missingTables.join('، ')) + '.</div>');
-      }
-      conflictTexts.forEach(text => {
-        lines.push('<div>ملاحظة التحليل: ' + escapeHtml(text) + '</div>');
-      });
-      panel.innerHTML = lines.join('');
+      panel.innerHTML = '<strong>ملاحظات تحتاج مراجعة</strong>' + issueTexts
+        .map(text => '<div>' + escapeHtml(text) + '</div>').join('');
     }
 
     function clearLandAnalysisDiagnostics() {

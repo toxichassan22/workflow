@@ -451,6 +451,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('regulation_text', index_source)
         self.assertIn('landAnalysisDiagnostics', index_source)
         self.assertIn('showLandAnalysisDiagnostics', index_source)
+        self.assertIn('uncertaintyMarkers', index_source)
+        self.assertNotIn('تمت قراءة جدولي التنظيم', index_source)
 
     def test_land_tables_survive_draft_round_trip_without_being_wiped(self):
         """The coordinate/direction tables live in hidden inputs as JSON strings, so the
