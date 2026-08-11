@@ -7405,6 +7405,7 @@
       renderSurveyCoordinates(source.survey_coordinates || storedAnalysis.survey_coordinates || []);
       renderSurveyDirections(source.directions_table || storedAnalysis.directions_table || storedAnalysis.parcels?.[0]?.directions || {});
       renderLandDocumentsUploadState(source.land_documents_files_file_meta || []);
+      showLandAnalysisDiagnostics(storedAnalysis);
       renderLandPhotos(source.land_photos_file_meta || []);
       renderProjectTeam();
 
@@ -11038,6 +11039,83 @@
       return fields;
     }
 
+    function showLandAnalysisDiagnostics(analysis = {}) {
+      const host = document.getElementById('landDocumentsUploadStatus');
+      if (!host) return;
+      const diagnostics = analysis && typeof analysis.extraction_diagnostics === 'object'
+        ? analysis.extraction_diagnostics : {};
+      const parcel = Array.isArray(analysis?.parcels) ? analysis.parcels[0] : null;
+      const coordinateRows = Number.isFinite(Number(diagnostics.coordinates_rows))
+        ? Number(diagnostics.coordinates_rows)
+        : (Array.isArray(analysis?.survey_coordinates) ? analysis.survey_coordinates.length
+          : (Array.isArray(parcel?.survey_coordinates) ? parcel.survey_coordinates.length : 0));
+      const completeCoordinateRows = Number.isFinite(Number(diagnostics.coordinates_complete_rows))
+        ? Number(diagnostics.coordinates_complete_rows)
+        : (Array.isArray(analysis?.survey_coordinates)
+          ? analysis.survey_coordinates.filter(row => row?.eastings && row?.northings).length : 0);
+      const directionMap = parcel?.directions && typeof parcel.directions === 'object' ? parcel.directions : {};
+      const directionRows = Number.isFinite(Number(diagnostics.directions_with_values))
+        ? Number(diagnostics.directions_with_values)
+        : Object.values(directionMap).filter(value => {
+          if (!value || typeof value !== 'object') return Boolean(String(value || '').trim());
+          return ['regulation_text', 'street_name', 'street_width_m', 'boundary_length_m', 'uses', 'notes']
+            .some(key => String(value[key] ?? '').trim());
+        }).length;
+      const documents = Array.isArray(analysis?.document_processing)
+        ? analysis.document_processing
+        : (Array.isArray(diagnostics.document_processing) ? diagnostics.document_processing : []);
+      const rotations = documents.flatMap(item => Array.isArray(item?.page_rotations) ? item.page_rotations : [])
+        .filter(item => Number(item?.rotation));
+      const tileCount = Number.isFinite(Number(diagnostics.tile_count))
+        ? Number(diagnostics.tile_count)
+        : documents.reduce((sum, item) => sum + Number(item?.tile_count || 0), 0);
+      const missingTables = Array.isArray(diagnostics.missing_tables) ? diagnostics.missing_tables : [];
+      const conflicts = Array.isArray(analysis?.conflicts) ? analysis.conflicts : [];
+      const conflictTexts = conflicts.map(item => {
+        if (typeof item === 'string') return item;
+        return item?.description || item?.field || '';
+      }).map(value => String(value).trim()).filter(Boolean).slice(0, 3);
+      const hasAnyResult = Boolean(coordinateRows || directionRows || conflictTexts.length || documents.length);
+      let panel = document.getElementById('landAnalysisDiagnostics');
+      if (!hasAnyResult) {
+        if (panel) panel.hidden = true;
+        return;
+      }
+      if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'landAnalysisDiagnostics';
+        host.insertAdjacentElement('afterend', panel);
+      }
+      const complete = !missingTables.length && coordinateRows > 0 && directionRows === 4;
+      panel.hidden = false;
+      panel.style.cssText = 'margin-top:10px;padding:11px 13px;border-radius:12px;' +
+        (complete ? 'background:#edf7f3;border:1px solid #b9e1d1;color:#126247;' :
+          'background:#fff8e8;border:1px solid #ead39a;color:#755b12;') +
+        'font-size:13px;line-height:1.7';
+      const status = complete ? 'تمت قراءة جدولي التنظيم' : 'اكتمل التحليل مع جدول يحتاج مراجعة';
+      const lines = [
+        '<strong>' + status + '</strong>',
+        '<div>الإحداثيات: ' + coordinateRows + ' صفوف، منها ' + completeCoordinateRows + ' صفوف مكتملة.</div>',
+        '<div>الاتجاهات بموجب التنظيم: ' + directionRows + ' من 4 اتجاهات.</div>',
+        '<div>القصاصات عالية الدقة: ' + tileCount + ' قصاصة.</div>'
+      ];
+      if (rotations.length) {
+        lines.push('<div>تصحيح اتجاه الصفحات: ' + rotations.map(item => 'صفحة ' + item.page + ' إلى ' + item.rotation + ' درجة').join('، ') + '.</div>');
+      }
+      if (missingTables.length) {
+        lines.push('<div style="font-weight:700">لم تُقرأ: ' + escapeHtml(missingTables.join('، ')) + '.</div>');
+      }
+      conflictTexts.forEach(text => {
+        lines.push('<div>ملاحظة التحليل: ' + escapeHtml(text) + '</div>');
+      });
+      panel.innerHTML = lines.join('');
+    }
+
+    function clearLandAnalysisDiagnostics() {
+      const panel = document.getElementById('landAnalysisDiagnostics');
+      if (panel) panel.hidden = true;
+    }
+
     async function extractTenantCroquisData(targetKey = 'land_documents_files') {
       const input = document.querySelector('#tenantProjectForm [data-key="land_documents_files"]');
       const projectContextKeys = [
@@ -11067,6 +11145,8 @@
         toast('يرجى رفع ملفي رخصة البناء والكروكي داخل الخانة أولًا');
         return;
       }
+      clearLandAnalysisFailure();
+      clearLandAnalysisDiagnostics();
       showLoader('تحليل الرخصة والكروكي معًا', 'جاري تحليل الملفين واستخراج التنظيم والاتجاهات والإحداثيات...', 10);
       try {
         updateLoaderProgress(35, 'جاري إرسال الملفات المحفوظة إلى الذكاء الاصطناعي...');
@@ -11110,6 +11190,7 @@
           storeLandDocumentAnalysis(data);
           renderSurveyCoordinates(data.survey_coordinates || []);
           renderSurveyDirections(tenantProjectData.directions_table);
+          showLandAnalysisDiagnostics(data);
           const appliedCount = Object.values(extractedFields)
             .filter(value => value !== undefined && value !== null && value !== '' && typeof value !== 'object').length;
           updateLoaderProgress(100, 'تم تحليل الملفات وتحديث ' + appliedCount + ' حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.');
@@ -11128,16 +11209,17 @@
           console.warn('[LAND ANALYSIS] rejected', res.failureReason || 'unknown', res);
         }
       } catch (err) {
+        const reason = 'حدث خطأ أثناء تحليل الملفات: ' + (err.message || err);
+        showLandAnalysisFailure(reason);
         updateLoaderProgress(100, 'فشل التحليل ولم يتغير أي حقل.');
-        toast('حدث خطأ أثناء تحليل الملفات: ' + (err.message || err));
+        toast(reason);
+        console.warn('[LAND ANALYSIS] exception', err);
       } finally {
         hideLoader('اكتمل تحليل ملفات الأرض');
       }
     }
 
-    // The analysis payload is persisted but never displayed: the directions table falls back to
-    // `parcels[0].directions` when the saved table is empty, and collectTenantFormData() only
-    // reads DOM inputs, so dropping this hidden field would lose the analysis on reload.
+    // The analysis payload stays hidden while its table-read diagnostics remain visible near the upload box.
     function storeLandDocumentAnalysis(analysis = {}) {
       const analysisInput = document.getElementById('landDocumentsAnalysisData');
       if (analysisInput) {
@@ -11145,7 +11227,9 @@
           ? JSON.stringify({
               parcels: analysis.parcels,
               conflicts: analysis.conflicts || [],
-              source_priority: analysis.source_priority || []
+              source_priority: analysis.source_priority || [],
+              extraction_diagnostics: analysis.extraction_diagnostics || {},
+              document_processing: analysis.document_processing || []
             })
           : '';
       }

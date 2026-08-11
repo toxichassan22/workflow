@@ -134,10 +134,132 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertNotIn('أُرسل الملف الأصلي كحل احتياطي', app_source)
         self.assertIn('finish_reason == \'length\'', app_source)
+        self.assertIn('_detect_scan_rotation', app_source)
+        self.assertIn('PDF_VISION_TILE_MAX_EDGE', app_source)
+        self.assertIn('extraction_diagnostics', app_source)
         # The cap is negotiated in _call_land_analysis_model: too low truncates the JSON, too high
         # is refused outright because the provider reserves max_tokens against the balance.
         self.assertIn('_call_land_analysis_model(\n', app_source)
         self.assertIn('LAND_ANALYSIS_MAX_TOKENS)', app_source)
+
+    def test_pdf_scan_orientation_adds_high_resolution_table_tiles(self):
+        import base64
+        import fitz
+        from PIL import Image, ImageDraw
+
+        source = Image.new('RGB', (800, 1000), 'white')
+        painter = ImageDraw.Draw(source)
+        for y in range(80, 900, 70):
+            painter.line((40, y, 760, y), fill='black', width=2)
+            painter.line((40, y + 28, 760, y + 28), fill='black', width=1)
+        sideways = source.rotate(90, expand=True)
+        image_buffer = io.BytesIO()
+        sideways.save(image_buffer, format='PNG')
+        document = fitz.open()
+        page = document.new_page(width=sideways.width, height=sideways.height)
+        page.insert_image(page.rect, stream=image_buffer.getvalue())
+        pdf_data = document.tobytes()
+        document.close()
+        data_uri = 'data:application/pdf;base64,' + base64.b64encode(pdf_data).decode('ascii')
+
+        diagnostics = {}
+        parts, warnings, page_count, mode = self.application_module._prepare_document_vision_parts(
+            {'filename': 'rotated-scan.pdf', 'mimeType': 'application/pdf', 'fileData': data_uri},
+            budget=8 * 1024 * 1024,
+            diagnostics=diagnostics,
+        )
+
+        self.assertEqual((page_count, mode), (1, 'pdf_rendered'))
+        self.assertEqual(diagnostics['rotated_page_count'], 1)
+        self.assertGreater(diagnostics['tile_count'], 0)
+        self.assertTrue(any('تم تصحيح اتجاه' in warning for warning in warnings))
+        self.assertTrue(any('قصاصة مكبرة' in part.get('text', '') for part in parts if part.get('type') == 'text'))
+
+    def test_land_normalizer_accepts_regulation_coordinate_and_direction_aliases(self):
+        result = self.application_module._normalize_land_document_result({
+            'parcels': [{
+                'parcel_id': 'P-2',
+                'directions': [{'direction': 'الشمال', 'regulation_text': 'بطول 80 م يحده شارع'}],
+                'regulation_coordinates': [{
+                    'point_number': 1,
+                    'الشرقيات': '511085,849',
+                    'الشماليات': '2392264,840',
+                }],
+            }],
+        })
+
+        parcel = result['parcels'][0]
+        self.assertEqual(parcel['directions']['north']['regulation_text'], 'بطول 80 م يحده شارع')
+        self.assertEqual(result['survey_coordinates'][0]['eastings'], '511085,849')
+        self.assertEqual(result['survey_coordinates'][0]['northings'], '2392264,840')
+        self.assertEqual(result['survey_coordinates'][0]['source'], 'regulation_table')
+
+        mixed = self.application_module._normalize_land_document_result({
+            'survey_coordinates': [
+                {'point': '1 (إحداثيات الموقع)', 'eastings': '511072.703', 'northings': '2392261.792'},
+                {'point': '1 (إحداثيات التنظيم)', 'eastings': '511085.849', 'northings': '2392264.840'},
+            ]
+        })
+        self.assertEqual(len(mixed['survey_coordinates']), 1)
+        self.assertEqual(mixed['survey_coordinates'][0]['point'], '1')
+        self.assertEqual(mixed['survey_coordinates'][0]['eastings'], '511085.849')
+
+    def test_land_extraction_diagnostics_identifies_empty_tables(self):
+        result = self.application_module._normalize_land_document_result({
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'directions': {'north': {'regulation_text': 'بطول 10 م يحده جار'}},
+                'survey_coordinates': [],
+            }],
+            'conflicts': [{'field': 'survey_coordinates', 'description': 'الجدول غير مقروء'}],
+        })
+        diagnostics = self.application_module._build_land_extraction_diagnostics(result, [])
+
+        self.assertEqual(diagnostics['status'], 'partial')
+        self.assertEqual(diagnostics['coordinates_rows'], 0)
+        self.assertEqual(diagnostics['directions_with_values'], 1)
+        self.assertIn('إحداثيات التنظيم', diagnostics['missing_tables'])
+        self.assertEqual(diagnostics['conflict_count'], 1)
+
+    def test_extract_croquis_response_exposes_table_diagnostics(self):
+        model_payload = {
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'survey_coordinates': [{
+                    'point': '1', 'eastings': '511085.849', 'northings': '2392264.840'
+                }],
+                'directions': {
+                    'north': {'regulation_text': 'بطول 10 م'},
+                    'south': {'regulation_text': 'بطول 11 م'},
+                    'east': {'regulation_text': 'بطول 12 م'},
+                    'west': {'regulation_text': 'بطول 13 م'},
+                },
+            }],
+            'conflicts': [],
+        }
+        provider_response = {
+            'choices': [{
+                'finish_reason': 'stop',
+                'message': {'content': json.dumps(model_payload, ensure_ascii=False)},
+            }]
+        }
+        with patch.object(self.application_module, 'OPENROUTER_KEY', 'test-key'), \
+                patch.object(self.application_module, '_prepare_document_vision_parts', return_value=(
+                    [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,test', 'detail': 'high'}}],
+                    [], 1, 'image_direct'
+                )), \
+                patch.object(self.application_module, 'search_official_regulations_pdf', return_value=('', [], [])), \
+                patch.object(self.application_module, 'render_regulation_table_pages', return_value=([], [])), \
+                patch.object(self.application_module, '_call_land_analysis_model', return_value=(provider_response, 9000, '')):
+            response = self.app.test_client().post('/api/extract-croquis', headers=self._headers(self.token_a), json={
+                'fileData': 'data:image/png;base64,test',
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        diagnostics = response.get_json()['extractedData']['extraction_diagnostics']
+        self.assertEqual(diagnostics['coordinates_rows'], 1)
+        self.assertEqual(diagnostics['directions_with_values'], 4)
+        self.assertEqual(diagnostics['status'], 'complete')
 
     def test_health_reports_deployment_marker(self):
         marker = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
@@ -327,6 +449,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("analyzeButton.textContent = 'تحليل الرخصة والكروكي معًا'", index_source)
         self.assertNotIn('analyzeLandDocumentsButton', index_source)
         self.assertIn('regulation_text', index_source)
+        self.assertIn('landAnalysisDiagnostics', index_source)
+        self.assertIn('showLandAnalysisDiagnostics', index_source)
 
     def test_land_tables_survive_draft_round_trip_without_being_wiped(self):
         """The coordinate/direction tables live in hidden inputs as JSON strings, so the
@@ -376,7 +500,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # silently picking a value, and they surface through the narrative summary.
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn('"conflicts": [{"field": "", "description": ""}]', app_source)
-        self.assertIn('single_page_document', app_source)
+        self.assertIn('_build_land_extraction_diagnostics', app_source)
         self.assertIn('إحداثيات التنظيم', app_source)
         self.assertIn('بموجب التنظيم', app_source)
         self.assertNotIn('"severity": "high|medium|low"', app_source)

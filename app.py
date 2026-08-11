@@ -5853,6 +5853,16 @@ PDF_VISION_MAX_PAGES = int(os.environ.get('PDF_VISION_MAX_PAGES', '40'))
 PDF_VISION_MAX_EDGE = int(os.environ.get('PDF_VISION_MAX_EDGE', '3000'))
 PDF_VISION_JPEG_QUALITY = int(os.environ.get('PDF_VISION_JPEG_QUALITY', '85'))
 PDF_VISION_MAX_TOTAL_BYTES = int(os.environ.get('PDF_VISION_MAX_TOTAL_BYTES', str(12 * 1024 * 1024)))
+PDF_VISION_TILE_COLUMNS = int(os.environ.get('PDF_VISION_TILE_COLUMNS', '2'))
+PDF_VISION_TILE_ROWS = int(os.environ.get('PDF_VISION_TILE_ROWS', '3'))
+PDF_VISION_TILE_MAX_PAGES = int(os.environ.get('PDF_VISION_TILE_MAX_PAGES', '6'))
+PDF_VISION_TILE_MAX_EDGE = int(os.environ.get('PDF_VISION_TILE_MAX_EDGE', '2600'))
+PDF_VISION_TILE_DPI = int(os.environ.get('PDF_VISION_TILE_DPI', '600'))
+PDF_VISION_TILE_JPEG_QUALITY = int(os.environ.get('PDF_VISION_TILE_JPEG_QUALITY', '72'))
+PDF_VISION_TILE_OVERLAP = float(os.environ.get('PDF_VISION_TILE_OVERLAP', '0.04'))
+PDF_VISION_ALTERNATE_TILE_LIMIT = int(os.environ.get('PDF_VISION_ALTERNATE_TILE_LIMIT', '2'))
+PDF_VISION_ROTATION_MIN_SCORE_GAP = float(os.environ.get('PDF_VISION_ROTATION_MIN_SCORE_GAP', '0.004'))
+PDF_VISION_ROTATION_DIRECTION_MIN_SCORE_GAP = float(os.environ.get('PDF_VISION_ROTATION_DIRECTION_MIN_SCORE_GAP', '0.003'))
 # The land prompt asks for a multi-paragraph Arabic narrative, sourced building rules and a full
 # coordinates table. Arabic costs roughly 2-3 tokens per word, so a low cap truncates the JSON and
 # the whole extraction is then rejected, which looks to the user like "nothing changed".
@@ -5950,8 +5960,145 @@ def _rank_pdf_page(raw_text):
     return score
 
 
+def _pixmap_to_pil(pixmap):
+    from PIL import Image
+    mode = 'RGBA' if pixmap.alpha else 'RGB'
+    return Image.frombytes(mode, (pixmap.width, pixmap.height), pixmap.samples).convert('RGB')
+
+
+def _encode_vision_image(image, quality, use_png=False):
+    import io
+    buffer = io.BytesIO()
+    if use_png:
+        image.save(buffer, format='PNG', optimize=True)
+        mime = 'image/png'
+    else:
+        image.save(buffer, format='JPEG', quality=max(40, int(quality)), optimize=True)
+        mime = 'image/jpeg'
+    encoded = base64.b64encode(buffer.getvalue()).decode('ascii')
+    return f'data:{mime};base64,{encoded}', len(encoded)
+
+
+def _detect_scan_rotation(image):
+    try:
+        import numpy as np
+        from PIL import Image
+    except ImportError:
+        return {
+            'rotation': 0,
+            'alternate_rotations': [],
+            'method': 'default_no_numpy',
+            'axis_gap': 0,
+            'scores': {},
+        }
+
+    sample = image.convert('L')
+    resampling = getattr(Image, 'Resampling', Image).LANCZOS
+    sample.thumbnail((900, 900), resampling)
+    gray = np.asarray(sample, dtype=np.uint8)
+    if gray.ndim != 2 or min(gray.shape) < 16:
+        return {
+            'rotation': 0,
+            'alternate_rotations': [],
+            'method': 'default_small_image',
+            'axis_gap': 0,
+            'scores': {},
+        }
+
+    pad_y = max(1, int(gray.shape[0] * 0.02))
+    pad_x = max(1, int(gray.shape[1] * 0.02))
+    gray = gray[pad_y:-pad_y, pad_x:-pad_x]
+    dark = gray < 200
+
+    def projection_score(mask):
+        height, width = mask.shape
+        horizontal = 0.0
+        vertical = 0.0
+        for span, weight in ((2, 1.0), (3, 2.0), (4, 2.0), (5, 1.0), (7, 1.0)):
+            if width >= span:
+                run = np.ones((height, width - span + 1), dtype=bool)
+                for offset in range(span):
+                    run &= mask[:, offset:offset + width - span + 1]
+                horizontal += weight * np.count_nonzero(run)
+            if height >= span:
+                run = np.ones((height - span + 1, width), dtype=bool)
+                for offset in range(span):
+                    run &= mask[offset:offset + height - span + 1, :]
+                vertical += weight * np.count_nonzero(run)
+        return float(horizontal - vertical) / max(1, mask.size)
+
+    scores = {
+        0: projection_score(dark),
+        90: projection_score(np.rot90(dark, 1)),
+        180: projection_score(np.rot90(dark, 2)),
+        270: projection_score(np.rot90(dark, 3)),
+    }
+    base_score = (scores[0] + scores[180]) / 2
+    sideways_score = (scores[90] + scores[270]) / 2
+    axis_gap = sideways_score - base_score
+    configured = os.environ.get('PDF_VISION_ROTATION', 'auto').strip().lower()
+    if configured in {'0', '90', '180', '270'}:
+        rotation = int(configured)
+        alternate = []
+        method = 'configured'
+    elif axis_gap >= PDF_VISION_ROTATION_MIN_SCORE_GAP:
+        rotation = 90 if scores[90] - scores[270] >= PDF_VISION_ROTATION_DIRECTION_MIN_SCORE_GAP else 270
+        alternate = [270 if rotation == 90 else 90]
+        method = 'projection_profile_sideways'
+    elif axis_gap <= -PDF_VISION_ROTATION_MIN_SCORE_GAP:
+        rotation = 180 if scores[180] - scores[0] >= PDF_VISION_ROTATION_DIRECTION_MIN_SCORE_GAP else 0
+        alternate = []
+        method = 'projection_profile_upright'
+    else:
+        rotation = 180 if scores[180] - scores[0] >= PDF_VISION_ROTATION_DIRECTION_MIN_SCORE_GAP else 0
+        alternate = []
+        method = 'projection_profile_ambiguous'
+
+    return {
+        'rotation': rotation,
+        'alternate_rotations': alternate,
+        'method': method,
+        'axis_gap': round(axis_gap, 6),
+        'scores': {str(key): round(value, 6) for key, value in scores.items()},
+    }
+
+
+def _render_pdf_clip_image(page, clip, scale, rotation):
+    import fitz
+    from PIL import Image
+    pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
+    image = _pixmap_to_pil(pixmap)
+    if rotation:
+        resampling = getattr(Image, 'Resampling', Image).BICUBIC
+        image = image.rotate(rotation, expand=True, resample=resampling)
+    return image
+
+
+def _pdf_tile_rects(rect):
+    import fitz
+    columns = max(1, PDF_VISION_TILE_COLUMNS)
+    rows = max(1, PDF_VISION_TILE_ROWS)
+    overlap = max(0.0, min(0.2, PDF_VISION_TILE_OVERLAP))
+    result = []
+    for row in range(rows):
+        for column in range(columns):
+            x0 = max(0.0, rect.width * column / columns - rect.width * overlap)
+            y0 = max(0.0, rect.height * row / rows - rect.height * overlap)
+            x1 = min(rect.width, rect.width * (column + 1) / columns + rect.width * overlap)
+            y1 = min(rect.height, rect.height * (row + 1) / rows + rect.height * overlap)
+            result.append((fitz.Rect(x0, y0, x1, y1), row, column))
+    return result
+
+
+def _alternate_tile_indexes(tile_count):
+    columns = max(1, PDF_VISION_TILE_COLUMNS)
+    priority = [index for index in range(tile_count) if index % columns == columns - 1]
+    priority.extend(index for index in range(tile_count) if index not in priority)
+    return priority
+
+
 def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pages=PDF_VISION_MAX_PAGES,
-                                 budget=PDF_VISION_MAX_TOTAL_BYTES):
+                                 budget=PDF_VISION_MAX_TOTAL_BYTES, diagnostics=None):
     """Render relevant PDF pages to image data URIs for vision models without OCR/text extraction.
 
     Raw 300 DPI PNG pages made multi-page deed books into a request so large that the
@@ -5969,6 +6116,7 @@ def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pa
         raise RuntimeError('PyMuPDF is required for visual PDF analysis') from exc
 
     pages = []
+    page_diagnostics = []
     truncated = False
     dpi_scale = max(1.0, float(dpi) / 72.0)
     ladder = (
@@ -5979,7 +6127,6 @@ def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pa
     document = fitz.open(stream=pdf_bytes, filetype='pdf')
     try:
         page_count = len(document)
-        single_page_document = page_count <= 2
         limit = min(page_count, max(1, int(max_pages)))
         if page_count <= limit:
             selected_pages = list(range(page_count))
@@ -6002,38 +6149,134 @@ def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pa
                     selected_pages.append(index)
             selected_pages.sort()
         truncated = len(selected_pages) < page_count
+        tile_limit = min(len(selected_pages), max(0, PDF_VISION_TILE_MAX_PAGES))
+        selection_order = {index: position for position, index in enumerate(selected_pages)}
+        tile_candidates = sorted(
+            selected_pages,
+            key=lambda index: (-_rank_pdf_page(document[index].get_text()), selection_order[index])
+        )
+        tile_page_indexes = set(tile_candidates[:tile_limit])
         for edge_cap, quality in ladder:
             pages = []
+            page_diagnostics = []
             total = 0
             for page_index in selected_pages:
-                rect = document[page_index].rect
+                page = document[page_index]
+                rect = page.rect
+                orientation_scale = min(dpi_scale, 900.0 / max(rect.width, rect.height, 1.0))
+                orientation_image = _render_pdf_clip_image(page, None, orientation_scale, 0)
+                orientation = _detect_scan_rotation(orientation_image)
                 scale = min(dpi_scale, float(edge_cap) / max(rect.width, rect.height, 1.0))
-                pixmap = document[page_index].get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-                try:
-                    if single_page_document and edge_cap == PDF_VISION_MAX_EDGE:
-                        blob = pixmap.tobytes('png')
-                        mime = 'image/png'
-                    else:
-                        blob = pixmap.tobytes('jpeg', jpg_quality=quality)
-                        mime = 'image/jpeg'
-                except Exception:
-                    blob = pixmap.tobytes('png')
-                    mime = 'image/png'
-                encoded = base64.b64encode(blob).decode('ascii')
-                total += len(encoded)
+                full_image = _render_pdf_clip_image(page, None, scale, orientation['rotation'])
+                full_data, full_size = _encode_vision_image(full_image, quality)
+                total += full_size
                 pages.append({
                     'page_number': page_index + 1,
-                    'image_data': f'data:{mime};base64,{encoded}'
+                    'image_data': full_data,
+                    'kind': 'full',
+                    'rotation': orientation['rotation'],
+                    'orientation_variant': 'primary',
+                    'orientation_method': orientation['method'],
+                    'axis_gap': orientation['axis_gap'],
                 })
+                if orientation['alternate_rotations']:
+                    alternate_scale = min(dpi_scale, float(edge_cap * 0.65) / max(rect.width, rect.height, 1.0))
+                    alternate_image = _render_pdf_clip_image(
+                        page, None, alternate_scale, orientation['alternate_rotations'][0]
+                    )
+                    alternate_data, alternate_size = _encode_vision_image(
+                        alternate_image, min(quality, 65)
+                    )
+                    total += alternate_size
+                    pages.append({
+                        'page_number': page_index + 1,
+                        'image_data': alternate_data,
+                        'kind': 'full',
+                        'rotation': orientation['alternate_rotations'][0],
+                        'orientation_variant': 'alternate',
+                    })
+                page_diagnostics.append({
+                    'page': page_index + 1,
+                    'rotation': orientation['rotation'],
+                    'alternate_rotations': orientation['alternate_rotations'],
+                    'method': orientation['method'],
+                    'axis_gap': orientation['axis_gap'],
+                })
+                if page_index not in tile_page_indexes:
+                    continue
+                tile_rects = _pdf_tile_rects(rect)
+                tile_edge = min(PDF_VISION_TILE_MAX_EDGE, max(1200, int(edge_cap)))
+                tile_quality = min(quality, PDF_VISION_TILE_JPEG_QUALITY)
+                for tile_index, (clip, row, column) in enumerate(tile_rects):
+                    tile_scale = min(float(PDF_VISION_TILE_DPI) / 72.0,
+                                     tile_edge / max(clip.width, clip.height, 1.0))
+                    tile_image = _render_pdf_clip_image(page, clip, tile_scale, orientation['rotation'])
+                    tile_data, tile_size = _encode_vision_image(tile_image, tile_quality)
+                    total += tile_size
+                    pages.append({
+                        'page_number': page_index + 1,
+                        'image_data': tile_data,
+                        'kind': 'tile',
+                        'tile_index': tile_index,
+                        'tile_row': row,
+                        'tile_column': column,
+                        'rotation': orientation['rotation'],
+                        'orientation_variant': 'primary',
+                    })
+                if orientation['alternate_rotations']:
+                    alternate_indexes = _alternate_tile_indexes(len(tile_rects))
+                    if budget < 8 * 1024 * 1024:
+                        alternate_indexes = alternate_indexes[:PDF_VISION_ALTERNATE_TILE_LIMIT]
+                    for tile_index in alternate_indexes:
+                        clip, row, column = tile_rects[tile_index]
+                        alternate_rotation = orientation['alternate_rotations'][0]
+                        tile_scale = min(float(PDF_VISION_TILE_DPI) / 72.0,
+                                         tile_edge / max(clip.width, clip.height, 1.0))
+                        tile_image = _render_pdf_clip_image(page, clip, tile_scale, alternate_rotation)
+                        tile_data, tile_size = _encode_vision_image(tile_image, tile_quality)
+                        total += tile_size
+                        pages.append({
+                            'page_number': page_index + 1,
+                            'image_data': tile_data,
+                            'kind': 'tile',
+                            'tile_index': tile_index,
+                            'tile_row': row,
+                            'tile_column': column,
+                            'rotation': alternate_rotation,
+                            'orientation_variant': 'alternate',
+                        })
             if total <= max(1, int(budget)):
                 break
+        while total > max(1, int(budget)):
+            removable = next((index for index in range(len(pages) - 1, -1, -1)
+                              if pages[index].get('kind') == 'tile'
+                              and pages[index].get('orientation_variant') == 'alternate'), None)
+            if removable is None:
+                removable = next((index for index in range(len(pages) - 1, -1, -1)
+                                  if pages[index].get('kind') == 'full'
+                                  and pages[index].get('orientation_variant') == 'alternate'), None)
+            if removable is None:
+                removable = next((index for index in range(len(pages) - 1, -1, -1)
+                                  if pages[index].get('kind') == 'tile'), None)
+            if removable is None:
+                break
+            total -= len(pages[removable].get('image_data', '').split(',', 1)[-1])
+            pages.pop(removable)
     finally:
         document.close()
 
+    if diagnostics is not None:
+        diagnostics.update({
+            'page_rotations': page_diagnostics,
+            'rotated_page_count': sum(1 for item in page_diagnostics if item.get('rotation')),
+            'tile_count': sum(1 for item in pages if item.get('kind') == 'tile'),
+            'image_count': len(pages),
+            'encoded_base64_bytes': sum(len(item.get('image_data', '').split(',', 1)[-1]) for item in pages),
+        })
     return pages, page_count, truncated
 
 
-def _prepare_document_vision_parts(document, budget=PDF_VISION_MAX_TOTAL_BYTES):
+def _prepare_document_vision_parts(document, budget=PDF_VISION_MAX_TOTAL_BYTES, diagnostics=None):
     """Prepare image parts for a document while preserving source/page metadata."""
     file_data = document.get('fileData') or ''
     filename = document.get('filename') or 'document'
@@ -6044,28 +6287,47 @@ def _prepare_document_vision_parts(document, budget=PDF_VISION_MAX_TOTAL_BYTES):
         or filename.lower().endswith('.pdf')
     )
     if not is_pdf:
+        if diagnostics is not None:
+            diagnostics.update({'image_count': 1, 'tile_count': 0, 'rotated_page_count': 0})
         return [{
             'type': 'image_url',
             'image_url': {'url': file_data, 'detail': 'high'}
         }], [], 1, 'image_direct'
 
-    pages, page_count, truncated = _render_pdf_pages_for_vision(file_data, filename, budget=budget)
+    vision_diagnostics = {}
+    pages, page_count, truncated = _render_pdf_pages_for_vision(
+        file_data, filename, budget=budget, diagnostics=vision_diagnostics)
     warnings = []
     if truncated:
-        selected_numbers = ', '.join(str(page.get('page_number')) for page in pages)
+        selected_numbers = ', '.join(dict.fromkeys(
+            str(page.get('page_number')) for page in pages if page.get('kind') == 'full'
+        ))
         warnings.append(f'{filename}: تم تحليل الصفحات الأكثر ارتباطًا ({selected_numbers}) من أصل {page_count}')
-    parts = [
-        {
-            'type': 'text',
-            'text': f'مصدر الصفحة: {filename} — الصفحة {page["page_number"]} من {page_count}'
-        }
-        for page in pages
-    ]
+    rotated_pages = [item for item in vision_diagnostics.get('page_rotations', []) if item.get('rotation')]
+    if rotated_pages:
+        rotations = '، '.join(f"صفحة {item['page']}: {item['rotation']} درجة" for item in rotated_pages)
+        warnings.append(f'{filename}: تم تصحيح اتجاه {rotations}')
+    if diagnostics is not None:
+        diagnostics.update(vision_diagnostics)
     expanded = []
-    for page, text_part in zip(pages, parts):
+    for page in pages:
+        if page.get('kind') == 'tile':
+            variant = 'بديلة' if page.get('orientation_variant') == 'alternate' else 'مصَححة'
+            label = (
+                f"قصاصة مكبرة {variant} من الصفحة {page['page_number']}، "
+                f"الموضع {page.get('tile_index', 0) + 1}، اتجاه {page.get('rotation', 0)} درجة. "
+                "استخدمها لقراءة الأرقام والجداول، وتجاهل النسخة البديلة إذا كانت مقلوبة."
+            )
+        else:
+            variant = ' بديلة' if page.get('orientation_variant') == 'alternate' else ''
+            label = (
+                f"الصورة الكاملة{variant} للمستند {filename}، الصفحة {page['page_number']} من {page_count}، "
+                f"اتجاه العرض {page.get('rotation', 0)} درجة. "
+                "استخدم الصورة البديلة فقط إذا كانت الكتابة فيها أفقية أوضح."
+            )
         expanded.extend([
-            text_part,
-            {'type': 'image_url', 'image_url': {'url': page['image_data'], 'detail': 'high'}}
+            {'type': 'text', 'text': label},
+            {'type': 'image_url', 'image_url': {'url': page['image_data'], 'detail': 'high'}},
         ])
     return expanded, warnings, page_count, 'pdf_rendered'
 
@@ -6158,6 +6420,120 @@ def _find_document_date(text):
     return ''
 
 
+def _coordinate_rows_from_payload(payload):
+    if not isinstance(payload, dict):
+        return []
+    for key in (
+        'regulation_coordinates', 'survey_coordinates', 'regulation_coordinates_table',
+        'coordinates_table', 'coordinatesTable'
+    ):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            value = value.get('rows') or value.get('points') or value.get('items') or []
+        if isinstance(value, list) and value:
+            return value
+    return []
+
+
+def _coordinate_value(item, aliases):
+    for key, value in item.items():
+        normalized = str(key).strip().casefold()
+        if normalized in aliases and value not in (None, ''):
+            return str(value)
+    return ''
+
+
+def _normalize_survey_coordinate_rows(raw_coordinates, parcel_id):
+    if isinstance(raw_coordinates, dict):
+        raw_coordinates = raw_coordinates.get('rows') or raw_coordinates.get('points') or []
+    if not isinstance(raw_coordinates, list):
+        return []
+    regulation_rows = []
+    for item in raw_coordinates:
+        if not isinstance(item, dict):
+            continue
+        metadata = ' '.join(str(item.get(key) or '') for key in (
+            'source', 'table', 'table_name', 'coordinates_table_name', 'point', 'point_number', 'notes', 'الجدول'
+        )).casefold()
+        if 'التنظيم' in metadata or 'regulation' in metadata:
+            regulation_rows.append(item)
+    if regulation_rows:
+        raw_coordinates = regulation_rows
+    normalized = []
+    for item in raw_coordinates:
+        if not isinstance(item, dict):
+            continue
+        row_parcel_id = _coordinate_value(item, {'parcel_id', 'parcelid', 'plot_number', 'رقم القطعة'}) or str(parcel_id)
+        point = _coordinate_value(item, {'point', 'point_number', 'pointnumber', 'رقم النقطة', 'النقطة'})
+        if 'التنظيم' in point or 'regulation' in point.casefold():
+            point_match = re.search(r'[0-9\u0660-\u0669]+', point)
+            if point_match:
+                point = point_match.group(0)
+        eastings = _coordinate_value(item, {
+            'eastings', 'easting', 'easting_coordinate', 'الشرقيات', 'الشرقي', 'شرقيات'
+        })
+        northings = _coordinate_value(item, {
+            'northings', 'northing', 'northing_coordinate', 'الشماليات', 'الشمالي', 'شماليات'
+        })
+        source = _coordinate_value(item, {'source', 'المصدر'}) or 'regulation_table'
+        if row_parcel_id or point or eastings or northings:
+            normalized.append({
+                'parcel_id': row_parcel_id,
+                'point': point,
+                'eastings': eastings,
+                'northings': northings,
+                'source': source,
+            })
+    return normalized
+
+
+_DIRECTION_ALIASES = {
+    'n': 'north', 'north': 'north', 'شمال': 'north', 'الشمال': 'north',
+    's': 'south', 'south': 'south', 'جنوب': 'south', 'الجنوب': 'south',
+    'e': 'east', 'east': 'east', 'شرق': 'east', 'الشرق': 'east',
+    'w': 'west', 'west': 'west', 'غرب': 'west', 'الغرب': 'west',
+}
+
+
+def _normalize_direction_map(value):
+    if isinstance(value, dict):
+        entries = []
+        for key, item in value.items():
+            if isinstance(item, dict):
+                entry = dict(item)
+            else:
+                entry = {'notes': str(item)}
+            entry['direction'] = key
+            entries.append(entry)
+    elif isinstance(value, list):
+        entries = [item for item in value if isinstance(item, dict)]
+    else:
+        entries = []
+    directions = {}
+    for entry in entries:
+        direction_key = str(entry.get('direction') or entry.get('key') or '').strip().casefold()
+        direction = _DIRECTION_ALIASES.get(direction_key)
+        if direction:
+            clean = dict(entry)
+            clean.pop('direction', None)
+            clean.pop('key', None)
+            directions[direction] = clean
+    for direction in ('north', 'south', 'east', 'west'):
+        directions.setdefault(direction, {})
+    return directions
+
+
+def _directions_have_content(directions):
+    if not isinstance(directions, dict):
+        return False
+    return any(
+        any(str(value.get(key) or '').strip() for key in (
+            'regulation_text', 'street_name', 'street_width_m', 'boundary_length_m', 'uses', 'notes'
+        )) if isinstance(value, dict) else bool(str(value or '').strip())
+        for value in directions.values()
+    )
+
+
 def _normalize_land_document_result(resp_json, text_content=''):
     """Normalize multi-parcel document output while keeping legacy flat fields compatible."""
     if not isinstance(resp_json, dict):
@@ -6165,18 +6541,12 @@ def _normalize_land_document_result(resp_json, text_content=''):
     raw_parcels = resp_json.get('parcels')
     if not isinstance(raw_parcels, list) or not raw_parcels:
         legacy = normalize_croquis_fields(resp_json, text_content)
-        directions = legacy.get('directions') if isinstance(legacy.get('directions'), dict) else {}
-        raw_coordinates = resp_json.get('survey_coordinates') or resp_json.get('coordinates_table') or []
-        survey_coordinates = [
-            {
-                'parcel_id': 'P-1',
-                'point': str(item.get('point') or item.get('point_number') or ''),
-                'eastings': str(item.get('eastings') or item.get('easting') or item.get('الشرقيات') or ''),
-                'northings': str(item.get('northings') or item.get('northing') or item.get('الشماليات') or ''),
-                'source': str(item.get('source') or 'regulation_table')
-            }
-            for item in raw_coordinates if isinstance(item, dict)
-        ]
+        directions = _normalize_direction_map(
+            legacy.get('directions') or resp_json.get('directions') or resp_json.get('directions_table')
+        )
+        survey_coordinates = _normalize_survey_coordinate_rows(
+            _coordinate_rows_from_payload(resp_json), 'P-1'
+        )
         parcel = {
             'parcel_id': 'P-1',
             'plot_number': legacy.get('plot_number_croquis', ''),
@@ -6204,42 +6574,26 @@ def _normalize_land_document_result(resp_json, text_content=''):
         result['parcels'] = [parcel]
         result['survey_coordinates'] = survey_coordinates
         result['source_priority'] = ['regulation_table', 'official_regulation', 'croquis', 'building_license']
-        result['conflicts'] = []
+        result['conflicts'] = resp_json.get('conflicts') if isinstance(resp_json.get('conflicts'), list) else []
         result['document_summary'] = result.get('land_and_building_summary', '')
         return result
 
-    direction_aliases = {
-        'n': 'north', 'north': 'north', 'شمال': 'north',
-        's': 'south', 'south': 'south', 'جنوب': 'south',
-        'e': 'east', 'east': 'east', 'شرق': 'east',
-        'w': 'west', 'west': 'west', 'غرب': 'west',
-    }
     normalized_parcels = []
     for index, raw in enumerate(raw_parcels):
         if not isinstance(raw, dict):
             continue
-        directions = {}
-        raw_directions = raw.get('directions') if isinstance(raw.get('directions'), dict) else {}
-        for key, value in raw_directions.items():
-            direction = direction_aliases.get(str(key).strip().casefold())
-            if not direction:
-                continue
-            directions[direction] = value if isinstance(value, dict) else {'notes': str(value)}
-        for direction in ('north', 'south', 'east', 'west'):
-            directions.setdefault(direction, {})
+        directions = _normalize_direction_map(
+            raw.get('directions') or raw.get('directions_table') or raw.get('regulation_directions')
+        )
+        if index == 0 and not _directions_have_content(directions):
+            directions = _normalize_direction_map(
+                resp_json.get('directions') or resp_json.get('directions_table')
+            )
         parcel = dict(raw)
         parcel['parcel_id'] = str(raw.get('parcel_id') or raw.get('parcelId') or f'P-{index + 1}')
-        coordinate_rows = raw.get('survey_coordinates') or raw.get('coordinates_table') or []
-        parcel['survey_coordinates'] = [
-            {
-                'parcel_id': parcel['parcel_id'],
-                'point': str(item.get('point') or item.get('point_number') or ''),
-                'eastings': str(item.get('eastings') or item.get('easting') or item.get('الشرقيات') or ''),
-                'northings': str(item.get('northings') or item.get('northing') or item.get('الشماليات') or ''),
-                'source': str(item.get('source') or 'regulation_table')
-            }
-            for item in coordinate_rows if isinstance(item, dict)
-        ]
+        parcel['survey_coordinates'] = _normalize_survey_coordinate_rows(
+            _coordinate_rows_from_payload(raw), parcel['parcel_id']
+        )
         parcel['directions'] = directions
         coords = raw.get('coordinates') if isinstance(raw.get('coordinates'), dict) else {}
         parcel['coordinates'] = {
@@ -6258,15 +6612,11 @@ def _normalize_land_document_result(resp_json, text_content=''):
     result.pop('approved_floors', None)
     result['parcels'] = normalized_parcels
     aggregate_coordinates = [row for parcel in normalized_parcels for row in parcel.get('survey_coordinates', [])]
-    top_coordinates = resp_json.get('survey_coordinates') or resp_json.get('coordinates_table') or []
-    if not aggregate_coordinates and isinstance(top_coordinates, list):
-        aggregate_coordinates = [{
-            'parcel_id': str(item.get('parcel_id') or item.get('parcelId') or normalized_parcels[0]['parcel_id']),
-            'point': str(item.get('point') or item.get('point_number') or ''),
-            'eastings': str(item.get('eastings') or item.get('easting') or item.get('الشرقيات') or ''),
-            'northings': str(item.get('northings') or item.get('northing') or item.get('الشماليات') or ''),
-            'source': str(item.get('source') or 'regulation_table')
-        } for item in top_coordinates if isinstance(item, dict)]
+    top_coordinates = _normalize_survey_coordinate_rows(
+        _coordinate_rows_from_payload(resp_json), normalized_parcels[0]['parcel_id']
+    )
+    if not aggregate_coordinates:
+        aggregate_coordinates = top_coordinates
     result['survey_coordinates'] = aggregate_coordinates
     result['source_priority'] = ['regulation_table', 'official_regulation', 'croquis', 'building_license']
     result['conflicts'] = resp_json.get('conflicts') if isinstance(resp_json.get('conflicts'), list) else []
@@ -6295,6 +6645,56 @@ def _normalize_land_document_result(resp_json, text_content=''):
         if value not in (None, ''):
             result.setdefault(key, value)
     return result
+
+
+def _build_land_extraction_diagnostics(result, document_processing=None):
+    parcels = result.get('parcels') if isinstance(result, dict) else []
+    parcels = parcels if isinstance(parcels, list) else []
+    coordinate_rows = result.get('survey_coordinates') if isinstance(result, dict) else []
+    if not isinstance(coordinate_rows, list):
+        coordinate_rows = []
+    first_parcel = parcels[0] if parcels and isinstance(parcels[0], dict) else {}
+    if not coordinate_rows:
+        coordinate_rows = first_parcel.get('survey_coordinates') if isinstance(first_parcel.get('survey_coordinates'), list) else []
+    directions = first_parcel.get('directions') if isinstance(first_parcel.get('directions'), dict) else {}
+    direction_values = 0
+    for direction in ('north', 'south', 'east', 'west'):
+        value = directions.get(direction)
+        if isinstance(value, dict):
+            has_value = any(str(value.get(key) or '').strip() for key in (
+                'regulation_text', 'street_name', 'street_width_m', 'boundary_length_m', 'uses', 'notes'
+            ))
+        else:
+            has_value = bool(str(value or '').strip())
+        direction_values += int(has_value)
+    complete_coordinates = sum(
+        bool(str(row.get('eastings') or '').strip() and str(row.get('northings') or '').strip())
+        for row in coordinate_rows if isinstance(row, dict)
+    )
+    conflicts = result.get('conflicts') if isinstance(result, dict) else []
+    conflicts = conflicts if isinstance(conflicts, list) else []
+    missing_tables = []
+    if not coordinate_rows:
+        missing_tables.append('إحداثيات التنظيم')
+    if direction_values < 4:
+        missing_tables.append('بموجب التنظيم')
+    if not missing_tables:
+        status = 'complete'
+    elif coordinate_rows or direction_values:
+        status = 'partial'
+    else:
+        status = 'empty'
+    return {
+        'status': status,
+        'coordinates_rows': len(coordinate_rows),
+        'coordinates_complete_rows': complete_coordinates,
+        'directions_rows': 4,
+        'directions_with_values': direction_values,
+        'missing_tables': missing_tables,
+        'conflict_count': len(conflicts),
+        'coordinates_table_name': str(first_parcel.get('coordinates_table_name') or ''),
+        'document_processing': document_processing if isinstance(document_processing, list) else [],
+    }
 
 
 @app.route('/api/extract-croquis', methods=['POST'])
@@ -6369,11 +6769,13 @@ def api_extract_croquis():
             "أنت مهندس مساح وخبير عقاري ومدقق مستندات تنظيمية. حلل كل الملفات المرفقة معًا، مع الحفاظ على هوية كل ملف ومصدر كل معلومة.\n"
             "أعد JSON فقط بدون Markdown. لا تخترع قيمة غير مقروءة؛ استخدم null أو نصًا فارغًا، وسجل التعارضات بدل اختيار قيمة من نفسك.\n"
             "أولوية المصادر إلزامية: جدول التنظيم الرسمي أولًا، ثم أي مرجع تنظيمي رسمي، ثم الكروكي، ثم رخصة البناء. إذا ظهرت جداول متعددة للإحداثيات أو الاتجاهات، استخدم جدول التنظيم واربط كل قيمة بـ source=regulation_table، وسجل البدائل والتعارضات في conflicts.\n"
+            "ستجد في مستندات PDF صورة كاملة للصفحة وقصاصات مكبرة عالية الدقة، وقد توجد قصاصات بديلة باتجاه دوران آخر. استخدم النسخة التي يكون النص فيها أفقيًا واضحًا، ولا تعتبر النسخة المقلوبة مصدرًا مستقلًا.\n"
             "إذا وجدت أكثر من قطعة أرض، أعد كل قطعة داخل parcels منفصلة ولا تدمج مساحاتها أو حدودها.\n"
-            "استخرج جدول الاتجاهات الأربعة بشكل مستقل من الجدول الذي يوضح الحدود «بموجب التنظيم» أولًا، وليس من وصف عام في الرخصة أو الكروكي. اقرأ أسماء الشوارع وعروضها وأطوال الحدود والواجهات من صورة الجدول.\n"
-            "بالنسبة للإحداثيات، ابحث بصريًا داخل صور الصفحات عن الجدول الذي يحمل العنوان «إحداثيات التنظيم» أو «جدول إحداثيات التنظيم» فقط. لا تستخدم أي جدول آخر أو أي نص مستخرج بديلًا عنه.\n"
-            "إذا لم تجد عنوان «إحداثيات التنظيم» أو لم يكن الجدول مقروءًا بوضوح، أعد survey_coordinates فارغًا وسجل تعارضًا يوضح أن جدول إحداثيات التنظيم غير موجود أو غير مقروء، ولا تستنتج الإحداثيات من الحدود أو الاتجاهات.\n"
-            "استخرج من جدول «إحداثيات التنظيم» كما هو: رقم القطعة، رقم النقطة، الشرقيات، الشماليات، بدون تحويل إلى latitude/longitude أو حساب أي نقطة.\n"
+            "استخرج جدول الاتجاهات الأربعة بشكل مستقل من جدول الجهات أو الحدود الذي يوضح «بموجب التنظيم» أولًا، وليس من وصف عام في الرخصة أو الكروكي. اقرأ أسماء الشوارع وعروضها وأطوال الحدود والواجهات من صورة الجدول.\n"
+            "بالنسبة للإحداثيات، ابحث بصريًا داخل صور الصفحات عن جدول يحمل «إحداثيات التنظيم» أو «جدول إحداثيات التنظيم» أو «احداثيات التنظيم» أو «إحداثيات الموقع» إذا كان واضحًا أنه عمود التنظيم. لا تستخدم أي جدول آخر أو أي نص مستخرج بديلًا عنه.\n"
+            "إذا لم تجد جدول إحداثيات التنظيم أو لم يكن الجدول مقروءًا بوضوح، أعد survey_coordinates فارغًا وسجل تعارضًا يوضح أن جدول إحداثيات التنظيم غير موجود أو غير مقروء، ولا تستنتج الإحداثيات من الحدود أو الاتجاهات.\n"
+            "إذا ظهرت إلى جواره إحداثيات الموقع أو إحداثيات الصك، لا تخلطها معه؛ أخرج صفوف إحداثيات التنظيم وحدها، ويمكنك تمييزها باسم الجدول أو مصدره.\n"
+            "استخرج من جدول إحداثيات التنظيم كما هو: رقم القطعة، رقم النقطة، الشرقيات، الشماليات، بدون تحويل إلى latitude/longitude أو حساب أي نقطة.\n"
             "الصيغة المطلوبة:\n"
             "{\n"
             '  "parcels": [{\n'
@@ -6464,16 +6866,23 @@ def api_extract_croquis():
             per_document_budget = PDF_VISION_MAX_TOTAL_BYTES // max(1, len(documents))
             for doc in documents:
                 try:
+                    vision_diagnostics = {}
                     parts, warnings, page_count, mode = _prepare_document_vision_parts(
-                        doc, budget=per_document_budget)
+                        doc, budget=per_document_budget, diagnostics=vision_diagnostics)
                     vision_parts.extend(parts)
                     vision_warnings.extend(warnings)
-                    document_processing.append({
+                    processing = {
                         'filename': doc['filename'],
                         'mode': mode,
                         'page_count': page_count,
                         'dpi': PDF_VISION_DPI if mode == 'pdf_rendered' else None
+                    }
+                    processing.update({
+                        key: vision_diagnostics[key]
+                        for key in ('page_rotations', 'rotated_page_count', 'tile_count', 'image_count', 'encoded_base64_bytes')
+                        if key in vision_diagnostics
                     })
+                    document_processing.append(processing)
                     document_descriptions.append(f"- {doc['key']}: {doc['filename']} ({mode}, {page_count} صفحة/صورة)")
                 except Exception as render_error:
                     print(f"[EXTRACT LAND DOCUMENTS RENDER ERROR] {doc['filename']}: {render_error}")
@@ -6582,13 +6991,24 @@ def api_extract_croquis():
         if vision_warnings:
             resp_json['warnings'] = vision_warnings
         resp_json['document_processing'] = document_processing
+        extraction_diagnostics = _build_land_extraction_diagnostics(resp_json, document_processing)
+        resp_json['extraction_diagnostics'] = extraction_diagnostics
+        print(
+            '[EXTRACT LAND DOCUMENTS TABLES] '
+            f"coordinates={extraction_diagnostics['coordinates_rows']} "
+            f"complete_coordinates={extraction_diagnostics['coordinates_complete_rows']} "
+            f"directions={extraction_diagnostics['directions_with_values']}/4 "
+            f"conflicts={extraction_diagnostics['conflict_count']}"
+        )
 
         # Check if there are actual non-empty values extracted
         parcels = resp_json.get('parcels') if isinstance(resp_json, dict) else []
-        has_non_empty_values = bool(raw_resp.strip()) and bool(parcels) and any(
+        has_scalar_values = bool(parcels) and any(
             any(value not in (None, '', [], {}) for key, value in parcel.items() if key not in {'parcel_id', 'directions', 'coordinates', 'confidence', 'sources'})
             for parcel in parcels if isinstance(parcel, dict)
         )
+        has_table_values = bool(extraction_diagnostics['coordinates_rows'] or extraction_diagnostics['directions_with_values'])
+        has_non_empty_values = bool(raw_resp.strip()) and bool(parcels) and (has_scalar_values or has_table_values)
 
         if not resp_json or not has_non_empty_values:
             print(f"[CROQUIS DEBUG RAW RESP]\n{raw_resp}")
