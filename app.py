@@ -6420,16 +6420,71 @@ def _find_document_date(text):
     return ''
 
 
+def _coordinate_table_rows(table):
+    if not isinstance(table, dict):
+        return []
+    for key in ('rows', 'points', 'items', 'data'):
+        rows = table.get(key)
+        if isinstance(rows, list) and rows:
+            return rows
+    return []
+
+
+def _coordinate_table_title(table):
+    if not isinstance(table, dict):
+        return ''
+    return ' '.join(str(table.get(key) or '') for key in (
+        'table_name', 'table_title', 'title', 'name', 'label', 'source', 'الجدول', 'اسم الجدول'
+    )).strip()
+
+
+def _coordinate_table_entries(value):
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict) and _coordinate_table_rows(item)]
+    if not isinstance(value, dict):
+        return []
+    if _coordinate_table_rows(value):
+        return [value]
+    entries = []
+    for title, rows in value.items():
+        if isinstance(rows, list) and rows:
+            entries.append({'table_name': str(title), 'rows': rows})
+    return entries
+
+
+def _is_regulation_coordinate_table(table):
+    title = _coordinate_table_title(table).casefold()
+    return 'التنظيم' in title or 'regulation' in title
+
+
+def _regulation_coordinate_rows_from_payload(payload):
+    if not isinstance(payload, dict):
+        return []
+    for key in ('coordinate_tables', 'coordinates_tables', 'coordinate_table', 'coordinates_table', 'coordinatesTable'):
+        for table in _coordinate_table_entries(payload.get(key)):
+            if _is_regulation_coordinate_table(table):
+                rows = _coordinate_table_rows(table)
+                if rows:
+                    return rows
+    for key in ('regulation_coordinates', 'regulation_coordinates_table'):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            value = _coordinate_table_rows(value)
+        if isinstance(value, list) and value:
+            return value
+    return []
+
+
 def _coordinate_rows_from_payload(payload):
     if not isinstance(payload, dict):
         return []
-    for key in (
-        'regulation_coordinates', 'survey_coordinates', 'regulation_coordinates_table',
-        'coordinates_table', 'coordinatesTable'
-    ):
+    regulation_rows = _regulation_coordinate_rows_from_payload(payload)
+    if regulation_rows:
+        return regulation_rows
+    for key in ('survey_coordinates', 'coordinates_table', 'coordinatesTable'):
         value = payload.get(key)
         if isinstance(value, dict):
-            value = value.get('rows') or value.get('points') or value.get('items') or []
+            value = _coordinate_table_rows(value)
         if isinstance(value, list) and value:
             return value
     return []
@@ -6612,10 +6667,14 @@ def _normalize_land_document_result(resp_json, text_content=''):
     result.pop('approved_floors', None)
     result['parcels'] = normalized_parcels
     aggregate_coordinates = [row for parcel in normalized_parcels for row in parcel.get('survey_coordinates', [])]
+    top_regulation_rows = _regulation_coordinate_rows_from_payload(resp_json)
     top_coordinates = _normalize_survey_coordinate_rows(
-        _coordinate_rows_from_payload(resp_json), normalized_parcels[0]['parcel_id']
+        top_regulation_rows or _coordinate_rows_from_payload(resp_json), normalized_parcels[0]['parcel_id']
     )
-    if not aggregate_coordinates:
+    if top_regulation_rows:
+        aggregate_coordinates = top_coordinates
+        normalized_parcels[0]['survey_coordinates'] = top_coordinates
+    elif not aggregate_coordinates:
         aggregate_coordinates = top_coordinates
     result['survey_coordinates'] = aggregate_coordinates
     result['source_priority'] = ['regulation_table', 'official_regulation', 'croquis', 'building_license']
@@ -6772,9 +6831,10 @@ def api_extract_croquis():
             "ستجد في مستندات PDF صورة كاملة للصفحة وقصاصات مكبرة عالية الدقة، وقد توجد قصاصات بديلة باتجاه دوران آخر. استخدم النسخة التي يكون النص فيها أفقيًا واضحًا، ولا تعتبر النسخة المقلوبة مصدرًا مستقلًا.\n"
             "إذا وجدت أكثر من قطعة أرض، أعد كل قطعة داخل parcels منفصلة ولا تدمج مساحاتها أو حدودها.\n"
             "استخرج جدول الاتجاهات الأربعة بشكل مستقل من جدول الجهات أو الحدود الذي يوضح «بموجب التنظيم» أولًا، وليس من وصف عام في الرخصة أو الكروكي. اقرأ أسماء الشوارع وعروضها وأطوال الحدود والواجهات من صورة الجدول.\n"
-            "بالنسبة للإحداثيات، ابحث بصريًا داخل صور الصفحات عن جدول يحمل «إحداثيات التنظيم» أو «جدول إحداثيات التنظيم» أو «احداثيات التنظيم» أو «إحداثيات الموقع» إذا كان واضحًا أنه عمود التنظيم. لا تستخدم أي جدول آخر أو أي نص مستخرج بديلًا عنه.\n"
-            "إذا لم تجد جدول إحداثيات التنظيم أو لم يكن الجدول مقروءًا بوضوح، أعد survey_coordinates فارغًا وسجل تعارضًا يوضح أن جدول إحداثيات التنظيم غير موجود أو غير مقروء، ولا تستنتج الإحداثيات من الحدود أو الاتجاهات.\n"
-            "إذا ظهرت إلى جواره إحداثيات الموقع أو إحداثيات الصك، لا تخلطها معه؛ أخرج صفوف إحداثيات التنظيم وحدها، ويمكنك تمييزها باسم الجدول أو مصدره.\n"
+            "بالنسبة للإحداثيات، إذا وجدت أكثر من جدول فافصل الجداول أولًا داخل coordinate_tables، وضع عنوان كل جدول في table_name وصفوفه في rows.\n"
+            "الجدول المطلوب حصريًا هو الجدول الذي عنوانه «إحداثيات التنظيم» أو «جدول إحداثيات التنظيم» أو «احداثيات التنظيم». جدول «إحداثيات الموقع» أو «إحداثيات الصك» ليس بديلًا ولا يجوز أخذ أي صف منه.\n"
+            "بعد فصل الجداول، انسخ صفوف جدول إحداثيات التنظيم وحده إلى regulation_coordinates ثم إلى survey_coordinates بنفس الترتيب. لا تخلط أو تنتقي صفوفًا من الجدولين.\n"
+            "إذا لم تجد جدول إحداثيات التنظيم أو لم يكن عنوانه وصفوفه مقروءة بوضوح، أعد regulation_coordinates وsurvey_coordinates فارغين وسجل تعارضًا يوضح السبب، ولا تستنتج الإحداثيات من الحدود أو الاتجاهات.\n"
             "استخرج من جدول إحداثيات التنظيم كما هو: رقم القطعة، رقم النقطة، الشرقيات، الشماليات، بدون تحويل إلى latitude/longitude أو حساب أي نقطة.\n"
             "الصيغة المطلوبة:\n"
             "{\n"
@@ -6794,9 +6854,12 @@ def api_extract_croquis():
             '    "allowed_uses_restrictions": "", "zoning_code": "",\n'
             '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
             '    "coordinates_table_name": "إحداثيات التنظيم", "coordinates_table_source_page": "",\n'
+            '    "coordinate_tables": [{"table_name": "", "rows": [{"point": "", "eastings": "", "northings": "", "source": ""}]}],\n'
+            '    "regulation_coordinates": [{"point": "", "eastings": "", "northings": "", "source": "regulation_table"}],\n'
             '    "survey_coordinates": [{"point": "", "eastings": "", "northings": "", "source": "regulation_table"}],\n'
             '    "confidence": {}, "sources": [], "summary": ""\n'
             '  }],\n'
+            '  "coordinate_tables": [], "regulation_coordinates": [],\n'
             '  "survey_coordinates": [], "source_priority": ["regulation_table", "official_regulation", "croquis", "building_license"],\n'
             '  "conflicts": [{"field": "", "description": ""}],\n'
             '  "land_and_building_summary": ""\n'

@@ -204,6 +204,41 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(mixed['survey_coordinates'][0]['point'], '1')
         self.assertEqual(mixed['survey_coordinates'][0]['eastings'], '511085.849')
 
+    def test_land_normalizer_selects_rows_under_regulation_coordinate_table(self):
+        result = self.application_module._normalize_land_document_result({
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'regulation_coordinates': [
+                    {'point': '1', 'eastings': '511073.703', 'northings': '2392261.792'},
+                ],
+                'coordinate_tables': [
+                    {
+                        'table_name': 'إحداثيات الموقع',
+                        'rows': [{'point': '1', 'eastings': '511073.703', 'northings': '2392261.792'}],
+                    },
+                    {
+                        'table_name': 'إحداثيات التنظيم',
+                        'rows': [{'point': '1', 'eastings': '511085.849', 'northings': '2392264.840'}],
+                    },
+                ],
+            }],
+        })
+
+        self.assertEqual(len(result['survey_coordinates']), 1)
+        self.assertEqual(result['survey_coordinates'][0]['eastings'], '511085.849')
+        self.assertEqual(result['survey_coordinates'][0]['northings'], '2392264.840')
+
+        top_level_regulation = self.application_module._normalize_land_document_result({
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'survey_coordinates': [{'point': '1', 'eastings': '511073.703', 'northings': '2392261.792'}],
+            }],
+            'regulation_coordinates': [{
+                'point': '1', 'eastings': '511085.849', 'northings': '2392264.840'
+            }],
+        })
+        self.assertEqual(top_level_regulation['survey_coordinates'][0]['eastings'], '511085.849')
+
     def test_land_extraction_diagnostics_identifies_empty_tables(self):
         result = self.application_module._normalize_land_document_result({
             'parcels': [{
@@ -505,6 +540,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('_build_land_extraction_diagnostics', app_source)
         self.assertIn('إحداثيات التنظيم', app_source)
         self.assertIn('بموجب التنظيم', app_source)
+        self.assertIn('"coordinate_tables"', app_source)
+        self.assertIn('"regulation_coordinates"', app_source)
         self.assertNotIn('"severity": "high|medium|low"', app_source)
 
     def test_project_draft_list_returns_metadata_without_payload(self):
