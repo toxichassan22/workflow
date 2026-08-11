@@ -3337,6 +3337,16 @@
     .tenant-floor-design-analysis-panel { min-height: 260px; padding: 22px; border: 1px dashed #b9cbd1; border-radius: 12px; background: #f7fafc; color: var(--muted); text-align: center; }
     .tenant-floor-design-analysis-panel strong { display: block; margin-bottom: 6px; color: var(--p); font-size: 16px; }
     .tenant-floor-design-stage-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    .tenant-floor-design-analysis-result { display: grid; gap: 12px; padding: 16px; border: 1px solid #b9cbd1; border-radius: 12px; background: #f7fafc; }
+    .tenant-floor-design-analysis-result[hidden] { display: none !important; }
+    .tenant-floor-design-analysis-result-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .tenant-floor-design-analysis-result-head h4 { margin: 0 0 3px; color: var(--p); font-size: 16px; }
+    .tenant-floor-design-analysis-result-head p, .tenant-floor-design-analysis-result > p { margin: 0; color: var(--muted); font-size: 12px; }
+    .tenant-floor-design-analysis-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .tenant-floor-design-analysis-section { display: grid; gap: 6px; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+    .tenant-floor-design-analysis-section strong { color: var(--p); font-size: 12px; }
+    .tenant-floor-design-analysis-section ul { margin: 0; padding: 0 18px 0 0; color: var(--muted); font-size: 11px; }
+    .tenant-floor-design-analysis-section li { margin: 3px 0; }
     .tenant-floor-design-readiness { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
     .tenant-floor-design-readiness h4 { margin: 0; color: var(--p); font-size: 16px; }
     .tenant-floor-design-readiness p { margin: 0; color: var(--muted); font-size: 12px; }
@@ -3368,7 +3378,7 @@
       .tenant-floor-design-image-frame { min-height: 260px; }
     }
     @media (max-width: 520px) {
-      .tenant-floor-design-stage-grid, .tenant-floor-design-source-grid { grid-template-columns: 1fr; }
+      .tenant-floor-design-stage-grid, .tenant-floor-design-source-grid, .tenant-floor-design-analysis-sections { grid-template-columns: 1fr; }
       .tenant-floor-design-organization-group { grid-template-columns: 1fr; gap: 6px; }
       .tenant-floor-design-setup-grid { grid-template-columns: 1fr; }
       .tenant-floor-design-field.full { grid-column: auto; }
@@ -3976,7 +3986,12 @@
           <div><h4>المطلوب قبل بدء التحليل</h4><p id="tenantFloorDesignAnalysisSummary">جاري مراجعة البيانات...</p></div>
           <div id="tenantFloorDesignAnalysisMissingList" class="tenant-floor-design-readiness-list"></div>
         </div>
-        <div class="tenant-floor-design-stage-actions"><span class="tenant-hint">سيتم تفعيل التحليل في مرحلة لاحقة.</span><button type="button" class="btn primary" id="tenantFloorDesignStartAnalysisButton" disabled>بدء تحليل البيانات</button></div>
+        <div id="tenantFloorDesignAnalysisResult" class="tenant-floor-design-analysis-result" hidden>
+          <div class="tenant-floor-design-analysis-result-head"><div><h4>نتيجة تحليل Luna</h4><p id="tenantFloorDesignAnalysisApprovalStatus">لم يعتمد التحليل بعد.</p></div><button type="button" class="btn primary" onclick="approveTenantFloorDesignAnalysis()">اعتماد التحليل</button></div>
+          <p id="tenantFloorDesignAnalysisSummaryText"></p>
+          <div id="tenantFloorDesignAnalysisSections" class="tenant-floor-design-analysis-sections"></div>
+        </div>
+        <div class="tenant-floor-design-stage-actions"><span class="tenant-hint">يتم تشغيل التحليل بعد اكتمال البيانات.</span><button type="button" class="btn primary" id="tenantFloorDesignStartAnalysisButton" onclick="startTenantFloorAnalysis()" disabled>بدء تحليل البيانات</button></div>
       </div>
 
       <div id="tenantFloorDesignSetup" class="tenant-floor-design-setup" hidden>
@@ -8179,10 +8194,11 @@
         approvedImageUrl: typeof group?.approvedImageUrl === 'string' ? group.approvedImageUrl : '',
         prompt: typeof group?.prompt === 'string' ? group.prompt.slice(0, 12000) : '',
         generatedPrompt: typeof group?.generatedPrompt === 'string' ? group.generatedPrompt.slice(0, 12000) : '',
+        negativePrompt: typeof group?.negativePrompt === 'string' ? group.negativePrompt.slice(0, 6000) : '',
         style: typeof group?.style === 'string' ? group.style.slice(0, 120) : '',
         chat: Array.isArray(group?.chat) ? group.chat.filter(item => item && typeof item.text === 'string').slice(-40).map(item => ({ role: item.role === 'assistant' ? 'assistant' : 'user', text: item.text.slice(0, 4000) })) : []
       })).filter(group => group.floorNumbers.length).filter(group => group.name) : [];
-      return { version: 1, floorCount, firstFloor, groups };
+      return { version: 1, floorCount, firstFloor, groups, analysis: value.analysis && typeof value.analysis === 'object' ? value.analysis : null, analysisApproved: value.analysisApproved === true };
     }
 
     function tenantFloorDesignSource() {
@@ -8289,14 +8305,39 @@
       if (element) element.textContent = value;
     }
 
-    function toggleTenantFloorDesignPrompt() {
+    async function toggleTenantFloorDesignPrompt() {
       const editor = document.getElementById('tenantFloorDesignPromptEditor');
       const button = document.getElementById('tenantFloorDesignPromptToggle');
       const group = tenantFloorDesignActiveGroup();
       if (!editor || !button || !group || group.unassigned) return;
-      if (!editor.value) editor.value = group.generatedPrompt || buildTenantFloorDesignPrompt(group);
+      if (!group.generatedPrompt) {
+        if (!tenantFloorDesignState?.analysisApproved) {
+          toast('اعتمد تحليل البيانات قبل إنشاء Prompt المخطط.');
+          showTenantFloorDesignStage('analysis');
+          return;
+        }
+        button.disabled = true;
+        button.textContent = 'جاري إنشاء Prompt...';
+        try {
+          const payload = await collectTenantFloorDesignAiPayload();
+          payload.groupId = group.id;
+          payload.analysis = tenantFloorDesignState.analysis;
+          const response = await api('POST', '/api/floor-design/prompt', payload);
+          if (!response?.success || !response.prompt) throw new Error(response?.error || 'تعذر إنشاء Prompt');
+          group.generatedPrompt = response.prompt;
+          group.negativePrompt = response.negativePrompt || '';
+          markTenantFloorDesignDirty();
+        } catch (error) {
+          toast(error?.message || 'تعذر إنشاء Prompt المجموعة');
+          button.disabled = false;
+          button.textContent = 'توليد Prompt';
+          return;
+        }
+      }
+      editor.value = group.generatedPrompt || buildTenantFloorDesignPrompt(group);
       editor.hidden = !editor.hidden;
       button.textContent = editor.hidden ? 'عرض Prompt' : 'إخفاء Prompt';
+      button.disabled = false;
       if (!editor.hidden) editor.focus();
     }
 
@@ -8437,7 +8478,7 @@
         editing.floorNumbers = [...tenantFloorDesignDraftMembers];
         editing.status = 'pending';
       } else {
-        tenantFloorDesignState.groups.push({ id: nextId, name, floorNumbers: [...tenantFloorDesignDraftMembers], type: 'غير محدد', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: description, generatedPrompt: '', style: '', chat: [] });
+        tenantFloorDesignState.groups.push({ id: nextId, name, floorNumbers: [...tenantFloorDesignDraftMembers], type: 'غير محدد', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: description, generatedPrompt: '', negativePrompt: '', style: '', chat: [] });
       }
       tenantFloorDesignState.groups = tenantFloorDesignState.groups.filter(group => group.floorNumbers.length);
       tenantFloorDesignActiveGroupId = nextId;
@@ -8507,7 +8548,45 @@
       return Boolean(input?.files?.length || (Array.isArray(stored) ? stored.length : stored));
     }
 
-    function renderTenantFloorDesignAnalysisReadiness() {
+    async function collectTenantFloorDesignAiPayload() {
+      const formData = await collectTenantFormData();
+      const projectData = { ...tenantProjectData, ...formData };
+      if (document.getElementById('section-financial-calc') && typeof collectFinancialStudyModel === 'function') {
+        projectData.financial_study_model = collectFinancialStudyModel();
+      }
+      return { draftId: tenantProjectData?.draftId || null, projectData, floorDesignState: tenantFloorDesignState };
+    }
+
+    function renderTenantFloorDesignAnalysisResult() {
+      const result = tenantFloorDesignState?.analysis;
+      const host = document.getElementById('tenantFloorDesignAnalysisResult');
+      const summary = document.getElementById('tenantFloorDesignAnalysisSummaryText');
+      const status = document.getElementById('tenantFloorDesignAnalysisApprovalStatus');
+      const sections = document.getElementById('tenantFloorDesignAnalysisSections');
+      if (!host || !summary || !status || !sections) return;
+      host.hidden = !result;
+      if (!result) return;
+      summary.textContent = result.summary || 'اكتمل التحليل ويحتاج إلى مراجعتك.';
+      status.textContent = tenantFloorDesignState.analysisApproved ? 'تم اعتماد التحليل.' : 'لم يعتمد التحليل بعد.';
+      const entries = [
+        ['القيود الإلزامية', result.hard_constraints],
+        ['مدخلات المشروع', result.project_inputs],
+        ['ملاحظات مجموعات الأدوار', result.group_notes],
+        ['التحذيرات', result.warnings],
+        ['الافتراضات', result.assumptions]
+      ].filter(([, values]) => Array.isArray(values) && values.length);
+      sections.innerHTML = entries.map(([label, values]) => `<div class="tenant-floor-design-analysis-section"><strong>${escapeHtml(label)}</strong><ul>${values.map(value => `<li>${escapeHtml(typeof value === 'string' ? value : JSON.stringify(value))}</li>`).join('')}</ul></div>`).join('');
+    }
+
+    function approveTenantFloorDesignAnalysis() {
+      if (!tenantFloorDesignState?.analysis) return;
+      tenantFloorDesignState.analysisApproved = true;
+      markTenantFloorDesignDirty();
+      renderTenantFloorDesignAnalysisResult();
+      toast('تم اعتماد تحليل بيانات التصميم.');
+    }
+
+    async function renderTenantFloorDesignAnalysisReadiness() {
       const list = document.getElementById('tenantFloorDesignAnalysisMissingList');
       const summary = document.getElementById('tenantFloorDesignAnalysisSummary');
       const button = document.getElementById('tenantFloorDesignStartAnalysisButton');
@@ -8524,17 +8603,33 @@
       if (!readiness.basement.valid && readiness.basement.required) missing.push('مساحة البدروم');
       if (!tenantFloorDesignState?.groups?.length) missing.push('تنظيم مجموعات الأدوار');
       if (!missing.length) {
-        summary.textContent = 'كل البيانات المطلوبة مكتملة، وسيتم تفعيل التحليل في مرحلة لاحقة.';
+        summary.textContent = tenantFloorDesignState?.analysis ? 'تم تجهيز التحليل للمراجعة.' : 'كل البيانات المطلوبة مكتملة ويمكن بدء التحليل.';
         list.innerHTML = '<div class="tenant-floor-design-readiness-row"><strong>حالة البيانات</strong><span class="complete">مكتملة</span></div>';
       } else {
         summary.textContent = 'استكمل البيانات التالية قبل بدء تحليل AI:';
         list.innerHTML = missing.map(item => `<div class="tenant-floor-design-readiness-row"><strong>${escapeHtml(item)}</strong><span class="missing">ناقص</span></div>`).join('');
       }
-      button.disabled = true;
+      button.disabled = missing.length > 0;
+      button.textContent = tenantFloorDesignState?.analysis ? 'إعادة تحليل البيانات' : 'بدء تحليل البيانات';
+      renderTenantFloorDesignAnalysisResult();
     }
 
-    function startTenantFloorAnalysis() {
-      toast('سيتم تفعيل تحليل البيانات بعد ربط AI بهذه المرحلة.');
+    async function startTenantFloorAnalysis() {
+      const button = document.getElementById('tenantFloorDesignStartAnalysisButton');
+      if (button) { button.disabled = true; button.textContent = 'جاري تحليل البيانات...'; }
+      try {
+        const response = await api('POST', '/api/floor-design/analyze', await collectTenantFloorDesignAiPayload());
+        if (!response?.success || !response.analysis) throw new Error(response?.error || 'تعذر تحليل البيانات');
+        if (!tenantFloorDesignState) return;
+        tenantFloorDesignState.analysis = response.analysis;
+        tenantFloorDesignState.analysisApproved = false;
+        markTenantFloorDesignDirty();
+        renderTenantFloorDesignAnalysisReadiness();
+        toast('اكتمل تحليل بيانات التصميم. راجعه ثم اعتمده.');
+      } catch (error) {
+        toast(error?.message || 'تعذر تحليل بيانات التصميم');
+        renderTenantFloorDesignAnalysisReadiness();
+      }
     }
 
     function renderTenantFloorDesignOrganizationGroups() {
@@ -8742,6 +8837,11 @@
     async function generateTenantFloorDesignImage() {
       const group = tenantFloorDesignActiveGroup();
       if (!group || group.unassigned) return false;
+      if (!tenantFloorDesignState?.analysisApproved) {
+        toast('اعتمد تحليل البيانات قبل توليد المخطط.');
+        showTenantFloorDesignStage('analysis');
+        return false;
+      }
       const approvedInputs = await requireTenantApprovedBuildInputs();
       if (!approvedInputs) return false;
       group.status = 'generating';

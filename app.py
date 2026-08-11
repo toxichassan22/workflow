@@ -180,14 +180,14 @@ OPENROUTER_KEY = (os.environ.get("OPENROUTER_KEY") or "").strip() or None
 GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip() or None
 ZAI_BASE = 'https://api.z.ai/api/paas/v4'
 OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
-GLM_MODEL = "glm-5.2"
-GLM_OPENROUTER_MODEL = "z-ai/glm-5.2"
-GLM_USE_OPENROUTER = os.environ.get("GLM_USE_OPENROUTER", "false").lower() in ("1", "true", "yes")
-# Prefer ZAI when its key is loaded; require explicit FORCE_OPENROUTER=1 to keep OpenRouter.
-if ZAI_KEY and OPENROUTER_KEY and GLM_USE_OPENROUTER and os.environ.get("FORCE_OPENROUTER", "false").lower() not in ("1", "true", "yes"):
-    GLM_USE_OPENROUTER = False
-    print("[CONFIG] Both keys found; preferring ZAI for GLM calls. Set FORCE_OPENROUTER=1 to override.")
+LUNA_TEXT_MODEL = "openai/gpt-5.6-luna-pro"
+GLM_MODEL = LUNA_TEXT_MODEL
+GLM_OPENROUTER_MODEL = LUNA_TEXT_MODEL
+GLM_USE_OPENROUTER = True
+print(f"[CONFIG] Primary text/design model: {LUNA_TEXT_MODEL}")
 IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
+FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"
+FLOOR_DESIGN_TEXT_MODEL = LUNA_TEXT_MODEL
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 DEPLOYMENT_MARKER_PATH = os.path.join(os.path.dirname(__file__), '.deployed_commit')
@@ -215,7 +215,7 @@ def _has_chat_choices(response):
     )
 
 
-def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300):
+def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None):
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
@@ -231,9 +231,12 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ],
-        "temperature": temperature,
         "max_tokens": max_tokens
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
         text = response.text or ''
@@ -266,69 +269,18 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
 
 def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
                   reasoning_effort=None):
-    """Call GLM (ZAI API) with automatic fallback to OpenRouter when ZAI fails or runs out of balance."""
-    deadline = time.monotonic() + max(1.0, float(timeout))
-
-    def remaining_timeout():
-        return max(1, min(float(timeout), deadline - time.monotonic()))
-
-    if not GLM_USE_OPENROUTER and ZAI_KEY:
-        try:
-            headers = {
-                "Authorization": f"Bearer {ZAI_KEY}",
-                "Content-Type": "application/json"
-            }
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ]
-            payload = {
-                "model": GLM_MODEL,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "thinking": {"type": "enabled" if reasoning_effort else "disabled"}
-            }
-            if reasoning_effort:
-                payload["reasoning_effort"] = reasoning_effort
-            response = requests.post(f"{ZAI_BASE}/chat/completions", headers=headers, json=payload, timeout=remaining_timeout())
-            text = response.text or ''
-            if not text.strip():
-                print(f"[ZAI EMPTY BODY] status={response.status_code} model={GLM_MODEL} cap={max_tokens}")
-                return {"error": {"message": f"زدثري (ZAI) رد بجسم فارغ (HTTP {response.status_code})"}}
-            try:
-                data = response.json()
-            except Exception as json_err:
-                print(f"[ZAI UNPARSEABLE] status={response.status_code} model={GLM_MODEL} json_err={json_err} body={text[:200]!r}")
-                return {"error": {"message": "استجابة ZAI ليست JSON صالحًا"}}
-            if response.status_code >= 400:
-                error_data = data.get('error', {}) if isinstance(data, dict) else data
-                print(f"[ZAI HTTP ERROR] status={response.status_code} model={GLM_MODEL} error={error_data}")
-                if isinstance(error_data, dict) and 'message' in error_data:
-                    error_data['message'] = f"[{response.status_code}] {error_data['message']}"
-                    return {"error": error_data}
-                return {"error": error_data if isinstance(error_data, dict) else {"message": f"[{response.status_code}] {error_data}"}}
-            if _has_chat_choices(data):
-                return data
-            error_data = data.get('error', {}) if isinstance(data, dict) else data
-            print(f"[ZAI QUOTA/BALANCE ERROR] {json.dumps(error_data, ensure_ascii=False)}. Falling back to OpenRouter...")
-        except requests.exceptions.Timeout:
-            print(f"[ZAI TIMEOUT] model={GLM_MODEL} cap={max_tokens}")
-        except requests.exceptions.ConnectionError as exc:
-            print(f"[ZAI CONNECTION] model={GLM_MODEL} {exc}")
-        except Exception as exc:
-            print(f"[ZAI EXCEPTION] {exc}. Falling back to OpenRouter...")
-
-    if OPENROUTER_KEY:
-        res = call_openrouter_chat(system_prompt, user_content, temperature, max_tokens, timeout=remaining_timeout())
-        if _has_chat_choices(res):
-            return res
-        # Fallback to alternate OpenRouter model if specific model fails
-        error_data = res.get('error', {}) if isinstance(res, dict) else res
-        print(f"[OPENROUTER PRIMARY ERROR] {json.dumps(error_data, ensure_ascii=False)}. Trying fallback model...")
-        return call_openrouter_chat(system_prompt, user_content, temperature, max_tokens, model="google/gemini-2.5-flash", timeout=remaining_timeout())
-
-    return {"error": {"message": "ZAI API has insufficient balance and OPENROUTER_KEY is not available."}}
+    """Compatibility wrapper: all text/design work now uses Luna through OpenRouter."""
+    if not OPENROUTER_KEY:
+        return {"error": {"message": "OPENROUTER_KEY is required for the Luna text model"}}
+    return call_openrouter_chat(
+        system_prompt,
+        user_content,
+        temperature=None,
+        max_tokens=max_tokens,
+        model=LUNA_TEXT_MODEL,
+        timeout=timeout,
+        reasoning_effort=reasoning_effort,
+    )
 
 
 def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300):
@@ -578,6 +530,66 @@ def persist_generated_image(image, tenant_id):
         with open(path, 'wb') as image_file:
             image_file.write(raw)
     return f'/uploads/creative/{safe_tenant}/{filename}'
+
+
+def call_openrouter_image_generation(prompt, model, reference=None):
+    """Generate one image through OpenRouter's dedicated Image API."""
+    if not OPENROUTER_KEY:
+        return None, 'NO_API_KEY'
+    payload = {
+        'model': model,
+        'prompt': prompt,
+        'aspect_ratio': '16:9',
+        'n': 1,
+    }
+    if model == 'openai/gpt-image-2':
+        payload['quality'] = 'high'
+    else:
+        payload['resolution'] = '2K'
+    if reference:
+        reference_for_model = _prepare_image_reference_for_model(reference)
+        if not reference_for_model:
+            return None, 'REFERENCE_INVALID'
+        payload['input_references'] = [{
+            'type': 'image_url',
+            'image_url': {'url': reference_for_model}
+        }]
+    headers = {
+        'Authorization': f'Bearer {OPENROUTER_KEY}',
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/toxichassan22/workflow',
+        'X-Title': 'Manafe Floor Design'
+    }
+    try:
+        response = requests.post(f'{OPENROUTER_BASE}/images', headers=headers, json=payload, timeout=300)
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        if response.status_code == 401:
+            return None, 'PROVIDER_AUTH_FAILED'
+        if response.status_code == 402:
+            return None, 'INSUFFICIENT_CREDITS'
+        if response.status_code == 429:
+            return None, 'RATE_LIMITED'
+        if response.status_code >= 400 or data.get('error'):
+            print(f'[FLOOR IMAGE ERROR] model={model} status={response.status_code}')
+            return None, 'IMAGE_PROVIDER_FAILED'
+        item = (data.get('data') or [{}])[0]
+        encoded = item.get('b64_json') if isinstance(item, dict) else None
+        if encoded:
+            return f'data:image/png;base64,{encoded}', None
+        image_url = item.get('url') if isinstance(item, dict) else None
+        if image_url:
+            image_response = requests.get(image_url, timeout=120)
+            image_response.raise_for_status()
+            mime = image_response.headers.get('Content-Type', 'image/png').split(';', 1)[0]
+            return f'data:{mime};base64,{base64.b64encode(image_response.content).decode("ascii")}', None
+        return None, 'IMAGE_PROVIDER_EMPTY'
+    except requests.exceptions.Timeout:
+        return None, 'IMAGE_PROVIDER_TIMEOUT'
+    except requests.exceptions.RequestException:
+        return None, 'IMAGE_PROVIDER_FAILED'
 
 
 def normalize_presentation_assets(value, tenant_id):
@@ -1240,6 +1252,206 @@ def api_generate_image_single():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+FLOOR_DESIGN_LAND_KEYS = (
+    'croquis_land_area', 'approved_financial_area', 'approved_floor_count', 'max_floors_height',
+    'building_ratio_setbacks', 'allowed_uses_restrictions', 'land_and_building_summary',
+    'boundary_lengths', 'surrounding_streets', 'facades_count', 'facades_directions',
+    'land_documents_files_file_meta', 'directions_table', 'survey_coordinates',
+)
+FLOOR_DESIGN_PROJECT_KEYS = (
+    'project_name', 'project_type', 'project_idea', 'project_goal', 'target_audience',
+    'project_stage', 'location_address', 'location_detail', 'location_lat', 'location_lng',
+)
+FLOOR_DESIGN_FINANCIAL_KEYS = (
+    'builtUpAreaAbove', 'basementArea', 'floorCount', 'totalBuiltUpArea', 'coverageRate',
+    'landArea', 'project_components_data', 'financial_calc_data', 'financial_study_model',
+)
+
+
+def _floor_design_parse_json(value, fallback=None):
+    if isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return fallback
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _floor_design_text(value, limit=5000):
+    if value is None:
+        return ''
+    return str(value).strip()[:limit]
+
+
+def _floor_design_read(source, key, *aliases):
+    for candidate in (key, *aliases):
+        value = source.get(candidate) if isinstance(source, dict) else None
+        if value not in (None, '', [], {}):
+            return value
+    return ''
+
+
+def _floor_design_components(source):
+    raw = _floor_design_parse_json(source.get('project_components_data'))
+    if not isinstance(raw, list):
+        financial_model = _floor_design_parse_json(source.get('financial_study_model'), {}) or {}
+        dynamic = financial_model.get('dynamicRows') if isinstance(financial_model, dict) else {}
+        raw = dynamic.get('components') if isinstance(dynamic, dict) else None
+    if not isinstance(raw, list):
+        financial_data = _floor_design_parse_json(source.get('financial_calc_data'), {}) or {}
+        raw = financial_data.get('components') if isinstance(financial_data, dict) else None
+    if not isinstance(raw, list):
+        return []
+    keys = ('id', 'name', 'useType', 'units', 'unitArea', 'builtArea', 'revenueArea', 'totalArea', 'investmentModel')
+    return [{key: item.get(key) for key in keys if item.get(key) not in (None, '')}
+            for item in raw[:100] if isinstance(item, dict)]
+
+
+def _floor_design_groups(raw_state):
+    state = _floor_design_parse_json(raw_state, {}) or {}
+    groups = state.get('groups') if isinstance(state, dict) else []
+    if not isinstance(groups, list):
+        return []
+    output = []
+    for group in groups[:200]:
+        if not isinstance(group, dict):
+            continue
+        floors = sorted({int(number) for number in (group.get('floorNumbers') or [])
+                         if isinstance(number, (int, float)) and int(number) == number and 0 <= int(number) <= 500})
+        if not floors:
+            continue
+        output.append({
+            'id': _floor_design_text(group.get('id'), 120),
+            'name': _floor_design_text(group.get('name'), 160),
+            'floorNumbers': floors,
+            'description': _floor_design_text(group.get('prompt'), 12000),
+            'components': group.get('components') if isinstance(group.get('components'), list) else [],
+        })
+    return output
+
+
+def _sanitize_floor_design_request(data):
+    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+    state = data.get('floorDesignState') if isinstance(data.get('floorDesignState'), dict) else project_data.get('floor_visual_design', {})
+    project = {key: _floor_design_text(_floor_design_read(project_data, key), 4000)
+               for key in FLOOR_DESIGN_PROJECT_KEYS}
+    land = {key: _floor_design_text(_floor_design_read(project_data, key), 12000)
+            for key in FLOOR_DESIGN_LAND_KEYS}
+    for key in ('directions_table', 'survey_coordinates', 'land_documents_files_file_meta'):
+        parsed = _floor_design_parse_json(_floor_design_read(project_data, key), None)
+        if parsed is not None:
+            land[key] = parsed
+    financial = {
+        'approved_financial_area': _floor_design_read(project_data, 'approved_financial_area'),
+        'approved_floor_count': _floor_design_read(project_data, 'approved_floor_count'),
+        'builtUpAreaAbove': _floor_design_read(project_data, 'builtUpAreaAbove', 'built_up_area_above'),
+        'basementArea': _floor_design_read(project_data, 'basementArea', 'basement_area'),
+        'floorCount': _floor_design_read(project_data, 'floorCount', 'floor_count'),
+        'components': _floor_design_components(project_data),
+    }
+    return {
+        'project': project,
+        'land': land,
+        'financial': financial,
+        'groups': _floor_design_groups(state),
+    }
+
+
+def _floor_design_missing_requirements(payload):
+    project = payload['project']
+    land = payload['land']
+    financial = payload['financial']
+    missing = []
+    try:
+        if float(financial['approved_financial_area']) <= 0:
+            missing.append('approved_financial_area')
+    except (TypeError, ValueError):
+        missing.append('approved_financial_area')
+    try:
+        if int(financial['approved_floor_count']) <= 0 or int(financial['approved_floor_count']) != float(financial['approved_floor_count']):
+            missing.append('approved_floor_count')
+    except (TypeError, ValueError):
+        missing.append('approved_floor_count')
+    for key in ('building_ratio_setbacks', 'allowed_uses_restrictions', 'land_and_building_summary'):
+        if not land.get(key):
+            missing.append(key)
+    if not financial['components']:
+        missing.append('project_components_data')
+    if not payload['groups']:
+        missing.append('floor_groups')
+    return missing
+
+
+def _floor_design_json_prompt(payload):
+    return json.dumps(payload, ensure_ascii=False, separators=(',', ':'))[:90000]
+
+
+@app.route('/api/floor-design/analyze', methods=['POST'])
+@require_auth
+def api_analyze_floor_design_data():
+    data = request.get_json(silent=True) or {}
+    payload = _sanitize_floor_design_request(data)
+    missing = _floor_design_missing_requirements(payload)
+    if missing:
+        return jsonify({'success': False, 'error': 'بيانات تصميم الطوابق غير مكتملة', 'error_code': 'FLOOR_DESIGN_DATA_INCOMPLETE', 'missingFields': missing}), 400
+    system_prompt = (
+        'أنت Luna، مستشار معماري وتحليل بيانات عقارية دقيق. أخرج JSON فقط. '
+        'حلل البيانات المعطاة فقط، ولا تخترع قياسات أو اشتراطات. '
+        'فرّق بين القيود النظامية الصارمة وتعليمات العميل والافتراضات. '
+        'لا تغيّر عدد الأدوار أو توزيع المجموعات أو مكونات المشروع.'
+    )
+    user_prompt = (
+        'حلل مدخلات مشروع لإنشاء مخططات 2D مفاهيمية. ركز على ما سيؤثر في الرسم: '
+        'حدود الأرض والاتجاهات والواجهات والارتدادات والمواقف والمداخل والمخارج، '
+        'المساحة والأدوار والبدروم والمكونات والمساحات، ومجموعات الأدوار. '
+        'أعد الشكل التالي فقط: {"summary":"","hard_constraints":[],"project_inputs":[],"group_notes":[],"warnings":[],"assumptions":[]}.\n\n'
+        + _floor_design_json_prompt(payload)
+    )
+    try:
+        response = call_openrouter_chat(system_prompt, user_prompt, temperature=None, max_tokens=8000, model=LUNA_TEXT_MODEL, reasoning_effort='high')
+        analysis = _designer_json_response(extract_chat_content(response, 'FLOOR-DESIGN-ANALYSIS'))
+        if not analysis:
+            return jsonify({'success': False, 'error': 'تعذر قراءة تحليل Luna', 'error_code': 'TEXT_PROVIDER_INVALID'}), 503
+        return jsonify({'success': True, 'analysis': analysis, 'model': LUNA_TEXT_MODEL})
+    except Exception:
+        app.logger.exception('Floor design analysis failed')
+        return jsonify({'success': False, 'error': 'تعذر تحليل بيانات تصميم الطوابق', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
+
+
+@app.route('/api/floor-design/prompt', methods=['POST'])
+@require_auth
+def api_generate_floor_design_prompt():
+    data = request.get_json(silent=True) or {}
+    payload = _sanitize_floor_design_request(data)
+    missing = _floor_design_missing_requirements(payload)
+    if missing:
+        return jsonify({'success': False, 'error': 'بيانات تصميم الطوابق غير مكتملة', 'error_code': 'FLOOR_DESIGN_DATA_INCOMPLETE', 'missingFields': missing}), 400
+    analysis = data.get('analysis') if isinstance(data.get('analysis'), dict) else {}
+    group_id = _floor_design_text(data.get('groupId'), 120)
+    group = next((item for item in payload['groups'] if item['id'] == group_id), None)
+    if not group:
+        return jsonify({'success': False, 'error': 'مجموعة الأدوار غير موجودة', 'error_code': 'GROUP_NOT_FOUND'}), 404
+    system_prompt = (
+        'أنت Luna، كاتب Prompts معماري صارم. أخرج JSON فقط بالشكل '
+        '{"prompt":"","negative_prompt":""}. استخدم القيود النظامية والبيانات فقط. '
+        'اكتب Prompt واضحًا لمخطط 2D علوي، بدون أثاث أو منظور أو زخرفة، مع حدود الوحدات والـ Core والمداخل والممرات. '
+        'لا تغيّر عدد الأدوار أو مكونات المجموعة. إذا تعارضت تعليمات العميل مع قيد نظامي، حافظ على القيد وسجّل التعارض داخل prompt.'
+    )
+    user_prompt = 'بيانات التحليل المعتمد:\n' + _floor_design_json_prompt(analysis) + '\n\nبيانات المشروع والمجموعة:\n' + _floor_design_json_prompt({'payload': payload, 'group': group})
+    try:
+        response = call_openrouter_chat(system_prompt, user_prompt, temperature=None, max_tokens=5000, model=LUNA_TEXT_MODEL, reasoning_effort='high')
+        result = _designer_json_response(extract_chat_content(response, 'FLOOR-DESIGN-PROMPT'))
+        prompt = _floor_design_text(result.get('prompt'), 12000)
+        if not prompt:
+            return jsonify({'success': False, 'error': 'تعذر إنشاء Prompt للمجموعة', 'error_code': 'PROMPT_PROVIDER_INVALID'}), 503
+        return jsonify({'success': True, 'prompt': prompt, 'negativePrompt': _floor_design_text(result.get('negative_prompt'), 6000), 'model': LUNA_TEXT_MODEL})
+    except Exception:
+        app.logger.exception('Floor design prompt failed')
+        return jsonify({'success': False, 'error': 'تعذر إنشاء Prompt للمجموعة', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
+
+
 @app.route('/api/floor-design/generate', methods=['POST'])
 @require_auth
 def api_generate_floor_design_image():
@@ -1270,12 +1482,16 @@ def api_generate_floor_design_image():
         if not (reference.startswith('data:image/') or reference.startswith('/uploads/creative/')):
             return jsonify({'success': False, 'error': 'نوع الصورة المرجعية غير مسموح', 'error_code': 'REFERENCE_INVALID'}), 400
     try:
-        image = call_image_api_with_reference(reference, prompt) if reference else call_image_api(prompt)
+        image, image_error = call_openrouter_image_generation(prompt, FLOOR_DESIGN_IMAGE_MODEL, reference)
         if not image:
-            if not OPENROUTER_KEY:
-                return jsonify({'success': False, 'error': 'مفتاح توليد الصور غير مُعدّ', 'error_code': 'NO_API_KEY'}), 503
-            return jsonify({'success': False, 'error': 'تعذر توليد صورة التصميم', 'error_code': 'IMAGE_FAILED'}), 503
-        return jsonify({'success': True, 'image': persist_generated_image(image, g.tenant_id)})
+            messages = {
+                'NO_API_KEY': 'مفتاح توليد الصور غير مُعدّ',
+                'INSUFFICIENT_CREDITS': 'رصيد توليد الصور غير كافٍ',
+                'RATE_LIMITED': 'تم تجاوز حد طلبات توليد الصور، أعد المحاولة لاحقًا',
+                'IMAGE_PROVIDER_TIMEOUT': 'استغرق توليد الصورة وقتًا أطول من المتوقع',
+            }
+            return jsonify({'success': False, 'error': messages.get(image_error, 'تعذر توليد صورة التصميم'), 'error_code': image_error or 'IMAGE_FAILED'}), 503
+        return jsonify({'success': True, 'image': persist_generated_image(image, g.tenant_id), 'model': FLOOR_DESIGN_IMAGE_MODEL})
     except Exception:
         app.logger.exception('Floor design image generation failed')
         return jsonify({'success': False, 'error': 'حدث خطأ أثناء توليد صورة التصميم', 'error_code': 'IMAGE_FAILED'}), 503
@@ -3615,8 +3831,9 @@ def api_site_analysis():
             fallback = call_openrouter_chat(
                 system_prompt,
                 prompt,
+                temperature=None,
                 max_tokens=SITE_ANALYSIS_MAX_TOKENS,
-                model='google/gemini-2.5-flash'
+                model=LUNA_TEXT_MODEL
             )
             analysis = extract_chat_content(fallback, 'SITE-ANALYSIS-FALLBACK').strip()
         warnings = [value for value in (
@@ -5618,8 +5835,8 @@ PDF_VISION_MAX_TOTAL_BYTES = int(os.environ.get('PDF_VISION_MAX_TOTAL_BYTES', st
 LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '16000'))
 LAND_ANALYSIS_MIN_TOKENS = int(os.environ.get('LAND_ANALYSIS_MIN_TOKENS', '6000'))
 LAND_ANALYSIS_TRUNCATION_CEILING = int(os.environ.get('LAND_ANALYSIS_TRUNCATION_CEILING', '20000'))
-# Vision-capable model on OpenRouter. Default chosen for vision support; override via env.
-LAND_ANALYSIS_MODEL = os.environ.get('LAND_ANALYSIS_MODEL', 'google/gemini-3.6-flash')
+# Luna accepts text and image inputs and is the primary model for all text/analysis workflows.
+LAND_ANALYSIS_MODEL = LUNA_TEXT_MODEL
 
 _AFFORDABLE_TOKENS_RE = re.compile(r'can only afford\s+(\d+)')
 _TRANSIENT_PROVIDER_RE = re.compile(r'\(HTTP 5\d\d\)')
@@ -5647,7 +5864,7 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens):
     message = ''
     res = None
     for attempt in range(3):
-        res = call_openrouter_chat(system_prompt, user_content, temperature=0.1,
+        res = call_openrouter_chat(system_prompt, user_content, temperature=None,
                                    max_tokens=cap, model=LAND_ANALYSIS_MODEL)
         if _has_chat_choices(res):
             choices = res.get('choices') or []
@@ -7364,7 +7581,7 @@ def api_upload_training_image():
             analysis_text = 'The image was stored, but automatic analysis is unavailable because the AI key is not configured.'
         else:
             vision_payload = {
-                "model": "google/gemini-3.1-flash-image-preview",
+                "model": LUNA_TEXT_MODEL,
                 "messages": [{
                     "role": "user",
                     "content": [

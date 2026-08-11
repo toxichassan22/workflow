@@ -1657,7 +1657,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()['analysis'], 'تحليل من النموذج الاحتياطي')
-        self.assertEqual(fallback.call_args.kwargs['model'], 'google/gemini-2.5-flash')
+        self.assertEqual(fallback.call_args.kwargs['model'], 'openai/gpt-5.6-luna-pro')
 
     def test_project_draft_preserves_selected_landmark_details(self):
         client = self.app.test_client()
@@ -1859,6 +1859,46 @@ class MeetingRequirementsTests(unittest.TestCase):
         loaded = client.get('/api/project-draft', headers=self._headers(self.token_a))
         self.assertEqual(loaded.status_code, 200, loaded.get_json())
         self.assertEqual(loaded.get_json()['draft']['draft_data']['floor_visual_design']['groups'][0]['floorNumbers'], [1, 3, 5])
+
+    def test_floor_design_ai_endpoints_use_luna_and_validate_project_payload(self):
+        client = self.app.test_client()
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('LUNA_TEXT_MODEL = "openai/gpt-5.6-luna-pro"', source)
+        self.assertIn('FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"', source)
+        payload = {
+            'projectData': {
+                'project_name': 'اختبار مخطط 2D',
+                'project_type': 'سكني',
+                'project_idea': 'مشروع سكني',
+                'project_goal': 'تطوير وحدات سكنية',
+                'building_ratio_setbacks': 'ارتداد أمامي 6م وخلفي 3م',
+                'allowed_uses_restrictions': 'سكني؛ موقف لكل وحدة؛ مدخل سيارات مستقل',
+                'land_and_building_summary': 'ملخص موثق من ملفات الأمانة',
+                'approved_financial_area': 7000,
+                'approved_floor_count': 5,
+                'project_components_data': json.dumps([{'id': 'c1', 'name': 'وحدات سكنية', 'builtArea': 3000}], ensure_ascii=False),
+                'basementArea': 0,
+            },
+            'floorDesignState': {
+                'floorCount': 5,
+                'groups': [{'id': 'g1', 'name': 'الأدوار المتكررة', 'floorNumbers': [1, 2, 3, 4, 5], 'prompt': 'وحدات متكررة'}]
+            }
+        }
+        missing = client.post('/api/floor-design/analyze', headers=self._headers(self.token_a), json={'projectData': {}})
+        self.assertEqual(missing.status_code, 400, missing.get_json())
+        self.assertEqual(missing.get_json()['error_code'], 'FLOOR_DESIGN_DATA_INCOMPLETE')
+        fake_analysis = {'summary': 'تحليل تجريبي', 'hard_constraints': ['لا تغيّر الارتدادات'], 'project_inputs': [], 'group_notes': [], 'warnings': [], 'assumptions': []}
+        with patch.object(self.application_module, 'call_openrouter_chat', return_value={'choices': [{'message': {'content': json.dumps(fake_analysis, ensure_ascii=False)}}]}) as call:
+            analyzed = client.post('/api/floor-design/analyze', headers=self._headers(self.token_a), json=payload)
+        self.assertEqual(analyzed.status_code, 200, analyzed.get_json())
+        self.assertEqual(analyzed.get_json()['analysis']['summary'], 'تحليل تجريبي')
+        self.assertEqual(call.call_args.kwargs['model'], 'openai/gpt-5.6-luna-pro')
+        prompt_response = {'prompt': 'مخطط 2D صارم', 'negative_prompt': 'بدون أثاث'}
+        with patch.object(self.application_module, 'call_openrouter_chat', return_value={'choices': [{'message': {'content': json.dumps(prompt_response, ensure_ascii=False)}}]}) as call:
+            prompted = client.post('/api/floor-design/prompt', headers=self._headers(self.token_a), json={**payload, 'groupId': 'g1', 'analysis': fake_analysis})
+        self.assertEqual(prompted.status_code, 200, prompted.get_json())
+        self.assertEqual(prompted.get_json()['prompt'], 'مخطط 2D صارم')
+        self.assertEqual(call.call_args.kwargs['model'], 'openai/gpt-5.6-luna-pro')
 
     def test_floor_design_generation_requires_auth_and_valid_prompt(self):
         client = self.app.test_client()
