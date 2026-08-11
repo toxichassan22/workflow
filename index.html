@@ -3328,6 +3328,16 @@
     .tenant-floor-design-readiness-row .complete { color: #347658; }
     .tenant-floor-design-readiness-row .missing { color: #b96831; }
     .tenant-floor-design-readiness-row .not-needed { color: var(--muted); }
+    .tenant-floor-design-organization-groups { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .tenant-floor-design-organization-groups[hidden] { display: none !important; }
+    .tenant-floor-design-organization-groups-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .tenant-floor-design-organization-groups-head h4 { margin: 0; color: var(--p); font-size: 16px; }
+    .tenant-floor-design-organization-group-list { display: grid; gap: 7px; }
+    .tenant-floor-design-organization-group { display: grid; grid-template-columns: minmax(100px, .35fr) minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #f7fafc; }
+    .tenant-floor-design-organization-group strong { color: var(--p); font-size: 13px; }
+    .tenant-floor-design-organization-group p { margin: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .tenant-floor-design-organization-group button { padding: 6px 10px; }
+    .tenant-floor-design-organization-empty { padding: 12px; border: 1px dashed #b9cbd1; border-radius: 9px; color: var(--muted); font-size: 12px; text-align: center; }
 
     @media (max-width: 800px) {
       .tenant-floor-design-page { padding: 14px !important; }
@@ -3339,6 +3349,7 @@
     }
     @media (max-width: 520px) {
       .tenant-floor-design-stage-grid, .tenant-floor-design-source-grid { grid-template-columns: 1fr; }
+      .tenant-floor-design-organization-group { grid-template-columns: 1fr; gap: 6px; }
       .tenant-floor-design-setup-grid { grid-template-columns: 1fr; }
       .tenant-floor-design-field.full { grid-column: auto; }
       .tenant-floor-design-setup-card { padding: 20px; }
@@ -3932,6 +3943,10 @@
           <div><h4>قبل بدء التخصيص</h4><p>لا نكرر إدخال البيانات هنا. يتم قراءتها من قسم الأرض والكروكي والدراسة المالية.</p></div>
           <div id="tenantFloorDesignReadinessList" class="tenant-floor-design-readiness-list"></div>
         </div>
+        <div id="tenantFloorDesignOrganizationGroups" class="tenant-floor-design-organization-groups" hidden>
+          <div class="tenant-floor-design-organization-groups-head"><h4>المجموعات المحفوظة</h4><button type="button" class="btn ghost" onclick="openTenantFloorGroupModal('')">إضافة مجموعة جديدة</button></div>
+          <div id="tenantFloorDesignOrganizationGroupList" class="tenant-floor-design-organization-group-list"></div>
+        </div>
         <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" id="tenantFloorDesignStartButton" onclick="startTenantFloorOrganization()" disabled>بدء تخصيص الأدوار</button></div>
       </div>
 
@@ -3997,7 +4012,7 @@
       <div id="tenantFloorGroupModal" class="tenant-floor-design-modal" hidden>
         <div class="tenant-floor-design-modal-card" role="dialog" aria-modal="true" aria-labelledby="tenantFloorGroupModalTitle">
           <div class="tenant-floor-design-modal-head"><div><h3 id="tenantFloorGroupModalTitle">تنظيم تشابه الأدوار</h3><p>حدد الأدوار التي تمثل نفس النموذج البصري.</p></div><button type="button" class="btn ghost" onclick="closeTenantFloorGroupModal()">إغلاق</button></div>
-          <div class="tenant-floor-design-modal-body"><div class="tenant-floor-design-field"><label for="tenantFloorGroupName">اسم المجموعة</label><input id="tenantFloorGroupName" type="text" placeholder="مثال: الأدوار السكنية المتكررة"></div><div class="tenant-floor-design-field"><label>حدد الأدوار المتشابهة</label><div id="tenantFloorGroupGrid" class="tenant-floor-design-chip-grid"></div></div><div class="tenant-floor-design-modal-preview"><span>الصيغة التي ستظهر في الشريط</span><strong id="tenantFloorGroupRangePreview">لم تحدد أدوارًا بعد</strong></div><div class="tenant-floor-design-modal-footer"><button type="button" class="btn ghost" onclick="closeTenantFloorGroupModal()">إلغاء</button><button type="button" class="btn primary" onclick="saveTenantFloorGroup()">حفظ المجموعة</button></div></div>
+          <div class="tenant-floor-design-modal-body"><div class="tenant-floor-design-field"><label for="tenantFloorGroupName">اسم المجموعة</label><input id="tenantFloorGroupName" type="text" placeholder="مثال: الأدوار السكنية المتكررة"></div><div class="tenant-floor-design-field"><label for="tenantFloorGroupDescription">وصف الأدوار وتعليمات التصميم</label><textarea id="tenantFloorGroupDescription" rows="4" placeholder="اكتب ما يميز هذه الأدوار وما يجب أن يعرفه AI عند تصميمها."></textarea></div><div class="tenant-floor-design-field"><label>حدد الأدوار المتشابهة</label><div id="tenantFloorGroupGrid" class="tenant-floor-design-chip-grid"></div></div><div class="tenant-floor-design-modal-preview"><span>الصيغة التي ستظهر في الشريط</span><strong id="tenantFloorGroupRangePreview">لم تحدد أدوارًا بعد</strong></div><div class="tenant-floor-design-modal-footer"><button type="button" class="btn ghost" onclick="closeTenantFloorGroupModal()">إلغاء</button><button type="button" class="btn primary" onclick="saveTenantFloorGroup()">حفظ المجموعة</button></div></div>
         </div>
       </div>
       <div id="tenantFloorDesignDrawerBackdrop" class="tenant-floor-design-drawer-backdrop" hidden onclick="closeTenantFloorDesignDrawer()"></div>
@@ -8356,6 +8371,7 @@
       modal.dataset.editingGroupId = editingId || '';
       tenantFloorDesignDraftMembers = group ? [...group.floorNumbers] : [];
       document.getElementById('tenantFloorGroupName').value = group?.name || '';
+      document.getElementById('tenantFloorGroupDescription').value = group?.prompt || '';
       document.getElementById('tenantFloorGroupRangePreview').textContent = formatTenantFloorDesignNumbers(tenantFloorDesignDraftMembers) || 'لم تحدد أدوارًا بعد';
       renderTenantFloorGroupGrid();
       modal.hidden = false;
@@ -8370,8 +8386,10 @@
     function saveTenantFloorGroup() {
       if (!tenantFloorDesignState) return;
       const name = document.getElementById('tenantFloorGroupName').value.trim();
+      const description = document.getElementById('tenantFloorGroupDescription').value.trim();
       const editingId = document.getElementById('tenantFloorGroupModal').dataset.editingGroupId || '';
       if (!name) { toast('اكتب اسم المجموعة'); return; }
+      if (!description) { toast('اكتب وصف الأدوار وتعليمات التصميم'); return; }
       if (!tenantFloorDesignDraftMembers.length) { toast('حدد دورًا واحدًا على الأقل'); return; }
       const editing = tenantFloorDesignState.groups.find(group => group.id === editingId);
       tenantFloorDesignState.groups.forEach(group => {
@@ -8380,15 +8398,17 @@
       const nextId = editing?.id || `floor-group-${crypto.randomUUID()}`;
       if (editing) {
         editing.name = name;
+        editing.prompt = description;
         editing.floorNumbers = [...tenantFloorDesignDraftMembers];
         editing.status = 'pending';
       } else {
-        tenantFloorDesignState.groups.push({ id: nextId, name, floorNumbers: [...tenantFloorDesignDraftMembers], type: 'غير محدد', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: '', style: '', chat: [] });
+        tenantFloorDesignState.groups.push({ id: nextId, name, floorNumbers: [...tenantFloorDesignDraftMembers], type: 'غير محدد', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: description, style: '', chat: [] });
       }
       tenantFloorDesignState.groups = tenantFloorDesignState.groups.filter(group => group.floorNumbers.length);
       tenantFloorDesignActiveGroupId = nextId;
       markTenantFloorDesignDirty();
       closeTenantFloorGroupModal();
+      renderTenantFloorDesignReadiness();
       renderTenantFloorDesignActiveGroup();
     }
 
@@ -8441,6 +8461,20 @@
       return Number.isFinite(number) ? number : 0;
     }
 
+    function renderTenantFloorDesignOrganizationGroups() {
+      const panel = document.getElementById('tenantFloorDesignOrganizationGroups');
+      const host = document.getElementById('tenantFloorDesignOrganizationGroupList');
+      if (!panel || !host) return;
+      const groups = tenantFloorDesignState?.groups || [];
+      panel.hidden = !tenantFloorDesignState;
+      if (!groups.length) {
+        host.innerHTML = '<div class="tenant-floor-design-organization-empty">لم يتم حفظ أي مجموعة بعد. ابدأ بتخصيص الأدوار.</div>';
+        return;
+      }
+      host.innerHTML = groups.map(group => `<div class="tenant-floor-design-organization-group"><strong>${escapeHtml(formatTenantFloorDesignNumbers(group.floorNumbers))} — ${escapeHtml(group.name)}</strong><p>${escapeHtml(group.prompt || 'لا يوجد وصف بعد')}</p><button type="button" class="btn ghost" data-edit-floor-group="${escapeHtml(group.id)}">تعديل</button></div>`).join('');
+      host.querySelectorAll('[data-edit-floor-group]').forEach(button => button.addEventListener('click', () => openTenantFloorGroupModal(button.dataset.editFloorGroup)));
+    }
+
     function renderTenantFloorDesignReadiness() {
       const host = document.getElementById('tenantFloorDesignReadinessList');
       const button = document.getElementById('tenantFloorDesignStartButton');
@@ -8454,6 +8488,7 @@
       ];
       host.innerHTML = rows.map(([label, valid, detail]) => `<div class="tenant-floor-design-readiness-row"><strong>${escapeHtml(label)}</strong><span class="${valid ? (detail === 'غير مطلوب' ? 'not-needed' : 'complete') : 'missing'}">${escapeHtml(valid ? 'مكتمل — ' + detail : 'ناقص — ' + detail)}</span></div>`).join('');
       button.disabled = !rows.every(([, valid]) => valid);
+      renderTenantFloorDesignOrganizationGroups();
     }
 
     function startTenantFloorOrganization() {
@@ -8464,6 +8499,7 @@
       }
       tenantFloorDesignState = { version: 1, floorCount: readiness.approvedFloors.value, firstFloor: 1, groups: [] };
       tenantFloorDesignActiveGroupId = 'unassigned';
+      renderTenantFloorDesignReadiness();
       openTenantFloorGroupModal('');
     }
 
