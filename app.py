@@ -1471,6 +1471,58 @@ def _sanitize_floor_design_analysis_patch(raw_patch):
     return patch
 
 
+def _sanitize_floor_design_group_patch(raw_patch):
+    raw_operations = raw_patch.get('operations') if isinstance(raw_patch, dict) else raw_patch
+    if not isinstance(raw_operations, list):
+        return {'operations': [], 'requires_confirmation': False}
+    operations = []
+    requires_confirmation = bool(raw_patch.get('requires_confirmation')) if isinstance(raw_patch, dict) else False
+    for raw in raw_operations[:50]:
+        if not isinstance(raw, dict):
+            continue
+        operation = _floor_design_text(raw.get('op') or raw.get('operation'), 40).lower()
+        if operation == 'create':
+            group = raw.get('group') if isinstance(raw.get('group'), dict) else raw
+            floor_numbers = sorted({int(number) for number in (group.get('floorNumbers') or group.get('floor_numbers') or [])
+                                    if isinstance(number, (int, float)) and int(number) == number and 0 <= int(number) <= 500})
+            if not floor_numbers:
+                continue
+            operations.append({
+                'op': 'create',
+                'group': {
+                    'id': _floor_design_text(group.get('id'), 120),
+                    'name': _floor_design_text(group.get('name'), 160) or 'مجموعة جديدة',
+                    'floorNumbers': floor_numbers,
+                    'type': _floor_design_text(group.get('type'), 80) or 'غير محدد',
+                    'prompt': _floor_design_text(group.get('prompt') or group.get('description'), 12000),
+                }
+            })
+        elif operation in ('assign', 'unassign'):
+            floor_numbers = sorted({int(number) for number in (raw.get('floorNumbers') or raw.get('floor_numbers') or [])
+                                    if isinstance(number, (int, float)) and int(number) == number and 0 <= int(number) <= 500})
+            group_id = _floor_design_text(raw.get('groupId') or raw.get('group_id'), 120)
+            if group_id and floor_numbers:
+                operations.append({'op': operation, 'groupId': group_id, 'floorNumbers': floor_numbers})
+        elif operation in ('rename', 'describe'):
+            group_id = _floor_design_text(raw.get('groupId') or raw.get('group_id'), 120)
+            if not group_id:
+                continue
+            operation_data = {'op': operation, 'groupId': group_id}
+            if operation == 'rename':
+                operation_data['name'] = _floor_design_text(raw.get('name'), 160)
+            else:
+                operation_data['prompt'] = _floor_design_text(raw.get('prompt') or raw.get('description'), 12000)
+            operations.append(operation_data)
+        elif operation in ('remove', 'delete'):
+            if raw.get('confirmed') is True:
+                group_id = _floor_design_text(raw.get('groupId') or raw.get('group_id'), 120)
+                if group_id:
+                    operations.append({'op': 'remove', 'groupId': group_id, 'confirmed': True})
+            else:
+                requires_confirmation = True
+    return {'operations': operations, 'requires_confirmation': requires_confirmation}
+
+
 @app.route('/api/floor-design/analysis-chat', methods=['POST'])
 @require_auth
 def api_floor_design_analysis_chat():
@@ -1482,17 +1534,33 @@ def api_floor_design_analysis_chat():
     if not analysis:
         return jsonify({'success': False, 'error': 'لا يوجد تحليل حالي لمراجعته', 'error_code': 'ANALYSIS_NOT_FOUND'}), 400
     payload = _sanitize_floor_design_request(data)
+    floor_state = data.get('floorDesignState') if isinstance(data.get('floorDesignState'), dict) else {}
+    history = floor_state.get('analysisChat') if isinstance(floor_state.get('analysisChat'), list) else []
+    history = [
+        {'role': 'assistant' if item.get('role') == 'assistant' else 'user', 'text': _floor_design_text(item.get('text'), 6000)}
+        for item in history[-20:] if isinstance(item, dict) and item.get('text')
+    ]
+    selected_section = _floor_design_text(data.get('selectedAnalysisSection'), 80)
     system_prompt = (
-        'أنت مساعد مراجعة تحليل معماري. حلل طلب المستخدم على التحليل الحالي فقط وأخرج JSON فقط بالشكل '
-        '{"reply":"","analysis_patch":{"summary":"","hard_constraints":[],"project_inputs":[],"group_notes":[],"warnings":[],"assumptions":[]}}. '
-        'اكتب reply عربيًا مختصرًا يشرح ما فعلته. أعد داخل analysis_patch المفاتيح التي تغيرت فقط. '
-        'لا تغيّر عدد الأدوار أو توزيع المجموعات أو المكونات أو المساحة المالية أو أي قيد خارج مفاتيح التحليل المسموحة. '
-        'إذا كان الطلب سؤالًا أو لا يحتاج تغييرًا، أعد analysis_patch فارغًا. لا تخترع اشتراطًا غير موجود في التحليل أو بيانات المشروع.'
+        'أنت مساعد ذكي لمراجعة تحليل تصميم معماري وتنظيم مجموعات الأدوار. أعد JSON فقط بالشكل '
+        '{"reply":"","analysis_patch":{"summary":"","hard_constraints":[],"project_inputs":[],"group_notes":[],"warnings":[],"assumptions":[]},'
+        '"groups_patch":{"requires_confirmation":false,"operations":[]}}. '
+        'افهم السياق الكامل للمحادثة والحالة الحالية قبل الرد، ولا ترد بأنك نفذت شيئًا إلا إذا أرسلت العملية داخل patch. '
+        'يمكنك تعديل أقسام التحليل المسموحة، ويمكنك إنشاء أو إعادة تسمية أو وصف أو إسناد أو إلغاء إسناد مجموعات الأدوار. '
+        'عند طلب الأدوار غير المنظمة احسبها من الحالة الحالية، ولا تنشئ مجموعة فارغة. '
+        'عمليات المجموعات المسموحة هي create مع group، assign، unassign، rename، describe، وremove. '
+        'كل عملية assign أو unassign يجب أن تحتوي groupId وfloorNumbers. create يجب أن يحتوي name وfloorNumbers وprompt. '
+        'لا تكرر الدور في مجموعتين؛ عند إسناد دور أزله من المجموعة القديمة. لا تغير عدد الأدوار أو المكونات أو البيانات المالية. '
+        'لا تنفذ حذف مجموعة إلا بعد تأكيد صريح؛ عند غيابه أعد requires_confirmation=true واسأل المستخدم. '
+        'إذا كان الطلب غامضًا أعد patch فارغًا واسأل سؤالًا واضحًا بدل اختراع مجموعة أو أدوار.'
     )
     user_prompt = (
         'بيانات المشروع المختصرة:\n' + _floor_design_json_prompt(payload) +
         '\n\nالتحليل الحالي:\n' + _floor_design_json_prompt(analysis) +
-        '\n\nطلب المستخدم:\n' + message
+        '\n\nمجموعات الأدوار الحالية بما فيها الأدوار غير المنظمة:\n' + _floor_design_json_prompt(payload.get('groups', [])) +
+        '\n\nقسم التحليل المفتوح حاليًا:\n' + selected_section +
+        '\n\nذاكرة المحادثة الأخيرة:\n' + _floor_design_json_prompt(history) +
+        '\n\nطلب المستخدم الجديد:\n' + message
     )
     try:
         response = call_openrouter_chat(
@@ -1503,8 +1571,16 @@ def api_floor_design_analysis_chat():
         reply = _floor_design_text(result.get('reply'), 6000)
         if not reply:
             return jsonify({'success': False, 'error': 'تعذر قراءة رد مراجعة التحليل', 'error_code': 'ANALYSIS_CHAT_INVALID'}), 503
-        patch = _sanitize_floor_design_analysis_patch(result.get('analysis_patch') or result.get('analysisPatch'))
-        return jsonify({'success': True, 'reply': reply, 'analysisPatch': patch, 'model': LUNA_TEXT_MODEL})
+        analysis_patch = _sanitize_floor_design_analysis_patch(result.get('analysis_patch') or result.get('analysisPatch'))
+        groups_patch = _sanitize_floor_design_group_patch(result.get('groups_patch') or result.get('groupsPatch'))
+        return jsonify({
+            'success': True,
+            'reply': reply,
+            'analysisPatch': analysis_patch,
+            'groupsPatch': groups_patch,
+            'needsConfirmation': groups_patch.get('requires_confirmation', False),
+            'model': LUNA_TEXT_MODEL,
+        })
     except Exception:
         app.logger.exception('Floor design analysis chat failed')
         return jsonify({'success': False, 'error': 'تعذر مراجعة تحليل البيانات', 'error_code': 'ANALYSIS_CHAT_FAILED'}), 503

@@ -4038,7 +4038,7 @@
               <section class="tenant-floor-design-analysis-chat">
                 <div class="tenant-floor-design-analysis-chat-head"><div><h4>محادثة مراجعة التحليل</h4><p>الشات مرتبط بكل أقسام التحليل. أي تعديل يخص أكثر من قسم سيتم تطبيقه على الأقسام المتأثرة.</p></div></div>
                 <div id="tenantFloorDesignAnalysisChatThread" class="tenant-floor-design-analysis-chat-thread"></div>
-                <div class="tenant-floor-design-analysis-chat-composer"><textarea id="tenantFloorDesignAnalysisChatInput" rows="2" placeholder="اكتب طلب تعديل أو سؤالًا عن التحليل"></textarea><button type="button" class="btn primary small" id="tenantFloorDesignAnalysisChatSendButton" onclick="sendTenantFloorDesignAnalysisChat()">إرسال</button></div>
+                <div class="tenant-floor-design-analysis-chat-composer"><textarea id="tenantFloorDesignAnalysisChatInput" rows="2" placeholder="مثال: أنشئ مجموعة للأدوار غير المنظمة أو عدّل قيدًا في التحليل"></textarea><button type="button" class="btn primary small" id="tenantFloorDesignAnalysisChatSendButton" onclick="sendTenantFloorDesignAnalysisChat()">إرسال</button></div>
               </section>
             </section>
           </div>
@@ -8846,6 +8846,89 @@
       return changedKeys;
     }
 
+    function tenantFloorDesignAllFloorNumbers() {
+      if (!tenantFloorDesignState) return [];
+      return tenantFloorDesignNumbers();
+    }
+
+    function tenantFloorDesignRemoveFloorsFromGroups(floorNumbers, exceptId = '') {
+      const floors = new Set(floorNumbers || []);
+      (tenantFloorDesignState?.groups || []).forEach(group => {
+        if (group.id === exceptId) return;
+        group.floorNumbers = (group.floorNumbers || []).filter(number => !floors.has(Number(number)));
+      });
+      if (tenantFloorDesignState) tenantFloorDesignState.groups = tenantFloorDesignState.groups.filter(group => group.floorNumbers.length);
+    }
+
+    function applyTenantFloorDesignGroupsPatch(groupsPatch) {
+      const operations = Array.isArray(groupsPatch?.operations) ? groupsPatch.operations : [];
+      if (!tenantFloorDesignState || !operations.length) return false;
+      const validFloors = new Set(tenantFloorDesignAllFloorNumbers());
+      let changed = false;
+      operations.forEach(operation => {
+        if (!operation || typeof operation !== 'object') return;
+        const op = operation.op;
+        if (op === 'create') {
+          const raw = operation.group && typeof operation.group === 'object' ? operation.group : {};
+          const floorNumbers = [...new Set((raw.floorNumbers || []).map(Number).filter(number => Number.isInteger(number) && validFloors.has(number)))].sort((a, b) => a - b);
+          if (!floorNumbers.length) return;
+          const id = String(raw.id || `floor-group-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`);
+          if (tenantFloorDesignState.groups.some(group => group.id === id)) return;
+          tenantFloorDesignRemoveFloorsFromGroups(floorNumbers);
+          tenantFloorDesignState.groups.push({
+            id,
+            name: String(raw.name || 'مجموعة جديدة').trim().slice(0, 160),
+            floorNumbers,
+            type: String(raw.type || 'غير محدد').slice(0, 80),
+            status: 'pending',
+            imageUrl: '',
+            approvedImageUrl: '',
+            prompt: String(raw.prompt || raw.description || '').slice(0, 12000),
+            generatedPrompt: '',
+            negativePrompt: '',
+            style: '',
+            chat: []
+          });
+          tenantFloorDesignAnalysisSection = 'group_notes';
+          changed = true;
+        } else if (op === 'assign' || op === 'unassign') {
+          const group = tenantFloorDesignState.groups.find(item => item.id === String(operation.groupId || ''));
+          const floorNumbers = [...new Set((operation.floorNumbers || []).map(Number).filter(number => Number.isInteger(number) && validFloors.has(number)))].sort((a, b) => a - b);
+          if (!group || !floorNumbers.length) return;
+          if (op === 'assign') {
+            tenantFloorDesignRemoveFloorsFromGroups(floorNumbers, group.id);
+            group.floorNumbers = [...new Set([...(group.floorNumbers || []), ...floorNumbers])].sort((a, b) => a - b);
+          } else {
+            group.floorNumbers = (group.floorNumbers || []).filter(number => !floorNumbers.includes(Number(number)));
+            tenantFloorDesignState.groups = tenantFloorDesignState.groups.filter(item => item.floorNumbers.length);
+          }
+          tenantFloorDesignAnalysisSection = 'group_notes';
+          changed = true;
+        } else if (op === 'rename' || op === 'describe') {
+          const group = tenantFloorDesignState.groups.find(item => item.id === String(operation.groupId || ''));
+          if (!group) return;
+          if (op === 'rename' && operation.name) group.name = String(operation.name).trim().slice(0, 160);
+          if (op === 'describe' && operation.prompt !== undefined) group.prompt = String(operation.prompt).slice(0, 12000);
+          changed = true;
+        } else if (op === 'remove' && operation.confirmed === true) {
+          const group = tenantFloorDesignState.groups.find(item => item.id === String(operation.groupId || ''));
+          if (!group) return;
+          tenantFloorDesignState.groups = tenantFloorDesignState.groups.filter(item => item.id !== group.id);
+          changed = true;
+        }
+      });
+      if (changed) {
+        tenantFloorDesignState.analysisApprovedSections = tenantFloorDesignState.analysisApprovedSections || {};
+        tenantFloorDesignState.analysisApprovedSections.group_notes = false;
+        tenantFloorDesignState.analysisApproved = false;
+        markTenantFloorDesignDirty();
+        renderTenantFloorDesignReadiness();
+        renderTenantFloorDesignGroupList();
+        renderTenantFloorDesignOrganizationGroups();
+      }
+      return changed;
+    }
+
     function renderTenantFloorDesignAnalysisDetail(result) {
       const detail = document.getElementById('tenantFloorDesignAnalysisSectionDetail');
       if (!detail) return;
@@ -8917,10 +9000,11 @@
         if (!response?.success) throw new Error(response?.error || 'تعذر تعديل التحليل');
         if (response.reply) tenantFloorDesignState.analysisChat.push({ role: 'assistant', text: response.reply });
         const changedKeys = applyTenantFloorDesignAnalysisPatch(response.analysisPatch || response.analysis_patch);
-        if (!changedKeys.length) markTenantFloorDesignDirty();
+        const groupsChanged = applyTenantFloorDesignGroupsPatch(response.groupsPatch || response.groups_patch);
+        if (!changedKeys.length && !groupsChanged) markTenantFloorDesignDirty();
         if (changedKeys.length) tenantFloorDesignAnalysisSection = changedKeys[0];
         renderTenantFloorDesignAnalysisResult();
-        updateLoaderProgress(100, changedKeys.length ? 'تم تطبيق تعديلك ويحتاج التحليل إلى اعتماد جديد.' : 'تم استلام الرد، ولم يتغير أي بند في التحليل.');
+        updateLoaderProgress(100, changedKeys.length || groupsChanged ? 'تم تطبيق تعديلك ويحتاج التحليل إلى اعتماد جديد.' : 'تم استلام الرد، ولم يتغير أي بند في التحليل.');
       } catch (error) {
         tenantFloorDesignState.analysisChat.push({ role: 'assistant', text: error?.message || 'تعذر تعديل التحليل.' });
         renderTenantFloorDesignAnalysisChat();

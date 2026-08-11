@@ -2181,7 +2181,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(prompted.get_json()['prompt'], 'مخطط 2D صارم')
         self.assertEqual(call.call_args.kwargs['model'], 'openai/gpt-5.6-luna-pro')
 
-        chat_response = {'reply': 'تم تعديل التحذير.', 'analysis_patch': {'warnings': ['تحذير معدل']}}
+        chat_response = {
+            'reply': 'تم تعديل التحذير وإنشاء المجموعة.',
+            'analysis_patch': {'warnings': ['تحذير معدل']},
+            'groups_patch': {'operations': [{
+                'op': 'create',
+                'group': {'id': 'g2', 'name': 'مجموعة جديدة', 'floorNumbers': [1, 2], 'prompt': 'وصف المجموعة'}
+            }]}
+        }
         with patch.object(self.application_module, 'call_openrouter_chat', return_value={
             'choices': [{'message': {'content': json.dumps(chat_response, ensure_ascii=False)}}]
         }) as call:
@@ -2189,8 +2196,9 @@ class MeetingRequirementsTests(unittest.TestCase):
                 **payload, 'analysis': fake_analysis, 'message': 'عدّل التحذير'
             })
         self.assertEqual(chat.status_code, 200, chat.get_json())
-        self.assertEqual(chat.get_json()['reply'], 'تم تعديل التحذير.')
+        self.assertEqual(chat.get_json()['reply'], 'تم تعديل التحذير وإنشاء المجموعة.')
         self.assertEqual(chat.get_json()['analysisPatch']['warnings'], ['تحذير معدل'])
+        self.assertEqual(chat.get_json()['groupsPatch']['operations'][0]['op'], 'create')
         self.assertEqual(call.call_args.kwargs['model'], 'openai/gpt-5.6-luna-pro')
 
     def test_floor_design_generation_requires_auth_and_valid_prompt(self):
