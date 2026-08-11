@@ -285,6 +285,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(field['fieldLabel'], 'الأدوار المعتمدة')
         self.assertEqual(field['fieldType'], 'number')
         self.assertTrue(field['isRequired'])
+        land_fields = {item['fieldKey']: item for item in fields}
+        for key in ('building_ratio_setbacks', 'allowed_uses_restrictions', 'land_and_building_summary'):
+            self.assertTrue(land_fields[key]['isRequired'])
 
         result = self.application_module._normalize_land_document_result({
             'parcels': [{'parcel_id': 'P-1', 'approved_floor_count': 7, 'max_floors_height': '12 دور'}]
@@ -293,9 +296,23 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('approved_floor_count', result['parcels'][0])
         self.assertEqual(result['parcels'][0]['max_floors_height'], '12 دور')
 
+        regulatory = self.application_module._normalize_land_document_result({
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'allowed_uses_restrictions': 'استخدام سكني',
+                'parking_requirements': 'موقف لكل وحدة',
+                'entrances_exits_requirements': 'مدخل سيارات منفصل',
+            }]
+        })
+        restrictions = regulatory['parcels'][0]['allowed_uses_restrictions']
+        self.assertIn('اشتراطات المواقف', restrictions)
+        self.assertIn('اشتراطات المداخل والمخارج', restrictions)
+
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn("resp_json.pop('approved_floor_count', None)", app_source)
+        self.assertIn('parking_requirements', app_source)
+        self.assertIn('entrances_exits_requirements', app_source)
         self.assertIn("delete fields.approved_floor_count", index_source)
         self.assertIn("'approved_floor_count'", index_source)
 

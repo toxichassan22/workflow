@@ -5320,6 +5320,23 @@ def strip_placeholder_values(payload):
     return cleaned
 
 
+def merge_regulatory_access_requirements(payload):
+    if not isinstance(payload, dict):
+        return payload
+    additions = []
+    for label, key in (
+        ('اشتراطات المواقف', 'parking_requirements'),
+        ('اشتراطات المداخل والمخارج', 'entrances_exits_requirements'),
+    ):
+        value = str(payload.get(key) or '').strip()
+        if value and value not in additions:
+            additions.append(f'{label}: {value}')
+    if additions:
+        base = str(payload.get('allowed_uses_restrictions') or '').strip()
+        payload['allowed_uses_restrictions'] = '\n'.join([item for item in (base, *additions) if item])
+    return payload
+
+
 def normalize_croquis_fields(resp_json, text_content=""):
     """Normalize extracted croquis fields, map select dropdown values, filter invalid placeholders, and apply text regex fallbacks."""
     if not isinstance(resp_json, dict):
@@ -5392,6 +5409,7 @@ def normalize_croquis_fields(resp_json, text_content=""):
                     resp_json[canonical] = resp_json[alternative]
                     break
 
+    merge_regulatory_access_requirements(resp_json)
     summary_text = str(resp_json.get('land_and_building_summary', '')).replace('{}', '').strip()
     if not summary_text:
         labels = (
@@ -5406,6 +5424,8 @@ def normalize_croquis_fields(resp_json, text_content=""):
             ('الشوارع والواجهات', resp_json.get('surrounding_streets')),
             ('نسب البناء والارتدادات', resp_json.get('building_ratio_setbacks')),
             ('الارتفاع/الأدوار', resp_json.get('max_floors_height')),
+            ('اشتراطات المواقف', resp_json.get('parking_requirements')),
+            ('المداخل والمخارج', resp_json.get('entrances_exits_requirements')),
             ('الاستخدامات والقيود', resp_json.get('allowed_uses_restrictions')),
         )
         available = [f'{label}: {value}' for label, value in labels if value not in (None, '', [], {})]
@@ -5763,7 +5783,7 @@ def _prepare_document_vision_parts(document, budget=PDF_VISION_MAX_TOTAL_BYTES):
 PARCEL_PLACEHOLDER_KEYS = (
     'plot_number', 'plan_number', 'subdivision_number', 'deed_number', 'deed_date',
     'north_direction', 'setbacks', 'building_ratio', 'max_floors_height',
-    'allowed_uses_restrictions', 'summary',
+    'parking_requirements', 'entrances_exits_requirements', 'allowed_uses_restrictions', 'summary',
 )
 
 
@@ -5811,6 +5831,7 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
         if plan_match:
             parcel['plan_number'] = re.sub(r'\s*', '', plan_match.group(1))
 
+    merge_regulatory_access_requirements(parcel)
     return parcel
 
 
@@ -6075,6 +6096,7 @@ def api_extract_croquis():
             '    },\n'
             '    "north_direction": "", "setbacks": "", "building_ratio": "", "coverage_ratio": "",\n'
             '    "floor_area_ratio": "", "table_floors": "", "max_floors_height": "",\n'
+            '    "parking_requirements": "", "entrances_exits_requirements": "",\n'
             '    "allowed_uses_restrictions": "", "zoning_code": "",\n'
             '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
             '    "survey_coordinates": [{"point": "", "eastings": "", "northings": "", "source": "regulation_table"}],\n'
@@ -6119,6 +6141,9 @@ def api_extract_croquis():
             "  مثال: «8 أدوار لشريحة 3000–5000 م² على محور تجاري رئيسي — اشتراطات1 صفحة 50».\n"
             "- setbacks: الارتدادات الأربعة كل واحد برقمه بالمتر (أمامي/خلفي/جانبي أيمن/جانبي أيسر). "
             "إن لم تجدها في اللائحة فاكتب «غير محددة في المرجع المتاح» ولا تخترع أرقامًا.\n"
+            "- parking_requirements: استخرج اشتراطات المواقف كاملة من ملفات الأمانة: العدد أو النسبة، نوع الاستخدام الذي ينطبق عليه الشرط، أبعاد الموقف أو المسار إن ذُكرت، ومصدر الصفحة. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
+            "- entrances_exits_requirements: استخرج اشتراطات مداخل ومخارج السيارات والمشاة والخدمات والتحميل والفصل بين المداخل إن ذُكرت، مع مصدر الصفحة. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
+            "- allowed_uses_restrictions: يجب أن يجمع الاستخدامات المسموحة والقيود، ويشمل داخله اشتراطات المواقف والمداخل والمخارج دون حذف التفاصيل.\n"
             "- استخدم مساحة الأرض المستخرجة لاختيار الشريحة الصحيحة من جدول التنظيم؛ الجداول مفتاحها مساحة الأرض ونوع المحور/المنطقة.\n"
             "- لا تنسب اشتراطات إلى مدينة أو أمانة إلا إذا كانت المدينة ومصدر اللائحة واضحين في الملفات أو في المرجع المرفق.\n"
             "قواعد التعارضات (conflicts) — لا تُعرض للمستخدم مباشرة:\n"
@@ -6128,7 +6153,8 @@ def api_extract_croquis():
             "قواعد الملخص (land_and_building_summary):\n"
             "- نص عربي مسترسل من ٣ إلى ٥ فقرات (١٨٠ كلمة على الأقل) وليس قائمة حقول مفصولة بشرطات.\n"
             "- لا تُعد سرد الأرقام التي وردت في الحقول؛ اربطها وحلّلها باختصار.\n"
-            "- يغطي بالترتيب: (١) هوية القطعة وموقعها وصكها، (٢) المساحات والحدود والاتجاهات والواجهات، (٣) اشتراطات البناء مع مصدرها من اللائحة، (٤) الاستخدامات المسموحة والقيود، (٥) الفرص التطويرية المستنبطة من الاشتراطات، (٦) المخاطر والتعارضات وما يحتاج مراجعة.\n"
+            "- يغطي بالترتيب: (١) هوية القطعة وموقعها وصكها، (٢) المساحات والحدود والاتجاهات والواجهات، (٣) اشتراطات البناء مع مصدرها من اللائحة، (٤) الاستخدامات المسموحة والقيود، (٥) اشتراطات المواقف والمداخل والمخارج، (٦) الفرص التطويرية المستنبطة من الاشتراطات، (٧) المخاطر والتعارضات وما يحتاج مراجعة.\n"
+            "- يجب أن يذكر الملخص بوضوح الارتدادات والمواقف والمداخل والمخارج حتى لو وردت التفاصيل في الحقول الأخرى.\n"
             "- اربط الفرص التطويرية وملاءمة الاشتراطات بفكرة المشروع وهدفه وفئاته ومرحلته ومميزاته وفرصه المدخلة، ولا تستبدلها بتحليل عام منفصل عن المشروع.\n"
             "- اذكر صراحة أي معلومة غير متوفرة بدل تخطيها بصمت.\n"
             "ملاحظة: لا تُخرج حقل المساحة المعتمدة للدراسة المالية إطلاقًا؛ العميل هو من يحددها."
