@@ -7895,6 +7895,36 @@
         sectionDiv.id = 'project-section-' + sectionKey;
         sectionDiv.appendChild(createProjectSectionHeader(sectionKey, sectionMap[sectionKey] || 'عام'));
 
+        if (sectionKey === 'location') {
+          const mirrorField = document.createElement('div');
+          mirrorField.className = 'tenant-field full';
+          const mirrorLabel = document.createElement('label');
+          mirrorLabel.textContent = 'رابط موقع الأرض في Google Maps';
+          const mirrorInput = document.createElement('input');
+          mirrorInput.id = 'locationAddressMirror';
+          mirrorInput.type = 'url';
+          mirrorInput.readOnly = true;
+          mirrorInput.tabIndex = -1;
+          mirrorInput.value = String(tenantProjectData.location_address || '');
+          mirrorInput.style.cssText = 'background:#f4f7fa;color:var(--muted);cursor:not-allowed;';
+          const mirrorStatus = document.createElement('div');
+          mirrorStatus.id = 'locationAddressMirrorStatus';
+          mirrorStatus.className = 'tenant-hint';
+          mirrorStatus.style.margin = '6px 0 0';
+          mirrorField.appendChild(mirrorLabel);
+          mirrorField.appendChild(mirrorInput);
+          mirrorField.appendChild(mirrorStatus);
+          const mirrorAnalyzeButton = document.createElement('button');
+          mirrorAnalyzeButton.type = 'button';
+          mirrorAnalyzeButton.className = 'btn ghost';
+          mirrorAnalyzeButton.textContent = 'تحليل رابط الموقع';
+          mirrorAnalyzeButton.style.marginTop = '8px';
+          mirrorAnalyzeButton.onclick = () => analyzeTenantSite();
+          mirrorField.appendChild(mirrorAnalyzeButton);
+          sectionDiv.appendChild(mirrorField);
+          syncLocationAddressMirror(tenantProjectData.location_address || '');
+        }
+
         sectionFields.forEach(f => {
           if (LOCATION_TABLE_FIELDS[f.fieldKey]) {
             const currentTableValue = (tenantProjectData && tenantProjectData[f.fieldKey]) || f.defaultValue || '';
@@ -7902,7 +7932,7 @@
             return;
           }
           const div = document.createElement('div');
-          div.className = 'tenant-field' + (f.fieldType === 'textarea' ? ' full' : '');
+          div.className = 'tenant-field' + (f.fieldType === 'textarea' || f.fieldKey === 'location_address' ? ' full' : '');
           const label = document.createElement('label');
           label.textContent = tenantProjectFieldLabel(f) + (f.isRequired ? ' *' : '');
           let input;
@@ -8123,36 +8153,6 @@
 
           sectionDiv.appendChild(div);
         });
-
-        if (sectionKey === 'location') {
-          const mirrorField = document.createElement('div');
-          mirrorField.className = 'tenant-field full';
-          const mirrorLabel = document.createElement('label');
-          mirrorLabel.textContent = 'رابط موقع الأرض في Google Maps';
-          const mirrorInput = document.createElement('input');
-          mirrorInput.id = 'locationAddressMirror';
-          mirrorInput.type = 'url';
-          mirrorInput.readOnly = true;
-          mirrorInput.tabIndex = -1;
-          mirrorInput.value = String(tenantProjectData.location_address || '');
-          mirrorInput.style.cssText = 'background:#f4f7fa;color:var(--muted);cursor:not-allowed;';
-          const mirrorStatus = document.createElement('div');
-          mirrorStatus.id = 'locationAddressMirrorStatus';
-          mirrorStatus.className = 'tenant-hint';
-          mirrorStatus.style.margin = '6px 0 0';
-          mirrorField.appendChild(mirrorLabel);
-          mirrorField.appendChild(mirrorInput);
-          mirrorField.appendChild(mirrorStatus);
-          const mirrorAnalyzeButton = document.createElement('button');
-          mirrorAnalyzeButton.type = 'button';
-          mirrorAnalyzeButton.className = 'btn ghost';
-          mirrorAnalyzeButton.textContent = 'تحليل رابط الموقع';
-          mirrorAnalyzeButton.style.marginTop = '8px';
-          mirrorAnalyzeButton.onclick = () => analyzeTenantSite();
-          mirrorField.appendChild(mirrorAnalyzeButton);
-          sectionDiv.appendChild(mirrorField);
-          syncLocationAddressMirror(tenantProjectData.location_address || '');
-        }
 
         if (sectionKey === 'land_croquis') {
           const analysisResultsField = document.createElement('div');
