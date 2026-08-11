@@ -3273,8 +3273,12 @@
     .tenant-floor-design-chat-panel { display: grid; gap: 9px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
     .tenant-floor-design-chat-head h4 { margin: 0 0 3px; color: var(--p); font-size: 14px; }
     .tenant-floor-design-chat-head p { margin: 0; color: var(--muted); font-size: 11px; }
-    .tenant-floor-design-chat-panel textarea { width: 100%; min-height: 80px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; font: inherit; resize: vertical; }
     .tenant-floor-design-chat-thread { display: grid; gap: 6px; max-height: 150px; overflow: auto; }
+    .tenant-floor-design-chat-composer { display: flex; direction: rtl; align-items: center; gap: 8px; min-height: 58px; padding: 6px 8px 6px 6px; border: 1px solid var(--line); border-radius: 999px; background: #f7fafc; }
+    .tenant-floor-design-chat-composer textarea { flex: 1; min-width: 0; height: 42px; padding: 10px 12px; border: 0; outline: 0; background: transparent; color: var(--txt, #252525); font: inherit; font-size: 13px; resize: none; text-align: center; }
+    .tenant-floor-design-chat-composer textarea::placeholder { color: var(--muted); }
+    .tenant-floor-design-chat-send { display: grid; width: 46px; height: 46px; flex: 0 0 46px; place-items: center; border: 0; border-radius: 50%; background: var(--p); color: #fff; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+    .tenant-floor-design-chat-send:disabled { opacity: .5; cursor: not-allowed; }
     .tenant-floor-design-image-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
     .tenant-floor-design-image-caption p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
     .tenant-floor-design-candidates { padding: 14px; }
@@ -4008,7 +4012,7 @@
             <div id="tenantFloorDesignImageFrame" class="tenant-floor-design-image-frame" role="button" tabindex="0" onclick="previewTenantFloorDesignImage()" onkeydown="if(event.key === 'Enter' || event.key === ' ') previewTenantFloorDesignImage()"><button type="button" class="tenant-floor-design-image-approve" id="tenantFloorDesignApproveButton" onclick="event.stopPropagation(); approveTenantFloorDesignImage()" disabled>اعتماد الصورة</button><div id="tenantFloorDesignImageEmpty" class="tenant-floor-design-image-empty">لم يتم توليد صورة لهذه المجموعة بعد.</div><img id="tenantFloorDesignImage" alt="التصور البصري للمجموعة" hidden></div>
             <div class="tenant-floor-design-image-caption"><div><strong id="tenantFloorDesignImageTitle">لا توجد نتيجة مختارة</strong><p>اضغط على الصورة لفتحها بحجم كامل.</p></div></div>
           </section>
-          <section class="tenant-floor-design-chat-panel"><div class="tenant-floor-design-chat-head"><div><h4>محادثة التعديل</h4><p>اكتب التعديلات المطلوبة على الصورة الحالية.</p></div></div><div id="tenantFloorDesignChatThread" class="tenant-floor-design-chat-thread"><div class="tenant-floor-design-chat-message">لم تبدأ محادثة تعديل لهذه المجموعة.</div></div><textarea id="tenantFloorDesignChatInput" rows="4" placeholder="اكتب التعديل المطلوب"></textarea><button type="button" class="btn primary" onclick="sendTenantFloorDesignChat()">إرسال التعديل</button></section>
+          <section class="tenant-floor-design-chat-panel"><div class="tenant-floor-design-chat-head"><div><h4>محادثة التعديل</h4><p>اكتب التعديلات المطلوبة على الصورة الحالية.</p></div></div><div id="tenantFloorDesignChatThread" class="tenant-floor-design-chat-thread"><div class="tenant-floor-design-chat-message">لم تبدأ محادثة تعديل لهذه المجموعة.</div></div><div class="tenant-floor-design-chat-composer"><button type="button" class="tenant-floor-design-chat-send" id="tenantFloorDesignChatSendButton" onclick="sendTenantFloorDesignChat()">إرسال</button><textarea id="tenantFloorDesignChatInput" rows="1" placeholder="اكتب التعديل المطلوب"></textarea></div></section>
           <div class="tenant-floor-design-footer"><p id="tenantFloorDesignActionStatus">اختر مجموعة من القائمة.</p><div class="tenant-floor-design-footer-actions"><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(-1)">السابق</button><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(1)">التالي</button></div></div>
         </main>
       </div>
@@ -8310,6 +8314,7 @@
       const promptEditor = document.getElementById('tenantFloorDesignPromptEditor');
       const imageCard = image?.closest('.tenant-floor-design-image-card');
       const chatInput = document.getElementById('tenantFloorDesignChatInput');
+      const chatSend = document.getElementById('tenantFloorDesignChatSendButton');
       if (!group) {
         title.textContent = 'لم يبدأ تصميم الأدوار';
         subtitle.textContent = 'اختر مجموعة من القائمة لبدء تصميمها.';
@@ -8326,6 +8331,7 @@
         promptToggle.disabled = true;
         promptEditor.hidden = true;
         chatInput.disabled = true;
+        if (chatSend) chatSend.disabled = true;
         imageCard?.classList.remove('approved');
         renderTenantFloorDesignChat(null);
         renderTenantFloorDesignGroupList();
@@ -8361,7 +8367,8 @@
         promptEditor.hidden = true;
         promptToggle.textContent = 'عرض Prompt';
       }
-      chatInput.disabled = Boolean(group.unassigned);
+      chatInput.disabled = Boolean(group.unassigned || !group.imageUrl);
+      if (chatSend) chatSend.disabled = Boolean(group.unassigned || !group.imageUrl);
       setTenantFloorDesignText('tenantFloorDesignActionStatus', group.unassigned ? 'نظم الأدوار أولًا من المرحلة الأولى.' : group.status === 'approved' ? 'تم اعتماد الصورة لهذه المجموعة.' : 'عدّل الـ Prompt أو اكتب تعديلًا ثم ولّد الصورة.');
       renderTenantFloorDesignChat(group);
       renderTenantFloorDesignGroupList();
@@ -8850,6 +8857,12 @@
         if (!group || group.unassigned) return;
         group.generatedPrompt = event.target.value.slice(0, 12000);
         markTenantFloorDesignDirty();
+      });
+      document.getElementById('tenantFloorDesignChatInput')?.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault();
+          sendTenantFloorDesignChat();
+        }
       });
       document.getElementById('tenantFloorDesignSearch')?.addEventListener('input', renderTenantFloorDesignGroupList);
       document.querySelectorAll('[data-floor-design-filter]').forEach(button => button.addEventListener('click', () => {
