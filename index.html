@@ -7330,11 +7330,12 @@
       rows.forEach(row => addRow(row));
     }
 
-    function hydrateFinancialStudyModel(raw) {
-      const snapshot = parseFinancialStudySnapshot(raw);
+    function hydrateFinancialStudyModel(raw, fallbackComponents = []) {
+      const snapshot = parseFinancialStudySnapshot(raw) || (Array.isArray(fallbackComponents) && fallbackComponents.length ? { dynamicRows: { components: fallbackComponents } } : null);
       if (!snapshot) return;
       Object.entries(snapshot.inputs || {}).forEach(([id, value]) => setFinancialSnapshotInput(id, value));
-      const rows = snapshot.dynamicRows || {};
+      const rows = { ...(snapshot.dynamicRows || {}) };
+      if (!Array.isArray(rows.components) && Array.isArray(fallbackComponents) && fallbackComponents.length) rows.components = fallbackComponents;
       window.__batchLoading = true;
       try {
         hydrateFinancialTableRows('componentsTable', rows.components, addComponent);
@@ -7401,7 +7402,9 @@
         const timelineInput = document.getElementById('timelineTableData');
         if (timelineInput) timelineInput.value = JSON.stringify(timelineRows);
       }
-      hydrateFinancialStudyModel(source.financial_study_model);
+      const legacyFinancial = parseFinancialStudySnapshot(source.financial_calc_data);
+      const savedComponents = parseStoredProjectTable(source.project_components_data) || legacyFinancial?.components || [];
+      hydrateFinancialStudyModel(source.financial_study_model, savedComponents);
 
       refreshLocationTables();
       // Mirror the restored timeline into the financial study before recalculating.
@@ -9147,6 +9150,7 @@
         </div>
 
         <input type="hidden" data-key="financial_calc_data" data-type="text" id="financialCalcData">
+        <input type="hidden" data-key="project_components_data" data-type="text" id="projectComponentsData">
       `;
 
       div.querySelector('.tenant-section-title')?.replaceWith(
@@ -9900,10 +9904,14 @@
       if(!window.__sensitivityRunning)renderSensitivity();
 
       // Save complete model data into hidden input for autosave & server sync
+      const componentRows = typeof getComponentRowsData === 'function' ? getComponentRowsData() : [];
+      const componentData = document.getElementById('projectComponentsData');
+      if (componentData) componentData.value = JSON.stringify(componentRows);
       const hidden = document.getElementById('financialCalcData');
       if (hidden) {
         hidden.value = JSON.stringify({
           projectCost, projectCostWithFinance, adjustedProjectCost, totalFundFees, roi, projectIrr, equityIrr: irrVal, payback, equityPayback, totalEquityRequired,
+          components: componentRows,
           unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), fundEnabled: val('fundEnabled'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
         });
       }
