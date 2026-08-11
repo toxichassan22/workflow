@@ -3347,6 +3347,27 @@
     .tenant-floor-design-analysis-section strong { color: var(--p); font-size: 12px; }
     .tenant-floor-design-analysis-section ul { margin: 0; padding: 0 18px 0 0; color: var(--muted); font-size: 11px; line-height: 1.75; }
     .tenant-floor-design-analysis-section li { margin: 3px 0; overflow-wrap: anywhere; white-space: normal; }
+    .tenant-floor-design-analysis-workspace { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); gap: 12px; align-items: start; }
+    .tenant-floor-design-analysis-editor, .tenant-floor-design-analysis-chat { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .tenant-floor-design-analysis-editor-head, .tenant-floor-design-analysis-chat-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .tenant-floor-design-analysis-editor-head h4, .tenant-floor-design-analysis-chat-head h4 { margin: 0 0 3px; color: var(--p); font-size: 15px; }
+    .tenant-floor-design-analysis-editor-head p, .tenant-floor-design-analysis-chat-head p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+    .tenant-floor-design-analysis-editor-summary { width: 100%; min-height: 100px; box-sizing: border-box; resize: vertical; border: 1px solid var(--line); border-radius: 9px; padding: 10px; font: inherit; font-size: 12px; line-height: 1.7; }
+    .tenant-floor-design-analysis-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .tenant-floor-design-analysis-edit-card { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #f7fafc; }
+    .tenant-floor-design-analysis-edit-card strong { color: var(--p); font-size: 12px; }
+    .tenant-floor-design-analysis-edit-card textarea { width: 100%; min-height: 90px; box-sizing: border-box; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: #fff; color: var(--txt, #252525); font: inherit; font-size: 11px; line-height: 1.7; }
+    .tenant-floor-design-analysis-chat-thread { display: grid; gap: 7px; min-height: 250px; max-height: 430px; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: #f7fafc; }
+    .tenant-floor-design-analysis-chat-message { max-width: 90%; padding: 8px 10px; border-radius: 9px; color: var(--muted); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
+    .tenant-floor-design-analysis-chat-message.user { justify-self: start; background: #e1f1ef; color: var(--txt, #252525); }
+    .tenant-floor-design-analysis-chat-message.assistant { justify-self: end; background: var(--soft); }
+    .tenant-floor-design-analysis-chat-composer { display: flex; align-items: flex-end; gap: 8px; }
+    .tenant-floor-design-analysis-chat-composer textarea { flex: 1; min-height: 70px; resize: vertical; border: 1px solid var(--line); border-radius: 9px; padding: 9px; font: inherit; font-size: 12px; line-height: 1.6; }
+    .tenant-floor-design-analysis-chat-composer button { flex: 0 0 auto; }
+    @media (max-width: 760px) {
+      .tenant-floor-design-analysis-workspace, .tenant-floor-design-analysis-edit-grid { grid-template-columns: 1fr; }
+      .tenant-floor-design-analysis-chat-thread { min-height: 180px; }
+    }
     .tenant-floor-design-readiness { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
     .tenant-floor-design-readiness h4 { margin: 0; color: var(--p); font-size: 16px; }
     .tenant-floor-design-readiness p { margin: 0; color: var(--muted); font-size: 12px; }
@@ -3987,9 +4008,19 @@
           <div id="tenantFloorDesignAnalysisMissingList" class="tenant-floor-design-readiness-list"></div>
         </div>
         <div id="tenantFloorDesignAnalysisResult" class="tenant-floor-design-analysis-result" hidden>
-          <div class="tenant-floor-design-analysis-result-head"><div><h4>نتيجة تحليل Luna</h4><p id="tenantFloorDesignAnalysisApprovalStatus">لم يعتمد التحليل بعد.</p></div><button type="button" class="btn primary" onclick="approveTenantFloorDesignAnalysis()">اعتماد التحليل</button></div>
-          <p id="tenantFloorDesignAnalysisSummaryText"></p>
-          <div id="tenantFloorDesignAnalysisSections" class="tenant-floor-design-analysis-sections"></div>
+          <div class="tenant-floor-design-analysis-result-head"><div><h4>مراجعة تحليل Luna</h4><p id="tenantFloorDesignAnalysisApprovalStatus">لم يعتمد التحليل بعد.</p></div><button type="button" class="btn primary" onclick="approveTenantFloorDesignAnalysis()">اعتماد التحليل</button></div>
+          <div class="tenant-floor-design-analysis-workspace">
+            <section class="tenant-floor-design-analysis-editor">
+              <div class="tenant-floor-design-analysis-editor-head"><div><h4>التحليل الحالي</h4><p>عدّل أي بند يدويًا، ثم أعد اعتماد التحليل قبل توليد المخططات.</p></div></div>
+              <textarea id="tenantFloorDesignAnalysisSummaryEditor" class="tenant-floor-design-analysis-editor-summary" placeholder="ملخص التحليل"></textarea>
+              <div id="tenantFloorDesignAnalysisSections" class="tenant-floor-design-analysis-edit-grid"></div>
+            </section>
+            <section class="tenant-floor-design-analysis-chat">
+              <div class="tenant-floor-design-analysis-chat-head"><div><h4>محادثة مراجعة التحليل</h4><p>اطلب من AI تعديل بند محدد في التحليل، وسيتم تطبيق التعديل على البيانات الحالية.</p></div></div>
+              <div id="tenantFloorDesignAnalysisChatThread" class="tenant-floor-design-analysis-chat-thread"></div>
+              <div class="tenant-floor-design-analysis-chat-composer"><textarea id="tenantFloorDesignAnalysisChatInput" rows="2" placeholder="مثال: عدّل ملاحظة المجموعة الأولى وأضف أن المدخل الرئيسي من الشمال"></textarea><button type="button" class="btn primary small" id="tenantFloorDesignAnalysisChatSendButton" onclick="sendTenantFloorDesignAnalysisChat()">إرسال</button></div>
+            </section>
+          </div>
         </div>
         <div class="tenant-floor-design-stage-actions"><span class="tenant-hint">يتم تشغيل التحليل بعد اكتمال البيانات.</span><button type="button" class="btn primary" id="tenantFloorDesignStartAnalysisButton" onclick="startTenantFloorAnalysis()" disabled>بدء تحليل البيانات</button></div>
       </div>
@@ -8275,7 +8306,13 @@
         style: typeof group?.style === 'string' ? group.style.slice(0, 120) : '',
         chat: Array.isArray(group?.chat) ? group.chat.filter(item => item && typeof item.text === 'string').slice(-40).map(item => ({ role: item.role === 'assistant' ? 'assistant' : 'user', text: item.text.slice(0, 4000) })) : []
       })).filter(group => group.floorNumbers.length).filter(group => group.name) : [];
-      return { version: 1, floorCount, firstFloor, groups, analysis: value.analysis && typeof value.analysis === 'object' ? value.analysis : null, analysisApproved: value.analysisApproved === true };
+      const analysisChat = Array.isArray(value.analysisChat)
+        ? value.analysisChat.filter(item => item && typeof item.text === 'string').slice(-60).map(item => ({
+          role: item.role === 'assistant' ? 'assistant' : 'user',
+          text: item.text.slice(0, 6000)
+        }))
+        : [];
+      return { version: 1, floorCount, firstFloor, groups, analysis: value.analysis && typeof value.analysis === 'object' ? value.analysis : null, analysisApproved: value.analysisApproved === true, analysisChat };
     }
 
     function tenantFloorDesignSource() {
@@ -8680,25 +8717,127 @@
       return parts.length ? parts.join(' — ') : formatTenantFloorDesignAnalysisValue(value);
     }
 
+    const TENANT_FLOOR_ANALYSIS_FIELDS = [
+      ['hard_constraints', 'القيود الإلزامية'],
+      ['project_inputs', 'مدخلات المشروع'],
+      ['group_notes', 'ملاحظات مجموعات الأدوار'],
+      ['warnings', 'التحذيرات'],
+      ['assumptions', 'الافتراضات']
+    ];
+
+    function tenantFloorDesignAnalysisEditorValue(key, value) {
+      if (key === 'summary') return String(value || '');
+      return Array.isArray(value) ? value.map(item => formatTenantFloorDesignAnalysisItem(item)).filter(Boolean).join('\n') : '';
+    }
+
+    function tenantFloorDesignAnalysisChatMessageMarkup(item) {
+      const role = item.role === 'assistant' ? 'assistant' : 'user';
+      return '<div class="tenant-floor-design-analysis-chat-message ' + role + '">' + escapeHtml(item.text || '') + '</div>';
+    }
+
+    function renderTenantFloorDesignAnalysisChat() {
+      const thread = document.getElementById('tenantFloorDesignAnalysisChatThread');
+      if (!thread) return;
+      const messages = tenantFloorDesignState?.analysisChat || [];
+      thread.innerHTML = messages.length
+        ? messages.map(tenantFloorDesignAnalysisChatMessageMarkup).join('')
+        : '<div class="tenant-floor-design-analysis-chat-message assistant">لم تبدأ محادثة مراجعة التحليل بعد.</div>';
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function updateTenantFloorDesignAnalysisApprovalStatus() {
+      const status = document.getElementById('tenantFloorDesignAnalysisApprovalStatus');
+      if (status) status.textContent = tenantFloorDesignState?.analysisApproved ? 'تم اعتماد التحليل.' : 'لم يعتمد التحليل بعد.';
+    }
+
+    function applyTenantFloorDesignAnalysisPatch(patch) {
+      if (!tenantFloorDesignState?.analysis || !patch || typeof patch !== 'object') return false;
+      let changed = false;
+      if (typeof patch.summary === 'string') {
+        tenantFloorDesignState.analysis.summary = patch.summary.slice(0, 16000);
+        changed = true;
+      }
+      TENANT_FLOOR_ANALYSIS_FIELDS.forEach(([key]) => {
+        if (!Array.isArray(patch[key])) return;
+        tenantFloorDesignState.analysis[key] = patch[key].slice(0, 100);
+        changed = true;
+      });
+      if (changed) {
+        tenantFloorDesignState.analysisApproved = false;
+        markTenantFloorDesignDirty();
+      }
+      return changed;
+    }
+
     function renderTenantFloorDesignAnalysisResult() {
       const result = tenantFloorDesignState?.analysis;
       const host = document.getElementById('tenantFloorDesignAnalysisResult');
-      const summary = document.getElementById('tenantFloorDesignAnalysisSummaryText');
+      const summaryEditor = document.getElementById('tenantFloorDesignAnalysisSummaryEditor');
       const status = document.getElementById('tenantFloorDesignAnalysisApprovalStatus');
       const sections = document.getElementById('tenantFloorDesignAnalysisSections');
-      if (!host || !summary || !status || !sections) return;
+      if (!host || !summaryEditor || !status || !sections) return;
       host.hidden = !result;
-      if (!result) return;
-      summary.textContent = result.summary || 'اكتمل التحليل ويحتاج إلى مراجعتك.';
-      status.textContent = tenantFloorDesignState.analysisApproved ? 'تم اعتماد التحليل.' : 'لم يعتمد التحليل بعد.';
-      const entries = [
-        ['القيود الإلزامية', result.hard_constraints],
-        ['مدخلات المشروع', result.project_inputs],
-        ['ملاحظات مجموعات الأدوار', result.group_notes],
-        ['التحذيرات', result.warnings],
-        ['الافتراضات', result.assumptions]
-      ].filter(([, values]) => Array.isArray(values) && values.length);
-      sections.innerHTML = entries.map(([label, values]) => `<div class="tenant-floor-design-analysis-section"><strong>${escapeHtml(label)}</strong><ul>${values.map(value => `<li>${escapeHtml(formatTenantFloorDesignAnalysisItem(value))}</li>`).join('')}</ul></div>`).join('');
+      if (!result) {
+        renderTenantFloorDesignAnalysisChat();
+        return;
+      }
+      summaryEditor.value = tenantFloorDesignAnalysisEditorValue('summary', result.summary);
+      summaryEditor.oninput = () => {
+        tenantFloorDesignState.analysis.summary = summaryEditor.value.slice(0, 16000);
+        tenantFloorDesignState.analysisApproved = false;
+        markTenantFloorDesignDirty();
+        updateTenantFloorDesignAnalysisApprovalStatus();
+      };
+      sections.innerHTML = TENANT_FLOOR_ANALYSIS_FIELDS.map(([key, label]) =>
+        '<label class="tenant-floor-design-analysis-edit-card"><strong>' + escapeHtml(label) +
+        '</strong><textarea data-floor-analysis-field="' + key + '" placeholder="أضف ملاحظات أو اكتب كل بند في سطر مستقل">' +
+        escapeHtml(tenantFloorDesignAnalysisEditorValue(key, result[key])) + '</textarea></label>'
+      ).join('');
+      sections.querySelectorAll('[data-floor-analysis-field]').forEach(editor => {
+        editor.addEventListener('input', () => {
+          const key = editor.dataset.floorAnalysisField;
+          tenantFloorDesignState.analysis[key] = editor.value.split(/\r?\n/).map(item => item.trim()).filter(Boolean).slice(0, 100);
+          tenantFloorDesignState.analysisApproved = false;
+          markTenantFloorDesignDirty();
+          updateTenantFloorDesignAnalysisApprovalStatus();
+        });
+      });
+      updateTenantFloorDesignAnalysisApprovalStatus();
+      renderTenantFloorDesignAnalysisChat();
+    }
+
+    async function sendTenantFloorDesignAnalysisChat() {
+      const input = document.getElementById('tenantFloorDesignAnalysisChatInput');
+      const sendButton = document.getElementById('tenantFloorDesignAnalysisChatSendButton');
+      const text = input?.value.trim();
+      if (!tenantFloorDesignState?.analysis || !text || sendButton?.disabled) return;
+      tenantFloorDesignState.analysisChat = tenantFloorDesignState.analysisChat || [];
+      tenantFloorDesignState.analysisChat.push({ role: 'user', text });
+      tenantFloorDesignState.analysisChat = tenantFloorDesignState.analysisChat.slice(-60);
+      if (input) input.value = '';
+      renderTenantFloorDesignAnalysisChat();
+      if (sendButton) { sendButton.disabled = true; sendButton.textContent = 'جاري المراجعة'; }
+      showLoader('جاري مراجعة التحليل', 'يتم تطبيق طلبك على التحليل الحالي فقط...', 35);
+      try {
+        updateLoaderProgress(55, 'جاري إرسال طلب تعديل التحليل إلى Luna...');
+        const payload = await collectTenantFloorDesignAiPayload();
+        payload.analysis = tenantFloorDesignState.analysis;
+        payload.message = text;
+        const response = await api('POST', '/api/floor-design/analysis-chat', payload);
+        if (!response?.success) throw new Error(response?.error || 'تعذر تعديل التحليل');
+        if (response.reply) tenantFloorDesignState.analysisChat.push({ role: 'assistant', text: response.reply });
+        const changed = applyTenantFloorDesignAnalysisPatch(response.analysisPatch || response.analysis_patch);
+        if (!changed) markTenantFloorDesignDirty();
+        renderTenantFloorDesignAnalysisResult();
+        updateLoaderProgress(100, changed ? 'تم تطبيق تعديلك ويحتاج التحليل إلى اعتماد جديد.' : 'تم استلام الرد، ولم يتغير أي بند في التحليل.');
+      } catch (error) {
+        tenantFloorDesignState.analysisChat.push({ role: 'assistant', text: error?.message || 'تعذر تعديل التحليل.' });
+        renderTenantFloorDesignAnalysisChat();
+        updateLoaderProgress(100, 'تعذر تعديل التحليل.');
+      } finally {
+        if (sendButton) { sendButton.disabled = false; sendButton.textContent = 'إرسال'; }
+        hideLoader('اكتملت مراجعة التحليل');
+      }
     }
 
     function approveTenantFloorDesignAnalysis() {

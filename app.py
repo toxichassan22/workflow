@@ -1437,6 +1437,79 @@ def api_analyze_floor_design_data():
         return jsonify({'success': False, 'error': 'تعذر تحليل بيانات تصميم الطوابق', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
 
 
+FLOOR_DESIGN_ANALYSIS_PATCH_KEYS = ('hard_constraints', 'project_inputs', 'group_notes', 'warnings', 'assumptions')
+
+
+def _sanitize_floor_design_analysis_patch(raw_patch):
+    if not isinstance(raw_patch, dict):
+        return {}
+    patch = {}
+    if isinstance(raw_patch.get('summary'), str):
+        patch['summary'] = raw_patch['summary'].strip()[:16000]
+    for key in FLOOR_DESIGN_ANALYSIS_PATCH_KEYS:
+        values = raw_patch.get(key)
+        if not isinstance(values, list):
+            continue
+        clean_values = []
+        for item in values[:100]:
+            if isinstance(item, str):
+                clean_values.append(item.strip()[:4000])
+            elif isinstance(item, dict):
+                clean_item = {}
+                for nested_key in ('classification', 'item', 'label', 'name', 'value', 'description',
+                                   'drawing_impact', 'impact', 'warning', 'note', 'floorNumbers', 'floorCount', 'components', 'source'):
+                    nested_value = item.get(nested_key)
+                    if nested_value in (None, ''):
+                        continue
+                    if isinstance(nested_value, (str, int, float, bool)):
+                        clean_item[nested_key] = _floor_design_text(nested_value, 4000)
+                    elif isinstance(nested_value, list):
+                        clean_item[nested_key] = nested_value[:50]
+                if clean_item:
+                    clean_values.append(clean_item)
+        patch[key] = clean_values
+    return patch
+
+
+@app.route('/api/floor-design/analysis-chat', methods=['POST'])
+@require_auth
+def api_floor_design_analysis_chat():
+    data = request.get_json(silent=True) or {}
+    message = _floor_design_text(data.get('message'), 4000)
+    analysis = data.get('analysis') if isinstance(data.get('analysis'), dict) else {}
+    if not message:
+        return jsonify({'success': False, 'error': 'اكتب التعديل المطلوب على التحليل أولًا', 'error_code': 'ANALYSIS_MESSAGE_REQUIRED'}), 400
+    if not analysis:
+        return jsonify({'success': False, 'error': 'لا يوجد تحليل حالي لمراجعته', 'error_code': 'ANALYSIS_NOT_FOUND'}), 400
+    payload = _sanitize_floor_design_request(data)
+    system_prompt = (
+        'أنت مساعد مراجعة تحليل معماري. حلل طلب المستخدم على التحليل الحالي فقط وأخرج JSON فقط بالشكل '
+        '{"reply":"","analysis_patch":{"summary":"","hard_constraints":[],"project_inputs":[],"group_notes":[],"warnings":[],"assumptions":[]}}. '
+        'اكتب reply عربيًا مختصرًا يشرح ما فعلته. أعد داخل analysis_patch المفاتيح التي تغيرت فقط. '
+        'لا تغيّر عدد الأدوار أو توزيع المجموعات أو المكونات أو المساحة المالية أو أي قيد خارج مفاتيح التحليل المسموحة. '
+        'إذا كان الطلب سؤالًا أو لا يحتاج تغييرًا، أعد analysis_patch فارغًا. لا تخترع اشتراطًا غير موجود في التحليل أو بيانات المشروع.'
+    )
+    user_prompt = (
+        'بيانات المشروع المختصرة:\n' + _floor_design_json_prompt(payload) +
+        '\n\nالتحليل الحالي:\n' + _floor_design_json_prompt(analysis) +
+        '\n\nطلب المستخدم:\n' + message
+    )
+    try:
+        response = call_openrouter_chat(
+            system_prompt, user_prompt, temperature=None, max_tokens=5000,
+            model=LUNA_TEXT_MODEL, reasoning_effort='high'
+        )
+        result = _designer_json_response(extract_chat_content(response, 'FLOOR-DESIGN-ANALYSIS-CHAT'))
+        reply = _floor_design_text(result.get('reply'), 6000)
+        if not reply:
+            return jsonify({'success': False, 'error': 'تعذر قراءة رد مراجعة التحليل', 'error_code': 'ANALYSIS_CHAT_INVALID'}), 503
+        patch = _sanitize_floor_design_analysis_patch(result.get('analysis_patch') or result.get('analysisPatch'))
+        return jsonify({'success': True, 'reply': reply, 'analysisPatch': patch, 'model': LUNA_TEXT_MODEL})
+    except Exception:
+        app.logger.exception('Floor design analysis chat failed')
+        return jsonify({'success': False, 'error': 'تعذر مراجعة تحليل البيانات', 'error_code': 'ANALYSIS_CHAT_FAILED'}), 503
+
+
 @app.route('/api/floor-design/prompt', methods=['POST'])
 @require_auth
 def api_generate_floor_design_prompt():

@@ -2141,6 +2141,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('FLOOR_DESIGN_IMAGE_HARD_NEGATIVE', source)
         self.assertIn("response_format={'type': 'json_object'}", source)
         self.assertIn('أي كتابة أو أرقام أو حروف', source)
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('tenantFloorDesignAnalysisChatThread', index_source)
+        self.assertIn('sendTenantFloorDesignAnalysisChat', index_source)
+        self.assertIn('/api/floor-design/analysis-chat', source)
         self.assertEqual(self.application_module._get_chat_response_text({'choices': [{'message': {'content': [{'type': 'text', 'text': '{"ok":true}'}]}}]}), '{"ok":true}')
         payload = {
             'projectData': {
@@ -2175,6 +2179,18 @@ class MeetingRequirementsTests(unittest.TestCase):
             prompted = client.post('/api/floor-design/prompt', headers=self._headers(self.token_a), json={**payload, 'groupId': 'g1', 'analysis': fake_analysis})
         self.assertEqual(prompted.status_code, 200, prompted.get_json())
         self.assertEqual(prompted.get_json()['prompt'], 'مخطط 2D صارم')
+        self.assertEqual(call.call_args.kwargs['model'], 'openai/gpt-5.6-luna-pro')
+
+        chat_response = {'reply': 'تم تعديل التحذير.', 'analysis_patch': {'warnings': ['تحذير معدل']}}
+        with patch.object(self.application_module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(chat_response, ensure_ascii=False)}}]
+        }) as call:
+            chat = client.post('/api/floor-design/analysis-chat', headers=self._headers(self.token_a), json={
+                **payload, 'analysis': fake_analysis, 'message': 'عدّل التحذير'
+            })
+        self.assertEqual(chat.status_code, 200, chat.get_json())
+        self.assertEqual(chat.get_json()['reply'], 'تم تعديل التحذير.')
+        self.assertEqual(chat.get_json()['analysisPatch']['warnings'], ['تحذير معدل'])
         self.assertEqual(call.call_args.kwargs['model'], 'openai/gpt-5.6-luna-pro')
 
     def test_floor_design_generation_requires_auth_and_valid_prompt(self):
