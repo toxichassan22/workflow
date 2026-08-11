@@ -284,7 +284,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         field = next(item for item in fields if item['fieldKey'] == 'approved_floor_count')
         self.assertEqual(field['fieldLabel'], 'الأدوار المعتمدة')
         self.assertEqual(field['fieldType'], 'number')
-        self.assertFalse(field['isRequired'])
+        self.assertTrue(field['isRequired'])
 
         result = self.application_module._normalize_land_document_result({
             'parcels': [{'parcel_id': 'P-1', 'approved_floor_count': 7, 'max_floors_height': '12 دور'}]
@@ -1815,6 +1815,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("tenantFloorDesignPage: '/app/projects/floor-design'", index_source)
         self.assertIn("floor_visual_design", index_source)
         self.assertIn("formatTenantFloorDesignNumbers", index_source)
+        self.assertIn('requireTenantApprovedBuildInputs', index_source)
+        self.assertIn("APPROVED_BUILD_INPUTS_REQUIRED", (ROOT / 'app.py').read_text(encoding='utf-8'))
 
         state = {
             'version': 1,
@@ -1847,8 +1849,18 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(missing_prompt.status_code, 400, missing_prompt.get_json())
         self.assertEqual(missing_prompt.get_json()['error_code'], 'PROMPT_REQUIRED')
 
+        missing_build_inputs = client.post('/api/floor-design/generate', headers=self._headers(self.token_a), json={
+            'prompt': 'تصميم دور نموذجي'
+        })
+        self.assertEqual(missing_build_inputs.status_code, 400, missing_build_inputs.get_json())
+        self.assertEqual(missing_build_inputs.get_json()['error_code'], 'APPROVED_BUILD_INPUTS_REQUIRED')
+        self.assertEqual(set(missing_build_inputs.get_json()['missingFields']), {'approved_financial_area', 'approved_floor_count'})
+
         invalid_reference = client.post('/api/floor-design/generate', headers=self._headers(self.token_a), json={
-            'prompt': 'تصميم دور نموذجي', 'referenceImage': 'https://example.com/image.png'
+            'prompt': 'تصميم دور نموذجي',
+            'approvedFinancialArea': 1000,
+            'approvedFloorCount': 5,
+            'referenceImage': 'https://example.com/image.png'
         })
         self.assertEqual(invalid_reference.status_code, 400, invalid_reference.get_json())
         self.assertEqual(invalid_reference.get_json()['error_code'], 'REFERENCE_INVALID')

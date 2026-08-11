@@ -1249,6 +1249,21 @@ def api_generate_floor_design_image():
     if not isinstance(prompt, str) or not prompt.strip():
         return jsonify({'success': False, 'error': 'وصف التصميم مطلوب', 'error_code': 'PROMPT_REQUIRED'}), 400
     prompt = prompt.strip()[:12000]
+    approved_area = data.get('approvedFinancialArea')
+    approved_floors = data.get('approvedFloorCount')
+    try:
+        valid_area = not isinstance(approved_area, bool) and float(approved_area) > 0
+        valid_floors = not isinstance(approved_floors, bool) and int(approved_floors) == float(approved_floors) and int(approved_floors) > 0
+    except (TypeError, ValueError):
+        valid_area = False
+        valid_floors = False
+    if not valid_area or not valid_floors:
+        return jsonify({
+            'success': False,
+            'error': 'المساحة المعتمدة والأدوار المعتمدة مطلوبان قبل توليد التصميم',
+            'error_code': 'APPROVED_BUILD_INPUTS_REQUIRED',
+            'missingFields': [key for key, valid in (('approved_financial_area', valid_area), ('approved_floor_count', valid_floors)) if not valid]
+        }), 400
     if reference is not None:
         if not isinstance(reference, str) or len(reference) > 20 * 1024 * 1024:
             return jsonify({'success': False, 'error': 'الصورة المرجعية غير صالحة أو كبيرة جدًا', 'error_code': 'REFERENCE_INVALID'}), 400

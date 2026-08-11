@@ -8359,13 +8359,52 @@
       return `أنشئ تصورًا بصريًا معماريًا ثنائي الأبعاد واضحًا لمجموعة الأدوار التالية في مشروع عقاري. الصورة تمثل نموذجًا بصريًا واحدًا لكل الأدوار المحددة، وليست مخطط CAD قابلًا للتحرير. حافظ على هوية المشروع، أظهر توزيع الفراغات والعلاقات المعمارية بوضوح، ولا تضف نصوصًا عشوائية أو شعارات أو علامة مائية.\n\n${context}`;
     }
 
+    function validateTenantApprovedBuildInputs() {
+      const readValue = key => {
+        const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+        return String(input?.value ?? tenantProjectData?.[key] ?? '').replace(/,/g, '').trim();
+      };
+      const approvedFinancialArea = Number(readValue('approved_financial_area'));
+      const approvedFloorCount = Number(readValue('approved_floor_count'));
+      const missing = [];
+      if (!Number.isFinite(approvedFinancialArea) || approvedFinancialArea <= 0) missing.push({ key: 'approved_financial_area', label: 'المساحة المعتمدة للدراسة المالية (م²)' });
+      if (!Number.isInteger(approvedFloorCount) || approvedFloorCount <= 0) missing.push({ key: 'approved_floor_count', label: 'الأدوار المعتمدة' });
+      return { valid: missing.length === 0, missing, approvedFinancialArea, approvedFloorCount };
+    }
+
+    async function requireTenantApprovedBuildInputs() {
+      const result = validateTenantApprovedBuildInputs();
+      if (result.valid) return result;
+      const first = result.missing[0];
+      toast('لا يمكن توليد المخطط قبل إدخال: ' + result.missing.map(item => item.label).join(' و'));
+      if (tenantFloorDesignEmbedded) exitTenantFloorDesignPage();
+      showTenantPage('tenantProjectPage');
+      showSection('land_croquis');
+      setTimeout(() => {
+        const input = document.querySelector('#tenantProjectForm [data-key="' + first.key + '"]');
+        if (!input) return;
+        input.setAttribute('aria-invalid', 'true');
+        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        input.focus({ preventScroll: true });
+        input.addEventListener('input', () => input.removeAttribute('aria-invalid'), { once: true });
+      }, 80);
+      return null;
+    }
+
     async function generateTenantFloorDesignImage() {
       const group = tenantFloorDesignActiveGroup();
       if (!group || group.unassigned) return;
+      const approvedInputs = await requireTenantApprovedBuildInputs();
+      if (!approvedInputs) return;
       group.status = 'generating';
       renderTenantFloorDesignActiveGroup();
       try {
-        const response = await api('POST', '/api/floor-design/generate', { prompt: buildTenantFloorDesignPrompt(group), referenceImage: group.referenceImage || null });
+        const response = await api('POST', '/api/floor-design/generate', {
+          prompt: buildTenantFloorDesignPrompt(group),
+          referenceImage: group.referenceImage || null,
+          approvedFinancialArea: approvedInputs.approvedFinancialArea,
+          approvedFloorCount: approvedInputs.approvedFloorCount
+        });
         if (!response?.success || !response.image) throw new Error(response?.error || 'تعذر توليد الصورة');
         group.imageUrl = response.image;
         group.approvedImageUrl = '';
