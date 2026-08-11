@@ -3224,7 +3224,7 @@
     .tenant-floor-design-sidebar-head h3 { margin: 0; color: var(--p); }
     .tenant-floor-design-sidebar-head span { color: var(--muted); font-size: 11px; }
     .tenant-floor-design-search { width: 100%; min-height: 38px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; font: inherit; }
-    .tenant-floor-design-filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 12px; }
+    .tenant-floor-design-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-bottom: 12px; }
     .tenant-floor-design-filter { min-height: 32px; padding: 5px 3px; border: 1px solid var(--line); border-radius: 7px; background: #f7fafc; color: var(--muted); font-size: 10px; cursor: pointer; }
     .tenant-floor-design-filter.active { border-color: var(--p); background: #e8f4fa; color: var(--p); font-weight: 700; }
     .tenant-floor-design-progress { display: grid; gap: 6px; margin-bottom: 12px; padding: 10px; border: 1px solid #c5dfdc; border-radius: 9px; background: #e1f1ef; }
@@ -3261,6 +3261,19 @@
     .tenant-floor-design-image-frame { display: grid; place-items: center; min-height: 360px; background: #edf2f2; }
     .tenant-floor-design-image-frame img { display: block; width: 100%; max-height: 560px; object-fit: contain; aspect-ratio: 16 / 10; }
     .tenant-floor-design-image-empty { padding: 50px 20px; color: var(--muted); font-size: 13px; text-align: center; }
+    .tenant-floor-design-prompt-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tenant-floor-design-prompt-editor { width: 100%; min-height: 120px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--txt, #252525); font: inherit; resize: vertical; }
+    .tenant-floor-design-image-frame { position: relative; min-height: 270px; padding: 18px; }
+    .tenant-floor-design-image-frame img { width: auto; max-width: 88%; max-height: 380px; aspect-ratio: auto; border-radius: 8px; object-fit: contain; box-shadow: 0 8px 24px rgba(24,53,74,.12); }
+    .tenant-floor-design-image-approve { position: absolute; z-index: 2; top: 12px; right: 12px; padding: 7px 11px; border: 1px solid #c8d6d8; border-radius: 8px; background: #fff; color: var(--p); font: inherit; font-size: 11px; cursor: pointer; }
+    .tenant-floor-design-image-approve:disabled { opacity: .5; cursor: not-allowed; }
+    .tenant-floor-design-image-card.approved { border-color: #9bc9aa; box-shadow: 0 0 0 2px rgba(52,118,88,.12); }
+    .tenant-floor-design-image-card.approved .tenant-floor-design-image-approve { border-color: #9bc9aa; background: #e4f1e8; color: #347658; }
+    .tenant-floor-design-chat-panel { display: grid; gap: 9px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
+    .tenant-floor-design-chat-head h4 { margin: 0 0 3px; color: var(--p); font-size: 14px; }
+    .tenant-floor-design-chat-head p { margin: 0; color: var(--muted); font-size: 11px; }
+    .tenant-floor-design-chat-panel textarea { width: 100%; min-height: 80px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; font: inherit; resize: vertical; }
+    .tenant-floor-design-chat-thread { display: grid; gap: 6px; max-height: 150px; overflow: auto; }
     .tenant-floor-design-image-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
     .tenant-floor-design-image-caption p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
     .tenant-floor-design-candidates { padding: 14px; }
@@ -3969,36 +3982,31 @@
 
       <div id="tenantFloorDesignWorkspace" class="tenant-floor-design-workspace" data-floor-design-stage-view="drawings" hidden>
         <aside class="tenant-floor-design-sidebar" aria-label="مجموعات تصميم الطوابق">
-          <div class="tenant-floor-design-sidebar-head"><h3>مجموعات التصميم</h3><span id="tenantFloorDesignGroupCount">0 مجموعات</span></div>
-          <input id="tenantFloorDesignSearch" class="tenant-floor-design-search" type="search" placeholder="ابحث عن مجموعة أو دور">
+          <div class="tenant-floor-design-sidebar-head"><h3>مجموعات التصميم</h3></div>
+          <input id="tenantFloorDesignSearch" class="tenant-floor-design-search" type="search" placeholder="ابحث باسم المجموعة أو رقم الدور">
           <div class="tenant-floor-design-filters" role="group" aria-label="فلترة مجموعات التصميم">
-            <button type="button" class="tenant-floor-design-filter active" data-floor-design-filter="all">الكل</button>
-            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="review">مراجعة</button>
-            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="approved">معتمد</button>
+            <button type="button" class="tenant-floor-design-filter active" data-floor-design-filter="all">كل المجموعات</button>
+            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="pending">تحتاج توليد</button>
+            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="review">قيد المراجعة</button>
+            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="approved">معتمدة</button>
           </div>
-          <div class="tenant-floor-design-progress"><div class="tenant-floor-design-progress-head"><span>تقدم التصميم</span><strong id="tenantFloorDesignProgressLabel">0 من 0</strong></div><div class="tenant-floor-design-progress-track"><div id="tenantFloorDesignProgressValue" class="tenant-floor-design-progress-value"></div></div></div>
           <div id="tenantFloorDesignGroupList" class="tenant-floor-design-group-list"></div>
           <div class="tenant-floor-design-sidebar-actions"><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('organization')">تنظيم الأدوار من المرحلة الأولى</button></div>
         </aside>
 
         <main class="tenant-floor-design-canvas" aria-label="مساحة تصميم مجموعة الطوابق">
           <div class="tenant-floor-design-canvas-head">
-            <div><h3 id="tenantFloorDesignTitle">لم يبدأ تصميم الأدوار</h3><p id="tenantFloorDesignSubtitle">أنشئ أول مجموعة لتظهر مساحة الصورة.</p></div>
-            <div class="tenant-floor-design-canvas-actions"><button type="button" class="btn ghost" id="tenantFloorDesignSettingsButton" onclick="openTenantFloorDesignDrawer('settings')">تخصيص المجموعة</button><button type="button" class="btn ghost" id="tenantFloorDesignChatButton" onclick="openTenantFloorDesignDrawer('chat')">محادثة التعديل</button></div>
+            <div><h3 id="tenantFloorDesignTitle">لم يبدأ تصميم الأدوار</h3><p id="tenantFloorDesignSubtitle">اختر مجموعة من القائمة لبدء تصميمها.</p></div>
           </div>
-          <div class="tenant-floor-design-context">
-            <div class="tenant-floor-design-context-card"><span>الأدوار التابعة</span><strong id="tenantFloorDesignMembers">غير محدد</strong></div>
-            <div class="tenant-floor-design-context-card"><span>اسم المجموعة</span><strong id="tenantFloorDesignGroupName">لا توجد مجموعة</strong></div>
-            <div class="tenant-floor-design-context-card"><span>حالة الصورة</span><strong id="tenantFloorDesignGroupStatus">لم يبدأ</strong></div>
-            <div class="tenant-floor-design-context-card"><span>الصور المطلوبة</span><strong id="tenantFloorDesignImageCount">لا توجد صور</strong></div>
-          </div>
+          <div class="tenant-floor-design-prompt-actions"><button type="button" class="btn ghost" id="tenantFloorDesignPromptToggle" onclick="toggleTenantFloorDesignPrompt()" disabled>عرض Prompt</button><button type="button" class="btn primary" id="tenantFloorDesignGenerateButton" onclick="generateTenantFloorDesignImage()" disabled>توليد الصورة</button></div>
+          <textarea id="tenantFloorDesignPromptEditor" class="tenant-floor-design-prompt-editor" rows="5" placeholder="سيظهر Prompt المجموعة هنا ويمكنك تعديله قبل التوليد." hidden></textarea>
           <section class="tenant-floor-design-image-card">
             <div class="tenant-floor-design-image-head"><strong>التصور المختار للمجموعة</strong><span id="tenantFloorDesignBadge" class="tenant-floor-design-badge">لم تبدأ</span></div>
-            <div id="tenantFloorDesignImageFrame" class="tenant-floor-design-image-frame"><div id="tenantFloorDesignImageEmpty" class="tenant-floor-design-image-empty">لم يتم توليد صورة لهذه المجموعة بعد.</div><img id="tenantFloorDesignImage" alt="التصور البصري للمجموعة" hidden></div>
+            <div id="tenantFloorDesignImageFrame" class="tenant-floor-design-image-frame"><button type="button" class="tenant-floor-design-image-approve" id="tenantFloorDesignApproveButton" onclick="approveTenantFloorDesignImage()" disabled>اعتماد الصورة</button><div id="tenantFloorDesignImageEmpty" class="tenant-floor-design-image-empty">لم يتم توليد صورة لهذه المجموعة بعد.</div><img id="tenantFloorDesignImage" alt="التصور البصري للمجموعة" hidden></div>
             <div class="tenant-floor-design-image-caption"><div><strong id="tenantFloorDesignImageTitle">لا توجد نتيجة مختارة</strong><p>ستظهر هنا صورة واحدة تمثل كل الأدوار داخل المجموعة.</p></div><button type="button" class="btn ghost" id="tenantFloorDesignPreviewButton" onclick="previewTenantFloorDesignImage()" disabled>معاينة كاملة</button></div>
           </section>
-          <section class="tenant-floor-design-candidates"><h4>نتائج المجموعة</h4><p id="tenantFloorDesignCandidatesEmpty" class="tenant-floor-design-candidate-empty">لا توجد نتائج بعد. ابدأ توليد صورة لهذه المجموعة.</p></section>
-          <div class="tenant-floor-design-footer"><p id="tenantFloorDesignActionStatus">حدد الأدوار من زر تنظيم تشابه الأدوار لبدء مجموعة جديدة.</p><div class="tenant-floor-design-footer-actions"><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(-1)">السابق</button><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(1)">التالي</button><button type="button" class="btn primary" id="tenantFloorDesignGenerateButton" onclick="generateTenantFloorDesignImage()" disabled>توليد الصورة</button><button type="button" class="btn primary" id="tenantFloorDesignApproveButton" onclick="approveTenantFloorDesignImage()" disabled>اعتماد الصورة</button></div></div>
+          <section class="tenant-floor-design-chat-panel"><div class="tenant-floor-design-chat-head"><div><h4>محادثة التعديل</h4><p>اكتب التعديلات المطلوبة على الصورة الحالية.</p></div></div><div id="tenantFloorDesignChatThread" class="tenant-floor-design-chat-thread"><div class="tenant-floor-design-chat-message">لم تبدأ محادثة تعديل لهذه المجموعة.</div></div><textarea id="tenantFloorDesignChatInput" rows="4" placeholder="اكتب التعديل المطلوب"></textarea><button type="button" class="btn ghost" onclick="sendTenantFloorDesignChat()">حفظ التعديل</button></section>
+          <div class="tenant-floor-design-footer"><p id="tenantFloorDesignActionStatus">اختر مجموعة من القائمة.</p><div class="tenant-floor-design-footer-actions"><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(-1)">السابق</button><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(1)">التالي</button></div></div>
         </main>
       </div>
 
@@ -4013,9 +4021,7 @@
           <div class="tenant-floor-design-modal-body"><div class="tenant-floor-design-field"><label for="tenantFloorGroupName">اسم المجموعة</label><input id="tenantFloorGroupName" type="text" placeholder="مثال: الأدوار السكنية المتكررة"></div><div class="tenant-floor-design-field"><label for="tenantFloorGroupDescription">وصف الأدوار وتعليمات التصميم</label><textarea id="tenantFloorGroupDescription" rows="4" placeholder="اكتب ما يميز هذه الأدوار وما يجب أن يعرفه AI عند تصميمها."></textarea></div><div class="tenant-floor-design-field"><label>حدد الأدوار المتشابهة</label><div id="tenantFloorGroupGrid" class="tenant-floor-design-chip-grid"></div></div><div class="tenant-floor-design-modal-preview"><span>الصيغة التي ستظهر في الشريط</span><strong id="tenantFloorGroupRangePreview">لم تحدد أدوارًا بعد</strong></div><div class="tenant-floor-design-modal-footer"><button type="button" class="btn ghost" onclick="closeTenantFloorGroupModal()">إلغاء</button><button type="button" class="btn primary" onclick="saveTenantFloorGroup()">حفظ المجموعة</button></div></div>
         </div>
       </div>
-      <div id="tenantFloorDesignDrawerBackdrop" class="tenant-floor-design-drawer-backdrop" hidden onclick="closeTenantFloorDesignDrawer()"></div>
-      <aside id="tenantFloorDesignSettingsDrawer" class="tenant-floor-design-drawer" hidden aria-label="تخصيص مجموعة الطوابق"><div class="tenant-floor-design-drawer-head"><div><h3>تخصيص المجموعة</h3><p id="tenantFloorDesignSettingsLabel">المجموعة الحالية</p></div><button type="button" class="btn ghost" onclick="closeTenantFloorDesignDrawer()">إغلاق</button></div><div class="tenant-floor-design-drawer-body"><div class="tenant-floor-design-field"><label for="tenantFloorDesignBrief">تعليمات العميل لهذه المجموعة</label><textarea id="tenantFloorDesignBrief" rows="6" placeholder="اكتب ما يجب الحفاظ عليه أو تغييره في الصورة."></textarea></div><div class="tenant-floor-design-field"><label for="tenantFloorDesignStyle">الأسلوب البصري</label><select id="tenantFloorDesignStyle"><option value="">غير محدد</option><option>معاصر هادئ</option><option>فاخر</option><option>عملي وواضح</option><option>مستوحى من الهوية المحلية</option></select></div><button type="button" class="btn primary" onclick="saveTenantFloorDesignCustomization()">حفظ تخصيص المجموعة</button></div></aside>
-      <aside id="tenantFloorDesignChatDrawer" class="tenant-floor-design-drawer" hidden aria-label="محادثة تعديل مجموعة الطوابق"><div class="tenant-floor-design-drawer-head"><div><h3>محادثة التعديل</h3><p id="tenantFloorDesignChatLabel">المجموعة الحالية</p></div><button type="button" class="btn ghost" onclick="closeTenantFloorDesignDrawer()">إغلاق</button></div><div class="tenant-floor-design-drawer-body"><div id="tenantFloorDesignChatThread"><div class="tenant-floor-design-chat-message">اكتب تعديلًا واضحًا على الصورة الحالية لهذه المجموعة.</div></div><textarea id="tenantFloorDesignChatInput" rows="5" placeholder="اكتب التعديل المطلوب"></textarea><button type="button" class="btn primary" onclick="sendTenantFloorDesignChat()">إرسال التعديل</button></div></aside>
+
     </section>
 
     <!-- Cover image generation -->
@@ -8165,6 +8171,7 @@
         imageUrl: typeof group?.imageUrl === 'string' ? group.imageUrl : '',
         approvedImageUrl: typeof group?.approvedImageUrl === 'string' ? group.approvedImageUrl : '',
         prompt: typeof group?.prompt === 'string' ? group.prompt.slice(0, 12000) : '',
+        generatedPrompt: typeof group?.generatedPrompt === 'string' ? group.generatedPrompt.slice(0, 12000) : '',
         style: typeof group?.style === 'string' ? group.style.slice(0, 120) : '',
         chat: Array.isArray(group?.chat) ? group.chat.filter(item => item && typeof item.text === 'string').slice(-40).map(item => ({ role: item.role === 'assistant' ? 'assistant' : 'user', text: item.text.slice(0, 4000) })) : []
       })).filter(group => group.floorNumbers.length).filter(group => group.name) : [];
@@ -8260,12 +8267,30 @@
       });
       host.innerHTML = visible.length ? visible.map(group => {
         const status = TENANT_FLOOR_DESIGN_STATUS_LABELS[group.status] || 'لم يبدأ';
-        return `<button type="button" class="tenant-floor-design-group-row${group.id === tenantFloorDesignActiveGroupId ? ' active' : ''}" data-floor-design-group-id="${escapeHtml(group.id)}"><span><span class="tenant-floor-design-group-range">${escapeHtml(formatTenantFloorDesignNumbers(group.floorNumbers))}</span><span class="tenant-floor-design-group-name">${escapeHtml(group.name)}</span><span class="tenant-floor-design-group-meta">${group.unassigned ? 'حددها في مجموعة' : `${group.floorNumbers.length} أدوار، صورة واحدة`}</span></span><span class="tenant-floor-design-group-status ${group.status}">${escapeHtml(status)}</span></button>`;
+        const range = formatTenantFloorDesignNumbers(group.floorNumbers);
+        const floorLabel = group.floorNumbers.length === 1 ? `الدور ${range}` : `الأدوار ${range}`;
+        return `<button type="button" class="tenant-floor-design-group-row${group.id === tenantFloorDesignActiveGroupId ? ' active' : ''}" data-floor-design-group-id="${escapeHtml(group.id)}"><span><span class="tenant-floor-design-group-range">${escapeHtml(floorLabel)}</span><span class="tenant-floor-design-group-name">${escapeHtml(group.name)}</span></span><span class="tenant-floor-design-group-status ${group.status}">${escapeHtml(status)}</span></button>`;
       }).join('') : '<p class="tenant-hint">لا توجد مجموعات مطابقة للبحث.</p>';
       host.querySelectorAll('[data-floor-design-group-id]').forEach(button => button.addEventListener('click', () => selectTenantFloorDesignGroup(button.dataset.floorDesignGroupId)));
       const countLabel = document.getElementById('tenantFloorDesignGroupCount');
       if (countLabel) countLabel.textContent = `${visible.length} من ${groups.length} مجموعات`;
       updateTenantFloorDesignProgress();
+    }
+
+    function setTenantFloorDesignText(id, value) {
+      const element = document.getElementById(id);
+      if (element) element.textContent = value;
+    }
+
+    function toggleTenantFloorDesignPrompt() {
+      const editor = document.getElementById('tenantFloorDesignPromptEditor');
+      const button = document.getElementById('tenantFloorDesignPromptToggle');
+      const group = tenantFloorDesignActiveGroup();
+      if (!editor || !button || !group || group.unassigned) return;
+      if (!editor.value) editor.value = group.generatedPrompt || buildTenantFloorDesignPrompt(group);
+      editor.hidden = !editor.hidden;
+      button.textContent = editor.hidden ? 'عرض Prompt' : 'إخفاء Prompt';
+      if (!editor.hidden) editor.focus();
     }
 
     function renderTenantFloorDesignActiveGroup() {
@@ -8277,66 +8302,64 @@
       const empty = document.getElementById('tenantFloorDesignImageEmpty');
       const generate = document.getElementById('tenantFloorDesignGenerateButton');
       const approve = document.getElementById('tenantFloorDesignApproveButton');
-      const settings = document.getElementById('tenantFloorDesignSettingsButton');
-      const chat = document.getElementById('tenantFloorDesignChatButton');
       const preview = document.getElementById('tenantFloorDesignPreviewButton');
-      const pageStatus = document.getElementById('tenantFloorDesignStatus');
-      if (pageStatus && tenantFloorDesignState) pageStatus.textContent = `${tenantFloorDesignState.groups.length} مجموعات، ${tenantFloorDesignState.floorCount} أدوار`;
+      const promptToggle = document.getElementById('tenantFloorDesignPromptToggle');
+      const promptEditor = document.getElementById('tenantFloorDesignPromptEditor');
+      const imageCard = image?.closest('.tenant-floor-design-image-card');
+      const chatInput = document.getElementById('tenantFloorDesignChatInput');
       if (!group) {
         title.textContent = 'لم يبدأ تصميم الأدوار';
-        subtitle.textContent = 'أنشئ أول مجموعة لتظهر مساحة الصورة.';
-        document.getElementById('tenantFloorDesignMembers').textContent = 'غير محدد';
-        document.getElementById('tenantFloorDesignGroupName').textContent = 'لا توجد مجموعة';
-        document.getElementById('tenantFloorDesignGroupStatus').textContent = 'لم يبدأ';
-        document.getElementById('tenantFloorDesignImageCount').textContent = 'لا توجد صور';
+        subtitle.textContent = 'اختر مجموعة من القائمة لبدء تصميمها.';
         badge.textContent = 'لم تبدأ';
         badge.className = 'tenant-floor-design-badge';
         image.hidden = true;
         empty.hidden = false;
-        empty.textContent = 'أنشئ مجموعة أدوار حتى تبدأ مساحة التصميم.';
-        document.getElementById('tenantFloorDesignImageTitle').textContent = 'لا توجد نتيجة مختارة';
-        document.getElementById('tenantFloorDesignCandidatesEmpty').textContent = 'لا توجد مجموعة نشطة بعد.';
+        empty.textContent = 'لا توجد مجموعة نشطة بعد.';
+        setTenantFloorDesignText('tenantFloorDesignImageTitle', 'لا توجد نتيجة مختارة');
+        setTenantFloorDesignText('tenantFloorDesignActionStatus', 'اختر مجموعة من القائمة.');
         generate.disabled = true;
         approve.disabled = true;
-        settings.disabled = true;
-        chat.disabled = true;
         preview.disabled = true;
-        document.getElementById('tenantFloorDesignActionStatus').textContent = 'أدخل عدد الأدوار ثم أنشئ أول مجموعة.';
+        promptToggle.disabled = true;
+        promptEditor.hidden = true;
+        chatInput.disabled = true;
+        imageCard?.classList.remove('approved');
+        renderTenantFloorDesignChat(null);
         renderTenantFloorDesignGroupList();
         return;
       }
       const status = TENANT_FLOOR_DESIGN_STATUS_LABELS[group.status] || 'لم يبدأ';
       const range = formatTenantFloorDesignNumbers(group.floorNumbers);
       const imageUrl = group.approvedImageUrl || group.imageUrl || '';
-      title.textContent = group.unassigned ? 'نظم الأدوار غير المصنفة' : `الأدوار ${range}`;
-      subtitle.textContent = group.unassigned ? 'حدد أدوارًا متشابهة لإنشاء مجموعة وصورة واحدة لها.' : `${group.name}، صورة واحدة تمثل ${group.floorNumbers.length} أدوار.`;
-      document.getElementById('tenantFloorDesignMembers').textContent = range || 'غير محدد';
-      document.getElementById('tenantFloorDesignGroupName').textContent = group.name;
-      document.getElementById('tenantFloorDesignGroupStatus').textContent = status;
-      document.getElementById('tenantFloorDesignImageCount').textContent = imageUrl ? 'صورة واحدة' : 'لم تولد بعد';
-      document.getElementById('tenantFloorDesignSettingsLabel').textContent = `${group.name} (${range})`;
-      document.getElementById('tenantFloorDesignChatLabel').textContent = `${group.name} (${range})`;
+      const titleText = group.unassigned ? 'أدوار غير منظمة' : group.floorNumbers.length === 1 ? `الدور ${range}` : group.name;
+      title.textContent = titleText;
+      subtitle.textContent = group.unassigned ? 'نظم هذه الأدوار في مجموعة قبل تصميمها.' : group.floorNumbers.length === 1 ? `صورة واحدة للدور ${range}.` : `الأدوار ${range}`;
       badge.textContent = status;
       badge.className = `tenant-floor-design-badge${group.status === 'approved' ? ' approved' : group.status === 'review' ? ' review' : ''}`;
+      imageCard?.classList.toggle('approved', group.status === 'approved' || Boolean(group.approvedImageUrl));
       if (imageUrl) {
         image.src = imageUrl;
-        image.alt = `التصور البصري لمجموعة الأدوار ${range}`;
+        image.alt = `التصور البصري ${titleText}`;
         image.hidden = false;
         empty.hidden = true;
-        document.getElementById('tenantFloorDesignImageTitle').textContent = `الصورة المعتمدة للمجموعة ${range}`;
+        setTenantFloorDesignText('tenantFloorDesignImageTitle', `الصورة المختارة لـ ${titleText}`);
       } else {
         image.hidden = true;
         empty.hidden = false;
         empty.textContent = group.unassigned ? 'هذه الأدوار لم تدخل في مجموعة بعد.' : 'لم يتم توليد صورة لهذه المجموعة بعد.';
-        document.getElementById('tenantFloorDesignImageTitle').textContent = 'لا توجد نتيجة مختارة';
+        setTenantFloorDesignText('tenantFloorDesignImageTitle', 'لا توجد نتيجة مختارة');
       }
-      document.getElementById('tenantFloorDesignCandidatesEmpty').textContent = group.unassigned ? 'صنّف الأدوار أولًا، ثم ابدأ توليد الصورة.' : 'هذه الصفحة تولد صورة واحدة لكل مجموعة.';
       generate.disabled = Boolean(group.unassigned);
       approve.disabled = Boolean(group.unassigned || !group.imageUrl);
-      settings.disabled = Boolean(group.unassigned);
-      chat.disabled = Boolean(group.unassigned);
       preview.disabled = !imageUrl;
-      document.getElementById('tenantFloorDesignActionStatus').textContent = group.unassigned ? 'حدد الأدوار من زر تنظيم تشابه الأدوار لبدء مجموعة جديدة.' : group.status === 'approved' ? 'تم اعتماد صورة واحدة لهذه المجموعة.' : 'راجع الصورة ثم اعتمدها أو أعد التوليد.';
+      promptToggle.disabled = Boolean(group.unassigned);
+      if (promptEditor && document.activeElement !== promptEditor) {
+        promptEditor.value = group.generatedPrompt || buildTenantFloorDesignPrompt(group);
+        promptEditor.hidden = true;
+        promptToggle.textContent = 'عرض Prompt';
+      }
+      chatInput.disabled = Boolean(group.unassigned);
+      setTenantFloorDesignText('tenantFloorDesignActionStatus', group.unassigned ? 'نظم الأدوار أولًا من المرحلة الأولى.' : group.status === 'approved' ? 'تم اعتماد الصورة لهذه المجموعة.' : 'عدّل الـ Prompt أو اكتب تعديلًا ثم ولّد الصورة.');
       renderTenantFloorDesignChat(group);
       renderTenantFloorDesignGroupList();
     }
@@ -8400,10 +8423,11 @@
       if (editing) {
         editing.name = name;
         editing.prompt = description;
+        editing.generatedPrompt = '';
         editing.floorNumbers = [...tenantFloorDesignDraftMembers];
         editing.status = 'pending';
       } else {
-        tenantFloorDesignState.groups.push({ id: nextId, name, floorNumbers: [...tenantFloorDesignDraftMembers], type: 'غير محدد', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: description, style: '', chat: [] });
+        tenantFloorDesignState.groups.push({ id: nextId, name, floorNumbers: [...tenantFloorDesignDraftMembers], type: 'غير محدد', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: description, generatedPrompt: '', style: '', chat: [] });
       }
       tenantFloorDesignState.groups = tenantFloorDesignState.groups.filter(group => group.floorNumbers.length);
       tenantFloorDesignActiveGroupId = nextId;
@@ -8692,7 +8716,7 @@
       renderTenantFloorDesignActiveGroup();
       try {
         const response = await api('POST', '/api/floor-design/generate', {
-          prompt: buildTenantFloorDesignPrompt(group),
+          prompt: group.generatedPrompt || buildTenantFloorDesignPrompt(group),
           referenceImage: group.referenceImage || null,
           approvedFinancialArea: approvedInputs.approvedFinancialArea,
           approvedFloorCount: approvedInputs.approvedFloorCount
@@ -8783,6 +8807,12 @@
       if (document.body.dataset.floorDesignBound === '1') return;
       document.body.dataset.floorDesignBound = '1';
       document.querySelectorAll('[data-floor-design-stage-target]').forEach(button => button.addEventListener('click', () => showTenantFloorDesignStage(button.dataset.floorDesignStageTarget)));
+      document.getElementById('tenantFloorDesignPromptEditor')?.addEventListener('input', event => {
+        const group = tenantFloorDesignActiveGroup();
+        if (!group || group.unassigned) return;
+        group.generatedPrompt = event.target.value.slice(0, 12000);
+        markTenantFloorDesignDirty();
+      });
       document.getElementById('tenantFloorDesignSearch')?.addEventListener('input', renderTenantFloorDesignGroupList);
       document.querySelectorAll('[data-floor-design-filter]').forEach(button => button.addEventListener('click', () => {
         tenantFloorDesignFilter = button.dataset.floorDesignFilter;
