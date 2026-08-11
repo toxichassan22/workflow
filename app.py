@@ -5849,8 +5849,8 @@ def render_regulation_table_pages(table_pages, dpi=200):
     return parts, warnings
 
 PDF_VISION_DPI = int(os.environ.get('PDF_VISION_DPI', '300'))
-PDF_VISION_MAX_PAGES = int(os.environ.get('PDF_VISION_MAX_PAGES', '20'))
-PDF_VISION_MAX_EDGE = int(os.environ.get('PDF_VISION_MAX_EDGE', '2000'))
+PDF_VISION_MAX_PAGES = int(os.environ.get('PDF_VISION_MAX_PAGES', '40'))
+PDF_VISION_MAX_EDGE = int(os.environ.get('PDF_VISION_MAX_EDGE', '3000'))
 PDF_VISION_JPEG_QUALITY = int(os.environ.get('PDF_VISION_JPEG_QUALITY', '85'))
 PDF_VISION_MAX_TOTAL_BYTES = int(os.environ.get('PDF_VISION_MAX_TOTAL_BYTES', str(12 * 1024 * 1024)))
 # The land prompt asks for a multi-paragraph Arabic narrative, sourced building rules and a full
@@ -5932,16 +5932,22 @@ def _decode_data_uri(data_uri):
 
 
 PDF_PAGE_SELECTION_TERMS = (
-    ('إحداثيات التنظيم', 120), ('جدول إحداثيات', 110), ('إحداثيات', 80),
-    ('الشرقيات', 60), ('الشماليات', 60), ('نقاط الحدود', 45),
-    ('ارتدادات', 25), ('مواقف', 25), ('مداخل', 25), ('مخارج', 25),
-    ('coordinates', 60), ('easting', 50), ('northing', 50),
+    ('إحداثيات التنظيم', 160), ('جدول إحداثيات', 145), ('إحداثيات', 100),
+    ('الشرقيات', 75), ('الشماليات', 75), ('نقاط الحدود', 60),
+    ('بموجب التنظيم', 150), ('الاتجاهات', 90), ('حدود', 55), ('الشوارع', 45), ('واجهات', 45),
+    ('ارتدادات', 35), ('مواقف', 35), ('مداخل', 35), ('مخارج', 35),
+    ('coordinates', 70), ('easting', 60), ('northing', 60),
 )
 
 
 def _rank_pdf_page(raw_text):
     text = str(raw_text or '').lower().replace('ـ', '')
-    return sum(weight for term, weight in PDF_PAGE_SELECTION_TERMS if term.lower() in text)
+    score = 0
+    for term, weight in PDF_PAGE_SELECTION_TERMS:
+        normalized = term.lower()
+        if normalized in text or normalized[::-1] in text:
+            score += weight
+    return score
 
 
 def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pages=PDF_VISION_MAX_PAGES,
@@ -5973,14 +5979,21 @@ def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pa
     document = fitz.open(stream=pdf_bytes, filetype='pdf')
     try:
         page_count = len(document)
+        single_page_document = page_count <= 2
         limit = min(page_count, max(1, int(max_pages)))
         if page_count <= limit:
             selected_pages = list(range(page_count))
         else:
-            ranked_pages = sorted(
-                ((score, index) for index, page in enumerate(document) if (score := _rank_pdf_page(page.get_text())) > 0),
-                key=lambda item: (-item[0], item[1])
-            )
+            scored_pages = []
+            for index, page in enumerate(document):
+                score = _rank_pdf_page(page.get_text())
+                try:
+                    score += min(3, len(page.find_tables().tables)) * 55
+                except Exception:
+                    pass
+                if score > 0:
+                    scored_pages.append((score, index))
+            ranked_pages = sorted(scored_pages, key=lambda item: (-item[0], item[1]))
             selected_pages = [index for _, index in ranked_pages[:limit]]
             for index in range(page_count):
                 if len(selected_pages) >= limit:
@@ -5997,8 +6010,12 @@ def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pa
                 scale = min(dpi_scale, float(edge_cap) / max(rect.width, rect.height, 1.0))
                 pixmap = document[page_index].get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
                 try:
-                    blob = pixmap.tobytes('jpeg', jpg_quality=quality)
-                    mime = 'image/jpeg'
+                    if single_page_document and edge_cap == PDF_VISION_MAX_EDGE:
+                        blob = pixmap.tobytes('png')
+                        mime = 'image/png'
+                    else:
+                        blob = pixmap.tobytes('jpeg', jpg_quality=quality)
+                        mime = 'image/jpeg'
                 except Exception:
                     blob = pixmap.tobytes('png')
                     mime = 'image/png'
@@ -6353,7 +6370,7 @@ def api_extract_croquis():
             "أعد JSON فقط بدون Markdown. لا تخترع قيمة غير مقروءة؛ استخدم null أو نصًا فارغًا، وسجل التعارضات بدل اختيار قيمة من نفسك.\n"
             "أولوية المصادر إلزامية: جدول التنظيم الرسمي أولًا، ثم أي مرجع تنظيمي رسمي، ثم الكروكي، ثم رخصة البناء. إذا ظهرت جداول متعددة للإحداثيات أو الاتجاهات، استخدم جدول التنظيم واربط كل قيمة بـ source=regulation_table، وسجل البدائل والتعارضات في conflicts.\n"
             "إذا وجدت أكثر من قطعة أرض، أعد كل قطعة داخل parcels منفصلة ولا تدمج مساحاتها أو حدودها.\n"
-            "استخرج جدول الاتجاهات الأربعة بشكل مستقل من جدول التنظيم أولًا، وليس من وصف عام في الرخصة أو الكروكي.\n"
+            "استخرج جدول الاتجاهات الأربعة بشكل مستقل من الجدول الذي يوضح الحدود «بموجب التنظيم» أولًا، وليس من وصف عام في الرخصة أو الكروكي. اقرأ أسماء الشوارع وعروضها وأطوال الحدود والواجهات من صورة الجدول.\n"
             "بالنسبة للإحداثيات، ابحث بصريًا داخل صور الصفحات عن الجدول الذي يحمل العنوان «إحداثيات التنظيم» أو «جدول إحداثيات التنظيم» فقط. لا تستخدم أي جدول آخر أو أي نص مستخرج بديلًا عنه.\n"
             "إذا لم تجد عنوان «إحداثيات التنظيم» أو لم يكن الجدول مقروءًا بوضوح، أعد survey_coordinates فارغًا وسجل تعارضًا يوضح أن جدول إحداثيات التنظيم غير موجود أو غير مقروء، ولا تستنتج الإحداثيات من الحدود أو الاتجاهات.\n"
             "استخرج من جدول «إحداثيات التنظيم» كما هو: رقم القطعة، رقم النقطة، الشرقيات، الشماليات، بدون تحويل إلى latitude/longitude أو حساب أي نقطة.\n"

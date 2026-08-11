@@ -376,6 +376,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         # silently picking a value, and they surface through the narrative summary.
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn('"conflicts": [{"field": "", "description": ""}]', app_source)
+        self.assertIn('single_page_document', app_source)
+        self.assertIn('إحداثيات التنظيم', app_source)
+        self.assertIn('بموجب التنظيم', app_source)
         self.assertNotIn('"severity": "high|medium|low"', app_source)
 
     def test_project_draft_list_returns_metadata_without_payload(self):
