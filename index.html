@@ -8250,8 +8250,7 @@
     function tenantFloorDesignAllGroups() {
       if (!tenantFloorDesignState) return [];
       const groups = [...tenantFloorDesignState.groups];
-      const unassigned = tenantFloorDesignUnassignedNumbers();
-      if (unassigned.length) groups.push({ id: 'unassigned', name: 'أدوار غير منظمة', floorNumbers: unassigned, type: 'تحتاج تصنيفًا', status: 'unassigned', imageUrl: '', approvedImageUrl: '', prompt: '', style: '', chat: [], unassigned: true });
+      tenantFloorDesignUnassignedNumbers().forEach(number => groups.push({ id: `unassigned-${number}`, name: `الدور ${number}`, floorNumbers: [number], type: 'دور مستقل', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: '', generatedPrompt: '', negativePrompt: '', style: '', chat: [], unassigned: true }));
       return groups;
     }
 
@@ -8292,7 +8291,8 @@
         const status = TENANT_FLOOR_DESIGN_STATUS_LABELS[group.status] || 'لم يبدأ';
         const range = formatTenantFloorDesignNumbers(group.floorNumbers);
         const floorLabel = group.floorNumbers.length === 1 ? `الدور ${range}` : `الأدوار ${range}`;
-        return `<button type="button" class="tenant-floor-design-group-row${group.id === tenantFloorDesignActiveGroupId ? ' active' : ''}" data-floor-design-group-id="${escapeHtml(group.id)}"><span><span class="tenant-floor-design-group-range">${escapeHtml(floorLabel)}</span><span class="tenant-floor-design-group-name">${escapeHtml(group.name)}</span></span><span class="tenant-floor-design-group-status ${group.status}">${escapeHtml(status)}</span></button>`;
+        const nameMarkup = group.floorNumbers.length === 1 ? '' : `<span class="tenant-floor-design-group-name">${escapeHtml(group.name)}</span>`;
+        return `<button type="button" class="tenant-floor-design-group-row${group.id === tenantFloorDesignActiveGroupId ? ' active' : ''}" data-floor-design-group-id="${escapeHtml(group.id)}"><span><span class="tenant-floor-design-group-range">${escapeHtml(floorLabel)}</span>${nameMarkup}</span><span class="tenant-floor-design-group-status ${group.status}">${escapeHtml(status)}</span></button>`;
       }).join('') : '<p class="tenant-hint">لا توجد مجموعات مطابقة للبحث.</p>';
       host.querySelectorAll('[data-floor-design-group-id]').forEach(button => button.addEventListener('click', () => selectTenantFloorDesignGroup(button.dataset.floorDesignGroupId)));
       const countLabel = document.getElementById('tenantFloorDesignGroupCount');
@@ -8309,7 +8309,7 @@
       const editor = document.getElementById('tenantFloorDesignPromptEditor');
       const button = document.getElementById('tenantFloorDesignPromptToggle');
       const group = tenantFloorDesignActiveGroup();
-      if (!editor || !button || !group || group.unassigned) return;
+      if (!editor || !button || !group) return;
       if (!group.generatedPrompt) {
         if (!tenantFloorDesignState?.analysisApproved) {
           toast('اعتمد تحليل البيانات قبل إنشاء Prompt المخطط.');
@@ -8416,9 +8416,16 @@
     }
 
     function selectTenantFloorDesignGroup(groupId) {
+      const selected = tenantFloorDesignAllGroups().find(group => group.id === groupId);
+      if (selected?.unassigned && tenantFloorDesignState) {
+        const individual = { ...selected };
+        delete individual.unassigned;
+        tenantFloorDesignState.groups.push(individual);
+        markTenantFloorDesignDirty();
+      }
       tenantFloorDesignActiveGroupId = groupId;
-      if (groupId === 'unassigned') openTenantFloorGroupModal('');
       renderTenantFloorDesignActiveGroup();
+      renderTenantFloorDesignGroupList();
     }
 
     function renderTenantFloorGroupGrid() {
@@ -8639,7 +8646,7 @@
       if (!readiness.approvedArea.valid) missing.push('المساحة المعتمدة للدراسة المالية');
       if (!readiness.components.valid) missing.push('مكونات المشروع');
       if (!readiness.basement.valid && readiness.basement.required) missing.push('مساحة البدروم');
-      if (!tenantFloorDesignState?.groups?.length) missing.push('تنظيم مجموعات الأدوار');
+      if (!tenantFloorDesignState?.floorCount) missing.push('بدء تخصيص الأدوار');
       if (!missing.length) {
         summary.textContent = tenantFloorDesignState?.analysis ? 'تم تجهيز التحليل للمراجعة.' : 'كل البيانات المطلوبة مكتملة ويمكن بدء التحليل.';
         list.innerHTML = '<div class="tenant-floor-design-readiness-row"><strong>حالة البيانات</strong><span class="complete">مكتملة</span></div>';
@@ -8874,7 +8881,7 @@
 
     async function generateTenantFloorDesignImage() {
       const group = tenantFloorDesignActiveGroup();
-      if (!group || group.unassigned) return false;
+      if (!group) return false;
       if (!tenantFloorDesignState?.analysisApproved) {
         toast('اعتمد تحليل البيانات قبل توليد المخطط.');
         showTenantFloorDesignStage('analysis');
@@ -8966,7 +8973,7 @@
       const group = tenantFloorDesignActiveGroup();
       const input = document.getElementById('tenantFloorDesignChatInput');
       const text = input?.value.trim();
-      if (!group || group.unassigned || !text) return;
+      if (!group || !text) return;
       if (!group.imageUrl) {
         toast('ولّد الصورة الأولى للمجموعة قبل إرسال تعديل عليها.');
         return;

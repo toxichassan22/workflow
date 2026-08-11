@@ -1329,6 +1329,15 @@ def _floor_design_groups(raw_state):
             'description': _floor_design_text(group.get('prompt'), 12000),
             'components': group.get('components') if isinstance(group.get('components'), list) else [],
         })
+    assigned = {floor for group in output for floor in group['floorNumbers']}
+    try:
+        floor_count = int(state.get('floorCount') or 0)
+        first_floor = int(state.get('firstFloor') or 1)
+    except (TypeError, ValueError):
+        floor_count, first_floor = 0, 1
+    for floor in range(first_floor, first_floor + max(0, min(floor_count, 500))):
+        if floor not in assigned:
+            output.append({'id': f'unassigned-{floor}', 'name': f'الدور {floor}', 'floorNumbers': [floor], 'description': '', 'components': []})
     return output
 
 
