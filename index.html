@@ -4627,6 +4627,7 @@
     let loaderHideTimer = null;
     let loaderProgressValue = 0;
     let loaderProgressStartValue = 0;
+    let loaderProgressMax = 92;
     const inlineLoaderTimers = new WeakMap();
 
     function clampLoaderProgress(pct) {
@@ -4660,18 +4661,19 @@
       loaderProgressStartValue = loaderProgressValue;
       loaderProgressTimer = setInterval(() => {
         const elapsed = Date.now() - startedAt;
-        const estimated = Math.min(92, loaderProgressStartValue + Math.max(1, Math.floor(elapsed / 900)));
+        const estimated = Math.min(loaderProgressMax, loaderProgressStartValue + Math.max(1, Math.floor(elapsed / 900)));
         if (estimated > loaderProgressValue) renderLoaderProgress(estimated);
       }, 700);
     }
 
-    function showLoader(title, text, pct) {
+    function showLoader(title, text, pct, options = {}) {
       const loader = document.getElementById('globalLoader');
       if (!loader) return;
       clearTimeout(loaderHideTimer);
       document.getElementById('globalLoaderTitle').textContent = title || 'جاري التحميل...';
       document.getElementById('globalLoaderText').textContent = text || '';
       document.getElementById('globalLoaderProgress').style.display = 'block';
+      loaderProgressMax = Number.isFinite(Number(options.maxProgress)) ? Math.max(1, Math.min(99, Number(options.maxProgress))) : 92;
       renderLoaderProgress(pct === undefined || pct === null ? 5 : pct, text || 'جاري التحضير...');
       loader.style.display = 'flex';
       startLoaderProgressTimer();
@@ -4693,6 +4695,7 @@
       clearTimeout(loaderHideTimer);
       loaderHideTimer = setTimeout(() => {
         loader.style.display = 'none';
+        loaderProgressMax = 92;
         renderLoaderProgress(0, 'جاري التحضير...');
       }, 420);
     }
@@ -9300,17 +9303,17 @@
       const approvedInputs = await requireTenantApprovedBuildInputs();
       if (!approvedInputs) return false;
       let generated = false;
-      showLoader('جاري توليد المخطط 2D', 'جاري تجهيز البيانات وإرسال الطلب...', 5);
+      showLoader('جاري توليد المخطط 2D', 'جاري تجهيز البيانات وإرسال الطلب...', 5, { maxProgress: 78 });
       group.status = 'generating';
       renderTenantFloorDesignActiveGroup();
       try {
-        updateLoaderProgress(20, 'تم تجهيز بيانات المجموعة...');
-        const response = await api('POST', '/api/floor-design/generate', {
+        updateLoaderProgress(20, 'تم تجهيز بيانات المجموعة، في انتظار مزود الصور...');
+        const response = await apiWithTimeout('POST', '/api/floor-design/generate', {
           prompt: group.generatedPrompt || buildTenantFloorDesignPrompt(group),
           referenceImage: group.referenceImage || null,
           approvedFinancialArea: approvedInputs.approvedFinancialArea,
           approvedFloorCount: approvedInputs.approvedFloorCount
-        });
+        }, 330000, 'انتهت مهلة توليد الصورة؛ تم إيقاف الحالة ويمكنك إعادة المحاولة.');
         updateLoaderProgress(88, 'تم استلام الصورة، جاري حفظها...');
         if (!response?.success || !response.image) throw new Error(response?.error || 'تعذر توليد الصورة');
         group.imageUrl = response.image;
