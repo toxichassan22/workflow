@@ -8110,7 +8110,7 @@
           }
 
           // Add geocode button and auto-geocode on blur
-          if (f.fieldKey === 'location_address' && addressInput) {
+          if (f.fieldKey === 'location_address' && addressInput && sectionKey === 'location') {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'btn ghost';
@@ -8143,6 +8143,13 @@
           mirrorField.appendChild(mirrorLabel);
           mirrorField.appendChild(mirrorInput);
           mirrorField.appendChild(mirrorStatus);
+          const mirrorAnalyzeButton = document.createElement('button');
+          mirrorAnalyzeButton.type = 'button';
+          mirrorAnalyzeButton.className = 'btn ghost';
+          mirrorAnalyzeButton.textContent = 'تحليل رابط الموقع';
+          mirrorAnalyzeButton.style.marginTop = '8px';
+          mirrorAnalyzeButton.onclick = () => analyzeTenantSite();
+          mirrorField.appendChild(mirrorAnalyzeButton);
           sectionDiv.appendChild(mirrorField);
           syncLocationAddressMirror(tenantProjectData.location_address || '');
         }

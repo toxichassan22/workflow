@@ -744,6 +744,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('locationAddressMirror', index_source)
         self.assertIn('geocodeTenantLocationLink', index_source)
+        self.assertIn("mirrorAnalyzeButton.textContent = 'تحليل رابط الموقع'", index_source)
+        self.assertIn("sectionKey === 'location'", index_source)
         self.assertIn('locationLat: projectContext.location_lat', index_source)
 
     def test_uploaded_land_documents_are_restored_as_server_metadata_after_refresh(self):
