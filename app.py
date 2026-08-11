@@ -5920,9 +5920,22 @@ def _decode_data_uri(data_uri):
         return None
 
 
+PDF_PAGE_SELECTION_TERMS = (
+    ('إحداثيات التنظيم', 120), ('جدول إحداثيات', 110), ('إحداثيات', 80),
+    ('الشرقيات', 60), ('الشماليات', 60), ('نقاط الحدود', 45),
+    ('ارتدادات', 25), ('مواقف', 25), ('مداخل', 25), ('مخارج', 25),
+    ('coordinates', 60), ('easting', 50), ('northing', 50),
+)
+
+
+def _rank_pdf_page(raw_text):
+    text = str(raw_text or '').lower().replace('ـ', '')
+    return sum(weight for term, weight in PDF_PAGE_SELECTION_TERMS if term.lower() in text)
+
+
 def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pages=PDF_VISION_MAX_PAGES,
                                  budget=PDF_VISION_MAX_TOTAL_BYTES):
-    """Render PDF pages to image data URIs for vision models without OCR/text extraction.
+    """Render relevant PDF pages to image data URIs for vision models without OCR/text extraction.
 
     Raw 300 DPI PNG pages made multi-page deed books into a request so large that the
     provider's proxy dropped it with a bare non-JSON 502. Each page is therefore capped to
@@ -5950,11 +5963,25 @@ def _render_pdf_pages_for_vision(file_data, filename, dpi=PDF_VISION_DPI, max_pa
     try:
         page_count = len(document)
         limit = min(page_count, max(1, int(max_pages)))
-        truncated = page_count > limit
+        if page_count <= limit:
+            selected_pages = list(range(page_count))
+        else:
+            ranked_pages = sorted(
+                ((score, index) for index, page in enumerate(document) if (score := _rank_pdf_page(page.get_text())) > 0),
+                key=lambda item: (-item[0], item[1])
+            )
+            selected_pages = [index for _, index in ranked_pages[:limit]]
+            for index in range(page_count):
+                if len(selected_pages) >= limit:
+                    break
+                if index not in selected_pages:
+                    selected_pages.append(index)
+            selected_pages.sort()
+        truncated = len(selected_pages) < page_count
         for edge_cap, quality in ladder:
             pages = []
             total = 0
-            for page_index in range(limit):
+            for page_index in selected_pages:
                 rect = document[page_index].rect
                 scale = min(dpi_scale, float(edge_cap) / max(rect.width, rect.height, 1.0))
                 pixmap = document[page_index].get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
@@ -5997,7 +6024,8 @@ def _prepare_document_vision_parts(document, budget=PDF_VISION_MAX_TOTAL_BYTES):
     pages, page_count, truncated = _render_pdf_pages_for_vision(file_data, filename, budget=budget)
     warnings = []
     if truncated:
-        warnings.append(f'{filename}: تم تحليل أول {len(pages)} صفحة من أصل {page_count}')
+        selected_numbers = ', '.join(str(page.get('page_number')) for page in pages)
+        warnings.append(f'{filename}: تم تحليل الصفحات الأكثر ارتباطًا ({selected_numbers}) من أصل {page_count}')
     parts = [
         {
             'type': 'text',
@@ -6315,7 +6343,9 @@ def api_extract_croquis():
             "أولوية المصادر إلزامية: جدول التنظيم الرسمي أولًا، ثم أي مرجع تنظيمي رسمي، ثم الكروكي، ثم رخصة البناء. إذا ظهرت جداول متعددة للإحداثيات أو الاتجاهات، استخدم جدول التنظيم واربط كل قيمة بـ source=regulation_table، وسجل البدائل والتعارضات في conflicts.\n"
             "إذا وجدت أكثر من قطعة أرض، أعد كل قطعة داخل parcels منفصلة ولا تدمج مساحاتها أو حدودها.\n"
             "استخرج جدول الاتجاهات الأربعة بشكل مستقل من جدول التنظيم أولًا، وليس من وصف عام في الرخصة أو الكروكي.\n"
-            "استخرج جدول الإحداثيات المساحية كما هو: رقم القطعة، رقم النقطة، الشرقيات، الشماليات، بدون تحويل إلى latitude/longitude.\n"
+            "بالنسبة للإحداثيات، ابحث بصريًا داخل صور الصفحات عن الجدول الذي يحمل العنوان «إحداثيات التنظيم» أو «جدول إحداثيات التنظيم» فقط. لا تستخدم أي جدول آخر أو أي نص مستخرج بديلًا عنه.\n"
+            "إذا لم تجد عنوان «إحداثيات التنظيم» أو لم يكن الجدول مقروءًا بوضوح، أعد survey_coordinates فارغًا وسجل تعارضًا يوضح أن جدول إحداثيات التنظيم غير موجود أو غير مقروء، ولا تستنتج الإحداثيات من الحدود أو الاتجاهات.\n"
+            "استخرج من جدول «إحداثيات التنظيم» كما هو: رقم القطعة، رقم النقطة، الشرقيات، الشماليات، بدون تحويل إلى latitude/longitude أو حساب أي نقطة.\n"
             "الصيغة المطلوبة:\n"
             "{\n"
             '  "parcels": [{\n'
@@ -6333,6 +6363,7 @@ def api_extract_croquis():
             '    "parking_requirements": "", "entrances_exits_requirements": "",\n'
             '    "allowed_uses_restrictions": "", "zoning_code": "",\n'
             '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
+            '    "coordinates_table_name": "إحداثيات التنظيم", "coordinates_table_source_page": "",\n'
             '    "survey_coordinates": [{"point": "", "eastings": "", "northings": "", "source": "regulation_table"}],\n'
             '    "confidence": {}, "sources": [], "summary": ""\n'
             '  }],\n'
