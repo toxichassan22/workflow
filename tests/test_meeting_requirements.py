@@ -2145,6 +2145,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('tenantFloorDesignAnalysisChatThread', index_source)
         self.assertIn('sendTenantFloorDesignAnalysisChat', index_source)
         self.assertIn('/api/floor-design/analysis-chat', source)
+        self.assertIn("image.removeAttribute('src')", index_source)
         self.assertEqual(self.application_module._get_chat_response_text({'choices': [{'message': {'content': [{'type': 'text', 'text': '{"ok":true}'}]}}]}), '{"ok":true}')
         payload = {
             'projectData': {

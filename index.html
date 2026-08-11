@@ -8503,6 +8503,8 @@
         subtitle.textContent = 'اختر مجموعة من القائمة لبدء تصميمها.';
         badge.textContent = 'لم تبدأ';
         badge.className = 'tenant-floor-design-badge';
+        image.removeAttribute('src');
+        image.alt = '';
         image.hidden = true;
         empty.hidden = false;
         empty.textContent = 'لا توجد مجموعة نشطة بعد.';
@@ -8536,6 +8538,8 @@
         empty.hidden = true;
         setTenantFloorDesignText('tenantFloorDesignImageTitle', `الصورة المختارة لـ ${titleText}`);
       } else {
+        image.removeAttribute('src');
+        image.alt = '';
         image.hidden = true;
         empty.hidden = false;
         empty.textContent = group.unassigned ? 'هذه الأدوار لم تدخل في مجموعة بعد.' : 'لم يتم توليد صورة لهذه المجموعة بعد.';
