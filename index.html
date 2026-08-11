@@ -3197,7 +3197,7 @@
     #section-financial-calc td.cf-finance { background: #fffdf4 !important; }
 
     #tenantFloorDesignMount:not([hidden]) { display: block; margin-top: 20px; }
-    #tenantFloorDesignMount .tenant-floor-design-page { display: block !important; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+    #tenantFloorDesignMount .tenant-floor-design-page { display: block !important; margin: 0; padding: 20px !important; background: #fff !important; border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.02); }
     #tenantProjectPage.tenant-floor-design-project-mode > .tenant-form-actions { position: sticky; z-index: 5; bottom: 10px; background: rgba(255,255,255,.96); box-shadow: 0 -4px 14px rgba(24,53,74,.08); }
     .tenant-floor-design-page { padding: 22px !important; background: #fbfaf7 !important; }
     .tenant-floor-design-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
@@ -3857,17 +3857,8 @@
     </section>
 
     <section id="tenantFloorDesignPage" class="tenant-page tenant-floor-design-page">
-      <div class="tenant-floor-design-header">
-        <div>
-          <h2>تصميم صور الطوابق</h2>
-          <p>حدد الأدوار المتشابهة ثم ولّد صورة واحدة لكل مجموعة باستخدام Nano Banana.</p>
-        </div>
-        <div class="tenant-floor-design-actions">
-          <span id="tenantFloorDesignStatus" class="tenant-floor-design-status">لم يبدأ التصميم</span>
-          <button type="button" class="btn ghost" id="tenantFloorDesignBackButton" onclick="showTenantPage('tenantProjectPage')">العودة لبيانات المشروع</button>
-
-        </div>
-      </div>
+      <div id="tenantFloorDesignSectionHeader"></div>
+      <p id="tenantFloorDesignStatus" class="tenant-hint">حدد الأدوار المتشابهة ثم ولّد صورة واحدة لكل مجموعة باستخدام Nano Banana.</p>
 
       <div id="tenantFloorDesignSetup" class="tenant-floor-design-setup" hidden>
         <div class="tenant-floor-design-setup-card">
@@ -8272,7 +8263,14 @@
       openTenantFloorGroupModal('');
     }
 
+    function mountTenantFloorDesignSectionHeader() {
+      const host = document.getElementById('tenantFloorDesignSectionHeader');
+      const source = document.querySelector('#section-conceptual-2d .tenant-section-title');
+      if (host && source && source.parentElement !== host) host.replaceChildren(source);
+    }
+
     function initializeTenantFloorDesign() {
+      mountTenantFloorDesignSectionHeader();
       bindTenantFloorDesignEvents();
       tenantFloorDesignState = null;
       tenantFloorDesignActiveGroupId = null;
