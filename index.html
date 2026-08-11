@@ -5296,6 +5296,7 @@
         presentationId: hasProjectContext ? (tenantPresentationId || null) : null,
         draftId: hasProjectContext && tenantProjectData ? (tenantProjectData.draftId || null) : null,
         activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null,
+        floorDesignStage: pageId === 'tenantFloorDesignPage' ? (overrides.floorDesignStage || tenantFloorDesignStage || 'home') : null,
         railTab: localStorage.getItem('tgrTab') || 'nav',
         ...overrides
       };
@@ -8741,6 +8742,9 @@
     function showTenantFloorDesignStage(stage) {
       const allowed = new Set(['home', 'organization', 'analysis', 'drawings', 'isometric']);
       tenantFloorDesignStage = allowed.has(stage) ? stage : 'home';
+      if (tenantFloorDesignEmbedded || getTenantNavigationState()?.pageId === 'tenantFloorDesignPage') {
+        saveTenantNavigationState('tenantFloorDesignPage', { floorDesignStage: tenantFloorDesignStage });
+      }
       document.querySelectorAll('#tenantFloorDesignPage [data-floor-design-stage-view]').forEach(view => {
         view.hidden = view.dataset.floorDesignStageView !== tenantFloorDesignStage;
       });
@@ -8762,7 +8766,8 @@
       tenantFloorDesignActiveGroupId = tenantFloorDesignState?.groups?.[0]?.id || null;
       document.getElementById('tenantFloorDesignSetup').hidden = true;
       document.getElementById('tenantFloorDesignStatus').textContent = 'اختر مرحلة للبدء';
-      showTenantFloorDesignStage('home');
+      const navigationStage = getTenantNavigationState()?.floorDesignStage;
+      showTenantFloorDesignStage(navigationStage || 'home');
     }
 
     function setTenantFloorDesignSidebarActive(active) {
@@ -8789,6 +8794,7 @@
     }
 
     async function openTenantFloorDesignPage(fromHistory = false) {
+      const navigationStage = fromHistory ? getTenantNavigationState()?.floorDesignStage : null;
       if (!tenantProjectData?.draftId) {
         const navigation = getTenantNavigationState();
         const currentTenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
@@ -8816,6 +8822,7 @@
       if (!fromHistory) syncTenantBrowserHistory('tenantFloorDesignPage');
       else if (window.location.pathname !== TENANT_PAGE_ROUTES.tenantFloorDesignPage) syncTenantBrowserHistory('tenantFloorDesignPage', {}, true);
       initializeTenantFloorDesign();
+      if (navigationStage) showTenantFloorDesignStage(navigationStage);
     }
 
     function resetTenantFloorDesign() {
