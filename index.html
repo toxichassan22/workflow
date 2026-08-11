@@ -8500,8 +8500,10 @@
         toast('استكمل الأدوار والمساحة والمكونات أولًا');
         return;
       }
-      tenantFloorDesignState = { version: 1, floorCount: readiness.approvedFloors.value, firstFloor: 1, groups: [] };
-      tenantFloorDesignActiveGroupId = 'unassigned';
+      if (!tenantFloorDesignState) {
+        tenantFloorDesignState = { version: 1, floorCount: readiness.approvedFloors.value, firstFloor: 1, groups: [] };
+        tenantFloorDesignActiveGroupId = 'unassigned';
+      }
       renderTenantFloorDesignReadiness();
       openTenantFloorGroupModal('');
     }
