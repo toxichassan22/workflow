@@ -219,3 +219,13 @@ two to three tokens per word, and the coordinates table can add dozens of rows.
   bare roots (`ارتداد`, `تغطية`) instead.
 - Index / list-of-figures pages match many keywords but contain no rules; `_is_regulation_index_page`
   filters them out.
+
+## Progress feedback for long operations
+
+Every operation that may take noticeable time must show visible progress feedback to the user. This
+includes AI text/image generation, analysis, uploads, downloads, exports, PDF generation, and other
+long-running requests. Reuse the global loader/progress UI when it exists; otherwise provide an
+inline progress state. Disable the triggering action while the operation is running, update the
+current step when possible, and always clear the progress state on both success and failure. Do not
+leave the user with a visually idle screen while a request is in flight. New agents must apply this
+rule to every new workflow and generation action.

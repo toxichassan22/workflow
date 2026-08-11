@@ -8402,17 +8402,18 @@
         empty.textContent = group.unassigned ? 'هذه الأدوار لم تدخل في مجموعة بعد.' : 'لم يتم توليد صورة لهذه المجموعة بعد.';
         setTenantFloorDesignText('tenantFloorDesignImageTitle', 'لا توجد نتيجة مختارة');
       }
-      generate.disabled = Boolean(group.unassigned);
-      approve.disabled = Boolean(group.unassigned || !group.imageUrl);
+      const generating = group.status === 'generating';
+      generate.disabled = Boolean(group.unassigned || generating);
+      approve.disabled = Boolean(group.unassigned || generating || !group.imageUrl);
       imageFrame?.classList.toggle('has-image', Boolean(imageUrl));
-      promptToggle.disabled = Boolean(group.unassigned);
+      promptToggle.disabled = Boolean(group.unassigned || generating);
       if (promptEditor && document.activeElement !== promptEditor) {
         promptEditor.value = group.generatedPrompt || buildTenantFloorDesignPrompt(group);
         promptEditor.hidden = true;
         promptToggle.textContent = 'عرض Prompt';
       }
-      chatInput.disabled = Boolean(group.unassigned);
-      if (chatSend) chatSend.disabled = Boolean(group.unassigned);
+      chatInput.disabled = Boolean(group.unassigned || generating);
+      if (chatSend) chatSend.disabled = Boolean(group.unassigned || generating);
       setTenantFloorDesignText('tenantFloorDesignActionStatus', group.unassigned ? 'نظم الأدوار أولًا من المرحلة الأولى.' : group.status === 'approved' ? 'تم اعتماد الصورة لهذه المجموعة.' : 'عدّل الـ Prompt أو اكتب تعديلًا ثم ولّد الصورة.');
       renderTenantFloorDesignChat(group);
       renderTenantFloorDesignGroupList();
@@ -8898,20 +8899,25 @@
       }
       const approvedInputs = await requireTenantApprovedBuildInputs();
       if (!approvedInputs) return false;
+      let generated = false;
+      showLoader('جاري توليد المخطط 2D', 'جاري تجهيز البيانات وإرسال الطلب...', 5);
       group.status = 'generating';
       renderTenantFloorDesignActiveGroup();
       try {
+        updateLoaderProgress(20, 'تم تجهيز بيانات المجموعة...');
         const response = await api('POST', '/api/floor-design/generate', {
           prompt: group.generatedPrompt || buildTenantFloorDesignPrompt(group),
           referenceImage: group.referenceImage || null,
           approvedFinancialArea: approvedInputs.approvedFinancialArea,
           approvedFloorCount: approvedInputs.approvedFloorCount
         });
+        updateLoaderProgress(88, 'تم استلام الصورة، جاري حفظها...');
         if (!response?.success || !response.image) throw new Error(response?.error || 'تعذر توليد الصورة');
         group.imageUrl = response.image;
         group.approvedImageUrl = '';
         group.status = 'review';
         markTenantFloorDesignDirty();
+        generated = true;
         toast('تم توليد صورة المجموعة. راجعها ثم اعتمدها.');
         renderTenantFloorDesignActiveGroup();
         return true;
@@ -8920,6 +8926,8 @@
         toast(error?.message || 'تعذر توليد صورة المجموعة');
         renderTenantFloorDesignActiveGroup();
         return false;
+      } finally {
+        hideLoader(generated ? 'اكتمل توليد المخطط 2D' : 'تعذر توليد المخطط 2D');
       }
     }
 
