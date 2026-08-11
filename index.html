@@ -8367,8 +8367,8 @@
         promptEditor.hidden = true;
         promptToggle.textContent = 'عرض Prompt';
       }
-      chatInput.disabled = Boolean(group.unassigned || !group.imageUrl);
-      if (chatSend) chatSend.disabled = Boolean(group.unassigned || !group.imageUrl);
+      chatInput.disabled = Boolean(group.unassigned);
+      if (chatSend) chatSend.disabled = Boolean(group.unassigned);
       setTenantFloorDesignText('tenantFloorDesignActionStatus', group.unassigned ? 'نظم الأدوار أولًا من المرحلة الأولى.' : group.status === 'approved' ? 'تم اعتماد الصورة لهذه المجموعة.' : 'عدّل الـ Prompt أو اكتب تعديلًا ثم ولّد الصورة.');
       renderTenantFloorDesignChat(group);
       renderTenantFloorDesignGroupList();
