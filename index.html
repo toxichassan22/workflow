@@ -3951,14 +3951,12 @@
       </div>
 
       <div id="tenantFloorDesignStageAnalysis" class="tenant-floor-design-stage-view" data-floor-design-stage-view="analysis" hidden>
-        <div class="tenant-floor-design-stage-view-head"><div><h3>تحليل البيانات والاشتراطات</h3><p>يعرض AI ما تم فهمه قبل السماح ببدء توليد المخططات.</p></div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل التصميم</button></div>
-        <div class="tenant-floor-design-source-grid">
-          <div class="tenant-floor-design-source-card"><strong>الأرض والكروكي</strong><span>الحدود، الاتجاهات، الارتدادات، المواقف والمداخل.</span></div>
-          <div class="tenant-floor-design-source-card"><strong>الدراسة المالية</strong><span>المكونات، الوحدات، المساحات، والبدروم.</span></div>
-          <div class="tenant-floor-design-source-card"><strong>صور الأرض والمراجع</strong><span>صور العميل وأي مراجع مرتبطة بالمشروع.</span></div>
+        <div class="tenant-floor-design-stage-view-head"><div><h3>تحليل البيانات والاشتراطات</h3><p>راجع البيانات الناقصة قبل بدء تحليل AI.</p></div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل التصميم</button></div>
+        <div class="tenant-floor-design-readiness">
+          <div><h4>المطلوب قبل بدء التحليل</h4><p id="tenantFloorDesignAnalysisSummary">جاري مراجعة البيانات...</p></div>
+          <div id="tenantFloorDesignAnalysisMissingList" class="tenant-floor-design-readiness-list"></div>
         </div>
-        <div class="tenant-floor-design-analysis-panel"><strong>التحليل سيظهر هنا</strong><span>سيظهر هنا تحليل البيانات في بطاقات قابلة للمراجعة والاعتماد.</span></div>
-        <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" disabled>بدء تحليل البيانات</button></div>
+        <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" id="tenantFloorDesignStartAnalysisButton" onclick="startTenantFloorAnalysis()" disabled>بدء تحليل البيانات</button></div>
       </div>
 
       <div id="tenantFloorDesignSetup" class="tenant-floor-design-setup" hidden>
@@ -8464,6 +8462,47 @@
       return Number.isFinite(number) ? number : 0;
     }
 
+    function tenantFloorDesignFieldHasValue(key) {
+      const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+      return Boolean(String(input?.value ?? tenantProjectData?.[key] ?? '').trim());
+    }
+
+    function tenantFloorDesignHasLandDocuments() {
+      const input = document.querySelector('#tenantProjectForm [data-key="land_documents_files"]');
+      const stored = tenantProjectData?.land_documents_files_file_meta;
+      return Boolean(input?.files?.length || (Array.isArray(stored) ? stored.length : stored));
+    }
+
+    function renderTenantFloorDesignAnalysisReadiness() {
+      const list = document.getElementById('tenantFloorDesignAnalysisMissingList');
+      const summary = document.getElementById('tenantFloorDesignAnalysisSummary');
+      const button = document.getElementById('tenantFloorDesignStartAnalysisButton');
+      if (!list || !summary || !button) return;
+      const readiness = tenantFloorDesignReadiness();
+      const missing = [];
+      if (!tenantFloorDesignHasLandDocuments()) missing.push('ملفات الرخصة والكروكي أو مستندات الأرض');
+      if (!tenantFloorDesignFieldHasValue('building_ratio_setbacks')) missing.push('نسبة البناء والتغطية والارتدادات');
+      if (!tenantFloorDesignFieldHasValue('allowed_uses_restrictions')) missing.push('الاستخدامات المسموحة والقيود التنظيمية');
+      if (!tenantFloorDesignFieldHasValue('land_and_building_summary')) missing.push('ملخص بيانات الأرض والاشتراطات');
+      if (!readiness.approvedFloors.valid) missing.push('الأدوار المعتمدة');
+      if (!readiness.approvedArea.valid) missing.push('المساحة المعتمدة للدراسة المالية');
+      if (!readiness.components.valid) missing.push('مكونات المشروع');
+      if (!readiness.basement.valid && readiness.basement.required) missing.push('مساحة البدروم');
+      if (!tenantFloorDesignState?.groups?.length) missing.push('تنظيم مجموعات الأدوار');
+      if (!missing.length) {
+        summary.textContent = 'كل البيانات المطلوبة مكتملة ويمكن بدء التحليل.';
+        list.innerHTML = '<div class="tenant-floor-design-readiness-row"><strong>حالة البيانات</strong><span class="complete">مكتملة</span></div>';
+      } else {
+        summary.textContent = 'استكمل البيانات التالية قبل بدء تحليل AI:';
+        list.innerHTML = missing.map(item => `<div class="tenant-floor-design-readiness-row"><strong>${escapeHtml(item)}</strong><span class="missing">ناقص</span></div>`).join('');
+      }
+      button.disabled = missing.length > 0;
+    }
+
+    function startTenantFloorAnalysis() {
+      toast('سيتم تفعيل تحليل البيانات بعد ربط AI بهذه المرحلة.');
+    }
+
     function renderTenantFloorDesignOrganizationGroups() {
       const panel = document.getElementById('tenantFloorDesignOrganizationGroups');
       const host = document.getElementById('tenantFloorDesignOrganizationGroupList');
@@ -8515,6 +8554,7 @@
         view.hidden = view.dataset.floorDesignStageView !== tenantFloorDesignStage;
       });
       if (tenantFloorDesignStage === 'organization') renderTenantFloorDesignReadiness();
+      if (tenantFloorDesignStage === 'analysis') renderTenantFloorDesignAnalysisReadiness();
       if (tenantFloorDesignStage === 'drawings') renderTenantFloorDesignActiveGroup();
     }
 
