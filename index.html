@@ -3265,6 +3265,7 @@
     .tenant-floor-design-prompt-editor { width: 100%; min-height: 120px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--txt, #252525); font: inherit; resize: vertical; }
     .tenant-floor-design-image-frame { position: relative; min-height: 270px; padding: 18px; }
     .tenant-floor-design-image-frame img { width: auto; max-width: 88%; max-height: 380px; aspect-ratio: auto; border-radius: 8px; object-fit: contain; box-shadow: 0 8px 24px rgba(24,53,74,.12); }
+    .tenant-floor-design-image-frame.has-image { cursor: pointer; }
     .tenant-floor-design-image-approve { position: absolute; z-index: 2; top: 12px; right: 12px; padding: 7px 11px; border: 1px solid #c8d6d8; border-radius: 8px; background: #fff; color: var(--p); font: inherit; font-size: 11px; cursor: pointer; }
     .tenant-floor-design-image-approve:disabled { opacity: .5; cursor: not-allowed; }
     .tenant-floor-design-image-card.approved { border-color: #9bc9aa; box-shadow: 0 0 0 2px rgba(52,118,88,.12); }
@@ -4002,10 +4003,10 @@
           <textarea id="tenantFloorDesignPromptEditor" class="tenant-floor-design-prompt-editor" rows="5" placeholder="سيظهر Prompt المجموعة هنا ويمكنك تعديله قبل التوليد." hidden></textarea>
           <section class="tenant-floor-design-image-card">
             <div class="tenant-floor-design-image-head"><strong>التصور المختار للمجموعة</strong><span id="tenantFloorDesignBadge" class="tenant-floor-design-badge">لم تبدأ</span></div>
-            <div id="tenantFloorDesignImageFrame" class="tenant-floor-design-image-frame"><button type="button" class="tenant-floor-design-image-approve" id="tenantFloorDesignApproveButton" onclick="approveTenantFloorDesignImage()" disabled>اعتماد الصورة</button><div id="tenantFloorDesignImageEmpty" class="tenant-floor-design-image-empty">لم يتم توليد صورة لهذه المجموعة بعد.</div><img id="tenantFloorDesignImage" alt="التصور البصري للمجموعة" hidden></div>
-            <div class="tenant-floor-design-image-caption"><div><strong id="tenantFloorDesignImageTitle">لا توجد نتيجة مختارة</strong><p>ستظهر هنا صورة واحدة تمثل كل الأدوار داخل المجموعة.</p></div><button type="button" class="btn ghost" id="tenantFloorDesignPreviewButton" onclick="previewTenantFloorDesignImage()" disabled>معاينة كاملة</button></div>
+            <div id="tenantFloorDesignImageFrame" class="tenant-floor-design-image-frame" role="button" tabindex="0" onclick="previewTenantFloorDesignImage()" onkeydown="if(event.key === 'Enter' || event.key === ' ') previewTenantFloorDesignImage()"><button type="button" class="tenant-floor-design-image-approve" id="tenantFloorDesignApproveButton" onclick="event.stopPropagation(); approveTenantFloorDesignImage()" disabled>اعتماد الصورة</button><div id="tenantFloorDesignImageEmpty" class="tenant-floor-design-image-empty">لم يتم توليد صورة لهذه المجموعة بعد.</div><img id="tenantFloorDesignImage" alt="التصور البصري للمجموعة" hidden></div>
+            <div class="tenant-floor-design-image-caption"><div><strong id="tenantFloorDesignImageTitle">لا توجد نتيجة مختارة</strong><p>اضغط على الصورة لفتحها بحجم كامل.</p></div></div>
           </section>
-          <section class="tenant-floor-design-chat-panel"><div class="tenant-floor-design-chat-head"><div><h4>محادثة التعديل</h4><p>اكتب التعديلات المطلوبة على الصورة الحالية.</p></div></div><div id="tenantFloorDesignChatThread" class="tenant-floor-design-chat-thread"><div class="tenant-floor-design-chat-message">لم تبدأ محادثة تعديل لهذه المجموعة.</div></div><textarea id="tenantFloorDesignChatInput" rows="4" placeholder="اكتب التعديل المطلوب"></textarea><button type="button" class="btn ghost" onclick="sendTenantFloorDesignChat()">حفظ التعديل</button></section>
+          <section class="tenant-floor-design-chat-panel"><div class="tenant-floor-design-chat-head"><div><h4>محادثة التعديل</h4><p>اكتب التعديلات المطلوبة على الصورة الحالية.</p></div></div><div id="tenantFloorDesignChatThread" class="tenant-floor-design-chat-thread"><div class="tenant-floor-design-chat-message">لم تبدأ محادثة تعديل لهذه المجموعة.</div></div><textarea id="tenantFloorDesignChatInput" rows="4" placeholder="اكتب التعديل المطلوب"></textarea><button type="button" class="btn primary" onclick="sendTenantFloorDesignChat()">إرسال التعديل</button></section>
           <div class="tenant-floor-design-footer"><p id="tenantFloorDesignActionStatus">اختر مجموعة من القائمة.</p><div class="tenant-floor-design-footer-actions"><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(-1)">السابق</button><button type="button" class="btn ghost" onclick="moveTenantFloorDesignGroup(1)">التالي</button></div></div>
         </main>
       </div>
@@ -8302,7 +8303,7 @@
       const empty = document.getElementById('tenantFloorDesignImageEmpty');
       const generate = document.getElementById('tenantFloorDesignGenerateButton');
       const approve = document.getElementById('tenantFloorDesignApproveButton');
-      const preview = document.getElementById('tenantFloorDesignPreviewButton');
+      const imageFrame = document.getElementById('tenantFloorDesignImageFrame');
       const promptToggle = document.getElementById('tenantFloorDesignPromptToggle');
       const promptEditor = document.getElementById('tenantFloorDesignPromptEditor');
       const imageCard = image?.closest('.tenant-floor-design-image-card');
@@ -8319,7 +8320,7 @@
         setTenantFloorDesignText('tenantFloorDesignActionStatus', 'اختر مجموعة من القائمة.');
         generate.disabled = true;
         approve.disabled = true;
-        preview.disabled = true;
+        imageFrame?.classList.remove('has-image');
         promptToggle.disabled = true;
         promptEditor.hidden = true;
         chatInput.disabled = true;
@@ -8351,7 +8352,7 @@
       }
       generate.disabled = Boolean(group.unassigned);
       approve.disabled = Boolean(group.unassigned || !group.imageUrl);
-      preview.disabled = !imageUrl;
+      imageFrame?.classList.toggle('has-image', Boolean(imageUrl));
       promptToggle.disabled = Boolean(group.unassigned);
       if (promptEditor && document.activeElement !== promptEditor) {
         promptEditor.value = group.generatedPrompt || buildTenantFloorDesignPrompt(group);
@@ -8709,9 +8710,9 @@
 
     async function generateTenantFloorDesignImage() {
       const group = tenantFloorDesignActiveGroup();
-      if (!group || group.unassigned) return;
+      if (!group || group.unassigned) return false;
       const approvedInputs = await requireTenantApprovedBuildInputs();
-      if (!approvedInputs) return;
+      if (!approvedInputs) return false;
       group.status = 'generating';
       renderTenantFloorDesignActiveGroup();
       try {
@@ -8727,11 +8728,14 @@
         group.status = 'review';
         markTenantFloorDesignDirty();
         toast('تم توليد صورة المجموعة. راجعها ثم اعتمدها.');
+        renderTenantFloorDesignActiveGroup();
+        return true;
       } catch (error) {
         group.status = 'pending';
         toast(error?.message || 'تعذر توليد صورة المجموعة');
+        renderTenantFloorDesignActiveGroup();
+        return false;
       }
-      renderTenantFloorDesignActiveGroup();
     }
 
     function approveTenantFloorDesignImage() {
@@ -8741,7 +8745,7 @@
       group.status = 'approved';
       markTenantFloorDesignDirty();
       renderTenantFloorDesignActiveGroup();
-      toast('تم اعتماد صورة المجموعة. اضغط حفظ التصميم لحفظها في المسودة.');
+      toast('تم اعتماد صورة المجموعة. اضغط حفظ كمسودة لحفظها.');
     }
 
     function previewTenantFloorDesignImage() {
@@ -8789,18 +8793,28 @@
       toast('تم حفظ تخصيص المجموعة محليًا.');
     }
 
-    function sendTenantFloorDesignChat() {
+    async function sendTenantFloorDesignChat() {
       const group = tenantFloorDesignActiveGroup();
       const input = document.getElementById('tenantFloorDesignChatInput');
-      const text = input.value.trim();
+      const text = input?.value.trim();
       if (!group || group.unassigned || !text) return;
+      if (!group.imageUrl) {
+        toast('ولّد الصورة الأولى للمجموعة قبل إرسال تعديل عليها.');
+        return;
+      }
       group.chat = Array.isArray(group.chat) ? group.chat : [];
       group.chat.push({ role: 'user', text });
-      group.prompt = text.slice(0, 12000);
+      group.prompt = [group.prompt, 'تعديل مطلوب بعد الصورة الحالية: ' + text].filter(Boolean).join('\n');
+      group.generatedPrompt = '';
       input.value = '';
       markTenantFloorDesignDirty();
       renderTenantFloorDesignChat(group);
-      toast('تم حفظ تعليمات التعديل للمجموعة. استخدم توليد الصورة لتطبيقها.');
+      const generated = await generateTenantFloorDesignImage();
+      if (generated) {
+        group.chat.push({ role: 'assistant', text: 'تم إنشاء نسخة جديدة من الصورة بناءً على التعديل.' });
+        markTenantFloorDesignDirty();
+        renderTenantFloorDesignChat(group);
+      }
     }
 
     function bindTenantFloorDesignEvents() {
