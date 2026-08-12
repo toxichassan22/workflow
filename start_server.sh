@@ -57,7 +57,6 @@ if [ "$1" != "--force" ] && curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PAT
   exit 0
 fi
 
-write_deployment_marker
 log "WARN: health check failed on port $PORT; restarting..."
 
 # Stop any old gunicorn, preferring the configured port
@@ -108,6 +107,7 @@ log ".htaccess routed to 127.0.0.1:$SELECTED_PORT"
 
 # Final health check
 if curl -fsS -m 10 "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}" >/dev/null 2>&1; then
+  write_deployment_marker
   log "OK: gunicorn running on port $SELECTED_PORT"
 else
   log "ERROR: gunicorn failed health check on port $SELECTED_PORT"

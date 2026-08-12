@@ -32,3 +32,16 @@ jobs:
           done
           echo "Hosting did not report expected commit ${EXPECTED_COMMIT}"
           exit 1
+
+      - name: Verify land analysis route
+        run: |
+          set -euo pipefail
+          route_status="$(curl --silent --show-error --connect-timeout 10 --max-time 20 \
+            -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' --data '{}' \
+            'https://sagdemo.site/api/extract-croquis')"
+          if [ "$route_status" != "401" ]; then
+            echo "Expected /api/extract-croquis to require authentication, got HTTP ${route_status}"
+            exit 1
+          fi
+          echo "Verified /api/extract-croquis route (HTTP 401 without credentials)"
