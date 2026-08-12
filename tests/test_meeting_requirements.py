@@ -8,6 +8,7 @@ import re
 import sys
 import tempfile
 import json
+import time
 import unittest
 import io
 from pathlib import Path
@@ -1805,6 +1806,66 @@ class MeetingRequirementsTests(unittest.TestCase):
             })
         self.assertEqual(result.status_code, 200, result.get_json())
         self.assertEqual(result.get_json()['extractedData']['plot_number_croquis'], '9991')
+
+    def test_live_land_analysis_returns_a_job_and_is_polled(self):
+        """The hosting proxy fabricates a 404 if extract-croquis stays open for minutes."""
+        module = self.application_module
+        model_payload = {
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'plot_number': '9991',
+                'survey_coordinates': [{'point': '1', 'eastings': '1', 'northings': '2'}],
+                'directions': {
+                    'north': {'regulation_text': 'بطول 10 م'},
+                    'south': {'regulation_text': 'بطول 11 م'},
+                    'east': {'regulation_text': 'بطول 12 م'},
+                    'west': {'regulation_text': 'بطول 13 م'},
+                },
+            }],
+            'conflicts': [],
+        }
+        provider_response = {
+            'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(model_payload, ensure_ascii=False)}}]
+        }
+        client = self.app.test_client()
+        with patch.object(module, 'OPENROUTER_KEY', 'test-key'), \
+                patch.object(module, '_prepare_document_vision_parts', return_value=(
+                    [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,test', 'detail': 'high'}}],
+                    [], 1, 'image_direct'
+                )), \
+                patch.object(module, 'search_official_regulations_evidence', return_value=(
+                    {'context': '', 'documents': [], 'table_pages': []}, []
+                )), \
+                patch.object(module, '_call_land_analysis_model', return_value=(provider_response, 9000, '')):
+            started = client.post('/api/extract-croquis', headers=self._headers(self.token_a), json={
+                'background': True,
+                'fileData': 'data:image/png;base64,test',
+                'locationAddress': 'https://www.google.com/maps/@24.0,46.0,17z',
+                'locationLat': 24.0,
+                'locationLng': 46.0,
+            })
+            self.assertEqual(started.status_code, 202, started.get_json())
+            job_id = started.get_json()['jobId']
+            self.assertTrue(job_id)
+            job = None
+            for _ in range(80):
+                polled = client.get('/api/extract-croquis/' + job_id, headers=self._headers(self.token_a))
+                self.assertEqual(polled.status_code, 200, polled.get_json())
+                job = polled.get_json()
+                if job.get('status') in ('completed', 'failed'):
+                    break
+                time.sleep(0.05)
+        self.assertEqual(job['status'], 'completed', job)
+        self.assertTrue(job['success'])
+        self.assertEqual(job['extractedData']['plot_number_croquis'], '9991')
+        self.assertNotIn('rawText', job)
+
+        foreign = client.get('/api/extract-croquis/' + job_id, headers=self._headers(self.token_b))
+        self.assertEqual(foreign.status_code, 404)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("api('GET', '/api/extract-croquis/' + encodeURIComponent(jobId))", index_source)
+        self.assertIn('res.jobId', index_source)
 
     def test_land_prompt_forbids_ai_written_approved_area_and_demands_narrative(self):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')

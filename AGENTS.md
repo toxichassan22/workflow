@@ -212,6 +212,9 @@ pins to OpenAI with `allow_fallbacks: false` and retries once without JSON mode 
 (or empty content) comes back.
 `_get_chat_response_text()` also reads `reasoning` / `reasoning_content` when `content` is empty —
 Luna often spends the reply there.
+The live hosting proxy fabricates a 404 if `POST /api/extract-croquis` stays open for the whole
+pipeline. Production therefore queues the job and the client polls `GET /api/extract-croquis/<id>`.
+Keep the unittest path synchronous (`TESTING`) unless a test passes `background: true`.
 `LAND_ANALYSIS_MIN_TOKENS`, `LAND_ANALYSIS_MODEL` are also env-overridable. Failures return a named
 `failureReason` (`truncated` / `invalid_json` / `insufficient_credit` / `empty_response` /
 `provider_blocked`) plus the raw `providerError`, and the frontend states that no field was

@@ -4975,17 +4975,24 @@
       const source = context || {};
       const slim = {};
       const scalarKeys = [
-        'project_name', 'project_type', 'project_stage', 'location_address', 'location_detail',
-        'location_lat', 'location_lng', 'main_roads', 'secondary_roads', 'nearby_landmarks',
-        'city', 'city_landmarks', 'catchment_areas', 'population_density',
-        'population_density_source', 'land_area', 'built_area', 'building_system',
-        'infrastructure', 'zoning_code', 'land_use', 'building_ratio_coverage', 'setbacks',
-        'allowed_uses', 'regulatory_constraints'
+        'project_name', 'project_type', 'project_stage', 'location_address',
+        'location_lat', 'location_lng', 'city', 'zoning_code', 'land_use'
       ];
+      const shortKeys = {
+        location_detail: 400,
+        main_roads: 400,
+        nearby_landmarks: 400,
+        city_landmarks: 400
+      };
       scalarKeys.forEach(key => {
         const value = source[key];
         if (value === undefined || value === null || value === '') return;
-        slim[key] = typeof value === 'string' ? value.slice(0, 12000) : value;
+        slim[key] = typeof value === 'string' ? value.slice(0, 400) : value;
+      });
+      Object.entries(shortKeys).forEach(([key, limit]) => {
+        const value = source[key];
+        if (value === undefined || value === null || value === '') return;
+        slim[key] = String(value).slice(0, limit);
       });
       if (source.location_polygon) slim.location_polygon = decimatePolygon(source.location_polygon);
       if (Array.isArray(source.nearby_landmarks_data)) {
@@ -11584,7 +11591,7 @@
       showLoader('تحليل الرخصة والكروكي معًا', 'جاري تحليل الملفين واستخراج التنظيم والاتجاهات والإحداثيات...', 10);
       try {
         updateLoaderProgress(25, 'جاري تجهيز بيانات الموقع والخرائط وملفات الاشتراطات كاملة...');
-        const res = await api('POST', '/api/extract-croquis', {
+        let res = await api('POST', '/api/extract-croquis', {
           documents,
           draftId: tenantProjectData.draftId,
           projectName: projectContext.project_name,
@@ -11599,6 +11606,22 @@
           siteContext: slimLandAnalysisSiteContext(projectContext),
           includeMapContext: true
         });
+        if (res && res.jobId && !res.extractedData) {
+          const jobId = res.jobId;
+          updateLoaderProgress(35, res.message || 'بدأ التحليل في الخلفية...');
+          const started = Date.now();
+          while (Date.now() - started < 12 * 60 * 1000) {
+            await new Promise(resolve => setTimeout(resolve, 2500));
+            res = await api('GET', '/api/extract-croquis/' + encodeURIComponent(jobId));
+            const jobStatus = String(res && res.status || '');
+            updateLoaderProgress(
+              jobStatus === 'running' ? 55 : 40,
+              (res && res.message) || 'جاري تحليل المستندات والاشتراطات...'
+            );
+            if (jobStatus === 'completed' || jobStatus === 'failed' || (res && res.extractedData) || (res && res.failureReason)) break;
+            if (!res || res.failureReason === 'job_not_found') break;
+          }
+        }
         updateLoaderProgress(55, 'تم تجهيز الموقع والخرائط؛ جاري قراءة المستندات والاشتراطات...');
         if (res.success && res.extractedData) {
           const data = res.extractedData;

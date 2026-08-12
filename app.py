@@ -11,11 +11,12 @@ import html as html_lib
 import subprocess
 import requests
 import uuid as _uuid
+import threading
 
 import db_driver
 import concurrent.futures
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_file, send_from_directory, g
+from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app
 
 load_dotenv()
 
@@ -7364,9 +7365,133 @@ def build_land_analysis_site_context(data, tenant_id, lat, lng):
     return context, warnings
 
 
+_LAND_JOB_LOCK = threading.Lock()
+
+
+def _land_job_dir(tenant_id):
+    path = os.path.join(UPLOADS_DIR, '.land_jobs', str(tenant_id))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _land_job_path(tenant_id, job_id):
+    return os.path.join(_land_job_dir(tenant_id), f'{job_id}.json')
+
+
+def _write_land_job(tenant_id, job_id, payload):
+    path = _land_job_path(tenant_id, job_id)
+    payload = dict(payload)
+    payload['updatedAt'] = time.time()
+    body = json.dumps(payload, ensure_ascii=False)
+    with _LAND_JOB_LOCK:
+        last_error = None
+        for _ in range(8):
+            try:
+                with open(path, 'w', encoding='utf-8') as fh:
+                    fh.write(body)
+                return
+            except OSError as error:
+                last_error = error
+                time.sleep(0.03)
+        if last_error:
+            raise last_error
+
+
+def _read_land_job(tenant_id, job_id):
+    path = _land_job_path(tenant_id, job_id)
+    if not os.path.isfile(path):
+        return None
+    with _LAND_JOB_LOCK:
+        try:
+            with open(path, encoding='utf-8') as fh:
+                payload = json.load(fh)
+        except Exception:
+            return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _land_job_worker(app, tenant_id, data, job_id):
+    """Run the long land extraction off the HTTP request so the hosting proxy cannot 404 it."""
+    with app.app_context():
+        _write_land_job(tenant_id, job_id, {
+            'status': 'running',
+            'success': True,
+            'message': 'جاري تحليل المستندات والاشتراطات...',
+        })
+        try:
+            with app.test_request_context('/api/extract-croquis', method='POST', json=data):
+                g.tenant_id = tenant_id
+                response = _execute_extract_croquis()
+            payload = response.get_json(silent=True) if response is not None else {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload.pop('rawText', None)
+            status = 'completed' if payload.get('success') else 'failed'
+            _write_land_job(tenant_id, job_id, {
+                **payload,
+                'status': status,
+                'httpStatus': getattr(response, 'status_code', 500),
+                'message': payload.get('error') or 'اكتمل التحليل',
+            })
+        except Exception as exc:
+            _write_land_job(tenant_id, job_id, {
+                'status': 'failed',
+                'success': False,
+                'error': f'حدث خطأ في قراءة ملف الكروكي: {exc}',
+                'failureReason': 'job_failed',
+            })
+
+
 @app.route('/api/extract-croquis', methods=['POST'])
 @require_auth
 def api_extract_croquis():
+    """Accept a land-analysis request.
+
+    The hosting proxy fabricates a 404 if this route stays open for the whole
+    vision + regulation pipeline. Production therefore queues the work and
+    returns immediately; the client polls GET /api/extract-croquis/<job_id>.
+    Tests keep the original synchronous response unless they pass background=true.
+    """
+    data = request.json or {}
+    use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
+    if not use_background:
+        return _execute_extract_croquis()
+    job_id = str(_uuid.uuid4())
+    tenant_id = g.tenant_id
+    _write_land_job(tenant_id, job_id, {
+        'status': 'queued',
+        'success': True,
+        'message': 'تم استلام طلب التحليل',
+    })
+    threading.Thread(
+        target=_land_job_worker,
+        args=(current_app._get_current_object(), tenant_id, data, job_id),
+        daemon=True,
+    ).start()
+    return jsonify({
+        'success': True,
+        'jobId': job_id,
+        'status': 'queued',
+        'message': 'بدأ التحليل في الخلفية',
+    }), 202
+
+
+@app.route('/api/extract-croquis/<job_id>', methods=['GET'])
+@require_auth
+def api_extract_croquis_job(job_id):
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', str(job_id or '')):
+        return jsonify({'success': False, 'error': 'معرف مهمة غير صالح'}), 400
+    job = _read_land_job(g.tenant_id, job_id)
+    if not job:
+        return jsonify({
+            'success': False,
+            'error': 'مهمة التحليل غير موجودة',
+            'failureReason': 'job_not_found',
+        }), 404
+    return jsonify(job)
+
+
+def _execute_extract_croquis():
     """Extract one or more land documents together using vision AI."""
     import traceback
     try:
