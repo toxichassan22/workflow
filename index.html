@@ -4971,6 +4971,36 @@
       return slim;
     }
 
+    function slimLandAnalysisSiteContext(context) {
+      const source = context || {};
+      const slim = {};
+      const scalarKeys = [
+        'project_name', 'project_type', 'project_stage', 'location_address', 'location_detail',
+        'location_lat', 'location_lng', 'main_roads', 'secondary_roads', 'nearby_landmarks',
+        'city', 'city_landmarks', 'catchment_areas', 'population_density',
+        'population_density_source', 'land_area', 'built_area', 'building_system',
+        'infrastructure', 'zoning_code', 'land_use', 'building_ratio_coverage', 'setbacks',
+        'allowed_uses', 'regulatory_constraints'
+      ];
+      scalarKeys.forEach(key => {
+        const value = source[key];
+        if (value === undefined || value === null || value === '') return;
+        slim[key] = typeof value === 'string' ? value.slice(0, 12000) : value;
+      });
+      if (source.location_polygon) slim.location_polygon = decimatePolygon(source.location_polygon);
+      if (Array.isArray(source.nearby_landmarks_data)) {
+        slim.nearby_landmarks_data = source.nearby_landmarks_data.slice(0, 20).map(item => {
+          if (!item || typeof item !== 'object') return item;
+          return Object.fromEntries(
+            ['name', 'category', 'distance_km', 'duration_minutes', 'distance_text', 'duration_text', 'address', 'lat', 'lng']
+              .filter(key => item[key] !== undefined && item[key] !== null && item[key] !== '')
+              .map(key => [key, item[key]])
+          );
+        });
+      }
+      return slim;
+    }
+
     function replaceCurrentSlideMapAssets(placeholders) {
       if (!tenantSlidesData || !tenantSlidesData.length || !placeholders) return false;
       let changed = false;
@@ -11566,7 +11596,7 @@
           locationAddress: projectContext.location_address,
           locationLat: projectContext.location_lat,
           locationLng: projectContext.location_lng,
-          siteContext: projectContext,
+          siteContext: slimLandAnalysisSiteContext(projectContext),
           includeMapContext: true
         });
         updateLoaderProgress(55, 'تم تجهيز الموقع والخرائط؛ جاري قراءة المستندات والاشتراطات...');
