@@ -755,7 +755,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('syncLocationAddressMirror', index_source)
         self.assertIn('geocodeTenantLocationLink', index_source)
         self.assertIn('includeMapContext: true', index_source)
-        self.assertIn('const landUseStatus = String(parcel.land_use_status || \'\').trim();', index_source)
+        self.assertIn('function renderAllowedUsesStatusNote(status)', index_source)
+        self.assertIn("id = 'allowedUsesStatusNote'", index_source)
+        self.assertIn("استخدام نوع المشروع غير مسموح حسب الاشتراطات", index_source)
         self.assertIn('function slimLandAnalysisSiteContext(context)', index_source)
         self.assertIn('siteContext: slimLandAnalysisSiteContext(projectContext)', index_source)
         self.assertNotIn('siteContext: projectContext', index_source)
@@ -1569,6 +1571,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("os.environ.get('REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE', '0')", app_source)
         self.assertIn('لا تكتب في أي حقل عبارات مثل «صفحة كذا»', app_source)
 
+    def test_land_use_status_is_split_out_of_allowed_uses_text(self):
+        module = self.application_module
+        self.assertEqual(module.normalize_land_use_status('غير مسموح في هذه المنطقة'), 'غير مسموح')
+        self.assertEqual(module.normalize_land_use_status('غير محسوم'), 'غير محسوم')
+        status, text = module.split_land_use_status_text('حالة استخدام المشروع: غير مسموح\nسكني وتجاري')
+        self.assertEqual(status, 'غير مسموح')
+        self.assertEqual(text, 'سكني وتجاري')
+
     def test_land_result_exposes_split_usage_fields_without_page_references(self):
         result = self.application_module._normalize_land_document_result({
             'parcels': [{
@@ -1577,7 +1587,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'coverage_ratio': '50%',
                 'floor_area_ratio': '2.5',
                 'setbacks': 'أمامي 6م؛ خلفي 3م',
-                'allowed_uses': 'حالة استخدام المشروع: مسموح\\nسكني',
+                'allowed_uses': 'حالة استخدام المشروع: مسموح\nسكني',
                 'land_use_status': 'مسموح',
                 'regulatory_constraints': 'اشتراطات المواقف: موقف لكل وحدة وفق اشتراطات1 صفحة 12',
                 'summary': 'الاشتراطات وفق اشتراطات2 صفحة 44 واضحة.',
@@ -1590,7 +1600,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('موقف لكل وحدة', parcel['regulatory_constraints'])
         self.assertNotIn('صفحة 12', parcel['regulatory_constraints'])
         self.assertNotIn('صفحة 44', parcel['summary'])
-        self.assertEqual(result['allowed_uses'], 'حالة استخدام المشروع: مسموح\\nسكني')
+        self.assertEqual(parcel['allowed_uses'], 'سكني')
+        self.assertEqual(result['allowed_uses'], 'سكني')
 
     def test_full_regulation_evidence_includes_unmatched_pages_and_tables(self):
         module = self.application_module
@@ -1878,6 +1889,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # truncated response is discarded whole.
         self.assertIn('١٨٠ كلمة على الأقل', source)
         self.assertIn('وليس قائمة حقول مفصولة بشرطات', source)
+        self.assertIn('لا تكتب حالة السماح داخل هذا الحقل', source)
 
     def test_regulation_lookup_skips_index_pages_and_strips_page_furniture(self):
         module = self.application_module

@@ -5742,6 +5742,34 @@ def strip_placeholder_values(payload):
     return cleaned
 
 
+_LAND_USE_STATUS_LINE_RE = re.compile(
+    r'حالة\s*استخدام\s*المشروع\s*[:：]\s*([^\n]+)',
+    re.IGNORECASE,
+)
+
+
+def normalize_land_use_status(value):
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    if re.search(r'غير\s*مسموح|ممنوع', text):
+        return 'غير مسموح'
+    if re.search(r'غير\s*محسوم|غير\s*محدد', text):
+        return 'غير محسوم'
+    if text == 'مسموح' or re.search(r'(^|[^\u0621-\u064A])مسموح([^\u0621-\u064A]|$)', text):
+        return 'مسموح'
+    return ''
+
+
+def split_land_use_status_text(text):
+    raw = str(text or '')
+    match = _LAND_USE_STATUS_LINE_RE.search(raw)
+    status = normalize_land_use_status(match.group(1) if match else '')
+    cleaned = _LAND_USE_STATUS_LINE_RE.sub('', raw, count=1)
+    cleaned = re.sub(r'\n{2,}', '\n', cleaned).strip()
+    return status, cleaned
+
+
 def merge_regulatory_access_requirements(payload):
     if not isinstance(payload, dict):
         return payload
@@ -6936,6 +6964,10 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
         parcel['building_ratio_setbacks'] = land_rule_text(parcel, include_setbacks=True)
     if not parcel.get('allowed_uses') and parcel.get('allowed_uses_restrictions'):
         parcel['allowed_uses'] = parcel['allowed_uses_restrictions']
+    status, uses = split_land_use_status_text(parcel.get('allowed_uses'))
+    if uses:
+        parcel['allowed_uses'] = uses
+    parcel['land_use_status'] = normalize_land_use_status(parcel.get('land_use_status')) or status
     strip_regulation_references_from_payload(parcel)
     return parcel
 
@@ -7654,8 +7686,8 @@ def _execute_extract_croquis():
             "- setbacks: الارتدادات الأربعة كل واحد برقمه بالمتر (أمامي/خلفي/جانبي أيمن/جانبي أيسر). إن لم تجدها فاكتب «غير محددة في المرجع المتاح» ولا تخترع أرقامًا.\n"
             "- parking_requirements: استخرج اشتراطات المواقف كاملة: العدد أو النسبة، نوع الاستخدام، وأبعاد الموقف أو المسار إن ذُكرت، دون ذكر أرقام الصفحات. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
             "- entrances_exits_requirements: استخرج اشتراطات مداخل ومخارج السيارات والمشاة والخدمات والتحميل والفصل بين المداخل إن ذُكرت، دون ذكر أرقام الصفحات. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
-            "- allowed_uses: ابدأ بعبارة «حالة استخدام المشروع: مسموح» أو «غير مسموح» أو «غير محسوم»، ثم اذكر الاستخدامات المسموحة. حدّد الحالة بمقارنة نوع المشروع المدخل مع استخدام الموقع في ملفي الاشتراطات كاملين.\n"
-            "- land_use_status: أعد قيمة واحدة فقط: «مسموح» أو «غير مسموح» أو «غير محسوم»، ولا تستخدم «مسموح» إذا لم يوجد دليل كافٍ.\n"
+            "- allowed_uses: اذكر الاستخدامات المسموحة فقط. لا تكتب حالة السماح داخل هذا الحقل.\n"
+            "- land_use_status: أعد قيمة واحدة فقط بعد مقارنة نوع المشروع المدخل مع الاشتراطات: «مسموح» أو «غير مسموح» أو «غير محسوم». لا تستخدم «مسموح» إذا لم يوجد دليل كافٍ.\n"
             "- regulatory_constraints: اذكر القيود التنظيمية المنطبقة على الموقع والمشروع، واجمع فيها المواقف والمداخل والمخارج والتحميل والخدمات عند وجودها، دون تكرار قائمة الاستخدامات.\n"
             "- allowed_uses_restrictions: اجمع allowed_uses وregulatory_constraints للتوافق مع البيانات القديمة فقط.\n"
             "- استخدم مساحة الأرض المستخرجة لاختيار الشريحة الصحيحة من جدول التنظيم؛ الجداول مفتاحها مساحة الأرض ونوع المحور/المنطقة.\n"

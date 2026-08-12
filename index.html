@@ -7501,6 +7501,7 @@
       renderLandDocumentsUploadState(source.land_documents_files_file_meta || []);
       showLandAnalysisDiagnostics(storedAnalysis);
       renderLandPhotos(source.land_photos_file_meta || []);
+      renderAllowedUsesStatusNote(source.land_use_status || storedAnalysis.land_use_status || storedAnalysis.parcels?.[0]?.land_use_status);
       renderProjectTeam();
 
       form.querySelectorAll('[data-key]').forEach(input => {
@@ -7513,6 +7514,12 @@
           input.value = '';
         } else if (typeof value === 'object') {
           input.value = JSON.stringify(value);
+        } else if (key === 'allowed_uses') {
+          const stripped = stripLandUseStatusFromText(value);
+          input.value = stripped.text;
+          if (stripped.status && !tenantProjectData.land_use_status) {
+            tenantProjectData.land_use_status = stripped.status;
+          }
         } else {
           input.value = String(value);
         }
@@ -8148,6 +8155,13 @@
             });
           }
           div.appendChild(input);
+          if (f.fieldKey === 'allowed_uses') {
+            const statusNote = document.createElement('div');
+            statusNote.id = 'allowedUsesStatusNote';
+            statusNote.hidden = true;
+            statusNote.style.cssText = 'margin-top:8px;font-size:13px;font-weight:700;line-height:1.6';
+            div.appendChild(statusNote);
+          }
           if (f.fieldKey === 'land_documents_files') {
             if (uploadStatus) {
               div.appendChild(uploadStatus);
@@ -11382,6 +11396,50 @@
       return false;
     }
 
+    function normalizeLandUseStatus(value) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      if (/غير\s*مسموح|ممنوع/.test(text)) return 'غير مسموح';
+      if (/غير\s*محسوم|غير\s*محدد/.test(text)) return 'غير محسوم';
+      if (text === 'مسموح' || /(^|[^\u0621-\u064A])مسموح([^\u0621-\u064A]|$)/.test(text)) return 'مسموح';
+      return '';
+    }
+
+    function stripLandUseStatusFromText(value) {
+      const raw = String(value || '');
+      const match = raw.match(/حالة\s*استخدام\s*المشروع\s*[:：]\s*([^\n]+)/);
+      const status = normalizeLandUseStatus(match ? match[1] : '');
+      const text = raw.replace(/حالة\s*استخدام\s*المشروع\s*[:：]\s*[^\n]+/, '').replace(/\n{2,}/g, '\n').trim();
+      return { status, text };
+    }
+
+    function landUseStatusNote(status) {
+      if (status === 'مسموح') {
+        return { tone: 'ok', text: 'استخدام نوع المشروع مسموح حسب الاشتراطات' };
+      }
+      if (status === 'غير مسموح') {
+        return { tone: 'bad', text: 'استخدام نوع المشروع غير مسموح حسب الاشتراطات' };
+      }
+      if (status === 'غير محسوم') {
+        return { tone: 'bad', text: 'استخدام نوع المشروع غير محدد حسب الاشتراطات' };
+      }
+      return null;
+    }
+
+    function renderAllowedUsesStatusNote(status) {
+      const note = document.getElementById('allowedUsesStatusNote');
+      if (!note) return;
+      const info = landUseStatusNote(normalizeLandUseStatus(status));
+      if (!info) {
+        note.hidden = true;
+        note.textContent = '';
+        return;
+      }
+      note.hidden = false;
+      note.textContent = info.text;
+      note.style.color = info.tone === 'ok' ? '#0b7a3b' : '#9c1d1d';
+    }
+
     function buildExtractedLandFieldData(data) {
       const fields = { ...(data || {}) };
       const parcel = Array.isArray(data?.parcels) ? data.parcels[0] : null;
@@ -11424,11 +11482,9 @@
         .filter(Boolean)
         .join('\n');
 
-      const allowedUsesRaw = String(parcel.allowed_uses || parcel.allowed_uses_restrictions || '').trim();
-      const landUseStatus = String(parcel.land_use_status || '').trim();
-      const allowedUsesText = landUseStatus && !allowedUsesRaw.includes('حالة استخدام المشروع')
-        ? ['حالة استخدام المشروع: ' + landUseStatus, allowedUsesRaw].filter(Boolean).join('\n')
-        : allowedUsesRaw;
+      const strippedUses = stripLandUseStatusFromText(parcel.allowed_uses || parcel.allowed_uses_restrictions || '');
+      const landUseStatus = normalizeLandUseStatus(parcel.land_use_status) || strippedUses.status;
+      const allowedUsesText = strippedUses.text;
       const constraintsText = String(parcel.regulatory_constraints || '').trim();
       const legacyRestrictionsText = [allowedUsesText, constraintsText]
         .filter(Boolean)
@@ -11452,7 +11508,7 @@
         max_floors_height: parcel.max_floors_height,
         allowed_uses: allowedUsesText,
         regulatory_constraints: constraintsText,
-        land_use_status: parcel.land_use_status,
+        land_use_status: landUseStatus,
         allowed_uses_restrictions: parcel.allowed_uses_restrictions || legacyRestrictionsText,
         // The whole-document summary is the detailed narrative; parcel.summary is only a
         // per-parcel note and must never replace it.
@@ -11634,7 +11690,9 @@
             if (v !== undefined && v !== null && v !== '') {
               tenantProjectData[k] = v;
               const inp = document.querySelector('#tenantProjectForm [data-key="' + k + '"]');
-              if (inp && typeof v !== 'object') inp.value = v;
+              if (inp && typeof v !== 'object') {
+                inp.value = k === 'allowed_uses' ? stripLandUseStatusFromText(v).text : v;
+              }
             }
           });
           tenantProjectData.land_documents_analysis = data;
@@ -11648,6 +11706,7 @@
           renderSurveyCoordinates(data.survey_coordinates || []);
           renderSurveyDirections(tenantProjectData.directions_table);
           showLandAnalysisDiagnostics(data);
+          renderAllowedUsesStatusNote(extractedFields.land_use_status);
           const appliedCount = Object.values(extractedFields)
             .filter(value => value !== undefined && value !== null && value !== '' && typeof value !== 'object').length;
           updateLoaderProgress(100, 'تم تحليل الملفات وتحديث ' + appliedCount + ' حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.');
