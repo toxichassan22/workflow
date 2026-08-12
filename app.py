@@ -5743,7 +5743,11 @@ def strip_placeholder_values(payload):
 
 
 _LAND_USE_STATUS_LINE_RE = re.compile(
-    r'حالة\s*استخدام\s*المشروع\s*[:：]\s*([^\n]+)',
+    r'(?:حالة\s*)?استخدام\s*(?:نوع\s*)?(?:المشروع|الأرض)\s*[:：]?\s*(مسموح|غير\s*مسموح|غير\s*محسوم|غير\s*محدد|ممنوع)',
+    re.IGNORECASE,
+)
+_LAND_USE_STATUS_ONLY_RE = re.compile(
+    r'^(حالة\s*استخدام\s*المشروع\s*[:：]\s*)?(مسموح|غير\s*مسموح|غير\s*محسوم|غير\s*محدد|ممنوع)\.?$',
     re.IGNORECASE,
 )
 
@@ -5764,9 +5768,14 @@ def normalize_land_use_status(value):
 def split_land_use_status_text(text):
     raw = str(text or '')
     match = _LAND_USE_STATUS_LINE_RE.search(raw)
-    status = normalize_land_use_status(match.group(1) if match else '')
-    cleaned = _LAND_USE_STATUS_LINE_RE.sub('', raw, count=1)
-    cleaned = re.sub(r'\n{2,}', '\n', cleaned).strip()
+    only = _LAND_USE_STATUS_ONLY_RE.fullmatch(raw.strip())
+    status = normalize_land_use_status(
+        (match.group(1) if match else '') or (only.group(2) if only else '') or raw
+    )
+    cleaned = _LAND_USE_STATUS_LINE_RE.sub('', raw)
+    cleaned = re.sub(r'\n{2,}', '\n', cleaned).strip(' \n-–—:')
+    if _LAND_USE_STATUS_ONLY_RE.fullmatch(cleaned):
+        cleaned = ''
     return status, cleaned
 
 
@@ -7686,7 +7695,9 @@ def _execute_extract_croquis():
             "- setbacks: الارتدادات الأربعة كل واحد برقمه بالمتر (أمامي/خلفي/جانبي أيمن/جانبي أيسر). إن لم تجدها فاكتب «غير محددة في المرجع المتاح» ولا تخترع أرقامًا.\n"
             "- parking_requirements: استخرج اشتراطات المواقف كاملة: العدد أو النسبة، نوع الاستخدام، وأبعاد الموقف أو المسار إن ذُكرت، دون ذكر أرقام الصفحات. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
             "- entrances_exits_requirements: استخرج اشتراطات مداخل ومخارج السيارات والمشاة والخدمات والتحميل والفصل بين المداخل إن ذُكرت، دون ذكر أرقام الصفحات. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
-            "- allowed_uses: اذكر الاستخدامات المسموحة فقط. لا تكتب حالة السماح داخل هذا الحقل.\n"
+            "- allowed_uses: اكتب قائمة الاستخدامات المسموحة تنظيميًا لهذه الأرض من جدول التنظيم وملفي الاشتراطات "
+            "(مثل: سكني، تجاري، إداري، فندقي). لا تكتب حالة توافق نوع المشروع، ولا تكتب «حالة استخدام المشروع». "
+            "إذا لم تُستخرج استخدامات واضحة فاكتب «غير محددة في المرجع المتاح».\n"
             "- land_use_status: أعد قيمة واحدة فقط بعد مقارنة نوع المشروع المدخل مع الاشتراطات: «مسموح» أو «غير مسموح» أو «غير محسوم». لا تستخدم «مسموح» إذا لم يوجد دليل كافٍ.\n"
             "- regulatory_constraints: اذكر القيود التنظيمية المنطبقة على الموقع والمشروع، واجمع فيها المواقف والمداخل والمخارج والتحميل والخدمات عند وجودها، دون تكرار قائمة الاستخدامات.\n"
             "- allowed_uses_restrictions: اجمع allowed_uses وregulatory_constraints للتوافق مع البيانات القديمة فقط.\n"

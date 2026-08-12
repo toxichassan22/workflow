@@ -758,6 +758,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function renderAllowedUsesStatusNote(status)', index_source)
         self.assertIn("id = 'allowedUsesStatusNote'", index_source)
         self.assertIn("استخدام نوع المشروع غير مسموح حسب الاشتراطات", index_source)
+        self.assertIn("قائمة الاستخدامات المسموحة تنظيميًا", (ROOT / 'db.py').read_text(encoding='utf-8'))
         self.assertIn('function slimLandAnalysisSiteContext(context)', index_source)
         self.assertIn('siteContext: slimLandAnalysisSiteContext(projectContext)', index_source)
         self.assertNotIn('siteContext: projectContext', index_source)
@@ -1578,6 +1579,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         status, text = module.split_land_use_status_text('حالة استخدام المشروع: غير مسموح\nسكني وتجاري')
         self.assertEqual(status, 'غير مسموح')
         self.assertEqual(text, 'سكني وتجاري')
+        status_only, empty_text = module.split_land_use_status_text('استخدام الأرض: مسموح')
+        self.assertEqual(status_only, 'مسموح')
+        self.assertEqual(empty_text, '')
 
     def test_land_result_exposes_split_usage_fields_without_page_references(self):
         result = self.application_module._normalize_land_document_result({
@@ -1889,7 +1893,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # truncated response is discarded whole.
         self.assertIn('١٨٠ كلمة على الأقل', source)
         self.assertIn('وليس قائمة حقول مفصولة بشرطات', source)
-        self.assertIn('لا تكتب حالة السماح داخل هذا الحقل', source)
+        self.assertIn('قائمة الاستخدامات المسموحة تنظيميًا', source)
 
     def test_regulation_lookup_skips_index_pages_and_strips_page_furniture(self):
         module = self.application_module

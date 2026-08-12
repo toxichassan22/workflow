@@ -8090,7 +8090,7 @@
             input = document.createElement('input');
             input.type = 'text';
           }
-          if (f.fieldKey === 'max_floors_height' && input.tagName === 'TEXTAREA') input.rows = 4;
+          if ((f.fieldKey === 'max_floors_height' || f.fieldKey === 'allowed_uses') && input.tagName === 'TEXTAREA') input.rows = 4;
           input.dataset.key = f.fieldKey;
           input.dataset.type = f.fieldType;
           input.placeholder = f.placeholder || '';
@@ -11407,9 +11407,13 @@
 
     function stripLandUseStatusFromText(value) {
       const raw = String(value || '');
-      const match = raw.match(/حالة\s*استخدام\s*المشروع\s*[:：]\s*([^\n]+)/);
-      const status = normalizeLandUseStatus(match ? match[1] : '');
-      const text = raw.replace(/حالة\s*استخدام\s*المشروع\s*[:：]\s*[^\n]+/, '').replace(/\n{2,}/g, '\n').trim();
+      const lineRe = /(?:حالة\s*)?استخدام\s*(?:نوع\s*)?(?:المشروع|الأرض)\s*[:：]?\s*(مسموح|غير\s*مسموح|غير\s*محسوم|غير\s*محدد|ممنوع)/i;
+      const onlyRe = /^(حالة\s*استخدام\s*المشروع\s*[:：]\s*)?(مسموح|غير\s*مسموح|غير\s*محسوم|غير\s*محدد|ممنوع)\.?$/i;
+      const match = raw.match(lineRe);
+      const only = raw.trim().match(onlyRe);
+      const status = normalizeLandUseStatus((match && match[1]) || (only && only[2]) || raw);
+      let text = raw.replace(lineRe, '').replace(/\n{2,}/g, '\n').replace(/^[\s\-–—:]+|[\s\-–—:]+$/g, '');
+      if (onlyRe.test(text)) text = '';
       return { status, text };
     }
 
