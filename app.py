@@ -5773,10 +5773,62 @@ def split_land_use_status_text(text):
         (match.group(1) if match else '') or (only.group(2) if only else '') or raw
     )
     cleaned = _LAND_USE_STATUS_LINE_RE.sub('', raw)
+    cleaned = re.sub(r'ولم ي[ُو]حدد نوع المشروع[^\n.]*[.\n]?', '', cleaned)
     cleaned = re.sub(r'\n{2,}', '\n', cleaned).strip(' \n-–—:')
     if _LAND_USE_STATUS_ONLY_RE.fullmatch(cleaned):
         cleaned = ''
     return status, cleaned
+
+
+PROJECT_TYPE_USE_ALIASES = {
+    'سكني': ('سكني',),
+    'تجاري': ('تجاري',),
+    'إداري': ('إداري', 'مكتبي'),
+    'فندقي': ('فندقي', 'فندق'),
+    'ترفيهي': ('ترفيهي', 'سياحي', 'ترفيه'),
+    'صناعي': ('صناعي',),
+    'لوجستي': ('لوجستي', 'مستودع', 'تخزين'),
+    'طبي': ('طبي', 'صحي'),
+    'تعليمي': ('تعليمي', 'مدرسة', 'جامعة'),
+    'سيارات وترفيه': ('سيارات', 'ترفيهي', 'ترفيه'),
+    'مختلط': ('مختلط', 'متنوع', 'سكني', 'تجاري'),
+}
+
+
+def resolve_land_use_status(project_type, allowed_uses):
+    """Compare the entered project type with extracted permitted uses.
+
+    The model often leaves land_use_status unresolved even when the form sent
+    "سكني" and the regulations already list residential use.
+    """
+    project = str(project_type or '').strip()
+    uses = str(allowed_uses or '').strip()
+    if not project or project.startswith('أخرى'):
+        return 'غير محسوم'
+    if not uses or uses.startswith('غير محدد'):
+        return 'غير محسوم'
+    aliases = PROJECT_TYPE_USE_ALIASES.get(project, (project,))
+    if any(alias and alias in uses for alias in aliases):
+        return 'مسموح'
+    return 'غير مسموح'
+
+
+def apply_entered_land_use_status(result, project_type=''):
+    if not isinstance(result, dict):
+        return result
+    parcels = result.get('parcels') if isinstance(result.get('parcels'), list) else []
+    first = parcels[0] if parcels and isinstance(parcels[0], dict) else {}
+    uses = str(result.get('allowed_uses') or first.get('allowed_uses') or '').strip()
+    _, uses = split_land_use_status_text(uses)
+    status = resolve_land_use_status(project_type, uses)
+    if uses:
+        result['allowed_uses'] = uses
+        if first:
+            first['allowed_uses'] = uses
+    result['land_use_status'] = status
+    if first:
+        first['land_use_status'] = status
+    return result
 
 
 def merge_regulatory_access_requirements(payload):
@@ -7183,7 +7235,7 @@ def _directions_have_content(directions):
     )
 
 
-def _normalize_land_document_result(resp_json, text_content=''):
+def _normalize_land_document_result(resp_json, text_content='', project_type=''):
     """Normalize multi-parcel document output while keeping legacy flat fields compatible."""
     if not isinstance(resp_json, dict):
         resp_json = {}
@@ -7235,7 +7287,7 @@ def _normalize_land_document_result(resp_json, text_content=''):
         result['conflicts'] = resp_json.get('conflicts') if isinstance(resp_json.get('conflicts'), list) else []
         result['document_summary'] = result.get('land_and_building_summary', '')
         strip_regulation_references_from_payload(result)
-        return result
+        return apply_entered_land_use_status(result, project_type)
 
     normalized_parcels = []
     for index, raw in enumerate(raw_parcels):
@@ -7313,7 +7365,7 @@ def _normalize_land_document_result(resp_json, text_content=''):
         if value not in (None, ''):
             result.setdefault(key, value)
     strip_regulation_references_from_payload(result)
-    return result
+    return apply_entered_land_use_status(result, project_type)
 
 
 def _build_land_extraction_diagnostics(result, document_processing=None):
@@ -7698,7 +7750,8 @@ def _execute_extract_croquis():
             "- allowed_uses: اكتب قائمة الاستخدامات المسموحة تنظيميًا لهذه الأرض من جدول التنظيم وملفي الاشتراطات "
             "(مثل: سكني، تجاري، إداري، فندقي). لا تكتب حالة توافق نوع المشروع، ولا تكتب «حالة استخدام المشروع». "
             "إذا لم تُستخرج استخدامات واضحة فاكتب «غير محددة في المرجع المتاح».\n"
-            "- land_use_status: أعد قيمة واحدة فقط بعد مقارنة نوع المشروع المدخل مع الاشتراطات: «مسموح» أو «غير مسموح» أو «غير محسوم». لا تستخدم «مسموح» إذا لم يوجد دليل كافٍ.\n"
+            "- land_use_status: أعد قيمة واحدة فقط بعد مقارنة نوع المشروع المدخل في بيانات العميل مع الاستخدامات المستخرجة: «مسموح» أو «غير مسموح» أو «غير محسوم». "
+            "إذا كان نوع المشروع مكتوبًا في بيانات العميل فلا تقل إنه غير مدخل. لا تستخدم «مسموح» إذا لم يوجد دليل كافٍ.\n"
             "- regulatory_constraints: اذكر القيود التنظيمية المنطبقة على الموقع والمشروع، واجمع فيها المواقف والمداخل والمخارج والتحميل والخدمات عند وجودها، دون تكرار قائمة الاستخدامات.\n"
             "- allowed_uses_restrictions: اجمع allowed_uses وregulatory_constraints للتوافق مع البيانات القديمة فقط.\n"
             "- استخدم مساحة الأرض المستخرجة لاختيار الشريحة الصحيحة من جدول التنظيم؛ الجداول مفتاحها مساحة الأرض ونوع المحور/المنطقة.\n"
@@ -7937,7 +7990,11 @@ def _execute_extract_croquis():
                 'providerError': raw_resp[:400],
                 'documentProcessing': document_processing
             }), 503
-        resp_json = _normalize_land_document_result(parsed_response, raw_resp)
+        resp_json = _normalize_land_document_result(
+            parsed_response,
+            raw_resp,
+            project_type=str(data.get('projectType') or data.get('project_type') or '').strip(),
+        )
         if vision_warnings:
             resp_json['warnings'] = vision_warnings
         resp_json['document_processing'] = document_processing

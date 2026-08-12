@@ -758,6 +758,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function renderAllowedUsesStatusNote(status)', index_source)
         self.assertIn("id = 'allowedUsesStatusNote'", index_source)
         self.assertIn("استخدام نوع المشروع غير مسموح حسب الاشتراطات", index_source)
+        self.assertIn('function resolveLandUseStatus(projectType, allowedUses)', index_source)
+        self.assertIn('function refreshAllowedUsesStatusNote()', index_source)
         self.assertIn("قائمة الاستخدامات المسموحة تنظيميًا", (ROOT / 'db.py').read_text(encoding='utf-8'))
         self.assertIn('function slimLandAnalysisSiteContext(context)', index_source)
         self.assertIn('siteContext: slimLandAnalysisSiteContext(projectContext)', index_source)
@@ -1582,6 +1584,20 @@ class MeetingRequirementsTests(unittest.TestCase):
         status_only, empty_text = module.split_land_use_status_text('استخدام الأرض: مسموح')
         self.assertEqual(status_only, 'مسموح')
         self.assertEqual(empty_text, '')
+        self.assertEqual(
+            module.resolve_land_use_status(
+                'سكني',
+                'الاستخدام المسموح للموقع هو سكني ترفيهي سياحي متنوع للجزء المطل على طريق الكورنيش، وسكني عمائر للجزء المتبقي.'
+            ),
+            'مسموح',
+        )
+        ignored = module.apply_entered_land_use_status({
+            'allowed_uses': 'سكني ترفيهي سياحي',
+            'land_use_status': 'غير محسوم',
+            'parcels': [{'allowed_uses': 'سكني ترفيهي سياحي', 'land_use_status': 'غير محسوم'}],
+        }, 'سكني')
+        self.assertEqual(ignored['land_use_status'], 'مسموح')
+        self.assertEqual(ignored['parcels'][0]['land_use_status'], 'مسموح')
 
     def test_land_result_exposes_split_usage_fields_without_page_references(self):
         result = self.application_module._normalize_land_document_result({
@@ -1591,12 +1607,12 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'coverage_ratio': '50%',
                 'floor_area_ratio': '2.5',
                 'setbacks': 'أمامي 6م؛ خلفي 3م',
-                'allowed_uses': 'حالة استخدام المشروع: مسموح\nسكني',
-                'land_use_status': 'مسموح',
+                'allowed_uses': 'حالة استخدام المشروع: غير محسوم\nسكني ترفيهي سياحي',
+                'land_use_status': 'غير محسوم',
                 'regulatory_constraints': 'اشتراطات المواقف: موقف لكل وحدة وفق اشتراطات1 صفحة 12',
                 'summary': 'الاشتراطات وفق اشتراطات2 صفحة 44 واضحة.',
             }]
-        })
+        }, project_type='سكني')
         parcel = result['parcels'][0]
         self.assertIn('نسبة البناء', parcel['building_ratio_coverage'])
         self.assertEqual(parcel['setbacks'], 'أمامي 6م؛ خلفي 3م')
@@ -1604,8 +1620,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('موقف لكل وحدة', parcel['regulatory_constraints'])
         self.assertNotIn('صفحة 12', parcel['regulatory_constraints'])
         self.assertNotIn('صفحة 44', parcel['summary'])
-        self.assertEqual(parcel['allowed_uses'], 'سكني')
-        self.assertEqual(result['allowed_uses'], 'سكني')
+        self.assertEqual(parcel['allowed_uses'], 'سكني ترفيهي سياحي')
+        self.assertEqual(result['allowed_uses'], 'سكني ترفيهي سياحي')
 
     def test_full_regulation_evidence_includes_unmatched_pages_and_tables(self):
         module = self.application_module

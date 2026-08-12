@@ -7501,7 +7501,7 @@
       renderLandDocumentsUploadState(source.land_documents_files_file_meta || []);
       showLandAnalysisDiagnostics(storedAnalysis);
       renderLandPhotos(source.land_photos_file_meta || []);
-      renderAllowedUsesStatusNote(source.land_use_status || storedAnalysis.land_use_status || storedAnalysis.parcels?.[0]?.land_use_status);
+      refreshAllowedUsesStatusNote();
       renderProjectTeam();
 
       form.querySelectorAll('[data-key]').forEach(input => {
@@ -8161,6 +8161,7 @@
             statusNote.hidden = true;
             statusNote.style.cssText = 'margin-top:8px;font-size:13px;font-weight:700;line-height:1.6';
             div.appendChild(statusNote);
+            input.addEventListener('input', refreshAllowedUsesStatusNote);
           }
           if (f.fieldKey === 'land_documents_files') {
             if (uploadStatus) {
@@ -8196,7 +8197,10 @@
               if (isOther && f.isRequired) otherInput.required = true;
               else otherInput.required = false;
             };
-            input.addEventListener('change', checkOther);
+            input.addEventListener('change', () => {
+              checkOther();
+              if (f.fieldKey === 'project_type') refreshAllowedUsesStatusNote();
+            });
             input.addEventListener('input', checkOther);
             otherInput.addEventListener('input', () => {
               if (tenantProjectData) tenantProjectData[f.fieldKey + '_other'] = otherInput.value;
@@ -11412,7 +11416,8 @@
       const match = raw.match(lineRe);
       const only = raw.trim().match(onlyRe);
       const status = normalizeLandUseStatus((match && match[1]) || (only && only[2]) || raw);
-      let text = raw.replace(lineRe, '').replace(/\n{2,}/g, '\n').replace(/^[\s\-–—:]+|[\s\-–—:]+$/g, '');
+      let text = raw.replace(lineRe, '').replace(/ولم ي[ُو]حدد نوع المشروع[^\n.]*/g, '')
+        .replace(/\n{2,}/g, '\n').replace(/^[\s\-–—:]+|[\s\-–—:]+$/g, '');
       if (onlyRe.test(text)) text = '';
       return { status, text };
     }
@@ -11428,6 +11433,38 @@
         return { tone: 'bad', text: 'استخدام نوع المشروع غير محدد حسب الاشتراطات' };
       }
       return null;
+    }
+
+    function resolveLandUseStatus(projectType, allowedUses) {
+      const project = String(projectType || '').trim();
+      const uses = stripLandUseStatusFromText(allowedUses).text;
+      if (!project || project.startsWith('أخرى')) return 'غير محسوم';
+      if (!uses || uses.startsWith('غير محدد')) return 'غير محسوم';
+      const aliases = {
+        'سكني': ['سكني'],
+        'تجاري': ['تجاري'],
+        'إداري': ['إداري', 'مكتبي'],
+        'فندقي': ['فندقي', 'فندق'],
+        'ترفيهي': ['ترفيهي', 'سياحي', 'ترفيه'],
+        'صناعي': ['صناعي'],
+        'لوجستي': ['لوجستي', 'مستودع', 'تخزين'],
+        'طبي': ['طبي', 'صحي'],
+        'تعليمي': ['تعليمي', 'مدرسة', 'جامعة'],
+        'سيارات وترفيه': ['سيارات', 'ترفيهي', 'ترفيه'],
+        'مختلط': ['مختلط', 'متنوع', 'سكني', 'تجاري']
+      };
+      const keys = aliases[project] || [project];
+      return keys.some(alias => alias && uses.includes(alias)) ? 'مسموح' : 'غير مسموح';
+    }
+
+    function refreshAllowedUsesStatusNote() {
+      const projectType = document.querySelector('#tenantProjectForm [data-key="project_type"]')?.value
+        || tenantProjectData.project_type;
+      const allowedUses = document.querySelector('#tenantProjectForm [data-key="allowed_uses"]')?.value
+        || tenantProjectData.allowed_uses;
+      const status = resolveLandUseStatus(projectType, allowedUses);
+      tenantProjectData.land_use_status = status;
+      renderAllowedUsesStatusNote(status);
     }
 
     function renderAllowedUsesStatusNote(status) {
@@ -11710,7 +11747,7 @@
           renderSurveyCoordinates(data.survey_coordinates || []);
           renderSurveyDirections(tenantProjectData.directions_table);
           showLandAnalysisDiagnostics(data);
-          renderAllowedUsesStatusNote(extractedFields.land_use_status);
+          refreshAllowedUsesStatusNote();
           const appliedCount = Object.values(extractedFields)
             .filter(value => value !== undefined && value !== null && value !== '' && typeof value !== 'object').length;
           updateLoaderProgress(100, 'تم تحليل الملفات وتحديث ' + appliedCount + ' حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.');
