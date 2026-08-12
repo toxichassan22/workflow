@@ -206,12 +206,12 @@ field keeps its old value, i.e. "re-analysis did nothing".
 `_call_land_analysis_model()` starts at `LAND_ANALYSIS_MAX_TOKENS` (16000), retries a truncated
 response once with a higher cap up to `LAND_ANALYSIS_TRUNCATION_CEILING`, and walks the cap down
 when the provider quotes an affordable figure.
+The primary text/analysis model is `google/gemini-3.6-flash` (`GEMINI_TEXT_MODEL`).
 Some OpenRouter fallbacks (especially Anthropic) reject `response_format: json_object` with
 `output_format` content filtering, which used to abort the whole croquis run. The land call now
-pins to OpenAI with `allow_fallbacks: false` and retries once without JSON mode if that block
+pins to Google with `allow_fallbacks: false` and retries once without JSON mode if that block
 (or empty content) comes back.
-`_get_chat_response_text()` also reads `reasoning` / `reasoning_content` when `content` is empty —
-Luna often spends the reply there.
+`_get_chat_response_text()` also reads `reasoning` / `reasoning_content` when `content` is empty.
 The live hosting proxy fabricates a 404 if `POST /api/extract-croquis` stays open for the whole
 pipeline. Production therefore queues the job and the client polls `GET /api/extract-croquis/<id>`.
 Keep the unittest path synchronous (`TESTING`) unless a test passes `background: true`.

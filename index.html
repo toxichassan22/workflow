@@ -4027,7 +4027,7 @@
           <div id="tenantFloorDesignAnalysisMissingList" class="tenant-floor-design-readiness-list"></div>
         </div>
         <div id="tenantFloorDesignAnalysisResult" class="tenant-floor-design-analysis-result" hidden>
-          <div class="tenant-floor-design-analysis-result-head"><div><h4>مراجعة تحليل Luna</h4><p id="tenantFloorDesignAnalysisApprovalStatus">لم يعتمد أي قسم بعد.</p></div><button type="button" class="btn primary" id="tenantFloorDesignAnalysisApproveAllButton" onclick="approveTenantFloorDesignAnalysis()">اعتماد كل التحليلات</button></div>
+          <div class="tenant-floor-design-analysis-result-head"><div><h4>مراجعة تحليل التصميم</h4><p id="tenantFloorDesignAnalysisApprovalStatus">لم يعتمد أي قسم بعد.</p></div><button type="button" class="btn primary" id="tenantFloorDesignAnalysisApproveAllButton" onclick="approveTenantFloorDesignAnalysis()">اعتماد كل التحليلات</button></div>
           <div class="tenant-floor-design-analysis-workspace">
             <aside class="tenant-floor-design-analysis-nav">
               <div class="tenant-floor-design-analysis-nav-head"><strong>أقسام التحليل</strong><span id="tenantFloorDesignAnalysisApprovalCount">0 من 6</span></div>
@@ -9003,7 +9003,7 @@
       if (sendButton) { sendButton.disabled = true; sendButton.textContent = 'جاري المراجعة'; }
       showLoader('جاري مراجعة التحليل', 'يتم تطبيق طلبك على التحليل الحالي فقط...', 35);
       try {
-        updateLoaderProgress(55, 'جاري إرسال طلب تعديل التحليل إلى Luna...');
+        updateLoaderProgress(55, 'جاري إرسال طلب تعديل التحليل...');
         const payload = await collectTenantFloorDesignAiPayload();
         payload.analysis = tenantFloorDesignState.analysis;
         payload.message = text;

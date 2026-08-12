@@ -181,14 +181,15 @@ OPENROUTER_KEY = (os.environ.get("OPENROUTER_KEY") or "").strip() or None
 GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip() or None
 ZAI_BASE = 'https://api.z.ai/api/paas/v4'
 OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
-LUNA_TEXT_MODEL = "openai/gpt-5.6-luna-pro"
-GLM_MODEL = LUNA_TEXT_MODEL
-GLM_OPENROUTER_MODEL = LUNA_TEXT_MODEL
+GEMINI_TEXT_MODEL = "google/gemini-3.6-flash"
+LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
+GLM_MODEL = GEMINI_TEXT_MODEL
+GLM_OPENROUTER_MODEL = GEMINI_TEXT_MODEL
 GLM_USE_OPENROUTER = True
-print(f"[CONFIG] Primary text/design model: {LUNA_TEXT_MODEL}")
+print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
 FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"
-FLOOR_DESIGN_TEXT_MODEL = LUNA_TEXT_MODEL
+FLOOR_DESIGN_TEXT_MODEL = GEMINI_TEXT_MODEL
 FLOOR_DESIGN_IMAGE_HARD_NEGATIVE = (
     'ABSOLUTE OUTPUT RULE: generate only the clean 2D architectural geometry. '
     'Do not render any written text, letters, numbers, labels, titles, dimensions, measurements, '
@@ -280,9 +281,9 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
 
 def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
                   reasoning_effort=None):
-    """Compatibility wrapper: all text/design work now uses Luna through OpenRouter."""
+    """Compatibility wrapper: all text/design work now uses Gemini through OpenRouter."""
     if not OPENROUTER_KEY:
-        return {"error": {"message": "OPENROUTER_KEY is required for the Luna text model"}}
+        return {"error": {"message": "OPENROUTER_KEY is required for the Gemini text model"}}
     return call_openrouter_chat(
         system_prompt,
         user_content,
@@ -1426,7 +1427,7 @@ def api_analyze_floor_design_data():
     if missing:
         return jsonify({'success': False, 'error': 'بيانات تصميم الطوابق غير مكتملة', 'error_code': 'FLOOR_DESIGN_DATA_INCOMPLETE', 'missingFields': missing}), 400
     system_prompt = (
-        'أنت Luna، مستشار معماري وتحليل بيانات عقارية دقيق. أخرج JSON فقط. '
+        'أنت مستشار معماري وتحليل بيانات عقارية دقيق. أخرج JSON فقط. '
         'حلل البيانات المعطاة فقط، ولا تخترع قياسات أو اشتراطات. '
         'فرّق بين القيود النظامية الصارمة وتعليمات العميل والافتراضات. '
         'لا تغيّر عدد الأدوار أو توزيع المجموعات أو مكونات المشروع.'
@@ -1442,7 +1443,7 @@ def api_analyze_floor_design_data():
         response = call_openrouter_chat(system_prompt, user_prompt, temperature=None, max_tokens=8000, model=LUNA_TEXT_MODEL, reasoning_effort='high')
         analysis = _designer_json_response(extract_chat_content(response, 'FLOOR-DESIGN-ANALYSIS'))
         if not analysis:
-            return jsonify({'success': False, 'error': 'تعذر قراءة تحليل Luna', 'error_code': 'TEXT_PROVIDER_INVALID'}), 503
+            return jsonify({'success': False, 'error': 'تعذر قراءة التحليل', 'error_code': 'TEXT_PROVIDER_INVALID'}), 503
         return jsonify({'success': True, 'analysis': analysis, 'model': LUNA_TEXT_MODEL})
     except Exception:
         app.logger.exception('Floor design analysis failed')
@@ -1612,7 +1613,7 @@ def api_generate_floor_design_prompt():
     if not group:
         return jsonify({'success': False, 'error': 'مجموعة الأدوار غير موجودة', 'error_code': 'GROUP_NOT_FOUND'}), 404
     system_prompt = (
-        'أنت Luna، كاتب Prompts معماري صارم. أخرج JSON فقط بالشكل '
+        'أنت كاتب Prompts معماري صارم. أخرج JSON فقط بالشكل '
         '{"prompt":"","negative_prompt":""}. استخدم القيود النظامية والبيانات فقط. '
         'اكتب Prompt واضحًا لمخطط 2D علوي، بدون أثاث أو منظور أو زخرفة، مع حدود الوحدات والـ Core والمداخل والممرات. '
         'ممنوع منعًا باتًا أن تظهر أي كتابة أو أرقام أو حروف أو Labels أو عنوان أو أبعاد أو جدول أو Legend أو بوصلة أو أسهم أو علامة مائية داخل الصورة. '
@@ -6352,8 +6353,9 @@ PDF_VISION_ROTATION_DIRECTION_MIN_SCORE_GAP = float(os.environ.get('PDF_VISION_R
 LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '16000'))
 LAND_ANALYSIS_MIN_TOKENS = int(os.environ.get('LAND_ANALYSIS_MIN_TOKENS', '6000'))
 LAND_ANALYSIS_TRUNCATION_CEILING = int(os.environ.get('LAND_ANALYSIS_TRUNCATION_CEILING', '20000'))
-# Luna accepts text and image inputs and is the primary model for all text/analysis workflows.
-LAND_ANALYSIS_MODEL = LUNA_TEXT_MODEL
+# Gemini 3.6 Flash accepts text, images, and files and is the primary model
+# for all text/analysis workflows, including land and croquis extraction.
+LAND_ANALYSIS_MODEL = GEMINI_TEXT_MODEL
 
 _AFFORDABLE_TOKENS_RE = re.compile(r'can only afford\s+(\d+)')
 _TRANSIENT_PROVIDER_RE = re.compile(r'\(HTTP 5\d\d\)')
@@ -6362,7 +6364,7 @@ _JSON_MODE_BLOCK_RE = re.compile(
     r'output_format|content filtering|response_format|structured.?output',
     re.IGNORECASE,
 )
-LAND_ANALYSIS_PROVIDER = {'order': ['OpenAI'], 'allow_fallbacks': False}
+LAND_ANALYSIS_PROVIDER = {'order': ['Google'], 'allow_fallbacks': False}
 
 
 def _chat_error_message(res):
