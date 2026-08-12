@@ -7480,8 +7480,6 @@
           input.value = String(value);
         }
       });
-      syncLocationAddressMirror(source.location_address || tenantProjectData.location_address || '');
-
       const timelineRows = parseStoredProjectTable(source.timeline_table_data || source.timelineRows);
       const timelineBody = document.getElementById('timelineTableBody');
       if (timelineBody && timelineRows.length) {
@@ -7887,20 +7885,12 @@
       return field.fieldLabel;
     }
 
-    function syncLocationAddressMirror(value) {
-      const mirror = document.getElementById('locationAddressMirror');
-      if (mirror) mirror.value = String(value || '');
-      const status = document.getElementById('locationAddressMirrorStatus');
-      if (status) status.textContent = value ? 'يتم تعديل الرابط من قسم الأرض والكروكي فقط.' : 'أدخل الرابط من قسم الأرض والكروكي.';
-    }
-
     async function geocodeTenantLocationLink(input, latInput, lngInput, force = false) {
       const value = String(input?.value || '').trim();
       tenantProjectData.location_address = value;
-      syncLocationAddressMirror(value);
       if (!value) return false;
       if (!isGoogleMapsUrl(value)) {
-        toast('أدخل رابط Google Maps صحيحًا لموقع الأرض');
+        toast('أدخل رابط Google Maps صحيحًا في قسم الموقع والخرائط');
         return false;
       }
       if (tenantLocationGeocodeRequest) return tenantLocationGeocodeRequest;
@@ -7950,36 +7940,6 @@
         sectionDiv.dataset.section = sectionKey;
         sectionDiv.id = 'project-section-' + sectionKey;
         sectionDiv.appendChild(createProjectSectionHeader(sectionKey, sectionMap[sectionKey] || 'عام'));
-
-        if (sectionKey === 'location') {
-          const mirrorField = document.createElement('div');
-          mirrorField.className = 'tenant-field full';
-          const mirrorLabel = document.createElement('label');
-          mirrorLabel.textContent = 'رابط موقع الأرض في Google Maps';
-          const mirrorInput = document.createElement('input');
-          mirrorInput.id = 'locationAddressMirror';
-          mirrorInput.type = 'url';
-          mirrorInput.readOnly = true;
-          mirrorInput.tabIndex = -1;
-          mirrorInput.value = String(tenantProjectData.location_address || '');
-          mirrorInput.style.cssText = 'background:#f4f7fa;color:var(--muted);cursor:not-allowed;';
-          const mirrorStatus = document.createElement('div');
-          mirrorStatus.id = 'locationAddressMirrorStatus';
-          mirrorStatus.className = 'tenant-hint';
-          mirrorStatus.style.margin = '6px 0 0';
-          mirrorField.appendChild(mirrorLabel);
-          mirrorField.appendChild(mirrorInput);
-          mirrorField.appendChild(mirrorStatus);
-          const mirrorAnalyzeButton = document.createElement('button');
-          mirrorAnalyzeButton.type = 'button';
-          mirrorAnalyzeButton.className = 'btn ghost';
-          mirrorAnalyzeButton.textContent = 'تحليل رابط الموقع';
-          mirrorAnalyzeButton.style.marginTop = '8px';
-          mirrorAnalyzeButton.onclick = () => analyzeTenantSite();
-          mirrorField.appendChild(mirrorAnalyzeButton);
-          sectionDiv.appendChild(mirrorField);
-          syncLocationAddressMirror(tenantProjectData.location_address || '');
-        }
 
         sectionFields.forEach(f => {
           if (LOCATION_TABLE_FIELDS[f.fieldKey]) {
@@ -8086,6 +8046,7 @@
             input = document.createElement('input');
             input.type = 'text';
           }
+          if (f.fieldKey === 'max_floors_height' && input.tagName === 'TEXTAREA') input.rows = 4;
           input.dataset.key = f.fieldKey;
           input.dataset.type = f.fieldType;
           input.placeholder = f.placeholder || '';
@@ -8109,7 +8070,6 @@
               const value = input.value.trim();
               const previous = String(tenantProjectData.location_address || '').trim();
               tenantProjectData.location_address = value;
-              syncLocationAddressMirror(value);
               if (previous && previous !== value) {
                 tenantProjectData.location_lat = '';
                 tenantProjectData.location_lng = '';
@@ -8694,8 +8654,16 @@
     }
 
     function tenantFloorDesignFieldHasValue(key) {
-      const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-      return Boolean(String(input?.value ?? tenantProjectData?.[key] ?? '').trim());
+      const aliases = {
+        building_ratio_coverage: ['building_ratio_coverage', 'building_ratio_setbacks'],
+        setbacks: ['setbacks', 'building_ratio_setbacks'],
+        allowed_uses: ['allowed_uses', 'allowed_uses_restrictions'],
+        regulatory_constraints: ['regulatory_constraints', 'allowed_uses_restrictions']
+      };
+      return (aliases[key] || [key]).some(candidate => {
+        const input = document.querySelector('#tenantProjectForm [data-key="' + candidate + '"]');
+        return Boolean(String(input?.value ?? tenantProjectData?.[candidate] ?? '').trim());
+      });
     }
 
     function tenantFloorDesignHasLandDocuments() {
@@ -9042,8 +9010,10 @@
       const readiness = tenantFloorDesignReadiness();
       const missing = [];
       if (!tenantFloorDesignHasLandDocuments()) missing.push('ملفات الرخصة والكروكي أو مستندات الأرض');
-      if (!tenantFloorDesignFieldHasValue('building_ratio_setbacks')) missing.push('نسبة البناء والتغطية والارتدادات');
-      if (!tenantFloorDesignFieldHasValue('allowed_uses_restrictions')) missing.push('الاستخدامات المسموحة والقيود التنظيمية');
+      if (!tenantFloorDesignFieldHasValue('building_ratio_coverage')) missing.push('نسبة البناء والتغطية');
+      if (!tenantFloorDesignFieldHasValue('setbacks')) missing.push('الارتدادات');
+      if (!tenantFloorDesignFieldHasValue('allowed_uses')) missing.push('الاستخدامات المسموحة');
+      if (!tenantFloorDesignFieldHasValue('regulatory_constraints')) missing.push('القيود التنظيمية');
       if (!tenantFloorDesignFieldHasValue('land_and_building_summary')) missing.push('ملخص بيانات الأرض والاشتراطات');
       if (!readiness.approvedFloors.valid) missing.push('الأدوار المعتمدة');
       if (!readiness.approvedArea.valid) missing.push('المساحة المعتمدة للدراسة المالية');
@@ -11367,7 +11337,6 @@
         tenantProjectData.location_lat = data.lat;
         tenantProjectData.location_lng = data.lng;
         tenantProjectData.location_coordinates_confirmed = false;
-        syncLocationAddressMirror(val);
         const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || val);
         toast('تم تحديد الموقع: ' + msg);
         return true;
@@ -11405,14 +11374,27 @@
         .join(' | ');
       // The field is labelled "نسبة البناء والتغطية والارتدادات", so all three parts have to be
       // shown. Taking `building_ratio || setbacks` used to reduce it to a bare "60%".
-      const buildingRulesText = [
+      const buildingRatioCoverageText = [
         ['نسبة البناء', parcel.building_ratio],
         ['نسبة التغطية', parcel.coverage_ratio],
         ['معامل مسطح البناء (FAR)', parcel.floor_area_ratio],
-        ['عدد الأدوار بموجب الجدول', parcel.table_floors],
-        ['الارتدادات', parcel.setbacks]
+        ['عدد الأدوار بموجب الجدول', parcel.table_floors]
       ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
         .map(([label, value]) => label + ': ' + String(value).trim())
+        .join('\n');
+      const setbacksText = String(parcel.setbacks || '').trim();
+      const buildingRulesText = [buildingRatioCoverageText, setbacksText]
+        .filter(Boolean)
+        .join('\n');
+
+      const allowedUsesRaw = String(parcel.allowed_uses || parcel.allowed_uses_restrictions || '').trim();
+      const landUseStatus = String(parcel.land_use_status || '').trim();
+      const allowedUsesText = landUseStatus && !allowedUsesRaw.includes('حالة استخدام المشروع')
+        ? ['حالة استخدام المشروع: ' + landUseStatus, allowedUsesRaw].filter(Boolean).join('\n')
+        : allowedUsesRaw;
+      const constraintsText = String(parcel.regulatory_constraints || '').trim();
+      const legacyRestrictionsText = [allowedUsesText, constraintsText]
+        .filter(Boolean)
         .join('\n');
 
       const parcelFields = {
@@ -11427,9 +11409,14 @@
         boundary_lengths: parcel.boundary_lengths || boundariesText,
         surrounding_streets: parcel.surrounding_streets || streetsText,
         north_direction: parcel.north_direction,
-        building_ratio_setbacks: buildingRulesText,
+        building_ratio_coverage: parcel.building_ratio_coverage || buildingRatioCoverageText,
+        setbacks: parcel.setbacks || setbacksText,
+        building_ratio_setbacks: parcel.building_ratio_setbacks || buildingRulesText,
         max_floors_height: parcel.max_floors_height,
-        allowed_uses_restrictions: parcel.allowed_uses_restrictions,
+        allowed_uses: allowedUsesText,
+        regulatory_constraints: constraintsText,
+        land_use_status: parcel.land_use_status,
+        allowed_uses_restrictions: parcel.allowed_uses_restrictions || legacyRestrictionsText,
         // The whole-document summary is the detailed narrative; parcel.summary is only a
         // per-parcel note and must never replace it.
         land_and_building_summary: data.land_and_building_summary || parcel.summary,
@@ -11513,14 +11500,18 @@
     async function extractTenantCroquisData(targetKey = 'land_documents_files') {
       const input = document.querySelector('#tenantProjectForm [data-key="land_documents_files"]');
       const projectContextKeys = [
-        'project_name', 'project_type', 'project_idea', 'project_goal', 'target_audience',
-        'project_stage', 'initial_features', 'initial_strengths', 'zoning_code',
-        'allowed_uses_restrictions', 'location_address', 'location_lat', 'location_lng'
+        'project_name', 'project_type', 'project_stage', 'location_address', 'location_detail',
+        'location_lat', 'location_lng', 'location_polygon', 'main_roads', 'secondary_roads',
+        'nearby_landmarks', 'nearby_landmarks_data', 'city', 'city_landmarks', 'catchment_areas',
+        'population_density', 'population_density_source', 'land_area', 'built_area',
+        'building_system', 'infrastructure', 'zoning_code', 'land_use', 'building_ratio_coverage',
+        'setbacks', 'allowed_uses', 'regulatory_constraints'
       ];
       const projectContext = {};
       projectContextKeys.forEach(key => {
         const field = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-        projectContext[key] = String(field ? field.value || '' : tenantProjectData[key] || '').trim();
+        const raw = field ? field.value : tenantProjectData[key];
+        projectContext[key] = raw && typeof raw === 'object' ? raw : String(raw || '').trim();
       });
       tenantProjectData = { ...tenantProjectData, ...projectContext };
       const files = Array.from(input?.files || []).slice(0, 2);
@@ -11544,7 +11535,7 @@
       const locationLngInput = document.querySelector('#tenantProjectForm [data-key="location_lng"]');
       const locationLink = String(locationInput?.value || tenantProjectData.location_address || '').trim();
       if (!isGoogleMapsUrl(locationLink)) {
-        toast('اكتب رابط Google Maps صحيحًا في قسم الأرض والكروكي قبل بدء التحليل');
+        toast('اكتب رابط Google Maps صحيحًا في قسم الموقع والخرائط قبل بدء التحليل');
         return;
       }
       const locationReady = await geocodeTenantLocationLink(
@@ -11554,30 +11545,31 @@
         toast('تعذر استخراج إحداثيات الموقع من رابط Google Maps؛ لم يبدأ تحليل الاشتراطات');
         return;
       }
+      projectContext.location_address = locationLink;
+      projectContext.location_lat = String(locationLatInput.value || '').trim();
+      projectContext.location_lng = String(locationLngInput.value || '').trim();
+      tenantProjectData = { ...tenantProjectData, ...projectContext };
       clearLandAnalysisFailure();
       clearLandAnalysisDiagnostics();
       showLoader('تحليل الرخصة والكروكي معًا', 'جاري تحليل الملفين واستخراج التنظيم والاتجاهات والإحداثيات...', 10);
       try {
-        updateLoaderProgress(35, 'جاري إرسال الملفات المحفوظة إلى الذكاء الاصطناعي...');
-        // Hints that let the backend rank the right regulation pages for this plot.
+        updateLoaderProgress(25, 'جاري تجهيز بيانات الموقع والخرائط وملفات الاشتراطات كاملة...');
         const res = await api('POST', '/api/extract-croquis', {
           documents,
           draftId: tenantProjectData.draftId,
           projectName: projectContext.project_name,
           projectType: projectContext.project_type,
-          city: tenantProjectData.city || '',
-          projectIdea: projectContext.project_idea,
-          projectGoal: projectContext.project_goal,
-          targetAudience: projectContext.target_audience,
           projectStage: projectContext.project_stage,
-          initialFeatures: projectContext.initial_features,
-          initialStrengths: projectContext.initial_strengths,
+          city: projectContext.city || '',
           zoningCode: projectContext.zoning_code,
-          landUse: projectContext.allowed_uses_restrictions,
+          landUse: projectContext.land_use,
           locationAddress: projectContext.location_address,
           locationLat: projectContext.location_lat,
-          locationLng: projectContext.location_lng
+          locationLng: projectContext.location_lng,
+          siteContext: projectContext,
+          includeMapContext: true
         });
+        updateLoaderProgress(55, 'تم تجهيز الموقع والخرائط؛ جاري قراءة المستندات والاشتراطات...');
         if (res.success && res.extractedData) {
           const data = res.extractedData;
           const documentProcessing = res.documentProcessing || data.document_processing || [];
@@ -11801,13 +11793,11 @@
         return;
       }
       const analysisKeys = [
-        'project_name', 'project_type', 'project_idea', 'project_goal', 'project_stage',
-        'initial_features', 'initial_strengths', 'description', 'project_description',
-        'project_features', 'investment_opportunities', 'target_audience', 'location_address',
-        'location_maps_link', 'maps_link', 'location_detail', 'location_lat', 'location_lng',
-        'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
-        'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
-        'land_area', 'built_area', 'building_system', 'infrastructure', 'location_polygon'
+        'project_name', 'project_type', 'project_stage', 'location_address', 'location_detail',
+        'location_maps_link', 'maps_link', 'location_lat', 'location_lng', 'main_roads',
+        'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks',
+        'catchment_areas', 'population_density', 'population_density_source', 'land_area',
+        'built_area', 'building_system', 'infrastructure', 'location_polygon'
       ];
       const analysisProjectData = {};
       analysisKeys.forEach(key => {

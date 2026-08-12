@@ -511,7 +511,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(field['fieldType'], 'number')
         self.assertTrue(field['isRequired'])
         land_fields = {item['fieldKey']: item for item in fields}
-        for key in ('building_ratio_setbacks', 'allowed_uses_restrictions', 'land_and_building_summary'):
+        for key in ('building_ratio_coverage', 'setbacks', 'allowed_uses', 'regulatory_constraints', 'land_and_building_summary'):
             self.assertTrue(land_fields[key]['isRequired'])
 
         result = self.application_module._normalize_land_document_result({
@@ -736,15 +736,26 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertIn(key, by_key)
             self.assertEqual(by_key[key]['sectionKey'], 'land_croquis')
         self.assertNotIn('subdivision_number', by_key)
-        self.assertEqual(by_key['location_address']['sectionKey'], 'land_croquis')
+        self.assertEqual(by_key['location_address']['sectionKey'], 'location')
         self.assertTrue(by_key['location_address']['isRequired'])
-        # The plot number is no longer a combined "plot + plan" box.
+        for key in ('project_name', 'project_type', 'project_stage', 'project_logo'):
+            self.assertEqual(by_key[key]['sectionKey'], 'basic')
+        for key in ('project_idea', 'project_goal', 'target_audience', 'initial_features', 'initial_strengths'):
+            self.assertNotIn(key, by_key)
         self.assertEqual(by_key['plot_number_croquis']['fieldLabel'], 'رقم القطعة')
         self.assertEqual(by_key['deed_date']['fieldLabel'], 'تاريخ الصك')
+        self.assertEqual(by_key['building_ratio_coverage']['fieldLabel'], 'نسبة البناء والتغطية')
+        self.assertEqual(by_key['setbacks']['fieldLabel'], 'الارتدادات')
+        self.assertEqual(by_key['max_floors_height']['fieldType'], 'textarea')
+        self.assertEqual(by_key['allowed_uses']['fieldLabel'], 'الاستخدامات المسموحة')
+        self.assertEqual(by_key['regulatory_constraints']['fieldLabel'], 'القيود التنظيمية')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn('locationAddressMirror', index_source)
+        self.assertNotIn('locationAddressMirror', index_source)
+        self.assertNotIn('syncLocationAddressMirror', index_source)
         self.assertIn('geocodeTenantLocationLink', index_source)
-        self.assertIn("mirrorAnalyzeButton.textContent = 'تحليل رابط الموقع'", index_source)
+        self.assertIn('includeMapContext: true', index_source)
+        self.assertIn('const landUseStatus = String(parcel.land_use_status || \'\').trim();', index_source)
+        self.assertIn('siteContext: projectContext', index_source)
         self.assertIn("sectionKey === 'location'", index_source)
         self.assertIn('locationLat: projectContext.location_lat', index_source)
         self.assertIn("f.fieldType === 'textarea' || f.fieldKey === 'location_address' ? ' full'", index_source)
@@ -1535,19 +1546,96 @@ class MeetingRequirementsTests(unittest.TestCase):
             module._normalize_parcel_scalar_fields(parcel, text)
             self.assertEqual(parcel['plan_number'], expected, text)
 
-    def test_building_rules_keep_ratio_coverage_and_setbacks_together(self):
-        """`building_ratio || setbacks` collapsed the field to a bare "60%"."""
+    def test_building_rules_are_split_into_ratio_and_setbacks_fields(self):
+        """The visible form separates ratios from setbacks without losing legacy payload support."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertNotIn('building_ratio_setbacks: parcel.building_ratio || parcel.setbacks', index_source)
-        self.assertIn('building_ratio_setbacks: buildingRulesText', index_source)
-        for label in ('نسبة البناء', 'نسبة التغطية', 'معامل مسطح البناء (FAR)', 'الارتدادات'):
+        self.assertIn('building_ratio_coverage: parcel.building_ratio_coverage || buildingRatioCoverageText', index_source)
+        self.assertIn('setbacks: parcel.setbacks || setbacksText', index_source)
+        self.assertIn('building_ratio_setbacks: parcel.building_ratio_setbacks || buildingRulesText', index_source)
+        for label in ('نسبة البناء', 'نسبة التغطية', 'معامل مسطح البناء (FAR)'):
             self.assertIn("['" + label + "'", index_source)
+        self.assertIn("const setbacksText = String(parcel.setbacks || '').trim();", index_source)
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn('"coverage_ratio": ""', app_source)
         self.assertIn('"floor_area_ratio": ""', app_source)
         self.assertIn('لا تكتب «60%» وحدها', app_source)
         self.assertIn('غير محددة في المرجع المتاح', app_source)
+        self.assertIn('REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE', app_source)
+        self.assertIn("os.environ.get('REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE', '0')", app_source)
+        self.assertIn('لا تكتب في أي حقل عبارات مثل «صفحة كذا»', app_source)
+
+    def test_land_result_exposes_split_usage_fields_without_page_references(self):
+        result = self.application_module._normalize_land_document_result({
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'building_ratio': '60% من مساحة الأرض',
+                'coverage_ratio': '50%',
+                'floor_area_ratio': '2.5',
+                'setbacks': 'أمامي 6م؛ خلفي 3م',
+                'allowed_uses': 'حالة استخدام المشروع: مسموح\\nسكني',
+                'land_use_status': 'مسموح',
+                'regulatory_constraints': 'اشتراطات المواقف: موقف لكل وحدة وفق اشتراطات1 صفحة 12',
+                'summary': 'الاشتراطات وفق اشتراطات2 صفحة 44 واضحة.',
+            }]
+        })
+        parcel = result['parcels'][0]
+        self.assertIn('نسبة البناء', parcel['building_ratio_coverage'])
+        self.assertEqual(parcel['setbacks'], 'أمامي 6م؛ خلفي 3م')
+        self.assertEqual(parcel['land_use_status'], 'مسموح')
+        self.assertIn('موقف لكل وحدة', parcel['regulatory_constraints'])
+        self.assertNotIn('صفحة 12', parcel['regulatory_constraints'])
+        self.assertNotIn('صفحة 44', parcel['summary'])
+        self.assertEqual(result['allowed_uses'], 'حالة استخدام المشروع: مسموح\\nسكني')
+
+    def test_full_regulation_evidence_includes_unmatched_pages_and_tables(self):
+        module = self.application_module
+        records = [
+            {'name': 'اشتراطات1.pdf', 'path': 'one.pdf', 'page': 1, 'text': 'قاعدة نسبة البناء', 'has_table': False},
+            {'name': 'اشتراطات1.pdf', 'path': 'one.pdf', 'page': 2, 'text': 'قاعدة غير مطابقة للكلمات المدخلة', 'has_table': True},
+            {'name': 'اشتراطات2.pdf', 'path': 'two.pdf', 'page': 1, 'text': 'قاعدة الارتداد', 'has_table': False},
+        ]
+        with patch.object(module, '_build_regulation_page_index', return_value=records):
+            package, warnings = module.search_official_regulations_evidence('كلمة لا تطابق', {})
+        self.assertEqual(warnings, [])
+        first = next(item for item in package['documents'] if item['name'] == 'اشتراطات1.pdf')
+        self.assertIn('قاعدة غير مطابقة للكلمات المدخلة', first['context'])
+        self.assertIn(2, first['text_pages'])
+        self.assertEqual(package['table_pages'][0]['page'], 2)
+        self.assertEqual({item['name'] for item in package['documents']}, {'اشتراطات1.pdf', 'اشتراطات2.pdf'})
+
+    def test_full_regulation_table_pages_are_not_dropped_when_batched(self):
+        module = self.application_module
+        pages = [
+            {'path': 'one.pdf', 'name': 'اشتراطات1.pdf', 'page': page}
+            for page in (7, 8, 9, 10, 11)
+        ]
+        with patch.object(module, 'REGULATION_EVIDENCE_TABLE_PAGES_PER_STAGE', 2):
+            batches = module.split_regulation_table_batches(pages)
+        self.assertEqual([[item['page'] for item in batch] for batch in batches], [[7, 8], [9, 10], [11]])
+        self.assertEqual(
+            [item['page'] for batch in batches for item in batch],
+            [item['page'] for item in pages],
+        )
+
+    def test_land_analysis_site_context_uses_map_fields(self):
+        module = self.application_module
+        with patch.object(module, '_collect_site_fields', return_value=(
+            {'location_detail': 'عنوان الموقع', 'main_roads': 'طريق رئيسي'},
+            [{'name': 'معلم قريب'}], [], [], [], [], None, {}
+        )):
+            context, warnings = module.build_land_analysis_site_context({
+                'locationAddress': 'https://www.google.com/maps/@24,46,17z',
+                'locationLat': 24,
+                'locationLng': 46,
+                'includeMapContext': True,
+                'siteContext': {'project_type': 'سكني'},
+            }, self.tenant_a, 24, 46)
+        self.assertEqual(warnings, [])
+        self.assertEqual(context['location_detail'], 'عنوان الموقع')
+        self.assertEqual(context['main_roads'], 'طريق رئيسي')
+        self.assertEqual(context['nearby_landmarks_data'][0]['name'], 'معلم قريب')
 
     def test_facade_count_accepts_real_counts_and_rejects_directions(self):
         normalize = self.application_module.normalize_facades_count
@@ -1575,6 +1663,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         module._normalize_parcel_scalar_fields(parcel, '')
         self.assertEqual(parcel['facades_directions'], 'شمالية، شرقية')
         self.assertEqual(parcel['facades_count'], '2')
+
+        wrong_count = {'facades_count': '4', 'directions': directions}
+        module._normalize_parcel_scalar_fields(wrong_count, '')
+        self.assertEqual(wrong_count['facades_count'], '2')
 
     def test_truncated_analysis_is_rejected_with_an_explicit_reason(self):
         """A rejected extraction changes no field, so it must not look like a silent no-op."""
@@ -1684,7 +1776,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Client documents stay vision-only; the regulation arrives as trusted text + table images.
         self.assertIn('لديك نوعان من المدخلات', source)
         self.assertIn('نص هذا الجدول يُستخرج بترتيب معكوس', source)
-        self.assertIn('لم تتوفر أدلة اشتراطات منتقاة من الملفين', source)
+        self.assertIn('نتائج استخلاص الاشتراطات من المحتوى الكامل للملفين', source)
 
     @unittest.skipUnless((ROOT / 'اشتراطات1.pdf').exists(), 'regulation PDFs not present')
     def test_regulation_lookup_returns_real_condition_pages(self):
@@ -1702,7 +1794,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len(parts), 4)
         self.assertTrue(parts[1]['image_url']['url'].startswith('data:image/png;base64,'))
 
-    def test_regulation_evidence_keeps_both_files_separate_and_bounded(self):
+    def test_regulation_evidence_can_be_limited_per_file_when_configured(self):
         module = self.application_module
         records = [
             {
@@ -1729,7 +1821,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual([item['name'] for item in package['documents']], ['اشتراطات1.pdf', 'اشتراطات2.pdf'])
         self.assertEqual([item['table_pages'] for item in package['documents']], [[12], [44]])
         self.assertEqual({item['name'] for item in package['table_pages']}, {'اشتراطات1.pdf', 'اشتراطات2.pdf'})
-        self.assertLessEqual(len(package['context']), 2 * module.REGULATION_EVIDENCE_MAX_CHARS_PER_FILE)
+        self.assertIn('نسبة البناء والاستخدامات والمواقف', package['context'])
+        self.assertIn('ارتداد وتغطية وعدد الطوابق', package['context'])
+        self.assertNotIn('مقدمة عامة عن الوثيقة', package['context'])
 
     def test_site_analysis_prefers_google_link_over_stale_coordinates(self):
         client = self.app.test_client()

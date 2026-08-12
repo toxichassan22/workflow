@@ -102,8 +102,17 @@ assertion deliberately, not reflexively.
 - A **facade is only a boundary that fronts a street** — every plot has four boundaries, so listing
   four compass points is meaningless. `facade_directions_from_streets()` filters neighbour
   boundaries and also derives `facades_count` when the model leaves it blank.
-- `building_ratio_setbacks` is a **composite** field (ratio + coverage + FAR + floors + setbacks).
-  It used to be `building_ratio || setbacks`, which collapsed it to a bare "60%".
+- The visible land rules are split into `building_ratio_coverage` and `setbacks`; the old
+  `building_ratio_setbacks` value remains only as a compatibility value for older drafts and floor
+  design payloads. Never collapse the visible ratio field to a bare "60%".
+- `location_address` belongs to the `location` section and is the only visible Google Maps link
+  field. Land analysis receives that link, the resolved coordinates, and the map/site context from
+  the location workflow.
+- The land analysis reads the complete text and tables from both `اشتراطات1.pdf` and
+  `اشتراطات2.pdf` by default. Page numbers may remain in internal evidence metadata, but must never
+  be written into user-facing land fields or the narrative summary. `allowed_uses` and
+  `regulatory_constraints` are separate visible fields; the former must state whether the selected
+  project type is allowed, disallowed, or unresolved.
 - The land analysis has **no visible review panel** (conflicts and the parcels table were removed on
   request), but `storeLandDocumentAnalysis()` must keep writing the hidden
   `landDocumentsAnalysisData` input — the directions table falls back to `parcels[0].directions`,

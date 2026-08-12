@@ -1262,6 +1262,7 @@ def api_generate_image_single():
 
 FLOOR_DESIGN_LAND_KEYS = (
     'croquis_land_area', 'approved_financial_area', 'approved_floor_count', 'max_floors_height',
+    'building_ratio_coverage', 'setbacks', 'allowed_uses', 'regulatory_constraints',
     'building_ratio_setbacks', 'allowed_uses_restrictions', 'land_and_building_summary',
     'boundary_lengths', 'surrounding_streets', 'facades_count', 'facades_directions',
     'land_documents_files_file_meta', 'directions_table', 'survey_coordinates',
@@ -1356,6 +1357,14 @@ def _sanitize_floor_design_request(data):
                for key in FLOOR_DESIGN_PROJECT_KEYS}
     land = {key: _floor_design_text(_floor_design_read(project_data, key), 12000)
             for key in FLOOR_DESIGN_LAND_KEYS}
+    land['building_ratio_coverage'] = _floor_design_text(
+        _floor_design_read(project_data, 'building_ratio_coverage', 'building_ratio_setbacks'), 12000)
+    land['setbacks'] = _floor_design_text(
+        _floor_design_read(project_data, 'setbacks', 'building_ratio_setbacks'), 12000)
+    land['allowed_uses'] = _floor_design_text(
+        _floor_design_read(project_data, 'allowed_uses', 'allowed_uses_restrictions'), 12000)
+    land['regulatory_constraints'] = _floor_design_text(
+        _floor_design_read(project_data, 'regulatory_constraints', 'allowed_uses_restrictions'), 12000)
     for key in ('directions_table', 'survey_coordinates', 'land_documents_files_file_meta'):
         parsed = _floor_design_parse_json(_floor_design_read(project_data, key), None)
         if parsed is not None:
@@ -1391,7 +1400,7 @@ def _floor_design_missing_requirements(payload):
             missing.append('approved_floor_count')
     except (TypeError, ValueError):
         missing.append('approved_floor_count')
-    for key in ('building_ratio_setbacks', 'allowed_uses_restrictions', 'land_and_building_summary'):
+    for key in ('building_ratio_coverage', 'setbacks', 'allowed_uses', 'regulatory_constraints', 'land_and_building_summary'):
         if not land.get(key):
             missing.append(key)
     if not financial['components']:
@@ -5716,17 +5725,28 @@ def strip_placeholder_values(payload):
 def merge_regulatory_access_requirements(payload):
     if not isinstance(payload, dict):
         return payload
+    uses = str(payload.get('allowed_uses') or '').strip()
+    legacy_uses = str(payload.get('allowed_uses_restrictions') or '').strip()
+    if not uses and legacy_uses:
+        uses = legacy_uses
+    constraints = str(payload.get('regulatory_constraints') or '').strip()
     additions = []
     for label, key in (
         ('اشتراطات المواقف', 'parking_requirements'),
         ('اشتراطات المداخل والمخارج', 'entrances_exits_requirements'),
     ):
         value = str(payload.get(key) or '').strip()
-        if value and value not in additions:
+        if value and value not in additions and value not in constraints:
             additions.append(f'{label}: {value}')
+    if uses:
+        payload['allowed_uses'] = uses
     if additions:
-        base = str(payload.get('allowed_uses_restrictions') or '').strip()
-        payload['allowed_uses_restrictions'] = '\n'.join([item for item in (base, *additions) if item])
+        constraints = '\n'.join([item for item in (constraints, *additions) if item])
+    if constraints:
+        payload['regulatory_constraints'] = constraints
+    legacy_parts = [item for item in (uses, constraints) if item]
+    if legacy_parts:
+        payload['allowed_uses_restrictions'] = '\n'.join(legacy_parts)
     return payload
 
 
@@ -5790,7 +5810,11 @@ def normalize_croquis_fields(resp_json, text_content=""):
         'subdivision_number': ['section_number', 'part_number'],
         'boundary_lengths': ['boundary_dimensions'],
         'surrounding_streets': ['surrounding_streets_widths'],
+        'building_ratio_coverage': ['building_coverage', 'building_ratio'],
         'building_ratio_setbacks': ['building_coverage_setbacks'],
+        'setbacks': ['setback_requirements'],
+        'allowed_uses': ['permitted_uses', 'allowed_land_uses'],
+        'regulatory_constraints': ['restrictions', 'regulatory_restrictions'],
         'max_floors_height': ['height_or_floors_allowed'],
     }
     # 8. Apply aliases and build a source-faithful summary. Missing values stay
@@ -5803,6 +5827,12 @@ def normalize_croquis_fields(resp_json, text_content=""):
                     break
 
     merge_regulatory_access_requirements(resp_json)
+    if not resp_json.get('building_ratio_coverage'):
+        resp_json['building_ratio_coverage'] = land_rule_text(resp_json)
+    if not resp_json.get('building_ratio_setbacks'):
+        resp_json['building_ratio_setbacks'] = land_rule_text(resp_json, include_setbacks=True)
+    if not resp_json.get('allowed_uses') and resp_json.get('allowed_uses_restrictions'):
+        resp_json['allowed_uses'] = resp_json['allowed_uses_restrictions']
     summary_text = str(resp_json.get('land_and_building_summary', '')).replace('{}', '').strip()
     if not summary_text:
         labels = (
@@ -5825,17 +5855,75 @@ def normalize_croquis_fields(resp_json, text_content=""):
         summary_text = ' | '.join(available) if available else 'لم يتم استخراج بيانات مؤكدة؛ تحتاج الوثائق إلى مراجعة يدوية.'
 
     resp_json['land_and_building_summary'] = summary_text.replace('{}', '').strip()
+    strip_regulation_references_from_payload(resp_json)
 
     return resp_json
+
+
+REGULATION_OUTPUT_KEYS = {
+    'building_ratio', 'coverage_ratio', 'floor_area_ratio', 'table_floors',
+    'building_ratio_coverage', 'building_ratio_setbacks', 'setbacks',
+    'max_floors_height', 'allowed_uses', 'allowed_uses_restrictions',
+    'regulatory_constraints', 'parking_requirements', 'entrances_exits_requirements',
+    'land_and_building_summary', 'document_summary', 'summary',
+}
+
+
+def strip_regulation_references(value):
+    if not isinstance(value, str):
+        return value
+    cleaned = re.sub(
+        r'(?:اشتراطات\s*[12](?:\.pdf)?\s*(?:[-–—]\s*)?)?(?:صفحة|صفحات|ص)\s*[0-9٠-٩]+(?:\s*[-–—]\s*[0-9٠-٩]+)?',
+        '', value, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+    return cleaned.replace('  ', ' ').strip(' \n-–—')
+
+
+def strip_regulation_references_from_payload(payload):
+    if not isinstance(payload, dict):
+        return payload
+    for key, value in list(payload.items()):
+        if key in REGULATION_OUTPUT_KEYS and isinstance(value, str):
+            payload[key] = strip_regulation_references(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    strip_regulation_references_from_payload(item)
+        elif isinstance(value, dict) and key in {'parcels', 'site_facts'}:
+            strip_regulation_references_from_payload(value)
+    return payload
+
+
+def land_rule_text(payload, include_setbacks=False):
+    if not isinstance(payload, dict):
+        return ''
+    labels = (
+        ('نسبة البناء', payload.get('building_ratio')),
+        ('نسبة التغطية', payload.get('coverage_ratio')),
+        ('معامل مسطح البناء (FAR)', payload.get('floor_area_ratio')),
+        ('عدد الأدوار بموجب الجدول', payload.get('table_floors')),
+    )
+    if include_setbacks:
+        labels += (('الارتدادات', payload.get('setbacks')),)
+    return '\n'.join(
+        f'{label}: {str(value).strip()}'
+        for label, value in labels
+        if value not in (None, '') and str(value).strip()
+    )
 
 
 REGULATION_PDF_NAMES = ('اشتراطات1.pdf', 'اشتراطات2.pdf')
 REGULATION_SNIPPET_CHARS = int(os.environ.get('REGULATION_SNIPPET_CHARS', '2600'))
 REGULATION_MAX_SNIPPETS = int(os.environ.get('REGULATION_MAX_SNIPPETS', '6'))
 REGULATION_MAX_TABLE_PAGES = int(os.environ.get('REGULATION_MAX_TABLE_PAGES', '6'))
-REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE = int(os.environ.get('REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE', '4'))
-REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE = int(os.environ.get('REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE', '3'))
-REGULATION_EVIDENCE_MAX_CHARS_PER_FILE = int(os.environ.get('REGULATION_EVIDENCE_MAX_CHARS_PER_FILE', '12000'))
+REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE = int(os.environ.get('REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE', '0'))
+REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE = int(os.environ.get('REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE', '0'))
+REGULATION_EVIDENCE_MAX_CHARS_PER_FILE = int(os.environ.get('REGULATION_EVIDENCE_MAX_CHARS_PER_FILE', '0'))
+REGULATION_EVIDENCE_TEXT_CHUNK_CHARS = int(os.environ.get('REGULATION_EVIDENCE_TEXT_CHUNK_CHARS', '50000'))
+REGULATION_EVIDENCE_TABLE_BATCH_SIZE = int(os.environ.get(
+    'REGULATION_EVIDENCE_TABLE_BATCH_SIZE',
+    os.environ.get('REGULATION_EVIDENCE_TABLE_PAGES_PER_STAGE', '4')))
+REGULATION_EVIDENCE_TABLE_PAGES_PER_STAGE = REGULATION_EVIDENCE_TABLE_BATCH_SIZE
 REGULATION_EVIDENCE_TABLE_DPI = int(os.environ.get('REGULATION_EVIDENCE_TABLE_DPI', '180'))
 LAND_FACTS_MAX_TOKENS = int(os.environ.get('LAND_FACTS_MAX_TOKENS', '2500'))
 LAND_FACTS_MIN_TOKENS = int(os.environ.get('LAND_FACTS_MIN_TOKENS', '1200'))
@@ -5938,12 +6026,12 @@ def _build_regulation_page_index():
                 if _is_regulation_index_page(raw):
                     continue
                 cleaned = _clean_regulation_text(raw)
-                if len(cleaned) < 120:
-                    continue
                 try:
                     has_table = bool(page.find_tables().tables)
                 except Exception:
                     has_table = False
+                if not cleaned and not has_table:
+                    continue
                 records.append({
                     'name': name,
                     'path': path,
@@ -5994,26 +6082,37 @@ def search_official_regulations_evidence(query_text='', site_facts=None):
             key=lambda record: (-record['score'], record['page'])
         )
         matched = [record for record in scored if record['score'] > 0]
-        text_records = matched[:max(0, REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE)]
-        table_records = [record for record in matched if record['has_table']][:max(0, REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE)]
+        full_document = REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE <= 0
+        text_records = file_records if full_document else matched[:REGULATION_EVIDENCE_TEXT_PAGES_PER_FILE]
+        table_pool = file_records if REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE <= 0 else matched
+        table_records = [record for record in table_pool if record['has_table']]
+        if REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE > 0:
+            table_records = table_records[:REGULATION_EVIDENCE_TABLE_PAGES_PER_FILE]
         if not text_records:
             warnings.append(f'لم يتم العثور على صفحات مطابقة في {name}')
         context_parts = []
-        remaining = max(0, REGULATION_EVIDENCE_MAX_CHARS_PER_FILE)
+        remaining = None if REGULATION_EVIDENCE_MAX_CHARS_PER_FILE <= 0 else REGULATION_EVIDENCE_MAX_CHARS_PER_FILE
         for record in text_records:
-            if remaining <= 0:
+            if remaining is not None and remaining <= 0:
                 break
-            snippet = record['text'][:min(REGULATION_SNIPPET_CHARS, remaining)]
+            raw_text = record.get('text') or ''
+            max_chars = len(raw_text) if remaining is None else min(REGULATION_SNIPPET_CHARS, remaining)
+            snippet = raw_text[:max_chars]
+            if not snippet and not record.get('has_table'):
+                continue
+            if not snippet:
+                snippet = 'لا يوجد نص مستخرج من هذه الصفحة؛ اقرأ الجدول من الصورة المرفقة.'
             context_parts.append(
-                f"--- {name} — صفحة {record['page']} — score={record['score']} ---\n{snippet}"
+                f"--- {name} — صفحة {record['page']} — score={record.get('score', 0)} ---\n{snippet}"
             )
-            remaining -= len(snippet)
+            if remaining is not None:
+                remaining -= len(snippet)
         for record in table_records:
             table_pages.append({
                 'path': record['path'],
                 'name': name,
                 'page': record['page'],
-                'score': record['score'],
+                'score': record.get('score', 0),
             })
         documents.append({
             'name': name,
@@ -6026,6 +6125,147 @@ def search_official_regulations_evidence(query_text='', site_facts=None):
         'documents': documents,
         'table_pages': table_pages,
     }, warnings
+
+
+def split_regulation_context(context, max_chars=None):
+    text = str(context or '').strip()
+    limit = max_chars if max_chars is not None else REGULATION_EVIDENCE_TEXT_CHUNK_CHARS
+    limit = max(1000, int(limit))
+    if not text:
+        return []
+    units = [unit.strip() for unit in re.split(
+        r'(?=---\s+[^\n]+—\s*صفحة\s+[0-9٠-٩]+\s+—)', text) if unit.strip()]
+    if not units:
+        units = [text]
+    chunks = []
+    current = ''
+    for unit in units:
+        if len(unit) > limit:
+            if current:
+                chunks.append(current)
+                current = ''
+            for start in range(0, len(unit), limit):
+                chunks.append(unit[start:start + limit])
+            continue
+        candidate = unit if not current else current + '\n\n' + unit
+        if current and len(candidate) > limit:
+            chunks.append(current)
+            current = unit
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def regulation_context_page_numbers(context):
+    return {
+        int(value.translate(_ARABIC_INDIC_DIGITS))
+        for value in re.findall(r'---\s+[^\n]+—\s*صفحة\s+([0-9٠-٩]+)\s+—', str(context or ''))
+    }
+
+
+def split_regulation_table_batches(table_pages, batch_size=None):
+    rows = list(table_pages or [])
+    limit = int(batch_size if batch_size is not None else REGULATION_EVIDENCE_TABLE_PAGES_PER_STAGE)
+    if limit <= 0:
+        return [rows] if rows else []
+    return [rows[start:start + limit] for start in range(0, len(rows), limit)]
+
+
+def _extract_full_regulation_evidence(source, site_facts):
+    source_name = source.get('name') or 'ملف اشتراطات'
+    context = str(source.get('context') or '')
+    table_pages = source.get('table_pages') if isinstance(source.get('table_pages'), list) else []
+    chunks = split_regulation_context(context)
+    if not chunks and table_pages:
+        chunks = ['']
+    evidence = []
+    uncertainties = []
+    warnings = []
+    base_prompt = (
+        "أنت مستخرج أدلة تنظيمية من ملف واحد كامل فقط. أعد JSON فقط بهذا الشكل: "
+        '{"evidence":[{"field":"","value":"","page":0,"quote":""}],'
+        '"uncertainties":[]} '
+        f"المصدر الوحيد هو {source_name}. لا تستخدم أي معلومة من ملف آخر. "
+        "اقرأ الجزء الحالي من المحتوى الكامل وصور الجداول المرفقة، واستخرج القواعد التي تنطبق على حقائق الموقع. "
+        "يمكن حفظ رقم الصفحة داخليًا داخل evidence فقط لتتبع الدليل، ولا تضعه في أي قيمة اشتراط أو نص موجّه للمستخدم. "
+        "أرقام الجداول تُقرأ من الصور المرفقة لأن النص قد يكون معكوسًا."
+    )
+
+    def run_stage(stage_name, context_chunk, table_batch, stage_note):
+        nonlocal evidence, uncertainties
+        parts, render_warnings = render_regulation_table_pages(
+            table_batch, dpi=REGULATION_EVIDENCE_TABLE_DPI)
+        warnings.extend(render_warnings)
+        user_content = [{
+            'type': 'text',
+            'text': base_prompt + stage_note
+                    + '\nحقائق الموقع المستخرجة من الكروكي:\n'
+                    + json.dumps(site_facts, ensure_ascii=False)
+                    + '\nجزء المحتوى الحالي:\n' + context_chunk
+        }] + parts
+        result, _cap, error = _run_land_json_stage(
+            stage_name, base_prompt, user_content,
+            REGULATION_EVIDENCE_MAX_TOKENS, REGULATION_EVIDENCE_MIN_TOKENS,
+            REGULATION_EVIDENCE_MAX_TOKENS * 2
+        )
+        if error:
+            warnings.append(f'تعذر استخراج جزء من أدلة {source_name}: {error}')
+            return
+        values = result.get('evidence') if isinstance(result, dict) else []
+        if isinstance(values, list):
+            evidence.extend(item for item in values if isinstance(item, dict))
+        uncertainty_values = result.get('uncertainties') if isinstance(result, dict) else []
+        if isinstance(uncertainty_values, list):
+            uncertainties.extend(uncertainty_values)
+
+    has_page_metadata = any(regulation_context_page_numbers(chunk) for chunk in chunks)
+    if not has_page_metadata:
+        if context.strip():
+            for chunk_index, context_chunk in enumerate(chunks):
+                run_stage(
+                    f'{source_name}-text-{chunk_index + 1}', context_chunk, [],
+                    f'\nهذا الجزء {chunk_index + 1} من {len(chunks)} من المحتوى الكامل للملف.')
+        table_batch_size = REGULATION_EVIDENCE_TABLE_BATCH_SIZE
+        if table_batch_size > 0:
+            table_batches = [
+                table_pages[start:start + table_batch_size]
+                for start in range(0, len(table_pages), table_batch_size)
+            ]
+        else:
+            table_batches = [table_pages]
+        for batch_index, table_batch in enumerate(table_batches):
+            run_stage(
+                f'{source_name}-tables-{batch_index + 1}', '', table_batch,
+                '\nهذه دفعة جداول من المحتوى الكامل للملف.')
+        return {'evidence': evidence, 'uncertainties': uncertainties, 'warnings': warnings}
+
+    for chunk_index, context_chunk in enumerate(chunks):
+        chunk_pages = regulation_context_page_numbers(context_chunk)
+        chunk_tables = [
+            entry for entry in table_pages
+            if not chunk_pages or entry.get('page') in chunk_pages
+        ]
+        table_batch_size = REGULATION_EVIDENCE_TABLE_BATCH_SIZE
+        if table_batch_size > 0:
+            table_batches = [
+                chunk_tables[start:start + table_batch_size]
+                for start in range(0, len(chunk_tables), table_batch_size)
+            ]
+        else:
+            table_batches = [chunk_tables]
+        if not table_batches:
+            table_batches = [[]]
+        for batch_index, table_batch in enumerate(table_batches):
+            context_for_stage = context_chunk if batch_index == 0 else ''
+            stage_note = f'\nهذا الجزء {chunk_index + 1} من {len(chunks)} من المحتوى الكامل للملف.'
+            if batch_index:
+                stage_note += '\nهذه دفعة جداول إضافية للجزء نفسه؛ استخرج منها ما لم يظهر في الدفعة السابقة.'
+            run_stage(
+                f'{source_name}-part-{chunk_index + 1}-tables-{batch_index + 1}',
+                context_for_stage, table_batch, stage_note)
+    return {'evidence': evidence, 'uncertainties': uncertainties, 'warnings': warnings}
 
 
 def render_regulation_table_pages(table_pages, dpi=200):
@@ -6600,8 +6840,10 @@ def _prepare_document_vision_parts(document, budget=PDF_VISION_MAX_TOTAL_BYTES, 
 
 PARCEL_PLACEHOLDER_KEYS = (
     'plot_number', 'plan_number', 'subdivision_number', 'deed_number', 'deed_date',
-    'north_direction', 'setbacks', 'building_ratio', 'max_floors_height',
-    'parking_requirements', 'entrances_exits_requirements', 'allowed_uses_restrictions', 'summary',
+    'north_direction', 'setbacks', 'building_ratio', 'building_ratio_coverage',
+    'coverage_ratio', 'floor_area_ratio', 'table_floors', 'max_floors_height',
+    'parking_requirements', 'entrances_exits_requirements', 'allowed_uses',
+    'allowed_uses_restrictions', 'regulatory_constraints', 'land_use_status', 'summary',
 )
 
 
@@ -6625,8 +6867,7 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
     street_sides = facade_directions_from_streets(parcel.get('directions'))
     if street_sides:
         parcel['facades_directions'] = street_sides
-        if not parcel['facades_count']:
-            parcel['facades_count'] = str(len(street_sides.split('،')))
+        parcel['facades_count'] = str(len(street_sides.split('،')))
     elif not parcel.get('facades_directions'):
         parcel['facades_directions'] = ''
 
@@ -6650,6 +6891,13 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
             parcel['plan_number'] = re.sub(r'\s*', '', plan_match.group(1))
 
     merge_regulatory_access_requirements(parcel)
+    if not parcel.get('building_ratio_coverage'):
+        parcel['building_ratio_coverage'] = land_rule_text(parcel)
+    if not parcel.get('building_ratio_setbacks'):
+        parcel['building_ratio_setbacks'] = land_rule_text(parcel, include_setbacks=True)
+    if not parcel.get('allowed_uses') and parcel.get('allowed_uses_restrictions'):
+        parcel['allowed_uses'] = parcel['allowed_uses_restrictions']
+    strip_regulation_references_from_payload(parcel)
     return parcel
 
 
@@ -6881,9 +7129,17 @@ def _normalize_land_document_result(resp_json, text_content=''):
             'facades_directions': legacy.get('facades_directions', ''),
             'directions': directions,
             'north_direction': legacy.get('north_direction', ''),
-            'setbacks': legacy.get('building_ratio_setbacks', ''),
-            'building_ratio': legacy.get('building_ratio_setbacks', ''),
+            'building_ratio_coverage': legacy.get('building_ratio_coverage', ''),
+            'setbacks': legacy.get('setbacks', ''),
+            'building_ratio': legacy.get('building_ratio', legacy.get('building_ratio_setbacks', '')),
+            'coverage_ratio': legacy.get('coverage_ratio', ''),
+            'floor_area_ratio': legacy.get('floor_area_ratio', ''),
+            'table_floors': legacy.get('table_floors', ''),
+            'building_ratio_setbacks': legacy.get('building_ratio_setbacks', ''),
             'max_floors_height': legacy.get('max_floors_height', ''),
+            'allowed_uses': legacy.get('allowed_uses', legacy.get('allowed_uses_restrictions', '')),
+            'regulatory_constraints': legacy.get('regulatory_constraints', ''),
+            'land_use_status': legacy.get('land_use_status', ''),
             'allowed_uses_restrictions': legacy.get('allowed_uses_restrictions', ''),
                 'coordinates': {'lat': None, 'lng': None, 'source': '', 'confidence': ''},
             'survey_coordinates': survey_coordinates,
@@ -6891,12 +7147,14 @@ def _normalize_land_document_result(resp_json, text_content=''):
             'sources': [],
             'summary': legacy.get('land_and_building_summary', ''),
         }
+        _normalize_parcel_scalar_fields(parcel, text_content)
         result = dict(legacy)
         result['parcels'] = [parcel]
         result['survey_coordinates'] = survey_coordinates
         result['source_priority'] = ['regulation_table', 'official_regulation', 'croquis', 'building_license']
         result['conflicts'] = resp_json.get('conflicts') if isinstance(resp_json.get('conflicts'), list) else []
         result['document_summary'] = result.get('land_and_building_summary', '')
+        strip_regulation_references_from_payload(result)
         return result
 
     normalized_parcels = []
@@ -6962,13 +7220,19 @@ def _normalize_land_document_result(resp_json, text_content=''):
         'facades_count': first.get('facades_count'),
         'facades_directions': first.get('facades_directions', ''),
         'north_direction': first.get('north_direction', ''),
-        'building_ratio_setbacks': first.get('building_ratio') or first.get('setbacks', ''),
+        'building_ratio_coverage': first.get('building_ratio_coverage') or land_rule_text(first),
+        'setbacks': first.get('setbacks', ''),
+        'building_ratio_setbacks': first.get('building_ratio_setbacks') or land_rule_text(first, include_setbacks=True),
         'max_floors_height': first.get('max_floors_height', ''),
+        'allowed_uses': first.get('allowed_uses', ''),
+        'regulatory_constraints': first.get('regulatory_constraints', ''),
+        'land_use_status': first.get('land_use_status', ''),
         'allowed_uses_restrictions': first.get('allowed_uses_restrictions', ''),
     }
     for key, value in legacy_map.items():
         if value not in (None, ''):
             result.setdefault(key, value)
+    strip_regulation_references_from_payload(result)
     return result
 
 
@@ -7022,6 +7286,48 @@ def _build_land_extraction_diagnostics(result, document_processing=None):
     }
 
 
+LAND_ANALYSIS_SITE_CONTEXT_KEYS = (
+    'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_polygon',
+    'city', 'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
+    'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
+    'land_area', 'built_area', 'building_system', 'infrastructure', 'zoning_code', 'land_use',
+)
+
+
+def build_land_analysis_site_context(data, tenant_id, lat, lng):
+    source = data.get('siteContext') if isinstance(data.get('siteContext'), dict) else {}
+    context = {}
+    for key in LAND_ANALYSIS_SITE_CONTEXT_KEYS:
+        value = source.get(key)
+        if value in (None, '', [], {}):
+            value = data.get(key)
+        if value not in (None, '', [], {}):
+            context[key] = value
+    context['location_address'] = data.get('locationAddress') or data.get('location_address') or context.get('location_address') or ''
+    context['location_lat'] = lat
+    context['location_lng'] = lng
+    warnings = []
+    needs_enrichment = any(context.get(key) in (None, '', [], {}) for key in (
+        'location_detail', 'main_roads', 'nearby_landmarks', 'city_landmarks'))
+    if data.get('includeMapContext') is True and needs_enrichment:
+        try:
+            enriched, nearby_items, *_rest, diagnostics = _collect_site_fields(context, tenant_id, lat, lng)
+            for key, value in (enriched or {}).items():
+                if value not in (None, '', [], {}) and context.get(key) in (None, '', [], {}):
+                    context[key] = value
+            if nearby_items and not context.get('nearby_landmarks_data'):
+                context['nearby_landmarks_data'] = nearby_items
+            warnings.extend(value for value in (
+                (diagnostics or {}).get('nearby_landmarks_error'),
+                (diagnostics or {}).get('nearby_landmarks_warning'),
+                (diagnostics or {}).get('city_landmarks_error'),
+                (diagnostics or {}).get('city_landmarks_warning'),
+            ) if value)
+        except Exception as error:
+            warnings.append('تعذر استكمال بعض بيانات الموقع والخرائط: ' + str(error))
+    return context, warnings
+
+
 @app.route('/api/extract-croquis', methods=['POST'])
 @require_auth
 def api_extract_croquis():
@@ -7052,26 +7358,24 @@ def api_extract_croquis():
         if not data.get('documents') and not legacy_file_data:
             return jsonify({'success': False, 'error': 'يرجى رفع صورة الأرض أو الكروكي أو الرخصة أولاً'}), 400
 
-        # The regulation lookup is keyed on the plot itself, so it runs after the documents are
-        # prepared (see below) — this only records what the client already knows about the site.
+        site_context, site_context_warnings = build_land_analysis_site_context(
+            data, g.tenant_id, location_lat, location_lng)
         regulation_query = ' '.join(str(data.get(key) or '') for key in (
             'zoningCode', 'zoning_code', 'projectType', 'city', 'landUse'
         )).strip()
         project_context_fields = (
             ('اسم المشروع', 'projectName'),
             ('نوع المشروع', 'projectType'),
-            ('المدينة', 'city'),
-            ('فكرة المشروع', 'projectIdea'),
-            ('الهدف من المشروع', 'projectGoal'),
-            ('الفئات المستهدفة', 'targetAudience'),
             ('مرحلة المشروع الحالية', 'projectStage'),
-            ('مميزات أولية للمشروع', 'initialFeatures'),
-            ('فرص استثمار ونقاط قوة أولية', 'initialStrengths'),
+            ('رابط Google Maps', 'locationAddress'),
+            ('خط العرض', 'locationLat'),
+            ('خط الطول', 'locationLng'),
         )
         project_context_block = '\n'.join(
             f'- {label}: {str(data.get(key) or "").strip() or "غير مدخل"}'
             for label, key in project_context_fields
-        )
+        ) + '\nبيانات الموقع والخرائط المحللة:\n' + json.dumps(
+            site_context, ensure_ascii=False, indent=2, default=str)
 
         documents = []
         raw_documents = data.get('documents')
@@ -7111,6 +7415,7 @@ def api_extract_croquis():
 
         system_prompt = (
             "أنت مهندس مساح وخبير عقاري ومدقق مستندات تنظيمية. حلل كل الملفات المرفقة معًا، مع الحفاظ على هوية كل ملف ومصدر كل معلومة.\n"
+            "ملفا الاشتراطات الرسميان اشتراطات1 واشتراطات2 متاحان لك بمحتواهما الكامل؛ استخدمهما كاملين ولا تعتمد على جزء أو صفحات منتقاة فقط.\n"
             "أعد JSON فقط بدون Markdown. لا تخترع قيمة غير مقروءة؛ استخدم null أو نصًا فارغًا، وسجل التعارضات بدل اختيار قيمة من نفسك.\n"
             "أولوية المصادر إلزامية: جدول التنظيم الرسمي أولًا، ثم أي مرجع تنظيمي رسمي، ثم الكروكي، ثم رخصة البناء. إذا ظهرت جداول متعددة للإحداثيات أو الاتجاهات، استخدم جدول التنظيم واربط كل قيمة بـ source=regulation_table، وسجل البدائل والتعارضات في conflicts.\n"
             "ستجد في مستندات PDF صورة كاملة للصفحة وقصاصات مكبرة عالية الدقة، وقد توجد قصاصات بديلة باتجاه دوران آخر. استخدم النسخة التي يكون النص فيها أفقيًا واضحًا، ولا تعتبر النسخة المقلوبة مصدرًا مستقلًا.\n"
@@ -7134,8 +7439,9 @@ def api_extract_croquis():
             '      "west": {"regulation_text": "", "street_name": "", "street_width_m": null, "boundary_length_m": null, "uses": "", "source": "regulation_table"}\n'
             '    },\n'
             '    "north_direction": "", "setbacks": "", "building_ratio": "", "coverage_ratio": "",\n'
-            '    "floor_area_ratio": "", "table_floors": "", "max_floors_height": "",\n'
+            '    "building_ratio_coverage": "", "floor_area_ratio": "", "table_floors": "", "max_floors_height": "",\n'
             '    "parking_requirements": "", "entrances_exits_requirements": "",\n'
+            '    "allowed_uses": "", "land_use_status": "", "regulatory_constraints": "",\n'
             '    "allowed_uses_restrictions": "", "zoning_code": "",\n'
             '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
             '    "coordinates_table_name": "إحداثيات التنظيم", "coordinates_table_source_page": "",\n'
@@ -7172,23 +7478,26 @@ def api_extract_croquis():
             "- في directions املأ street_name و street_width_m للحدود المطلة على شوارع، "
             "واذكر في uses أن الحد يجاور قطعة/جار للحدود غير المطلة على شارع.\n"
             "قواعد منع التكرار:\n"
-            "- لا تكرر نفس المعلومة في أكثر من حقل. setbacks للارتدادات فقط، building_ratio لنسبة البناء والتغطية فقط.\n"
+            "- لا تكرر نفس المعلومة في أكثر من حقل. building_ratio_coverage لنسب البناء والتغطية وFAR والأدوار، وsetbacks للارتدادات فقط.\n"
+            "- allowed_uses للاستخدامات وحالة توافق نوع المشروع، وregulatory_constraints للقيود فقط.\n"
             "- أطوال الحدود وأسماء الشوارع تُكتب داخل directions فقط، ولا تُعاد في summary كقائمة.\n"
-            "قواعد الاشتراطات — ممنوع إعادة رقم مجرد:\n"
-            "- zoning_code: كود التنظيم/الاستخدام كما هو في الرخصة أو جدول التنظيم (مثل ت ر1، س ف، ت خ) إن وُجد.\n"
-            "- building_ratio: لا تكتب «60%» وحدها. اكتب جملة كاملة: النسبة، وعلى أي دور تُطبَّق، ومصدرها.\n"
-            "  مثال: «60% من مساحة الأرض للدور الأرضي بموجب جدول أنظمة البناء — اشتراطات1 صفحة 50».\n"
+            "قواعد الاشتراطات — ممنوع إعادة رقم مجرد أو إحالة المستخدم إلى مكان داخل ملف:\n"
+            "- zoning_code: كود التنظيم/الاستخدام كما هو في الرخصة أو جدول التنظيم إن وُجد.\n"
+            "- building_ratio: اكتب النسبة بجملة كاملة توضّح مجال تطبيقها، ولا تكتب «60%» وحدها. لا تذكر اسم الملف أو رقم الصفحة في القيمة.\n"
             "- coverage_ratio: نسبة التغطية إن ذُكرت منفصلة عن نسبة البناء، وإلا اتركها فارغة ولا تكرر نسبة البناء فيها.\n"
-            "- floor_area_ratio: معامل مسطح البناء (FAR) رقمًا مع مصدره إن وُجد في الجدول.\n"
-            "- table_floors: عدد الأدوار المقابل لمساحة هذه الأرض في جدول التنظيم، مع ذكر شريحة المساحة المستخدمة.\n"
-            "  مثال: «8 أدوار لشريحة 3000–5000 م² على محور تجاري رئيسي — اشتراطات1 صفحة 50».\n"
-            "- setbacks: الارتدادات الأربعة كل واحد برقمه بالمتر (أمامي/خلفي/جانبي أيمن/جانبي أيسر). "
-            "إن لم تجدها في اللائحة فاكتب «غير محددة في المرجع المتاح» ولا تخترع أرقامًا.\n"
-            "- parking_requirements: استخرج اشتراطات المواقف كاملة من ملفات الأمانة: العدد أو النسبة، نوع الاستخدام الذي ينطبق عليه الشرط، أبعاد الموقف أو المسار إن ذُكرت، ومصدر الصفحة. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
-            "- entrances_exits_requirements: استخرج اشتراطات مداخل ومخارج السيارات والمشاة والخدمات والتحميل والفصل بين المداخل إن ذُكرت، مع مصدر الصفحة. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
-            "- allowed_uses_restrictions: يجب أن يجمع الاستخدامات المسموحة والقيود، ويشمل داخله اشتراطات المواقف والمداخل والمخارج دون حذف التفاصيل.\n"
+            "- building_ratio_coverage: اجمع نسبة البناء والتغطية وFAR وعدد الأدوار المرتبط بشريحة مساحة الأرض في قيمة مفهومة، بدون إحالات إلى الصفحات.\n"
+            "- floor_area_ratio: معامل مسطح البناء (FAR) رقمًا مع شرح نطاق تطبيقه إن وُجد.\n"
+            "- table_floors: عدد الأدوار المقابل لمساحة هذه الأرض، مع ذكر شريحة المساحة أو المحور بالكلمات فقط.\n"
+            "- setbacks: الارتدادات الأربعة كل واحد برقمه بالمتر (أمامي/خلفي/جانبي أيمن/جانبي أيسر). إن لم تجدها فاكتب «غير محددة في المرجع المتاح» ولا تخترع أرقامًا.\n"
+            "- parking_requirements: استخرج اشتراطات المواقف كاملة: العدد أو النسبة، نوع الاستخدام، وأبعاد الموقف أو المسار إن ذُكرت، دون ذكر أرقام الصفحات. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
+            "- entrances_exits_requirements: استخرج اشتراطات مداخل ومخارج السيارات والمشاة والخدمات والتحميل والفصل بين المداخل إن ذُكرت، دون ذكر أرقام الصفحات. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
+            "- allowed_uses: ابدأ بعبارة «حالة استخدام المشروع: مسموح» أو «غير مسموح» أو «غير محسوم»، ثم اذكر الاستخدامات المسموحة. حدّد الحالة بمقارنة نوع المشروع المدخل مع استخدام الموقع في ملفي الاشتراطات كاملين.\n"
+            "- land_use_status: أعد قيمة واحدة فقط: «مسموح» أو «غير مسموح» أو «غير محسوم»، ولا تستخدم «مسموح» إذا لم يوجد دليل كافٍ.\n"
+            "- regulatory_constraints: اذكر القيود التنظيمية المنطبقة على الموقع والمشروع، واجمع فيها المواقف والمداخل والمخارج والتحميل والخدمات عند وجودها، دون تكرار قائمة الاستخدامات.\n"
+            "- allowed_uses_restrictions: اجمع allowed_uses وregulatory_constraints للتوافق مع البيانات القديمة فقط.\n"
             "- استخدم مساحة الأرض المستخرجة لاختيار الشريحة الصحيحة من جدول التنظيم؛ الجداول مفتاحها مساحة الأرض ونوع المحور/المنطقة.\n"
             "- لا تنسب اشتراطات إلى مدينة أو أمانة إلا إذا كانت المدينة ومصدر اللائحة واضحين في الملفات أو في المرجع المرفق.\n"
+            "- لا تكتب في أي حقل عبارات مثل «صفحة كذا» أو «راجع الملف» أو اسم ملف كمصدر؛ اكتب الاشتراط نفسه مباشرة.\n"
             "قواعد التعارضات (conflicts) — لا تُعرض للمستخدم مباشرة:\n"
             "- عند اختلاف قيمة بين مستندين، سجّل التعارض هنا بجملة واحدة بدل اختيار قيمة من نفسك بصمت.\n"
             "- الشرح المفصّل للتعارض وأثره يُكتب داخل land_and_building_summary في فقرة المخاطر.\n"
@@ -7196,9 +7505,10 @@ def api_extract_croquis():
             "قواعد الملخص (land_and_building_summary):\n"
             "- نص عربي مسترسل من ٣ إلى ٥ فقرات (١٨٠ كلمة على الأقل) وليس قائمة حقول مفصولة بشرطات.\n"
             "- لا تُعد سرد الأرقام التي وردت في الحقول؛ اربطها وحلّلها باختصار.\n"
-            "- يغطي بالترتيب: (١) هوية القطعة وموقعها وصكها، (٢) المساحات والحدود والاتجاهات والواجهات، (٣) اشتراطات البناء مع مصدرها من اللائحة، (٤) الاستخدامات المسموحة والقيود، (٥) اشتراطات المواقف والمداخل والمخارج، (٦) الفرص التطويرية المستنبطة من الاشتراطات، (٧) المخاطر والتعارضات وما يحتاج مراجعة.\n"
+            "- يغطي بالترتيب: (١) هوية القطعة وموقعها وصكها، (٢) المساحات والحدود والاتجاهات والواجهات، (٣) اشتراطات البناء، (٤) الاستخدامات المسموحة وحالة توافق نوع المشروع، (٥) القيود والمواقف والمداخل والمخارج، (٦) الفرص التطويرية المستنبطة من الاشتراطات، (٧) المخاطر والتعارضات وما يحتاج مراجعة.\n"
             "- يجب أن يذكر الملخص بوضوح الارتدادات والمواقف والمداخل والمخارج حتى لو وردت التفاصيل في الحقول الأخرى.\n"
-            "- اربط الفرص التطويرية وملاءمة الاشتراطات بفكرة المشروع وهدفه وفئاته ومرحلته ومميزاته وفرصه المدخلة، ولا تستبدلها بتحليل عام منفصل عن المشروع.\n"
+            "- اربط ملاءمة الاشتراطات بنوع المشروع ومرحلته المدخلين، ولا تستبدلها بتحليل عام منفصل عن المشروع.\n"
+            "- لا تذكر أرقام الصفحات أو أسماء الملفات أو مكان الاشتراط داخل الملخص؛ اذكر الاشتراط نفسه مباشرة.\n"
             "- اذكر صراحة أي معلومة غير متوفرة بدل تخطيها بصمت.\n"
             "ملاحظة: لا تُخرج حقل المساحة المعتمدة للدراسة المالية إطلاقًا؛ العميل هو من يحددها."
         )
@@ -7206,7 +7516,7 @@ def api_extract_croquis():
         raw_resp = ""
         response_finish_reason = None
         model_error = ''
-        vision_warnings = []
+        vision_warnings = list(site_context_warnings)
         document_processing = []
         regulation_evidence_metadata = []
         if OPENROUTER_KEY:
@@ -7243,13 +7553,13 @@ def api_extract_croquis():
                     }), 422
 
             request_facts = {
-                'zoning_code': data.get('zoningCode') or data.get('zoning_code') or '',
-                'land_use': data.get('landUse') or data.get('allowed_uses_restrictions') or '',
-                'city': data.get('city') or '',
+                'zoning_code': data.get('zoningCode') or data.get('zoning_code') or site_context.get('zoning_code') or '',
+                'land_use': data.get('landUse') or data.get('land_use') or site_context.get('land_use') or '',
+                'city': data.get('city') or site_context.get('city') or '',
                 'project_type': data.get('projectType') or '',
                 'location_address': data.get('locationAddress') or data.get('location_address') or '',
-                'location_lat': data.get('locationLat') or data.get('location_lat') or '',
-                'location_lng': data.get('locationLng') or data.get('location_lng') or '',
+                'location_lat': data.get('locationLat') or data.get('location_lat') or location_lat,
+                'location_lng': data.get('locationLng') or data.get('location_lng') or location_lng,
             }
             facts_prompt = (
                 "أنت مستخرج حقائق أولي من صور مستندات الأرض والكروكي. أعد JSON فقط بهذا الشكل: "
@@ -7283,51 +7593,27 @@ def api_extract_croquis():
             evidence_results = []
             for source in evidence_package.get('documents', []):
                 source_name = source.get('name') or 'ملف اشتراطات'
-                if not source.get('context') and not source.get('table_pages'):
-                    vision_warnings.append(f'لم توجد صفحات مطابقة في {source_name}؛ لن يتم تخمين اشتراطاته.')
-                    evidence_results.append({
-                        'source_file': source_name,
-                        'evidence': {},
-                        'error': 'لا توجد صفحات مطابقة',
-                    })
-                    continue
                 source_tables = [
                     entry for entry in evidence_package.get('table_pages', [])
                     if entry.get('name') == source_name
                 ]
-                regulation_parts, render_warnings = render_regulation_table_pages(
-                    source_tables, dpi=REGULATION_EVIDENCE_TABLE_DPI)
-                vision_warnings.extend(render_warnings)
-                evidence_prompt = (
-                    "أنت مستخرج أدلة تنظيمية من ملف واحد فقط. أعد JSON فقط بهذا الشكل: "
-                    '{"evidence":[{"field":"","value":"","page":0,"quote":""}],'
-                    '"uncertainties":[]} '
-                    f"المصدر الوحيد هو {source_name}. لا تستخدم أي معلومة من ملف آخر. "
-                    "استخرج القواعد التي تنطبق على حقائق الموقع، واذكر رقم الصفحة لكل دليل. "
-                    "أرقام الجداول تُقرأ من الصور المرفقة، والنص المرفق يستخدم للبحث والفهم فقط."
-                )
-                evidence_user = [{
-                    'type': 'text',
-                    'text': evidence_prompt
-                            + '\nحقائق الموقع المستخرجة من الكروكي:\n'
-                            + json.dumps(site_facts, ensure_ascii=False)
-                            + '\nنصوص الصفحات المنتقاة:\n'
-                            + str(source.get('context') or '')
-                }] + regulation_parts
-                evidence_result, evidence_cap, evidence_error = _run_land_json_stage(
-                    source_name, evidence_prompt, evidence_user,
-                    REGULATION_EVIDENCE_MAX_TOKENS, REGULATION_EVIDENCE_MIN_TOKENS,
-                    REGULATION_EVIDENCE_MAX_TOKENS * 2
-                )
-                if evidence_error:
-                    vision_warnings.append(f'تعذر استخراج أدلة {source_name}؛ ستحتاج هذه اللائحة إلى مراجعة.')
+                source_for_evidence = {**source, 'table_pages': source_tables}
+                extracted_evidence = _extract_full_regulation_evidence(source_for_evidence, site_facts)
+                vision_warnings.extend(extracted_evidence.get('warnings', []))
+                if not extracted_evidence.get('evidence') and not extracted_evidence.get('uncertainties'):
+                    if not source.get('context') and not source_tables:
+                        vision_warnings.append(f'لم يتوفر محتوى قابل للقراءة في {source_name}؛ لن يتم تخمين اشتراطاته.')
                     evidence_results.append({
                         'source_file': source_name,
                         'evidence': {},
-                        'error': evidence_error,
+                        'error': 'لا يوجد محتوى قابل للقراءة أو تعذر استخراج أدلة',
                     })
-                else:
-                    evidence_results.append(_compact_regulation_evidence(source_name, evidence_result))
+                    continue
+                evidence_results.append({
+                    'source_file': source_name,
+                    'evidence': extracted_evidence.get('evidence', []),
+                    'uncertainties': extracted_evidence.get('uncertainties', []),
+                })
             regulation_evidence_metadata = [
                 {
                     'name': source.get('name'),
@@ -7346,17 +7632,17 @@ def api_extract_croquis():
                 "لديك نوعان من المدخلات، لا تخلط بينهما:\n"
                 "١) مستندات العميل (الصك/الكروكي/الرخصة): مُرسلة صورًا عالية الدقة. اقرأها بصريًا فقط "
                 "ولا تعتمد على OCR أو نص مستخرج، واقرأ جداولها من الصورة نفسها.\n"
-                "٢) أدلة منتقاة من ملفي اشتراطات1 واشتراطات2: أُرسلت نصوص صفحات محددة وصور جداول محددة فقط. "
-                "استخدم كل مصدر حسب اسمه ورقم صفحته، ولا تخترع قاعدة من صفحة أو ملف غير موجود في الأدلة.\n"
+                "٢) نتائج استخلاص مبنية على المحتوى الكامل لملفي اشتراطات1 واشتراطات2، بما في ذلك جداول كل ملف. "
+                "استخدم القواعد التي تنطبق على حقائق الموقع فقط، ولا تخترع قاعدة غير موجودة في المحتوى الكامل.\n"
                 "أولوية جدول التنظيم الرسمية مطلقة عند التعارض، وخاصة لجدول الإحداثيات وجدول الاتجاهات. "
-                "لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude.\n"
+                "لا تخلط بين شرقيات/شماليات المساحية وبين latitude/longitude. لا تذكر أرقام الصفحات أو أسماء الملفات في أي قيمة للمستخدم.\n"
             )
             regulation_block = (
-                "أدلة الاشتراطات المنتقاة من الملفين، وكل دليل مرتبط بمصدره:\n"
+                "نتائج استخلاص الاشتراطات من المحتوى الكامل للملفين:\n"
                 + json.dumps(evidence_results, ensure_ascii=False)
                 + "\n\n"
                 if evidence_results else
-                "تنبيه: لم تتوفر أدلة اشتراطات منتقاة من الملفين. لا تخترع اشتراطات، وسجّل ذلك في conflicts.\n\n"
+                "تنبيه: لم تتوفر نتائج قابلة للاستخدام من الملفين كاملين. لا تخترع اشتراطات، وسجّل ذلك في conflicts.\n\n"
             )
             user_content = [{
                 "type": "text",
