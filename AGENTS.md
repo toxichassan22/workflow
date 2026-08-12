@@ -206,10 +206,16 @@ field keeps its old value, i.e. "re-analysis did nothing".
 `_call_land_analysis_model()` starts at `LAND_ANALYSIS_MAX_TOKENS` (16000), retries a truncated
 response once with a higher cap up to `LAND_ANALYSIS_TRUNCATION_CEILING`, and walks the cap down
 when the provider quotes an affordable figure.
+Some OpenRouter fallbacks (especially Anthropic) reject `response_format: json_object` with
+`output_format` content filtering, which used to abort the whole croquis run. The land call now
+pins to OpenAI with `allow_fallbacks: false` and retries once without JSON mode if that block
+(or empty content) comes back.
+`_get_chat_response_text()` also reads `reasoning` / `reasoning_content` when `content` is empty —
+Luna often spends the reply there.
 `LAND_ANALYSIS_MIN_TOKENS`, `LAND_ANALYSIS_MODEL` are also env-overridable. Failures return a named
-`failureReason` (`truncated` / `invalid_json` / `insufficient_credit` / `empty_response`) plus the
-raw `providerError`, and the frontend states that no field was updated. Keep it that way — a silent
-rejection is indistinguishable from a broken button.
+`failureReason` (`truncated` / `invalid_json` / `insufficient_credit` / `empty_response` /
+`provider_blocked`) plus the raw `providerError`, and the frontend states that no field was
+updated. Keep it that way — a silent rejection is indistinguishable from a broken button.
 
 When enlarging the prompt's expected output, re-check the truncation risk: Arabic costs roughly
 two to three tokens per word, and the coordinates table can add dozens of rows.

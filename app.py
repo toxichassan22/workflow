@@ -221,7 +221,7 @@ def _has_chat_choices(response):
     )
 
 
-def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None):
+def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None):
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
@@ -245,6 +245,8 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
         payload["reasoning_effort"] = reasoning_effort
     if response_format:
         payload["response_format"] = response_format
+    if provider:
+        payload["provider"] = provider
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
         text = response.text or ''
@@ -5520,6 +5522,23 @@ def api_update_custom_section(section_key):
     return jsonify({'success': True})
 
 
+def _stringify_chat_part(value):
+    """Flatten OpenRouter/OpenAI message fragments into a single string."""
+    if value is None:
+        return ''
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return ''.join(_stringify_chat_part(item) for item in value)
+    if isinstance(value, dict):
+        for key in ('text', 'content', 'reasoning', 'output', 'summary'):
+            fragment = value.get(key)
+            if fragment not in (None, '', [], {}):
+                return _stringify_chat_part(fragment)
+        return ''
+    return str(value)
+
+
 def _get_chat_response_text(res):
     """Safely extract string content from OpenAI/GLM/OpenRouter chat response dict."""
     if not isinstance(res, dict):
@@ -5529,16 +5548,15 @@ def _get_chat_response_text(res):
         if isinstance(choice, dict):
             msg = choice.get('message', {})
             if isinstance(msg, dict):
-                content = msg.get('content', '') or ''
-                if isinstance(content, str):
-                    return content
-                if isinstance(content, list):
-                    return ''.join(
-                        str(part.get('text') or part.get('content') or '') if isinstance(part, dict) else str(part)
-                        for part in content
-                    )
-                return str(content)
-            return str(choice.get('text', ''))
+                for key in ('content', 'reasoning', 'reasoning_content', 'reasoning_details'):
+                    text = _stringify_chat_part(msg.get(key))
+                    if text and str(text).strip():
+                        return text
+                parsed = msg.get('parsed')
+                if isinstance(parsed, dict):
+                    return json.dumps(parsed, ensure_ascii=False)
+                return ''
+            return str(choice.get('text', '') or '')
     return ""
 
 
@@ -6339,6 +6357,11 @@ LAND_ANALYSIS_MODEL = LUNA_TEXT_MODEL
 _AFFORDABLE_TOKENS_RE = re.compile(r'can only afford\s+(\d+)')
 _TRANSIENT_PROVIDER_RE = re.compile(r'\(HTTP 5\d\d\)')
 _EMPTY_PROVIDER_RE = re.compile(r'جسم فارغ \(HTTP \d+\)')
+_JSON_MODE_BLOCK_RE = re.compile(
+    r'output_format|content filtering|response_format|structured.?output',
+    re.IGNORECASE,
+)
+LAND_ANALYSIS_PROVIDER = {'order': ['OpenAI'], 'allow_fallbacks': False}
 
 
 def _chat_error_message(res):
@@ -6363,10 +6386,14 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_token
     cap = max(minimum, int(max_tokens))
     message = ''
     res = None
+    use_json_mode = True
     for attempt in range(3):
-        res = call_openrouter_chat(system_prompt, user_content, temperature=None,
-                                   max_tokens=cap, model=LAND_ANALYSIS_MODEL,
-                                   response_format={'type': 'json_object'})
+        res = call_openrouter_chat(
+            system_prompt, user_content, temperature=None,
+            max_tokens=cap, model=LAND_ANALYSIS_MODEL,
+            response_format={'type': 'json_object'} if use_json_mode else None,
+            provider=LAND_ANALYSIS_PROVIDER,
+        )
         if _has_chat_choices(res):
             choices = res.get('choices') or []
             finish_reason = choices[0].get('finish_reason') if choices and isinstance(choices[0], dict) else None
@@ -6374,6 +6401,11 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_token
             if finish_reason == 'length' and higher_cap > cap and attempt < 2:
                 print(f'[LAND ANALYSIS] response truncated at cap={cap}; retrying with {higher_cap}')
                 cap = higher_cap
+                continue
+            raw_text = _get_chat_response_text(res)
+            if not str(raw_text).strip() and use_json_mode and attempt < 2:
+                print('[LAND ANALYSIS] json_object returned empty content; retrying without response_format')
+                use_json_mode = False
                 continue
             return res, cap, ''
         message = _chat_error_message(res)
@@ -6385,6 +6417,10 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_token
                 break
             print(f'[LAND ANALYSIS] provider refused max_tokens={cap}; retrying with {retry_cap}')
             cap = retry_cap
+            continue
+        if use_json_mode and _JSON_MODE_BLOCK_RE.search(message) and attempt < 2:
+            print(f'[LAND ANALYSIS] json_object blocked; retrying without response_format: {message}')
+            use_json_mode = False
             continue
         if (_TRANSIENT_PROVIDER_RE.search(message) or _EMPTY_PROVIDER_RE.search(message)) and attempt < 2:
             print(f'[LAND ANALYSIS] transient provider response; retrying: {message}')
@@ -7688,10 +7724,28 @@ def api_extract_croquis():
             # Report what the provider actually said. "Check your API keys" was misleading when the
             # real cause was an insufficient credit balance for the reserved max_tokens.
             insufficient_credit = 'afford' in model_error or 'credit' in model_error.lower()
+            blocked_format = bool(_JSON_MODE_BLOCK_RE.search(model_error or ''))
             if insufficient_credit:
                 message = ('رصيد OpenRouter لا يكفي لهذا الطلب، فلم يُعتمد أي حقل ولم تتغير البيانات. '
                            'أضف رصيدًا أو قلّل LAND_ANALYSIS_MAX_TOKENS.')
-            elif model_error:
+                return jsonify({
+                    'success': False,
+                    'error': message,
+                    'failureReason': 'insufficient_credit',
+                    'providerError': model_error,
+                    'documentProcessing': document_processing
+                }), 503
+            if blocked_format:
+                message = ('مزوّد الذكاء الاصطناعي رفض صيغة JSON الإجبارية، فلم يُعتمد أي حقل ولم تتغير البيانات. '
+                           f'سبب المزوّد: {model_error}')
+                return jsonify({
+                    'success': False,
+                    'error': message,
+                    'failureReason': 'provider_blocked',
+                    'providerError': model_error,
+                    'documentProcessing': document_processing
+                }), 503
+            if model_error:
                 message = f'لم يرد الذكاء الاصطناعي بأي محتوى فلم تتغير البيانات. سبب المزوّد: {model_error}'
             else:
                 message = ('لم يرد الذكاء الاصطناعي بأي محتوى، فلم تتغير البيانات. '
@@ -7699,7 +7753,7 @@ def api_extract_croquis():
             return jsonify({
                 'success': False,
                 'error': message,
-                'failureReason': 'insufficient_credit' if insufficient_credit else 'empty_response',
+                'failureReason': 'empty_response',
                 'providerError': model_error,
                 'documentProcessing': document_processing
             }), 503
@@ -7710,6 +7764,7 @@ def api_extract_croquis():
                 'success': False,
                 'error': 'استجابة الذكاء الاصطناعي ليست JSON صالحًا، فلم يُعتمد أي حقل ولم تتغير البيانات.',
                 'failureReason': 'invalid_json',
+                'providerError': raw_resp[:400],
                 'documentProcessing': document_processing
             }), 503
         resp_json = _normalize_land_document_result(parsed_response, raw_resp)

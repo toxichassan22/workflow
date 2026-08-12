@@ -1697,7 +1697,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         success = {'choices': [{'message': {'content': '{"ok":1}'}, 'finish_reason': 'stop'}]}
         caps = []
 
-        def fake_call(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None):
+        def fake_call(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None):
             caps.append(max_tokens)
             return refusal if max_tokens > 25898 else success
 
@@ -1731,6 +1731,80 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(cap, 16000)
         self.assertEqual(error, '')
         self.assertEqual(call.call_count, 2)
+
+    def test_land_analysis_retries_without_json_mode_after_output_format_block(self):
+        """Anthropic and some OpenRouter fallbacks reject json_object with output_format
+        content filtering, which used to abort the whole croquis analysis."""
+        module = self.application_module
+        blocked = {'error': {'message': (
+            '[400] Provider returned error '
+            '{"type":"error","error":{"type":"invalid_request_error",'
+            '"message":"Output blocked by content filtering policy","code":"output_format"}}'
+        )}}
+        success = {'choices': [{'message': {'content': '{"plot_number":"9991"}'}, 'finish_reason': 'stop'}]}
+        formats = []
+
+        def fake_call(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None,
+                      timeout=300, reasoning_effort=None, response_format=None, provider=None):
+            formats.append(response_format)
+            return blocked if response_format else success
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_call) as call:
+            res, cap, error = module._call_land_analysis_model('s', 'u', 16000)
+        self.assertTrue(module._has_chat_choices(res))
+        self.assertEqual(error, '')
+        self.assertEqual(cap, 16000)
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(formats[0], {'type': 'json_object'})
+        self.assertIsNone(formats[1])
+        self.assertEqual(module._get_chat_response_text(res), '{"plot_number":"9991"}')
+
+    def test_land_analysis_reads_json_from_reasoning_when_content_is_empty(self):
+        """Luna often spends the reply on reasoning and leaves message.content empty."""
+        module = self.application_module
+        payload = json.dumps({
+            'parcels': [{
+                'parcel_id': 'P-1',
+                'plot_number': '9991',
+                'area_sqm': 3000,
+                'survey_coordinates': [{'point': '1', 'eastings': '511085.849', 'northings': '2392264.840'}],
+                'directions': {
+                    'north': {'regulation_text': 'بطول 10 م'},
+                    'south': {'regulation_text': 'بطول 11 م'},
+                    'east': {'regulation_text': 'بطول 12 م'},
+                    'west': {'regulation_text': 'بطول 13 م'},
+                },
+            }],
+            'conflicts': [],
+        }, ensure_ascii=False)
+        response = {
+            'choices': [{
+                'finish_reason': 'stop',
+                'message': {
+                    'content': '',
+                    'reasoning': 'thinking first then answer\n' + payload,
+                },
+            }]
+        }
+        self.assertEqual(module.parse_json_object(module._get_chat_response_text(response))['parcels'][0]['plot_number'], '9991')
+
+        with patch.object(module, 'OPENROUTER_KEY', 'test-key'), \
+                patch.object(module, '_prepare_document_vision_parts', return_value=(
+                    [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,test', 'detail': 'high'}}],
+                    [], 1, 'image_direct'
+                )), \
+                patch.object(module, 'search_official_regulations_evidence', return_value=(
+                    {'context': '', 'documents': [], 'table_pages': []}, []
+                )), \
+                patch.object(module, '_call_land_analysis_model', return_value=(response, 9000, '')):
+            result = self.app.test_client().post('/api/extract-croquis', headers=self._headers(self.token_a), json={
+                'fileData': 'data:image/png;base64,test',
+                'locationAddress': 'https://www.google.com/maps/@24.0,46.0,17z',
+                'locationLat': 24.0,
+                'locationLng': 46.0,
+            })
+        self.assertEqual(result.status_code, 200, result.get_json())
+        self.assertEqual(result.get_json()['extractedData']['plot_number_croquis'], '9991')
 
     def test_land_prompt_forbids_ai_written_approved_area_and_demands_narrative(self):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
