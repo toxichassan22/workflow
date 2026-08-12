@@ -1184,9 +1184,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("createProjectSectionHeader('section-team', 'فريق العمل')", index_source)
         self.assertIn('data-key="team_selection"', index_source)
 
-        # Team is the second section, right after the basic information.
-        self.assertIn('addTeamSection(form, form.querySelector(\'.tenant-form-section[data-section="basic"]\')?.nextSibling)',
-                      index_source)
+        # The project form keeps the requested order, with the timeline feeding the financial study.
+        self.assertIn("const sectionOrder = ['basic', 'location', 'land_croquis'];", index_source)
+        build_start = index_source.index('addTimelineTable(form);')
+        build_end = index_source.index('const projectSections = Array.from', build_start)
+        build_source = index_source[build_start:build_end]
+        self.assertLess(build_source.index('addTimelineTable(form);'), build_source.index('addFinancialCalculations(form);'))
+        self.assertLess(build_source.index('addFinancialCalculations(form);'), build_source.index('addTeamSection(form);'))
+        self.assertLess(build_source.index('addTeamSection(form);'), build_source.index('const conceptual2dSection'))
 
         # The three per-file behaviours.
         self.assertIn('function toggleTeamEntityInFile(entityId)', index_source)

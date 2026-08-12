@@ -624,8 +624,8 @@ def update_branding(tenant_id, **fields):
 
 FIELD_SECTIONS = [
     {'key': 'basic', 'label': 'معلومات أساسية'},
-    {'key': 'land_croquis', 'label': 'الأرض والكروكي'},
     {'key': 'location', 'label': 'الموقع والخرائط'},
+    {'key': 'land_croquis', 'label': 'الأرض والكروكي'},
 ]
 
 DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}

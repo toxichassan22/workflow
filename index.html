@@ -7938,7 +7938,7 @@
       let lngInput = null;
       let locationSection = null;
 
-      const sectionOrder = ['basic', 'land_croquis', 'location'];
+      const sectionOrder = ['basic', 'location', 'land_croquis'];
       sectionOrder.forEach(sectionKey => {
 
         const sectionFields = grouped[sectionKey];
@@ -8263,14 +8263,13 @@
         (locationSection || form).appendChild(previewDiv);
       }
 
-      // Team is descriptive, not calculated, so it sits right after the basic information.
-      // The field sections are built by the loop above, hence insertBefore rather than append.
-      addTeamSection(form, form.querySelector('.tenant-form-section[data-section="basic"]')?.nextSibling);
-      // Append order defines the sidebar order. The timeline comes before the financial study
+      // Append order defines the sidebar order: basic, location, land/croquis, timeline,
+      // financial, team, and conceptual 2D. The timeline comes before the financial study
       // because it feeds it (development duration and the stage list), so it has to be filled
       // first. Components are part of the financial study; there is no separate section for them.
       addTimelineTable(form);
       addFinancialCalculations(form);
+      addTeamSection(form);
 
       const conceptual2dSection = document.createElement('div');
       conceptual2dSection.className = 'tenant-form-section';
