@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ar" dir="rtl">
 
 <head>
@@ -10453,8 +10453,12 @@
     }
 
     function syncTenantFloorDesignGroupStatus(group) {
-      const pages = Array.isArray(group?.pages) ? group.pages : [];
-      if (!pages.length) return;
+      if (!group) return;
+      const pages = Array.isArray(group.pages) ? group.pages : [];
+      if (!pages.length) {
+        if (group.status === 'generating') group.status = 'pending';
+        return;
+      }
       group.status = pages.every(page => page.status === 'approved') ? 'approved'
         : pages.some(page => page.status === 'generating') ? 'generating'
           : pages.some(page => page.status === 'review' || page.status === 'approved') ? 'review' : 'pending';
@@ -10580,6 +10584,11 @@
           const payload = await collectTenantFloorDesignAiPayload();
           payload.groupId = group.id;
           payload.analysis = tenantFloorDesignState.analysis;
+          payload.approvedConflictKeys = [
+            'approved_area', 'approved_floor_count', 'approved_coverage', 'floor_design_floor_count',
+            'source_length_edge_1', 'source_length_edge_2', 'source_length_edge_3', 'source_length_edge_4',
+            ...Object.keys(tenantFloorDesignState?.analysisApprovedSections || {})
+          ];
           const response = await api('POST', '/api/floor-design/prompt', payload);
           if (!response?.success || !Array.isArray(response.pages) || !response.pages.length) {
             throw new Error(describeFloorDesignPreflight(response));
@@ -10605,7 +10614,7 @@
         } catch (error) {
           toast(error?.message || 'تعذر إنشاء Prompt المجموعة', 9000);
           button.disabled = false;
-          button.textContent = 'توليد Prompt';
+          button.textContent = 'عرض Prompt';
           return;
         }
       }
@@ -11467,6 +11476,11 @@
           const promptPayload = await collectTenantFloorDesignAiPayload();
           promptPayload.groupId = group.id;
           promptPayload.analysis = tenantFloorDesignState.analysis;
+          promptPayload.approvedConflictKeys = [
+            'approved_area', 'approved_floor_count', 'approved_coverage', 'floor_design_floor_count',
+            'source_length_edge_1', 'source_length_edge_2', 'source_length_edge_3', 'source_length_edge_4',
+            ...Object.keys(tenantFloorDesignState?.analysisApprovedSections || {})
+          ];
           const promptResponse = await api('POST', '/api/floor-design/prompt', promptPayload);
           if (!promptResponse?.success || !Array.isArray(promptResponse.pages) || !promptResponse.pages.length) throw new Error(promptResponse?.error || 'تعذر إنشاء Prompts الصفحات');
           group.pages = promptResponse.pages.map(item => ({
@@ -11504,8 +11518,10 @@
         renderTenantFloorDesignActiveGroup();
         return true;
       } catch (error) {
-        const activePage = tenantFloorDesignActivePage(group);
-        if (activePage?.status === 'generating') activePage.status = 'pending';
+        group.status = 'pending';
+        if (Array.isArray(group.pages)) {
+          group.pages.forEach(p => { if (p.status === 'generating') p.status = 'pending'; });
+        }
         syncTenantFloorDesignGroupStatus(group);
         toast(error?.message || 'تعذر توليد صفحات المجموعة');
         renderTenantFloorDesignActiveGroup();

@@ -2928,6 +2928,54 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('unicode-bidi: plaintext', index_source)
         self.assertIn('const pagesAreCurrent =', index_source)
 
+    def test_floor_design_single_floor_and_range_parsing(self):
+        module = self.application_module
+        # Range parsing
+        self.assertEqual(module._parse_floor_numbers_range('2-50'), list(range(2, 51)))
+        self.assertEqual(module._parse_floor_numbers_range('1, 3-5, 10'), [1, 3, 4, 5, 10])
+        self.assertEqual(module._parse_floor_numbers_range('الأدوار 2-10'), list(range(2, 11)))
+        self.assertEqual(module._parse_floor_numbers_range('1'), [1])
+
+        # Single floor vs multi-floor prompt generation
+        client = self.app.test_client()
+        single_group = {'id': 'g_single', 'name': 'الدور 1', 'floorNumbers': [1]}
+        multi_group = {'id': 'g_multi', 'name': 'الأدوار 2-50 (شقق سكنية)', 'floorNumbers': list(range(2, 51))}
+        project_data = {
+            'project_name': 'برج سكني', 'project_type': 'سكني', 'project_idea': 'فكرة', 'project_goal': 'هدف',
+            'building_ratio_coverage': '35%', 'setbacks': '6 م', 'allowed_uses': 'سكني مسموح',
+            'regulatory_constraints': 'مواقف سيارات', 'land_and_building_summary': 'ملخص الأرض',
+            'boundary_lengths': '100م, 100م, 100م, 100م', 'surrounding_streets': 'شارع 30م',
+            'facades_count': 1, 'facades_directions': 'شمال', 'max_floors_height': '50 دور',
+            'approved_financial_area': 50000, 'approved_floor_count': 50,
+            'project_components_data': json.dumps([
+                {'id': 'c_res', 'name': 'شقق سكنية', 'area': 49000, 'useType': 'residential', 'units': 200, 'unitArea': 245, 'floors': '2-50'},
+            ], ensure_ascii=False)
+        }
+        floor_design_state = {
+            'floorCount': 50,
+            'groups': [single_group, multi_group],
+        }
+
+        # Single floor prompt generation (Floor 1 has no explicit residential component, should use fallback services and not crash)
+        single_payload = {'projectData': project_data, 'floorDesignState': floor_design_state, 'groupId': single_group['id']}
+        res_single = client.post('/api/floor-design/prompt', headers=self._headers(self.token_a), json=single_payload)
+        self.assertEqual(res_single.status_code, 200, res_single.get_json())
+        single_data = res_single.get_json()
+        self.assertTrue(single_data['success'])
+        self.assertEqual(len(single_data['pages']), 1)
+        self.assertEqual(single_data['pages'][0]['pageType'], 'floor')
+        self.assertEqual(single_data['pages'][0]['floorNumber'], 1)
+
+        # Multi-floor prompt generation
+        multi_payload = {'projectData': project_data, 'floorDesignState': floor_design_state, 'groupId': multi_group['id']}
+        res_multi = client.post('/api/floor-design/prompt', headers=self._headers(self.token_a), json=multi_payload)
+        self.assertEqual(res_multi.status_code, 200, res_multi.get_json())
+        multi_data = res_multi.get_json()
+        self.assertTrue(multi_data['success'])
+        self.assertEqual(len(multi_data['pages']), 1)
+        self.assertEqual(multi_data['pages'][0]['pageType'], 'typical_floor')
+        self.assertEqual(multi_data['pages'][0]['floorNumbers'], list(range(2, 51)))
+
     def test_floor_design_image_generation_forces_cached_system_reference(self):
         client = self.app.test_client()
         generated = 'data:image/png;base64,AAAA'

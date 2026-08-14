@@ -1417,7 +1417,7 @@ def _floor_design_components(source):
         'id', 'name', 'useType', 'units', 'unitArea', 'builtArea', 'revenueArea', 'totalArea',
         'investmentModel', 'floorNumbers', 'floors', 'groupIds', 'floorAreas', 'areaPerFloor',
         'grossArea', 'netArea', 'color', 'unitsPerFloor', 'unitCountPerFloor', 'floorUnits',
-        'unit_area', 'units_per_floor',
+        'unit_area', 'units_per_floor', 'area',
     )
     return [{key: item.get(key) for key in keys if item.get(key) not in (None, '')}
             for item in raw[:100] if isinstance(item, dict)]
@@ -1784,11 +1784,44 @@ def _floor_design_setback_spec(land, geometry):
     return result
 
 
-def _floor_design_component_floor_numbers(component, group):
+def _parse_floor_numbers_range(value):
+    if not value:
+        return []
+    if isinstance(value, list):
+        result = []
+        for item in value:
+            result.extend(_parse_floor_numbers_range(item))
+        return sorted({int(item) for item in result if isinstance(item, (int, float)) and int(item) == item and 0 <= int(item) <= 500})
+    text = str(value).translate(str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789'))
+    results = set()
+    for part in re.split(r'[,،;\s]+', text):
+        part = part.strip()
+        if not part:
+            continue
+        range_match = re.match(r'^(\d+)\s*[-–—~to]\s*(\d+)$', part)
+        if range_match:
+            start, end = int(range_match.group(1)), int(range_match.group(2))
+            if start > end:
+                start, end = end, start
+            for f in range(start, min(end + 1, 501)):
+                results.add(f)
+        else:
+            num_match = re.match(r'^\d+$', part)
+            if num_match:
+                results.add(int(num_match.group(0)))
+            else:
+                for n in re.findall(r'\d+', part):
+                    results.add(int(n))
+    return sorted({f for f in results if 0 <= f <= 500})
+
+
+def _floor_design_component_explicit_floors(component):
     explicit = component.get('floorNumbers') or component.get('floors') or []
-    if isinstance(explicit, str):
-        explicit = [_floor_design_number(item) for item in re.findall(r'\d+', explicit)]
-    floors = sorted({int(item) for item in explicit if isinstance(item, (int, float)) and int(item) == item}) if isinstance(explicit, list) else []
+    return _parse_floor_numbers_range(explicit)
+
+
+def _floor_design_component_floor_numbers(component, group):
+    floors = _floor_design_component_explicit_floors(component)
     group_ids = component.get('groupIds') if isinstance(component.get('groupIds'), list) else []
     if group.get('id') in [str(item) for item in group_ids]:
         floors = group['floorNumbers']
@@ -1796,7 +1829,7 @@ def _floor_design_component_floor_numbers(component, group):
 
 
 def _floor_design_round_number(value):
-    if value is None:
+    if value in (None, ''):
         return None
     number = round(float(value), 2)
     return int(number) if number.is_integer() else number
@@ -1848,10 +1881,13 @@ def _floor_design_component_units_per_floor(component, group, floors):
 
 
 def _floor_design_is_residential(component, group):
-    text = ' '.join(_floor_design_text(source.get(key), 12000)
-                    for source in (component, group)
-                    for key in ('name', 'useType', 'description'))
-    return bool(re.search(r'سكن|شقق|شقة|وحدات\s*سكن|residential|apartments?', text, flags=re.IGNORECASE))
+    group_text = ' '.join(_floor_design_text(group.get(key), 12000) for key in ('name', 'description'))
+    if re.search(r'مدخل|مداخل|استقبال|بهو|خدمات|مواقف|تجاري|ميزانين|إداري|مكاتب|commercial|retail|services|lobby|entrance|parking|office', group_text, flags=re.IGNORECASE):
+        if not re.search(r'سكني|شقق|شقة|residential|apartment', group_text, flags=re.IGNORECASE):
+            return False
+    comp_text = ' '.join(_floor_design_text(component.get(key), 12000) for key in ('name', 'useType', 'description'))
+    return bool(re.search(r'سكن|شقق|شقة|وحدات\s*سكن|residential|apartments?', comp_text, flags=re.IGNORECASE) or
+                re.search(r'سكن|شقق|شقة|وحدات\s*سكن|residential|apartments?', group_text, flags=re.IGNORECASE))
 
 
 def _floor_design_floor_range(numbers):
@@ -1888,6 +1924,9 @@ def _floor_design_space_program(payload, group, floor_number):
     components, rows, missing = payload['financial']['components'], [], []
     for index, component in enumerate(components):
         component_id = _floor_design_text(component.get('id') or index + 1, 80)
+        explicit_floors = _floor_design_component_explicit_floors(component)
+        if explicit_floors and floor_number not in explicit_floors:
+            continue
         floors = _floor_design_component_floor_numbers(component, group)
         if not floors:
             # No explicit floor assignment: the component is assumed to span
@@ -1895,7 +1934,7 @@ def _floor_design_space_program(payload, group, floor_number):
             floors = group['floorNumbers']
         floor_areas = component.get('floorAreas') if isinstance(component.get('floorAreas'), dict) else {}
         explicit_area = _floor_design_number(floor_areas.get(str(floor_number), floor_areas.get(floor_number)))
-        gross_total = _floor_design_number(component.get('grossArea') or component.get('builtArea') or component.get('totalArea'))
+        gross_total = _floor_design_number(component.get('grossArea') or component.get('builtArea') or component.get('totalArea') or component.get('area'))
         net_total = _floor_design_number(component.get('netArea'))
         area_per_floor = _floor_design_number(component.get('areaPerFloor'))
         units_total = _floor_design_number(component.get('units'))
@@ -1935,12 +1974,27 @@ def _floor_design_space_program(payload, group, floor_number):
             if unit_area is not None:
                 required_unit_area = round(units_per_floor * unit_area, 2)
                 row['requiredUnitLayoutAreaSqm'] = required_unit_area
-                if abs(required_unit_area - gross_area) > max(0.01, max(required_unit_area, gross_area) * 0.001):
+                if required_unit_area > round(gross_area * 1.05, 2):
                     row['areaConsistency'] = 'conflict_between_unit_count_area_and_reported_floor_area'
                     row['reportedGrossAreaSqm'] = round(gross_area, 2)
             else:
                 row['unitAreaStatus'] = 'unavailable'
         rows.append(row)
+
+    if not rows:
+        total_floors = int(payload.get('financial', {}).get('approved_floor_count') or payload.get('financial', {}).get('floorCount') or len(group.get('floorNumbers') or [1]) or 1)
+        total_app_area = float(payload.get('financial', {}).get('approved_financial_area') or payload.get('financial', {}).get('builtUpAreaAbove') or 1000)
+        floor_gross = round(total_app_area / max(1, total_floors), 2)
+        group_name = _floor_design_text(group.get('name') or f'الدور {floor_number}', 160)
+        rows.append({
+            'id': f'auto_component_{floor_number}',
+            'name': group_name,
+            'useType': 'services' if not _floor_design_is_residential({}, group) else 'residential',
+            'grossAreaSqm': floor_gross,
+            'netAreaSqm': floor_gross,
+            'color': '#3B6E91'
+        })
+
     total_area = round(sum(row['grossAreaSqm'] for row in rows), 2)
     percentages = _floor_design_allocate_rounded(100, [row['grossAreaSqm'] for row in rows]) if rows and total_area else []
     for row, percentage in zip(rows, percentages):
