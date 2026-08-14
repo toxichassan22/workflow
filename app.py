@@ -190,9 +190,12 @@ print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
 FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"
 FLOOR_DESIGN_TEXT_MODEL = GEMINI_TEXT_MODEL
-FLOOR_DESIGN_REFERENCE_PATH = os.path.join(
-    os.path.dirname(__file__), 'sandbox', 'reference', 'plans_pages_24_32.png')
-_FLOOR_DESIGN_REFERENCE_CACHE = {'mtime': None, 'data_uri': None}
+FLOOR_DESIGN_REASONING_EFFORT = 'high'
+FLOOR_DESIGN_REFERENCE_DIR = os.path.join(os.path.dirname(__file__), '2D reference')
+FLOOR_DESIGN_REFERENCE_FILE = os.path.basename((os.environ.get('FLOOR_DESIGN_REFERENCE_FILE') or '1.png').strip() or '1.png')
+FLOOR_DESIGN_REFERENCE_PATH = os.path.join(FLOOR_DESIGN_REFERENCE_DIR, FLOOR_DESIGN_REFERENCE_FILE)
+_FLOOR_DESIGN_REFERENCE_CACHE = {'mtime': None, 'data_uri': None, 'path': None}
+_FLOOR_DESIGN_REFERENCE_PACK_CACHE = {'fingerprint': None, 'references': None}
 FLOOR_DESIGN_IMAGE_HARD_NEGATIVE = (
     'ABSOLUTE OUTPUT RULES: no watermark, no logo, no Acacia name, no copied project name, '
     'no copied dimensions, no copied room names, and no copied project content from the style reference. '
@@ -226,7 +229,7 @@ def _has_chat_choices(response):
     )
 
 
-def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None):
+def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None):
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
@@ -236,11 +239,24 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
         "HTTP-Referer": "https://github.com",
         "X-Title": "Real Estate Proposal Generator"
     }
+    user_message_content = user_content
+    if image_references:
+        user_message_content = [{"type": "text", "text": str(user_content)}]
+        for image_reference in image_references:
+            if isinstance(image_reference, dict):
+                image_url = image_reference.get('data_uri') or image_reference.get('url')
+            else:
+                image_url = image_reference
+            if isinstance(image_url, str) and image_url.startswith('data:image/'):
+                user_message_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": image_url}
+                })
     payload = {
         "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
+            {"role": "user", "content": user_message_content}
         ],
         "max_tokens": max_tokens
     }
@@ -547,22 +563,57 @@ def persist_generated_image(image, tenant_id):
     return f'/uploads/creative/{safe_tenant}/{filename}'
 
 
-def _floor_design_default_reference_data_uri():
-    """Return the style-only system reference as a cached, validated PNG data URI."""
+def _floor_design_reference_data_uri(path):
     try:
-        modified = os.path.getmtime(FLOOR_DESIGN_REFERENCE_PATH)
-        if (_FLOOR_DESIGN_REFERENCE_CACHE.get('mtime') == modified
-                and _FLOOR_DESIGN_REFERENCE_CACHE.get('data_uri')):
-            return _FLOOR_DESIGN_REFERENCE_CACHE['data_uri']
-        with open(FLOOR_DESIGN_REFERENCE_PATH, 'rb') as reference_file:
+        modified = os.path.getmtime(path)
+        with open(path, 'rb') as reference_file:
             raw = reference_file.read()
         if len(raw) > 20 * 1024 * 1024 or not raw.startswith(b'\x89PNG\r\n\x1a\n'):
             return None
-        data_uri = 'data:image/png;base64,' + base64.b64encode(raw).decode('ascii')
-        _FLOOR_DESIGN_REFERENCE_CACHE.update({'mtime': modified, 'data_uri': data_uri})
-        return data_uri
+        return modified, 'data:image/png;base64,' + base64.b64encode(raw).decode('ascii')
     except (OSError, ValueError):
         return None
+
+
+def _floor_design_reference_pack_data_uris():
+    """Load the nine shared visual references for the prompt-writing vision model."""
+    paths = [os.path.join(FLOOR_DESIGN_REFERENCE_DIR, f'{index}.png') for index in range(1, 10)]
+    fingerprint = tuple((path, os.path.getmtime(path), os.path.getsize(path))
+                        for path in paths if os.path.isfile(path))
+    cached = _FLOOR_DESIGN_REFERENCE_PACK_CACHE
+    if cached.get('fingerprint') == fingerprint and cached.get('references') is not None:
+        return cached['references']
+    references = []
+    for index, path in enumerate(paths, 1):
+        loaded = _floor_design_reference_data_uri(path)
+        if not loaded:
+            continue
+        _modified, data_uri = loaded
+        references.append({'name': f'{index}.png', 'data_uri': data_uri})
+    cached.update({'fingerprint': fingerprint, 'references': references})
+    return references
+
+
+def _floor_design_default_reference_data_uri():
+    """Return one selected style-only reference for the image-generation model."""
+    selected_path = FLOOR_DESIGN_REFERENCE_PATH
+    if not os.path.isfile(selected_path):
+        pack = _floor_design_reference_pack_data_uris()
+        selected_name = os.path.basename(selected_path)
+        selected = next((item for item in pack if item['name'] == selected_name), None)
+        if selected:
+            return selected['data_uri']
+        return None
+    loaded = _floor_design_reference_data_uri(selected_path)
+    if not loaded:
+        return None
+    modified, data_uri = loaded
+    cached = _FLOOR_DESIGN_REFERENCE_CACHE
+    if (cached.get('mtime') == modified and cached.get('path') == selected_path
+            and cached.get('data_uri')):
+        return cached['data_uri']
+    cached.update({'mtime': modified, 'path': selected_path, 'data_uri': data_uri})
+    return data_uri
 
 
 def call_openrouter_image_generation(prompt, model, reference=None):
@@ -2207,11 +2258,12 @@ def api_analyze_floor_design_data():
         + _floor_design_json_prompt(payload)
     )
     try:
-        response = call_openrouter_chat(system_prompt, user_prompt, temperature=None, max_tokens=8000, model=LUNA_TEXT_MODEL, reasoning_effort='high')
+        response = call_openrouter_chat(system_prompt, user_prompt, temperature=None, max_tokens=8000,
+                                        model=FLOOR_DESIGN_TEXT_MODEL, reasoning_effort=FLOOR_DESIGN_REASONING_EFFORT)
         analysis = _designer_json_response(extract_chat_content(response, 'FLOOR-DESIGN-ANALYSIS'))
         if not analysis:
             return jsonify({'success': False, 'error': 'تعذر قراءة التحليل', 'error_code': 'TEXT_PROVIDER_INVALID'}), 503
-        return jsonify({'success': True, 'analysis': analysis, 'model': LUNA_TEXT_MODEL})
+        return jsonify({'success': True, 'analysis': analysis, 'model': FLOOR_DESIGN_TEXT_MODEL})
     except Exception:
         app.logger.exception('Floor design analysis failed')
         return jsonify({'success': False, 'error': 'تعذر تحليل بيانات تصميم الطوابق', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
@@ -2345,7 +2397,7 @@ def api_floor_design_analysis_chat():
     try:
         response = call_openrouter_chat(
             system_prompt, user_prompt, temperature=None, max_tokens=5000,
-            model=LUNA_TEXT_MODEL, reasoning_effort='high'
+            model=FLOOR_DESIGN_TEXT_MODEL, reasoning_effort=FLOOR_DESIGN_REASONING_EFFORT
         )
         result = _designer_json_response(extract_chat_content(response, 'FLOOR-DESIGN-ANALYSIS-CHAT'))
         reply = _floor_design_text(result.get('reply'), 6000)
@@ -2359,7 +2411,7 @@ def api_floor_design_analysis_chat():
             'analysisPatch': analysis_patch,
             'groupsPatch': groups_patch,
             'needsConfirmation': groups_patch.get('requires_confirmation', False),
-            'model': LUNA_TEXT_MODEL,
+            'model': FLOOR_DESIGN_TEXT_MODEL,
         })
     except Exception:
         app.logger.exception('Floor design analysis chat failed')
@@ -2394,24 +2446,42 @@ def api_generate_floor_design_prompt():
         'Table of Contents rows, complete Space Program, and pie labels, values, percentages, colors, and unit counts. '
         'When residentialLayout.required is true, explicitly describe repeated residential unit boundaries, common circulation, and cores for the representative floor or typical group; never collapse the floor into one component bubble. '
         'Never use unresolved instructions such as calculate, determine, approximately, or as appropriate. Never invent missing values. '
-        'The supplied reference is style and layout guidance only. Never copy Acacia names, project content, values, dimensions, room names, or components. '
+        'The nine attached reference images, when supplied, show the same fixed design across different floor types. Extract only their invariant layout, spacing, palette, line hierarchy, and information architecture; do not copy any reference content. '
+        'The supplied references are style and layout guidance only. Never copy Acacia names, project content, values, dimensions, room names, or components. '
         'Permit English titles, labels, numbers, dimensions, tables, legends, and north notation. No logo and no watermark.'
     )
-    user_prompt = _floor_design_json_prompt({
+    reference_pack = _floor_design_reference_pack_data_uris()
+    reference_images = [item['data_uri'] for item in reference_pack]
+    reference_instruction = (
+        f'Nine official visual references are attached ({len(reference_images)} available). They are the same design language across different floor types. '
+        'Use their common fixed division exactly; do not infer project data from them and do not copy their text or dimensions.'
+        if reference_images else
+        'The official visual reference pack is unavailable for this request. Follow the supplied engineering specification and do not invent visual reference details.'
+    )
+    user_prompt = reference_instruction + '\n\n' + _floor_design_json_prompt({
         'analysis': analysis, 'projectData': payload, 'group': group,
         'pageSpecs': prepared['pages'], 'preparedEngineeringSpecification': prepared,
         'preflight': preflight,
     })
+    chat_kwargs = {
+        'temperature': None, 'max_tokens': 10000,
+        'model': FLOOR_DESIGN_TEXT_MODEL,
+        'reasoning_effort': FLOOR_DESIGN_REASONING_EFFORT,
+        'response_format': {'type': 'json_object'},
+    }
+    if reference_images:
+        chat_kwargs['image_references'] = reference_images
     try:
-        response = call_openrouter_chat(system_prompt, user_prompt, temperature=None, max_tokens=10000,
-                                        model=LUNA_TEXT_MODEL, reasoning_effort='high',
-                                        response_format={'type': 'json_object'})
+        response = call_openrouter_chat(system_prompt, user_prompt, **chat_kwargs)
         result = _designer_json_response(extract_chat_content(response, 'FLOOR-DESIGN-PROMPT'))
         pages = _floor_design_normalize_prompt_pages(result, prepared, payload, group)
         first = pages[0]
         return jsonify({'success': True, 'pages': pages, 'prompt': first['prompt'],
                         'negativePrompt': first['negative_prompt'], 'preparedSpecification': prepared,
-                        'preflight': preflight, 'model': LUNA_TEXT_MODEL})
+                        'preflight': preflight, 'model': FLOOR_DESIGN_TEXT_MODEL,
+                        'referencePack': {'count': len(reference_pack),
+                                         'files': [item['name'] for item in reference_pack],
+                                         'imageGenerationReference': FLOOR_DESIGN_REFERENCE_FILE}})
     except Exception:
         app.logger.exception('Floor design prompt failed')
         return jsonify({'success': False, 'error': 'تعذر إنشاء Prompts لصفحات المجموعة', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503

@@ -1101,6 +1101,24 @@ class MeetingRequirementsTests(unittest.TestCase):
                 self.assertIn(expected, result['error'].get('message', ''),
                               f'status code not in message for status {response.status_code}')
 
+    def test_openrouter_chat_attaches_visual_references_as_multimodal_content(self):
+        module = self.application_module
+        response = Mock()
+        response.status_code = 200
+        response.text = '{"choices":[{"message":{"content":"ok"}}]}'
+        response.json.return_value = {'choices': [{'message': {'content': 'ok'}}]}
+        with patch('app.requests.post', return_value=response) as post:
+            result = module.call_openrouter_chat(
+                'system', 'instructions', model='google/gemini-3.7-flash',
+                reasoning_effort='high', image_references=['data:image/png;base64,AAAA'])
+        self.assertIn('choices', result)
+        request_payload = post.call_args.kwargs['json']
+        user_content = request_payload['messages'][1]['content']
+        self.assertEqual(user_content[0], {'type': 'text', 'text': 'instructions'})
+        self.assertEqual(user_content[1]['type'], 'image_url')
+        self.assertEqual(user_content[1]['image_url']['url'], 'data:image/png;base64,AAAA')
+        self.assertEqual(request_payload['reasoning_effort'], 'high')
+
     def test_app_never_answers_502(self):
         """The hosting edge fabricates 502s of its own for large bodies, so an app that also answers
         502 makes "the proxy broke" and "the AI failed" impossible to tell apart."""
@@ -2503,6 +2521,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(prompted.get_json()['prompt'].startswith('Create one representative typical-floor architectural presentation page for FLOORS 1-5'))
         self.assertIn('MANDATORY SERVER ENGINEERING SPECIFICATION', prompted.get_json()['prompt'])
         self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.7-flash')
+        self.assertEqual(call.call_args.kwargs['reasoning_effort'], 'high')
+        self.assertEqual(len(call.call_args.kwargs['image_references']), 9)
+        self.assertEqual(prompted.get_json()['referencePack']['count'], 9)
+        self.assertEqual(prompted.get_json()['referencePack']['imageGenerationReference'], '1.png')
         prompt_system, prompt_user = call.call_args.args[:2]
         self.assertIn('Table of Contents', prompt_system)
         self.assertIn('data_conflicts', prompt_user)
