@@ -2198,7 +2198,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()['analysis'], 'تحليل من النموذج الاحتياطي')
-        self.assertEqual(fallback.call_args.kwargs['model'], 'google/gemini-3.6-flash')
+        self.assertEqual(fallback.call_args.kwargs['model'], 'google/gemini-3.7-flash')
 
     def test_project_draft_preserves_selected_landmark_details(self):
         client = self.app.test_client()
@@ -2404,7 +2404,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_floor_design_ai_endpoints_use_luna_and_validate_project_payload(self):
         client = self.app.test_client()
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
-        self.assertIn('GEMINI_TEXT_MODEL = "google/gemini-3.6-flash"', source)
+        self.assertIn('GEMINI_TEXT_MODEL = "google/gemini-3.7-flash"', source)
         self.assertIn('FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"', source)
         self.assertIn('FLOOR_DESIGN_IMAGE_HARD_NEGATIVE', source)
         self.assertIn("response_format={'type': 'json_object'}", source)
@@ -2450,7 +2450,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             analyzed = client.post('/api/floor-design/analyze', headers=self._headers(self.token_a), json=payload)
         self.assertEqual(analyzed.status_code, 200, analyzed.get_json())
         self.assertEqual(analyzed.get_json()['analysis']['summary'], 'تحليل تجريبي')
-        self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.6-flash')
+        self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.7-flash')
         prompt_response = {'pages': [
             {'pageType': 'floor', 'floorNumber': floor, 'prompt': f'Floor {floor} design', 'negative_prompt': 'No furniture'}
             for floor in range(1, 6)
@@ -2461,7 +2461,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len(prompted.get_json()['pages']), 6)
         self.assertTrue(prompted.get_json()['prompt'].startswith('Floor 1 design'))
         self.assertIn('MANDATORY SERVER ENGINEERING SPECIFICATION', prompted.get_json()['prompt'])
-        self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.6-flash')
+        self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.7-flash')
         prompt_system, prompt_user = call.call_args.args[:2]
         self.assertIn('Table of Contents', prompt_system)
         self.assertIn('data_conflicts', prompt_user)
@@ -2486,7 +2486,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(chat.get_json()['reply'], 'تم تعديل التحذير وإنشاء المجموعة.')
         self.assertEqual(chat.get_json()['analysisPatch']['warnings'], ['تحذير معدل'])
         self.assertEqual(chat.get_json()['groupsPatch']['operations'][0]['op'], 'create')
-        self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.6-flash')
+        self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.7-flash')
 
     def test_floor_design_payload_includes_financial_areas_tables_and_explicit_conflicts(self):
         project_data = {
