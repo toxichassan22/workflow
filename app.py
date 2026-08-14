@@ -11633,6 +11633,12 @@ def deploy_webhook():
     secret = request.args.get('secret') or request.headers.get('X-Deploy-Secret') or (request.json.get('secret') if (request.is_json and request.json) else None)
     if not secret or secret != env_secret:
         return jsonify({'error': 'Unauthorized'}), 401
+
+    requested_commit = request.args.get('commit') or (
+        request.json.get('commit') if (request.is_json and request.json) else None
+    )
+    if requested_commit and not re.fullmatch(r'[0-9a-fA-F]{40}', str(requested_commit)):
+        return jsonify({'error': 'Invalid deployment commit'}), 400
     
     deploy_script = '/home/sagdemo/proposal-generator/deploy.sh'
     if not os.path.exists(deploy_script):
@@ -11641,8 +11647,13 @@ def deploy_webhook():
     if os.path.exists(deploy_script):
         try:
             import subprocess
-            subprocess.Popen(['bash', deploy_script])
-            return jsonify({'status': 'Deployment triggered successfully', 'timestamp': datetime.now().isoformat()}), 200
+            command = ['bash', deploy_script]
+            if requested_commit:
+                command.append(str(requested_commit))
+            subprocess.Popen(command)
+            return jsonify({'status': 'Deployment triggered successfully',
+                            'expected_commit': requested_commit,
+                            'timestamp': datetime.now().isoformat()}), 200
         except Exception as e:
             return jsonify({'error': str(e)}), 500
     return jsonify({'error': 'deploy.sh not found'}), 404

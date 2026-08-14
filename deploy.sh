@@ -12,11 +12,25 @@ WEB_ROOT="/home/sagdemo/public_html"
 PYTHON="$APP_DIR/venv/bin/python"
 PIP="$APP_DIR/venv/bin/pip"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"
+TARGET_COMMIT="${1:-}"
+
+if [ -n "$TARGET_COMMIT" ] && [[ ! "$TARGET_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  echo "ERROR: invalid target deployment commit"
+  exit 1
+fi
 
 echo "===== 1. Pull latest code ====="
 cd "$REPO_DIR"
 git fetch origin main
-git reset --hard origin/main
+if [ -n "$TARGET_COMMIT" ]; then
+  if ! git cat-file -e "${TARGET_COMMIT}^{commit}" 2>/dev/null; then
+    echo "ERROR: target deployment commit is not available after fetch: $TARGET_COMMIT"
+    exit 1
+  fi
+  git reset --hard "$TARGET_COMMIT"
+else
+  git reset --hard origin/main
+fi
 git lfs pull || true
 
 echo "===== 2. Sync to app directory ====="

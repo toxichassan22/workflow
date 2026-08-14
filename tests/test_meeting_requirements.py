@@ -376,6 +376,28 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(payload['deployed_commit'], '492d856c7fa')
         self.assertEqual(payload['deployment_source'], 'github')
 
+    def test_deploy_webhook_forwards_and_validates_the_expected_commit(self):
+        module = self.application_module
+        commit = 'a' * 40
+        with patch.dict(os.environ, {'DEPLOY_WEBHOOK_SECRET': 'deploy-secret'}), \
+                patch('subprocess.Popen') as popen:
+            response = self.app.test_client().post(
+                f'/api/deploy-webhook?secret=deploy-secret&commit={commit}')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['expected_commit'], commit)
+        self.assertEqual(popen.call_args.args[0][-1], commit)
+
+        with patch.dict(os.environ, {'DEPLOY_WEBHOOK_SECRET': 'deploy-secret'}):
+            invalid = self.app.test_client().post(
+                '/api/deploy-webhook?secret=deploy-secret&commit=not-a-commit')
+        self.assertEqual(invalid.status_code, 400, invalid.get_json())
+
+        workflow = (ROOT / '.github/workflows/deploy.yml').read_text(encoding='utf-8')
+        deploy_script = (ROOT / 'deploy.sh').read_text(encoding='utf-8')
+        self.assertIn('&commit=${{ github.sha }}', workflow)
+        self.assertIn('TARGET_COMMIT="${1:-}"', deploy_script)
+        self.assertIn('git reset --hard "$TARGET_COMMIT"', deploy_script)
+
     def test_fresh_database_has_meeting_columns(self):
         """Fresh initialization no longer executes multiple DDL statements incorrectly."""
         with self.app.app_context():
