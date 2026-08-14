@@ -2767,6 +2767,19 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIsNone(first_program['netAreaSqm'])
         self.assertIn('net_area_without_approved_net_rule', first_program['unavailableCalculations'])
 
+    def test_floor_design_components_without_floor_assignment_span_the_group_evenly(self):
+        module = self.application_module
+        group = {'id': 'g1', 'name': 'Typical', 'floorNumbers': [1, 2, 3, 4], 'description': '', 'components': []}
+        payload = {'financial': {'components': [
+            {'id': 'c1', 'name': 'Residential', 'builtArea': 400},
+        ]}}
+        for floor_number in (1, 2, 3, 4):
+            program = module._floor_design_space_program(payload, group, floor_number)
+            self.assertEqual(program['missingRequirements'], [])
+            self.assertEqual(len(program['components']), 1)
+            self.assertEqual(program['components'][0]['grossAreaSqm'], 100.0)
+            self.assertEqual(program['grossAreaSqm'], 100.0)
+
     def test_floor_design_geographic_conversion_and_preflight_require_explicit_approvals(self):
         module = self.application_module
         geometry = module._floor_design_polygon_geometry({'survey_coordinates': [

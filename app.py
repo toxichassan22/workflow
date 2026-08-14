@@ -1758,6 +1758,10 @@ def _floor_design_space_program(payload, group, floor_number):
     for index, component in enumerate(components):
         component_id = _floor_design_text(component.get('id') or index + 1, 80)
         floors = _floor_design_component_floor_numbers(component, group)
+        if not floors:
+            # No explicit floor assignment: the component is assumed to span
+            # every floor in the group, and its total area is split evenly.
+            floors = group['floorNumbers']
         floor_areas = component.get('floorAreas') if isinstance(component.get('floorAreas'), dict) else {}
         explicit_area = _floor_design_number(floor_areas.get(str(floor_number), floor_areas.get(floor_number)))
         gross_total = _floor_design_number(component.get('grossArea') or component.get('builtArea') or component.get('totalArea'))

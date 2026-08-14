@@ -10515,12 +10515,21 @@
       plot_boundary_geometry_or_source_lengths: 'حدود الأرض أو أطوال الأضلاع'
     };
 
+    function translateFloorDesignMissingKey(key) {
+      if (TENANT_FLOOR_PREFLIGHT_LABELS[key]) return TENANT_FLOOR_PREFLIGHT_LABELS[key];
+      const allocation = /^component_floor_allocation:(.+)$/.exec(String(key));
+      if (allocation) return 'توزيع المكوّن على الأدوار';
+      const floor = /^space_program_floor_(\d+)$/.exec(String(key));
+      if (floor) return 'مكونات الدور ' + floor[1];
+      return key;
+    }
+
     function describeFloorDesignPreflight(response) {
       const lines = [];
       const missing = Array.isArray(response?.missingItems) ? response.missingItems : [];
       const blocked = Array.isArray(response?.blockedItems) ? response.blockedItems : [];
       if (missing.length) {
-        lines.push('ناقص: ' + missing.map(key => TENANT_FLOOR_PREFLIGHT_LABELS[key] || key).join('، '));
+        lines.push('ناقص: ' + missing.map(translateFloorDesignMissingKey).join('، '));
       }
       blocked.forEach(entry => {
         const type = entry?.type;
