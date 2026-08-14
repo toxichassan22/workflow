@@ -2520,12 +2520,8 @@ def api_generate_floor_design_image():
         if not (reference.startswith('data:image/') or reference.startswith('/uploads/creative/')):
             return jsonify({'success': False, 'error': 'نوع الصورة المرجعية غير مسموح', 'error_code': 'REFERENCE_INVALID'}), 400
     system_reference = _floor_design_default_reference_data_uri()
-    reference_for_generation = system_reference or reference
-    reference_mode = (
-        'system_floor_plan_style' if system_reference else
-        'user_reference_fallback' if reference else
-        'prompt_only_no_reference'
-    )
+    reference_for_generation = system_reference
+    reference_mode = 'system_floor_plan_style' if system_reference else 'prompt_only_no_reference'
     if not system_reference:
         app.logger.warning('Floor design style reference is unavailable; continuing without the system reference')
     try:

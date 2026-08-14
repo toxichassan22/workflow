@@ -2926,6 +2926,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             fallback = client.post('/api/floor-design/generate', headers=self._headers(self.token_a), json={
                 'prompt': 'Complete presentation page without local reference',
                 'approvedFinancialArea': 1000, 'approvedFloorCount': 2,
+                'referenceImage': 'data:image/png;base64,USER_REFERENCE_MUST_BE_IGNORED',
             })
         self.assertEqual(fallback.status_code, 200, fallback.get_json())
         self.assertIsNone(fallback_call.call_args.args[2])
