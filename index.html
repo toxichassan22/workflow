@@ -3186,27 +3186,14 @@
       display: none;
     }
 
-    /* shift main content so the rail does not overlap */
-    body.tgr-on .tenant-app {
-      width: calc(100% - 288px);
-      max-width: none;
-      margin-right: 288px;
-      margin-left: 0;
-      transition: width .18s ease, margin .18s ease;
-    }
-
+    /* The global rail is intentionally hidden, so it must not reserve viewport space. */
+    body.tgr-on .tenant-app,
     body.tgr-on.tgr-collapsed .tenant-app {
-      width: calc(100% - 46px);
+      width: 100%;
       max-width: none;
-      margin-right: 46px;
-    }
-
-    @media (max-width: 1200px) {
-      body.tgr-on .tenant-app {
-        width: calc(100% - 46px);
-        max-width: none;
-        margin-right: 46px;
-      }
+      margin-right: 0;
+      margin-left: 0;
+      transition: none;
     }
 
     @media (max-width: 900px) {
