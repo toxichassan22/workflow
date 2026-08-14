@@ -9518,8 +9518,10 @@
       hydrateFinancialStudyModel(source.financial_study_model, savedComponents);
 
       refreshLocationTables();
-      // Mirror the restored timeline into the financial study before recalculating.
+      // Mirror the restored timeline and land/croquis inputs into the financial study
+      // before recalculating, so read-only fields always reflect their single source of truth.
       if (typeof syncFinancialFromTimeline === 'function') syncFinancialFromTimeline();
+      if (typeof syncFinancialFromLand === 'function') syncFinancialFromLand();
       if (typeof calculateAll === 'function') {
         try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
       }
@@ -10077,6 +10079,12 @@
           input.placeholder = f.placeholder || '';
           if (f.defaultValue) input.value = f.defaultValue;
           if (f.isRequired) input.required = true;
+
+          // The land/croquis section owns the approved build inputs; mirror them into the
+          // financial study as soon as they change so the two can never disagree.
+          if (f.fieldKey === 'approved_financial_area' || f.fieldKey === 'approved_floor_count' || f.fieldKey === 'building_ratio_coverage') {
+            input.addEventListener('input', syncFinancialFromLand);
+          }
 
           if (f.fieldKey === 'site_analysis') {
             input.readOnly = !(tenantProjectData && tenantProjectData.site_analysis);
@@ -11658,9 +11666,9 @@
             <div id="operationStartYearWrap"><label>سنة بدء التشغيل</label><input id="operationStartYear" readonly><span class="help formula">مدة التطوير + 1.</span></div>
             <div><label>إجمالي سنوات المشروع</label><input id="totalProjectYearsDisplay" readonly><span class="help formula">مدة التطوير + مدة التشغيل.</span></div>
 
-            <div><label>مساحة الأرض م²</label><input id="landArea" type="number" value="70000" oninput="calculateAll()"><span class="help input">مدخل أساسي.</span></div>
-            <div><label>نسبة التغطية %</label><input id="coverageRate" type="number" value="35" oninput="calculateAll()"><span class="help input">نسبة المساحة المغطاة من الأرض.</span></div>
-            <div><label>عدد الطوابق</label><input id="floorCount" type="number" min="1" value="1" oninput="calculateAll()"><span class="help input">إجمالي عدد الطوابق فوق الأرض.</span></div>
+            <div><label>مساحة الأرض م²</label><input id="landArea" type="number" value="70000" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
+            <div><label>نسبة التغطية %</label><input id="coverageRate" type="number" value="35" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «نسبة البناء والتغطية» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
+            <div><label>عدد الطوابق</label><input id="floorCount" type="number" min="1" value="1" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
             <div><label>مسطحات البناء فوق الأرض م²</label><input id="builtUpAreaAbove" type="number" value="100000" oninput="calculateAll()"><span class="help input">إجمالي مسطحات الأدوار فوق الأرض.</span></div>
             <div><label>مساحة البدرومات م²</label><input id="basementArea" type="number" value="30078" oninput="calculateAll()"><span class="help input">إجمالي مسطحات البدرومات.</span></div>
 
@@ -11959,6 +11967,7 @@
 
       setTimeout(() => {
         syncFinancialFromTimeline();
+        syncFinancialFromLand();
         calculateAll();
       }, 50);
     }
@@ -13233,6 +13242,44 @@
       if (!wasBatching && typeof calculateAll === 'function') {
         try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
       }
+    }
+
+    // The land/croquis section is the single source of truth for the approved area, floor count
+    // and coverage ratio; the financial study mirrors them read-only so the two cannot disagree.
+    function syncFinancialFromLand() {
+      const landAreaInput = document.getElementById('landArea');
+      const coverageInput = document.getElementById('coverageRate');
+      const floorInput = document.getElementById('floorCount');
+      if (!landAreaInput && !coverageInput && !floorInput) return;
+
+      const readLand = key => {
+        const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+        return String(input?.value ?? tenantProjectData?.[key] ?? '').trim();
+      };
+
+      const area = parseNumber(readLand('approved_financial_area'));
+      const floors = parseNumber(readLand('approved_floor_count'));
+      const coverage = parseCoverageFromLandText(readLand('building_ratio_coverage'));
+      if (landAreaInput && area > 0) landAreaInput.value = String(area);
+      if (floorInput && floors > 0) floorInput.value = String(floors);
+      if (coverageInput && coverage > 0) coverageInput.value = String(coverage);
+
+      if (typeof calculateAll === 'function') {
+        try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
+      }
+    }
+
+    function parseCoverageFromLandText(value) {
+      const text = String(value || '');
+      if (!text) return 0;
+      const match = text.match(/(?:نسبة\s*)?التغطية[^\d٠-٩۰-۹+-]{0,40}([-+]?\d[\d٠-٩۰-۹\s,.٬٫]*)/);
+      const token = match ? match[1] : text;
+      const translated = token
+        .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+        .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+        .replace(/٫/g, '.')
+        .replace(/٬/g, '');
+      return parseNumber(translated);
     }
 
     function saveTimelineData() {

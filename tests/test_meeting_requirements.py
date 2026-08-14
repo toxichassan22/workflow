@@ -1357,6 +1357,26 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertLess(timeline_at, financial_at,
                         'the timeline section must be appended before the financial study')
 
+    def test_financial_study_mirrors_approved_build_inputs_from_land(self):
+        """Approved area, floor count and coverage are owned by land/croquis and read-only here."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        self.assertIn('function syncFinancialFromLand()', index_source)
+
+        # The three approved-build fields come from the land/croquis section and are locked.
+        self.assertIn('id="landArea" type="number" value="70000" readonly', index_source)
+        self.assertIn('id="coverageRate" type="number" value="35" readonly', index_source)
+        self.assertIn('id="floorCount" type="number" min="1" value="1" readonly', index_source)
+        self.assertIn('مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي', index_source)
+        self.assertIn('مأخوذة من «نسبة البناء والتغطية» في قسم الأرض والكروكي', index_source)
+        self.assertIn('مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي', index_source)
+
+        # Changing those land fields re-mirrors them into the financial study.
+        self.assertIn(
+            "f.fieldKey === 'approved_financial_area' || f.fieldKey === 'approved_floor_count' || f.fieldKey === 'building_ratio_coverage'",
+            index_source)
+        self.assertIn('parseCoverageFromLandText', index_source)
+
     def test_timeline_starts_blank_with_a_quarter_picker_and_row_delete(self):
         """Phases are client data, so the table must not seed invented stages."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
