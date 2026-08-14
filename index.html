@@ -7995,13 +7995,28 @@
       // A path the user actually asked for wins over the last-visited page, so deep links and
       // refreshes land where the URL says instead of somewhere remembered in localStorage.
       const requestedPage = TENANT_ROUTE_PAGES[window.location.pathname];
+      const requestedSection = new URLSearchParams(window.location.search).get('section');
       if (requestedPage) {
-        if (requestedPage === 'tenantFloorDesignPage') await openTenantFloorDesignPage(true);
-        else showTenantPage(requestedPage, true);
-        const requestedSection = new URLSearchParams(window.location.search).get('section');
-        if (requestedPage === 'tenantProjectPage' && requestedSection) {
-          await restoreTenantNavigation();
-          showSection(requestedSection, true);
+        if (requestedPage === 'tenantFloorDesignPage') {
+          await openTenantFloorDesignPage(true);
+        } else if (requestedPage === 'tenantProjectPage') {
+          // The project-form route carries no draft identity in the URL, so a refresh must
+          // reopen the draft remembered in localStorage instead of showing a blank new-project
+          // form. Read the state first: showTenantPage() rewrites it from the still-empty
+          // tenantProjectData, which would erase the draft id we are about to restore.
+          const navigation = getTenantNavigationState();
+          const currentTenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
+          const savedDraftId = navigation && navigation.draftId &&
+            (!navigation.tenantId || navigation.tenantId === currentTenantId)
+            ? navigation.draftId : null;
+          if (!(savedDraftId && await openProjectDraftById(savedDraftId))) {
+            await startTenantProject();
+          }
+          const sectionToShow = requestedSection ||
+            (navigation && navigation.pageId === 'tenantProjectPage' && navigation.activeSection) || null;
+          if (sectionToShow) showSection(sectionToShow, true);
+        } else {
+          showTenantPage(requestedPage, true);
         }
       } else if (!(await restoreTenantNavigation())) {
         // Restore the last page for every role; SAG super admin falls back to the admin panel.

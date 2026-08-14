@@ -1308,6 +1308,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('if (current && TENANT_PAGE_ROUTES[current]) syncTenantBrowserHistory(current, {}, true);',
                       index_source)
 
+    def test_project_refresh_reopens_the_saved_draft(self):
+        """Refreshing the project form must reopen the remembered draft, not a blank project."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('const savedDraftId = navigation && navigation.draftId &&', index_source)
+        self.assertIn('if (!(savedDraftId && await openProjectDraftById(savedDraftId)))', index_source)
+        self.assertIn('await startTenantProject()', index_source)
+
     def test_timeline_is_the_only_source_of_dev_duration_and_stages(self):
         """The financial study mirrors the timeline read-only so the two cannot disagree."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
