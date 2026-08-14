@@ -800,8 +800,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('element.hidden = !visible', index_source)
         self.assertIn("setConditionalVisibility('graceDetails', graceOn)", index_source)
         self.assertIn("setConditionalVisibility('graceScheduleWrap', scheduledGrace)", index_source)
-        self.assertIn('const modeFlags=projectModeFlags();', index_source)
-        self.assertIn('targetCarry=profit*carryRate', index_source)
+        self.assertIn('const modeFlags = projectModeFlags();', index_source)
+        self.assertIn('const targetCarry = profit * carryRate', index_source)
         self.assertIn("setConditionalVisibility('fundExitPerformanceGrid', feesOn)", index_source)
 
     def test_croquis_expiry_date_field_is_retired(self):
@@ -1320,8 +1320,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("مأخوذة من «عدد السنوات» في قسم الجدول الزمني", index_source)
 
         # Stage name and year are locked; only the two percentages remain editable.
-        self.assertIn('<td data-field="name"><input value="${escapeHtml(d.name||\'\')}" readonly', index_source)
-        self.assertIn('<td data-field="year"><input type="number" min="1" value="${d.year??1}" readonly', index_source)
+        self.assertIn('<td data-field="name"><input value="${escapeHtml(d.name || \'\')}" readonly', index_source)
+        self.assertIn('tr.dataset.stageYear = String(d.year ?? 1)', index_source)
         self.assertIn("tr.querySelectorAll('input:not([readonly])')", index_source)
 
         # No way to add or delete a stage from the financial study.
@@ -1341,7 +1341,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('warning.hidden = namedStages.length > 0', index_source)
 
         # The stage table lost its actions column, so the report must stop dropping the last one.
-        self.assertIn("reportTableSnapshot('scheduleTable',false)", index_source)
+        self.assertIn("reportTableSnapshot('scheduleTable', false)", index_source)
 
         # Sidebar order comes from append order: the timeline feeds the financial study, so it
         # must be filled first and therefore listed first.
@@ -1413,7 +1413,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         # The financial study still owns the richer table and its readers.
         self.assertIn('<table id="componentsTable">', index_source)
-        self.assertIn('function addComponent(d={})', index_source)
+        self.assertIn('function addComponent(d = {})', index_source)
         self.assertIn('function getComponentRowsData()', index_source)
         self.assertIn('function validateComponentAreas()', index_source)
         self.assertIn("data-field=\"investmentModel\"", index_source)
@@ -2408,13 +2408,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"', source)
         self.assertIn('FLOOR_DESIGN_IMAGE_HARD_NEGATIVE', source)
         self.assertIn("response_format={'type': 'json_object'}", source)
-        self.assertIn('أي كتابة أو أرقام أو حروف', source)
+        self.assertIn('Permit English titles, labels, numbers, dimensions, tables, legends, and north notation.', source)
+        self.assertIn('MANDATORY SERVER ENGINEERING SPECIFICATION', source)
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('tenantFloorDesignAnalysisChatThread', index_source)
         self.assertIn('sendTenantFloorDesignAnalysisChat', index_source)
         self.assertIn('/api/floor-design/analysis-chat', source)
         self.assertIn("apiWithTimeout('POST', '/api/floor-design/generate'", index_source)
-        self.assertIn('maxProgress: 78', index_source)
+        self.assertIn('for (let index = 0; index < group.pages.length; index += 1)', index_source)
+        self.assertIn('hideLoader', index_source)
         self.assertIn("image.removeAttribute('src')", index_source)
         self.assertEqual(self.application_module._get_chat_response_text({'choices': [{'message': {'content': [{'type': 'text', 'text': '{"ok":true}'}]}}]}), '{"ok":true}')
         payload = {
@@ -2424,11 +2426,15 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'project_idea': 'مشروع سكني',
                 'project_goal': 'تطوير وحدات سكنية',
                 'building_ratio_setbacks': 'ارتداد أمامي 6م وخلفي 3م',
+                'boundary_lengths': 'حدود معتمدة من الكروكي',
                 'allowed_uses_restrictions': 'سكني؛ موقف لكل وحدة؛ مدخل سيارات مستقل',
                 'land_and_building_summary': 'ملخص موثق من ملفات الأمانة',
                 'approved_financial_area': 7000,
                 'approved_floor_count': 5,
-                'project_components_data': json.dumps([{'id': 'c1', 'name': 'وحدات سكنية', 'builtArea': 3000}], ensure_ascii=False),
+                'project_components_data': json.dumps([{
+                    'id': 'c1', 'name': 'وحدات سكنية', 'builtArea': 3000,
+                    'floorNumbers': [1, 2, 3, 4, 5], 'netArea': 2500,
+                }], ensure_ascii=False),
                 'basementArea': 0,
             },
             'floorDesignState': {
@@ -2445,12 +2451,22 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(analyzed.status_code, 200, analyzed.get_json())
         self.assertEqual(analyzed.get_json()['analysis']['summary'], 'تحليل تجريبي')
         self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.6-flash')
-        prompt_response = {'prompt': 'مخطط 2D صارم', 'negative_prompt': 'بدون أثاث'}
+        prompt_response = {'pages': [
+            {'pageType': 'floor', 'floorNumber': floor, 'prompt': f'Floor {floor} design', 'negative_prompt': 'No furniture'}
+            for floor in range(1, 6)
+        ] + [{'pageType': 'group_overview', 'floorNumber': None, 'prompt': 'Overview design', 'negative_prompt': 'No furniture'}]}
         with patch.object(self.application_module, 'call_openrouter_chat', return_value={'choices': [{'message': {'content': json.dumps(prompt_response, ensure_ascii=False)}}]}) as call:
             prompted = client.post('/api/floor-design/prompt', headers=self._headers(self.token_a), json={**payload, 'groupId': 'g1', 'analysis': fake_analysis})
         self.assertEqual(prompted.status_code, 200, prompted.get_json())
-        self.assertEqual(prompted.get_json()['prompt'], 'مخطط 2D صارم')
+        self.assertEqual(len(prompted.get_json()['pages']), 6)
+        self.assertTrue(prompted.get_json()['prompt'].startswith('Floor 1 design'))
+        self.assertIn('MANDATORY SERVER ENGINEERING SPECIFICATION', prompted.get_json()['prompt'])
         self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.6-flash')
+        prompt_system, prompt_user = call.call_args.args[:2]
+        self.assertIn('Table of Contents', prompt_system)
+        self.assertIn('data_conflicts', prompt_user)
+        self.assertIn('directions_table', prompt_user)
+        self.assertIn('components', prompt_user)
 
         chat_response = {
             'reply': 'تم تعديل التحذير وإنشاء المجموعة.',
@@ -2471,6 +2487,324 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(chat.get_json()['analysisPatch']['warnings'], ['تحذير معدل'])
         self.assertEqual(chat.get_json()['groupsPatch']['operations'][0]['op'], 'create')
         self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.6-flash')
+
+    def test_floor_design_payload_includes_financial_areas_tables_and_explicit_conflicts(self):
+        project_data = {
+            'approved_financial_area': '٧٬٠٠٠ م²',
+            'approved_floor_count': '٥ أدوار',
+            'building_ratio_coverage': 'نسبة البناء 60%، نسبة التغطية ٣٥٫٥٪',
+            'setbacks': 'أمامي 6م وخلفي 3م',
+            'allowed_uses': 'سكني',
+            'regulatory_constraints': 'موقف لكل وحدة',
+            'land_and_building_summary': 'ملخص الأرض',
+            'boundary_lengths': 'الشمال 100م والجنوب 100م',
+            'surrounding_streets': 'شارع شمالي عرض 20م',
+            'facades_count': 1,
+            'facades_directions': 'شمالية',
+            'directions_table': json.dumps({'rows': [
+                {'direction': 'شمال', 'boundary': 'شارع', 'length': '100م'},
+                {'direction': 'جنوب', 'boundary': 'قطعة مجاورة', 'length': '100م'},
+            ]}, ensure_ascii=False),
+            'financial_study_model': {
+                'inputs': {
+                    'landArea': '7,100.00 م2',
+                    'coverageRate': '36 %',
+                    'floorCount': '6',
+                    'builtUpAreaAbove': '12,000',
+                    'basementArea': '2,000',
+                    'totalBuiltUpArea': '14,000',
+                    'coveredArea': '2,556',
+                    'openArea': '4,544',
+                },
+                'dynamicRows': {'components': [
+                    {'id': 'c1', 'name': 'سكني', 'builtArea': 9000},
+                    {'id': 'c2', 'name': 'تجاري', 'builtArea': 3000},
+                ]},
+            },
+        }
+        state = {'floorCount': 6, 'groups': [
+            {'id': 'g1', 'name': 'الأدوار', 'floorNumbers': [1, 2, 3, 4, 5, 6]}
+        ]}
+        payload = self.application_module._sanitize_floor_design_request({
+            'projectData': project_data, 'floorDesignState': state
+        })
+
+        self.assertEqual(payload['financial']['builtUpAreaAbove'], '12,000')
+        self.assertEqual(payload['financial']['totalBuiltUpArea'], '14,000')
+        self.assertEqual(payload['financial']['coveredArea'], '2,556')
+        self.assertEqual(payload['financial']['openArea'], '4,544')
+        self.assertEqual(len(payload['financial']['components']), 2)
+        self.assertEqual(len(payload['land']['directions_table']['rows']), 2)
+        self.assertEqual(
+            {item['key'] for item in payload['data_conflicts']},
+            {'approved_area', 'approved_floor_count', 'approved_coverage', 'floor_design_floor_count'},
+        )
+        for conflict in payload['data_conflicts']:
+            self.assertRegex(conflict['note'], 'لا تختر قيمة|لا تزامن المجموعات')
+
+        legacy = self.application_module._sanitize_floor_design_request({
+            'projectData': {
+                **{key: value for key, value in project_data.items() if key != 'financial_study_model'},
+                'financial_calc_data': json.dumps({
+                    'landArea': 7000, 'coverageRate': 35.5, 'floorCount': 5,
+                    'builtUpAreaAbove': 12000, 'basementArea': 2000,
+                    'components': [{'id': 'legacy', 'name': 'قديم', 'builtArea': 12000}],
+                }, ensure_ascii=False),
+            },
+            'floorDesignState': {'floorCount': 5, 'groups': [
+                {'id': 'legacy-group', 'name': 'قديم', 'floorNumbers': [1, 2, 3, 4, 5]}
+            ]},
+        })
+        self.assertEqual(legacy['data_conflicts'], [])
+        self.assertEqual(legacy['financial']['totalBuiltUpArea'], 14000.0)
+        self.assertEqual(legacy['financial']['coveredArea'], 2485.0)
+        self.assertEqual(legacy['financial']['openArea'], 4515.0)
+        self.assertEqual(legacy['financial']['components'][0]['id'], 'legacy')
+
+    def test_floor_design_saved_groups_conflict_after_approved_floor_count_changes(self):
+        state = {'floorCount': 5, 'groups': [
+            {'id': 'saved', 'name': 'مجموعات محفوظة', 'floorNumbers': [1, 2, 3, 4, 5], 'prompt': 'وصف محفوظ'}
+        ]}
+        payload = self.application_module._sanitize_floor_design_request({
+            'projectData': {
+                'approved_floor_count': 7,
+                'financial_study_model': {'inputs': {'floorCount': 7}},
+            },
+            'floorDesignState': state,
+        })
+
+        self.assertEqual(payload['groups'][0]['floorNumbers'], [1, 2, 3, 4, 5])
+        conflicts = [item for item in payload['data_conflicts'] if item['key'] == 'floor_design_floor_count']
+        self.assertEqual(len(conflicts), 4)
+        self.assertEqual(
+            {(item['source_a'], item['source_b']) for item in conflicts},
+            {
+                ('floorDesignState.floorCount', 'بيانات الأرض والكروكي'),
+                ('floorDesignState.floorCount', 'الدراسة المالية'),
+                ('المدى الفعلي لمجموعات الأدوار', 'بيانات الأرض والكروكي'),
+                ('المدى الفعلي لمجموعات الأدوار', 'الدراسة المالية'),
+            },
+        )
+        self.assertTrue(all(float(item['value_b']) == 7 for item in conflicts))
+
+    def test_floor_design_prompt_endpoint_appends_provider_omitted_conflicts(self):
+        client = self.app.test_client()
+        payload = {
+            'projectData': {
+                'approved_financial_area': 7000,
+                'approved_floor_count': 5,
+                'building_ratio_coverage': 'نسبة التغطية 35%',
+                'setbacks': 'أمامي 6م',
+                'allowed_uses': 'سكني',
+                'regulatory_constraints': 'موقف لكل وحدة',
+                'land_and_building_summary': 'ملخص',
+                'boundary_lengths': 'حدود معتمدة',
+                'financial_study_model': {
+                    'inputs': {'landArea': 7100, 'floorCount': 6, 'coverageRate': 36},
+                    'dynamicRows': {'components': [{
+                        'id': 'c1', 'name': 'سكني', 'builtArea': 3000,
+                        'floorNumbers': [1, 2, 3, 4, 5], 'netArea': 2500,
+                    }]},
+                },
+            },
+            'floorDesignState': {'floorCount': 5, 'groups': [
+                {'id': 'g1', 'name': 'محفوظ', 'floorNumbers': [1, 2, 3, 4, 5]}
+            ]},
+            'groupId': 'g1',
+            'analysis': {'summary': 'تحليل'},
+            'approvedConflictKeys': [
+                'approved_area', 'approved_floor_count', 'approved_coverage', 'floor_design_floor_count'
+            ],
+        }
+        provider_result = {'prompt': 'مخطط مقدم من المزود بلا تعارضات', 'negative_prompt': 'بدون نص'}
+        with patch.object(self.application_module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': json.dumps(provider_result, ensure_ascii=False)}}]
+        }):
+            response = client.post('/api/floor-design/prompt', headers=self._headers(self.token_a), json=payload)
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        final_prompt = response.get_json()['prompt']
+        self.assertIn('"dataConflicts"', final_prompt)
+        self.assertIn('"land_croquis_value": "7000"', final_prompt)
+        self.assertIn('"financial_study_value": 7100', final_prompt)
+        self.assertIn('floorDesignState.floorCount', final_prompt)
+        self.assertIn('لا تختر قيمة أو تعدل بيانات المستخدم', final_prompt)
+
+    def test_floor_design_json_prompt_large_payload_stays_valid_and_keeps_conflicts(self):
+        conflict = {
+            'key': 'floor_design_floor_count',
+            'label': 'تعارض عدد الطوابق',
+            'source_a': 'floorDesignState.floorCount',
+            'value_a': 5,
+            'source_b': 'الدراسة المالية',
+            'value_b': 7,
+            'note': 'لا تعدل بيانات المستخدم',
+        }
+        payload = {
+            'project': {'project_idea': 'وصف طويل ' * 20000},
+            'land': {'land_and_building_summary': 'اشتراط ' * 20000},
+            'financial': {'components': [
+                {'id': f'c{index}', 'name': 'مكون ' + ('تفصيل ' * 2000), 'builtArea': index}
+                for index in range(100)
+            ]},
+            'shared_values': {'approved_floor_count': {'financial_study_value': 7}},
+            'data_conflicts': [conflict],
+            'groups': [
+                {'id': f'g{index}', 'name': f'مجموعة {index}', 'floorNumbers': [index + 1],
+                 'description': 'وصف مجموعة ' * 3000, 'components': list(range(100))}
+                for index in range(200)
+            ],
+        }
+
+        encoded = self.application_module._floor_design_json_prompt(payload)
+        decoded = json.loads(encoded)
+        self.assertLessEqual(len(encoded), 90000)
+        self.assertEqual(decoded['data_conflicts'], [conflict])
+        self.assertIn('project', decoded)
+        self.assertIn('land', decoded)
+        self.assertIn('financial', decoded)
+        self.assertIn('groups', decoded)
+
+    def test_floor_design_geometry_space_program_and_page_preparation_are_deterministic(self):
+        module = self.application_module
+        land = {
+            'survey_coordinates': [
+                {'point': 'A', 'x': 1000, 'y': 2000},
+                {'point': 'B', 'x': 1040, 'y': 2000},
+                {'point': 'C', 'x': 1040, 'y': 2030},
+                {'point': 'D', 'x': 1000, 'y': 2030},
+            ],
+            'directions_table': {'rows': [
+                {'direction': 'south', 'setback': 2},
+                {'direction': 'east', 'setback': 3},
+                {'direction': 'north', 'setback': 4},
+                {'direction': 'west', 'setback': 5},
+            ]},
+            'setbacks': 'Approved edge setbacks',
+        }
+        geometry = module._floor_design_polygon_geometry(land)
+        self.assertEqual(geometry['coordinateMode'], 'local_or_projected_meters')
+        self.assertEqual(geometry['areaSqm'], 1200.0)
+        self.assertEqual([edge['computedLength'] for edge in geometry['edges']], [40.0, 30.0, 40.0, 30.0])
+        setbacks = module._floor_design_setback_spec(land, geometry)
+        self.assertEqual(setbacks['buildableEnvelopeStatus'], 'computed_axis_aligned_rectangle')
+        self.assertEqual(setbacks['buildableEnvelope']['areaSqm'], 768.0)
+        self.assertEqual(module._floor_design_allocate_rounded(100, [1, 1, 1]), [33.34, 33.33, 33.33])
+        self.assertEqual(module._floor_design_allocate_rounded(100, []), [])
+
+        group = {'id': 'g1', 'name': 'Typical', 'floorNumbers': [1, 2], 'description': '', 'components': []}
+        payload = {
+            'project': {}, 'land': land, 'data_conflicts': [], 'groups': [group],
+            'financial': {'components': [
+                {'id': 'c1', 'name': 'Residential', 'builtArea': 100, 'netArea': 80, 'floorNumbers': [1, 2]},
+                {'id': 'c2', 'name': 'Retail', 'floorAreas': {'1': 25, '2': 35}},
+            ]},
+        }
+        prepared = module._floor_design_prepare(payload, group)
+        self.assertEqual(len(prepared['pages']), 3)
+        self.assertEqual([page['pageType'] for page in prepared['pages']], ['floor', 'floor', 'group_overview'])
+        first_program = prepared['pages'][0]['spaceProgram']
+        self.assertEqual(first_program['grossAreaSqm'], 75.0)
+        self.assertEqual(sum(item['percentage'] for item in first_program['components']), 100.0)
+        self.assertIsNone(first_program['netAreaSqm'])
+        self.assertIn('net_area_without_approved_net_rule', first_program['unavailableCalculations'])
+
+    def test_floor_design_geographic_conversion_and_preflight_require_explicit_approvals(self):
+        module = self.application_module
+        geometry = module._floor_design_polygon_geometry({'survey_coordinates': [
+            {'longitude': 31.0000, 'latitude': 30.0000},
+            {'longitude': 31.0010, 'latitude': 30.0000},
+            {'longitude': 31.0010, 'latitude': 30.0010},
+        ]})
+        self.assertEqual(geometry['coordinateMode'], 'geographic_converted_local_meters')
+        self.assertGreater(geometry['areaSqm'], 5000)
+        rejected = module._floor_design_polygon_geometry({'survey_coordinates': [
+            {'point': 'A', 'first': 1, 'second': 2},
+            {'point': 'B', 'first': 2, 'second': 2},
+            {'point': 'C', 'first': 2, 'second': 3},
+        ]})
+        self.assertEqual(rejected['calculationStatus'], 'unavailable')
+
+        prepared = {
+            'geometry': {'calculationStatus': 'computed', 'missingItems': [], 'sourceLengthConflicts': [
+                {'edge': 1, 'sourceLength': 10, 'computedLength': 11}
+            ]},
+            'setbacks': {'requirements': []},
+            'pages': [{'pageType': 'floor', 'floorNumber': 1, 'spaceProgram': {
+                'components': [{'id': 'c1'}], 'missingRequirements': [], 'unavailableCalculations': []
+            }}],
+        }
+        payload = {
+            'project': {'project_name': 'Test', 'project_type': 'Residential', 'project_idea': 'Idea', 'project_goal': 'Goal'},
+            'land': {'building_ratio_coverage': '35%', 'setbacks': '6 m', 'allowed_uses': 'Residential',
+                     'regulatory_constraints': 'Parking', 'land_and_building_summary': 'Summary'},
+            'financial': {'approved_financial_area': 1000, 'approved_floor_count': 1, 'components': [{'id': 'c1'}]},
+            'groups': [{'id': 'g1'}],
+            'data_conflicts': [{'key': 'approved_area'}],
+        }
+        blocked = module._floor_design_preflight(payload, prepared, {'analysisApproved': True})
+        self.assertFalse(blocked['ok'])
+        self.assertEqual(len(blocked['blockedItems']), 2)
+        approved = module._floor_design_preflight(payload, prepared, {
+            'approvedConflictKeys': ['approved_area', 'source_length_edge_1']
+        })
+        self.assertTrue(approved['ok'])
+
+    def test_floor_design_prompt_normalization_and_frontend_keep_independent_pages(self):
+        module = self.application_module
+        group = {'id': 'g1', 'name': 'Typical', 'description': '', 'floorNumbers': [1, 2]}
+        payload = {'project': {}, 'land': {}, 'financial': {}, 'data_conflicts': [], 'groups': [group]}
+        prepared = {'geometry': {}, 'setbacks': {}, 'siteContext': {}, 'pages': [
+            {'pageType': 'floor', 'floorNumber': 1, 'floorNumbers': [1], 'title': 'FLOOR 1 PLAN', 'spaceProgram': {}},
+            {'pageType': 'floor', 'floorNumber': 2, 'floorNumbers': [2], 'title': 'FLOOR 2 PLAN', 'spaceProgram': {}},
+            {'pageType': 'group_overview', 'floorNumber': None, 'floorNumbers': [1, 2], 'title': 'TYPICAL FLOORS OVERVIEW', 'spaceProgram': {}},
+        ]}
+        pages = module._floor_design_normalize_prompt_pages(
+            {'pages': [{'pageType': 'floor', 'floorNumber': 1, 'prompt': 'Provider floor one'}]},
+            prepared, payload, group,
+        )
+        self.assertEqual(len(pages), 3)
+        self.assertTrue(pages[0]['prompt'].startswith('Provider floor one'))
+        self.assertTrue(pages[1]['prompt'].startswith('Create the specified architectural presentation page.'))
+        self.assertTrue(all('MANDATORY SERVER ENGINEERING SPECIFICATION' in page['prompt'] for page in pages))
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('const legacyPage = group?.generatedPrompt || group?.imageUrl || group?.approvedImageUrl', index_source)
+        self.assertIn('group.pages = response.pages.map((item, index)', index_source)
+        self.assertIn('for (let index = 0; index < group.pages.length; index += 1)', index_source)
+        self.assertIn('page.approvedImageUrl = page.imageUrl', index_source)
+        self.assertIn('tenantFloorDesignActivePageIndex', index_source)
+
+    def test_floor_design_image_generation_forces_cached_system_reference(self):
+        client = self.app.test_client()
+        generated = 'data:image/png;base64,AAAA'
+        with patch.object(self.application_module, '_floor_design_default_reference_data_uri', return_value='data:image/png;base64,SYSTEM'), \
+                patch.object(self.application_module, 'call_openrouter_image_generation', return_value=(generated, None)) as call, \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/generated.png'):
+            response = client.post('/api/floor-design/generate', headers=self._headers(self.token_a), json={
+                'prompt': 'Complete presentation page', 'referenceImage': 'data:image/png;base64,USER',
+                'approvedFinancialArea': 1000, 'approvedFloorCount': 2,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(call.call_args.args[2], 'data:image/png;base64,SYSTEM')
+        self.assertEqual(response.get_json()['reference'], 'system_floor_plan_style')
+
+        too_long = client.post('/api/floor-design/generate', headers=self._headers(self.token_a), json={
+            'prompt': 'x' * 30001, 'approvedFinancialArea': 1000, 'approvedFloorCount': 2,
+        })
+        self.assertEqual(too_long.status_code, 400)
+        self.assertEqual(too_long.get_json()['error_code'], 'PROMPT_TOO_LONG')
+
+    def test_floor_design_numeric_conflicts_handle_arabic_units_percentages_and_empty_values(self):
+        check = self.application_module._floor_design_values_conflict
+        self.assertEqual(check('٧٬٠٠٠ م²', '7,000.00 متر')[0], False)
+        self.assertEqual(check('نسبة التغطية ٣٥٫٥٪', '35.50 %', coverage=True)[0], False)
+        self.assertEqual(check('نسبة البناء 60% ونسبة التغطية 35%', '36%', coverage=True)[0], True)
+        self.assertEqual(check('5 أدوار', '٦ طوابق')[0], True)
+        self.assertEqual(check('', '35%', coverage=True)[0], False)
+        self.assertEqual(check('غير محدد', None)[0], False)
+        self.assertEqual(check('7000.0 م2', '7005 م2')[0], False)
+        self.assertEqual(check('7000 م2', '7010 م2')[0], True)
 
     def test_floor_design_generation_requires_auth_and_valid_prompt(self):
         client = self.app.test_client()

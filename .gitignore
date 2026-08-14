@@ -46,3 +46,7 @@ userfiles/
 # Duplicate, lower-quality extraction of the same Jeddah building regulations as
 # اشتراطات1.pdf. Kept locally only; regulation_pdf_paths() skips it when absent.
 اشتراطات2.pdf
+
+# Local tooling data. Never commit: Freebuff's workspace database and Playwright logs.
+.freebuff/
+.playwright-mcp/

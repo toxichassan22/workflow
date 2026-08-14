@@ -190,11 +190,14 @@ print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
 FLOOR_DESIGN_IMAGE_MODEL = "openai/gpt-image-2"
 FLOOR_DESIGN_TEXT_MODEL = GEMINI_TEXT_MODEL
+FLOOR_DESIGN_REFERENCE_PATH = os.path.join(
+    os.path.dirname(__file__), 'sandbox', 'reference', 'plans_pages_24_32.png')
+_FLOOR_DESIGN_REFERENCE_CACHE = {'mtime': None, 'data_uri': None}
 FLOOR_DESIGN_IMAGE_HARD_NEGATIVE = (
-    'ABSOLUTE OUTPUT RULE: generate only the clean 2D architectural geometry. '
-    'Do not render any written text, letters, numbers, labels, titles, dimensions, measurements, '
-    'legends, tables, annotations, arrows, compass, scale bar, logos, watermark, notes, or UI. '
-    'No text of any kind may appear inside the image.'
+    'ABSOLUTE OUTPUT RULES: no watermark, no logo, no Acacia name, no copied project name, '
+    'no copied dimensions, no copied room names, and no copied project content from the style reference. '
+    'Do not omit, shorten, summarize, recalculate, estimate, or alter any supplied engineering value. '
+    'Do not add decorative symbols, pictograms, three-dimensional perspective, photorealism, or unrelated UI.'
 )
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
@@ -542,6 +545,24 @@ def persist_generated_image(image, tenant_id):
         with open(path, 'wb') as image_file:
             image_file.write(raw)
     return f'/uploads/creative/{safe_tenant}/{filename}'
+
+
+def _floor_design_default_reference_data_uri():
+    """Return the style-only system reference as a cached, validated PNG data URI."""
+    try:
+        modified = os.path.getmtime(FLOOR_DESIGN_REFERENCE_PATH)
+        if (_FLOOR_DESIGN_REFERENCE_CACHE.get('mtime') == modified
+                and _FLOOR_DESIGN_REFERENCE_CACHE.get('data_uri')):
+            return _FLOOR_DESIGN_REFERENCE_CACHE['data_uri']
+        with open(FLOOR_DESIGN_REFERENCE_PATH, 'rb') as reference_file:
+            raw = reference_file.read()
+        if len(raw) > 20 * 1024 * 1024 or not raw.startswith(b'\x89PNG\r\n\x1a\n'):
+            return None
+        data_uri = 'data:image/png;base64,' + base64.b64encode(raw).decode('ascii')
+        _FLOOR_DESIGN_REFERENCE_CACHE.update({'mtime': modified, 'data_uri': data_uri})
+        return data_uri
+    except (OSError, ValueError):
+        return None
 
 
 def call_openrouter_image_generation(prompt, model, reference=None):
@@ -1277,7 +1298,8 @@ FLOOR_DESIGN_PROJECT_KEYS = (
 )
 FLOOR_DESIGN_FINANCIAL_KEYS = (
     'builtUpAreaAbove', 'basementArea', 'floorCount', 'totalBuiltUpArea', 'coverageRate',
-    'landArea', 'project_components_data', 'financial_calc_data', 'financial_study_model',
+    'landArea', 'coveredArea', 'openArea', 'project_components_data', 'financial_calc_data',
+    'financial_study_model',
 )
 
 
@@ -1306,6 +1328,24 @@ def _floor_design_read(source, key, *aliases):
     return ''
 
 
+def _floor_design_financial_sources(source):
+    model = _floor_design_parse_json(source.get('financial_study_model'), {}) or {}
+    inputs = model.get('inputs') if isinstance(model, dict) and isinstance(model.get('inputs'), dict) else {}
+    model_calc = model.get('financialCalcData') if isinstance(model, dict) and isinstance(model.get('financialCalcData'), dict) else {}
+    legacy_calc = _floor_design_parse_json(source.get('financial_calc_data'), {}) or {}
+    return inputs, model_calc, legacy_calc if isinstance(legacy_calc, dict) else {}
+
+
+def _floor_design_financial_read(source, key, *aliases):
+    candidates = (key, *aliases)
+    inputs, model_calc, legacy_calc = _floor_design_financial_sources(source)
+    for container in (inputs, source, model_calc, legacy_calc):
+        value = _floor_design_read(container, candidates[0], *candidates[1:])
+        if value not in (None, '', [], {}):
+            return value
+    return ''
+
+
 def _floor_design_components(source):
     raw = _floor_design_parse_json(source.get('project_components_data'))
     if not isinstance(raw, list):
@@ -1313,13 +1353,117 @@ def _floor_design_components(source):
         dynamic = financial_model.get('dynamicRows') if isinstance(financial_model, dict) else {}
         raw = dynamic.get('components') if isinstance(dynamic, dict) else None
     if not isinstance(raw, list):
-        financial_data = _floor_design_parse_json(source.get('financial_calc_data'), {}) or {}
-        raw = financial_data.get('components') if isinstance(financial_data, dict) else None
+        _inputs, model_calc, legacy_calc = _floor_design_financial_sources(source)
+        raw = model_calc.get('components') if isinstance(model_calc, dict) else None
+        if not isinstance(raw, list):
+            raw = legacy_calc.get('components') if isinstance(legacy_calc, dict) else None
     if not isinstance(raw, list):
         return []
-    keys = ('id', 'name', 'useType', 'units', 'unitArea', 'builtArea', 'revenueArea', 'totalArea', 'investmentModel')
+    keys = (
+        'id', 'name', 'useType', 'units', 'unitArea', 'builtArea', 'revenueArea', 'totalArea',
+        'investmentModel', 'floorNumbers', 'floors', 'groupIds', 'floorAreas', 'areaPerFloor',
+        'grossArea', 'netArea', 'color',
+    )
     return [{key: item.get(key) for key in keys if item.get(key) not in (None, '')}
             for item in raw[:100] if isinstance(item, dict)]
+
+
+def _floor_design_number(value):
+    if value in (None, '') or isinstance(value, bool):
+        return None
+    text = str(value).strip().translate(str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789'))
+    text = text.replace('\u066c', '').replace('\u066b', '.')
+    match = re.search(r'[-+]?\d[\d\s,.]*', text)
+    if not match:
+        return None
+    token = re.sub(r'\s+', '', match.group(0))
+    if ',' in token and '.' not in token:
+        parts = token.split(',')
+        token = '.'.join(parts) if len(parts) == 2 and 0 < len(parts[1]) <= 2 else ''.join(parts)
+    else:
+        token = token.replace(',', '')
+    try:
+        number = float(token)
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _floor_design_coverage_number(value):
+    text = _floor_design_text(value, 12000)
+    coverage_match = re.search(r'(?:نسبة\s*)?التغطية[^\d٠-٩۰-۹+-]{0,40}([-+]?\d[\d٠-٩۰-۹\s,.٬٫]*)', text)
+    return _floor_design_number(coverage_match.group(1) if coverage_match else value)
+
+
+def _floor_design_values_conflict(first, second, *, coverage=False):
+    parser = _floor_design_coverage_number if coverage else _floor_design_number
+    first_number, second_number = parser(first), parser(second)
+    if first_number is None or second_number is None:
+        return False, first_number, second_number
+    tolerance = 0.01 if coverage else max(0.01, max(abs(first_number), abs(second_number)) * 0.001)
+    return abs(first_number - second_number) > tolerance, first_number, second_number
+
+
+def _floor_design_shared_values(land, financial):
+    definitions = (
+        ('approved_area', 'المساحة المعتمدة', land.get('approved_financial_area'), financial.get('landArea'), False),
+        ('approved_floor_count', 'عدد الطوابق المعتمد', land.get('approved_floor_count'), financial.get('floorCount'), False),
+        ('approved_coverage', 'نسبة التغطية المعتمدة', land.get('building_ratio_coverage'), financial.get('coverageRate'), True),
+    )
+    shared, conflicts = {}, []
+    for key, label, land_value, financial_value, is_coverage in definitions:
+        differs, land_number, financial_number = _floor_design_values_conflict(
+            land_value, financial_value, coverage=is_coverage)
+        shared[key] = {
+            'land_croquis_value': land_value,
+            'financial_study_value': financial_value,
+            'land_croquis_number': land_number,
+            'financial_study_number': financial_number,
+        }
+        if differs:
+            conflicts.append({
+                'key': key,
+                'label': label,
+                'land_croquis_value': land_value,
+                'financial_study_value': financial_value,
+                'note': 'تعارض بين بيانات الأرض والكروكي والدراسة المالية. اعرض القيمتين ولا تختر قيمة أو تعدل بيانات المستخدم.',
+            })
+    return shared, conflicts
+
+
+def _floor_design_state_conflicts(raw_state, groups, land, financial):
+    state = _floor_design_parse_json(raw_state, {}) or {}
+    state_floor_count = state.get('floorCount') if isinstance(state, dict) else None
+    assigned_floors = sorted({floor for group in groups for floor in group.get('floorNumbers', [])})
+    group_floor_count = len(assigned_floors)
+    group_range = ''
+    if assigned_floors:
+        group_range = f'{assigned_floors[0]}-{assigned_floors[-1]} ({group_floor_count} طابق)'
+
+    approved_sources = (
+        ('بيانات الأرض والكروكي', land.get('approved_floor_count')),
+        ('الدراسة المالية', financial.get('floorCount')),
+    )
+    design_sources = (
+        ('floorDesignState.floorCount', state_floor_count, state_floor_count),
+        ('المدى الفعلي لمجموعات الأدوار', group_range, group_floor_count if assigned_floors else None),
+    )
+    conflicts = []
+    for design_source, display_value, numeric_value in design_sources:
+        for approved_source, approved_value in approved_sources:
+            differs, _design_number, _approved_number = _floor_design_values_conflict(numeric_value, approved_value)
+            if not differs:
+                continue
+            conflicts.append({
+                'key': 'floor_design_floor_count',
+                'label': 'تعارض عدد طوابق المخطط المحفوظ',
+                'source_a': design_source,
+                'value_a': display_value,
+                'source_b': approved_source,
+                'value_b': approved_value,
+                'note': 'بيانات المخطط المحفوظة لا تطابق عدد الطوابق المعتمد. اعرض القيمتين ولا تزامن المجموعات أو تعدل بيانات المستخدم.',
+            })
+    return conflicts
 
 
 def _floor_design_groups(raw_state):
@@ -1376,17 +1520,330 @@ def _sanitize_floor_design_request(data):
     financial = {
         'approved_financial_area': _floor_design_read(project_data, 'approved_financial_area'),
         'approved_floor_count': _floor_design_read(project_data, 'approved_floor_count'),
-        'builtUpAreaAbove': _floor_design_read(project_data, 'builtUpAreaAbove', 'built_up_area_above'),
-        'basementArea': _floor_design_read(project_data, 'basementArea', 'basement_area'),
-        'floorCount': _floor_design_read(project_data, 'floorCount', 'floor_count'),
+        'landArea': _floor_design_financial_read(project_data, 'landArea', 'land_area'),
+        'builtUpAreaAbove': _floor_design_financial_read(project_data, 'builtUpAreaAbove', 'built_up_area_above'),
+        'floorCount': _floor_design_financial_read(project_data, 'floorCount', 'floor_count'),
+        'basementArea': _floor_design_financial_read(project_data, 'basementArea', 'basement_area'),
+        'totalBuiltUpArea': _floor_design_financial_read(project_data, 'totalBuiltUpArea', 'total_built_up_area'),
+        'coverageRate': _floor_design_financial_read(project_data, 'coverageRate', 'coverage_rate'),
+        'coveredArea': _floor_design_financial_read(project_data, 'coveredArea', 'covered_area'),
+        'openArea': _floor_design_financial_read(project_data, 'openArea', 'open_area'),
         'components': _floor_design_components(project_data),
     }
+    land_area_number = _floor_design_number(financial['landArea'])
+    coverage_number = _floor_design_number(financial['coverageRate'])
+    above_number = _floor_design_number(financial['builtUpAreaAbove'])
+    basement_number = _floor_design_number(financial['basementArea'])
+    if financial['totalBuiltUpArea'] in (None, '') and above_number is not None and basement_number is not None:
+        financial['totalBuiltUpArea'] = above_number + basement_number
+    if financial['coveredArea'] in (None, '') and land_area_number is not None and coverage_number is not None:
+        financial['coveredArea'] = land_area_number * coverage_number / 100
+    if financial['openArea'] in (None, '') and land_area_number is not None and coverage_number is not None:
+        financial['openArea'] = land_area_number - (land_area_number * coverage_number / 100)
+    shared_values, data_conflicts = _floor_design_shared_values(land, financial)
+    groups = _floor_design_groups(state)
+    data_conflicts.extend(_floor_design_state_conflicts(state, groups, land, financial))
     return {
         'project': project,
         'land': land,
         'financial': financial,
-        'groups': _floor_design_groups(state),
+        'shared_values': shared_values,
+        'data_conflicts': data_conflicts,
+        'groups': groups,
     }
+
+
+def _floor_design_coordinate_value(row, *keys):
+    if not isinstance(row, dict):
+        return None
+    lowered = {str(key).strip().casefold(): value for key, value in row.items()}
+    for key in keys:
+        value = lowered.get(str(key).casefold())
+        number = _floor_design_number(value)
+        if number is not None:
+            return number
+    return None
+
+
+def _floor_design_coordinate_rows(raw):
+    if isinstance(raw, dict):
+        raw = raw.get('rows') or raw.get('coordinates') or raw.get('survey_coordinates') or []
+    if not isinstance(raw, list):
+        return []
+    rows = []
+    for index, item in enumerate(raw[:500]):
+        if not isinstance(item, dict):
+            continue
+        lowered_keys = {str(key).strip().casefold() for key in item}
+        geographic_keys = {'lng', 'longitude', 'lon', 'lat', 'latitude'}
+        local_keys = {'eastings', 'easting', 'x', 'coordinate_x', 'northings', 'northing', 'y',
+                      'coordinate_y', 'الشرقيات', 'الشماليات'}
+        has_geographic_keys = bool(lowered_keys & geographic_keys)
+        has_local_keys = bool(lowered_keys & local_keys)
+        coordinate_kind = 'mixed' if has_geographic_keys and has_local_keys else (
+            'geographic' if has_geographic_keys else 'local' if has_local_keys else 'unknown')
+        x = _floor_design_coordinate_value(
+            item, 'eastings', 'easting', 'x', 'coordinate_x', 'lng', 'longitude', 'lon', 'الشرقيات')
+        y = _floor_design_coordinate_value(
+            item, 'northings', 'northing', 'y', 'coordinate_y', 'lat', 'latitude', 'الشماليات')
+        if x is None or y is None:
+            continue
+        rows.append({'point': _floor_design_text(item.get('point') or item.get('point_number') or index + 1, 80),
+                     'x': x, 'y': y, 'coordinateKind': coordinate_kind})
+    if len(rows) > 2 and rows[0]['x'] == rows[-1]['x'] and rows[0]['y'] == rows[-1]['y']:
+        rows.pop()
+    return rows
+
+
+def _floor_design_direction_rows(raw):
+    if isinstance(raw, dict):
+        raw = raw.get('rows') or [dict(value, direction=key) if isinstance(value, dict) else {'direction': key, 'value': value}
+                                  for key, value in raw.items()]
+    return [row for row in raw if isinstance(row, dict)][:500] if isinstance(raw, list) else []
+
+
+def _floor_design_polygon_geometry(land):
+    source_rows = _floor_design_coordinate_rows(land.get('survey_coordinates'))
+    result = {
+        'coordinateMode': 'unavailable', 'sourceVertices': source_rows, 'verticesMeters': [],
+        'edges': [], 'areaSqm': None, 'rotation': None, 'calculationStatus': 'unavailable',
+        'missingItems': [], 'sourceLengthConflicts': [],
+    }
+    if len(source_rows) < 3:
+        result['missingItems'].append('polygon_coordinates_for_computed_angles_and_area')
+        return result
+    coordinate_kinds = {row.get('coordinateKind') for row in source_rows}
+    if 'mixed' in coordinate_kinds or ('geographic' in coordinate_kinds and 'local' in coordinate_kinds):
+        result['missingItems'].append('consistent_coordinate_system')
+        result['calculationStatus'] = 'rejected_mixed_coordinate_system'
+        return result
+    geographic = coordinate_kinds == {'geographic'}
+    if geographic and not all(abs(row['x']) <= 180 and abs(row['y']) <= 90 for row in source_rows):
+        result['missingItems'].append('valid_geographic_coordinates')
+        result['calculationStatus'] = 'rejected_invalid_geographic_coordinates'
+        return result
+    if 'unknown' in coordinate_kinds:
+        result['missingItems'].append('declared_coordinate_system')
+        result['calculationStatus'] = 'rejected_unknown_coordinate_system'
+        return result
+    if geographic:
+        origin_lon = sum(row['x'] for row in source_rows) / len(source_rows)
+        origin_lat = sum(row['y'] for row in source_rows) / len(source_rows)
+        radius = 6378137.0
+        points = [{
+            'point': row['point'],
+            'x': radius * math.radians(row['x'] - origin_lon) * math.cos(math.radians(origin_lat)),
+            'y': radius * math.radians(row['y'] - origin_lat),
+        } for row in source_rows]
+        result['coordinateMode'] = 'geographic_converted_local_meters'
+        result['localOrigin'] = {'latitude': round(origin_lat, 8), 'longitude': round(origin_lon, 8)}
+    else:
+        origin_x, origin_y = source_rows[0]['x'], source_rows[0]['y']
+        points = [{'point': row['point'], 'x': row['x'] - origin_x, 'y': row['y'] - origin_y}
+                  for row in source_rows]
+        result['coordinateMode'] = 'local_or_projected_meters'
+        result['localOrigin'] = {'x': origin_x, 'y': origin_y}
+    twice_area = sum(
+        points[index]['x'] * points[(index + 1) % len(points)]['y']
+        - points[(index + 1) % len(points)]['x'] * points[index]['y']
+        for index in range(len(points)))
+    if abs(twice_area) < 0.001:
+        result['missingItems'].append('non_degenerate_polygon')
+        result['calculationStatus'] = 'rejected_degenerate_polygon'
+        return result
+    direction_rows = _floor_design_direction_rows(land.get('directions_table'))
+    source_lengths = []
+    for row in direction_rows:
+        source_lengths.append(_floor_design_number(
+            row.get('length') or row.get('boundary_length') or row.get('distance')))
+    edges = []
+    for index, point in enumerate(points):
+        following = points[(index + 1) % len(points)]
+        dx, dy = following['x'] - point['x'], following['y'] - point['y']
+        length = math.hypot(dx, dy)
+        azimuth = (math.degrees(math.atan2(dx, dy)) + 360) % 360
+        compass = ('North' if azimuth < 22.5 or azimuth >= 337.5 else 'North East' if azimuth < 67.5
+                   else 'East' if azimuth < 112.5 else 'South East' if azimuth < 157.5
+                   else 'South' if azimuth < 202.5 else 'South West' if azimuth < 247.5
+                   else 'West' if azimuth < 292.5 else 'North West')
+        source_length = source_lengths[index] if index < len(source_lengths) else None
+        edge = {'edge': index + 1, 'from': point['point'], 'to': following['point'],
+                'deltaX': round(dx, 3), 'deltaY': round(dy, 3), 'computedLength': round(length, 3),
+                'azimuthDegrees': round(azimuth, 3), 'direction': compass,
+                'sourceLength': source_length}
+        if source_length is not None and abs(source_length - length) > max(0.05, source_length * 0.005):
+            conflict = {'edge': index + 1, 'sourceLength': source_length,
+                        'computedLength': round(length, 3), 'status': 'unapproved_source_length_conflict'}
+            result['sourceLengthConflicts'].append(conflict)
+            edge['lengthConflict'] = conflict
+        edges.append(edge)
+    result.update({
+        'verticesMeters': [{'point': point['point'], 'x': round(point['x'], 3), 'y': round(point['y'], 3)}
+                           for point in points],
+        'edges': edges, 'areaSqm': round(abs(twice_area) / 2, 3),
+        'rotation': 'counterclockwise' if twice_area > 0 else 'clockwise', 'calculationStatus': 'computed',
+    })
+    return result
+
+
+def _floor_design_setback_spec(land, geometry):
+    rows = _floor_design_direction_rows(land.get('directions_table'))
+    setbacks_text = _floor_design_text(land.get('setbacks'), 12000)
+    mapped_setbacks = []
+    for index, row in enumerate(rows):
+        value = _floor_design_number(row.get('setback') or row.get('setback_meters') or row.get('ارتداد'))
+        if value is not None:
+            mapped_setbacks.append({'edge': index + 1, 'valueMeters': value})
+    result = {'sourceText': setbacks_text, 'boundaryRows': rows, 'mappedSetbacks': mapped_setbacks,
+              'buildableEnvelopeStatus': 'unavailable', 'buildableEnvelope': None, 'requirements': []}
+    if geometry.get('calculationStatus') != 'computed':
+        result['requirements'].append('buildable_envelope_requires_computable_polygon')
+    elif len(geometry.get('edges', [])) != 4 or len(mapped_setbacks) != 4:
+        result['requirements'].append('approved_edge_setback_mapping_required')
+    else:
+        vertices = geometry['verticesMeters']
+        xs, ys = [item['x'] for item in vertices], [item['y'] for item in vertices]
+        axis_aligned = all(abs(edge['deltaX']) < 0.02 or abs(edge['deltaY']) < 0.02 for edge in geometry['edges'])
+        values = [item['valueMeters'] for item in mapped_setbacks]
+        if axis_aligned:
+            width, height = max(xs) - min(xs), max(ys) - min(ys)
+            horizontal_edges = [index for index, edge in enumerate(geometry['edges']) if abs(edge['deltaY']) < 0.02]
+            vertical_edges = [index for index, edge in enumerate(geometry['edges']) if abs(edge['deltaX']) < 0.02]
+            horizontal_setbacks = sum(values[index] for index in horizontal_edges)
+            vertical_setbacks = sum(values[index] for index in vertical_edges)
+            envelope_width = width - vertical_setbacks
+            envelope_height = height - horizontal_setbacks
+            if envelope_width > 0 and envelope_height > 0:
+                result['buildableEnvelopeStatus'] = 'computed_axis_aligned_rectangle'
+                result['buildableEnvelope'] = {
+                    'widthMeters': round(envelope_width, 3), 'heightMeters': round(envelope_height, 3),
+                    'areaSqm': round(envelope_width * envelope_height, 3),
+                    'setbacksByEdge': mapped_setbacks,
+                }
+            else:
+                result['requirements'].append('setbacks_exceed_plot_dimensions')
+        else:
+            result['requirements'].append('irregular_polygon_offset_requires_approved_engineering_envelope')
+    return result
+
+
+def _floor_design_component_floor_numbers(component, group):
+    explicit = component.get('floorNumbers') or component.get('floors') or []
+    if isinstance(explicit, str):
+        explicit = [_floor_design_number(item) for item in re.findall(r'\d+', explicit)]
+    floors = sorted({int(item) for item in explicit if isinstance(item, (int, float)) and int(item) == item}) if isinstance(explicit, list) else []
+    group_ids = component.get('groupIds') if isinstance(component.get('groupIds'), list) else []
+    if group.get('id') in [str(item) for item in group_ids]:
+        floors = group['floorNumbers']
+    return [floor for floor in floors if floor in group['floorNumbers']]
+
+
+def _floor_design_allocate_rounded(total, weights, digits=2):
+    if not weights or any(float(weight) < 0 for weight in weights) or sum(float(weight) for weight in weights) <= 0:
+        return []
+    scale = 10 ** digits
+    target = int(round(float(total) * scale))
+    weight_total = sum(float(weight) for weight in weights)
+    raw = [target * float(weight) / weight_total for weight in weights]
+    base = [math.floor(value) for value in raw]
+    residual = target - sum(base)
+    order = sorted(range(len(raw)), key=lambda index: (-(raw[index] - base[index]), index))
+    for index in order[:residual]:
+        base[index] += 1
+    return [value / scale for value in base]
+
+
+def _floor_design_space_program(payload, group, floor_number):
+    components, rows, missing = payload['financial']['components'], [], []
+    for index, component in enumerate(components):
+        component_id = _floor_design_text(component.get('id') or index + 1, 80)
+        floors = _floor_design_component_floor_numbers(component, group)
+        floor_areas = component.get('floorAreas') if isinstance(component.get('floorAreas'), dict) else {}
+        explicit_area = _floor_design_number(floor_areas.get(str(floor_number), floor_areas.get(floor_number)))
+        gross_total = _floor_design_number(component.get('grossArea') or component.get('builtArea') or component.get('totalArea'))
+        net_total = _floor_design_number(component.get('netArea'))
+        area_per_floor = _floor_design_number(component.get('areaPerFloor'))
+        if explicit_area is not None:
+            gross_area = explicit_area
+        elif floor_number in floors and area_per_floor is not None:
+            gross_area = area_per_floor
+        elif floor_number in floors and gross_total is not None:
+            gross_area = _floor_design_allocate_rounded(gross_total, [1] * len(floors))[floors.index(floor_number)]
+        elif floors and floor_number not in floors:
+            continue
+        else:
+            missing.append(f'component_floor_allocation:{component_id}')
+            continue
+        if gross_area <= 0:
+            continue
+        net_area = None
+        if net_total is not None and gross_total and gross_total > 0:
+            net_area = round(gross_area * net_total / gross_total, 2)
+        rows.append({'id': component_id,
+                     'name': _floor_design_text(component.get('name') or f'Component {index + 1}', 160),
+                     'grossAreaSqm': round(gross_area, 2), 'netAreaSqm': net_area,
+                     'color': _floor_design_text(component.get('color'), 40) or ['#3B6E91', '#7AA6C2', '#C7A56A', '#8A9A5B', '#A97878'][index % 5]})
+    total_area = round(sum(row['grossAreaSqm'] for row in rows), 2)
+    percentages = _floor_design_allocate_rounded(100, [row['grossAreaSqm'] for row in rows]) if rows and total_area else []
+    for row, percentage in zip(rows, percentages):
+        row['percentage'] = percentage
+    net_values = [row['netAreaSqm'] for row in rows]
+    return {'floorNumber': floor_number, 'components': rows, 'grossAreaSqm': total_area,
+            'netAreaSqm': round(sum(net_values), 2) if rows and all(value is not None for value in net_values) else None,
+            'pieChartSeries': [{'label': row['name'], 'value': row['grossAreaSqm'],
+                                'percentage': row['percentage'], 'color': row['color']} for row in rows],
+            'missingRequirements': sorted(set(missing)), 'unavailableCalculations': (
+                [] if not rows or all(value is not None for value in net_values) else ['net_area_without_approved_net_rule']),
+            'rounding': 'largest_remainder_2_decimals'}
+
+
+def _floor_design_prepare(payload, group):
+    geometry = _floor_design_polygon_geometry(payload['land'])
+    setbacks = _floor_design_setback_spec(payload['land'], geometry)
+    pages = []
+    for floor_number in group['floorNumbers']:
+        pages.append({'pageType': 'floor', 'floorNumber': floor_number, 'floorNumbers': [floor_number],
+                      'title': f'FLOOR {floor_number} PLAN',
+                      'spaceProgram': _floor_design_space_program(payload, group, floor_number)})
+    if len(group['floorNumbers']) > 1:
+        pages.append({'pageType': 'group_overview', 'floorNumber': None,
+                      'floorNumbers': group['floorNumbers'], 'title': 'TYPICAL FLOORS OVERVIEW',
+                      'spaceProgram': {'floors': [page['spaceProgram'] for page in pages]}})
+    return {
+        'geometry': geometry, 'setbacks': setbacks,
+        'siteContext': {key: payload['land'].get(key) for key in (
+            'boundary_lengths', 'surrounding_streets', 'facades_count', 'facades_directions',
+            'directions_table', 'max_floors_height', 'regulatory_constraints', 'allowed_uses')},
+        'financial': payload['financial'], 'pages': pages,
+    }
+
+
+def _floor_design_preflight(payload, prepared, data):
+    missing = _floor_design_missing_requirements(payload)
+    blocked = []
+    approvals = {str(item) for item in (data.get('approvedConflictKeys') or [])}
+    for conflict in payload.get('data_conflicts', []):
+        if str(conflict.get('key')) not in approvals:
+            blocked.append({'type': 'data_conflict', 'item': conflict})
+    for conflict in prepared['geometry'].get('sourceLengthConflicts', []):
+        key = f'source_length_edge_{conflict["edge"]}'
+        if key not in approvals:
+            blocked.append({'type': 'source_length_conflict', 'item': conflict})
+    unavailable = list(prepared['geometry'].get('missingItems', []))
+    for page in prepared['pages']:
+        program = page.get('spaceProgram', {})
+        if page['pageType'] == 'floor':
+            missing.extend(program.get('missingRequirements', []))
+            unavailable.extend(program.get('unavailableCalculations', []))
+            if not program.get('components'):
+                missing.append(f'space_program_floor_{page["floorNumber"]}')
+    geometry_available = prepared['geometry'].get('calculationStatus') == 'computed'
+    source_geometry_available = bool(payload['land'].get('boundary_lengths') or payload['land'].get('directions_table'))
+    if not geometry_available and not source_geometry_available:
+        missing.append('plot_boundary_geometry_or_source_lengths')
+    return {'ok': not missing and not blocked, 'missingItems': sorted(set(missing)),
+            'blockedItems': blocked, 'unavailableCalculations': sorted(set(unavailable)),
+            'requirements': prepared['setbacks'].get('requirements', [])}
 
 
 def _floor_design_missing_requirements(payload):
@@ -1414,8 +1871,150 @@ def _floor_design_missing_requirements(payload):
     return missing
 
 
+def _floor_design_compact_prompt_value(value, string_limit, list_limit, key=''):
+    if isinstance(value, str):
+        return value[:string_limit]
+    if isinstance(value, dict):
+        return {
+            item_key: _floor_design_compact_prompt_value(
+                item_value,
+                4000 if item_key == 'data_conflicts' else string_limit,
+                200 if item_key == 'data_conflicts' else list_limit,
+                item_key,
+            )
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        effective_limit = 200 if key == 'data_conflicts' else list_limit
+        return [_floor_design_compact_prompt_value(item, string_limit, list_limit, key)
+                for item in value[:effective_limit]]
+    return value
+
+
 def _floor_design_json_prompt(payload):
-    return json.dumps(payload, ensure_ascii=False, separators=(',', ':'))[:90000]
+    for string_limit, list_limit in ((12000, 200), (6000, 100), (3000, 50), (1500, 25), (800, 12), (400, 8)):
+        compact = _floor_design_compact_prompt_value(payload, string_limit, list_limit)
+        encoded = json.dumps(compact, ensure_ascii=False, separators=(',', ':'))
+        if len(encoded) <= 90000:
+            return encoded
+    minimal = {
+        'project': payload.get('project', {}) if isinstance(payload, dict) else {},
+        'land': payload.get('land', {}) if isinstance(payload, dict) else {},
+        'financial': payload.get('financial', {}) if isinstance(payload, dict) else {},
+        'shared_values': payload.get('shared_values', {}) if isinstance(payload, dict) else {},
+        'data_conflicts': payload.get('data_conflicts', []) if isinstance(payload, dict) else [],
+        'groups': payload.get('groups', []) if isinstance(payload, dict) else [],
+    }
+    compact = _floor_design_compact_prompt_value(minimal, 200, 5)
+    compact['data_conflicts'] = _floor_design_compact_prompt_value(minimal['data_conflicts'], 4000, 200, 'data_conflicts')
+    return json.dumps(compact, ensure_ascii=False, separators=(',', ':'))
+
+
+def _floor_design_conflicts_section(conflicts):
+    if not isinstance(conflicts, list) or not conflicts:
+        return ''
+    lines = ['تعارضات البيانات الإلزامية']
+    for index, conflict in enumerate(conflicts, 1):
+        if not isinstance(conflict, dict):
+            continue
+        source_a = conflict.get('source_a') or 'بيانات الأرض والكروكي'
+        value_a = conflict.get('value_a', conflict.get('land_croquis_value', ''))
+        source_b = conflict.get('source_b') or 'الدراسة المالية'
+        value_b = conflict.get('value_b', conflict.get('financial_study_value', ''))
+        label = conflict.get('label') or conflict.get('key') or 'تعارض بيانات'
+        lines.append(f'{index}. {label}: المصدر الأول: {source_a}، القيمة: {value_a}. المصدر الثاني: {source_b}، القيمة: {value_b}. لا تحسم التعارض ولا تعدل بيانات المستخدم.')
+    return '\n'.join(lines) if len(lines) > 1 else ''
+
+
+def _floor_design_append_conflicts(prompt, conflicts):
+    section = _floor_design_conflicts_section(conflicts)
+    if not section:
+        return prompt
+    conflict_lines = section.splitlines()[1:]
+    if conflict_lines and all(line in prompt for line in conflict_lines):
+        return prompt
+    return prompt.rstrip() + '\n\n' + section
+
+
+def _floor_design_page_specification(page, prepared, payload, group):
+    """Build the authoritative appendix. The image model receives no numeric work to perform."""
+    specification = {
+        'contract': {
+            'canvas': '16:9 landscape presentation page',
+            'layout': {
+                'leftColumn': '0 to 24 percent, Table of Contents',
+                'centerColumn': '24 to 72 percent, numbered architectural plan',
+                'rightColumn': '72 to 100 percent, Pie Charts and Space Program',
+            },
+            'style': {
+                'referenceUse': 'layout, spacing, palette, line hierarchy, and typography only',
+                'background': '#F5F1E8 warm ivory', 'primaryLines': '#243B53 at 1.6 px',
+                'secondaryLines': '#7A8C99 at 0.8 px', 'accent': '#C7A56A',
+                'typography': 'English geometric sans serif, dark navy, consistent table alignment',
+            },
+        },
+        'page': {key: page.get(key) for key in ('pageType', 'floorNumber', 'floorNumbers', 'title')},
+        'plotGeometry': prepared['geometry'],
+        'buildableEnvelope': prepared['setbacks'],
+        'siteContext': prepared['siteContext'],
+        'spaceProgram': page.get('spaceProgram'),
+        'group': {'id': group.get('id'), 'name': group.get('name'), 'description': group.get('description'),
+                  'floorNumbers': group.get('floorNumbers')},
+        'project': payload['project'],
+        'dataConflicts': payload.get('data_conflicts', []),
+        'financialTotals': {key: payload['financial'].get(key) for key in (
+            'landArea', 'builtUpAreaAbove', 'basementArea', 'totalBuiltUpArea', 'coveredArea',
+            'openArea', 'coverageRate', 'floorCount')},
+        'drawingRules': [
+            'Render every supplied plot edge, source length, computed length, azimuth, direction, street, facade, and setback exactly as listed.',
+            'Render the plan with entrances, cores, circulation, component boundaries, and numbered component bubbles.',
+            'Match each numbered bubble to one English Table of Contents row on the left.',
+            'Render the complete Space Program table and pie series on the right with every supplied label, area, percentage, and color.',
+            'Use unavailable exactly where a calculation status is unavailable. Do not fill an absent measurement.',
+            'Do not alter source values when a computed value also exists.',
+        ],
+        'referenceSafety': [
+            'Do not copy Acacia names, project titles, room names, dimensions, values, components, or project content.',
+            'No logo and no watermark.',
+        ],
+    }
+    return ('MANDATORY SERVER ENGINEERING SPECIFICATION\n'
+            + json.dumps(specification, ensure_ascii=False, indent=2)
+            + '\nEND MANDATORY SERVER ENGINEERING SPECIFICATION')
+
+
+def _floor_design_provider_pages(result):
+    pages = result.get('pages') if isinstance(result, dict) else None
+    return pages if isinstance(pages, list) else []
+
+
+def _floor_design_normalize_prompt_pages(result, prepared, payload, group):
+    provider_pages = _floor_design_provider_pages(result)
+    normalized = []
+    for index, page_spec in enumerate(prepared['pages']):
+        provider_page = next((item for item in provider_pages if isinstance(item, dict)
+                              and item.get('pageType') == page_spec['pageType']
+                              and item.get('floorNumber') == page_spec['floorNumber']), None)
+        if provider_page is None and index < len(provider_pages) and isinstance(provider_pages[index], dict):
+            provider_page = provider_pages[index]
+        provider_page = provider_page or {}
+        provider_prompt = _floor_design_text(provider_page.get('prompt'), 24000)
+        if not provider_prompt and index == 0:
+            provider_prompt = _floor_design_text(result.get('prompt'), 24000)
+        base_prompt = provider_prompt or (
+            'Create the specified architectural presentation page. Follow the mandatory server engineering specification verbatim.')
+        appendix = _floor_design_page_specification(page_spec, prepared, payload, group)
+        normalized.append({
+            'id': f'{group.get("id") or "group"}:{page_spec["pageType"]}:{page_spec.get("floorNumber") or "overview"}',
+            'pageType': page_spec['pageType'], 'floorNumber': page_spec['floorNumber'],
+            'floorNumbers': page_spec['floorNumbers'], 'title': page_spec['title'],
+            'prompt': base_prompt.rstrip() + '\n\n' + appendix,
+            'negative_prompt': _floor_design_text(
+                provider_page.get('negative_prompt') or result.get('negative_prompt'), 6000)
+                or FLOOR_DESIGN_IMAGE_HARD_NEGATIVE,
+            'preparedSpecification': page_spec,
+        })
+    return normalized
 
 
 @app.route('/api/floor-design/analyze', methods=['POST'])
@@ -1430,12 +2029,14 @@ def api_analyze_floor_design_data():
         'أنت مستشار معماري وتحليل بيانات عقارية دقيق. أخرج JSON فقط. '
         'حلل البيانات المعطاة فقط، ولا تخترع قياسات أو اشتراطات. '
         'فرّق بين القيود النظامية الصارمة وتعليمات العميل والافتراضات. '
-        'لا تغيّر عدد الأدوار أو توزيع المجموعات أو مكونات المشروع.'
+        'لا تغيّر عدد الأدوار أو توزيع المجموعات أو مكونات المشروع. '
+        'انقل كل عنصر في data_conflicts إلى warnings صراحة مع القيمتين ومصدريهما، ولا تحسم التعارض أو تعدل أي قيمة.'
     )
     user_prompt = (
         'حلل مدخلات مشروع لإنشاء مخططات 2D مفاهيمية. ركز على ما سيؤثر في الرسم: '
-        'حدود الأرض والاتجاهات والواجهات والارتدادات والمواقف والمداخل والمخارج، '
-        'المساحة والأدوار والبدروم والمكونات والمساحات، ومجموعات الأدوار. '
+        'أطوال الأضلاع وحدود الأرض والشوارع المحيطة والواجهات واتجاهاتها وجدول الاتجاهات كاملًا، '
+        'نسبة التغطية والارتدادات والارتفاع وعدد الأدوار والقيود التنظيمية، '
+        'المساحة المعتمدة ومسطحات البناء فوق الأرض والبدرومات وإجمالي المسطحات والمساحة المغطاة والمفتوحة وجدول المكونات كاملًا، ومجموعات الأدوار. '
         'أعد الشكل التالي فقط: {"summary":"","hard_constraints":[],"project_inputs":[],"group_notes":[],"warnings":[],"assumptions":[]}.\n\n'
         + _floor_design_json_prompt(payload)
     )
@@ -1604,33 +2205,48 @@ def api_floor_design_analysis_chat():
 def api_generate_floor_design_prompt():
     data = request.get_json(silent=True) or {}
     payload = _sanitize_floor_design_request(data)
-    missing = _floor_design_missing_requirements(payload)
-    if missing:
-        return jsonify({'success': False, 'error': 'بيانات تصميم الطوابق غير مكتملة', 'error_code': 'FLOOR_DESIGN_DATA_INCOMPLETE', 'missingFields': missing}), 400
     analysis = data.get('analysis') if isinstance(data.get('analysis'), dict) else {}
     group_id = _floor_design_text(data.get('groupId'), 120)
     group = next((item for item in payload['groups'] if item['id'] == group_id), None)
     if not group:
         return jsonify({'success': False, 'error': 'مجموعة الأدوار غير موجودة', 'error_code': 'GROUP_NOT_FOUND'}), 404
+    prepared = _floor_design_prepare(payload, group)
+    preflight = _floor_design_preflight(payload, prepared, data)
+    if not preflight['ok']:
+        error_code = 'FLOOR_DESIGN_CONFLICTS_BLOCKED' if preflight['blockedItems'] else 'FLOOR_DESIGN_DATA_INCOMPLETE'
+        return jsonify({'success': False, 'error': 'بيانات المخطط الهندسية غير جاهزة للتوليد',
+                        'error_code': error_code, 'missingFields': preflight['missingItems'],
+                        'missingItems': preflight['missingItems'], 'blockedItems': preflight['blockedItems'],
+                        'preflight': preflight}), 409 if preflight['blockedItems'] else 400
     system_prompt = (
-        'أنت كاتب Prompts معماري صارم. أخرج JSON فقط بالشكل '
-        '{"prompt":"","negative_prompt":""}. استخدم القيود النظامية والبيانات فقط. '
-        'اكتب Prompt واضحًا لمخطط 2D علوي، بدون أثاث أو منظور أو زخرفة، مع حدود الوحدات والـ Core والمداخل والممرات. '
-        'ممنوع منعًا باتًا أن تظهر أي كتابة أو أرقام أو حروف أو Labels أو عنوان أو أبعاد أو جدول أو Legend أو بوصلة أو أسهم أو علامة مائية داخل الصورة. '
-        'الصورة يجب أن تحتوي على الرسم الهندسي والخطوط والحدود فقط، بدون أي نص مرئي. '
-        'لا تغيّر عدد الأدوار أو مكونات المجموعة. إذا تعارضت تعليمات العميل مع قيد نظامي، حافظ على القيد وسجّل التعارض داخل prompt.'
+        'You write strict English image prompts for complete landscape architectural presentation pages. '
+        'Return JSON only as {"pages":[{"pageType":"floor","floorNumber":1,"prompt":"","negative_prompt":""}]}. '
+        'Return exactly one item for every supplied Page Spec in the same order. The image model designs only and performs no arithmetic. '
+        'Use every prepared value verbatim. Include the 16:9 canvas, three-column proportions, visual style, plot, envelope status, north orientation, '
+        'all sides, available angles and lengths, setbacks, streets, facades, entrances, cores, circulation, numbered plan bubbles, matching English '
+        'Table of Contents rows, complete Space Program, and pie labels, values, percentages, and colors. '
+        'Never use unresolved instructions such as calculate, determine, approximately, or as appropriate. Never invent missing values. '
+        'The supplied reference is style and layout guidance only. Never copy Acacia names, project content, values, dimensions, room names, or components. '
+        'Permit English titles, labels, numbers, dimensions, tables, legends, and north notation. No logo and no watermark.'
     )
-    user_prompt = 'بيانات التحليل المعتمد:\n' + _floor_design_json_prompt(analysis) + '\n\nبيانات المشروع والمجموعة:\n' + _floor_design_json_prompt({'payload': payload, 'group': group})
+    user_prompt = _floor_design_json_prompt({
+        'analysis': analysis, 'projectData': payload, 'group': group,
+        'pageSpecs': prepared['pages'], 'preparedEngineeringSpecification': prepared,
+        'preflight': preflight,
+    })
     try:
-        response = call_openrouter_chat(system_prompt, user_prompt, temperature=None, max_tokens=5000, model=LUNA_TEXT_MODEL, reasoning_effort='high')
+        response = call_openrouter_chat(system_prompt, user_prompt, temperature=None, max_tokens=10000,
+                                        model=LUNA_TEXT_MODEL, reasoning_effort='high',
+                                        response_format={'type': 'json_object'})
         result = _designer_json_response(extract_chat_content(response, 'FLOOR-DESIGN-PROMPT'))
-        prompt = _floor_design_text(result.get('prompt'), 12000)
-        if not prompt:
-            return jsonify({'success': False, 'error': 'تعذر إنشاء Prompt للمجموعة', 'error_code': 'PROMPT_PROVIDER_INVALID'}), 503
-        return jsonify({'success': True, 'prompt': prompt, 'negativePrompt': _floor_design_text(result.get('negative_prompt'), 6000), 'model': LUNA_TEXT_MODEL})
+        pages = _floor_design_normalize_prompt_pages(result, prepared, payload, group)
+        first = pages[0]
+        return jsonify({'success': True, 'pages': pages, 'prompt': first['prompt'],
+                        'negativePrompt': first['negative_prompt'], 'preparedSpecification': prepared,
+                        'preflight': preflight, 'model': LUNA_TEXT_MODEL})
     except Exception:
         app.logger.exception('Floor design prompt failed')
-        return jsonify({'success': False, 'error': 'تعذر إنشاء Prompt للمجموعة', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
+        return jsonify({'success': False, 'error': 'تعذر إنشاء Prompts لصفحات المجموعة', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
 
 
 @app.route('/api/floor-design/generate', methods=['POST'])
@@ -1641,7 +2257,10 @@ def api_generate_floor_design_image():
     reference = data.get('referenceImage')
     if not isinstance(prompt, str) or not prompt.strip():
         return jsonify({'success': False, 'error': 'وصف التصميم مطلوب', 'error_code': 'PROMPT_REQUIRED'}), 400
-    prompt = prompt.strip()[:12000]
+    prompt = prompt.strip()
+    if len(prompt) > 30000:
+        return jsonify({'success': False, 'error': 'وصف التصميم يتجاوز الحد المسموح',
+                        'error_code': 'PROMPT_TOO_LONG'}), 400
     approved_area = data.get('approvedFinancialArea')
     approved_floors = data.get('approvedFloorCount')
     try:
@@ -1662,8 +2281,12 @@ def api_generate_floor_design_image():
             return jsonify({'success': False, 'error': 'الصورة المرجعية غير صالحة أو كبيرة جدًا', 'error_code': 'REFERENCE_INVALID'}), 400
         if not (reference.startswith('data:image/') or reference.startswith('/uploads/creative/')):
             return jsonify({'success': False, 'error': 'نوع الصورة المرجعية غير مسموح', 'error_code': 'REFERENCE_INVALID'}), 400
+    system_reference = _floor_design_default_reference_data_uri()
+    if not system_reference:
+        return jsonify({'success': False, 'error': 'المرجع البصري الافتراضي غير متاح',
+                        'error_code': 'DEFAULT_REFERENCE_UNAVAILABLE'}), 503
     try:
-        image, image_error = call_openrouter_image_generation(prompt, FLOOR_DESIGN_IMAGE_MODEL, reference)
+        image, image_error = call_openrouter_image_generation(prompt, FLOOR_DESIGN_IMAGE_MODEL, system_reference)
         if not image:
             messages = {
                 'NO_API_KEY': 'مفتاح توليد الصور غير مُعدّ',
@@ -1672,7 +2295,8 @@ def api_generate_floor_design_image():
                 'IMAGE_PROVIDER_TIMEOUT': 'استغرق توليد الصورة وقتًا أطول من المتوقع',
             }
             return jsonify({'success': False, 'error': messages.get(image_error, 'تعذر توليد صورة التصميم'), 'error_code': image_error or 'IMAGE_FAILED'}), 503
-        return jsonify({'success': True, 'image': persist_generated_image(image, g.tenant_id), 'model': FLOOR_DESIGN_IMAGE_MODEL})
+        return jsonify({'success': True, 'image': persist_generated_image(image, g.tenant_id),
+                        'model': FLOOR_DESIGN_IMAGE_MODEL, 'reference': 'system_floor_plan_style'})
     except Exception:
         app.logger.exception('Floor design image generation failed')
         return jsonify({'success': False, 'error': 'حدث خطأ أثناء توليد صورة التصميم', 'error_code': 'IMAGE_FAILED'}), 503
