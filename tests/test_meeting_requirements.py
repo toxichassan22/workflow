@@ -2532,6 +2532,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         project_data = {
             'approved_financial_area': '٧٬٠٠٠ م²',
             'approved_floor_count': '٥ أدوار',
+            'approved_coverage_ratio': '35.5',
             'building_ratio_coverage': 'نسبة البناء 60%، نسبة التغطية ٣٥٫٥٪',
             'setbacks': 'أمامي 6م وخلفي 3م',
             'allowed_uses': 'سكني',
@@ -2627,12 +2628,29 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
         self.assertTrue(all(float(item['value_b']) == 7 for item in conflicts))
 
+    def test_approved_coverage_conflict_uses_the_dedicated_field(self):
+        """Coverage conflicts compare the client-approved ratio, not the regulation prose."""
+        module = self.application_module
+        # Regulation text alone must not fabricate a coverage conflict.
+        _, conflicts = module._floor_design_shared_values(
+            {'building_ratio_coverage': 'نسبة التغطية 30%'},
+            {'coverageRate': '35'},
+        )
+        self.assertEqual([item['key'] for item in conflicts], [])
+        # The dedicated approved-coverage field is what drives the comparison.
+        _, conflicts = module._floor_design_shared_values(
+            {'approved_coverage_ratio': '30'},
+            {'coverageRate': '35'},
+        )
+        self.assertEqual([item['key'] for item in conflicts], ['approved_coverage'])
+
     def test_floor_design_prompt_endpoint_appends_provider_omitted_conflicts(self):
         client = self.app.test_client()
         payload = {
             'projectData': {
                 'approved_financial_area': 7000,
                 'approved_floor_count': 5,
+                'approved_coverage_ratio': 33,
                 'building_ratio_coverage': 'نسبة التغطية 35%',
                 'setbacks': 'أمامي 6م',
                 'allowed_uses': 'سكني',

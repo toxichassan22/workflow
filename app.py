@@ -1286,8 +1286,8 @@ def api_generate_image_single():
 
 
 FLOOR_DESIGN_LAND_KEYS = (
-    'croquis_land_area', 'approved_financial_area', 'approved_floor_count', 'max_floors_height',
-    'building_ratio_coverage', 'setbacks', 'allowed_uses', 'regulatory_constraints',
+    'croquis_land_area', 'approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio',
+    'max_floors_height', 'building_ratio_coverage', 'setbacks', 'allowed_uses', 'regulatory_constraints',
     'building_ratio_setbacks', 'allowed_uses_restrictions', 'land_and_building_summary',
     'boundary_lengths', 'surrounding_streets', 'facades_count', 'facades_directions',
     'land_documents_files_file_meta', 'directions_table', 'survey_coordinates',
@@ -1408,7 +1408,7 @@ def _floor_design_shared_values(land, financial):
     definitions = (
         ('approved_area', 'المساحة المعتمدة', land.get('approved_financial_area'), financial.get('landArea'), False),
         ('approved_floor_count', 'عدد الطوابق المعتمد', land.get('approved_floor_count'), financial.get('floorCount'), False),
-        ('approved_coverage', 'نسبة التغطية المعتمدة', land.get('building_ratio_coverage'), financial.get('coverageRate'), True),
+        ('approved_coverage', 'نسبة التغطية المعتمدة', land.get('approved_coverage_ratio'), financial.get('coverageRate'), False),
     )
     shared, conflicts = {}, []
     for key, label, land_value, financial_value, is_coverage in definitions:

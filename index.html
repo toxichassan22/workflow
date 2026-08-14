@@ -10502,6 +10502,43 @@
       if (element) element.textContent = value;
     }
 
+    const TENANT_FLOOR_PREFLIGHT_LABELS = {
+      approved_financial_area: 'المساحة المعتمدة للدراسة المالية',
+      approved_floor_count: 'الأدوار المعتمدة',
+      building_ratio_coverage: 'نسبة البناء والتغطية',
+      setbacks: 'الارتدادات',
+      allowed_uses: 'الاستخدامات المسموحة',
+      regulatory_constraints: 'القيود التنظيمية',
+      land_and_building_summary: 'ملخص بيانات الأرض والاشتراطات',
+      project_components_data: 'جدول المكونات',
+      floor_groups: 'مجموعات الأدوار',
+      plot_boundary_geometry_or_source_lengths: 'حدود الأرض أو أطوال الأضلاع'
+    };
+
+    function describeFloorDesignPreflight(response) {
+      const lines = [];
+      const missing = Array.isArray(response?.missingItems) ? response.missingItems : [];
+      const blocked = Array.isArray(response?.blockedItems) ? response.blockedItems : [];
+      if (missing.length) {
+        lines.push('ناقص: ' + missing.map(key => TENANT_FLOOR_PREFLIGHT_LABELS[key] || key).join('، '));
+      }
+      blocked.forEach(entry => {
+        const type = entry?.type;
+        const item = entry?.item || {};
+        if (type === 'source_length_conflict') {
+          lines.push('تعارض طول الضلع ' + (item.edge ?? '') + ' (المصدر ' + item.sourceLength + ' مقابل المحسوب ' + item.computedLength + ')');
+          return;
+        }
+        const label = item.label || item.key || 'تعارض بيانات';
+        const sourceA = item.source_a || 'الأرض والكروكي';
+        const sourceB = item.source_b || 'الدراسة المالية';
+        const valueA = item.value_a ?? item.land_croquis_value ?? '';
+        const valueB = item.value_b ?? item.financial_study_value ?? '';
+        lines.push(label + ' (' + sourceA + ': ' + valueA + ' مقابل ' + sourceB + ': ' + valueB + ')');
+      });
+      return lines.length ? 'البيانات غير جاهزة: ' + lines.join('؛ ') : (response?.error || 'تعذر إنشاء Prompts الصفحات');
+    }
+
     async function toggleTenantFloorDesignPrompt() {
       const editor = document.getElementById('tenantFloorDesignPromptEditor');
       const button = document.getElementById('tenantFloorDesignPromptToggle');
@@ -10522,7 +10559,7 @@
           payload.analysis = tenantFloorDesignState.analysis;
           const response = await api('POST', '/api/floor-design/prompt', payload);
           if (!response?.success || !Array.isArray(response.pages) || !response.pages.length) {
-            throw new Error(response?.error || 'تعذر إنشاء Prompts الصفحات');
+            throw new Error(describeFloorDesignPreflight(response));
           }
           group.pages = response.pages.map((item, index) => ({
             id: String(item.id || `${group.id}:page:${index + 1}`),
@@ -10542,7 +10579,7 @@
           markTenantFloorDesignDirty();
           renderTenantFloorDesignActiveGroup();
         } catch (error) {
-          toast(error?.message || 'تعذر إنشاء Prompt المجموعة');
+          toast(error?.message || 'تعذر إنشاء Prompt المجموعة', 9000);
           button.disabled = false;
           button.textContent = 'توليد Prompt';
           return;
