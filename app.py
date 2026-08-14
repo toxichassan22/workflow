@@ -1285,7 +1285,7 @@ def api_generate_image_single():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-FLOOR_DESIGN_PROMPT_VERSION = 2
+FLOOR_DESIGN_PROMPT_VERSION = 3
 
 
 FLOOR_DESIGN_LAND_KEYS = (
@@ -1803,6 +1803,21 @@ def _floor_design_is_residential(component, group):
     return bool(re.search(r'سكن|شقق|شقة|وحدات\s*سكن|residential|apartments?', text, flags=re.IGNORECASE))
 
 
+def _floor_design_floor_range(numbers):
+    sorted_numbers = sorted({int(number) for number in (numbers or []) if isinstance(number, (int, float)) and int(number) == number})
+    if not sorted_numbers:
+        return ''
+    tokens, start, previous = [], sorted_numbers[0], sorted_numbers[0]
+    for number in sorted_numbers[1:]:
+        if number == previous + 1:
+            previous = number
+            continue
+        tokens.append(str(start) if start == previous else f'{start}-{previous}')
+        start = previous = number
+    tokens.append(str(start) if start == previous else f'{start}-{previous}')
+    return '/'.join(tokens)
+
+
 def _floor_design_allocate_rounded(total, weights, digits=2):
     if not weights or any(float(weight) < 0 for weight in weights) or sum(float(weight) for weight in weights) <= 0:
         return []
@@ -1886,7 +1901,9 @@ def _floor_design_space_program(payload, group, floor_number):
         unavailable.append('residential_unit_area_conflict')
     if any(row.get('unitAreaStatus') == 'unavailable' for row in unit_rows):
         unavailable.append('residential_unit_area_missing')
-    return {'floorNumber': floor_number, 'components': rows, 'grossAreaSqm': total_area,
+    represented_floors = group.get('floorNumbers') or [floor_number]
+    return {'floorNumber': floor_number, 'representedFloorRange': _floor_design_floor_range(represented_floors),
+            'representedFloorCount': len(represented_floors), 'components': rows, 'grossAreaSqm': total_area,
             'netAreaSqm': round(sum(net_values), 2) if rows and all(value is not None for value in net_values) else None,
             'pieChartSeries': [{'label': row['name'], 'value': row['grossAreaSqm'],
                                 'percentage': row['percentage'], 'color': row['color']} for row in rows],
@@ -1905,15 +1922,15 @@ def _floor_design_space_program(payload, group, floor_number):
 def _floor_design_prepare(payload, group):
     geometry = _floor_design_polygon_geometry(payload['land'])
     setbacks = _floor_design_setback_spec(payload['land'], geometry)
-    pages = []
-    for floor_number in group['floorNumbers']:
-        pages.append({'pageType': 'floor', 'floorNumber': floor_number, 'floorNumbers': [floor_number],
-                      'title': f'FLOOR {floor_number} PLAN',
-                      'spaceProgram': _floor_design_space_program(payload, group, floor_number)})
-    if len(group['floorNumbers']) > 1:
-        pages.append({'pageType': 'group_overview', 'floorNumber': None,
-                      'floorNumbers': group['floorNumbers'], 'title': 'TYPICAL FLOORS OVERVIEW',
-                      'spaceProgram': {'floors': [page['spaceProgram'] for page in pages]}})
+    floor_numbers = sorted(group.get('floorNumbers') or [])
+    representative_floor = floor_numbers[0] if floor_numbers else None
+    is_typical_group = len(floor_numbers) > 1
+    floor_range = _floor_design_floor_range(floor_numbers)
+    page_type = 'typical_floor' if is_typical_group else 'floor'
+    title = f'FLOORS {floor_range} TYPICAL PLAN' if is_typical_group else f'FLOOR {representative_floor} PLAN'
+    pages = [{'pageType': page_type, 'floorNumber': representative_floor, 'floorNumbers': floor_numbers,
+              'floorRange': floor_range, 'title': title,
+              'spaceProgram': _floor_design_space_program(payload, group, representative_floor)}] if representative_floor is not None else []
     return {
         'geometry': geometry, 'setbacks': setbacks,
         'siteContext': {key: payload['land'].get(key) for key in (
@@ -1937,11 +1954,12 @@ def _floor_design_preflight(payload, prepared, data):
     unavailable = list(prepared['geometry'].get('missingItems', []))
     for page in prepared['pages']:
         program = page.get('spaceProgram', {})
-        if page['pageType'] == 'floor':
+        if page['pageType'] in ('floor', 'typical_floor'):
             missing.extend(program.get('missingRequirements', []))
             unavailable.extend(program.get('unavailableCalculations', []))
             if not program.get('components'):
                 missing.append(f'space_program_floor_{page["floorNumber"]}')
+
     geometry_available = prepared['geometry'].get('calculationStatus') == 'computed'
     source_geometry_available = bool(payload['land'].get('boundary_lengths') or payload['land'].get('directions_table'))
     if not geometry_available and not source_geometry_available:
@@ -2043,23 +2061,30 @@ def _floor_design_append_conflicts(prompt, conflicts):
 
 def _floor_design_page_specification(page, prepared, payload, group):
     """Build the authoritative appendix. The image model receives no numeric work to perform."""
+    is_typical_group = page.get('pageType') == 'typical_floor'
     is_single_floor = page.get('pageType') == 'floor'
+    represented_floors = page.get('floorNumbers') or group.get('floorNumbers') or []
+    floor_range = _floor_design_floor_range(represented_floors)
     page_scope = {
-        'scope': 'single_floor_only' if is_single_floor else 'group_overview',
-        'currentFloor': page.get('floorNumber'),
-        'renderOtherFloors': False if is_single_floor else True,
-        'typicalFloorRepeat': bool(is_single_floor and len(group.get('floorNumbers') or []) > 1),
+        'scope': 'typical_group_floor' if is_typical_group else 'single_floor_only' if is_single_floor else 'group_overview',
+        'representativeFloor': page.get('floorNumber'),
+        'representedFloorRange': floor_range,
+        'representedFloorCount': len(represented_floors),
+        'renderOtherFloors': False,
+        'typicalFloorRepeat': is_typical_group,
     }
     group_context = {
         'id': group.get('id'), 'name': group.get('name'),
         'description': group.get('description'),
-        'typicalFloorRepeat': bool(is_single_floor and len(group.get('floorNumbers') or []) > 1),
-        'scopeInstruction': 'Use this group only as context. This page is the current floor, not the complete group.'
-        if is_single_floor else 'This page is a group overview.',
+        'floorRange': floor_range,
+        'floorCount': len(represented_floors),
+        'typicalFloorRepeat': is_typical_group,
+        'scopeInstruction': 'This is one representative typical-floor plan for every floor in the supplied range. Do not generate a separate floor 2 plan.'
+        if is_typical_group else 'This page represents one floor only.',
     }
     financial_keys = ('landArea', 'builtUpAreaAbove', 'basementArea', 'totalBuiltUpArea', 'coveredArea',
                       'openArea', 'coverageRate')
-    if not is_single_floor:
+    if not is_single_floor and not is_typical_group:
         financial_keys += ('floorCount',)
     specification = {
         'contract': {
@@ -2076,7 +2101,7 @@ def _floor_design_page_specification(page, prepared, payload, group):
                 'typography': 'English geometric sans serif, dark navy, consistent table alignment',
             },
         },
-        'page': {key: page.get(key) for key in ('pageType', 'floorNumber', 'floorNumbers', 'title')},
+        'page': {key: page.get(key) for key in ('pageType', 'floorNumber', 'floorRange', 'title')},
         'pageScope': page_scope,
         'plotGeometry': prepared['geometry'],
         'buildableEnvelope': prepared['setbacks'],
@@ -2087,7 +2112,7 @@ def _floor_design_page_specification(page, prepared, payload, group):
         'dataConflicts': payload.get('data_conflicts', []),
         'financialTotals': {key: payload['financial'].get(key) for key in financial_keys},
         'drawingRules': [
-            'This is a single-floor page when pageScope.scope is single_floor_only. Render and label only the current floor; never list, compare, or draw the complete group floor range or total project floor count on this page.',
+            'For pageScope.scope typical_group_floor, this is one representative plan for every floor in representedFloorRange. Label the range and do not generate or label a separate floor 2 plan. For single_floor_only, label only the current floor.',
             'Treat plotGeometry as the site boundary, not as the building floor plate. Do not shade the whole plot as if it were the building.',
             'Render every supplied plot edge, source length, computed length, azimuth, direction, street, facade, and setback exactly as listed.',
             'Render a conceptual building floor plate separately from the site boundary, using the supplied floor Space Program and never inventing an unavailable setback envelope.',
@@ -2128,11 +2153,18 @@ def _floor_design_normalize_prompt_pages(result, prepared, payload, group):
         provider_prompt = _floor_design_text(provider_page.get('prompt'), 24000)
         if not provider_prompt and index == 0:
             provider_prompt = _floor_design_text(result.get('prompt'), 24000)
-        if page_spec['pageType'] == 'floor':
-            base_prompt = (
-                f'Create one single-floor architectural presentation page for FLOOR {page_spec["floorNumber"]} ONLY. '
-                'Do not show, list, compare, or mention any other floor number or the total number of project floors. '
-                'Follow the mandatory server engineering specification verbatim.')
+        if page_spec['pageType'] in ('floor', 'typical_floor'):
+            if page_spec['pageType'] == 'typical_floor':
+                base_prompt = (
+                    f'Create one representative typical-floor architectural presentation page for FLOORS {page_spec.get("floorRange")} '
+                    f'with FLOOR {page_spec["floorNumber"]} as the representative floor. '
+                    'The same design represents every floor in the supplied group; do not create a separate plan for floor 2 only. '
+                    'Follow the mandatory server engineering specification verbatim.')
+            else:
+                base_prompt = (
+                    f'Create one single-floor architectural presentation page for FLOOR {page_spec["floorNumber"]} ONLY. '
+                    'Do not show, list, compare, or mention any other floor number or the total number of project floors. '
+                    'Follow the mandatory server engineering specification verbatim.')
         else:
             base_prompt = provider_prompt or (
                 'Create the specified architectural presentation page. Follow the mandatory server engineering specification verbatim.')
@@ -2354,13 +2386,13 @@ def api_generate_floor_design_prompt():
                         'preflight': preflight}), 409 if preflight['blockedItems'] else 400
     system_prompt = (
         'You write strict English image prompts for complete landscape architectural presentation pages. '
-        'Return JSON only as {"pages":[{"pageType":"floor","floorNumber":1,"prompt":"","negative_prompt":""}]}. '
+        'Return JSON only as {"pages":[{"pageType":"typical_floor","floorNumber":1,"prompt":"","negative_prompt":""}]}. '
         'Return exactly one item for every supplied Page Spec in the same order. The image model designs only and performs no arithmetic. '
-        'Use every prepared value verbatim. A floor page is one current floor only: never list, draw, or describe the complete group floor range or total project floor count on that page. '
+        'Use every prepared value verbatim. A typical_floor page represents the complete supplied group range with one representative plan; do not reduce a multi-floor group to a floor 2-only design. A floor page with one floor represents that floor only. '
         'Keep the site boundary separate from the conceptual building floor plate. Include the 16:9 canvas, three-column proportions, visual style, plot, envelope status, north orientation, '
         'all sides, available angles and lengths, setbacks, streets, facades, entrances, cores, circulation, numbered plan references, matching English '
         'Table of Contents rows, complete Space Program, and pie labels, values, percentages, colors, and unit counts. '
-        'When residentialLayout.required is true, explicitly describe repeated residential unit boundaries, common circulation, and cores for the current floor; never collapse the floor into one component bubble. '
+        'When residentialLayout.required is true, explicitly describe repeated residential unit boundaries, common circulation, and cores for the representative floor or typical group; never collapse the floor into one component bubble. '
         'Never use unresolved instructions such as calculate, determine, approximately, or as appropriate. Never invent missing values. '
         'The supplied reference is style and layout guidance only. Never copy Acacia names, project content, values, dimensions, room names, or components. '
         'Permit English titles, labels, numbers, dimensions, tables, legends, and north notation. No logo and no watermark.'

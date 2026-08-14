@@ -2492,15 +2492,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(analyzed.get_json()['analysis']['summary'], 'تحليل تجريبي')
         self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.7-flash')
         prompt_response = {'pages': [
-            {'pageType': 'floor', 'floorNumber': floor, 'prompt': f'Floor {floor} design', 'negative_prompt': 'No furniture'}
-            for floor in range(1, 6)
-        ] + [{'pageType': 'group_overview', 'floorNumber': None, 'prompt': 'Overview design', 'negative_prompt': 'No furniture'}]}
+            {'pageType': 'typical_floor', 'floorNumber': 1, 'prompt': 'Typical group design', 'negative_prompt': 'No furniture'}
+        ]}
         with patch.object(self.application_module, 'call_openrouter_chat', return_value={'choices': [{'message': {'content': json.dumps(prompt_response, ensure_ascii=False)}}]}) as call:
             prompted = client.post('/api/floor-design/prompt', headers=self._headers(self.token_a), json={**payload, 'groupId': 'g1', 'analysis': fake_analysis})
         self.assertEqual(prompted.status_code, 200, prompted.get_json())
-        self.assertEqual(len(prompted.get_json()['pages']), 6)
-        self.assertEqual(prompted.get_json()['pages'][0]['promptVersion'], 2)
-        self.assertTrue(prompted.get_json()['prompt'].startswith('Create one single-floor architectural presentation page for FLOOR 1 ONLY.'))
+        self.assertEqual(len(prompted.get_json()['pages']), 1)
+        self.assertEqual(prompted.get_json()['pages'][0]['pageType'], 'typical_floor')
+        self.assertEqual(prompted.get_json()['pages'][0]['promptVersion'], 3)
+        self.assertTrue(prompted.get_json()['prompt'].startswith('Create one representative typical-floor architectural presentation page for FLOORS 1-5'))
         self.assertIn('MANDATORY SERVER ENGINEERING SPECIFICATION', prompted.get_json()['prompt'])
         self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.7-flash')
         prompt_system, prompt_user = call.call_args.args[:2]
@@ -2760,8 +2760,10 @@ class MeetingRequirementsTests(unittest.TestCase):
             ]},
         }
         prepared = module._floor_design_prepare(payload, group)
-        self.assertEqual(len(prepared['pages']), 3)
-        self.assertEqual([page['pageType'] for page in prepared['pages']], ['floor', 'floor', 'group_overview'])
+        self.assertEqual(len(prepared['pages']), 1)
+        self.assertEqual([page['pageType'] for page in prepared['pages']], ['typical_floor'])
+        self.assertEqual(prepared['pages'][0]['floorNumbers'], [1, 2])
+        self.assertEqual(prepared['pages'][0]['title'], 'FLOORS 1-2 TYPICAL PLAN')
         first_program = prepared['pages'][0]['spaceProgram']
         self.assertEqual(first_program['grossAreaSqm'], 75.0)
         self.assertEqual(sum(item['percentage'] for item in first_program['components']), 100.0)
@@ -2810,7 +2812,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         spec = json.loads(spec_json)
         self.assertNotIn('floorNumbers', spec['group'])
         self.assertNotIn('floorCount', spec['financialTotals'])
-        self.assertEqual(spec['pageScope']['currentFloor'], 2)
+        self.assertEqual(spec['pageScope']['representativeFloor'], 2)
         self.assertFalse(spec['pageScope']['renderOtherFloors'])
         self.assertIn('residentialLayout.required', '\n'.join(spec['drawingRules']))
 
@@ -2860,19 +2862,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         group = {'id': 'g1', 'name': 'Typical', 'description': '', 'floorNumbers': [1, 2]}
         payload = {'project': {}, 'land': {}, 'financial': {}, 'data_conflicts': [], 'groups': [group]}
         prepared = {'geometry': {}, 'setbacks': {}, 'siteContext': {}, 'pages': [
-            {'pageType': 'floor', 'floorNumber': 1, 'floorNumbers': [1], 'title': 'FLOOR 1 PLAN', 'spaceProgram': {}},
-            {'pageType': 'floor', 'floorNumber': 2, 'floorNumbers': [2], 'title': 'FLOOR 2 PLAN', 'spaceProgram': {}},
-            {'pageType': 'group_overview', 'floorNumber': None, 'floorNumbers': [1, 2], 'title': 'TYPICAL FLOORS OVERVIEW', 'spaceProgram': {}},
+            {'pageType': 'typical_floor', 'floorNumber': 1, 'floorNumbers': [1, 2], 'floorRange': '1-2', 'title': 'FLOORS 1-2 TYPICAL PLAN', 'spaceProgram': {}},
         ]}
         pages = module._floor_design_normalize_prompt_pages(
-            {'pages': [{'pageType': 'floor', 'floorNumber': 1, 'prompt': 'Provider floor one'}]},
+            {'pages': [{'pageType': 'typical_floor', 'floorNumber': 1, 'prompt': 'Provider group plan'}]},
             prepared, payload, group,
         )
-        self.assertEqual(len(pages), 3)
-        self.assertTrue(pages[0]['prompt'].startswith('Create one single-floor architectural presentation page for FLOOR 1 ONLY.'))
-        self.assertTrue(pages[1]['prompt'].startswith('Create one single-floor architectural presentation page for FLOOR 2 ONLY.'))
+        self.assertEqual(len(pages), 1)
+        self.assertTrue(pages[0]['prompt'].startswith('Create one representative typical-floor architectural presentation page for FLOORS 1-2'))
         self.assertTrue(all('MANDATORY SERVER ENGINEERING SPECIFICATION' in page['prompt'] for page in pages))
-        self.assertNotIn('Provider floor one', pages[0]['prompt'])
+        self.assertNotIn('Provider group plan', pages[0]['prompt'])
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('const legacyPage = group?.generatedPrompt || group?.imageUrl || group?.approvedImageUrl', index_source)
@@ -2880,7 +2879,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('for (let index = 0; index < group.pages.length; index += 1)', index_source)
         self.assertIn('page.approvedImageUrl = page.imageUrl', index_source)
         self.assertIn('tenantFloorDesignActivePageIndex', index_source)
-        self.assertIn('const TENANT_FLOOR_DESIGN_PROMPT_VERSION = 2', index_source)
+        self.assertIn('const TENANT_FLOOR_DESIGN_PROMPT_VERSION = 3', index_source)
         self.assertIn('const pagesAreCurrent =', index_source)
 
     def test_floor_design_image_generation_forces_cached_system_reference(self):

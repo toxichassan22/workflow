@@ -10310,7 +10310,7 @@
       renderProjectTeam();
     }
 
-    const TENANT_FLOOR_DESIGN_PROMPT_VERSION = 2;
+    const TENANT_FLOOR_DESIGN_PROMPT_VERSION = 3;
     const TENANT_FLOOR_DESIGN_STATUS_LABELS = {
       approved: 'معتمد',
       review: 'يحتاج مراجعة',
@@ -10341,7 +10341,7 @@
         const pages = (Array.isArray(group?.pages) ? group.pages : legacyPage).filter(page => page && typeof page === 'object').map((page, pageIndex) => ({
           id: String(page.id || `${String(group?.id || `floor-group-${index + 1}`)}:page:${pageIndex + 1}`),
           promptVersion: Number(page.promptVersion) || 0,
-          pageType: page.pageType === 'group_overview' ? 'group_overview' : 'floor',
+          pageType: page.pageType === 'group_overview' ? 'group_overview' : page.pageType === 'typical_floor' ? 'typical_floor' : 'floor',
           floorNumber: Number.isInteger(Number(page.floorNumber)) ? Number(page.floorNumber) : null,
           floorNumbers: Array.isArray(page.floorNumbers) ? page.floorNumbers.map(Number).filter(Number.isInteger) : [],
           title: String(page.title || `PAGE ${pageIndex + 1}`).slice(0, 160),
@@ -10658,7 +10658,7 @@
       const imageUrl = page?.approvedImageUrl || page?.imageUrl || group.approvedImageUrl || group.imageUrl || '';
       const pageNavigation = document.getElementById('tenantFloorDesignPageNavigation');
       const pageLabel = document.getElementById('tenantFloorDesignPageLabel');
-      if (pageNavigation) pageNavigation.hidden = !group.pages?.length;
+      if (pageNavigation) pageNavigation.hidden = !group.pages?.length || group.pages.length <= 1;
       if (pageLabel) pageLabel.textContent = group.pages?.length ? `${page?.title || 'صفحة'}، ${tenantFloorDesignActivePageIndex + 1} من ${group.pages.length}` : '';
       const previousPage = document.getElementById('tenantFloorDesignPreviousPage');
       const nextPage = document.getElementById('tenantFloorDesignNextPage');
