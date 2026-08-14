@@ -10310,6 +10310,7 @@
       renderProjectTeam();
     }
 
+    const TENANT_FLOOR_DESIGN_PROMPT_VERSION = 2;
     const TENANT_FLOOR_DESIGN_STATUS_LABELS = {
       approved: 'معتمد',
       review: 'يحتاج مراجعة',
@@ -10339,6 +10340,7 @@
         }] : [];
         const pages = (Array.isArray(group?.pages) ? group.pages : legacyPage).filter(page => page && typeof page === 'object').map((page, pageIndex) => ({
           id: String(page.id || `${String(group?.id || `floor-group-${index + 1}`)}:page:${pageIndex + 1}`),
+          promptVersion: Number(page.promptVersion) || 0,
           pageType: page.pageType === 'group_overview' ? 'group_overview' : 'floor',
           floorNumber: Number.isInteger(Number(page.floorNumber)) ? Number(page.floorNumber) : null,
           floorNumbers: Array.isArray(page.floorNumbers) ? page.floorNumbers.map(Number).filter(Number.isInteger) : [],
@@ -10563,7 +10565,7 @@
       const group = tenantFloorDesignActiveGroup();
       let page = tenantFloorDesignActivePage(group);
       if (!editor || !button || !group) return;
-      if (!page?.prompt) {
+      if (!page?.prompt || page.promptVersion !== TENANT_FLOOR_DESIGN_PROMPT_VERSION) {
         if (!tenantFloorDesignState?.analysisApproved) {
           toast('اعتمد تحليل البيانات قبل إنشاء Prompt المخطط.');
           showTenantFloorDesignStage('analysis');
@@ -10581,6 +10583,7 @@
           }
           group.pages = response.pages.map((item, index) => ({
             id: String(item.id || `${group.id}:page:${index + 1}`),
+            promptVersion: Number(item.promptVersion) || TENANT_FLOOR_DESIGN_PROMPT_VERSION,
             pageType: item.pageType || 'floor',
             floorNumber: item.floorNumber ?? null,
             floorNumbers: Array.isArray(item.floorNumbers) ? item.floorNumbers : [],
@@ -10772,6 +10775,9 @@
         editing.name = name;
         editing.prompt = description;
         editing.generatedPrompt = '';
+        editing.pages = [];
+        editing.imageUrl = '';
+        editing.approvedImageUrl = '';
         editing.floorNumbers = [...tenantFloorDesignDraftMembers];
         if (unitsPerFloor == null) delete editing.unitsPerFloor; else editing.unitsPerFloor = unitsPerFloor;
         if (unitArea == null) delete editing.unitArea; else editing.unitArea = unitArea;
@@ -11451,7 +11457,9 @@
       group.status = 'generating';
       renderTenantFloorDesignActiveGroup();
       try {
-        if (!Array.isArray(group.pages) || !group.pages.length) {
+        const pagesAreCurrent = Array.isArray(group.pages) && group.pages.length
+          && group.pages.every(page => Number(page.promptVersion) === TENANT_FLOOR_DESIGN_PROMPT_VERSION);
+        if (!pagesAreCurrent) {
           updateLoaderProgress(10, 'جاري إنشاء مواصفات كل صفحة من بيانات الأرض والدراسة المالية...');
           const promptPayload = await collectTenantFloorDesignAiPayload();
           promptPayload.groupId = group.id;
@@ -11459,7 +11467,8 @@
           const promptResponse = await api('POST', '/api/floor-design/prompt', promptPayload);
           if (!promptResponse?.success || !Array.isArray(promptResponse.pages) || !promptResponse.pages.length) throw new Error(promptResponse?.error || 'تعذر إنشاء Prompts الصفحات');
           group.pages = promptResponse.pages.map(item => ({
-            id: item.id, pageType: item.pageType, floorNumber: item.floorNumber,
+            id: item.id, promptVersion: Number(item.promptVersion) || TENANT_FLOOR_DESIGN_PROMPT_VERSION,
+            pageType: item.pageType, floorNumber: item.floorNumber,
             floorNumbers: item.floorNumbers || [], title: item.title || '', prompt: item.prompt || '',
             negativePrompt: item.negative_prompt || '', imageUrl: '', approvedImageUrl: '', status: 'pending'
           }));

@@ -2499,6 +2499,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             prompted = client.post('/api/floor-design/prompt', headers=self._headers(self.token_a), json={**payload, 'groupId': 'g1', 'analysis': fake_analysis})
         self.assertEqual(prompted.status_code, 200, prompted.get_json())
         self.assertEqual(len(prompted.get_json()['pages']), 6)
+        self.assertEqual(prompted.get_json()['pages'][0]['promptVersion'], 2)
         self.assertTrue(prompted.get_json()['prompt'].startswith('Create one single-floor architectural presentation page for FLOOR 1 ONLY.'))
         self.assertIn('MANDATORY SERVER ENGINEERING SPECIFICATION', prompted.get_json()['prompt'])
         self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.7-flash')
@@ -2879,6 +2880,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('for (let index = 0; index < group.pages.length; index += 1)', index_source)
         self.assertIn('page.approvedImageUrl = page.imageUrl', index_source)
         self.assertIn('tenantFloorDesignActivePageIndex', index_source)
+        self.assertIn('const TENANT_FLOOR_DESIGN_PROMPT_VERSION = 2', index_source)
+        self.assertIn('const pagesAreCurrent =', index_source)
 
     def test_floor_design_image_generation_forces_cached_system_reference(self):
         client = self.app.test_client()

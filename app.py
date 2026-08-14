@@ -1285,6 +1285,9 @@ def api_generate_image_single():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+FLOOR_DESIGN_PROMPT_VERSION = 2
+
+
 FLOOR_DESIGN_LAND_KEYS = (
     'croquis_land_area', 'approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio',
     'max_floors_height', 'building_ratio_coverage', 'setbacks', 'allowed_uses', 'regulatory_constraints',
@@ -2139,6 +2142,7 @@ def _floor_design_normalize_prompt_pages(result, prepared, payload, group):
             'pageType': page_spec['pageType'], 'floorNumber': page_spec['floorNumber'],
             'floorNumbers': page_spec['floorNumbers'], 'title': page_spec['title'],
             'prompt': base_prompt.rstrip() + '\n\n' + appendix,
+            'promptVersion': FLOOR_DESIGN_PROMPT_VERSION,
             'negative_prompt': _floor_design_text(
                 provider_page.get('negative_prompt') or result.get('negative_prompt'), 6000)
                 or FLOOR_DESIGN_IMAGE_HARD_NEGATIVE,
