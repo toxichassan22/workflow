@@ -2499,7 +2499,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             prompted = client.post('/api/floor-design/prompt', headers=self._headers(self.token_a), json={**payload, 'groupId': 'g1', 'analysis': fake_analysis})
         self.assertEqual(prompted.status_code, 200, prompted.get_json())
         self.assertEqual(len(prompted.get_json()['pages']), 6)
-        self.assertTrue(prompted.get_json()['prompt'].startswith('Floor 1 design'))
+        self.assertTrue(prompted.get_json()['prompt'].startswith('Create one single-floor architectural presentation page for FLOOR 1 ONLY.'))
         self.assertIn('MANDATORY SERVER ENGINEERING SPECIFICATION', prompted.get_json()['prompt'])
         self.assertEqual(call.call_args.kwargs['model'], 'google/gemini-3.7-flash')
         prompt_system, prompt_user = call.call_args.args[:2]
@@ -2780,6 +2780,39 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertEqual(program['components'][0]['grossAreaSqm'], 100.0)
             self.assertEqual(program['grossAreaSqm'], 100.0)
 
+    def test_floor_design_residential_units_are_explicit_and_page_scope_excludes_group_range(self):
+        module = self.application_module
+        group = {
+            'id': 'g1', 'name': 'شقق سكنية', 'description': 'يوجد في الطابق الواحد تقريبا 1000 وحدة سكنية',
+            'floorNumbers': [2, 3, 4],
+        }
+        payload = {
+            'financial': {'components': [{
+                'id': 'apt', 'name': 'شقة', 'useType': 'residential', 'units': 1000,
+                'unitArea': 18.37, 'builtArea': 18.37,
+            }]},
+            'land': {}, 'project': {}, 'data_conflicts': [],
+        }
+        program = module._floor_design_space_program(payload, group, 2)
+        row = program['components'][0]
+        self.assertEqual(row['unitsPerFloor'], 1000)
+        self.assertEqual(row['unitAreaSqm'], 18.37)
+        self.assertEqual(row['layoutType'], 'repeated_residential_units')
+        self.assertEqual(row['requiredUnitLayoutAreaSqm'], 18370.0)
+        self.assertIn('residential_unit_area_conflict', program['unavailableCalculations'])
+        self.assertTrue(program['residentialLayout']['required'])
+
+        prepared = {'geometry': {}, 'setbacks': {}, 'siteContext': {}, 'pages': []}
+        page = {'pageType': 'floor', 'floorNumber': 2, 'floorNumbers': [2], 'title': 'FLOOR 2 PLAN', 'spaceProgram': program}
+        spec_text = module._floor_design_page_specification(page, prepared, payload, group)
+        spec_json = spec_text.split('\n', 1)[1].rsplit('\nEND MANDATORY SERVER ENGINEERING SPECIFICATION', 1)[0]
+        spec = json.loads(spec_json)
+        self.assertNotIn('floorNumbers', spec['group'])
+        self.assertNotIn('floorCount', spec['financialTotals'])
+        self.assertEqual(spec['pageScope']['currentFloor'], 2)
+        self.assertFalse(spec['pageScope']['renderOtherFloors'])
+        self.assertIn('residentialLayout.required', '\n'.join(spec['drawingRules']))
+
     def test_floor_design_geographic_conversion_and_preflight_require_explicit_approvals(self):
         module = self.application_module
         geometry = module._floor_design_polygon_geometry({'survey_coordinates': [
@@ -2835,9 +2868,10 @@ class MeetingRequirementsTests(unittest.TestCase):
             prepared, payload, group,
         )
         self.assertEqual(len(pages), 3)
-        self.assertTrue(pages[0]['prompt'].startswith('Provider floor one'))
-        self.assertTrue(pages[1]['prompt'].startswith('Create the specified architectural presentation page.'))
+        self.assertTrue(pages[0]['prompt'].startswith('Create one single-floor architectural presentation page for FLOOR 1 ONLY.'))
+        self.assertTrue(pages[1]['prompt'].startswith('Create one single-floor architectural presentation page for FLOOR 2 ONLY.'))
         self.assertTrue(all('MANDATORY SERVER ENGINEERING SPECIFICATION' in page['prompt'] for page in pages))
+        self.assertNotIn('Provider floor one', pages[0]['prompt'])
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('const legacyPage = group?.generatedPrompt || group?.imageUrl || group?.approvedImageUrl', index_source)

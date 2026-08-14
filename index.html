@@ -6014,6 +6014,13 @@
             <div class="tenant-floor-design-field"><label for="tenantFloorGroupDescription">وصف الأدوار وتعليمات
                 التصميم</label><textarea id="tenantFloorGroupDescription" rows="4"
                 placeholder="اكتب ما يميز هذه الأدوار وما يجب أن يعرفه AI عند تصميمها."></textarea></div>
+            <div class="tenant-floor-design-field"><label for="tenantFloorGroupUnitsPerFloor">عدد الوحدات في الدور (اختياري)</label><input
+                id="tenantFloorGroupUnitsPerFloor" type="number" min="1" step="1"
+                placeholder="مثال: 20"></div>
+            <div class="tenant-floor-design-field"><label for="tenantFloorGroupUnitArea">مساحة الوحدة م² (اختياري)</label><input
+                id="tenantFloorGroupUnitArea" type="number" min="0.01" step="0.01"
+                placeholder="مثال: 85"></div>
+            <p class="tenant-hint">إذا تركت الحقلين فارغين، سيقرأ النظام العدد والمساحة من جدول المكونات أو وصف المجموعة. عند وجود تعارض بين الأرقام سيعرضه في Prompt بدل تغيير أي قيمة.</p>
             <div class="tenant-floor-design-field"><label>حدد الأدوار المتشابهة</label>
               <div id="tenantFloorGroupGrid" class="tenant-floor-design-chip-grid"></div>
             </div>
@@ -10349,6 +10356,8 @@
           name: String(group?.name || `مجموعة ${index + 1}`).trim().slice(0, 160),
           floorNumbers: [...new Set((Array.isArray(group?.floorNumbers) ? group.floorNumbers : []).map(Number).filter(number => Number.isInteger(number) && number >= firstFloor && number < firstFloor + floorCount))].sort((first, second) => first - second),
           type: String(group?.type || 'غير محدد').slice(0, 80), status, pages,
+          unitsPerFloor: Number.isFinite(Number(group?.unitsPerFloor)) && Number(group.unitsPerFloor) > 0 ? Number(group.unitsPerFloor) : null,
+          unitArea: Number.isFinite(Number(group?.unitArea)) && Number(group.unitArea) > 0 ? Number(group.unitArea) : null,
           imageUrl: typeof group?.imageUrl === 'string' ? group.imageUrl : pages[0]?.imageUrl || '',
           approvedImageUrl: typeof group?.approvedImageUrl === 'string' ? group.approvedImageUrl : pages[0]?.approvedImageUrl || '',
           prompt: typeof group?.prompt === 'string' ? group.prompt.slice(0, 12000) : '',
@@ -10729,6 +10738,8 @@
       tenantFloorDesignDraftMembers = group ? [...group.floorNumbers] : [];
       document.getElementById('tenantFloorGroupName').value = group?.name || '';
       document.getElementById('tenantFloorGroupDescription').value = group?.prompt || '';
+      document.getElementById('tenantFloorGroupUnitsPerFloor').value = group?.unitsPerFloor ?? '';
+      document.getElementById('tenantFloorGroupUnitArea').value = group?.unitArea ?? '';
       document.getElementById('tenantFloorGroupRangePreview').textContent = formatTenantFloorDesignNumbers(tenantFloorDesignDraftMembers) || 'لم تحدد أدوارًا بعد';
       renderTenantFloorGroupGrid();
       modal.hidden = false;
@@ -10744,6 +10755,10 @@
       if (!tenantFloorDesignState) return;
       const name = document.getElementById('tenantFloorGroupName').value.trim();
       const description = document.getElementById('tenantFloorGroupDescription').value.trim();
+      const unitsPerFloorValue = Number(document.getElementById('tenantFloorGroupUnitsPerFloor').value);
+      const unitAreaValue = Number(document.getElementById('tenantFloorGroupUnitArea').value);
+      const unitsPerFloor = Number.isFinite(unitsPerFloorValue) && unitsPerFloorValue > 0 ? unitsPerFloorValue : null;
+      const unitArea = Number.isFinite(unitAreaValue) && unitAreaValue > 0 ? unitAreaValue : null;
       const editingId = document.getElementById('tenantFloorGroupModal').dataset.editingGroupId || '';
       if (!name) { toast('اكتب اسم المجموعة'); return; }
       if (!description) { toast('اكتب وصف الأدوار وتعليمات التصميم'); return; }
@@ -10758,9 +10773,14 @@
         editing.prompt = description;
         editing.generatedPrompt = '';
         editing.floorNumbers = [...tenantFloorDesignDraftMembers];
+        if (unitsPerFloor == null) delete editing.unitsPerFloor; else editing.unitsPerFloor = unitsPerFloor;
+        if (unitArea == null) delete editing.unitArea; else editing.unitArea = unitArea;
         editing.status = 'pending';
       } else {
-        tenantFloorDesignState.groups.push({ id: nextId, name, floorNumbers: [...tenantFloorDesignDraftMembers], type: 'غير محدد', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: description, generatedPrompt: '', negativePrompt: '', style: '', chat: [] });
+        const nextGroup = { id: nextId, name, floorNumbers: [...tenantFloorDesignDraftMembers], type: 'غير محدد', status: 'pending', imageUrl: '', approvedImageUrl: '', prompt: description, generatedPrompt: '', negativePrompt: '', style: '', chat: [] };
+        if (unitsPerFloor != null) nextGroup.unitsPerFloor = unitsPerFloor;
+        if (unitArea != null) nextGroup.unitArea = unitArea;
+        tenantFloorDesignState.groups.push(nextGroup);
       }
       tenantFloorDesignState.groups = tenantFloorDesignState.groups.filter(group => group.floorNumbers.length);
       tenantFloorDesignActiveGroupId = nextId;

@@ -1362,7 +1362,8 @@ def _floor_design_components(source):
     keys = (
         'id', 'name', 'useType', 'units', 'unitArea', 'builtArea', 'revenueArea', 'totalArea',
         'investmentModel', 'floorNumbers', 'floors', 'groupIds', 'floorAreas', 'areaPerFloor',
-        'grossArea', 'netArea', 'color',
+        'grossArea', 'netArea', 'color', 'unitsPerFloor', 'unitCountPerFloor', 'floorUnits',
+        'unit_area', 'units_per_floor',
     )
     return [{key: item.get(key) for key in keys if item.get(key) not in (None, '')}
             for item in raw[:100] if isinstance(item, dict)]
@@ -1485,6 +1486,8 @@ def _floor_design_groups(raw_state):
             'floorNumbers': floors,
             'description': _floor_design_text(group.get('prompt'), 12000),
             'components': group.get('components') if isinstance(group.get('components'), list) else [],
+            'unitsPerFloor': group.get('unitsPerFloor') or group.get('unitCountPerFloor'),
+            'unitArea': group.get('unitArea'),
         })
     assigned = {floor for group in output for floor in group['floorNumbers']}
     try:
@@ -1738,6 +1741,65 @@ def _floor_design_component_floor_numbers(component, group):
     return [floor for floor in floors if floor in group['floorNumbers']]
 
 
+def _floor_design_round_number(value):
+    if value is None:
+        return None
+    number = round(float(value), 2)
+    return int(number) if number.is_integer() else number
+
+
+def _floor_design_group_units_per_floor(group):
+    for key in ('unitsPerFloor', 'unitCountPerFloor', 'floorUnits', 'units_per_floor'):
+        number = _floor_design_number(group.get(key))
+        if number is not None and number > 0:
+            return number, f'group.{key}'
+    description = ' '.join(_floor_design_text(group.get(key), 12000) for key in ('name', 'description'))
+    number_pattern = r'([-+]?\d[\d\s,٬٫.]*)'
+    unit_pattern = r'(?:وحد(?:ة|ه|ات)|شقق?|units?|apartments?)'
+    floor_pattern = r'(?:الطابق(?:\s+الواحد)?|الدور(?:\s+الواحد)?|floor)'
+    patterns = (
+        rf'(?:في|لكل|per)\s*{floor_pattern}[^0-9٠-٩۰-۹]{{0,80}}{number_pattern}\s*{unit_pattern}',
+        rf'{number_pattern}\s*{unit_pattern}[^0-9٠-٩۰-۹]{{0,80}}(?:في|لكل|per)\s*{floor_pattern}',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, description, flags=re.IGNORECASE)
+        if match:
+            number = _floor_design_number(match.group(1))
+            if number is not None and number > 0:
+                return number, 'group.description'
+    return None, ''
+
+
+def _floor_design_component_unit_area(component, group):
+    for source in (component, group):
+        for key in ('unitArea', 'unit_area', 'areaPerUnit'):
+            number = _floor_design_number(source.get(key))
+            if number is not None and number > 0:
+                return number, f'{key}'
+    return None, ''
+
+
+def _floor_design_component_units_per_floor(component, group, floors):
+    for key in ('unitsPerFloor', 'unitCountPerFloor', 'floorUnits', 'units_per_floor'):
+        number = _floor_design_number(component.get(key))
+        if number is not None and number > 0:
+            return number, f'component.{key}'
+    group_number, group_source = _floor_design_group_units_per_floor(group)
+    if group_number is not None:
+        return group_number, group_source
+    total_units = _floor_design_number(component.get('units'))
+    if total_units is not None and total_units > 0 and floors:
+        return total_units / len(floors), 'component.units_distributed_across_assigned_floors'
+    return None, ''
+
+
+def _floor_design_is_residential(component, group):
+    text = ' '.join(_floor_design_text(source.get(key), 12000)
+                    for source in (component, group)
+                    for key in ('name', 'useType', 'description'))
+    return bool(re.search(r'سكن|شقق|شقة|وحدات\s*سكن|residential|apartments?', text, flags=re.IGNORECASE))
+
+
 def _floor_design_allocate_rounded(total, weights, digits=2):
     if not weights or any(float(weight) < 0 for weight in weights) or sum(float(weight) for weight in weights) <= 0:
         return []
@@ -1767,6 +1829,9 @@ def _floor_design_space_program(payload, group, floor_number):
         gross_total = _floor_design_number(component.get('grossArea') or component.get('builtArea') or component.get('totalArea'))
         net_total = _floor_design_number(component.get('netArea'))
         area_per_floor = _floor_design_number(component.get('areaPerFloor'))
+        units_total = _floor_design_number(component.get('units'))
+        unit_area, unit_area_source = _floor_design_component_unit_area(component, group)
+        units_per_floor, units_source = _floor_design_component_units_per_floor(component, group, floors)
         if explicit_area is not None:
             gross_area = explicit_area
         elif floor_number in floors and area_per_floor is not None:
@@ -1783,21 +1848,54 @@ def _floor_design_space_program(payload, group, floor_number):
         net_area = None
         if net_total is not None and gross_total and gross_total > 0:
             net_area = round(gross_area * net_total / gross_total, 2)
-        rows.append({'id': component_id,
-                     'name': _floor_design_text(component.get('name') or f'Component {index + 1}', 160),
-                     'grossAreaSqm': round(gross_area, 2), 'netAreaSqm': net_area,
-                     'color': _floor_design_text(component.get('color'), 40) or ['#3B6E91', '#7AA6C2', '#C7A56A', '#8A9A5B', '#A97878'][index % 5]})
+        row = {'id': component_id,
+               'name': _floor_design_text(component.get('name') or f'Component {index + 1}', 160),
+               'useType': _floor_design_text(component.get('useType'), 80),
+               'grossAreaSqm': round(gross_area, 2), 'netAreaSqm': net_area,
+               'color': _floor_design_text(component.get('color'), 40) or ['#3B6E91', '#7AA6C2', '#C7A56A', '#8A9A5B', '#A97878'][index % 5]}
+        if units_total is not None:
+            row['unitCountTotal'] = _floor_design_round_number(units_total)
+        if unit_area is not None:
+            row['unitAreaSqm'] = _floor_design_round_number(unit_area)
+            row['unitAreaSource'] = unit_area_source
+        if units_per_floor is not None:
+            row['unitsPerFloor'] = _floor_design_round_number(units_per_floor)
+            row['unitsPerFloorSource'] = units_source
+        if _floor_design_is_residential(component, group) and units_per_floor is not None:
+            row['layoutType'] = 'repeated_residential_units'
+            if unit_area is not None:
+                required_unit_area = round(units_per_floor * unit_area, 2)
+                row['requiredUnitLayoutAreaSqm'] = required_unit_area
+                if abs(required_unit_area - gross_area) > max(0.01, max(required_unit_area, gross_area) * 0.001):
+                    row['areaConsistency'] = 'conflict_between_unit_count_area_and_reported_floor_area'
+                    row['reportedGrossAreaSqm'] = round(gross_area, 2)
+            else:
+                row['unitAreaStatus'] = 'unavailable'
+        rows.append(row)
     total_area = round(sum(row['grossAreaSqm'] for row in rows), 2)
     percentages = _floor_design_allocate_rounded(100, [row['grossAreaSqm'] for row in rows]) if rows and total_area else []
     for row, percentage in zip(rows, percentages):
         row['percentage'] = percentage
     net_values = [row['netAreaSqm'] for row in rows]
+    unit_rows = [row for row in rows if row.get('layoutType') == 'repeated_residential_units']
+    unavailable = [] if not rows or all(value is not None for value in net_values) else ['net_area_without_approved_net_rule']
+    if any(row.get('areaConsistency') for row in unit_rows):
+        unavailable.append('residential_unit_area_conflict')
+    if any(row.get('unitAreaStatus') == 'unavailable' for row in unit_rows):
+        unavailable.append('residential_unit_area_missing')
     return {'floorNumber': floor_number, 'components': rows, 'grossAreaSqm': total_area,
             'netAreaSqm': round(sum(net_values), 2) if rows and all(value is not None for value in net_values) else None,
             'pieChartSeries': [{'label': row['name'], 'value': row['grossAreaSqm'],
                                 'percentage': row['percentage'], 'color': row['color']} for row in rows],
-            'missingRequirements': sorted(set(missing)), 'unavailableCalculations': (
-                [] if not rows or all(value is not None for value in net_values) else ['net_area_without_approved_net_rule']),
+            'residentialLayout': {
+                'required': bool(unit_rows),
+                'mode': 'repeated_residential_units' if unit_rows else 'component_areas',
+                'components': [{key: row[key] for key in (
+                    'id', 'name', 'useType', 'unitsPerFloor', 'unitAreaSqm', 'requiredUnitLayoutAreaSqm',
+                    'reportedGrossAreaSqm', 'grossAreaSqm', 'areaConsistency', 'unitAreaStatus') if key in row}
+                    for row in unit_rows],
+            },
+            'missingRequirements': sorted(set(missing)), 'unavailableCalculations': sorted(set(unavailable)),
             'rounding': 'largest_remainder_2_decimals'}
 
 
@@ -1942,6 +2040,24 @@ def _floor_design_append_conflicts(prompt, conflicts):
 
 def _floor_design_page_specification(page, prepared, payload, group):
     """Build the authoritative appendix. The image model receives no numeric work to perform."""
+    is_single_floor = page.get('pageType') == 'floor'
+    page_scope = {
+        'scope': 'single_floor_only' if is_single_floor else 'group_overview',
+        'currentFloor': page.get('floorNumber'),
+        'renderOtherFloors': False if is_single_floor else True,
+        'typicalFloorRepeat': bool(is_single_floor and len(group.get('floorNumbers') or []) > 1),
+    }
+    group_context = {
+        'id': group.get('id'), 'name': group.get('name'),
+        'description': group.get('description'),
+        'typicalFloorRepeat': bool(is_single_floor and len(group.get('floorNumbers') or []) > 1),
+        'scopeInstruction': 'Use this group only as context. This page is the current floor, not the complete group.'
+        if is_single_floor else 'This page is a group overview.',
+    }
+    financial_keys = ('landArea', 'builtUpAreaAbove', 'basementArea', 'totalBuiltUpArea', 'coveredArea',
+                      'openArea', 'coverageRate')
+    if not is_single_floor:
+        financial_keys += ('floorCount',)
     specification = {
         'contract': {
             'canvas': '16:9 landscape presentation page',
@@ -1958,22 +2074,26 @@ def _floor_design_page_specification(page, prepared, payload, group):
             },
         },
         'page': {key: page.get(key) for key in ('pageType', 'floorNumber', 'floorNumbers', 'title')},
+        'pageScope': page_scope,
         'plotGeometry': prepared['geometry'],
         'buildableEnvelope': prepared['setbacks'],
         'siteContext': prepared['siteContext'],
         'spaceProgram': page.get('spaceProgram'),
-        'group': {'id': group.get('id'), 'name': group.get('name'), 'description': group.get('description'),
-                  'floorNumbers': group.get('floorNumbers')},
+        'group': group_context,
         'project': payload['project'],
         'dataConflicts': payload.get('data_conflicts', []),
-        'financialTotals': {key: payload['financial'].get(key) for key in (
-            'landArea', 'builtUpAreaAbove', 'basementArea', 'totalBuiltUpArea', 'coveredArea',
-            'openArea', 'coverageRate', 'floorCount')},
+        'financialTotals': {key: payload['financial'].get(key) for key in financial_keys},
         'drawingRules': [
+            'This is a single-floor page when pageScope.scope is single_floor_only. Render and label only the current floor; never list, compare, or draw the complete group floor range or total project floor count on this page.',
+            'Treat plotGeometry as the site boundary, not as the building floor plate. Do not shade the whole plot as if it were the building.',
             'Render every supplied plot edge, source length, computed length, azimuth, direction, street, facade, and setback exactly as listed.',
-            'Render the plan with entrances, cores, circulation, component boundaries, and numbered component bubbles.',
-            'Match each numbered bubble to one English Table of Contents row on the left.',
-            'Render the complete Space Program table and pie series on the right with every supplied label, area, percentage, and color.',
+            'Render a conceptual building floor plate separately from the site boundary, using the supplied floor Space Program and never inventing an unavailable setback envelope.',
+            'The active floor Space Program and group use govern the floor layout even if the general project type is different; preserve the raw project type as metadata but do not let it replace a residential unit program.',
+            'Render the plan with entrances, cores, circulation, component boundaries, and numbered plan references.',
+            'If spaceProgram.residentialLayout.required is true, divide the conceptual floor plate into repeated residential unit boundaries using the supplied unitsPerFloor and unitAreaSqm when available. If unitAreaSqm is unavailable, show the repeated unit boundaries and count without inventing dimensions. Show common circulation and cores, and never represent the entire residential floor as one component bubble.',
+            'When residential unit area consistency is marked as a conflict, show the conflict clearly and do not silently change either source value.',
+            'Match each numbered plan reference to one English Table of Contents row on the left.',
+            'Render the complete Space Program table and pie series on the right with every supplied label, area, percentage, color, and residential unit count.',
             'Use unavailable exactly where a calculation status is unavailable. Do not fill an absent measurement.',
             'Do not alter source values when a computed value also exists.',
         ],
@@ -2005,8 +2125,14 @@ def _floor_design_normalize_prompt_pages(result, prepared, payload, group):
         provider_prompt = _floor_design_text(provider_page.get('prompt'), 24000)
         if not provider_prompt and index == 0:
             provider_prompt = _floor_design_text(result.get('prompt'), 24000)
-        base_prompt = provider_prompt or (
-            'Create the specified architectural presentation page. Follow the mandatory server engineering specification verbatim.')
+        if page_spec['pageType'] == 'floor':
+            base_prompt = (
+                f'Create one single-floor architectural presentation page for FLOOR {page_spec["floorNumber"]} ONLY. '
+                'Do not show, list, compare, or mention any other floor number or the total number of project floors. '
+                'Follow the mandatory server engineering specification verbatim.')
+        else:
+            base_prompt = provider_prompt or (
+                'Create the specified architectural presentation page. Follow the mandatory server engineering specification verbatim.')
         appendix = _floor_design_page_specification(page_spec, prepared, payload, group)
         normalized.append({
             'id': f'{group.get("id") or "group"}:{page_spec["pageType"]}:{page_spec.get("floorNumber") or "overview"}',
@@ -2226,9 +2352,11 @@ def api_generate_floor_design_prompt():
         'You write strict English image prompts for complete landscape architectural presentation pages. '
         'Return JSON only as {"pages":[{"pageType":"floor","floorNumber":1,"prompt":"","negative_prompt":""}]}. '
         'Return exactly one item for every supplied Page Spec in the same order. The image model designs only and performs no arithmetic. '
-        'Use every prepared value verbatim. Include the 16:9 canvas, three-column proportions, visual style, plot, envelope status, north orientation, '
-        'all sides, available angles and lengths, setbacks, streets, facades, entrances, cores, circulation, numbered plan bubbles, matching English '
-        'Table of Contents rows, complete Space Program, and pie labels, values, percentages, and colors. '
+        'Use every prepared value verbatim. A floor page is one current floor only: never list, draw, or describe the complete group floor range or total project floor count on that page. '
+        'Keep the site boundary separate from the conceptual building floor plate. Include the 16:9 canvas, three-column proportions, visual style, plot, envelope status, north orientation, '
+        'all sides, available angles and lengths, setbacks, streets, facades, entrances, cores, circulation, numbered plan references, matching English '
+        'Table of Contents rows, complete Space Program, and pie labels, values, percentages, colors, and unit counts. '
+        'When residentialLayout.required is true, explicitly describe repeated residential unit boundaries, common circulation, and cores for the current floor; never collapse the floor into one component bubble. '
         'Never use unresolved instructions such as calculate, determine, approximately, or as appropriate. Never invent missing values. '
         'The supplied reference is style and layout guidance only. Never copy Acacia names, project content, values, dimensions, room names, or components. '
         'Permit English titles, labels, numbers, dimensions, tables, legends, and north notation. No logo and no watermark.'
