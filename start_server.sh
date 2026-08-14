@@ -105,8 +105,17 @@ sleep 3
 sed "s/127\\.0\\.0\\.1:[0-9]*/127.0.0.1:$SELECTED_PORT/g" "$APP_DIR/.htaccess_prod" > "$WEB_ROOT/.htaccess"
 log ".htaccess routed to 127.0.0.1:$SELECTED_PORT"
 
-# Final health check
-if curl -fsS -m 10 "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}" >/dev/null 2>&1; then
+# Final health check with retry loop
+HEALTH_OK=0
+for i in $(seq 1 15); do
+  if curl -fsS -m 5 "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}" >/dev/null 2>&1; then
+    HEALTH_OK=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$HEALTH_OK" -eq 1 ]; then
   write_deployment_marker
   log "OK: gunicorn running on port $SELECTED_PORT"
 else

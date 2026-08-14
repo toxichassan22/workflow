@@ -5,6 +5,7 @@
 set -e
 
 export PATH="$HOME/bin:$PATH"
+export GIT_LFS_SKIP_SMUDGE=1
 
 REPO_DIR="/home/sagdemo/workflow.git"
 APP_DIR="/home/sagdemo/proposal-generator"
@@ -31,7 +32,7 @@ if [ -n "$TARGET_COMMIT" ]; then
 else
   git reset --hard origin/main
 fi
-git lfs pull || true
+git lfs pull 2>/dev/null || true
 
 echo "===== 2. Sync to app directory ====="
 mkdir -p "$APP_DIR"
@@ -49,6 +50,7 @@ rsync -av \
   --exclude='server_stdout.log' \
   --exclude='watchdog.log' \
   --exclude='boot.log' \
+  --exclude='deploy.log' \
   --exclude='outputs' \
   --exclude='uploads' \
   "$REPO_DIR/" "$APP_DIR/"
@@ -65,9 +67,9 @@ echo "===== 5. Update dependencies ====="
 if [ ! -d "$APP_DIR/venv" ]; then
   python3 -m venv "$APP_DIR/venv"
 fi
-"$PIP" install --upgrade pip setuptools wheel
-"$PIP" install -r "$APP_DIR/requirements.txt"
-"$PIP" install gunicorn
+"$PIP" install --upgrade pip setuptools wheel || true
+"$PIP" install -r "$APP_DIR/requirements.txt" || true
+"$PIP" install gunicorn || true
 
 # Ensure headless Chromium is available for Playwright PDF/PPTX export
 if ! "$PYTHON" -m playwright install chromium >/tmp/playwright_install.log 2>&1; then
@@ -76,6 +78,13 @@ fi
 
 echo "===== 6. Run database migrations ====="
 "$PYTHON" -c "import app; app.db.init_db()"
+
+# Pre-seed deployment marker from repo HEAD
+local_commit=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)
+if [ -n "$local_commit" ]; then
+  printf '{"commit":"%s","deployed_at":"%s","source":"github"}\n' \
+    "$local_commit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$APP_DIR/.deployed_commit"
+fi
 
 echo "===== 7. Start/restart application server ====="
 bash "$APP_DIR/start_server.sh" --force

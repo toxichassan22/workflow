@@ -11650,7 +11650,25 @@ def deploy_webhook():
             command = ['bash', deploy_script]
             if requested_commit:
                 command.append(str(requested_commit))
-            subprocess.Popen(command)
+            
+            deploy_log_path = '/home/sagdemo/proposal-generator/deploy.log'
+            if not os.path.exists(os.path.dirname(deploy_log_path)):
+                deploy_log_path = os.path.join(os.path.dirname(__file__), 'deploy.log')
+            
+            log_fh = None
+            try:
+                log_fh = open(deploy_log_path, 'a', encoding='utf-8')
+                log_fh.write(f"\n--- Deployment triggered at {datetime.now().isoformat()} for commit {requested_commit or 'latest'} ---\n")
+                log_fh.flush()
+            except OSError:
+                log_fh = None
+            
+            popen_kwargs = {'start_new_session': True}
+            if log_fh is not None:
+                popen_kwargs['stdout'] = log_fh
+                popen_kwargs['stderr'] = subprocess.STDOUT
+            
+            subprocess.Popen(command, **popen_kwargs)
             return jsonify({'status': 'Deployment triggered successfully',
                             'expected_commit': requested_commit,
                             'timestamp': datetime.now().isoformat()}), 200
