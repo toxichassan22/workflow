@@ -2880,6 +2880,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('page.approvedImageUrl = page.imageUrl', index_source)
         self.assertIn('tenantFloorDesignActivePageIndex', index_source)
         self.assertIn('const TENANT_FLOOR_DESIGN_PROMPT_VERSION = 3', index_source)
+        self.assertIn('dir="ltr"', index_source)
+        self.assertIn('unicode-bidi: plaintext', index_source)
         self.assertIn('const pagesAreCurrent =', index_source)
 
     def test_floor_design_image_generation_forces_cached_system_reference(self):

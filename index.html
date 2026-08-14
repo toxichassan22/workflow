@@ -4108,6 +4108,9 @@
       border-radius: 10px;
       background: #fff;
       color: var(--txt, #252525);
+      direction: ltr;
+      text-align: left;
+      unicode-bidi: plaintext;
       font: inherit;
       resize: vertical;
     }
@@ -5944,7 +5947,7 @@
             <button type="button" class="btn ghost" id="tenantFloorDesignNextPage"
               onclick="moveTenantFloorDesignPage(1)">الصفحة التالية</button>
           </div>
-          <textarea id="tenantFloorDesignPromptEditor" class="tenant-floor-design-prompt-editor" rows="5"
+          <textarea id="tenantFloorDesignPromptEditor" class="tenant-floor-design-prompt-editor" dir="ltr" rows="5"
             placeholder="سيظهر Prompt الصفحة النشطة هنا ويمكنك تعديله قبل التوليد." hidden></textarea>
           <section class="tenant-floor-design-image-card">
             <div class="tenant-floor-design-image-head"><strong>التصور المختار للمجموعة</strong><span
