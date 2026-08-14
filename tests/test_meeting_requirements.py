@@ -511,6 +511,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(field['fieldLabel'], 'الأدوار المعتمدة')
         self.assertEqual(field['fieldType'], 'number')
         self.assertTrue(field['isRequired'])
+        coverage = next(item for item in fields if item['fieldKey'] == 'approved_coverage_ratio')
+        self.assertEqual(coverage['fieldLabel'], 'التغطية المعتمدة (%)')
+        self.assertEqual(coverage['fieldType'], 'number')
+        self.assertTrue(coverage['isRequired'])
         land_fields = {item['fieldKey']: item for item in fields}
         for key in ('building_ratio_coverage', 'setbacks', 'allowed_uses', 'regulatory_constraints', 'land_and_building_summary'):
             self.assertTrue(land_fields[key]['isRequired'])
@@ -521,6 +525,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('approved_floor_count', result)
         self.assertNotIn('approved_floor_count', result['parcels'][0])
         self.assertEqual(result['parcels'][0]['max_floors_height'], '12 دور')
+
+        coverage_result = self.application_module._normalize_land_document_result({
+            'parcels': [{'parcel_id': 'P-1', 'approved_coverage_ratio': 55, 'setbacks': 'أمامي 6م'}]
+        })
+        self.assertNotIn('approved_coverage_ratio', coverage_result)
+        self.assertNotIn('approved_coverage_ratio', coverage_result['parcels'][0])
 
         regulatory = self.application_module._normalize_land_document_result({
             'parcels': [{
@@ -537,9 +547,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn("resp_json.pop('approved_floor_count', None)", app_source)
+        self.assertIn("resp_json.pop('approved_coverage_ratio', None)", app_source)
         self.assertIn('parking_requirements', app_source)
         self.assertIn('entrances_exits_requirements', app_source)
         self.assertIn("delete fields.approved_floor_count", index_source)
+        self.assertIn("delete fields.approved_coverage_ratio", index_source)
         self.assertIn("'approved_floor_count'", index_source)
 
     def test_direction_and_coordinate_tables_are_separate_ai_outputs(self):
@@ -1368,14 +1380,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('id="coverageRate" type="number" value="35" readonly', index_source)
         self.assertIn('id="floorCount" type="number" min="1" value="1" readonly', index_source)
         self.assertIn('مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي', index_source)
-        self.assertIn('مأخوذة من «نسبة البناء والتغطية» في قسم الأرض والكروكي', index_source)
+        self.assertIn('مأخوذة من «التغطية المعتمدة» في قسم الأرض والكروكي', index_source)
         self.assertIn('مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي', index_source)
 
         # Changing those land fields re-mirrors them into the financial study.
         self.assertIn(
-            "f.fieldKey === 'approved_financial_area' || f.fieldKey === 'approved_floor_count' || f.fieldKey === 'building_ratio_coverage'",
+            "f.fieldKey === 'approved_financial_area' || f.fieldKey === 'approved_floor_count' || f.fieldKey === 'approved_coverage_ratio'",
             index_source)
-        self.assertIn('parseCoverageFromLandText', index_source)
+        self.assertIn("readLand('approved_coverage_ratio')", index_source)
+        self.assertNotIn('parseCoverageFromLandText', index_source)
 
     def test_timeline_starts_blank_with_a_quarter_picker_and_row_delete(self):
         """Phases are client data, so the table must not seed invented stages."""

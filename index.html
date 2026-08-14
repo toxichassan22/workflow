@@ -10082,7 +10082,7 @@
 
           // The land/croquis section owns the approved build inputs; mirror them into the
           // financial study as soon as they change so the two can never disagree.
-          if (f.fieldKey === 'approved_financial_area' || f.fieldKey === 'approved_floor_count' || f.fieldKey === 'building_ratio_coverage') {
+          if (f.fieldKey === 'approved_financial_area' || f.fieldKey === 'approved_floor_count' || f.fieldKey === 'approved_coverage_ratio') {
             input.addEventListener('input', syncFinancialFromLand);
           }
 
@@ -11667,7 +11667,7 @@
             <div><label>إجمالي سنوات المشروع</label><input id="totalProjectYearsDisplay" readonly><span class="help formula">مدة التطوير + مدة التشغيل.</span></div>
 
             <div><label>مساحة الأرض م²</label><input id="landArea" type="number" value="70000" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
-            <div><label>نسبة التغطية %</label><input id="coverageRate" type="number" value="35" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «نسبة البناء والتغطية» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
+            <div><label>نسبة التغطية %</label><input id="coverageRate" type="number" value="35" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «التغطية المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
             <div><label>عدد الطوابق</label><input id="floorCount" type="number" min="1" value="1" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
             <div><label>مسطحات البناء فوق الأرض م²</label><input id="builtUpAreaAbove" type="number" value="100000" oninput="calculateAll()"><span class="help input">إجمالي مسطحات الأدوار فوق الأرض.</span></div>
             <div><label>مساحة البدرومات م²</label><input id="basementArea" type="number" value="30078" oninput="calculateAll()"><span class="help input">إجمالي مسطحات البدرومات.</span></div>
@@ -13259,7 +13259,7 @@
 
       const area = parseNumber(readLand('approved_financial_area'));
       const floors = parseNumber(readLand('approved_floor_count'));
-      const coverage = parseCoverageFromLandText(readLand('building_ratio_coverage'));
+      const coverage = parseNumber(readLand('approved_coverage_ratio'));
       if (landAreaInput && area > 0) landAreaInput.value = String(area);
       if (floorInput && floors > 0) floorInput.value = String(floors);
       if (coverageInput && coverage > 0) coverageInput.value = String(coverage);
@@ -13267,19 +13267,6 @@
       if (typeof calculateAll === 'function') {
         try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
       }
-    }
-
-    function parseCoverageFromLandText(value) {
-      const text = String(value || '');
-      if (!text) return 0;
-      const match = text.match(/(?:نسبة\s*)?التغطية[^\d٠-٩۰-۹+-]{0,40}([-+]?\d[\d٠-٩۰-۹\s,.٬٫]*)/);
-      const token = match ? match[1] : text;
-      const translated = token
-        .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-        .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
-        .replace(/٫/g, '.')
-        .replace(/٬/g, '');
-      return parseNumber(translated);
     }
 
     function saveTimelineData() {
@@ -13706,6 +13693,7 @@
       delete fields.approved_financial_area_sqm;
       delete fields.approved_floor_count;
       delete fields.approved_floors;
+      delete fields.approved_coverage_ratio;
       return fields;
     }
 
@@ -14058,7 +14046,7 @@
       const isApproved = btn.classList.contains('approved');
       if (!isApproved) {
         inputs.forEach(inp => {
-          if (!['approved_financial_area', 'approved_floor_count'].includes(inp.dataset.key)) {
+          if (!['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio'].includes(inp.dataset.key)) {
             inp.disabled = true;
           }
         });
@@ -14106,7 +14094,7 @@
         const data = await api('POST', '/api/site-analysis', { projectData: analysisProjectData });
         if (data.success && data.analysis) {
           const filledFields = data.fields && typeof data.fields === 'object' ? data.fields : {};
-          const clientOnlyFields = new Set(['approved_financial_area', 'approved_financial_area_sqm', 'approved_floor_count', 'approved_floors']);
+          const clientOnlyFields = new Set(['approved_financial_area', 'approved_financial_area_sqm', 'approved_floor_count', 'approved_floors', 'approved_coverage_ratio']);
           const safeFilledFields = Object.fromEntries(Object.entries(filledFields).filter(([key]) => !clientOnlyFields.has(key)));
           if (Array.isArray(data.warnings) && data.warnings.length) {
             toast('اكتمل التحليل، لكن تعذر جلب بعض المعالم: ' + data.warnings.join(' | '));

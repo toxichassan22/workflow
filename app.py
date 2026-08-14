@@ -6515,6 +6515,7 @@ def normalize_croquis_fields(resp_json, text_content=""):
     resp_json.pop('approved_financial_area_sqm', None)
     resp_json.pop('approved_floor_count', None)
     resp_json.pop('approved_floors', None)
+    resp_json.pop('approved_coverage_ratio', None)
 
     # 4. Facades count normalization & fallback (Pure Number: 1, 2, 3, 4)
     raw_facades = resp_json.get('facades_count', '')
@@ -7607,6 +7608,7 @@ def _normalize_parcel_scalar_fields(parcel, text_content=''):
     """
     parcel.pop('approved_floor_count', None)
     parcel.pop('approved_floors', None)
+    parcel.pop('approved_coverage_ratio', None)
     for key in PARCEL_PLACEHOLDER_KEYS:
         if is_placeholder_value(parcel.get(key)):
             parcel[key] = ''
@@ -7945,6 +7947,7 @@ def _normalize_land_document_result(resp_json, text_content='', project_type='')
     result = dict(resp_json)
     result.pop('approved_floor_count', None)
     result.pop('approved_floors', None)
+    result.pop('approved_coverage_ratio', None)
     result['parcels'] = normalized_parcels
     aggregate_coordinates = [row for parcel in normalized_parcels for row in parcel.get('survey_coordinates', [])]
     top_regulation_rows = _regulation_coordinate_rows_from_payload(resp_json)
