@@ -2450,11 +2450,16 @@ def api_generate_floor_design_image():
         if not (reference.startswith('data:image/') or reference.startswith('/uploads/creative/')):
             return jsonify({'success': False, 'error': 'نوع الصورة المرجعية غير مسموح', 'error_code': 'REFERENCE_INVALID'}), 400
     system_reference = _floor_design_default_reference_data_uri()
+    reference_for_generation = system_reference or reference
+    reference_mode = (
+        'system_floor_plan_style' if system_reference else
+        'user_reference_fallback' if reference else
+        'prompt_only_no_reference'
+    )
     if not system_reference:
-        return jsonify({'success': False, 'error': 'المرجع البصري الافتراضي غير متاح',
-                        'error_code': 'DEFAULT_REFERENCE_UNAVAILABLE'}), 503
+        app.logger.warning('Floor design style reference is unavailable; continuing without the system reference')
     try:
-        image, image_error = call_openrouter_image_generation(prompt, FLOOR_DESIGN_IMAGE_MODEL, system_reference)
+        image, image_error = call_openrouter_image_generation(prompt, FLOOR_DESIGN_IMAGE_MODEL, reference_for_generation)
         if not image:
             messages = {
                 'NO_API_KEY': 'مفتاح توليد الصور غير مُعدّ',
@@ -2464,7 +2469,7 @@ def api_generate_floor_design_image():
             }
             return jsonify({'success': False, 'error': messages.get(image_error, 'تعذر توليد صورة التصميم'), 'error_code': image_error or 'IMAGE_FAILED'}), 503
         return jsonify({'success': True, 'image': persist_generated_image(image, g.tenant_id),
-                        'model': FLOOR_DESIGN_IMAGE_MODEL, 'reference': 'system_floor_plan_style'})
+                        'model': FLOOR_DESIGN_IMAGE_MODEL, 'reference': reference_mode})
     except Exception:
         app.logger.exception('Floor design image generation failed')
         return jsonify({'success': False, 'error': 'حدث خطأ أثناء توليد صورة التصميم', 'error_code': 'IMAGE_FAILED'}), 503

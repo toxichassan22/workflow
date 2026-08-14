@@ -2896,6 +2896,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(call.call_args.args[2], 'data:image/png;base64,SYSTEM')
         self.assertEqual(response.get_json()['reference'], 'system_floor_plan_style')
 
+        with patch.object(self.application_module, '_floor_design_default_reference_data_uri', return_value=None), \
+                patch.object(self.application_module, 'call_openrouter_image_generation', return_value=(generated, None)) as fallback_call, \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/generated.png'):
+            fallback = client.post('/api/floor-design/generate', headers=self._headers(self.token_a), json={
+                'prompt': 'Complete presentation page without local reference',
+                'approvedFinancialArea': 1000, 'approvedFloorCount': 2,
+            })
+        self.assertEqual(fallback.status_code, 200, fallback.get_json())
+        self.assertIsNone(fallback_call.call_args.args[2])
+        self.assertEqual(fallback.get_json()['reference'], 'prompt_only_no_reference')
+
         too_long = client.post('/api/floor-design/generate', headers=self._headers(self.token_a), json={
             'prompt': 'x' * 30001, 'approvedFinancialArea': 1000, 'approvedFloorCount': 2,
         })
