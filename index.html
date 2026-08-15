@@ -10962,6 +10962,7 @@
       const nextPage = document.getElementById('tenantFloorDesignNextPage');
       if (previousPage) previousPage.disabled = tenantFloorDesignActivePageIndex <= 0;
       if (nextPage) nextPage.disabled = !group.pages?.length || tenantFloorDesignActivePageIndex >= group.pages.length - 1;
+      const titleText = group.unassigned ? 'أدوار غير منظمة' : group.floorNumbers.length === 1 ? `الدور ${range}` : group.name;
       title.textContent = titleText;
       if (group.unassigned) {
         subtitle.innerHTML = 'نظم هذه الأدوار في مجموعة قبل تصميمها.';
