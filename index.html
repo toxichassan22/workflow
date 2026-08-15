@@ -3697,7 +3697,9 @@
     .tenant-floor-design-setup[hidden],
     .tenant-floor-design-workspace[hidden],
     .tenant-floor-design-modal[hidden],
-    .tenant-floor-design-drawer[hidden] {
+    .tenant-floor-design-drawer[hidden],
+    .tenant-floor-design-page-nav[hidden],
+    .tenant-floor-prompt-drawer[hidden] {
       display: none !important;
     }
 
@@ -4195,6 +4197,11 @@
       background: #f8fafc;
       border-radius: 8px;
       border: 1px solid var(--line);
+    }
+
+    .tenant-floor-design-page-nav[hidden],
+    .tenant-floor-prompt-drawer[hidden] {
+      display: none !important;
     }
 
     .tenant-floor-prompt-drawer {
