@@ -11826,7 +11826,7 @@
 
     function buildTenantFloorDesignPrompt(group) {
       const range = formatTenantFloorDesignNumbers(group.floorNumbers);
-      return `Create a complete 16:9 landscape architectural presentation page for floors ${range}. Use English titles, numbered plan bubbles, matching Table of Contents rows, a complete Space Program table, and labeled pie charts. Use only server-prepared engineering values. Do not perform calculations, estimate missing measurements, copy reference-project content, add a logo, or add a watermark.`;
+      return `Create a complete 16:9 landscape architectural presentation page in clean 2D CAD style for floors ${range} on a solid pure white #FFFFFF background. Left 25% info panel: floor title, Table of Contents, Space Program table, and pastel donut chart. Dominant 75% main area: high-precision 2D CAD architectural floor plan with solid black structural column grid, thin partition walls, clear circulation corridors, elevator and stair cores, pastel programmatic zoning fills, and numbered legend pills. Use only server-prepared engineering values. Do not render site survey polygons or azimuths. Do not perform calculations, estimate missing measurements, copy reference-project content, add a logo, or add a watermark.`;
     }
 
     function validateTenantApprovedBuildInputs() {

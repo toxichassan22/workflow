@@ -199,8 +199,10 @@ _FLOOR_DESIGN_REFERENCE_PACK_CACHE = {'fingerprint': None, 'references': None}
 FLOOR_DESIGN_IMAGE_HARD_NEGATIVE = (
     'ABSOLUTE OUTPUT RULES: no watermark, no logo, no Acacia name, no copied project name, '
     'no copied dimensions, no copied room names, and no copied project content from the style reference. '
+    'No beige, ivory, cream, dark, or textured background; canvas background must be solid pure white #FFFFFF. '
+    'No raw site survey boundary polygon, azimuth angles, or street width annotations on typical floor plans. '
     'Do not omit, shorten, summarize, recalculate, estimate, or alter any supplied engineering value. '
-    'Do not add decorative symbols, pictograms, three-dimensional perspective, photorealism, or unrelated UI.'
+    'Do not add decorative symbols, pictograms, three-dimensional perspective, isometric view, photorealism, or unrelated UI.'
 )
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
@@ -2195,15 +2197,18 @@ def _floor_design_page_specification(page, prepared, payload, group):
         'contract': {
             'canvas': '16:9 landscape presentation page',
             'layout': {
-                'leftColumn': '0 to 24 percent, Table of Contents',
-                'centerColumn': '24 to 72 percent, numbered architectural plan',
-                'rightColumn': '72 to 100 percent, Pie Charts and Space Program',
+                'leftColumn': '0 to 25 percent, Header, Table of Contents, Space Program table, and pastel donut chart',
+                'mainArea': '25 to 100 percent, dominant 2D CAD architectural floor plan with functional zoning and numbered legend',
             },
             'style': {
+                'aesthetic': 'Clean high-end CAD presentation drawing matching Acacia standard',
                 'referenceUse': 'layout, spacing, palette, line hierarchy, and typography only',
-                'background': '#F5F1E8 warm ivory', 'primaryLines': '#243B53 at 1.6 px',
-                'secondaryLines': '#7A8C99 at 0.8 px', 'accent': '#C7A56A',
-                'typography': 'English geometric sans serif, dark navy, consistent table alignment',
+                'background': '#FFFFFF pure white solid background',
+                'primaryLines': '#1F2937 dark graphite at 1.2 px, solid black #000000 structural column grid',
+                'secondaryLines': '#9CA3AF at 0.8 px, thin partition walls, window cuts, door swing arcs',
+                'colorFills': 'Soft elegant pastel functional zoning fills with high contrast and legibility',
+                'accent': '#C7A56A',
+                'typography': 'English geometric sans serif, dark charcoal, consistent table alignment',
             },
         },
         'page': {key: page.get(key) for key in ('pageType', 'floorNumber', 'floorRange', 'title')},
@@ -2218,15 +2223,18 @@ def _floor_design_page_specification(page, prepared, payload, group):
         'financialTotals': {key: payload['financial'].get(key) for key in financial_keys},
         'drawingRules': [
             'For pageScope.scope typical_group_floor, this is one representative plan for every floor in representedFloorRange. Label the range and do not generate or label a separate floor 2 plan. For single_floor_only, label only the current floor.',
-            'Treat plotGeometry as the site boundary, not as the building floor plate. Do not shade the whole plot as if it were the building.',
-            'Render every supplied plot edge, source length, computed length, azimuth, direction, street, facade, and setback exactly as listed.',
-            'Render a conceptual building floor plate separately from the site boundary, using the supplied floor Space Program and never inventing an unavailable setback envelope.',
+            'Background MUST be pure solid white #FFFFFF with no borders, textures, or shadows.',
+            'Render a dominant, high-precision 2D CAD architectural floor plan occupying 75% width of the canvas.',
+            'Include a solid black structural column grid, crisp interior partition walls, standard door swing arcs, window openings, and vertical circulation cores (elevators with cross lines, fire exit stairs with step treads).',
+            'Provide generous, continuous circulation corridors connecting all spaces and units directly to the central core.',
+            'Apply soft pastel color washes to distinguish programmatic zones matching the Space Program.',
+            'Do not render raw site survey boundary polygons, azimuth angles, or street width annotations on typical floor plans.',
             'The active floor Space Program and group use govern the floor layout even if the general project type is different; preserve the raw project type as metadata but do not let it replace a residential unit program.',
-            'Render the plan with entrances, cores, circulation, component boundaries, and numbered plan references.',
-            'If spaceProgram.residentialLayout.required is true, divide the conceptual floor plate into repeated residential unit boundaries using the supplied unitsPerFloor and unitAreaSqm when available. If unitAreaSqm is unavailable, show the repeated unit boundaries and count without inventing dimensions. Show common circulation and cores, and never represent the entire residential floor as one component bubble.',
+            'If spaceProgram.residentialLayout.required is true, divide the floor plate into repeated residential unit boundaries using the supplied unitsPerFloor and unitAreaSqm when available. If unitAreaSqm is unavailable, show the repeated unit boundaries and count without inventing dimensions. Show common circulation and cores, and never represent the entire residential floor as one component bubble.',
             'When residential unit area consistency is marked as a conflict, show the conflict clearly and do not silently change either source value.',
-            'Match each numbered plan reference to one English Table of Contents row on the left.',
-            'Render the complete Space Program table and pie series on the right with every supplied label, area, percentage, color, and residential unit count.',
+            'Match each numbered plan reference to one English Table of Contents / Legend row on the left.',
+            'Render the complete Space Program table and pastel donut breakdown on the left info panel (0-25% width) with every supplied label, area, percentage, color, and residential unit count.',
+            'Include a minimalist North arrow indicator.',
             'Use unavailable exactly where a calculation status is unavailable. Do not fill an absent measurement.',
             'Do not alter source values when a computed value also exists.',
         ],
@@ -2262,17 +2270,17 @@ def _floor_design_normalize_prompt_pages(result, prepared, payload, group):
             if page_spec['pageType'] == 'typical_floor':
                 base_prompt = (
                     f'Create one representative typical-floor architectural presentation page for FLOORS {page_spec.get("floorRange")} '
-                    f'with FLOOR {page_spec["floorNumber"]} as the representative floor. '
+                    f'with FLOOR {page_spec["floorNumber"]} as the representative floor in clean 2D CAD architectural style on a solid pure white #FFFFFF background. '
                     'The same design represents every floor in the supplied group; do not create a separate plan for floor 2 only. '
                     'Follow the mandatory server engineering specification verbatim.')
             else:
                 base_prompt = (
-                    f'Create one single-floor architectural presentation page for FLOOR {page_spec["floorNumber"]} ONLY. '
+                    f'Create one single-floor architectural presentation page for FLOOR {page_spec["floorNumber"]} ONLY in clean 2D CAD architectural style on a solid pure white #FFFFFF background. '
                     'Do not show, list, compare, or mention any other floor number or the total number of project floors. '
                     'Follow the mandatory server engineering specification verbatim.')
         else:
             base_prompt = provider_prompt or (
-                'Create the specified architectural presentation page. Follow the mandatory server engineering specification verbatim.')
+                'Create the specified architectural presentation page in clean 2D CAD architectural style on a solid pure white #FFFFFF background. Follow the mandatory server engineering specification verbatim.')
         appendix = _floor_design_page_specification(page_spec, prepared, payload, group)
         normalized.append({
             'id': f'{group.get("id") or "group"}:{page_spec["pageType"]}:{page_spec.get("floorNumber") or "overview"}',
@@ -2495,9 +2503,11 @@ def api_generate_floor_design_prompt():
         'Return JSON only as {"pages":[{"pageType":"typical_floor","floorNumber":1,"prompt":"","negative_prompt":""}]}. '
         'Return exactly one item for every supplied Page Spec in the same order. The image model designs only and performs no arithmetic. '
         'Use every prepared value verbatim. A typical_floor page represents the complete supplied group range with one representative plan; do not reduce a multi-floor group to a floor 2-only design. A floor page with one floor represents that floor only. '
-        'Keep the site boundary separate from the conceptual building floor plate. Include the 16:9 canvas, three-column proportions, visual style, plot, envelope status, north orientation, '
-        'all sides, available angles and lengths, setbacks, streets, facades, entrances, cores, circulation, numbered plan references, matching English '
-        'Table of Contents rows, complete Space Program, and pie labels, values, percentages, colors, and unit counts. '
+        'The presentation format strictly follows the clean CAD architectural standard of the Acacia reference: '
+        '16:9 landscape canvas, pure white #FFFFFF solid background, left 25% info panel with floor title, Table of Contents, Space Program table and pastel donut chart, '
+        'and the dominant right 75% featuring a high-precision 2D CAD architectural floor plan with solid black column grid, thin partition walls, clear circulation corridors, '
+        'vertical circulation cores (elevators & fire exit stairs), soft pastel programmatic zoning fills, and numbered legend badges. '
+        'Do not render raw site survey boundary polygons, azimuth angles, or street width annotations on typical floor plans. '
         'When residentialLayout.required is true, explicitly describe repeated residential unit boundaries, common circulation, and cores for the representative floor or typical group; never collapse the floor into one component bubble. '
         'Never use unresolved instructions such as calculate, determine, approximately, or as appropriate. Never invent missing values. '
         'The nine attached reference images, when supplied, show the same fixed design across different floor types. Extract only their invariant layout, spacing, palette, line hierarchy, and information architecture; do not copy any reference content. '
