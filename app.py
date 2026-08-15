@@ -2213,12 +2213,9 @@ def _floor_design_page_specification(page, prepared, payload, group):
         },
         'page': {key: page.get(key) for key in ('pageType', 'floorNumber', 'floorRange', 'title')},
         'pageScope': page_scope,
-        'plotGeometry': prepared['geometry'],
-        'buildableEnvelope': prepared['setbacks'],
-        'siteContext': prepared['siteContext'],
         'spaceProgram': page.get('spaceProgram'),
         'group': group_context,
-        'project': payload['project'],
+        'project': {key: payload['project'].get(key) for key in ('project_name', 'project_type', 'project_stage') if payload['project'].get(key)},
         'dataConflicts': payload.get('data_conflicts', []),
         'financialTotals': {key: payload['financial'].get(key) for key in financial_keys},
         'drawingRules': [
@@ -2266,27 +2263,26 @@ def _floor_design_normalize_prompt_pages(result, prepared, payload, group):
         provider_prompt = _floor_design_text(provider_page.get('prompt'), 24000)
         if not provider_prompt and index == 0:
             provider_prompt = _floor_design_text(result.get('prompt'), 24000)
-        if page_spec['pageType'] in ('floor', 'typical_floor'):
-            if page_spec['pageType'] == 'typical_floor':
-                base_prompt = (
-                    f'Create one representative typical-floor architectural presentation page for FLOORS {page_spec.get("floorRange")} '
-                    f'with FLOOR {page_spec["floorNumber"]} as the representative floor in clean 2D CAD architectural style on a solid pure white #FFFFFF background. '
-                    'The same design represents every floor in the supplied group; do not create a separate plan for floor 2 only. '
-                    'Follow the mandatory server engineering specification verbatim.')
-            else:
-                base_prompt = (
-                    f'Create one single-floor architectural presentation page for FLOOR {page_spec["floorNumber"]} ONLY in clean 2D CAD architectural style on a solid pure white #FFFFFF background. '
-                    'Do not show, list, compare, or mention any other floor number or the total number of project floors. '
-                    'Follow the mandatory server engineering specification verbatim.')
+        if page_spec['pageType'] == 'typical_floor':
+            base_prompt = (
+                f'Create one representative typical-floor architectural presentation page for FLOORS {page_spec.get("floorRange")} '
+                f'with FLOOR {page_spec["floorNumber"]} as the representative floor. '
+                'The same design represents every floor in the supplied group; do not create a separate plan for floor 2 only. '
+                'Follow the mandatory server engineering specification verbatim.')
+            clean_provider = provider_prompt.strip() if provider_prompt else ''
+            if clean_provider and clean_provider not in ('Provider group plan', 'Typical group design', base_prompt.strip()):
+                base_prompt = f'{base_prompt}\n\nARCHITECTURAL DESIGN INSTRUCTIONS (GEMINI 3.7 FLASH):\n{clean_provider}'
         else:
             base_prompt = provider_prompt or (
-                'Create the specified architectural presentation page in clean 2D CAD architectural style on a solid pure white #FFFFFF background. Follow the mandatory server engineering specification verbatim.')
+                'Create the specified architectural presentation page. Follow the mandatory server engineering specification verbatim.')
+        full_lead = base_prompt
+        
         appendix = _floor_design_page_specification(page_spec, prepared, payload, group)
         normalized.append({
             'id': f'{group.get("id") or "group"}:{page_spec["pageType"]}:{page_spec.get("floorNumber") or "overview"}',
             'pageType': page_spec['pageType'], 'floorNumber': page_spec['floorNumber'],
             'floorNumbers': page_spec['floorNumbers'], 'title': page_spec['title'],
-            'prompt': base_prompt.rstrip() + '\n\n' + appendix,
+            'prompt': full_lead.rstrip() + '\n\n' + appendix,
             'promptVersion': FLOOR_DESIGN_PROMPT_VERSION,
             'negative_prompt': _floor_design_text(
                 provider_page.get('negative_prompt') or result.get('negative_prompt'), 6000)
