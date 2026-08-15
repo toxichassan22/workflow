@@ -4203,7 +4203,7 @@
       border: 1px solid #e2e8f0;
       border-radius: 10px;
       display: grid;
-      gap: 8px;
+      gap: 10px;
       margin-top: 4px;
     }
 
@@ -4211,9 +4211,22 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       font-size: 12px;
       color: var(--p);
+      flex-wrap: wrap;
+    }
+
+    .tenant-floor-prompt-title-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .tenant-floor-prompt-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       flex-wrap: wrap;
     }
 
@@ -6185,10 +6198,18 @@
 
             <div id="tenantFloorDesignPromptContainer" class="tenant-floor-prompt-drawer" hidden>
               <div class="tenant-floor-prompt-drawer-head">
-                <strong>المواصفات الهندسية للـ Prompt (قابلة للتعديل)</strong>
-                <span class="tenant-hint">يمكنك مراجعة أو تخصيص النص الإنجليزي الموجه لنموذج الذكاء الاصطناعي</span>
+                <div class="tenant-floor-prompt-title-wrap">
+                  <strong>المواصفات الهندسية للـ Prompt (قابلة للتعديل)</strong>
+                  <span class="tenant-hint">يمكنك تعديل النص الإنجليزي مباشرة أو إعادة صياغته بالذكاء الاصطناعي</span>
+                </div>
+                <div class="tenant-floor-prompt-actions">
+                  <button type="button" class="btn ghost small" id="tenantFloorDesignPromptRegenerateBtn"
+                    onclick="regenerateTenantFloorDesignPrompt()">إعادة صياغة بالذكاء الاصطناعي</button>
+                  <button type="button" class="btn ghost small" id="tenantFloorDesignPromptResetBtn"
+                    onclick="resetTenantFloorDesignPromptToDefault()">استعادة النص التلقائي</button>
+                </div>
               </div>
-              <textarea id="tenantFloorDesignPromptEditor" class="tenant-floor-design-prompt-editor" dir="ltr" rows="5"
+              <textarea id="tenantFloorDesignPromptEditor" class="tenant-floor-design-prompt-editor" dir="ltr" rows="6"
                 placeholder="سيظهر Prompt الصفحة النشطة هنا ويمكنك تعديله قبل التوليد." hidden></textarea>
             </div>
           </div>
@@ -10896,6 +10917,82 @@
       button.textContent = editor.hidden ? 'المواصفات الهندسية للـ Prompt' : 'إخفاء المواصفات الهندسية';
       button.disabled = false;
       if (!editor.hidden) editor.focus();
+    }
+
+    async function regenerateTenantFloorDesignPrompt() {
+      const button = document.getElementById('tenantFloorDesignPromptRegenerateBtn');
+      const toggle = document.getElementById('tenantFloorDesignPromptToggle');
+      const editor = document.getElementById('tenantFloorDesignPromptEditor');
+      const container = document.getElementById('tenantFloorDesignPromptContainer');
+      const group = tenantFloorDesignActiveGroup();
+      if (!group) return;
+      if (!tenantFloorDesignState?.analysisApproved) {
+        toast('اعتمد تحليل البيانات قبل إنشاء Prompt المخطط.');
+        showTenantFloorDesignStage('analysis');
+        return;
+      }
+      if (button) { button.disabled = true; button.textContent = 'جاري إعادة الصياغة...'; }
+      if (toggle) { toggle.disabled = true; }
+      try {
+        const payload = await collectTenantFloorDesignAiPayload();
+        payload.groupId = group.id;
+        payload.analysis = tenantFloorDesignState.analysis;
+        payload.approvedConflictKeys = [
+          'approved_area', 'approved_floor_count', 'approved_coverage', 'floor_design_floor_count',
+          'source_length_edge_1', 'source_length_edge_2', 'source_length_edge_3', 'source_length_edge_4',
+          ...Object.keys(tenantFloorDesignState?.analysisApprovedSections || {})
+        ];
+        const response = await api('POST', '/api/floor-design/prompt', payload);
+        if (!response?.success || !Array.isArray(response.pages) || !response.pages.length) {
+          throw new Error(describeFloorDesignPreflight(response));
+        }
+        group.pages = response.pages.map((item, index) => ({
+          id: String(item.id || `${group.id}:page:${index + 1}`),
+          promptVersion: Number(item.promptVersion) || TENANT_FLOOR_DESIGN_PROMPT_VERSION,
+          pageType: item.pageType || 'floor',
+          floorNumber: item.floorNumber ?? null,
+          floorNumbers: Array.isArray(item.floorNumbers) ? item.floorNumbers : [],
+          title: String(item.title || `PAGE ${index + 1}`),
+          prompt: String(item.prompt || ''),
+          negativePrompt: String(item.negative_prompt || item.negativePrompt || ''),
+          imageUrl: group.pages?.[index]?.imageUrl || '',
+          approvedImageUrl: group.pages?.[index]?.approvedImageUrl || '',
+          status: group.pages?.[index]?.status || 'pending'
+        }));
+        tenantFloorDesignActivePageIndex = Math.min(tenantFloorDesignActivePageIndex, group.pages.length - 1);
+        const page = tenantFloorDesignActivePage(group);
+        syncTenantFloorDesignGroupStatus(group);
+        markTenantFloorDesignDirty();
+        if (editor) editor.value = page?.prompt || group.generatedPrompt || buildTenantFloorDesignPrompt(group);
+        toast('تمت إعادة صياغة الـ Prompt بالذكاء الاصطناعي بنجاح.');
+        renderTenantFloorDesignActiveGroup();
+        if (container) container.hidden = false;
+        if (editor) { editor.hidden = false; editor.focus(); }
+      } catch (error) {
+        toast(error?.message || 'تعذر إعادة صياغة Prompt المجموعة', 9000);
+      } finally {
+        if (button) { button.disabled = false; button.textContent = 'إعادة صياغة بالذكاء الاصطناعي'; }
+        if (toggle) { toggle.disabled = false; toggle.textContent = 'إخفاء المواصفات الهندسية'; }
+      }
+    }
+
+    function resetTenantFloorDesignPromptToDefault() {
+      const group = tenantFloorDesignActiveGroup();
+      const editor = document.getElementById('tenantFloorDesignPromptEditor');
+      if (!group || !editor) return;
+      const defaultSpec = buildTenantFloorDesignPrompt(group);
+      editor.value = defaultSpec;
+      const page = tenantFloorDesignActivePage(group);
+      if (page) {
+        page.prompt = defaultSpec;
+        if (page.status === 'approved') page.status = page.imageUrl ? 'review' : 'pending';
+        syncTenantFloorDesignGroupStatus(group);
+      } else {
+        group.generatedPrompt = defaultSpec;
+      }
+      markTenantFloorDesignDirty();
+      toast('تم استعادة المواصفات الهندسية التلقائية.');
+      editor.focus();
     }
 
     function applyFloorDesignQuickPrompt(text) {
