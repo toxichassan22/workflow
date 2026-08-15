@@ -3777,9 +3777,98 @@
       margin-top: 18px;
     }
 
+    .tenant-floor-stepper {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin: 14px 0 22px;
+      padding: 10px 16px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 2px 8px rgba(24, 53, 74, 0.04);
+    }
+
+    .tenant-floor-step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      cursor: pointer;
+      color: var(--muted);
+      font: inherit;
+      transition: all 0.2s ease;
+      text-align: start;
+    }
+
+    .tenant-floor-step:hover {
+      background: #f7fafc;
+      color: var(--txt, #252525);
+    }
+
+    .tenant-floor-step.active {
+      background: #eef7f6;
+      border-color: #b5deda;
+      color: var(--p);
+      font-weight: 700;
+    }
+
+    .tenant-floor-step.completed .tenant-floor-step-num {
+      background: #2a8a70;
+      color: #ffffff;
+    }
+
+    .tenant-floor-step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: #e2e8f0;
+      color: #475569;
+      font-weight: 700;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .tenant-floor-step.active .tenant-floor-step-num {
+      background: var(--p);
+      color: #ffffff;
+    }
+
+    .tenant-floor-step-content {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .tenant-floor-step-title {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .tenant-floor-step-desc {
+      font-size: 10px;
+      color: var(--muted);
+      font-weight: normal;
+    }
+
+    .tenant-floor-step-divider {
+      width: 20px;
+      height: 2px;
+      background: #e2e8f0;
+      flex-shrink: 0;
+    }
+
     .tenant-floor-design-workspace {
       display: grid;
-      grid-template-columns: minmax(225px, 275px) minmax(0, 1fr);
+      grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
       gap: 16px;
       min-height: 680px;
     }
@@ -3799,50 +3888,70 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
 
     .tenant-floor-design-sidebar-head h3 {
       margin: 0;
       color: var(--p);
+      font-size: 15px;
+      font-weight: 700;
     }
 
-    .tenant-floor-design-sidebar-head span {
-      color: var(--muted);
+    .tenant-floor-design-count-pill {
       font-size: 11px;
+      color: var(--muted);
+      background: #f1f5f9;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+
+    .tenant-floor-design-search-wrap {
+      margin-bottom: 8px;
     }
 
     .tenant-floor-design-search {
       width: 100%;
       min-height: 38px;
-      margin-bottom: 8px;
+      box-sizing: border-box;
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 8px 9px;
+      padding: 8px 10px;
       font: inherit;
+      font-size: 12px;
     }
 
     .tenant-floor-design-filters {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 4px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 3px;
       margin-bottom: 12px;
     }
 
     .tenant-floor-design-filter {
-      min-height: 32px;
-      padding: 5px 3px;
+      min-height: 30px;
+      padding: 4px 2px;
       border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #f7fafc;
+      border-radius: 6px;
+      background: #f8fafc;
       color: var(--muted);
+      font: inherit;
       font-size: 10px;
       cursor: pointer;
+      text-align: center;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+
+    .tenant-floor-design-filter:hover {
+      border-color: #cbd5e1;
+      color: var(--txt, #252525);
     }
 
     .tenant-floor-design-filter.active {
       border-color: var(--p);
-      background: #e8f4fa;
+      background: #eef7f6;
       color: var(--p);
       font-weight: 700;
     }
@@ -3886,6 +3995,7 @@
       gap: 5px;
       overflow: auto;
       min-height: 0;
+      flex: 1;
     }
 
     .tenant-floor-design-group-row {
@@ -3894,30 +4004,32 @@
       gap: 8px;
       align-items: center;
       width: 100%;
-      min-height: 62px;
-      padding: 8px;
+      min-height: 56px;
+      padding: 8px 10px;
       border: 1px solid transparent;
       border-radius: 9px;
       background: transparent;
       color: var(--txt, #252525);
       text-align: start;
       cursor: pointer;
+      font: inherit;
+      transition: all 0.15s ease;
     }
 
     .tenant-floor-design-group-row:hover {
       border-color: var(--line);
-      background: #f7fafc;
+      background: #f8fafc;
     }
 
     .tenant-floor-design-group-row.active {
       border-color: #acd8d4;
-      background: #e1f1ef;
+      background: #eef7f6;
     }
 
     .tenant-floor-design-group-range {
       display: block;
       color: var(--p);
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 800;
     }
 
@@ -3926,7 +4038,8 @@
       overflow: hidden;
       margin-top: 2px;
       font-size: 11px;
-      font-weight: 700;
+      font-weight: 600;
+      color: var(--muted);
       text-overflow: ellipsis;
       white-space: nowrap;
     }
@@ -3945,17 +4058,23 @@
       color: var(--muted);
       font-size: 10px;
       white-space: nowrap;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #f1f5f9;
     }
 
     .tenant-floor-design-group-status.approved {
+      background: #e4f1e8;
       color: #347658;
     }
 
     .tenant-floor-design-group-status.review {
+      background: #faeadc;
       color: #b96831;
     }
 
     .tenant-floor-design-group-status.generating {
+      background: #e1f1ef;
       color: #177b7d;
     }
 
@@ -3963,6 +4082,8 @@
       display: grid;
       gap: 7px;
       margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
     }
 
     .tenant-floor-design-canvas {
@@ -3972,92 +4093,78 @@
       min-width: 0;
     }
 
-    .tenant-floor-design-canvas-head {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
+    .tenant-floor-hero-card {
+      padding: 16px 20px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 2px 8px rgba(24, 53, 74, 0.03);
+      display: grid;
       gap: 12px;
+    }
+
+    .tenant-floor-hero-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
       flex-wrap: wrap;
     }
 
-    .tenant-floor-design-canvas-head h3 {
-      margin: 0 0 3px;
-      color: var(--p);
-      font-size: 20px;
+    .tenant-floor-hero-titles {
+      display: grid;
+      gap: 4px;
     }
 
-    .tenant-floor-design-canvas-head p {
+    .tenant-floor-hero-tag-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tenant-floor-range-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      background: #eef7f6;
+      border: 1px solid #b5deda;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--p);
+    }
+
+    .tenant-floor-hero-titles h3 {
+      margin: 0;
+      color: var(--p);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .tenant-floor-hero-titles p {
       margin: 0;
       color: var(--muted);
       font-size: 12px;
     }
 
-    .tenant-floor-design-canvas-actions {
-      display: flex;
-      gap: 7px;
-      flex-wrap: wrap;
-    }
-
-    .tenant-floor-design-context {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 7px;
-    }
-
-    .tenant-floor-design-context-card {
-      min-width: 0;
-      padding: 10px;
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      background: #fff;
-    }
-
-    .tenant-floor-design-context-card span {
-      display: block;
-      color: var(--muted);
-      font-size: 10px;
-    }
-
-    .tenant-floor-design-context-card strong {
-      display: block;
-      overflow: hidden;
-      margin-top: 2px;
-      font-size: 13px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .tenant-floor-design-image-card,
-    .tenant-floor-design-candidates {
-      border: 1px solid var(--line);
-      border-radius: 13px;
-      background: #fff;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, .03);
-    }
-
-    .tenant-floor-design-image-head {
+    .tenant-floor-hero-actions {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 10px;
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .tenant-floor-design-image-head strong {
-      font-size: 13px;
+      flex-wrap: wrap;
     }
 
     .tenant-floor-design-badge {
       display: inline-flex;
-      min-height: 25px;
+      min-height: 24px;
       align-items: center;
-      padding: 4px 9px;
+      padding: 3px 8px;
       border: 1px solid var(--line);
       border-radius: 999px;
-      background: #f7fafc;
+      background: #f8fafc;
       color: var(--muted);
       font-size: 10px;
+      font-weight: 600;
     }
 
     .tenant-floor-design-badge.approved {
@@ -4072,82 +4179,164 @@
       color: #b96831;
     }
 
-    .tenant-floor-design-image-frame {
-      display: grid;
-      place-items: center;
-      min-height: 360px;
-      background: #edf2f2;
-    }
-
-    .tenant-floor-design-image-frame img {
-      display: block;
-      width: 100%;
-      max-height: 560px;
-      object-fit: contain;
-      aspect-ratio: 16 / 10;
-    }
-
-    .tenant-floor-design-image-empty {
-      padding: 50px 20px;
-      color: var(--muted);
-      font-size: 13px;
-      text-align: center;
-    }
-
-    .tenant-floor-design-prompt-actions {
+    .tenant-floor-design-page-nav {
       display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+
+    .tenant-floor-prompt-drawer {
+      padding: 14px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      display: grid;
       gap: 8px;
+      margin-top: 4px;
+    }
+
+    .tenant-floor-prompt-drawer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--p);
       flex-wrap: wrap;
     }
 
     .tenant-floor-design-prompt-editor {
       width: 100%;
       min-height: 120px;
+      box-sizing: border-box;
       padding: 12px;
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 8px;
       background: #fff;
       color: var(--txt, #252525);
       direction: ltr;
       text-align: left;
       unicode-bidi: plaintext;
       font: inherit;
+      font-size: 12px;
       resize: vertical;
+    }
+
+    .tenant-floor-design-image-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .03);
+      overflow: hidden;
+    }
+
+    .tenant-floor-image-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #fafcfc;
+    }
+
+    .tenant-floor-image-card-title-wrap {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .tenant-floor-image-card-title-wrap strong {
+      font-size: 13px;
+      color: var(--p);
+    }
+
+    .tenant-floor-image-card-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .tenant-floor-design-image-frame {
       position: relative;
-      min-height: 270px;
-      padding: 18px;
+      display: grid;
+      place-items: center;
+      min-height: 380px;
+      padding: 20px;
+      background: #edf2f2;
     }
 
     .tenant-floor-design-image-frame img {
       width: auto;
-      max-width: 88%;
-      max-height: 380px;
-      aspect-ratio: auto;
+      max-width: 92%;
+      max-height: 480px;
       border-radius: 8px;
       object-fit: contain;
       box-shadow: 0 8px 24px rgba(24, 53, 74, .12);
+      transition: transform 0.2s ease;
     }
 
     .tenant-floor-design-image-frame.has-image {
       cursor: pointer;
     }
 
+    .tenant-floor-design-image-frame.has-image:hover img {
+      transform: scale(1.01);
+    }
+
+    .tenant-floor-design-image-empty {
+      width: 100%;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .tenant-floor-empty-blueprint {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      text-align: center;
+      gap: 8px;
+      max-width: 440px;
+      margin: 0 auto;
+    }
+
+    .tenant-floor-empty-blueprint h4 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--p);
+    }
+
+    .tenant-floor-empty-blueprint p {
+      margin: 0 0 10px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
     .tenant-floor-design-image-approve {
-      position: absolute;
-      z-index: 2;
-      top: 12px;
-      right: 12px;
-      padding: 7px 11px;
+      padding: 7px 14px;
       border: 1px solid #c8d6d8;
       border-radius: 8px;
       background: #fff;
       color: var(--p);
       font: inherit;
-      font-size: 11px;
+      font-size: 12px;
+      font-weight: 700;
       cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .tenant-floor-design-image-approve:hover:not(:disabled) {
+      background: #eef7f6;
+      border-color: #acd8d4;
     }
 
     .tenant-floor-design-image-approve:disabled {
@@ -4168,10 +4357,10 @@
 
     .tenant-floor-design-chat-panel {
       display: grid;
-      gap: 9px;
-      padding: 14px;
+      gap: 10px;
+      padding: 16px;
       border: 1px solid var(--line);
-      border-radius: 13px;
+      border-radius: 14px;
       background: #fff;
     }
 
@@ -4179,6 +4368,7 @@
       margin: 0 0 3px;
       color: var(--p);
       font-size: 14px;
+      font-weight: 700;
     }
 
     .tenant-floor-design-chat-head p {
@@ -4187,11 +4377,37 @@
       font-size: 11px;
     }
 
+    .tenant-floor-quick-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .tenant-floor-chip {
+      padding: 6px 12px;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      font: inherit;
+      font-size: 11px;
+      color: #334155;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .tenant-floor-chip:hover {
+      background: #eef7f6;
+      border-color: #acd8d4;
+      color: var(--p);
+    }
+
     .tenant-floor-design-chat-thread {
       display: grid;
       gap: 6px;
-      max-height: 150px;
+      max-height: 160px;
       overflow: auto;
+      padding: 4px 0;
     }
 
     .tenant-floor-design-chat-composer {
@@ -4199,30 +4415,30 @@
       direction: rtl;
       align-items: center;
       gap: 8px;
-      min-height: 58px;
+      min-height: 52px;
       padding: 6px 8px 6px 6px;
       border: 1px solid var(--line);
       border-radius: 999px;
-      background: #f7fafc;
+      background: #f8fafc;
     }
 
     .tenant-floor-design-chat-composer textarea {
       flex: 1;
       min-width: 0;
       min-height: 0 !important;
-      height: 42px !important;
-      max-height: 42px;
+      height: 38px !important;
+      max-height: 38px;
       overflow: hidden;
       box-sizing: border-box;
-      padding: 10px 12px;
+      padding: 8px 12px;
       border: 0;
       outline: 0;
       background: transparent;
       color: var(--txt, #252525);
       font: inherit;
-      font-size: 13px;
+      font-size: 12px;
       resize: none;
-      text-align: center;
+      text-align: right;
     }
 
     .tenant-floor-design-chat-composer textarea::placeholder {
@@ -4230,54 +4446,26 @@
     }
 
     .tenant-floor-design-chat-send {
-      display: grid;
-      width: 46px;
-      height: 46px;
-      flex: 0 0 46px;
-      place-items: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 16px;
+      height: 36px;
       border: 0;
-      border-radius: 50%;
+      border-radius: 999px;
       background: var(--p);
       color: #fff;
       font: inherit;
       font-size: 11px;
       font-weight: 700;
       cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s ease;
     }
 
     .tenant-floor-design-chat-send:disabled {
       opacity: .5;
       cursor: not-allowed;
-    }
-
-    .tenant-floor-design-image-caption {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 12px 14px;
-    }
-
-    .tenant-floor-design-image-caption p {
-      margin: 2px 0 0;
-      color: var(--muted);
-      font-size: 11px;
-    }
-
-    .tenant-floor-design-candidates {
-      padding: 14px;
-    }
-
-    .tenant-floor-design-candidates h4 {
-      margin: 0 0 10px;
-      color: var(--p);
-      font-size: 13px;
-    }
-
-    .tenant-floor-design-candidate-empty {
-      margin: 0;
-      color: var(--muted);
-      font-size: 12px;
     }
 
     .tenant-floor-design-footer {
@@ -5776,6 +5964,32 @@
       <p id="tenantFloorDesignStatus" class="tenant-hint">حدد الأدوار المتشابهة ثم ولّد صورة واحدة لكل مجموعة باستخدام
         Nano Banana.</p>
 
+      <div class="tenant-floor-stepper" id="tenantFloorDesignStepper">
+        <button type="button" class="tenant-floor-step active" data-step="1" data-floor-design-stage-target="organization">
+          <span class="tenant-floor-step-num">1</span>
+          <span class="tenant-floor-step-content">
+            <span class="tenant-floor-step-title">تنظيم الأدوار والمكونات</span>
+            <span class="tenant-floor-step-desc">تجميع الأدوار وربط عناصر الدراسة</span>
+          </span>
+        </button>
+        <span class="tenant-floor-step-divider"></span>
+        <button type="button" class="tenant-floor-step" data-step="2" data-floor-design-stage-target="analysis">
+          <span class="tenant-floor-step-num">2</span>
+          <span class="tenant-floor-step-content">
+            <span class="tenant-floor-step-title">تحليل البيانات والاشتراطات</span>
+            <span class="tenant-floor-step-desc">تدقيق ومطابقة اشتراطات الكروكي والمالية</span>
+          </span>
+        </button>
+        <span class="tenant-floor-step-divider"></span>
+        <button type="button" class="tenant-floor-step" data-step="3" data-floor-design-stage-target="drawings">
+          <span class="tenant-floor-step-num">3</span>
+          <span class="tenant-floor-step-content">
+            <span class="tenant-floor-step-title">المخططات التصورية 2D</span>
+            <span class="tenant-floor-step-desc">توليد المخططات المعمارية واعتمادها</span>
+          </span>
+        </button>
+      </div>
+
       <div id="tenantFloorDesignStageHome" class="tenant-floor-design-stage-home" data-floor-design-stage-view="home">
         <p class="tenant-floor-design-stage-intro">مساحة العمل مقسمة إلى مراحل واضحة حتى لا تظهر كل التعليمات والأدوات
           مرة واحدة.</p>
@@ -5901,10 +6115,13 @@
       <div id="tenantFloorDesignDrawingsHead" class="tenant-floor-design-stage-view-head"
         data-floor-design-stage-view="drawings" hidden>
         <div>
-          <h3>المخططات 2D</h3>
-          <p>اختر مجموعة أو دورًا منفردًا لبدء إعداد المخطط.</p>
-        </div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل
-          التصميم</button>
+          <h3>المرحلة الثالثة: المخططات التصورية 2D</h3>
+          <p>اختر مجموعة أدوار من القائمة الجانبية لبدء إعداد وتوليد المخطط المعماري واعتماده.</p>
+        </div>
+        <div class="tenant-floor-design-head-actions">
+          <button type="button" class="btn ghost small" onclick="showTenantFloorDesignStage('analysis')">مراجعة تدقيق البيانات</button>
+          <button type="button" class="btn ghost small" onclick="showTenantFloorDesignStage('home')">الرئيسية</button>
+        </div>
       </div>
 
       <div id="tenantFloorDesignWorkspace" class="tenant-floor-design-workspace" data-floor-design-stage-view="drawings"
@@ -5912,79 +6129,123 @@
         <aside class="tenant-floor-design-sidebar" aria-label="مجموعات تصميم الطوابق">
           <div class="tenant-floor-design-sidebar-head">
             <h3>مجموعات التصميم</h3>
+            <span class="tenant-floor-design-count-pill" id="tenantFloorDesignGroupCount"></span>
           </div>
-          <input id="tenantFloorDesignSearch" class="tenant-floor-design-search" type="search"
-            placeholder="ابحث باسم المجموعة أو رقم الدور">
+          <div class="tenant-floor-design-search-wrap">
+            <input id="tenantFloorDesignSearch" class="tenant-floor-design-search" type="search"
+              placeholder="ابحث باسم المجموعة أو رقم الدور...">
+          </div>
           <div class="tenant-floor-design-filters" role="group" aria-label="فلترة مجموعات التصميم">
-            <button type="button" class="tenant-floor-design-filter active" data-floor-design-filter="all">كل
-              المجموعات</button>
-            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="pending">تحتاج
-              توليد</button>
-            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="review">قيد
-              المراجعة</button>
+            <button type="button" class="tenant-floor-design-filter active" data-floor-design-filter="all">الكل</button>
+            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="pending">تحتاج توليد</button>
+            <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="review">مراجعة</button>
             <button type="button" class="tenant-floor-design-filter" data-floor-design-filter="approved">معتمدة</button>
           </div>
           <div id="tenantFloorDesignGroupList" class="tenant-floor-design-group-list"></div>
-          <div class="tenant-floor-design-sidebar-actions"><button type="button" class="btn ghost"
-              onclick="showTenantFloorDesignStage('organization')">تنظيم الأدوار من المرحلة الأولى</button></div>
+          <div class="tenant-floor-design-sidebar-actions">
+            <button type="button" class="btn ghost small full-width"
+              onclick="showTenantFloorDesignStage('organization')">إعادة ضبط المجموعات</button>
+          </div>
         </aside>
 
         <main class="tenant-floor-design-canvas" aria-label="مساحة تصميم مجموعة الطوابق">
-          <div class="tenant-floor-design-canvas-head">
-            <div>
-              <h3 id="tenantFloorDesignTitle">لم يبدأ تصميم الأدوار</h3>
-              <p id="tenantFloorDesignSubtitle">اختر مجموعة من القائمة لبدء تصميمها.</p>
-            </div>
-          </div>
-          <div class="tenant-floor-design-prompt-actions"><button type="button" class="btn ghost"
-              id="tenantFloorDesignPromptToggle" onclick="toggleTenantFloorDesignPrompt()" disabled>عرض
-              Prompt</button><button type="button" class="btn primary" id="tenantFloorDesignGenerateButton"
-              onclick="generateTenantFloorDesignImage()" disabled>توليد الصورة</button></div>
-          <div id="tenantFloorDesignPageNavigation" class="tenant-floor-design-prompt-actions" hidden>
-            <button type="button" class="btn ghost" id="tenantFloorDesignPreviousPage"
-              onclick="moveTenantFloorDesignPage(-1)">الصفحة السابقة</button>
-            <span id="tenantFloorDesignPageLabel" class="tenant-hint"></span>
-            <button type="button" class="btn ghost" id="tenantFloorDesignNextPage"
-              onclick="moveTenantFloorDesignPage(1)">الصفحة التالية</button>
-          </div>
-          <textarea id="tenantFloorDesignPromptEditor" class="tenant-floor-design-prompt-editor" dir="ltr" rows="5"
-            placeholder="سيظهر Prompt الصفحة النشطة هنا ويمكنك تعديله قبل التوليد." hidden></textarea>
-          <section class="tenant-floor-design-image-card">
-            <div class="tenant-floor-design-image-head"><strong>التصور المختار للمجموعة</strong><span
-                id="tenantFloorDesignBadge" class="tenant-floor-design-badge">لم تبدأ</span></div>
-            <div id="tenantFloorDesignImageFrame" class="tenant-floor-design-image-frame" role="button" tabindex="0"
-              onclick="previewTenantFloorDesignImage()"
-              onkeydown="if(event.key === 'Enter' || event.key === ' ') previewTenantFloorDesignImage()"><button
-                type="button" class="tenant-floor-design-image-approve" id="tenantFloorDesignApproveButton"
-                onclick="event.stopPropagation(); approveTenantFloorDesignImage()" disabled>اعتماد الصورة</button>
-              <div id="tenantFloorDesignImageEmpty" class="tenant-floor-design-image-empty">لم يتم توليد صورة لهذه
-                المجموعة بعد.</div><img id="tenantFloorDesignImage" alt="التصور البصري للمجموعة" hidden>
-            </div>
-            <div class="tenant-floor-design-image-caption">
-              <div><strong id="tenantFloorDesignImageTitle">لا توجد نتيجة مختارة</strong>
-                <p>اضغط على الصورة لفتحها بحجم كامل.</p>
+          <div class="tenant-floor-hero-card">
+            <div class="tenant-floor-hero-main">
+              <div class="tenant-floor-hero-titles">
+                <div class="tenant-floor-hero-tag-row">
+                  <span id="tenantFloorDesignBadge" class="tenant-floor-design-badge">لم تبدأ</span>
+                  <span id="tenantFloorDesignRangeBadge" class="tenant-floor-range-badge" hidden></span>
+                </div>
+                <h3 id="tenantFloorDesignTitle">لم يبدأ تصميم الأدوار</h3>
+                <p id="tenantFloorDesignSubtitle">اختر مجموعة من القائمة لبدء تصميمها.</p>
+              </div>
+              <div class="tenant-floor-hero-actions">
+                <button type="button" class="btn primary" id="tenantFloorDesignGenerateButton"
+                  onclick="generateTenantFloorDesignImage()" disabled>توليد المخطط المعماري 2D</button>
+                <button type="button" class="btn ghost" id="tenantFloorDesignPromptToggle"
+                  onclick="toggleTenantFloorDesignPrompt()" disabled>المواصفات الهندسية للـ Prompt</button>
               </div>
             </div>
+
+            <div id="tenantFloorDesignPageNavigation" class="tenant-floor-design-page-nav" hidden>
+              <button type="button" class="btn ghost small" id="tenantFloorDesignPreviousPage"
+                onclick="moveTenantFloorDesignPage(-1)">الصفحة السابقة</button>
+              <span id="tenantFloorDesignPageLabel" class="tenant-hint"></span>
+              <button type="button" class="btn ghost small" id="tenantFloorDesignNextPage"
+                onclick="moveTenantFloorDesignPage(1)">الصفحة التالية</button>
+            </div>
+
+            <div id="tenantFloorDesignPromptContainer" class="tenant-floor-prompt-drawer" hidden>
+              <div class="tenant-floor-prompt-drawer-head">
+                <strong>المواصفات الهندسية للـ Prompt (قابلة للتعديل)</strong>
+                <span class="tenant-hint">يمكنك مراجعة أو تخصيص النص الإنجليزي الموجه لنموذج الذكاء الاصطناعي</span>
+              </div>
+              <textarea id="tenantFloorDesignPromptEditor" class="tenant-floor-design-prompt-editor" dir="ltr" rows="5"
+                placeholder="سيظهر Prompt الصفحة النشطة هنا ويمكنك تعديله قبل التوليد." hidden></textarea>
+            </div>
+          </div>
+
+          <section class="tenant-floor-design-image-card">
+            <div class="tenant-floor-image-card-header">
+              <div class="tenant-floor-image-card-title-wrap">
+                <strong id="tenantFloorDesignImageTitle">المخطط المعماري للمجموعة</strong>
+                <span class="tenant-hint">اضغط على المخطط للتكبير الكامل</span>
+              </div>
+              <div class="tenant-floor-image-card-controls">
+                <button type="button" class="tenant-floor-design-image-approve" id="tenantFloorDesignApproveButton"
+                  onclick="event.stopPropagation(); approveTenantFloorDesignImage()" disabled>اعتماد هذا المخطط</button>
+              </div>
+            </div>
+
+            <div id="tenantFloorDesignImageFrame" class="tenant-floor-design-image-frame" role="button" tabindex="0"
+              onclick="previewTenantFloorDesignImage()"
+              onkeydown="if(event.key === 'Enter' || event.key === ' ') previewTenantFloorDesignImage()">
+              <div id="tenantFloorDesignImageEmpty" class="tenant-floor-design-image-empty">
+                <div class="tenant-floor-empty-blueprint">
+                  <h4>جاهز لتوليد المخطط المعماري</h4>
+                  <p>تم تجهيز الاشتراطات والمساحات. اضغط على الزر أدناه لبدء التوليد بالذكاء الاصطناعي.</p>
+                  <button type="button" class="btn primary" id="tenantFloorDesignCanvasCtaButton"
+                    onclick="generateTenantFloorDesignImage()" disabled>توليد المخطط الآن</button>
+                </div>
+              </div>
+              <img id="tenantFloorDesignImage" alt="التصور البصري للمجموعة" hidden>
+            </div>
           </section>
+
           <section class="tenant-floor-design-chat-panel">
             <div class="tenant-floor-design-chat-head">
               <div>
-                <h4>محادثة التعديل</h4>
-                <p>اكتب التعديلات المطلوبة على الصورة الحالية.</p>
+                <h4>تعديل وتطوير المخطط (AI Revision)</h4>
+                <p>اطلب تعديلات معمارية محددة أو اختر من المقترحات السريعة:</p>
               </div>
+            </div>
+            <div class="tenant-floor-quick-chips">
+              <button type="button" class="tenant-floor-chip"
+                onclick="applyFloorDesignQuickPrompt('إعادة توزيع المساحات الداخلية والممرات لزيادة الكفاءة')">إعادة توزيع المساحات</button>
+              <button type="button" class="tenant-floor-chip"
+                onclick="applyFloorDesignQuickPrompt('توسيع منطقة المصاعد والمصاعد البانورامية والمداخل')">توسيع المصاعد والمداخل</button>
+              <button type="button" class="tenant-floor-chip"
+                onclick="applyFloorDesignQuickPrompt('توضيح الارتدادات النظامية وإبراز الواجهات المطلة على الشوارع')">توضيح الارتدادات والواجهات</button>
+              <button type="button" class="tenant-floor-chip"
+                onclick="applyFloorDesignQuickPrompt('تحسين الإضاءة الطبيعية وزيادة مساحات الزجاج على الواجهة')">إبراز الواجهات الزجاجية</button>
             </div>
             <div id="tenantFloorDesignChatThread" class="tenant-floor-design-chat-thread">
               <div class="tenant-floor-design-chat-message">لم تبدأ محادثة تعديل لهذه المجموعة.</div>
             </div>
-            <div class="tenant-floor-design-chat-composer"><button type="button" class="tenant-floor-design-chat-send"
-                id="tenantFloorDesignChatSendButton" onclick="sendTenantFloorDesignChat()">إرسال</button><textarea
-                id="tenantFloorDesignChatInput" rows="1" placeholder="اكتب التعديل المطلوب"></textarea></div>
+            <div class="tenant-floor-design-chat-composer">
+              <textarea id="tenantFloorDesignChatInput" rows="1"
+                placeholder="اكتب ملاحظاتك المعمارية للتعديل... (مثلاً: زيادة عرض المدخل الرئيسي)"></textarea>
+              <button type="button" class="tenant-floor-design-chat-send" id="tenantFloorDesignChatSendButton"
+                onclick="sendTenantFloorDesignChat()">إرسال التعديل</button>
+            </div>
           </section>
+
           <div class="tenant-floor-design-footer">
             <p id="tenantFloorDesignActionStatus">اختر مجموعة من القائمة.</p>
-            <div class="tenant-floor-design-footer-actions"><button type="button" class="btn ghost"
-                onclick="moveTenantFloorDesignGroup(-1)">السابق</button><button type="button" class="btn ghost"
-                onclick="moveTenantFloorDesignGroup(1)">التالي</button></div>
+            <div class="tenant-floor-design-footer-actions">
+              <button type="button" class="btn ghost small" onclick="moveTenantFloorDesignGroup(-1)">المجموعة السابقة</button>
+              <button type="button" class="btn ghost small" onclick="moveTenantFloorDesignGroup(1)">المجموعة التالية</button>
+            </div>
           </div>
         </main>
       </div>
@@ -10505,13 +10766,15 @@
       host.innerHTML = visible.length ? visible.map(group => {
         const status = TENANT_FLOOR_DESIGN_STATUS_LABELS[group.status] || 'لم يبدأ';
         const range = formatTenantFloorDesignNumbers(group.floorNumbers);
-        const floorLabel = group.floorNumbers.length === 1 ? `الدور ${range}` : `الأدوار ${range}`;
+        const floorLabel = group.floorNumbers.length === 1
+          ? `الدور <bdi dir="ltr">${escapeHtml(range)}</bdi>`
+          : `الأدوار <bdi dir="ltr">${escapeHtml(range)}</bdi>`;
         const nameMarkup = group.floorNumbers.length === 1 ? '' : `<span class="tenant-floor-design-group-name">${escapeHtml(group.name)}</span>`;
-        return `<button type="button" class="tenant-floor-design-group-row${group.id === tenantFloorDesignActiveGroupId ? ' active' : ''}" data-floor-design-group-id="${escapeHtml(group.id)}"><span><span class="tenant-floor-design-group-range">${escapeHtml(floorLabel)}</span>${nameMarkup}</span><span class="tenant-floor-design-group-status ${group.status}">${escapeHtml(status)}</span></button>`;
+        return `<button type="button" class="tenant-floor-design-group-row${group.id === tenantFloorDesignActiveGroupId ? ' active' : ''}" data-floor-design-group-id="${escapeHtml(group.id)}"><span><span class="tenant-floor-design-group-range">${floorLabel}</span>${nameMarkup}</span><span class="tenant-floor-design-group-status ${group.status}">${escapeHtml(status)}</span></button>`;
       }).join('') : '<p class="tenant-hint">لا توجد مجموعات مطابقة للبحث.</p>';
       host.querySelectorAll('[data-floor-design-group-id]').forEach(button => button.addEventListener('click', () => selectTenantFloorDesignGroup(button.dataset.floorDesignGroupId)));
       const countLabel = document.getElementById('tenantFloorDesignGroupCount');
-      if (countLabel) countLabel.textContent = `${visible.length} من ${groups.length} مجموعات`;
+      if (countLabel) countLabel.textContent = `${visible.length} من ${groups.length}`;
       updateTenantFloorDesignProgress();
     }
 
@@ -10569,6 +10832,7 @@
     async function toggleTenantFloorDesignPrompt() {
       const editor = document.getElementById('tenantFloorDesignPromptEditor');
       const button = document.getElementById('tenantFloorDesignPromptToggle');
+      const container = document.getElementById('tenantFloorDesignPromptContainer');
       const group = tenantFloorDesignActiveGroup();
       let page = tenantFloorDesignActivePage(group);
       if (!editor || !button || !group) return;
@@ -10614,15 +10878,23 @@
         } catch (error) {
           toast(error?.message || 'تعذر إنشاء Prompt المجموعة', 9000);
           button.disabled = false;
-          button.textContent = 'عرض Prompt';
+          button.textContent = 'المواصفات الهندسية للـ Prompt';
           return;
         }
       }
       editor.value = page?.prompt || buildTenantFloorDesignPrompt(group);
       editor.hidden = !editor.hidden;
-      button.textContent = editor.hidden ? 'عرض Prompt' : 'إخفاء Prompt';
+      if (container) container.hidden = editor.hidden;
+      button.textContent = editor.hidden ? 'المواصفات الهندسية للـ Prompt' : 'إخفاء المواصفات الهندسية';
       button.disabled = false;
       if (!editor.hidden) editor.focus();
+    }
+
+    function applyFloorDesignQuickPrompt(text) {
+      const input = document.getElementById('tenantFloorDesignChatInput');
+      if (!input) return;
+      input.value = text;
+      input.focus();
     }
 
     function renderTenantFloorDesignActiveGroup() {
@@ -10630,13 +10902,16 @@
       const title = document.getElementById('tenantFloorDesignTitle');
       const subtitle = document.getElementById('tenantFloorDesignSubtitle');
       const badge = document.getElementById('tenantFloorDesignBadge');
+      const rangeBadge = document.getElementById('tenantFloorDesignRangeBadge');
       const image = document.getElementById('tenantFloorDesignImage');
       const empty = document.getElementById('tenantFloorDesignImageEmpty');
       const generate = document.getElementById('tenantFloorDesignGenerateButton');
+      const canvasCta = document.getElementById('tenantFloorDesignCanvasCtaButton');
       const approve = document.getElementById('tenantFloorDesignApproveButton');
       const imageFrame = document.getElementById('tenantFloorDesignImageFrame');
       const promptToggle = document.getElementById('tenantFloorDesignPromptToggle');
       const promptEditor = document.getElementById('tenantFloorDesignPromptEditor');
+      const promptContainer = document.getElementById('tenantFloorDesignPromptContainer');
       const imageCard = image?.closest('.tenant-floor-design-image-card');
       const chatInput = document.getElementById('tenantFloorDesignChatInput');
       const chatSend = document.getElementById('tenantFloorDesignChatSendButton');
@@ -10645,6 +10920,7 @@
         subtitle.textContent = 'اختر مجموعة من القائمة لبدء تصميمها.';
         badge.textContent = 'لم تبدأ';
         badge.className = 'tenant-floor-design-badge';
+        if (rangeBadge) rangeBadge.hidden = true;
         image.removeAttribute('src');
         image.alt = '';
         image.hidden = true;
@@ -10653,10 +10929,12 @@
         setTenantFloorDesignText('tenantFloorDesignImageTitle', 'لا توجد نتيجة مختارة');
         setTenantFloorDesignText('tenantFloorDesignActionStatus', 'اختر مجموعة من القائمة.');
         generate.disabled = true;
+        if (canvasCta) canvasCta.disabled = true;
         approve.disabled = true;
         imageFrame?.classList.remove('has-image');
         promptToggle.disabled = true;
         promptEditor.hidden = true;
+        if (promptContainer) promptContainer.hidden = true;
         chatInput.disabled = true;
         if (chatSend) chatSend.disabled = true;
         imageCard?.classList.remove('approved');
@@ -10678,37 +10956,48 @@
       if (nextPage) nextPage.disabled = !group.pages?.length || tenantFloorDesignActivePageIndex >= group.pages.length - 1;
       const titleText = group.unassigned ? 'أدوار غير منظمة' : group.floorNumbers.length === 1 ? `الدور ${range}` : group.name;
       title.textContent = titleText;
-      subtitle.textContent = group.unassigned ? 'نظم هذه الأدوار في مجموعة قبل تصميمها.' : group.floorNumbers.length === 1 ? `صورة واحدة للدور ${range}.` : `الأدوار ${range}`;
+      subtitle.textContent = group.unassigned ? 'نظم هذه الأدوار في مجموعة قبل تصميمها.' : group.floorNumbers.length === 1 ? `تصميم ومخطط الدور ${range}` : `الأدوار المشمولة: ${range}`;
       badge.textContent = status;
       badge.className = `tenant-floor-design-badge${group.status === 'approved' ? ' approved' : group.status === 'review' ? ' review' : ''}`;
+      if (rangeBadge) {
+        if (!group.unassigned) {
+          rangeBadge.innerHTML = group.floorNumbers.length === 1
+            ? `الدور <bdi dir="ltr">${escapeHtml(range)}</bdi>`
+            : `الأدوار <bdi dir="ltr">${escapeHtml(range)}</bdi>`;
+          rangeBadge.hidden = false;
+        } else {
+          rangeBadge.hidden = true;
+        }
+      }
       imageCard?.classList.toggle('approved', group.status === 'approved' || Boolean(group.approvedImageUrl));
       if (imageUrl) {
         image.src = imageUrl;
         image.alt = `التصور البصري ${titleText}`;
         image.hidden = false;
         empty.hidden = true;
-        setTenantFloorDesignText('tenantFloorDesignImageTitle', `الصورة المختارة لـ ${titleText}`);
+        setTenantFloorDesignText('tenantFloorDesignImageTitle', `المخطط المعماري لـ ${titleText}`);
       } else {
         image.removeAttribute('src');
         image.alt = '';
         image.hidden = true;
         empty.hidden = false;
-        empty.textContent = group.unassigned ? 'هذه الأدوار لم تدخل في مجموعة بعد.' : 'لم يتم توليد صورة لهذه المجموعة بعد.';
         setTenantFloorDesignText('tenantFloorDesignImageTitle', 'لا توجد نتيجة مختارة');
       }
       const generating = group.status === 'generating';
       generate.disabled = Boolean(group.unassigned || generating);
+      if (canvasCta) canvasCta.disabled = Boolean(group.unassigned || generating);
       approve.disabled = Boolean(group.unassigned || generating || !(page?.imageUrl || group.imageUrl));
       imageFrame?.classList.toggle('has-image', Boolean(imageUrl));
       promptToggle.disabled = Boolean(group.unassigned || generating);
       if (promptEditor && document.activeElement !== promptEditor) {
         promptEditor.value = page?.prompt || group.generatedPrompt || buildTenantFloorDesignPrompt(group);
         promptEditor.hidden = true;
-        promptToggle.textContent = 'عرض Prompt';
+        if (promptContainer) promptContainer.hidden = true;
+        promptToggle.textContent = 'المواصفات الهندسية للـ Prompt';
       }
       chatInput.disabled = Boolean(group.unassigned || generating);
       if (chatSend) chatSend.disabled = Boolean(group.unassigned || generating);
-      setTenantFloorDesignText('tenantFloorDesignActionStatus', group.unassigned ? 'نظم الأدوار أولًا من المرحلة الأولى.' : group.status === 'approved' ? 'تم اعتماد الصورة لهذه المجموعة.' : 'عدّل الـ Prompt أو اكتب تعديلًا ثم ولّد الصورة.');
+      setTenantFloorDesignText('tenantFloorDesignActionStatus', group.unassigned ? 'نظم الأدوار أولًا من المرحلة الأولى.' : group.status === 'approved' ? 'تم اعتماد المخطط لهذه المجموعة.' : 'ولّد المخطط المعماري أو أرسل تعديلات لتطويره.');
       renderTenantFloorDesignChat(group);
       renderTenantFloorDesignGroupList();
     }
@@ -11324,6 +11613,13 @@
       }
       document.querySelectorAll('#tenantFloorDesignPage [data-floor-design-stage-view]').forEach(view => {
         view.hidden = view.dataset.floorDesignStageView !== tenantFloorDesignStage;
+      });
+      const stageStepMap = { home: 1, organization: 1, analysis: 2, drawings: 3, isometric: 3 };
+      const currentStepNum = stageStepMap[tenantFloorDesignStage] || 1;
+      document.querySelectorAll('.tenant-floor-step').forEach(stepEl => {
+        const stepNum = Number(stepEl.dataset.step);
+        stepEl.classList.toggle('active', stepNum === currentStepNum);
+        stepEl.classList.toggle('completed', stepNum < currentStepNum);
       });
       if (tenantFloorDesignStage === 'organization') renderTenantFloorDesignReadiness();
       if (tenantFloorDesignStage === 'analysis') renderTenantFloorDesignAnalysisReadiness();
