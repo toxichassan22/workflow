@@ -8977,10 +8977,16 @@
     };
     const MARKET_MIXED_COMPONENTS = ['سكني', 'مكاتب', 'تجزئة ومحلات', 'مطاعم ومقاهي', 'مركز تجاري', 'فندق', 'شقق مخدومة', 'منتجع', 'مساكن فندقية', 'مصنع', 'مستودعات', 'مركز لوجستي', 'مجمع صناعي', 'أخرى'];
     const MARKET_OTHER_TYPE_OPTIONS = ['سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي'];
+    const MARKET_PROJECT_LEVELS = ['اقتصادي', 'متوسط', 'فوق المتوسط', 'متميز', 'فاخر', 'فائق الفخامة', 'أخرى'];
+    const MARKET_SPECIALIZED_CLASS_KINDS = ['فندقي', 'مكاتب', 'صناعي ولوجستي'];
     const MARKET_ACTIVITY_CLASS_LABELS = {
       'فندقي': 'تصنيف النشاط الفندقي',
       'مكاتب': 'تصنيف المكاتب',
-      'صناعي ولوجستي': 'تصنيف الصناعي واللوجستي'
+      'صناعي ولوجستي': 'تصنيف الصناعي واللوجستي',
+      'سكني': 'مستوى المشروع السكني',
+      'تجاري': 'مستوى المشروع التجاري',
+      'تجزئة': 'مستوى المشروع التجاري',
+      'متعدد الاستخدامات': 'مستوى المشروع'
     };
     const MARKET_AUDIENCE_LABELS = {
       'سكني': 'الفئة المستهدفة للسكني',
@@ -9425,6 +9431,7 @@
       const mixedHidden = document.querySelector('#tenantProjectForm [data-key="project_mixed_components"]');
       const mixedHost = document.getElementById('projectMixedComponentsGrid');
       const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
+      const levelInput = document.querySelector('#tenantProjectForm [data-key="project_level"]');
       const audienceHidden = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
       const audienceHost = document.getElementById('projectAudienceGrid');
       const otherInput = document.querySelector('#tenantProjectForm [data-key="project_type_other"]');
@@ -9465,7 +9472,7 @@
         if (mixedHost) renderChoiceGrid(mixedHost, 'project_mixed_components', MARKET_MIXED_COMPONENTS, selectedMixedComponents());
       }
       const kinds = projectAnalysisKinds();
-      renderActivityClassFields(kinds, classInput);
+      renderActivityClassFields(main, isOther, kinds, classInput, levelInput);
       if (audienceHost && audienceHidden) {
         const audienceWrap = audienceHidden.closest('.tenant-field');
         if (!main) {
@@ -9570,26 +9577,49 @@
       host.querySelectorAll('input[type="checkbox"]').forEach(input => input.addEventListener('change', persist));
     }
 
-    function renderActivityClassFields(kinds, classInput) {
+    function classificationGroupsForProject(main, isOther, kinds) {
+      const groups = [];
+      const addGroup = (typeName) => {
+        const specializedKind = MARKET_SPECIALIZED_CLASS_KINDS.includes(typeName)
+          ? typeName
+          : (MARKET_SPECIALIZED_CLASS_KINDS.includes(marketAudienceKind(typeName)) ? marketAudienceKind(typeName) : '');
+        const key = specializedKind || typeName;
+        if (key && !groups.includes(key)) groups.push(key);
+      };
+      if (!main) return [];
+      if (isOther) selectedOtherProjectTypes().forEach(addGroup);
+      else if (main === 'متعدد الاستخدامات') selectedMixedComponents().forEach(addGroup);
+      else addGroup(main);
+      kinds.forEach(addGroup);
+      return groups;
+    }
+
+    function renderActivityClassFields(main, isOther, kinds, classInput, levelInput) {
+      if (levelInput) {
+        const levelWrap = levelInput.closest('.tenant-field');
+        if (levelWrap) levelWrap.style.display = 'none';
+        levelInput.style.display = 'none';
+      }
       if (!classInput) return;
       const wrap = classInput.closest('.tenant-field');
       const host = document.getElementById('projectActivityClassFields');
-      const needed = ['فندقي', 'مكاتب', 'صناعي ولوجستي'].filter(kind => kinds.includes(kind));
+      const groups = classificationGroupsForProject(main, isOther, kinds);
       classInput.style.display = 'none';
-      if (wrap) wrap.style.display = needed.length ? '' : 'none';
+      if (wrap) wrap.style.display = groups.length ? '' : 'none';
       if (!host) return;
-      const stored = parseStoredLandTable(classInput.value || tenantProjectData.activity_class);
+      const stored = parseStoredLandTable(classInput.value || tenantProjectData.activity_class || tenantProjectData.project_level);
       const current = (stored && typeof stored === 'object' && !Array.isArray(stored))
         ? stored
-        : { value: classInput.value || tenantProjectData.activity_class || '' };
-      host.innerHTML = needed.map(kind => {
-        const options = MARKET_ACTIVITY_CLASS[kind] || [];
-        const selected = current[kind] || (needed.length === 1 ? (current.value || '') : '');
+        : { value: classInput.value || tenantProjectData.activity_class || tenantProjectData.project_level || '' };
+      host.innerHTML = groups.map(kind => {
+        const specialized = MARKET_ACTIVITY_CLASS[kind] || MARKET_ACTIVITY_CLASS[marketAudienceKind(kind)];
+        const options = specialized || MARKET_PROJECT_LEVELS;
+        const selected = current[kind] || (groups.length === 1 ? (current.value || '') : '');
         const selectOptions = '<option value="">-- اختر القيمة --</option>' + options.map(option =>
           '<option value="' + String(option).replace(/"/g, '&quot;') + '"' +
           (option === selected ? ' selected' : '') + '>' + option + '</option>'
         ).join('');
-        return '<div style="margin-top:10px"><label>' + (MARKET_ACTIVITY_CLASS_LABELS[kind] || 'تصنيف النشاط') +
+        return '<div style="margin-top:10px"><label>' + (MARKET_ACTIVITY_CLASS_LABELS[kind] || MARKET_ACTIVITY_CLASS_LABELS[marketAudienceKind(kind)] || 'تصنيف المشروع') +
           '</label><select data-activity-kind="' + kind + '">' + selectOptions + '</select></div>';
       }).join('');
       const persist = () => {
@@ -9600,6 +9630,13 @@
         const encoded = Object.keys(next).length ? JSON.stringify(next) : '';
         classInput.value = encoded;
         tenantProjectData.activity_class = encoded;
+        if (levelInput) {
+          const genericValues = Object.entries(next)
+            .filter(([kind]) => !MARKET_SPECIALIZED_CLASS_KINDS.includes(kind) && !MARKET_ACTIVITY_CLASS[kind])
+            .map(([, value]) => value);
+          levelInput.value = genericValues[0] || '';
+          tenantProjectData.project_level = levelInput.value;
+        }
         triggerAutoSaveDraft();
       };
       host.querySelectorAll('select').forEach(select => select.addEventListener('change', persist));

@@ -3080,6 +3080,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function selectedOtherProjectTypes()', index_source)
         self.assertIn('function renderGroupedAudienceFields(main, isOther, hidden, host)', index_source)
         self.assertIn('function renderGroupedSubtypeFields(typeNames, host, hidden)', index_source)
+        self.assertIn('const MARKET_PROJECT_LEVELS', index_source)
+        self.assertIn('function classificationGroupsForProject(main, isOther, kinds)', index_source)
         self.assertIn("if (f.fieldKey === 'project_type') {", index_source)
         self.assertIn('otherHost.hidden = !isOther;', index_source)
         self.assertNotIn('🎯', index_source)
@@ -3167,6 +3169,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('أخرى', market_study.GENERAL_TARGET_AUDIENCE)
         self.assertNotIn('أخرى', market_study.target_audience_options('سكني'))
         self.assertNotIn('أخرى', market_study.target_audience_options('تجاري', 'مكاتب'))
+        self.assertEqual(
+            market_study.activity_class_options('سكني'),
+            [item['label'] for item in market_study.PROJECT_LEVELS]
+        )
 
     def test_other_project_type_unlocks_selected_mains_and_subtypes(self):
         import market_study

@@ -150,11 +150,11 @@ prompt or a screen.
   صناعي ولوجستي / متعدد الاستخدامات / أخرى). `project_subtype` appears for تجاري / فندقي /
   صناعي ولوجستي. Mixed-use uses a multi-select (`project_mixed_components`). Choosing `أخرى`
   is also a multi-select of the four real mains; matching subtypes then open automatically.
-  Extra activity classifications stay on the basic page and appear per selected hotel / office /
-  industrial kind. `project_idea` is client-typed only. `project_level` is separate from
-  `activity_class`. Choosing a type always reveals that type's subtype list and target-audience
-  list. If `أخرى` selects several mains, each selected type gets its own subtype and audience
-  group.
+  Extra classification is one field on the basic page. Hotel, office, and industrial/logistics
+  get their specialized lists; every other type (سكني, تجاري, mixed leftovers, Other leftovers)
+  uses the generic مستوى المشروع list. `project_idea` is client-typed only. Choosing a type
+  always reveals that type's subtype list and target-audience list. If `أخرى` selects several
+  mains, each selected type gets its own subtype, audience, and classification group.
 - **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).

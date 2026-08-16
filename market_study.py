@@ -500,12 +500,16 @@ def activity_class_options(main_type, subtype='', components=None):
         'مكاتب': ACTIVITY_CLASS_BY_TYPE['مكاتب'],
         'صناعي ولوجستي': ACTIVITY_CLASS_BY_TYPE['صناعي ولوجستي'],
     }
+    specialized = False
     for kind in kinds:
         for option in mapping.get(kind, []):
+            specialized = True
             if option not in seen:
                 seen.add(option)
                 options.append(option)
-    return options
+    if specialized:
+        return options
+    return [item['label'] for item in PROJECT_LEVELS]
 
 
 def target_audience_options(main_type, subtype='', components=None):
