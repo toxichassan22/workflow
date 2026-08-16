@@ -773,13 +773,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('subdivision_number', by_key)
         self.assertEqual(by_key['location_address']['sectionKey'], 'location')
         self.assertTrue(by_key['location_address']['isRequired'])
-        for key in ('project_name', 'project_type', 'project_stage', 'project_logo',
+        for key in ('project_name', 'project_type', 'project_subtype', 'project_stage', 'project_logo',
                     'project_idea', 'project_level', 'target_audience', 'activity_class'):
             self.assertEqual(by_key[key]['sectionKey'], 'basic')
-        for key in ('project_goal', 'initial_features', 'initial_strengths', 'project_subtype'):
+        for key in ('project_goal', 'initial_features', 'initial_strengths'):
             self.assertNotIn(key, by_key)
         self.assertEqual(by_key['project_type']['fieldOptions'], [
-            'سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات', 'أخرى'
+            'سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات'
         ])
         self.assertEqual(by_key['city']['sectionKey'], 'location')
         self.assertEqual(by_key['district']['sectionKey'], 'location')
@@ -3072,17 +3072,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const MARKET_STUDY_SWOT_SECTIONS', index_source)
         self.assertIn("id=\"marketSwotFields\"", index_source)
         self.assertIn('تحليل SWOT', index_source)
-        self.assertIn('const MARKET_OTHER_TYPE_OPTIONS', index_source)
-        self.assertIn("id = 'projectOtherTypesGrid'", index_source)
-        self.assertNotIn("id = 'projectOtherSubtypesGrid'", index_source)
+        self.assertNotIn('const MARKET_OTHER_TYPE_OPTIONS', index_source)
+        self.assertNotIn("id = 'projectOtherTypesGrid'", index_source)
+        self.assertIn("id = 'projectSubtypeGrid'", index_source)
         self.assertIn("id = 'projectActivityClassFields'", index_source)
-        self.assertIn('function selectedOtherProjectTypes()', index_source)
+        self.assertIn('function selectedProjectSubtypesByMain()', index_source)
         self.assertIn('function renderGroupedAudienceFields(main, isOther, hidden, host)', index_source)
         self.assertIn('const MARKET_PROJECT_LEVELS', index_source)
         self.assertIn('function classificationGroupsForProject(main, isOther, kinds)', index_source)
         self.assertNotIn('      kinds.forEach(addGroup);', index_source)
         self.assertIn("if (f.fieldKey === 'project_type') {", index_source)
-        self.assertIn('otherHost.hidden = !isOther;', index_source)
+        self.assertNotIn('otherHost.hidden = !isOther;', index_source)
         self.assertNotIn('🎯', index_source)
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
@@ -3173,16 +3173,17 @@ class MeetingRequirementsTests(unittest.TestCase):
             [item['label'] for item in market_study.PROJECT_LEVELS]
         )
 
-    def test_other_project_type_unlocks_selected_mains_and_subtypes(self):
+    def test_mixed_use_unlocks_selected_subtypes(self):
         import market_study
         self.assertEqual(
-            market_study.analysis_kind_for_project('أخرى', 'مكاتب، فندق', ['تجاري', 'فندقي']),
-            ['تجزئة', 'فندقي', 'مكاتب']
+            market_study.analysis_kind_for_project('متعدد الاستخدامات', '', ['مكاتب', 'فندق']),
+            ['مكاتب', 'فندقي']
         )
         self.assertEqual(
-            market_study.activity_class_options('أخرى', 'مكاتب', ['تجاري', 'فندقي']),
-            market_study.ACTIVITY_CLASS_BY_TYPE['فندقي'] + [
-                option for option in market_study.ACTIVITY_CLASS_BY_TYPE['مكاتب'] if option != 'أخرى'
+            market_study.activity_class_options('متعدد الاستخدامات', '', ['مكاتب', 'فندق']),
+            market_study.ACTIVITY_CLASS_BY_TYPE['مكاتب'] + [
+                option for option in market_study.ACTIVITY_CLASS_BY_TYPE['فندقي']
+                if option not in market_study.ACTIVITY_CLASS_BY_TYPE['مكاتب']
             ]
         )
 

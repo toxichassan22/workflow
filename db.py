@@ -635,14 +635,14 @@ REMOVED_PREBUILT_FIELDS = {
     'north_direction', 'croquis_expiry_date', 'subdivision_number',
     'project_goal', 'initial_features', 'initial_strengths',
     'building_ratio_setbacks', 'allowed_uses_restrictions',
-    'project_subtype',
 }
 
 PREBUILT_FIELDS = [
     {'key': 'project_name', 'label': 'اسم المشروع', 'type': 'text', 'required': True, 'section_key': 'basic', 'ai_hint': 'اسم المشروع الرئيسي', 'sort_order': 1},
-    {'key': 'project_type', 'label': 'نوع المشروع الرئيسي', 'type': 'select', 'options': ['سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات', 'أخرى'], 'required': True, 'section_key': 'basic', 'ai_hint': 'النوع الرئيسي للمشروع حسب دراسة السوق', 'sort_order': 2},
-    {'key': 'activity_class', 'label': 'تصنيف النشاط', 'type': 'select', 'options': [], 'required': False, 'section_key': 'basic', 'ai_hint': '', 'sort_order': 3},
-    {'key': 'project_mixed_components', 'label': 'مكونات متعدد الاستخدامات', 'type': 'text', 'required': False, 'section_key': 'basic', 'ai_hint': 'مكونات المشروع متعدد الاستخدامات', 'sort_order': 4},
+    {'key': 'project_type', 'label': 'نوع المشروع الرئيسي', 'type': 'select', 'options': ['سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات'], 'required': True, 'section_key': 'basic', 'ai_hint': 'النوع الرئيسي للمشروع حسب دراسة السوق', 'sort_order': 2},
+    {'key': 'project_subtype', 'label': 'الأنواع الفرعية للمشروع', 'type': 'textarea', 'options': [], 'required': False, 'section_key': 'basic', 'ai_hint': 'اختيار نوع فرعي واحد أو أكثر حسب النوع الرئيسي', 'sort_order': 3},
+    {'key': 'activity_class', 'label': 'تصنيف النشاط', 'type': 'select', 'options': [], 'required': False, 'section_key': 'basic', 'ai_hint': '', 'sort_order': 4},
+    {'key': 'project_mixed_components', 'label': 'مكونات متعدد الاستخدامات', 'type': 'text', 'required': False, 'section_key': 'basic', 'ai_hint': 'مكونات المشروع متعدد الاستخدامات', 'sort_order': 5},
     {'key': 'project_idea', 'label': 'فكرة المشروع', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'فكرة المشروع كما يدخلها العميل يدويًا', 'sort_order': 5},
     {'key': 'project_level', 'label': 'مستوى المشروع', 'type': 'select', 'options': ['اقتصادي', 'متوسط', 'فوق المتوسط', 'متميز', 'فاخر', 'فائق الفخامة', 'أخرى'], 'required': False, 'section_key': 'basic', 'ai_hint': '', 'sort_order': 6},
     {'key': 'target_audience', 'label': 'الفئة المستهدفة', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'الفئة المستهدفة متعددة الاختيارات وتتغير حسب نوع المشروع', 'sort_order': 7},

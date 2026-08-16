@@ -23,7 +23,6 @@ PROJECT_TYPE_MAIN = [
     'فندقي',
     'صناعي ولوجستي',
     'متعدد الاستخدامات',
-    'أخرى',
 ]
 
 PROJECT_TYPE_SUBTYPES = {
@@ -31,26 +30,14 @@ PROJECT_TYPE_SUBTYPES = {
     'تجاري': ['مكاتب', 'تجزئة ومحلات', 'مطاعم ومقاهي', 'مركز تجاري'],
     'فندقي': ['فندق', 'شقق مخدومة', 'منتجع', 'مساكن فندقية'],
     'صناعي ولوجستي': ['مصنع', 'مستودعات', 'مركز لوجستي', 'مجمع صناعي'],
-    'متعدد الاستخدامات': [],
-    'أخرى': [],
+    'متعدد الاستخدامات': [
+        'سكني', 'مكاتب', 'تجزئة ومحلات', 'مطاعم ومقاهي', 'مركز تجاري',
+        'فندق', 'شقق مخدومة', 'منتجع', 'مساكن فندقية', 'مصنع', 'مستودعات',
+        'مركز لوجستي', 'مجمع صناعي',
+    ],
 }
 
-MIXED_USE_COMPONENT_OPTIONS = [
-    'سكني',
-    'مكاتب',
-    'تجزئة ومحلات',
-    'مطاعم ومقاهي',
-    'مركز تجاري',
-    'فندق',
-    'شقق مخدومة',
-    'منتجع',
-    'مساكن فندقية',
-    'مصنع',
-    'مستودعات',
-    'مركز لوجستي',
-    'مجمع صناعي',
-    'أخرى',
-]
+MIXED_USE_COMPONENT_OPTIONS = PROJECT_TYPE_SUBTYPES['متعدد الاستخدامات'][:]
 
 PROJECT_LEVELS = [
     {'value': 'economy', 'label': 'اقتصادي', 'description': 'أقل تكلفة وسعر، خدمات أساسية'},
@@ -458,7 +445,10 @@ def audience_kind_for_label(label):
 
 def analysis_kind_for_project(main_type, subtype='', components=None):
     main = _norm(main_type)
+    if main == 'أخرى':
+        main = 'متعدد الاستخدامات'
     sub = _norm(subtype)
+    subtype_list = parse_selected_list(sub)
     extra = parse_selected_list(components)
     kinds = []
 
@@ -468,23 +458,17 @@ def analysis_kind_for_project(main_type, subtype='', components=None):
             kinds.append(kind)
 
     if main == 'متعدد الاستخدامات':
-        for item in extra:
-            add_kind(item)
-        return kinds
-    if main.startswith('أخرى'):
-        for item in extra:
-            add_kind(item)
-        for item in parse_selected_list(sub):
+        for item in extra or subtype_list:
             add_kind(item)
         return kinds
     if main == 'تجاري':
-        if sub == 'مكاتب':
-            return ['مكاتب']
-        return ['تجزئة']
+        for item in subtype_list:
+            add_kind(item)
+        return kinds
     if main == 'فندقي':
-        return ['فندقي']
+        return ['فندقي'] if subtype_list else []
     if main == 'صناعي ولوجستي':
-        return ['صناعي ولوجستي']
+        return ['صناعي ولوجستي'] if subtype_list else []
     if main == 'سكني':
         return ['سكني']
     add_kind(sub or main)
