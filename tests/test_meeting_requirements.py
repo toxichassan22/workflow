@@ -3078,6 +3078,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("id = 'projectSubtypeGrid'", index_source)
         self.assertIn("id = 'projectActivityClassFields'", index_source)
         self.assertIn('function renderMultiSelectDropdown(host, options, selected, placeholder, onChange)', index_source)
+        self.assertNotIn('function reopenProjectMultiSelect', index_source)
         self.assertIn('function selectedProjectTypeMains()', index_source)
         self.assertIn('function selectedProjectSubtypesByMain()', index_source)
         self.assertIn('function renderGroupedAudienceFields(mains, hidden, host)', index_source)

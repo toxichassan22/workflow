@@ -1633,16 +1633,20 @@
       margin-top: 8px;
     }
     .project-multi-select > summary {
-      list-style: none;
-      min-height: 44px;
+      display: flex;
+      align-items: center;
+      min-height: 48px;
       box-sizing: border-box;
-      padding: 11px 14px;
+      padding: 12px;
       border: 1px solid var(--line);
       border-radius: 12px;
       background: #fff;
       color: var(--ink);
       cursor: pointer;
-      font-size: 14px;
+      font: inherit;
+      font-size: 15px;
+      text-align: right;
+      list-style: none;
     }
     .project-multi-select > summary::-webkit-details-marker {
       display: none;
@@ -9447,13 +9451,6 @@
       if (value && select.value !== value) select.value = '';
     }
 
-    function reopenProjectMultiSelect(hostId) {
-      setTimeout(() => {
-        const details = document.getElementById(hostId)?.querySelector('details');
-        if (details) details.open = true;
-      }, 0);
-    }
-
     function renderMultiSelectDropdown(host, options, selected, placeholder, onChange) {
       if (!host) return;
       const values = Array.isArray(selected) ? selected.map(String) : [];
@@ -9498,7 +9495,6 @@
           typeInput.value = selected.join('، ');
           tenantProjectData.project_type = typeInput.value;
           syncProjectClassificationFields();
-          reopenProjectMultiSelect('projectTypeGrid');
           triggerAutoSaveDraft();
         });
       }
@@ -9561,7 +9557,6 @@
           else delete next[group.main];
           persistGroupedChoice(hidden, next);
           syncProjectClassificationFields();
-          reopenProjectMultiSelect('projectSubtypeGrid');
         });
       });
     }
