@@ -8712,10 +8712,11 @@ def _execute_market_summary(data):
     payload = _prepare_market_payload(data)
     competitors = data.get('competitors') if isinstance(data.get('competitors'), list) else []
     current_summary = data.get('currentSummary') if isinstance(data.get('currentSummary'), dict) else None
+    current_sources = data.get('currentSources') if isinstance(data.get('currentSources'), list) else None
     current_swot = data.get('currentSwot') if isinstance(data.get('currentSwot'), dict) else None
     system_prompt = market_study.build_consultant_system_prompt()
     user_prompt = market_study.build_summary_user_prompt(
-        payload, competitors, current_summary, current_swot=current_swot
+        payload, competitors, current_summary, current_sources=current_sources, current_swot=current_swot
     )
     res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS)
     parsed, parse_error = _parse_market_model_json(res)

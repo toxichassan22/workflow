@@ -266,7 +266,7 @@ TYPE_ANALYSIS_POINTS = {
         'المساحات المكتبية المطلوبة',
         'الطلب من الشركات المحلية والعالمية',
         'المشروعات المكتبية المستقبلية',
-        'المنافسين ومزاياهم ومواصفاتهم وخدماتهم',
+        'المنافسين ومزاياهم ومواقفهم وخدماتهم',
     ],
     'تجزئة': [
         'عدد السكان في نطاق الخدمة',
@@ -323,15 +323,56 @@ TYPE_ANALYSIS_POINTS = {
     ],
 }
 
-_SOURCE_PRIORITY_ORDER = [
-    source
-    for level in sorted(SOURCE_PRIORITY)
-    for source in SOURCE_PRIORITY[level]
-]
-
 TYPE_SOURCE_PRIORITY = {
-    key: list(_SOURCE_PRIORITY_ORDER)
-    for key in ('سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي')
+    'سكني': [
+        'منصة المؤشرات العقارية وبيانات الصفقات الفعلية',
+        'الهيئة العامة للإحصاء',
+        'البنك المركزي السعودي',
+        'وافي',
+        'سكني وNHC',
+        'الأمانة وبلدي',
+        'المواقع الرسمية للمطورين',
+        'تقارير CBRE وJLL وKnight Frank وColliers',
+        'منصات الإعلانات العقارية',
+        'Google Maps للموقع والخدمات فقط',
+    ],
+    'تجاري': [
+        'منصة المؤشرات العقارية وشبكة إيجار',
+        'الهيئة العامة للإحصاء',
+        'وزارة التجارة',
+        'الأمانة وبلدي',
+        'البنك المركزي السعودي',
+        'المواقع الرسمية للمراكز والمشروعات التجارية',
+        'تداول وتقارير الصناديق العقارية',
+        'CBRE وJLL وKnight Frank وColliers وSavills',
+        'منصات التأجير والإعلانات',
+        'Google Maps وGoogle Places للخدمات والتقييمات',
+    ],
+    'فندقي': [
+        'وزارة السياحة',
+        'الهيئة العامة للإحصاء وإحصاءات المنشآت السياحية',
+        'الهيئة العامة للطيران المدني',
+        'الجهات الرسمية للفعاليات والسياحة في المدينة',
+        'المواقع الرسمية للفنادق والمشغلين',
+        'STR أو CoStar',
+        'CBRE وJLL وKnight Frank وColliers',
+        'مواقع الحجز لمقارنة السعر في تاريخ محدد فقط',
+        'Google Maps للتقييمات والموقع والخدمات',
+    ],
+    'صناعي ولوجستي': [
+        'وزارة الصناعة والثروة المعدنية',
+        'الهيئة السعودية للمدن الصناعية ومناطق التقنية مدن',
+        'خرائط مدن GIS',
+        'هيئة المدن والمناطق الاقتصادية الخاصة',
+        'الهيئة العامة للإحصاء',
+        'الهيئة العامة للموانئ',
+        'الهيئة العامة للطيران المدني للشحن الجوي',
+        'وزارة النقل والخدمات اللوجستية',
+        'الأمانة وبلدي',
+        'المواقع الرسمية للمدن الصناعية والمشروعات',
+        'تقارير CBRE وJLL وKnight Frank وColliers',
+        'منصات المستودعات والعقارات الصناعية',
+    ],
 }
 
 MANDATORY_RULES = [
@@ -563,6 +604,7 @@ def catalog_payload():
         'generalAudience': GENERAL_TARGET_AUDIENCE,
         'audienceByKind': TARGET_AUDIENCE_BY_KIND,
         'sourcePriority': SOURCE_PRIORITY,
+        'typeSourcePriority': TYPE_SOURCE_PRIORITY,
         'competitorRadiusOptions': COMPETITOR_RADIUS_OPTIONS,
         'defaultCompetitorRadiusKm': DEFAULT_COMPETITOR_RADIUS_KM,
         'dataPeriodOptions': DATA_PERIOD_OPTIONS,
@@ -676,39 +718,37 @@ def build_consultant_system_prompt():
 
 
 def _project_input_block(payload):
-    components = payload.get('components') or []
-    if isinstance(components, list):
+    components = payload.get('components')
+    if isinstance(components, list) and components:
         components_text = json.dumps(components, ensure_ascii=False)
     else:
-        components_text = str(components)
+        components_text = str(
+            payload.get('projectComponents')
+            or payload.get('project_components')
+            or 'غير مدخل'
+        )
     audience = payload.get('targetAudience') or payload.get('target_audience') or []
     if isinstance(audience, list):
         audience_text = '، '.join(str(item) for item in audience if item)
+    elif isinstance(audience, dict):
+        audience_text = json.dumps(audience, ensure_ascii=False)
     else:
         audience_text = str(audience or '')
     lines = [
         f"- اسم المشروع: {payload.get('projectName') or payload.get('project_name') or 'غير مدخل'}",
         f"- نوع المشروع الرئيسي: {payload.get('projectType') or payload.get('project_type') or 'غير مدخل'}",
-        f"- الأنواع المختارة عند اختيار أخرى: {payload.get('otherProjectTypes') or 'غير مدخل'}",
         f"- نوع المشروع الفرعي: {payload.get('projectSubtype') or payload.get('project_subtype') or 'غير مدخل'}",
-        f"- مكونات متعدد الاستخدامات: {payload.get('projectComponents') or payload.get('project_components') or 'غير مدخل'}",
         f"- المدينة: {payload.get('city') or 'غير مدخل'}",
         f"- الحي: {payload.get('district') or payload.get('neighborhood') or 'غير مدخل'}",
         f"- الإحداثيات: {payload.get('locationLat') or payload.get('location_lat') or ''} , {payload.get('locationLng') or payload.get('location_lng') or ''}",
         f"- مساحة الأرض: {payload.get('landArea') or payload.get('approved_financial_area') or payload.get('croquis_land_area') or 'غير مدخل'}",
         f"- مساحة البناء المتاحة: {payload.get('builtArea') or payload.get('built_area') or 'غير مدخل'}",
         f"- الأنشطة المسموح بها: {payload.get('allowedUses') or payload.get('allowed_uses') or 'غير مدخل'}",
-        f"- المكونات الأولية من الدراسة المالية: {components_text}",
+        f"- المكونات الأولية: {components_text or payload.get('projectComponents') or payload.get('project_components') or 'غير مدخل'}",
         f"- مستوى المشروع: {payload.get('projectLevel') or payload.get('project_level') or 'غير مدخل'}",
-        f"- تصنيف النشاط: {payload.get('activityClass') or payload.get('activity_class') or 'غير مدخل'}",
         f"- الفئة المستهدفة: {audience_text or 'غير مدخل'}",
-        f"- فكرة المشروع: {payload.get('projectIdea') or payload.get('project_idea') or 'غير مدخل'}",
         f"- نطاق المنافسين: {payload.get('competitorRadiusLabel') or payload.get('competitor_radius') or 'تلقائي'}",
-        f"- نصف قطر البحث بالكيلومتر: {payload.get('resolvedRadiusKm') if payload.get('resolvedRadiusKm') is not None else 'كامل المدينة'}",
-        f"- فترة البيانات: {payload.get('dataPeriodLabel') or payload.get('data_period') or 'غير مدخل'}",
-        f"- فترة مخصصة من: {payload.get('dataPeriodFrom') or payload.get('data_period_from') or ''}",
-        f"- فترة مخصصة إلى: {payload.get('dataPeriodTo') or payload.get('data_period_to') or ''}",
-        f"- رابط الموقع: {payload.get('locationAddress') or payload.get('location_address') or ''}",
+        f"- فترة البيانات المطلوبة: {payload.get('dataPeriodLabel') or payload.get('data_period') or 'غير مدخل'}",
     ]
     return '\n'.join(lines)
 
@@ -799,6 +839,8 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         f'{json.dumps(competitors or [], ensure_ascii=False, indent=2)}\n\n'
         'ملخص حالي إن وُجد (للسياق فقط، أعد كتابة ملخص جديد كامل):\n'
         f'{json.dumps(current_summary or {}, ensure_ascii=False)}\n\n'
+        'مصادر حالية إن وُجدت (للسياق فقط، أعد بناء جدول المصادر كاملًا مع كل رقم):\n'
+        f'{json.dumps(current_sources or [], ensure_ascii=False)}\n\n'
         'تحليل SWOT حالي إن وُجد (للسياق فقط، أعد كتابته كاملًا):\n'
         f'{json.dumps(current_swot or {}, ensure_ascii=False)}\n\n'
         'أرجع JSON فقط بهذا الشكل:\n'

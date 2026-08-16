@@ -3263,10 +3263,40 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'وكالة الأنباء السعودية', 'البيانات الصحفية الرسمية'],
         }
         self.assertEqual(market_study.SOURCE_PRIORITY, expected)
-        ordered = [source for level in sorted(expected) for source in expected[level]]
-        for sources in market_study.TYPE_SOURCE_PRIORITY.values():
-            self.assertEqual(sources, ordered)
+        expected_type_sources = {
+            'سكني': [
+                'منصة المؤشرات العقارية وبيانات الصفقات الفعلية', 'الهيئة العامة للإحصاء',
+                'البنك المركزي السعودي', 'وافي', 'سكني وNHC', 'الأمانة وبلدي',
+                'المواقع الرسمية للمطورين', 'تقارير CBRE وJLL وKnight Frank وColliers',
+                'منصات الإعلانات العقارية', 'Google Maps للموقع والخدمات فقط',
+            ],
+            'تجاري': [
+                'منصة المؤشرات العقارية وشبكة إيجار', 'الهيئة العامة للإحصاء', 'وزارة التجارة',
+                'الأمانة وبلدي', 'البنك المركزي السعودي',
+                'المواقع الرسمية للمراكز والمشروعات التجارية', 'تداول وتقارير الصناديق العقارية',
+                'CBRE وJLL وKnight Frank وColliers وSavills', 'منصات التأجير والإعلانات',
+                'Google Maps وGoogle Places للخدمات والتقييمات',
+            ],
+            'فندقي': [
+                'وزارة السياحة', 'الهيئة العامة للإحصاء وإحصاءات المنشآت السياحية',
+                'الهيئة العامة للطيران المدني', 'الجهات الرسمية للفعاليات والسياحة في المدينة',
+                'المواقع الرسمية للفنادق والمشغلين', 'STR أو CoStar',
+                'CBRE وJLL وKnight Frank وColliers', 'مواقع الحجز لمقارنة السعر في تاريخ محدد فقط',
+                'Google Maps للتقييمات والموقع والخدمات',
+            ],
+            'صناعي ولوجستي': [
+                'وزارة الصناعة والثروة المعدنية',
+                'الهيئة السعودية للمدن الصناعية ومناطق التقنية مدن', 'خرائط مدن GIS',
+                'هيئة المدن والمناطق الاقتصادية الخاصة', 'الهيئة العامة للإحصاء',
+                'الهيئة العامة للموانئ', 'الهيئة العامة للطيران المدني للشحن الجوي',
+                'وزارة النقل والخدمات اللوجستية', 'الأمانة وبلدي',
+                'المواقع الرسمية للمدن الصناعية والمشروعات',
+                'تقارير CBRE وJLL وKnight Frank وColliers', 'منصات المستودعات والعقارات الصناعية',
+            ],
+        }
+        self.assertEqual(market_study.TYPE_SOURCE_PRIORITY, expected_type_sources)
         self.assertEqual(market_study.catalog_payload()['sourcePriority'], expected)
+        self.assertEqual(market_study.catalog_payload()['typeSourcePriority'], expected_type_sources)
         prompt = market_study.build_consultant_system_prompt()
         self.assertIn('ابدأ بالمستوى الأول، ولا تنتقل إلى مستوى أدنى', prompt)
         self.assertIn('تعامل مع أسعار منصات الإعلانات باعتبارها أسعار طلب وليست صفقات منفذة.', prompt)
@@ -3316,6 +3346,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(parsed['decision'], 'فرصة واعدة بشروط')
         self.assertIn('ابدأ المخرجات بعنوان: الملخص التنفيذي لسوق المشروع.', market_study.build_summary_user_prompt({}, []))
         self.assertIn('في حدود 500 كلمة', market_study.build_summary_user_prompt({}, []))
+        self.assertIn('مصادر حالية إن وُجدت', market_study.build_summary_user_prompt({}, []))
 
 
 if __name__ == '__main__':
