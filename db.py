@@ -635,17 +635,17 @@ REMOVED_PREBUILT_FIELDS = {
     'north_direction', 'croquis_expiry_date', 'subdivision_number',
     'project_goal', 'initial_features', 'initial_strengths',
     'building_ratio_setbacks', 'allowed_uses_restrictions',
+    'project_subtype',
 }
 
 PREBUILT_FIELDS = [
     {'key': 'project_name', 'label': 'اسم المشروع', 'type': 'text', 'required': True, 'section_key': 'basic', 'ai_hint': 'اسم المشروع الرئيسي', 'sort_order': 1},
     {'key': 'project_type', 'label': 'نوع المشروع الرئيسي', 'type': 'select', 'options': ['سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات', 'أخرى'], 'required': True, 'section_key': 'basic', 'ai_hint': 'النوع الرئيسي للمشروع حسب دراسة السوق', 'sort_order': 2},
-    {'key': 'project_subtype', 'label': 'نوع المشروع الفرعي', 'type': 'select', 'options': [], 'required': False, 'section_key': 'basic', 'ai_hint': 'النوع الفرعي حسب النشاط: مكاتب أو تجزئة أو فندق أو مستودعات', 'sort_order': 3},
+    {'key': 'activity_class', 'label': 'تصنيف النشاط', 'type': 'select', 'options': [], 'required': False, 'section_key': 'basic', 'ai_hint': '', 'sort_order': 3},
     {'key': 'project_mixed_components', 'label': 'مكونات متعدد الاستخدامات', 'type': 'text', 'required': False, 'section_key': 'basic', 'ai_hint': 'مكونات المشروع متعدد الاستخدامات', 'sort_order': 4},
     {'key': 'project_idea', 'label': 'فكرة المشروع', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'فكرة المشروع كما يدخلها العميل يدويًا', 'sort_order': 5},
-    {'key': 'project_level', 'label': 'مستوى المشروع', 'type': 'select', 'options': ['اقتصادي', 'متوسط', 'فوق المتوسط', 'متميز', 'فاخر', 'فائق الفخامة', 'أخرى'], 'required': False, 'section_key': 'basic', 'ai_hint': 'تصنيف إضافي عام يظهر للأنواع غير الفندقية وغير المكتبية وغير الصناعية', 'sort_order': 6},
-    {'key': 'activity_class', 'label': 'تصنيف النشاط', 'type': 'select', 'options': [], 'required': False, 'section_key': 'basic', 'ai_hint': 'تصنيف إضافي حسب نوع المشروع: فنادق أو مكاتب أو صناعي ولوجستي، وباقي الأنواع تستخدم مستوى المشروع', 'sort_order': 7},
-    {'key': 'target_audience', 'label': 'الفئة المستهدفة', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'الفئة المستهدفة متعددة الاختيارات وتتغير حسب نوع المشروع', 'sort_order': 8},
+    {'key': 'project_level', 'label': 'مستوى المشروع', 'type': 'select', 'options': ['اقتصادي', 'متوسط', 'فوق المتوسط', 'متميز', 'فاخر', 'فائق الفخامة', 'أخرى'], 'required': False, 'section_key': 'basic', 'ai_hint': '', 'sort_order': 6},
+    {'key': 'target_audience', 'label': 'الفئة المستهدفة', 'type': 'textarea', 'required': False, 'section_key': 'basic', 'ai_hint': 'الفئة المستهدفة متعددة الاختيارات وتتغير حسب نوع المشروع', 'sort_order': 7},
     {'key': 'project_stage', 'label': 'مرحلة المشروع الحالية', 'type': 'select', 'options': ['فكرة أولية', 'فرصة استثمارية', 'دراسة جدوى', 'تصميم', 'تحت التنفيذ', 'قائم لإعادة التطوير', 'أخرى'], 'required': False, 'section_key': 'basic', 'ai_hint': 'المرحلة الحالية التي يمر بها المشروع', 'sort_order': 9},
     {'key': 'project_logo', 'label': 'شعار المشروع (Logo)', 'type': 'image', 'required': False, 'section_key': 'basic', 'ai_hint': 'صورة شعار المشروع', 'sort_order': 10},
     {'key': 'location_address', 'label': 'رابط موقع الأرض في Google Maps', 'type': 'text', 'required': True, 'section_key': 'location', 'ai_hint': 'رابط Google Maps مباشر لنقطة الأرض؛ يستخدم لتحديد الإحداثيات والبيانات المكانية والاشتراطات المرتبطة بالموقع', 'sort_order': 11},

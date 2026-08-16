@@ -774,10 +774,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(by_key['location_address']['sectionKey'], 'location')
         self.assertTrue(by_key['location_address']['isRequired'])
         for key in ('project_name', 'project_type', 'project_stage', 'project_logo',
-                    'project_idea', 'project_level', 'target_audience', 'activity_class',
-                    'project_subtype'):
+                    'project_idea', 'project_level', 'target_audience', 'activity_class'):
             self.assertEqual(by_key[key]['sectionKey'], 'basic')
-        for key in ('project_goal', 'initial_features', 'initial_strengths'):
+        for key in ('project_goal', 'initial_features', 'initial_strengths', 'project_subtype'):
             self.assertNotIn(key, by_key)
         self.assertEqual(by_key['project_type']['fieldOptions'], [
             'سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات', 'أخرى'
@@ -3075,11 +3074,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('تحليل SWOT', index_source)
         self.assertIn('const MARKET_OTHER_TYPE_OPTIONS', index_source)
         self.assertIn("id = 'projectOtherTypesGrid'", index_source)
-        self.assertIn("id = 'projectOtherSubtypesGrid'", index_source)
+        self.assertNotIn("id = 'projectOtherSubtypesGrid'", index_source)
         self.assertIn("id = 'projectActivityClassFields'", index_source)
         self.assertIn('function selectedOtherProjectTypes()', index_source)
         self.assertIn('function renderGroupedAudienceFields(main, isOther, hidden, host)', index_source)
-        self.assertIn('function renderGroupedSubtypeFields(typeNames, host, hidden)', index_source)
         self.assertIn('const MARKET_PROJECT_LEVELS', index_source)
         self.assertIn('function classificationGroupsForProject(main, isOther, kinds)', index_source)
         self.assertIn("if (f.fieldKey === 'project_type') {", index_source)

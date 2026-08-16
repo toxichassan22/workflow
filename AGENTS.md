@@ -147,14 +147,13 @@ priority, mandatory rules, and option lists. Do not drop a required item from th
 prompt or a screen.
 
 - **Basic fields:** `project_type` is the main type from the brief (سكني / تجاري / فندقي /
-  صناعي ولوجستي / متعدد الاستخدامات / أخرى). `project_subtype` appears for تجاري / فندقي /
-  صناعي ولوجستي. Mixed-use uses a multi-select (`project_mixed_components`). Choosing `أخرى`
-  is also a multi-select of the four real mains; matching subtypes then open automatically.
-  Extra classification is one field on the basic page. Hotel, office, and industrial/logistics
-  get their specialized lists; every other type (سكني, تجاري, mixed leftovers, Other leftovers)
-  uses the generic مستوى المشروع list. `project_idea` is client-typed only. Choosing a type
-  always reveals that type's subtype list and target-audience list. If `أخرى` selects several
-  mains, each selected type gets its own subtype, audience, and classification group.
+  صناعي ولوجستي / متعدد الاستخدامات / أخرى). There is no visible `project_subtype` field;
+  `activity_class` sits directly after the main type. Mixed-use uses a multi-select
+  (`project_mixed_components`). Choosing `أخرى` is a multi-select of the four real mains.
+  Extra classification is one field: hotel / office / industrial get specialized lists, every
+  other type uses the generic مستوى المشروع list. `project_idea` is client-typed only.
+  Choosing a type reveals that type's audience list. If `أخرى` selects several mains, each
+  selected type gets its own audience and classification group.
 - **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).

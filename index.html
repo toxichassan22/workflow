@@ -9447,24 +9447,11 @@
           else otherHost.innerHTML = '';
         }
       }
-      const otherMains = selectedOtherProjectTypes();
       if (subtypeInput) {
+        subtypeInput.style.display = 'none';
         const wrap = subtypeInput.closest('.tenant-field');
-        if (!main) {
-          if (wrap) wrap.style.display = 'none';
-          if (otherSubtypesHost) otherSubtypesHost.innerHTML = '';
-        } else if (isOther) {
-          subtypeInput.style.display = 'none';
-          const hasSubtypes = otherMains.some(typeName => (MARKET_SUBTYPES[typeName] || []).length);
-          if (wrap) wrap.style.display = hasSubtypes ? '' : 'none';
-          renderGroupedSubtypeFields(otherMains, otherSubtypesHost, subtypeInput);
-        } else {
-          const subtypes = MARKET_SUBTYPES[main] || [];
-          if (wrap) wrap.style.display = (main === 'متعدد الاستخدامات' || !subtypes.length) ? 'none' : '';
-          subtypeInput.style.display = '';
-          if (otherSubtypesHost) otherSubtypesHost.innerHTML = '';
-          fillSelectOptions(subtypeInput, subtypes, subtypeInput.value || tenantProjectData.project_subtype, '-- اختر النوع الفرعي --');
-        }
+        if (wrap) wrap.style.display = 'none';
+        if (otherSubtypesHost) otherSubtypesHost.innerHTML = '';
       }
       if (mixedHidden) {
         const wrap = mixedHidden.closest('.tenant-field') || mixedHidden.parentElement;
@@ -9605,7 +9592,11 @@
       const host = document.getElementById('projectActivityClassFields');
       const groups = classificationGroupsForProject(main, isOther, kinds);
       classInput.style.display = 'none';
-      if (wrap) wrap.style.display = groups.length ? '' : 'none';
+      if (wrap) {
+        wrap.style.display = groups.length ? '' : 'none';
+        const fieldLabel = wrap.querySelector(':scope > label');
+        if (fieldLabel) fieldLabel.textContent = 'تصنيف النشاط';
+      }
       if (!host) return;
       const stored = parseStoredLandTable(classInput.value || tenantProjectData.activity_class || tenantProjectData.project_level);
       const current = (stored && typeof stored === 'object' && !Array.isArray(stored))
@@ -9619,8 +9610,10 @@
           '<option value="' + String(option).replace(/"/g, '&quot;') + '"' +
           (option === selected ? ' selected' : '') + '>' + option + '</option>'
         ).join('');
-        return '<div style="margin-top:10px"><label>' + (MARKET_ACTIVITY_CLASS_LABELS[kind] || MARKET_ACTIVITY_CLASS_LABELS[marketAudienceKind(kind)] || 'تصنيف المشروع') +
-          '</label><select data-activity-kind="' + kind + '">' + selectOptions + '</select></div>';
+        return groups.length > 1
+          ? '<div style="margin-top:10px"><div class="tenant-hint" style="margin-bottom:6px">' + (MARKET_ACTIVITY_CLASS_LABELS[kind] || MARKET_ACTIVITY_CLASS_LABELS[marketAudienceKind(kind)] || kind) +
+            '</div><select data-activity-kind="' + kind + '">' + selectOptions + '</select></div>'
+          : '<select data-activity-kind="' + kind + '">' + selectOptions + '</select>';
       }).join('');
       const persist = () => {
         const next = {};
@@ -9662,12 +9655,6 @@
         grid.id = 'projectOtherTypesGrid';
         grid.className = 'project-choice-grid';
         otherInput.insertAdjacentElement('afterend', grid);
-      }
-      if (subtypeInput && !document.getElementById('projectOtherSubtypesGrid')) {
-        const grid = document.createElement('div');
-        grid.id = 'projectOtherSubtypesGrid';
-        grid.className = 'project-choice-grid';
-        subtypeInput.insertAdjacentElement('afterend', grid);
       }
       if (classInput && !document.getElementById('projectActivityClassFields')) {
         const host = document.createElement('div');
@@ -11699,7 +11686,7 @@
             div.appendChild(uploadStatus);
             renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
           }
-          if (f.fieldType === 'select') {
+          if (f.fieldType === 'select' && f.fieldKey !== 'activity_class' && f.fieldKey !== 'project_level') {
             const otherInput = document.createElement('input');
             otherInput.type = 'text';
             otherInput.placeholder = 'اكتب التحديد المخصص بالتفصيل...';
