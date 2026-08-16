@@ -10049,7 +10049,8 @@
       const tb = document.querySelector('#marketCompetitorsTable tbody');
       if (!tb) return;
       tb.innerHTML = '';
-      (rows || []).forEach(row => addMarketCompetitorRow(row));
+      const visibleRows = Array.isArray(rows) && rows.length ? rows : [{}];
+      visibleRows.forEach(row => addMarketCompetitorRow(row));
     }
 
     function addMarketSourceRow(row = {}) {
