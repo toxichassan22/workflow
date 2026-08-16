@@ -773,10 +773,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('subdivision_number', by_key)
         self.assertEqual(by_key['location_address']['sectionKey'], 'location')
         self.assertTrue(by_key['location_address']['isRequired'])
-        for key in ('project_name', 'project_type', 'project_stage', 'project_logo'):
+        for key in ('project_name', 'project_type', 'project_stage', 'project_logo',
+                    'project_idea', 'project_level', 'target_audience', 'activity_class',
+                    'project_subtype'):
             self.assertEqual(by_key[key]['sectionKey'], 'basic')
-        for key in ('project_idea', 'project_goal', 'target_audience', 'initial_features', 'initial_strengths'):
+        for key in ('project_goal', 'initial_features', 'initial_strengths'):
             self.assertNotIn(key, by_key)
+        self.assertEqual(by_key['project_type']['fieldOptions'], [
+            'سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات', 'أخرى'
+        ])
+        self.assertEqual(by_key['city']['sectionKey'], 'location')
+        self.assertEqual(by_key['district']['sectionKey'], 'location')
         self.assertEqual(by_key['plot_number_croquis']['fieldLabel'], 'رقم القطعة')
         self.assertEqual(by_key['deed_date']['fieldLabel'], 'تاريخ الصك')
         self.assertEqual(by_key['building_ratio_coverage']['fieldLabel'], 'نسبة البناء والتغطية')
@@ -3043,6 +3050,97 @@ class MeetingRequirementsTests(unittest.TestCase):
         })
         self.assertEqual(invalid_reference.status_code, 400, invalid_reference.get_json())
         self.assertEqual(invalid_reference.get_json()['error_code'], 'REFERENCE_INVALID')
+
+    def test_market_study_fields_and_section_are_wired(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("function addMarketStudySection(form, before)", index_source)
+        self.assertIn("addMarketStudySection(form);", index_source)
+        self.assertIn("id = 'section-market-study'", index_source)
+        self.assertIn("data-key=\"market_study_data\"", index_source)
+        self.assertIn("function runMarketCompetitorsJob(mode)", index_source)
+        self.assertIn("function runMarketSummaryJob()", index_source)
+        self.assertIn("function renderMarketSummaryCompare(current, incoming)", index_source)
+        self.assertIn('/api/market-study/competitors', index_source)
+        self.assertIn('/api/market-study/summary', index_source)
+        self.assertIn('/api/market-study/jobs/', index_source)
+        self.assertIn('function enhanceProjectClassificationFields()', index_source)
+        self.assertIn("id = 'projectAudienceGrid'", index_source)
+        self.assertIn('id="marketCityMirror"', index_source)
+        self.assertNotIn('🎯', index_source)
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn("import market_study", app_source)
+        self.assertIn("@app.route('/api/market-study/competitors'", app_source)
+        self.assertIn("{'type': 'openrouter:web_search'", app_source)
+        self.assertIn('def _start_market_job(kind, executor):', app_source)
+
+        self.assertIn('project_idea', {field['key'] for field in db.PREBUILT_FIELDS})
+        self.assertNotIn('project_idea', db.REMOVED_PREBUILT_FIELDS)
+
+    def test_market_study_merge_keeps_client_rows(self):
+        import market_study
+        existing = [{
+            'id': 'keep-me',
+            'name': 'مشروع العميل',
+            'project_type': 'سكني',
+            'status': 'قائم',
+            'source': 'العميل',
+            'row_source': 'manual',
+        }]
+        generated = [
+            {'name': 'مشروع العميل', 'price_value': '1200000', 'source': 'منصة عقار'},
+            {'name': 'منافس جديد', 'classification': 'مباشر', 'status': 'تحت الإنشاء'},
+        ]
+        merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode='generate')
+        self.assertEqual(added, 1)
+        self.assertEqual(updated, 1)
+        self.assertEqual(merged[0]['name'], 'مشروع العميل')
+        self.assertEqual(merged[0]['id'], 'keep-me')
+        self.assertEqual(merged[0]['source'], 'العميل')
+        self.assertEqual(merged[0]['price_value'], '1200000')
+        self.assertEqual(len(merged), 2)
+
+        filled_only, added_fill, _updated_fill = market_study.merge_generated_competitors(
+            existing, [{'name': 'اسم غير موجود', 'status': 'قائم'}], mode='fill'
+        )
+        self.assertEqual(added_fill, 0)
+        self.assertEqual([row['name'] for row in filled_only], ['مشروع العميل'])
+
+    def test_market_study_radius_auto_is_ten_km(self):
+        import market_study
+        self.assertEqual(market_study.resolve_competitor_radius_km('auto'), 10)
+        self.assertEqual(market_study.resolve_competitor_radius_km('custom', 7), 7)
+        self.assertIsNone(market_study.resolve_competitor_radius_km('city'))
+
+    def test_market_study_endpoints_queue_or_run_without_deleting_rows(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        fake = {
+            'competitors': [
+                {'name': 'برج الشمال', 'project_type': 'سكني', 'classification': 'مباشر', 'status': 'قائم', 'source': 'موقع المطور'}
+            ]
+        }
+        with patch.object(self.application_module, '_call_market_study_model', return_value=(
+            {'choices': [{'message': {'content': json.dumps(fake, ensure_ascii=False)}}]},
+            '',
+        )):
+            response = client.post('/api/market-study/competitors', headers=headers, json={
+                'projectType': 'سكني',
+                'city': 'الرياض',
+                'competitors': [{'id': 'c1', 'name': 'منافس العميل', 'row_source': 'manual'}],
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        names = [row['name'] for row in payload['competitors']]
+        self.assertIn('منافس العميل', names)
+        self.assertIn('برج الشمال', names)
+
+        catalog = client.get('/api/market-study/catalog', headers=headers)
+        self.assertEqual(catalog.status_code, 200)
+        self.assertIn('سكني', catalog.get_json()['catalog']['projectTypes'])
+
+        missing = client.get('/api/market-study/jobs/not-a-job-id-xxx', headers=headers)
+        self.assertEqual(missing.status_code, 404)
 
 
 if __name__ == '__main__':

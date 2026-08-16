@@ -23,6 +23,7 @@ load_dotenv()
 import db
 import auth
 import maps_service
+import market_study
 import population_service
 import slide_engine
 from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
@@ -231,7 +232,7 @@ def _has_chat_choices(response):
     )
 
 
-def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None):
+def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None):
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
@@ -270,6 +271,10 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
         payload["response_format"] = response_format
     if provider:
         payload["provider"] = provider
+    if tools:
+        payload["tools"] = tools
+    if plugins:
+        payload["plugins"] = plugins
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
         text = response.text or ''
@@ -632,7 +637,7 @@ def call_openrouter_image_generation(prompt, model, reference=None):
         payload['quality'] = 'high'
     else:
         payload['resolution'] = '2K'
-    if reference:
+    if reference and os.environ.get('FLOOR_DESIGN_PASS_INPUT_REFERENCES', 'false').lower() == 'true':
         reference_for_model = _prepare_image_reference_for_model(reference)
         if not reference_for_model:
             return None, 'REFERENCE_INVALID'
@@ -1661,12 +1666,109 @@ def _floor_design_direction_rows(raw):
     return [row for row in raw if isinstance(row, dict)][:500] if isinstance(raw, list) else []
 
 
+def _floor_design_boundary_shape_analysis(land, points=None):
+    instructions = []
+    shape_type = 'orthogonal_rectangle'
+    dimensions = {}
+
+    if points and len(points) >= 3:
+        xs = [p['x'] for p in points]
+        ys = [p['y'] for p in points]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        width = max_x - min_x
+        height = max_y - min_y
+
+        mid_x = min_x + width / 2.0
+        west_ys = [p['y'] for p in points if p['x'] <= mid_x]
+        east_ys = [p['y'] for p in points if p['x'] > mid_x]
+
+        west_height = (max(west_ys) - min(west_ys)) if west_ys else height
+        east_height = (max(east_ys) - min(east_ys)) if east_ys else height
+
+        if east_height > west_height * 1.1:
+            shape_type = 'asymmetrical_tapered_trapezoid_wedge'
+            ratio = round(east_height / max(1, west_height), 2)
+            instructions.append(f'Asymmetrical tapered trapezoid footprint (NOT a rectangle): Eastern facade ({east_height:.1f}m) is {ratio}x the height of Western facade ({west_height:.1f}m), creating a gentle, subtle taper from East to West.')
+        elif west_height > east_height * 1.1:
+            shape_type = 'asymmetrical_tapered_trapezoid_wedge'
+            ratio = round(west_height / max(1, east_height), 2)
+            instructions.append(f'Asymmetrical tapered trapezoid footprint (NOT a rectangle): Western facade ({west_height:.1f}m) is {ratio}x the height of Eastern facade ({east_height:.1f}m), creating a gentle, subtle taper from West to East.')
+
+        top_pts = sorted([p for p in points if p['y'] >= min_y + height * 0.5], key=lambda p: p['x'])
+        if len(top_pts) >= 2:
+            dx_top = top_pts[-1]['x'] - top_pts[0]['x']
+            dy_top = top_pts[-1]['y'] - top_pts[0]['y']
+            if dx_top > 10 and abs(dy_top) > 5:
+                angle_deg = round(math.degrees(math.atan2(dy_top, dx_top)))
+                if dy_top > 0:
+                    instructions.append(f'The Northern (top) outer perimeter wall has a gentle upward slope from left to right at ~{angle_deg} degrees (rising {dy_top:.1f}m). It must NOT be drawn as horizontal or overly steep.')
+                else:
+                    instructions.append(f'The Northern (top) outer perimeter wall has a gentle downward slope from left to right at ~{abs(angle_deg)} degrees. It must NOT be drawn as horizontal or overly steep.')
+
+        instructions.append('The Western (left) perimeter wall is continuous and bows gently outward (convex); it must NOT be indented or bent inward.')
+        instructions.append(f'Site overall bounding dimensions: {width:.1f}m East-West width by {height:.1f}m North-South depth.')
+        dimensions = {'widthMeters': round(width, 2), 'heightMeters': round(height, 2), 'westHeight': round(west_height, 2), 'eastHeight': round(east_height, 2)}
+
+    boundary_text = str(land.get('boundary_lengths') or '')
+    if boundary_text:
+        parts = boundary_text.split('|')
+        dir_data = {}
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            for d, en in [('شمال', 'north'), ('جنوب', 'south'), ('شرق', 'east'), ('غرب', 'west')]:
+                if part.startswith(d) or f'{d}:' in part:
+                    cleaned = re.sub(r'عرض\s*[\d\.]+\s*م', '', part)
+                    lengths = [float(x) for x in re.findall(r'(\d+(?:\.\d+)?)\s*م', cleaned)]
+                    dir_data[en] = round(sum(lengths), 2) if lengths else None
+                    break
+        n_len = dir_data.get('north')
+        s_len = dir_data.get('south')
+        e_len = dir_data.get('east')
+        w_len = dir_data.get('west')
+        if not instructions and e_len and w_len:
+            if e_len > w_len * 1.1:
+                ratio = round(e_len / w_len, 2)
+                shape_type = 'asymmetrical_tapered_trapezoid_wedge'
+                instructions.append(f'Asymmetrical tapered trapezoid footprint (NOT a rectangle): Eastern facade ({e_len:.1f}m) is {ratio}x the height of Western facade ({w_len:.1f}m), creating a gentle taper from East to West.')
+            elif w_len > e_len * 1.1:
+                ratio = round(w_len / e_len, 2)
+                shape_type = 'asymmetrical_tapered_trapezoid_wedge'
+                instructions.append(f'Asymmetrical tapered trapezoid footprint (NOT a rectangle): Western facade ({w_len:.1f}m) is {ratio}x the height of Eastern facade ({e_len:.1f}m), creating a gentle taper from West to East.')
+        if not any('Northern' in item for item in instructions) and n_len and e_len and w_len and abs(e_len - w_len) > 5:
+            rise = abs(e_len - w_len)
+            instructions.append(f'The Northern (top) outer perimeter wall has a gentle upward slope from left to right at ~12 degrees ({n_len:.1f}m length, rising {rise:.1f}m).')
+        if not any('Western' in item for item in instructions):
+            instructions.append('The Western (left) perimeter wall bows gently outward (convex); it must NOT be indented or bent inward.')
+        if not any('Southern' in item for item in instructions) and s_len:
+            instructions.append(f'The Southern (bottom) outer perimeter wall is a wide horizontal boundary ({s_len:.1f}m base).')
+        if not dimensions:
+            dimensions = {'north': n_len, 'south': s_len, 'east': e_len, 'west': w_len}
+
+    if not instructions:
+        instructions.append('Conform outer perimeter walls to the authentic site boundary angles and dimensions.')
+
+    instructions.append('Structural column grid, circulation corridors, and residential units must fan out across the tapered footprint and follow the angled northern wall.')
+
+    return {
+        'shapeType': shape_type,
+        'visualShapeInstructions': instructions,
+        'dimensions': dimensions
+    }
+
+
 def _floor_design_polygon_geometry(land):
     source_rows = _floor_design_coordinate_rows(land.get('survey_coordinates'))
+    shape_analysis = _floor_design_boundary_shape_analysis(land)
     result = {
         'coordinateMode': 'unavailable', 'sourceVertices': source_rows, 'verticesMeters': [],
         'edges': [], 'areaSqm': None, 'rotation': None, 'calculationStatus': 'unavailable',
         'missingItems': [], 'sourceLengthConflicts': [],
+        'shapeType': shape_analysis['shapeType'],
+        'visualShapeInstructions': shape_analysis['visualShapeInstructions'],
+        'dimensions': shape_analysis['dimensions'],
     }
     if len(source_rows) < 3:
         result['missingItems'].append('polygon_coordinates_for_computed_angles_and_area')
@@ -1736,11 +1838,15 @@ def _floor_design_polygon_geometry(land):
             result['sourceLengthConflicts'].append(conflict)
             edge['lengthConflict'] = conflict
         edges.append(edge)
+    points_shape = _floor_design_boundary_shape_analysis(land, points)
     result.update({
         'verticesMeters': [{'point': point['point'], 'x': round(point['x'], 3), 'y': round(point['y'], 3)}
                            for point in points],
         'edges': edges, 'areaSqm': round(abs(twice_area) / 2, 3),
         'rotation': 'counterclockwise' if twice_area > 0 else 'clockwise', 'calculationStatus': 'computed',
+        'shapeType': points_shape['shapeType'],
+        'visualShapeInstructions': points_shape['visualShapeInstructions'],
+        'dimensions': points_shape['dimensions'],
     })
     return result
 
@@ -2218,14 +2324,22 @@ def _floor_design_page_specification(page, prepared, payload, group):
         'project': {key: payload['project'].get(key) for key in ('project_name', 'project_type', 'project_stage') if payload['project'].get(key)},
         'dataConflicts': payload.get('data_conflicts', []),
         'financialTotals': {key: payload['financial'].get(key) for key in financial_keys},
+        'footprintGeometry': {
+            'shapeType': prepared.get('geometry', {}).get('shapeType', 'polygon'),
+            'visualShapeInstructions': prepared.get('geometry', {}).get('visualShapeInstructions', []),
+            'dimensions': prepared.get('geometry', {}).get('dimensions', {}),
+        },
         'drawingRules': [
             'For pageScope.scope typical_group_floor, this is one representative plan for every floor in representedFloorRange. Label the range and do not generate or label a separate floor 2 plan. For single_floor_only, label only the current floor.',
             'Background MUST be pure solid white #FFFFFF with no borders, textures, or shadows.',
             'Render a dominant, high-precision 2D CAD architectural floor plan occupying 75% width of the canvas.',
-            'Include a solid black structural column grid, crisp interior partition walls, standard door swing arcs, window openings, and vertical circulation cores (elevators with cross lines, fire exit stairs with step treads).',
+            'Include a solid black structural column grid, crisp interior partition walls, standard door swing arcs, window openings, and vertical circulation cores.',
+            'Represent vertical cores as solid enclosed structural blocks with simple "X" cab markings and basic egress stair treads, marked with circular numbered red badges (1, 2, 3).',
+            'For service, basement, commercial, or amenity floors, avoid interior furniture or micro apartment partitions; instead, use clean translucent pastel color-coded zones matching the space program (e.g. Soft Pink for Administration, Pale Yellow for Core, Light Mint for Gym/Open Space).',
+            'For basement, ground, or parking levels, render standard 90-degree and angled parking stalls with dashed CAD line markings, directional traffic circulation arrows, and structural columns centered on stall grid lines.',
             'Provide generous, continuous circulation corridors connecting all spaces and units directly to the central core.',
             'Apply soft pastel color washes to distinguish programmatic zones matching the Space Program.',
-            'The outer building perimeter walls and floor plan footprint MUST conform strictly to the authentic plot geometry and setback envelope (matching boundary facet angles, relative edge lengths, and street/neighbour orientations). Do not render a generic symmetrical rectangle or box.',
+            'The outer building perimeter walls and floor plan footprint MUST conform strictly to the authentic plot geometry: ' + (' '.join(prepared.get('geometry', {}).get('visualShapeInstructions', [])) or 'follow specific angular polygon footprint rather than a generic symmetrical rectangle.'),
             'The active floor Space Program and group use govern the floor layout even if the general project type is different; preserve the raw project type as metadata but do not let it replace a residential unit program.',
             'If spaceProgram.residentialLayout.required is true, divide the floor plate into repeated residential unit boundaries using the supplied unitsPerFloor and unitAreaSqm when available. If unitAreaSqm is unavailable, show the repeated unit boundaries and count without inventing dimensions. Show common circulation and cores, and never represent the entire residential floor as one component bubble.',
             'When residential unit area consistency is marked as a conflict, show the conflict clearly and do not silently change either source value.',
@@ -2495,16 +2609,21 @@ def api_generate_floor_design_prompt():
                         'missingItems': preflight['missingItems'], 'blockedItems': preflight['blockedItems'],
                         'preflight': preflight}), 409 if preflight['blockedItems'] else 400
     system_prompt = (
-        'You write strict English image prompts for complete landscape architectural presentation pages. '
+        'You write strict English image prompts for complete landscape architectural presentation pages using a reference plot/croquis image. '
         'Return JSON only as {"pages":[{"pageType":"typical_floor","floorNumber":1,"prompt":"","negative_prompt":""}]}. '
         'Return exactly one item for every supplied Page Spec in the same order. The image model designs only and performs no arithmetic. '
         'Use every prepared value verbatim. A typical_floor page represents the complete supplied group range with one representative plan; do not reduce a multi-floor group to a floor 2-only design. A floor page with one floor represents that floor only. '
-        'The presentation format strictly follows the clean CAD architectural standard of the Acacia reference: '
-        '16:9 landscape canvas, pure white #FFFFFF solid background, left 25% info panel with floor title, Table of Contents, Space Program table and pastel donut chart, '
-        'and the dominant right 75% featuring a high-precision 2D CAD architectural floor plan with solid black column grid, thin partition walls, clear circulation corridors, '
-        'vertical circulation cores (elevators & fire exit stairs), soft pastel programmatic zoning fills, and numbered legend badges. '
-        'CRITICAL FOOTPRINT GEOMETRY: The building footprint is NOT a generic rectangle or symmetrical box. You must analyze the plot boundary dimensions, directions table, survey coordinates, setbacks, and surrounding streets from the input. In your prompt description, explicitly describe the authentic non-orthogonal polygon building footprint (e.g. angled boundaries, dual-segment street facades, setback envelope, and facet orientations relative to North/South/East/West). Instruct the image model that the outer structural perimeter walls, columns, circulation corridors, and perimeter residential units MUST conform strictly to this specific angular polygon footprint rather than a generic box. '
+        'You MUST format each generated page prompt strictly following the fixed Acacia CAD presentation template structure, filling in the dynamic placeholders based on the active floor specification, project requirements, and Space Program table: '
+        '1. Top Header & Sub-banner: Category title "PLANS" with Table of Contents and teal-tinted block for the specific floor/range name (e.g. "FLOORS 2-50 TYPICAL PLAN" or "BASEMENT LEVEL - PARKING"). '
+        '2. Space Program Schedule: Exact table rows detailing space name, area in m², percentage, and Total Floor Area matching the prepared data. '
+        '3. Representative Floor Badge: Callout badge stating the level and floor count (e.g. "Representative Floor: Level 2-50 (49 Typical Floors)"). '
+        '4. Vector Donut Chart: Single clean circular pastel donut chart reflecting the programmatic split with a single clean leader line. '
+        '5. Color Theme from Reference Images: Extract and apply ONLY the elegant soft pastel functional color-coding theme from the reference images (e.g. soft slate blue #3B6E91 for residential, pale yellow for cores, soft pink for administration, light mint for amenities/open space). '
+        '6. Architectural Plan: Solid black column grid, enclosed structural vertical cores (elevators with simple X cab markings, egress fire stairs with step treads), wide continuous circulation corridor, and clear structural unit partition walls with swing arcs ONLY. STRICTLY NO interior furniture, beds, couches, or dining tables. '
+        '7. Numbered Legend Badges: Circular red badges (1, 2, 3, 4, ...) placed on corresponding zones linked to a clean top-right legend key. '
+        '8. Geometry Fidelity: Outer building perimeter walls must strictly trace and mirror the authentic polygon envelope from the reference image vertex-by-vertex, precisely preserving inward kinks on northern walls and angled corner bends without straightening into generic boxes. '
         'When residentialLayout.required is true, explicitly describe repeated residential unit boundaries, common circulation, and cores for the representative floor or typical group; never collapse the floor into one component bubble. '
+        'For basement, parking, or ground service levels, render standard 90-degree and angled parking stalls with dashed CAD line markings, directional traffic circulation arrows, and structural columns centered on stall grid lines; use clean translucent pastel color-coded zones matching the space program. '
         'Never use unresolved instructions such as calculate, determine, approximately, or as appropriate. Never invent missing values. '
         'The nine attached reference images, when supplied, show the same fixed design across different floor types. Extract only their invariant layout, spacing, palette, line hierarchy, and information architecture; do not copy any reference content. '
         'The supplied references are style and layout guidance only. Never copy Acacia names, project content, values, dimensions, room names, or components. '
@@ -4320,11 +4439,22 @@ def api_geocode():
         coords = maps_service.extract_coords_from_maps_link(query)
         if coords:
             print(f"[MAPS LINK] Extracted coords from link: {coords}")
+            place = maps_service.reverse_geocode_location(
+                coords['lat'], coords['lng'], tenant_id=g.tenant_id, language='ar'
+            ) or {}
+            names = market_study.extract_city_district(
+                place.get('address_components') or [],
+                place.get('formatted_address') or '',
+            )
             return jsonify({
                 'success': True,
                 'lat': coords['lat'],
                 'lng': coords['lng'],
-                'formatted_address': address if (address and not address.startswith('http')) else 'تم الاستخراج من رابط خرائط جوجل',
+                'formatted_address': place.get('formatted_address') or (
+                    address if (address and not address.startswith('http')) else 'تم الاستخراج من رابط خرائط جوجل'
+                ),
+                'city': names.get('city') or '',
+                'district': names.get('district') or '',
                 'source': 'maps_link'
             })
 
@@ -4654,13 +4784,22 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
 
     population = population_service.get_population_density(lat, lng)
     location_details = maps_service.reverse_geocode_location(lat, lng, tenant_id=tenant_id, language='en')
+    arabic_location = maps_service.reverse_geocode_location(lat, lng, tenant_id=tenant_id, language='ar') or {}
+    place_names = market_study.extract_city_district(
+        arabic_location.get('address_components') or location_details.get('address_components') or [],
+        arabic_location.get('formatted_address') or location_details.get('formatted_address') or '',
+    )
     fields = {
         'location_lat': lat,
-        'location_detail': location_details.get('formatted_address', ''),
+        'location_detail': arabic_location.get('formatted_address') or location_details.get('formatted_address', ''),
         'location_lng': lng,
         'nearby_landmarks': landmark_lines(nearby_items, nearby_matrix),
         'city_landmarks': landmark_lines(city_items),
     }
+    if place_names.get('city') and not str(project_data.get('city') or '').strip():
+        fields['city'] = place_names['city']
+    if place_names.get('district') and not str(project_data.get('district') or '').strip():
+        fields['district'] = place_names['district']
     if population.get('available'):
         fields['population_density'] = f"{population['value']} {population.get('unit', 'نسمة/كم²')}"
         fields['population_density_source'] = population.get('source')
@@ -4851,11 +4990,11 @@ def api_site_analysis():
     data = request.json or {}
     raw_project_data = clean_project_data(data.get('projectData', {}))
     analysis_keys = (
-        'project_name', 'project_type', 'project_idea', 'description', 'project_description',
+        'project_name', 'project_type', 'project_subtype', 'project_idea', 'description', 'project_description',
         'project_goal', 'project_stage', 'initial_features', 'initial_strengths',
         'project_features', 'investment_opportunities', 'target_audience', 'location_address',
         'location_maps_link', 'maps_link', 'location_detail', 'location_lat', 'location_lng',
-        'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
+        'city', 'district', 'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
         'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
         'land_area', 'built_area', 'building_system', 'infrastructure', 'location_polygon'
     )
@@ -6706,15 +6845,17 @@ def split_land_use_status_text(text):
 PROJECT_TYPE_USE_ALIASES = {
     'سكني': ('سكني',),
     'تجاري': ('تجاري',),
-    'إداري': ('إداري', 'مكتبي'),
+    'إداري': ('إداري', 'مكتبي', 'مكاتب'),
     'فندقي': ('فندقي', 'فندق'),
     'ترفيهي': ('ترفيهي', 'سياحي', 'ترفيه'),
     'صناعي': ('صناعي',),
     'لوجستي': ('لوجستي', 'مستودع', 'تخزين'),
+    'صناعي ولوجستي': ('صناعي', 'لوجستي', 'مستودع', 'تخزين'),
+    'متعدد الاستخدامات': ('متعدد', 'مختلط', 'متنوع', 'سكني', 'تجاري'),
     'طبي': ('طبي', 'صحي'),
     'تعليمي': ('تعليمي', 'مدرسة', 'جامعة'),
     'سيارات وترفيه': ('سيارات', 'ترفيهي', 'ترفيه'),
-    'مختلط': ('مختلط', 'متنوع', 'سكني', 'تجاري'),
+    'مختلط': ('مختلط', 'متنوع', 'سكني', 'تجاري', 'متعدد'),
 }
 
 
@@ -8346,7 +8487,7 @@ def _build_land_extraction_diagnostics(result, document_processing=None):
 
 LAND_ANALYSIS_SITE_CONTEXT_KEYS = (
     'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_polygon',
-    'city', 'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
+    'city', 'district', 'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
     'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
     'land_area', 'built_area', 'building_system', 'infrastructure', 'zoning_code', 'land_use',
 )
@@ -8384,6 +8525,282 @@ def build_land_analysis_site_context(data, tenant_id, lat, lng):
         except Exception as error:
             warnings.append('تعذر استكمال بعض بيانات الموقع والخرائط: ' + str(error))
     return context, warnings
+
+
+MARKET_STUDY_MAX_TOKENS = int(os.environ.get('MARKET_STUDY_MAX_TOKENS', '8000'))
+MARKET_STUDY_MODEL = os.environ.get('MARKET_STUDY_MODEL') or GEMINI_TEXT_MODEL
+_MARKET_JOB_LOCK = threading.Lock()
+
+
+def _market_job_dir(tenant_id):
+    path = os.path.join(UPLOADS_DIR, '.market_jobs', str(tenant_id))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _market_job_path(tenant_id, job_id):
+    return os.path.join(_market_job_dir(tenant_id), f'{job_id}.json')
+
+
+def _write_market_job(tenant_id, job_id, payload):
+    path = _market_job_path(tenant_id, job_id)
+    payload = dict(payload)
+    payload['updatedAt'] = time.time()
+    body = json.dumps(payload, ensure_ascii=False)
+    with _MARKET_JOB_LOCK:
+        last_error = None
+        for _ in range(8):
+            try:
+                with open(path, 'w', encoding='utf-8') as fh:
+                    fh.write(body)
+                return
+            except OSError as error:
+                last_error = error
+                time.sleep(0.03)
+        if last_error:
+            raise last_error
+
+
+def _read_market_job(tenant_id, job_id):
+    path = _market_job_path(tenant_id, job_id)
+    if not os.path.isfile(path):
+        return None
+    with _MARKET_JOB_LOCK:
+        try:
+            with open(path, encoding='utf-8') as fh:
+                payload = json.load(fh)
+        except Exception:
+            return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _call_market_study_model(system_prompt, user_content, max_tokens=None):
+    """Search-backed market call. Prefer the web tool; fall back to a plain JSON call."""
+    cap = max(2000, int(max_tokens or MARKET_STUDY_MAX_TOKENS))
+    tools = [{'type': 'openrouter:web_search', 'parameters': {'max_results': 8}}]
+    res = call_openrouter_chat(
+        system_prompt,
+        user_content,
+        temperature=None,
+        max_tokens=cap,
+        model=MARKET_STUDY_MODEL,
+        response_format={'type': 'json_object'},
+        provider={'order': ['Google'], 'allow_fallbacks': True},
+        tools=tools,
+        timeout=240,
+    )
+    if _has_chat_choices(res) and str(_get_chat_response_text(res) or '').strip():
+        return res, _chat_error_message(res)
+    print(f'[MARKET STUDY] web-tool call failed or empty; retrying without tools: {_chat_error_message(res)}')
+    res = call_openrouter_chat(
+        system_prompt,
+        user_content,
+        temperature=None,
+        max_tokens=cap,
+        model=MARKET_STUDY_MODEL,
+        response_format={'type': 'json_object'},
+        provider={'order': ['Google'], 'allow_fallbacks': True},
+        timeout=240,
+    )
+    return res, _chat_error_message(res)
+
+
+def _parse_market_model_json(res):
+    if not _has_chat_choices(res):
+        return {}, _chat_error_message(res) or 'empty_response'
+    text = _get_chat_response_text(res)
+    parsed = parse_json_object(text)
+    if not parsed:
+        return {}, 'invalid_json'
+    return parsed, ''
+
+
+def _market_period_label(data):
+    period = str(data.get('dataPeriod') or data.get('data_period') or '').strip()
+    labels = {item['value']: item['label'] for item in market_study.DATA_PERIOD_OPTIONS}
+    if period == 'custom':
+        start = str(data.get('dataPeriodFrom') or data.get('data_period_from') or '').strip()
+        end = str(data.get('dataPeriodTo') or data.get('data_period_to') or '').strip()
+        if start or end:
+            return f'فترة مخصصة من {start or "غير محدد"} إلى {end or "غير محدد"}'
+    return labels.get(period, period or 'غير محدد')
+
+
+def _market_radius_label(data, resolved_km):
+    value = str(data.get('competitorRadius') or data.get('competitor_radius') or 'auto').strip()
+    labels = {item['value']: item['label'] for item in market_study.COMPETITOR_RADIUS_OPTIONS}
+    if value == 'custom':
+        custom = data.get('competitorRadiusCustomKm') or data.get('competitor_radius_custom_km') or resolved_km
+        return f'نطاق مخصص {custom} كم'
+    if value == 'auto':
+        return f'تلقائي حسب نوع المشروع ({market_study.DEFAULT_COMPETITOR_RADIUS_KM} كم)'
+    if resolved_km is None and value == 'city':
+        return 'كامل المدينة'
+    return labels.get(value, value)
+
+
+def _prepare_market_payload(data):
+    payload = dict(data or {})
+    radius_value = payload.get('competitorRadius') or payload.get('competitor_radius') or 'auto'
+    custom_km = payload.get('competitorRadiusCustomKm') or payload.get('competitor_radius_custom_km')
+    resolved = market_study.resolve_competitor_radius_km(radius_value, custom_km)
+    payload['resolvedRadiusKm'] = resolved
+    payload['competitorRadiusLabel'] = _market_radius_label(payload, resolved)
+    payload['dataPeriodLabel'] = _market_period_label(payload)
+    mixed = payload.get('projectComponents') or payload.get('project_mixed_components') or payload.get('project_components')
+    payload['projectComponents'] = mixed
+    return payload
+
+
+def _execute_market_competitors(data):
+    payload = _prepare_market_payload(data)
+    existing = data.get('competitors') if isinstance(data.get('competitors'), list) else []
+    mode = 'fill' if str(data.get('mode') or '').strip() == 'fill' else 'generate'
+    system_prompt = market_study.build_consultant_system_prompt()
+    user_prompt = market_study.build_competitors_user_prompt(payload, existing, mode=mode)
+    res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=6000)
+    parsed, parse_error = _parse_market_model_json(res)
+    if parse_error:
+        reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
+        return {
+            'success': False,
+            'error': 'تعذر توليد المنافسين. لم يُحذف أي صف موجود.',
+            'failureReason': reason,
+            'providerError': provider_error,
+        }
+    generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
+    merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
+    return {
+        'success': True,
+        'competitors': merged,
+        'added': added,
+        'updated': updated,
+        'searchExpanded': bool(parsed.get('searchExpanded')),
+        'expansionNote': parsed.get('expansionNote') or parsed.get('notes') or '',
+        'notes': parsed.get('notes') or '',
+    }
+
+
+def _execute_market_summary(data):
+    payload = _prepare_market_payload(data)
+    competitors = data.get('competitors') if isinstance(data.get('competitors'), list) else []
+    current_summary = data.get('currentSummary') if isinstance(data.get('currentSummary'), dict) else None
+    system_prompt = market_study.build_consultant_system_prompt()
+    user_prompt = market_study.build_summary_user_prompt(payload, competitors, current_summary)
+    res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS)
+    parsed, parse_error = _parse_market_model_json(res)
+    if parse_error:
+        reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
+        return {
+            'success': False,
+            'error': 'تعذر توليد ملخص السوق. لم يُستبدل النص الحالي.',
+            'failureReason': reason,
+            'providerError': provider_error,
+        }
+    normalized = market_study.normalize_summary(parsed)
+    if not any(normalized['summary'].values()):
+        return {
+            'success': False,
+            'error': 'عاد النموذج ملخصًا فارغًا. لم يُستبدل النص الحالي.',
+            'failureReason': 'empty_response',
+            'providerError': provider_error,
+        }
+    return {
+        'success': True,
+        **normalized,
+    }
+
+
+def _market_job_worker(app, tenant_id, kind, data, job_id):
+    with app.app_context():
+        _write_market_job(tenant_id, job_id, {
+            'status': 'running',
+            'success': True,
+            'message': 'جاري البحث في المصادر الرسمية وإعداد النتائج...',
+            'kind': kind,
+        })
+        try:
+            if kind == 'competitors':
+                payload = _execute_market_competitors(data)
+            else:
+                payload = _execute_market_summary(data)
+            status = 'completed' if payload.get('success') else 'failed'
+            _write_market_job(tenant_id, job_id, {
+                **payload,
+                'status': status,
+                'kind': kind,
+                'message': payload.get('error') or 'اكتملت دراسة السوق',
+            })
+        except Exception as exc:
+            _write_market_job(tenant_id, job_id, {
+                'status': 'failed',
+                'success': False,
+                'kind': kind,
+                'error': f'حدث خطأ في دراسة السوق: {exc}',
+                'failureReason': 'job_failed',
+            })
+
+
+def _start_market_job(kind, executor):
+    data = request.json or {}
+    use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
+    if not use_background:
+        result = executor(data)
+        status = 200 if result.get('success') else 422
+        return jsonify(result), status
+    job_id = str(_uuid.uuid4())
+    tenant_id = g.tenant_id
+    _write_market_job(tenant_id, job_id, {
+        'status': 'queued',
+        'success': True,
+        'kind': kind,
+        'message': 'تم استلام طلب دراسة السوق',
+    })
+    threading.Thread(
+        target=_market_job_worker,
+        args=(current_app._get_current_object(), tenant_id, kind, data, job_id),
+        daemon=True,
+    ).start()
+    return jsonify({
+        'success': True,
+        'jobId': job_id,
+        'status': 'queued',
+        'kind': kind,
+        'message': 'بدأت دراسة السوق في الخلفية',
+    }), 202
+
+
+@app.route('/api/market-study/catalog', methods=['GET'])
+@require_auth
+def api_market_study_catalog():
+    return jsonify({'success': True, 'catalog': market_study.catalog_payload()})
+
+
+@app.route('/api/market-study/competitors', methods=['POST'])
+@require_auth
+def api_market_study_competitors():
+    return _start_market_job('competitors', _execute_market_competitors)
+
+
+@app.route('/api/market-study/summary', methods=['POST'])
+@require_auth
+def api_market_study_summary():
+    return _start_market_job('summary', _execute_market_summary)
+
+
+@app.route('/api/market-study/jobs/<job_id>', methods=['GET'])
+@require_auth
+def api_market_study_job(job_id):
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', str(job_id or '')):
+        return jsonify({'success': False, 'error': 'معرف مهمة غير صالح'}), 400
+    job = _read_market_job(g.tenant_id, job_id)
+    if not job:
+        return jsonify({
+            'success': False,
+            'error': 'مهمة دراسة السوق غير موجودة',
+            'failureReason': 'job_not_found',
+        }), 404
+    return jsonify(job)
 
 
 _LAND_JOB_LOCK = threading.Lock()
@@ -8674,7 +9091,7 @@ def _execute_extract_croquis():
             "- parking_requirements: استخرج اشتراطات المواقف كاملة: العدد أو النسبة، نوع الاستخدام، وأبعاد الموقف أو المسار إن ذُكرت، دون ذكر أرقام الصفحات. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
             "- entrances_exits_requirements: استخرج اشتراطات مداخل ومخارج السيارات والمشاة والخدمات والتحميل والفصل بين المداخل إن ذُكرت، دون ذكر أرقام الصفحات. إذا لم توجد فاكتب «غير محددة في المرجع المتاح».\n"
             "- allowed_uses: اكتب قائمة الاستخدامات المسموحة تنظيميًا لهذه الأرض من جدول التنظيم وملفي الاشتراطات "
-            "(مثل: سكني، تجاري، إداري، فندقي). لا تكتب حالة توافق نوع المشروع، ولا تكتب «حالة استخدام المشروع». "
+            "(مثل: سكني، تجاري، فندقي، صناعي ولوجستي). لا تكتب حالة توافق نوع المشروع، ولا تكتب «حالة استخدام المشروع». "
             "إذا لم تُستخرج استخدامات واضحة فاكتب «غير محددة في المرجع المتاح».\n"
             "- land_use_status: أعد قيمة واحدة فقط بعد مقارنة نوع المشروع المدخل في بيانات العميل مع الاستخدامات المستخرجة: «مسموح» أو «غير مسموح» أو «غير محسوم». "
             "إذا كان نوع المشروع مكتوبًا في بيانات العميل فلا تقل إنه غير مدخل. لا تستخدم «مسموح» إذا لم يوجد دليل كافٍ.\n"

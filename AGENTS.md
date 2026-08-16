@@ -137,8 +137,30 @@ Logos reuse `project_files` with `file_type='team_logo'`, so they inherit tenant
 authenticated `GET /api/project-files/<id>` preview route. `team_logo` is in
 `PROJECT_IMAGE_ONLY_TYPES` because it renders in an `<img>`.
 
-Section order is `basic → location → land_croquis → timeline → financial → team → conceptual 2D`.
+Section order is `basic → location → land_croquis → timeline → financial → team → market study → conceptual 2D`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order.
+
+## Market study (دراسة السوق)
+
+The full brief is `تحليل السوق .pdf`. `market_study.py` is that brief as code — indicators, source
+priority, mandatory rules, and option lists. Do not drop a required item from the PDF to shorten a
+prompt or a screen.
+
+- **Basic fields:** `project_type` is the main type from the brief (سكني / تجاري / فندقي /
+  صناعي ولوجستي / متعدد الاستخدامات / أخرى). `project_subtype` appears for تجاري / فندقي /
+  صناعي ولوجستي. Mixed-use uses a multi-select (`project_mixed_components`). `project_idea` is
+  client-typed only. `project_level` is separate from `activity_class` (hotel stars / office class /
+  industrial spec). `target_audience` is a multi-select that changes with type.
+- **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
+  and mirrored read-only inside دراسة السوق. Persist via `data-key`.
+- **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).
+  Competitor rows are never deleted by generation. Fill-by-name completes empty cells only.
+  Re-generating a summary shows current vs new and waits for replace/keep.
+- Production jobs are queued (`POST /api/market-study/competitors` or `/summary`, poll
+  `GET /api/market-study/jobs/<id>`) for the same hosting-proxy reason as croquis. Tests stay
+  synchronous unless they pass `background: true`. Web search goes through OpenRouter
+  `openrouter:web_search`; a failed tool call retries without tools. Missing figures stay
+  `غير متوفر من مصدر موثوق`.
 
 ## Performance rules
 

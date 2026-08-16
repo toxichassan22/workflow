@@ -1542,6 +1542,103 @@
       outline: none;
     }
 
+    #section-market-study.tenant-form-section.active,
+    #section-market-study {
+      display: block !important;
+      width: 100%;
+    }
+    .project-form-content #section-market-study.tenant-form-section:not(.active) {
+      display: none !important;
+    }
+    #section-market-study .market-study-body {
+      grid-column: 1 / -1;
+    }
+    #section-market-study .market-block {
+      margin: 0 0 22px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+    #section-market-study .market-block h4 {
+      margin: 0 0 10px;
+      color: var(--p);
+      font-size: 15px;
+    }
+    #section-market-study .market-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    #section-market-study label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    #section-market-study select,
+    #section-market-study input,
+    #section-market-study textarea {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    #section-market-study .market-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0;
+    }
+    #section-market-study .table-wrap {
+      overflow-x: auto;
+    }
+    #section-market-study table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #section-market-study th,
+    #section-market-study td {
+      border: 1px solid var(--line);
+      padding: 6px;
+      vertical-align: top;
+    }
+    #section-market-study th {
+      background: #f7fafc;
+      font-size: 12px;
+    }
+    #section-market-study .choice-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+    }
+    #section-market-study .choice-grid label,
+    .project-choice-grid label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      font-weight: 500;
+      color: var(--ink);
+      font-size: 13px;
+    }
+    .project-choice-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 8px;
+    }
+    #section-market-study .summary-compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    #marketSummaryFailure,
+    #marketCompetitorsNote {
+      margin-top: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
     /* THE VIEW Financial Model Styles - Complete Scoped Copy from THE-VIEW-Financial-Model-FINAL-v2.html */
     .project-form-content #section-financial-calc.tenant-form-section.active,
     #section-financial-calc.tenant-form-section.active,
@@ -7248,8 +7345,8 @@
       const source = context || {};
       const slim = {};
       const scalarKeys = [
-        'project_name', 'project_type', 'project_stage', 'location_address',
-        'location_lat', 'location_lng', 'city', 'zoning_code', 'land_use'
+        'project_name', 'project_type', 'project_subtype', 'project_stage', 'location_address',
+        'location_lat', 'location_lng', 'city', 'district', 'zoning_code', 'land_use'
       ];
       const shortKeys = {
         location_detail: 400,
@@ -8851,6 +8948,793 @@
       else form.appendChild(div);
     }
 
+    const MARKET_STUDY_SUMMARY_SECTIONS = [
+      { key: 'market_definition', label: 'تعريف السوق' },
+      { key: 'city_position', label: 'وضع المدينة' },
+      { key: 'sector_performance', label: 'أداء القطاع' },
+      { key: 'supply', label: 'العرض' },
+      { key: 'demand', label: 'الطلب' },
+      { key: 'competition', label: 'المنافسة' },
+      { key: 'market_gap', label: 'الفجوة السوقية' },
+      { key: 'recommendation', label: 'التوصية' },
+      { key: 'risks', label: 'المخاطر' },
+      { key: 'decision', label: 'القرار' }
+    ];
+    const MARKET_PROJECT_TYPES = ['سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات', 'أخرى'];
+    const MARKET_SUBTYPES = {
+      'سكني': [],
+      'تجاري': ['مكاتب', 'تجزئة ومحلات', 'مطاعم ومقاهي', 'مركز تجاري'],
+      'فندقي': ['فندق', 'شقق مخدومة', 'منتجع', 'مساكن فندقية'],
+      'صناعي ولوجستي': ['مصنع', 'مستودعات', 'مركز لوجستي', 'مجمع صناعي'],
+      'متعدد الاستخدامات': [],
+      'أخرى': []
+    };
+    const MARKET_MIXED_COMPONENTS = ['سكني', 'مكاتب', 'تجزئة ومحلات', 'مطاعم ومقاهي', 'مركز تجاري', 'فندق', 'شقق مخدومة', 'منتجع', 'مساكن فندقية', 'مصنع', 'مستودعات', 'مركز لوجستي', 'مجمع صناعي', 'أخرى'];
+    const MARKET_ACTIVITY_CLASS = {
+      'فندقي': ['غير مصنف', 'نجمة واحدة', 'نجمتان', '3 نجوم', '4 نجوم', '5 نجوم', '5 نجوم فاخر', 'منتجع', 'فندق بوتيك', 'شقق مخدومة اقتصادية', 'شقق مخدومة متوسطة', 'شقق مخدومة فاخرة', 'أخرى'],
+      'مكاتب': ['فئة C', 'فئة B', 'فئة B+', 'فئة A', 'فئة A+ أو مكاتب مميزة', 'مكاتب مرنة ومشتركة', 'أخرى'],
+      'صناعي ولوجستي': ['أساسي', 'قياسي', 'متقدم', 'عالي المواصفات', 'متخصص حسب النشاط', 'منشأة مؤتمتة أو ذكية', 'أخرى']
+    };
+    const MARKET_AUDIENCE = {
+      'سكني': ['أفراد', 'حديثو الزواج', 'العائلات الصغيرة', 'العائلات المتوسطة', 'العائلات الكبيرة', 'كبار السن', 'الطلاب', 'الموظفون', 'التنفيذيون ورجال الأعمال', 'أصحاب الدخل المحدود', 'أصحاب الدخل المتوسط', 'أصحاب الدخل فوق المتوسط', 'أصحاب الدخل المرتفع', 'أصحاب الثروات', 'السعوديون', 'المقيمون', 'الأجانب المؤهلون للتملك', 'زوار المدينة', 'الباحثون عن منزل ثان', 'الباحثون عن مساكن فندقية', 'موظفو الشركات القريبة'],
+      'مكاتب': ['رواد الأعمال', 'الشركات الناشئة', 'المنشآت الصغيرة', 'المنشآت المتوسطة', 'الشركات الكبيرة', 'الشركات العالمية', 'المقرات الإقليمية', 'الجهات الحكومية', 'الجهات شبه الحكومية', 'الشركات المهنية والاستشارية', 'شركات التقنية', 'الشركات المالية', 'شركات العقار والإنشاءات', 'الشركات الطبية', 'مكاتب المحاماة والمحاسبة', 'مشغلو المكاتب المشتركة', 'المستقلون', 'المستثمرون العقاريون'],
+      'تجزئة': ['متاجر محلية', 'علامات تجارية عالمية', 'مطاعم ومقاهي', 'متاجر فاخرة', 'سوبرماركت', 'صيدليات', 'خدمات يومية', 'مراكز ترفيه', 'عيادات', 'نواد رياضية', 'بنوك وخدمات مالية', 'مشغلو التجزئة'],
+      'فندقي': ['سياح الترفيه', 'سياح الأعمال', 'رجال الأعمال والتنفيذيون', 'العائلات', 'الأزواج', 'الزوار الدوليون', 'الزوار المحليون', 'الزوار الخليجيون', 'الحجاج والمعتمرون', 'زوار الفعاليات والمواسم', 'زوار المؤتمرات والمعارض', 'المجموعات السياحية', 'أصحاب الدخل المتوسط', 'أصحاب الدخل المرتفع', 'فئة الفخامة', 'أصحاب الثروات', 'نزلاء الإقامة الطويلة', 'نزلاء الإقامة القصيرة', 'مسافرو الترانزيت', 'أطقم شركات الطيران', 'الرياضيون والفرق الرياضية', 'المرضى ومرافقوهم', 'موظفو الشركات', 'الجهات الحكومية', 'منظمو المؤتمرات والفعاليات', 'مشترو المساكن الفندقية'],
+      'صناعي ولوجستي': ['المصانع الصغيرة والمتوسطة', 'الشركات الصناعية الكبرى', 'المستثمرون الصناعيون', 'المصنعون المحليون', 'المصنعون الدوليون', 'شركات الخدمات اللوجستية', 'مشغلو الطرف الثالث 3PL', 'شركات التجارة الإلكترونية', 'شركات التوزيع', 'شركات الاستيراد والتصدير', 'شركات الشحن', 'مشغلو الميل الأخير', 'شركات التخزين الجاف', 'شركات التخزين المبرد', 'الصناعات الغذائية', 'الصناعات الدوائية', 'الصناعات الطبية', 'الصناعات الخفيفة', 'الصناعات المتوسطة', 'الصناعات الثقيلة', 'الصناعات التقنية والإلكترونية', 'صناعة السيارات وقطع الغيار', 'مواد البناء', 'الشركات المرتبطة بالموانئ', 'الشركات المرتبطة بالمطارات', 'الجهات الحكومية', 'المستأجرون الصناعيون', 'مشترو المستودعات أو المصانع']
+    };
+    const MARKET_PRICE_TYPES = {
+      'بيع': ['سعر الوحدة', 'سعر المتر المربع', 'متوسط سعر الوحدة', 'متوسط سعر المتر', 'يبدأ من', 'نطاق سعري', 'أخرى'],
+      'إيجار': ['إيجار الوحدة الشهري', 'إيجار الوحدة السنوي', 'إيجار المتر الشهري', 'إيجار المتر السنوي', 'متوسط إيجار الوحدة', 'متوسط إيجار المتر', 'يبدأ من', 'نطاق سعري', 'أخرى'],
+      'تشغيل فندقي': ['سعر الليلة', 'متوسط سعر الغرفة ADR', 'الإيراد لكل غرفة RevPAR', 'متوسط الإقامة الشهرية', 'نطاق أسعار الغرف', 'أخرى'],
+      'أخرى': ['قيمة واحدة', 'نطاق سعري', 'أخرى']
+    };
+    const MARKET_RANGE_PRICE_TYPES = ['نطاق سعري', 'نطاق أسعار الغرف'];
+    let marketSummaryPending = null;
+
+    function marketAudienceKind(label) {
+      const text = String(label || '').trim();
+      if (['مكاتب', 'إداري'].includes(text)) return 'مكاتب';
+      if (['تجزئة ومحلات', 'مطاعم ومقاهي', 'مركز تجاري', 'تجاري'].includes(text)) return 'تجزئة';
+      if (['فندق', 'شقق مخدومة', 'منتجع', 'مساكن فندقية', 'فندقي'].includes(text)) return 'فندقي';
+      if (['مصنع', 'مستودعات', 'مركز لوجستي', 'مجمع صناعي', 'صناعي ولوجستي', 'صناعي', 'لوجستي'].includes(text)) return 'صناعي ولوجستي';
+      if (text === 'سكني') return 'سكني';
+      return '';
+    }
+
+    function selectedProjectTypeMain() {
+      return String(document.querySelector('#tenantProjectForm [data-key="project_type"]')?.value || tenantProjectData.project_type || '').trim();
+    }
+
+    function selectedProjectSubtype() {
+      return String(document.querySelector('#tenantProjectForm [data-key="project_subtype"]')?.value || tenantProjectData.project_subtype || '').trim();
+    }
+
+    function selectedMixedComponents() {
+      const hidden = document.querySelector('#tenantProjectForm [data-key="project_mixed_components"]');
+      const raw = hidden ? hidden.value : tenantProjectData.project_mixed_components;
+      return parseSelectedMarketList(raw);
+    }
+
+    function parseSelectedMarketList(value) {
+      if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
+      const text = String(value || '').trim();
+      if (!text) return [];
+      if (text.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed)) return parsed.map(item => String(item || '').trim()).filter(Boolean);
+        } catch (e) { /* keep splitting */ }
+      }
+      return text.split(/[,،\n;|]/).map(item => item.trim()).filter(Boolean);
+    }
+
+    function projectAnalysisKinds() {
+      const main = selectedProjectTypeMain();
+      const sub = selectedProjectSubtype();
+      if (main === 'متعدد الاستخدامات') {
+        const kinds = [];
+        selectedMixedComponents().forEach(item => {
+          const kind = marketAudienceKind(item);
+          if (kind && !kinds.includes(kind)) kinds.push(kind);
+        });
+        return kinds.length ? kinds : ['سكني'];
+      }
+      if (main === 'تجاري') return [sub === 'مكاتب' ? 'مكاتب' : 'تجزئة'];
+      const kind = marketAudienceKind(sub || main);
+      return kind ? [kind] : [];
+    }
+
+    function emptyMarketStudyState() {
+      const summary = {};
+      MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => { summary[item.key] = ''; });
+      return {
+        competitor_radius: 'auto',
+        competitor_radius_custom_km: '',
+        data_period: '12m',
+        data_period_from: '',
+        data_period_to: '',
+        competitors: [],
+        summary,
+        sources: [],
+        decision: '',
+        disclaimer: ''
+      };
+    }
+
+    function getMarketStudyState() {
+      const parsed = parseStoredLandTable(tenantProjectData.market_study_data);
+      const base = emptyMarketStudyState();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return base;
+      return {
+        ...base,
+        ...parsed,
+        competitors: Array.isArray(parsed.competitors) ? parsed.competitors : [],
+        sources: Array.isArray(parsed.sources) ? parsed.sources : [],
+        summary: { ...base.summary, ...(parsed.summary || {}) }
+      };
+    }
+
+    function setMarketStudyState(state) {
+      const next = { ...emptyMarketStudyState(), ...(state || {}) };
+      tenantProjectData.market_study_data = next;
+      const hidden = document.getElementById('marketStudyData');
+      if (hidden) hidden.value = JSON.stringify(next);
+      triggerAutoSaveDraft();
+    }
+
+    function collectMarketStudyFromDom() {
+      const state = getMarketStudyState();
+      state.competitor_radius = document.getElementById('marketCompetitorRadius')?.value || state.competitor_radius;
+      state.competitor_radius_custom_km = document.getElementById('marketCompetitorRadiusCustom')?.value || '';
+      state.data_period = document.getElementById('marketDataPeriod')?.value || state.data_period;
+      state.data_period_from = document.getElementById('marketDataPeriodFrom')?.value || '';
+      state.data_period_to = document.getElementById('marketDataPeriodTo')?.value || '';
+      state.competitors = collectMarketCompetitorRows();
+      const summary = {};
+      MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
+        summary[item.key] = document.getElementById('marketSummary_' + item.key)?.value || '';
+      });
+      state.summary = summary;
+      state.decision = document.getElementById('marketDecision')?.value || '';
+      state.disclaimer = document.getElementById('marketDisclaimer')?.value || state.disclaimer;
+      state.sources = collectMarketSourceRows();
+      return state;
+    }
+
+    function persistMarketStudyFromDom() {
+      setMarketStudyState(collectMarketStudyFromDom());
+    }
+
+    function addMarketStudySection(form, before) {
+      const div = document.createElement('div');
+      div.className = 'tenant-form-section';
+      div.id = 'section-market-study';
+      div.dataset.section = 'section-market-study';
+      div.appendChild(createProjectSectionHeader('section-market-study', 'دراسة السوق'));
+      const body = document.createElement('div');
+      body.className = 'market-study-body';
+      body.innerHTML = `
+        <div class="market-block">
+          <h4>نطاق الدراسة</h4>
+          <p class="tenant-hint">النطاق والفترة يغيّران المنافسين والمؤشرات. التلقائي = 10 كم لكل الأنواع.</p>
+          <div class="market-grid">
+            <div><label>نطاق المنافسين</label>
+              <select id="marketCompetitorRadius">
+                <option value="auto">تلقائي حسب نوع المشروع</option>
+                <option value="3">3 كم</option>
+                <option value="5">5 كم</option>
+                <option value="10">10 كم</option>
+                <option value="city">كامل المدينة</option>
+                <option value="custom">نطاق مخصص</option>
+              </select>
+            </div>
+            <div id="marketCustomRadiusWrap" hidden><label>النطاق المخصص (كم)</label><input id="marketCompetitorRadiusCustom" type="number" min="1" step="0.1"></div>
+            <div><label>فترة البيانات</label>
+              <select id="marketDataPeriod">
+                <option value="12m">آخر 12 شهرًا</option>
+                <option value="24m">آخر 24 شهرًا</option>
+                <option value="3y">آخر 3 سنوات</option>
+                <option value="5y">آخر 5 سنوات</option>
+                <option value="custom">فترة مخصصة</option>
+              </select>
+            </div>
+            <div id="marketCustomPeriodWrap" hidden>
+              <label>من تاريخ</label><input id="marketDataPeriodFrom" type="date">
+              <label style="margin-top:8px">إلى تاريخ</label><input id="marketDataPeriodTo" type="date">
+            </div>
+          </div>
+          <div class="market-grid" style="margin-top:12px">
+            <div><label>المدينة</label><input id="marketCityMirror" readonly></div>
+            <div><label>الحي</label><input id="marketDistrictMirror" readonly></div>
+          </div>
+          <p class="tenant-hint">المدينة والحي مرتبطان بقسم الموقع والخرائط. عدّلهما من هناك.</p>
+        </div>
+        <div class="market-block">
+          <h4>المنافسون</h4>
+          <p class="tenant-hint">صفوفك لا تُحذف. اكتب الاسم ثم استخدم إكمال البيانات، أو ولّد منافسين إضافيين.</p>
+          <div class="market-actions">
+            <button type="button" class="btn ghost" onclick="addMarketCompetitorRow()">إضافة منافس</button>
+            <button type="button" class="btn ghost" id="marketFillCompetitorsBtn" onclick="runMarketCompetitorsJob('fill')">إكمال بيانات المنافسين بالاسم</button>
+            <button type="button" class="btn primary" id="marketGenerateCompetitorsBtn" onclick="runMarketCompetitorsJob('generate')">توليد المنافسين</button>
+          </div>
+          <div id="marketCompetitorsNote"></div>
+          <div class="table-wrap">
+            <table id="marketCompetitorsTable">
+              <thead><tr>
+                <th>اسم المشروع</th><th>النوع</th><th>المساحة م²</th><th>الحالة</th><th>التصنيف</th>
+                <th>نوع العملية</th><th>نوع السعر</th><th>القيمة</th><th>المصدر</th><th></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="market-block">
+          <h4>الملخص التنفيذي لسوق المشروع</h4>
+          <p class="tenant-hint">عشرة أقسام قابلة للتعديل. عند إعادة التوليد تظهر النسختان وتختار الاستبدال أو الإبقاء.</p>
+          <div class="market-actions">
+            <button type="button" class="btn primary" id="marketGenerateSummaryBtn" onclick="runMarketSummaryJob()">توليد ملخص السوق</button>
+          </div>
+          <div id="marketSummaryFailure"></div>
+          <div id="marketSummaryCompare" hidden></div>
+          <div id="marketSummaryFields"></div>
+          <div style="margin-top:12px"><label>تصنيف القرار</label>
+            <select id="marketDecision">
+              <option value="">-- اختر القيمة --</option>
+              <option>فرصة قوية</option>
+              <option>فرصة واعدة بشروط</option>
+              <option>فرصة متوسطة</option>
+              <option>فرصة مرتفعة المخاطر</option>
+              <option>البيانات غير كافية</option>
+            </select>
+          </div>
+          <div style="margin-top:12px"><label>إخلاء المسؤولية</label>
+            <textarea id="marketDisclaimer" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="market-block">
+          <h4>المصادر</h4>
+          <div class="market-actions">
+            <button type="button" class="btn ghost" onclick="addMarketSourceRow()">إضافة مصدر</button>
+          </div>
+          <div class="table-wrap">
+            <table id="marketSourcesTable">
+              <thead><tr>
+                <th>المصدر</th><th>الرابط</th><th>تاريخ البيانات</th><th>تاريخ الوصول</th><th>الموثوقية</th><th>ملاحظة</th><th></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <input type="hidden" data-key="market_study_data" data-type="text" id="marketStudyData">
+      `;
+      div.appendChild(body);
+      if (before) form.insertBefore(div, before);
+      else form.appendChild(div);
+      const summaryHost = document.getElementById('marketSummaryFields');
+      if (summaryHost) {
+        summaryHost.innerHTML = MARKET_STUDY_SUMMARY_SECTIONS.map(item =>
+          '<div style="margin-top:12px"><label>' + item.label + '</label>' +
+          '<textarea id="marketSummary_' + item.key + '" rows="4"></textarea></div>'
+        ).join('');
+      }
+      ['marketCompetitorRadius', 'marketDataPeriod'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', () => {
+          updateMarketStudyFieldVisibility();
+          persistMarketStudyFromDom();
+        });
+      });
+      ['marketCompetitorRadiusCustom', 'marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer']
+        .forEach(id => document.getElementById(id)?.addEventListener('input', persistMarketStudyFromDom));
+      MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
+        document.getElementById('marketSummary_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
+      });
+    }
+
+    function updateMarketStudyFieldVisibility() {
+      const radius = document.getElementById('marketCompetitorRadius')?.value;
+      const period = document.getElementById('marketDataPeriod')?.value;
+      const radiusWrap = document.getElementById('marketCustomRadiusWrap');
+      const periodWrap = document.getElementById('marketCustomPeriodWrap');
+      if (radiusWrap) radiusWrap.hidden = radius !== 'custom';
+      if (periodWrap) periodWrap.hidden = period !== 'custom';
+    }
+
+    function syncMarketLocationMirrors() {
+      const city = document.querySelector('#tenantProjectForm [data-key="city"]')?.value || tenantProjectData.city || '';
+      const district = document.querySelector('#tenantProjectForm [data-key="district"]')?.value || tenantProjectData.district || '';
+      const cityMirror = document.getElementById('marketCityMirror');
+      const districtMirror = document.getElementById('marketDistrictMirror');
+      if (cityMirror) cityMirror.value = city;
+      if (districtMirror) districtMirror.value = district;
+    }
+
+    function applyCityDistrictToForm(city, district, overwrite = false) {
+      const cityInput = document.querySelector('#tenantProjectForm [data-key="city"]');
+      const districtInput = document.querySelector('#tenantProjectForm [data-key="district"]');
+      if (city && cityInput && (overwrite || !String(cityInput.value || '').trim())) {
+        cityInput.value = city;
+        tenantProjectData.city = city;
+      }
+      if (district && districtInput && (overwrite || !String(districtInput.value || '').trim())) {
+        districtInput.value = district;
+        tenantProjectData.district = district;
+      }
+      syncMarketLocationMirrors();
+    }
+
+    function fillSelectOptions(select, options, current, placeholder) {
+      if (!select) return;
+      const value = current == null ? select.value : current;
+      select.innerHTML = '';
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = placeholder || '-- اختر القيمة --';
+      select.appendChild(empty);
+      (options || []).forEach(option => {
+        const item = document.createElement('option');
+        item.value = option;
+        item.textContent = option;
+        select.appendChild(item);
+      });
+      if (value && !(options || []).includes(value)) {
+        const extra = document.createElement('option');
+        extra.value = value;
+        extra.textContent = value;
+        select.appendChild(extra);
+      }
+      if (value) select.value = value;
+      if (value && select.value !== value) select.value = '';
+    }
+
+    function renderChoiceGrid(host, key, options, selected) {
+      if (!host) return;
+      const picked = new Set((selected || []).map(item => String(item)));
+      host.innerHTML = (options || []).map(option => {
+        const safe = String(option).replace(/"/g, '&quot;');
+        return '<label><input type="checkbox" data-choice-key="' + key + '" value="' + safe + '"' +
+          (picked.has(option) ? ' checked' : '') + '> ' + option + '</label>';
+      }).join('');
+      host.querySelectorAll('input').forEach(input => {
+        input.addEventListener('change', () => {
+          const values = Array.from(host.querySelectorAll('input:checked')).map(item => item.value);
+          const hidden = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+          const encoded = JSON.stringify(values);
+          if (hidden) hidden.value = encoded;
+          tenantProjectData[key] = encoded;
+          if (key === 'project_mixed_components') syncProjectClassificationFields();
+          triggerAutoSaveDraft();
+        });
+      });
+    }
+
+    function syncProjectClassificationFields() {
+      const main = selectedProjectTypeMain();
+      const subtypeInput = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
+      const mixedHidden = document.querySelector('#tenantProjectForm [data-key="project_mixed_components"]');
+      const mixedHost = document.getElementById('projectMixedComponentsGrid');
+      const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
+      const audienceHidden = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
+      const audienceHost = document.getElementById('projectAudienceGrid');
+      const otherInput = document.querySelector('#tenantProjectForm [data-key="project_type_other"]');
+      if (otherInput) otherInput.style.display = (main === 'أخرى' || String(main).startsWith('أخرى')) ? 'block' : 'none';
+      if (subtypeInput) {
+        const subtypes = MARKET_SUBTYPES[main] || [];
+        const wrap = subtypeInput.closest('.tenant-field');
+        if (wrap) wrap.style.display = (main === 'متعدد الاستخدامات' || main === 'أخرى' || !subtypes.length) ? 'none' : '';
+        fillSelectOptions(subtypeInput, subtypes, subtypeInput.value || tenantProjectData.project_subtype, '-- اختر النوع الفرعي --');
+      }
+      if (mixedHidden) {
+        const wrap = mixedHidden.closest('.tenant-field') || mixedHidden.parentElement;
+        if (wrap) wrap.style.display = main === 'متعدد الاستخدامات' ? '' : 'none';
+        if (mixedHost) renderChoiceGrid(mixedHost, 'project_mixed_components', MARKET_MIXED_COMPONENTS, selectedMixedComponents());
+      }
+      const kinds = projectAnalysisKinds();
+      const classOptions = [];
+      kinds.forEach(kind => {
+        (MARKET_ACTIVITY_CLASS[kind] || []).forEach(option => {
+          if (!classOptions.includes(option)) classOptions.push(option);
+        });
+      });
+      if (classInput) {
+        const wrap = classInput.closest('.tenant-field');
+        if (wrap) wrap.style.display = classOptions.length ? '' : 'none';
+        fillSelectOptions(classInput, classOptions, classInput.value || tenantProjectData.activity_class, '-- اختر تصنيف النشاط --');
+      }
+      if (audienceHost && audienceHidden) {
+        const options = [];
+        kinds.forEach(kind => {
+          (MARKET_AUDIENCE[kind] || []).forEach(option => {
+            if (!options.includes(option)) options.push(option);
+          });
+        });
+        if (!options.includes('أخرى')) options.push('أخرى');
+        renderChoiceGrid(audienceHost, 'target_audience', options.length ? options : ['أفراد', 'عائلات', 'مستثمرون', 'شركات', 'أخرى'], parseSelectedMarketList(audienceHidden.value || tenantProjectData.target_audience));
+      }
+      refreshAllowedUsesStatusNote();
+    }
+
+    function enhanceProjectClassificationFields() {
+      const subtypeInput = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
+      const mixedInput = document.querySelector('#tenantProjectForm [data-key="project_mixed_components"]');
+      const audienceInput = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
+      const typeInput = document.querySelector('#tenantProjectForm [data-key="project_type"]');
+      if (mixedInput && !document.getElementById('projectMixedComponentsGrid')) {
+        mixedInput.type = 'hidden';
+        const grid = document.createElement('div');
+        grid.id = 'projectMixedComponentsGrid';
+        grid.className = 'project-choice-grid';
+        mixedInput.insertAdjacentElement('afterend', grid);
+      }
+      if (audienceInput && !document.getElementById('projectAudienceGrid')) {
+        audienceInput.style.display = 'none';
+        const grid = document.createElement('div');
+        grid.id = 'projectAudienceGrid';
+        grid.className = 'project-choice-grid';
+        audienceInput.insertAdjacentElement('afterend', grid);
+      }
+      typeInput?.addEventListener('change', syncProjectClassificationFields);
+      subtypeInput?.addEventListener('change', syncProjectClassificationFields);
+      ['city', 'district'].forEach(key => {
+        document.querySelector('#tenantProjectForm [data-key="' + key + '"]')
+          ?.addEventListener('input', () => {
+            tenantProjectData[key] = document.querySelector('#tenantProjectForm [data-key="' + key + '"]').value;
+            syncMarketLocationMirrors();
+          });
+      });
+      syncProjectClassificationFields();
+    }
+
+    function marketSelectHtml(options, selected) {
+      return '<option value="">--</option>' + (options || []).map(option =>
+        '<option value="' + String(option).replace(/"/g, '&quot;') + '"' +
+        (option === selected ? ' selected' : '') + '>' + option + '</option>'
+      ).join('');
+    }
+
+    function competitorPriceIsRange(priceType) {
+      return MARKET_RANGE_PRICE_TYPES.includes(String(priceType || '').trim());
+    }
+
+    function addMarketCompetitorRow(row = {}) {
+      const tb = document.querySelector('#marketCompetitorsTable tbody');
+      if (!tb) return;
+      const tr = document.createElement('tr');
+      tr.dataset.competitorId = row.id || ('c_' + Date.now() + '_' + Math.random().toString(16).slice(2));
+      const operation = row.operation_type || '';
+      const priceType = row.price_type || '';
+      const priceTypes = MARKET_PRICE_TYPES[operation] || MARKET_PRICE_TYPES['أخرى'];
+      tr.innerHTML =
+        '<td><input data-field="name" value="' + escapeHtml(row.name || '') + '"></td>' +
+        '<td><select data-field="project_type">' + marketSelectHtml(MARKET_PROJECT_TYPES, row.project_type || '') + '</select></td>' +
+        '<td><input data-field="area_sqm" value="' + escapeHtml(row.area_sqm || '') + '"></td>' +
+        '<td><select data-field="status">' + marketSelectHtml(['قائم', 'تحت الإنشاء', 'على الخارطة'], row.status || '') + '</select></td>' +
+        '<td><select data-field="classification">' + marketSelectHtml(['مباشر', 'غير مباشر', 'مرجعي'], row.classification || '') + '</select></td>' +
+        '<td><select data-field="operation_type">' + marketSelectHtml(['بيع', 'إيجار', 'تشغيل فندقي', 'أخرى'], operation) + '</select></td>' +
+        '<td><select data-field="price_type">' + marketSelectHtml(priceTypes, priceType) + '</select></td>' +
+        '<td data-field="price_cell"></td>' +
+        '<td><input data-field="source" value="' + escapeHtml(row.source || '') + '" placeholder="المصدر">' +
+        '<input data-field="source_url" value="' + escapeHtml(row.source_url || '') + '" placeholder="الرابط" style="margin-top:6px"></td>' +
+        '<td><button type="button" class="btn ghost small" data-remove-competitor>حذف</button></td>';
+      tb.appendChild(tr);
+      renderCompetitorPriceInputs(tr, row);
+      tr.querySelector('[data-field="operation_type"]').addEventListener('change', () => {
+        const nextOp = tr.querySelector('[data-field="operation_type"]').value;
+        fillSelectOptions(tr.querySelector('[data-field="price_type"]'), MARKET_PRICE_TYPES[nextOp] || MARKET_PRICE_TYPES['أخرى'], '', '--');
+        renderCompetitorPriceInputs(tr, {});
+        persistMarketStudyFromDom();
+      });
+      tr.querySelector('[data-field="price_type"]').addEventListener('change', () => {
+        renderCompetitorPriceInputs(tr, collectOneCompetitorRow(tr));
+        persistMarketStudyFromDom();
+      });
+      tr.querySelector('[data-remove-competitor]').addEventListener('click', () => {
+        tr.remove();
+        persistMarketStudyFromDom();
+      });
+      tr.querySelectorAll('input,select').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+    }
+
+    function renderCompetitorPriceInputs(tr, row) {
+      const cell = tr.querySelector('[data-field="price_cell"]');
+      if (!cell) return;
+      const priceType = tr.querySelector('[data-field="price_type"]')?.value || row.price_type || '';
+      if (competitorPriceIsRange(priceType)) {
+        cell.innerHTML = '<input data-field="price_from" value="' + escapeHtml(row.price_from || '') + '" placeholder="من">' +
+          '<input data-field="price_to" value="' + escapeHtml(row.price_to || '') + '" placeholder="إلى" style="margin-top:6px">';
+      } else {
+        cell.innerHTML = '<input data-field="price_value" value="' + escapeHtml(row.price_value || '') + '" placeholder="القيمة بالريال">';
+      }
+      cell.querySelectorAll('input').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+    }
+
+    function collectOneCompetitorRow(tr) {
+      const read = (field) => tr.querySelector('[data-field="' + field + '"]')?.value || '';
+      return {
+        id: tr.dataset.competitorId,
+        name: read('name'),
+        project_type: read('project_type'),
+        area_sqm: read('area_sqm'),
+        status: read('status'),
+        classification: read('classification'),
+        operation_type: read('operation_type'),
+        price_type: read('price_type'),
+        price_value: read('price_value'),
+        price_from: read('price_from'),
+        price_to: read('price_to'),
+        source: read('source'),
+        source_url: read('source_url'),
+        row_source: tr.dataset.rowSource || 'manual'
+      };
+    }
+
+    function collectMarketCompetitorRows() {
+      return Array.from(document.querySelectorAll('#marketCompetitorsTable tbody tr')).map(collectOneCompetitorRow);
+    }
+
+    function renderMarketCompetitors(rows) {
+      const tb = document.querySelector('#marketCompetitorsTable tbody');
+      if (!tb) return;
+      tb.innerHTML = '';
+      (rows || []).forEach(row => addMarketCompetitorRow(row));
+    }
+
+    function addMarketSourceRow(row = {}) {
+      const tb = document.querySelector('#marketSourcesTable tbody');
+      if (!tb) return;
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><input data-field="name" value="' + escapeHtml(row.name || '') + '"></td>' +
+        '<td><input data-field="url" value="' + escapeHtml(row.url || '') + '"></td>' +
+        '<td><input data-field="data_date" value="' + escapeHtml(row.data_date || '') + '"></td>' +
+        '<td><input data-field="accessed_at" value="' + escapeHtml(row.accessed_at || '') + '"></td>' +
+        '<td><input data-field="reliability" value="' + escapeHtml(row.reliability || '') + '"></td>' +
+        '<td><input data-field="note" value="' + escapeHtml(row.note || '') + '"></td>' +
+        '<td><button type="button" class="btn ghost small" data-remove-source>حذف</button></td>';
+      tb.appendChild(tr);
+      tr.querySelector('[data-remove-source]').addEventListener('click', () => {
+        tr.remove();
+        persistMarketStudyFromDom();
+      });
+      tr.querySelectorAll('input').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+    }
+
+    function collectMarketSourceRows() {
+      return Array.from(document.querySelectorAll('#marketSourcesTable tbody tr')).map(tr => {
+        const read = (field) => tr.querySelector('[data-field="' + field + '"]')?.value || '';
+        return {
+          name: read('name'),
+          url: read('url'),
+          data_date: read('data_date'),
+          accessed_at: read('accessed_at'),
+          reliability: read('reliability'),
+          note: read('note')
+        };
+      }).filter(row => row.name || row.url);
+    }
+
+    function renderMarketSources(rows) {
+      const tb = document.querySelector('#marketSourcesTable tbody');
+      if (!tb) return;
+      tb.innerHTML = '';
+      (rows || []).forEach(row => addMarketSourceRow(row));
+    }
+
+    function applyMarketStudyState(state) {
+      const next = { ...emptyMarketStudyState(), ...(state || {}) };
+      const radius = document.getElementById('marketCompetitorRadius');
+      const custom = document.getElementById('marketCompetitorRadiusCustom');
+      const period = document.getElementById('marketDataPeriod');
+      const from = document.getElementById('marketDataPeriodFrom');
+      const to = document.getElementById('marketDataPeriodTo');
+      if (radius) radius.value = next.competitor_radius || 'auto';
+      if (custom) custom.value = next.competitor_radius_custom_km || '';
+      if (period) period.value = next.data_period || '12m';
+      if (from) from.value = next.data_period_from || '';
+      if (to) to.value = next.data_period_to || '';
+      renderMarketCompetitors(next.competitors || []);
+      MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
+        const field = document.getElementById('marketSummary_' + item.key);
+        if (field) field.value = (next.summary && next.summary[item.key]) || '';
+      });
+      const decision = document.getElementById('marketDecision');
+      const disclaimer = document.getElementById('marketDisclaimer');
+      if (decision) decision.value = next.decision || '';
+      if (disclaimer) disclaimer.value = next.disclaimer || 'هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.';
+      renderMarketSources(next.sources || []);
+      const hidden = document.getElementById('marketStudyData');
+      if (hidden) hidden.value = JSON.stringify(next);
+      tenantProjectData.market_study_data = next;
+      updateMarketStudyFieldVisibility();
+      syncMarketLocationMirrors();
+    }
+
+    function collectMarketStudyRequestPayload() {
+      persistMarketStudyFromDom();
+      const state = getMarketStudyState();
+      const components = (typeof getComponentRowsData === 'function' ? getComponentRowsData() : []).map(row => ({
+        name: row.name, useType: row.useType, units: row.units, builtArea: row.builtArea, revenueArea: row.revenueArea
+      }));
+      return {
+        projectName: tenantProjectData.project_name || '',
+        projectType: selectedProjectTypeMain(),
+        projectSubtype: selectedProjectSubtype(),
+        projectComponents: selectedMixedComponents().join('، ') || (components.map(item => item.name).filter(Boolean).join('، ')),
+        projectLevel: document.querySelector('#tenantProjectForm [data-key="project_level"]')?.value || tenantProjectData.project_level || '',
+        activityClass: document.querySelector('#tenantProjectForm [data-key="activity_class"]')?.value || tenantProjectData.activity_class || '',
+        targetAudience: parseSelectedMarketList(document.querySelector('#tenantProjectForm [data-key="target_audience"]')?.value || tenantProjectData.target_audience),
+        projectIdea: document.querySelector('#tenantProjectForm [data-key="project_idea"]')?.value || tenantProjectData.project_idea || '',
+        city: document.querySelector('#tenantProjectForm [data-key="city"]')?.value || tenantProjectData.city || '',
+        district: document.querySelector('#tenantProjectForm [data-key="district"]')?.value || tenantProjectData.district || '',
+        locationAddress: tenantProjectData.location_address || '',
+        locationLat: tenantProjectData.location_lat || '',
+        locationLng: tenantProjectData.location_lng || '',
+        landArea: tenantProjectData.approved_financial_area || tenantProjectData.croquis_land_area || '',
+        builtArea: tenantProjectData.built_area || '',
+        allowedUses: tenantProjectData.allowed_uses || '',
+        components,
+        competitorRadius: state.competitor_radius,
+        competitorRadiusCustomKm: state.competitor_radius_custom_km,
+        dataPeriod: state.data_period,
+        dataPeriodFrom: state.data_period_from,
+        dataPeriodTo: state.data_period_to,
+        competitors: state.competitors,
+        currentSummary: state.summary
+      };
+    }
+
+    async function pollMarketStudyJob(jobId, onProgress) {
+      const started = Date.now();
+      let res = null;
+      while (Date.now() - started < 12 * 60 * 1000) {
+        await new Promise(resolve => setTimeout(resolve, 2500));
+        res = await api('GET', '/api/market-study/jobs/' + encodeURIComponent(jobId));
+        const status = String(res && res.status || '');
+        if (typeof onProgress === 'function') onProgress(res);
+        if (status === 'completed' || status === 'failed' || (res && res.failureReason)) break;
+        if (!res || res.failureReason === 'job_not_found') break;
+      }
+      return res;
+    }
+
+    async function runMarketCompetitorsJob(mode) {
+      const generateBtn = document.getElementById('marketGenerateCompetitorsBtn');
+      const fillBtn = document.getElementById('marketFillCompetitorsBtn');
+      const note = document.getElementById('marketCompetitorsNote');
+      if (generateBtn) generateBtn.disabled = true;
+      if (fillBtn) fillBtn.disabled = true;
+      showLoader(
+        mode === 'fill' ? 'إكمال بيانات المنافسين' : 'توليد المنافسين',
+        'جاري البحث عن المنافسين من المصادر المعتمدة...',
+        12
+      );
+      try {
+        const payload = collectMarketStudyRequestPayload();
+        payload.mode = mode;
+        let res = await api('POST', '/api/market-study/competitors', payload);
+        if (res && res.jobId && !Array.isArray(res.competitors)) {
+          updateLoaderProgress(35, res.message || 'بدأت المهمة في الخلفية...');
+          res = await pollMarketStudyJob(res.jobId, job => {
+            updateLoaderProgress(job && job.status === 'running' ? 60 : 40, (job && job.message) || 'جاري البحث...');
+          });
+        }
+        if (!res || !res.success) {
+          if (note) note.textContent = (res && (res.error || res.providerError)) || 'تعذر تحديث المنافسين. لم يُحذف أي صف.';
+          toast((res && res.error) || 'تعذر تحديث المنافسين. لم يُحذف أي صف.');
+          return;
+        }
+        const state = getMarketStudyState();
+        state.competitors = res.competitors || state.competitors;
+        applyMarketStudyState(state);
+        persistMarketStudyFromDom();
+        const extra = res.expansionNote || res.notes || '';
+        if (note) {
+          note.textContent = 'أُضيف ' + (res.added || 0) + ' وأُكمل ' + (res.updated || 0) +
+            (extra ? ' — ' + extra : '');
+        }
+        toast('تم تحديث جدول المنافسين دون حذف الصفوف الحالية');
+        updateLoaderProgress(100, 'اكتمل تحديث المنافسين');
+      } catch (error) {
+        toast(error.message || 'تعذر تحديث المنافسين');
+      } finally {
+        hideLoader();
+        if (generateBtn) generateBtn.disabled = false;
+        if (fillBtn) fillBtn.disabled = false;
+      }
+    }
+
+    function renderMarketSummaryCompare(current, incoming) {
+      const host = document.getElementById('marketSummaryCompare');
+      if (!host) return;
+      host.hidden = false;
+      const currentText = MARKET_STUDY_SUMMARY_SECTIONS.map(item =>
+        (item.label + '\n' + ((current && current[item.key]) || '')).trim()
+      ).join('\n\n');
+      const incomingText = MARKET_STUDY_SUMMARY_SECTIONS.map(item =>
+        (item.label + '\n' + ((incoming && incoming[item.key]) || '')).trim()
+      ).join('\n\n');
+      host.innerHTML =
+        '<div class="summary-compare">' +
+        '<div><label>النسخة الحالية</label><textarea rows="12" readonly>' + currentText.replace(/</g, '&lt;') + '</textarea></div>' +
+        '<div><label>النسخة الجديدة</label><textarea rows="12" readonly>' + incomingText.replace(/</g, '&lt;') + '</textarea></div>' +
+        '</div>' +
+        '<div class="market-actions">' +
+        '<button type="button" class="btn primary" id="marketAcceptSummaryBtn">استبدال بالنسخة الجديدة</button>' +
+        '<button type="button" class="btn ghost" id="marketKeepSummaryBtn">الإبقاء على الحالية</button>' +
+        '</div>';
+      document.getElementById('marketAcceptSummaryBtn')?.addEventListener('click', () => {
+        if (!marketSummaryPending) return;
+        const state = getMarketStudyState();
+        state.summary = marketSummaryPending.summary;
+        state.sources = marketSummaryPending.sources;
+        state.decision = marketSummaryPending.decision;
+        state.disclaimer = marketSummaryPending.disclaimer;
+        applyMarketStudyState(state);
+        persistMarketStudyFromDom();
+        marketSummaryPending = null;
+        host.hidden = true;
+        host.innerHTML = '';
+        toast('تم استبدال الملخص والمصادر بالنسخة الجديدة');
+      });
+      document.getElementById('marketKeepSummaryBtn')?.addEventListener('click', () => {
+        marketSummaryPending = null;
+        host.hidden = true;
+        host.innerHTML = '';
+        toast('تم الإبقاء على الملخص الحالي');
+      });
+    }
+
+    async function runMarketSummaryJob() {
+      const btn = document.getElementById('marketGenerateSummaryBtn');
+      const fail = document.getElementById('marketSummaryFailure');
+      if (btn) btn.disabled = true;
+      if (fail) fail.textContent = '';
+      showLoader('توليد ملخص السوق', 'جاري البحث في المصادر الرسمية وكتابة الملخص التنفيذي...', 12);
+      try {
+        const payload = collectMarketStudyRequestPayload();
+        const currentSummary = { ...(getMarketStudyState().summary || {}) };
+        let res = await api('POST', '/api/market-study/summary', payload);
+        if (res && res.jobId && !res.summary) {
+          updateLoaderProgress(35, res.message || 'بدأت المهمة في الخلفية...');
+          res = await pollMarketStudyJob(res.jobId, job => {
+            updateLoaderProgress(job && job.status === 'running' ? 65 : 45, (job && job.message) || 'جاري إعداد الملخص...');
+          });
+        }
+        if (!res || !res.success || !res.summary) {
+          const message = (res && (res.error || res.providerError)) || 'تعذر توليد الملخص. لم يُستبدل النص الحالي.';
+          if (fail) fail.textContent = message;
+          toast(message);
+          return;
+        }
+        const hasCurrent = Object.values(currentSummary).some(value => String(value || '').trim());
+        marketSummaryPending = {
+          summary: res.summary,
+          sources: res.sources || [],
+          decision: res.decision || '',
+          disclaimer: res.disclaimer || ''
+        };
+        if (hasCurrent) {
+          renderMarketSummaryCompare(currentSummary, res.summary);
+          toast('النسختان ظاهرتان. اختر الاستبدال أو الإبقاء.');
+        } else {
+          const state = getMarketStudyState();
+          state.summary = res.summary;
+          state.sources = res.sources || [];
+          state.decision = res.decision || '';
+          state.disclaimer = res.disclaimer || state.disclaimer;
+          applyMarketStudyState(state);
+          persistMarketStudyFromDom();
+          toast('تم توليد ملخص السوق');
+        }
+        updateLoaderProgress(100, 'اكتمل ملخص السوق');
+      } catch (error) {
+        if (fail) fail.textContent = error.message || 'تعذر توليد الملخص';
+        toast(error.message || 'تعذر توليد الملخص');
+      } finally {
+        hideLoader();
+        if (btn) btn.disabled = false;
+      }
+    }
+
     async function renderProjectTeam() {
       const libraryHost = document.getElementById('projectTeamLibrary');
       const localHost = document.getElementById('projectTeamLocal');
@@ -9845,6 +10729,8 @@
         }
       }
       window._lastAnalyzedAddress = (source.location_address || '').trim();
+      enhanceProjectClassificationFields();
+      applyMarketStudyState(parseStoredLandTable(source.market_study_data) || getMarketStudyState());
     }
 
     function recoverTenantSlidePlan(projectData, slidesData) {
@@ -10386,6 +11272,15 @@
           input.placeholder = f.placeholder || '';
           if (f.defaultValue) input.value = f.defaultValue;
           if (f.isRequired) input.required = true;
+          if (input.tagName === 'SELECT' && tenantProjectData && tenantProjectData[f.fieldKey]) {
+            const stored = String(tenantProjectData[f.fieldKey]);
+            if (stored && !Array.from(input.options).some(option => option.value === stored)) {
+              const extra = document.createElement('option');
+              extra.value = stored;
+              extra.textContent = stored;
+              input.appendChild(extra);
+            }
+          }
 
           // The land/croquis section owns the approved build inputs; mirror them into the
           // financial study as soon as they change so the two can never disagree.
@@ -10495,7 +11390,10 @@
             };
             input.addEventListener('change', () => {
               checkOther();
-              if (f.fieldKey === 'project_type') refreshAllowedUsesStatusNote();
+              if (f.fieldKey === 'project_type') {
+                refreshAllowedUsesStatusNote();
+                if (typeof syncProjectClassificationFields === 'function') syncProjectClassificationFields();
+              }
             });
             input.addEventListener('input', checkOther);
             otherInput.addEventListener('input', () => {
@@ -10575,12 +11473,12 @@
       }
 
       // Append order defines the sidebar order: basic, location, land/croquis, timeline,
-      // financial, team, and conceptual 2D. The timeline comes before the financial study
-      // because it feeds it (development duration and the stage list), so it has to be filled
-      // first. Components are part of the financial study; there is no separate section for them.
+      // financial, team, market study, and conceptual 2D. The timeline comes before the
+      // financial study because it feeds it. The market study comes after the team.
       addTimelineTable(form);
       addFinancialCalculations(form);
       addTeamSection(form);
+      addMarketStudySection(form);
 
       const conceptual2dSection = document.createElement('div');
       conceptual2dSection.className = 'tenant-form-section';
@@ -10608,6 +11506,8 @@
       renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
       renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
       renderProjectTeam();
+      enhanceProjectClassificationFields();
+      applyMarketStudyState(getMarketStudyState());
     }
 
     const TENANT_FLOOR_DESIGN_PROMPT_VERSION = 3;
@@ -13898,6 +14798,9 @@
     async function saveProjectAsDraftNow(silent = false) {
       try {
         Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
+        if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) {
+          persistMarketStudyFromDom();
+        }
         const data = { ...tenantProjectData, ...(await collectTenantFormData()) };
         if (document.getElementById('section-financial-calc') && typeof collectFinancialStudyModel === 'function') {
           data.financial_study_model = collectFinancialStudyModel();
@@ -14029,6 +14932,7 @@
         tenantProjectData.location_lat = data.lat;
         tenantProjectData.location_lng = data.lng;
         tenantProjectData.location_coordinates_confirmed = false;
+        if (data.city || data.district) applyCityDistrictToForm(data.city, data.district, false);
         const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || val);
         toast('تم تحديد الموقع: ' + msg);
         return true;
@@ -14080,15 +14984,17 @@
       const aliases = {
         'سكني': ['سكني'],
         'تجاري': ['تجاري'],
-        'إداري': ['إداري', 'مكتبي'],
+        'إداري': ['إداري', 'مكتبي', 'مكاتب'],
         'فندقي': ['فندقي', 'فندق'],
         'ترفيهي': ['ترفيهي', 'سياحي', 'ترفيه'],
         'صناعي': ['صناعي'],
         'لوجستي': ['لوجستي', 'مستودع', 'تخزين'],
+        'صناعي ولوجستي': ['صناعي', 'لوجستي', 'مستودع', 'تخزين'],
+        'متعدد الاستخدامات': ['متعدد', 'مختلط', 'متنوع', 'سكني', 'تجاري'],
         'طبي': ['طبي', 'صحي'],
         'تعليمي': ['تعليمي', 'مدرسة', 'جامعة'],
         'سيارات وترفيه': ['سيارات', 'ترفيهي', 'ترفيه'],
-        'مختلط': ['مختلط', 'متنوع', 'سكني', 'تجاري']
+        'مختلط': ['مختلط', 'متنوع', 'سكني', 'تجاري', 'متعدد']
       };
       const keys = aliases[project] || [project];
       return keys.some(alias => alias && uses.includes(alias)) ? 'مسموح' : 'غير مسموح';
@@ -14272,9 +15178,9 @@
     async function extractTenantCroquisData(targetKey = 'land_documents_files') {
       const input = document.querySelector('#tenantProjectForm [data-key="land_documents_files"]');
       const projectContextKeys = [
-        'project_name', 'project_type', 'project_stage', 'location_address', 'location_detail',
+        'project_name', 'project_type', 'project_subtype', 'project_stage', 'location_address', 'location_detail',
         'location_lat', 'location_lng', 'location_polygon', 'main_roads', 'secondary_roads',
-        'nearby_landmarks', 'nearby_landmarks_data', 'city', 'city_landmarks', 'catchment_areas',
+        'nearby_landmarks', 'nearby_landmarks_data', 'city', 'district', 'city_landmarks', 'catchment_areas',
         'population_density', 'population_density_source', 'land_area', 'built_area',
         'building_system', 'infrastructure', 'zoning_code', 'land_use', 'building_ratio_coverage',
         'setbacks', 'allowed_uses', 'regulatory_constraints'
@@ -14584,8 +15490,8 @@
         return;
       }
       const analysisKeys = [
-        'project_name', 'project_type', 'project_stage', 'location_address', 'location_detail',
-        'location_maps_link', 'maps_link', 'location_lat', 'location_lng', 'main_roads',
+        'project_name', 'project_type', 'project_subtype', 'project_stage', 'location_address', 'location_detail',
+        'location_maps_link', 'maps_link', 'location_lat', 'location_lng', 'city', 'district', 'main_roads',
         'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks',
         'catchment_areas', 'population_density', 'population_density_source', 'land_area',
         'built_area', 'building_system', 'infrastructure', 'location_polygon'
@@ -14718,6 +15624,7 @@
           const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
           if (input && value !== null && value !== undefined) input.value = value;
         });
+        applyCityDistrictToForm(fields.city || tenantProjectData.city, fields.district || tenantProjectData.district, false);
         refreshLocationTables();
         window._lastAnalyzedAddress = (tenantProjectData.location_address || '').trim();
         if (fields.location_polygon_source === 'manual' && fields.location_polygon) {
