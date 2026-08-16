@@ -9151,7 +9151,7 @@
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         const mapped = {};
         Object.entries(parsed).forEach(([typeName, values]) => {
-          const list = parseSelectedMarketList(values);
+          const list = [...new Set(parseSelectedMarketList(values))];
           if (typeName === 'متعدد الاستخدامات') {
             list.forEach(value => {
               const parent = parentMainForSubtype(value);
@@ -9164,7 +9164,7 @@
         });
         return mapped;
       }
-      const listed = parseSelectedMarketList(raw);
+      const listed = [...new Set(parseSelectedMarketList(raw))];
       const mains = selectedProjectTypeMains();
       return mains.length === 1 && listed.length ? { [mains[0]]: listed } : {};
     }
@@ -9697,53 +9697,103 @@
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         const mapped = {};
         Object.entries(parsed).forEach(([typeName, values]) => {
-          mapped[typeName] = parseSelectedMarketList(values);
+          mapped[typeName] = [...new Set(parseSelectedMarketList(values))];
         });
         return mapped;
       }
-      return { general: parseSelectedMarketList(raw) };
+      return { general: [...new Set(parseSelectedMarketList(raw))] };
+    }
+
+    function setGroupedChoiceValue(hidden, groups, markDirty = true) {
+      if (!hidden) return;
+      const encoded = JSON.stringify(groups || {});
+      hidden.value = encoded;
+      tenantProjectData[hidden.dataset.key] = encoded;
+      if (markDirty) triggerAutoSaveDraft();
+    }
+
+    function audienceGroupInfo(main, subtype) {
+      const parent = main === 'متعدد الاستخدامات' ? parentMainForSubtype(subtype) : main;
+      const kind = audienceKindForMain(parent, subtype) || parent;
+      return { parent, kind };
+    }
+
+    function audienceValuesForGroup(current, group) {
+      const values = [];
+      [group.key, ...(group.legacyKeys || [])].forEach(key => {
+        values.push(...parseSelectedMarketList(current[key]));
+      });
+      return [...new Set(values)];
     }
 
     function renderGroupedAudienceFields(mains, hidden, host) {
       const current = groupedAudienceSelection();
       const subtypeMap = selectedProjectSubtypesByMain();
-      let groups = [];
+      const groups = [];
+      const addGroup = (main, subtype = '') => {
+        const info = audienceGroupInfo(main, subtype);
+        const legacyKey = subtype ? main + '::' + subtype : main;
+        let group = groups.find(item => item.kind === info.kind);
+        if (!group) {
+          group = {
+            key: 'audience::' + info.kind,
+            kind: info.kind,
+            parent: info.parent,
+            subtype,
+            subtypes: [],
+            legacyKeys: []
+          };
+          groups.push(group);
+        }
+        if (subtype && !group.subtypes.includes(subtype)) group.subtypes.push(subtype);
+        if (!group.legacyKeys.includes(legacyKey)) group.legacyKeys.push(legacyKey);
+      };
       (mains || []).forEach(main => {
         const selectedSubtypes = subtypeMap[main] || [];
-        if (main === 'سكني') {
-          groups.push({ key: main, parent: main, subtype: '' });
-        } else if (['تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات'].includes(main)) {
-          selectedSubtypes.forEach(subtype => groups.push({
-            key: main + '::' + subtype,
-            parent: main === 'متعدد الاستخدامات' ? parentMainForSubtype(subtype) : main,
-            subtype
-          }));
+        if (main === 'سكني') addGroup(main);
+        else if (['تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات'].includes(main)) {
+          [...new Set(selectedSubtypes)].forEach(subtype => addGroup(main, subtype));
         }
       });
       if (!groups.length) {
         host.innerHTML = '';
         host.dataset.audienceSignature = '';
-        persistGroupedChoice(hidden, {});
+        if (Object.keys(current).length) setGroupedChoiceValue(hidden, {}, false);
         return;
+      }
+      const normalized = {};
+      groups.forEach(group => {
+        const selected = audienceValuesForGroup(current, group);
+        if (selected.length) normalized[group.key] = selected;
+      });
+      if (groups.length === 1 && !Object.keys(normalized).length && current.general?.length) {
+        normalized[groups[0].key] = [...new Set(current.general)];
+      }
+      if (JSON.stringify(current) !== JSON.stringify(normalized)) {
+        setGroupedChoiceValue(hidden, normalized, false);
       }
       const signature = JSON.stringify(groups.map(group => group.key));
       if (host.dataset.audienceSignature !== signature) {
         host.dataset.audienceSignature = signature;
         host.innerHTML = groups.map((group, index) => {
-          const kind = audienceKindForMain(group.parent, group.subtype) || group.parent;
-          return '<div style="margin-top:10px"><label>' + (MARKET_AUDIENCE_LABELS[kind] || ('الفئة المستهدفة ل' + group.key)) +
+          const subtypeText = group.subtypes.length ? ' (' + group.subtypes.join('، ') + ')' : '';
+          const label = MARKET_AUDIENCE_LABELS[group.kind] || ('الفئة المستهدفة ل' + group.kind);
+          return '<div style="margin-top:10px"><label>' + label + subtypeText +
             '</label><div data-audience-group-index="' + index + '"></div></div>';
         }).join('');
       }
       groups.forEach((group, index) => {
         const groupHost = host.querySelector('[data-audience-group-index="' + index + '"]');
         const options = audienceOptionsForMain(group.parent, group.subtype).filter(option => option !== 'أخرى');
-        const selected = current[group.key] || (groups.length === 1 ? (current.general || []) : []);
+        const selected = audienceValuesForGroup(current, group);
         renderMultiSelectDropdown(groupHost, options, selected, 'اختر فئة أو أكثر', values => {
           const next = groupedAudienceSelection();
           delete next.general;
+          (group.legacyKeys || []).forEach(key => {
+            if (key !== group.key) delete next[key];
+          });
           next[group.key] = values;
-          persistGroupedChoice(hidden, next);
+          setGroupedChoiceValue(hidden, next);
         });
       });
     }

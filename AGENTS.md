@@ -165,7 +165,8 @@ prompt or a screen.
   after the subtype selector. Extra classification is one field: hotel / office /
   industrial get specialized lists, every other type uses the generic مستوى المشروع
   list. `project_idea` is client-typed only. Choosing a main plus subtype reveals the
-  matching audience list.
+  matching audience list. Audience drawers are grouped by audience kind, so all hotel
+  subtypes share one فندقي audience drawer instead of repeating identical drawers.
 - **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).
