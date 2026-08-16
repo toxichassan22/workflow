@@ -3080,6 +3080,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function renderGroupedAudienceFields(main, isOther, hidden, host)', index_source)
         self.assertIn('const MARKET_PROJECT_LEVELS', index_source)
         self.assertIn('function classificationGroupsForProject(main, isOther, kinds)', index_source)
+        self.assertNotIn('      kinds.forEach(addGroup);', index_source)
         self.assertIn("if (f.fieldKey === 'project_type') {", index_source)
         self.assertIn('otherHost.hidden = !isOther;', index_source)
         self.assertNotIn('🎯', index_source)
