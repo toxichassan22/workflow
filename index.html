@@ -8982,6 +8982,19 @@
       'مكاتب': 'تصنيف المكاتب',
       'صناعي ولوجستي': 'تصنيف الصناعي واللوجستي'
     };
+    const MARKET_AUDIENCE_LABELS = {
+      'سكني': 'الفئة المستهدفة للسكني',
+      'تجاري': 'الفئة المستهدفة للتجاري',
+      'تجزئة': 'الفئة المستهدفة للتجزئة والمراكز التجارية',
+      'مكاتب': 'الفئة المستهدفة للمكاتب',
+      'فندقي': 'الفئة المستهدفة للفندقي',
+      'صناعي ولوجستي': 'الفئة المستهدفة للصناعي واللوجستي'
+    };
+    const MARKET_SUBTYPE_LABELS = {
+      'تجاري': 'النوع الفرعي التجاري',
+      'فندقي': 'النوع الفرعي الفندقي',
+      'صناعي ولوجستي': 'النوع الفرعي الصناعي واللوجستي'
+    };
     const MARKET_ACTIVITY_CLASS = {
       'فندقي': ['غير مصنف', 'نجمة واحدة', 'نجمتان', '3 نجوم', '4 نجوم', '5 نجوم', '5 نجوم فاخر', 'منتجع', 'فندق بوتيك', 'شقق مخدومة اقتصادية', 'شقق مخدومة متوسطة', 'شقق مخدومة فاخرة', 'أخرى'],
       'مكاتب': ['فئة C', 'فئة B', 'فئة B+', 'فئة A', 'فئة A+ أو مكاتب مميزة', 'مكاتب مرنة ومشتركة', 'أخرى'],
@@ -9035,13 +9048,29 @@
       return parseSelectedMarketList(hidden ? hidden.value : tenantProjectData.project_type_other);
     }
 
-    function selectedOtherSubtypes() {
+    function selectedOtherSubtypesByType() {
       const hidden = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
       const raw = hidden ? hidden.value : tenantProjectData.project_subtype;
+      const parsed = parseStoredLandTable(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const mapped = {};
+        Object.entries(parsed).forEach(([typeName, values]) => {
+          mapped[typeName] = parseSelectedMarketList(values);
+        });
+        return mapped;
+      }
       const listed = parseSelectedMarketList(raw);
-      if (listed.length) return listed;
+      if (listed.length) {
+        const first = selectedOtherProjectTypes()[0];
+        return first ? { [first]: listed } : {};
+      }
       const single = selectedProjectSubtype();
-      return single ? [single] : [];
+      const first = selectedOtherProjectTypes()[0];
+      return single && first ? { [first]: [single] } : {};
+    }
+
+    function selectedOtherSubtypes() {
+      return Object.values(selectedOtherSubtypesByType()).flat();
     }
 
     function effectiveProjectTypeMains() {
@@ -9063,6 +9092,23 @@
       return text.split(/[,،\n;|]/).map(item => item.trim()).filter(Boolean);
     }
 
+    function audienceKindForMain(main, subtype) {
+      if (main === 'تجاري') return subtype === 'مكاتب' ? 'مكاتب' : 'تجزئة';
+      return marketAudienceKind(subtype || main);
+    }
+
+    function audienceOptionsForMain(main, subtype) {
+      if (main === 'تجاري') {
+        const retail = MARKET_AUDIENCE['تجزئة'] || [];
+        const offices = MARKET_AUDIENCE['مكاتب'] || [];
+        if (subtype === 'مكاتب') return offices.slice();
+        if (subtype && subtype !== 'مكاتب') return retail.slice();
+        return [...offices, ...retail.filter(option => !offices.includes(option))];
+      }
+      const kind = audienceKindForMain(main, subtype);
+      return (MARKET_AUDIENCE[kind] || MARKET_GENERAL_AUDIENCE).slice();
+    }
+
     function projectAnalysisKinds() {
       const main = selectedProjectTypeMain();
       const sub = selectedProjectSubtype();
@@ -9076,12 +9122,12 @@
         return kinds;
       }
       if (main === 'أخرى' || String(main).startsWith('أخرى')) {
-        selectedOtherProjectTypes().forEach(addKind);
-        selectedOtherSubtypes().forEach(addKind);
+        selectedOtherProjectTypes().forEach(typeName => addKind(typeName));
+        selectedOtherSubtypesByType();
+        Object.values(selectedOtherSubtypesByType()).forEach(values => values.forEach(addKind));
         return kinds;
       }
-      if (main === 'تجاري') return [sub === 'مكاتب' ? 'مكاتب' : 'تجزئة'];
-      addKind(sub || main);
+      addKind(audienceKindForMain(main, sub) || main);
       return kinds;
     }
 
@@ -9395,29 +9441,16 @@
         }
       }
       const otherMains = selectedOtherProjectTypes();
-      const otherSubtypes = [];
-      otherMains.forEach(typeName => {
-        (MARKET_SUBTYPES[typeName] || []).forEach(option => {
-          if (!otherSubtypes.includes(option)) otherSubtypes.push(option);
-        });
-      });
       if (subtypeInput) {
         const wrap = subtypeInput.closest('.tenant-field');
         if (!main) {
           if (wrap) wrap.style.display = 'none';
           if (otherSubtypesHost) otherSubtypesHost.innerHTML = '';
         } else if (isOther) {
-          if (wrap) wrap.style.display = otherSubtypes.length ? '' : 'none';
           subtypeInput.style.display = 'none';
-          if (otherSubtypesHost) {
-            if (otherSubtypes.length) {
-              const allowed = new Set(otherSubtypes);
-              const selected = selectedOtherSubtypes().filter(item => allowed.has(item));
-              renderChoiceGrid(otherSubtypesHost, 'project_subtype', otherSubtypes, selected);
-            } else {
-              otherSubtypesHost.innerHTML = '';
-            }
-          }
+          const hasSubtypes = otherMains.some(typeName => (MARKET_SUBTYPES[typeName] || []).length);
+          if (wrap) wrap.style.display = hasSubtypes ? '' : 'none';
+          renderGroupedSubtypeFields(otherMains, otherSubtypesHost, subtypeInput);
         } else {
           const subtypes = MARKET_SUBTYPES[main] || [];
           if (wrap) wrap.style.display = (main === 'متعدد الاستخدامات' || !subtypes.length) ? 'none' : '';
@@ -9434,24 +9467,107 @@
       const kinds = projectAnalysisKinds();
       renderActivityClassFields(kinds, classInput);
       if (audienceHost && audienceHidden) {
-        const options = [];
-        kinds.forEach(kind => {
-          (MARKET_AUDIENCE[kind] || []).forEach(option => {
-            if (!options.includes(option)) options.push(option);
-          });
-        });
         const audienceWrap = audienceHidden.closest('.tenant-field');
         if (!main) {
           audienceHost.innerHTML = '';
           if (audienceWrap) audienceWrap.style.display = 'none';
         } else {
           if (audienceWrap) audienceWrap.style.display = '';
-          const availableOptions = options.length ? options : MARKET_GENERAL_AUDIENCE;
-          if (!availableOptions.includes('أخرى')) availableOptions.push('أخرى');
-          renderChoiceGrid(audienceHost, 'target_audience', availableOptions, parseSelectedMarketList(audienceHidden.value || tenantProjectData.target_audience));
+          renderGroupedAudienceFields(main, isOther, audienceHidden, audienceHost);
         }
       }
       refreshAllowedUsesStatusNote();
+    }
+
+    function persistGroupedChoice(hidden, groups) {
+      if (!hidden) return;
+      const encoded = JSON.stringify(groups);
+      hidden.value = encoded;
+      tenantProjectData[hidden.dataset.key] = encoded;
+      triggerAutoSaveDraft();
+    }
+
+    function renderGroupedSubtypeFields(typeNames, host, hidden) {
+      if (!host || !hidden) return;
+      const current = selectedOtherSubtypesByType();
+      const groups = typeNames.filter(typeName => (MARKET_SUBTYPES[typeName] || []).length);
+      if (!groups.length) {
+        host.innerHTML = '';
+        persistGroupedChoice(hidden, {});
+        return;
+      }
+      host.innerHTML = groups.map(typeName => {
+        const options = MARKET_SUBTYPES[typeName] || [];
+        const selected = new Set(current[typeName] || []);
+        const boxes = options.map(option =>
+          '<label><input type="checkbox" data-group-type="' + typeName + '" value="' + String(option).replace(/"/g, '&quot;') + '"' +
+          (selected.has(option) ? ' checked' : '') + '> ' + option + '</label>'
+        ).join('');
+        return '<div style="margin-top:10px"><label>' + (MARKET_SUBTYPE_LABELS[typeName] || ('النوع الفرعي ل' + typeName)) +
+          '</label><div class="project-choice-grid">' + boxes + '</div></div>';
+      }).join('');
+      const persist = () => {
+        const next = {};
+        host.querySelectorAll('input[type="checkbox"]').forEach(input => {
+          if (!input.checked) return;
+          const typeName = input.dataset.groupType;
+          if (!next[typeName]) next[typeName] = [];
+          next[typeName].push(input.value);
+        });
+        persistGroupedChoice(hidden, next);
+        syncProjectClassificationFields();
+      };
+      host.querySelectorAll('input[type="checkbox"]').forEach(input => input.addEventListener('change', persist));
+    }
+
+    function groupedAudienceSelection() {
+      const hidden = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
+      const raw = hidden ? hidden.value : tenantProjectData.target_audience;
+      const parsed = parseStoredLandTable(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const mapped = {};
+        Object.entries(parsed).forEach(([typeName, values]) => {
+          mapped[typeName] = parseSelectedMarketList(values);
+        });
+        return mapped;
+      }
+      return { general: parseSelectedMarketList(raw) };
+    }
+
+    function renderGroupedAudienceFields(main, isOther, hidden, host) {
+      const current = groupedAudienceSelection();
+      const groups = isOther ? selectedOtherProjectTypes() : (main === 'متعدد الاستخدامات' ? selectedMixedComponents() : [main]);
+      const uniqueGroups = groups.filter(Boolean);
+      if (!uniqueGroups.length) {
+        host.innerHTML = '';
+        persistGroupedChoice(hidden, {});
+        return;
+      }
+      host.innerHTML = uniqueGroups.map(typeName => {
+        const mappedMain = typeName === 'مكاتب' ? 'تجاري' : typeName;
+        const subtype = typeName === 'مكاتب'
+          ? 'مكاتب'
+          : (isOther ? (selectedOtherSubtypesByType()[typeName] || [])[0] : selectedProjectSubtype());
+        const options = audienceOptionsForMain(mappedMain, subtype);
+        const selected = new Set(current[typeName] || (!isOther && uniqueGroups.length === 1 ? (current.general || []) : []));
+        const boxes = options.map(option =>
+          '<label><input type="checkbox" data-audience-type="' + typeName + '" value="' + String(option).replace(/"/g, '&quot;') + '"' +
+          (selected.has(option) ? ' checked' : '') + '> ' + option + '</label>'
+        ).join('');
+        return '<div style="margin-top:10px"><label>' + (MARKET_AUDIENCE_LABELS[typeName] || MARKET_AUDIENCE_LABELS[audienceKindForMain(typeName)] || ('الفئة المستهدفة ل' + typeName)) +
+          '</label><div class="project-choice-grid">' + boxes + '</div></div>';
+      }).join('');
+      const persist = () => {
+        const next = {};
+        host.querySelectorAll('input[type="checkbox"]').forEach(input => {
+          if (!input.checked) return;
+          const typeName = input.dataset.audienceType;
+          if (!next[typeName]) next[typeName] = [];
+          next[typeName].push(input.value);
+        });
+        persistGroupedChoice(hidden, next);
+      };
+      host.querySelectorAll('input[type="checkbox"]').forEach(input => input.addEventListener('change', persist));
     }
 
     function renderActivityClassFields(kinds, classInput) {
@@ -9722,7 +9838,7 @@
         projectComponents: selectedMixedComponents().join('، ') || (components.map(item => item.name).filter(Boolean).join('، ')),
         projectLevel: document.querySelector('#tenantProjectForm [data-key="project_level"]')?.value || tenantProjectData.project_level || '',
         activityClass: document.querySelector('#tenantProjectForm [data-key="activity_class"]')?.value || tenantProjectData.activity_class || '',
-        targetAudience: parseSelectedMarketList(document.querySelector('#tenantProjectForm [data-key="target_audience"]')?.value || tenantProjectData.target_audience),
+        targetAudience: groupedAudienceSelection(),
         projectIdea: document.querySelector('#tenantProjectForm [data-key="project_idea"]')?.value || tenantProjectData.project_idea || '',
         city: document.querySelector('#tenantProjectForm [data-key="city"]')?.value || tenantProjectData.city || '',
         district: document.querySelector('#tenantProjectForm [data-key="district"]')?.value || tenantProjectData.district || '',

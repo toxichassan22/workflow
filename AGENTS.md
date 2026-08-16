@@ -152,7 +152,9 @@ prompt or a screen.
   is also a multi-select of the four real mains; matching subtypes then open automatically.
   Extra activity classifications stay on the basic page and appear per selected hotel / office /
   industrial kind. `project_idea` is client-typed only. `project_level` is separate from
-  `activity_class`. `target_audience` is a multi-select that changes with type.
+  `activity_class`. Choosing a type always reveals that type's subtype list and target-audience
+  list. If `أخرى` selects several mains, each selected type gets its own subtype and audience
+  group.
 - **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).
