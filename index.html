@@ -1645,6 +1645,12 @@
       gap: 8px 14px;
       margin-top: 8px;
     }
+    .location-derived-input,
+    #marketCityMirror,
+    #marketDistrictMirror {
+      background: #f4f7fa !important;
+      cursor: not-allowed;
+    }
     .project-multi-select {
       position: relative;
       width: 100%;
@@ -9494,8 +9500,16 @@
       const district = document.querySelector('#tenantProjectForm [data-key="district"]')?.value || tenantProjectData.district || '';
       const cityMirror = document.getElementById('marketCityMirror');
       const districtMirror = document.getElementById('marketDistrictMirror');
-      if (cityMirror) cityMirror.value = city;
-      if (districtMirror) districtMirror.value = district;
+      if (cityMirror) {
+        cityMirror.readOnly = true;
+        cityMirror.setAttribute('aria-readonly', 'true');
+        cityMirror.value = city;
+      }
+      if (districtMirror) {
+        districtMirror.readOnly = true;
+        districtMirror.setAttribute('aria-readonly', 'true');
+        districtMirror.value = district;
+      }
     }
 
     function applyCityDistrictToForm(city, district, overwrite = false) {
@@ -11902,6 +11916,12 @@
           input.dataset.key = f.fieldKey;
           input.dataset.type = f.fieldType;
           input.placeholder = f.placeholder || '';
+          if (f.fieldKey === 'city' || f.fieldKey === 'district') {
+            input.readOnly = true;
+            input.setAttribute('aria-readonly', 'true');
+            input.classList.add('location-derived-input');
+            input.title = 'تُملأ تلقائيًا من الموقع والخرائط';
+          }
           if (f.fieldKey === 'project_type' || f.fieldKey === 'project_mixed_components' || f.fieldKey === 'activity_class') {
             input.type = 'hidden';
             input.dataset.type = 'text';
@@ -15577,7 +15597,7 @@
         tenantProjectData.location_lat = data.lat;
         tenantProjectData.location_lng = data.lng;
         tenantProjectData.location_coordinates_confirmed = false;
-        if (data.city || data.district) applyCityDistrictToForm(data.city, data.district, false);
+        if (data.city || data.district) applyCityDistrictToForm(data.city, data.district, true);
         const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || val);
         toast('تم تحديد الموقع: ' + msg);
         return true;
@@ -16270,7 +16290,7 @@
           const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
           if (input && value !== null && value !== undefined) input.value = value;
         });
-        applyCityDistrictToForm(fields.city || tenantProjectData.city, fields.district || tenantProjectData.district, false);
+        applyCityDistrictToForm(fields.city || tenantProjectData.city, fields.district || tenantProjectData.district, true);
         refreshLocationTables();
         window._lastAnalyzedAddress = (tenantProjectData.location_address || '').trim();
         if (fields.location_polygon_source === 'manual' && fields.location_polygon) {
