@@ -9015,7 +9015,9 @@
     }
 
     function selectedProjectTypeMain() {
-      return String(document.querySelector('#tenantProjectForm [data-key="project_type"]')?.value || tenantProjectData.project_type || '').trim();
+      const input = document.querySelector('#tenantProjectForm [data-key="project_type"]');
+      if (input) return String(input.value || '').trim();
+      return String(tenantProjectData.project_type || '').trim();
     }
 
     function selectedProjectSubtype() {
@@ -9386,6 +9388,7 @@
         otherInput.type = 'hidden';
         otherInput.style.display = 'none';
         if (otherHost) {
+          otherHost.hidden = !isOther;
           otherHost.style.display = isOther ? '' : 'none';
           if (isOther) renderChoiceGrid(otherHost, 'project_type_other', MARKET_OTHER_TYPE_OPTIONS, selectedOtherProjectTypes());
           else otherHost.innerHTML = '';
@@ -9400,7 +9403,10 @@
       });
       if (subtypeInput) {
         const wrap = subtypeInput.closest('.tenant-field');
-        if (isOther) {
+        if (!main) {
+          if (wrap) wrap.style.display = 'none';
+          if (otherSubtypesHost) otherSubtypesHost.innerHTML = '';
+        } else if (isOther) {
           if (wrap) wrap.style.display = otherSubtypes.length ? '' : 'none';
           subtypeInput.style.display = 'none';
           if (otherSubtypesHost) {
@@ -9434,9 +9440,12 @@
             if (!options.includes(option)) options.push(option);
           });
         });
+        const audienceWrap = audienceHidden.closest('.tenant-field');
         if (!main) {
-          audienceHost.innerHTML = '<span class="tenant-hint">اختر نوع المشروع الرئيسي أولًا لتظهر الفئات المستهدفة.</span>';
+          audienceHost.innerHTML = '';
+          if (audienceWrap) audienceWrap.style.display = 'none';
         } else {
+          if (audienceWrap) audienceWrap.style.display = '';
           const availableOptions = options.length ? options : MARKET_GENERAL_AUDIENCE;
           if (!availableOptions.includes('أخرى')) availableOptions.push('أخرى');
           renderChoiceGrid(audienceHost, 'target_audience', availableOptions, parseSelectedMarketList(audienceHidden.value || tenantProjectData.target_audience));
@@ -11550,6 +11559,11 @@
             const checkOther = () => {
               const val = (input.value || '').trim();
               const isOther = val === 'أخرى' || val.startsWith('أخرى');
+              if (f.fieldKey === 'project_type') {
+                otherInput.style.display = 'none';
+                otherInput.required = false;
+                return;
+              }
               otherInput.style.display = isOther ? 'block' : 'none';
               if (isOther && f.isRequired) otherInput.required = true;
               else otherInput.required = false;

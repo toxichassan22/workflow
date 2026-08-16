@@ -3067,7 +3067,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("id = 'projectAudienceGrid'", index_source)
         self.assertIn('id="marketCityMirror"', index_source)
         self.assertIn('const MARKET_GENERAL_AUDIENCE', index_source)
-        self.assertIn('اختر نوع المشروع الرئيسي أولًا لتظهر الفئات المستهدفة.', index_source)
+        self.assertIn('if (audienceWrap) audienceWrap.style.display = \'none\';', index_source)
         self.assertIn('const availableOptions = options.length ? options : MARKET_GENERAL_AUDIENCE;', index_source)
         self.assertIn('const MARKET_STUDY_SWOT_SECTIONS', index_source)
         self.assertIn("id=\"marketSwotFields\"", index_source)
@@ -3077,6 +3077,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("id = 'projectOtherSubtypesGrid'", index_source)
         self.assertIn("id = 'projectActivityClassFields'", index_source)
         self.assertIn('function selectedOtherProjectTypes()', index_source)
+        self.assertIn("if (f.fieldKey === 'project_type') {", index_source)
+        self.assertIn('otherHost.hidden = !isOther;', index_source)
         self.assertNotIn('🎯', index_source)
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
