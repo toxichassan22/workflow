@@ -3062,6 +3062,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("data-key=\"market_study_data\"", index_source)
         self.assertIn("function runMarketCompetitorsJob(mode)", index_source)
         self.assertIn("function runMarketSummaryJob()", index_source)
+        self.assertIn('#section-market-study th {', index_source)
+        self.assertIn('color: var(--ink);', index_source)
         self.assertIn("function renderMarketSummaryCompare(current, incoming, currentSwot, incomingSwot)", index_source)
         self.assertIn('/api/market-study/competitors', index_source)
         self.assertIn('/api/market-study/summary', index_source)
