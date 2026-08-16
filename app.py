@@ -6865,13 +6865,21 @@ def resolve_land_use_status(project_type, allowed_uses):
     The model often leaves land_use_status unresolved even when the form sent
     "سكني" and the regulations already list residential use.
     """
-    project = str(project_type or '').strip()
+    raw_project = project_type
+    if isinstance(raw_project, str):
+        try:
+            parsed_project = json.loads(raw_project)
+            raw_project = parsed_project
+        except (TypeError, ValueError):
+            raw_project = re.split(r'[,،\n;|]', raw_project)
+    projects = raw_project if isinstance(raw_project, (list, tuple, set)) else [raw_project]
+    projects = [str(item or '').strip() for item in projects if str(item or '').strip()]
     uses = str(allowed_uses or '').strip()
-    if not project or project.startswith('أخرى'):
+    if not projects:
         return 'غير محسوم'
     if not uses or uses.startswith('غير محدد'):
         return 'غير محسوم'
-    aliases = PROJECT_TYPE_USE_ALIASES.get(project, (project,))
+    aliases = [alias for project in projects for alias in PROJECT_TYPE_USE_ALIASES.get(project, (project,))]
     if any(alias and alias in uses for alias in aliases):
         return 'مسموح'
     return 'غير مسموح'
