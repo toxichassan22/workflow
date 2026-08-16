@@ -3150,6 +3150,49 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(market_study.resolve_competitor_radius_km('custom', 7), 7)
         self.assertIsNone(market_study.resolve_competitor_radius_km('city'))
 
+    def test_market_study_retries_without_tools_and_json_mode(self):
+        module = self.application_module
+        responses = [
+            {'error': {'message': 'web search response was empty'}},
+            {'choices': [{'message': {'content': 'not valid json'}}]},
+            {'choices': [{'message': {'content': '{"competitors": []}'}}]},
+        ]
+        calls = []
+
+        def fake_call(system_prompt, user_content, **kwargs):
+            calls.append(kwargs)
+            return responses.pop(0)
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_call) as call:
+            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
+
+        self.assertTrue(module._has_chat_choices(response))
+        self.assertEqual(call.call_count, 3)
+        self.assertIsNotNone(calls[0]['tools'])
+        self.assertEqual(calls[0]['response_format'], {'type': 'json_object'})
+        self.assertIsNone(calls[1]['tools'])
+        self.assertEqual(calls[1]['response_format'], {'type': 'json_object'})
+        self.assertIsNone(calls[2]['tools'])
+        self.assertIsNone(calls[2]['response_format'])
+        self.assertEqual(error, '')
+
+    def test_market_study_lowers_token_cap_when_credit_is_limited(self):
+        module = self.application_module
+        refusal = {'error': {'message': 'You requested up to 6000 tokens, but can only afford 3000'}}
+        success = {'choices': [{'message': {'content': '{"competitors": []}'}}]}
+        caps = []
+
+        def fake_call(system_prompt, user_content, **kwargs):
+            caps.append(kwargs['max_tokens'])
+            return refusal if len(caps) == 1 else success
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_call):
+            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
+
+        self.assertTrue(module._has_chat_choices(response))
+        self.assertEqual(error, '')
+        self.assertEqual(caps, [6000, 2550])
+
     def test_market_study_endpoints_queue_or_run_without_deleting_rows(self):
         client = self.app.test_client()
         headers = self._headers(self.token_a)

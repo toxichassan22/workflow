@@ -8583,34 +8583,53 @@ def _read_market_job(tenant_id, job_id):
 
 
 def _call_market_study_model(system_prompt, user_content, max_tokens=None):
-    """Search-backed market call. Prefer the web tool; fall back to a plain JSON call."""
+    """Search-backed market call with JSON, provider, and credit fallbacks."""
     cap = max(2000, int(max_tokens or MARKET_STUDY_MAX_TOKENS))
     tools = [{'type': 'openrouter:web_search', 'parameters': {'max_results': 8}}]
-    res = call_openrouter_chat(
-        system_prompt,
-        user_content,
-        temperature=None,
-        max_tokens=cap,
-        model=MARKET_STUDY_MODEL,
-        response_format={'type': 'json_object'},
-        provider={'order': ['Google'], 'allow_fallbacks': True},
-        tools=tools,
-        timeout=240,
-    )
-    if _has_chat_choices(res) and str(_get_chat_response_text(res) or '').strip():
-        return res, _chat_error_message(res)
-    print(f'[MARKET STUDY] web-tool call failed or empty; retrying without tools: {_chat_error_message(res)}')
-    res = call_openrouter_chat(
-        system_prompt,
-        user_content,
-        temperature=None,
-        max_tokens=cap,
-        model=MARKET_STUDY_MODEL,
-        response_format={'type': 'json_object'},
-        provider={'order': ['Google'], 'allow_fallbacks': True},
-        timeout=240,
-    )
-    return res, _chat_error_message(res)
+    provider = {'order': ['Google'], 'allow_fallbacks': True}
+    attempts = [
+        (tools, {'type': 'json_object'}),
+        (None, {'type': 'json_object'}),
+        (None, None),
+    ]
+    last_response = {}
+    last_error = ''
+    for _cap_attempt in range(4):
+        retry_cap = None
+        for index, (attempt_tools, response_format) in enumerate(attempts):
+            if index:
+                print(
+                    '[MARKET STUDY] retrying competitor/summary call '
+                    f'without {"web tools" if index == 1 else "JSON mode"}: '
+                    f'{_chat_error_message(last_response)}'
+                )
+            last_response = call_openrouter_chat(
+                system_prompt,
+                user_content,
+                temperature=None,
+                max_tokens=cap,
+                model=MARKET_STUDY_MODEL,
+                response_format=response_format,
+                provider=provider,
+                tools=attempt_tools,
+                timeout=240,
+            )
+            last_error = _chat_error_message(last_response)
+            text = _get_chat_response_text(last_response)
+            if _has_chat_choices(last_response) and parse_json_object(text):
+                return last_response, ''
+            affordable = _AFFORDABLE_TOKENS_RE.search(last_error or '')
+            if affordable:
+                quoted = int(affordable.group(1))
+                candidate = max(2000, int(quoted * 0.85))
+                if candidate < cap:
+                    retry_cap = candidate
+                    break
+        if retry_cap is None:
+            break
+        print(f'[MARKET STUDY] provider refused cap={cap}; retrying with cap={retry_cap}')
+        cap = retry_cap
+    return last_response, last_error
 
 
 def _parse_market_model_json(res):
