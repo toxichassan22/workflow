@@ -8975,6 +8975,7 @@
       'مكاتب': ['فئة C', 'فئة B', 'فئة B+', 'فئة A', 'فئة A+ أو مكاتب مميزة', 'مكاتب مرنة ومشتركة', 'أخرى'],
       'صناعي ولوجستي': ['أساسي', 'قياسي', 'متقدم', 'عالي المواصفات', 'متخصص حسب النشاط', 'منشأة مؤتمتة أو ذكية', 'أخرى']
     };
+    const MARKET_GENERAL_AUDIENCE = ['أفراد', 'عائلات', 'مستثمرون', 'شركات', 'جهات حكومية', 'سياح وزوار', 'مشغلون ومستأجرون', 'أخرى'];
     const MARKET_AUDIENCE = {
       'سكني': ['أفراد', 'حديثو الزواج', 'العائلات الصغيرة', 'العائلات المتوسطة', 'العائلات الكبيرة', 'كبار السن', 'الطلاب', 'الموظفون', 'التنفيذيون ورجال الأعمال', 'أصحاب الدخل المحدود', 'أصحاب الدخل المتوسط', 'أصحاب الدخل فوق المتوسط', 'أصحاب الدخل المرتفع', 'أصحاب الثروات', 'السعوديون', 'المقيمون', 'الأجانب المؤهلون للتملك', 'زوار المدينة', 'الباحثون عن منزل ثان', 'الباحثون عن مساكن فندقية', 'موظفو الشركات القريبة'],
       'مكاتب': ['رواد الأعمال', 'الشركات الناشئة', 'المنشآت الصغيرة', 'المنشآت المتوسطة', 'الشركات الكبيرة', 'الشركات العالمية', 'المقرات الإقليمية', 'الجهات الحكومية', 'الجهات شبه الحكومية', 'الشركات المهنية والاستشارية', 'شركات التقنية', 'الشركات المالية', 'شركات العقار والإنشاءات', 'الشركات الطبية', 'مكاتب المحاماة والمحاسبة', 'مشغلو المكاتب المشتركة', 'المستقلون', 'المستثمرون العقاريون'],
@@ -9347,8 +9348,13 @@
             if (!options.includes(option)) options.push(option);
           });
         });
-        if (!options.includes('أخرى')) options.push('أخرى');
-        renderChoiceGrid(audienceHost, 'target_audience', options.length ? options : ['أفراد', 'عائلات', 'مستثمرون', 'شركات', 'أخرى'], parseSelectedMarketList(audienceHidden.value || tenantProjectData.target_audience));
+        if (!main) {
+          audienceHost.innerHTML = '<span class="tenant-hint">اختر نوع المشروع الرئيسي أولًا لتظهر الفئات المستهدفة.</span>';
+        } else {
+          const availableOptions = options.length ? options : MARKET_GENERAL_AUDIENCE;
+          if (!availableOptions.includes('أخرى')) availableOptions.push('أخرى');
+          renderChoiceGrid(audienceHost, 'target_audience', availableOptions, parseSelectedMarketList(audienceHidden.value || tenantProjectData.target_audience));
+        }
       }
       refreshAllowedUsesStatusNote();
     }

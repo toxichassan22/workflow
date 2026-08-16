@@ -3066,6 +3066,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function enhanceProjectClassificationFields()', index_source)
         self.assertIn("id = 'projectAudienceGrid'", index_source)
         self.assertIn('id="marketCityMirror"', index_source)
+        self.assertIn('const MARKET_GENERAL_AUDIENCE', index_source)
+        self.assertIn('اختر نوع المشروع الرئيسي أولًا لتظهر الفئات المستهدفة.', index_source)
+        self.assertIn('const availableOptions = options.length ? options : MARKET_GENERAL_AUDIENCE;', index_source)
         self.assertNotIn('🎯', index_source)
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
