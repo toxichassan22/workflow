@@ -146,8 +146,9 @@ The full brief is `تحليل السوق .pdf`. `market_study.py` is that brief 
 priority, mandatory rules, and option lists. Do not drop a required item from the PDF to shorten a
 prompt or a screen.
 
-- **Basic fields:** `project_type` is the main type from the brief (سكني / تجاري / فندقي /
-  صناعي ولوجستي / متعدد الاستخدامات). `project_subtype` is a visible multi-select that opens
+- **Basic fields:** `project_type` is a native single `<select>` like `project_stage` — one main
+  type from the brief (سكني / تجاري / فندقي / صناعي ولوجستي / متعدد الاستخدامات). Do not hide it
+  behind a multi-select grid. `project_subtype` is a visible multi-select that opens
   the subtype list for the selected main; residential has no subtypes and mixed-use can select
   from all subtype families. `activity_class` sits after the subtype selector. Extra
   classification is one field: hotel / office / industrial get specialized lists, every other

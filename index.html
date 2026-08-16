@@ -9096,11 +9096,28 @@
       return '';
     }
 
+    function normalizeProjectTypeValue(raw) {
+      const values = parseSelectedMarketList(raw).map(value => value === 'أخرى' ? 'متعدد الاستخدامات' : value);
+      return values.find(value => MARKET_PROJECT_TYPES.includes(value)) || values[0] || '';
+    }
+
+    function applyProjectTypeSelect(input, raw) {
+      if (!input) return normalizeProjectTypeValue(raw);
+      const value = normalizeProjectTypeValue(raw || input.value);
+      if (value && !Array.from(input.options).some(option => option.value === value)) {
+        const extra = document.createElement('option');
+        extra.value = value;
+        extra.textContent = value;
+        input.appendChild(extra);
+      }
+      if (value) input.value = value;
+      return input.value || value || '';
+    }
+
     function selectedProjectTypeMains() {
       const input = document.querySelector('#tenantProjectForm [data-key="project_type"]');
-      const raw = input ? input.value : tenantProjectData.project_type;
-      const values = parseSelectedMarketList(raw).map(value => value === 'أخرى' ? 'متعدد الاستخدامات' : value);
-      return [...new Set(values)];
+      const value = normalizeProjectTypeValue((input && input.value) || tenantProjectData.project_type);
+      return value ? [value] : [];
     }
 
     function selectedProjectTypeMain() {
@@ -9511,19 +9528,9 @@
 
     function syncProjectClassificationFields() {
       const mains = selectedProjectTypeMains();
-      const main = mains[0] || '';
       const typeInput = document.querySelector('#tenantProjectForm [data-key="project_type"]');
-      const typeHost = document.getElementById('projectTypeGrid');
-      if (typeInput && typeHost) {
-        typeInput.style.display = 'none';
-        renderMultiSelectDropdown(typeHost, MARKET_PROJECT_TYPES, mains, 'اختر نوعًا أو أكثر', selected => {
-          typeInput.value = selected.join('، ');
-          tenantProjectData.project_type = typeInput.value;
-          syncProjectClassificationFields();
-          keepProjectMultiSelectOpen('projectTypeGrid');
-          triggerAutoSaveDraft();
-        });
-      }
+      const normalizedType = applyProjectTypeSelect(typeInput, mains[0] || tenantProjectData.project_type);
+      if (normalizedType) tenantProjectData.project_type = normalizedType;
       const subtypeInput = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
       const subtypeHost = document.getElementById('projectSubtypeGrid');
       const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
@@ -9536,6 +9543,13 @@
         const wrap = subtypeInput.closest('.tenant-field');
         const subtypeOptions = mains.flatMap(typeName => MARKET_SUBTYPES[typeName] || []);
         if (wrap) wrap.style.display = subtypeOptions.length ? '' : 'none';
+        const currentSubtypes = selectedProjectSubtypesByMain();
+        const prunedSubtypes = {};
+        mains.forEach(typeName => {
+          if ((currentSubtypes[typeName] || []).length) prunedSubtypes[typeName] = currentSubtypes[typeName];
+        });
+        const hasStaleSubtypes = Object.keys(currentSubtypes).some(typeName => !mains.includes(typeName));
+        if (hasStaleSubtypes) persistGroupedChoice(subtypeInput, prunedSubtypes);
         if (subtypeHost) renderProjectSubtypeFields(mains, subtypeHost, subtypeInput);
       }
       const kinds = projectAnalysisKinds();
@@ -9724,13 +9738,6 @@
       const audienceInput = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
       const typeInput = document.querySelector('#tenantProjectForm [data-key="project_type"]');
       const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
-      if (typeInput && !document.getElementById('projectTypeGrid')) {
-        typeInput.style.display = 'none';
-        const grid = document.createElement('div');
-        grid.id = 'projectTypeGrid';
-        grid.className = 'project-choice-grid';
-        typeInput.insertAdjacentElement('afterend', grid);
-      }
       if (mixedInput && !document.getElementById('projectMixedComponentsGrid')) {
         mixedInput.type = 'hidden';
         const grid = document.createElement('div');
@@ -9757,8 +9764,14 @@
         grid.className = 'project-choice-grid';
         audienceInput.insertAdjacentElement('afterend', grid);
       }
-      typeInput?.addEventListener('change', syncProjectClassificationFields);
-      subtypeInput?.addEventListener('change', syncProjectClassificationFields);
+      if (typeInput && !typeInput.dataset.classificationBound) {
+        typeInput.dataset.classificationBound = '1';
+        typeInput.addEventListener('change', syncProjectClassificationFields);
+      }
+      if (subtypeInput && !subtypeInput.dataset.classificationBound) {
+        subtypeInput.dataset.classificationBound = '1';
+        subtypeInput.addEventListener('change', syncProjectClassificationFields);
+      }
       ['city', 'district'].forEach(key => {
         document.querySelector('#tenantProjectForm [data-key="' + key + '"]')
           ?.addEventListener('input', () => {
@@ -9945,7 +9958,7 @@
       }));
       return {
         projectName: tenantProjectData.project_name || '',
-        projectType: selectedProjectTypeMains().join('، '),
+        projectType: selectedProjectTypeMain(),
         projectSubtype: selectedProjectSubtypes().join('، '),
         projectComponents: selectedProjectSubtypes().join('، ') || (components.map(item => item.name).filter(Boolean).join('، ')),
         projectLevel: document.querySelector('#tenantProjectForm [data-key="project_level"]')?.value || tenantProjectData.project_level || '',
@@ -11095,6 +11108,8 @@
           if (stripped.status && !tenantProjectData.land_use_status) {
             tenantProjectData.land_use_status = stripped.status;
           }
+        } else if (key === 'project_type') {
+          tenantProjectData.project_type = applyProjectTypeSelect(input, value);
         } else {
           input.value = String(value);
         }
@@ -11676,12 +11691,17 @@
           if (f.defaultValue) input.value = f.defaultValue;
           if (f.isRequired) input.required = true;
           if (input.tagName === 'SELECT' && tenantProjectData && tenantProjectData[f.fieldKey]) {
-            const stored = String(tenantProjectData[f.fieldKey]);
-            if (stored && !Array.from(input.options).some(option => option.value === stored)) {
-              const extra = document.createElement('option');
-              extra.value = stored;
-              extra.textContent = stored;
-              input.appendChild(extra);
+            if (f.fieldKey === 'project_type') {
+              applyProjectTypeSelect(input, tenantProjectData.project_type);
+            } else {
+              const stored = String(tenantProjectData[f.fieldKey]);
+              if (stored && !Array.from(input.options).some(option => option.value === stored)) {
+                const extra = document.createElement('option');
+                extra.value = stored;
+                extra.textContent = stored;
+                input.appendChild(extra);
+              }
+              if (stored) input.value = stored;
             }
           }
 
@@ -11774,7 +11794,7 @@
             div.appendChild(uploadStatus);
             renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
           }
-          if (f.fieldType === 'select' && f.fieldKey !== 'activity_class' && f.fieldKey !== 'project_level' && f.fieldKey !== 'project_type') {
+          if (f.fieldType === 'select' && f.fieldKey !== 'activity_class' && f.fieldKey !== 'project_level') {
             const otherInput = document.createElement('input');
             otherInput.type = 'text';
             otherInput.placeholder = 'اكتب التحديد المخصص بالتفصيل...';
@@ -11787,11 +11807,6 @@
             const checkOther = () => {
               const val = (input.value || '').trim();
               const isOther = val === 'أخرى' || val.startsWith('أخرى');
-              if (f.fieldKey === 'project_type') {
-                otherInput.style.display = 'none';
-                otherInput.required = false;
-                return;
-              }
               otherInput.style.display = isOther ? 'block' : 'none';
               if (isOther && f.isRequired) otherInput.required = true;
               else otherInput.required = false;
