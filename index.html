@@ -9032,7 +9032,8 @@
       { key: 'opportunities', label: 'الفرص' },
       { key: 'threats', label: 'التهديدات' }
     ];
-    const MARKET_PROJECT_TYPES = ['سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات'];
+    const MARKET_PROJECT_TYPES = ['سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي'];
+    const MARKET_MIXED_TYPE_OPTIONS = MARKET_PROJECT_TYPES.slice();
     const MARKET_SUBTYPES = {
       'سكني': [],
       'تجاري': ['مكاتب', 'تجزئة ومحلات', 'مطاعم ومقاهي', 'مركز تجاري'],
@@ -9096,32 +9097,51 @@
       return '';
     }
 
+    function normalizeProjectTypeValues(raw) {
+      const listed = parseSelectedMarketList(raw);
+      const values = [];
+      listed.forEach(value => {
+        if (value === 'أخرى' || value === 'متعدد الاستخدامات') {
+          selectedMixedComponents().forEach(item => values.push(item));
+          return;
+        }
+        if (MARKET_PROJECT_TYPES.includes(value)) values.push(value);
+      });
+      return [...new Set(values)];
+    }
+
     function normalizeProjectTypeValue(raw) {
-      const values = parseSelectedMarketList(raw).map(value => value === 'أخرى' ? 'متعدد الاستخدامات' : value);
-      return values.find(value => MARKET_PROJECT_TYPES.includes(value)) || values[0] || '';
+      return normalizeProjectTypeValues(raw)[0] || '';
+    }
+
+    function persistProjectTypes(values) {
+      const next = normalizeProjectTypeValues(values);
+      const encoded = JSON.stringify(next);
+      const input = document.querySelector('#tenantProjectForm [data-key="project_type"]');
+      if (input) {
+        input.type = 'hidden';
+        input.style.display = 'none';
+        input.value = encoded;
+      }
+      tenantProjectData.project_type = encoded;
+      return next;
     }
 
     function applyProjectTypeSelect(input, raw) {
-      if (!input) return normalizeProjectTypeValue(raw);
-      const value = normalizeProjectTypeValue(raw || input.value);
-      if (value && !Array.from(input.options).some(option => option.value === value)) {
-        const extra = document.createElement('option');
-        extra.value = value;
-        extra.textContent = value;
-        input.appendChild(extra);
-      }
-      if (value) input.value = value;
-      return input.value || value || '';
+      const values = persistProjectTypes(raw || (input && input.value) || tenantProjectData.project_type);
+      return values[0] || '';
     }
 
     function selectedProjectTypeMains() {
       const input = document.querySelector('#tenantProjectForm [data-key="project_type"]');
-      const value = normalizeProjectTypeValue((input && input.value) || tenantProjectData.project_type);
-      return value ? [value] : [];
+      const values = normalizeProjectTypeValues((input && input.value) || tenantProjectData.project_type);
+      return values.length ? values : selectedMixedComponents();
     }
 
     function selectedProjectTypeMain() {
-      return selectedProjectTypeMains()[0] || '';
+      const mains = selectedProjectTypeMains();
+      if (mains.length > 1) return 'متعدد الاستخدامات';
+      return mains[0] || '';
     }
 
     function selectedProjectSubtypesByMain() {
@@ -9132,13 +9152,21 @@
         const mapped = {};
         Object.entries(parsed).forEach(([typeName, values]) => {
           const list = parseSelectedMarketList(values);
+          if (typeName === 'متعدد الاستخدامات') {
+            list.forEach(value => {
+              const parent = parentMainForSubtype(value);
+              if (!MARKET_MIXED_TYPE_OPTIONS.includes(parent) || parent === 'سكني') return;
+              mapped[parent] = [...new Set((mapped[parent] || []).concat(value))];
+            });
+            return;
+          }
           if (list.length) mapped[typeName] = list;
         });
         return mapped;
       }
       const listed = parseSelectedMarketList(raw);
-      const main = selectedProjectTypeMain();
-      return main && listed.length ? { [main]: listed } : {};
+      const mains = selectedProjectTypeMains();
+      return mains.length === 1 && listed.length ? { [mains[0]]: listed } : {};
     }
 
     function selectedProjectSubtypes() {
@@ -9150,9 +9178,21 @@
     }
 
     function selectedMixedComponents() {
-      const selected = selectedProjectSubtypesByMain()['متعدد الاستخدامات'] || [];
-      if (selected.length) return selected;
-      return parseSelectedMarketList(tenantProjectData.project_mixed_components);
+      const hidden = document.querySelector('#tenantProjectForm [data-key="project_mixed_components"]');
+      const listed = parseSelectedMarketList(hidden ? hidden.value : tenantProjectData.project_mixed_components)
+        .filter(value => MARKET_MIXED_TYPE_OPTIONS.includes(value));
+      if (listed.length) return [...new Set(listed)];
+      const subtypeHidden = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
+      const parsed = parseStoredLandTable(subtypeHidden ? subtypeHidden.value : tenantProjectData.project_subtype);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const fromLegacy = parseSelectedMarketList(parsed['متعدد الاستخدامات']).map(parentMainForSubtype)
+          .filter(value => MARKET_MIXED_TYPE_OPTIONS.includes(value));
+        const fromKeys = Object.keys(parsed)
+          .map(key => key === 'متعدد الاستخدامات' ? '' : key)
+          .filter(value => MARKET_MIXED_TYPE_OPTIONS.includes(value));
+        return [...new Set([...fromLegacy, ...fromKeys])];
+      }
+      return [];
     }
 
     function parentMainForSubtype(subtype) {
@@ -9529,8 +9569,29 @@
     function syncProjectClassificationFields() {
       const mains = selectedProjectTypeMains();
       const typeInput = document.querySelector('#tenantProjectForm [data-key="project_type"]');
-      const normalizedType = applyProjectTypeSelect(typeInput, mains[0] || tenantProjectData.project_type);
-      if (normalizedType) tenantProjectData.project_type = normalizedType;
+      const typeHost = document.getElementById('projectTypeGrid');
+      if (typeInput) {
+        typeInput.type = 'hidden';
+        typeInput.style.display = 'none';
+        persistProjectTypes(mains);
+        if (typeHost) {
+          renderMultiSelectDropdown(typeHost, MARKET_PROJECT_TYPES, mains, 'اختر نوعًا أو أكثر', selected => {
+            persistProjectTypes(selected);
+            triggerAutoSaveDraft();
+            syncProjectClassificationFields();
+            keepProjectMultiSelectOpen('projectTypeGrid');
+          });
+        }
+      }
+      const mixedInput = document.querySelector('#tenantProjectForm [data-key="project_mixed_components"]');
+      const mixedHost = document.getElementById('projectMixedComponentsGrid');
+      if (mixedInput) {
+        mixedInput.type = 'hidden';
+        mixedInput.style.display = 'none';
+        const mixedWrap = mixedInput.closest('.tenant-field');
+        if (mixedWrap) mixedWrap.style.display = 'none';
+        if (mixedHost) mixedHost.innerHTML = '';
+      }
       const subtypeInput = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
       const subtypeHost = document.getElementById('projectSubtypeGrid');
       const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
@@ -9585,8 +9646,9 @@
         host.innerHTML = '';
         return;
       }
+      const showSubtypeLabels = groups.length > 1;
       host.innerHTML = groups.map((group, index) =>
-        '<div style="margin-top:10px"><label>' + (groups.length > 1 ? (MARKET_SUBTYPE_LABELS[group.main] || ('الأنواع الفرعية ل' + group.main)) : '') +
+        '<div style="margin-top:10px"><label>' + (showSubtypeLabels ? (MARKET_SUBTYPE_LABELS[group.main] || ('الأنواع الفرعية ل' + group.main)) : '') +
         '</label><div data-subtype-group-index="' + index + '"></div></div>'
       ).join('');
       groups.forEach((group, index) => {
@@ -9738,12 +9800,19 @@
       const audienceInput = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
       const typeInput = document.querySelector('#tenantProjectForm [data-key="project_type"]');
       const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
-      if (mixedInput && !document.getElementById('projectMixedComponentsGrid')) {
-        mixedInput.type = 'hidden';
+      if (typeInput && !document.getElementById('projectTypeGrid')) {
+        typeInput.type = 'hidden';
+        typeInput.style.display = 'none';
         const grid = document.createElement('div');
-        grid.id = 'projectMixedComponentsGrid';
+        grid.id = 'projectTypeGrid';
         grid.className = 'project-choice-grid';
-        mixedInput.insertAdjacentElement('afterend', grid);
+        typeInput.insertAdjacentElement('afterend', grid);
+      }
+      if (mixedInput) {
+        mixedInput.type = 'hidden';
+        mixedInput.style.display = 'none';
+        const mixedWrap = mixedInput.closest('.tenant-field');
+        if (mixedWrap) mixedWrap.style.display = 'none';
       }
       if (subtypeInput && !document.getElementById('projectSubtypeGrid')) {
         subtypeInput.type = 'hidden';
@@ -9958,7 +10027,7 @@
       }));
       return {
         projectName: tenantProjectData.project_name || '',
-        projectType: selectedProjectTypeMain(),
+        projectType: selectedProjectTypeMains().join('، '),
         projectSubtype: selectedProjectSubtypes().join('، '),
         projectComponents: selectedProjectSubtypes().join('، ') || (components.map(item => item.name).filter(Boolean).join('، ')),
         projectLevel: document.querySelector('#tenantProjectForm [data-key="project_level"]')?.value || tenantProjectData.project_level || '',
@@ -11109,7 +11178,13 @@
             tenantProjectData.land_use_status = stripped.status;
           }
         } else if (key === 'project_type') {
-          tenantProjectData.project_type = applyProjectTypeSelect(input, value);
+          persistProjectTypes(value);
+        } else if (key === 'project_mixed_components') {
+          const encoded = Array.isArray(value) || (value && typeof value === 'object')
+            ? JSON.stringify(value)
+            : String(value || '');
+          input.value = encoded;
+          tenantProjectData.project_mixed_components = encoded;
         } else {
           input.value = String(value);
         }
@@ -11514,12 +11589,13 @@
       return wrap;
     }
 
-    const TENANT_PROJECT_HIDDEN_FIELDS = new Set(['plot_number', 'land_area', 'built_area', 'building_system', 'infrastructure', 'population_density', 'secondary_roads', 'city_landmarks', 'project_mixed_components']);
+    const TENANT_PROJECT_HIDDEN_FIELDS = new Set(['plot_number', 'land_area', 'built_area', 'building_system', 'infrastructure', 'population_density', 'secondary_roads', 'city_landmarks']);
 
     function tenantProjectFieldLabel(field) {
       if (field.fieldKey === 'main_roads') return 'الطرق الرئيسية المحيطة';
       if (field.fieldKey === 'secondary_roads') return 'طرق الوصول الفرعية';
       if (field.fieldKey === 'catchment_areas') return 'أهم المعالم الرئيسية في المدينة';
+      if (field.fieldKey === 'project_mixed_components') return 'أنواع المشروع متعدد الاستخدامات';
       return field.fieldLabel;
     }
 
@@ -11586,7 +11662,7 @@
             return;
           }
           const div = document.createElement('div');
-          div.className = 'tenant-field' + (f.fieldType === 'textarea' || f.fieldKey === 'location_address' ? ' full' : '');
+          div.className = 'tenant-field' + (f.fieldType === 'textarea' || f.fieldKey === 'location_address' || f.fieldKey === 'project_type' ? ' full' : '');
           const label = document.createElement('label');
           label.textContent = tenantProjectFieldLabel(f) + (f.isRequired ? ' *' : '');
           let input;
@@ -11688,21 +11764,28 @@
           input.dataset.key = f.fieldKey;
           input.dataset.type = f.fieldType;
           input.placeholder = f.placeholder || '';
+          if (f.fieldKey === 'project_type' || f.fieldKey === 'project_mixed_components') {
+            input.type = 'hidden';
+            input.dataset.type = 'text';
+            const stored = tenantProjectData[f.fieldKey];
+            if (Array.isArray(stored) || (stored && typeof stored === 'object')) {
+              input.value = JSON.stringify(stored);
+            } else if (stored) {
+              input.value = String(stored);
+            }
+            if (f.fieldKey === 'project_mixed_components') div.style.display = 'none';
+          }
           if (f.defaultValue) input.value = f.defaultValue;
           if (f.isRequired) input.required = true;
-          if (input.tagName === 'SELECT' && tenantProjectData && tenantProjectData[f.fieldKey]) {
-            if (f.fieldKey === 'project_type') {
-              applyProjectTypeSelect(input, tenantProjectData.project_type);
-            } else {
-              const stored = String(tenantProjectData[f.fieldKey]);
-              if (stored && !Array.from(input.options).some(option => option.value === stored)) {
-                const extra = document.createElement('option');
-                extra.value = stored;
-                extra.textContent = stored;
-                input.appendChild(extra);
-              }
-              if (stored) input.value = stored;
+          if (f.fieldKey !== 'project_type' && input.tagName === 'SELECT' && tenantProjectData && tenantProjectData[f.fieldKey]) {
+            const stored = String(tenantProjectData[f.fieldKey]);
+            if (stored && !Array.from(input.options).some(option => option.value === stored)) {
+              const extra = document.createElement('option');
+              extra.value = stored;
+              extra.textContent = stored;
+              input.appendChild(extra);
             }
+            if (stored) input.value = stored;
           }
 
           // The land/croquis section owns the approved build inputs; mirror them into the
@@ -11794,7 +11877,7 @@
             div.appendChild(uploadStatus);
             renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
           }
-          if (f.fieldType === 'select' && f.fieldKey !== 'activity_class' && f.fieldKey !== 'project_level') {
+          if (f.fieldType === 'select' && f.fieldKey !== 'activity_class' && f.fieldKey !== 'project_level' && f.fieldKey !== 'project_type') {
             const otherInput = document.createElement('input');
             otherInput.type = 'text';
             otherInput.placeholder = 'اكتب التحديد المخصص بالتفصيل...';
@@ -15424,7 +15507,8 @@
     }
 
     function refreshAllowedUsesStatusNote() {
-      const projectType = document.querySelector('#tenantProjectForm [data-key="project_type"]')?.value
+      const projectType = selectedProjectTypeMains().join('، ')
+        || document.querySelector('#tenantProjectForm [data-key="project_type"]')?.value
         || tenantProjectData.project_type;
       const allowedUses = document.querySelector('#tenantProjectForm [data-key="allowed_uses"]')?.value
         || tenantProjectData.allowed_uses;

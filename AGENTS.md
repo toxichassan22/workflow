@@ -2,6 +2,18 @@
 
 Project notes for automated agents working on this repo (Manafe — real-estate proposal generator).
 
+## Always push to GitHub
+
+This is a standing owner rule. After a requested change is done and verified:
+
+- Commit only the files that belong to that change. Do not commit local leftovers
+  (`*.png`, PDFs, `model_benchmark/`, `sandbox/`, `الطلوبات لليوم.md`, etc.).
+- Push `main` to `github/main` in the same turn. Do not wait to be asked again.
+- If the user asked to implement something, shipping means commit **and** push.
+  A local-only commit is unfinished work.
+
+Remote: `github` → `https://github.com/toxichassan22/workflow.git`.
+
 ## No icons, no emojis — anywhere
 
 This is a hard product rule, not a preference. **Never add an emoji or an icon** to this project:
@@ -146,14 +158,14 @@ The full brief is `تحليل السوق .pdf`. `market_study.py` is that brief 
 priority, mandatory rules, and option lists. Do not drop a required item from the PDF to shorten a
 prompt or a screen.
 
-- **Basic fields:** `project_type` is a native single `<select>` like `project_stage` — one main
-  type from the brief (سكني / تجاري / فندقي / صناعي ولوجستي / متعدد الاستخدامات). Do not hide it
-  behind a multi-select grid. `project_subtype` is a visible multi-select that opens
-  the subtype list for the selected main; residential has no subtypes and mixed-use can select
-  from all subtype families. `activity_class` sits after the subtype selector. Extra
-  classification is one field: hotel / office / industrial get specialized lists, every other
-  type uses the generic مستوى المشروع list. `project_idea` is client-typed only. Choosing a
-  main plus subtype reveals the matching audience list.
+- **Basic fields:** `project_type` is a multi-select of the four mains (سكني / تجاري /
+  فندقي / صناعي ولوجستي). One choice is a single-type project; two or more is mixed-use.
+  There is no fifth "متعدد الاستخدامات" option. Then `project_subtype` opens the matching
+  subtype list for each chosen type; residential has no subtypes. `activity_class` sits
+  after the subtype selector. Extra classification is one field: hotel / office /
+  industrial get specialized lists, every other type uses the generic مستوى المشروع
+  list. `project_idea` is client-typed only. Choosing a main plus subtype reveals the
+  matching audience list.
 - **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).

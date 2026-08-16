@@ -773,13 +773,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('subdivision_number', by_key)
         self.assertEqual(by_key['location_address']['sectionKey'], 'location')
         self.assertTrue(by_key['location_address']['isRequired'])
-        for key in ('project_name', 'project_type', 'project_subtype', 'project_stage', 'project_logo',
+        for key in ('project_name', 'project_type', 'project_mixed_components', 'project_subtype', 'project_stage', 'project_logo',
                     'project_idea', 'project_level', 'target_audience', 'activity_class'):
             self.assertEqual(by_key[key]['sectionKey'], 'basic')
+        self.assertEqual(by_key['project_mixed_components']['fieldLabel'], 'أنواع المشروع متعدد الاستخدامات')
         for key in ('project_goal', 'initial_features', 'initial_strengths'):
             self.assertNotIn(key, by_key)
         self.assertEqual(by_key['project_type']['fieldOptions'], [
-            'سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات'
+            'سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي'
         ])
         self.assertEqual(by_key['city']['sectionKey'], 'location')
         self.assertEqual(by_key['district']['sectionKey'], 'location')
@@ -806,7 +807,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('siteContext: projectContext', index_source)
         self.assertIn("sectionKey === 'location'", index_source)
         self.assertIn('locationLat: projectContext.location_lat', index_source)
-        self.assertIn("f.fieldType === 'textarea' || f.fieldKey === 'location_address' ? ' full'", index_source)
+        self.assertIn("f.fieldType === 'textarea' || f.fieldKey === 'location_address' || f.fieldKey === 'project_type' ? ' full'", index_source)
 
     def test_uploaded_land_documents_are_restored_as_server_metadata_after_refresh(self):
         client = self.app.test_client()
@@ -3074,8 +3075,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('تحليل SWOT', index_source)
         self.assertNotIn('const MARKET_OTHER_TYPE_OPTIONS', index_source)
         self.assertNotIn("id = 'projectOtherTypesGrid'", index_source)
-        self.assertNotIn("id = 'projectTypeGrid'", index_source)
-        self.assertNotIn("keepProjectMultiSelectOpen('projectTypeGrid')", index_source)
+        self.assertIn("id = 'projectTypeGrid'", index_source)
+        self.assertIn("keepProjectMultiSelectOpen('projectTypeGrid')", index_source)
+        self.assertIn('function persistProjectTypes(values)', index_source)
         self.assertIn("id = 'projectSubtypeGrid'", index_source)
         self.assertIn("id = 'projectActivityClassFields'", index_source)
         self.assertIn('function renderMultiSelectDropdown(host, options, selected, placeholder, onChange, closeAfterSelection = false)', index_source)
