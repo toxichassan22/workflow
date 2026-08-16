@@ -3064,6 +3064,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("function runMarketSummaryJob()", index_source)
         self.assertIn('<th>القيمة (ر.س)</th>', index_source)
         self.assertIn('const visibleRows = Array.isArray(rows) && rows.length ? rows : [{}];', index_source)
+        self.assertIn('function inferCompetitorPriceType(row = {})', index_source)
+        self.assertIn('min-width: 1320px;', index_source)
         self.assertNotIn('<select data-field="classification">', index_source)
         self.assertIn('data-currency="SAR"', index_source)
         self.assertIn('placeholder="من (ر.س)"', index_source)

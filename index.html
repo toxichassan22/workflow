@@ -1596,6 +1596,21 @@
       width: 100%;
       border-collapse: collapse;
     }
+    #marketCompetitorsTable {
+      min-width: 1320px;
+    }
+    #marketCompetitorsTable th:nth-child(1),
+    #marketCompetitorsTable td:nth-child(1) {
+      min-width: 190px;
+    }
+    #marketCompetitorsTable th:nth-child(5),
+    #marketCompetitorsTable td:nth-child(5) {
+      min-width: 260px;
+    }
+    #marketCompetitorsTable th:nth-child(8),
+    #marketCompetitorsTable td:nth-child(8) {
+      min-width: 190px;
+    }
     #section-market-study th,
     #section-market-study td {
       border: 1px solid var(--line);
@@ -9966,6 +9981,15 @@
       return MARKET_RANGE_PRICE_TYPES.includes(String(priceType || '').trim());
     }
 
+    function inferCompetitorPriceType(row = {}) {
+      const explicit = String(row.price_type || row.priceType || '').trim();
+      if (explicit) return explicit;
+      if (String(row.price_from || '').trim() || String(row.price_to || '').trim()) {
+        return row.operation_type === 'تشغيل فندقي' ? 'نطاق أسعار الغرف' : 'نطاق سعري';
+      }
+      return String(row.price_value || '').trim() ? 'أخرى' : '';
+    }
+
     function addMarketCompetitorRow(row = {}) {
       const tb = document.querySelector('#marketCompetitorsTable tbody');
       if (!tb) return;
@@ -9975,7 +9999,7 @@
       tr.dataset.rowSource = row.row_source || 'manual';
       tr.dataset.priceCurrency = row.price_currency || row.currency || 'SAR';
       const operation = row.operation_type || '';
-      const priceType = row.price_type || '';
+      const priceType = inferCompetitorPriceType(row);
       const priceTypes = MARKET_PRICE_TYPES[operation] || MARKET_PRICE_TYPES['أخرى'];
       tr.innerHTML =
         '<td><input data-field="name" value="' + escapeHtml(row.name || '') + '"></td>' +
@@ -10010,7 +10034,7 @@
     function renderCompetitorPriceInputs(tr, row) {
       const cell = tr.querySelector('[data-field="price_cell"]');
       if (!cell) return;
-      const priceType = tr.querySelector('[data-field="price_type"]')?.value || row.price_type || '';
+      const priceType = tr.querySelector('[data-field="price_type"]')?.value || inferCompetitorPriceType(row);
       if (competitorPriceIsRange(priceType)) {
         cell.innerHTML = '<input data-field="price_from" data-currency="SAR" value="' + escapeHtml(row.price_from || '') + '" placeholder="من (ر.س)" inputmode="decimal">' +
           '<input data-field="price_to" data-currency="SAR" value="' + escapeHtml(row.price_to || '') + '" placeholder="إلى (ر.س)" style="margin-top:6px" inputmode="decimal">';
