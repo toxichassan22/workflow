@@ -9651,12 +9651,28 @@
       refreshAllowedUsesStatusNote();
     }
 
-    function persistGroupedChoice(hidden, groups) {
-      if (!hidden) return;
-      const encoded = JSON.stringify(groups);
-      hidden.value = encoded;
-      tenantProjectData[hidden.dataset.key] = encoded;
-      triggerAutoSaveDraft();
+    function persistClassificationDraftState() {
+      persistProjectTypes(selectedProjectTypeMains());
+      const subtypeInput = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
+      if (subtypeInput) setGroupedChoiceValue(subtypeInput, selectedProjectSubtypesByMain(), false);
+      const audienceInput = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
+      if (audienceInput) setGroupedChoiceValue(audienceInput, groupedAudienceSelection(), false);
+      const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
+      if (classInput) {
+        classInput.type = 'hidden';
+        const stored = tenantProjectData.activity_class;
+        if (Array.isArray(stored) || (stored && typeof stored === 'object')) {
+          classInput.value = JSON.stringify(stored);
+        } else {
+          classInput.value = String(stored || classInput.value || '');
+        }
+        tenantProjectData.activity_class = classInput.value;
+      }
+      const mixedInput = document.querySelector('#tenantProjectForm [data-key="project_mixed_components"]');
+      if (mixedInput) {
+        mixedInput.type = 'hidden';
+        mixedInput.value = String(tenantProjectData.project_mixed_components || mixedInput.value || '');
+      }
     }
 
     function renderProjectSubtypeFields(mains, host, hidden) {
@@ -9710,6 +9726,10 @@
       hidden.value = encoded;
       tenantProjectData[hidden.dataset.key] = encoded;
       if (markDirty) triggerAutoSaveDraft();
+    }
+
+    function persistGroupedChoice(hidden, groups) {
+      setGroupedChoiceValue(hidden, groups);
     }
 
     function audienceGroupInfo(main, subtype) {
@@ -11260,12 +11280,12 @@
           }
         } else if (key === 'project_type') {
           persistProjectTypes(value);
-        } else if (key === 'project_mixed_components') {
+        } else if (key === 'project_mixed_components' || key === 'project_subtype' || key === 'target_audience' || key === 'activity_class') {
           const encoded = Array.isArray(value) || (value && typeof value === 'object')
             ? JSON.stringify(value)
             : String(value || '');
           input.value = encoded;
-          tenantProjectData.project_mixed_components = encoded;
+          tenantProjectData[key] = encoded;
         } else {
           input.value = String(value);
         }
@@ -11748,8 +11768,14 @@
           label.textContent = tenantProjectFieldLabel(f) + (f.isRequired ? ' *' : '');
           let input;
           let uploadStatus = null;
-          if (f.fieldType === 'textarea') {
+          if (f.fieldKey === 'project_subtype' || f.fieldKey === 'target_audience') {
             input = document.createElement('textarea');
+            input.style.display = 'none';
+          } else if (f.fieldType === 'textarea') {
+            input = document.createElement('textarea');
+          } else if (f.fieldKey === 'project_type' || f.fieldKey === 'project_mixed_components' || f.fieldKey === 'activity_class') {
+            input = document.createElement('input');
+            input.type = 'hidden';
           } else if (f.fieldType === 'select') {
             input = document.createElement('select');
             let opts = f.fieldOptions || f.options || [];
@@ -11845,7 +11871,7 @@
           input.dataset.key = f.fieldKey;
           input.dataset.type = f.fieldType;
           input.placeholder = f.placeholder || '';
-          if (f.fieldKey === 'project_type' || f.fieldKey === 'project_mixed_components') {
+          if (f.fieldKey === 'project_type' || f.fieldKey === 'project_mixed_components' || f.fieldKey === 'activity_class') {
             input.type = 'hidden';
             input.dataset.type = 'text';
             const stored = tenantProjectData[f.fieldKey];
@@ -15388,6 +15414,7 @@
         if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) {
           persistMarketStudyFromDom();
         }
+        if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
         const data = { ...tenantProjectData, ...(await collectTenantFormData()) };
         if (document.getElementById('section-financial-calc') && typeof collectFinancialStudyModel === 'function') {
           data.financial_study_model = collectFinancialStudyModel();
@@ -17238,6 +17265,7 @@
     }
 
     async function collectTenantFormData() {
+      if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
       const result = {};
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
       for (const input of inputs) {

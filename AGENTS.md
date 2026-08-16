@@ -198,6 +198,15 @@ prompt or a screen.
 
 ## Drafts and routing
 
+- **Drafts persist only `data-key` DOM values.** `saveProjectAsDraftNow()` merges
+  `tenantProjectData` with `collectTenantFormData()`. Anything kept only in a JS object or
+  a custom widget is **lost on save** unless it is written into a `data-key` input first.
+  New fields and new sections are therefore mandatory draft work: give them a `data-key`,
+  keep a hidden/native input in `#tenantProjectForm`, and call an explicit persist helper
+  from `saveProjectAsDraftNow()` / `collectTenantFormData()` before the merge. Custom
+  widgets (`<select>` overlays, drawers, maps, tables) must never be the only copy of the
+  value. Classification currently uses `persistClassificationDraftState()` for
+  `project_type`, `project_subtype`, `target_audience`, and `activity_class`.
 - **Drafts are never autosaved.** `triggerAutoSaveDraft()` keeps its name (~40 call sites) but only
   sets the dirty flag via `setDraftDirty()`; a `beforeunload` handler warns about unsaved work.
   Saving happens through `saveProjectAsDraft()` (the "حفظ كمسودة" buttons) and at a few explicit
