@@ -9000,7 +9000,7 @@
       'مكاتب': ['فئة C', 'فئة B', 'فئة B+', 'فئة A', 'فئة A+ أو مكاتب مميزة', 'مكاتب مرنة ومشتركة', 'أخرى'],
       'صناعي ولوجستي': ['أساسي', 'قياسي', 'متقدم', 'عالي المواصفات', 'متخصص حسب النشاط', 'منشأة مؤتمتة أو ذكية', 'أخرى']
     };
-    const MARKET_GENERAL_AUDIENCE = ['أفراد', 'عائلات', 'مستثمرون', 'شركات', 'جهات حكومية', 'سياح وزوار', 'مشغلون ومستأجرون', 'أخرى'];
+    const MARKET_GENERAL_AUDIENCE = ['أفراد', 'عائلات', 'مستثمرون', 'شركات', 'جهات حكومية', 'سياح وزوار', 'مشغلون ومستأجرون'];
     const MARKET_AUDIENCE = {
       'سكني': ['أفراد', 'حديثو الزواج', 'العائلات الصغيرة', 'العائلات المتوسطة', 'العائلات الكبيرة', 'كبار السن', 'الطلاب', 'الموظفون', 'التنفيذيون ورجال الأعمال', 'أصحاب الدخل المحدود', 'أصحاب الدخل المتوسط', 'أصحاب الدخل فوق المتوسط', 'أصحاب الدخل المرتفع', 'أصحاب الثروات', 'السعوديون', 'المقيمون', 'الأجانب المؤهلون للتملك', 'زوار المدينة', 'الباحثون عن منزل ثان', 'الباحثون عن مساكن فندقية', 'موظفو الشركات القريبة'],
       'مكاتب': ['رواد الأعمال', 'الشركات الناشئة', 'المنشآت الصغيرة', 'المنشآت المتوسطة', 'الشركات الكبيرة', 'الشركات العالمية', 'المقرات الإقليمية', 'الجهات الحكومية', 'الجهات شبه الحكومية', 'الشركات المهنية والاستشارية', 'شركات التقنية', 'الشركات المالية', 'شركات العقار والإنشاءات', 'الشركات الطبية', 'مكاتب المحاماة والمحاسبة', 'مشغلو المكاتب المشتركة', 'المستقلون', 'المستثمرون العقاريون'],
@@ -9106,7 +9106,7 @@
         return [...offices, ...retail.filter(option => !offices.includes(option))];
       }
       const kind = audienceKindForMain(main, subtype);
-      return (MARKET_AUDIENCE[kind] || MARKET_GENERAL_AUDIENCE).slice();
+      return (MARKET_AUDIENCE[kind] || MARKET_GENERAL_AUDIENCE).filter(option => option !== 'أخرى');
     }
 
     function projectAnalysisKinds() {
@@ -9548,7 +9548,7 @@
         const subtype = typeName === 'مكاتب'
           ? 'مكاتب'
           : (isOther ? (selectedOtherSubtypesByType()[typeName] || [])[0] : selectedProjectSubtype());
-        const options = audienceOptionsForMain(mappedMain, subtype);
+        const options = audienceOptionsForMain(mappedMain, subtype).filter(option => option !== 'أخرى');
         const selected = new Set(current[typeName] || (!isOther && uniqueGroups.length === 1 ? (current.general || []) : []));
         const boxes = options.map(option =>
           '<label><input type="checkbox" data-audience-type="' + typeName + '" value="' + String(option).replace(/"/g, '&quot;') + '"' +

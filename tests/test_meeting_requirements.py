@@ -3069,6 +3069,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const MARKET_GENERAL_AUDIENCE', index_source)
         self.assertIn('if (audienceWrap) audienceWrap.style.display = \'none\';', index_source)
         self.assertIn('function audienceOptionsForMain(main, subtype)', index_source)
+        self.assertIn("const MARKET_GENERAL_AUDIENCE = ['أفراد', 'عائلات', 'مستثمرون', 'شركات', 'جهات حكومية', 'سياح وزوار', 'مشغلون ومستأجرون'];", index_source)
         self.assertIn('const MARKET_STUDY_SWOT_SECTIONS', index_source)
         self.assertIn("id=\"marketSwotFields\"", index_source)
         self.assertIn('تحليل SWOT', index_source)
@@ -3160,6 +3161,12 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         missing = client.get('/api/market-study/jobs/not-a-job-id-xxx', headers=headers)
         self.assertEqual(missing.status_code, 404)
+
+    def test_target_audience_options_do_not_include_other(self):
+        import market_study
+        self.assertNotIn('أخرى', market_study.GENERAL_TARGET_AUDIENCE)
+        self.assertNotIn('أخرى', market_study.target_audience_options('سكني'))
+        self.assertNotIn('أخرى', market_study.target_audience_options('تجاري', 'مكاتب'))
 
     def test_other_project_type_unlocks_selected_mains_and_subtypes(self):
         import market_study

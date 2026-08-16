@@ -80,7 +80,7 @@ ACTIVITY_CLASS_BY_TYPE = {
 
 GENERAL_TARGET_AUDIENCE = [
     'أفراد', 'عائلات', 'مستثمرون', 'شركات', 'جهات حكومية',
-    'سياح وزوار', 'مشغلون ومستأجرون', 'أخرى',
+    'سياح وزوار', 'مشغلون ومستأجرون',
 ]
 
 TARGET_AUDIENCE_BY_KIND = {
@@ -519,8 +519,6 @@ def target_audience_options(main_type, subtype='', components=None):
             if option not in seen:
                 seen.add(option)
                 options.append(option)
-    if 'أخرى' not in seen:
-        options.append('أخرى')
     return options
 
 
