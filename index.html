@@ -1596,8 +1596,25 @@
       width: 100%;
       border-collapse: collapse;
     }
-    #marketCompetitorsTable {
-      min-width: 1320px;
+    #marketCompetitorsTable,
+    #marketSourcesTable {
+      min-width: 1450px;
+    }
+    #marketSourcesTable th:nth-child(1),
+    #marketSourcesTable td:nth-child(1) {
+      min-width: 250px;
+    }
+    #marketSourcesTable th:nth-child(2),
+    #marketSourcesTable td:nth-child(2) {
+      min-width: 280px;
+    }
+    #marketSourcesTable th:nth-child(5),
+    #marketSourcesTable td:nth-child(5) {
+      min-width: 220px;
+    }
+    #marketSourcesTable th:nth-child(6),
+    #marketSourcesTable td:nth-child(6) {
+      min-width: 300px;
     }
     #marketCompetitorsTable th:nth-child(1),
     #marketCompetitorsTable td:nth-child(1) {
@@ -1616,6 +1633,17 @@
       border: 1px solid var(--line);
       padding: 6px;
       vertical-align: top;
+      white-space: normal;
+    }
+    #section-market-study td textarea {
+      min-height: 46px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+    #section-market-study td [data-field="url"],
+    #section-market-study td [data-field="source_url"] {
+      direction: ltr;
+      text-align: left;
     }
     #section-market-study th {
       background: #f7fafc;
@@ -10016,11 +10044,11 @@
       const priceType = inferCompetitorPriceType(row);
       const priceTypes = MARKET_PRICE_TYPES[operation] || MARKET_PRICE_TYPES['أخرى'];
       tr.innerHTML =
-        '<td><input data-field="name" value="' + escapeHtml(row.name || '') + '"></td>' +
+        '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(MARKET_PROJECT_TYPES, row.project_type || '') + '</select></td>' +
         '<td><input data-field="area_sqm" value="' + escapeHtml(row.area_sqm || '') + '" inputmode="decimal"></td>' +
         '<td><select data-field="status">' + marketSelectHtml(['قائم', 'تحت الإنشاء', 'على الخارطة'], row.status || '') + '</select></td>' +
-        '<td><input data-field="source" value="' + escapeHtml(row.source || '') + '" placeholder="المصدر">' +
+        '<td><textarea data-field="source" rows="2" placeholder="المصدر">' + escapeHtml(row.source || '') + '</textarea>' +
         '<input data-field="source_url" value="' + escapeHtml(row.source_url || '') + '" placeholder="رابط المصدر" style="margin-top:6px"></td>' +
         '<td><select data-field="operation_type">' + marketSelectHtml(['بيع', 'إيجار', 'تشغيل فندقي', 'أخرى'], operation) + '</select></td>' +
         '<td><select data-field="price_type">' + marketSelectHtml(priceTypes, priceType) + '</select></td>' +
@@ -10042,7 +10070,7 @@
         tr.remove();
         persistMarketStudyFromDom();
       });
-      tr.querySelectorAll('input,select').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+      tr.querySelectorAll('input,select,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
     }
 
     function renderCompetitorPriceInputs(tr, row) {
@@ -10096,19 +10124,19 @@
       if (!tb) return;
       const tr = document.createElement('tr');
       tr.innerHTML =
-        '<td><input data-field="name" value="' + escapeHtml(row.name || '') + '"></td>' +
+        '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td><input data-field="url" value="' + escapeHtml(row.url || '') + '"></td>' +
         '<td><input data-field="data_date" value="' + escapeHtml(row.data_date || '') + '"></td>' +
         '<td><input data-field="accessed_at" value="' + escapeHtml(row.accessed_at || '') + '"></td>' +
-        '<td><input data-field="reliability" value="' + escapeHtml(row.reliability || '') + '"></td>' +
-        '<td><input data-field="note" value="' + escapeHtml(row.note || '') + '"></td>' +
+        '<td><textarea data-field="reliability" rows="2">' + escapeHtml(row.reliability || '') + '</textarea></td>' +
+        '<td><textarea data-field="note" rows="2">' + escapeHtml(row.note || '') + '</textarea></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-source>حذف</button></td>';
       tb.appendChild(tr);
       tr.querySelector('[data-remove-source]').addEventListener('click', () => {
         tr.remove();
         persistMarketStudyFromDom();
       });
-      tr.querySelectorAll('input').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+      tr.querySelectorAll('input,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
     }
 
     function collectMarketSourceRows() {
