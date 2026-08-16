@@ -3059,7 +3059,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("data-key=\"market_study_data\"", index_source)
         self.assertIn("function runMarketCompetitorsJob(mode)", index_source)
         self.assertIn("function runMarketSummaryJob()", index_source)
-        self.assertIn("function renderMarketSummaryCompare(current, incoming)", index_source)
+        self.assertIn("function renderMarketSummaryCompare(current, incoming, currentSwot, incomingSwot)", index_source)
         self.assertIn('/api/market-study/competitors', index_source)
         self.assertIn('/api/market-study/summary', index_source)
         self.assertIn('/api/market-study/jobs/', index_source)
@@ -3069,6 +3069,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const MARKET_GENERAL_AUDIENCE', index_source)
         self.assertIn('اختر نوع المشروع الرئيسي أولًا لتظهر الفئات المستهدفة.', index_source)
         self.assertIn('const availableOptions = options.length ? options : MARKET_GENERAL_AUDIENCE;', index_source)
+        self.assertIn('const MARKET_STUDY_SWOT_SECTIONS', index_source)
+        self.assertIn("id=\"marketSwotFields\"", index_source)
+        self.assertIn('تحليل SWOT', index_source)
         self.assertNotIn('🎯', index_source)
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
@@ -3141,9 +3144,31 @@ class MeetingRequirementsTests(unittest.TestCase):
         catalog = client.get('/api/market-study/catalog', headers=headers)
         self.assertEqual(catalog.status_code, 200)
         self.assertIn('سكني', catalog.get_json()['catalog']['projectTypes'])
+        self.assertEqual(
+            [item['key'] for item in catalog.get_json()['catalog']['swotSections']],
+            ['strengths', 'weaknesses', 'opportunities', 'threats']
+        )
 
         missing = client.get('/api/market-study/jobs/not-a-job-id-xxx', headers=headers)
         self.assertEqual(missing.status_code, 404)
+
+    def test_market_study_normalizes_swot_independently_of_summary(self):
+        import market_study
+        parsed = market_study.normalize_summary({
+            'summary': {'market_definition': 'سوق سكني في الرياض', 'decision': 'فرصة واعدة بشروط'},
+            'swot': {
+                'strengths': 'موقع على طريق رئيسي',
+                'weaknesses': 'مساحة الأرض محدودة',
+                'opportunities': 'نقص المعروض المناسب',
+                'threats': 'مشروعات جديدة قريبة',
+            },
+            'decision': 'فرصة واعدة بشروط',
+            'sources': [{'name': 'الهيئة العامة للإحصاء', 'url': 'https://www.stats.gov.sa'}],
+        })
+        self.assertEqual(parsed['swot']['strengths'], 'موقع على طريق رئيسي')
+        self.assertEqual(parsed['swot']['threats'], 'مشروعات جديدة قريبة')
+        self.assertEqual(parsed['summary']['market_definition'], 'سوق سكني في الرياض')
+        self.assertIn('swot', market_study.build_summary_user_prompt({}, []))
 
 
 if __name__ == '__main__':

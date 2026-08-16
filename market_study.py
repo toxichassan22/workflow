@@ -188,6 +188,13 @@ SUMMARY_SECTIONS = [
     {'key': 'decision', 'label': 'القرار'},
 ]
 
+SWOT_SECTIONS = [
+    {'key': 'strengths', 'label': 'نقاط القوة'},
+    {'key': 'weaknesses', 'label': 'نقاط الضعف'},
+    {'key': 'opportunities', 'label': 'الفرص'},
+    {'key': 'threats', 'label': 'التهديدات'},
+]
+
 DECISION_OPTIONS = [
     'فرصة قوية',
     'فرصة واعدة بشروط',
@@ -418,6 +425,13 @@ SUMMARY_SECTION_HINTS = {
     'decision': 'صنّف الفرصة إلى: فرصة قوية، فرصة واعدة بشروط، فرصة متوسطة، فرصة مرتفعة المخاطر، أو البيانات غير كافية.',
 }
 
+SWOT_SECTION_HINTS = {
+    'strengths': 'نقاط قوة المشروع نفسه أمام السوق والمنافسين: الموقع، النوع، المستوى، الاشتراطات، المساحة، أو أي ميزة مثبتة.',
+    'weaknesses': 'نقاط ضعف المشروع نفسه: قيود الموقع، المساحة، المستوى، الفئة، المعروض المشابه، أو أي قيد مثبت.',
+    'opportunities': 'فرص السوق التي يستطيع المشروع استهدافها: فجوة المنتج، الطلب غير المغطى، النمو، أو نقص المعروض المناسب.',
+    'threats': 'تهديدات السوق: فائض المعروض، المنافسون الأقوى، تغيّر الأسعار أو الإشغال، المخاطر التنظيمية أو التمويلية المرتبطة بالنوع.',
+}
+
 
 # ---------------------------------------------------------------------------
 # Classification helpers
@@ -565,6 +579,10 @@ def empty_summary():
     return {item['key']: '' for item in SUMMARY_SECTIONS}
 
 
+def empty_swot():
+    return {item['key']: '' for item in SWOT_SECTIONS}
+
+
 def empty_source_row():
     return {
         'id': str(uuid.uuid4()),
@@ -595,8 +613,10 @@ def catalog_payload():
         'priceTypesByOperation': PRICE_TYPE_BY_OPERATION,
         'rangePriceTypes': sorted(RANGE_PRICE_TYPES),
         'summarySections': SUMMARY_SECTIONS,
+        'swotSections': SWOT_SECTIONS,
         'decisionOptions': DECISION_OPTIONS,
         'summarySectionHints': SUMMARY_SECTION_HINTS,
+        'swotSectionHints': SWOT_SECTION_HINTS,
         'currency': CURRENCY_LABEL,
         'missingValuePhrase': MISSING_VALUE_PHRASE,
         'minDirectCompetitors': COMPETITOR_MIN_DIRECT,
@@ -683,6 +703,10 @@ def build_consultant_system_prompt():
         'يجب أن يحتوي على:\n'
         + '\n'.join(summary_spec)
         + f'\nاكتب الملخص في حدود {SUMMARY_WORD_TARGET} كلمة.\n\n'
+        'بعد الملخص أعد تحليل SWOT مستقلًا للمشروع في السوق المحدد، من أربع خانات:\n'
+        + '\n'.join(f'- {item["label"]}: {SWOT_SECTION_HINTS[item["key"]]}' for item in SWOT_SECTIONS)
+        + '\nلا تخلط SWOT مع أقسام الملخص العشرة. كل خانة نقاط قصيرة خاصة بهذا المشروع وهذا النوع.\n'
+        'لا تستخدم وصفًا عامًا للمدينة بدل تحليل المشروع.\n\n'
         'خامسًا قواعد إلزامية:\n'
         + _format_list(MANDATORY_RULES)
         + '\nالدراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.'
@@ -787,9 +811,10 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
     )
 
 
-def build_summary_user_prompt(payload, competitors, current_summary=None, current_sources=None):
+def build_summary_user_prompt(payload, competitors, current_summary=None, current_sources=None, current_swot=None):
     today = date.today().isoformat()
     section_keys = ', '.join(item['key'] for item in SUMMARY_SECTIONS)
+    swot_keys = ', '.join(item['key'] for item in SWOT_SECTIONS)
     return (
         f'تاريخ اليوم / تاريخ الوصول للمصادر: {today}\n'
         'اكتب الملخص التنفيذي لسوق المشروع حسب القواعد أعلاه.\n'
@@ -799,16 +824,21 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         f'إذا لم تتوفر معلومة فاكتب داخل القسم: {MISSING_VALUE_PHRASE}.\n'
         'في قسم القرار اختر قيمة واحدة فقط من: '
         + '، '.join(DECISION_OPTIONS)
-        + ' ثم اشرحها في نص القرار.\n\n'
+        + ' ثم اشرحها في نص القرار.\n'
+        'بعد الملخص اكتب تحليل SWOT مستقلًا من أربع خانات: نقاط القوة، نقاط الضعف، الفرص، التهديدات.\n'
+        'اجعل كل خانة نقاطًا قصيرة خاصة بهذا المشروع وهذا النوع، ولا تكرر الملخص حرفيًا.\n\n'
         'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
         'المنافسون المعتمدون في الجدول:\n'
         f'{json.dumps(competitors or [], ensure_ascii=False, indent=2)}\n\n'
         'ملخص حالي إن وُجد (للسياق فقط، أعد كتابة ملخص جديد كامل):\n'
         f'{json.dumps(current_summary or {}, ensure_ascii=False)}\n\n'
+        'تحليل SWOT حالي إن وُجد (للسياق فقط، أعد كتابته كاملًا):\n'
+        f'{json.dumps(current_swot or {}, ensure_ascii=False)}\n\n'
         'أرجع JSON فقط بهذا الشكل:\n'
         '{\n'
         f'  "summary": {{ مفاتيح إلزامية: {section_keys} }},\n'
+        f'  "swot": {{ مفاتيح إلزامية: {swot_keys} }},\n'
         '  "decision": "قيمة من قائمة القرار",\n'
         '  "sources": [\n'
         '    {"name": "", "url": "", "data_date": "", "accessed_at": "' + today + '", "reliability": "", "note": ""}\n'
@@ -926,8 +956,24 @@ def normalize_summary(raw):
     disclaimer = _norm(data.get('disclaimer')) or (
         'هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.'
     )
+    raw_swot = data.get('swot') if isinstance(data.get('swot'), dict) else {}
+    swot = {}
+    aliases = {
+        'strengths': ('strengths', 'swot_strengths', 'نقاط القوة'),
+        'weaknesses': ('weaknesses', 'swot_weaknesses', 'نقاط الضعف'),
+        'opportunities': ('opportunities', 'swot_opportunities', 'الفرص'),
+        'threats': ('threats', 'swot_threats', 'التهديدات'),
+    }
+    for item in SWOT_SECTIONS:
+        value = ''
+        for key in aliases[item['key']]:
+            value = _norm(raw_swot.get(key) or nested.get(key) or data.get(key))
+            if value:
+                break
+        swot[item['key']] = value
     return {
         'summary': summary,
+        'swot': swot,
         'decision': decision,
         'sources': sources,
         'disclaimer': disclaimer,

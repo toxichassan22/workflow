@@ -8960,6 +8960,12 @@
       { key: 'risks', label: 'المخاطر' },
       { key: 'decision', label: 'القرار' }
     ];
+    const MARKET_STUDY_SWOT_SECTIONS = [
+      { key: 'strengths', label: 'نقاط القوة' },
+      { key: 'weaknesses', label: 'نقاط الضعف' },
+      { key: 'opportunities', label: 'الفرص' },
+      { key: 'threats', label: 'التهديدات' }
+    ];
     const MARKET_PROJECT_TYPES = ['سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي', 'متعدد الاستخدامات', 'أخرى'];
     const MARKET_SUBTYPES = {
       'سكني': [],
@@ -9047,7 +9053,9 @@
 
     function emptyMarketStudyState() {
       const summary = {};
+      const swot = {};
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => { summary[item.key] = ''; });
+      MARKET_STUDY_SWOT_SECTIONS.forEach(item => { swot[item.key] = ''; });
       return {
         competitor_radius: 'auto',
         competitor_radius_custom_km: '',
@@ -9056,6 +9064,7 @@
         data_period_to: '',
         competitors: [],
         summary,
+        swot,
         sources: [],
         decision: '',
         disclaimer: ''
@@ -9071,7 +9080,8 @@
         ...parsed,
         competitors: Array.isArray(parsed.competitors) ? parsed.competitors : [],
         sources: Array.isArray(parsed.sources) ? parsed.sources : [],
-        summary: { ...base.summary, ...(parsed.summary || {}) }
+        summary: { ...base.summary, ...(parsed.summary || {}) },
+        swot: { ...base.swot, ...(parsed.swot || {}) }
       };
     }
 
@@ -9096,6 +9106,11 @@
         summary[item.key] = document.getElementById('marketSummary_' + item.key)?.value || '';
       });
       state.summary = summary;
+      const swot = {};
+      MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
+        swot[item.key] = document.getElementById('marketSwot_' + item.key)?.value || '';
+      });
+      state.swot = swot;
       state.decision = document.getElementById('marketDecision')?.value || '';
       state.disclaimer = document.getElementById('marketDisclaimer')?.value || state.disclaimer;
       state.sources = collectMarketSourceRows();
@@ -9178,6 +9193,9 @@
           <div id="marketSummaryFailure"></div>
           <div id="marketSummaryCompare" hidden></div>
           <div id="marketSummaryFields"></div>
+          <h4 style="margin-top:18px">تحليل SWOT</h4>
+          <p class="tenant-hint">أربع خانات مستقلة عن أقسام الملخص العشرة، قابلة للتعديل قبل التوليد وبعده.</p>
+          <div id="marketSwotFields"></div>
           <div style="margin-top:12px"><label>تصنيف القرار</label>
             <select id="marketDecision">
               <option value="">-- اختر القيمة --</option>
@@ -9218,6 +9236,13 @@
           '<textarea id="marketSummary_' + item.key + '" rows="4"></textarea></div>'
         ).join('');
       }
+      const swotHost = document.getElementById('marketSwotFields');
+      if (swotHost) {
+        swotHost.innerHTML = MARKET_STUDY_SWOT_SECTIONS.map(item =>
+          '<div style="margin-top:12px"><label>' + item.label + '</label>' +
+          '<textarea id="marketSwot_' + item.key + '" rows="4"></textarea></div>'
+        ).join('');
+      }
       ['marketCompetitorRadius', 'marketDataPeriod'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', () => {
           updateMarketStudyFieldVisibility();
@@ -9228,6 +9253,9 @@
         .forEach(id => document.getElementById(id)?.addEventListener('input', persistMarketStudyFromDom));
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
         document.getElementById('marketSummary_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
+      });
+      MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
+        document.getElementById('marketSwot_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
       });
     }
 
@@ -9542,6 +9570,10 @@
         const field = document.getElementById('marketSummary_' + item.key);
         if (field) field.value = (next.summary && next.summary[item.key]) || '';
       });
+      MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
+        const field = document.getElementById('marketSwot_' + item.key);
+        if (field) field.value = (next.swot && next.swot[item.key]) || '';
+      });
       const decision = document.getElementById('marketDecision');
       const disclaimer = document.getElementById('marketDisclaimer');
       if (decision) decision.value = next.decision || '';
@@ -9584,7 +9616,8 @@
         dataPeriodFrom: state.data_period_from,
         dataPeriodTo: state.data_period_to,
         competitors: state.competitors,
-        currentSummary: state.summary
+        currentSummary: state.summary,
+        currentSwot: state.swot
       };
     }
 
@@ -9648,16 +9681,23 @@
       }
     }
 
-    function renderMarketSummaryCompare(current, incoming) {
+    function renderMarketSummaryCompare(current, incoming, currentSwot, incomingSwot) {
       const host = document.getElementById('marketSummaryCompare');
       if (!host) return;
       host.hidden = false;
-      const currentText = MARKET_STUDY_SUMMARY_SECTIONS.map(item =>
-        (item.label + '\n' + ((current && current[item.key]) || '')).trim()
+      const formatBlocks = (sections, values) => sections.map(item =>
+        (item.label + '\n' + ((values && values[item.key]) || '')).trim()
       ).join('\n\n');
-      const incomingText = MARKET_STUDY_SUMMARY_SECTIONS.map(item =>
-        (item.label + '\n' + ((incoming && incoming[item.key]) || '')).trim()
-      ).join('\n\n');
+      const currentText = [
+        formatBlocks(MARKET_STUDY_SUMMARY_SECTIONS, current),
+        'تحليل SWOT',
+        formatBlocks(MARKET_STUDY_SWOT_SECTIONS, currentSwot)
+      ].join('\n\n');
+      const incomingText = [
+        formatBlocks(MARKET_STUDY_SUMMARY_SECTIONS, incoming),
+        'تحليل SWOT',
+        formatBlocks(MARKET_STUDY_SWOT_SECTIONS, incomingSwot)
+      ].join('\n\n');
       host.innerHTML =
         '<div class="summary-compare">' +
         '<div><label>النسخة الحالية</label><textarea rows="12" readonly>' + currentText.replace(/</g, '&lt;') + '</textarea></div>' +
@@ -9671,6 +9711,7 @@
         if (!marketSummaryPending) return;
         const state = getMarketStudyState();
         state.summary = marketSummaryPending.summary;
+        state.swot = marketSummaryPending.swot || state.swot;
         state.sources = marketSummaryPending.sources;
         state.decision = marketSummaryPending.decision;
         state.disclaimer = marketSummaryPending.disclaimer;
@@ -9697,7 +9738,9 @@
       showLoader('توليد ملخص السوق', 'جاري البحث في المصادر الرسمية وكتابة الملخص التنفيذي...', 12);
       try {
         const payload = collectMarketStudyRequestPayload();
-        const currentSummary = { ...(getMarketStudyState().summary || {}) };
+        const currentState = getMarketStudyState();
+        const currentSummary = { ...(currentState.summary || {}) };
+        const currentSwot = { ...(currentState.swot || {}) };
         let res = await api('POST', '/api/market-study/summary', payload);
         if (res && res.jobId && !res.summary) {
           updateLoaderProgress(35, res.message || 'بدأت المهمة في الخلفية...');
@@ -9711,25 +9754,28 @@
           toast(message);
           return;
         }
-        const hasCurrent = Object.values(currentSummary).some(value => String(value || '').trim());
+        const hasCurrent = Object.values(currentSummary).some(value => String(value || '').trim())
+          || Object.values(currentSwot).some(value => String(value || '').trim());
         marketSummaryPending = {
           summary: res.summary,
+          swot: res.swot || {},
           sources: res.sources || [],
           decision: res.decision || '',
           disclaimer: res.disclaimer || ''
         };
         if (hasCurrent) {
-          renderMarketSummaryCompare(currentSummary, res.summary);
+          renderMarketSummaryCompare(currentSummary, res.summary, currentSwot, res.swot || {});
           toast('النسختان ظاهرتان. اختر الاستبدال أو الإبقاء.');
         } else {
           const state = getMarketStudyState();
           state.summary = res.summary;
+          state.swot = res.swot || {};
           state.sources = res.sources || [];
           state.decision = res.decision || '';
           state.disclaimer = res.disclaimer || state.disclaimer;
           applyMarketStudyState(state);
           persistMarketStudyFromDom();
-          toast('تم توليد ملخص السوق');
+          toast('تم توليد ملخص السوق وتحليل SWOT');
         }
         updateLoaderProgress(100, 'اكتمل ملخص السوق');
       } catch (error) {

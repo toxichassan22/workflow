@@ -155,7 +155,10 @@ prompt or a screen.
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).
   Competitor rows are never deleted by generation. Fill-by-name completes empty cells only.
-  Re-generating a summary shows current vs new and waits for replace/keep.
+  Re-generating a summary shows current vs new and waits for replace/keep. The client also
+  asked for a separate SWOT block (`strengths` / `weaknesses` / `opportunities` / `threats`)
+  inside دراسة السوق; it is generated with the summary but must stay independent of the
+  ten executive-summary sections from the PDF.
 - Production jobs are queued (`POST /api/market-study/competitors` or `/summary`, poll
   `GET /api/market-study/jobs/<id>`) for the same hosting-proxy reason as croquis. Tests stay
   synchronous unless they pass `background: true`. Web search goes through OpenRouter
