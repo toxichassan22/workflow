@@ -3079,6 +3079,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("id = 'projectActivityClassFields'", index_source)
         self.assertIn('function renderMultiSelectDropdown(host, options, selected, placeholder, onChange, closeAfterSelection = false)', index_source)
         self.assertIn('if (closeAfterSelection && details) details.open = false;', index_source)
+        self.assertIn('class="project-multi-select-option', index_source)
+        self.assertIn("host.querySelectorAll('.project-multi-select-option')", index_source)
         self.assertNotIn('function reopenProjectMultiSelect', index_source)
         self.assertIn('function selectedProjectTypeMains()', index_source)
         self.assertIn('function selectedProjectSubtypesByMain()', index_source)

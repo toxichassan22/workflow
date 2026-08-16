@@ -1669,19 +1669,26 @@
       background: #fff;
       box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
     }
-    .project-multi-select-menu label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    .project-multi-select-option {
+      display: block;
+      width: 100%;
       margin: 0;
-      padding: 7px 4px;
+      padding: 9px 10px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
       color: var(--ink);
-      font-size: 13px;
       cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+      text-align: right;
     }
-    .project-multi-select-menu input[type="checkbox"] {
-      width: auto;
-      margin: 0;
+    .project-multi-select-option:hover {
+      background: #f3f7fb;
+    }
+    .project-multi-select-option.selected {
+      background: var(--p);
+      color: #fff;
     }
     #section-market-study .summary-compare {
       display: grid;
@@ -9453,24 +9460,31 @@
 
     function renderMultiSelectDropdown(host, options, selected, placeholder, onChange, closeAfterSelection = false) {
       if (!host) return;
-      const values = Array.isArray(selected) ? selected.map(String) : [];
-      const picked = new Set(values);
+      const choices = (options || []).map(String);
+      const selectedValues = Array.isArray(selected) ? selected.map(String) : [];
+      const picked = new Set(selectedValues);
       host.innerHTML = '<details class="project-multi-select"><summary></summary><div class="project-multi-select-menu">' +
-        (options || []).map(option => {
-          const value = String(option);
-          return '<label><input type="checkbox" value="' + escapeHtml(value) + '"' +
-            (picked.has(value) ? ' checked' : '') + '> ' + escapeHtml(value) + '</label>';
-        }).join('') + '</div></details>';
+        choices.map(value => '<button type="button" class="project-multi-select-option' +
+          (picked.has(value) ? ' selected' : '') + '" data-value="' + escapeHtml(value) + '">' +
+          escapeHtml(value) + '</button>').join('') + '</div></details>';
       const details = host.querySelector('details');
       const summary = host.querySelector('summary');
       const update = () => {
-        const next = Array.from(host.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
+        const next = choices.filter(value => picked.has(value));
         if (summary) summary.textContent = next.length ? next.join('، ') : placeholder;
         if (closeAfterSelection && details) details.open = false;
         if (typeof onChange === 'function') onChange(next);
       };
-      if (summary) summary.textContent = values.length ? values.join('، ') : placeholder;
-      host.querySelectorAll('input[type="checkbox"]').forEach(input => input.addEventListener('change', update));
+      if (summary) summary.textContent = selectedValues.length ? selectedValues.join('، ') : placeholder;
+      host.querySelectorAll('.project-multi-select-option').forEach(button => {
+        button.addEventListener('click', () => {
+          const value = button.dataset.value || '';
+          if (picked.has(value)) picked.delete(value);
+          else picked.add(value);
+          button.classList.toggle('selected', picked.has(value));
+          update();
+        });
+      });
       details?.addEventListener('click', event => event.stopPropagation());
     }
 
