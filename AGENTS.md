@@ -155,8 +155,10 @@ The first three come from the `sectionOrder` loop; the remaining sections are ap
 ## Market study (دراسة السوق)
 
 The full brief is `تحليل السوق .pdf`. `market_study.py` is that brief as code — indicators, source
-priority, mandatory rules, and option lists. Do not drop a required item from the PDF to shorten a
-prompt or a screen.
+priority, mandatory rules, and option lists. `SOURCE_PRIORITY` is the canonical five-level source
+order supplied by the owner; do not add alternate per-type sources that bypass it. The AI must start
+at level 1 and descend only when the higher level has no usable data. Do not drop a required item
+from the PDF to shorten a prompt or a screen.
 
 - **Basic fields:** `project_type` is a multi-select of the four mains (سكني / تجاري /
   فندقي / صناعي ولوجستي). One choice is a single-type project; two or more is mixed-use.

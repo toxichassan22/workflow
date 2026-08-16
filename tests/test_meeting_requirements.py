@@ -3236,6 +3236,38 @@ class MeetingRequirementsTests(unittest.TestCase):
         missing = client.get('/api/market-study/jobs/not-a-job-id-xxx', headers=headers)
         self.assertEqual(missing.status_code, 404)
 
+    def test_market_source_priority_matches_owner_order(self):
+        import market_study
+        expected = {
+            1: [
+                'الهيئة العامة للعقار', 'منصة المؤشرات العقارية',
+                'السجل العقاري وبيانات وزارة العدل المتاحة', 'شبكة إيجار',
+                'الهيئة العامة للإحصاء', 'منصة البيانات المفتوحة السعودية',
+                'وزارة البلديات والإسكان', 'منصة بلدي', 'الأمانة التابعة للمدينة',
+                'كود البناء السعودي', 'البنك المركزي السعودي', 'برنامج وافي',
+                'منصة سكني', 'الشركة الوطنية للإسكان NHC',
+            ],
+            2: [
+                'موقع المشروع الرسمي', 'موقع المطور الرسمي', 'موقع المشغل الرسمي',
+                'موقع العلامة الفندقية', 'كتيب المشروع الرسمي', 'بيانات البيع الرسمية',
+                'بيانات تداول للشركات والصناديق العقارية', 'الإعلانات الرسمية للمطور',
+            ],
+            3: ['CBRE', 'JLL', 'Knight Frank', 'Colliers', 'Savills', 'ValuStrat',
+                'Deloitte', 'PwC', 'KPMG', 'EY', 'STR', 'CoStar'],
+            4: ['منصة عقار', 'بيوت السعودية', 'وصلت', 'تطبيق ديل',
+                'منصات المسوقين العقاريين المرخصين'],
+            5: ['Google Maps', 'Google Places', 'المواقع الإخبارية الموثوقة',
+                'وكالة الأنباء السعودية', 'البيانات الصحفية الرسمية'],
+        }
+        self.assertEqual(market_study.SOURCE_PRIORITY, expected)
+        ordered = [source for level in sorted(expected) for source in expected[level]]
+        for sources in market_study.TYPE_SOURCE_PRIORITY.values():
+            self.assertEqual(sources, ordered)
+        self.assertEqual(market_study.catalog_payload()['sourcePriority'], expected)
+        prompt = market_study.build_consultant_system_prompt()
+        self.assertIn('ابدأ بالمستوى الأول، ولا تنتقل إلى مستوى أدنى', prompt)
+        self.assertIn('تعامل مع أسعار منصات الإعلانات باعتبارها أسعار طلب وليست صفقات منفذة.', prompt)
+
     def test_target_audience_options_do_not_include_other(self):
         import market_study
         self.assertNotIn('أخرى', market_study.GENERAL_TARGET_AUDIENCE)
