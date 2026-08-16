@@ -9520,15 +9520,27 @@
 
     function keepProjectMultiSelectOpen(hostId) {
       setTimeout(() => {
-        const details = document.getElementById(hostId)?.querySelector('details');
+        const host = document.getElementById(hostId);
+        const details = host && host.matches('details') ? host : host?.querySelector('details');
         if (details) details.open = true;
       }, 0);
+    }
+
+    function closeOtherProjectMultiSelects(current) {
+      document.querySelectorAll('.project-multi-select[open]').forEach(dropdown => {
+        if (dropdown !== current) dropdown.open = false;
+      });
     }
 
     function renderMultiSelectDropdown(host, options, selected, placeholder, onChange, closeAfterSelection = false) {
       if (!host) return;
       const choices = (options || []).map(String);
       const selectedValues = Array.isArray(selected) ? selected.map(String) : [];
+      const signature = JSON.stringify({ choices, selectedValues, placeholder, closeAfterSelection });
+      const existing = host.querySelector('details.project-multi-select');
+      if (existing && host.dataset.multiSelectSignature === signature) return;
+      const keepOpen = existing?.open === true;
+      host.dataset.multiSelectSignature = signature;
       const picked = new Set(selectedValues);
       host.innerHTML = '<details class="project-multi-select"><summary></summary><div class="project-multi-select-menu">' +
         choices.map(value => '<button type="button" class="project-multi-select-option' +
@@ -9539,6 +9551,7 @@
       const update = () => {
         const next = choices.filter(value => picked.has(value));
         if (summary) summary.textContent = next.length ? next.join('، ') : placeholder;
+        host.dataset.multiSelectSignature = JSON.stringify({ choices, selectedValues: next, placeholder, closeAfterSelection });
         if (closeAfterSelection && details) details.open = false;
         if (typeof onChange === 'function') onChange(next);
       };
@@ -9552,7 +9565,11 @@
           update();
         });
       });
+      details?.addEventListener('toggle', () => {
+        if (details.open) closeOtherProjectMultiSelects(details);
+      });
       details?.addEventListener('click', event => event.stopPropagation());
+      if (keepOpen && details) details.open = true;
     }
 
     function renderChoiceGrid(host, key, options, selected) {
@@ -9594,10 +9611,6 @@
       }
       const subtypeInput = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
       const subtypeHost = document.getElementById('projectSubtypeGrid');
-      const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
-      const levelInput = document.querySelector('#tenantProjectForm [data-key="project_level"]');
-      const audienceHidden = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
-      const audienceHost = document.getElementById('projectAudienceGrid');
       if (subtypeInput) {
         subtypeInput.type = 'hidden';
         subtypeInput.style.display = 'none';
@@ -9613,13 +9626,22 @@
         if (hasStaleSubtypes) persistGroupedChoice(subtypeInput, prunedSubtypes);
         if (subtypeHost) renderProjectSubtypeFields(mains, subtypeHost, subtypeInput);
       }
-      const kinds = projectAnalysisKinds();
-      renderActivityClassFields(mains, false, kinds, classInput, levelInput);
+      refreshClassificationDependents();
+    }
+
+    function refreshClassificationDependents() {
+      const mains = selectedProjectTypeMains();
+      const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
+      const levelInput = document.querySelector('#tenantProjectForm [data-key="project_level"]');
+      const audienceHidden = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
+      const audienceHost = document.getElementById('projectAudienceGrid');
+      renderActivityClassFields(mains, false, projectAnalysisKinds(), classInput, levelInput);
       if (audienceHost && audienceHidden) {
         const audienceWrap = audienceHidden.closest('.tenant-field');
         const hasAudience = mains.includes('سكني') || mains.some(typeName => (selectedProjectSubtypesByMain()[typeName] || []).length > 0);
         if (!mains.length || !hasAudience) {
           audienceHost.innerHTML = '';
+          audienceHost.dataset.audienceSignature = '';
           if (audienceWrap) audienceWrap.style.display = 'none';
         } else {
           if (audienceWrap) audienceWrap.style.display = '';
@@ -9644,13 +9666,18 @@
         .filter(group => group.options.length);
       if (!groups.length) {
         host.innerHTML = '';
+        host.dataset.subtypeSignature = '';
         return;
       }
       const showSubtypeLabels = groups.length > 1;
-      host.innerHTML = groups.map((group, index) =>
-        '<div style="margin-top:10px"><label>' + (showSubtypeLabels ? (MARKET_SUBTYPE_LABELS[group.main] || ('الأنواع الفرعية ل' + group.main)) : '') +
-        '</label><div data-subtype-group-index="' + index + '"></div></div>'
-      ).join('');
+      const signature = JSON.stringify(groups.map(group => group.main));
+      if (host.dataset.subtypeSignature !== signature) {
+        host.dataset.subtypeSignature = signature;
+        host.innerHTML = groups.map((group, index) =>
+          '<div style="margin-top:10px"><label>' + (showSubtypeLabels ? (MARKET_SUBTYPE_LABELS[group.main] || ('الأنواع الفرعية ل' + group.main)) : '') +
+          '</label><div data-subtype-group-index="' + index + '"></div></div>'
+        ).join('');
+      }
       groups.forEach((group, index) => {
         const groupHost = host.querySelector('[data-subtype-group-index="' + index + '"]');
         renderMultiSelectDropdown(groupHost, group.options, current[group.main] || [], 'اختر نوعًا فرعيًا أو أكثر', selected => {
@@ -9658,8 +9685,7 @@
           if (selected.length) next[group.main] = selected;
           else delete next[group.main];
           persistGroupedChoice(hidden, next);
-          syncProjectClassificationFields();
-          keepProjectMultiSelectOpen('projectSubtypeGrid');
+          refreshClassificationDependents();
         });
       });
     }
@@ -9696,14 +9722,19 @@
       });
       if (!groups.length) {
         host.innerHTML = '';
+        host.dataset.audienceSignature = '';
         persistGroupedChoice(hidden, {});
         return;
       }
-      host.innerHTML = groups.map((group, index) => {
-        const kind = audienceKindForMain(group.parent, group.subtype) || group.parent;
-        return '<div style="margin-top:10px"><label>' + (MARKET_AUDIENCE_LABELS[kind] || ('الفئة المستهدفة ل' + group.key)) +
-          '</label><div data-audience-group-index="' + index + '"></div></div>';
-      }).join('');
+      const signature = JSON.stringify(groups.map(group => group.key));
+      if (host.dataset.audienceSignature !== signature) {
+        host.dataset.audienceSignature = signature;
+        host.innerHTML = groups.map((group, index) => {
+          const kind = audienceKindForMain(group.parent, group.subtype) || group.parent;
+          return '<div style="margin-top:10px"><label>' + (MARKET_AUDIENCE_LABELS[kind] || ('الفئة المستهدفة ل' + group.key)) +
+            '</label><div data-audience-group-index="' + index + '"></div></div>';
+        }).join('');
+      }
       groups.forEach((group, index) => {
         const groupHost = host.querySelector('[data-audience-group-index="' + index + '"]');
         const options = audienceOptionsForMain(group.parent, group.subtype).filter(option => option !== 'أخرى');
