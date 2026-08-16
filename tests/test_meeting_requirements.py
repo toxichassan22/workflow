@@ -3072,6 +3072,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const MARKET_STUDY_SWOT_SECTIONS', index_source)
         self.assertIn("id=\"marketSwotFields\"", index_source)
         self.assertIn('تحليل SWOT', index_source)
+        self.assertIn('const MARKET_OTHER_TYPE_OPTIONS', index_source)
+        self.assertIn("id = 'projectOtherTypesGrid'", index_source)
+        self.assertIn("id = 'projectOtherSubtypesGrid'", index_source)
+        self.assertIn("id = 'projectActivityClassFields'", index_source)
+        self.assertIn('function selectedOtherProjectTypes()', index_source)
         self.assertNotIn('🎯', index_source)
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
@@ -3151,6 +3156,19 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         missing = client.get('/api/market-study/jobs/not-a-job-id-xxx', headers=headers)
         self.assertEqual(missing.status_code, 404)
+
+    def test_other_project_type_unlocks_selected_mains_and_subtypes(self):
+        import market_study
+        self.assertEqual(
+            market_study.analysis_kind_for_project('أخرى', 'مكاتب، فندق', ['تجاري', 'فندقي']),
+            ['تجزئة', 'فندقي', 'مكاتب']
+        )
+        self.assertEqual(
+            market_study.activity_class_options('أخرى', 'مكاتب', ['تجاري', 'فندقي']),
+            market_study.ACTIVITY_CLASS_BY_TYPE['فندقي'] + [
+                option for option in market_study.ACTIVITY_CLASS_BY_TYPE['مكاتب'] if option != 'أخرى'
+            ]
+        )
 
     def test_market_study_normalizes_swot_independently_of_summary(self):
         import market_study

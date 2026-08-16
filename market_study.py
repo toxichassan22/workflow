@@ -459,13 +459,24 @@ def audience_kind_for_label(label):
 def analysis_kind_for_project(main_type, subtype='', components=None):
     main = _norm(main_type)
     sub = _norm(subtype)
+    extra = parse_selected_list(components)
+    kinds = []
+
+    def add_kind(label):
+        kind = audience_kind_for_label(label)
+        if kind and kind not in kinds:
+            kinds.append(kind)
+
     if main == 'متعدد الاستخدامات':
-        kinds = []
-        for item in components or []:
-            kind = audience_kind_for_label(item) or analysis_kind_for_project(item, '')
-            if kind and kind not in kinds:
-                kinds.append(kind)
-        return kinds or ['سكني']
+        for item in extra:
+            add_kind(item)
+        return kinds
+    if main.startswith('أخرى'):
+        for item in extra:
+            add_kind(item)
+        for item in parse_selected_list(sub):
+            add_kind(item)
+        return kinds
     if main == 'تجاري':
         if sub == 'مكاتب':
             return ['مكاتب']
@@ -476,8 +487,8 @@ def analysis_kind_for_project(main_type, subtype='', components=None):
         return ['صناعي ولوجستي']
     if main == 'سكني':
         return ['سكني']
-    kind = audience_kind_for_label(sub or main)
-    return [kind] if kind else []
+    add_kind(sub or main)
+    return kinds
 
 
 def activity_class_options(main_type, subtype='', components=None):
@@ -727,6 +738,7 @@ def _project_input_block(payload):
     lines = [
         f"- اسم المشروع: {payload.get('projectName') or payload.get('project_name') or 'غير مدخل'}",
         f"- نوع المشروع الرئيسي: {payload.get('projectType') or payload.get('project_type') or 'غير مدخل'}",
+        f"- الأنواع المختارة عند اختيار أخرى: {payload.get('otherProjectTypes') or 'غير مدخل'}",
         f"- نوع المشروع الفرعي: {payload.get('projectSubtype') or payload.get('project_subtype') or 'غير مدخل'}",
         f"- مكونات متعدد الاستخدامات: {payload.get('projectComponents') or payload.get('project_components') or 'غير مدخل'}",
         f"- المدينة: {payload.get('city') or 'غير مدخل'}",

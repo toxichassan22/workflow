@@ -148,9 +148,11 @@ prompt or a screen.
 
 - **Basic fields:** `project_type` is the main type from the brief (سكني / تجاري / فندقي /
   صناعي ولوجستي / متعدد الاستخدامات / أخرى). `project_subtype` appears for تجاري / فندقي /
-  صناعي ولوجستي. Mixed-use uses a multi-select (`project_mixed_components`). `project_idea` is
-  client-typed only. `project_level` is separate from `activity_class` (hotel stars / office class /
-  industrial spec). `target_audience` is a multi-select that changes with type.
+  صناعي ولوجستي. Mixed-use uses a multi-select (`project_mixed_components`). Choosing `أخرى`
+  is also a multi-select of the four real mains; matching subtypes then open automatically.
+  Extra activity classifications stay on the basic page and appear per selected hotel / office /
+  industrial kind. `project_idea` is client-typed only. `project_level` is separate from
+  `activity_class`. `target_audience` is a multi-select that changes with type.
 - **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).
