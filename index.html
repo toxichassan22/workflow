@@ -8243,6 +8243,9 @@
 
     document.addEventListener('click', function (e) {
       if (!e.target.closest('.tenant-dropdown')) closeTenantDropdown();
+      document.querySelectorAll('.project-multi-select[open]').forEach(dropdown => {
+        if (!dropdown.contains(e.target)) dropdown.open = false;
+      });
     });
 
     async function loadDashboard() {
@@ -9458,6 +9461,13 @@
       if (value && select.value !== value) select.value = '';
     }
 
+    function keepProjectMultiSelectOpen(hostId) {
+      setTimeout(() => {
+        const details = document.getElementById(hostId)?.querySelector('details');
+        if (details) details.open = true;
+      }, 0);
+    }
+
     function renderMultiSelectDropdown(host, options, selected, placeholder, onChange, closeAfterSelection = false) {
       if (!host) return;
       const choices = (options || []).map(String);
@@ -9510,8 +9520,9 @@
           typeInput.value = selected.join('، ');
           tenantProjectData.project_type = typeInput.value;
           syncProjectClassificationFields();
+          keepProjectMultiSelectOpen('projectTypeGrid');
           triggerAutoSaveDraft();
-        }, true);
+        });
       }
       const subtypeInput = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
       const subtypeHost = document.getElementById('projectSubtypeGrid');
@@ -9572,7 +9583,8 @@
           else delete next[group.main];
           persistGroupedChoice(hidden, next);
           syncProjectClassificationFields();
-        }, true);
+          keepProjectMultiSelectOpen('projectSubtypeGrid');
+        });
       });
     }
 
