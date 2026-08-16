@@ -9383,8 +9383,8 @@
           <div class="table-wrap">
             <table id="marketCompetitorsTable">
               <thead><tr>
-                <th>اسم المشروع</th><th>النوع</th><th>المساحة م²</th><th>الحالة</th><th>التصنيف</th>
-                <th>نوع العملية</th><th>نوع السعر</th><th>القيمة</th><th>المصدر</th><th></th>
+                <th>اسم المشروع</th><th>النوع</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
+                <th>نوع العملية</th><th>نوع السعر</th><th>القيمة (ر.س)</th><th></th>
               </tr></thead>
               <tbody></tbody>
             </table>
@@ -9971,20 +9971,22 @@
       if (!tb) return;
       const tr = document.createElement('tr');
       tr.dataset.competitorId = row.id || ('c_' + Date.now() + '_' + Math.random().toString(16).slice(2));
+      tr.dataset.classification = row.classification || '';
+      tr.dataset.rowSource = row.row_source || 'manual';
+      tr.dataset.priceCurrency = row.price_currency || row.currency || 'SAR';
       const operation = row.operation_type || '';
       const priceType = row.price_type || '';
       const priceTypes = MARKET_PRICE_TYPES[operation] || MARKET_PRICE_TYPES['أخرى'];
       tr.innerHTML =
         '<td><input data-field="name" value="' + escapeHtml(row.name || '') + '"></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(MARKET_PROJECT_TYPES, row.project_type || '') + '</select></td>' +
-        '<td><input data-field="area_sqm" value="' + escapeHtml(row.area_sqm || '') + '"></td>' +
+        '<td><input data-field="area_sqm" value="' + escapeHtml(row.area_sqm || '') + '" inputmode="decimal"></td>' +
         '<td><select data-field="status">' + marketSelectHtml(['قائم', 'تحت الإنشاء', 'على الخارطة'], row.status || '') + '</select></td>' +
-        '<td><select data-field="classification">' + marketSelectHtml(['مباشر', 'غير مباشر', 'مرجعي'], row.classification || '') + '</select></td>' +
+        '<td><input data-field="source" value="' + escapeHtml(row.source || '') + '" placeholder="المصدر">' +
+        '<input data-field="source_url" value="' + escapeHtml(row.source_url || '') + '" placeholder="رابط المصدر" style="margin-top:6px"></td>' +
         '<td><select data-field="operation_type">' + marketSelectHtml(['بيع', 'إيجار', 'تشغيل فندقي', 'أخرى'], operation) + '</select></td>' +
         '<td><select data-field="price_type">' + marketSelectHtml(priceTypes, priceType) + '</select></td>' +
         '<td data-field="price_cell"></td>' +
-        '<td><input data-field="source" value="' + escapeHtml(row.source || '') + '" placeholder="المصدر">' +
-        '<input data-field="source_url" value="' + escapeHtml(row.source_url || '') + '" placeholder="الرابط" style="margin-top:6px"></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-competitor>حذف</button></td>';
       tb.appendChild(tr);
       renderCompetitorPriceInputs(tr, row);
@@ -10010,10 +10012,10 @@
       if (!cell) return;
       const priceType = tr.querySelector('[data-field="price_type"]')?.value || row.price_type || '';
       if (competitorPriceIsRange(priceType)) {
-        cell.innerHTML = '<input data-field="price_from" value="' + escapeHtml(row.price_from || '') + '" placeholder="من">' +
-          '<input data-field="price_to" value="' + escapeHtml(row.price_to || '') + '" placeholder="إلى" style="margin-top:6px">';
+        cell.innerHTML = '<input data-field="price_from" data-currency="SAR" value="' + escapeHtml(row.price_from || '') + '" placeholder="من (ر.س)" inputmode="decimal">' +
+          '<input data-field="price_to" data-currency="SAR" value="' + escapeHtml(row.price_to || '') + '" placeholder="إلى (ر.س)" style="margin-top:6px" inputmode="decimal">';
       } else {
-        cell.innerHTML = '<input data-field="price_value" value="' + escapeHtml(row.price_value || '') + '" placeholder="القيمة بالريال">';
+        cell.innerHTML = '<input data-field="price_value" data-currency="SAR" value="' + escapeHtml(row.price_value || '') + '" placeholder="القيمة (ر.س)" inputmode="decimal">';
       }
       cell.querySelectorAll('input').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
     }
@@ -10026,9 +10028,10 @@
         project_type: read('project_type'),
         area_sqm: read('area_sqm'),
         status: read('status'),
-        classification: read('classification'),
+        classification: tr.dataset.classification || '',
         operation_type: read('operation_type'),
         price_type: read('price_type'),
+        price_currency: tr.dataset.priceCurrency || 'SAR',
         price_value: read('price_value'),
         price_from: read('price_from'),
         price_to: read('price_to'),

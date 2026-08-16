@@ -170,7 +170,11 @@ prompt or a screen.
 - **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).
-  Competitor rows are never deleted by generation. Fill-by-name completes empty cells only.
+  The competitor table shows project name, type, area, status, source, operation type,
+  dynamic price type, and dynamic value. The backend-only `classification` is preserved
+  in each row but is not a visible table column. Price inputs default to Saudi riyal (`SAR`);
+  range types render `من` and `إلى` values. Competitor rows are never deleted by generation.
+  Fill-by-name completes empty cells only.
   Re-generating a summary shows current vs new and waits for replace/keep. The client also
   asked for a separate SWOT block (`strengths` / `weaknesses` / `opportunities` / `threats`)
   inside دراسة السوق; it is generated with the summary but must stay independent of the
