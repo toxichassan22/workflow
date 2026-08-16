@@ -192,6 +192,7 @@ DECISION_OPTIONS = [
 
 MISSING_VALUE_PHRASE = 'غير متوفر من مصدر موثوق'
 CURRENCY_LABEL = 'ريال سعودي'
+SUMMARY_TITLE = 'الملخص التنفيذي لسوق المشروع'
 SUMMARY_WORD_TARGET = 500
 
 SOURCE_PRIORITY = {
@@ -570,10 +571,13 @@ def catalog_payload():
         'competitorOperations': COMPETITOR_OPERATION_OPTIONS,
         'priceTypesByOperation': PRICE_TYPE_BY_OPERATION,
         'rangePriceTypes': sorted(RANGE_PRICE_TYPES),
+        'summaryTitle': SUMMARY_TITLE,
+        'summaryWordTarget': SUMMARY_WORD_TARGET,
         'summarySections': SUMMARY_SECTIONS,
+        'summarySectionHints': SUMMARY_SECTION_HINTS,
+        'mandatoryRules': MANDATORY_RULES,
         'swotSections': SWOT_SECTIONS,
         'decisionOptions': DECISION_OPTIONS,
-        'summarySectionHints': SUMMARY_SECTION_HINTS,
         'swotSectionHints': SWOT_SECTION_HINTS,
         'currency': CURRENCY_LABEL,
         'missingValuePhrase': MISSING_VALUE_PHRASE,
@@ -656,7 +660,7 @@ def build_consultant_system_prompt():
         + '\n\n'.join(type_blocks)
         + '\n\n' + mixed
         + '\n\nرابعًا ملخص السوق — أهم مخرج:\n'
-        'ابدأ مخرجات الدراسة بعنوان: الملخص التنفيذي لسوق المشروع.\n'
+        f'ابدأ مخرجات الدراسة بعنوان: {SUMMARY_TITLE}.\n'
         'يجب أن يكون الملخص مخصصًا لنوع المشروع وليس وصفًا عامًا للمدينة.\n'
         'يجب أن يحتوي على:\n'
         + '\n'.join(summary_spec)
@@ -776,8 +780,11 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
     swot_keys = ', '.join(item['key'] for item in SWOT_SECTIONS)
     return (
         f'تاريخ اليوم / تاريخ الوصول للمصادر: {today}\n'
+        f'ابدأ المخرجات بعنوان: {SUMMARY_TITLE}.\n'
         'اكتب الملخص التنفيذي لسوق المشروع حسب القواعد أعلاه.\n'
         'الملخص مخصص لنوع هذا المشروع وليس وصفًا عامًا للمدينة.\n'
+        'أعد الأقسام العشرة بالترتيب: تعريف السوق، وضع المدينة، أداء القطاع، العرض، الطلب، المنافسة، الفجوة السوقية، التوصية، المخاطر، القرار.\n'
+        'غطِّ في كل قسم جميع العناصر المطلوبة في brief النظام، ولا تستبدل أي قسم بوصف عام للمدينة.\n'
         f'اجعل مجموع أقسام الملخص في حدود {SUMMARY_WORD_TARGET} كلمة.\n'
         'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
         f'إذا لم تتوفر معلومة فاكتب داخل القسم: {MISSING_VALUE_PHRASE}.\n'
@@ -796,6 +803,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         f'{json.dumps(current_swot or {}, ensure_ascii=False)}\n\n'
         'أرجع JSON فقط بهذا الشكل:\n'
         '{\n'
+        f'  "title": "{SUMMARY_TITLE}",\n'
         f'  "summary": {{ مفاتيح إلزامية: {section_keys} }},\n'
         f'  "swot": {{ مفاتيح إلزامية: {swot_keys} }},\n'
         '  "decision": "قيمة من قائمة القرار",\n'
@@ -887,13 +895,11 @@ def normalize_summary(raw):
     nested = data.get('summary') if isinstance(data.get('summary'), dict) else data
     summary = {}
     for item in SUMMARY_SECTIONS:
-        summary[item['key']] = _norm(nested.get(item['key']))
+        summary[item['key']] = _norm(nested.get(item['key'])) or MISSING_VALUE_PHRASE
     decision = _norm(data.get('decision') or nested.get('decision'))
     if decision not in DECISION_OPTIONS:
-        for option in DECISION_OPTIONS:
-            if option in decision:
-                decision = option
-                break
+        matched = next((option for option in DECISION_OPTIONS if option in decision), '')
+        decision = matched or 'البيانات غير كافية'
     sources = []
     raw_sources = data.get('sources')
     if isinstance(raw_sources, list):
@@ -931,6 +937,7 @@ def normalize_summary(raw):
                 break
         swot[item['key']] = value
     return {
+        'title': SUMMARY_TITLE,
         'summary': summary,
         'swot': swot,
         'decision': decision,

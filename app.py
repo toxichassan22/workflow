@@ -8727,14 +8727,15 @@ def _execute_market_summary(data):
             'failureReason': reason,
             'providerError': provider_error,
         }
-    normalized = market_study.normalize_summary(parsed)
-    if not any(normalized['summary'].values()):
+    raw_summary = parsed.get('summary') if isinstance(parsed.get('summary'), dict) else {}
+    if not any(str(raw_summary.get(item['key']) or '').strip() for item in market_study.SUMMARY_SECTIONS):
         return {
             'success': False,
             'error': 'عاد النموذج ملخصًا فارغًا. لم يُستبدل النص الحالي.',
             'failureReason': 'empty_response',
             'providerError': provider_error,
         }
+    normalized = market_study.normalize_summary(parsed)
     return {
         'success': True,
         **normalized,

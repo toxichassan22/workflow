@@ -3308,10 +3308,14 @@ class MeetingRequirementsTests(unittest.TestCase):
             'decision': 'فرصة واعدة بشروط',
             'sources': [{'name': 'الهيئة العامة للإحصاء', 'url': 'https://www.stats.gov.sa'}],
         })
+        self.assertEqual(parsed['title'], 'الملخص التنفيذي لسوق المشروع')
         self.assertEqual(parsed['swot']['strengths'], 'موقع على طريق رئيسي')
         self.assertEqual(parsed['swot']['threats'], 'مشروعات جديدة قريبة')
         self.assertEqual(parsed['summary']['market_definition'], 'سوق سكني في الرياض')
-        self.assertIn('swot', market_study.build_summary_user_prompt({}, []))
+        self.assertEqual(parsed['summary']['city_position'], market_study.MISSING_VALUE_PHRASE)
+        self.assertEqual(parsed['decision'], 'فرصة واعدة بشروط')
+        self.assertIn('ابدأ المخرجات بعنوان: الملخص التنفيذي لسوق المشروع.', market_study.build_summary_user_prompt({}, []))
+        self.assertIn('في حدود 500 كلمة', market_study.build_summary_user_prompt({}, []))
 
 
 if __name__ == '__main__':
