@@ -2857,6 +2857,17 @@
       gap: 20px;
     }
 
+    .visual-concept-section {
+      display: grid;
+      gap: 16px;
+    }
+
+    .visual-concept-section > h3 {
+      margin: 8px 0 0;
+      color: var(--p);
+      font-size: 18px;
+    }
+
     .visual-concept-chat {
       max-height: 160px;
       overflow: auto;
@@ -6649,7 +6660,7 @@
         <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
         <div class="workflow-stage-content">
           <h2>التصور البصري</h2>
-          <p class="tenant-hint">ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة. المود بورد يُفتح بعد اعتماد الصورة الرئيسية.</p>
+          <p class="tenant-hint">التصور البصري قسمان: تصور خارجي وتصور داخلي. ابدئي بالصورة الرئيسية في التصور الخارجي؛ زوايا يمين وشمال وفوق وخلف تُفتح بعد اعتمادها.</p>
           <div id="visualConceptMissing" class="visual-concept-missing" hidden></div>
           <div class="visual-concept-card">
             <div class="visual-concept-head">
@@ -15684,7 +15695,7 @@
           },
           moodboard: {
             prompts: Array.isArray(tenantCreativeImages.moodboard_prompts) ? [...tenantCreativeImages.moodboard_prompts] : [],
-            images: VISUAL_CONCEPT_SLOTS.slice(1).reduce((acc, item, index) => {
+            images: VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).reduce((acc, item, index) => {
               acc[index] = tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl
                 || tenantVisualConceptState?.slots?.[item.id]?.imageUrl
                 || tenantCreativeImages.moodboard?.[index]
@@ -17734,15 +17745,35 @@
     }
 
     const VISUAL_CONCEPT_SLOTS = [
-      { id: 'cover', label: 'الصورة الرئيسية' },
-      { id: 'east', label: 'الواجهة الشرقية' },
-      { id: 'west', label: 'الواجهة الغربية' },
-      { id: 'aerial', label: 'المنظر العلوي' },
-      { id: 'interior', label: 'التصميم الداخلي' }
+      { id: 'cover', label: 'الصورة الرئيسية', group: 'external' },
+      { id: 'right', label: 'يمين', group: 'external' },
+      { id: 'left', label: 'شمال', group: 'external' },
+      { id: 'top', label: 'فوق', group: 'external' },
+      { id: 'back', label: 'خلف', group: 'external' },
+      { id: 'interior', label: 'التصميم الداخلي', group: 'internal' }
     ];
+    const VISUAL_CONCEPT_EXTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'external');
+    const VISUAL_CONCEPT_INTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'internal');
+    const VISUAL_CONCEPT_SLOT_ALIASES = {
+      cover: ['cover', 'main', 'hero'],
+      right: ['right', 'east', 'east_facade'],
+      left: ['left', 'west', 'west_facade'],
+      top: ['top', 'aerial', 'above'],
+      back: ['back', 'rear', 'behind'],
+      interior: ['interior', 'inside', 'internal']
+    };
 
     function emptyVisualConceptSlot(id) {
       return { id, prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [] };
+    }
+
+    function visualConceptSlotSource(sourceSlots, itemId) {
+      const slots = sourceSlots && typeof sourceSlots === 'object' ? sourceSlots : {};
+      const aliases = VISUAL_CONCEPT_SLOT_ALIASES[itemId] || [itemId];
+      for (const key of aliases) {
+        if (slots[key] && typeof slots[key] === 'object') return slots[key];
+      }
+      return null;
     }
 
     function normalizeVisualConceptState(raw) {
@@ -17753,7 +17784,7 @@
       const source = value && typeof value === 'object' ? value : {};
       const slots = {};
       VISUAL_CONCEPT_SLOTS.forEach(item => {
-        const slot = source.slots && source.slots[item.id] ? source.slots[item.id] : emptyVisualConceptSlot(item.id);
+        const slot = visualConceptSlotSource(source.slots, item.id) || emptyVisualConceptSlot(item.id);
         const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => ({
           role: entry.role === 'assistant' ? 'assistant' : 'user',
           text: String(entry.text).slice(0, 4000)
@@ -17779,7 +17810,7 @@
       }
       const moodboardImages = Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard : [];
       const moodboardPrompts = Array.isArray(tenantCreativeImages.moodboard_prompts) ? tenantCreativeImages.moodboard_prompts : [];
-      VISUAL_CONCEPT_SLOTS.slice(1).forEach((item, index) => {
+      VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).forEach((item, index) => {
         const slot = slots[item.id];
         if (!slot.approvedImageUrl && moodboardImages[index]) {
           slot.approvedImageUrl = moodboardImages[index];
@@ -17807,11 +17838,11 @@
       tenantCreativeImages = previousImages;
       tenantCreativeImages.cover = cover.approvedImageUrl || tenantCreativeImages.cover || '';
       tenantCreativeImages.cover_prompt = cover.prompt || tenantCreativeImages.cover_prompt || '';
-      tenantCreativeImages.moodboard = VISUAL_CONCEPT_SLOTS.slice(1).map((item, index) => {
+      tenantCreativeImages.moodboard = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map((item, index) => {
         const slot = tenantVisualConceptState.slots[item.id] || {};
         return slot.approvedImageUrl || slot.imageUrl || previousMoodboard[index] || '';
       });
-      tenantCreativeImages.moodboard_prompts = VISUAL_CONCEPT_SLOTS.slice(1).map((item, index) => {
+      tenantCreativeImages.moodboard_prompts = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map((item, index) => {
         const slot = tenantVisualConceptState.slots[item.id] || {};
         return slot.prompt || previousPrompts[index] || '';
       });
@@ -17853,6 +17884,12 @@
       };
     }
 
+    function visualConceptSlotLocked(slotId) {
+      const slot = VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId);
+      if (slot && slot.group === 'internal') return true;
+      return slotId !== 'cover' && !tenantVisualConceptState.slots.cover.approvedImageUrl;
+    }
+
     function renderVisualConceptSlot(slotDef, locked) {
       const slot = tenantVisualConceptState.slots[slotDef.id];
       const image = slot.approvedImageUrl || slot.imageUrl;
@@ -17862,7 +17899,7 @@
       )).join('') || '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
       const preview = image
         ? '<img src="' + escapeHtml(image) + '" alt="' + escapeHtml(slotDef.label) + '">'
-        : (locked ? 'مقفل حتى اعتماد الصورة الرئيسية.' : 'لم يتم توليد هذه الصورة بعد.');
+        : (locked ? (slotDef.group === 'internal' ? 'التصور الداخلي سيفتح لاحقًا.' : 'مقفل حتى اعتماد الصورة الرئيسية.') : 'لم يتم توليد هذه الصورة بعد.');
       return '<article class="visual-concept-card' + (locked ? ' locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
         '<div class="visual-concept-head"><h3>' + escapeHtml(slotDef.label) + '</h3>' +
         '<span class="visual-concept-status ' + slot.status + '">' + statusLabel + '</span></div>' +
@@ -17931,11 +17968,20 @@
       renderVisualConceptStyleReference();
       const coverApproved = Boolean(tenantVisualConceptState.slots.cover.approvedImageUrl);
       const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], false);
-      const moodboardHtml = VISUAL_CONCEPT_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !coverApproved)).join('');
-      host.innerHTML = coverHtml +
-        '<section class="visual-concept-stack">' +
-        (coverApproved ? '' : '<p class="tenant-hint">المود بورد مقفل حتى اعتماد الصورة الرئيسية.</p>') +
-        moodboardHtml + '</section>';
+      const angleHtml = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !coverApproved)).join('');
+      const interiorHtml = VISUAL_CONCEPT_INTERNAL_SLOTS.map(item => renderVisualConceptSlot(item, true)).join('');
+      host.innerHTML =
+        '<section class="visual-concept-section" data-visual-group="external">' +
+        '<h3>التصور الخارجي</h3>' +
+        '<p class="tenant-hint">ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة. يمين وشمال وفوق وخلف تُفتح بعد اعتماد الصورة الرئيسية.</p>' +
+        coverHtml +
+        '<div class="visual-concept-stack">' +
+        (coverApproved ? '' : '<p class="tenant-hint">زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.</p>') +
+        angleHtml + '</div></section>' +
+        '<section class="visual-concept-section" data-visual-group="internal">' +
+        '<h3>التصور الداخلي</h3>' +
+        '<p class="tenant-hint">سكشن مستقل. سنعمل عليه بعد اعتماد التصور الخارجي.</p>' +
+        interiorHtml + '</section>';
       host.querySelectorAll('[data-visual-prompt]').forEach(input => {
         input.addEventListener('input', () => {
           const slotId = input.getAttribute('data-visual-prompt');
@@ -17994,9 +18040,8 @@
     }
 
     async function generateVisualConceptPrompt(slotId, instruction) {
-      const locked = slotId !== 'cover' && !tenantVisualConceptState.slots.cover.approvedImageUrl;
-      if (locked) {
-        toast('اعتمد الصورة الرئيسية أولاً.');
+      if (visualConceptSlotLocked(slotId)) {
+        toast(slotId === 'interior' ? 'التصور الداخلي سيفتح لاحقًا.' : 'اعتمد الصورة الرئيسية أولاً.');
         return;
       }
       showLoader('جاري إنشاء وصف التصور البصري', 'يتم قراءة بيانات المشروع والصور المرجعية...');
@@ -18023,9 +18068,8 @@
     }
 
     async function generateVisualConceptImage(slotId) {
-      const locked = slotId !== 'cover' && !tenantVisualConceptState.slots.cover.approvedImageUrl;
-      if (locked) {
-        toast('اعتمد الصورة الرئيسية أولاً.');
+      if (visualConceptSlotLocked(slotId)) {
+        toast(slotId === 'interior' ? 'التصور الداخلي سيفتح لاحقًا.' : 'اعتمد الصورة الرئيسية أولاً.');
         return;
       }
       if (!tenantVisualConceptState.slots[slotId].prompt) {
@@ -18078,9 +18122,8 @@
     }
 
     async function sendVisualConceptChat(slotId) {
-      const locked = slotId !== 'cover' && !tenantVisualConceptState.slots.cover.approvedImageUrl;
-      if (locked) {
-        toast('اعتمد الصورة الرئيسية أولاً.');
+      if (visualConceptSlotLocked(slotId)) {
+        toast(slotId === 'interior' ? 'التصور الداخلي سيفتح لاحقًا.' : 'اعتمد الصورة الرئيسية أولاً.');
         return;
       }
       const input = document.querySelector('[data-visual-chat="' + slotId + '"]');

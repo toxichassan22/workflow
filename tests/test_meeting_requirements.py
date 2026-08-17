@@ -2542,7 +2542,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('<section id="tenantVisualConceptPage" class="tenant-page">', index_source)
         self.assertIn("tenantVisualConceptPage: '/app/projects/visual-concept'", index_source)
         self.assertIn("{ pageId: 'tenantVisualConceptPage', label: 'التصور البصري' }", index_source)
-        self.assertIn('ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة', index_source)
+        self.assertIn('التصور البصري قسمان: تصور خارجي وتصور داخلي', index_source)
+        self.assertIn('data-visual-group="external"', index_source)
+        self.assertIn('data-visual-group="internal"', index_source)
         self.assertIn('function persistVisualConceptDraftState()', index_source)
         self.assertIn("data-key=\"visual_concept\"", index_source)
         self.assertIn('function persistVisualConceptDraftState()', index_source)
@@ -2564,7 +2566,8 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_visual_concept_requires_real_project_facts_and_cover_before_moodboard(self):
         client = self.app.test_client()
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
-        self.assertIn("VISUAL_CONCEPT_MOODBOARD_SLOTS = ('east', 'west', 'aerial', 'interior')", source)
+        self.assertIn("VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')", source)
+        self.assertIn("VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')", source)
         self.assertIn("'overview_map', 'خريطة الأرض / المبنى'", source)
         self.assertIn('style_reference_file_id', source)
         self.assertNotIn("facts.get('land_photo_ids')", source)
@@ -2604,8 +2607,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(ready.get_json()['success'])
 
         moodboard_blocked = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
-            'slotId': 'east',
-            'prompt': 'East facade',
+            'slotId': 'right',
+            'prompt': 'Right elevation',
             'projectData': facts,
         })
         self.assertEqual(moodboard_blocked.status_code, 400, moodboard_blocked.get_json())
@@ -2624,14 +2627,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(image_call.called)
         self.assertEqual(image_call.call_args.args[0], 'Hero image from the project facts')
 
-        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Revised east prompt', 'تم')):
+        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Revised right prompt', 'تم')):
             east_prompt = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
                 'slotId': 'east',
                 'coverImage': '/uploads/creative/cover.png',
                 'projectData': facts,
             })
         self.assertEqual(east_prompt.status_code, 200, east_prompt.get_json())
-        self.assertEqual(east_prompt.get_json()['prompt'], 'Revised east prompt')
+        self.assertEqual(east_prompt.get_json()['slotId'], 'right')
+        self.assertEqual(east_prompt.get_json()['prompt'], 'Revised right prompt')
 
     def test_floor_design_state_is_saved_as_tenant_draft_data(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')

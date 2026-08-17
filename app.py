@@ -570,13 +570,15 @@ def persist_generated_image(image, tenant_id):
     return f'/uploads/creative/{safe_tenant}/{filename}'
 
 
-VISUAL_CONCEPT_SLOTS = ('cover', 'east', 'west', 'aerial', 'interior')
-VISUAL_CONCEPT_MOODBOARD_SLOTS = ('east', 'west', 'aerial', 'interior')
+VISUAL_CONCEPT_SLOTS = ('cover', 'right', 'left', 'top', 'back', 'interior')
+VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')
+VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')
 VISUAL_CONCEPT_SLOT_LABELS = {
     'cover': 'الصورة الرئيسية',
-    'east': 'الواجهة الشرقية',
-    'west': 'الواجهة الغربية',
-    'aerial': 'المنظر العلوي',
+    'right': 'يمين',
+    'left': 'شمال',
+    'top': 'فوق',
+    'back': 'خلف',
     'interior': 'التصميم الداخلي',
 }
 VISUAL_CONCEPT_REQUIRED_FIELDS = (
@@ -822,8 +824,8 @@ def _visual_concept_missing_fields(facts, slot_id='cover'):
         missing.append({'key': 'directions_table', 'label': 'جدول الاتجاهات'})
     if not facts.get('overview_map_url'):
         missing.append({'key': 'overview_map', 'label': 'خريطة الأرض / المبنى'})
-    if slot_id == 'interior' and not facts.get('components'):
-        missing.append({'key': 'project_components_data', 'label': 'مكونات المشروع في الدراسة المالية'})
+    if slot_id == 'interior':
+        missing.append({'key': 'interior_section', 'label': 'التصور الداخلي سيفتح بعد إنهاء التصور الخارجي'})
     return missing
 
 
@@ -833,9 +835,10 @@ def _visual_concept_normalize_slot(slot_id):
         return value
     aliases = {
         'main': 'cover', 'cover_image': 'cover', 'hero': 'cover',
-        'right': 'east', 'east_facade': 'east',
-        'left': 'west', 'west_facade': 'west',
-        'top': 'aerial', 'above': 'aerial',
+        'east': 'right', 'east_facade': 'right', 'يمين': 'right',
+        'west': 'left', 'west_facade': 'left', 'شمال': 'left',
+        'aerial': 'top', 'above': 'top', 'فوق': 'top',
+        'rear': 'back', 'behind': 'back', 'خلف': 'back',
         'inside': 'interior', 'internal': 'interior',
     }
     return aliases.get(value)
@@ -855,20 +858,25 @@ def _visual_concept_slot_instruction(slot_id, facts):
             + style_note +
             'The composition is a cinematic exterior establishing shot, 16:9.'
         )
-    if slot_id == 'east':
+    if slot_id == 'right':
         return (
-            f'Render the EAST facade of the exact same building shown in the attached hero image of {name}. '
-            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the eastern elevation.'
+            f'Render the RIGHT elevation of the exact same building shown in the attached hero image of {name}. '
+            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the building from the right side.'
         )
-    if slot_id == 'west':
+    if slot_id == 'left':
         return (
-            f'Render the WEST facade of the exact same building shown in the attached hero image of {name}. '
-            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the western elevation.'
+            f'Render the LEFT elevation of the exact same building shown in the attached hero image of {name}. '
+            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the building from the left side.'
         )
-    if slot_id == 'aerial':
+    if slot_id == 'top':
         return (
             f'Render a true top-down aerial view of the exact same building shown in the attached hero image of {name}. '
             'Show the roof, overall mass, and the same plot shape. No surrounding invented towers.'
+        )
+    if slot_id == 'back':
+        return (
+            f'Render the REAR elevation of the exact same building shown in the attached hero image of {name}. '
+            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the back of the building.'
         )
     component_names = '، '.join(item['name'] for item in (facts.get('components') or []) if item.get('name'))
     return (
@@ -3306,7 +3314,7 @@ def api_visual_concept_prompt():
     if slot_id != 'cover' and not str(data.get('coverImage') or '').strip():
         return jsonify({
             'success': False,
-            'error': 'اعتمد الصورة الرئيسية قبل إنشاء وصف المود بورد',
+            'error': 'اعتمد الصورة الرئيسية قبل إنشاء وصف التصور الخارجي',
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, data.get('coverImage') or '')
@@ -3353,7 +3361,7 @@ def api_visual_concept_generate():
     if slot_id != 'cover' and not str(cover_image).strip():
         return jsonify({
             'success': False,
-            'error': 'اعتمد الصورة الرئيسية قبل توليد المود بورد',
+            'error': 'اعتمد الصورة الرئيسية قبل توليد التصور الخارجي',
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
@@ -3395,7 +3403,7 @@ def api_visual_concept_chat():
     if slot_id != 'cover' and not str(cover_image).strip():
         return jsonify({
             'success': False,
-            'error': 'اعتمد الصورة الرئيسية قبل تعديل المود بورد',
+            'error': 'اعتمد الصورة الرئيسية قبل تعديل التصور الخارجي',
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)

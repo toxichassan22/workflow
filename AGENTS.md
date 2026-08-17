@@ -224,16 +224,20 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   value. Classification currently uses `persistClassificationDraftState()` for
   `project_type`, `project_subtype`, `target_audience`, and `activity_class`.
   Visual concept uses `persistVisualConceptDraftState()` for the hidden
-  `visual_concept` input plus `tenantCreativeImages`. Rebuilding the project
-  form must restore the existing `visual_concept` / `target_audience` values
-  before writing those hidden inputs; empty widgets must not overwrite a
-  saved draft. Moodboard slots restore from `tenantCreativeImages.moodboard`
-  and `moodboard_prompts` the same way the cover restores from `cover`.
+  `visual_concept` input plus `tenantCreativeImages`. The page now has two
+  groups: `التصور الخارجي` (`cover`, `right`, `left`, `top`, `back`) and
+  `التصور الداخلي` (`interior`, locked until that section is built). Legacy
+  ids `east`/`west`/`aerial` hydrate into `right`/`left`/`top`. Rebuilding
+  the project form must restore the existing `visual_concept` /
+  `target_audience` values before writing those hidden inputs; empty widgets
+  must not overwrite a saved draft. External angle slots restore from
+  `tenantCreativeImages.moodboard` and `moodboard_prompts` the same way the
+  cover restores from `cover`.
   The optional style reference is a `project_files` upload with
   `file_type='visual_reference'`. Land photos are not visual-concept
   references. Cover generation uses the overview map as the plot background
-  and the uploaded style image only if the client supplied one. Moodboard
-  generation uses the approved cover only.
+  and the uploaded style image only if the client supplied one. External
+  angles use the approved cover only.
 - **Rebuilding the form can wipe a saved draft.** `renderTenantProjectForm()`
   recreates every `data-key` input empty, then persist helpers run immediately.
   If a helper reads the new empty widget instead of `tenantProjectData`, the
