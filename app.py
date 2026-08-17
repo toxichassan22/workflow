@@ -570,6 +570,462 @@ def persist_generated_image(image, tenant_id):
     return f'/uploads/creative/{safe_tenant}/{filename}'
 
 
+VISUAL_CONCEPT_SLOTS = ('cover', 'east', 'west', 'aerial', 'interior')
+VISUAL_CONCEPT_MOODBOARD_SLOTS = ('east', 'west', 'aerial', 'interior')
+VISUAL_CONCEPT_SLOT_LABELS = {
+    'cover': 'الصورة الرئيسية',
+    'east': 'الواجهة الشرقية',
+    'west': 'الواجهة الغربية',
+    'aerial': 'المنظر العلوي',
+    'interior': 'التصميم الداخلي',
+}
+VISUAL_CONCEPT_REQUIRED_FIELDS = (
+    ('project_name', 'اسم المشروع'),
+    ('project_idea', 'فكرة المشروع'),
+    ('land_and_building_summary', 'وصف المشروع والأرض'),
+    ('target_audience', 'الفئات المستهدفة'),
+    ('approved_financial_area', 'المساحة المعتمدة للدراسة المالية'),
+    ('approved_floor_count', 'عدد الأدوار المعتمدة'),
+    ('approved_coverage_ratio', 'نسبة التغطية المعتمدة'),
+    ('facades', 'عدد الواجهات على الشارع واتجاهاتها'),
+    ('allowed_uses', 'الاستخدامات المسموحة'),
+    ('directions_table', 'جدول الاتجاهات'),
+    ('overview_map', 'خريطة الأرض / المبنى'),
+)
+
+
+def _visual_concept_text(value, limit=4000):
+    if value is None:
+        return ''
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, list):
+        parts = [_visual_concept_text(item, 400) for item in value]
+        return '، '.join(part for part in parts if part).strip()[:limit]
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)[:limit]
+    return str(value).strip()[:limit]
+
+
+def _visual_concept_parse_json(value, fallback=None):
+    if isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return fallback
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if isinstance(parsed, (dict, list)) else fallback
+
+
+def _visual_concept_number(value):
+    if isinstance(value, bool) or value in (None, ''):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    text = str(value).translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).replace(',', '')
+    match = re.search(r'-?\d+(?:\.\d+)?', text)
+    if not match:
+        return None
+    try:
+        number = float(match.group(0))
+    except ValueError:
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _visual_concept_read(project_data, *keys):
+    source = project_data if isinstance(project_data, dict) else {}
+    for key in keys:
+        if key in source and source[key] not in (None, ''):
+            return source[key]
+    return ''
+
+
+def _visual_concept_components(project_data):
+    source = project_data if isinstance(project_data, dict) else {}
+    financial = source.get('financial_study_model') if isinstance(source.get('financial_study_model'), dict) else {}
+    dynamic_rows = financial.get('dynamicRows') if isinstance(financial.get('dynamicRows'), dict) else {}
+    rows = dynamic_rows.get('components')
+    if not isinstance(rows, list):
+        rows = _visual_concept_parse_json(_visual_concept_read(source, 'project_components_data'), [])
+    output = []
+    for item in rows or []:
+        if not isinstance(item, dict):
+            continue
+        name = _visual_concept_text(item.get('name') or item.get('component') or item.get('title'), 160)
+        if not name:
+            continue
+        output.append({
+            'name': name,
+            'useType': _visual_concept_text(item.get('useType') or item.get('type'), 80),
+            'units': _visual_concept_number(item.get('units')),
+            'unitArea': _visual_concept_number(item.get('unitArea')),
+            'builtArea': _visual_concept_number(item.get('builtArea') or item.get('totalArea')),
+        })
+        if len(output) >= 40:
+            break
+    return output
+
+
+def _visual_concept_directions(project_data):
+    raw = _visual_concept_parse_json(_visual_concept_read(project_data, 'directions_table'), None)
+    if isinstance(raw, dict):
+        raw = [{'direction': key, **(value if isinstance(value, dict) else {'regulation_text': value})}
+               for key, value in raw.items()]
+    if not isinstance(raw, list):
+        return []
+    labels = {'north': 'شمال', 'south': 'جنوب', 'east': 'شرق', 'west': 'غرب',
+              'شمال': 'شمال', 'جنوب': 'جنوب', 'شرق': 'شرق', 'غرب': 'غرب'}
+    rows = []
+    for item in raw[:8]:
+        if not isinstance(item, dict):
+            continue
+        direction = _visual_concept_text(item.get('direction') or item.get('label'), 40)
+        label = labels.get(direction.lower(), direction or labels.get(item.get('label'), ''))
+        text = _visual_concept_text(
+            item.get('regulation_text') or item.get('regulation') or item.get('text') or item.get('notes'),
+            400,
+        )
+        if not text:
+            continue
+        rows.append({'direction': label or direction, 'regulation_text': text})
+    return rows
+
+
+def _visual_concept_land_photo_ids(project_data):
+    source = project_data if isinstance(project_data, dict) else {}
+    meta = source.get('land_photos_file_meta')
+    if isinstance(meta, str):
+        meta = _visual_concept_parse_json(meta, [])
+    ids = []
+    if isinstance(meta, list):
+        for item in meta:
+            file_id = item.get('id') if isinstance(item, dict) else item
+            file_id = str(file_id or '').strip()
+            if file_id and file_id not in ids:
+                ids.append(file_id)
+    raw_ids = source.get('land_photos_file_ids')
+    if isinstance(raw_ids, str):
+        raw_ids = _visual_concept_parse_json(raw_ids, [])
+    if isinstance(raw_ids, list):
+        for file_id in raw_ids:
+            file_id = str(file_id or '').strip()
+            if file_id and file_id not in ids:
+                ids.append(file_id)
+    return ids[:4]
+
+
+def _visual_concept_overview_map_url(project_data):
+    source = project_data if isinstance(project_data, dict) else {}
+    creative = source.get('tenantCreativeImages') if isinstance(source.get('tenantCreativeImages'), dict) else {}
+    placeholders = creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {}
+    if not placeholders and isinstance(source.get('map_placeholders'), dict):
+        placeholders = source.get('map_placeholders')
+    for key in ('##MAP_OVERVIEW##', '##MAP_OVERVIEW_SATELLITE##', '##MAP_OVERVIEW_ROADMAP##'):
+        url = placeholders.get(key)
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+    return ''
+
+
+def _visual_concept_project_file_data_uri(file_id):
+    tenant_id = getattr(g, 'tenant_id', None)
+    if not tenant_id or not file_id:
+        return None
+    stored = db.get_project_file(tenant_id, str(file_id))
+    if not stored or not stored.get('storage_path'):
+        return None
+    mime_type = stored.get('mime_type') or ''
+    if not mime_type.startswith('image/'):
+        return None
+    tenant_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'uploads', str(tenant_id)))
+    storage_path = os.path.realpath(stored['storage_path'])
+    try:
+        if os.path.commonpath([tenant_root, storage_path]) != tenant_root:
+            return None
+    except ValueError:
+        return None
+    if not os.path.isfile(storage_path) or os.path.getsize(storage_path) > 15 * 1024 * 1024:
+        return None
+    try:
+        with open(storage_path, 'rb') as image_file:
+            encoded = base64.b64encode(image_file.read()).decode('ascii')
+    except OSError:
+        return None
+    return f'data:{mime_type};base64,{encoded}'
+
+
+def _visual_concept_reference_uris(urls=None, file_ids=None):
+    references = []
+    for url in urls or []:
+        prepared = _prepare_image_reference_for_model(url)
+        if prepared:
+            references.append(prepared)
+    for file_id in file_ids or []:
+        prepared = _visual_concept_project_file_data_uri(file_id)
+        if prepared:
+            references.append(prepared)
+    unique = []
+    seen = set()
+    for item in references:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+        if len(unique) >= 5:
+            break
+    return unique
+
+
+def _visual_concept_facts(project_data):
+    source = project_data if isinstance(project_data, dict) else {}
+    directions = _visual_concept_directions(source)
+    components = _visual_concept_components(source)
+    land_photo_ids = _visual_concept_land_photo_ids(source)
+    map_url = _visual_concept_overview_map_url(source)
+    facades_count = _visual_concept_text(_visual_concept_read(source, 'facades_count'), 40)
+    facades_directions = _visual_concept_text(_visual_concept_read(source, 'facades_directions'), 240)
+    facts = {
+        'project_name': _visual_concept_text(_visual_concept_read(source, 'project_name', 'projectName'), 200),
+        'project_idea': _visual_concept_text(_visual_concept_read(source, 'project_idea'), 4000),
+        'land_and_building_summary': _visual_concept_text(
+            _visual_concept_read(source, 'land_and_building_summary', 'project_description', 'description'), 8000),
+        'target_audience': _visual_concept_text(_visual_concept_read(source, 'target_audience'), 2000),
+        'approved_financial_area': _visual_concept_text(_visual_concept_read(source, 'approved_financial_area'), 80),
+        'approved_floor_count': _visual_concept_text(_visual_concept_read(source, 'approved_floor_count'), 40),
+        'approved_coverage_ratio': _visual_concept_text(_visual_concept_read(source, 'approved_coverage_ratio'), 40),
+        'facades_count': facades_count,
+        'facades_directions': facades_directions,
+        'allowed_uses': _visual_concept_text(_visual_concept_read(source, 'allowed_uses'), 4000),
+        'city': _visual_concept_text(_visual_concept_read(source, 'city'), 80),
+        'district': _visual_concept_text(_visual_concept_read(source, 'district'), 80),
+        'directions': directions,
+        'components': components,
+        'land_photo_ids': land_photo_ids,
+        'overview_map_url': map_url,
+    }
+    return facts
+
+
+def _visual_concept_missing_fields(facts, slot_id='cover'):
+    missing = []
+    if not facts.get('project_name'):
+        missing.append({'key': 'project_name', 'label': 'اسم المشروع'})
+    if not facts.get('project_idea'):
+        missing.append({'key': 'project_idea', 'label': 'فكرة المشروع'})
+    if not facts.get('land_and_building_summary'):
+        missing.append({'key': 'land_and_building_summary', 'label': 'وصف المشروع والأرض'})
+    if not facts.get('target_audience'):
+        missing.append({'key': 'target_audience', 'label': 'الفئات المستهدفة'})
+    if _visual_concept_number(facts.get('approved_financial_area')) in (None, 0):
+        missing.append({'key': 'approved_financial_area', 'label': 'المساحة المعتمدة للدراسة المالية'})
+    if _visual_concept_number(facts.get('approved_floor_count')) in (None, 0):
+        missing.append({'key': 'approved_floor_count', 'label': 'عدد الأدوار المعتمدة'})
+    if _visual_concept_number(facts.get('approved_coverage_ratio')) in (None, 0):
+        missing.append({'key': 'approved_coverage_ratio', 'label': 'نسبة التغطية المعتمدة'})
+    if not facts.get('facades_count') or not facts.get('facades_directions'):
+        missing.append({'key': 'facades', 'label': 'عدد الواجهات على الشارع واتجاهاتها'})
+    if not facts.get('allowed_uses'):
+        missing.append({'key': 'allowed_uses', 'label': 'الاستخدامات المسموحة'})
+    if not facts.get('directions'):
+        missing.append({'key': 'directions_table', 'label': 'جدول الاتجاهات'})
+    if not facts.get('overview_map_url'):
+        missing.append({'key': 'overview_map', 'label': 'خريطة الأرض / المبنى'})
+    if slot_id == 'interior' and not facts.get('components'):
+        missing.append({'key': 'project_components_data', 'label': 'مكونات المشروع في الدراسة المالية'})
+    return missing
+
+
+def _visual_concept_normalize_slot(slot_id):
+    value = str(slot_id or 'cover').strip().lower()
+    if value in VISUAL_CONCEPT_SLOTS:
+        return value
+    aliases = {
+        'main': 'cover', 'cover_image': 'cover', 'hero': 'cover',
+        'right': 'east', 'east_facade': 'east',
+        'left': 'west', 'west_facade': 'west',
+        'top': 'aerial', 'above': 'aerial',
+        'inside': 'interior', 'internal': 'interior',
+    }
+    return aliases.get(value)
+
+
+def _visual_concept_slot_instruction(slot_id, facts):
+    name = facts.get('project_name') or 'the project'
+    if slot_id == 'cover':
+        return (
+            f'Create the primary architectural hero photograph of {name}. '
+            'Show the building sitting on the attached site/map footprint. '
+            'The composition is a cinematic exterior establishing shot, 16:9.'
+        )
+    if slot_id == 'east':
+        return (
+            f'Render the EAST facade of the exact same building shown in the attached hero image of {name}. '
+            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the eastern elevation.'
+        )
+    if slot_id == 'west':
+        return (
+            f'Render the WEST facade of the exact same building shown in the attached hero image of {name}. '
+            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the western elevation.'
+        )
+    if slot_id == 'aerial':
+        return (
+            f'Render a true top-down aerial view of the exact same building shown in the attached hero image of {name}. '
+            'Show the roof, overall mass, and the same plot shape. No surrounding invented towers.'
+        )
+    component_names = '، '.join(item['name'] for item in (facts.get('components') or []) if item.get('name'))
+    return (
+        f'Render one photorealistic interior of {name} that belongs to the same project as the attached hero image. '
+        f'Visible interior program must come from the financial components only: {component_names or "the listed project components"}. '
+        'Do not invent unrelated interior uses.'
+    )
+
+
+def _visual_concept_facts_prompt(facts, slot_id):
+    directions = '\n'.join(
+        f"- {row['direction']}: {row['regulation_text']}" for row in facts.get('directions') or []
+    ) or 'غير متوفر'
+    components = '\n'.join(
+        f"- {item['name']}"
+        + (f" / {item['useType']}" if item.get('useType') else '')
+        + (f" / وحدات {item['units']}" if item.get('units') not in (None, '') else '')
+        + (f" / مساحة {item['builtArea'] or item['unitArea']}" if (item.get('builtArea') or item.get('unitArea')) else '')
+        for item in facts.get('components') or []
+    ) or 'غير متوفر'
+    location = '، '.join(part for part in (facts.get('city'), facts.get('district')) if part)
+    return (
+        f"اسم المشروع: {facts.get('project_name')}\n"
+        f"فكرة المشروع: {facts.get('project_idea')}\n"
+        f"وصف المشروع والأرض: {facts.get('land_and_building_summary')}\n"
+        f"الفئات المستهدفة: {facts.get('target_audience')}\n"
+        f"المساحة المعتمدة للدراسة المالية: {facts.get('approved_financial_area')}\n"
+        f"عدد الأدوار المعتمدة: {facts.get('approved_floor_count')}\n"
+        f"نسبة التغطية المعتمدة: {facts.get('approved_coverage_ratio')}\n"
+        f"عدد الواجهات على الشارع: {facts.get('facades_count')}\n"
+        f"اتجاهات الواجهات: {facts.get('facades_directions')}\n"
+        f"الاستخدامات المسموحة: {facts.get('allowed_uses')}\n"
+        f"المدينة والحي: {location or 'غير متوفر'}\n"
+        f"جدول الاتجاهات:\n{directions}\n"
+        f"مكونات الدراسة المالية:\n{components}\n"
+        f"صور الأرض المرفقة: {len(facts.get('land_photo_ids') or [])}\n"
+        f"خريطة الأرض / المبنى: {'مرفقة' if facts.get('overview_map_url') else 'غير متوفرة'}\n"
+        f"نوع الصورة المطلوبة: {VISUAL_CONCEPT_SLOT_LABELS.get(slot_id, slot_id)}\n"
+        f"تعليمات الكادر: {_visual_concept_slot_instruction(slot_id, facts)}"
+    )
+
+
+def _visual_concept_sanitize_prompt(prompt):
+    return _visual_concept_text(prompt, 12000)
+
+
+def call_image_api_with_references(prompt, references=None):
+    if not OPENROUTER_KEY:
+        print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
+        return None
+    prepared = []
+    for reference in references or []:
+        item = _prepare_image_reference_for_model(reference) if isinstance(reference, str) and not str(reference).startswith('data:image/') else reference
+        if isinstance(item, str) and item.startswith('data:image/'):
+            prepared.append(item)
+        elif isinstance(item, str) and item:
+            resolved = _prepare_image_reference_for_model(item)
+            if resolved:
+                prepared.append(resolved)
+    if not prepared:
+        return call_image_api(prompt)
+    if len(prepared) == 1:
+        return call_image_api_with_reference(prepared[0], prompt)
+    try:
+        headers = {
+            'Authorization': f'Bearer {OPENROUTER_KEY}',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com',
+            'X-Title': 'Real Estate Proposal Generator'
+        }
+        user_content = [{'type': 'text', 'text': prompt + ' --aspect 16:9'}]
+        for image_url in prepared[:5]:
+            user_content.append({'type': 'image_url', 'image_url': {'url': image_url}})
+        payload = {
+            'model': IMAGE_MODEL,
+            'messages': [{'role': 'user', 'content': user_content}],
+            'modalities': ['image', 'text']
+        }
+        response = requests.post(f'{OPENROUTER_BASE}/chat/completions', headers=headers, json=payload, timeout=120)
+        data = response.json()
+        if response.status_code in (401, 402, 429) or 'error' in data:
+            print(f"[IMAGE ERROR] Visual concept multi-reference failed: {data.get('error') if isinstance(data, dict) else response.status_code}")
+            return None
+        if data.get('choices'):
+            msg = data['choices'][0].get('message', {})
+            images = msg.get('images') if isinstance(msg, dict) else None
+            if images and isinstance(images[0], dict):
+                return (images[0].get('image_url') or {}).get('url')
+    except Exception as error:
+        print('[IMAGE ERROR]', error)
+    return None
+
+
+def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', instruction='', image_references=None):
+    system_prompt = (
+        'You write one English architectural image prompt for a Saudi real-estate project. '
+        'Use only the supplied project facts and attached references. '
+        'Never invent a generic building style, never copy a previous project signature, '
+        'and never add text, logos, people, or watermarks. '
+        'Match the attached site/map footprint and any attached land photos. '
+        'Return JSON only: {"prompt":"..."}.'
+    )
+    user_prompt = _visual_concept_facts_prompt(facts, slot_id)
+    if current_prompt:
+        user_prompt += '\n\nCurrent prompt to revise:\n' + current_prompt
+    if instruction:
+        user_prompt += '\n\nUser revision request:\n' + instruction
+    response = call_openrouter_chat(
+        system_prompt,
+        user_prompt,
+        temperature=None,
+        max_tokens=2500,
+        model=GEMINI_TEXT_MODEL,
+        response_format={'type': 'json_object'},
+        image_references=image_references or None,
+    )
+    parsed = _designer_json_response(_get_chat_response_text(response) or extract_chat_content(response, 'VISUAL-CONCEPT-PROMPT'))
+    prompt = _visual_concept_sanitize_prompt(parsed.get('prompt') or parsed.get('cover_prompt'))
+    return prompt, parsed.get('reply') or ''
+
+
+def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''):
+    if slot_id == 'cover':
+        return _visual_concept_reference_uris(
+            urls=[facts.get('overview_map_url')] if facts.get('overview_map_url') else [],
+            file_ids=facts.get('land_photo_ids') or [],
+        )
+    references = []
+    if cover_image:
+        prepared = _prepare_image_reference_for_model(cover_image) or (
+            cover_image if isinstance(cover_image, str) and cover_image.startswith('data:image/') else None
+        )
+        if prepared:
+            references.append(prepared)
+    return references
+
+
+def _visual_concept_request_bundle(data, slot_id):
+    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+    creative = data.get('creativeImages') if isinstance(data.get('creativeImages'), dict) else {}
+    if creative:
+        existing = project_data.get('tenantCreativeImages') if isinstance(project_data.get('tenantCreativeImages'), dict) else {}
+        project_data = {
+            **project_data,
+            'tenantCreativeImages': {**existing, **creative},
+            'map_placeholders': creative.get('map_placeholders') or project_data.get('map_placeholders'),
+        }
+    facts = _visual_concept_facts(project_data)
+    missing = _visual_concept_missing_fields(facts, slot_id)
+    return project_data, facts, missing
+
+
 def _floor_design_reference_data_uri(path):
     try:
         modified = os.path.getmtime(path)
@@ -2811,6 +3267,166 @@ def api_get_image_prompts():
         'moodboard_prompts': moodboard_prompts,
         'engine': 'fallback'
     })
+
+
+@app.route('/api/visual-concept/preflight', methods=['POST'])
+@require_auth
+def api_visual_concept_preflight():
+    data = request.get_json(silent=True) or {}
+    slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover') or 'cover'
+    _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
+    return jsonify({
+        'success': not missing,
+        'slotId': slot_id,
+        'missingFields': missing,
+        'facts': {
+            'project_name': facts.get('project_name'),
+            'landPhotoCount': len(facts.get('land_photo_ids') or []),
+            'hasOverviewMap': bool(facts.get('overview_map_url')),
+            'componentCount': len(facts.get('components') or []),
+        },
+        'error': 'أكمل الحقول الناقصة قبل توليد التصور البصري' if missing else None,
+        'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE' if missing else None,
+    }), (400 if missing else 200)
+
+
+@app.route('/api/visual-concept/prompt', methods=['POST'])
+@require_auth
+def api_visual_concept_prompt():
+    data = request.get_json(silent=True) or {}
+    slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
+    if not slot_id:
+        return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
+    _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
+    if missing:
+        return jsonify({
+            'success': False,
+            'error': 'أكمل الحقول الناقصة قبل إنشاء وصف التصور البصري',
+            'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
+            'missingFields': missing,
+        }), 400
+    if slot_id != 'cover' and not str(data.get('coverImage') or '').strip():
+        return jsonify({
+            'success': False,
+            'error': 'اعتمد الصورة الرئيسية قبل إنشاء وصف المود بورد',
+            'error_code': 'COVER_REQUIRED',
+        }), 400
+    references = _visual_concept_collect_generation_references(facts, slot_id, data.get('coverImage') or '')
+    if slot_id == 'cover':
+        references = _visual_concept_reference_uris(
+            urls=[facts.get('overview_map_url')] if facts.get('overview_map_url') else [],
+            file_ids=facts.get('land_photo_ids') or [],
+        )
+    current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
+    instruction = _visual_concept_text(data.get('instruction') or data.get('message'), 4000)
+    try:
+        prompt, reply = _visual_concept_generate_prompt_text(
+            facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references
+        )
+        if not prompt:
+            return jsonify({'success': False, 'error': 'تعذر إنشاء وصف التصور البصري', 'error_code': 'TEXT_PROVIDER_INVALID'}), 503
+        return jsonify({
+            'success': True,
+            'slotId': slot_id,
+            'prompt': prompt,
+            'reply': reply,
+            'referenceCount': len(references),
+            'model': GEMINI_TEXT_MODEL,
+        })
+    except Exception:
+        app.logger.exception('Visual concept prompt failed')
+        return jsonify({'success': False, 'error': 'تعذر إنشاء وصف التصور البصري', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
+
+
+@app.route('/api/visual-concept/generate', methods=['POST'])
+@require_auth
+def api_visual_concept_generate():
+    data = request.get_json(silent=True) or {}
+    slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
+    if not slot_id:
+        return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
+    _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
+    if missing:
+        return jsonify({
+            'success': False,
+            'error': 'أكمل الحقول الناقصة قبل توليد التصور البصري',
+            'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
+            'missingFields': missing,
+        }), 400
+    prompt = _visual_concept_sanitize_prompt(data.get('prompt'))
+    if not prompt:
+        return jsonify({'success': False, 'error': 'وصف التصور البصري مطلوب', 'error_code': 'PROMPT_REQUIRED'}), 400
+    cover_image = data.get('coverImage') or ''
+    if slot_id != 'cover' and not str(cover_image).strip():
+        return jsonify({
+            'success': False,
+            'error': 'اعتمد الصورة الرئيسية قبل توليد المود بورد',
+            'error_code': 'COVER_REQUIRED',
+        }), 400
+    references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
+    image = call_image_api_with_references(prompt, references)
+    if not image:
+        if not OPENROUTER_KEY:
+            return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ', 'error_code': 'NO_API_KEY'}), 400
+        return jsonify({'success': False, 'error': 'تعذر توليد صورة التصور البصري', 'error_code': 'IMAGE_FAILED'}), 503
+    return jsonify({
+        'success': True,
+        'slotId': slot_id,
+        'image': persist_generated_image(image, g.tenant_id),
+        'prompt': prompt,
+        'referenceCount': len(references),
+        'model': IMAGE_MODEL,
+    })
+
+
+@app.route('/api/visual-concept/chat', methods=['POST'])
+@require_auth
+def api_visual_concept_chat():
+    data = request.get_json(silent=True) or {}
+    slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
+    if not slot_id:
+        return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
+    instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
+    if not instruction:
+        return jsonify({'success': False, 'error': 'اكتب طلب التعديل أولاً', 'error_code': 'MESSAGE_REQUIRED'}), 400
+    _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
+    if missing:
+        return jsonify({
+            'success': False,
+            'error': 'أكمل الحقول الناقصة قبل تعديل التصور البصري',
+            'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
+            'missingFields': missing,
+        }), 400
+    current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
+    cover_image = data.get('coverImage') or ''
+    if slot_id != 'cover' and not str(cover_image).strip():
+        return jsonify({
+            'success': False,
+            'error': 'اعتمد الصورة الرئيسية قبل تعديل المود بورد',
+            'error_code': 'COVER_REQUIRED',
+        }), 400
+    references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
+    if slot_id == 'cover':
+        references = _visual_concept_reference_uris(
+            urls=[facts.get('overview_map_url')] if facts.get('overview_map_url') else [],
+            file_ids=facts.get('land_photo_ids') or [],
+        )
+    try:
+        prompt, reply = _visual_concept_generate_prompt_text(
+            facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references
+        )
+        if not prompt:
+            return jsonify({'success': False, 'error': 'تعذر تعديل وصف التصور البصري', 'error_code': 'TEXT_PROVIDER_INVALID'}), 503
+        return jsonify({
+            'success': True,
+            'slotId': slot_id,
+            'prompt': prompt,
+            'reply': reply or 'تم تحديث وصف الصورة حسب طلبك.',
+            'referenceCount': len(references),
+        })
+    except Exception:
+        app.logger.exception('Visual concept chat failed')
+        return jsonify({'success': False, 'error': 'تعذر تعديل وصف التصور البصري', 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
 
 
 @app.route('/api/designer-generate', methods=['POST'])

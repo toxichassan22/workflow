@@ -2478,11 +2478,83 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('<section id="tenantVisualConceptPage" class="tenant-page">', index_source)
         self.assertIn("tenantVisualConceptPage: '/app/projects/visual-concept'", index_source)
         self.assertIn("{ pageId: 'tenantVisualConceptPage', label: 'التصور البصري' }", index_source)
-        self.assertIn('سيتم تجهيز محتوى التصور البصري هنا', index_source)
+        self.assertIn('ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة', index_source)
+        self.assertIn('function persistVisualConceptDraftState()', index_source)
+        self.assertIn("data-key=\"visual_concept\"", index_source)
+        self.assertIn("api('POST', '/api/visual-concept/prompt'", index_source)
+        self.assertIn("apiWithTimeout('POST', '/api/visual-concept/generate'", index_source)
         self.assertNotIn('tenantMainImagePage', index_source)
         self.assertNotIn('tenantMoodboardPage', index_source)
         self.assertNotIn('tenantMainImagePromptInput', index_source)
         self.assertNotIn('tenantMoodboardPreview', index_source)
+
+    def test_visual_concept_requires_real_project_facts_and_cover_before_moodboard(self):
+        client = self.app.test_client()
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn("VISUAL_CONCEPT_MOODBOARD_SLOTS = ('east', 'west', 'aerial', 'interior')", source)
+        self.assertIn("'overview_map', 'خريطة الأرض / المبنى'", source)
+        self.assertIn('approved_financial_area', source)
+
+        incomplete = client.post('/api/visual-concept/preflight', headers=self._headers(self.token_a), json={
+            'projectData': {'project_name': 'برج الاختبار'}
+        })
+        self.assertEqual(incomplete.status_code, 400, incomplete.get_json())
+        self.assertEqual(incomplete.get_json()['error_code'], 'VISUAL_CONCEPT_DATA_INCOMPLETE')
+        missing_keys = {item['key'] for item in incomplete.get_json()['missingFields']}
+        self.assertIn('approved_financial_area', missing_keys)
+        self.assertIn('overview_map', missing_keys)
+
+        facts = {
+            'project_name': 'برج الاختبار',
+            'project_idea': 'أبراج مكتبية على أرض تجارية',
+            'land_and_building_summary': 'أرض تجارية بواجهة شرقية وغربية',
+            'target_audience': 'شركات ومكاتب',
+            'approved_financial_area': 8500,
+            'approved_floor_count': 12,
+            'approved_coverage_ratio': 60,
+            'facades_count': 2,
+            'facades_directions': 'شرق وغرب',
+            'allowed_uses': 'تجاري مكتبي',
+            'directions_table': [
+                {'direction': 'east', 'regulation_text': 'شارع تجاري 30م'},
+                {'direction': 'west', 'regulation_text': 'شارع فرعي 15م'},
+            ],
+            'project_components_data': [{'name': 'مكاتب', 'useType': 'office', 'units': 20, 'builtArea': 4000}],
+            'tenantCreativeImages': {'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/overview.png'}},
+        }
+        ready = client.post('/api/visual-concept/preflight', headers=self._headers(self.token_a), json={'projectData': facts})
+        self.assertEqual(ready.status_code, 200, ready.get_json())
+        self.assertTrue(ready.get_json()['success'])
+
+        moodboard_blocked = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'east',
+            'prompt': 'East facade',
+            'projectData': facts,
+        })
+        self.assertEqual(moodboard_blocked.status_code, 400, moodboard_blocked.get_json())
+        self.assertEqual(moodboard_blocked.get_json()['error_code'], 'COVER_REQUIRED')
+
+        generated = 'data:image/png;base64,AAAA'
+        with patch.object(self.application_module, 'call_image_api_with_references', return_value=generated) as image_call, \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/cover.png'):
+            cover = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'cover',
+                'prompt': 'Hero image from the project facts',
+                'projectData': facts,
+            })
+        self.assertEqual(cover.status_code, 200, cover.get_json())
+        self.assertEqual(cover.get_json()['image'], '/uploads/creative/cover.png')
+        self.assertTrue(image_call.called)
+        self.assertEqual(image_call.call_args.args[0], 'Hero image from the project facts')
+
+        with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Revised east prompt', 'تم')):
+            east_prompt = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
+                'slotId': 'east',
+                'coverImage': '/uploads/creative/cover.png',
+                'projectData': facts,
+            })
+        self.assertEqual(east_prompt.status_code, 200, east_prompt.get_json())
+        self.assertEqual(east_prompt.get_json()['prompt'], 'Revised east prompt')
 
     def test_floor_design_state_is_saved_as_tenant_draft_data(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')

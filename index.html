@@ -2761,6 +2761,127 @@
       padding-bottom: 80px;
     }
 
+    .visual-concept-page {
+      display: grid;
+      gap: 20px;
+    }
+
+    .visual-concept-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+    }
+
+    .visual-concept-card.locked {
+      opacity: .68;
+    }
+
+    .visual-concept-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .visual-concept-head h3,
+    .visual-concept-head h4 {
+      margin: 0 0 4px;
+      color: var(--p);
+    }
+
+    .visual-concept-status {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #475569;
+    }
+
+    .visual-concept-status.approved {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .visual-concept-status.review {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .visual-concept-preview {
+      min-height: 220px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      margin-bottom: 12px;
+      color: var(--muted);
+      text-align: center;
+      padding: 16px;
+    }
+
+    .visual-concept-preview img {
+      width: 100%;
+      max-height: 420px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .visual-concept-actions,
+    .visual-concept-chat-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .visual-concept-prompt {
+      width: 100%;
+      min-height: 90px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font: inherit;
+      direction: ltr;
+      text-align: left;
+    }
+
+    .visual-concept-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .visual-concept-chat {
+      max-height: 160px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fafafa;
+      margin-top: 10px;
+    }
+
+    .visual-concept-chat-message {
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .visual-concept-missing {
+      border: 1px solid #efb3b3;
+      background: #fff0f0;
+      color: #9c1d1d;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-weight: 700;
+    }
+
     .tenant-form-actions {
       display: flex;
       flex-wrap: wrap;
@@ -6529,7 +6650,9 @@
         <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
         <div class="workflow-stage-content">
           <h2>التصور البصري</h2>
-          <p class="tenant-hint">سيتم تجهيز محتوى التصور البصري هنا. سيشمل هذا القسم الصورة الرئيسية والمود بورد في مرحلة لاحقة.</p>
+          <p class="tenant-hint">ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة. المود بورد يُفتح بعد اعتماد الصورة الرئيسية.</p>
+          <div id="visualConceptMissing" class="visual-concept-missing" hidden></div>
+          <div id="visualConceptWorkspace" class="visual-concept-page"></div>
         </div>
       </div>
     </section>
@@ -7252,6 +7375,7 @@
     let tenantPresentationId = null;
     let tenantProjectMode = 'new';
     let tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
+    let tenantVisualConceptState = null;
     let tenantArchiveCache = null;
     let tenantLocationGeocodeRequest = null;
 
@@ -7963,7 +8087,7 @@
         return;
       }
       if (pageId === 'tenantVisualConceptPage') {
-        showTenantPage(pageId);
+        return openTenantVisualConceptPage();
       }
     }
 
@@ -8427,6 +8551,14 @@
       if (requestedPage) {
         if (requestedPage === 'tenantFloorDesignPage') {
           await openTenantFloorDesignPage(true);
+        } else if (requestedPage === 'tenantVisualConceptPage') {
+          const navigation = getTenantNavigationState();
+          const currentTenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
+          const savedDraftId = navigation && navigation.draftId &&
+            (!navigation.tenantId || navigation.tenantId === currentTenantId)
+            ? navigation.draftId : null;
+          if (savedDraftId) await openProjectDraftById(savedDraftId);
+          await openTenantVisualConceptPage();
         } else if (requestedPage === 'tenantProjectPage') {
           // The project-form route carries no draft identity in the URL, so a refresh must
           // reopen the draft remembered in localStorage instead of showing a blank new-project
@@ -11229,6 +11361,7 @@
       }
       tenantProjectData = { ...tenantProjectData, ...source };
       tenantFloorDesignState = normalizeTenantFloorDesignState(source.floor_visual_design);
+      tenantVisualConceptState = normalizeVisualConceptState(source.visual_concept);
       tenantFloorDesignActiveGroupId = null;
       tenantFloorDesignDraftMembers = [];
       // Stored as a JSON string in a hidden input, so it must be parsed before use.
@@ -11329,6 +11462,7 @@
       tenantProjectMode = 'new';
       tenantProjectData = { draftId: crypto.randomUUID() };
       tenantFloorDesignState = null;
+      tenantVisualConceptState = null;
       tenantFloorDesignActiveGroupId = null;
       tenantFloorDesignDraftMembers = [];
       tenantFloorDesignFilter = 'all';
@@ -12079,6 +12213,13 @@
       addTeamSection(form);
       addMarketStudySection(form);
 
+      const visualConceptField = document.createElement('div');
+      visualConceptField.className = 'tenant-field full';
+      visualConceptField.style.display = 'none';
+      visualConceptField.innerHTML = '<input type="hidden" data-key="visual_concept" data-type="text" id="visualConceptData">';
+      form.appendChild(visualConceptField);
+      persistVisualConceptDraftState();
+
       const conceptual2dSection = document.createElement('div');
       conceptual2dSection.className = 'tenant-form-section';
       conceptual2dSection.id = 'section-conceptual-2d';
@@ -12107,6 +12248,7 @@
       renderProjectTeam();
       enhanceProjectClassificationFields();
       applyMarketStudyState(getMarketStudyState());
+      persistVisualConceptDraftState();
     }
 
     const TENANT_FLOOR_DESIGN_PROMPT_VERSION = 3;
@@ -15401,6 +15543,7 @@
           persistMarketStudyFromDom();
         }
         if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
+        if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
         const data = { ...tenantProjectData, ...(await collectTenantFormData()) };
         if (document.getElementById('section-financial-calc') && typeof collectFinancialStudyModel === 'function') {
           data.financial_study_model = collectFinancialStudyModel();
@@ -15415,6 +15558,11 @@
         if (tenantFloorDesignState) {
           data.floor_visual_design = tenantFloorDesignState;
           tenantProjectData.floor_visual_design = tenantFloorDesignState;
+        }
+        if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
+        if (tenantVisualConceptState) {
+          data.visual_concept = tenantVisualConceptState;
+          tenantProjectData.visual_concept = tenantVisualConceptState;
         }
         data.tenantCreativeImages = tenantCreativeImages;
         data.tenantSlidesData = tenantSlidesData;
@@ -17252,6 +17400,7 @@
 
     async function collectTenantFormData() {
       if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
+      if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
       const result = {};
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
       for (const input of inputs) {
@@ -17342,7 +17491,7 @@
         setGenStep('plan', 'done');
         setGenPct(20, 'تم إعداد خطة الشرائح — جاري توليد الصور...');
         triggerAutoSaveDraft();
-        showTenantPage('tenantVisualConceptPage');
+        openTenantVisualConceptPage();
       } else {
         const errorMessage = data.error || 'فشل إعداد خطة العرض';
         setGenStep('plan', 'error');
@@ -17447,9 +17596,315 @@
       return map[style] || style;
     }
 
+    const VISUAL_CONCEPT_SLOTS = [
+      { id: 'cover', label: 'الصورة الرئيسية', hint: 'تُبنى من بيانات المشروع، جدول الاتجاهات، صور الأرض إن وُجدت، وخريطة الأرض / المبنى.' },
+      { id: 'east', label: 'الواجهة الشرقية', hint: 'نفس المبنى المعتمد، من الجهة الشرقية.' },
+      { id: 'west', label: 'الواجهة الغربية', hint: 'نفس المبنى المعتمد، من الجهة الغربية.' },
+      { id: 'aerial', label: 'المنظر العلوي', hint: 'نفس المبنى المعتمد، من الأعلى.' },
+      { id: 'interior', label: 'التصميم الداخلي', hint: 'داخل المشروع حسب مكونات الدراسة المالية فقط.' }
+    ];
 
+    function emptyVisualConceptSlot(id) {
+      return { id, prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [] };
+    }
 
+    function normalizeVisualConceptState(raw) {
+      let value = raw;
+      if (typeof value === 'string') {
+        try { value = JSON.parse(value); } catch (error) { value = null; }
+      }
+      const source = value && typeof value === 'object' ? value : {};
+      const slots = {};
+      VISUAL_CONCEPT_SLOTS.forEach(item => {
+        const slot = source.slots && source.slots[item.id] ? source.slots[item.id] : emptyVisualConceptSlot(item.id);
+        const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => ({
+          role: entry.role === 'assistant' ? 'assistant' : 'user',
+          text: String(entry.text).slice(0, 4000)
+        })) : [];
+        const approved = String(slot.approvedImageUrl || '');
+        const imageUrl = String(slot.imageUrl || '');
+        slots[item.id] = {
+          id: item.id,
+          prompt: String(slot.prompt || '').slice(0, 12000),
+          imageUrl,
+          approvedImageUrl: approved,
+          status: ['approved', 'review', 'generating', 'pending'].includes(slot.status)
+            ? slot.status
+            : (approved ? 'approved' : imageUrl ? 'review' : 'pending'),
+          chat
+        };
+      });
+      if (!slots.cover.approvedImageUrl && tenantCreativeImages.cover) {
+        slots.cover.approvedImageUrl = tenantCreativeImages.cover;
+        slots.cover.imageUrl = slots.cover.imageUrl || tenantCreativeImages.cover;
+        slots.cover.prompt = slots.cover.prompt || tenantCreativeImages.cover_prompt || '';
+        slots.cover.status = 'approved';
+      }
+      return { version: 1, slots };
+    }
 
+    function persistVisualConceptDraftState() {
+      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+      tenantProjectData.visual_concept = tenantVisualConceptState;
+      const cover = tenantVisualConceptState.slots.cover || {};
+      tenantCreativeImages = tenantCreativeImages || {};
+      tenantCreativeImages.cover = cover.approvedImageUrl || tenantCreativeImages.cover || '';
+      tenantCreativeImages.cover_prompt = cover.prompt || tenantCreativeImages.cover_prompt || '';
+      tenantCreativeImages.moodboard = VISUAL_CONCEPT_SLOTS.slice(1).map(item => tenantVisualConceptState.slots[item.id].approvedImageUrl || '');
+      tenantCreativeImages.moodboard_prompts = VISUAL_CONCEPT_SLOTS.slice(1).map(item => tenantVisualConceptState.slots[item.id].prompt || '');
+      tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+      const hidden = document.getElementById('visualConceptData');
+      if (hidden) hidden.value = JSON.stringify(tenantVisualConceptState);
+    }
+
+    function markVisualConceptDirty() {
+      persistVisualConceptDraftState();
+      setDraftDirty(true);
+    }
+
+    function visualConceptMissingMessage(response) {
+      const missing = Array.isArray(response?.missingFields) ? response.missingFields : [];
+      if (!missing.length) return response?.error || '';
+      return 'أكمل الحقول الناقصة: ' + missing.map(item => item.label || item.key).join('، ');
+    }
+
+    async function collectVisualConceptPayload(slotId) {
+      if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
+      if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) persistMarketStudyFromDom();
+      persistVisualConceptDraftState();
+      let projectData = { ...tenantProjectData };
+      if (typeof collectTenantFormData === 'function' && document.getElementById('tenantProjectForm')) {
+        projectData = { ...projectData, ...(await collectTenantFormData()) };
+      }
+      if (document.getElementById('section-financial-calc') && typeof collectFinancialStudyModel === 'function') {
+        projectData.financial_study_model = collectFinancialStudyModel();
+      }
+      tenantProjectData = projectData;
+      return {
+        slotId,
+        projectData,
+        creativeImages: tenantCreativeImages,
+        coverImage: tenantVisualConceptState.slots.cover.approvedImageUrl || '',
+        currentPrompt: tenantVisualConceptState.slots[slotId]?.prompt || '',
+        prompt: tenantVisualConceptState.slots[slotId]?.prompt || ''
+      };
+    }
+
+    function renderVisualConceptSlot(slotDef, locked) {
+      const slot = tenantVisualConceptState.slots[slotDef.id];
+      const image = slot.approvedImageUrl || slot.imageUrl;
+      const statusLabel = slot.status === 'approved' ? 'معتمدة' : slot.status === 'review' ? 'تحتاج اعتماد' : slot.status === 'generating' ? 'قيد التوليد' : 'لم تبدأ';
+      const chat = (slot.chat || []).map(item => (
+        '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? 'النظام: ' : 'أنت: ') + '</strong>' + escapeHtml(item.text) + '</div>'
+      )).join('') || '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
+      const preview = image
+        ? '<img src="' + escapeHtml(image) + '" alt="' + escapeHtml(slotDef.label) + '">'
+        : (locked ? 'مقفل حتى اعتماد الصورة الرئيسية.' : 'لم يتم توليد هذه الصورة بعد.');
+      return '<article class="visual-concept-card' + (locked ? ' locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
+        '<div class="visual-concept-head"><div><h' + (slotDef.id === 'cover' ? '3' : '4') + '>' + escapeHtml(slotDef.label) + '</h' + (slotDef.id === 'cover' ? '3' : '4') + '>' +
+        '<p class="tenant-hint">' + escapeHtml(slotDef.hint) + '</p></div>' +
+        '<span class="visual-concept-status ' + slot.status + '">' + statusLabel + '</span></div>' +
+        '<div class="visual-concept-preview">' + preview + '</div>' +
+        '<label>وصف الصورة</label>' +
+        '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
+        '<div class="visual-concept-actions">' +
+        '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
+        '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + '>توليد الصورة</button>' +
+        '<button type="button" class="btn ghost small" data-visual-action="approve" data-visual-slot="' + slotDef.id + '" ' + (locked || !image ? 'disabled' : '') + '>اعتماد الصورة</button>' +
+        '</div>' +
+        '<div class="visual-concept-chat">' + chat + '</div>' +
+        '<div class="visual-concept-chat-row">' +
+        '<textarea data-visual-chat="' + slotDef.id + '" rows="2" placeholder="اكتب تعديل هذه الصورة..." ' + (locked ? 'disabled' : '') + '></textarea>' +
+        '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + '>إرسال التعديل</button>' +
+        '</div></article>';
+    }
+
+    function renderVisualConceptPage() {
+      const host = document.getElementById('visualConceptWorkspace');
+      if (!host) return;
+      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+      persistVisualConceptDraftState();
+      const coverApproved = Boolean(tenantVisualConceptState.slots.cover.approvedImageUrl);
+      const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], false);
+      const moodboardHtml = VISUAL_CONCEPT_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !coverApproved)).join('');
+      host.innerHTML = coverHtml +
+        '<section><h3>المود بورد</h3><p class="tenant-hint">' +
+        (coverApproved ? 'كل صورة تُلف من الصورة الرئيسية المعتمدة. الداخلي يستخدم مكونات الدراسة المالية.' : 'المود بورد مقفل حتى اعتماد الصورة الرئيسية.') +
+        '</p><div class="visual-concept-grid">' + moodboardHtml + '</div></section>';
+      host.querySelectorAll('[data-visual-prompt]').forEach(input => {
+        input.addEventListener('input', () => {
+          const slotId = input.getAttribute('data-visual-prompt');
+          tenantVisualConceptState.slots[slotId].prompt = input.value;
+          markVisualConceptDirty();
+        });
+      });
+      host.querySelectorAll('[data-visual-action]').forEach(button => {
+        button.addEventListener('click', () => {
+          const action = button.getAttribute('data-visual-action');
+          const slotId = button.getAttribute('data-visual-slot');
+          if (action === 'prompt') generateVisualConceptPrompt(slotId);
+          else if (action === 'generate') generateVisualConceptImage(slotId);
+          else if (action === 'approve') approveVisualConceptImage(slotId);
+          else if (action === 'chat') sendVisualConceptChat(slotId);
+        });
+      });
+    }
+
+    function showVisualConceptMissing(message) {
+      const box = document.getElementById('visualConceptMissing');
+      if (!box) return;
+      if (!message) {
+        box.hidden = true;
+        box.textContent = '';
+        return;
+      }
+      box.hidden = false;
+      box.textContent = message;
+    }
+
+    async function refreshVisualConceptPreflight() {
+      try {
+        const payload = await collectVisualConceptPayload('cover');
+        const response = await api('POST', '/api/visual-concept/preflight', payload);
+        if (!response?.success) showVisualConceptMissing(visualConceptMissingMessage(response));
+        else showVisualConceptMissing('');
+        return response;
+      } catch (error) {
+        showVisualConceptMissing(error.message || 'تعذر مراجعة بيانات التصور البصري');
+        return null;
+      }
+    }
+
+    async function openTenantVisualConceptPage() {
+      tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept || tenantVisualConceptState);
+      persistVisualConceptDraftState();
+      showTenantPage('tenantVisualConceptPage');
+      renderVisualConceptPage();
+      await refreshVisualConceptPreflight();
+    }
+
+    async function generateVisualConceptPrompt(slotId, instruction) {
+      const locked = slotId !== 'cover' && !tenantVisualConceptState.slots.cover.approvedImageUrl;
+      if (locked) {
+        toast('اعتمد الصورة الرئيسية أولاً.');
+        return;
+      }
+      showLoader('جاري إنشاء وصف التصور البصري', 'يتم قراءة بيانات المشروع والصور المرجعية...');
+      try {
+        const payload = await collectVisualConceptPayload(slotId);
+        if (instruction) payload.instruction = instruction;
+        const response = await api('POST', '/api/visual-concept/prompt', payload);
+        hideLoader();
+        if (!response?.success || !response.prompt) {
+          const message = visualConceptMissingMessage(response) || response?.error || 'تعذر إنشاء الوصف';
+          showVisualConceptMissing(visualConceptMissingMessage(response));
+          toast(message);
+          return;
+        }
+        showVisualConceptMissing('');
+        tenantVisualConceptState.slots[slotId].prompt = response.prompt;
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+        toast('تم تجهيز وصف ' + (VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label || 'الصورة'));
+      } catch (error) {
+        hideLoader();
+        toast(error.message || 'تعذر إنشاء الوصف');
+      }
+    }
+
+    async function generateVisualConceptImage(slotId) {
+      const locked = slotId !== 'cover' && !tenantVisualConceptState.slots.cover.approvedImageUrl;
+      if (locked) {
+        toast('اعتمد الصورة الرئيسية أولاً.');
+        return;
+      }
+      if (!tenantVisualConceptState.slots[slotId].prompt) {
+        await generateVisualConceptPrompt(slotId);
+      }
+      if (!tenantVisualConceptState.slots[slotId].prompt) return;
+      tenantVisualConceptState.slots[slotId].status = 'generating';
+      renderVisualConceptPage();
+      showLoader('جاري توليد التصور البصري', 'يتم توليد ' + (VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label || 'الصورة') + '...');
+      try {
+        const payload = await collectVisualConceptPayload(slotId);
+        const response = await apiWithTimeout('POST', '/api/visual-concept/generate', payload, 180000, 'انتهت مهلة توليد الصورة؛ أعد المحاولة.');
+        hideLoader();
+        if (!response?.success || !response.image) {
+          tenantVisualConceptState.slots[slotId].status = tenantVisualConceptState.slots[slotId].imageUrl ? 'review' : 'pending';
+          renderVisualConceptPage();
+          const message = visualConceptMissingMessage(response) || response?.error || 'تعذر توليد الصورة';
+          showVisualConceptMissing(visualConceptMissingMessage(response));
+          toast(message);
+          return;
+        }
+        showVisualConceptMissing('');
+        tenantVisualConceptState.slots[slotId].prompt = response.prompt || tenantVisualConceptState.slots[slotId].prompt;
+        tenantVisualConceptState.slots[slotId].imageUrl = response.image;
+        tenantVisualConceptState.slots[slotId].approvedImageUrl = '';
+        tenantVisualConceptState.slots[slotId].status = 'review';
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+        toast('تم توليد المعاينة. اضغط اعتماد الصورة لتثبيتها.');
+      } catch (error) {
+        hideLoader();
+        tenantVisualConceptState.slots[slotId].status = 'pending';
+        renderVisualConceptPage();
+        toast(error.message || 'تعذر توليد الصورة');
+      }
+    }
+
+    function approveVisualConceptImage(slotId) {
+      const slot = tenantVisualConceptState.slots[slotId];
+      const image = slot.imageUrl || slot.approvedImageUrl;
+      if (!image) {
+        toast('ولّد الصورة أولاً حتى يمكن اعتمادها');
+        return;
+      }
+      slot.approvedImageUrl = image;
+      slot.status = 'approved';
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+      toast('تم اعتماد ' + (VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label || 'الصورة'));
+    }
+
+    async function sendVisualConceptChat(slotId) {
+      const locked = slotId !== 'cover' && !tenantVisualConceptState.slots.cover.approvedImageUrl;
+      if (locked) {
+        toast('اعتمد الصورة الرئيسية أولاً.');
+        return;
+      }
+      const input = document.querySelector('[data-visual-chat="' + slotId + '"]');
+      const message = (input?.value || '').trim();
+      if (!message) {
+        toast('اكتب طلب التعديل أولاً');
+        return;
+      }
+      const slot = tenantVisualConceptState.slots[slotId];
+      slot.chat.push({ role: 'user', text: message });
+      markVisualConceptDirty();
+      showLoader('جاري تعديل وصف الصورة', 'يتم تطبيق ملاحظاتك على نفس المشروع...');
+      try {
+        const payload = await collectVisualConceptPayload(slotId);
+        payload.message = message;
+        const response = await api('POST', '/api/visual-concept/chat', payload);
+        hideLoader();
+        if (!response?.success || !response.prompt) {
+          const errorText = visualConceptMissingMessage(response) || response?.error || 'تعذر تعديل الوصف';
+          showVisualConceptMissing(visualConceptMissingMessage(response));
+          toast(errorText);
+          return;
+        }
+        showVisualConceptMissing('');
+        slot.prompt = response.prompt;
+        slot.chat.push({ role: 'assistant', text: response.reply || 'تم تحديث وصف الصورة.' });
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+        toast('تم تحديث الوصف. اضغط توليد الصورة لتطبيق التعديل.');
+      } catch (error) {
+        hideLoader();
+        toast(error.message || 'تعذر تعديل الوصف');
+      }
+    }
 
 
 
@@ -17522,10 +17977,14 @@
           setGenPct(40, 'لا توجد خرائط مطلوبة');
         }
 
+        persistVisualConceptDraftState();
+        const visualMoodboard = VISUAL_CONCEPT_SLOTS.slice(1).map(item => tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl || tenantVisualConceptState?.slots?.[item.id]?.imageUrl || '');
         const generationImages = {
           ...tenantCreativeImages,
-          cover: tenantCreativeImages.cover || tempCoverImage || '',
-          moodboard: Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard.map((image, index) => image || tempMoodboardImages[index] || '') : []
+          cover: tenantVisualConceptState?.slots?.cover?.approvedImageUrl || tenantCreativeImages.cover || tempCoverImage || '',
+          moodboard: visualMoodboard.some(Boolean)
+            ? visualMoodboard
+            : (Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard.map((image, index) => image || tempMoodboardImages[index] || '') : [])
         };
         const hasUnapprovedImages = !!tempCoverImage || Object.keys(tempMoodboardImages || {}).length > 0;
         if (hasUnapprovedImages) toast('سيتم استخدام الصور المولدة غير المعتمدة مع استمرار إمكانية اعتمادها لاحقًا.');
