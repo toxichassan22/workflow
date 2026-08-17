@@ -14,6 +14,15 @@ This is a standing owner rule. After a requested change is done and verified:
 
 Remote: `github` → `https://github.com/toxichassan22/workflow.git`.
 
+## Hosting autodeploy
+
+GitHub Actions (`.github/workflows/deploy.yml`) POSTs to
+`https://sagdemos.store/api/deploy-webhook` after every `main` push. The
+cPanel account is `demos`; server paths are `/home/demos/workflow.git`,
+`/home/demos/proposal-generator`, and `/home/demos/public_html`. Do not
+put the cPanel password or `DEPLOY_WEBHOOK_SECRET` in the repo. Keep the
+secret in GitHub Actions secrets and in the server `.env` only.
+
 ## No icons, no emojis — anywhere
 
 This is a hard product rule, not a preference. **Never add an emoji or an icon** to this project:

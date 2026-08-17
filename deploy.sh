@@ -1,15 +1,15 @@
 #!/bin/bash
 # One-command deployment script for cPanel shared hosting.
-# Run this from /home/sagdemo/proposal-generator after pushing code to GitHub.
+# Run this from /home/demos/proposal-generator after pushing code to GitHub.
 
 set -e
 
 export PATH="$HOME/bin:$PATH"
 export GIT_LFS_SKIP_SMUDGE=1
 
-REPO_DIR="/home/sagdemo/workflow.git"
-APP_DIR="/home/sagdemo/proposal-generator"
-WEB_ROOT="/home/sagdemo/public_html"
+REPO_DIR="/home/demos/workflow.git"
+APP_DIR="/home/demos/proposal-generator"
+WEB_ROOT="/home/demos/public_html"
 PYTHON="$APP_DIR/venv/bin/python"
 PIP="$APP_DIR/venv/bin/pip"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"

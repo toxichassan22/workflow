@@ -1,15 +1,15 @@
 #!/bin/bash
 # Lightweight watchdog / (re)start script for cPanel shared hosting.
 # Safe to run from cron every minute.
-# Usage: /home/sagdemo/proposal-generator/start_server.sh
+# Usage: /home/demos/proposal-generator/start_server.sh
 
 set -e
 
 export PATH="$HOME/bin:$PATH"
 
-APP_DIR="/home/sagdemo/proposal-generator"
-REPO_DIR="/home/sagdemo/workflow.git"
-WEB_ROOT="/home/sagdemo/public_html"
+APP_DIR="/home/demos/proposal-generator"
+REPO_DIR="/home/demos/workflow.git"
+WEB_ROOT="/home/demos/public_html"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"
 DEPLOYMENT_MARKER="$APP_DIR/.deployed_commit"
 WATCHDOG_LOG="$APP_DIR/watchdog.log"

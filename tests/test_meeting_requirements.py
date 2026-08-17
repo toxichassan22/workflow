@@ -395,8 +395,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/deploy.yml').read_text(encoding='utf-8')
         deploy_script = (ROOT / 'deploy.sh').read_text(encoding='utf-8')
         self.assertIn('&commit=${{ github.sha }}', workflow)
+        self.assertIn('https://sagdemos.store/api/deploy-webhook', workflow)
+        self.assertNotIn('sagdemo.site', workflow)
         self.assertIn('TARGET_COMMIT="${1:-}"', deploy_script)
         self.assertIn('git reset --hard "$TARGET_COMMIT"', deploy_script)
+        self.assertIn('REPO_DIR="/home/demos/workflow.git"', deploy_script)
+        self.assertIn('APP_DIR="/home/demos/proposal-generator"', deploy_script)
+        start_script = (ROOT / 'start_server.sh').read_text(encoding='utf-8')
+        self.assertIn('WEB_ROOT="/home/demos/public_html"', start_script)
+        self.assertIn("deploy_script = '/home/demos/proposal-generator/deploy.sh'", (ROOT / 'app.py').read_text(encoding='utf-8'))
 
     def test_fresh_database_has_meeting_columns(self):
         """Fresh initialization no longer executes multiple DDL statements incorrectly."""
