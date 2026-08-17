@@ -2852,10 +2852,9 @@
       text-align: left;
     }
 
-    .visual-concept-grid {
+    .visual-concept-stack {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px;
+      gap: 20px;
     }
 
     .visual-concept-chat {
@@ -17597,11 +17596,11 @@
     }
 
     const VISUAL_CONCEPT_SLOTS = [
-      { id: 'cover', label: 'الصورة الرئيسية', hint: 'تُبنى من بيانات المشروع، جدول الاتجاهات، صور الأرض إن وُجدت، وخريطة الأرض / المبنى.' },
-      { id: 'east', label: 'الواجهة الشرقية', hint: 'نفس المبنى المعتمد، من الجهة الشرقية.' },
-      { id: 'west', label: 'الواجهة الغربية', hint: 'نفس المبنى المعتمد، من الجهة الغربية.' },
-      { id: 'aerial', label: 'المنظر العلوي', hint: 'نفس المبنى المعتمد، من الأعلى.' },
-      { id: 'interior', label: 'التصميم الداخلي', hint: 'داخل المشروع حسب مكونات الدراسة المالية فقط.' }
+      { id: 'cover', label: 'الصورة الرئيسية' },
+      { id: 'east', label: 'الواجهة الشرقية' },
+      { id: 'west', label: 'الواجهة الغربية' },
+      { id: 'aerial', label: 'المنظر العلوي' },
+      { id: 'interior', label: 'التصميم الداخلي' }
     ];
 
     function emptyVisualConceptSlot(id) {
@@ -17701,8 +17700,7 @@
         ? '<img src="' + escapeHtml(image) + '" alt="' + escapeHtml(slotDef.label) + '">'
         : (locked ? 'مقفل حتى اعتماد الصورة الرئيسية.' : 'لم يتم توليد هذه الصورة بعد.');
       return '<article class="visual-concept-card' + (locked ? ' locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
-        '<div class="visual-concept-head"><div><h' + (slotDef.id === 'cover' ? '3' : '4') + '>' + escapeHtml(slotDef.label) + '</h' + (slotDef.id === 'cover' ? '3' : '4') + '>' +
-        '<p class="tenant-hint">' + escapeHtml(slotDef.hint) + '</p></div>' +
+        '<div class="visual-concept-head"><h3>' + escapeHtml(slotDef.label) + '</h3>' +
         '<span class="visual-concept-status ' + slot.status + '">' + statusLabel + '</span></div>' +
         '<div class="visual-concept-preview">' + preview + '</div>' +
         '<label>وصف الصورة</label>' +
@@ -17728,9 +17726,9 @@
       const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], false);
       const moodboardHtml = VISUAL_CONCEPT_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !coverApproved)).join('');
       host.innerHTML = coverHtml +
-        '<section><h3>المود بورد</h3><p class="tenant-hint">' +
-        (coverApproved ? 'كل صورة تُلف من الصورة الرئيسية المعتمدة. الداخلي يستخدم مكونات الدراسة المالية.' : 'المود بورد مقفل حتى اعتماد الصورة الرئيسية.') +
-        '</p><div class="visual-concept-grid">' + moodboardHtml + '</div></section>';
+        '<section class="visual-concept-stack">' +
+        (coverApproved ? '' : '<p class="tenant-hint">المود بورد مقفل حتى اعتماد الصورة الرئيسية.</p>') +
+        moodboardHtml + '</section>';
       host.querySelectorAll('[data-visual-prompt]').forEach(input => {
         input.addEventListener('input', () => {
           const slotId = input.getAttribute('data-visual-prompt');
