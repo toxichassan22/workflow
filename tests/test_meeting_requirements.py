@@ -1339,6 +1339,20 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertNotIn("@app.route('/api/project-draft', methods=['DELETE'])", app_source)
 
+    def test_project_form_action_bar_stays_visible_while_scrolling_every_section(self):
+        """Save/back stay on screen while the user is inside a long section, then settle at the
+        natural page end. The bar is shared by every project-form section, including floor design."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('.tenant-form-actions {', index_source)
+        actions_start = index_source.index('.tenant-form-actions {')
+        actions_end = index_source.index('}', actions_start)
+        actions_css = index_source[actions_start:actions_end]
+        self.assertIn('position: sticky', actions_css)
+        self.assertIn('bottom: 10px', actions_css)
+        self.assertNotIn('#tenantProjectPage.tenant-floor-design-project-mode>.tenant-form-actions', index_source)
+        self.assertIn('<div class="tenant-form-actions">', index_source)
+        self.assertIn('onclick="saveProjectAsDraft()"', index_source)
+
     def test_deep_links_serve_the_spa_instead_of_a_404(self):
         """Reloading or sharing a client-side route must not drop the user on an error page."""
         client = self.app.test_client()
