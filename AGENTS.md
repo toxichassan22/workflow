@@ -227,6 +227,23 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   references. Cover generation uses the overview map as the plot background
   and the uploaded style image only if the client supplied one. Moodboard
   generation uses the approved cover only.
+- **Rebuilding the form can wipe a saved draft.** `renderTenantProjectForm()`
+  recreates every `data-key` input empty, then persist helpers run immediately.
+  If a helper reads the new empty widget instead of `tenantProjectData`, the
+  next save stores blanks. This already happened twice:
+  - `target_audience` disappeared because `renderGroupedAudienceFields()` and
+    `persistClassificationDraftState()` wrote `{}` when the drawers were not
+    mounted yet.
+  - Moodboard images and prompts disappeared because
+    `persistVisualConceptDraftState()` rewrote `tenantCreativeImages.moodboard`
+    from empty slots. The cover survived only because it had a separate
+    `tenantCreativeImages.cover` fallback.
+  The fix: seed hidden inputs from `tenantProjectData` while building the
+  form, restore `tenantVisualConceptState` before persist, never replace a
+  populated value with `{}` / `''` during a render pass, and fall back to
+  previously saved creative assets (`cover`, `moodboard`,
+  `moodboard_prompts`) when a slot is empty. A later agent adding a custom
+  field must assume this wipe will happen unless they copy that pattern.
 - **Every new section or page gets an explicit draft save.** Give it a `data-key` in
   `#tenantProjectForm`, persist it from `saveProjectAsDraftNow()` /
   `collectTenantFormData()`, and put a visible `حفظ كمسودة` button on that page. Do not
