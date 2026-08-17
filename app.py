@@ -694,27 +694,16 @@ def _visual_concept_directions(project_data):
     return rows
 
 
-def _visual_concept_land_photo_ids(project_data):
+def _visual_concept_style_reference_id(project_data):
     source = project_data if isinstance(project_data, dict) else {}
-    meta = source.get('land_photos_file_meta')
-    if isinstance(meta, str):
-        meta = _visual_concept_parse_json(meta, [])
-    ids = []
-    if isinstance(meta, list):
-        for item in meta:
-            file_id = item.get('id') if isinstance(item, dict) else item
-            file_id = str(file_id or '').strip()
-            if file_id and file_id not in ids:
-                ids.append(file_id)
-    raw_ids = source.get('land_photos_file_ids')
-    if isinstance(raw_ids, str):
-        raw_ids = _visual_concept_parse_json(raw_ids, [])
-    if isinstance(raw_ids, list):
-        for file_id in raw_ids:
-            file_id = str(file_id or '').strip()
-            if file_id and file_id not in ids:
-                ids.append(file_id)
-    return ids[:4]
+    visual = source.get('visual_concept')
+    if isinstance(visual, str):
+        visual = _visual_concept_parse_json(visual, {})
+    if isinstance(visual, dict):
+        file_id = str(visual.get('styleReferenceFileId') or visual.get('style_reference_file_id') or '').strip()
+        if file_id:
+            return file_id
+    return str(source.get('visual_style_reference_file_id') or '').strip()
 
 
 def _visual_concept_overview_map_url(project_data):
@@ -783,7 +772,7 @@ def _visual_concept_facts(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     directions = _visual_concept_directions(source)
     components = _visual_concept_components(source)
-    land_photo_ids = _visual_concept_land_photo_ids(source)
+    style_reference_id = _visual_concept_style_reference_id(source)
     map_url = _visual_concept_overview_map_url(source)
     facades_count = _visual_concept_text(_visual_concept_read(source, 'facades_count'), 40)
     facades_directions = _visual_concept_text(_visual_concept_read(source, 'facades_directions'), 240)
@@ -803,7 +792,7 @@ def _visual_concept_facts(project_data):
         'district': _visual_concept_text(_visual_concept_read(source, 'district'), 80),
         'directions': directions,
         'components': components,
-        'land_photo_ids': land_photo_ids,
+        'style_reference_file_id': style_reference_id,
         'overview_map_url': map_url,
     }
     return facts
@@ -855,9 +844,15 @@ def _visual_concept_normalize_slot(slot_id):
 def _visual_concept_slot_instruction(slot_id, facts):
     name = facts.get('project_name') or 'the project'
     if slot_id == 'cover':
+        style_note = (
+            'If a style-reference building image is attached, follow its architectural signature, materials, and design language. '
+            if facts.get('style_reference_file_id') else
+            'No style-reference image was supplied; invent the architecture from the project facts only. '
+        )
         return (
             f'Create the primary architectural hero photograph of {name}. '
-            'Show the building sitting on the attached site/map footprint. '
+            'Use the attached site/map image as the actual ground and plot background. Place the building on that plot. '
+            + style_note +
             'The composition is a cinematic exterior establishing shot, 16:9.'
         )
     if slot_id == 'east':
@@ -909,8 +904,8 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"المدينة والحي: {location or 'غير متوفر'}\n"
         f"جدول الاتجاهات:\n{directions}\n"
         f"مكونات الدراسة المالية:\n{components}\n"
-        f"صور الأرض المرفقة: {len(facts.get('land_photo_ids') or [])}\n"
-        f"خريطة الأرض / المبنى: {'مرفقة' if facts.get('overview_map_url') else 'غير متوفرة'}\n"
+        f"صورة مرجعية للتصميم: {'مرفقة' if facts.get('style_reference_file_id') else 'غير مرفوعة — ولّد التصميم من البيانات فقط'}\n"
+        f"خريطة الأرض / المبنى كخلفية الموقع: {'مرفقة' if facts.get('overview_map_url') else 'غير متوفرة'}\n"
         f"نوع الصورة المطلوبة: {VISUAL_CONCEPT_SLOT_LABELS.get(slot_id, slot_id)}\n"
         f"تعليمات الكادر: {_visual_concept_slot_instruction(slot_id, facts)}"
     )
@@ -997,9 +992,10 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
 
 def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''):
     if slot_id == 'cover':
+        file_ids = [facts.get('style_reference_file_id')] if facts.get('style_reference_file_id') else []
         return _visual_concept_reference_uris(
             urls=[facts.get('overview_map_url')] if facts.get('overview_map_url') else [],
-            file_ids=facts.get('land_photo_ids') or [],
+            file_ids=file_ids,
         )
     references = []
     if cover_image:
@@ -3281,7 +3277,7 @@ def api_visual_concept_preflight():
         'missingFields': missing,
         'facts': {
             'project_name': facts.get('project_name'),
-            'landPhotoCount': len(facts.get('land_photo_ids') or []),
+            'hasStyleReference': bool(facts.get('style_reference_file_id')),
             'hasOverviewMap': bool(facts.get('overview_map_url')),
             'componentCount': len(facts.get('components') or []),
         },
@@ -3312,11 +3308,6 @@ def api_visual_concept_prompt():
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, data.get('coverImage') or '')
-    if slot_id == 'cover':
-        references = _visual_concept_reference_uris(
-            urls=[facts.get('overview_map_url')] if facts.get('overview_map_url') else [],
-            file_ids=facts.get('land_photo_ids') or [],
-        )
     current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
     instruction = _visual_concept_text(data.get('instruction') or data.get('message'), 4000)
     try:
@@ -3406,11 +3397,6 @@ def api_visual_concept_chat():
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
-    if slot_id == 'cover':
-        references = _visual_concept_reference_uris(
-            urls=[facts.get('overview_map_url')] if facts.get('overview_map_url') else [],
-            file_ids=facts.get('land_photo_ids') or [],
-        )
     try:
         prompt, reply = _visual_concept_generate_prompt_text(
             facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references
@@ -10228,9 +10214,9 @@ PROJECT_FILE_EXTENSIONS = {
     '.webp': 'image/webp', '.pdf': 'application/pdf'
 }
 PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license',
-                      'regulation_reference', 'team_logo'}
+                      'regulation_reference', 'team_logo', 'visual_reference'}
 # Types that must be real images: they are rendered in <img> thumbnails, where a PDF shows nothing.
-PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo'}
+PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'visual_reference'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
 
 

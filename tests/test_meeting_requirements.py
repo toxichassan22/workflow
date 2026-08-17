@@ -2488,6 +2488,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("api('POST', '/api/visual-concept/prompt'", index_source)
         self.assertIn("apiWithTimeout('POST', '/api/visual-concept/generate'", index_source)
         self.assertIn('visual-concept-stack', index_source)
+        self.assertIn('visualConceptStyleReferenceInput', index_source)
+        self.assertIn("input.dataset.projectFileType = 'visual_reference'", index_source)
         self.assertNotIn('visual-concept-grid', index_source)
         self.assertNotIn('نفس المبنى المعتمد', index_source)
         self.assertNotIn('tenantMainImagePage', index_source)
@@ -2500,6 +2502,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn("VISUAL_CONCEPT_MOODBOARD_SLOTS = ('east', 'west', 'aerial', 'interior')", source)
         self.assertIn("'overview_map', 'خريطة الأرض / المبنى'", source)
+        self.assertIn('style_reference_file_id', source)
+        self.assertNotIn("facts.get('land_photo_ids')", source)
+        self.assertIn('visual_reference', self.application_module.PROJECT_FILE_TYPES)
+        self.assertIn('visual_reference', self.application_module.PROJECT_IMAGE_ONLY_TYPES)
         self.assertIn('approved_financial_area', source)
 
         incomplete = client.post('/api/visual-concept/preflight', headers=self._headers(self.token_a), json={

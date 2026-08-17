@@ -6651,6 +6651,17 @@
           <h2>التصور البصري</h2>
           <p class="tenant-hint">ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة. المود بورد يُفتح بعد اعتماد الصورة الرئيسية.</p>
           <div id="visualConceptMissing" class="visual-concept-missing" hidden></div>
+          <div class="visual-concept-card">
+            <div class="visual-concept-head">
+              <h3>الصورة المرجعية</h3>
+            </div>
+            <p class="tenant-hint">اختياري: ارفع صورة مبنى يعجبك ليأخذ التوليد نفس التصميم. لو لم ترفع صورة، يولد النظام التصميم من بيانات المشروع وخريطة الأرض فقط.</p>
+            <input id="visualConceptStyleReferenceInput" type="file" accept="image/png,image/jpeg,image/jpg,image/webp">
+            <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="min-height:140px;margin-top:12px">لم تُرفع صورة مرجعية.</div>
+            <div class="visual-concept-actions">
+              <button type="button" class="btn ghost small" onclick="clearVisualConceptStyleReference()">حذف الصورة المرجعية</button>
+            </div>
+          </div>
           <div id="visualConceptWorkspace" class="visual-concept-page"></div>
           <div class="tenant-form-actions">
             <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
@@ -17643,12 +17654,18 @@
         slots.cover.prompt = slots.cover.prompt || tenantCreativeImages.cover_prompt || '';
         slots.cover.status = 'approved';
       }
-      return { version: 1, slots };
+      return {
+        version: 1,
+        slots,
+        styleReferenceFileId: String(source.styleReferenceFileId || source.style_reference_file_id || '').trim(),
+        styleReferenceName: String(source.styleReferenceName || '').trim()
+      };
     }
 
     function persistVisualConceptDraftState() {
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
       tenantProjectData.visual_concept = tenantVisualConceptState;
+      tenantProjectData.visual_style_reference_file_id = tenantVisualConceptState.styleReferenceFileId || '';
       const cover = tenantVisualConceptState.slots.cover || {};
       tenantCreativeImages = tenantCreativeImages || {};
       tenantCreativeImages.cover = cover.approvedImageUrl || tenantCreativeImages.cover || '';
@@ -17721,11 +17738,54 @@
         '</div></article>';
     }
 
+    function renderVisualConceptStyleReference() {
+      const preview = document.getElementById('visualConceptStyleReferencePreview');
+      if (!preview) return;
+      const fileId = tenantVisualConceptState?.styleReferenceFileId;
+      if (!fileId) {
+        preview.textContent = 'لم تُرفع صورة مرجعية.';
+        return;
+      }
+      preview.innerHTML = '<img alt="الصورة المرجعية" style="width:100%;max-height:220px;object-fit:contain;display:block">';
+      attachProjectFileThumbnail(preview.querySelector('img'), fileId);
+    }
+
+    async function uploadVisualConceptStyleReference(input) {
+      const file = input?.files?.[0];
+      if (!file) return;
+      try {
+        input.dataset.projectFileType = 'visual_reference';
+        const uploaded = await uploadTenantProjectFileInput(input, 'visual_style_reference');
+        const fileId = uploaded?.id || uploaded;
+        if (!fileId) throw new Error('تعذر رفع الصورة المرجعية');
+        tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+        tenantVisualConceptState.styleReferenceFileId = fileId;
+        tenantVisualConceptState.styleReferenceName = uploaded.originalName || file.name || '';
+        markVisualConceptDirty();
+        renderVisualConceptStyleReference();
+        toast('تم حفظ الصورة المرجعية. ستُستخدم في توليد الصورة الرئيسية.');
+      } catch (error) {
+        toast(error.message || 'تعذر رفع الصورة المرجعية');
+      } finally {
+        if (input) input.value = '';
+      }
+    }
+
+    function clearVisualConceptStyleReference() {
+      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+      tenantVisualConceptState.styleReferenceFileId = '';
+      tenantVisualConceptState.styleReferenceName = '';
+      markVisualConceptDirty();
+      renderVisualConceptStyleReference();
+      toast('تم حذف الصورة المرجعية. سيولد النظام التصميم من البيانات والخريطة فقط.');
+    }
+
     function renderVisualConceptPage() {
       const host = document.getElementById('visualConceptWorkspace');
       if (!host) return;
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
       persistVisualConceptDraftState();
+      renderVisualConceptStyleReference();
       const coverApproved = Boolean(tenantVisualConceptState.slots.cover.approvedImageUrl);
       const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], false);
       const moodboardHtml = VISUAL_CONCEPT_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !coverApproved)).join('');
@@ -17781,6 +17841,11 @@
       tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept || tenantVisualConceptState);
       persistVisualConceptDraftState();
       showTenantPage('tenantVisualConceptPage');
+      const input = document.getElementById('visualConceptStyleReferenceInput');
+      if (input && !input.dataset.bound) {
+        input.dataset.bound = '1';
+        input.addEventListener('change', () => uploadVisualConceptStyleReference(input));
+      }
       renderVisualConceptPage();
       await refreshVisualConceptPreflight();
     }
