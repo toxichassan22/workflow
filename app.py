@@ -1248,13 +1248,15 @@ def build_system_prompt(project_data, images_info, design_rules=None):
     # Truncate project data if too long to keep system prompt compact
     if len(project_json) > 4000:
         project_json = project_json[:4000] + '\n... [تم اختصار البيانات]'
+    timeline_note = slide_engine._timeline_data_note(project_data)
     return f"""{design_rules}
 
 ## بيانات المشروع
 {project_json}
 
 ## الصور المتوفرة
-{images_info}"""
+{images_info}
+{timeline_note}"""
 
 def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
     """Replace all logo placeholders and broken logo paths with tenant's logo URL."""
@@ -1352,7 +1354,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
         _min_s, _max_s, total = resolve_slide_bounds(branding)
         total = max(_min_s, min(total, _max_s))
     total = int(total)
-    base_user_msg = slide_engine.build_slide_user_msg(slide, slide_num, total, branding)
+    base_user_msg = slide_engine.build_slide_user_msg(slide, slide_num, total, branding, project_data=None)
 
     for attempt in range(1, max_retries + 2):
         try:
@@ -4833,7 +4835,8 @@ def api_ai_build_fields():
 from slide_engine import (
     build_slide_plan_prompt, parse_slide_plan, validate_slide_plan,
     generate_all_slides, extract_html_from_glm, CONTENT_DISTRIBUTION_RULES,
-    resolve_slide_bounds, build_fallback_plan, _suggest_design_style
+    resolve_slide_bounds, build_fallback_plan, _suggest_design_style,
+    _timeline_data_note,
 )
 
 
@@ -5913,6 +5916,7 @@ def api_generate_slide_single():
             "استخدم البيانات الموثقة التالية كما هي وممنوع تعديل الأرقام:\n" +
             json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
         )
+    timeline_note = _timeline_data_note(project_data)
 
     system_prompt = f"""{design_rules}
 
@@ -5924,6 +5928,7 @@ def api_generate_slide_single():
 
 ## بيانات المسافات والأوقات (ممنوع تعديل الأرقام)
 {landmarks_note}
+{timeline_note}
 
 ## قواعد عامة
 - كل شريحة 1280x720px (أو حسب نسبة العرض المحددة)
@@ -5942,7 +5947,7 @@ def api_generate_slide_single():
 
     slide = slides[slide_index]
     total = len(slides)
-    html = generate_single_slide(system_prompt, slide, slide_index + 1, total, branding, call_glm_fn, max_retries=3)
+    html = generate_single_slide(system_prompt, slide, slide_index + 1, total, branding, call_glm_fn, max_retries=3, project_data=project_data)
 
     # Never turn a failed generation into a fake successful slide. The client
     # can retry the request, but it must not save an incomplete presentation.

@@ -105,6 +105,93 @@ def _maybe_map_slide_type(title, project_data):
     return None
 
 
+TIMELINE_QUARTERS = ('Q1', 'Q2', 'Q3', 'Q4')
+
+
+def compute_timeline_end(year, quarter, duration):
+    """Return the inclusive end year/quarter from a start quarter and duration in months."""
+    try:
+        start_year = int(year)
+        quarter_index = TIMELINE_QUARTERS.index(str(quarter or '').strip())
+        months = int(duration)
+    except (TypeError, ValueError):
+        return None
+    if months <= 0:
+        return None
+    end_month = start_year * 12 + quarter_index * 3 + months - 1
+    return {
+        'year': str(end_month // 12),
+        'quarter': TIMELINE_QUARTERS[(end_month % 12) // 3],
+    }
+
+
+def parse_timeline_phases(project_data):
+    """Return named timeline phases from the draft table, including notes."""
+    source = project_data if isinstance(project_data, dict) else {}
+    raw = source.get('timeline_table_data')
+    if raw in (None, '', []):
+        raw = source.get('timelineRows')
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            raw = []
+    if not isinstance(raw, list):
+        return []
+    phases = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get('name') or '').strip()
+        if not name:
+            continue
+        year = str(item.get('year') or '').strip()
+        quarter = str(item.get('quarter') or '').strip()
+        duration = str(item.get('duration') or '').strip()
+        end_year = str(item.get('endYear') or '').strip()
+        end_quarter = str(item.get('endQuarter') or '').strip()
+        if not end_year or not end_quarter:
+            computed = compute_timeline_end(year, quarter, duration)
+            if computed:
+                end_year = end_year or computed['year']
+                end_quarter = end_quarter or computed['quarter']
+        phases.append({
+            'name': name,
+            'year': year,
+            'quarter': quarter,
+            'duration': duration,
+            'endYear': end_year,
+            'endQuarter': end_quarter,
+            'notes': str(item.get('notes') or '').strip(),
+        })
+    return phases
+
+
+def format_timeline_phase_line(phase):
+    start = ' '.join(part for part in (phase.get('year'), phase.get('quarter')) if part)
+    end = ' '.join(part for part in (phase.get('endYear'), phase.get('endQuarter')) if part)
+    span = f'{start} إلى {end}' if start and end else (start or end)
+    duration = phase.get('duration')
+    duration_text = f' لمدة {duration} شهر' if duration else ''
+    notes = phase.get('notes')
+    notes_text = f' — {notes}' if notes else ''
+    detail = f'{span}{duration_text}' if span or duration_text else ''
+    return f"{phase['name']}: {detail}{notes_text}".strip(': ').strip()
+
+
+def _timeline_data_note(project_data):
+    """Keep the phase table, including notes, outside the truncated project JSON."""
+    phases = parse_timeline_phases(project_data)
+    if not phases:
+        return ''
+    return (
+        "\n\n## الجدول الزمني للمشروع — إلزامي في شريحة الجدول الزمني\n"
+        "هذه المراحل مصدر الحقيقة. اعرض كل مرحلة مع بدايتها ومدتها ونهايتها المحسوبة.\n"
+        "عمود الملاحظات جزء من الشريحة: إذا وُجدت ملاحظة فاعرضها تحت المرحلة أو بجانبها، ولا تحذفها ولا تختصرها.\n"
+        + '\n'.join(f'- {format_timeline_phase_line(phase)}' for phase in phases)
+    )
+
+
 def _location_data_note(project_data):
     """Build an extra prompt note when map/location data is present."""
     if not project_data:
@@ -222,6 +309,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - لو في صور مود بورد متوفرة، ضع شريحة moodboard قبل الختام
 - لو في إحداثيات + بيانات موقع، يجب أن يتضمن العرض شرائح الموقع الأساسية: site_specs، map_overview، map_access، map_catchment، map_landmarks حسب توفر البيانات، بالإضافة إلى تحليل الموقع من الحقل site_analysis.
 - لا تحذف نوع المعلم أو المسافة أو مدة القيادة من جداول المعالم عند توفرها.
+- لو وُجد جدول زمني (`timeline_table_data`)، ضع شريحة خطة زمنية بنمط timeline واعرض كل مرحلة مع مدتها ونهايتها وملاحظتها. الملاحظات جزء من الشريحة وليست هامشًا داخليًا.
 - كل شريحة content لازم يكون فيها 3-6 bullets على الأقل
 - وزع المحتوى بحيث كل شريحة تكون ممتلئة بصرياً 60-85%
 """
@@ -321,6 +409,9 @@ def build_slide_plan_prompt(project_data, branding):
     location_note = _location_data_note(project_data)
     if location_note:
         prompt += location_note
+    timeline_note = _timeline_data_note(project_data)
+    if timeline_note:
+        prompt += timeline_note
     return prompt
 
 
@@ -547,7 +638,7 @@ def validate_slide_plan(plan, branding):
 # Single Slide Generation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_slide_user_msg(slide, slide_num, total_slides, branding):
+def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=None):
     """Build the user message for generating a single slide."""
     title = slide.get('title', f'شريحة {slide_num}')
     slide_type = slide.get('type', 'content')
@@ -560,7 +651,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding):
     style_instructions = {
         'dashboard': 'بطاقات أرقام مالية كبيرة (metrics) — كل رقم في بطاقة كبيرة 32-48px',
         'cards': 'بطاقات متعددة (2-6 بطاقات) بتخطيط مرن يناسب المحتوى — لا تلجأ تلقائياً إلى 4 بطاقات متساوية',
-        'timeline': 'خط زمني أفقي — نقاط لكل مرحلة مع أشرطة ملونة',
+        'timeline': 'خط زمني أفقي — نقاط لكل مرحلة مع أشرطة ملونة، واعرض الملاحظة تحت المرحلة إن وُجدت',
         'table': 'جدول احترافي — header ملون + صفوف متبادلة + صف إجمالي بارز',
         'text': 'نص + نقاط (bullets) في قائمة منظمة',
         'image': 'صورة رئيسية + نص قصير — استخدم placeholder الصورة المحدد',
@@ -606,6 +697,11 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding):
     ]
     if placeholder_note:
         notes.insert(0, placeholder_note)
+    if design_style == 'timeline' or re.search(r'(?:خطة|زمن|جدول|مراحل)', title):
+        notes.append('اعرض مراحل الجدول الزمني كما وردت، بما في ذلك عمود الملاحظات داخل الشريحة.')
+        timeline_note = _timeline_data_note(project_data)
+        if timeline_note:
+            notes.append(timeline_note.strip())
     notes_text = '\n'.join(f'- {n}' for n in notes)
 
     return f"""أنشئ شريحة {slide_num}/{total_slides}: {title}
@@ -669,12 +765,12 @@ def _ensure_map_placeholder(html, slide_type):
     return html
 
 
-def generate_single_slide(system_prompt, slide, slide_num, total_slides, branding, call_glm_fn, max_retries=2):
+def generate_single_slide(system_prompt, slide, slide_num, total_slides, branding, call_glm_fn, max_retries=2, project_data=None):
     """
     Generate a single slide's HTML.
     call_glm_fn: function(system_prompt, user_msg, max_tokens) -> response_dict
     """
-    user_msg = build_slide_user_msg(slide, slide_num, total_slides, branding)
+    user_msg = build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=project_data)
     slide_title = slide.get('title', f'شريحة {slide_num}')
     slide_type = slide.get('type', 'content')
 
@@ -1154,6 +1250,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
             "استخدم البيانات الموثقة التالية كما هي وممنوع تعديل الأرقام:\n" +
             json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
         )
+    timeline_note = _timeline_data_note(project_data)
 
     system_prompt = f"""{design_rules}
 
@@ -1165,6 +1262,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
 
 ## بيانات المسافات والأوقات (ممنوع تعديل الأرقام)
 {landmarks_note}
+{timeline_note}
 
 ## قواعد عامة
 - كل شريحة 1280x720px (أو حسب نسبة العرض المحددة)
@@ -1183,7 +1281,8 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
         for i, slide in enumerate(slides):
             future = executor.submit(
                 generate_single_slide,
-                system_prompt, slide, i + 1, total, branding, call_glm_fn
+                system_prompt, slide, i + 1, total, branding, call_glm_fn,
+                project_data=project_data
             )
             future_to_idx[future] = i
 

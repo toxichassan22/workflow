@@ -1472,7 +1472,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function computeTimelineEnd(year, quarter, duration)', index_source)
         self.assertIn('class="tl-end"', index_source)
         self.assertIn('endYear: end ? String(end.year) : \'\'', index_source)
-        self.assertIn('الملاحظات داخلية في الملف فقط', index_source)
+        self.assertIn('الملاحظات تظهر مع المرحلة في شريحة الجدول الزمني', index_source)
+        self.assertNotIn('الملاحظات داخلية في الملف فقط', index_source)
 
         # Rows can be deleted, and one editable row always survives.
         self.assertIn('function removeTimelineRow(button)', index_source)
@@ -1505,6 +1506,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         restored = json.loads(draft_data['timeline_table_data'])[0]
         self.assertEqual(restored['quarter'], 'Q3')
         self.assertEqual(restored['notes'], 'بانتظار الأمانة')
+
+        note = self.application_module.slide_engine._timeline_data_note({
+            'timeline_table_data': json.dumps(rows, ensure_ascii=False)
+        })
+        self.assertIn('التراخيص', note)
+        self.assertIn('بانتظار الأمانة', note)
+        self.assertIn('2027 Q4', note)
 
     def test_components_live_only_inside_the_financial_study(self):
         """The standalone components section duplicated id="componentsTable", and duplicate ids

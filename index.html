@@ -15279,7 +15279,7 @@
           </table>
         </div>
         <button type="button" class="btn ghost small" style="margin-top:10px" onclick="addTimelineRow()">إضافة مرحلة</button>
-        <p class="tenant-hint" style="margin:8px 0 0">عمود «إلى» يُحسب تلقائيًا من البداية والمدة. الملاحظات داخلية في الملف فقط ولا تظهر في الشرائح أو الدراسة المالية.</p>
+        <p class="tenant-hint" style="margin:8px 0 0">عمود «إلى» يُحسب تلقائيًا من البداية والمدة. الملاحظات تظهر مع المرحلة في شريحة الجدول الزمني.</p>
         <input type="hidden" data-key="timeline_table_data" data-type="text" id="timelineTableData">
       `;
       div.querySelector('.tenant-section-title')?.replaceWith(
@@ -15333,7 +15333,7 @@
         '<td><select class="tl-quarter" style="min-width:78px" onchange="updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()">' + options + '</select></td>' +
         '<td><input type="number" class="tl-duration" min="1" value="' + attr(data.duration) + '" placeholder="0" style="width:78px" oninput="updateTimelineRowEnd(this.closest(\'tr\'))" onchange="updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()"></td>' +
         '<td><input type="text" class="tl-end" value="' + attr(formatTimelineEnd(end)) + '" readonly title="تُحسب من البداية والمدة"></td>' +
-        '<td><input type="text" class="tl-notes" value="' + attr(data.notes) + '" placeholder="ملاحظات داخلية للمرحلة" onchange="saveTimelineData()"></td>' +
+        '<td><input type="text" class="tl-notes" value="' + attr(data.notes) + '" placeholder="ملاحظة تظهر في الشريحة" onchange="saveTimelineData()"></td>' +
         '<td><button type="button" class="btn danger small" style="padding:4px 9px;font-size:11px" onclick="removeTimelineRow(this)" title="حذف المرحلة">حذف</button></td>';
     }
 
