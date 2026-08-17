@@ -216,6 +216,12 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   widgets (`<select>` overlays, drawers, maps, tables) must never be the only copy of the
   value. Classification currently uses `persistClassificationDraftState()` for
   `project_type`, `project_subtype`, `target_audience`, and `activity_class`.
+  Visual concept uses `persistVisualConceptDraftState()` for the hidden
+  `visual_concept` input plus `tenantCreativeImages`.
+- **Every new section or page gets an explicit draft save.** Give it a `data-key` in
+  `#tenantProjectForm`, persist it from `saveProjectAsDraftNow()` /
+  `collectTenantFormData()`, and put a visible `حفظ كمسودة` button on that page. Do not
+  rely on autosave or on values that live only in a JS object.
 - **Drafts are never autosaved.** `triggerAutoSaveDraft()` keeps its name (~40 call sites) but only
   sets the dirty flag via `setDraftDirty()`; a `beforeunload` handler warns about unsaved work.
   Saving happens through `saveProjectAsDraft()` (the "حفظ كمسودة" buttons) and at a few explicit

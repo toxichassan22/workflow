@@ -2481,6 +2481,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة', index_source)
         self.assertIn('function persistVisualConceptDraftState()', index_source)
         self.assertIn("data-key=\"visual_concept\"", index_source)
+        self.assertIn('function persistVisualConceptDraftState()', index_source)
+        visual_page = index_source[index_source.index('id="tenantVisualConceptPage"'):index_source.index('id="tenantSlidesPage"')]
+        self.assertIn('onclick="saveProjectAsDraft()"', visual_page)
+        self.assertIn('حفظ كمسودة', visual_page)
         self.assertIn("api('POST', '/api/visual-concept/prompt'", index_source)
         self.assertIn("apiWithTimeout('POST', '/api/visual-concept/generate'", index_source)
         self.assertIn('visual-concept-stack', index_source)
