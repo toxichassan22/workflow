@@ -2491,37 +2491,6 @@
       background: var(--soft);
     }
 
-    .tenant-creative-preview {
-      min-height: 260px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      overflow: hidden;
-      background: #fff;
-      color: var(--muted);
-    }
-
-    .tenant-creative-preview img {
-      width: 100%;
-      height: 100%;
-      max-height: 460px;
-      object-fit: cover;
-      display: block;
-    }
-
-    .tenant-moodboard-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-    }
-
-    .tenant-moodboard-grid .tenant-creative-preview {
-      aspect-ratio: 16/10;
-      min-height: 0;
-    }
-
     .tenant-designer-chat {
       margin-top: 28px;
       background: #fff;
@@ -6547,76 +6516,12 @@
 
     </section>
 
-    <!-- Cover image generation -->
-    <section id="tenantMainImagePage" class="tenant-page">
+    <section id="tenantVisualConceptPage" class="tenant-page">
       <div class="workflow-stage-layout">
         <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
         <div class="workflow-stage-content">
-          <h2>توليد الصورة الرئيسية للمشروع</h2>
-          <p class="tenant-hint" style="margin-bottom:16px">قم براجعة أو تعديل الوصف النصي، ثم اضغط <strong>"توليد
-              الصورة"</strong>. عند الوصول للنتيجة المناسبة، اضغط <strong>"إعتماد الصورة"</strong> لتأكيد حفظها في العرض
-            والمسودة.</p>
-
-          <div class="tenant-image-card"
-            style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.03);">
-            <div id="tenantMainImagePreview" class="tenant-creative-preview"
-              style="min-height:260px;display:flex;align-items:center;justify-content:center;border-radius:12px;overflow:hidden;background:#f8fafc;position:relative;">
-              لم يتم توليد صورة رئيسية بعد.
-            </div>
-
-            <div style="margin-top:18px;">
-              <label style="display:block;font-weight:700;margin-bottom:8px;color:var(--text-main);">وصف الصورة الرئيسية
-                (Prompt)</label>
-              <textarea id="tenantMainImagePromptInput"
-                oninput="tenantCreativeImages.cover_prompt=this.value;triggerAutoSaveDraft()"
-                placeholder="أدخل الوصف التفصيلي للصورة الرئيسية..." rows="3"
-                style="width:100%;border:1px solid #ddd;border-radius:12px;padding:12px;font-family:inherit;font-size:13px;margin-bottom:12px;"></textarea>
-
-              <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-                <button class="btn primary" onclick="generateTenantMainImageFromPrompt()"
-                  style="background:#3B6E91;color:#fff;border:none;padding:10px 20px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;">
-                  توليد الصورة
-                </button>
-                <button id="approveMainImageBtn" class="btn primary" onclick="approveTenantMainImage()"
-                  style="background:#2e7d32;color:#fff;border:none;padding:10px 20px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;">
-                  إعتماد الصورة الرئيسية
-                </button>
-                <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ صفحة الصورة كمسودة</button>
-                <button class="btn ghost" onclick="refreshImagePromptsWithGLM()"
-                  style="border:1px solid #cbd5e1;padding:10px 16px;border-radius:10px;display:flex;align-items:center;gap:6px;font-weight:600;font-size:12px;margin-right:auto;">
-                  إعادة صياغة الوصف بـ GLM 5.1
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="tenant-btns" style="display:flex;gap:12px;justify-content:space-between;">
-            <button class="btn ghost" onclick="showTenantPage('tenantProjectPage')">عودة لبيانات المشروع</button>
-            <button class="btn primary" onclick="goToTenantMoodboard()">التالي: صور المود بورد </button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Moodboard image generation -->
-    <section id="tenantMoodboardPage" class="tenant-page">
-      <div class="workflow-stage-layout">
-        <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
-        <div class="workflow-stage-content">
-          <h2>توليد صور المود بورد (Moodboard)</h2>
-          <p class="tenant-hint" id="tenantMoodboardHint" style="margin-bottom:16px">لكل صورة، يمكنك تعديل الوصف النصي
-            المخصص لها، ثم ضغط <strong>"توليد الصورة"</strong>، ثم <strong>"إعتماد الصورة"</strong> لكل عنصر على حدة.
-          </p>
-
-          <div id="tenantMoodboardPreview" class="tenant-moodboard-cards-grid"
-            style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:20px;margin-bottom:24px;">
-          </div>
-
-          <div class="tenant-btns" style="display:flex;gap:12px;justify-content:space-between;margin-top:20px;">
-            <button class="btn ghost" onclick="goToTenantMainImage()">عودة للصورة الرئيسية</button>
-            <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ صفحة المود بورد كمسودة</button>
-            <button class="btn primary" onclick="generateTenantSlides()"> توليد العرض والتصميم</button>
-          </div>
+          <h2>التصور البصري</h2>
+          <p class="tenant-hint">سيتم تجهيز محتوى التصور البصري هنا. سيشمل هذا القسم الصورة الرئيسية والمود بورد في مرحلة لاحقة.</p>
         </div>
       </div>
     </section>
@@ -7850,8 +7755,7 @@
     const TENANT_NAVIGATION_CONTEXT_PAGES = new Set([
       'tenantProjectPage',
       'tenantFloorDesignPage',
-      'tenantMainImagePage',
-      'tenantMoodboardPage',
+      'tenantVisualConceptPage',
       'tenantSlidesPage',
       'tenantGenerationPage'
     ]);
@@ -7930,8 +7834,7 @@
       tenantDashboardPage: '/app/dashboard',
       tenantProjectPage: '/app/projects/new',
       tenantFloorDesignPage: '/app/projects/floor-design',
-      tenantMainImagePage: '/app/projects/generation/cover',
-      tenantMoodboardPage: '/app/projects/generation/moodboard',
+      tenantVisualConceptPage: '/app/projects/visual-concept',
       tenantGenerationPage: '/app/projects/generation',
       tenantSlidesPage: '/app/presentations/current',
       tenantPresentationsPage: '/app/presentations',
@@ -8034,8 +7937,7 @@
     const TENANT_WORKFLOW_ITEMS = [
       { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
       { pageId: 'tenantFloorDesignPage', label: 'تصميم صور الطوابق' },
-      { pageId: 'tenantMainImagePage', label: 'الصورة الرئيسية' },
-      { pageId: 'tenantMoodboardPage', label: 'المود بورد' },
+      { pageId: 'tenantVisualConceptPage', label: 'التصور البصري' },
       { pageId: 'tenantSlidesPage', label: 'صفحة التصميم والمعاينة' }
     ];
 
@@ -8052,11 +7954,8 @@
         showTenantPage('tenantSlidesPage');
         return;
       }
-      if (pageId === 'tenantMainImagePage') {
-        return goToTenantMainImage();
-      }
-      if (pageId === 'tenantMoodboardPage') {
-        return goToTenantMoodboard();
+      if (pageId === 'tenantVisualConceptPage') {
+        showTenantPage(pageId);
       }
     }
 
@@ -8108,8 +8007,7 @@
     const TGR_STAGES = [
       { id: 'tenantProjectPage', label: 'بيانات المشروع' },
       { id: 'tenantFloorDesignPage', label: 'تصميم صور الطوابق' },
-      { id: 'tenantMainImagePage', label: 'الصورة الرئيسية' },
-      { id: 'tenantMoodboardPage', label: 'المود بورد' },
+      { id: 'tenantVisualConceptPage', label: 'التصور البصري' },
       { id: 'tenantSlidesPage', label: 'معاينة الشرائح' }
     ];
 
@@ -17436,7 +17334,7 @@
         setGenStep('plan', 'done');
         setGenPct(20, 'تم إعداد خطة الشرائح — جاري توليد الصور...');
         triggerAutoSaveDraft();
-        await goToTenantMainImage();
+        showTenantPage('tenantVisualConceptPage');
       } else {
         const errorMessage = data.error || 'فشل إعداد خطة العرض';
         setGenStep('plan', 'error');
@@ -17567,234 +17465,6 @@
     let tempCoverImage = null;
     let tempMoodboardImages = {};
 
-    async function prepareDefaultImagePrompts(forceRefresh = false) {
-      if (typeof collectTenantFormData === 'function') {
-        try {
-          const formData = await collectTenantFormData();
-          tenantProjectData = { ...tenantProjectData, ...formData };
-        } catch (e) {
-          console.warn('[FORM] Error collecting form data:', e);
-        }
-      }
-      if (!tenantProjectData) return;
-      const count = (tenantBranding && tenantBranding.moodboard_count) ? tenantBranding.moodboard_count : 4;
-      tenantCreativeImages = tenantCreativeImages || {};
-
-      if (forceRefresh || !tenantCreativeImages.cover_prompt || !tenantCreativeImages.moodboard_prompts || tenantCreativeImages.moodboard_prompts.length < count) {
-        showLoader('جاري صياغة أوصاف الصور بالذكاء الاصطناعي', 'يقوم محرك GLM 5.1 بتحليل بيانات المشروع...', 42);
-        updateLoaderProgress(42, 'تحليل البيانات وتوليد الأوصاف...');
-        try {
-          const res = await api('POST', '/api/get-image-prompts', {
-            projectData: tenantProjectData,
-            count: count
-          });
-          if (res && res.success) {
-            if (forceRefresh || !tenantCreativeImages.cover_prompt) tenantCreativeImages.cover_prompt = res.cover_prompt;
-            if (forceRefresh || !tenantCreativeImages.moodboard_prompts || !tenantCreativeImages.moodboard_prompts.length) {
-              tenantCreativeImages.moodboard_prompts = res.moodboard_prompts;
-            }
-          }
-        } catch (e) {
-          console.warn('[PROMPTS] Error fetching default prompts:', e);
-        } finally {
-          hideLoader();
-        }
-      }
-    }
-
-    async function refreshImagePromptsWithGLM() {
-      await prepareDefaultImagePrompts(true);
-      const promptInput = document.getElementById('tenantMainImagePromptInput');
-      if (promptInput && tenantCreativeImages.cover_prompt) {
-        promptInput.value = tenantCreativeImages.cover_prompt;
-      }
-      renderTenantMainImage();
-      renderTenantMoodboard();
-      toast('تمت إعادة صياغة الأوصاف بالذكاء الاصطناعي GLM 5.1 بناءً على جميع بيانات المشروع!');
-    }
-
-    function renderTenantMainImage() {
-      const preview = document.getElementById('tenantMainImagePreview');
-      if (!preview) return;
-
-      const imgToDisplay = tempCoverImage || tenantCreativeImages.cover;
-      const promptInput = document.getElementById('tenantMainImagePromptInput');
-
-      if (promptInput && tenantCreativeImages.cover_prompt && !promptInput.value) {
-        promptInput.value = tenantCreativeImages.cover_prompt;
-      }
-
-      if (imgToDisplay) {
-        const badge = tempCoverImage
-          ? '<div style="position:absolute;top:10px;right:10px;background:#f59e0b;color:#fff;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;z-index:2;"> معاينة مؤقتة (اضغط إعتماد الصورة للحفظ)</div>'
-          : '<div style="position:absolute;top:10px;right:10px;background:#10b981;color:#fff;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;z-index:2;"> مُعتمدة ومحفوظة</div>';
-
-        preview.innerHTML = badge + '<img src="' + escapeHtml(imgToDisplay) + '" alt="الصورة الرئيسية للمشروع" style="width:100%;max-height:400px;object-fit:cover;border-radius:12px;">';
-      } else {
-        preview.innerHTML = '<div style="color:#64748b;font-size:14px;padding:30px;text-align:center;">لم يتم توليد صورة رئيسية بعد.<br><small style="color:#94a3b8;">قم براجعة الوصف أدناه واضغط "توليد الصورة"</small></div>';
-      }
-    }
-
-    function renderTenantMoodboard() {
-      const preview = document.getElementById('tenantMoodboardPreview');
-      if (!preview) return;
-
-      const images = tenantCreativeImages.moodboard || [];
-      const targetCount = (tenantBranding && tenantBranding.moodboard_count) ? tenantBranding.moodboard_count : 4;
-      const count = Math.max(images.length, targetCount);
-
-      const indices = Array.from({ length: count }, (_, i) => i);
-      const defaultPrompts = tenantCreativeImages.moodboard_prompts || [];
-
-      preview.innerHTML = indices.map(i => {
-        const approvedImg = images[i];
-        const tempImg = tempMoodboardImages[i];
-        const displayImg = tempImg || approvedImg || '';
-        const promptVal = (defaultPrompts[i] || ('وصف صورة المود بورد رقم ' + (i + 1))).replace(/"/g, '&quot;');
-
-        let badgeHtml = '<span style="background:#94a3b8;color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;">غير مُولدة</span>';
-        if (tempImg) {
-          badgeHtml = '<span style="background:#f59e0b;color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;"> معاينة مؤقتة</span>';
-        } else if (approvedImg) {
-          badgeHtml = '<span style="background:#10b981;color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;"> مُعتمدة</span>';
-        }
-
-        const imgBox = displayImg
-          ? '<img src="' + escapeHtml(displayImg) + '" alt="صورة مود بورد ' + (i + 1) + '" style="width:100%;height:180px;object-fit:cover;border-radius:8px;margin-bottom:10px;">'
-          : '<div style="width:100%;height:180px;background:#f1f5f9;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;margin-bottom:10px;">صورة مود بورد ' + (i + 1) + '</div>';
-
-        return '<div class="tenant-moodboard-card" style="background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,0.03);display:flex;flex-direction:column;justify-content:space-between;">' +
-          '<div>' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
-          '<span style="font-weight:700;font-size:13px;color:var(--text-main);">صورة مود بورد #' + (i + 1) + '</span>' +
-          badgeHtml +
-          '</div>' +
-          imgBox +
-          '<label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475569;">وصف الصورة (Prompt)</label>' +
-          '<textarea id="tenantMoodboardPrompt_' + i + '" rows="2" oninput="tenantCreativeImages.moodboard_prompts=tenantCreativeImages.moodboard_prompts||[];tenantCreativeImages.moodboard_prompts[' + i + ']=this.value;triggerAutoSaveDraft()" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px;font-family:inherit;font-size:12px;margin-bottom:10px;resize:vertical;">' + escapeHtml(promptVal) + '</textarea>' +
-          '</div>' +
-          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">' +
-          '<button class="btn primary" onclick="generateTenantMoodboardSingleImage(' + i + ')" style="flex:1;background:#3B6E91;color:#fff;border:none;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;"> توليد الصورة</button>' +
-          '<button class="btn primary" onclick="approveTenantMoodboardSingleImage(' + i + ')" style="flex:1;background:#2e7d32;color:#fff;border:none;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;"> إعتماد</button>' +
-          '</div>' +
-          '</div>';
-      }).join('');
-
-      const hint = document.getElementById('tenantMoodboardHint');
-      if (hint) {
-        hint.innerHTML = count + ' صور مرجعية للتصميم. قم براجعة وصف كل صورة، ثم اضغط <strong>"توليد الصورة"</strong>، ثم <strong>"إعتماد الصورة"</strong> لكل عنصر على حدة.';
-      }
-    }
-
-    async function goToTenantMainImage() {
-      if (!tenantSlidePlan || !tenantProjectData) {
-        toast('أنشئ هيكل الشرائح أولاً.');
-        return;
-      }
-      await prepareDefaultImagePrompts();
-      if (!tenantPresentationId) await saveProjectAsDraft(true);
-      renderTenantMainImage();
-      showTenantPage('tenantMainImagePage');
-    }
-
-    async function goToTenantMoodboard() {
-      if (!tenantSlidePlan || !tenantProjectData) {
-        toast('أنشئ هيكل الشرائح أولاً.');
-        return;
-      }
-      await prepareDefaultImagePrompts();
-      if (!tenantPresentationId) await saveProjectAsDraft(true);
-      renderTenantMoodboard();
-      showTenantPage('tenantMoodboardPage');
-    }
-
-    async function generateTenantMainImageFromPrompt() {
-      const promptInput = document.getElementById('tenantMainImagePromptInput');
-      const prompt = promptInput ? promptInput.value.trim() : '';
-      if (!prompt) { toast('أدخل وصفًا للصورة الرئيسية أولاً'); return; }
-
-      tenantCreativeImages = tenantCreativeImages || {};
-      tenantCreativeImages.cover_prompt = prompt;
-
-      showLoader('جاري توليد الصورة الرئيسية', 'يتم التواصل مع الذكاء الاصطناعي لتوليد الصورة...');
-      try {
-        const data = await api('POST', '/api/generate-image', {
-          prompt: prompt,
-          referenceImage: tenantCreativeImages.cover || null
-        });
-        hideLoader();
-        if (data && data.success && data.image) {
-          tempCoverImage = data.image;
-          triggerAutoSaveDraft();
-          renderTenantMainImage();
-          toast('تم توليد المعاينة بنجاح! اضغط "إعتماد الصورة" لتثبيتها في العرض.');
-        } else {
-          toast((data && data.error) || 'تعذر توليد الصورة الرئيسية');
-        }
-      } catch (err) {
-        hideLoader();
-        toast('حدث خطأ أثناء توليد الصورة');
-      }
-    }
-
-    function approveTenantMainImage() {
-      const imgToApprove = tempCoverImage || tenantCreativeImages.cover;
-      if (!imgToApprove) {
-        toast('قم بتوليد صورة أولاً حتى تتمكن من إعتمادها');
-        return;
-      }
-      tenantCreativeImages = tenantCreativeImages || {};
-      tenantCreativeImages.cover = imgToApprove;
-      tempCoverImage = null;
-      triggerAutoSaveDraft();
-      renderTenantMainImage();
-      toast('تم إعتماد الصورة الرئيسية بنجاح وثباتها في المسودة والعرض!');
-    }
-
-    async function generateTenantMoodboardSingleImage(index) {
-      const promptInput = document.getElementById('tenantMoodboardPrompt_' + index);
-      const prompt = promptInput ? promptInput.value.trim() : '';
-      if (!prompt) { toast('أدخل وصفًا لصورة المود بورد أولاً'); return; }
-
-      tenantCreativeImages = tenantCreativeImages || {};
-      tenantCreativeImages.moodboard_prompts = tenantCreativeImages.moodboard_prompts || [];
-      tenantCreativeImages.moodboard_prompts[index] = prompt;
-
-      showLoader('جاري توليد صورة المود بورد #' + (index + 1), 'يتم التواصل مع الذكاء الاصطناعي...');
-      try {
-        const data = await api('POST', '/api/generate-image', {
-          prompt: prompt,
-          referenceImage: tenantCreativeImages.cover || null
-        });
-        hideLoader();
-        if (data && data.success && data.image) {
-          tempMoodboardImages[index] = data.image;
-          triggerAutoSaveDraft();
-          renderTenantMoodboard();
-          toast('تم توليد المعاينة للصورة #' + (index + 1) + '! اضغط "إعتماد" لتثبيتها.');
-        } else {
-          toast((data && data.error) || 'تعذر توليد صورة المود بورد');
-        }
-      } catch (err) {
-        hideLoader();
-        toast('حدث خطأ أثناء توليد الصورة');
-      }
-    }
-
-    function approveTenantMoodboardSingleImage(index) {
-      const imgToApprove = tempMoodboardImages[index] || (tenantCreativeImages.moodboard && tenantCreativeImages.moodboard[index]);
-      if (!imgToApprove) {
-        toast('قم بتوليد الصورة رقم ' + (index + 1) + ' أولاً لإعتمادها');
-        return;
-      }
-      tenantCreativeImages = tenantCreativeImages || {};
-      tenantCreativeImages.moodboard = tenantCreativeImages.moodboard || [];
-      tenantCreativeImages.moodboard[index] = imgToApprove;
-      delete tempMoodboardImages[index];
-      triggerAutoSaveDraft();
-      renderTenantMoodboard();
-      toast('تم إعتماد صورة المود بورد رقم ' + (index + 1) + ' وتثبيتها بنجاح!');
-    }
 
     let isGeneratingTenantSlides = false;
     async function generateTenantSlides() {
@@ -18831,8 +18501,6 @@
       hydrateTenantProjectForm(tenantProjectData);
       applySectionStatuses(tenantProjectSectionStatuses);
       renderTenantSlidePlan();
-      renderTenantMainImage();
-      renderTenantMoodboard();
       renderTenantSlides();
       const editorInfo = document.getElementById('slidesEditorInfo');
       if (editorInfo) {
@@ -18984,8 +18652,6 @@
         hydrateTenantProjectForm(tenantProjectData);
         applySectionStatuses(sectionStatuses);
         renderTenantSlidePlan();
-        renderTenantMainImage();
-        renderTenantMoodboard();
         refreshGlobalRail();
         toast('تم فتح المسودة المحفوظة بنجاح');
         return true;

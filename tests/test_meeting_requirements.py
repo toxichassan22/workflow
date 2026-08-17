@@ -1344,7 +1344,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         client = self.app.test_client()
         html_headers = {'Accept': 'text/html'}
         for path in ('/', '/app', '/app/dashboard', '/app/projects/new',
-                     '/app/projects/floor-design', '/app/settings/users', '/projects/123/financial'):
+                     '/app/projects/floor-design', '/app/projects/visual-concept',
+                     '/app/settings/users', '/projects/123/financial'):
             response = client.get(path, headers=html_headers)
             self.assertEqual(response.status_code, 200, f'{path} should serve the SPA shell')
 
@@ -2457,6 +2458,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         maps_source = Path('maps_service.py').read_text(encoding='utf-8')
         self.assertNotIn('router.project-osrm.org', maps_source)
         self.assertIn('maps.googleapis.com/maps/api/directions/json', maps_source)
+
+    def test_visual_concept_replaces_legacy_image_workflow_pages(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('<section id="tenantVisualConceptPage" class="tenant-page">', index_source)
+        self.assertIn("tenantVisualConceptPage: '/app/projects/visual-concept'", index_source)
+        self.assertIn("{ pageId: 'tenantVisualConceptPage', label: 'التصور البصري' }", index_source)
+        self.assertIn('سيتم تجهيز محتوى التصور البصري هنا', index_source)
+        self.assertNotIn('tenantMainImagePage', index_source)
+        self.assertNotIn('tenantMoodboardPage', index_source)
+        self.assertNotIn('tenantMainImagePromptInput', index_source)
+        self.assertNotIn('tenantMoodboardPreview', index_source)
 
     def test_floor_design_state_is_saved_as_tenant_draft_data(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
