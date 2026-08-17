@@ -9364,7 +9364,7 @@
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => { summary[item.key] = ''; });
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => { swot[item.key] = ''; });
       return {
-        competitor_radius: 'auto',
+        competitor_radius: '10',
         competitor_radius_custom_km: '',
         data_period: '12m',
         data_period_from: '',
@@ -9439,14 +9439,13 @@
       body.innerHTML = `
         <div class="market-block">
           <h4>نطاق الدراسة</h4>
-          <p class="tenant-hint">النطاق يحدد دائرة البحث عن المنافسين حول موقع المشروع. التلقائي = 10 كم لأي نوع مشروع.</p>
+          <p class="tenant-hint">النطاق يحدد دائرة البحث عن المنافسين حول موقع المشروع. الافتراضي 10 كم، أو اختاري كامل المدينة أو رقمًا مخصصًا.</p>
           <div class="market-grid">
             <div><label>نطاق المنافسين</label>
               <select id="marketCompetitorRadius">
-                <option value="auto">تلقائي حسب نوع المشروع</option>
                 <option value="3">3 كم</option>
                 <option value="5">5 كم</option>
-                <option value="10">10 كم</option>
+                <option value="10" selected>10 كم</option>
                 <option value="city">كامل المدينة</option>
                 <option value="custom">نطاق مخصص</option>
               </select>
@@ -10227,7 +10226,7 @@
       const period = document.getElementById('marketDataPeriod');
       const from = document.getElementById('marketDataPeriodFrom');
       const to = document.getElementById('marketDataPeriodTo');
-      if (radius) radius.value = next.competitor_radius || 'auto';
+      if (radius) radius.value = (!next.competitor_radius || next.competitor_radius === 'auto') ? '10' : next.competitor_radius;
       if (custom) custom.value = next.competitor_radius_custom_km || '';
       if (period) period.value = next.data_period || '12m';
       if (from) from.value = next.data_period_from || '';

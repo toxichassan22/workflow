@@ -119,7 +119,6 @@ TARGET_AUDIENCE_BY_KIND = {
 }
 
 COMPETITOR_RADIUS_OPTIONS = [
-    {'value': 'auto', 'label': 'تلقائي حسب نوع المشروع'},
     {'value': '3', 'label': '3 كم'},
     {'value': '5', 'label': '5 كم'},
     {'value': '10', 'label': '10 كم'},
@@ -521,7 +520,9 @@ def price_uses_range(price_type):
 
 
 def resolve_competitor_radius_km(radius_value, custom_km=None):
-    value = _norm(radius_value) or 'auto'
+    value = _norm(radius_value) or '10'
+    if value == 'auto':
+        value = '10'
     if value == 'city':
         return None
     if value == 'custom':
@@ -530,8 +531,6 @@ def resolve_competitor_radius_km(radius_value, custom_km=None):
         except (TypeError, ValueError):
             return DEFAULT_COMPETITOR_RADIUS_KM
         return number if number > 0 else DEFAULT_COMPETITOR_RADIUS_KM
-    if value == 'auto':
-        return DEFAULT_COMPETITOR_RADIUS_KM
     try:
         number = float(value)
     except (TypeError, ValueError):

@@ -9292,13 +9292,13 @@ def _market_period_label(data):
 
 
 def _market_radius_label(data, resolved_km):
-    value = str(data.get('competitorRadius') or data.get('competitor_radius') or 'auto').strip()
+    value = str(data.get('competitorRadius') or data.get('competitor_radius') or '10').strip()
+    if value == 'auto':
+        value = '10'
     labels = {item['value']: item['label'] for item in market_study.COMPETITOR_RADIUS_OPTIONS}
     if value == 'custom':
         custom = data.get('competitorRadiusCustomKm') or data.get('competitor_radius_custom_km') or resolved_km
         return f'نطاق مخصص {custom} كم'
-    if value == 'auto':
-        return f'تلقائي حسب نوع المشروع ({market_study.DEFAULT_COMPETITOR_RADIUS_KM} كم)'
     if resolved_km is None and value == 'city':
         return 'كامل المدينة'
     return labels.get(value, value)
@@ -9306,7 +9306,7 @@ def _market_radius_label(data, resolved_km):
 
 def _prepare_market_payload(data):
     payload = dict(data or {})
-    radius_value = payload.get('competitorRadius') or payload.get('competitor_radius') or 'auto'
+    radius_value = payload.get('competitorRadius') or payload.get('competitor_radius') or '10'
     custom_km = payload.get('competitorRadiusCustomKm') or payload.get('competitor_radius_custom_km')
     resolved = market_study.resolve_competitor_radius_km(radius_value, custom_km)
     payload['resolvedRadiusKm'] = resolved

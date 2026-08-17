@@ -3346,9 +3346,14 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_market_study_radius_auto_is_ten_km(self):
         import market_study
+        self.assertNotIn('auto', [item['value'] for item in market_study.COMPETITOR_RADIUS_OPTIONS])
+        self.assertEqual(market_study.resolve_competitor_radius_km(None), 10)
         self.assertEqual(market_study.resolve_competitor_radius_km('auto'), 10)
         self.assertEqual(market_study.resolve_competitor_radius_km('custom', 7), 7)
         self.assertIsNone(market_study.resolve_competitor_radius_km('city'))
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertNotIn('تلقائي حسب نوع المشروع', index_source)
+        self.assertIn('<option value="10" selected>10 كم</option>', index_source)
 
     def test_market_study_retries_without_tools_and_json_mode(self):
         module = self.application_module
