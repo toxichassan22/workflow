@@ -15274,11 +15274,12 @@
         <div id="timelineStartYearWarning" class="validation-panel error" hidden>اكتب «سنة البداية» — بدونها تُحسب كل المراحل في السنة الأولى.</div>
         <div class="fin-table-wrap">
           <table class="fin-table" id="timelineTable">
-            <thead><tr><th>المرحلة</th><th>السنة</th><th>الربع</th><th>المدة (أشهر)</th><th>الملاحظات</th><th style="width:46px"></th></tr></thead>
+            <thead><tr><th>المرحلة</th><th>من (السنة)</th><th>من (الربع)</th><th>المدة (أشهر)</th><th>إلى</th><th>الملاحظات</th><th style="width:46px"></th></tr></thead>
             <tbody id="timelineTableBody"></tbody>
           </table>
         </div>
-        <button type="button" class="btn ghost small" style="margin-top:10px" onclick="addTimelineRow()">+ إضافة مرحلة</button>
+        <button type="button" class="btn ghost small" style="margin-top:10px" onclick="addTimelineRow()">إضافة مرحلة</button>
+        <p class="tenant-hint" style="margin:8px 0 0">عمود «إلى» يُحسب تلقائيًا من البداية والمدة. الملاحظات داخلية في الملف فقط ولا تظهر في الشرائح أو الدراسة المالية.</p>
         <input type="hidden" data-key="timeline_table_data" data-type="text" id="timelineTableData">
       `;
       div.querySelector('.tenant-section-title')?.replaceWith(
@@ -15290,6 +15291,34 @@
 
     const TIMELINE_QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
 
+    function computeTimelineEnd(year, quarter, duration) {
+      const startYear = parseInt(year, 10);
+      const quarterIndex = TIMELINE_QUARTERS.indexOf(String(quarter || '').trim());
+      const months = parseInt(duration, 10);
+      if (!Number.isFinite(startYear) || quarterIndex < 0 || !Number.isFinite(months) || months <= 0) return null;
+      const endMonth = startYear * 12 + quarterIndex * 3 + months - 1;
+      return {
+        year: Math.floor(endMonth / 12),
+        quarter: TIMELINE_QUARTERS[Math.floor((endMonth % 12) / 3)]
+      };
+    }
+
+    function formatTimelineEnd(end) {
+      return end ? (end.year + ' ' + end.quarter) : '';
+    }
+
+    function updateTimelineRowEnd(row) {
+      if (!row) return null;
+      const end = computeTimelineEnd(
+        row.querySelector('.tl-year')?.value,
+        row.querySelector('.tl-quarter')?.value,
+        row.querySelector('.tl-duration')?.value
+      );
+      const output = row.querySelector('.tl-end');
+      if (output) output.value = formatTimelineEnd(end);
+      return end;
+    }
+
     // One builder for every path (blank row, "add phase", and draft hydration) so the columns
     // cannot drift apart between them.
     function timelineRowHtml(data = {}) {
@@ -15298,12 +15327,14 @@
         quarter => '<option value="' + quarter + '"' + (chosen === quarter ? ' selected' : '') + '>' + quarter + '</option>'
       )).join('');
       const attr = value => escapeHtml(value === undefined || value === null ? '' : String(value));
+      const end = computeTimelineEnd(data.year, data.quarter, data.duration);
       return '<td><input type="text" class="tl-name" value="' + attr(data.name) + '" placeholder="مثال: التصميم والتراخيص" onchange="saveTimelineData()"></td>' +
-        '<td><input type="number" class="tl-year" value="' + attr(data.year) + '" placeholder="السنة" onchange="saveTimelineData()"></td>' +
-        '<td><select class="tl-quarter" style="min-width:78px" onchange="saveTimelineData()">' + options + '</select></td>' +
-        '<td><input type="number" class="tl-duration" value="' + attr(data.duration) + '" placeholder="0" style="width:78px" onchange="saveTimelineData()"></td>' +
-        '<td><input type="text" class="tl-notes" value="' + attr(data.notes) + '" placeholder="ملاحظات" onchange="saveTimelineData()"></td>' +
-        '<td><button type="button" class="btn danger small" style="padding:4px 9px;font-size:11px" onclick="removeTimelineRow(this)" title="حذف المرحلة">×</button></td>';
+        '<td><input type="number" class="tl-year" value="' + attr(data.year) + '" placeholder="السنة" onchange="updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()"></td>' +
+        '<td><select class="tl-quarter" style="min-width:78px" onchange="updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()">' + options + '</select></td>' +
+        '<td><input type="number" class="tl-duration" min="1" value="' + attr(data.duration) + '" placeholder="0" style="width:78px" oninput="updateTimelineRowEnd(this.closest(\'tr\'))" onchange="updateTimelineRowEnd(this.closest(\'tr\')); saveTimelineData()"></td>' +
+        '<td><input type="text" class="tl-end" value="' + attr(formatTimelineEnd(end)) + '" readonly title="تُحسب من البداية والمدة"></td>' +
+        '<td><input type="text" class="tl-notes" value="' + attr(data.notes) + '" placeholder="ملاحظات داخلية للمرحلة" onchange="saveTimelineData()"></td>' +
+        '<td><button type="button" class="btn danger small" style="padding:4px 9px;font-size:11px" onclick="removeTimelineRow(this)" title="حذف المرحلة">حذف</button></td>';
     }
 
     // Phases are entered by the client, so the table starts blank instead of seeding invented
@@ -15332,6 +15363,7 @@
       const tr = document.createElement('tr');
       tr.innerHTML = timelineRowHtml(data);
       tbody.appendChild(tr);
+      updateTimelineRowEnd(tr);
       return tr;
     }
 
@@ -15346,13 +15378,21 @@
     }
 
     function collectTimelineRows() {
-      return Array.from(document.querySelectorAll('#timelineTableBody tr')).map(tr => ({
-        name: tr.querySelector('.tl-name')?.value || '',
-        year: tr.querySelector('.tl-year')?.value || '',
-        quarter: tr.querySelector('.tl-quarter')?.value || '',
-        duration: tr.querySelector('.tl-duration')?.value || '',
-        notes: tr.querySelector('.tl-notes')?.value || ''
-      }));
+      return Array.from(document.querySelectorAll('#timelineTableBody tr')).map(tr => {
+        const year = tr.querySelector('.tl-year')?.value || '';
+        const quarter = tr.querySelector('.tl-quarter')?.value || '';
+        const duration = tr.querySelector('.tl-duration')?.value || '';
+        const end = computeTimelineEnd(year, quarter, duration);
+        return {
+          name: tr.querySelector('.tl-name')?.value || '',
+          year,
+          quarter,
+          duration,
+          endYear: end ? String(end.year) : '',
+          endQuarter: end ? end.quarter : '',
+          notes: tr.querySelector('.tl-notes')?.value || ''
+        };
+      });
     }
 
     // The timeline is the single source of truth for the development duration and the stage list;

@@ -285,6 +285,12 @@ block and draft hydration. Timeline years are **calendar** years while the cashf
 **relative** to project start, so the conversion is `calendarYear - tlStartYear + 1`, clamped to
 `[1, developmentYears]`.
 
+Each phase row has a start year/quarter and a duration in months. `computeTimelineEnd()` fills the
+read-only «إلى» cell (`endYear` / `endQuarter` in `timeline_table_data`). Clients only type the
+start and the months; never ask them to enter the end. The notes column is **internal to the
+draft only** — it is saved with the row but is not mirrored into the financial study, slides, or
+PDF. Do not drop it; users use it as a reminder on the phase.
+
 An empty timeline is allowed but surfaces `#timelineStagesWarning`, because with no stages the
 development cost never reaches the cashflow. Note that `scheduleTable` no longer has an actions
 column, so `reportTableSnapshot('scheduleTable', false)` must keep `false` or the PDF drops the

@@ -1469,6 +1469,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("const TIMELINE_QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];", index_source)
         self.assertIn('<select class="tl-quarter"', index_source)
         self.assertNotIn('class="tl-quarter" value=', index_source)
+        self.assertIn('function computeTimelineEnd(year, quarter, duration)', index_source)
+        self.assertIn('class="tl-end"', index_source)
+        self.assertIn('endYear: end ? String(end.year) : \'\'', index_source)
+        self.assertIn('الملاحظات داخلية في الملف فقط', index_source)
 
         # Rows can be deleted, and one editable row always survives.
         self.assertIn('function removeTimelineRow(button)', index_source)
