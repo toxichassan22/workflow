@@ -9766,9 +9766,9 @@
     function persistClassificationDraftState() {
       persistProjectTypes(selectedProjectTypeMains());
       const subtypeInput = document.querySelector('#tenantProjectForm [data-key="project_subtype"]');
-      if (subtypeInput) setGroupedChoiceValue(subtypeInput, selectedProjectSubtypesByMain(), false);
+      if (subtypeInput) persistGroupedChoiceValue(subtypeInput, selectedProjectSubtypesByMain());
       const audienceInput = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
-      if (audienceInput) setGroupedChoiceValue(audienceInput, groupedAudienceSelection(), false);
+      if (audienceInput) persistGroupedChoiceValue(audienceInput, groupedAudienceSelection());
       const classInput = document.querySelector('#tenantProjectForm [data-key="activity_class"]');
       if (classInput) {
         classInput.type = 'hidden';
@@ -9820,7 +9820,7 @@
 
     function groupedAudienceSelection() {
       const hidden = document.querySelector('#tenantProjectForm [data-key="target_audience"]');
-      const raw = hidden ? hidden.value : tenantProjectData.target_audience;
+      const raw = (hidden && hidden.value) || tenantProjectData.target_audience;
       const parsed = parseStoredLandTable(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         const mapped = {};
@@ -9832,16 +9832,25 @@
       return { general: [...new Set(parseSelectedMarketList(raw))] };
     }
 
-    function setGroupedChoiceValue(hidden, groups, markDirty = true) {
-      if (!hidden) return;
+    function encodeGroupedChoiceValue(groups) {
       const encoded = JSON.stringify(groups || {});
-      hidden.value = encoded;
-      tenantProjectData[hidden.dataset.key] = encoded;
+      return encoded === '{}' ? '' : encoded;
+    }
+
+    function persistGroupedChoiceValue(hidden, groups, markDirty = false) {
+      const encoded = encodeGroupedChoiceValue(groups);
+      if (hidden) hidden.value = encoded;
+      if (hidden?.dataset?.key) tenantProjectData[hidden.dataset.key] = encoded;
       if (markDirty) triggerAutoSaveDraft();
+      return encoded;
+    }
+
+    function setGroupedChoiceValue(hidden, groups, markDirty = true) {
+      persistGroupedChoiceValue(hidden, groups, markDirty);
     }
 
     function persistGroupedChoice(hidden, groups) {
-      setGroupedChoiceValue(hidden, groups);
+      persistGroupedChoiceValue(hidden, groups, true);
     }
 
     function audienceGroupInfo(main, subtype) {
@@ -9890,7 +9899,6 @@
       if (!groups.length) {
         host.innerHTML = '';
         host.dataset.audienceSignature = '';
-        if (Object.keys(current).length) setGroupedChoiceValue(hidden, {}, false);
         return;
       }
       const normalized = {};
@@ -9901,8 +9909,8 @@
       if (groups.length === 1 && !Object.keys(normalized).length && current.general?.length) {
         normalized[groups[0].key] = [...new Set(current.general)];
       }
-      if (JSON.stringify(current) !== JSON.stringify(normalized)) {
-        setGroupedChoiceValue(hidden, normalized, false);
+      if (Object.keys(normalized).length && JSON.stringify(current) !== JSON.stringify(normalized)) {
+        persistGroupedChoiceValue(hidden, normalized, false);
       }
       const signature = JSON.stringify(groups.map(group => group.key));
       if (host.dataset.audienceSignature !== signature) {
@@ -12005,7 +12013,7 @@
             input.classList.add('location-derived-input');
             input.title = 'تُملأ تلقائيًا من الموقع والخرائط';
           }
-          if (f.fieldKey === 'project_type' || f.fieldKey === 'project_mixed_components' || f.fieldKey === 'activity_class') {
+          if (f.fieldKey === 'project_type' || f.fieldKey === 'project_mixed_components' || f.fieldKey === 'project_subtype' || f.fieldKey === 'target_audience' || f.fieldKey === 'activity_class') {
             input.type = 'hidden';
             input.dataset.type = 'text';
             const stored = tenantProjectData[f.fieldKey];
@@ -12232,6 +12240,7 @@
       visualConceptField.style.display = 'none';
       visualConceptField.innerHTML = '<input type="hidden" data-key="visual_concept" data-type="text" id="visualConceptData">';
       form.appendChild(visualConceptField);
+      tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept || tenantVisualConceptState);
       persistVisualConceptDraftState();
 
       const conceptual2dSection = document.createElement('div');
@@ -15558,7 +15567,10 @@
         }
         if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
         if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
-        const data = { ...tenantProjectData, ...(await collectTenantFormData()) };
+        const formData = await collectTenantFormData();
+        const data = { ...tenantProjectData, ...formData };
+        if (!data.target_audience && tenantProjectData.target_audience) data.target_audience = tenantProjectData.target_audience;
+        if (!data.visual_concept && tenantProjectData.visual_concept) data.visual_concept = tenantProjectData.visual_concept;
         if (document.getElementById('section-financial-calc') && typeof collectFinancialStudyModel === 'function') {
           data.financial_study_model = collectFinancialStudyModel();
         }
@@ -15596,7 +15608,14 @@
           },
           moodboard: {
             prompts: Array.isArray(tenantCreativeImages.moodboard_prompts) ? [...tenantCreativeImages.moodboard_prompts] : [],
-            images: { ...tempMoodboardImages },
+            images: VISUAL_CONCEPT_SLOTS.slice(1).reduce((acc, item, index) => {
+              acc[index] = tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl
+                || tenantVisualConceptState?.slots?.[item.id]?.imageUrl
+                || tenantCreativeImages.moodboard?.[index]
+                || tempMoodboardImages[index]
+                || '';
+              return acc;
+            }, { ...tempMoodboardImages }),
             approved: Array.isArray(tenantCreativeImages.moodboard)
               ? tenantCreativeImages.moodboard.map(image => !!image)
               : []
@@ -17654,6 +17673,17 @@
         slots.cover.prompt = slots.cover.prompt || tenantCreativeImages.cover_prompt || '';
         slots.cover.status = 'approved';
       }
+      const moodboardImages = Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard : [];
+      const moodboardPrompts = Array.isArray(tenantCreativeImages.moodboard_prompts) ? tenantCreativeImages.moodboard_prompts : [];
+      VISUAL_CONCEPT_SLOTS.slice(1).forEach((item, index) => {
+        const slot = slots[item.id];
+        if (!slot.approvedImageUrl && moodboardImages[index]) {
+          slot.approvedImageUrl = moodboardImages[index];
+          slot.imageUrl = slot.imageUrl || moodboardImages[index];
+          slot.status = 'approved';
+        }
+        if (!slot.prompt && moodboardPrompts[index]) slot.prompt = String(moodboardPrompts[index] || '').slice(0, 12000);
+      });
       return {
         version: 1,
         slots,
@@ -17663,15 +17693,24 @@
     }
 
     function persistVisualConceptDraftState() {
-      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+      const previousImages = tenantCreativeImages || {};
+      const previousMoodboard = Array.isArray(previousImages.moodboard) ? previousImages.moodboard : [];
+      const previousPrompts = Array.isArray(previousImages.moodboard_prompts) ? previousImages.moodboard_prompts : [];
+      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState || tenantProjectData.visual_concept);
       tenantProjectData.visual_concept = tenantVisualConceptState;
       tenantProjectData.visual_style_reference_file_id = tenantVisualConceptState.styleReferenceFileId || '';
       const cover = tenantVisualConceptState.slots.cover || {};
-      tenantCreativeImages = tenantCreativeImages || {};
+      tenantCreativeImages = previousImages;
       tenantCreativeImages.cover = cover.approvedImageUrl || tenantCreativeImages.cover || '';
       tenantCreativeImages.cover_prompt = cover.prompt || tenantCreativeImages.cover_prompt || '';
-      tenantCreativeImages.moodboard = VISUAL_CONCEPT_SLOTS.slice(1).map(item => tenantVisualConceptState.slots[item.id].approvedImageUrl || '');
-      tenantCreativeImages.moodboard_prompts = VISUAL_CONCEPT_SLOTS.slice(1).map(item => tenantVisualConceptState.slots[item.id].prompt || '');
+      tenantCreativeImages.moodboard = VISUAL_CONCEPT_SLOTS.slice(1).map((item, index) => {
+        const slot = tenantVisualConceptState.slots[item.id] || {};
+        return slot.approvedImageUrl || slot.imageUrl || previousMoodboard[index] || '';
+      });
+      tenantCreativeImages.moodboard_prompts = VISUAL_CONCEPT_SLOTS.slice(1).map((item, index) => {
+        const slot = tenantVisualConceptState.slots[item.id] || {};
+        return slot.prompt || previousPrompts[index] || '';
+      });
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
       const hidden = document.getElementById('visualConceptData');
       if (hidden) hidden.value = JSON.stringify(tenantVisualConceptState);
@@ -19026,6 +19065,7 @@
         moodboard_prompts: Array.isArray(ci.moodboard_prompts) ? ci.moodboard_prompts : []
       };
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+      tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept);
       tenantProjectSectionStatuses = {
         ...(p.sectionStatuses || {}),
         ...(tenantProjectData.sectionStatuses || {}),
@@ -19163,23 +19203,35 @@
         }
 
         const ci = tenantProjectData.tenantCreativeImages || {};
+        const savedMoodboard = Array.isArray(ci.moodboard) ? ci.moodboard.slice() : [];
+        const savedMoodboardPrompts = Array.isArray(ci.moodboard_prompts) ? ci.moodboard_prompts.slice() : [];
+        const pageMoodboard = pageDrafts.moodboard || {};
+        VISUAL_CONCEPT_SLOTS.slice(1).forEach((item, index) => {
+          if (!savedMoodboard[index] && pageMoodboard.images && pageMoodboard.images[index]) {
+            savedMoodboard[index] = pageMoodboard.images[index];
+          }
+          if (!savedMoodboardPrompts[index] && Array.isArray(pageMoodboard.prompts) && pageMoodboard.prompts[index]) {
+            savedMoodboardPrompts[index] = pageMoodboard.prompts[index];
+          }
+        });
         tenantCreativeImages = {
           ...ci,
           cover: ci.cover || ci.mainImageData || '',
-          moodboard: Array.isArray(ci.moodboard) ? ci.moodboard : [],
+          moodboard: savedMoodboard,
           map_placeholders: ci.map_placeholders || {},
           map_landmarks: ci.map_landmarks || [],
           images_signature: ci.images_signature || null,
           maps_signature: ci.maps_signature || null,
           cover_prompt: ci.cover_prompt || (pageDrafts.mainImage && pageDrafts.mainImage.prompt) || '',
-          moodboard_prompts: Array.isArray(ci.moodboard_prompts)
-            ? ci.moodboard_prompts
-            : (pageDrafts.moodboard && pageDrafts.moodboard.prompts) || []
+          moodboard_prompts: savedMoodboardPrompts.length
+            ? savedMoodboardPrompts
+            : (pageMoodboard.prompts || [])
         };
         if (pageDrafts.mainImage && pageDrafts.mainImage.approved && pageDrafts.mainImage.image && !tenantCreativeImages.cover) {
           tenantCreativeImages.cover = pageDrafts.mainImage.image;
         }
         tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+        tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept);
 
         showTenantPage('tenantProjectPage');
         await loadTenantProjectForm();

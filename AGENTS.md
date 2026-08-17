@@ -217,11 +217,16 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   value. Classification currently uses `persistClassificationDraftState()` for
   `project_type`, `project_subtype`, `target_audience`, and `activity_class`.
   Visual concept uses `persistVisualConceptDraftState()` for the hidden
-  `visual_concept` input plus `tenantCreativeImages`. The optional style
-  reference is a `project_files` upload with `file_type='visual_reference'`.
-  Land photos are not visual-concept references. Cover generation uses the
-  overview map as the plot background and the uploaded style image only if the
-  client supplied one. Moodboard generation uses the approved cover only.
+  `visual_concept` input plus `tenantCreativeImages`. Rebuilding the project
+  form must restore the existing `visual_concept` / `target_audience` values
+  before writing those hidden inputs; empty widgets must not overwrite a
+  saved draft. Moodboard slots restore from `tenantCreativeImages.moodboard`
+  and `moodboard_prompts` the same way the cover restores from `cover`.
+  The optional style reference is a `project_files` upload with
+  `file_type='visual_reference'`. Land photos are not visual-concept
+  references. Cover generation uses the overview map as the plot background
+  and the uploaded style image only if the client supplied one. Moodboard
+  generation uses the approved cover only.
 - **Every new section or page gets an explicit draft save.** Give it a `data-key` in
   `#tenantProjectForm`, persist it from `saveProjectAsDraftNow()` /
   `collectTenantFormData()`, and put a visible `حفظ كمسودة` button on that page. Do not
