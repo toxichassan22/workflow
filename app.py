@@ -1180,7 +1180,7 @@ def clean_project_data(data):
     elif isinstance(data, list):
         return [clean_project_data(item) for item in data]
     elif isinstance(data, str):
-        if data.startswith('data:image/') or (len(data) > 1000 and ';base64,' in data) or len(data) > 10000:
+        if data.startswith('data:image/') or (len(data) > 1000 and ';base64,' in data):
             return "[IMAGE_DATA_OMITTED]"
         return data
     else:
@@ -6569,6 +6569,16 @@ FINANCIAL_COLUMN_LABELS = {
     'fundExitFee': 'أتعاب التخارج', 'performanceFee': 'حافز الأداء',
     'operationYear': 'سنة التشغيل', 'studyYear': 'السنة في الدراسة', 'reachPct': 'نسبة الوصول %',
     'terminal': 'قيمة التخارج',
+    'key': 'المتغير', 'low': 'متحفظ', 'high': 'متفائل',
+    'scenario': 'السيناريو', 'totalRevenue': 'إجمالي الإيرادات',
+    'fullOccupancyNOI': 'NOI عند الإشغال المستهدف', 'investmentCost': 'إجمالي تكلفة الاستثمار',
+    'netProfit': 'صافي الربح', 'exitValue': 'قيمة التخارج', 'roi': 'ROI',
+    'projectIrr': 'Project IRR', 'equityIrr': 'Equity IRR', 'payback': 'فترة الاسترداد',
+    'equityRequired': 'إجمالي حقوق الملكية',
+}
+
+FINANCIAL_REPORT_DROP_COLUMNS = {
+    'ترتيب / حذف', 'حذف', 'ترتيب', 'idx', 'id', 'leasable', 'totalArea',
 }
 
 
@@ -6579,6 +6589,9 @@ def _financial_report_table(rows):
     for row in rows:
         if isinstance(row, dict):
             for key in row:
+                label = FINANCIAL_COLUMN_LABELS.get(key, key)
+                if key in FINANCIAL_REPORT_DROP_COLUMNS or label in FINANCIAL_REPORT_DROP_COLUMNS:
+                    continue
                 if key not in keys:
                     keys.append(key)
     if not keys:
@@ -6619,15 +6632,30 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
     if inputs.get('exitEnabled') == 'yes':
         sections.append('<section><h2>11. التخارج</h2>' + rows([('saleExitMethod', 'التخارج البيعي'), ('saleExitYear', 'سنة التخارج البيعي'), ('exitMethod', 'التخارج التشغيلي'), ('operatingExitYear', 'سنة التخارج التشغيلي'), ('exitInput', 'مدخل التخارج')]) + '</section>')
     projection_rows = [(label, projection.get(key)) for key, label in FINANCIAL_RESULT_LABELS]
-    sections.append('<section><h2>12. النتائج المالية</h2>' + _financial_report_rows(projection_rows) + _financial_report_table(tables.get('cashflowTable')) + '</section>')
+    sections.append('<section class="keep-together"><h2>12. النتائج المالية</h2>' + _financial_report_rows(projection_rows) + '</section>')
+    sections.append('<section class="wide-table"><h2>13. التدفقات النقدية السنوية</h2>' + _financial_report_table(tables.get('cashflowTable')) + '</section>')
+    sensitivity_assumptions = tables.get('sensitivityAssumptionsTable')
+    if not isinstance(sensitivity_assumptions, list) or not sensitivity_assumptions:
+        dynamic_rows = model.get('dynamicRows') if isinstance(model, dict) else {}
+        if isinstance(dynamic_rows, dict) and isinstance(dynamic_rows.get('sensitivity'), list):
+            sensitivity_assumptions = dynamic_rows.get('sensitivity')
+    sections.append(
+        '<section class="wide-table"><h2>14. تحليل الحساسية العام</h2>'
+        + '<h3>افتراضات السيناريوهات</h3>' + _financial_report_table(sensitivity_assumptions)
+        + '<h3>النتائج المقارنة</h3>' + _financial_report_table(tables.get('sensitivityTable'))
+        + '</section>'
+    )
     return f'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
 {font_css}
-@page {{ size: A4 landscape; margin: 12mm; }}
+@page {{ size: A4 landscape; margin: 10mm; }}
 * {{ box-sizing:border-box; }} body {{ margin:0; color:#252525; background:#fff; font-family:{font_family}; direction:rtl; line-height:1.5; }}
-.financial-report {{ max-width:1120px; margin:0 auto; }} section {{ break-inside:avoid; margin:0 0 16px; }}
+.financial-report {{ max-width:none; margin:0; }} section {{ margin:0 0 16px; page-break-inside:auto; }}
+.keep-together {{ break-inside:avoid; page-break-inside:avoid; }}
+.wide-table table {{ font-size:8px; }} .wide-table th,.wide-table td {{ padding:4px; white-space:normal; word-break:break-word; }}
 .cover {{ min-height:175mm; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; border:2px solid {primary}; padding:30px; page-break-after:always; }}
 .eyebrow {{ color:{accent}; font-weight:700; }} h1 {{ color:{secondary}; font-size:32px; margin:18px 0 6px; }} h2 {{ color:{primary}; font-size:20px; border-bottom:2px solid {primary}; padding-bottom:6px; }}
-table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px; }} th,td {{ border:1px solid #d9d1cb; padding:6px; text-align:right; vertical-align:top; }} thead th {{ background:{primary}; color:#fff; }} .summary-table th {{ width:34%; background:#EAF2F8; color:{secondary}; }} .summary-table td {{ font-weight:700; }} .empty {{ color:#777; border:1px dashed #ccc; padding:10px; }}
+h3 {{ color:{secondary}; font-size:14px; margin:12px 0 6px; }}
+table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px; }} th,td {{ border:1px solid #d9d1cb; padding:6px; text-align:right; vertical-align:top; }} thead {{ display:table-header-group; }} tr {{ break-inside:avoid; page-break-inside:avoid; }} thead th {{ background:{primary}; color:#fff; }} .summary-table th {{ width:34%; background:#EAF2F8; color:{secondary}; }} .summary-table td {{ font-weight:700; }} .empty {{ color:#777; border:1px dashed #ccc; padding:10px; }}
 </style></head><body><main class="financial-report">{''.join(sections)}</main></body></html>'''
 
 

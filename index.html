@@ -11364,6 +11364,11 @@
         hydrateFinancialTableRows('opexTable', rows.opex, addOpex);
         hydrateFinancialTableRows('externalTable', rows.external, addExternal);
         hydrateFinancialTableRows('graceScheduleTable', rows.graceSchedule, addGraceScheduleRow);
+        const sensitivityBody = document.querySelector('#sensitivityAssumptionsTable tbody');
+        if (sensitivityBody && Array.isArray(rows.sensitivity) && typeof addSensitivityVariable === 'function') {
+          sensitivityBody.innerHTML = '';
+          rows.sensitivity.forEach(row => addSensitivityVariable({ ...row, silent: true }));
+        }
       } finally {
         window.__batchLoading = false;
       }
@@ -13787,11 +13792,19 @@
         span.textContent = select.selectedOptions?.[0]?.textContent?.trim() || '—';
         select.replaceWith(span);
       });
-      table.querySelectorAll('button,.help,.custom-formula-row').forEach(node => node.remove());
+      table.querySelectorAll('button,.help,.custom-formula-row,.row-actions').forEach(node => node.remove());
       table.querySelectorAll('.off-cell').forEach(cell => { if (!cell.textContent.trim()) cell.textContent = '—' });
-      if (dropLastColumn) {
-        table.querySelectorAll('tr').forEach(row => { if (row.cells.length) row.deleteCell(row.cells.length - 1) });
+      const dropIndexes = new Set();
+      table.querySelectorAll('thead th').forEach((th, idx) => {
+        const text = String(th.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text === 'ترتيب / حذف' || text === 'حذف' || text === 'ترتيب') dropIndexes.add(idx);
+      });
+      if (!dropIndexes.size && dropLastColumn && table.querySelector('thead tr')?.cells.length) {
+        dropIndexes.add(table.querySelector('thead tr').cells.length - 1);
       }
+      [...dropIndexes].sort((a, b) => b - a).forEach(idx => {
+        table.querySelectorAll('tr').forEach(row => { if (row.cells[idx]) row.deleteCell(idx); });
+      });
       if (removeZeroRows) table.querySelectorAll('tbody tr').forEach(row => { const last = row.cells[row.cells.length - 1]; if (last && reportValueIsZero(last.textContent)) row.remove() });
       table.querySelectorAll('[style]').forEach(node => node.removeAttribute('style'));
       return table.outerHTML;
@@ -14130,6 +14143,7 @@
 
         <input type="hidden" data-key="financial_calc_data" data-type="text" id="financialCalcData">
         <input type="hidden" data-key="project_components_data" data-type="text" id="projectComponentsData">
+        <input type="hidden" data-key="financial_study_model" data-type="text" id="financialStudyModelData">
       `;
 
       div.querySelector('.tenant-section-title')?.replaceWith(
@@ -14229,8 +14243,16 @@
       const startYear = Math.max(1, Math.min(60, Math.round(num('financeRepaymentStartYear') || 1)));
       const years = Math.max(1, Math.min(40, Math.round(num('financeRepaymentYears') || 1)));
       const tb = document.querySelector('#financeRepaymentTable tbody'); if (!tb) return;
-      const existing = Array.isArray(plan) ? plan : []; tb.innerHTML = '';
-      for (let index = 0; index < years; index++) { const year = startYear + index; const found = existing.find(r => Number(r.year) === year); addFinanceRepaymentYear(found || { year, repaymentPct: 100 / years }); }
+      const existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')].map(tr => ({
+        year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1,
+        repaymentPct: parseNumber(tr.querySelector('[data-field="repaymentPct"] input')?.value)
+      }));
+      tb.innerHTML = '';
+      for (let index = 0; index < years; index++) {
+        const year = startYear + index;
+        const found = existing.find(r => Number(r.year) === year);
+        addFinanceRepaymentYear(found || { year, repaymentPct: 100 / years });
+      }
     }
     function addFundAdditionalFee(d = {}) {
       const tb = document.querySelector('#fundAdditionalFeesTable tbody'); if (!tb) return; const tr = document.createElement('tr');
@@ -14430,7 +14452,7 @@
       updateRevenueComponentOptions();
       document.querySelectorAll('#componentsTable tbody tr').forEach(tr => { tr.querySelectorAll('input,select').forEach(x => { if (!x.dataset.boundComponentRefresh) { x.addEventListener('input', () => { updateRevenueComponentOptions(); calculateAll(); }); x.dataset.boundComponentRefresh = '1'; } }); });
       document.querySelectorAll('#revenueTable tbody tr').forEach(tr => {
-        const method = tr.querySelector('[data-field="method"] select')?.value; const source = tr.querySelector('[data-field="qtySource"] select')?.value || 'manual'; const comp = getLinkedComponentForRevenueRow(tr); tr.dataset.componentId = tr.querySelector('[data-field="component"] select')?.value || ''; updateAutoQtyPreview(tr);
+        const method = tr.querySelector('[data-field="method"] select')?.value; const source = tr.querySelector('[data-field="qtySource"] select')?.value || 'manual'; const comp = getLinkedComponentForRevenueRow(tr); tr.dataset.componentId = tr.querySelector('[data-field="component"] select')?.value || ''; if (source !== 'manual') updateAutoQtyPreview(tr);
         const visible = {
           areaSale: { qty: true, price: true, period: false, occupancy: false, qtyHelp: 'المساحة البيعية', priceHelp: 'سعر البيع للمتر' },
           dailyRent: { qty: true, price: true, period: false, occupancy: true, qtyHelp: 'عدد الوحدات', priceHelp: 'السعر اليومي' },
@@ -14916,6 +14938,7 @@
           const control = cell.querySelector('input,select,textarea');
           if (!control) return;
           result[cell.dataset.field] = control.type === 'checkbox' ? Boolean(control.checked) : control.value;
+          if (cell.dataset.field === 'customFormula') result.formula = control.value;
         });
         if (tableId === 'scheduleTable') result.year = row.dataset.stageYear || result.year || 1;
         if (tableId === 'revenueTable') result.componentId = row.dataset.componentId || result.component || '';
@@ -14936,17 +14959,27 @@
         costs: collectFinancialDataRows('costTable'),
         opex: collectFinancialDataRows('opexTable'),
         external: collectFinancialDataRows('externalTable'),
-        graceSchedule: collectFinancialDataRows('graceScheduleTable')
+        graceSchedule: collectFinancialDataRows('graceScheduleTable'),
+        sensitivity: collectSensitivityVariables()
       };
+    }
+
+    function persistFinancialStudyDraftState() {
+      const root = document.getElementById('section-financial-calc');
+      if (!root || typeof collectFinancialStudyModel !== 'function') return null;
+      const model = collectFinancialStudyModel();
+      tenantProjectData.financial_study_model = model;
+      const hidden = document.getElementById('financialStudyModelData');
+      if (hidden) hidden.value = JSON.stringify(model);
+      return model;
     }
 
     function collectFinancialStudyModel() {
       calculateAll();
       const root = document.getElementById('section-financial-calc');
       const inputs = {};
-      const isActive = el => !el.disabled && !el.closest('.conditional-off,.dynamic-off,.off-cell');
       root?.querySelectorAll('input[id],select[id],textarea[id]').forEach(el => {
-        if (!isActive(el)) return;
+        if (el.type === 'hidden') return;
         inputs[el.id] = el.type === 'checkbox' ? !!el.checked : (el.value ?? '');
       });
       const tables = {};
@@ -15168,9 +15201,11 @@
       .cover p{font-size:15px;color:#666;max-width:760px}
       .print-actions{position:sticky;top:0;z-index:5;background:#fff;padding:10px 0;text-align:left;border-bottom:1px solid #ddd}
       .print-actions button{border:0;border-radius:8px;background:#123B6D;color:#fff;padding:10px 18px;font-family:inherit;font-weight:700;cursor:pointer}
-      .section{margin:0 0 20px;break-inside:avoid}
+      .section{margin:0 0 20px}
       .conditional-off{display:none!important}
       .page-break{break-before:page}
+      .wide-table table{font-size:8px}
+      .wide-table th,.wide-table td{white-space:normal;word-break:break-word}
       h3{font-size:19px;color:#123B6D;margin:0 0 10px;padding-bottom:7px;border-bottom:2px solid #123B6D}
       h4{font-size:14px;color:#082646;margin:14px 0 7px}
       table{width:100%;border-collapse:collapse;margin:0 0 14px;font-size:9px;direction:rtl}
@@ -15213,8 +15248,8 @@
         ${bonusReportSection}
         ${externalReportSection}
         <section class="section page-break"><h3>12. ملخص النتائج المالية</h3>${resultSummary}</section>
-        <section class="section page-break"><h3>13. التدفقات النقدية السنوية</h3>${reportTableSnapshot('cashflowTable', false)}</section>
-        <section class="section page-break"><h3>14. تحليل الحساسية</h3><h4>افتراضات السيناريوهات</h4>${reportTableSnapshot('sensitivityAssumptionsTable', false)}<h4>النتائج المقارنة</h4>${reportTableSnapshot('sensitivityTable', false)}</section>
+        <section class="section wide-table"><h3>13. التدفقات النقدية السنوية</h3>${reportTableSnapshot('cashflowTable', false)}</section>
+        <section class="section wide-table"><h3>14. تحليل الحساسية العام</h3><h4>افتراضات السيناريوهات</h4>${reportTableSnapshot('sensitivityAssumptionsTable', false)}<h4>النتائج المقارنة</h4>${reportTableSnapshot('sensitivityTable', false)}</section>
         ${exitReportSection}
         <section class="section conditional-off"><h3>15. التخارج والافتراضات المالية</h3>${reportRows([
         ['طريقة التخارج البيعي', reportFieldValue('saleExitMethod')],
@@ -15607,12 +15642,13 @@
         }
         if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
         if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
+        if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
         const formData = await collectTenantFormData();
         const data = { ...tenantProjectData, ...formData };
         if (!data.target_audience && tenantProjectData.target_audience) data.target_audience = tenantProjectData.target_audience;
         if (!data.visual_concept && tenantProjectData.visual_concept) data.visual_concept = tenantProjectData.visual_concept;
-        if (document.getElementById('section-financial-calc') && typeof collectFinancialStudyModel === 'function') {
-          data.financial_study_model = collectFinancialStudyModel();
+        if (typeof persistFinancialStudyDraftState === 'function') {
+          data.financial_study_model = persistFinancialStudyDraftState() || data.financial_study_model;
         }
         data.draftId = tenantProjectData.draftId || crypto.randomUUID();
         tenantProjectData.draftId = data.draftId;
@@ -17498,6 +17534,7 @@
     async function collectTenantFormData() {
       if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
       if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
+      if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
       const result = {};
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
       for (const input of inputs) {
@@ -17527,6 +17564,9 @@
           }
         } else if (type === 'number') {
           result[key] = Number(input.value) || 0;
+        } else if (key === 'financial_study_model') {
+          const parsed = parseFinancialStudySnapshot(input.value);
+          result[key] = parsed || tenantProjectData.financial_study_model || '';
         } else {
           result[key] = input.value || '';
         }

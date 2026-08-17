@@ -297,6 +297,18 @@ development cost never reaches the cashflow. Note that `scheduleTable` no longer
 column, so `reportTableSnapshot('scheduleTable', false)` must keep `false` or the PDF drops the
 developer-payment column.
 
+## Financial study draft and PDF
+
+The study is not just the two hidden `data-key` inputs. Persist the full snapshot through
+`persistFinancialStudyDraftState()` into `financial_study_model` (hidden `#financialStudyModelData`
+plus the JS object). That object must include `dynamicRows.sensitivity` so table 14 survives a
+reload. `collectFinancialStudyModel()` must keep values from fields that are currently hidden by a
+mode switch; otherwise toggling بيع / تأجير wipes the other side on the next save.
+
+Server PDF (`build_financial_report_html`) must emit section 14 «تحليل الحساسية العام». Do not wrap
+wide tables (`cashflowTable`, `sensitivityTable`) in `break-inside:avoid` or the last rows are
+clipped. Strip «ترتيب / حذف» from both the print snapshot and the server table renderer.
+
 ## Token budget for the land analysis
 
 `max_tokens` cannot simply be raised: **OpenRouter reserves the whole cap against the account

@@ -1576,13 +1576,29 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'fundFeesEnabled': 'no', 'externalEnabled': 'no',
                 'exitEnabled': 'no',
             },
-            'tables': {}, 'projection': {'projectCost': 10}
+            'tables': {
+                'sensitivityAssumptionsTable': [{'key': 'executionCost', 'low': 90, 'high': 110, 'ترتيب / حذف': 'أعلى'}],
+                'sensitivityTable': [{'scenario': 'أساسي', 'roi': '12%'}],
+                'cashflowTable': [{'year': 1, 'final': -10, 'cumulative': -10}],
+            },
+            'projection': {'projectCost': 10},
+            'dynamicRows': {'sensitivity': [{'key': 'executionCost', 'low': 90, 'high': 110}]},
         }
         with self.app.app_context():
             html = self.application_module.build_financial_report_html('مشروع مالي', model, {}, self.tenant_a)
         self.assertNotIn('8. التمويل', html)
         self.assertNotIn('9. الصندوق وأتعابه', html)
         self.assertIn('12. النتائج المالية', html)
+        self.assertIn('13. التدفقات النقدية السنوية', html)
+        self.assertIn('14. تحليل الحساسية العام', html)
+        self.assertIn('wide-table', html)
+        self.assertNotIn('ترتيب / حذف', html)
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function persistFinancialStudyDraftState()', index_source)
+        self.assertIn("data-key=\"financial_study_model\"", index_source)
+        self.assertIn('sensitivity: collectSensitivityVariables()', index_source)
+        self.assertIn("existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')]", index_source)
+        self.assertIn('if (source !== \'manual\') updateAutoQtyPreview(tr);', index_source)
         client = self.app.test_client()
         with patch.object(self.application_module, 'generate_financial_pdf') as generate_pdf:
             response = client.post('/api/financial-study/export', headers=self._headers(self.token_a), json={
