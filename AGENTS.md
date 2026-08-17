@@ -120,6 +120,11 @@ assertion deliberately, not reflexively.
 - `location_address` belongs to the `location` section and is the only visible Google Maps link
   field. Land analysis receives that link, the resolved coordinates, and the map/site context from
   the location workflow.
+- Map preview «إعادة توليد» must actually fetch a new image: `POST /api/generate-map-image`
+  deletes that view's DB rows, sets `refresh_maps` + `regen_seed`, and skips `_get_cached_map_images`.
+  After a successful response, the client must replace the view's placeholders, bust the img cache,
+  and call `selectMapPreviewView`. On the access map, Google road labels stay off and our names are
+  drawn after the gold highlight so the stroke never covers the text.
 - The land analysis reads the complete text and tables from both `اشتراطات1.pdf` and
   `اشتراطات2.pdf` by default. Page numbers may remain in internal evidence metadata, but must never
   be written into user-facing land fields or the narrative summary. `allowed_uses` and

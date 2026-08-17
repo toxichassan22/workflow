@@ -5718,6 +5718,9 @@ def api_generate_single_map_image():
     for image_type in (map_type, f'{map_type}_satellite', f'{map_type}_roadmap'):
         db.delete_map_images(g.tenant_id, presentation_id=effective_id, image_type=image_type)
     project_data['enabled_maps'] = [map_type]
+    project_data['refresh_maps'] = True
+    if data.get('regenSeed') is not None:
+        project_data['regen_seed'] = data.get('regenSeed')
     branding = db.get_branding(g.tenant_id) or {}
     result = maps_service.generate_all_map_images(
         project_data,

@@ -7472,7 +7472,7 @@
       'enabled_maps', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
       'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_maps_link',
       'locationLat', 'locationLng', 'location_polygon', 'longitude', 'main_roads', 'map_styles',
-      'map_type', 'maps_link', 'nearby_landmarks', 'secondary_roads'
+      'map_type', 'maps_link', 'nearby_landmarks', 'regen_seed', 'refresh_maps', 'secondary_roads'
     ];
 
     // A drawn/detected boundary can carry thousands of points, which alone exceeds the
@@ -16481,7 +16481,7 @@
         const approved = !!approvals[view.mapType];
         return '<figure style="margin:0;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;">' +
           '<figcaption style="font-weight:700;font-size:12px;color:var(--p);margin-bottom:6px;">' + escapeHtml(view.title) + '</figcaption>' +
-          '<img src="' + escapeHtml(url) + '" data-map-select="' + escapeHtml(view.mapType) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;cursor:pointer;">' +
+          '<img src="' + escapeHtml(withCacheBust(url)) + '" data-map-select="' + escapeHtml(view.mapType) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;cursor:pointer;">' +
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">' +
           '<button type="button" class="btn small ' + (approved ? 'success' : 'primary') + '" data-map-action="approve" data-map-type="' + escapeHtml(view.mapType) + '">' + (approved ? 'معتمدة' : 'اعتماد الخريطة') + '</button>' +
           '<button type="button" class="btn small ghost" data-map-action="regenerate" data-map-type="' + escapeHtml(view.mapType) + '">إعادة توليد</button>' +
@@ -16501,6 +16501,21 @@
       gallery.style.display = cards ? 'grid' : 'none';
     }
 
+    function withCacheBust(url) {
+      if (!url) return url;
+      const raw = String(url);
+      const hashIndex = raw.indexOf('#');
+      const withoutHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+      const hash = hashIndex >= 0 ? raw.slice(hashIndex) : '';
+      const queryIndex = withoutHash.indexOf('?');
+      const path = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+      const params = queryIndex >= 0
+        ? withoutHash.slice(queryIndex + 1).split('&').filter(part => part && !/^t=\d+$/.test(part))
+        : [];
+      params.push('t=' + Date.now());
+      return path + '?' + params.join('&') + hash;
+    }
+
     function selectMapPreviewView(mapType) {
       const view = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === mapType);
       if (!view) return;
@@ -16511,7 +16526,7 @@
       const image = previewBox?.querySelector('img');
       if (!url || !previewBox || !image) return;
       image.onload = () => { renderTenantMapPolygonOverlay(); applyTenantPolygonZoom(); };
-      image.src = url;
+      image.src = withCacheBust(url);
       image.alt = view.title;
       previewBox.style.display = 'block';
       const lat = Number(tenantCreativeImages.map_lat || tenantProjectData.location_lat);
@@ -16546,17 +16561,25 @@
         const payload = slimMapProjectData(tenantProjectData);
         payload.enabled_maps = [mapType];
         payload.draftId = tenantProjectData.draftId;
+        payload.refresh_maps = true;
+        const regenSeed = Date.now();
+        payload.regen_seed = regenSeed;
         const data = await api('POST', '/api/generate-map-image', {
           projectData: payload,
           mapType,
           presentationId: tenantPresentationId,
-          highlightSite: shouldHighlightTenantSite()
+          highlightSite: shouldHighlightTenantSite(),
+          regenSeed
         });
         if (!data.success) {
           toast(data.error || 'تعذر إعادة توليد الخريطة');
           return;
         }
-        tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
+        const nextPlaceholders = { ...(tenantCreativeImages.map_placeholders || {}) };
+        MAP_PREVIEW_VIEW_DEFS.filter(view => view.mapType === mapType).forEach(view => {
+          view.keys.forEach(key => { delete nextPlaceholders[key]; });
+        });
+        tenantCreativeImages.map_placeholders = { ...nextPlaceholders, ...(data.placeholders || {}) };
         tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
         tenantCreativeImages.maps_persisted = true;
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
@@ -16564,6 +16587,7 @@
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
         await saveMapPreviewState();
         renderMapPreviewGallery();
+        selectMapPreviewView(mapType);
         toast('تمت إعادة توليد الخريطة، راجعها ثم اضغط اعتماد الخريطة');
       } finally {
         hideLoader();
@@ -16617,7 +16641,7 @@
       if (mapUrl && img) {
         tenantSelectedMapType = 'overview';
         img.onload = () => { renderTenantMapPolygonOverlay(); applyTenantPolygonZoom(); };
-        img.src = mapUrl;
+        img.src = withCacheBust(mapUrl);
         if (previewBox) previewBox.style.display = 'block';
         const hint = document.getElementById('mapPreviewHint');
         if (hint) hint.style.display = 'block';

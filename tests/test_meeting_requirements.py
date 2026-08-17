@@ -2165,6 +2165,42 @@ class MeetingRequirementsTests(unittest.TestCase):
         generated_project = generate_maps.call_args.args[0]
         self.assertEqual(generated_project['enabled_maps'], ['overview', 'landmarks', 'access', 'catchment'])
 
+    def test_single_map_regeneration_bypasses_cached_assets(self):
+        client = self.app.test_client()
+        with patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={
+            'placeholders': {'##MAP_ACCESS##': '/uploads/maps/access.png'},
+            'landmarks': [],
+            'landmarks_matrix': [],
+            'zooms': {'access': 16},
+        }) as generate_maps:
+            response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'one-map'},
+                'mapType': 'access',
+                'regenSeed': 17,
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        generated_project = generate_maps.call_args.args[0]
+        self.assertEqual(generated_project['enabled_maps'], ['access'])
+        self.assertTrue(generated_project['refresh_maps'])
+        self.assertEqual(generated_project['regen_seed'], 17)
+        self.assertFalse(generate_maps.call_args.kwargs.get('force'))
+
+    def test_access_road_names_are_drawn_above_highlights(self):
+        source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v3'", source)
+        self.assertIn("'feature:road|element:labels|visibility:off'", source)
+        self.assertIn('pending_labels.append((route_segment, label_text))', source)
+        self.assertIn('labels_overlay = Image.new', source)
+        self.assertLess(
+            source.index('draw.line(segment, fill=gold_color, width=9)'),
+            source.index('_draw_road_label(labels_draw')
+        )
+        self.assertIn('function withCacheBust(url)', index_source)
+        self.assertIn('payload.refresh_maps = true', index_source)
+        self.assertIn('selectMapPreviewView(mapType)', index_source)
+
     def test_presentation_map_regeneration_uses_current_project_data(self):
         with self.app.app_context():
             pres_id = db.create_presentation(

@@ -144,8 +144,19 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
-ACCESS_ROADS_RENDER_VERSION = 'v2'
+ACCESS_ROADS_RENDER_VERSION = 'v3'
 MAP_HIGHLIGHT_RENDER_VERSION = 'overview-context-v2'
+ACCESS_ROADMAP_STYLES = [
+    'feature:poi|visibility:off',
+    'feature:poi.business|visibility:off',
+    'feature:transit|visibility:off',
+    'feature:administrative.land_parcel|visibility:off',
+    'feature:road|element:labels|visibility:off',
+    'feature:road.highway|element:labels|visibility:off',
+    'feature:road.arterial|element:labels|visibility:off',
+    'feature:road.local|element:labels|visibility:off',
+]
+MAP_REGEN_ZOOM_OFFSETS = (1, -1, 2, -2, 0)
 _MAP_GENERATION_LOCKS = {}
 _MAP_GENERATION_LOCKS_GUARD = threading.Lock()
 
@@ -518,7 +529,8 @@ def _map_cache_path(lat, lng, maptype, zoom, markers=None, paths=None, size=None
 
 
 def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720), output_path=None,
-                   maptype='satellite', styles=None, use_google_markers=False, language='ar'):
+                   maptype='satellite', styles=None, use_google_markers=False, language='ar',
+                   bypass_cache=False):
     """Generate a static map image with optional markers and paths (cached by lat,lng,maptype,zoom)."""
     if not _has_api_key():
         return _api_key_error()
@@ -530,7 +542,7 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
         output_path = cache_path
 
     # Re-use cached raw map image if available
-    if os.path.exists(cache_path):
+    if not bypass_cache and os.path.exists(cache_path):
         if output_path != cache_path:
             shutil.copyfile(cache_path, output_path)
         return {'success': True, 'path': output_path, 'size': os.path.getsize(output_path), 'cached': True}
@@ -1911,7 +1923,7 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
 def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, project_data=None, tenant_id=None,
                        origin_lat=None, origin_lng=None):
     """Draw only Google Maps-derived access-road geometry and labels."""
-    def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 245), border_color=(240, 230, 210, 220)):
+    def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 255), border_color=(240, 230, 210, 255)):
         if not font:
             font = _get_arabic_font(17)
 
@@ -1925,6 +1937,24 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
 
         draw.rounded_rectangle(rect, radius=8, fill=bg_color, outline=border_color, width=2)
         draw.text((int(px - tw // 2), int(py - th // 2 - 2)), reshaped_text, fill='#FFFFFF', font=font)
+
+    def _offset_label_point(point, route_segment, img_w, img_h, distance=28):
+        px, py = point
+        if len(route_segment) < 2:
+            return px, py
+        nearest_index = min(range(len(route_segment)), key=lambda index: (route_segment[index][0] - px) ** 2 + (route_segment[index][1] - py) ** 2)
+        previous_point = route_segment[max(0, nearest_index - 1)]
+        next_point = route_segment[min(len(route_segment) - 1, nearest_index + 1)]
+        dx = next_point[0] - previous_point[0]
+        dy = next_point[1] - previous_point[1]
+        length = math.hypot(dx, dy) or 1
+        ox = -dy / length * distance
+        oy = dx / length * distance
+        candidates = [(px + ox, py + oy), (px - ox, py - oy)]
+        for candidate_x, candidate_y in candidates:
+            if 90 <= candidate_x <= img_w - 90 and 60 <= candidate_y <= img_h - 60:
+                return int(candidate_x), int(candidate_y)
+        return px, py
 
     try:
         img = Image.open(image_path).convert('RGBA')
@@ -1958,12 +1988,20 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         print("[ACCESS ROADS] Discovering nearby roads through Google Maps APIs...")
         lat_step = 0.0018  # approximately 200 m in Riyadh
         lng_step = 0.0024
+        try:
+            regen_seed = int((project_data or {}).get('regen_seed') or 0)
+        except (TypeError, ValueError):
+            regen_seed = 0
+        seed_step = (regen_seed % 5) * 0.0004
         probe_points = [
-            (route_origin_lat + lat_step, route_origin_lng),
-            (route_origin_lat - lat_step, route_origin_lng),
-            (route_origin_lat, route_origin_lng + lng_step),
-            (route_origin_lat, route_origin_lng - lng_step),
+            (route_origin_lat + lat_step + seed_step, route_origin_lng),
+            (route_origin_lat - lat_step - seed_step, route_origin_lng),
+            (route_origin_lat, route_origin_lng + lng_step + seed_step),
+            (route_origin_lat, route_origin_lng - lng_step - seed_step),
         ]
+        if regen_seed:
+            rotate_by = regen_seed % len(probe_points)
+            probe_points = probe_points[rotate_by:] + probe_points[:rotate_by]
         seen_road_keys = set()
 
         def _fetch_probe_route(probe):
@@ -1999,8 +2037,10 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             if len(road_route_mapping) >= 3:
                 break
 
-        # 3. Draw routes and labels
+        # 3. Draw routes and labels. Highlights first, names last so the gold
+        # stroke never covers the road name.
         placed_label_rects = []  # track (x1,y1,x2,y2) of placed labels to avoid overlap
+        pending_labels = []
 
         if road_route_mapping:
             origin_dx, origin_dy = _latlng_to_pixel_offset(
@@ -2035,9 +2075,14 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                     draw.line(segment, fill=(105, 73, 35, 125), width=18)
                     draw.line(segment, fill=gold_color, width=9)
 
-                # Find best place to draw road label (away from center, no overlap)
-                best_p = None
                 route_segment = max(segments, key=len)
+                pending_labels.append((route_segment, label_text))
+
+            img = Image.alpha_composite(img, overlay)
+            labels_overlay = Image.new('RGBA', (img_w, img_h), (0, 0, 0, 0))
+            labels_draw = ImageDraw.Draw(labels_overlay)
+            for route_segment, label_text in pending_labels:
+                best_p = None
                 candidates = []
                 for p in route_segment:
                     distance = math.sqrt((p[0] - origin_px) ** 2 + (p[1] - origin_py) ** 2)
@@ -2047,23 +2092,24 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
 
                 label_half_width = min(240, max(90, len(label_text or '') * 7))
                 for _, point in candidates:
-                    lx1 = point[0] - label_half_width
-                    ly1 = point[1] - 24
-                    lx2 = point[0] + label_half_width
-                    ly2 = point[1] + 24
+                    offset_point = _offset_label_point(point, route_segment, img_w, img_h)
+                    lx1 = offset_point[0] - label_half_width
+                    ly1 = offset_point[1] - 24
+                    lx2 = offset_point[0] + label_half_width
+                    ly2 = offset_point[1] + 24
                     collision = any(
                         not (lx2 < rx1 or lx1 > rx2 or ly2 < ry1 or ly1 > ry2)
                         for rx1, ry1, rx2, ry2 in placed_label_rects
                     )
                     if not collision:
-                        best_p = point
+                        best_p = offset_point
                         placed_label_rects.append((lx1, ly1, lx2, ly2))
                         break
 
                 if best_p and label_text:
-                    _draw_road_label(draw, best_p[0], best_p[1], label_text)
+                    _draw_road_label(labels_draw, best_p[0], best_p[1], label_text)
 
-            img = Image.alpha_composite(img, overlay)
+            img = Image.alpha_composite(img, labels_overlay)
             img.save(image_path, 'PNG')
             print("[ACCESS ROADS] Successfully drew Google Maps road routes")
             return True
@@ -2248,7 +2294,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         except Exception:
             return False
 
-    if not force and effective_pres_id:
+    if not force and not project_data.get('refresh_maps') and effective_pres_id:
         cached = _get_cached_map_images(
             tenant_id,
             effective_pres_id,
@@ -2310,6 +2356,16 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
     # Compute presentation-friendly zoom levels from the selected boundary.
     zooms = _calculate_map_zooms(polygon_coords)
+    refresh_maps = force or bool(project_data.get('refresh_maps'))
+    try:
+        regen_seed = int(project_data.get('regen_seed') or 0)
+    except (TypeError, ValueError):
+        regen_seed = 0
+    if project_data.get('refresh_maps') and regen_seed:
+        zoom_shift = MAP_REGEN_ZOOM_OFFSETS[regen_seed % len(MAP_REGEN_ZOOM_OFFSETS)]
+        for map_key in enabled_maps:
+            if map_key in zooms:
+                zooms[map_key] = max(12, min(20, int(zooms[map_key]) + zoom_shift))
     overview_zoom = zooms['overview']
     landmarks_zoom = zooms['landmarks']
     access_zoom = zooms['access']
@@ -2445,11 +2501,13 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         result['landmarks'] = landmarks
 
     # Helper: pick styles based on maptype
-    def _styles_for(maptype, default_styles):
-        """For satellite, use our custom styles. For roadmap/terrain/hybrid, no custom styles needed."""
+    def _styles_for(maptype, default_styles, map_kind=None):
+        """Satellite keeps custom tones; access roadmap hides native labels so our names stay readable."""
         if maptype == 'satellite':
             return default_styles
-        return []  # roadmap/terrain/hybrid look best with default Google styling
+        if map_kind == 'access':
+            return ACCESS_ROADMAP_STYLES
+        return []
 
     # Generate map_overview
     if 'overview' in enabled_maps:
@@ -2463,7 +2521,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
             overview_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            overview_res = get_static_map(map_center_lat, map_center_lng, zoom=overview_zoom, size=(1280, 720), output_path=overview_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WITH_LABELS_STYLES))
+            overview_res = get_static_map(map_center_lat, map_center_lng, zoom=overview_zoom, size=(1280, 720), output_path=overview_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WITH_LABELS_STYLES), bypass_cache=refresh_maps)
             if overview_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(overview_path, intensity=0.35)
@@ -2492,7 +2550,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
             landmarks_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            lm_res = get_static_map(map_center_lat, map_center_lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES))
+            lm_res = get_static_map(map_center_lat, map_center_lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps)
             if lm_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(landmarks_path, intensity=0.35)
@@ -2519,7 +2577,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
             access_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
-            access_res = get_static_map(map_center_lat, map_center_lng, zoom=access_zoom, size=(1280, 720), output_path=access_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_CLEAN_STYLES))
+            access_res = get_static_map(map_center_lat, map_center_lng, zoom=access_zoom, size=(1280, 720), output_path=access_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_CLEAN_STYLES, 'access'), bypass_cache=refresh_maps)
             if access_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(access_path, intensity=0.35)
@@ -2574,7 +2632,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         for active_mt, placeholder, img_suffix in styles_to_gen:
             catchment_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
             # Fetch clean map without the API-drawn paths, as we will draw them with PIL for premium styling.
-            catchment_res = get_static_map(lat, lng, zoom=catchment_zoom, paths=None, size=(1280, 720), output_path=catchment_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES))
+            catchment_res = get_static_map(lat, lng, zoom=catchment_zoom, paths=None, size=(1280, 720), output_path=catchment_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps)
             if catchment_res.get('success'):
                 if active_mt == 'satellite':
                     _apply_sepia_tone(catchment_path, intensity=0.35)
