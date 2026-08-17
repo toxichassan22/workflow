@@ -2868,6 +2868,72 @@
       font-size: 18px;
     }
 
+    .visual-concept-home {
+      display: grid;
+      gap: 16px;
+    }
+
+    .visual-concept-home-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .visual-concept-home-card {
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      min-height: 170px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      color: var(--txt, #252525);
+      text-align: right;
+      cursor: pointer;
+    }
+
+    .visual-concept-home-card:hover:not(:disabled) {
+      border-color: var(--p);
+      box-shadow: 0 8px 20px rgba(24, 53, 74, .08);
+    }
+
+    .visual-concept-home-card:disabled {
+      cursor: not-allowed;
+      opacity: .58;
+    }
+
+    .visual-concept-home-card h3 {
+      margin: 0;
+      color: var(--p);
+      font-size: 18px;
+    }
+
+    .visual-concept-home-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .visual-concept-home-status {
+      justify-self: start;
+      margin-top: auto;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: #f7fafc;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .visual-concept-home-status.locked {
+      background: #f3f3f3;
+      color: #8a8a8a;
+    }
+
+    #tenantVisualConceptPage [data-visual-concept-view][hidden] {
+      display: none !important;
+    }
+
     .visual-concept-chat {
       max-height: 160px;
       overflow: auto;
@@ -5710,6 +5776,7 @@
     @media (max-width: 520px) {
 
       .tenant-floor-design-stage-grid,
+      .visual-concept-home-grid,
       .tenant-floor-design-source-grid,
       .tenant-floor-design-analysis-sections {
         grid-template-columns: 1fr;
@@ -6660,20 +6727,55 @@
         <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
         <div class="workflow-stage-content">
           <h2>التصور البصري</h2>
-          <p class="tenant-hint">التصور البصري قسمان: تصور خارجي وتصور داخلي. ابدئي بالصورة الرئيسية في التصور الخارجي؛ زوايا يمين وشمال وفوق وخلف تُفتح بعد اعتمادها.</p>
-          <div id="visualConceptMissing" class="visual-concept-missing" hidden></div>
-          <div class="visual-concept-card">
-            <div class="visual-concept-head">
-              <h3>الصورة المرجعية</h3>
-            </div>
-            <p class="tenant-hint">اختياري: ارفع صورة مبنى يعجبك ليأخذ التوليد نفس التصميم. لو لم ترفع صورة، يولد النظام التصميم من بيانات المشروع وخريطة الأرض فقط.</p>
-            <input id="visualConceptStyleReferenceInput" type="file" accept="image/png,image/jpeg,image/jpg,image/webp">
-            <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="min-height:140px;margin-top:12px">لم تُرفع صورة مرجعية.</div>
-            <div class="visual-concept-actions">
-              <button type="button" class="btn ghost small" onclick="clearVisualConceptStyleReference()">حذف الصورة المرجعية</button>
+          <div id="visualConceptHome" class="visual-concept-home" data-visual-concept-view="home">
+            <p class="tenant-hint">اختاري كرت التصور الخارجي أو الداخلي. كل كرت يفتح صفحة العمل الخاصة به.</p>
+            <div class="visual-concept-home-grid">
+              <button type="button" class="visual-concept-home-card" data-visual-concept-target="external">
+                <span class="tenant-floor-design-stage-number">القسم الأول</span>
+                <h3>التصور الخارجي</h3>
+                <p>الصورة الرئيسية ثم يمين وشمال وفوق وخلف بعد اعتمادها.</p>
+                <span class="visual-concept-home-status">جاهز للعمل</span>
+              </button>
+              <button type="button" class="visual-concept-home-card" data-visual-concept-target="internal">
+                <span class="tenant-floor-design-stage-number">القسم الثاني</span>
+                <h3>التصور الداخلي</h3>
+                <p>سكشن مستقل لصور الداخل. سنعمل عليه بعد اعتماد التصور الخارجي.</p>
+                <span class="visual-concept-home-status locked">تحت الإنشاء</span>
+              </button>
             </div>
           </div>
-          <div id="visualConceptWorkspace" class="visual-concept-page"></div>
+          <div id="visualConceptExternalView" class="visual-concept-section" data-visual-concept-view="external" hidden>
+            <div class="tenant-floor-design-stage-view-head">
+              <div>
+                <h3>التصور الخارجي</h3>
+                <p>ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة. يمين وشمال وفوق وخلف تُفتح بعد اعتماد الصورة الرئيسية.</p>
+              </div>
+              <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
+            </div>
+            <div id="visualConceptMissing" class="visual-concept-missing" hidden></div>
+            <div class="visual-concept-card">
+              <div class="visual-concept-head">
+                <h3>الصورة المرجعية</h3>
+              </div>
+              <p class="tenant-hint">اختياري: ارفع صورة مبنى يعجبك ليأخذ التوليد نفس التصميم. لو لم ترفع صورة، يولد النظام التصميم من بيانات المشروع وخريطة الأرض فقط.</p>
+              <input id="visualConceptStyleReferenceInput" type="file" accept="image/png,image/jpeg,image/jpg,image/webp">
+              <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="min-height:140px;margin-top:12px">لم تُرفع صورة مرجعية.</div>
+              <div class="visual-concept-actions">
+                <button type="button" class="btn ghost small" onclick="clearVisualConceptStyleReference()">حذف الصورة المرجعية</button>
+              </div>
+            </div>
+            <div id="visualConceptWorkspace" class="visual-concept-page"></div>
+          </div>
+          <div id="visualConceptInternalView" class="visual-concept-section" data-visual-concept-view="internal" hidden>
+            <div class="tenant-floor-design-stage-view-head">
+              <div>
+                <h3>التصور الداخلي</h3>
+                <p>سكشن مستقل. سنعمل عليه بعد اعتماد التصور الخارجي.</p>
+              </div>
+              <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
+            </div>
+            <div id="visualConceptInternalWorkspace" class="visual-concept-page"></div>
+          </div>
           <div class="tenant-form-actions">
             <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
             <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
@@ -7937,6 +8039,7 @@
         draftId: hasProjectContext && tenantProjectData ? (tenantProjectData.draftId || null) : null,
         activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null,
         floorDesignStage: pageId === 'tenantFloorDesignPage' ? (overrides.floorDesignStage || tenantFloorDesignStage || 'home') : null,
+        visualConceptView: pageId === 'tenantVisualConceptPage' ? (overrides.visualConceptView || document.querySelector('#tenantVisualConceptPage [data-visual-concept-view]:not([hidden])')?.dataset.visualConceptView || 'home') : null,
         railTab: localStorage.getItem('tgrTab') || 'nav',
         ...overrides
       };
@@ -17969,27 +18072,23 @@
       const coverApproved = Boolean(tenantVisualConceptState.slots.cover.approvedImageUrl);
       const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], false);
       const angleHtml = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, !coverApproved)).join('');
-      const interiorHtml = VISUAL_CONCEPT_INTERNAL_SLOTS.map(item => renderVisualConceptSlot(item, true)).join('');
-      host.innerHTML =
-        '<section class="visual-concept-section" data-visual-group="external">' +
-        '<h3>التصور الخارجي</h3>' +
-        '<p class="tenant-hint">ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة. يمين وشمال وفوق وخلف تُفتح بعد اعتماد الصورة الرئيسية.</p>' +
-        coverHtml +
+      host.innerHTML = coverHtml +
         '<div class="visual-concept-stack">' +
         (coverApproved ? '' : '<p class="tenant-hint">زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.</p>') +
-        angleHtml + '</div></section>' +
-        '<section class="visual-concept-section" data-visual-group="internal">' +
-        '<h3>التصور الداخلي</h3>' +
-        '<p class="tenant-hint">سكشن مستقل. سنعمل عليه بعد اعتماد التصور الخارجي.</p>' +
-        interiorHtml + '</section>';
-      host.querySelectorAll('[data-visual-prompt]').forEach(input => {
+        angleHtml + '</div>';
+      const interiorHost = document.getElementById('visualConceptInternalWorkspace');
+      if (interiorHost) {
+        interiorHost.innerHTML = VISUAL_CONCEPT_INTERNAL_SLOTS.map(item => renderVisualConceptSlot(item, true)).join('');
+      }
+      const bindRoot = document.getElementById('tenantVisualConceptPage') || host;
+      bindRoot.querySelectorAll('[data-visual-prompt]').forEach(input => {
         input.addEventListener('input', () => {
           const slotId = input.getAttribute('data-visual-prompt');
           tenantVisualConceptState.slots[slotId].prompt = input.value;
           markVisualConceptDirty();
         });
       });
-      host.querySelectorAll('[data-visual-action]').forEach(button => {
+      bindRoot.querySelectorAll('[data-visual-action]').forEach(button => {
         button.addEventListener('click', () => {
           const action = button.getAttribute('data-visual-action');
           const slotId = button.getAttribute('data-visual-slot');
@@ -17999,6 +18098,17 @@
           else if (action === 'chat') sendVisualConceptChat(slotId);
         });
       });
+    }
+
+    function showVisualConceptView(view) {
+      const allowed = new Set(['home', 'external', 'internal']);
+      const next = allowed.has(view) ? view : 'home';
+      document.querySelectorAll('#tenantVisualConceptPage [data-visual-concept-view]').forEach(node => {
+        node.hidden = node.dataset.visualConceptView !== next;
+      });
+      if (getTenantNavigationState()?.pageId === 'tenantVisualConceptPage') {
+        saveTenantNavigationState('tenantVisualConceptPage', { visualConceptView: next });
+      }
     }
 
     function showVisualConceptMissing(message) {
@@ -18035,7 +18145,16 @@
         input.dataset.bound = '1';
         input.addEventListener('change', () => uploadVisualConceptStyleReference(input));
       }
+      document.querySelectorAll('[data-visual-concept-target]').forEach(button => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = '1';
+        button.addEventListener('click', () => {
+          showVisualConceptView(button.dataset.visualConceptTarget);
+          renderVisualConceptPage();
+        });
+      });
       renderVisualConceptPage();
+      showVisualConceptView(getTenantNavigationState()?.visualConceptView || 'home');
       await refreshVisualConceptPreflight();
     }
 
