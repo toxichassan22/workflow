@@ -3325,19 +3325,24 @@ class MeetingRequirementsTests(unittest.TestCase):
             {'name': 'منافس جديد', 'classification': 'مباشر', 'status': 'تحت الإنشاء'},
         ]
         merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode='generate')
-        self.assertEqual(added, 1)
-        self.assertEqual(updated, 1)
-        self.assertEqual(merged[0]['name'], 'مشروع العميل')
-        self.assertEqual(merged[0]['id'], 'keep-me')
-        self.assertEqual(merged[0]['source'], 'العميل')
-        self.assertEqual(merged[0]['price_value'], '1200000')
+        self.assertEqual(added, 2)
+        self.assertEqual(updated, 0)
+        self.assertEqual([row['name'] for row in merged], ['مشروع العميل', 'منافس جديد'])
+        self.assertEqual(merged[0]['source'], 'منصة عقار')
         self.assertEqual(len(merged), 2)
 
-        filled_only, added_fill, _updated_fill = market_study.merge_generated_competitors(
-            existing, [{'name': 'اسم غير موجود', 'status': 'قائم'}], mode='fill'
+        filled, added_fill, updated_fill = market_study.merge_generated_competitors(
+            existing, [
+                {'name': 'مشروع العميل', 'price_value': '1200000', 'source': 'منصة عقار'},
+                {'name': 'اسم غير موجود', 'status': 'قائم'},
+            ], mode='fill'
         )
         self.assertEqual(added_fill, 0)
-        self.assertEqual([row['name'] for row in filled_only], ['مشروع العميل'])
+        self.assertEqual(updated_fill, 1)
+        self.assertEqual([row['name'] for row in filled], ['مشروع العميل'])
+        self.assertEqual(filled[0]['id'], 'keep-me')
+        self.assertEqual(filled[0]['source'], 'العميل')
+        self.assertEqual(filled[0]['price_value'], '1200000')
 
     def test_market_study_radius_auto_is_ten_km(self):
         import market_study
@@ -3400,16 +3405,24 @@ class MeetingRequirementsTests(unittest.TestCase):
             {'choices': [{'message': {'content': json.dumps(fake, ensure_ascii=False)}}]},
             '',
         )):
-            response = client.post('/api/market-study/competitors', headers=headers, json={
+            generated = client.post('/api/market-study/competitors', headers=headers, json={
                 'projectType': 'سكني',
                 'city': 'الرياض',
+                'mode': 'generate',
                 'competitors': [{'id': 'c1', 'name': 'منافس العميل', 'row_source': 'manual'}],
             })
-        self.assertEqual(response.status_code, 200, response.get_json())
-        payload = response.get_json()
-        names = [row['name'] for row in payload['competitors']]
-        self.assertIn('منافس العميل', names)
-        self.assertIn('برج الشمال', names)
+            filled = client.post('/api/market-study/competitors', headers=headers, json={
+                'projectType': 'سكني',
+                'city': 'الرياض',
+                'mode': 'fill',
+                'competitors': [{'id': 'c1', 'name': 'منافس العميل', 'row_source': 'manual'}],
+            })
+        self.assertEqual(generated.status_code, 200, generated.get_json())
+        generated_names = [row['name'] for row in generated.get_json()['competitors']]
+        self.assertEqual(generated_names, ['برج الشمال'])
+        self.assertEqual(filled.status_code, 200, filled.get_json())
+        filled_names = [row['name'] for row in filled.get_json()['competitors']]
+        self.assertEqual(filled_names, ['منافس العميل'])
 
         catalog = client.get('/api/market-study/catalog', headers=headers)
         self.assertEqual(catalog.status_code, 200)

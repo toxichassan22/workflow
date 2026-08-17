@@ -9439,7 +9439,7 @@
       body.innerHTML = `
         <div class="market-block">
           <h4>نطاق الدراسة</h4>
-          <p class="tenant-hint">النطاق والفترة يغيّران المنافسين والمؤشرات. التلقائي = 10 كم لكل الأنواع.</p>
+          <p class="tenant-hint">النطاق يحدد دائرة البحث عن المنافسين حول موقع المشروع. التلقائي = 10 كم لأي نوع مشروع.</p>
           <div class="market-grid">
             <div><label>نطاق المنافسين</label>
               <select id="marketCompetitorRadius">
@@ -9474,7 +9474,7 @@
         </div>
         <div class="market-block">
           <h4>المنافسون</h4>
-          <p class="tenant-hint">صفوفك لا تُحذف. اكتب الاسم ثم استخدم إكمال البيانات، أو ولّد منافسين إضافيين.</p>
+          <p class="tenant-hint">توليد المنافسين يمسح الجدول ويضع النتيجة الجديدة. إكمال البيانات بالاسم يملأ الخلايا الفارغة فقط ولا يضيف ولا يحذف.</p>
           <div class="market-actions">
             <button type="button" class="btn ghost" onclick="addMarketCompetitorRow()">إضافة منافس</button>
             <button type="button" class="btn ghost" id="marketFillCompetitorsBtn" onclick="runMarketCompetitorsJob('fill')">إكمال بيانات المنافسين بالاسم</button>
@@ -10325,8 +10325,8 @@
           });
         }
         if (!res || !res.success) {
-          if (note) note.textContent = (res && (res.error || res.providerError)) || 'تعذر تحديث المنافسين. لم يُحذف أي صف.';
-          toast((res && res.error) || 'تعذر تحديث المنافسين. لم يُحذف أي صف.');
+          if (note) note.textContent = (res && (res.error || res.providerError)) || 'تعذر تحديث المنافسين.';
+          toast((res && res.error) || 'تعذر تحديث المنافسين.');
           return;
         }
         const state = getMarketStudyState();
@@ -10335,10 +10335,11 @@
         persistMarketStudyFromDom();
         const extra = res.expansionNote || res.notes || '';
         if (note) {
-          note.textContent = 'أُضيف ' + (res.added || 0) + ' وأُكمل ' + (res.updated || 0) +
-            (extra ? ' — ' + extra : '');
+          note.textContent = mode === 'fill'
+            ? ('أُكملت بيانات ' + (res.updated || 0) + ' منافس' + (extra ? ' — ' + extra : ''))
+            : ('تم استبدال الجدول بـ ' + ((res.competitors || []).length) + ' منافس' + (extra ? ' — ' + extra : ''));
         }
-        toast('تم تحديث جدول المنافسين دون حذف الصفوف الحالية');
+        toast(mode === 'fill' ? 'تم إكمال بيانات المنافسين دون حذف الصفوف' : 'تم استبدال جدول المنافسين بالنتيجة الجديدة');
         updateLoaderProgress(100, 'اكتمل تحديث المنافسين');
       } catch (error) {
         toast(error.message || 'تعذر تحديث المنافسين');

@@ -9329,7 +9329,7 @@ def _execute_market_competitors(data):
         reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
         return {
             'success': False,
-            'error': 'تعذر توليد المنافسين. لم يُحذف أي صف موجود.',
+            'error': 'تعذر توليد المنافسين.',
             'failureReason': reason,
             'providerError': provider_error,
         }

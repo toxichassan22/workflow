@@ -685,17 +685,20 @@ def build_consultant_system_prompt():
         'مهمتك إعداد دراسة سوق أولية استرشادية لفرصة عقارية، على أن يتغير التحليل '
         'والمؤشرات والمصادر والمنافسون حسب نوع المشروع.\n\n'
         'أولًا التعامل مع المنافسين:\n'
-        'إذا أدخل العميل منافسين:\n'
-        '1. اعتمد قائمة المنافسين التي أدخلها العميل ولا تحذف أي منافس منها.\n'
-        '2. استخدم البيانات التي أدخلها العميل كأساس للتحليل.\n'
-        'إذا لم يدخل العميل أي منافسين أو طُلب توليد المنافسين بالذكاء الاصطناعي:\n'
-        '1. ابحث عن المنافسين تلقائيًا.\n'
-        '2. ابدأ بالمنافسين داخل النطاق المحدد.\n'
+        'إذا طُلب إكمال بيانات المنافسين بالاسم:\n'
+        '1. أبق كل صف موجود كما هو ولا تضف منافسًا جديدًا ولا تحذف أحدًا.\n'
+        '2. املأ الحقول الناقصة فقط من مصادر موثوقة.\n'
+        'إذا طُلب توليد المنافسين بالذكاء الاصطناعي:\n'
+        '1. ابحث عن قائمة منافسين جديدة كاملة داخل النطاق المحدد.\n'
+        '2. أعد قائمة جديدة تحل محل الجدول الحالي بالكامل.\n'
         '3. اختر المنافسين الأقرب من حيث: نوع الاستخدام، مستوى المشروع، الموقع، المساحات، الأسعار، حالة المشروع.\n'
         f'4. حاول توفير {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل إذا كانوا متاحين.\n'
         '5. إذا لم يتوفر العدد الكافي وسّع نطاق البحث تدريجيًا مع توضيح ذلك.\n'
         '6. صنّف المنافسين إلى: منافس مباشر، منافس غير مباشر، مشروع مرجعي.\n'
-        '7. اذكر سبب اختيار كل منافس داخليًا في التحليل حتى لو لم يظهر عمود السبب في الجدول.\n\n'
+        '7. اذكر سبب اختيار كل منافس داخليًا في التحليل حتى لو لم يظهر عمود السبب في الجدول.\n'
+        'إذا كان الطلب تحليلًا أو ملخصًا والسوق يعتمد على جدول المنافسين الحالي:\n'
+        '1. اعتمد قائمة المنافسين الموجودة في الجدول ولا تحذف أي منافس منها.\n'
+        '2. استخدم البيانات التي أدخلها العميل أو وُلدت سابقًا كأساس للتحليل.\n\n'
         'ثانيًا ترتيب أولوية المصادر:\n'
         + '\n\n'.join(source_blocks)
         + '\n\nثالثًا التحليل حسب نوع المشروع:\n'
@@ -771,8 +774,8 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         )
     else:
         task = (
-            'ولّد منافسين إضافيين للمشروع. لا تحذف أي منافس أدخله العميل. '
-            f'أضف منافسين حتى يتوفر {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل إن أمكن. '
+            'ولّد قائمة منافسين جديدة كاملة تحل محل الجدول الحالي. '
+            f'أرجع {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل إن أمكن. '
             'إن لم يكفِ العدد داخل النطاق، وسّع البحث تدريجيًا واذكر ذلك في notes. '
             'صنف كل منافس: مباشر أو غير مباشر أو مرجعي.'
         )
@@ -781,8 +784,12 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         f'المهمة: {task}\n\n'
         'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
-        'المنافسون الحاليون (لا تحذف أحدًا منهم):\n'
-        f'{json.dumps(existing, ensure_ascii=False, indent=2)}\n\n'
+        + (
+            'المنافسون الحاليون (أبقهم جميعًا واملأ الناقص فقط):\n'
+            if mode == 'fill' else
+            'المنافسون الحاليون للسياق فقط. أعد قائمة جديدة تحل محلهم بالكامل:\n'
+        )
+        + f'{json.dumps(existing, ensure_ascii=False, indent=2)}\n\n'
         'الصفوف التي تحتاج إكمالًا إن وُجدت:\n'
         f'{json.dumps(incomplete, ensure_ascii=False, indent=2)}\n\n'
         'أرجع JSON فقط بهذا الشكل:\n'
@@ -899,9 +906,15 @@ def merge_generated_competitors(existing, generated, mode='generate'):
             item = dict(row)
             item['id'] = item.get('id') or str(uuid.uuid4())
             current.append(item)
+    if mode != 'fill':
+        replaced = []
+        for raw in generated or []:
+            incoming = normalize_competitor_row(raw)
+            if incoming:
+                replaced.append(incoming)
+        return replaced, len(replaced), 0
     by_id = {str(row.get('id')): index for index, row in enumerate(current)}
     by_name = {_norm(row.get('name')).casefold(): index for index, row in enumerate(current)}
-    added = 0
     updated = 0
     for raw in generated or []:
         incoming = normalize_competitor_row(raw)
@@ -913,12 +926,6 @@ def merge_generated_competitors(existing, generated, mode='generate'):
         elif incoming['name'].casefold() in by_name:
             index = by_name[incoming['name'].casefold()]
         if index is None:
-            if mode == 'fill':
-                continue
-            current.append(incoming)
-            by_id[incoming['id']] = len(current) - 1
-            by_name[incoming['name'].casefold()] = len(current) - 1
-            added += 1
             continue
         target = current[index]
         for key, value in incoming.items():
@@ -929,7 +936,7 @@ def merge_generated_competitors(existing, generated, mode='generate'):
                 updated += 1
         if not target.get('row_source'):
             target['row_source'] = incoming.get('row_source') or 'ai'
-    return current, added, updated
+    return current, 0, updated
 
 
 def normalize_summary(raw):

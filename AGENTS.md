@@ -180,8 +180,8 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   The competitor table shows project name, type, area, status, source, operation type,
   dynamic price type, and dynamic value. The backend-only `classification` is preserved
   in each row but is not a visible table column. Price inputs default to Saudi riyal (`SAR`);
-  range types render `من` and `إلى` values. Competitor rows are never deleted by generation.
-  Fill-by-name completes empty cells only.
+  range types render `من` and `إلى` values. Generating competitors **replaces** the table
+  with the new list. Fill-by-name completes empty cells only and never adds or deletes a row.
   Re-generating a summary shows current vs new and waits for replace/keep. The client also
   asked for a separate SWOT block (`strengths` / `weaknesses` / `opportunities` / `threats`)
   inside دراسة السوق; it is generated with the summary but must stay independent of the
