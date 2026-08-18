@@ -2247,10 +2247,12 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v3'", source)
+        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v4'", source)
         self.assertIn("'feature:road|element:labels|visibility:off'", source)
         self.assertIn('pending_labels.append((route_segment, label_text))', source)
         self.assertIn('labels_overlay = Image.new', source)
+        self.assertIn('distance=52', source)
+        self.assertIn('ly1 = offset_point[1] - 30', source)
         self.assertLess(
             source.index('draw.line(segment, fill=gold_color, width=9)'),
             source.index('_draw_road_label(labels_draw')

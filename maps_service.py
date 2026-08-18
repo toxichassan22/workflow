@@ -144,7 +144,7 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
-ACCESS_ROADS_RENDER_VERSION = 'v3'
+ACCESS_ROADS_RENDER_VERSION = 'v4'
 MAP_HIGHLIGHT_RENDER_VERSION = 'overview-context-v2'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
@@ -1938,7 +1938,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         draw.rounded_rectangle(rect, radius=8, fill=bg_color, outline=border_color, width=2)
         draw.text((int(px - tw // 2), int(py - th // 2 - 2)), reshaped_text, fill='#FFFFFF', font=font)
 
-    def _offset_label_point(point, route_segment, img_w, img_h, distance=28):
+    def _offset_label_point(point, route_segment, img_w, img_h, distance=52):
         px, py = point
         if len(route_segment) < 2:
             return px, py
@@ -2094,9 +2094,9 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 for _, point in candidates:
                     offset_point = _offset_label_point(point, route_segment, img_w, img_h)
                     lx1 = offset_point[0] - label_half_width
-                    ly1 = offset_point[1] - 24
+                    ly1 = offset_point[1] - 30
                     lx2 = offset_point[0] + label_half_width
-                    ly2 = offset_point[1] + 24
+                    ly2 = offset_point[1] + 30
                     collision = any(
                         not (lx2 < rx1 or lx1 > rx2 or ly2 < ry1 or ly1 > ry2)
                         for rx1, ry1, rx2, ry2 in placed_label_rects
