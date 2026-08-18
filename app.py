@@ -6615,6 +6615,61 @@ def _financial_report_escape(value):
     return html_lib.escape(str(value))
 
 
+_FINANCIAL_PERCENT_KEYS = {
+    'coverageRate', 'occupancy', 'costPct', 'devPct', 'drawPct', 'repaymentPct',
+    'growth', 'occupancyReach', 'reachPct', 'financingRate', 'annualFinanceRate',
+    'developerRate', 'financeArrangementFeeRate', 'fundManagementRate',
+    'operatingExitCostRate', 'developerUpliftShare', 'roi', 'projectIrr', 'equityIrr',
+}
+_FINANCIAL_YEAR_KEYS = {
+    'year', 'startYear', 'endYear', 'studyYear', 'operationYear', 'developmentYears',
+    'operationYears', 'financeDrawYears', 'financeRepaymentYears', 'floorCount', 'units',
+}
+
+
+def _financial_report_plain_number(value):
+    if isinstance(value, bool) or value in (None, ''):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text or text == '—':
+        return None
+    percent = text.endswith('%')
+    cleaned = text.translate(str.maketrans('٠١٢٣٤٥٦٧٨٩٬،', '0123456789,,'))
+    cleaned = cleaned.replace('%', '').replace('سنة', '').replace(' ', '')
+    cleaned = cleaned.replace('(', '-').replace(')', '')
+    if cleaned.count(',') == 1 and '.' not in cleaned:
+        cleaned = cleaned.replace(',', '.')
+    else:
+        cleaned = cleaned.replace(',', '')
+    match = re.search(r'-?\d+(?:\.\d+)?', cleaned)
+    if not match:
+        return None
+    try:
+        number = float(match.group(0))
+    except ValueError:
+        return None
+    if percent and abs(number) > 1:
+        number = number / 100.0
+    return number
+
+
+def _financial_report_format_number(value, key=''):
+    number = _financial_report_plain_number(value)
+    if number is None:
+        return _financial_report_escape(value)
+    field = str(key or '')
+    if field in _FINANCIAL_PERCENT_KEYS or (isinstance(value, str) and '%' in value):
+        display = number * 100 if abs(number) <= 1 else number
+        return html_lib.escape(f'{display:,.2f}%')
+    if field in {'payback', 'equityPayback'} or (isinstance(value, str) and 'سنة' in value):
+        return html_lib.escape(f'{number:,.2f} سنة')
+    if field in _FINANCIAL_YEAR_KEYS and float(number).is_integer() and abs(number) < 10000:
+        return html_lib.escape(f'{int(number):,}')
+    return html_lib.escape(f'{number:,.2f}')
+
+
 # Section 12 is a results summary, so it lists chosen metrics with Arabic labels instead of dumping
 # the whole projection object, which also carried echoed inputs and raw schedule arrays.
 FINANCIAL_RESULT_LABELS = (
@@ -6652,13 +6707,21 @@ FINANCIAL_RESULT_LABELS = (
 
 def _financial_report_rows(rows):
     # Structured values are dropped rather than stringified: they have their own tables.
-    visible = [(label, value) for label, value in rows
-               if value not in (None, '', [], {}) and not isinstance(value, (dict, list))]
+    visible = []
+    for item in rows:
+        if len(item) == 3:
+            label, value, key = item
+        else:
+            label, value = item
+            key = ''
+        if value in (None, '', [], {}) or isinstance(value, (dict, list)):
+            continue
+        visible.append((label, value, key))
     if not visible:
         return '<p class="empty">لا توجد قيم مطبقة في هذا القسم.</p>'
     return '<table class="summary-table"><tbody>' + ''.join(
-        f'<tr><th>{_financial_report_escape(label)}</th><td>{_financial_report_escape(value)}</td></tr>'
-        for label, value in visible
+        f'<tr><th>{_financial_report_escape(label)}</th><td>{_financial_report_format_number(value, key)}</td></tr>'
+        for label, value, key in visible
     ) + '</tbody></table>'
 
 
@@ -6718,7 +6781,7 @@ def _financial_report_table(rows):
         return '<p class="empty">لا توجد بنود مدخلة في هذا الجدول.</p>'
     headers = ''.join(
         f'<th>{_financial_report_escape(FINANCIAL_COLUMN_LABELS.get(key, key))}</th>' for key in keys)
-    body = ''.join('<tr>' + ''.join(f'<td>{_financial_report_escape(row.get(key))}</td>' for key in keys) + '</tr>'
+    body = ''.join('<tr>' + ''.join(f'<td>{_financial_report_format_number(row.get(key), key)}</td>' for key in keys) + '</tr>'
                    for row in rows if isinstance(row, dict))
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table>'
 
@@ -6732,7 +6795,7 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
     accent = (branding or {}).get('accent_color') or '#C4A35A'
     font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
     font_css = (font_css or '').replace('.slide', '.financial-report')
-    rows = lambda keys: _financial_report_rows([(label, inputs.get(key)) for key, label in keys])
+    rows = lambda keys: _financial_report_rows([(label, inputs.get(key), key) for key, label in keys])
     sections = []
     sections.append(f'<section class="cover"><div class="eyebrow">دراسة مالية</div><h1>{_financial_report_escape(project_name)}</h1><h2>التقرير المالي المنظم</h2><p>تم إنشاء التقرير من النسخة المعتمدة للمدخلات والافتراضات.</p></section>')
     sections.append('<section><h2>1. ملخص المشروع</h2>' + rows([('unitRevenueMode', 'طبيعة الإيرادات'), ('developmentYears', 'مدة التطوير'), ('operationYears', 'سنوات التشغيل'), ('landArea', 'مساحة الأرض')]) + '</section>')
@@ -6751,7 +6814,7 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
         sections.append('<section><h2>10. البنود الخارجية</h2>' + _financial_report_table(tables.get('externalTable')) + '</section>')
     if inputs.get('exitEnabled') == 'yes':
         sections.append('<section><h2>11. التخارج</h2>' + rows([('saleExitMethod', 'التخارج البيعي'), ('saleExitYear', 'سنة التخارج البيعي'), ('exitMethod', 'التخارج التشغيلي'), ('operatingExitYear', 'سنة التخارج التشغيلي'), ('exitInput', 'مدخل التخارج')]) + '</section>')
-    projection_rows = [(label, projection.get(key)) for key, label in FINANCIAL_RESULT_LABELS]
+    projection_rows = [(label, projection.get(key), key) for key, label in FINANCIAL_RESULT_LABELS]
     sections.append('<section class="keep-together"><h2>12. النتائج المالية</h2>' + _financial_report_rows(projection_rows) + '</section>')
     sections.append('<section class="wide-table"><h2>13. التدفقات النقدية السنوية</h2>' + _financial_report_table(tables.get('cashflowTable')) + '</section>')
     sensitivity_assumptions = tables.get('sensitivityAssumptionsTable')
