@@ -459,6 +459,29 @@ class MeetingRequirementsTests(unittest.TestCase):
         reference_url = request_payload['messages'][0]['content'][1]['image_url']['url']
         self.assertEqual(reference_url, 'data:image/png;base64,YWJj')
 
+    def test_visual_concept_image_response_accepts_content_image_parts(self):
+        module = self.application_module
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            'choices': [{'message': {'content': [
+                {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,from-content'}}
+            ]}}]
+        }
+        with patch.object(module, 'OPENROUTER_KEY', 'test-key'), \
+                patch.object(module.requests, 'post', return_value=response):
+            result = module.call_image_api_with_references(
+                'prompt', ['data:image/png;base64,AAAA', 'data:image/png;base64,BBBB']
+            )
+        self.assertEqual(result, 'data:image/png;base64,from-content')
+
+    def test_visual_concept_keeps_five_reference_file_ids(self):
+        module = self.application_module
+        ids = [f'file-{index}' for index in range(7)]
+        result = module._visual_concept_style_reference_ids({
+            'visual_concept': {'styleReferenceFileIds': ids}
+        })
+        self.assertEqual(result, ids[:5])
+
     def test_osm_boundary_ignores_landuse_and_selects_containing_building(self):
         response = Mock(status_code=200)
         response.json.return_value = {
@@ -2564,6 +2587,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('visual-concept-stack', index_source)
         self.assertIn('visualConceptStyleReferenceInput', index_source)
         self.assertIn("input.dataset.projectFileType = 'visual_reference'", index_source)
+        self.assertIn('multiple accept="image/png,image/jpeg,image/jpg,image/webp"', index_source)
+        self.assertIn('styleReferenceFileIds', index_source)
+        self.assertIn('visualConceptImageUrl(response.image)', index_source)
         self.assertNotIn('visual-concept-grid', index_source)
         self.assertNotIn('نفس المبنى المعتمد', index_source)
         self.assertNotIn('tenantMainImagePage', index_source)
@@ -2578,6 +2604,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')", source)
         self.assertIn("'overview_map', 'خريطة الأرض / المبنى'", source)
         self.assertIn('style_reference_file_id', source)
+        self.assertIn('style_reference_file_ids', source)
+        self.assertIn('VISUAL_CONCEPT_MAX_REFERENCE_IMAGES = 5', source)
         self.assertNotIn("facts.get('land_photo_ids')", source)
         self.assertIn('visual_reference', self.application_module.PROJECT_FILE_TYPES)
         self.assertIn('visual_reference', self.application_module.PROJECT_IMAGE_ONLY_TYPES)

@@ -246,9 +246,11 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   cover restores from `cover`.
   The optional style reference is a `project_files` upload with
   `file_type='visual_reference'`. Land photos are not visual-concept
-  references. Cover generation uses the overview map as the plot background
-  and the uploaded style image only if the client supplied one. External
-  angles use the approved cover only.
+  references. The external reference input accepts up to five images and
+  persists `styleReferenceFileIds` (with singular legacy fields retained).
+  Cover generation uses those references and the overview map when it fits
+  the provider's five-image limit; external angles use the approved cover
+  only. Generated local image URLs get a cache-busting query on regeneration.
 - **Rebuilding the form can wipe a saved draft.** `renderTenantProjectForm()`
   recreates every `data-key` input empty, then persist helpers run immediately.
   If a helper reads the new empty widget instead of `tenantProjectData`, the

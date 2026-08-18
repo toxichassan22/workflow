@@ -2833,6 +2833,31 @@
       display: block;
     }
 
+    .visual-concept-reference-list {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      width: 100%;
+    }
+
+    .visual-concept-reference-item {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 10px;
+      text-align: center;
+    }
+
+    .visual-concept-reference-item img {
+      width: 100%;
+      height: 110px;
+      max-height: none;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+
     .visual-concept-actions,
     .visual-concept-chat-row {
       display: flex;
@@ -5777,6 +5802,7 @@
 
       .tenant-floor-design-stage-grid,
       .visual-concept-home-grid,
+      .visual-concept-reference-list,
       .tenant-floor-design-source-grid,
       .tenant-floor-design-analysis-sections {
         grid-template-columns: 1fr;
@@ -6757,11 +6783,11 @@
               <div class="visual-concept-head">
                 <h3>الصورة المرجعية</h3>
               </div>
-              <p class="tenant-hint">اختياري: ارفع صورة مبنى يعجبك ليأخذ التوليد نفس التصميم. لو لم ترفع صورة، يولد النظام التصميم من بيانات المشروع وخريطة الأرض فقط.</p>
-              <input id="visualConceptStyleReferenceInput" type="file" accept="image/png,image/jpeg,image/jpg,image/webp">
-              <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="min-height:140px;margin-top:12px">لم تُرفع صورة مرجعية.</div>
+              <p class="tenant-hint">اختياري: ارفع حتى 5 صور لمبانٍ أو واجهات تعجبك ليأخذ التوليد اللغة المعمارية والمواد منها. لو لم ترفع صورًا، يولد النظام التصميم من بيانات المشروع وخريطة الأرض فقط.</p>
+              <input id="visualConceptStyleReferenceInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
+              <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="min-height:140px;margin-top:12px">لم تُرفع صور مرجعية.</div>
               <div class="visual-concept-actions">
-                <button type="button" class="btn ghost small" onclick="clearVisualConceptStyleReference()">حذف الصورة المرجعية</button>
+                <button type="button" class="btn ghost small" onclick="clearVisualConceptStyleReference()">حذف الصور المرجعية</button>
               </div>
             </div>
             <div id="visualConceptWorkspace" class="visual-concept-page"></div>
@@ -17590,7 +17616,7 @@
     }
 
     async function uploadTenantProjectFileInput(input, key) {
-      const multiLimit = key === 'land_photos' ? LAND_PHOTOS_MAX : 2;
+      const multiLimit = key === 'land_photos' ? LAND_PHOTOS_MAX : key === 'visual_style_reference' ? 5 : 2;
       const files = Array.from(input?.files || []).slice(0, input?.multiple ? multiLimit : 1);
       const fileType = input?.dataset?.projectFileType;
       if (!files.length || !fileType) {
@@ -17879,12 +17905,38 @@
       return null;
     }
 
+    function visualConceptReferenceList(value) {
+      if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
+      if (typeof value !== 'string' || !value.trim()) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map(item => String(item || '').trim()).filter(Boolean) : [value.trim()];
+      } catch (error) {
+        return [value.trim()];
+      }
+    }
+
     function normalizeVisualConceptState(raw) {
       let value = raw;
       if (typeof value === 'string') {
         try { value = JSON.parse(value); } catch (error) { value = null; }
       }
       const source = value && typeof value === 'object' ? value : {};
+      const hasStateReferenceIds = ['styleReferenceFileIds', 'style_reference_file_ids', 'styleReferenceFileId', 'style_reference_file_id']
+        .some(key => Object.prototype.hasOwnProperty.call(source, key));
+      const savedReferenceIds = visualConceptReferenceList(source.styleReferenceFileIds || source.style_reference_file_ids);
+      const legacyReferenceId = String(source.styleReferenceFileId || source.style_reference_file_id || '').trim();
+      if (legacyReferenceId && !savedReferenceIds.includes(legacyReferenceId)) savedReferenceIds.unshift(legacyReferenceId);
+      if (!hasStateReferenceIds && typeof tenantProjectData !== 'undefined') {
+        visualConceptReferenceList(tenantProjectData.visual_style_reference_file_ids).forEach(fileId => {
+          if (!savedReferenceIds.includes(fileId)) savedReferenceIds.push(fileId);
+        });
+      }
+      const styleReferenceFileIds = savedReferenceIds.slice(0, 5);
+      const styleReferenceNames = visualConceptReferenceList(source.styleReferenceNames || source.style_reference_names);
+      const legacyReferenceName = String(source.styleReferenceName || '').trim();
+      if (legacyReferenceName && !styleReferenceNames.includes(legacyReferenceName)) styleReferenceNames.unshift(legacyReferenceName);
+      styleReferenceNames.splice(5);
       const slots = {};
       VISUAL_CONCEPT_SLOTS.forEach(item => {
         const slot = visualConceptSlotSource(source.slots, item.id) || emptyVisualConceptSlot(item.id);
@@ -17925,8 +17977,10 @@
       return {
         version: 1,
         slots,
-        styleReferenceFileId: String(source.styleReferenceFileId || source.style_reference_file_id || '').trim(),
-        styleReferenceName: String(source.styleReferenceName || '').trim()
+        styleReferenceFileIds,
+        styleReferenceFileId: styleReferenceFileIds[0] || '',
+        styleReferenceNames,
+        styleReferenceName: styleReferenceNames[0] || ''
       };
     }
 
@@ -17936,7 +17990,10 @@
       const previousPrompts = Array.isArray(previousImages.moodboard_prompts) ? previousImages.moodboard_prompts : [];
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState || tenantProjectData.visual_concept);
       tenantProjectData.visual_concept = tenantVisualConceptState;
-      tenantProjectData.visual_style_reference_file_id = tenantVisualConceptState.styleReferenceFileId || '';
+      const referenceIds = Array.isArray(tenantVisualConceptState.styleReferenceFileIds)
+        ? tenantVisualConceptState.styleReferenceFileIds.slice(0, 5) : [];
+      tenantProjectData.visual_style_reference_file_ids = referenceIds;
+      tenantProjectData.visual_style_reference_file_id = referenceIds[0] || '';
       const cover = tenantVisualConceptState.slots.cover || {};
       tenantCreativeImages = previousImages;
       tenantCreativeImages.cover = cover.approvedImageUrl || tenantCreativeImages.cover || '';
@@ -18011,7 +18068,7 @@
         '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
         '<div class="visual-concept-actions">' +
         '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
-        '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + '>توليد الصورة</button>' +
+        '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (locked || slot.status === 'generating' ? 'disabled' : '') + '>توليد الصورة</button>' +
         '<button type="button" class="btn ghost small" data-visual-action="approve" data-visual-slot="' + slotDef.id + '" ' + (locked || !image ? 'disabled' : '') + '>اعتماد الصورة</button>' +
         '</div>' +
         '<div class="visual-concept-chat">' + chat + '</div>' +
@@ -18021,34 +18078,66 @@
         '</div></article>';
     }
 
+    function visualConceptImageUrl(url) {
+      const value = String(url || '');
+      if (!value.startsWith('/uploads/')) return value;
+      return value.split('?')[0] + '?t=' + Date.now();
+    }
+
     function renderVisualConceptStyleReference() {
       const preview = document.getElementById('visualConceptStyleReferencePreview');
       if (!preview) return;
-      const fileId = tenantVisualConceptState?.styleReferenceFileId;
-      if (!fileId) {
-        preview.textContent = 'لم تُرفع صورة مرجعية.';
+      const ids = Array.isArray(tenantVisualConceptState?.styleReferenceFileIds)
+        ? tenantVisualConceptState.styleReferenceFileIds : [];
+      const names = Array.isArray(tenantVisualConceptState?.styleReferenceNames)
+        ? tenantVisualConceptState.styleReferenceNames : [];
+      if (!ids.length) {
+        preview.textContent = 'لم تُرفع صور مرجعية.';
         return;
       }
-      preview.innerHTML = '<img alt="الصورة المرجعية" style="width:100%;max-height:220px;object-fit:contain;display:block">';
-      attachProjectFileThumbnail(preview.querySelector('img'), fileId);
+      preview.innerHTML = '<div class="visual-concept-reference-list"></div>';
+      const list = preview.firstElementChild;
+      ids.forEach((fileId, index) => {
+        const item = document.createElement('div');
+        item.className = 'visual-concept-reference-item';
+        item.innerHTML = '<img alt="صورة مرجعية ' + (index + 1) + '"><span>' + escapeHtml(names[index] || ('صورة مرجعية ' + (index + 1))) + '</span>';
+        list.appendChild(item);
+        attachProjectFileThumbnail(item.querySelector('img'), fileId);
+      });
     }
 
     async function uploadVisualConceptStyleReference(input) {
-      const file = input?.files?.[0];
-      if (!file) return;
+      const files = Array.from(input?.files || []);
+      if (!files.length) return;
+      if (files.length > 5) toast('سيتم رفع أول 5 صور فقط.');
       try {
         input.dataset.projectFileType = 'visual_reference';
         const uploaded = await uploadTenantProjectFileInput(input, 'visual_style_reference');
-        const fileId = uploaded?.id || uploaded;
-        if (!fileId) throw new Error('تعذر رفع الصورة المرجعية');
+        const incoming = (Array.isArray(uploaded) ? uploaded : [uploaded]).map((file, index) => ({
+          id: file?.id || file,
+          name: file?.originalName || files[index]?.name || ''
+        })).filter(file => file.id);
+        if (!incoming.length) throw new Error('تعذر رفع الصور المرجعية');
         tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
-        tenantVisualConceptState.styleReferenceFileId = fileId;
-        tenantVisualConceptState.styleReferenceName = uploaded.originalName || file.name || '';
+        const merged = [];
+        const existingIds = tenantVisualConceptState.styleReferenceFileIds || [];
+        const existingNames = tenantVisualConceptState.styleReferenceNames || [];
+        existingIds.forEach((id, index) => merged.push({ id, name: existingNames[index] || '' }));
+        incoming.forEach(file => {
+          const found = merged.find(item => String(item.id) === String(file.id));
+          if (found) found.name = found.name || file.name;
+          else merged.push(file);
+        });
+        const limited = merged.slice(0, 5);
+        tenantVisualConceptState.styleReferenceFileIds = limited.map(file => file.id);
+        tenantVisualConceptState.styleReferenceNames = limited.map(file => file.name);
+        tenantVisualConceptState.styleReferenceFileId = limited[0]?.id || '';
+        tenantVisualConceptState.styleReferenceName = limited[0]?.name || '';
         markVisualConceptDirty();
         renderVisualConceptStyleReference();
-        toast('تم حفظ الصورة المرجعية. ستُستخدم في توليد الصورة الرئيسية.');
+        toast('تم حفظ ' + limited.length + ' صور مرجعية.');
       } catch (error) {
-        toast(error.message || 'تعذر رفع الصورة المرجعية');
+        toast(error.message || 'تعذر رفع الصور المرجعية');
       } finally {
         if (input) input.value = '';
       }
@@ -18056,11 +18145,13 @@
 
     function clearVisualConceptStyleReference() {
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+      tenantVisualConceptState.styleReferenceFileIds = [];
       tenantVisualConceptState.styleReferenceFileId = '';
+      tenantVisualConceptState.styleReferenceNames = [];
       tenantVisualConceptState.styleReferenceName = '';
       markVisualConceptDirty();
       renderVisualConceptStyleReference();
-      toast('تم حذف الصورة المرجعية. سيولد النظام التصميم من البيانات والخريطة فقط.');
+      toast('تم حذف الصور المرجعية. سيولد النظام التصميم من البيانات والخريطة فقط.');
     }
 
     function renderVisualConceptPage() {
@@ -18187,6 +18278,8 @@
     }
 
     async function generateVisualConceptImage(slotId) {
+      const slot = tenantVisualConceptState.slots[slotId];
+      if (!slot || slot.status === 'generating') return;
       if (visualConceptSlotLocked(slotId)) {
         toast(slotId === 'interior' ? 'التصور الداخلي سيفتح لاحقًا.' : 'اعتمد الصورة الرئيسية أولاً.');
         return;
@@ -18195,7 +18288,8 @@
         await generateVisualConceptPrompt(slotId);
       }
       if (!tenantVisualConceptState.slots[slotId].prompt) return;
-      tenantVisualConceptState.slots[slotId].status = 'generating';
+      const previousImage = slot.imageUrl || slot.approvedImageUrl;
+      slot.status = 'generating';
       renderVisualConceptPage();
       showLoader('جاري توليد التصور البصري', 'يتم توليد ' + (VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label || 'الصورة') + '...');
       try {
@@ -18203,7 +18297,7 @@
         const response = await apiWithTimeout('POST', '/api/visual-concept/generate', payload, 180000, 'انتهت مهلة توليد الصورة؛ أعد المحاولة.');
         hideLoader();
         if (!response?.success || !response.image) {
-          tenantVisualConceptState.slots[slotId].status = tenantVisualConceptState.slots[slotId].imageUrl ? 'review' : 'pending';
+          slot.status = previousImage ? 'review' : 'pending';
           renderVisualConceptPage();
           const message = visualConceptMissingMessage(response) || response?.error || 'تعذر توليد الصورة';
           showVisualConceptMissing(visualConceptMissingMessage(response));
@@ -18212,15 +18306,15 @@
         }
         showVisualConceptMissing('');
         tenantVisualConceptState.slots[slotId].prompt = response.prompt || tenantVisualConceptState.slots[slotId].prompt;
-        tenantVisualConceptState.slots[slotId].imageUrl = response.image;
-        tenantVisualConceptState.slots[slotId].approvedImageUrl = '';
+        slot.imageUrl = visualConceptImageUrl(response.image);
+        slot.approvedImageUrl = '';
         tenantVisualConceptState.slots[slotId].status = 'review';
         markVisualConceptDirty();
         renderVisualConceptPage();
         toast('تم توليد المعاينة. اضغط اعتماد الصورة لتثبيتها.');
       } catch (error) {
         hideLoader();
-        tenantVisualConceptState.slots[slotId].status = 'pending';
+        slot.status = previousImage ? 'review' : 'pending';
         renderVisualConceptPage();
         toast(error.message || 'تعذر توليد الصورة');
       }

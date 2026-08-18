@@ -384,6 +384,45 @@ def extract_chat_content(response, label="GLM"):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Call Image API (OpenRouter - Gemini)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _image_response_url(data):
+    def candidate(value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value if value.startswith('data:image/') or value.startswith('http') else None
+        if not isinstance(value, dict):
+            return None
+        encoded = value.get('b64_json') or value.get('base64')
+        if encoded:
+            return 'data:image/png;base64,' + str(encoded)
+        for key in ('image_url', 'image', 'url', 'data_uri'):
+            nested = value.get(key)
+            if isinstance(nested, dict):
+                nested = nested.get('url') or nested.get('data_uri')
+            result = candidate(nested)
+            if result:
+                return result
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    for choice in data.get('choices') or []:
+        message = choice.get('message') if isinstance(choice, dict) else None
+        if not isinstance(message, dict):
+            continue
+        for key in ('images', 'content'):
+            value = message.get(key)
+            values = value if isinstance(value, list) else [value]
+            for item in values:
+                result = candidate(item)
+                if result:
+                    return result
+    for item in data.get('data') or []:
+        result = candidate(item)
+        if result:
+            return result
+    return None
+
+
 def call_image_api(prompt):
     # AI4: Check if OpenRouter key is configured
     if not OPENROUTER_KEY:
@@ -417,18 +456,10 @@ def call_image_api(prompt):
             err_msg = data['error'].get('message', '') if isinstance(data['error'], dict) else str(data['error'])
             print(f"[IMAGE ERROR] OpenRouter API error: {err_msg}")
             return None
-        if "choices" in data and len(data["choices"]) > 0:
-            msg = data["choices"][0].get("message", {})
-            if "images" in msg and len(msg["images"]) > 0:
-                img = msg["images"][0]
-                if isinstance(img, dict) and "image_url" in img:
-                    return img["image_url"].get("url")
-            text_part = msg.get("content")
-            if isinstance(text_part, list):
-                text_part = ' '.join(str(c.get('text', '')) if isinstance(c, dict) else str(c) for c in text_part)
-            print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Text: {str(text_part)[:300]}")
-        else:
-            print(f"[IMAGE ERROR] Unexpected API response (status {response.status_code}): {str(data)[:300]}")
+        image_url = _image_response_url(data)
+        if image_url:
+            return image_url
+        print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Response: {str(data)[:300]}")
     except requests.exceptions.Timeout:
         print("[IMAGE ERROR] OpenRouter API request timed out")
     except requests.exceptions.ConnectionError:
@@ -519,18 +550,10 @@ def call_image_api_with_reference(reference_image_base64, prompt):
             err_msg = data['error'].get('message', '') if isinstance(data['error'], dict) else str(data['error'])
             print(f"[IMAGE ERROR] OpenRouter API error: {err_msg}")
             return None
-        if "choices" in data and len(data["choices"]) > 0:
-            msg = data["choices"][0].get("message", {})
-            if "images" in msg and len(msg["images"]) > 0:
-                img = msg["images"][0]
-                if isinstance(img, dict) and "image_url" in img:
-                    return img["image_url"].get("url")
-            text_part = msg.get("content")
-            if isinstance(text_part, list):
-                text_part = ' '.join(str(c.get('text', '')) if isinstance(c, dict) else str(c) for c in text_part)
-            print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Text: {str(text_part)[:300]}")
-        else:
-            print(f"[IMAGE ERROR] Unexpected API response (status {response.status_code}): {str(data)[:300]}")
+        image_url = _image_response_url(data)
+        if image_url:
+            return image_url
+        print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Response: {str(data)[:300]}")
     except requests.exceptions.Timeout:
         print("[IMAGE ERROR] OpenRouter API request timed out")
     except requests.exceptions.ConnectionError:
@@ -570,6 +593,7 @@ def persist_generated_image(image, tenant_id):
     return f'/uploads/creative/{safe_tenant}/{filename}'
 
 
+VISUAL_CONCEPT_MAX_REFERENCE_IMAGES = 5
 VISUAL_CONCEPT_SLOTS = ('cover', 'right', 'left', 'top', 'back', 'interior')
 VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')
 VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')
@@ -696,16 +720,41 @@ def _visual_concept_directions(project_data):
     return rows
 
 
-def _visual_concept_style_reference_id(project_data):
+def _visual_concept_list(value):
+    if isinstance(value, list):
+        values = value
+    elif isinstance(value, str):
+        parsed = _visual_concept_parse_json(value, None)
+        values = parsed if isinstance(parsed, list) else ([value] if value.strip() else [])
+    else:
+        values = []
+    return [str(item).strip() for item in values if str(item).strip()]
+
+
+def _visual_concept_style_reference_ids(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     visual = source.get('visual_concept')
     if isinstance(visual, str):
         visual = _visual_concept_parse_json(visual, {})
-    if isinstance(visual, dict):
-        file_id = str(visual.get('styleReferenceFileId') or visual.get('style_reference_file_id') or '').strip()
-        if file_id:
-            return file_id
-    return str(source.get('visual_style_reference_file_id') or '').strip()
+    visual = visual if isinstance(visual, dict) else {}
+    candidates = []
+    for key in ('styleReferenceFileIds', 'style_reference_file_ids'):
+        candidates.extend(_visual_concept_list(visual.get(key)))
+    candidates.extend(_visual_concept_list(visual.get('styleReferenceFileId') or visual.get('style_reference_file_id')))
+    for key in ('visual_style_reference_file_ids',):
+        candidates.extend(_visual_concept_list(source.get(key)))
+    candidates.extend(_visual_concept_list(source.get('visual_style_reference_file_id')))
+    unique = []
+    for file_id in candidates:
+        if file_id not in unique:
+            unique.append(file_id)
+        if len(unique) >= VISUAL_CONCEPT_MAX_REFERENCE_IMAGES:
+            break
+    return unique
+
+
+def _visual_concept_style_reference_id(project_data):
+    return next(iter(_visual_concept_style_reference_ids(project_data)), '')
 
 
 def _visual_concept_overview_map_url(project_data):
@@ -750,12 +799,12 @@ def _visual_concept_project_file_data_uri(file_id):
 
 def _visual_concept_reference_uris(urls=None, file_ids=None):
     references = []
-    for url in urls or []:
-        prepared = _prepare_image_reference_for_model(url)
-        if prepared:
-            references.append(prepared)
     for file_id in file_ids or []:
         prepared = _visual_concept_project_file_data_uri(file_id)
+        if prepared:
+            references.append(prepared)
+    for url in urls or []:
+        prepared = _prepare_image_reference_for_model(url)
         if prepared:
             references.append(prepared)
     unique = []
@@ -765,7 +814,7 @@ def _visual_concept_reference_uris(urls=None, file_ids=None):
             continue
         seen.add(item)
         unique.append(item)
-        if len(unique) >= 5:
+        if len(unique) >= VISUAL_CONCEPT_MAX_REFERENCE_IMAGES:
             break
     return unique
 
@@ -774,7 +823,8 @@ def _visual_concept_facts(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     directions = _visual_concept_directions(source)
     components = _visual_concept_components(source)
-    style_reference_id = _visual_concept_style_reference_id(source)
+    style_reference_ids = _visual_concept_style_reference_ids(source)
+    style_reference_id = style_reference_ids[0] if style_reference_ids else ''
     map_url = _visual_concept_overview_map_url(source)
     facades_count = _visual_concept_text(_visual_concept_read(source, 'facades_count'), 40)
     facades_directions = _visual_concept_text(_visual_concept_read(source, 'facades_directions'), 240)
@@ -795,6 +845,7 @@ def _visual_concept_facts(project_data):
         'directions': directions,
         'components': components,
         'style_reference_file_id': style_reference_id,
+        'style_reference_file_ids': style_reference_ids,
         'overview_map_url': map_url,
     }
     return facts
@@ -849,12 +900,12 @@ def _visual_concept_slot_instruction(slot_id, facts):
     if slot_id == 'cover':
         style_note = (
             'If a style-reference building image is attached, follow its architectural signature, materials, and design language. '
-            if facts.get('style_reference_file_id') else
+            if facts.get('style_reference_file_ids') else
             'No style-reference image was supplied; invent the architecture from the project facts only. '
         )
         return (
             f'Create the primary architectural hero photograph of {name}. '
-            'Use the attached site/map image as the actual ground and plot background. Place the building on that plot. '
+            'Use the attached site/map image as the actual ground and plot background when it is included. Place the building on that plot. '
             + style_note +
             'The composition is a cinematic exterior establishing shot, 16:9.'
         )
@@ -912,7 +963,7 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"المدينة والحي: {location or 'غير متوفر'}\n"
         f"جدول الاتجاهات:\n{directions}\n"
         f"مكونات الدراسة المالية:\n{components}\n"
-        f"صورة مرجعية للتصميم: {'مرفقة' if facts.get('style_reference_file_id') else 'غير مرفوعة — ولّد التصميم من البيانات فقط'}\n"
+        f"صور مرجعية للتصميم: {'مرفقة' if facts.get('style_reference_file_ids') else 'غير مرفوعة — ولّد التصميم من البيانات فقط'}\n"
         f"خريطة الأرض / المبنى كخلفية الموقع: {'مرفقة' if facts.get('overview_map_url') else 'غير متوفرة'}\n"
         f"نوع الصورة المطلوبة: {VISUAL_CONCEPT_SLOT_LABELS.get(slot_id, slot_id)}\n"
         f"تعليمات الكادر: {_visual_concept_slot_instruction(slot_id, facts)}"
@@ -948,7 +999,7 @@ def call_image_api_with_references(prompt, references=None):
             'X-Title': 'Real Estate Proposal Generator'
         }
         user_content = [{'type': 'text', 'text': prompt + ' --aspect 16:9'}]
-        for image_url in prepared[:5]:
+        for image_url in prepared[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]:
             user_content.append({'type': 'image_url', 'image_url': {'url': image_url}})
         payload = {
             'model': IMAGE_MODEL,
@@ -960,11 +1011,11 @@ def call_image_api_with_references(prompt, references=None):
         if response.status_code in (401, 402, 429) or 'error' in data:
             print(f"[IMAGE ERROR] Visual concept multi-reference failed: {data.get('error') if isinstance(data, dict) else response.status_code}")
             return None
-        if data.get('choices'):
-            msg = data['choices'][0].get('message', {})
-            images = msg.get('images') if isinstance(msg, dict) else None
-            if images and isinstance(images[0], dict):
-                return (images[0].get('image_url') or {}).get('url')
+        image_url = _image_response_url(data)
+        if image_url:
+            return image_url
+        print('[IMAGE ERROR] Multi-reference response contained no image; retrying with the first reference')
+        return call_image_api_with_reference(prepared[0], prompt)
     except Exception as error:
         print('[IMAGE ERROR]', error)
     return None
@@ -1000,11 +1051,11 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
 
 def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''):
     if slot_id == 'cover':
-        file_ids = [facts.get('style_reference_file_id')] if facts.get('style_reference_file_id') else []
-        return _visual_concept_reference_uris(
-            urls=[facts.get('overview_map_url')] if facts.get('overview_map_url') else [],
-            file_ids=file_ids,
-        )
+        file_ids = list(facts.get('style_reference_file_ids') or [])[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
+        map_urls = []
+        if len(file_ids) < VISUAL_CONCEPT_MAX_REFERENCE_IMAGES and facts.get('overview_map_url'):
+            map_urls.append(facts['overview_map_url'])
+        return _visual_concept_reference_uris(urls=map_urls, file_ids=file_ids)
     references = []
     if cover_image:
         prepared = _prepare_image_reference_for_model(cover_image) or (
@@ -3287,7 +3338,7 @@ def api_visual_concept_preflight():
         'missingFields': missing,
         'facts': {
             'project_name': facts.get('project_name'),
-            'hasStyleReference': bool(facts.get('style_reference_file_id')),
+            'hasStyleReference': bool(facts.get('style_reference_file_ids')),
             'hasOverviewMap': bool(facts.get('overview_map_url')),
             'componentCount': len(facts.get('components') or []),
         },
