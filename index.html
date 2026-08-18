@@ -2812,7 +2812,7 @@
     }
 
     .visual-concept-preview {
-      min-height: 220px;
+      min-height: 0;
       border: 1px solid var(--line);
       border-radius: 12px;
       background: #f8fafc;
@@ -2823,13 +2823,15 @@
       margin-bottom: 12px;
       color: var(--muted);
       text-align: center;
-      padding: 16px;
+      padding: 10px;
     }
 
     .visual-concept-preview img {
       width: 100%;
-      max-height: 420px;
-      object-fit: cover;
+      height: auto;
+      max-height: 360px;
+      object-fit: contain;
+      object-position: center;
       display: block;
     }
 
@@ -2851,9 +2853,11 @@
 
     .visual-concept-reference-item img {
       width: 100%;
-      height: 110px;
+      height: 92px;
       max-height: none;
-      object-fit: cover;
+      object-fit: contain;
+      object-position: center;
+      background: #fff;
       border-radius: 8px;
       border: 1px solid var(--line);
     }
@@ -2868,7 +2872,7 @@
 
     .visual-concept-prompt {
       width: 100%;
-      min-height: 90px;
+      min-height: 64px;
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 10px;
@@ -2879,7 +2883,17 @@
 
     .visual-concept-stack {
       display: grid;
-      gap: 20px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      align-items: start;
+    }
+
+    .visual-concept-stack > .tenant-hint {
+      grid-column: 1 / -1;
+    }
+
+    .visual-concept-card[data-visual-slot="cover"] .visual-concept-preview img {
+      max-height: 420px;
     }
 
     .visual-concept-section {
@@ -5798,6 +5812,12 @@
       }
     }
 
+    @media (max-width: 980px) {
+      .visual-concept-stack {
+        grid-template-columns: 1fr;
+      }
+    }
+
     @media (max-width: 520px) {
 
       .tenant-floor-design-stage-grid,
@@ -6785,7 +6805,7 @@
               </div>
               <p class="tenant-hint">اختياري: ارفع حتى 5 صور لمبانٍ أو واجهات تعجبك ليأخذ التوليد اللغة المعمارية والمواد منها. لو لم ترفع صورًا، يولد النظام التصميم من بيانات المشروع وخريطة الأرض فقط.</p>
               <input id="visualConceptStyleReferenceInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
-              <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="min-height:140px;margin-top:12px">لم تُرفع صور مرجعية.</div>
+              <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="margin-top:12px">لم تُرفع صور مرجعية.</div>
               <div class="visual-concept-actions">
                 <button type="button" class="btn ghost small" onclick="clearVisualConceptStyleReference()">حذف الصور المرجعية</button>
               </div>
@@ -6811,7 +6831,7 @@
               </div>
               <p class="tenant-hint">اختياري: حتى 5 صور داخلية خاصة بهذا المكون فقط. الصورة الرئيسية تُرفق تلقائيًا.</p>
               <input id="visualConceptInteriorReferenceInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
-              <div id="visualConceptInteriorReferencePreview" class="visual-concept-preview" style="min-height:140px;margin-top:12px">لم تُرفع صور مرجعية لهذا المكون.</div>
+              <div id="visualConceptInteriorReferencePreview" class="visual-concept-preview" style="margin-top:12px">لم تُرفع صور مرجعية لهذا المكون.</div>
               <div class="visual-concept-actions">
                 <button type="button" class="btn ghost small" onclick="clearVisualConceptInteriorReferences()">حذف صور هذا المكون</button>
               </div>
