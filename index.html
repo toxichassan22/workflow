@@ -7337,6 +7337,8 @@
     let loaderProgressValue = 0;
     let loaderProgressStartValue = 0;
     let loaderProgressMax = 92;
+    let loaderSessionActive = false;
+    let genProgressValue = 0;
     const inlineLoaderTimers = new WeakMap();
 
     function clampLoaderProgress(pct) {
@@ -7344,8 +7346,10 @@
       return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 0;
     }
 
-    function renderLoaderProgress(pct, stepText) {
-      const value = clampLoaderProgress(pct);
+    function renderLoaderProgress(pct, stepText, options = {}) {
+      const requested = clampLoaderProgress(pct);
+      const allowDecrease = !!options.allowDecrease;
+      const value = allowDecrease ? requested : Math.max(loaderProgressValue, requested);
       const bar = document.getElementById('globalLoaderBar');
       const pctEl = document.getElementById('globalLoaderPct');
       const stepEl = document.getElementById('globalLoaderStep');
@@ -7378,12 +7382,21 @@
     function showLoader(title, text, pct, options = {}) {
       const loader = document.getElementById('globalLoader');
       if (!loader) return;
+      const alreadyVisible = loader.style.display === 'flex';
+      const continueExisting = alreadyVisible && loaderSessionActive && options.reset !== true;
       clearTimeout(loaderHideTimer);
       document.getElementById('globalLoaderTitle').textContent = title || 'جاري التحميل...';
       document.getElementById('globalLoaderText').textContent = text || '';
       document.getElementById('globalLoaderProgress').style.display = 'block';
       loaderProgressMax = Number.isFinite(Number(options.maxProgress)) ? Math.max(1, Math.min(99, Number(options.maxProgress))) : 92;
-      renderLoaderProgress(pct === undefined || pct === null ? 5 : pct, text || 'جاري التحضير...');
+      const nextPct = pct === undefined || pct === null ? (continueExisting ? loaderProgressValue : 5) : pct;
+      if (continueExisting) {
+        renderLoaderProgress(nextPct, text || 'جاري التحضير...');
+      } else {
+        loaderSessionActive = true;
+        loaderProgressValue = 0;
+        renderLoaderProgress(nextPct, text || 'جاري التحضير...', { allowDecrease: true });
+      }
       loader.style.display = 'flex';
       startLoaderProgressTimer();
     }
@@ -7404,8 +7417,9 @@
       clearTimeout(loaderHideTimer);
       loaderHideTimer = setTimeout(() => {
         loader.style.display = 'none';
+        loaderSessionActive = false;
         loaderProgressMax = 92;
-        renderLoaderProgress(0, 'جاري التحضير...');
+        renderLoaderProgress(0, 'جاري التحضير...', { allowDecrease: true });
       }, 420);
     }
 
@@ -7454,7 +7468,7 @@
           clearInterval(timer);
           return;
         }
-        pct = Math.min(92, pct + (pct < 60 ? 7 : 3));
+        pct = Math.max(pct, Math.min(92, pct + (pct < 60 ? 7 : 3)));
         bar.style.width = pct + '%';
         bar.parentElement.setAttribute('aria-valuenow', String(pct));
         if (pctEl) pctEl.textContent = pct + '%';
@@ -7477,6 +7491,7 @@
 
     function showGenProgress() {
       genStartMs = Date.now();
+      genProgressValue = 0;
       const stepsEl = document.getElementById('genSteps');
       if (stepsEl) {
         stepsEl.innerHTML = GEN_STEPS.map(s =>
@@ -7491,16 +7506,19 @@
     }
 
     function setGenPct(pct, subtitle) {
+      const requested = clampLoaderProgress(pct);
+      const value = Math.max(genProgressValue, requested);
+      genProgressValue = value;
       const bar = document.getElementById('genBar');
       const pctEl = document.getElementById('genPct');
       const subEl = document.getElementById('genSubtitle');
       const etaEl = document.getElementById('genEta');
-      if (bar) bar.style.width = pct + '%';
-      if (pctEl) pctEl.textContent = pct + '%';
+      if (bar) bar.style.width = value + '%';
+      if (pctEl) pctEl.textContent = value + '%';
       if (subEl && subtitle) subEl.textContent = subtitle;
-      if (etaEl && genStartMs && pct > 2) {
+      if (etaEl && genStartMs && value > 2) {
         const elapsed = (Date.now() - genStartMs) / 1000;
-        const remaining = Math.round((elapsed / pct) * (100 - pct));
+        const remaining = Math.max(0, Math.round((elapsed / value) * (100 - value)));
         etaEl.textContent = 'متبقي ~' + remaining + ' ثانية';
       }
     }

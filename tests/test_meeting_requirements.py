@@ -2261,6 +2261,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('payload.refresh_maps = true', index_source)
         self.assertIn('selectMapPreviewView(mapType)', index_source)
 
+    def test_progress_bars_never_jump_backward(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('const value = allowDecrease ? requested : Math.max(loaderProgressValue, requested);', index_source)
+        self.assertIn('const continueExisting = alreadyVisible && loaderSessionActive && options.reset !== true;', index_source)
+        self.assertIn('const value = Math.max(genProgressValue, requested);', index_source)
+        self.assertIn('let genProgressValue = 0;', index_source)
+
     def test_presentation_map_regeneration_uses_current_project_data(self):
         with self.app.app_context():
             pres_id = db.create_presentation(
