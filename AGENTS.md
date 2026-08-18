@@ -235,9 +235,11 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   Visual concept uses `persistVisualConceptDraftState()` for the hidden
   `visual_concept` input plus `tenantCreativeImages`. The page now has two
   groups on a home page of two cards, like floor-design stages: `التصور الخارجي`
-  (`cover`, `right`, `left`, `top`, `back`) and `التصور الداخلي` (`interior`,
-  locked until that section is built). Clicking a card opens that group's
-  workspace. Legacy
+  (`cover`, `right`, `left`, `top`, `back`) and `التصور الداخلي`. Internal
+  images are one per actual financial-study component, chosen from a
+  dropdown. Each component has its own five optional references plus the
+  approved cover as a required sixth image. Clicking a card opens that
+  group's workspace. Legacy
   ids `east`/`west`/`aerial` hydrate into `right`/`left`/`top`. Rebuilding
   the project form must restore the existing `visual_concept` /
   `target_audience` values before writing those hidden inputs; empty widgets

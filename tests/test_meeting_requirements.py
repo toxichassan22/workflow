@@ -2575,6 +2575,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('اختاري كرت التصور الخارجي أو الداخلي', index_source)
         self.assertIn('data-visual-concept-target="external"', index_source)
         self.assertIn('data-visual-concept-target="internal"', index_source)
+        self.assertIn('visualConceptInteriorComponentSelect', index_source)
+        self.assertIn('function uploadVisualConceptInteriorReferences', index_source)
+        self.assertIn('عدد الصور الداخلية يساوي عدد مكونات المشروع', index_source)
         self.assertIn('function showVisualConceptView(view)', index_source)
         self.assertIn('function persistVisualConceptDraftState()', index_source)
         self.assertIn("data-key=\"visual_concept\"", index_source)
@@ -2672,6 +2675,46 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(east_prompt.status_code, 200, east_prompt.get_json())
         self.assertEqual(east_prompt.get_json()['slotId'], 'right')
         self.assertEqual(east_prompt.get_json()['prompt'], 'Revised right prompt')
+
+        interior_blocked = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+            'slotId': 'interior_comp-1',
+            'prompt': 'Apartment interior',
+            'componentId': 'comp-1',
+            'projectData': {
+                **facts,
+                'project_components_data': [{'id': 'comp-1', 'name': 'شقق', 'useType': 'residential', 'units': 12}],
+            },
+        })
+        self.assertEqual(interior_blocked.status_code, 400, interior_blocked.get_json())
+        self.assertEqual(interior_blocked.get_json()['error_code'], 'COVER_REQUIRED')
+
+        with patch.object(self.application_module, 'call_image_api_with_references', return_value='data:image/png;base64,BBBB') as interior_call, \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/interior.png'), \
+                patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
+                patch.object(self.application_module, '_visual_concept_project_file_data_uri', side_effect=lambda file_id: f'data:image/png;base64,{file_id}'):
+            interior = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                'slotId': 'interior_comp-1',
+                'prompt': 'Apartment interior',
+                'componentId': 'comp-1',
+                'coverImage': '/uploads/creative/cover.png',
+                'referenceFileIds': ['ref-a', 'ref-b', 'ref-c', 'ref-d', 'ref-e'],
+                'projectData': {
+                    **facts,
+                    'project_components_data': [{'id': 'comp-1', 'name': 'شقق', 'useType': 'residential', 'units': 12}],
+                },
+            })
+        self.assertEqual(interior.status_code, 200, interior.get_json())
+        self.assertEqual(interior.get_json()['slotId'], 'interior_comp-1')
+        self.assertTrue(interior_call.called)
+        self.assertEqual(interior_call.call_args.args[0], 'Apartment interior')
+        self.assertEqual(interior.get_json()['referenceCount'], 6)
+        references = interior_call.call_args.args[1]
+        self.assertEqual(len(references), 6)
+        self.assertIn('cover.png', str(references[0]))
+        self.assertTrue(any('ref-a' in str(item) for item in references))
+
+        self.assertIn('visualConceptInteriorComponentSelect', (ROOT / 'index.html').read_text(encoding='utf-8'))
+        self.assertIn('function visualConceptInteriorSlotId', (ROOT / 'index.html').read_text(encoding='utf-8'))
 
     def test_floor_design_state_is_saved_as_tenant_draft_data(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')

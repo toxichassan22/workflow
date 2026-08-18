@@ -597,6 +597,7 @@ VISUAL_CONCEPT_MAX_REFERENCE_IMAGES = 5
 VISUAL_CONCEPT_SLOTS = ('cover', 'right', 'left', 'top', 'back', 'interior')
 VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')
 VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')
+VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior'
 VISUAL_CONCEPT_SLOT_LABELS = {
     'cover': 'الصورة الرئيسية',
     'right': 'يمين',
@@ -683,7 +684,9 @@ def _visual_concept_components(project_data):
         name = _visual_concept_text(item.get('name') or item.get('component') or item.get('title'), 160)
         if not name:
             continue
+        component_id = _visual_concept_text(item.get('id') or item.get('componentId') or item.get('component_id'), 80)
         output.append({
+            'id': component_id or f'component_{len(output) + 1}',
             'name': name,
             'useType': _visual_concept_text(item.get('useType') or item.get('type'), 80),
             'units': _visual_concept_number(item.get('units')),
@@ -797,16 +800,19 @@ def _visual_concept_project_file_data_uri(file_id):
     return f'data:{mime_type};base64,{encoded}'
 
 
-def _visual_concept_reference_uris(urls=None, file_ids=None):
-    references = []
+def _visual_concept_reference_uris(urls=None, file_ids=None, max_images=None, urls_first=False):
+    limit = VISUAL_CONCEPT_MAX_REFERENCE_IMAGES if max_images is None else max(1, int(max_images))
+    prepared_files = []
     for file_id in file_ids or []:
         prepared = _visual_concept_project_file_data_uri(file_id)
         if prepared:
-            references.append(prepared)
+            prepared_files.append(prepared)
+    prepared_urls = []
     for url in urls or []:
         prepared = _prepare_image_reference_for_model(url)
         if prepared:
-            references.append(prepared)
+            prepared_urls.append(prepared)
+    references = (prepared_urls + prepared_files) if urls_first else (prepared_files + prepared_urls)
     unique = []
     seen = set()
     for item in references:
@@ -814,7 +820,7 @@ def _visual_concept_reference_uris(urls=None, file_ids=None):
             continue
         seen.add(item)
         unique.append(item)
-        if len(unique) >= VISUAL_CONCEPT_MAX_REFERENCE_IMAGES:
+        if len(unique) >= limit:
             break
     return unique
 
@@ -875,15 +881,25 @@ def _visual_concept_missing_fields(facts, slot_id='cover'):
         missing.append({'key': 'directions_table', 'label': 'جدول الاتجاهات'})
     if not facts.get('overview_map_url'):
         missing.append({'key': 'overview_map', 'label': 'خريطة الأرض / المبنى'})
-    if slot_id == 'interior':
-        missing.append({'key': 'interior_section', 'label': 'التصور الداخلي سيفتح بعد إنهاء التصور الخارجي'})
+    if slot_id == 'interior' or str(slot_id or '').startswith(VISUAL_CONCEPT_INTERNAL_PREFIX + '_'):
+        if not facts.get('components'):
+            missing.append({'key': 'project_components_data', 'label': 'مكونات المشروع في الدراسة المالية'})
     return missing
 
 
+def _visual_concept_is_internal_slot(slot_id):
+    value = str(slot_id or '')
+    return value == VISUAL_CONCEPT_INTERNAL_PREFIX or value.startswith(VISUAL_CONCEPT_INTERNAL_PREFIX + '_')
+
+
 def _visual_concept_normalize_slot(slot_id):
-    value = str(slot_id or 'cover').strip().lower()
-    if value in VISUAL_CONCEPT_SLOTS:
-        return value
+    value = str(slot_id or 'cover').strip()
+    folded = value.lower()
+    if folded in VISUAL_CONCEPT_SLOTS:
+        return folded
+    if folded.startswith(VISUAL_CONCEPT_INTERNAL_PREFIX + '_'):
+        suffix = value.split('_', 1)[1].strip()
+        return f'{VISUAL_CONCEPT_INTERNAL_PREFIX}_{suffix}' if suffix else None
     aliases = {
         'main': 'cover', 'cover_image': 'cover', 'hero': 'cover',
         'east': 'right', 'east_facade': 'right', 'يمين': 'right',
@@ -892,7 +908,7 @@ def _visual_concept_normalize_slot(slot_id):
         'rear': 'back', 'behind': 'back', 'خلف': 'back',
         'inside': 'interior', 'internal': 'interior',
     }
-    return aliases.get(value)
+    return aliases.get(folded)
 
 
 def _visual_concept_slot_instruction(slot_id, facts):
@@ -929,6 +945,29 @@ def _visual_concept_slot_instruction(slot_id, facts):
             f'Render the REAR elevation of the exact same building shown in the attached hero image of {name}. '
             'Keep the architecture, materials, height, and massing unchanged. Camera looks at the back of the building.'
         )
+    if _visual_concept_is_internal_slot(slot_id):
+        selected = facts.get('selected_component') if isinstance(facts.get('selected_component'), dict) else {}
+        component_name = selected.get('name') or 'the selected project component'
+        use_type = selected.get('useType') or ''
+        units = selected.get('units')
+        area = selected.get('builtArea') or selected.get('unitArea')
+        details = []
+        if use_type:
+            details.append(f'use type {use_type}')
+        if units not in (None, ''):
+            details.append(f'{units} units')
+        if area not in (None, ''):
+            details.append(f'area {area}')
+        detail_text = ', '.join(details)
+        return (
+            f'Render one photorealistic INTERIOR of {name} for the actual project component named {component_name}. '
+            f'This interior must belong to the same building shown in the attached approved hero image. '
+            f'Use only this component: {component_name}'
+            + (f' ({detail_text})' if detail_text else '')
+            + '. Do not invent another program, mix other components, or change the exterior architecture. '
+            'If component-specific interior references are attached, follow their materials and atmosphere. '
+            'Composition is 16:9, no people, no text, no logos.'
+        )
     component_names = '، '.join(item['name'] for item in (facts.get('components') or []) if item.get('name'))
     return (
         f'Render one photorealistic interior of {name} that belongs to the same project as the attached hero image. '
@@ -948,6 +987,8 @@ def _visual_concept_facts_prompt(facts, slot_id):
         + (f" / مساحة {item['builtArea'] or item['unitArea']}" if (item.get('builtArea') or item.get('unitArea')) else '')
         for item in facts.get('components') or []
     ) or 'غير متوفر'
+    selected = facts.get('selected_component') if isinstance(facts.get('selected_component'), dict) else {}
+    selected_component = selected.get('name') or 'غير محدد'
     location = '، '.join(part for part in (facts.get('city'), facts.get('district')) if part)
     return (
         f"اسم المشروع: {facts.get('project_name')}\n"
@@ -963,9 +1004,11 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"المدينة والحي: {location or 'غير متوفر'}\n"
         f"جدول الاتجاهات:\n{directions}\n"
         f"مكونات الدراسة المالية:\n{components}\n"
+        f"المكون الداخلي المختار: {selected_component}\n"
         f"صور مرجعية للتصميم: {'مرفقة' if facts.get('style_reference_file_ids') else 'غير مرفوعة — ولّد التصميم من البيانات فقط'}\n"
+        f"صور مرجعية للمكون الداخلي: {'مرفقة' if facts.get('interior_reference_file_ids') else 'غير مرفوعة'}\n"
         f"خريطة الأرض / المبنى كخلفية الموقع: {'مرفقة' if facts.get('overview_map_url') else 'غير متوفرة'}\n"
-        f"نوع الصورة المطلوبة: {VISUAL_CONCEPT_SLOT_LABELS.get(slot_id, slot_id)}\n"
+        f"نوع الصورة المطلوبة: {VISUAL_CONCEPT_SLOT_LABELS.get(slot_id, 'تصور داخلي للمكون')}\n"
         f"تعليمات الكادر: {_visual_concept_slot_instruction(slot_id, facts)}"
     )
 
@@ -1056,14 +1099,16 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
         if len(file_ids) < VISUAL_CONCEPT_MAX_REFERENCE_IMAGES and facts.get('overview_map_url'):
             map_urls.append(facts['overview_map_url'])
         return _visual_concept_reference_uris(urls=map_urls, file_ids=file_ids)
-    references = []
-    if cover_image:
-        prepared = _prepare_image_reference_for_model(cover_image) or (
-            cover_image if isinstance(cover_image, str) and cover_image.startswith('data:image/') else None
+    urls = [cover_image] if cover_image else []
+    if _visual_concept_is_internal_slot(slot_id):
+        file_ids = list(facts.get('interior_reference_file_ids') or [])[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
+        return _visual_concept_reference_uris(
+            urls=urls,
+            file_ids=file_ids,
+            max_images=VISUAL_CONCEPT_MAX_REFERENCE_IMAGES + 1,
+            urls_first=True,
         )
-        if prepared:
-            references.append(prepared)
-    return references
+    return _visual_concept_reference_uris(urls=urls, file_ids=[], urls_first=True)
 
 
 def _visual_concept_request_bundle(data, slot_id):
@@ -1077,7 +1122,22 @@ def _visual_concept_request_bundle(data, slot_id):
             'map_placeholders': creative.get('map_placeholders') or project_data.get('map_placeholders'),
         }
     facts = _visual_concept_facts(project_data)
+    requested_component_id = _visual_concept_text(data.get('componentId') or data.get('component_id'), 80)
+    if _visual_concept_is_internal_slot(slot_id):
+        if not requested_component_id and str(slot_id).startswith(VISUAL_CONCEPT_INTERNAL_PREFIX + '_'):
+            requested_component_id = str(slot_id).split('_', 1)[1]
+        selected = next((item for item in (facts.get('components') or []) if item.get('id') == requested_component_id), None)
+        if not selected and requested_component_id:
+            selected = next((item for item in (facts.get('components') or []) if item.get('name') == requested_component_id), None)
+        if not selected and (facts.get('components') or []):
+            selected = facts['components'][0]
+        facts['selected_component'] = selected or {}
+        facts['interior_reference_file_ids'] = _visual_concept_list(
+            data.get('referenceFileIds') or data.get('interiorReferenceFileIds')
+        )[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
     missing = _visual_concept_missing_fields(facts, slot_id)
+    if _visual_concept_is_internal_slot(slot_id) and not (facts.get('selected_component') or {}).get('name'):
+        missing.append({'key': 'project_components_data', 'label': 'اختر مكونًا فعليًا من الدراسة المالية'})
     return project_data, facts, missing
 
 
@@ -3341,6 +3401,7 @@ def api_visual_concept_preflight():
             'hasStyleReference': bool(facts.get('style_reference_file_ids')),
             'hasOverviewMap': bool(facts.get('overview_map_url')),
             'componentCount': len(facts.get('components') or []),
+            'components': facts.get('components') or [],
         },
         'error': 'أكمل الحقول الناقصة قبل توليد التصور البصري' if missing else None,
         'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE' if missing else None,
@@ -3365,7 +3426,7 @@ def api_visual_concept_prompt():
     if slot_id != 'cover' and not str(data.get('coverImage') or '').strip():
         return jsonify({
             'success': False,
-            'error': 'اعتمد الصورة الرئيسية قبل إنشاء وصف التصور الخارجي',
+            'error': 'اعتمد الصورة الرئيسية قبل إنشاء وصف التصور البصري',
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, data.get('coverImage') or '')
@@ -3412,7 +3473,7 @@ def api_visual_concept_generate():
     if slot_id != 'cover' and not str(cover_image).strip():
         return jsonify({
             'success': False,
-            'error': 'اعتمد الصورة الرئيسية قبل توليد التصور الخارجي',
+            'error': 'اعتمد الصورة الرئيسية قبل توليد التصور البصري',
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
@@ -3454,7 +3515,7 @@ def api_visual_concept_chat():
     if slot_id != 'cover' and not str(cover_image).strip():
         return jsonify({
             'success': False,
-            'error': 'اعتمد الصورة الرئيسية قبل تعديل التصور الخارجي',
+            'error': 'اعتمد الصورة الرئيسية قبل تعديل التصور البصري',
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
