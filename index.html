@@ -2337,6 +2337,44 @@
       box-shadow: 0 0 0 3px rgba(0, 0, 0, .08);
     }
 
+    .tenant-client-required-field {
+      background: #fff7f7;
+      border: 2px solid #dc2626;
+      box-shadow: 0 0 0 3px rgba(220, 38, 38, .12);
+    }
+
+    .tenant-client-required-field:hover {
+      border-color: #b91c1c;
+      box-shadow: 0 0 0 4px rgba(220, 38, 38, .16);
+    }
+
+    .tenant-client-required-field label {
+      color: #b91c1c;
+    }
+
+    .tenant-client-required-field input,
+    .tenant-client-required-field textarea,
+    .tenant-client-required-field select,
+    .tenant-client-required-field input:focus,
+    .tenant-client-required-field textarea:focus,
+    .tenant-client-required-field select:focus {
+      border: 2px solid #dc2626;
+      background: #fff;
+      box-shadow: 0 0 0 2px rgba(220, 38, 38, .1);
+    }
+
+    .tenant-client-required-badge {
+      display: inline-block;
+      margin-inline-start: 8px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #dc2626;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      vertical-align: middle;
+    }
+
     .tenant-field input[type="checkbox"] {
       width: auto;
       margin-left: 8px;
@@ -12341,6 +12379,7 @@
     }
 
     const TENANT_PROJECT_HIDDEN_FIELDS = new Set(['plot_number', 'land_area', 'built_area', 'building_system', 'infrastructure', 'population_density', 'secondary_roads', 'city_landmarks']);
+    const TENANT_CLIENT_ENTERED_LAND_FIELDS = new Set(['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio']);
 
     function tenantProjectFieldLabel(field) {
       if (field.fieldKey === 'main_roads') return 'الطرق الرئيسية المحيطة';
@@ -12414,8 +12453,16 @@
           }
           const div = document.createElement('div');
           div.className = 'tenant-field' + (f.fieldType === 'textarea' || f.fieldKey === 'location_address' || f.fieldKey === 'project_type' ? ' full' : '');
+          const isClientEnteredLandField = sectionKey === 'land_croquis' && TENANT_CLIENT_ENTERED_LAND_FIELDS.has(f.fieldKey);
+          if (isClientEnteredLandField) div.classList.add('tenant-client-required-field');
           const label = document.createElement('label');
           label.textContent = tenantProjectFieldLabel(f) + (f.isRequired ? ' *' : '');
+          if (isClientEnteredLandField) {
+            const badge = document.createElement('span');
+            badge.className = 'tenant-client-required-badge';
+            badge.textContent = 'إدخال العميل';
+            label.appendChild(badge);
+          }
           let input;
           let uploadStatus = null;
           if (f.fieldKey === 'project_subtype' || f.fieldKey === 'target_audience') {

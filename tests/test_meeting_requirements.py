@@ -2350,6 +2350,14 @@ class MeetingRequirementsTests(unittest.TestCase):
             index_source,
         )
 
+    def test_client_entered_land_fields_are_highlighted(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("TENANT_CLIENT_ENTERED_LAND_FIELDS = new Set(['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio'])", index_source)
+        self.assertIn('tenant-client-required-field', index_source)
+        self.assertIn('tenant-client-required-badge', index_source)
+        self.assertIn("badge.textContent = 'إدخال العميل';", index_source)
+        self.assertIn("sectionKey === 'land_croquis' && TENANT_CLIENT_ENTERED_LAND_FIELDS.has(f.fieldKey)", index_source)
+
     def test_financial_pdf_fallback_writes_real_arabic_text(self):
         import tempfile
         from pathlib import Path
