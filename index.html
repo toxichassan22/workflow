@@ -1627,6 +1627,11 @@
     #section-market-study .market-source-panel {
       min-width: 0;
     }
+    #marketStudyOneBlockSummary {
+      min-height: 360px;
+      line-height: 1.8;
+      white-space: pre-wrap;
+    }
     #section-market-study table {
       width: max-content;
       min-width: 100%;
@@ -10004,9 +10009,70 @@
         summary,
         swot,
         sources: [],
+        one_block_summary: '',
         decision: '',
         disclaimer: ''
       };
+    }
+
+    function buildMarketStudyOneBlockSummary(state = {}) {
+      const generated = String(state.one_block_summary || '').trim();
+      if (generated) return generated;
+      const lines = [];
+      const text = value => String(value || '').trim();
+      const scope = [
+        tenantProjectData.city ? 'المدينة: ' + text(tenantProjectData.city) : '',
+        tenantProjectData.district ? 'الحي: ' + text(tenantProjectData.district) : '',
+        state.competitor_radius ? 'نطاق المنافسين: ' + text(state.competitor_radius_custom_km || state.competitor_radius) + ' كم' : '',
+        state.data_period ? 'فترة البيانات: ' + text(state.data_period) : ''
+      ].filter(Boolean);
+      if (scope.length) {
+        lines.push('نطاق دراسة السوق');
+        lines.push(scope.join(' — '));
+      }
+
+      const competitors = Array.isArray(state.competitors) ? state.competitors : [];
+      if (competitors.some(row => text(row && row.name))) {
+        lines.push('المنافسون');
+        competitors.forEach(row => {
+          if (!row || !text(row.name)) return;
+          const price = row.price_type
+            ? row.price_type + ': ' + (row.price_from || row.price_to
+              ? [row.price_from, row.price_to].filter(Boolean).join(' إلى ')
+              : (row.price_value || ''))
+            : (row.price_value || '');
+          const details = [
+            row.project_type ? 'النوع: ' + row.project_type : '',
+            row.area_sqm ? 'مساحة الوحدة: ' + row.area_sqm + ' م²' : '',
+            row.status ? 'الحالة: ' + row.status : '',
+            row.operation_type ? 'نوع العملية: ' + row.operation_type : '',
+            price ? 'السعر: ' + price : '',
+            row.source ? 'المصدر: ' + row.source : '',
+            row.notes || ''
+          ].filter(Boolean);
+          lines.push('المنافس: ' + text(row.name));
+          if (details.length) lines.push(details.join(' — '));
+        });
+      }
+
+      const summarySections = (MARKET_STUDY_SUMMARY_SECTIONS || [])
+        .map(item => ({ label: item.label, value: text(state.summary && state.summary[item.key]) }))
+        .filter(item => item.value);
+      if (summarySections.length) {
+        lines.push('ملخص السوق');
+        summarySections.forEach(item => lines.push(item.label + ': ' + item.value));
+      }
+
+      const swotSections = (MARKET_STUDY_SWOT_SECTIONS || [])
+        .map(item => ({ label: item.label, value: text(state.swot && state.swot[item.key]) }))
+        .filter(item => item.value);
+      if (swotSections.length) {
+        lines.push('تحليل SWOT');
+        swotSections.forEach(item => lines.push(item.label + ': ' + item.value));
+      }
+      if (text(state.decision)) lines.push('تصنيف القرار: ' + text(state.decision));
+      if (text(state.disclaimer)) lines.push('إخلاء المسؤولية: ' + text(state.disclaimer));
+      return lines.join('\\n\\n');
     }
 
     function getMarketStudyState() {
@@ -10029,6 +10095,9 @@
 
     function setMarketStudyState(state) {
       const next = { ...emptyMarketStudyState(), ...(state || {}) };
+      next.one_block_summary = buildMarketStudyOneBlockSummary(next);
+      const oneBlock = document.getElementById('marketStudyOneBlockSummary');
+      if (oneBlock) oneBlock.value = next.one_block_summary;
       tenantProjectData.market_study_data = next;
       const hidden = document.getElementById('marketStudyData');
       if (hidden) hidden.value = JSON.stringify(next);
@@ -10059,6 +10128,7 @@
         collectMarketSourceRows(),
         buildMarketCompetitorSourceRows(state.competitors)
       );
+      state.one_block_summary = buildMarketStudyOneBlockSummary(state);
       return state;
     }
 
@@ -10148,6 +10218,10 @@
           <div style="margin-top:12px"><label>إخلاء المسؤولية</label>
             <textarea id="marketDisclaimer" rows="2"></textarea>
           </div>
+        </div>
+        <div class="market-block">
+          <h4>ملخص دراسة سوق العمل</h4>
+          <textarea id="marketStudyOneBlockSummary" rows="18" readonly></textarea>
         </div>
         <div class="market-block">
           <h4>المصادر</h4>
@@ -11178,6 +11252,9 @@
       const disclaimer = document.getElementById('marketDisclaimer');
       if (decision) decision.value = next.decision || '';
       if (disclaimer) disclaimer.value = next.disclaimer || 'هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.';
+      next.one_block_summary = buildMarketStudyOneBlockSummary(next);
+      const oneBlock = document.getElementById('marketStudyOneBlockSummary');
+      if (oneBlock) oneBlock.value = next.one_block_summary;
       renderMarketSources(next.sources || []);
       const hidden = document.getElementById('marketStudyData');
       if (hidden) hidden.value = JSON.stringify(next);
@@ -11324,6 +11401,7 @@
         );
         state.decision = marketSummaryPending.decision;
         state.disclaimer = marketSummaryPending.disclaimer;
+        state.one_block_summary = marketSummaryPending.oneBlockSummary || '';
         applyMarketStudyState(state);
         persistMarketStudyFromDom();
         marketSummaryPending = null;
@@ -11370,7 +11448,8 @@
           swot: res.swot || {},
           sources: res.sources || [],
           decision: res.decision || '',
-          disclaimer: res.disclaimer || ''
+          disclaimer: res.disclaimer || '',
+          oneBlockSummary: res.one_block_summary || res.oneBlockSummary || ''
         };
         if (hasCurrent) {
           renderMarketSummaryCompare(currentSummary, res.summary, currentSwot, res.swot || {});
@@ -11385,6 +11464,7 @@
           );
           state.decision = res.decision || '';
           state.disclaimer = res.disclaimer || state.disclaimer;
+          state.one_block_summary = res.one_block_summary || res.oneBlockSummary || '';
           applyMarketStudyState(state);
           persistMarketStudyFromDom();
           toast('تم توليد ملخص السوق وتحليل SWOT');

@@ -3818,6 +3818,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("data-key=\"market_study_data\"", index_source)
         self.assertIn("function runMarketCompetitorsJob(mode)", index_source)
         self.assertIn("function runMarketSummaryJob()", index_source)
+        self.assertIn('id="marketStudyOneBlockSummary"', index_source)
+        self.assertIn('function buildMarketStudyOneBlockSummary(state = {})', index_source)
         self.assertIn('<th>القيمة (ر.س)</th>', index_source)
         self.assertIn('source_urls', index_source)
         self.assertNotIn('<textarea data-field="source_urls"', index_source)
@@ -3947,6 +3949,13 @@ class MeetingRequirementsTests(unittest.TestCase):
             }],
         })
         self.assertEqual(summary['sources'][0]['url'], 'https://www.stats.gov.sa/statistics/housing-2024')
+        normalized = market_study.normalize_summary({
+            'one_block_summary': 'ملخص موحد لدراسة السوق.',
+            'summary': {},
+        })
+        self.assertEqual(normalized['one_block_summary'], 'ملخص موحد لدراسة السوق.')
+        summary_prompt = market_study.build_summary_user_prompt({}, [])
+        self.assertIn('one_block_summary', summary_prompt)
         prompt = market_study.build_consultant_system_prompt()
         self.assertIn('رابط الصفحة بالضبط', prompt)
 

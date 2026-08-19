@@ -1137,7 +1137,10 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         + '، '.join(DECISION_OPTIONS)
         + ' ثم اشرحها في نص القرار.\n'
         'بعد الملخص اكتب تحليل SWOT مستقلًا من أربع خانات: نقاط القوة، نقاط الضعف، الفرص، التهديدات.\n'
-        'اجعل كل خانة نقاطًا قصيرة خاصة بهذا المشروع وهذا النوع، ولا تكرر الملخص حرفيًا.\n\n'
+        'اجعل كل خانة نقاطًا قصيرة خاصة بهذا المشروع وهذا النوع، ولا تكرر الملخص حرفيًا.\n'
+        'بعد ذلك اكتب one_block_summary كنص عربي متماسك يلخص دراسة السوق كاملة في كتلة واحدة، '
+        'ويجمع المنافسين والبيانات السعرية وأقسام الملخص العشرة وSWOT والقرار. استخدم الحقائق والأرقام والمصادر الموجودة فقط، '
+        'ولا تضف أي معلومة غير موجودة. اجعل النص مناسبًا للقراءة المباشرة من العميل دون تحويله إلى قائمة حقول.\n\n'
         'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
         'المنافسون المعتمدون في الجدول:\n'
@@ -1157,7 +1160,8 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         '  "sources": [\n'
         '    {"name": "", "url": "", "data_date": "", "accessed_at": "' + today + '", "reliability": "", "note": ""}\n'
         '  ],\n'
-        '  "disclaimer": "هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا."\n'
+        '  "disclaimer": "هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا",\n'
+        '  "one_block_summary": "نص عربي متماسك يلخص الدراسة كاملة"\n'
         '}\n'
         'في url ضع رابط الصفحة المحددة التي ظهر فيها الرقم أو المعلومة، وليس رابط الصفحة الرئيسية للموقع.\n'
     )
@@ -1404,6 +1408,16 @@ def normalize_summary(raw):
             if value:
                 break
         swot[item['key']] = value
+    raw_one_block = (
+        data.get('one_block_summary')
+        or data.get('oneBlockSummary')
+        or data.get('market_summary_block')
+        or data.get('executive_summary')
+        or nested.get('one_block_summary')
+    )
+    one_block_summary = str(raw_one_block or '').strip()
+    one_block_summary = re.sub(r'[ \t]+', ' ', one_block_summary)
+    one_block_summary = re.sub(r'\n{3,}', '\n\n', one_block_summary)
     return {
         'title': SUMMARY_TITLE,
         'summary': summary,
@@ -1411,6 +1425,7 @@ def normalize_summary(raw):
         'decision': decision,
         'sources': sources,
         'disclaimer': disclaimer,
+        'one_block_summary': one_block_summary,
     }
 
 
