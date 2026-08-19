@@ -204,11 +204,19 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   be one of the five allowed classifications.
 - Production jobs are queued (`POST /api/market-study/competitors` or `/summary`, poll
   `GET /api/market-study/jobs/<id>`) for the same hosting-proxy reason as croquis. Tests stay
-  synchronous unless they pass `background: true`. Web search goes through OpenRouter
-  `openrouter:web_search`; a failed tool call retries without tools. Missing figures stay
+  synchronous unless they pass `background: true`. Web search goes through the OpenRouter
+  `openrouter:web_search` server tool; a failed tool call retries without tools. Missing figures stay
   `غير متوفر من مصدر موثوق`. Competitor `source_url` and summary `url` must be the exact
   page that contained the figure, not the site homepage. `prefer_specific_source_url()`
   drops a bare domain/home path when a deeper URL is also present.
+- **Never send the search tool together with `response_format: json_object`.** Gemini answers that
+  pair with reasoning and empty content, the JSON parse fails, and the retry ladder then drops the
+  tool — so no search ever ran and every link was a homepage recalled from memory. The first attempt
+  in `_call_market_study_model` must be tools with JSON mode **off** (`parse_json_object` reads the
+  fenced block), and the tool asks for `engine: 'exa'` because native Google search returns no
+  citations. `_market_citation_urls()` reads the `url_citation` annotations and
+  `market_study.apply_search_citations()` swaps a model-written homepage for the retrieved page on
+  the same host. It never touches a row the user typed (`row_source != 'ai'`).
 
 ## Performance rules
 
@@ -257,6 +265,12 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   Cover generation uses those references and the overview map when it fits
   the provider's five-image limit; external angles use the approved cover
   only. Generated local image URLs get a cache-busting query on regeneration.
+  **Never hold a slot reference across an `await` or a render.** `renderVisualConceptPage()`
+  reassigns `tenantVisualConceptState` through `normalizeVisualConceptState()`, which builds new
+  slot objects, so a `const slot = tenantVisualConceptState.slots[slotId]` captured earlier is
+  detached. That is why the cover image reported success and never appeared: the status was written
+  to the live slot and `imageUrl` to the dead one. `generateVisualConceptImage()` and
+  `sendVisualConceptChat()` use a `liveSlot()` accessor instead.
 - **Rebuilding the form can wipe a saved draft.** `renderTenantProjectForm()`
   recreates every `data-key` input empty, then persist helpers run immediately.
   If a helper reads the new empty widget instead of `tenantProjectData`, the
@@ -345,11 +359,30 @@ clipped. Strip «ترتيب / حذف» from both the print snapshot and the serv
 `POST /api/financial-study/export` is authenticated only (`@require_auth`); do not put
 `export_files` back on it — employees who can fill the study must be able to download it.
 The financial section itself needs a visible `حفظ كمسودة` next to the PDF button.
-`generate_financial_pdf()` must fall back to PyMuPDF when Playwright is missing on the host.
+`generate_financial_pdf()` has three engines and the order matters. Playwright is only available
+locally; hosting has no Chromium, so the real engine there is
+`generate_financial_pdf_from_model()`, which embeds the font itself. The MuPDF HTML engine
+(`fitz.open('html', ...)`) depends on **system** Arabic fonts the host does not have and writes
+pages of empty table borders, so it stays last. Every engine's output is gated on
+`_financial_pdf_has_text()` — a size-only check accepted those blank pages and the client
+downloaded an empty report.
+
+In the model writer, never use `insert_textbox`: it silently draws **nothing** when the font's line
+height does not fit the rectangle, which is how the whole report became borders with no text. Use
+the `place()` helper (`insert_text` + `Font.text_length` for right alignment). PyMuPDF applies no
+shaping or bidi, so text must go through `_financial_pdf_shape()`
+(`maps_service.shape_arabic_for_drawing`) first, and Latin or `%` characters must be drawn with
+`helv` because the bundled Arabic font has no glyph for them — `split_runs()` does that. Tables and
+label/value pairs are laid out right-to-left.
+
 Arabic in that PDF must use `fonts/arabic-text.bin`; Pillow map overlays must use
 `fonts/arabic-overlay.bin` (both are real fonts stored under non-LFS names). Hosting cannot
 use `*.ttf` because those files are Git LFS pointers. Strip Arabic diacritics from map road
 names before reshaping; do not draw Arabic with Helvetica.
+
+Map overlay fonts must be loaded with `layout_engine=ImageFont.Layout.BASIC`. `_reshape_arabic_text`
+already returns presentation forms in visual order, and a Pillow built **with Raqm** (hosting, not
+the local venv) re-runs bidi over them and draws every label backwards.
 
 Section approval is one toggle: `اعتماد` / `الغاء الاعتماد`. Approved sections get
 `.section-locked` and every control inside is disabled except the toggle. Two separate
