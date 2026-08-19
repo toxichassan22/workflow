@@ -442,7 +442,7 @@ def _first_nonempty(*values):
 
 def _iter_source_values(value):
     if isinstance(value, dict):
-        for key in ('url', 'source_url', 'sourceUrl', 'href'):
+        for key in ('url', 'urls', 'source_url', 'source_urls', 'sourceUrl', 'sourceUrls', 'href'):
             if value.get(key):
                 yield from _iter_source_values(value.get(key))
         return
@@ -486,15 +486,94 @@ def _unique_values(values):
     return result
 
 
+_COMPETITOR_SOURCE_FIELD_ALIASES = {
+    'name': 'name',
+    'project_name': 'name',
+    'projectName': 'name',
+    'اسم المشروع': 'name',
+    'project_type': 'project_type',
+    'projectType': 'project_type',
+    'نوع المشروع': 'project_type',
+    'area': 'area_sqm',
+    'area_sqm': 'area_sqm',
+    'areaSqm': 'area_sqm',
+    'المساحة': 'area_sqm',
+    'status': 'status',
+    'project_status': 'status',
+    'حالة المشروع': 'status',
+    'operation_type': 'operation_type',
+    'operationType': 'operation_type',
+    'operation': 'operation_type',
+    'نوع العملية': 'operation_type',
+    'price_type': 'price_type',
+    'priceType': 'price_type',
+    'نوع السعر': 'price_type',
+    'price_value': 'price_value',
+    'priceValue': 'price_value',
+    'value': 'price_value',
+    'price_from': 'price_from',
+    'priceFrom': 'price_from',
+    'price_to': 'price_to',
+    'priceTo': 'price_to',
+}
+
+_COMPETITOR_SOURCE_FIELD_LABELS = {
+    'name': 'اسم المشروع',
+    'project_type': 'نوع المشروع',
+    'area_sqm': 'مساحة الوحدة',
+    'status': 'الحالة',
+    'operation_type': 'نوع العملية',
+    'price_type': 'نوع السعر',
+    'price_value': 'قيمة السعر',
+    'price_from': 'حد السعر الأدنى',
+    'price_to': 'حد السعر الأعلى',
+}
+
+
+def _canonical_source_field(value):
+    text = _norm(value)
+    return _COMPETITOR_SOURCE_FIELD_ALIASES.get(text, text)
+
+
+def _http_source_urls(value):
+    return _unique_values(
+        item for item in _iter_source_values(value)
+        if str(item).strip().lower().startswith(('http://', 'https://'))
+    )
+
+
+def competitor_field_sources(row):
+    if not isinstance(row, dict):
+        return {}
+    raw = row.get('field_sources') or row.get('fieldSources') or {}
+    entries = []
+    if isinstance(raw, dict):
+        entries = raw.items()
+    elif isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            field = item.get('field') or item.get('key') or item.get('name')
+            urls = item.get('urls') or item.get('source_urls') or item.get('sourceUrls') or item.get('url')
+            if field:
+                entries.append((field, urls))
+    result = {}
+    for field, value in entries:
+        key = _canonical_source_field(field)
+        urls = _http_source_urls(value)
+        if key and urls:
+            result[key] = _unique_values((result.get(key) or []) + urls)
+    return result
+
+
 def competitor_source_urls(row):
     if not isinstance(row, dict):
         return []
     values = []
     for key in ('source_urls', 'sourceUrls', 'urls', 'source_url', 'sourceUrl', 'url', 'sources', 'source'):
-        values.extend(
-            item for item in _iter_source_values(row.get(key))
-            if str(item).strip().lower().startswith(('http://', 'https://'))
-        )
+        values.extend(_http_source_urls(row.get(key)))
+    for urls in competitor_field_sources(row).values():
+        values.extend(urls)
     return _unique_values(values)
 
 
@@ -701,6 +780,7 @@ def empty_competitor(source='manual'):
         'source': '',
         'source_url': '',
         'source_urls': [],
+        'field_sources': {},
         'row_source': source,
     }
 
@@ -876,6 +956,8 @@ def build_consultant_system_prompt():
         '6. صنّف المنافسين إلى: منافس مباشر، منافس غير مباشر، مشروع مرجعي.\n'
         '7. اذكر سبب اختيار كل منافس داخليًا في التحليل حتى لو لم يظهر عمود السبب في الجدول.\n'
         '8. لكل منافس أعد جميع روابط الصفحات التي استخدمت منها البيانات في source_urls، وليس رابطًا واحدًا فقط.\n'
+        '9. area_sqm تعني مساحة الوحدة القابلة للبيع أو الإيجار أو الوحدة النموذجية فقط، لا مساحة الأرض أو المبنى أو البرج أو المشروع الكلية.\n'
+        '10. في الفندق استخدم مساحة الغرفة أو الجناح أو الشقة الفندقية، وإذا لم توجد مساحة وحدة موثوقة اترك area_sqm فارغة ولا تستخدم Tower GFA أو Gross Floor Area.\n'
         'إذا كان الطلب تحليلًا أو ملخصًا والسوق يعتمد على جدول المنافسين الحالي:\n'
         '1. اعتمد قائمة المنافسين الموجودة في الجدول ولا تحذف أي منافس منها.\n'
         '2. استخدم البيانات التي أدخلها العميل أو وُلدت سابقًا كأساس للتحليل.\n\n'
@@ -969,11 +1051,14 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '2. ثم نفّذ بحثًا منفصلًا لكل منافس على حدة عن سعره الفعلي '
         '(سعر البيع أو المتر أو الإيجار أو سعر الليلة أو ADR حسب نوع التشغيل) '
         'باستخدام اسم المنافس مع المدينة، وابدأ من مصادر المستوى الأول لهذا النشاط.\n'
-        '3. لا تكتب سعرًا من معرفتك السابقة. السعر يُقبل فقط إذا ورد في صفحة قرأتها في هذا البحث، '
+        '3. area_sqm هي مساحة الوحدة القابلة للبيع أو الإيجار أو الوحدة النموذجية، مثل مساحة الشقة أو الفيلا أو المكتب أو المحل أو الغرفة أو الجناح أو المستودع. '
+        'لا تستخدم مساحة الأرض أو مساحة البناء الكلية أو Tower GFA أو Gross Floor Area أو مساحة البرج أو المشروع. '
+        'إذا وجدت فقط المساحة الإجمالية اترك area_sqm فارغة واكتب السبب في notes.\n'
+        '4. لا تكتب سعرًا من معرفتك السابقة. السعر يُقبل فقط إذا ورد في صفحة قرأتها في هذا البحث، '
         'ويجب أن يكون رابط تلك الصفحة نفسها في source_url، مع إدراج كل الصفحات المستخدمة للمنافس في source_urls.\n'
-        f'4. إذا لم تجد سعرًا بعد البحث اترك حقول السعر فارغة واكتب في source عبارة {MISSING_VALUE_PHRASE} '
+        f'5. إذا لم تجد سعرًا بعد البحث اترك حقول السعر فارغة واكتب في source عبارة {MISSING_VALUE_PHRASE} '
         'مع بيان ما بحثت عنه في notes. الصف الناقص السعر مقبول؛ الرقم المختلق مرفوض.\n'
-        '5. املأ price_type من القائمة المسموحة لنوع التشغيل، واستخدم price_from و price_to لأنواع النطاق '
+        '6. املأ price_type من القائمة المسموحة لنوع التشغيل، واستخدم price_from و price_to لأنواع النطاق '
         f'({"، ".join(sorted(RANGE_PRICE_TYPES))}) و price_value لغيرها.\n'
         'أنواع السعر المسموحة حسب نوع التشغيل:\n'
         f'{price_types}\n'
@@ -1010,6 +1095,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "source": "",\n'
         '      "source_url": "",\n'
         '      "source_urls": [],\n'
+        '      "field_sources": {"name": [], "project_type": [], "area_sqm": [], "status": [], "operation_type": [], "price_type": [], "price_value": [], "price_from": [], "price_to": []},\n'
         '      "notes": "",\n'
         '      "row_source": "ai"\n'
         '    }\n'
@@ -1023,6 +1109,8 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'إذا لم تجد سعرًا اترك حقول السعر فارغة واذكر المصدر إن وُجد.\n'
         'في source_urls ضع كل روابط الصفحات التي قرأتها واستخدمت منها أي معلومة لهذا المنافس، رابطًا لكل صفحة، '
         'ولا تكتف برابط واحد إذا استخدمت أكثر من صفحة. اجعل source_url هو الرابط الأهم للتوافق مع البيانات القديمة. '
+        'في field_sources اربط كل حقل أعدت له قيمة بروابط الصفحات التي تثبته، وبالأخص area_sqm، status، operation_type، price_type، price_value، price_from، وprice_to. '
+        'اجعل source_urls اتحاد جميع روابط field_sources. '
         'في source_url وsource_urls ضع روابط الصفحات المحددة من نتائج البحث، وليس رابط الصفحة الرئيسية للموقع. '
         'رابط النطاق وحده أو الصفحة الرئيسية غير مقبول؛ إن لم تتوفر صفحة محددة '
         f'اترك source_url وsource_urls فارغين واكتب في source عبارة {MISSING_VALUE_PHRASE}.'
@@ -1110,10 +1198,18 @@ def normalize_competitor_row(row, fallback_source='ai'):
     price_type = _canonical_price_type(raw_price_type, operation, price_from, price_to, price_value)
     classification = _norm(row.get('classification') or row.get('class') or row.get('تصنيف'))
     status = _norm(row.get('status') or row.get('project_status') or row.get('حالة المشروع'))
+    field_sources = competitor_field_sources(row)
     source_urls = competitor_source_urls(row)
-    source_url = prefer_specific_source_url(*source_urls)
-    if not source_url:
-        source_url = prefer_specific_source_url(row.get('source_url'), row.get('sourceUrl'), row.get('url'))
+    price_source_urls = (
+        field_sources.get('price_value', [])
+        + field_sources.get('price_from', [])
+        + field_sources.get('price_to', [])
+    )
+    source_url = prefer_specific_source_url(
+        row.get('source_url'), row.get('sourceUrl'), row.get('url'),
+        *price_source_urls,
+        *source_urls,
+    )
     result = {
         'id': _norm(row.get('id')) or str(uuid.uuid4()),
         'name': name,
@@ -1129,6 +1225,7 @@ def normalize_competitor_row(row, fallback_source='ai'):
         'source': _norm(row.get('source') or row.get('source_name') or row.get('sourceName')),
         'source_url': source_url,
         'source_urls': source_urls,
+        'field_sources': field_sources,
         'notes': _norm(row.get('notes') or row.get('note')),
         'row_source': _norm(row.get('row_source') or row.get('rowSource')) or fallback_source,
     }
@@ -1154,11 +1251,24 @@ def apply_search_citations(rows, citations, url_key='source_url'):
         if (row.get('row_source') or 'ai') != 'ai' and url_key == 'source_url':
             continue
         if url_key == 'source_url':
+            field_sources = competitor_field_sources(row)
+            resolved_field_sources = {
+                field: resolved
+                for field, urls in field_sources.items()
+                if (resolved := _resolve_source_urls(urls, citations))
+            }
             urls = competitor_source_urls(row)
             resolved_urls = _resolve_source_urls(urls, citations)
             if resolved_urls:
                 row['source_urls'] = resolved_urls
-                row['source_url'] = prefer_specific_source_url(*resolved_urls)
+                price_urls = (
+                    resolved_field_sources.get('price_value', [])
+                    + resolved_field_sources.get('price_from', [])
+                    + resolved_field_sources.get('price_to', [])
+                )
+                row['source_url'] = prefer_specific_source_url(*price_urls, *resolved_urls)
+            if resolved_field_sources:
+                row['field_sources'] = resolved_field_sources
             continue
         resolved = resolve_source_url_from_citations(row.get(url_key), citations)
         if resolved:
@@ -1177,18 +1287,27 @@ def competitor_source_rows(competitors):
         source_name = _norm(competitor.get('source')) or 'مصدر المنافس'
         note = _norm(competitor.get('notes') or competitor.get('note'))
         competitor_id = _norm(competitor.get('id'))
+        field_sources = competitor_field_sources(competitor)
         for url in competitor_source_urls(competitor):
+            source_fields = [
+                _COMPETITOR_SOURCE_FIELD_LABELS.get(field, field)
+                for field, urls in field_sources.items()
+                if any(str(item).casefold() == url.casefold() for item in urls)
+            ]
+            field_note = 'الحقول: ' + '، '.join(source_fields) if source_fields else ''
+            source_note = ' — '.join(item for item in (note, field_note) if item)
             rows.append({
                 'id': str(uuid.uuid4()),
                 'competitor_id': competitor_id,
                 'competitor_name': name,
                 'source_kind': 'competitor',
+                'source_fields': source_fields,
                 'name': source_name,
                 'url': url,
                 'data_date': '',
                 'accessed_at': date.today().isoformat(),
                 'reliability': '',
-                'note': note,
+                'note': source_note,
             })
     return rows
 

@@ -3952,6 +3952,10 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'https://developer.example/project',
                 'https://listing.example/project-123',
             ],
+            'field_sources': {
+                'name': ['https://developer.example/project'],
+                'area_sqm': ['https://listing.example/project-123'],
+            },
             'source': 'المطور ومنصة الإعلانات',
         })
         self.assertEqual(row['source_url'], 'https://developer.example/project')
@@ -3959,11 +3963,17 @@ class MeetingRequirementsTests(unittest.TestCase):
             'https://developer.example/project',
             'https://listing.example/project-123',
         ])
+        self.assertEqual(row['field_sources'], {
+            'name': ['https://developer.example/project'],
+            'area_sqm': ['https://listing.example/project-123'],
+        })
         self.assertEqual(row['price_type'], 'سعر المتر المربع')
         self.assertEqual(row['price_value'], '4500')
         sources = market_study.competitor_source_rows([row])
         self.assertEqual([item['url'] for item in sources], row['source_urls'])
         self.assertEqual([item['competitor_name'] for item in sources], ['برج الأعمال', 'برج الأعمال'])
+        self.assertEqual(sources[0]['source_fields'], ['اسم المشروع'])
+        self.assertEqual(sources[1]['source_fields'], ['مساحة الوحدة'])
 
     def test_market_study_normalizes_price_object_and_operation_aliases(self):
         import market_study
@@ -4077,6 +4087,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('نفّذ بحثًا منفصلًا لكل منافس على حدة عن سعره الفعلي', prompt)
         self.assertIn('لا تكتب سعرًا من معرفتك السابقة', prompt)
         self.assertIn('source_urls', prompt)
+        self.assertIn('field_sources', prompt)
+        self.assertIn('مساحة الوحدة القابلة للبيع', prompt)
+        self.assertIn('Tower GFA', prompt)
         self.assertIn('price_type والقيمة', prompt)
         self.assertIn(market_study.MISSING_VALUE_PHRASE, prompt)
         self.assertIn('سعر الليلة', prompt)

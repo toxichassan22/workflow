@@ -10629,7 +10629,7 @@
     function marketValueList(value) {
       if (Array.isArray(value)) return value.reduce((items, item) => items.concat(marketValueList(item)), []);
       if (value && typeof value === 'object') {
-        return ['url', 'source_url', 'sourceUrl', 'href'].reduce((items, key) =>
+        return ['url', 'urls', 'source_url', 'source_urls', 'sourceUrl', 'sourceUrls', 'href'].reduce((items, key) =>
           items.concat(marketValueList(value[key])), []);
       }
       const text = String(value || '').trim();
@@ -10645,10 +10645,58 @@
       return [text];
     }
 
+    function marketFieldSources(row = {}) {
+      const raw = row.field_sources || row.fieldSources || {};
+      const entries = [];
+      if (Array.isArray(raw)) {
+        raw.forEach(item => {
+          if (!item || typeof item !== 'object') return;
+          const field = item.field || item.key || item.name;
+          const urls = item.urls || item.source_urls || item.sourceUrls || item.url;
+          if (field) entries.push([field, urls]);
+        });
+      } else if (raw && typeof raw === 'object') {
+        entries.push(...Object.entries(raw));
+      }
+      const result = {};
+      entries.forEach(([field, value]) => {
+        const urls = Array.from(new Set(marketValueList(value)
+          .map(item => String(item || '').trim())
+          .filter(item => /^https?:\/\//i.test(item))));
+        if (field && urls.length) result[String(field)] = urls;
+      });
+      return result;
+    }
+
+    function marketSourceFields(row, url) {
+      const labels = {
+        name: 'اسم المشروع', project_name: 'اسم المشروع',
+        project_type: 'نوع المشروع', projectType: 'نوع المشروع',
+        area_sqm: 'مساحة الوحدة', areaSqm: 'مساحة الوحدة', area: 'مساحة الوحدة',
+        status: 'الحالة', project_status: 'الحالة',
+        operation_type: 'نوع العملية', operationType: 'نوع العملية', operation: 'نوع العملية',
+        price_type: 'نوع السعر', priceType: 'نوع السعر',
+        price_value: 'قيمة السعر', priceValue: 'قيمة السعر', value: 'قيمة السعر',
+        price_from: 'حد السعر الأدنى', priceFrom: 'حد السعر الأدنى',
+        price_to: 'حد السعر الأعلى', priceTo: 'حد السعر الأعلى'
+      };
+      const target = String(url || '').toLowerCase();
+      return Object.entries(marketFieldSources(row))
+        .filter(([, urls]) => urls.some(item => String(item).toLowerCase() === target))
+        .map(([field]) => labels[field] || field);
+    }
+
+    function marketSourceNote(row, sourceFields) {
+      const notes = [row.notes || row.note || ''];
+      if (sourceFields && sourceFields.length) notes.push('الحقول: ' + sourceFields.join('، '));
+      return notes.filter(Boolean).join(' — ');
+    }
+
     function marketSourceUrls(row = {}) {
       const values = [];
       ['source_urls', 'sourceUrls', 'urls', 'source_url', 'sourceUrl', 'url', 'sources', 'source']
         .forEach(key => values.push(...marketValueList(row[key])));
+      Object.values(marketFieldSources(row)).forEach(urls => values.push(...urls));
       return Array.from(new Set(values
         .map(value => String(value || '').trim())
         .filter(value => /^https?:\/\//i.test(value))));
@@ -10676,18 +10724,22 @@
       const rows = [];
       (Array.isArray(competitors) ? competitors : []).forEach(competitor => {
         const urls = marketSourceUrls(competitor);
-        urls.forEach(url => rows.push({
-          id: 'competitor-source-' + encodeURIComponent(String(competitor.id || competitor.name || '') + '|' + url),
-          competitor_id: competitor.id || '',
-          competitor_name: competitor.name || '',
-          source_kind: 'competitor',
-          name: competitor.source || 'مصدر المنافس',
-          url,
-          data_date: '',
-          accessed_at: '',
-          reliability: '',
-          note: competitor.notes || ''
-        }));
+        urls.forEach(url => {
+          const sourceFields = marketSourceFields(competitor, url);
+          rows.push({
+            id: 'competitor-source-' + encodeURIComponent(String(competitor.id || competitor.name || '') + '|' + url),
+            competitor_id: competitor.id || '',
+            competitor_name: competitor.name || '',
+            source_kind: 'competitor',
+            source_fields: sourceFields,
+            name: competitor.source || 'مصدر المنافس',
+            url,
+            data_date: '',
+            accessed_at: '',
+            reliability: '',
+            note: marketSourceNote(competitor, sourceFields)
+          });
+        });
       });
       return rows;
     }
@@ -10772,6 +10824,7 @@
       tr.dataset.classification = row.classification || '';
       tr.dataset.rowSource = row.row_source || 'manual';
       tr.dataset.priceCurrency = row.price_currency || row.currency || 'SAR';
+      tr.dataset.fieldSources = JSON.stringify(row.field_sources || row.fieldSources || {});
       const operation = inferCompetitorOperation(row);
       const priceType = inferCompetitorPriceType(row);
       const priceTypes = MARKET_PRICE_TYPES[operation] || MARKET_PRICE_TYPES['أخرى'];
@@ -10830,7 +10883,13 @@
 
     function collectOneCompetitorRow(tr) {
       const read = (field) => tr.querySelector('[data-field="' + field + '"]')?.value || '';
-      const source_urls = marketSourceUrls({ source_urls: read('source_urls') });
+      let field_sources = {};
+      try {
+        field_sources = JSON.parse(tr.dataset.fieldSources || '{}') || {};
+      } catch (error) {
+        field_sources = {};
+      }
+      const source_urls = marketSourceUrls({ source_urls: read('source_urls'), field_sources });
       return {
         id: tr.dataset.competitorId,
         name: read('name'),
@@ -10847,6 +10906,7 @@
         source: read('source'),
         source_url: source_urls[0] || '',
         source_urls,
+        field_sources,
         row_source: tr.dataset.rowSource || 'manual'
       };
     }
