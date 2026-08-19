@@ -222,7 +222,7 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
-ACCESS_ROADS_RENDER_VERSION = 'v10-bahij-arabic-labels'
+ACCESS_ROADS_RENDER_VERSION = 'v11-stable-road-names'
 MAP_HIGHLIGHT_RENDER_VERSION = 'survey-polygon-v3'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
@@ -2278,6 +2278,60 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
     return roads
 
 
+def access_probe_points(lat, lng):
+    """The four fixed points used to discover the access roads around a site.
+
+    These must never depend on a regeneration seed: moving them snapped to different roads
+    and produced a different set of street names on every regeneration of the same site.
+    """
+    lat_step = 0.0018  # about 200 m
+    lng_step = 0.0024
+    return [
+        (lat + lat_step, lng),
+        (lat - lat_step, lng),
+        (lat, lng + lng_step),
+        (lat, lng - lng_step),
+    ]
+
+
+_ROAD_NAME_PREFIXES = ('طريق', 'شارع', 'الطريق', 'الشارع', 'ش.', 'ش')
+
+
+def _road_name_key(name):
+    """Normalise a road name so the same road is not drawn twice under two spellings."""
+    text = _strip_arabic_diacritics(name).strip()
+    text = re.sub(r'[\u0623\u0625\u0622]', '\u0627', text)
+    text = re.sub(r'[\u0649]', '\u064a', text)
+    text = re.sub(r'[\u0629]', '\u0647', text)
+    text = re.sub(r'[^\w\s]', ' ', text)
+    words = [word for word in text.split() if word not in _ROAD_NAME_PREFIXES]
+    words = [word[2:] if word.startswith('ال') and len(word) > 3 else word for word in words]
+    return ' '.join(words).casefold()
+
+
+def match_known_road_name(discovered, known_names):
+    """Return the road name the user entered when it is the same road Google returned."""
+    discovered_key = _road_name_key(discovered)
+    if not discovered_key:
+        return ''
+    discovered_words = set(discovered_key.split())
+    best = ''
+    best_score = 0
+    for candidate in known_names or []:
+        candidate_key = _road_name_key(candidate)
+        if not candidate_key:
+            continue
+        if candidate_key == discovered_key:
+            return str(candidate).strip()
+        candidate_words = set(candidate_key.split())
+        shared = discovered_words & candidate_words
+        # One shared word is enough only when it is not a bare generic token.
+        score = sum(len(word) for word in shared if len(word) > 2)
+        if score > best_score:
+            best_score, best = score, str(candidate).strip()
+    return best if best_score >= 4 else ''
+
+
 def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, project_data=None, tenant_id=None,
                        origin_lat=None, origin_lng=None):
     """Draw only Google Maps-derived access-road geometry and labels."""
@@ -2344,22 +2398,10 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         # snap, route geometry, and road name used in the final map.
         road_route_mapping = []  # stores (coords, road_name)
         print("[ACCESS ROADS] Discovering nearby roads through Google Maps APIs...")
-        lat_step = 0.0018  # approximately 200 m in Riyadh
-        lng_step = 0.0024
-        try:
-            regen_seed = int((project_data or {}).get('regen_seed') or 0)
-        except (TypeError, ValueError):
-            regen_seed = 0
-        seed_step = (regen_seed % 5) * 0.0004
-        probe_points = [
-            (route_origin_lat + lat_step + seed_step, route_origin_lng),
-            (route_origin_lat - lat_step - seed_step, route_origin_lng),
-            (route_origin_lat, route_origin_lng + lng_step + seed_step),
-            (route_origin_lat, route_origin_lng - lng_step - seed_step),
-        ]
-        if regen_seed:
-            rotate_by = regen_seed % len(probe_points)
-            probe_points = probe_points[rotate_by:] + probe_points[:rotate_by]
+        # The probes are fixed on purpose. They used to be shifted and rotated by regen_seed,
+        # so every regeneration snapped to different roads and the map came back with a
+        # different set of street names for the same site.
+        probe_points = access_probe_points(route_origin_lat, route_origin_lng)
         seen_road_keys = set()
 
         def _fetch_probe_route(probe):
@@ -2380,9 +2422,11 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 )
                 if localized_name:
                     road_name = localized_name
+            # The road names the user entered in the location section are the authoritative
+            # ones; Google's route summary wording varies between identical requests.
+            road_name = match_known_road_name(road_name, fallback_road_names) or road_name
             road_name = road_name or (fallback_road_names[0] if fallback_road_names else 'طريق قريب')
-            road_key = (snapped or {}).get('place_id') or road_name.casefold()
-            return route['coords'], road_name, road_key
+            return route['coords'], road_name, _road_name_key(road_name)
 
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -2395,6 +2439,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             road_route_mapping.append((result[0], result[1]))
             if len(road_route_mapping) >= 3:
                 break
+        print(f"[ACCESS ROADS] labels: {[name for _, name in road_route_mapping]}")
 
         # 3. Draw routes and labels. Highlights first, names last so the gold
         # stroke never covers the road name.

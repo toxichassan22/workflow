@@ -2309,7 +2309,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v10-bahij-arabic-labels'", source)
+        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v11-stable-road-names'", source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
         self.assertIn("def _strip_arabic_diacritics(text):", source)
         self.assertIn("def _arabic_reshaper_without_ligatures():", source)
@@ -2382,6 +2382,37 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
         self.assertIn('def _financial_pdf_shape(text):', source)
         self.assertIn('def split_runs(value):', source)
+
+    def test_access_road_names_do_not_change_between_regenerations(self):
+        import maps_service
+
+        site = (21.6324618, 39.1056571)
+        # The probes decided which roads were found; seeding them meant a new set of street
+        # names on every regeneration of the same site.
+        self.assertEqual(maps_service.access_probe_points(*site), maps_service.access_probe_points(*site))
+        self.assertEqual(len(maps_service.access_probe_points(*site)), 4)
+        source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        access_at = source.index('def _draw_access_roads(')
+        body = source[access_at:source.index('def _get_cached_map_images(')]
+        self.assertIn('probe_points = access_probe_points(route_origin_lat, route_origin_lng)', body)
+        self.assertNotIn('seed_step', body)
+        self.assertNotIn('rotate_by', body)
+        self.assertNotIn("regen_seed = int(", body)
+
+        # The names the user entered in the location section win over Google's wording.
+        known = [
+            'شارع الشاطئ وإسطنبول', 'الامير فيصل بن فهد والخليفة المهدي',
+            'الامير فيصل بن فهد', 'شارع الشاطئ', 'طريق الكورنيش الفرعي',
+        ]
+        self.assertEqual(maps_service.match_known_road_name('شارع الشاطئ', known), 'شارع الشاطئ')
+        self.assertEqual(maps_service.match_known_road_name('طريق الأمير فيصل بن فهد', known), 'الامير فيصل بن فهد')
+        self.assertEqual(maps_service.match_known_road_name('الكورنيش', known), 'طريق الكورنيش الفرعي')
+        self.assertEqual(maps_service.match_known_road_name('طريق مجهول تماما', known), '')
+        self.assertEqual(maps_service.match_known_road_name('', known), '')
+        self.assertEqual(
+            maps_service._road_name_key('طريق الأمير فيصل بن فهد'),
+            maps_service._road_name_key('الامير فيصل بن فهد'),
+        )
 
     def test_croquis_coordinates_become_the_site_boundary(self):
         import maps_service

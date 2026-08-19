@@ -167,6 +167,13 @@ assertion deliberately, not reflexively.
   nine circles up to 31 km wide with unreadable labels. The landmarks view is framed the same way
   around the landmarks it draws; it used to inherit the plot zoom, so every landmark fell outside
   the frame.
+- **Access-road discovery must be deterministic.** `access_probe_points()` is fixed; it used to be
+  shifted and rotated by `regen_seed`, so every regeneration snapped to different roads and the same
+  site came back with different street names. The label also prefers the road names the user entered
+  in the location section: `match_known_road_name()` normalises hamza/ال/ة and the
+  «طريق»/«شارع» prefix, so Google's varying wording («طريق الأمير فيصل بن فهد») resolves to the
+  stored name («الامير فيصل بن فهد»). Roads are de-duplicated on `_road_name_key()`, not on the
+  snapped `place_id`, which differed per probe for one road.
 - Landmark names are resolved with `find_place_near()` (Places text search biased to the site).
   Geocoding `"<name>, <project address>"` returned the project's own coordinates, so 14 of 16
   landmarks were then dropped by the 50 m duplicate filter and the map showed none.
