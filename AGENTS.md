@@ -133,7 +133,9 @@ assertion deliberately, not reflexively.
   deletes that view's DB rows, sets `refresh_maps` + `regen_seed`, and skips `_get_cached_map_images`.
   After a successful response, the client must replace the view's placeholders, bust the img cache,
   and call `selectMapPreviewView`. On the access map, Google road labels stay off and our names are
-  drawn after the gold highlight so the stroke never covers the text.
+  drawn after the gold highlight so the stroke never covers the text. Overlay and reverse-geocode
+  labels are requested in English (`language=en`) because Arabic presentation forms still break
+  on the map font.
 - The land analysis reads the complete text and tables from both `اشتراطات1.pdf` and
   `اشتراطات2.pdf` by default. Page numbers may remain in internal evidence metadata, but must never
   be written into user-facing land fields or the narrative summary. `allowed_uses` and
@@ -204,7 +206,9 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   `GET /api/market-study/jobs/<id>`) for the same hosting-proxy reason as croquis. Tests stay
   synchronous unless they pass `background: true`. Web search goes through OpenRouter
   `openrouter:web_search`; a failed tool call retries without tools. Missing figures stay
-  `غير متوفر من مصدر موثوق`.
+  `غير متوفر من مصدر موثوق`. Competitor `source_url` and summary `url` must be the exact
+  page that contained the figure, not the site homepage. `prefer_specific_source_url()`
+  drops a bare domain/home path when a deeper URL is also present.
 
 ## Performance rules
 
@@ -335,6 +339,13 @@ commas and Arabic digits before writing a value back into an input.
 Server PDF (`build_financial_report_html`) must emit section 14 «تحليل الحساسية العام». Do not wrap
 wide tables (`cashflowTable`, `sensitivityTable`) in `break-inside:avoid` or the last rows are
 clipped. Strip «ترتيب / حذف» from both the print snapshot and the server table renderer.
+`POST /api/financial-study/export` is authenticated only (`@require_auth`); do not put
+`export_files` back on it — employees who can fill the study must be able to download it.
+The financial section itself needs a visible `حفظ كمسودة` next to the PDF button.
+
+Section approval is one toggle: `اعتماد` / `الغاء الاعتماد`. Approved sections get
+`.section-locked` and every control inside is disabled except the toggle. Two separate
+approve/unapprove buttons must not come back.
 
 ## Token budget for the land analysis
 

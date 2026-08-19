@@ -6865,7 +6865,7 @@ def api_validate_financial_study():
 
 
 @app.route('/api/financial-study/export', methods=['POST'])
-@require_permission('export_files')
+@require_auth
 def api_export_financial_study():
     data = request.json or {}
     model = data.get('financialModel') or data.get('model') or {}
@@ -6882,7 +6882,13 @@ def api_export_financial_study():
         report_html = build_financial_report_html(project_name, model, branding, g.tenant_id)
         generate_financial_pdf(report_html, output_path)
         export_id = db.create_export(data.get('presentationId'), g.tenant_id, 'financial_pdf', output_path)
-        return jsonify({'success': True, 'exportId': export_id, 'format': 'financial_pdf', 'url': f'/api/exports/{export_id}/download'})
+        return jsonify({
+            'success': True,
+            'exportId': export_id,
+            'format': 'financial_pdf',
+            'fileName': os.path.basename(output_path),
+            'url': f'/api/exports/{export_id}/download',
+        })
     except Exception as error:
         print(f'[FINANCIAL PDF ERROR] {error}')
         if os.path.exists(output_path):

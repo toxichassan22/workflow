@@ -1571,6 +1571,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Renamed section.
         self.assertIn("createProjectSectionHeader('section-financial-calc', 'الدراسة المالية والمؤشرات')",
                       index_source)
+        self.assertIn('onclick="saveProjectAsDraft()">حفظ كمسودة</button>', index_source)
+        self.assertIn('function applySectionLockState(sectionKey, status)', index_source)
+        self.assertIn("toggleButton.textContent = status === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';", index_source)
+        self.assertNotIn("resetButton.textContent = 'إلغاء الاعتماد';", index_source)
+        self.assertIn('function updateVisualConceptHomeCards()', index_source)
+        self.assertIn('id="visualConceptHomeCoverPreview"', index_source)
         self.assertNotIn('الدراسة المالية المبسطة', index_source)
 
         # The backend still reports on the financial components table.
@@ -1650,6 +1656,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertTrue(response.get_json()['success'])
         generate_pdf.assert_called_once()
+        export_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        export_at = export_source.index('def api_export_financial_study()')
+        self.assertIn('@require_auth', export_source[export_at - 80:export_at])
+        self.assertNotIn('@require_permission(\'export_files\')', export_source[export_at - 80:export_at])
 
     def test_land_document_normalizer_keeps_each_parcel_and_four_directions(self):
         result = self.application_module._normalize_land_document_result({
@@ -3451,6 +3461,27 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(filled[0]['id'], 'keep-me')
         self.assertEqual(filled[0]['source'], 'العميل')
         self.assertEqual(filled[0]['price_value'], '1200000')
+
+    def test_market_study_prefers_exact_page_urls_over_homepages(self):
+        import market_study
+        row = market_study.normalize_competitor_row({
+            'name': 'برج تجاري',
+            'source': 'منصة عقار',
+            'source_url': 'https://sa.aqar.fm/',
+            'url': 'https://sa.aqar.fm/apartment-for-sale/12345',
+        })
+        self.assertEqual(row['source_url'], 'https://sa.aqar.fm/apartment-for-sale/12345')
+        summary = market_study.normalize_summary({
+            'decision': 'البيانات غير كافية',
+            'sources': [{
+                'name': 'الهيئة العامة للإحصاء',
+                'url': 'https://www.stats.gov.sa/',
+                'source_url': 'https://www.stats.gov.sa/statistics/housing-2024',
+            }],
+        })
+        self.assertEqual(summary['sources'][0]['url'], 'https://www.stats.gov.sa/statistics/housing-2024')
+        prompt = market_study.build_consultant_system_prompt()
+        self.assertIn('رابط الصفحة بالضبط', prompt)
 
     def test_market_study_radius_auto_is_ten_km(self):
         import market_study

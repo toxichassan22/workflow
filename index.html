@@ -2835,6 +2835,20 @@
       display: block;
     }
 
+    .visual-concept-home-card.has-preview {
+      text-align: right;
+    }
+
+    .visual-concept-home-preview {
+      display: block;
+      width: 100%;
+      max-height: 180px;
+      object-fit: cover;
+      border-radius: 10px;
+      margin: 10px 0 8px;
+      background: #f8fafc;
+    }
+
     .visual-concept-reference-list {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3126,6 +3140,19 @@
 
     .section-approve-btn:hover {
       background: var(--soft);
+    }
+
+    .tenant-form-section.section-locked input:not([type="hidden"]):not([data-section-lock-ignore]),
+    .tenant-form-section.section-locked select:not([data-section-lock-ignore]),
+    .tenant-form-section.section-locked textarea:not([data-section-lock-ignore]),
+    .tenant-form-section.section-locked button:not([data-section-lock-ignore]) {
+      pointer-events: none;
+      opacity: .62;
+    }
+
+    .tenant-form-section.section-locked [data-section-lock-ignore] {
+      pointer-events: auto;
+      opacity: 1;
     }
 
     @media (max-width: 800px) {
@@ -6779,14 +6806,15 @@
               <button type="button" class="visual-concept-home-card" data-visual-concept-target="external">
                 <span class="tenant-floor-design-stage-number">القسم الأول</span>
                 <h3>التصور الخارجي</h3>
+                <img id="visualConceptHomeCoverPreview" class="visual-concept-home-preview" alt="معاينة الصورة الرئيسية" hidden>
                 <p>الصورة الرئيسية ثم يمين وشمال وفوق وخلف بعد اعتمادها.</p>
-                <span class="visual-concept-home-status">جاهز للعمل</span>
+                <span class="visual-concept-home-status" id="visualConceptHomeExternalStatus">جاهز للعمل</span>
               </button>
               <button type="button" class="visual-concept-home-card" data-visual-concept-target="internal">
                 <span class="tenant-floor-design-stage-number">القسم الثاني</span>
                 <h3>التصور الداخلي</h3>
                 <p>اختر مكونًا من الدراسة المالية وولّد صورة داخلية مستقلة لكل مكون.</p>
-                <span class="visual-concept-home-status">جاهز للعمل</span>
+                <span class="visual-concept-home-status" id="visualConceptHomeInternalStatus">جاهز للعمل</span>
               </button>
             </div>
           </div>
@@ -11733,7 +11761,7 @@
       const title = document.createElement('h3');
       title.className = 'tenant-section-title';
 
-      const status = tenantProjectSectionStatuses[sectionKey] || 'draft';
+      const status = tenantProjectSectionStatuses[sectionKey] === 'approved' ? 'approved' : 'draft';
       const badge = document.createElement('span');
       badge.id = 'badge-' + sectionKey;
       badge.className = 'section-status-badge ' + status;
@@ -11745,36 +11773,61 @@
       titleText.textContent = label;
       title.appendChild(titleText);
 
-      const approveButton = document.createElement('button');
-      approveButton.type = 'button';
-      approveButton.className = 'section-approve-btn';
-      approveButton.textContent = 'اعتماد القسم';
-      approveButton.addEventListener('click', () => setSectionStatus(sectionKey, 'approved'));
-      title.appendChild(approveButton);
-
-      const resetButton = document.createElement('button');
-      resetButton.type = 'button';
-      resetButton.className = 'section-approve-btn';
-      resetButton.textContent = 'إلغاء الاعتماد';
-      resetButton.addEventListener('click', () => setSectionStatus(sectionKey, 'draft'));
-      title.appendChild(resetButton);
+      const toggleButton = document.createElement('button');
+      toggleButton.type = 'button';
+      toggleButton.className = 'section-approve-btn';
+      toggleButton.id = 'section-lock-toggle-' + sectionKey;
+      toggleButton.dataset.sectionLockIgnore = '1';
+      toggleButton.textContent = status === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';
+      toggleButton.addEventListener('click', () => {
+        const next = (tenantProjectSectionStatuses[sectionKey] === 'approved') ? 'draft' : 'approved';
+        setSectionStatus(sectionKey, next);
+      });
+      title.appendChild(toggleButton);
       return title;
+    }
+
+    function applySectionLockState(sectionKey, status) {
+      const section = getProjectSectionElement(sectionKey);
+      if (!section) return;
+      const approved = status === 'approved';
+      section.classList.remove('section-draft', 'section-approved', 'section-locked');
+      section.classList.add(approved ? 'section-approved' : 'section-draft');
+      section.classList.toggle('section-locked', approved);
+      section.querySelectorAll('input,select,textarea,button').forEach(control => {
+        if (control.dataset.sectionLockIgnore === '1' || control.type === 'hidden') {
+          control.disabled = false;
+          return;
+        }
+        if (approved) {
+          if (!Object.prototype.hasOwnProperty.call(control.dataset, 'sectionLockWasDisabled')) {
+            control.dataset.sectionLockWasDisabled = control.disabled ? '1' : '0';
+          }
+          control.disabled = true;
+        } else if (Object.prototype.hasOwnProperty.call(control.dataset, 'sectionLockWasDisabled')) {
+          control.disabled = control.dataset.sectionLockWasDisabled === '1';
+          delete control.dataset.sectionLockWasDisabled;
+        }
+      });
     }
 
     function applySectionStatuses(statuses) {
       tenantProjectSectionStatuses = { ...tenantProjectSectionStatuses, ...(statuses || {}) };
-      Object.entries(statuses || {}).forEach(([sectionKey, status]) => {
-        const normalizedStatus = status === 'approved' ? 'approved' : 'draft';
-        const section = getProjectSectionElement(sectionKey);
-        if (section) {
-          section.classList.remove('section-draft', 'section-approved');
-          section.classList.add(normalizedStatus === 'approved' ? 'section-approved' : 'section-draft');
-        }
+      const keys = new Set([
+        ...Object.keys(statuses || {}),
+        ...Array.from(document.querySelectorAll('#tenantProjectForm .tenant-form-section[data-section]')).map(section => section.dataset.section)
+      ]);
+      keys.forEach(sectionKey => {
+        if (!sectionKey) return;
+        const normalizedStatus = tenantProjectSectionStatuses[sectionKey] === 'approved' ? 'approved' : 'draft';
+        applySectionLockState(sectionKey, normalizedStatus);
         const badge = document.getElementById('badge-' + sectionKey);
         if (badge) {
           badge.className = 'section-status-badge ' + normalizedStatus;
           badge.textContent = normalizedStatus === 'approved' ? 'معتمد' : 'مسودة';
         }
+        const toggle = document.getElementById('section-lock-toggle-' + sectionKey);
+        if (toggle) toggle.textContent = normalizedStatus === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';
         updateProjectSidebarStatus(sectionKey, normalizedStatus);
       });
     }
@@ -14352,6 +14405,7 @@
         </div>
 
         <div class="finance-block" style="text-align:center;padding:20px">
+          <button type="button" class="btn ghost" style="font-size:15px;padding:12px 30px;margin-left:10px" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
           <button type="button" class="btn primary" style="font-size:15px;padding:12px 30px" onclick="exportFinancialStudyPdf()">تصدير الدراسة المالية المنظمة (PDF)</button>
         </div>
 
@@ -15192,7 +15246,9 @@
     }
 
     function collectFinancialStudyModel() {
-      calculateAll();
+      if (typeof calculateAll === 'function') {
+        try { calculateAll(); } catch (error) { console.warn('calculateAll failed during draft collect:', error); }
+      }
       const root = document.getElementById('section-financial-calc');
       const inputs = {};
       root?.querySelectorAll('input[id],select[id],textarea[id]').forEach(el => {
@@ -15262,18 +15318,19 @@
         });
         if (!response?.success || !response.url) {
           focusFinancialValidation(response?.validation);
-          toast(response?.error || 'لا يمكن تصدير الدراسة المالية');
+          toast(response?.error || response?.validation?.[0]?.message || 'لا يمكن تصدير الدراسة المالية');
           return;
         }
         updateLoaderProgress(80, 'تم إنشاء الملف، جاري تحميله...');
         const token = getTenantToken();
         const download = await fetch(response.url, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
-        if (!download.ok) throw new Error('Download failed');
+        if (!download.ok) throw new Error(download.status === 403 ? 'لا توجد صلاحية لتحميل الملف' : 'Download failed');
         const blob = await download.blob();
         const blobUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
+        const suggestedName = response.fileName || response.url.split('/').pop() || 'financial-study.pdf';
         link.href = blobUrl;
-        link.download = response.url.split('/').pop() || 'financial-study.pdf';
+        link.download = suggestedName.endsWith('.pdf') ? suggestedName : suggestedName + '.pdf';
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -18400,11 +18457,41 @@
       toast('تم حذف الصور المرجعية. سيولد النظام التصميم من البيانات والخريطة فقط.');
     }
 
+    function updateVisualConceptHomeCards() {
+      const cover = tenantVisualConceptState?.slots?.cover || {};
+      const image = cover.approvedImageUrl || cover.imageUrl || tenantCreativeImages?.cover || '';
+      const preview = document.getElementById('visualConceptHomeCoverPreview');
+      const externalStatus = document.getElementById('visualConceptHomeExternalStatus');
+      const internalStatus = document.getElementById('visualConceptHomeInternalStatus');
+      const externalCard = document.querySelector('.visual-concept-home-card[data-visual-concept-target="external"]');
+      if (preview) {
+        if (image) {
+          preview.src = image;
+          preview.hidden = false;
+        } else {
+          preview.removeAttribute('src');
+          preview.hidden = true;
+        }
+      }
+      if (externalCard) externalCard.classList.toggle('has-preview', !!image);
+      if (externalStatus) {
+        externalStatus.textContent = cover.status === 'approved'
+          ? 'معتمدة'
+          : (image ? 'تم التوليد — تحتاج اعتماد' : 'جاهز للعمل');
+      }
+      if (internalStatus) {
+        internalStatus.textContent = cover.approvedImageUrl
+          ? (visualConceptInteriorComponents().length ? 'جاهز للعمل' : 'أضف مكونات الدراسة المالية')
+          : 'مقفل حتى اعتماد الصورة الرئيسية';
+      }
+    }
+
     function renderVisualConceptPage() {
       const host = document.getElementById('visualConceptWorkspace');
-      if (!host) return;
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
       persistVisualConceptDraftState();
+      updateVisualConceptHomeCards();
+      if (!host) return;
       renderVisualConceptStyleReference();
       const coverApproved = Boolean(tenantVisualConceptState.slots.cover.approvedImageUrl);
       const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], false);

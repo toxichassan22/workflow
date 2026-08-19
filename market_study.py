@@ -8,6 +8,7 @@ required indicator, source-priority rule, or input option from the PDF.
 from __future__ import annotations
 
 from datetime import date
+from urllib.parse import urlsplit, urlunsplit
 import json
 import re
 import uuid
@@ -384,7 +385,7 @@ MANDATORY_RULES = [
     'افصل بين المساحة الإجمالية والمساحة الصافية أو التأجيرية.',
     'لا تنشئ أي رقم غير متوفر.',
     f'إذا لم تتوفر المعلومة اكتب: {MISSING_VALUE_PHRASE}.',
-    'اذكر مع كل رقم: اسم المصدر، الرابط، تاريخ البيانات، تاريخ الوصول، مستوى الموثوقية.',
+    'اذكر مع كل رقم: اسم المصدر، رابط الصفحة بالضبط التي ورد فيها الرقم (وليس الصفحة الرئيسية للموقع)، تاريخ البيانات، تاريخ الوصول، مستوى الموثوقية.',
     'ابدأ بالمستوى الأول، ولا تنتقل إلى مستوى أدنى إلا إذا لم تتوفر المعلومة في المستوى الأعلى، مع تسجيل سبب الانتقال.',
     'عند اختلاف المصادر استخدم المصدر الأعلى أولوية واشرح الاختلاف.',
     'لا تستخدم وسائل التواصل أو المدونات أو ويكيبيديا كمصدر مالي.',
@@ -579,6 +580,31 @@ def empty_summary():
 
 def empty_swot():
     return {item['key']: '' for item in SWOT_SECTIONS}
+
+
+_GENERIC_SOURCE_PATHS = {
+    '', '/', '/en', '/ar', '/en/', '/ar/', '/index.html', '/index.php',
+    '/home', '/home/', '/ar/home', '/en/home',
+}
+
+
+def is_generic_source_homepage(url):
+    text = str(url or '').strip()
+    if not text:
+        return False
+    parsed = urlsplit(text)
+    if not parsed.netloc:
+        return False
+    path = (parsed.path or '').rstrip('/') or '/'
+    return (path.lower() in _GENERIC_SOURCE_PATHS or path.lower() in {'/', ''}) and not parsed.query and not parsed.fragment
+
+
+def prefer_specific_source_url(*candidates):
+    values = [_norm(item) for item in candidates if _norm(item)]
+    for value in values:
+        if value.startswith(('http://', 'https://')) and not is_generic_source_homepage(value):
+            return value
+    return next((value for value in values if value.startswith(('http://', 'https://'))), values[0] if values else '')
 
 
 def empty_source_row():
@@ -816,7 +842,9 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '  "expansionNote": "",\n'
         '  "notes": ""\n'
         '}\n'
-        'لا تخترع رقمًا. إذا لم تجد سعرًا اترك حقول السعر فارغة واذكر المصدر إن وُجد.'
+        'لا تخترع رقمًا. إذا لم تجد سعرًا اترك حقول السعر فارغة واذكر المصدر إن وُجد.\n'
+        'في source_url ضع رابط الصفحة المحددة من نتائج البحث التي أخذت منها المعلومة، '
+        'وليس رابط الصفحة الرئيسية للموقع.'
     )
 
 
@@ -860,6 +888,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         '  ],\n'
         '  "disclaimer": "هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا."\n'
         '}\n'
+        'في url ضع رابط الصفحة المحددة التي ظهر فيها الرقم أو المعلومة، وليس رابط الصفحة الرئيسية للموقع.\n'
     )
 
 
@@ -891,7 +920,7 @@ def normalize_competitor_row(row, fallback_source='ai'):
         'price_from': _norm(row.get('price_from') or row.get('priceFrom')),
         'price_to': _norm(row.get('price_to') or row.get('priceTo')),
         'source': _norm(row.get('source')),
-        'source_url': _norm(row.get('source_url') or row.get('sourceUrl') or row.get('url')),
+        'source_url': prefer_specific_source_url(row.get('source_url'), row.get('sourceUrl'), row.get('url')),
         'notes': _norm(row.get('notes')),
         'row_source': _norm(row.get('row_source') or row.get('rowSource')) or fallback_source,
     }
@@ -960,7 +989,7 @@ def normalize_summary(raw):
             sources.append({
                 'id': _norm(row.get('id')) or str(uuid.uuid4()),
                 'name': name,
-                'url': _norm(row.get('url') or row.get('source_url')),
+                'url': prefer_specific_source_url(row.get('url'), row.get('source_url'), row.get('sourceUrl')),
                 'data_date': _norm(row.get('data_date') or row.get('dataDate')),
                 'accessed_at': _norm(row.get('accessed_at') or row.get('accessedAt')) or date.today().isoformat(),
                 'reliability': _norm(row.get('reliability')),

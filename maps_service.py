@@ -93,14 +93,14 @@ def _reshape_arabic_text(text):
 
 
 # Professional satellite map style — sepia/greyscale tone matching reference examples
-# Road labels kept visible in Arabic for context
+# Road labels stay on in English so the Google stroke remains readable.
 SATELLITE_WITH_LABELS_STYLES = [
     'feature:all|saturation:-80|lightness:-10',
     'feature:poi|visibility:off',
     'feature:poi.business|visibility:off',
     'feature:transit|visibility:off',
     'feature:administrative|visibility:off',
-    # Keep road labels visible in Arabic
+    # Keep English road labels visible
     'feature:road|element:geometry|visibility:simplified',
     'feature:road.highway|element:labels|visibility:on',
     'feature:road.highway|element:labels.text.fill|color:0xffffff',
@@ -529,7 +529,7 @@ def _map_cache_path(lat, lng, maptype, zoom, markers=None, paths=None, size=None
 
 
 def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720), output_path=None,
-                   maptype='satellite', styles=None, use_google_markers=False, language='ar',
+                   maptype='satellite', styles=None, use_google_markers=False, language='en',
                    bypass_cache=False):
     """Generate a static map image with optional markers and paths (cached by lat,lng,maptype,zoom)."""
     if not _has_api_key():
@@ -1842,7 +1842,7 @@ def _google_reverse_geocode_road(lat, lng, tenant_id=None):
     try:
         response = requests.get(
             'https://maps.googleapis.com/maps/api/geocode/json',
-            params={'latlng': f'{lat},{lng}', 'key': _get_api_key(), 'language': 'ar'}, timeout=15
+            params={'latlng': f'{lat},{lng}', 'key': _get_api_key(), 'language': 'en'}, timeout=15
         )
         data = response.json()
         if data.get('status') != 'OK':
@@ -1881,9 +1881,11 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
         if not route:
             return None
         name = (route.get('summary') or '').strip()
-        if not name or re.search(r'[A-Za-z]', name):
-            name = _google_reverse_geocode_road(dest_lat, dest_lng, tenant_id=tenant_id) or name
-        name = name or 'طريق قريب'
+        if not name or not re.search(r'[A-Za-z]', name):
+            english_name = _google_reverse_geocode_road(dest_lat, dest_lng, tenant_id=tenant_id)
+            if english_name and re.search(r'[A-Za-z]', english_name):
+                name = english_name
+        name = name or 'Nearby road'
         key = (snapped or {}).get('place_id') or name.casefold()
         distance_meters = route.get('distance_meters')
         if distance_meters is None:
@@ -2016,12 +2018,13 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 return None
 
             road_name = (route.get('summary') or '').strip()
-            if not road_name or re.search(r'[A-Za-z]', road_name):
+            if not road_name or not re.search(r'[A-Za-z]', road_name):
                 localized_name = _google_reverse_geocode_road(
                     dest_lat, dest_lng, tenant_id=tenant_id
                 )
-                road_name = localized_name or road_name
-            road_name = road_name or (fallback_road_names[0] if fallback_road_names else 'طريق قريب')
+                if localized_name and re.search(r'[A-Za-z]', localized_name):
+                    road_name = localized_name
+            road_name = road_name or (fallback_road_names[0] if fallback_road_names else 'Nearby road')
             road_key = (snapped or {}).get('place_id') or road_name.casefold()
             return route['coords'], road_name, road_key
 
