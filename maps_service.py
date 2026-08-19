@@ -51,28 +51,46 @@ def _load_city_landmarks():
 CURATED_CITY_LANDMARKS = _load_city_landmarks()
 
 
+def _is_real_font_file(path):
+    if not path or not os.path.isfile(path) or os.path.getsize(path) < 10000:
+        return False
+    try:
+        with open(path, 'rb') as handle:
+            header = handle.read(16)
+    except OSError:
+        return False
+    if header.startswith(b'version https://') or header.startswith(b'oid sha'):
+        return False
+    return header[:4] in {b'\x00\x01\x00\x00', b'OTTO', b'true', b'typ1'}
+
+
+def bundled_arabic_font_path():
+    """Return a real Arabic-capable font, never a Git LFS pointer."""
+    candidates = [
+        os.path.join(FONTS_DIR, 'arabic-text.bin'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts', 'arabic-text.bin'),
+        os.path.join(FONTS_DIR, 'BahijTheSansArabic-Bold.ttf'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts', 'BahijTheSansArabic-Bold.ttf'),
+        '/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf',
+        '/usr/share/fonts/opentype/noto/NotoNaskhArabic-Bold.ttf',
+        '/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf',
+        'C:\\Windows\\Fonts\\arial.ttf',
+        'C:\\Windows\\Fonts\\tahoma.ttf',
+    ]
+    for path in candidates:
+        if _is_real_font_file(path):
+            return path
+    return None
+
+
 def _get_arabic_font(size=14):
     """Load an Arabic-compatible TrueType font using absolute paths with fallback."""
-    local_font = os.path.join(FONTS_DIR, 'BahijTheSansArabic-Bold.ttf')
-    if os.path.exists(local_font):
+    path = bundled_arabic_font_path()
+    if path:
         try:
-            return ImageFont.truetype(local_font, int(size))
-        except Exception as e:
-            print(f"[FONT WARN] Failed loading local font {local_font}: {e}")
-
-    fallbacks = [
-        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf",
-        "/usr/share/fonts/opentype/noto/NotoNaskhArabic-Bold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
-        "C:\\Windows\\Fonts\\arial.ttf",
-        "C:\\Windows\\Fonts\\seguiemj.ttf",
-    ]
-    for fp in fallbacks:
-        if os.path.exists(fp):
-            try:
-                return ImageFont.truetype(fp, int(size))
-            except Exception:
-                continue
+            return ImageFont.truetype(path, int(size))
+        except Exception as error:
+            print(f"[FONT WARN] Failed loading {path}: {error}")
     return ImageFont.load_default()
 
 
@@ -1497,9 +1515,11 @@ def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale
             draw.ellipse([ccx - r, ccy - r, ccx + r, ccy + r], fill=None, outline=(255, 255, 255, 60), width=1 * canvas_scale)
             
             # Draw elegant label pill for each zone
-            label = zone.get('label', f"{zone.get('minutes', 5)} دقائق")
+            label = zone.get('label') or f"{zone.get('minutes', 5)} min"
+            if any('\u0600' <= ch <= '\u06ff' for ch in str(label)):
+                label = f"{zone.get('minutes', 5)} min"
             font = _get_arabic_font(10 * canvas_scale)
-            reshaped = _reshape_arabic_text(label)
+            reshaped = label
                 
             bbox = draw.textbbox((0, 0), reshaped, font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -1577,14 +1597,14 @@ def _post_process_streetview(image_path, heading, index):
         
         # 5. Add an elegant direction label pill at the bottom-right
         directions = {
-            0: "إطلالة الشمال",
-            90: "إطلالة الشرق",
-            180: "إطلالة الجنوب",
-            270: "إطلالة الغرب"
+            0: "North view",
+            90: "East view",
+            180: "South view",
+            270: "West view"
         }
-        dir_text = directions.get(heading, f"إطلالة {heading}°")
+        dir_text = directions.get(heading, f"{heading} deg view")
         font = _get_arabic_font(14)
-        reshaped = _reshape_arabic_text(dir_text)
+        reshaped = dir_text
             
         bbox = draw.textbbox((0, 0), reshaped, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -1629,9 +1649,8 @@ def _draw_compass(image_path, position='top-right', compass_size=60):
         draw.ellipse([comp_cx - r, comp_cy - r, comp_cx + r, comp_cy + r],
                      fill=(240, 230, 210, 220), outline=COMPASS_COLOR + (255,), width=3)
 
-        # Draw "ش" (شمال = North) in center
         font = _get_arabic_font(compass_size // 2)
-        text = _reshape_arabic_text("ش")
+        text = 'N'
         bbox = draw.textbbox((0, 0), text, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         draw.text((comp_cx - tw // 2, comp_cy - th // 2 - 2), text,

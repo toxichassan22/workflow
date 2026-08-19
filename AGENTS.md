@@ -346,6 +346,9 @@ clipped. Strip «ترتيب / حذف» from both the print snapshot and the serv
 `export_files` back on it — employees who can fill the study must be able to download it.
 The financial section itself needs a visible `حفظ كمسودة` next to the PDF button.
 `generate_financial_pdf()` must fall back to PyMuPDF when Playwright is missing on the host.
+Arabic in that PDF and on map overlays must use `fonts/arabic-text.bin` (a real TTF
+stored under a non-LFS name). Hosting cannot use `*.ttf` because those files are Git LFS
+pointers. Do not draw Arabic with Helvetica.
 
 Section approval is one toggle: `اعتماد` / `الغاء الاعتماد`. Approved sections get
 `.section-locked` and every control inside is disabled except the toggle. Two separate

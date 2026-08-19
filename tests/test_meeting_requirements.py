@@ -1670,6 +1670,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('def _financial_pdf_plain_html(html):', export_source)
         self.assertIn('def generate_financial_pdf_from_model(project_name, model, output_path):', export_source)
         self.assertIn("generate_financial_pdf(report_html, output_path, model=model, project_name=project_name)", export_source)
+        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        self.assertIn('def bundled_arabic_font_path():', maps_source)
+        self.assertIn("os.path.join(FONTS_DIR, 'arabic-text.bin')", maps_source)
+        font_path = ROOT / 'fonts' / 'arabic-text.bin'
+        self.assertGreater(font_path.stat().st_size, 10000)
+        self.assertEqual(font_path.read_bytes()[:4], b'\x00\x01\x00\x00')
         import tempfile
         from pathlib import Path
         with self.app.app_context():

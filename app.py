@@ -6758,10 +6758,13 @@ FINANCIAL_COLUMN_LABELS = {
     'netProfit': 'صافي الربح', 'exitValue': 'قيمة التخارج', 'roi': 'ROI',
     'projectIrr': 'Project IRR', 'equityIrr': 'Equity IRR', 'payback': 'فترة الاسترداد',
     'equityRequired': 'إجمالي حقوق الملكية',
+    'cashEquityRequired': 'الضخ النقدي المطلوب',
 }
 
 FINANCIAL_REPORT_DROP_COLUMNS = {
     'ترتيب / حذف', 'حذف', 'ترتيب', 'idx', 'id', 'leasable', 'totalArea',
+    'projected', 'cashflows', 'projectCashflows', 'financePlan', 'financeRepaymentPlan',
+    'modeFlags', 'areaState',
 }
 
 
@@ -6852,23 +6855,7 @@ def _financial_pdf_plain_html(html):
 
 
 def _financial_pdf_font():
-    candidates = [
-        os.path.join(os.path.dirname(__file__), 'fonts', 'BahijTheSansArabic-Bold.ttf'),
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-        '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
-    ]
-    for path in candidates:
-        if not os.path.isfile(path) or os.path.getsize(path) < 10000:
-            continue
-        with open(path, 'rb') as handle:
-            header = handle.read(12)
-        if header.startswith(b'version https://') or header.startswith(b'oid sha'):
-            continue
-        if header[:4] not in {b'\x00\x01\x00\x00', b'OTTO', b'true', b'typ1'}:
-            continue
-        return path
-    return None
+    return maps_service.bundled_arabic_font_path()
 
 
 def _financial_pdf_text(value, key=''):
@@ -6911,13 +6898,8 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
     def draw_text(text, size=11, indent=0):
         nonlocal y
         ensure_space(size + 8)
-        page.insert_text(
-            fitz.Point(page_size.width - margin - indent, y + size),
-            str(text or ''),
-            fontname=font_name,
-            fontsize=size,
-            color=(0.07, 0.23, 0.43),
-        )
+        box = fitz.Rect(margin + indent, y, page_size.width - margin, y + size + 6)
+        page.insert_textbox(box, str(text or ''), fontname=font_name, fontsize=size, color=(0.07, 0.23, 0.43), align=fitz.TEXT_ALIGN_RIGHT)
         y += size + 8
 
     def draw_kv_table(rows):
@@ -6960,6 +6942,22 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             draw_text(title, 12)
             draw_text('لا توجد بنود مدخلة في هذا الجدول.', 9)
             return
+        preferred = {
+            'cashflowTable': ['year', 'phase', 'saleRevenue', 'operatingRevenue', 'developmentCost', 'developerPayment', 'opex', 'noi', 'financeDraw', 'financeInterest', 'final', 'cumulative'],
+            'sensitivityAssumptionsTable': ['key', 'low', 'high'],
+            'sensitivityTable': ['scenario', 'totalRevenue', 'investmentCost', 'netProfit', 'roi', 'projectIrr', 'equityRequired'],
+        }
+        wanted = preferred.get(title) or preferred.get(next((key for key in ('cashflowTable', 'sensitivityAssumptionsTable', 'sensitivityTable') if key in title), ''))
+        if 'التدفقات' in title:
+            wanted = preferred['cashflowTable']
+        elif 'الافتراضات' in title:
+            wanted = preferred['sensitivityAssumptionsTable']
+        elif 'النتائج' in title and 'حساسية' in title:
+            wanted = preferred['sensitivityTable']
+        if wanted:
+            keys = [key for key in wanted if key in keys] or keys[:8]
+        elif len(keys) > 8:
+            keys = keys[:8]
         draw_text(title, 12)
         usable = page_size.width - margin * 2
         col_w = usable / max(1, len(keys))
@@ -7033,7 +7031,11 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             ('سنة التخارج التشغيلي', inputs.get('operatingExitYear'), 'operatingExitYear'),
         ])
     draw_text('12. النتائج المالية', 12)
-    draw_kv_table([(label, projection.get(key), key) for key, label in FINANCIAL_RESULT_LABELS])
+    result_source = dict(projection or {})
+    for key in ('projectCost', 'projectCostWithFinance', 'facilityAmount', 'arrangementFee', 'totalFinanceInterest', 'landEquityContribution', 'cashEquityRequired', 'equityRequired', 'totalCashEquity', 'totalEquityRequired'):
+        if result_source.get(key) in (None, '', 0) and inputs.get(key) not in (None, ''):
+            result_source[key] = inputs.get(key)
+    draw_kv_table([(label, result_source.get(key), key) for key, label in FINANCIAL_RESULT_LABELS])
     draw_data_table(tables.get('cashflowTable'), '13. التدفقات النقدية السنوية')
     sensitivity_assumptions = tables.get('sensitivityAssumptionsTable')
     if not isinstance(sensitivity_assumptions, list) or not sensitivity_assumptions:
