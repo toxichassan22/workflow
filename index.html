@@ -14235,7 +14235,7 @@
 
         <div class="finance-block">
           <h3>7. مراحل التطوير ودفعات المطور</h3>
-          <p class="hint">المراحل وسنواتها تُعدّل من قسم الجدول الزمني. النسبتان فقط تُدخلان هنا.</p>
+          <p class="hint">المراحل وسنواتها تُعدّل من قسم الجدول الزمني. النسبتان فقط تُدخلان هنا، وتُوزَّع دفعة المطور على كل سنوات المرحلة في التدفقات.</p>
           <div id="timelineStagesWarning" class="validation-panel error" hidden>لا توجد مراحل في الجدول الزمني بعد، فلن تُوزَّع تكاليف التطوير على السنوات.</div>
           <div class="table-wrap">
             <table id="scheduleTable">
@@ -14479,7 +14479,7 @@
     // The stage name and its year mirror the project timeline and are read-only here; only the
     // two financial percentages belong to this study, so only they stay editable.
     function addScheduleStage(d = {}) {
-      const tb = document.querySelector('#scheduleTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.stageYear = String(d.year ?? 1); tr.innerHTML = `
+      const tb = document.querySelector('#scheduleTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.stageYear = String(d.year ?? 1); tr.dataset.stageEndYear = String(d.endYear ?? d.year ?? 1); tr.innerHTML = `
     <td data-field="name"><input value="${escapeHtml(d.name || '')}" readonly class="readonly-highlight" title="تُعدّل من قسم الجدول الزمني"></td>
     <td data-field="costPct"><input type="number" min="0" value="${financialInputNumber(d.costPct, 0)}"></td>
     <td data-field="devPct"><input type="number" min="0" value="${financialInputNumber(d.devPct, 0)}"></td>
@@ -14976,7 +14976,19 @@
       const financeRepaymentPctTotal = financeRepaymentPlan.reduce((sum, row) => sum + row.repaymentPct, 0);
       financeRepaymentPlan.forEach(row => { const amount = financeRepaymentPctTotal ? facilityAmount * (row.repaymentPct / financeRepaymentPctTotal) : 0; const c = row.tr.querySelector('.financeRepaymentAmount'); if (c) c.textContent = money(amount); });
 
-      const scheduleRows = [...document.querySelectorAll('#scheduleTable tbody tr')].map(tr => ({ tr, name: tr.querySelector('[data-field="name"] input')?.value || 'مرحلة تطوير', year: Math.max(1, Math.min(developmentYears, Math.round(parseNumber(tr.dataset.stageYear) || 1))), costPct: Math.max(0, parseNumber(tr.querySelector('[data-field="costPct"] input')?.value)), devPct: Math.max(0, parseNumber(tr.querySelector('[data-field="devPct"] input')?.value)) }));
+      const scheduleRows = [...document.querySelectorAll('#scheduleTable tbody tr')].map(tr => {
+        const startYear = Math.max(1, Math.min(developmentYears, Math.round(parseNumber(tr.dataset.stageYear) || 1)));
+        const endYear = Math.max(startYear, Math.min(developmentYears, Math.round(parseNumber(tr.dataset.stageEndYear) || startYear)));
+        return {
+          tr,
+          name: tr.querySelector('[data-field="name"] input')?.value || 'مرحلة تطوير',
+          year: startYear,
+          endYear,
+          spanYears: endYear - startYear + 1,
+          costPct: Math.max(0, parseNumber(tr.querySelector('[data-field="costPct"] input')?.value)),
+          devPct: Math.max(0, parseNumber(tr.querySelector('[data-field="devPct"] input')?.value))
+        };
+      });
       const costPctTotal = scheduleRows.reduce((s, r) => s + r.costPct, 0), devPctTotal = scheduleRows.reduce((s, r) => s + r.devPct, 0), developmentCostBase = costTotal + externalCost;
       scheduleRows.forEach(r => { const stageCost = costPctTotal ? developmentCostBase * (r.costPct / costPctTotal) : 0, stageDev = devPctTotal ? developerCost * (r.devPct / devPctTotal) : 0; const c1 = r.tr.querySelector('.stageCost'), c2 = r.tr.querySelector('.stageDevPayment'); if (c1) c1.textContent = money(stageCost); if (c2) c2.textContent = money(stageDev); });
 
@@ -15016,7 +15028,11 @@
         }
 
         let developmentCost = 0, developerPayment = 0;
-        scheduleRows.filter(r => r.year === year).forEach(r => { developmentCost += costPctTotal ? developmentCostBase * (r.costPct / costPctTotal) : 0; developerPayment += devPctTotal ? developerCost * (r.devPct / devPctTotal) : 0; });
+        scheduleRows.filter(r => year >= r.year && year <= r.endYear).forEach(r => {
+          const span = Math.max(1, r.spanYears || 1);
+          developmentCost += costPctTotal ? developmentCostBase * (r.costPct / costPctTotal) / span : 0;
+          developerPayment += devPctTotal ? developerCost * (r.devPct / devPctTotal) / span : 0;
+        });
         if (!costPctTotal && year <= developmentYears) developmentCost = developmentCostBase / developmentYears;
         if (!devPctTotal && year <= developmentYears) developerPayment = developerCost / developmentYears;
         const landPayment = (year === landContributionYear && landContributionType === 'cash') ? landCostIncluded : 0, landInKindContribution = (year === landContributionYear && landContributionType === 'inKind') ? landCostIncluded : 0;
@@ -15211,7 +15227,10 @@
             : (isFinancialNumericControl(control) ? parseNumber(control.value) : control.value);
           if (cell.dataset.field === 'customFormula') result.formula = control.value;
         });
-        if (tableId === 'scheduleTable') result.year = row.dataset.stageYear || result.year || 1;
+        if (tableId === 'scheduleTable') {
+          result.year = row.dataset.stageYear || result.year || 1;
+          result.endYear = row.dataset.stageEndYear || result.endYear || result.year;
+        }
         if (tableId === 'revenueTable') result.componentId = row.dataset.componentId || result.component || '';
         if (Object.values(result).some(value => String(value ?? '').trim() !== '')) return result;
         return null;
@@ -15759,9 +15778,15 @@
           ? calendarYear - startYear + 1
           : 1;
         const kept = previous.get(name) || {};
+        const startRelative = Math.max(1, Math.min(devYears, relative || 1));
+        const calendarEndYear = parseInt(row.endYear, 10);
+        const endRelative = (Number.isFinite(calendarEndYear) && Number.isFinite(startYear))
+          ? calendarEndYear - startYear + 1
+          : startRelative;
         addScheduleStage({
           name,
-          year: Math.max(1, Math.min(devYears, relative || 1)),
+          year: startRelative,
+          endYear: Math.max(startRelative, Math.min(devYears, endRelative || startRelative)),
           costPct: kept.costPct ?? 0,
           devPct: kept.devPct ?? 0
         });

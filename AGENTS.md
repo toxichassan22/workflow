@@ -308,7 +308,9 @@ and they are carried across a rebuild by matching on stage name. `syncFinancialF
 the mirroring and is called from `recalcTimeline()`, `saveTimelineData()`, the financial seeding
 block and draft hydration. Timeline years are **calendar** years while the cashflow uses years
 **relative** to project start, so the conversion is `calendarYear - tlStartYear + 1`, clamped to
-`[1, developmentYears]`.
+`[1, developmentYears]`. Developer and development-cost amounts are spread evenly across every
+cashflow year the phase covers (`stageYear` through `stageEndYear` from «إلى»), not dumped into
+the start year only.
 
 Each phase row has a start year/quarter and a duration in months. `computeTimelineEnd()` fills the
 read-only «إلى» cell (`endYear` / `endQuarter` in `timeline_table_data`). Clients only type the

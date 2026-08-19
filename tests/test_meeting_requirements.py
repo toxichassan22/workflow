@@ -1452,6 +1452,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Calendar year -> relative cashflow year, and the percentages survive a rebuild.
         self.assertIn('calendarYear - startYear + 1', index_source)
         self.assertIn('previous.get(name) || {}', index_source)
+        self.assertIn('tr.dataset.stageEndYear = String(d.endYear ?? d.year ?? 1)', index_source)
+        self.assertIn('year >= r.year && year <= r.endYear', index_source)
+        self.assertIn('developerPayment += devPctTotal ? developerCost * (r.devPct / devPctTotal) / span : 0', index_source)
 
         # Empty timeline warns rather than silently zeroing the cost distribution.
         self.assertIn('id="timelineStagesWarning"', index_source)
