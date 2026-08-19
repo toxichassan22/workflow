@@ -2302,14 +2302,14 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v7-arabic-light-labels'", source)
+        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v8-cairo-arabic-labels'", source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
         self.assertIn("def _strip_arabic_diacritics(text):", source)
         self.assertIn('from bidi.algorithm import get_display', source)
         self.assertIn("'language': 'ar'", source)
-        overlay_font = ROOT / 'fonts' / 'arabic-overlay-light.bin'
+        overlay_font = ROOT / 'fonts' / 'cairo-overlay.bin'
         self.assertGreater(overlay_font.stat().st_size, 10000)
-        self.assertEqual(overlay_font.read_bytes()[:4], b'OTTO')
+        self.assertEqual(overlay_font.read_bytes()[:4], b'\x00\x01\x00\x00')
         self.assertIn("'feature:road|element:labels|visibility:off'", source)
         self.assertIn('pending_labels.append((route_segment, label_text))', source)
         self.assertIn('labels_overlay = Image.new', source)
