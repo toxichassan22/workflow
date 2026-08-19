@@ -6842,6 +6842,15 @@ table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px
 </style></head><body><main class="financial-report">{''.join(sections)}</main></body></html>'''
 
 
+def _financial_pdf_plain_html(html):
+    """Drop huge embedded fonts so the PyMuPDF HTML parser can open the report."""
+    text = str(html or '')
+    text = re.sub(r'@font-face\s*\{.*?\}', '', text, flags=re.S)
+    text = re.sub(r'src:\s*url\(data:font/[^)]+\);?', '', text, flags=re.I)
+    text = re.sub(r'<style>.*?</style>', '<style>body{font-family:Tahoma,Arial,sans-serif;direction:rtl}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #ccc;padding:4px;text-align:right}h1,h2,h3{color:#123B6D}</style>', text, flags=re.S)
+    return text
+
+
 def generate_financial_pdf(html, output_path):
     last_error = None
     try:
@@ -6873,14 +6882,20 @@ def generate_financial_pdf(html, output_path):
         last_error = error
         print(f'[FINANCIAL PDF] Playwright failed ({error}); falling back to PyMuPDF')
     import fitz
-    document = fitz.open('html', str(html or '').encode('utf-8'))
-    try:
-        document.save(output_path)
-    finally:
-        document.close()
-    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
-        raise RuntimeError(str(last_error or 'PyMuPDF wrote an empty PDF'))
-    return output_path
+    candidates = [_financial_pdf_plain_html(html), str(html or '')]
+    for candidate in candidates:
+        try:
+            document = fitz.open('html', candidate.encode('utf-8'))
+            try:
+                document.save(output_path)
+            finally:
+                document.close()
+            if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+                return output_path
+        except Exception as error:
+            last_error = error
+            print(f'[FINANCIAL PDF] PyMuPDF html open failed ({error})')
+    raise RuntimeError(str(last_error or 'Could not write financial PDF'))
 
 
 @app.route('/api/financial-study/validate', methods=['POST'])

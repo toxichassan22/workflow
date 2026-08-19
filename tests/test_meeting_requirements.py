@@ -1667,6 +1667,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('@require_permission(\'export_files\')', export_source[export_at - 80:export_at])
         self.assertIn("Playwright failed ({error}); falling back to PyMuPDF", export_source)
         self.assertIn("str(error).strip() or type(error).__name__", export_source)
+        self.assertIn('def _financial_pdf_plain_html(html):', export_source)
         import tempfile
         from pathlib import Path
         with self.app.app_context():
