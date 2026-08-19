@@ -375,6 +375,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(payload['commit'], '492d856')
         self.assertEqual(payload['deployed_commit'], '492d856c7fa')
         self.assertEqual(payload['deployment_source'], 'github')
+        self.assertIn('map_label_font', payload)
 
     def test_deploy_webhook_forwards_and_validates_the_expected_commit(self):
         module = self.application_module

@@ -13317,6 +13317,7 @@ def health():
         'deployed_commit': metadata.get('deployed_commit', 'unknown'),
         'deployed_at': metadata.get('deployed_at'),
         'deployment_source': metadata.get('source'),
+        'map_label_font': os.path.basename(maps_service.bundled_arabic_overlay_font_path() or ''),
         'model': GLM_MODEL,
         'image_model': IMAGE_MODEL,
     })
