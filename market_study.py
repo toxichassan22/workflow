@@ -599,6 +599,29 @@ def is_generic_source_homepage(url):
     return (path.lower() in _GENERIC_SOURCE_PATHS or path.lower() in {'/', ''}) and not parsed.query and not parsed.fragment
 
 
+def _source_host(url):
+    return (urlsplit(str(url or '')).netloc or '').lower().removeprefix('www.')
+
+
+def resolve_source_url_from_citations(url, citations):
+    """Replace a homepage with the retrieved page the search actually returned.
+
+    The model tends to quote a site's front page from memory even when the figure
+    came from a deep page, and the client needs the exact page.
+    """
+    value = _norm(url)
+    pages = [_norm(item) for item in (citations or []) if _norm(item).startswith(('http://', 'https://'))]
+    pages = [item for item in pages if not is_generic_source_homepage(item)]
+    if value and not is_generic_source_homepage(value):
+        return value
+    host = _source_host(value)
+    if host:
+        same_host = next((item for item in pages if _source_host(item) == host), '')
+        if same_host:
+            return same_host
+    return value
+
+
 def prefer_specific_source_url(*candidates):
     values = [_norm(item) for item in candidates if _norm(item)]
     for value in values:
@@ -844,7 +867,9 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '}\n'
         'لا تخترع رقمًا. إذا لم تجد سعرًا اترك حقول السعر فارغة واذكر المصدر إن وُجد.\n'
         'في source_url ضع رابط الصفحة المحددة من نتائج البحث التي أخذت منها المعلومة، '
-        'وليس رابط الصفحة الرئيسية للموقع.'
+        'وليس رابط الصفحة الرئيسية للموقع. '
+        'رابط النطاق وحده أو الصفحة الرئيسية غير مقبول؛ إن لم تتوفر صفحة محددة '
+        f'اترك source_url فارغًا واكتب في source عبارة {MISSING_VALUE_PHRASE}.'
     )
 
 
@@ -925,6 +950,21 @@ def normalize_competitor_row(row, fallback_source='ai'):
         'row_source': _norm(row.get('row_source') or row.get('rowSource')) or fallback_source,
     }
     return result
+
+
+def apply_search_citations(rows, citations, url_key='source_url'):
+    """Upgrade AI-written homepage links to the exact pages returned by the search."""
+    if not citations:
+        return rows
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if (row.get('row_source') or 'ai') != 'ai' and url_key == 'source_url':
+            continue
+        resolved = resolve_source_url_from_citations(row.get(url_key), citations)
+        if resolved:
+            row[url_key] = resolved
+    return rows
 
 
 def merge_generated_competitors(existing, generated, mode='generate'):

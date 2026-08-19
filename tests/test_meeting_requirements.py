@@ -2328,6 +2328,55 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('Regenerating a map is an explicit user action.', index_source)
         self.assertIn('await saveProjectAsDraftNow(true);', index_source)
 
+    def test_financial_pdf_fallback_writes_real_arabic_text(self):
+        import tempfile
+        from pathlib import Path
+
+        model = {
+            'inputs': {
+                'unitRevenueMode': 'nonRevenue', 'developmentYears': 2, 'operationYears': 5,
+                'landArea': 70000, 'builtUpAreaAbove': 100000, 'coverageRate': 35,
+                'financeEnabled': 'no', 'fundEnabled': 'no', 'fundFeesEnabled': 'no',
+                'externalEnabled': 'no', 'exitEnabled': 'no',
+            },
+            'tables': {
+                'cashflowTable': [{'year': 1, 'final': -10, 'cumulative': -10}],
+                'sensitivityTable': [{'scenario': 'أساسي', 'roi': '12%'}],
+            },
+            'projection': {'projectCost': 1000},
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / 'model.pdf'
+            with self.app.app_context():
+                self.application_module.generate_financial_pdf_from_model('مشروع مالي', model, output)
+            self.assertTrue(self.application_module._financial_pdf_has_text(output))
+            import fitz
+            document = fitz.open(output)
+            try:
+                text = '\n'.join(page.get_text() for page in document)
+            finally:
+                document.close()
+            # PyMuPDF applies no shaping, so the report must carry presentation forms.
+            self.assertIn('\ufee3', text)
+            self.assertIn('70,000.00', text)
+            empty = Path(temp_dir) / 'empty.pdf'
+            blank = fitz.open()
+            blank.new_page()
+            blank.save(empty)
+            blank.close()
+            self.assertFalse(self.application_module._financial_pdf_has_text(empty))
+
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        # A textless PDF must never be accepted, and the font-embedding writer must be
+        # tried before the MuPDF HTML engine, which needs system fonts we do not have.
+        self.assertNotIn('os.path.getsize(output_path) > 0', source)
+        self.assertLess(
+            source.index('generate_financial_pdf_from_model(project_name, model, output_path)\n            if _financial_pdf_has_text'),
+            source.index("fitz.open('html', candidate.encode('utf-8'))")
+        )
+        self.assertIn('def _financial_pdf_shape(text):', source)
+        self.assertIn('def split_runs(value):', source)
+
     def test_map_label_font_never_reapplies_bidi(self):
         from PIL import ImageFont
         import maps_service
@@ -2688,6 +2737,21 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('tenantMoodboardPage', index_source)
         self.assertNotIn('tenantMainImagePromptInput', index_source)
         self.assertNotIn('tenantMoodboardPreview', index_source)
+
+    def test_visual_concept_generation_writes_to_the_live_slot(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        start = index_source.index('async function generateVisualConceptImage(slotId)')
+        body = index_source[start:index_source.index('function approveVisualConceptImage(slotId)')]
+        # renderVisualConceptPage reassigns tenantVisualConceptState, so a slot captured
+        # before a render is detached and the generated image is written to a dead object.
+        self.assertIn('const liveSlot = () => tenantVisualConceptState.slots[slotId];', body)
+        self.assertIn('liveSlot().imageUrl = visualConceptImageUrl(response.image);', body)
+        self.assertNotIn('const slot = tenantVisualConceptState.slots[slotId];', body)
+        self.assertNotIn('slot.imageUrl =', body)
+        chat_start = index_source.index('async function sendVisualConceptChat(slotId)')
+        chat_body = index_source[chat_start:chat_start + 2200]
+        self.assertIn('liveSlot().prompt = response.prompt;', chat_body)
+        self.assertNotIn('slot.chat.push({ role: \'assistant\'', chat_body)
 
     def test_visual_concept_requires_real_project_facts_and_cover_before_moodboard(self):
         client = self.app.test_client()
@@ -3548,11 +3612,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('تلقائي حسب نوع المشروع', index_source)
         self.assertIn('<option value="10" selected>10 كم</option>', index_source)
 
-    def test_market_study_retries_without_tools_and_json_mode(self):
+    def test_market_study_searches_before_it_falls_back_to_json_mode(self):
         module = self.application_module
         responses = [
             {'error': {'message': 'web search response was empty'}},
             {'choices': [{'message': {'content': 'not valid json'}}]},
+            {'choices': [{'message': {'content': 'still not json'}}]},
             {'choices': [{'message': {'content': '{"competitors": []}'}}]},
         ]
         calls = []
@@ -3565,14 +3630,45 @@ class MeetingRequirementsTests(unittest.TestCase):
             response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
 
         self.assertTrue(module._has_chat_choices(response))
-        self.assertEqual(call.call_count, 3)
+        self.assertEqual(call.call_count, 4)
+        # Gemini answers a tools + JSON-mode call with reasoning only, so searching with
+        # JSON mode off must be the first attempt or no search ever runs.
         self.assertIsNotNone(calls[0]['tools'])
-        self.assertEqual(calls[0]['response_format'], {'type': 'json_object'})
-        self.assertIsNone(calls[1]['tools'])
+        self.assertIsNone(calls[0]['response_format'])
+        self.assertIsNotNone(calls[1]['tools'])
         self.assertEqual(calls[1]['response_format'], {'type': 'json_object'})
         self.assertIsNone(calls[2]['tools'])
-        self.assertIsNone(calls[2]['response_format'])
+        self.assertEqual(calls[2]['response_format'], {'type': 'json_object'})
+        self.assertIsNone(calls[3]['tools'])
+        self.assertIsNone(calls[3]['response_format'])
         self.assertEqual(error, '')
+
+    def test_market_study_uses_the_retrieved_page_for_homepage_links(self):
+        import market_study
+        module = self.application_module
+        citations = [
+            'https://sa.aqar.fm/',
+            'https://sa.aqar.fm/%D8%B4%D9%82%D9%82-%D9%84%D9%84%D8%A8%D9%8A%D8%B9/12345',
+            'https://www.stats.gov.sa/statistics/housing-2026',
+        ]
+        response = {'choices': [{'message': {'annotations': [
+            {'type': 'url_citation', 'url_citation': {'url': url}} for url in citations
+        ]}}]}
+        self.assertEqual(module._market_citation_urls(response), citations)
+        rows = [
+            {'name': 'برج سكني', 'source_url': 'https://sa.aqar.fm/', 'row_source': 'ai'},
+            {'name': 'برج العميل', 'source_url': 'https://sa.aqar.fm/', 'row_source': 'user'},
+        ]
+        market_study.apply_search_citations(rows, citations)
+        self.assertEqual(rows[0]['source_url'], citations[1])
+        self.assertEqual(rows[1]['source_url'], 'https://sa.aqar.fm/')
+        sources = [{'name': 'الهيئة العامة للإحصاء', 'url': 'https://www.stats.gov.sa'}]
+        market_study.apply_search_citations(sources, citations, url_key='url')
+        self.assertEqual(sources[0]['url'], citations[2])
+        prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
+        self.assertIn('رابط النطاق وحده أو الصفحة الرئيسية غير مقبول', prompt)
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn("market_study.apply_search_citations(merged, _market_citation_urls(res))", app_source)
 
     def test_market_study_lowers_token_cap_when_credit_is_limited(self):
         module = self.application_module

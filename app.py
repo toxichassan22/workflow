@@ -6858,6 +6858,32 @@ def _financial_pdf_font():
     return maps_service.bundled_arabic_font_path()
 
 
+def _financial_pdf_shape(text):
+    """PyMuPDF places glyphs verbatim, so Arabic must be shaped and ordered first."""
+    value = str(text or '')
+    if not re.search(r'[\u0600-\u06ff]', value):
+        return value
+    return maps_service.shape_arabic_for_drawing(value)
+
+
+def _financial_pdf_has_text(output_path, minimum=200):
+    """A PDF of table borders with no glyphs is a failed render, not a report.
+
+    The MuPDF HTML engine writes exactly that on hosts with no system Arabic font,
+    and the old size-only check accepted it, so the client downloaded blank pages.
+    """
+    import fitz
+    try:
+        document = fitz.open(output_path)
+    except Exception as error:
+        print(f'[FINANCIAL PDF] cannot inspect the written file ({error})')
+        return False
+    try:
+        return sum(len(page.get_text().strip()) for page in document) >= minimum
+    finally:
+        document.close()
+
+
 def _financial_pdf_text(value, key=''):
     raw = _financial_report_format_number(value, key)
     return html_lib.unescape(raw).replace('\xa0', ' ')
@@ -6882,6 +6908,8 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
         except Exception as error:
             print(f'[FINANCIAL PDF] custom font skipped ({error})')
             font_path = None
+    metrics = fitz.Font(fontfile=font_path) if font_path else fitz.Font('helv')
+    latin_metrics = fitz.Font('helv')
 
     def ensure_space(needed=24):
         nonlocal page, y
@@ -6895,11 +6923,47 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
                 pass
         y = margin
 
+    def split_runs(value):
+        """Group a visual-order line by which embedded font actually owns each glyph.
+
+        The bundled Arabic font carries no Latin or percent glyph, so a single-font
+        line drops them to empty boxes.
+        """
+        runs = []
+        for character in value:
+            arabic = font_name == 'arabic' and metrics.has_glyph(ord(character))
+            name, font = (font_name, metrics) if arabic else ('helv', latin_metrics)
+            if runs and runs[-1][0] == name:
+                runs[-1][2] += character
+            else:
+                runs.append([name, font, character])
+        return runs
+
+    def place(rect, text, size, color=(0.15, 0.15, 0.15)):
+        """Right-align one line with insert_text.
+
+        insert_textbox silently draws nothing when its line height does not fit the
+        rectangle, which is why the whole report used to come out as empty borders.
+        """
+        value = _financial_pdf_shape(text)
+        if not value.strip():
+            return
+        runs = split_runs(value)
+        width = lambda items: sum(font.text_length(part, size) for _, font, part in items)
+        while len(value) > 1 and width(runs) > rect.width:
+            value = value[1:]
+            runs = split_runs(value)
+        baseline = min(rect.y0 + size, rect.y1 - 1) if rect.height > size else rect.y0 + size
+        x = max(rect.x0, rect.x1 - width(runs))
+        for name, font, part in runs:
+            page.insert_text((x, baseline), part, fontname=name, fontsize=size, color=color)
+            x += font.text_length(part, size)
+
     def draw_text(text, size=11, indent=0):
         nonlocal y
         ensure_space(size + 8)
         box = fitz.Rect(margin + indent, y, page_size.width - margin, y + size + 6)
-        page.insert_textbox(box, str(text or ''), fontname=font_name, fontsize=size, color=(0.07, 0.23, 0.43), align=fitz.TEXT_ALIGN_RIGHT)
+        place(box, text, size, color=(0.07, 0.23, 0.43))
         y += size + 8
 
     def draw_kv_table(rows):
@@ -6918,8 +6982,9 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             ensure_space(16)
             rect = fitz.Rect(margin, y, page_size.width - margin, y + 15)
             page.draw_rect(rect, color=(0.85, 0.82, 0.8), width=0.4)
-            page.insert_textbox(fitz.Rect(rect.x0 + 4, rect.y0 + 2, rect.x0 + col_w - 4, rect.y1), label, fontname=font_name, fontsize=8, align=fitz.TEXT_ALIGN_RIGHT)
-            page.insert_textbox(fitz.Rect(rect.x0 + col_w + 4, rect.y0 + 2, rect.x1 - 4, rect.y1), value, fontname=font_name, fontsize=8, align=fitz.TEXT_ALIGN_RIGHT)
+            # Right-to-left reading order: the label owns the right half.
+            place(fitz.Rect(rect.x0 + col_w + 4, rect.y0 + 2, rect.x1 - 4, rect.y1), label, 8)
+            place(fitz.Rect(rect.x0 + 4, rect.y0 + 2, rect.x0 + col_w - 4, rect.y1), value, 8)
             y += 15
 
     def draw_data_table(rows, title):
@@ -6966,12 +7031,13 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             nonlocal y
             ensure_space(row_h)
             x = margin
-            for value in values:
+            # Right-to-left tables: the first column belongs on the right edge.
+            for value in reversed(values):
                 cell = fitz.Rect(x, y, x + col_w, y + row_h)
                 fill = (0.07, 0.23, 0.43) if header else None
                 page.draw_rect(cell, color=(0.85, 0.82, 0.8), fill=fill, width=0.4)
                 color = (1, 1, 1) if header else (0.15, 0.15, 0.15)
-                page.insert_textbox(cell + (2, 1, -2, -1), str(value), fontname=font_name, fontsize=7, color=color, align=fitz.TEXT_ALIGN_RIGHT)
+                place(cell + (2, 1, -2, -1), value, 7, color=color)
                 x += col_w
             y += row_h
         paint_row([FINANCIAL_COLUMN_LABELS.get(key, key) for key in keys], header=True)
@@ -7073,12 +7139,24 @@ def generate_financial_pdf(html, output_path, model=None, project_name=''):
                 )
             finally:
                 browser.close()
-        if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+        if os.path.isfile(output_path) and _financial_pdf_has_text(output_path):
             return output_path
         last_error = RuntimeError('Playwright wrote an empty PDF')
     except Exception as error:
         last_error = error
         print(f'[FINANCIAL PDF] Playwright failed ({error}); falling back to PyMuPDF')
+    # The model writer embeds the Arabic font itself, so it is the reliable engine on
+    # hosts without Chromium. The MuPDF HTML engine relies on system fonts and writes
+    # pages of empty table borders there, so it is only the last resort.
+    if model is not None:
+        try:
+            generate_financial_pdf_from_model(project_name, model, output_path)
+            if _financial_pdf_has_text(output_path):
+                return output_path
+            last_error = RuntimeError('Model renderer wrote a PDF with no text')
+        except Exception as error:
+            last_error = error
+            print(f'[FINANCIAL PDF] model fallback failed ({error})')
     import fitz
     candidates = [_financial_pdf_plain_html(html), str(html or '')]
     for candidate in candidates:
@@ -7088,17 +7166,11 @@ def generate_financial_pdf(html, output_path, model=None, project_name=''):
                 document.save(output_path)
             finally:
                 document.close()
-            if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+            if os.path.isfile(output_path) and _financial_pdf_has_text(output_path):
                 return output_path
         except Exception as error:
             last_error = error
             print(f'[FINANCIAL PDF] PyMuPDF html open failed ({error})')
-    if model is not None:
-        try:
-            return generate_financial_pdf_from_model(project_name, model, output_path)
-        except Exception as error:
-            last_error = error
-            print(f'[FINANCIAL PDF] model fallback failed ({error})')
     raise RuntimeError(str(last_error or 'Could not write financial PDF'))
 
 
@@ -9659,9 +9731,13 @@ def _read_market_job(tenant_id, job_id):
 def _call_market_study_model(system_prompt, user_content, max_tokens=None):
     """Search-backed market call with JSON, provider, and credit fallbacks."""
     cap = max(2000, int(max_tokens or MARKET_STUDY_MAX_TOKENS))
-    tools = [{'type': 'openrouter:web_search', 'parameters': {'max_results': 8}}]
+    tools = [{'type': 'openrouter:web_search', 'parameters': {'max_results': 8, 'engine': 'exa'}}]
     provider = {'order': ['Google'], 'allow_fallbacks': True}
+    # Gemini returns reasoning and no content when tools are combined with JSON mode, so
+    # that pair silently dropped the search on every call and the model answered from
+    # memory with homepage links. Search first, JSON mode only as a fallback.
     attempts = [
+        (tools, None),
         (tools, {'type': 'json_object'}),
         (None, {'type': 'json_object'}),
         (None, None),
@@ -9673,8 +9749,8 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None):
         for index, (attempt_tools, response_format) in enumerate(attempts):
             if index:
                 print(
-                    '[MARKET STUDY] retrying competitor/summary call '
-                    f'without {"web tools" if index == 1 else "JSON mode"}: '
+                    '[MARKET STUDY] retrying competitor/summary call with '
+                    f'tools={bool(attempt_tools)} json_mode={bool(response_format)}: '
                     f'{_chat_error_message(last_response)}'
                 )
             last_response = call_openrouter_chat(
@@ -9704,6 +9780,21 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None):
         print(f'[MARKET STUDY] provider refused cap={cap}; retrying with cap={retry_cap}')
         cap = retry_cap
     return last_response, last_error
+
+
+def _market_citation_urls(res):
+    """Collect the url_citation pages the web search actually retrieved."""
+    urls = []
+    for choice in (res.get('choices') or []) if isinstance(res, dict) else []:
+        message = (choice or {}).get('message') or {}
+        for annotation in message.get('annotations') or []:
+            if not isinstance(annotation, dict):
+                continue
+            citation = annotation.get('url_citation') if isinstance(annotation.get('url_citation'), dict) else {}
+            url = str(citation.get('url') or annotation.get('url') or '').strip()
+            if url and url not in urls:
+                urls.append(url)
+    return urls
 
 
 def _parse_market_model_json(res):
@@ -9771,6 +9862,7 @@ def _execute_market_competitors(data):
         }
     generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
     merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
+    market_study.apply_search_citations(merged, _market_citation_urls(res))
     return {
         'success': True,
         'competitors': merged,
@@ -9811,6 +9903,7 @@ def _execute_market_summary(data):
             'providerError': provider_error,
         }
     normalized = market_study.normalize_summary(parsed)
+    market_study.apply_search_citations(normalized.get('sources'), _market_citation_urls(res), url_key='url')
     return {
         'success': True,
         **normalized,

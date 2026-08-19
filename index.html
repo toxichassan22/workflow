@@ -18657,18 +18657,21 @@
     }
 
     async function generateVisualConceptImage(slotId) {
-      const slot = tenantVisualConceptState.slots[slotId];
-      if (!slot || slot.status === 'generating') return;
+      // Never hold a slot reference across an await or a render: renderVisualConceptPage
+      // reassigns tenantVisualConceptState through normalizeVisualConceptState, so a
+      // captured slot is detached and the generated image was written to a dead object.
+      const liveSlot = () => tenantVisualConceptState.slots[slotId];
+      if (!liveSlot() || liveSlot().status === 'generating') return;
       if (visualConceptSlotLocked(slotId)) {
         toast(isVisualConceptInteriorSlot(slotId) ? 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.' : 'اعتمد الصورة الرئيسية أولاً.');
         return;
       }
-      if (!tenantVisualConceptState.slots[slotId].prompt) {
+      if (!liveSlot().prompt) {
         await generateVisualConceptPrompt(slotId);
       }
-      if (!tenantVisualConceptState.slots[slotId].prompt) return;
-      const previousImage = slot.imageUrl || slot.approvedImageUrl;
-      slot.status = 'generating';
+      if (!liveSlot() || !liveSlot().prompt) return;
+      const previousImage = liveSlot().imageUrl || liveSlot().approvedImageUrl;
+      liveSlot().status = 'generating';
       renderVisualConceptPage();
       showLoader('جاري توليد التصور البصري', 'يتم توليد ' + (VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : 'الصورة')) + '...');
       try {
@@ -18676,7 +18679,7 @@
         const response = await apiWithTimeout('POST', '/api/visual-concept/generate', payload, 180000, 'انتهت مهلة توليد الصورة؛ أعد المحاولة.');
         hideLoader();
         if (!response?.success || !response.image) {
-          slot.status = previousImage ? 'review' : 'pending';
+          liveSlot().status = previousImage ? 'review' : 'pending';
           renderVisualConceptPage();
           const message = visualConceptMissingMessage(response) || response?.error || 'تعذر توليد الصورة';
           showVisualConceptMissing(visualConceptMissingMessage(response));
@@ -18684,16 +18687,16 @@
           return;
         }
         showVisualConceptMissing('');
-        tenantVisualConceptState.slots[slotId].prompt = response.prompt || tenantVisualConceptState.slots[slotId].prompt;
-        slot.imageUrl = visualConceptImageUrl(response.image);
-        slot.approvedImageUrl = '';
-        tenantVisualConceptState.slots[slotId].status = 'review';
+        liveSlot().prompt = response.prompt || liveSlot().prompt;
+        liveSlot().imageUrl = visualConceptImageUrl(response.image);
+        liveSlot().approvedImageUrl = '';
+        liveSlot().status = 'review';
         markVisualConceptDirty();
         renderVisualConceptPage();
         toast('تم توليد المعاينة. اضغط اعتماد الصورة لتثبيتها.');
       } catch (error) {
         hideLoader();
-        slot.status = previousImage ? 'review' : 'pending';
+        liveSlot().status = previousImage ? 'review' : 'pending';
         renderVisualConceptPage();
         toast(error.message || 'تعذر توليد الصورة');
       }
@@ -18724,8 +18727,8 @@
         toast('اكتب طلب التعديل أولاً');
         return;
       }
-      const slot = tenantVisualConceptState.slots[slotId];
-      slot.chat.push({ role: 'user', text: message });
+      const liveSlot = () => tenantVisualConceptState.slots[slotId];
+      liveSlot().chat.push({ role: 'user', text: message });
       markVisualConceptDirty();
       showLoader('جاري تعديل وصف الصورة', 'يتم تطبيق ملاحظاتك على نفس المشروع...');
       try {
@@ -18740,8 +18743,8 @@
           return;
         }
         showVisualConceptMissing('');
-        slot.prompt = response.prompt;
-        slot.chat.push({ role: 'assistant', text: response.reply || 'تم تحديث وصف الصورة.' });
+        liveSlot().prompt = response.prompt;
+        liveSlot().chat.push({ role: 'assistant', text: response.reply || 'تم تحديث وصف الصورة.' });
         markVisualConceptDirty();
         renderVisualConceptPage();
         toast('تم تحديث الوصف. اضغط توليد الصورة لتطبيق التعديل.');

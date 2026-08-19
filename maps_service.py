@@ -165,6 +165,11 @@ def _reshape_arabic_text(text):
         return text_str
 
 
+def shape_arabic_for_drawing(text):
+    """Public entry point for renderers that place glyphs themselves (PIL, PyMuPDF)."""
+    return _reshape_arabic_text(text)
+
+
 # Professional satellite map style — sepia/greyscale tone matching reference examples
 # Road labels stay on in Arabic; custom overlays use the bundled Arabic presentation-form font.
 SATELLITE_WITH_LABELS_STYLES = [
