@@ -3950,10 +3950,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         })
         self.assertEqual(summary['sources'][0]['url'], 'https://www.stats.gov.sa/statistics/housing-2024')
         normalized = market_study.normalize_summary({
-            'one_block_summary': 'ملخص موحد لدراسة السوق.',
+            'one_block_summary': 'عنوان الملخص\\n\\nفقرة الملخص.',
             'summary': {},
         })
-        self.assertEqual(normalized['one_block_summary'], 'ملخص موحد لدراسة السوق.')
+        self.assertEqual(normalized['one_block_summary'], 'عنوان الملخص\n\nفقرة الملخص.')
         summary_prompt = market_study.build_summary_user_prompt({}, [])
         self.assertIn('one_block_summary', summary_prompt)
         prompt = market_study.build_consultant_system_prompt()

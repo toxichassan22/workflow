@@ -10016,7 +10016,9 @@
     }
 
     function buildMarketStudyOneBlockSummary(state = {}) {
-      const generated = String(state.one_block_summary || '').trim();
+      const generated = String(state.one_block_summary || '')
+        .replace(/\\r?\\n/g, '\n')
+        .trim();
       if (generated) return generated;
       const lines = [];
       const text = value => String(value || '').trim();

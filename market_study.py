@@ -1138,9 +1138,10 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         + ' ثم اشرحها في نص القرار.\n'
         'بعد الملخص اكتب تحليل SWOT مستقلًا من أربع خانات: نقاط القوة، نقاط الضعف، الفرص، التهديدات.\n'
         'اجعل كل خانة نقاطًا قصيرة خاصة بهذا المشروع وهذا النوع، ولا تكرر الملخص حرفيًا.\n'
-        'بعد ذلك اكتب one_block_summary كنص عربي متماسك يلخص دراسة السوق كاملة في كتلة واحدة، '
+        'بعد ذلك اكتب one_block_summary كنص عربي متماسك يلخص دراسة السوق كاملة داخل حقل واحد، '
         'ويجمع المنافسين والبيانات السعرية وأقسام الملخص العشرة وSWOT والقرار. استخدم الحقائق والأرقام والمصادر الموجودة فقط، '
-        'ولا تضف أي معلومة غير موجودة. اجعل النص مناسبًا للقراءة المباشرة من العميل دون تحويله إلى قائمة حقول.\n\n'
+        'ولا تضف أي معلومة غير موجودة. حافظ داخل الحقل الواحد على عناوين واضحة وفقرات وأسطر فارغة وتنسيق مناسب للقراءة، '
+        'ولا تضغط النص في سطر واحد ولا تكتب رموز فصل الأسطر حرفيًا.\n\n'
         'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
         'المنافسون المعتمدون في الجدول:\n'
@@ -1416,6 +1417,7 @@ def normalize_summary(raw):
         or nested.get('one_block_summary')
     )
     one_block_summary = str(raw_one_block or '').strip()
+    one_block_summary = one_block_summary.replace('\\r\\n', '\n').replace('\\n', '\n')
     one_block_summary = re.sub(r'[ \t]+', ' ', one_block_summary)
     one_block_summary = re.sub(r'\n{3,}', '\n\n', one_block_summary)
     return {
