@@ -16928,8 +16928,13 @@
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
       if (tenantPresentationId) {
         await api('PUT', '/api/presentations/' + encodeURIComponent(tenantPresentationId), { projectData: tenantProjectData });
+      } else if (tenantProjectData.draftId && typeof saveProjectAsDraftNow === 'function') {
+        // Regenerating a map is an explicit user action. Persist the new image URL
+        // immediately for drafts; otherwise reload restores the previous placeholder.
+        await saveProjectAsDraftNow(true);
+      } else {
+        triggerAutoSaveDraft();
       }
-      triggerAutoSaveDraft();
     }
 
     async function approveMapPreview(mapType) {

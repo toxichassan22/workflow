@@ -2325,6 +2325,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function withCacheBust(url)', index_source)
         self.assertIn('payload.refresh_maps = true', index_source)
         self.assertIn('selectMapPreviewView(mapType)', index_source)
+        self.assertIn('Regenerating a map is an explicit user action.', index_source)
+        self.assertIn('await saveProjectAsDraftNow(true);', index_source)
 
     def test_progress_bars_never_jump_backward(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
