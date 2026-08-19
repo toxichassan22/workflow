@@ -3819,6 +3819,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("function runMarketCompetitorsJob(mode)", index_source)
         self.assertIn("function runMarketSummaryJob()", index_source)
         self.assertIn('<th>القيمة (ر.س)</th>', index_source)
+        self.assertIn('source_urls', index_source)
+        self.assertIn('function mergeMarketSourceRows(existing, incoming)', index_source)
         self.assertIn('const visibleRows = Array.isArray(rows) && rows.length ? rows : [{}];', index_source)
         self.assertIn('function inferCompetitorPriceType(row = {})', index_source)
         self.assertIn('min-width: 1450px;', index_source)
@@ -3911,10 +3913,11 @@ class MeetingRequirementsTests(unittest.TestCase):
             ], mode='fill'
         )
         self.assertEqual(added_fill, 0)
-        self.assertEqual(updated_fill, 1)
+        self.assertEqual(updated_fill, 2)
         self.assertEqual([row['name'] for row in filled], ['مشروع العميل'])
         self.assertEqual(filled[0]['id'], 'keep-me')
         self.assertEqual(filled[0]['source'], 'العميل')
+        self.assertEqual(filled[0]['price_type'], 'أخرى')
         self.assertEqual(filled[0]['price_value'], '1200000')
 
     def test_market_study_prefers_exact_page_urls_over_homepages(self):
@@ -3937,6 +3940,56 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(summary['sources'][0]['url'], 'https://www.stats.gov.sa/statistics/housing-2024')
         prompt = market_study.build_consultant_system_prompt()
         self.assertIn('رابط الصفحة بالضبط', prompt)
+
+    def test_market_study_keeps_all_competitor_urls_and_builds_source_rows(self):
+        import market_study
+        row = market_study.normalize_competitor_row({
+            'name': 'برج الأعمال',
+            'operation_type': 'بيع',
+            'price_type': 'سعر المتر المربع',
+            'price_value': '4500',
+            'source_urls': [
+                'https://developer.example/project',
+                'https://listing.example/project-123',
+            ],
+            'source': 'المطور ومنصة الإعلانات',
+        })
+        self.assertEqual(row['source_url'], 'https://developer.example/project')
+        self.assertEqual(row['source_urls'], [
+            'https://developer.example/project',
+            'https://listing.example/project-123',
+        ])
+        self.assertEqual(row['price_type'], 'سعر المتر المربع')
+        self.assertEqual(row['price_value'], '4500')
+        sources = market_study.competitor_source_rows([row])
+        self.assertEqual([item['url'] for item in sources], row['source_urls'])
+        self.assertEqual([item['competitor_name'] for item in sources], ['برج الأعمال', 'برج الأعمال'])
+
+    def test_market_study_normalizes_price_object_and_operation_aliases(self):
+        import market_study
+        row = market_study.normalize_competitor_row({
+            'name': 'فندق الأعمال',
+            'project_type': 'فندقي',
+            'operation': 'sale',
+            'price': {'type': 'سعر الوحدة', 'value': 1200000},
+            'sources': [
+                {'url': 'https://developer.example/hotel'},
+                {'source_url': 'https://listing.example/hotel-1'},
+            ],
+        })
+        self.assertEqual(row['operation_type'], 'بيع')
+        self.assertEqual(row['price_type'], 'سعر الوحدة')
+        self.assertEqual(row['price_value'], '1200000')
+        self.assertEqual(row['source_urls'], [
+            'https://developer.example/hotel',
+            'https://listing.example/hotel-1',
+        ])
+        derived = market_study.normalize_competitor_row({
+            'name': 'وحدة سكنية',
+            'price_type': 'سعر الوحدة',
+            'price_value': '900000',
+        })
+        self.assertEqual(derived['operation_type'], 'بيع')
 
     def test_market_study_radius_auto_is_ten_km(self):
         import market_study
@@ -4002,6 +4055,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         sources = [{'name': 'الهيئة العامة للإحصاء', 'url': 'https://www.stats.gov.sa'}]
         market_study.apply_search_citations(sources, citations, url_key='url')
         self.assertEqual(sources[0]['url'], citations[2])
+        multi = [{
+            'name': 'برج متعدد المصادر',
+            'source_urls': ['https://sa.aqar.fm/', 'https://www.stats.gov.sa/statistics/housing-2026'],
+            'row_source': 'ai',
+        }]
+        market_study.apply_search_citations(multi, citations)
+        self.assertEqual(multi[0]['source_urls'], [citations[1], citations[2]])
+        self.assertEqual(multi[0]['source_url'], citations[1])
         prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
         self.assertIn('رابط النطاق وحده أو الصفحة الرئيسية غير مقبول', prompt)
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
@@ -4015,6 +4076,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('بروتوكول البحث الإلزامي', prompt)
         self.assertIn('نفّذ بحثًا منفصلًا لكل منافس على حدة عن سعره الفعلي', prompt)
         self.assertIn('لا تكتب سعرًا من معرفتك السابقة', prompt)
+        self.assertIn('source_urls', prompt)
+        self.assertIn('price_type والقيمة', prompt)
         self.assertIn(market_study.MISSING_VALUE_PHRASE, prompt)
         self.assertIn('سعر الليلة', prompt)
         self.assertIn('متوسط سعر الغرفة ADR', prompt)
@@ -4045,7 +4108,20 @@ class MeetingRequirementsTests(unittest.TestCase):
         headers = self._headers(self.token_a)
         fake = {
             'competitors': [
-                {'name': 'برج الشمال', 'project_type': 'سكني', 'classification': 'مباشر', 'status': 'قائم', 'source': 'موقع المطور'}
+                {
+                    'name': 'برج الشمال',
+                    'project_type': 'سكني',
+                    'classification': 'مباشر',
+                    'status': 'قائم',
+                    'operation_type': 'بيع',
+                    'price_type': 'سعر الوحدة',
+                    'price_value': '1200000',
+                    'source': 'موقع المطور',
+                    'source_urls': [
+                        'https://developer.example/north-tower',
+                        'https://listing.example/north-tower',
+                    ],
+                }
             ]
         }
         with patch.object(self.application_module, '_call_market_study_model', return_value=(
@@ -4065,8 +4141,13 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'competitors': [{'id': 'c1', 'name': 'منافس العميل', 'row_source': 'manual'}],
             })
         self.assertEqual(generated.status_code, 200, generated.get_json())
-        generated_names = [row['name'] for row in generated.get_json()['competitors']]
+        generated_payload = generated.get_json()
+        generated_names = [row['name'] for row in generated_payload['competitors']]
         self.assertEqual(generated_names, ['برج الشمال'])
+        self.assertEqual(
+            [row['url'] for row in generated_payload['sources']],
+            ['https://developer.example/north-tower', 'https://listing.example/north-tower'],
+        )
         self.assertEqual(filled.status_code, 200, filled.get_json())
         filled_names = [row['name'] for row in filled.get_json()['competitors']]
         self.assertEqual(filled_names, ['منافس العميل'])

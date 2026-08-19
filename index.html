@@ -1605,18 +1605,22 @@
     }
     #marketSourcesTable th:nth-child(1),
     #marketSourcesTable td:nth-child(1) {
-      min-width: 250px;
+      min-width: 190px;
     }
     #marketSourcesTable th:nth-child(2),
     #marketSourcesTable td:nth-child(2) {
-      min-width: 280px;
+      min-width: 250px;
     }
-    #marketSourcesTable th:nth-child(5),
-    #marketSourcesTable td:nth-child(5) {
-      min-width: 220px;
+    #marketSourcesTable th:nth-child(3),
+    #marketSourcesTable td:nth-child(3) {
+      min-width: 320px;
     }
     #marketSourcesTable th:nth-child(6),
     #marketSourcesTable td:nth-child(6) {
+      min-width: 220px;
+    }
+    #marketSourcesTable th:nth-child(7),
+    #marketSourcesTable td:nth-child(7) {
       min-width: 300px;
     }
     #marketCompetitorsTable th:nth-child(1),
@@ -1644,9 +1648,17 @@
       line-height: 1.45;
     }
     #section-market-study td [data-field="url"],
-    #section-market-study td [data-field="source_url"] {
+    #section-market-study td [data-field="source_url"],
+    #section-market-study td [data-field="source_urls"] {
       direction: ltr;
       text-align: left;
+    }
+    #section-market-study .market-source-links {
+      direction: ltr;
+      text-align: left;
+      word-break: break-all;
+      line-height: 1.45;
+      margin-top: 4px;
     }
     #section-market-study th {
       background: #f7fafc;
@@ -9923,11 +9935,15 @@
       const parsed = parseStoredLandTable(tenantProjectData.market_study_data);
       const base = emptyMarketStudyState();
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return base;
+      const competitors = Array.isArray(parsed.competitors) ? parsed.competitors : [];
       return {
         ...base,
         ...parsed,
-        competitors: Array.isArray(parsed.competitors) ? parsed.competitors : [],
-        sources: Array.isArray(parsed.sources) ? parsed.sources : [],
+        competitors,
+        sources: mergeMarketSourceRows(
+          Array.isArray(parsed.sources) ? parsed.sources : [],
+          buildMarketCompetitorSourceRows(competitors)
+        ),
         summary: { ...base.summary, ...(parsed.summary || {}) },
         swot: { ...base.swot, ...(parsed.swot || {}) }
       };
@@ -9961,7 +9977,10 @@
       state.swot = swot;
       state.decision = document.getElementById('marketDecision')?.value || '';
       state.disclaimer = document.getElementById('marketDisclaimer')?.value || state.disclaimer;
-      state.sources = collectMarketSourceRows();
+      state.sources = mergeMarketSourceRows(
+        collectMarketSourceRows(),
+        buildMarketCompetitorSourceRows(state.competitors)
+      );
       return state;
     }
 
@@ -10060,7 +10079,7 @@
           <div class="table-wrap">
             <table id="marketSourcesTable">
               <thead><tr>
-                <th>المصدر</th><th>الرابط</th><th>تاريخ البيانات</th><th>تاريخ الوصول</th><th>الموثوقية</th><th>ملاحظة</th><th></th>
+                <th>المنافس</th><th>المصدر</th><th>الرابط</th><th>تاريخ البيانات</th><th>تاريخ الوصول</th><th>الموثوقية</th><th>ملاحظة</th><th></th>
               </tr></thead>
               <tbody></tbody>
             </table>
@@ -10607,24 +10626,142 @@
       syncProjectClassificationFields();
     }
 
+    function marketValueList(value) {
+      if (Array.isArray(value)) return value.reduce((items, item) => items.concat(marketValueList(item)), []);
+      if (value && typeof value === 'object') {
+        return ['url', 'source_url', 'sourceUrl', 'href'].reduce((items, key) =>
+          items.concat(marketValueList(value[key])), []);
+      }
+      const text = String(value || '').trim();
+      if (!text) return [];
+      const urls = text.match(/https?:\/\/[^\s<>"'\[\]{}]+/g);
+      if (urls && urls.length) return urls.map(url => url.replace(/[.,،;:!?)]}]+$/g, ''));
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object') return marketValueList(parsed);
+      } catch (error) {
+        return text.split(/[\r\n,،;|]+/).map(item => item.trim()).filter(Boolean);
+      }
+      return [text];
+    }
+
+    function marketSourceUrls(row = {}) {
+      const values = [];
+      ['source_urls', 'sourceUrls', 'urls', 'source_url', 'sourceUrl', 'url', 'sources', 'source']
+        .forEach(key => values.push(...marketValueList(row[key])));
+      return Array.from(new Set(values
+        .map(value => String(value || '').trim())
+        .filter(value => /^https?:\/\//i.test(value))));
+    }
+
+    function safeMarketUrl(value) {
+      try {
+        const url = new URL(String(value || '').trim(), window.location.origin);
+        return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function marketSourceLinksHtml(row = {}) {
+      return marketSourceUrls(row).map(url => {
+        const safeUrl = safeMarketUrl(url);
+        return safeUrl
+          ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(url) + '</a>'
+          : '<span>' + escapeHtml(url) + '</span>';
+      }).join('<br>');
+    }
+
+    function buildMarketCompetitorSourceRows(competitors) {
+      const rows = [];
+      (Array.isArray(competitors) ? competitors : []).forEach(competitor => {
+        const urls = marketSourceUrls(competitor);
+        urls.forEach(url => rows.push({
+          id: 'competitor-source-' + encodeURIComponent(String(competitor.id || competitor.name || '') + '|' + url),
+          competitor_id: competitor.id || '',
+          competitor_name: competitor.name || '',
+          source_kind: 'competitor',
+          name: competitor.source || 'مصدر المنافس',
+          url,
+          data_date: '',
+          accessed_at: '',
+          reliability: '',
+          note: competitor.notes || ''
+        }));
+      });
+      return rows;
+    }
+
+    function mergeMarketSourceRows(existing, incoming) {
+      const base = (Array.isArray(existing) ? existing : [])
+        .filter(row => row && row.source_kind !== 'competitor');
+      const rows = [];
+      const seen = new Set();
+      (Array.isArray(incoming) ? incoming : []).forEach(row => {
+        if (!row || !String(row.url || '').trim()) return;
+        const key = [row.source_kind || 'source', row.competitor_id || '', String(row.url).trim().toLowerCase()].join('|');
+        if (seen.has(key)) return;
+        seen.add(key);
+        rows.push(row);
+      });
+      return base.concat(rows);
+    }
+
     function marketSelectHtml(options, selected) {
-      return '<option value="">--</option>' + (options || []).map(option =>
+      const values = Array.from(new Set([...(options || []), ...(selected ? [selected] : [])]));
+      return '<option value="">--</option>' + values.map(option =>
         '<option value="' + String(option).replace(/"/g, '&quot;') + '"' +
         (option === selected ? ' selected' : '') + '>' + option + '</option>'
       ).join('');
     }
 
     function competitorPriceIsRange(priceType) {
-      return MARKET_RANGE_PRICE_TYPES.includes(String(priceType || '').trim());
+      return MARKET_RANGE_PRICE_TYPES.includes(String(priceType || '').trim())
+        || String(priceType || '').includes('نطاق');
+    }
+
+    function inferCompetitorOperation(row = {}) {
+      const explicit = String(row.operation_type || row.operationType || row.operation || '').trim();
+      if (MARKET_PRICE_TYPES[explicit]) return explicit;
+      const folded = explicit.replace(/[أإآ]/g, 'ا').toLowerCase();
+      if (folded.includes('بيع') || folded.includes('sale') || folded.includes('sell')) return 'بيع';
+      if (folded.includes('ايجار') || folded.includes('تأجير') || folded.includes('rent')) return 'إيجار';
+      if (folded.includes('فندقي') || folded.includes('فندق') || folded.includes('hotel')) return 'تشغيل فندقي';
+      const priceType = String(row.price_type || row.priceType || '').trim();
+      for (const [operation, options] of Object.entries(MARKET_PRICE_TYPES)) {
+        if (priceType && options.includes(priceType)) return operation;
+      }
+      if (String(row.project_type || '').trim() === 'فندقي') return 'تشغيل فندقي';
+      return explicit ? 'أخرى' : '';
     }
 
     function inferCompetitorPriceType(row = {}) {
       const explicit = String(row.price_type || row.priceType || '').trim();
       if (explicit) return explicit;
-      if (String(row.price_from || '').trim() || String(row.price_to || '').trim()) {
-        return row.operation_type === 'تشغيل فندقي' ? 'نطاق أسعار الغرف' : 'نطاق سعري';
+      if (String(competitorPriceField(row, 'price_from') || '').trim() || String(competitorPriceField(row, 'price_to') || '').trim()) {
+        return inferCompetitorOperation(row) === 'تشغيل فندقي' ? 'نطاق أسعار الغرف' : 'نطاق سعري';
       }
-      return String(row.price_value || '').trim() ? 'أخرى' : '';
+      return String(competitorPriceField(row, 'price_value') || '').trim() ? 'أخرى' : '';
+    }
+
+    function competitorPriceField(row, key) {
+      const direct = row && row[key];
+      if (direct !== undefined && direct !== null && String(direct).trim()) return direct;
+      const aliases = {
+        price_value: ['priceValue', 'value'],
+        price_from: ['priceFrom', 'price_min', 'priceMin', 'min_price', 'minPrice'],
+        price_to: ['priceTo', 'price_max', 'priceMax', 'max_price', 'maxPrice']
+      };
+      for (const alias of aliases[key] || []) {
+        if (row && row[alias] !== undefined && row[alias] !== null && String(row[alias]).trim()) return row[alias];
+      }
+      if (row && row.price && typeof row.price === 'object') {
+        const nested = { price_value: ['value', 'price_value', 'priceValue'], price_from: ['from', 'min', 'minimum'], price_to: ['to', 'max', 'maximum'] };
+        for (const alias of nested[key] || []) {
+          if (row.price[alias] !== undefined && row.price[alias] !== null && String(row.price[alias]).trim()) return row.price[alias];
+        }
+      }
+      return '';
     }
 
     function addMarketCompetitorRow(row = {}) {
@@ -10635,16 +10772,18 @@
       tr.dataset.classification = row.classification || '';
       tr.dataset.rowSource = row.row_source || 'manual';
       tr.dataset.priceCurrency = row.price_currency || row.currency || 'SAR';
-      const operation = row.operation_type || '';
+      const operation = inferCompetitorOperation(row);
       const priceType = inferCompetitorPriceType(row);
       const priceTypes = MARKET_PRICE_TYPES[operation] || MARKET_PRICE_TYPES['أخرى'];
+      const sourceUrls = marketSourceUrls(row);
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(MARKET_PROJECT_TYPES, row.project_type || '') + '</select></td>' +
         '<td><input data-field="area_sqm" value="' + escapeHtml(row.area_sqm || '') + '" inputmode="decimal"></td>' +
         '<td><select data-field="status">' + marketSelectHtml(['قائم', 'تحت الإنشاء', 'على الخارطة'], row.status || '') + '</select></td>' +
         '<td><textarea data-field="source" rows="2" placeholder="المصدر">' + escapeHtml(row.source || '') + '</textarea>' +
-        '<input data-field="source_url" value="' + escapeHtml(row.source_url || '') + '" placeholder="رابط المصدر" style="margin-top:6px"></td>' +
+        '<div data-source-links class="market-source-links">' + marketSourceLinksHtml(row) + '</div>' +
+        '<textarea data-field="source_urls" rows="3" placeholder="روابط المصادر">' + escapeHtml(sourceUrls.join('\n')) + '</textarea></td>' +
         '<td><select data-field="operation_type">' + marketSelectHtml(['بيع', 'إيجار', 'تشغيل فندقي', 'أخرى'], operation) + '</select></td>' +
         '<td><select data-field="price_type">' + marketSelectHtml(priceTypes, priceType) + '</select></td>' +
         '<td data-field="price_cell"></td>' +
@@ -10665,6 +10804,11 @@
         tr.remove();
         persistMarketStudyFromDom();
       });
+      tr.querySelector('[data-field="source_urls"]')?.addEventListener('input', () => {
+        const links = tr.querySelector('[data-source-links]');
+        if (links) links.innerHTML = marketSourceLinksHtml(collectOneCompetitorRow(tr));
+        syncMarketCompetitorSources();
+      });
       tr.querySelectorAll('input,select,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
     }
 
@@ -10672,17 +10816,21 @@
       const cell = tr.querySelector('[data-field="price_cell"]');
       if (!cell) return;
       const priceType = tr.querySelector('[data-field="price_type"]')?.value || inferCompetitorPriceType(row);
+      const priceFrom = competitorPriceField(row, 'price_from');
+      const priceTo = competitorPriceField(row, 'price_to');
+      const priceValue = competitorPriceField(row, 'price_value');
       if (competitorPriceIsRange(priceType)) {
-        cell.innerHTML = '<input data-field="price_from" data-currency="SAR" value="' + escapeHtml(row.price_from || '') + '" placeholder="من (ر.س)" inputmode="decimal">' +
-          '<input data-field="price_to" data-currency="SAR" value="' + escapeHtml(row.price_to || '') + '" placeholder="إلى (ر.س)" style="margin-top:6px" inputmode="decimal">';
+        cell.innerHTML = '<input data-field="price_from" data-currency="SAR" value="' + escapeHtml(priceFrom) + '" placeholder="من (ر.س)" inputmode="decimal">' +
+          '<input data-field="price_to" data-currency="SAR" value="' + escapeHtml(priceTo) + '" placeholder="إلى (ر.س)" style="margin-top:6px" inputmode="decimal">';
       } else {
-        cell.innerHTML = '<input data-field="price_value" data-currency="SAR" value="' + escapeHtml(row.price_value || '') + '" placeholder="القيمة (ر.س)" inputmode="decimal">';
+        cell.innerHTML = '<input data-field="price_value" data-currency="SAR" value="' + escapeHtml(priceValue) + '" placeholder="القيمة (ر.س)" inputmode="decimal">';
       }
       cell.querySelectorAll('input').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
     }
 
     function collectOneCompetitorRow(tr) {
       const read = (field) => tr.querySelector('[data-field="' + field + '"]')?.value || '';
+      const source_urls = marketSourceUrls({ source_urls: read('source_urls') });
       return {
         id: tr.dataset.competitorId,
         name: read('name'),
@@ -10697,13 +10845,25 @@
         price_from: read('price_from'),
         price_to: read('price_to'),
         source: read('source'),
-        source_url: read('source_url'),
+        source_url: source_urls[0] || '',
+        source_urls,
         row_source: tr.dataset.rowSource || 'manual'
       };
     }
 
     function collectMarketCompetitorRows() {
       return Array.from(document.querySelectorAll('#marketCompetitorsTable tbody tr')).map(collectOneCompetitorRow);
+    }
+
+    function syncMarketCompetitorSources() {
+      const state = getMarketStudyState();
+      state.competitors = collectMarketCompetitorRows();
+      state.sources = mergeMarketSourceRows(
+        collectMarketSourceRows(),
+        buildMarketCompetitorSourceRows(state.competitors)
+      );
+      renderMarketSources(state.sources);
+      setMarketStudyState(state);
     }
 
     function renderMarketCompetitors(rows) {
@@ -10718,9 +10878,16 @@
       const tb = document.querySelector('#marketSourcesTable tbody');
       if (!tb) return;
       const tr = document.createElement('tr');
+      tr.dataset.sourceKind = row.source_kind || '';
+      tr.dataset.competitorId = row.competitor_id || '';
+      const safeUrl = safeMarketUrl(row.url || '');
+      const link = safeUrl
+        ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(row.url || '') + '</a>'
+        : '';
       tr.innerHTML =
+        '<td><input data-field="competitor_name" value="' + escapeHtml(row.competitor_name || '') + '" readonly></td>' +
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
-        '<td><input data-field="url" value="' + escapeHtml(row.url || '') + '"></td>' +
+        '<td><input data-field="url" value="' + escapeHtml(row.url || '') + '"><div data-source-link class="market-source-links">' + link + '</div></td>' +
         '<td><input data-field="data_date" value="' + escapeHtml(row.data_date || '') + '"></td>' +
         '<td><input data-field="accessed_at" value="' + escapeHtml(row.accessed_at || '') + '"></td>' +
         '<td><textarea data-field="reliability" rows="2">' + escapeHtml(row.reliability || '') + '</textarea></td>' +
@@ -10731,6 +10898,14 @@
         tr.remove();
         persistMarketStudyFromDom();
       });
+      tr.querySelector('[data-field="url"]').addEventListener('input', () => {
+        const value = tr.querySelector('[data-field="url"]')?.value || '';
+        const current = safeMarketUrl(value);
+        const host = tr.querySelector('[data-source-link]');
+        if (host) host.innerHTML = current
+          ? '<a href="' + escapeHtml(current) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(value) + '</a>'
+          : '';
+      });
       tr.querySelectorAll('input,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
     }
 
@@ -10738,6 +10913,9 @@
       return Array.from(document.querySelectorAll('#marketSourcesTable tbody tr')).map(tr => {
         const read = (field) => tr.querySelector('[data-field="' + field + '"]')?.value || '';
         return {
+          competitor_id: tr.dataset.competitorId || '',
+          competitor_name: read('competitor_name'),
+          source_kind: tr.dataset.sourceKind || '',
           name: read('name'),
           url: read('url'),
           data_date: read('data_date'),
@@ -10757,6 +10935,10 @@
 
     function applyMarketStudyState(state) {
       const next = { ...emptyMarketStudyState(), ...(state || {}) };
+      next.sources = mergeMarketSourceRows(
+        Array.isArray(next.sources) ? next.sources : [],
+        buildMarketCompetitorSourceRows(next.competitors)
+      );
       const radius = document.getElementById('marketCompetitorRadius');
       const custom = document.getElementById('marketCompetitorRadiusCustom');
       const period = document.getElementById('marketDataPeriod');
@@ -10866,6 +11048,10 @@
         }
         const state = getMarketStudyState();
         state.competitors = res.competitors || state.competitors;
+        state.sources = mergeMarketSourceRows(
+          state.sources,
+          res.sources || buildMarketCompetitorSourceRows(state.competitors)
+        );
         applyMarketStudyState(state);
         persistMarketStudyFromDom();
         const extra = res.expansionNote || res.notes || '';
@@ -10916,7 +11102,10 @@
         const state = getMarketStudyState();
         state.summary = marketSummaryPending.summary;
         state.swot = marketSummaryPending.swot || state.swot;
-        state.sources = marketSummaryPending.sources;
+        state.sources = mergeMarketSourceRows(
+          marketSummaryPending.sources,
+          buildMarketCompetitorSourceRows(state.competitors)
+        );
         state.decision = marketSummaryPending.decision;
         state.disclaimer = marketSummaryPending.disclaimer;
         applyMarketStudyState(state);
@@ -10974,7 +11163,10 @@
           const state = getMarketStudyState();
           state.summary = res.summary;
           state.swot = res.swot || {};
-          state.sources = res.sources || [];
+          state.sources = mergeMarketSourceRows(
+            res.sources || [],
+            buildMarketCompetitorSourceRows(state.competitors)
+          );
           state.decision = res.decision || '';
           state.disclaimer = res.disclaimer || state.disclaimer;
           applyMarketStudyState(state);

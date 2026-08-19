@@ -9898,6 +9898,7 @@ def _execute_market_competitors(data):
     return {
         'success': True,
         'competitors': merged,
+        'sources': market_study.competitor_source_rows(merged),
         'added': added,
         'updated': updated,
         'searchExpanded': bool(parsed.get('searchExpanded')),
