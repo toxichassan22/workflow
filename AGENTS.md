@@ -277,6 +277,16 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   detached. That is why the cover image reported success and never appeared: the status was written
   to the live slot and `imageUrl` to the dead one. `generateVisualConceptImage()` and
   `sendVisualConceptChat()` use a `liveSlot()` accessor instead.
+  **Each image carries the same single approval toggle as a section**: `اعتماد` becomes
+  `الغاء الاعتماد`, the chip reads `مسودة` / `معتمد`, and while approved the card gets
+  `.section-locked` and every control in it — prompt, generate, chat, and the interior reference
+  card — is disabled except the toggle. Unapproving the cover re-locks the angles and interiors
+  because they key off `cover.approvedImageUrl`.
+  `normalizeVisualConceptState()` must decide approval from the slot's own state, never from the
+  legacy `tenantCreativeImages.cover` / `moodboard` mirrors: those store unapproved previews too, so
+  rebuilding from them re-approved an image on the next render or reload. The `stated[id]` guard
+  keeps the mirrors as a fallback for old drafts only, and unapproving the cover clears
+  `tenantCreativeImages.cover` because slides read that as the approved cover.
 - **Rebuilding the form can wipe a saved draft.** `renderTenantProjectForm()`
   recreates every `data-key` input empty, then persist helpers run immediately.
   If a helper reads the new empty widget instead of `tenantProjectData`, the

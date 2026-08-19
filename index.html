@@ -2777,6 +2777,11 @@
       opacity: .68;
     }
 
+    .visual-concept-card.section-locked textarea,
+    .visual-concept-card.section-locked button:not([data-visual-action="unapprove"]) {
+      opacity: .62;
+    }
+
     .visual-concept-head {
       display: flex;
       justify-content: space-between;
@@ -18147,6 +18152,10 @@
       if (legacyReferenceName && !styleReferenceNames.includes(legacyReferenceName)) styleReferenceNames.unshift(legacyReferenceName);
       styleReferenceNames.splice(5);
       const slots = {};
+      // A slot that already carries its own state must never be rebuilt from the legacy
+      // tenantCreativeImages mirrors: those hold previews too, so they used to re-approve
+      // an image the user had just unapproved, or never approved at all.
+      const stated = {};
       const slotIds = new Set(VISUAL_CONCEPT_SLOTS.map(item => item.id));
       Object.keys(source.slots && typeof source.slots === 'object' ? source.slots : {}).forEach(id => {
         if (isVisualConceptInteriorSlot(id)) slotIds.add(id);
@@ -18160,6 +18169,7 @@
         })) : [];
         const approved = String(slot.approvedImageUrl || '');
         const imageUrl = String(slot.imageUrl || '');
+        stated[id] = Boolean(slot.status || approved || imageUrl);
         slots[id] = {
           id,
           prompt: String(slot.prompt || '').slice(0, 12000),
@@ -18173,7 +18183,7 @@
           styleReferenceNames: visualConceptReferenceList(slot.styleReferenceNames).slice(0, 5)
         };
       });
-      if (!slots.cover.approvedImageUrl && tenantCreativeImages.cover) {
+      if (!stated.cover && tenantCreativeImages.cover) {
         slots.cover.approvedImageUrl = tenantCreativeImages.cover;
         slots.cover.imageUrl = slots.cover.imageUrl || tenantCreativeImages.cover;
         slots.cover.prompt = slots.cover.prompt || tenantCreativeImages.cover_prompt || '';
@@ -18183,7 +18193,7 @@
       const moodboardPrompts = Array.isArray(tenantCreativeImages.moodboard_prompts) ? tenantCreativeImages.moodboard_prompts : [];
       VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).forEach((item, index) => {
         const slot = slots[item.id];
-        if (!slot.approvedImageUrl && moodboardImages[index]) {
+        if (!stated[item.id] && moodboardImages[index]) {
           slot.approvedImageUrl = moodboardImages[index];
           slot.imageUrl = slot.imageUrl || moodboardImages[index];
           slot.status = 'approved';
@@ -18335,33 +18345,44 @@
         group: 'internal'
       }, false);
       renderVisualConceptInteriorReferences(slotId);
+      // The reference card feeds this one component, so an approved interior locks it too.
+      const interiorApproved = tenantVisualConceptState.slots[slotId].status === 'approved';
+      if (referenceCard) {
+        referenceCard.classList.toggle('section-locked', interiorApproved);
+        referenceCard.querySelectorAll('input, button').forEach(control => {
+          control.disabled = interiorApproved;
+        });
+      }
     }
 
     function renderVisualConceptSlot(slotDef, locked) {
       const slot = tenantVisualConceptState.slots[slotDef.id];
       const image = slot.approvedImageUrl || slot.imageUrl;
-      const statusLabel = slot.status === 'approved' ? 'معتمدة' : slot.status === 'review' ? 'تحتاج اعتماد' : slot.status === 'generating' ? 'قيد التوليد' : 'لم تبدأ';
+      // Approval is one toggle per image and it locks that card, exactly like a section.
+      const approved = slot.status === 'approved';
+      const frozen = locked || approved;
+      const statusLabel = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد' : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
       const chat = (slot.chat || []).map(item => (
         '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? 'النظام: ' : 'أنت: ') + '</strong>' + escapeHtml(item.text) + '</div>'
       )).join('') || '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
       const preview = image
         ? '<img src="' + escapeHtml(image) + '" alt="' + escapeHtml(slotDef.label) + '">'
         : (locked ? 'مقفل حتى اعتماد الصورة الرئيسية وإضافة مكونات المشروع.' : 'لم يتم توليد هذه الصورة بعد.');
-      return '<article class="visual-concept-card' + (locked ? ' locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
+      return '<article class="visual-concept-card' + (locked ? ' locked' : '') + (approved ? ' section-locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
         '<div class="visual-concept-head"><h3>' + escapeHtml(slotDef.label) + '</h3>' +
         '<span class="visual-concept-status ' + slot.status + '">' + statusLabel + '</span></div>' +
         '<div class="visual-concept-preview">' + preview + '</div>' +
         '<label>وصف الصورة</label>' +
-        '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
+        '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
         '<div class="visual-concept-actions">' +
-        '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
-        '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (locked || slot.status === 'generating' ? 'disabled' : '') + '>توليد الصورة</button>' +
-        '<button type="button" class="btn ghost small" data-visual-action="approve" data-visual-slot="' + slotDef.id + '" ' + (locked || !image ? 'disabled' : '') + '>اعتماد الصورة</button>' +
+        '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
+        '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (frozen || slot.status === 'generating' ? 'disabled' : '') + '>توليد الصورة</button>' +
+        '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + (locked || (!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
         '</div>' +
         '<div class="visual-concept-chat">' + chat + '</div>' +
         '<div class="visual-concept-chat-row">' +
-        '<textarea data-visual-chat="' + slotDef.id + '" rows="2" placeholder="اكتب تعديل هذه الصورة..." ' + (locked ? 'disabled' : '') + '></textarea>' +
-        '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (locked ? 'disabled' : '') + '>إرسال التعديل</button>' +
+        '<textarea data-visual-chat="' + slotDef.id + '" rows="2" placeholder="اكتب تعديل هذه الصورة..." ' + (frozen ? 'disabled' : '') + '></textarea>' +
+        '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>إرسال التعديل</button>' +
         '</div></article>';
     }
 
@@ -18551,6 +18572,7 @@
           if (action === 'prompt') generateVisualConceptPrompt(slotId);
           else if (action === 'generate') generateVisualConceptImage(slotId);
           else if (action === 'approve') approveVisualConceptImage(slotId);
+          else if (action === 'unapprove') unapproveVisualConceptImage(slotId);
           else if (action === 'chat') sendVisualConceptChat(slotId);
         });
       });
@@ -18713,7 +18735,26 @@
       slot.status = 'approved';
       markVisualConceptDirty();
       renderVisualConceptPage();
-      toast('تم اعتماد ' + (VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : 'الصورة')));
+      toast('تم اعتماد ' + visualConceptSlotLabel(slotId));
+    }
+
+    function visualConceptSlotLabel(slotId) {
+      return VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label
+        || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : 'الصورة');
+    }
+
+    function unapproveVisualConceptImage(slotId) {
+      const slot = tenantVisualConceptState.slots[slotId];
+      if (!slot || slot.status !== 'approved') return;
+      // The cover gates every other slot, so releasing it re-locks the angles and interiors.
+      slot.imageUrl = slot.imageUrl || slot.approvedImageUrl;
+      slot.approvedImageUrl = '';
+      slot.status = slot.imageUrl ? 'review' : 'pending';
+      // Slides and the generation payload read this mirror as the approved cover.
+      if (slotId === 'cover' && tenantCreativeImages) tenantCreativeImages.cover = '';
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+      toast('تم إلغاء اعتماد ' + visualConceptSlotLabel(slotId));
     }
 
     async function sendVisualConceptChat(slotId) {

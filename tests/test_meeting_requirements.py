@@ -2738,6 +2738,25 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('tenantMainImagePromptInput', index_source)
         self.assertNotIn('tenantMoodboardPreview', index_source)
 
+    def test_visual_concept_approval_is_one_toggle_per_image(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        start = index_source.index('function renderVisualConceptSlot(slotDef, locked)')
+        body = index_source[start:index_source.index('function visualConceptImageUrl(url)')]
+        # Same rule as a section: one button, status مسودة / معتمد, card frozen while approved.
+        self.assertIn("(approved ? 'unapprove' : 'approve')", body)
+        self.assertIn("(approved ? 'الغاء الاعتماد' : 'اعتماد')", body)
+        self.assertIn("approved ? 'معتمد'", body)
+        self.assertIn("(approved ? ' section-locked' : '')", body)
+        self.assertIn('const frozen = locked || approved;', body)
+        self.assertNotIn('اعتماد الصورة<', body)
+        self.assertIn('function unapproveVisualConceptImage(slotId)', index_source)
+        self.assertIn("else if (action === 'unapprove') unapproveVisualConceptImage(slotId);", index_source)
+        self.assertIn(".visual-concept-card.section-locked button:not([data-visual-action=\"unapprove\"])", index_source)
+        # The legacy tenantCreativeImages mirrors hold previews, so they must not decide approval.
+        self.assertIn('if (!stated.cover && tenantCreativeImages.cover) {', index_source)
+        self.assertIn('if (!stated[item.id] && moodboardImages[index]) {', index_source)
+        self.assertIn("if (slotId === 'cover' && tenantCreativeImages) tenantCreativeImages.cover = '';", index_source)
+
     def test_visual_concept_generation_writes_to_the_live_slot(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         start = index_source.index('async function generateVisualConceptImage(slotId)')
