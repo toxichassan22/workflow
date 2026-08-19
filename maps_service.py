@@ -222,9 +222,9 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
-ACCESS_ROADS_RENDER_VERSION = 'v11-stable-road-names'
+ACCESS_ROADS_RENDER_VERSION = 'v12-context-zoom-road-names'
 MAP_HIGHLIGHT_RENDER_VERSION = 'survey-polygon-v3'
-MAP_LABEL_RENDER_VERSION = 'named-labels-v2'
+MAP_LABEL_RENDER_VERSION = 'named-labels-v3-access-context'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
     'feature:poi.business|visibility:off',
@@ -237,6 +237,7 @@ ACCESS_ROADMAP_STYLES = [
 ]
 MAP_REGEN_ZOOM_OFFSETS = (1, -1, 2, -2, 0)
 LANDMARKS_MAX_RADIUS_KM = 8.0
+ACCESS_MAP_CONTEXT_RADIUS_KM = 0.6
 _MAP_GENERATION_LOCKS = {}
 _MAP_GENERATION_LOCKS_GUARD = threading.Lock()
 
@@ -1890,6 +1891,17 @@ def zoom_for_radius_km(lat, radius_km, size=(1280, 720), scale=2, fill=0.8):
     return 8
 
 
+def access_map_zoom(lat, base_zoom):
+    try:
+        base = int(base_zoom)
+    except (TypeError, ValueError):
+        base = 17
+    context_zoom = zoom_for_radius_km(lat, ACCESS_MAP_CONTEXT_RADIUS_KM)
+    if context_zoom is None:
+        return max(15, min(17, base))
+    return max(15, min(17, base, context_zoom))
+
+
 def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale=2):
     """Draw smooth, anti-aliased concentric catchment rings and elegant label pills using PIL."""
     try:
@@ -2744,7 +2756,7 @@ def _calculate_map_zooms(polygon_coords):
         zooms.update({
             'overview': overview_zoom,
             'landmarks': max(14, min(17, overview_zoom - 2)),
-            'access': max(15, min(19, overview_zoom + 1)),
+            'access': max(15, min(17, overview_zoom)),
             'catchment': max(12, min(14, overview_zoom - 4)),
         })
     except (TypeError, ValueError, OverflowError) as error:
@@ -2916,7 +2928,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 zooms[map_key] = max(12, min(20, int(zooms[map_key]) + zoom_shift))
     overview_zoom = zooms['overview']
     landmarks_zoom = zooms['landmarks']
-    access_zoom = zooms['access']
+    access_zoom = access_map_zoom(lat, zooms['access'])
     catchment_zoom = zooms['catchment']
 
     if polygon_coords and len(polygon_coords) >= 3:

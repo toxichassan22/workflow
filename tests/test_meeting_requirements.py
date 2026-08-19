@@ -70,7 +70,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         # is exact, so the plot view may go to 19 while the context views stay wider.
         self.assertLessEqual(zooms['overview'], 19)
         self.assertEqual(zooms['landmarks'], max(14, min(17, zooms['overview'] - 2)))
-        self.assertEqual(zooms['access'], max(15, min(19, zooms['overview'] + 1)))
+        self.assertEqual(zooms['access'], max(15, min(17, zooms['overview'])))
+        self.assertEqual(self.application_module.maps_service.access_map_zoom(21.63, 19), 16)
         self.assertLessEqual(zooms['catchment'], 14)
 
     def test_google_places_errors_are_explicit_instead_of_empty_success(self):
@@ -2310,7 +2311,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v11-stable-road-names'", source)
+        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v12-context-zoom-road-names'", source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
         self.assertIn("def _strip_arabic_diacritics(text):", source)
         self.assertIn("def _arabic_reshaper_without_ligatures():", source)
@@ -2581,6 +2582,8 @@ class MeetingRequirementsTests(unittest.TestCase):
             metres_per_pixel = 156543.03392 * math.cos(math.radians(21.63)) / (2 ** zoom) / 2
             self.assertLessEqual(radius * 1000 / metres_per_pixel, 720 * 0.8 + 1)
         self.assertIn('def zoom_for_radius_km(', source)
+        self.assertIn('def access_map_zoom(', source)
+        self.assertIn("access_zoom = access_map_zoom(lat, zooms['access'])", source)
         self.assertIn('shown_landmarks = [item for item in landmarks if item.get', source)
         self.assertIn('def find_place_near(', source)
         # Appending the project address made Google return the site itself for every landmark.
