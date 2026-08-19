@@ -2305,6 +2305,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v6-arabic-labels'", source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
         self.assertIn("def _strip_arabic_diacritics(text):", source)
+        self.assertIn('from bidi.algorithm import get_display', source)
         self.assertIn("'language': 'ar'", source)
         overlay_font = ROOT / 'fonts' / 'arabic-overlay.bin'
         self.assertGreater(overlay_font.stat().st_size, 10000)

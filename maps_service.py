@@ -122,8 +122,14 @@ def _reshape_arabic_text(text):
     try:
         import arabic_reshaper
         # Pillow on the server has no libraqm, so reshape logical Arabic into presentation forms.
-        # The bundled overlay font contains those glyphs; diacritics are removed for clean road names.
-        return arabic_reshaper.reshape(text_str)
+        # Apply bidi ordering before drawing; diacritics are removed for clean road names.
+        shaped = arabic_reshaper.reshape(text_str)
+        try:
+            from bidi.algorithm import get_display
+            return get_display(shaped)
+        except Exception as error:
+            print(f"[ARABIC BIDI WARN] Ordering failed for '{text_str}': {error}")
+            return shaped
     except Exception as e:
         print(f"[ARABIC RESHAPE WARN] Reshaping failed for '{text_str}': {e}")
         return text_str
