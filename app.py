@@ -6843,6 +6843,7 @@ table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px
 
 
 def generate_financial_pdf(html, output_path):
+    last_error = None
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as playwright:
@@ -6865,16 +6866,21 @@ def generate_financial_pdf(html, output_path):
                 )
             finally:
                 browser.close()
+        if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
             return output_path
+        last_error = RuntimeError('Playwright wrote an empty PDF')
     except Exception as error:
+        last_error = error
         print(f'[FINANCIAL PDF] Playwright failed ({error}); falling back to PyMuPDF')
-        import fitz
-        document = fitz.open('html', html.encode('utf-8'))
-        try:
-            document.save(output_path)
-        finally:
-            document.close()
-        return output_path
+    import fitz
+    document = fitz.open('html', str(html or '').encode('utf-8'))
+    try:
+        document.save(output_path)
+    finally:
+        document.close()
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+        raise RuntimeError(str(last_error or 'PyMuPDF wrote an empty PDF'))
+    return output_path
 
 
 @app.route('/api/financial-study/validate', methods=['POST'])
@@ -6902,7 +6908,7 @@ def api_export_financial_study():
         branding = db.get_branding(g.tenant_id) or {}
         report_html = build_financial_report_html(project_name, model, branding, g.tenant_id)
         generate_financial_pdf(report_html, output_path)
-        export_id = db.create_export(data.get('presentationId'), g.tenant_id, 'financial_pdf', output_path)
+        export_id = db.create_export(data.get('presentationId') or None, g.tenant_id, 'financial_pdf', output_path)
         return jsonify({
             'success': True,
             'exportId': export_id,
@@ -6911,10 +6917,11 @@ def api_export_financial_study():
             'url': f'/api/exports/{export_id}/download',
         })
     except Exception as error:
-        print(f'[FINANCIAL PDF ERROR] {error}')
+        print(f'[FINANCIAL PDF ERROR] {type(error).__name__}: {error!r}')
         if os.path.exists(output_path):
             os.unlink(output_path)
-        return jsonify({'success': False, 'error': 'تعذر إنشاء ملف الدراسة المالية: ' + str(error)}), 500
+        detail = str(error).strip() or type(error).__name__
+        return jsonify({'success': False, 'error': 'تعذر إنشاء ملف الدراسة المالية: ' + detail}), 500
 
 
 @app.route('/api/export', methods=['POST'])
