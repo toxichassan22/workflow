@@ -3713,6 +3713,20 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(invalid_reference.status_code, 400, invalid_reference.get_json())
         self.assertEqual(invalid_reference.get_json()['error_code'], 'REFERENCE_INVALID')
 
+    def test_executive_content_section_exists_as_under_construction(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("function addExecutiveContentSection(form, before)", index_source)
+        self.assertIn("addExecutiveContentSection(form);", index_source)
+        self.assertIn("id = 'section-executive-content'", index_source)
+        self.assertIn("createProjectSectionHeader('section-executive-content', 'المحتوى التنفيذي', { underConstruction: true })", index_source)
+        self.assertIn('id="executiveContentStatus"', index_source)
+        self.assertIn('data-under-construction="1"', index_source)
+        # A placeholder must not enter the approval map or invent fields.
+        self.assertIn('if (sec.dataset.underConstruction === \'1\') return;', index_source)
+        self.assertIn("if (section.dataset.underConstruction === '1') return;", index_source)
+        self.assertNotIn('data-key="executive_content"', index_source)
+        self.assertNotIn('/api/executive-content', index_source)
+
     def test_market_study_fields_and_section_are_wired(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn("function addMarketStudySection(form, before)", index_source)

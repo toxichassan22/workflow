@@ -206,8 +206,11 @@ Logos reuse `project_files` with `file_type='team_logo'`, so they inherit tenant
 authenticated `GET /api/project-files/<id>` preview route. `team_logo` is in
 `PROJECT_IMAGE_ONLY_TYPES` because it renders in an `<img>`.
 
-Section order is `basic → location → land_croquis → timeline → financial → team → market study → conceptual 2D`.
+Section order is `basic → location → land_croquis → timeline → financial → team → market study → executive content → conceptual 2D`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order.
+`section-executive-content` is currently a placeholder (`data-under-construction="1"`). It appears in
+the sidebar as «تحت الإنشاء» and must stay out of `initialStatuses`, `approveAllSections()`, and the
+server approval map until the owner specifies its fields. Do not invent those fields.
 
 ## Market study (دراسة السوق)
 
