@@ -1596,12 +1596,21 @@
       overflow-x: auto;
     }
     #section-market-study table {
-      width: 100%;
+      width: max-content;
+      min-width: 100%;
+      max-width: none;
+      table-layout: fixed;
       border-collapse: collapse;
     }
     #marketCompetitorsTable,
     #marketSourcesTable {
       min-width: 1450px;
+    }
+    #marketCompetitorsTable {
+      min-width: 2200px;
+    }
+    #marketSourcesTable {
+      min-width: 2100px;
     }
     #marketSourcesTable th:nth-child(1),
     #marketSourcesTable td:nth-child(1) {
@@ -1625,15 +1634,48 @@
     }
     #marketCompetitorsTable th:nth-child(1),
     #marketCompetitorsTable td:nth-child(1) {
+      width: 300px;
+      min-width: 300px;
+    }
+    #marketCompetitorsTable th:nth-child(2),
+    #marketCompetitorsTable td:nth-child(2) {
+      width: 190px;
       min-width: 190px;
+    }
+    #marketCompetitorsTable th:nth-child(3),
+    #marketCompetitorsTable td:nth-child(3) {
+      width: 180px;
+      min-width: 180px;
+    }
+    #marketCompetitorsTable th:nth-child(4),
+    #marketCompetitorsTable td:nth-child(4) {
+      width: 180px;
+      min-width: 180px;
     }
     #marketCompetitorsTable th:nth-child(5),
     #marketCompetitorsTable td:nth-child(5) {
-      min-width: 260px;
+      width: 620px;
+      min-width: 620px;
+    }
+    #marketCompetitorsTable th:nth-child(6),
+    #marketCompetitorsTable td:nth-child(6) {
+      width: 190px;
+      min-width: 190px;
+    }
+    #marketCompetitorsTable th:nth-child(7),
+    #marketCompetitorsTable td:nth-child(7) {
+      width: 240px;
+      min-width: 240px;
     }
     #marketCompetitorsTable th:nth-child(8),
     #marketCompetitorsTable td:nth-child(8) {
-      min-width: 190px;
+      width: 220px;
+      min-width: 220px;
+    }
+    #marketCompetitorsTable th:nth-child(9),
+    #marketCompetitorsTable td:nth-child(9) {
+      width: 100px;
+      min-width: 100px;
     }
     #section-market-study th,
     #section-market-study td {
@@ -1646,6 +1688,10 @@
       min-height: 46px;
       resize: vertical;
       line-height: 1.45;
+    }
+    #marketCompetitorsTable td:nth-child(1) textarea,
+    #marketCompetitorsTable td:nth-child(5) textarea {
+      min-height: 84px;
     }
     #section-market-study td [data-field="url"],
     #section-market-study td [data-field="source_url"],

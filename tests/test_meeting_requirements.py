@@ -3826,6 +3826,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const visibleRows = Array.isArray(rows) && rows.length ? rows : [{}];', index_source)
         self.assertIn('function inferCompetitorPriceType(row = {})', index_source)
         self.assertIn('min-width: 1450px;', index_source)
+        self.assertIn('width: max-content;', index_source)
+        self.assertIn('min-width: 2200px;', index_source)
         self.assertIn('<textarea data-field="name" rows="2">', index_source)
         self.assertIn('<textarea data-field="note" rows="2">', index_source)
         self.assertIn("tr.querySelectorAll('input,select,textarea')", index_source)
