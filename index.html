@@ -5980,7 +5980,6 @@
         <input type="password" id="registerPassword" placeholder="كلمة المرور" required minlength="10">
         <label>دومين الشركة (اختياري)</label>
         <input type="text" id="registerDomain" placeholder="company.com">
-        <span class="tenant-hint">الموظفين اللي إيميلهم @الدومين ده هيتم ربطهم بشركتك تلقائياً.</span>
         <label>النطاق الفرعي (اختياري)</label>
         <input type="text" id="registerSubdomain" placeholder="manafe">
         <button type="submit" class="auth-btn">إنشاء حساب شركة</button>
@@ -6088,7 +6087,6 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
           <h2 style="margin:0">إعدادات الشركة والهوية البصرية</h2>
-          <p class="tenant-hint" style="margin:4px 0 0">تحكم في الشعار والألوان والخطوط وشكل العروض.</p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
@@ -6134,7 +6132,6 @@
           <div class="tenant-field full" data-permission="company_settings">
             <label>إدارة أوزان وخطوط العرض</label>
             <div id="tenantFontSelections" style="display:grid;gap:8px;margin-top:6px;"></div>
-            <p class="tenant-hint" style="margin:8px 0 0">يمكن اختيار خط مركزي أو رفع خط خاص للشركة لكل لغة ووزن.</p>
           </div>
           <div class="tenant-field">
             <label>قالب التصميم</label>
@@ -6190,12 +6187,10 @@
           <div class="tenant-field" style="align-items:flex-start;justify-content:center">
             <label>قفل عدد الشرائح</label>
             <input type="checkbox" id="settingsLockSlideCount" style="width:20px;height:20px;margin-top:4px">
-            <span class="tenant-hint">منع AI من تغيير عدد الشرائح عند توليد الهيكل.</span>
           </div>
           <div class="tenant-field">
             <label>عدد صور المود بورد (Moodboard)</label>
             <input type="number" id="settingsMoodboardCount" value="4" min="1" max="16">
-            <span class="tenant-hint">عدد الصور التي يولدها النظام لشريحة المود بورد (الموديل سيلتزم بنفس العدد).</span>
           </div>
         </div>
 
@@ -6271,7 +6266,6 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
         <div>
           <h2>فريق التطوير</h2>
-          <p class="tenant-hint">المطورون المسجّلون هنا يظهرون في كل المشاريع.</p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
@@ -6305,8 +6299,6 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
         <div>
           <h2>الحقول المخصصة للمشاريع</h2>
-          <p class="tenant-hint">أنشئ أقساماً وحقولاً مخصصة لشركتك، ثم أضفها أو عدّلها أو رتّبها دون تغيير الحقول
-            والأقسام الثابتة.</p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
@@ -6315,8 +6307,6 @@
       <!-- Custom Sections Manager -->
       <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
         <h3 style="margin-bottom:6px">إدارة الأقسام</h3>
-        <p class="tenant-hint">أنشئ أقساماً مخصصة لتنظيم بياناتك. الأقسام الأساسية ثابتة، والقسم المخصص يظهر في القائمة
-          الجانبية لفورم المشروع.</p>
         <div id="customSectionsList" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
           <div class="tenant-field" style="flex:1;min-width:180px">
@@ -6330,15 +6320,12 @@
       <!-- AI Input Builder -->
       <div style="background:#fff8e1;border:1px solid #f57f17;border-radius:16px;padding:18px;margin-bottom:20px">
         <h3 style="margin-bottom:6px">بنّاء الحقول الذكي (AI Input Builder)</h3>
-        <p class="tenant-hint">اكتب وصف سريع للمشروع أو لطبيعة شركتك، واقترح AI الحقول المناسبة. تقدر توافق، ترفض، أو
-          تعدل الاقتراح.</p>
 
         <div class="tenant-grid full" style="margin-bottom:12px">
           <div class="tenant-field">
             <label>وصف المشروع أو طبيعة العمل</label>
             <textarea id="aiFieldDescription" rows="3"
               placeholder="مثال: مشروع سكني فاخر في شمال الرياض يتكون من 200 فيلا، معROI هدف 15%، مدة استرداد 5 سنوات..."></textarea>
-            <span class="tenant-hint">كلما كان الوصف أدق، كانت الاقتراحات أفضل.</span>
           </div>
         </div>
 
@@ -6363,13 +6350,11 @@
       <div id="tenantFieldEditor"
         style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px">
         <h3 id="tenantFieldFormTitle" style="margin-bottom:6px">إضافة حقل جديد يدوياً</h3>
-        <p id="tenantFieldFormHint" class="tenant-hint">أنشئ قسماً مخصصاً أولاً عند الحاجة، ثم أضف داخله الحقول التي
-          تريدها.</p>
+        <p id="tenantFieldFormHint" class="tenant-hint"></p>
         <div class="tenant-grid">
           <div class="tenant-field">
             <label>اسم الحقل (اللي يظهر للمستخدم) *</label>
             <input type="text" id="newFieldLabel" placeholder="مثال: حالة البناء">
-            <span class="tenant-hint">ده الاسم اللي هيكون مكتوب فوق الفورم.</span>
           </div>
           <input type="hidden" id="newFieldKey">
           <div class="tenant-field">
@@ -6390,7 +6375,6 @@
           <div class="tenant-field" id="newFieldOptionsWrap" style="display:none">
             <label>خيارات القائمة (افصل بينهم بفاصلة) *</label>
             <input type="text" id="newFieldOptions" placeholder="جديد، قديم، تحت الإنشاء">
-            <span class="tenant-hint">هتظهر للمستخدم كقائمة اختيارات.</span>
           </div>
         </div>
 
@@ -6432,8 +6416,6 @@
               style="font-size:12px;padding:3px 10px;border-radius:20px;background:#e2e8f0;color:#475569;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">
               جاهز للمزامنة</span>
           </div>
-          <p class="tenant-hint" style="margin-top:4px;">اختر القسم من القائمة الجانبية. أضف الأقسام والحقول المخصصة من
-            صفحة تخصيص الحقول، ثم اضغط التالي بعد اكتمال البيانات.</p>
         </div>
         <button class="btn ghost" onclick="openTenantFields()">تخصيص الحقول</button>
       </div>
@@ -6454,8 +6436,7 @@
 
     <section id="tenantFloorDesignPage" class="tenant-page tenant-floor-design-page">
       <div id="tenantFloorDesignSectionHeader"></div>
-      <p id="tenantFloorDesignStatus" class="tenant-hint">حدد الأدوار المتشابهة ثم ولّد صورة واحدة لكل مجموعة باستخدام
-        Nano Banana.</p>
+      <p id="tenantFloorDesignStatus" class="tenant-hint"></p>
 
       <div class="tenant-floor-stepper" id="tenantFloorDesignStepper">
         <button type="button" class="tenant-floor-step active" data-step="1" data-floor-design-stage-target="organization">
@@ -6484,8 +6465,6 @@
       </div>
 
       <div id="tenantFloorDesignStageHome" class="tenant-floor-design-stage-home" data-floor-design-stage-view="home">
-        <p class="tenant-floor-design-stage-intro">مساحة العمل مقسمة إلى مراحل واضحة حتى لا تظهر كل التعليمات والأدوات
-          مرة واحدة.</p>
         <div class="tenant-floor-design-stage-grid">
           <button type="button" class="tenant-floor-design-stage-card" data-floor-design-stage-target="organization">
             <span class="tenant-floor-design-stage-number">المرحلة الأولى</span>
@@ -6519,14 +6498,12 @@
         <div class="tenant-floor-design-stage-view-head">
           <div>
             <h3>تنظيم الأدوار والمكونات</h3>
-            <p>راجع اكتمال البيانات أولًا، ثم ابدأ تخصيص مجموعات الأدوار ومكونات كل مجموعة.</p>
           </div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل
             التصميم</button>
         </div>
         <div class="tenant-floor-design-readiness">
           <div>
             <h4>قبل بدء التخصيص</h4>
-            <p>لا نكرر إدخال البيانات هنا. يتم قراءتها من قسم الأرض والكروكي والدراسة المالية.</p>
           </div>
           <div id="tenantFloorDesignReadinessList" class="tenant-floor-design-readiness-list"></div>
         </div>
@@ -6547,7 +6524,6 @@
         <div class="tenant-floor-design-stage-view-head">
           <div>
             <h3>تحليل البيانات والاشتراطات</h3>
-            <p>راجع البيانات الناقصة قبل بدء تحليل AI.</p>
           </div><button type="button" class="btn ghost" onclick="showTenantFloorDesignStage('home')">العودة إلى مراحل
             التصميم</button>
         </div>
@@ -6578,7 +6554,6 @@
                 <div class="tenant-floor-design-analysis-chat-head">
                   <div>
                     <h4>محادثة مراجعة التحليل</h4>
-                    <p>الشات مرتبط بكل أقسام التحليل. أي تعديل يخص أكثر من قسم سيتم تطبيقه على الأقسام المتأثرة.</p>
                   </div>
                 </div>
                 <div id="tenantFloorDesignAnalysisChatThread" class="tenant-floor-design-analysis-chat-thread"></div>
@@ -6591,17 +6566,13 @@
             </section>
           </div>
         </div>
-        <div class="tenant-floor-design-stage-actions"><span class="tenant-hint">يتم تشغيل التحليل بعد اكتمال
-            البيانات.</span><button type="button" class="btn primary" id="tenantFloorDesignStartAnalysisButton"
+        <div class="tenant-floor-design-stage-actions"><button type="button" class="btn primary" id="tenantFloorDesignStartAnalysisButton"
             onclick="startTenantFloorAnalysis()" disabled>بدء تحليل البيانات</button></div>
       </div>
 
       <div id="tenantFloorDesignSetup" class="tenant-floor-design-setup" hidden>
         <div class="tenant-floor-design-setup-card">
           <h3>بانتظار بيانات الأدوار</h3>
-          <p>عدد الأدوار وتقسيماتها ستأتي من قسم بيانات المشروع المخصص لها. هذه الصفحة تعرض تجربة التصميم فقط.</p>
-          <p class="tenant-floor-design-note">بعد وصول بيانات الأدوار، ستظهر هنا مجموعات مثل 1-10 أو 1/3/5 بدون إدخالها
-            مرة أخرى.</p>
         </div>
       </div>
 
@@ -6609,7 +6580,6 @@
         data-floor-design-stage-view="drawings" hidden>
         <div>
           <h3>المرحلة الثالثة: المخططات التصورية 2D</h3>
-          <p>اختر مجموعة أدوار من القائمة الجانبية لبدء إعداد وتوليد المخطط المعماري واعتماده.</p>
         </div>
         <div class="tenant-floor-design-head-actions">
           <button type="button" class="btn ghost small" onclick="showTenantFloorDesignStage('analysis')">مراجعة تدقيق البيانات</button>
@@ -6650,7 +6620,7 @@
                   <span id="tenantFloorDesignRangeBadge" class="tenant-floor-range-badge" hidden></span>
                 </div>
                 <h3 id="tenantFloorDesignTitle">لم يبدأ تصميم الأدوار</h3>
-                <p id="tenantFloorDesignSubtitle">اختر مجموعة من القائمة لبدء تصميمها.</p>
+                <p id="tenantFloorDesignSubtitle"></p>
               </div>
               <div class="tenant-floor-hero-actions">
                 <button type="button" class="btn primary" id="tenantFloorDesignGenerateButton"
@@ -6672,7 +6642,6 @@
               <div class="tenant-floor-prompt-drawer-head">
                 <div class="tenant-floor-prompt-title-wrap">
                   <strong>المواصفات الهندسية للـ Prompt (قابلة للتعديل)</strong>
-                  <span class="tenant-hint">يمكنك تعديل النص الإنجليزي مباشرة أو إعادة صياغته بالذكاء الاصطناعي</span>
                 </div>
                 <div class="tenant-floor-prompt-actions">
                   <button type="button" class="btn ghost small" id="tenantFloorDesignPromptRegenerateBtn"
@@ -6690,7 +6659,6 @@
             <div class="tenant-floor-image-card-header">
               <div class="tenant-floor-image-card-title-wrap">
                 <strong id="tenantFloorDesignImageTitle">المخطط المعماري للمجموعة</strong>
-                <span class="tenant-hint">اضغط على المخطط للتكبير الكامل</span>
               </div>
               <div class="tenant-floor-image-card-controls">
                 <button type="button" class="tenant-floor-design-image-approve" id="tenantFloorDesignApproveButton"
@@ -6704,7 +6672,6 @@
               <div id="tenantFloorDesignImageEmpty" class="tenant-floor-design-image-empty">
                 <div class="tenant-floor-empty-blueprint">
                   <h4>جاهز لتوليد المخطط المعماري</h4>
-                  <p>تم تجهيز الاشتراطات والمساحات. اضغط على الزر أدناه لبدء التوليد بالذكاء الاصطناعي.</p>
                   <button type="button" class="btn primary" id="tenantFloorDesignCanvasCtaButton"
                     onclick="generateTenantFloorDesignImage()" disabled>توليد المخطط الآن</button>
                 </div>
@@ -6770,7 +6737,6 @@
           <div class="tenant-floor-design-modal-head">
             <div>
               <h3 id="tenantFloorGroupModalTitle">تنظيم تشابه الأدوار</h3>
-              <p>حدد الأدوار التي تمثل نفس النموذج البصري.</p>
             </div><button type="button" class="btn ghost" onclick="closeTenantFloorGroupModal()">إغلاق</button>
           </div>
           <div class="tenant-floor-design-modal-body">
@@ -6785,7 +6751,6 @@
             <div class="tenant-floor-design-field"><label for="tenantFloorGroupUnitArea">مساحة الوحدة م² (اختياري)</label><input
                 id="tenantFloorGroupUnitArea" type="number" min="0.01" step="0.01"
                 placeholder="مثال: 85"></div>
-            <p class="tenant-hint">إذا تركت الحقلين فارغين، سيقرأ النظام العدد والمساحة من جدول المكونات أو وصف المجموعة. عند وجود تعارض بين الأرقام سيعرضه في Prompt بدل تغيير أي قيمة.</p>
             <div class="tenant-floor-design-field"><label>حدد الأدوار المتشابهة</label>
               <div id="tenantFloorGroupGrid" class="tenant-floor-design-chip-grid"></div>
             </div>
@@ -6806,19 +6771,16 @@
         <div class="workflow-stage-content">
           <h2>التصور البصري</h2>
           <div id="visualConceptHome" class="visual-concept-home" data-visual-concept-view="home">
-            <p class="tenant-hint">اختاري كرت التصور الخارجي أو الداخلي. كل كرت يفتح صفحة العمل الخاصة به.</p>
             <div class="visual-concept-home-grid">
               <button type="button" class="visual-concept-home-card" data-visual-concept-target="external">
                 <span class="tenant-floor-design-stage-number">القسم الأول</span>
                 <h3>التصور الخارجي</h3>
                 <img id="visualConceptHomeCoverPreview" class="visual-concept-home-preview" alt="معاينة الصورة الرئيسية" hidden>
-                <p>الصورة الرئيسية ثم يمين وشمال وفوق وخلف بعد اعتمادها.</p>
                 <span class="visual-concept-home-status" id="visualConceptHomeExternalStatus">جاهز للعمل</span>
               </button>
               <button type="button" class="visual-concept-home-card" data-visual-concept-target="internal">
                 <span class="tenant-floor-design-stage-number">القسم الثاني</span>
                 <h3>التصور الداخلي</h3>
-                <p>اختر مكونًا من الدراسة المالية وولّد صورة داخلية مستقلة لكل مكون.</p>
                 <span class="visual-concept-home-status" id="visualConceptHomeInternalStatus">جاهز للعمل</span>
               </button>
             </div>
@@ -6827,7 +6789,6 @@
             <div class="tenant-floor-design-stage-view-head">
               <div>
                 <h3>التصور الخارجي</h3>
-                <p>ولّد الصورة الرئيسية أولًا من بيانات المشروع والأرض والخريطة. يمين وشمال وفوق وخلف تُفتح بعد اعتماد الصورة الرئيسية.</p>
               </div>
               <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
             </div>
@@ -6836,7 +6797,6 @@
               <div class="visual-concept-head">
                 <h3>الصورة المرجعية</h3>
               </div>
-              <p class="tenant-hint">اختياري: ارفع حتى 5 صور لمبانٍ أو واجهات تعجبك ليأخذ التوليد اللغة المعمارية والمواد منها. لو لم ترفع صورًا، يولد النظام التصميم من بيانات المشروع وخريطة الأرض فقط.</p>
               <input id="visualConceptStyleReferenceInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
               <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="margin-top:12px">لم تُرفع صور مرجعية.</div>
               <div class="visual-concept-actions">
@@ -6849,20 +6809,18 @@
             <div class="tenant-floor-design-stage-view-head">
               <div>
                 <h3>التصور الداخلي</h3>
-                <p>عدد الصور الداخلية يساوي عدد مكونات المشروع. اختر المكون ثم ولّد البرومبت والصورة. الصورة الرئيسية المعتمدة أساسية، ويمكن إضافة حتى 5 صور مرجعية خاصة بهذا المكون.</p>
               </div>
               <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
             </div>
             <div class="visual-concept-card">
               <label>المكون</label>
               <select id="visualConceptInteriorComponentSelect"></select>
-              <p class="tenant-hint" id="visualConceptInteriorHint">اختر مكونًا من قائمة المكونات الفعلية في الدراسة المالية.</p>
+              <p class="tenant-hint" id="visualConceptInteriorHint"></p>
             </div>
             <div class="visual-concept-card" id="visualConceptInteriorReferenceCard" hidden>
               <div class="visual-concept-head">
                 <h3>الصور المرجعية لهذا المكون</h3>
               </div>
-              <p class="tenant-hint">اختياري: حتى 5 صور داخلية خاصة بهذا المكون فقط. الصورة الرئيسية تُرفق تلقائيًا.</p>
               <input id="visualConceptInteriorReferenceInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
               <div id="visualConceptInteriorReferencePreview" class="visual-concept-preview" style="margin-top:12px">لم تُرفع صور مرجعية لهذا المكون.</div>
               <div class="visual-concept-actions">
@@ -7008,8 +6966,6 @@
         style="background:#fff; border-radius:20px; padding:24px; max-width:600px; width:100%; box-shadow: 0 10px 40px rgba(0,0,0,0.2); position:relative;">
         <h3 style="margin-top:0; margin-bottom:12px; color:#3B6E91; font-size:18px; font-weight:700;">نوع الخريطة لكل
           شريحة</h3>
-        <p class="tenant-hint" style="margin-bottom:14px; font-size:13px;">اختار النوع المناسب لكل خريطة (قمر صناعي،
-          جرافيك، تضاريس، أو هجين)</p>
 
         <div class="tenant-grid"
           style="display:grid; grid-template-columns:1fr; gap:12px; max-height:50vh; overflow-y:auto; padding-right:4px;">
@@ -7068,7 +7024,6 @@
         <div class="presentation-font-head">
           <div>
             <h3 id="presentationFontSettingsTitle">نوع خط العرض</h3>
-            <p class="tenant-hint">اختار الخط الذي سيظهر في الشرائح والتصدير.</p>
           </div>
           <button type="button" class="presentation-font-close" onclick="closePresentationFontSettings()"
             aria-label="إغلاق">×</button>
@@ -7077,7 +7032,6 @@
         <select id="presentationFontSelect" onchange="selectPresentationFont(this.value)" disabled>
           <option value="">جاري تحميل الخطوط...</option>
         </select>
-        <p class="tenant-hint">يمكنك إدارة الأوزان ورفع خط مخصص من إعدادات الشركة.</p>
       </div>
     </div>
 
@@ -7096,8 +7050,6 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
           <h2 style="margin:0">إدارة الموظفين</h2>
-          <p class="tenant-hint" style="margin:4px 0 0">أضف موظفين لشركتك أو ابعتهم لينك دعوة — تتحكم بالصلاحيات من هنا.
-          </p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
@@ -7153,7 +7105,6 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
           <h2>تدريب GLM عبر المحادثة</h2>
-          <p class="tenant-hint">اكتب معلومات عن شركتك وسيقوم الذكاء الاصطناعي بحفظها وتدريب نفسه عليها</p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
@@ -7212,7 +7163,6 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
           <h2>قواعد الذكاء الاصطناعي</h2>
-          <p class="tenant-hint">تدريب AI عبر المحادثة ومتابعة سجل التدريب</p>
         </div>
         <div style="display:flex;gap:8px;">
           <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
@@ -7282,7 +7232,6 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
           <h2>تعميد العروض</h2>
-          <p class="tenant-hint">العروض المرسلة من الموظفين للمراجعة والاعتماد</p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
@@ -7295,7 +7244,6 @@
         style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <div>
           <h2>لوحة تحكم SAG - المالك الرئيسي</h2>
-          <p class="tenant-hint">إدارة كاملة لكل الشركات المسجلة على النظام</p>
         </div>
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
       </div>
@@ -7655,8 +7603,11 @@
     }
 
     function shouldHighlightTenantSite() {
+      // 'none' only means no boundary has been found yet, so the server must still try the
+      // croquis coordinates and the other automatic sources. Highlighting is off only after
+      // the user explicitly clears the boundary.
       const source = tenantProjectData && tenantProjectData.location_polygon_source;
-      return source !== 'none';
+      return source !== 'cleared';
     }
 
     function hasStoredMaps(highlightSite) {
@@ -7697,8 +7648,12 @@
       'catchment_areas', 'city_landmarks', 'calculate_landmark_driving', 'draft_id', 'draftId', 'draw_compass', 'draw_inset',
       'enabled_maps', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
       'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_maps_link',
-      'locationLat', 'locationLng', 'location_polygon', 'longitude', 'main_roads', 'map_styles',
-      'map_type', 'maps_link', 'nearby_landmarks', 'regen_seed', 'refresh_maps', 'secondary_roads'
+      'locationLat', 'locationLng', 'location_polygon', 'location_polygon_source', 'longitude',
+      'main_roads', 'map_styles', 'map_type', 'maps_link', 'nearby_landmarks', 'regen_seed',
+      'refresh_maps', 'secondary_roads',
+      // The croquis coordinates are the real plot boundary, so the server needs them to
+      // highlight the plot without anyone drawing anything.
+      'survey_coordinates', 'city'
     ];
 
     // A drawn/detected boundary can carry thousands of points, which alone exceeds the
@@ -7906,6 +7861,10 @@
               ...(tenantCreativeImages.map_zooms || {}),
               ...(res.zooms || {})
             };
+            tenantCreativeImages.map_centers = {
+              ...(tenantCreativeImages.map_centers || {}),
+              ...(res.centers || {})
+            };
             tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData, highlightSite);
             tenantCreativeImages.maps_persisted = true;
             tenantCreativeImages.map_highlight_site = highlightSite !== false;
@@ -7940,6 +7899,7 @@
         ...(tenantCreativeImages || {}),
         map_placeholders: {},
         map_zooms: {},
+        map_centers: {},
         map_landmarks: [],
         map_lat: null,
         map_lng: null,
@@ -7947,7 +7907,7 @@
         maps_persisted: false,
         map_approvals: {}
       };
-      tenantProjectData.location_polygon_source = 'none';
+      tenantProjectData.location_polygon_source = 'auto';
       tenantMapPreviewState = null;
       tenantMapPolygonPoints = [];
       tenantMapDraftPolygonPoints = [];
@@ -9666,7 +9626,6 @@
       body.innerHTML = `
         <div class="market-block">
           <h4>نطاق الدراسة</h4>
-          <p class="tenant-hint">النطاق يحدد دائرة البحث عن المنافسين حول موقع المشروع. الافتراضي 10 كم، أو اختاري كامل المدينة أو رقمًا مخصصًا.</p>
           <div class="market-grid">
             <div><label>نطاق المنافسين</label>
               <select id="marketCompetitorRadius">
@@ -9696,11 +9655,9 @@
             <div><label>المدينة</label><input id="marketCityMirror" readonly></div>
             <div><label>الحي</label><input id="marketDistrictMirror" readonly></div>
           </div>
-          <p class="tenant-hint">المدينة والحي مرتبطان بقسم الموقع والخرائط. عدّلهما من هناك.</p>
         </div>
         <div class="market-block">
           <h4>المنافسون</h4>
-          <p class="tenant-hint">توليد المنافسين يمسح الجدول ويضع النتيجة الجديدة. إكمال البيانات بالاسم يملأ الخلايا الفارغة فقط ولا يضيف ولا يحذف.</p>
           <div class="market-actions">
             <button type="button" class="btn ghost" onclick="addMarketCompetitorRow()">إضافة منافس</button>
             <button type="button" class="btn ghost" id="marketFillCompetitorsBtn" onclick="runMarketCompetitorsJob('fill')">إكمال بيانات المنافسين بالاسم</button>
@@ -9719,7 +9676,6 @@
         </div>
         <div class="market-block">
           <h4>الملخص التنفيذي لسوق المشروع</h4>
-          <p class="tenant-hint">عشرة أقسام قابلة للتعديل. عند إعادة التوليد تظهر النسختان وتختار الاستبدال أو الإبقاء.</p>
           <div class="market-actions">
             <button type="button" class="btn primary" id="marketGenerateSummaryBtn" onclick="runMarketSummaryJob()">توليد ملخص السوق</button>
           </div>
@@ -9727,7 +9683,6 @@
           <div id="marketSummaryCompare" hidden></div>
           <div id="marketSummaryFields"></div>
           <h4 style="margin-top:18px">تحليل SWOT</h4>
-          <p class="tenant-hint">أربع خانات مستقلة عن أقسام الملخص العشرة، قابلة للتعديل قبل التوليد وبعده.</p>
           <div id="marketSwotFields"></div>
           <div style="margin-top:12px"><label>تصنيف القرار</label>
             <select id="marketDecision">
@@ -12483,7 +12438,7 @@
             <svg id="mapPolygonOverlay" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>
           </div>
           <div id="mapPreviewGallery" class="tenant-map-preview-gallery" style="display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;"></div>
-          <p id="mapPreviewHint" class="tenant-hint" style="margin:8px 0 0;display:none">فعّل رسم حدود الموقع ثم أضف النقاط. اعتماد الحدود يثبت الـ highlight والـ zoom محليًا فقط؛ استخدم «تحليل رابط الموقع» لجلب بيانات الموقع.</p>
+          <p id="mapPreviewHint" class="tenant-hint" style="margin:8px 0 0;display:none"></p>
           <input id="tenantLocationPolygon" type="hidden" data-key="location_polygon" data-type="text" value="">
           <div id="siteAnalysisWarnings" hidden style="margin-top:10px;padding:11px 13px;border-radius:12px;background:#fff0f0;border:1px solid #efb3b3;color:#9c1d1d;font-weight:700;font-size:13px;line-height:1.6"></div>
           <div id="landmarksPreview" style="margin-top:10px;display:none;"></div>
@@ -15619,7 +15574,6 @@
           </table>
         </div>
         <button type="button" class="btn ghost small" style="margin-top:10px" onclick="addTimelineRow()">إضافة مرحلة</button>
-        <p class="tenant-hint" style="margin:8px 0 0">عمود «إلى» يُحسب تلقائيًا من البداية والمدة. الملاحظات تظهر مع المرحلة في شريحة الجدول الزمني.</p>
         <input type="hidden" data-key="timeline_table_data" data-type="text" id="timelineTableData">
       `;
       div.querySelector('.tenant-section-title')?.replaceWith(
@@ -16822,11 +16776,12 @@
         tenantCreativeImages.map_lat = data.lat;
         tenantCreativeImages.map_lng = data.lng;
         tenantCreativeImages.map_zooms = data.zooms || {};
+        tenantCreativeImages.map_centers = data.centers || {};
         tenantProjectData = { ...tenantProjectData, ...fields };
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
         triggerAutoSaveDraft();
         await previewProjectMap({
-          highlightSite: tenantProjectData.location_polygon_source !== 'none'
+          highlightSite: tenantProjectData.location_polygon_source !== 'cleared'
         });
         renderTenantMapPolygonOverlay();
         applyTenantPolygonZoom();
@@ -16875,15 +16830,17 @@
           '<figcaption style="font-weight:700;font-size:12px;color:var(--p);margin-bottom:6px;">' + escapeHtml(view.title) + '</figcaption>' +
           '<img src="' + escapeHtml(withCacheBust(url)) + '" data-map-select="' + escapeHtml(view.mapType) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;cursor:pointer;">' +
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">' +
-          '<button type="button" class="btn small ' + (approved ? 'success' : 'primary') + '" data-map-action="approve" data-map-type="' + escapeHtml(view.mapType) + '">' + (approved ? 'معتمدة' : 'اعتماد الخريطة') + '</button>' +
-          '<button type="button" class="btn small ghost" data-map-action="regenerate" data-map-type="' + escapeHtml(view.mapType) + '">إعادة توليد</button>' +
+          '<button type="button" class="btn small ' + (approved ? 'ghost' : 'primary') + '" data-map-action="' + (approved ? 'unapprove' : 'approve') + '" data-map-type="' + escapeHtml(view.mapType) + '">' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
+          '<button type="button" class="btn small ghost" data-map-action="regenerate" data-map-type="' + escapeHtml(view.mapType) + '" ' + (approved ? 'disabled' : '') + '>إعادة توليد</button>' +
           '</div></figure>';
       }).filter(Boolean).join('');
       gallery.innerHTML = cards;
       gallery.querySelectorAll('[data-map-action]').forEach(button => {
         button.addEventListener('click', () => {
           const mapType = button.dataset.mapType;
-          if (button.dataset.mapAction === 'approve') approveMapPreview(mapType);
+          const action = button.dataset.mapAction;
+          if (action === 'approve') approveMapPreview(mapType);
+          else if (action === 'unapprove') unapproveMapPreview(mapType);
           else regenerateMapPreview(mapType);
         });
       });
@@ -16921,9 +16878,12 @@
       image.src = withCacheBust(url);
       image.alt = view.title;
       previewBox.style.display = 'block';
-      const lat = Number(tenantCreativeImages.map_lat || tenantProjectData.location_lat);
-      const lng = Number(tenantCreativeImages.map_lng || tenantProjectData.location_lng);
-      const zoom = Number((tenantCreativeImages.map_zooms || {})[mapType] || (tenantCreativeImages.map_zooms || {}).overview || 13);
+      // Clicks are converted against this state, so it must be the centre the server actually
+      // rendered: the plot view is centred on the boundary, not on the site pin.
+      const center = (tenantCreativeImages.map_centers || {})[mapType] || {};
+      const lat = Number(center.lat ?? tenantCreativeImages.map_lat ?? tenantProjectData.location_lat);
+      const lng = Number(center.lng ?? tenantCreativeImages.map_lng ?? tenantProjectData.location_lng);
+      const zoom = Number((tenantCreativeImages.map_zooms || {})[mapType] || (tenantCreativeImages.map_zooms || {}).overview || 17);
       if (Number.isFinite(lat) && Number.isFinite(lng)) tenantMapPreviewState = { lat, lng, zoom };
       renderTenantMapPolygonOverlay();
       previewBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -16947,6 +16907,14 @@
       await saveMapPreviewState();
       renderMapPreviewGallery();
       toast('تم اعتماد الخريطة');
+    }
+
+    async function unapproveMapPreview(mapType) {
+      // Approval was one-way, so an approved map could never be regenerated or replaced.
+      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
+      await saveMapPreviewState();
+      renderMapPreviewGallery();
+      toast('تم إلغاء اعتماد الخريطة');
     }
 
     async function regenerateMapPreview(mapType) {
@@ -16978,6 +16946,7 @@
         });
         tenantCreativeImages.map_placeholders = { ...nextPlaceholders, ...(data.placeholders || {}) };
         tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
+        tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
         tenantCreativeImages.maps_persisted = true;
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
         tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
@@ -17042,10 +17011,11 @@
         if (previewBox) previewBox.style.display = 'block';
         const hint = document.getElementById('mapPreviewHint');
         if (hint) hint.style.display = 'block';
+        const overviewCenter = (tenantCreativeImages.map_centers || {}).overview || {};
         tenantMapPreviewState = {
-          lat: Number(tenantCreativeImages.map_lat || lat),
-          lng: Number(tenantCreativeImages.map_lng || lng),
-          zoom: Number((tenantCreativeImages.map_zooms && tenantCreativeImages.map_zooms.overview) || 13)
+          lat: Number(overviewCenter.lat ?? tenantCreativeImages.map_lat ?? lat),
+          lng: Number(overviewCenter.lng ?? tenantCreativeImages.map_lng ?? lng),
+          zoom: Number((tenantCreativeImages.map_zooms && tenantCreativeImages.map_zooms.overview) || 17)
         };
         renderTenantMapPolygonOverlay();
         renderMapPreviewGallery();
@@ -17213,14 +17183,14 @@
       tenantMapDraftPolygonPoints = [];
       tenantMapPolygonMode = false;
       tenantProjectData.location_polygon = '';
-      tenantProjectData.location_polygon_source = 'none';
+      tenantProjectData.location_polygon_source = 'cleared';
       syncTenantLocationPolygon();
       renderTenantMapPolygonOverlay();
       resetTenantMapZoom();
       updateTenantPolygonControls();
       triggerAutoSaveDraft();
       const hint = document.getElementById('mapPreviewHint');
-      if (hint) hint.textContent = 'فعّل رسم حدود الموقع ثم أضف النقاط. اعتماد الحدود يثبت الـ highlight والـ zoom محليًا فقط؛ استخدم «تحليل رابط الموقع» لجلب بيانات الموقع.';
+      if (hint) hint.textContent = '';
       if (tenantMapPreviewState) await previewProjectMap({ force: true, highlightSite: false });
       toast('تم مسح الحدود المرسومة وإزالة التمييز من الخريطة.');
     }
@@ -17640,8 +17610,7 @@
       if (!host) return;
       const items = (Array.isArray(photos) ? photos : []).filter(Boolean).slice(0, LAND_PHOTOS_MAX);
       if (!items.length) {
-        host.innerHTML = '<div class="tenant-hint">اختياري: ارفع حتى ' + LAND_PHOTOS_MAX +
-          ' صور للأرض واكتب وصفًا لكل صورة.</div>';
+        host.innerHTML = '<div class="tenant-hint">لم تُرفع صور للأرض.</div>';
         return;
       }
       host.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">' +
@@ -19514,7 +19483,7 @@
       }
 
       if (!tenantDesignerMessages.length) {
-        messages.innerHTML = '<div class="tenant-hint">اكتب التعديل المطلوب، وسيطبقه المصمم على الشريحة الحالية أو على العرض كله حسب طلبك.</div>';
+        messages.innerHTML = '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
         return;
       }
       messages.innerHTML = tenantDesignerMessages.map(message =>
@@ -20089,6 +20058,7 @@
         const placeholders = data.placeholders || {};
         tenantCreativeImages.map_placeholders = placeholders;
         tenantCreativeImages.map_zooms = data.zooms || {};
+        tenantCreativeImages.map_centers = data.centers || {};
         tenantCreativeImages.map_lat = data.lat || tenantCreativeImages.map_lat;
         tenantCreativeImages.map_lng = data.lng || tenantCreativeImages.map_lng;
         tenantCreativeImages.maps_persisted = Object.values(placeholders).some(Boolean);
@@ -20541,7 +20511,7 @@
       const log = document.getElementById('trainingChatLog');
       if (!log) return;
       if (!trainingChatHistory.length) {
-        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><h3 style="margin:0 0 8px;color:var(--accent);">وكيل الإدارة الذكي</h3><p class="tenant-hint" style="margin:0;font-size:13px;line-height:1.7;">أنا مساعدك التنفيذي الكامل — أقدر أعدّل الألوان، الحقول، الشرائح، الموظفين، الصلاحيات، وكل إعدادات النظام مباشرة من هنا.<br>جرّب تسألني: <em>"كم عدد الشرائح عندنا؟"</em> أو <em>"أضف حقل عدد الوحدات السكنية"</em></p></div>';
+        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><h3 style="margin:0 0 8px;color:var(--accent);">وكيل الإدارة الذكي</h3></div>';
         return;
       }
       log.innerHTML = trainingChatHistory.map(m => {
@@ -20955,7 +20925,7 @@
       const log = document.getElementById('aiRulesChatLog');
       if (!log) return;
       if (!aiRulesChatHistory.length) {
-        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><h3 style="margin:0 0 8px;color:var(--accent);">وكيل الإدارة الذكي</h3><p class="tenant-hint" style="margin:0;font-size:13px;line-height:1.7;">أنا مساعدك التنفيذي — أقدر أغيّر الألوان، القوالب، الحقول، صلاحيات الموظفين، وكل شيء من هنا مباشرة.<br>أرسل صورة لتحليلها وحفظها كبيانات تدريب </p></div>';
+        log.innerHTML = '<div style="text-align:center;padding:32px 20px;"><h3 style="margin:0 0 8px;color:var(--accent);">وكيل الإدارة الذكي</h3></div>';
         return;
       }
       log.innerHTML = aiRulesChatHistory.map(m => {
@@ -21305,10 +21275,10 @@
         '<h3>صلاحيات: ' + escapeHtml(userName) + '</h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'userPermissionsModal\').remove()">إغلاق</button></div>' +
         '<h4 style="margin:12px 0 8px;color:var(--p)">صلاحيات التطبيق</h4>' +
-        '<p class="tenant-hint" style="margin-bottom:12px">حدد الأقسام التي يمكن للموظف الوصول إليها. الأدمن يملك كل الصلاحيات تلقائياً.</p>' +
+        '' +
         permRows +
         '<h4 style="margin:20px 0 8px;color:var(--p)">أقسام فورم المشروع</h4>' +
-        '<p class="tenant-hint" style="margin-bottom:12px">حدد الأقسام التي تظهر للموظف عند إنشاء عرض جديد.</p>' +
+        '' +
         sectionRows +
         '<div class="tenant-btns" style="margin-top:16px">' +
         '<button class="btn primary" onclick="saveUserPermissions()">حفظ الصلاحيات</button>' +

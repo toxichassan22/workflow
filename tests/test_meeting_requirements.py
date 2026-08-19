@@ -3,6 +3,7 @@
 The suite uses a temporary SQLite database and never calls Google or an AI API.
 """
 
+import math
 import os
 import re
 import sys
@@ -65,9 +66,12 @@ class MeetingRequirementsTests(unittest.TestCase):
             (21.63200, 39.10501),
         ])
 
-        self.assertLessEqual(zooms['overview'], 17)
-        self.assertEqual(zooms['landmarks'], max(14, zooms['overview'] - 1))
-        self.assertEqual(zooms['access'], max(15, zooms['overview'] + 1))
+        # The old cap of 17 left a 7,000 sqm plot as a dot on the slide. The croquis boundary
+        # is exact, so the plot view may go to 19 while the context views stay wider.
+        self.assertLessEqual(zooms['overview'], 19)
+        self.assertEqual(zooms['landmarks'], max(14, min(17, zooms['overview'] - 2)))
+        self.assertEqual(zooms['access'], max(15, min(19, zooms['overview'] + 1)))
+        self.assertLessEqual(zooms['catchment'], 14)
 
     def test_google_places_errors_are_explicit_instead_of_empty_success(self):
         response = Mock(status_code=403)
@@ -1511,8 +1515,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function computeTimelineEnd(year, quarter, duration)', index_source)
         self.assertIn('class="tl-end"', index_source)
         self.assertIn('endYear: end ? String(end.year) : \'\'', index_source)
-        self.assertIn('الملاحظات تظهر مع المرحلة في شريحة الجدول الزمني', index_source)
+        # The owner asked for no how-to copy on screen; the notes column still feeds the slide.
+        self.assertNotIn('الملاحظات تظهر مع المرحلة في شريحة الجدول الزمني', index_source)
         self.assertNotIn('الملاحظات داخلية في الملف فقط', index_source)
+        self.assertIn('<th>إلى</th><th>الملاحظات</th>', index_source)
 
         # Rows can be deleted, and one editable row always survives.
         self.assertIn('function removeTimelineRow(button)', index_source)
@@ -2377,6 +2383,94 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('def _financial_pdf_shape(text):', source)
         self.assertIn('def split_runs(value):', source)
 
+    def test_croquis_coordinates_become_the_site_boundary(self):
+        import maps_service
+
+        # Jeddah, UTM zone 37N. The plot below is the real croquis table of a live project,
+        # whose approved area is 7,012 sqm.
+        site_lat, site_lng = 21.6324618, 39.1056571
+        rows = [
+            {'eastings': '511085.849', 'northings': '2392264.840', 'parcel_id': 'P-1'},
+            {'eastings': '511189.416', 'northings': '2392298.825', 'parcel_id': 'P-1'},
+            {'eastings': '511198.442', 'northings': '2392262.273', 'parcel_id': 'P-1'},
+            {'eastings': '511208.664', 'northings': '2392220.822', 'parcel_id': 'P-1'},
+            {'eastings': '511196.244', 'northings': '2392219.452', 'parcel_id': 'P-1'},
+            {'eastings': '511111.135', 'northings': '2392211.397', 'parcel_id': 'P-1'},
+            {'eastings': '511100.913', 'northings': '2392224.147', 'parcel_id': 'P-1'},
+        ]
+        self.assertEqual(maps_service.utm_zone_for_longitude(site_lng), 37)
+        polygon = maps_service.survey_polygon_from_project(
+            {'survey_coordinates': json.dumps(rows)}, site_lat, site_lng
+        )
+        self.assertIsNotNone(polygon)
+        self.assertEqual(len(polygon), 7)
+        mean_latitude = math.radians(site_lat)
+        metres = [
+            ((point[1] - site_lng) * 111320 * math.cos(mean_latitude), (point[0] - site_lat) * 110540)
+            for point in polygon
+        ]
+        area = abs(sum(
+            metres[index][0] * metres[(index + 1) % len(metres)][1]
+            - metres[(index + 1) % len(metres)][0] * metres[index][1]
+            for index in range(len(metres))
+        )) / 2
+        self.assertAlmostEqual(area, 7012.12, delta=400)
+
+        # A local grid that lands in another region must be refused, not drawn.
+        self.assertIsNone(maps_service.survey_polygon_from_project(
+            {'survey_coordinates': json.dumps([
+                {'eastings': '1000.0', 'northings': '2000.0', 'parcel_id': 'X'},
+                {'eastings': '1100.0', 'northings': '2000.0', 'parcel_id': 'X'},
+                {'eastings': '1100.0', 'northings': '2100.0', 'parcel_id': 'X'},
+            ])}, site_lat, site_lng
+        ))
+
+        source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('def survey_polygon_from_project(', source)
+        self.assertIn('Using croquis survey polygon with', source)
+        self.assertIn('def _google_bounds_polygon(', source)
+        # The client must send the croquis table and must not switch the highlight off just
+        # because no boundary has been found yet.
+        self.assertIn("'survey_coordinates', 'city'", index_source)
+        self.assertIn("return source !== 'cleared';", index_source)
+        self.assertIn("tenantProjectData.location_polygon_source = 'cleared';", index_source)
+
+    def test_map_preview_uses_the_rendered_centre_and_fits_its_content(self):
+        import maps_service
+
+        source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        # Clicks were converted against the site pin while the image is centred on the plot,
+        # which put every manually drawn boundary off by that distance.
+        self.assertIn("result['centers'] = {", source)
+        self.assertIn("'center_lat': map_center_lat", source)
+        self.assertIn('const center = (tenantCreativeImages.map_centers || {})[mapType] || {};', index_source)
+        self.assertIn('tenantCreativeImages.map_centers = data.centers || {};', index_source)
+
+        # Nine destination rows became nine rings up to 31 km wide; keep three and frame them.
+        rings = maps_service.catchment_rings([
+            {'km': 1.6, 'minutes': 5}, {'km': 4.9, 'minutes': 11}, {'km': 13.6, 'minutes': 22},
+            {'km': 28.6, 'minutes': 35}, {'km': 30.9, 'minutes': 38},
+        ])
+        self.assertEqual(len(rings), 3)
+        self.assertEqual([ring['km'] for ring in rings], [1.6, 13.6, 30.9])
+        self.assertEqual(rings[0]['label'], '5 دقائق')
+        self.assertEqual(maps_service.catchment_rings([]), [])
+        near = maps_service.zoom_for_radius_km(21.63, 1.6)
+        far = maps_service.zoom_for_radius_km(21.63, 30.9)
+        self.assertGreater(near, far)
+        for radius, zoom in ((1.6, near), (30.9, far)):
+            metres_per_pixel = 156543.03392 * math.cos(math.radians(21.63)) / (2 ** zoom) / 2
+            self.assertLessEqual(radius * 1000 / metres_per_pixel, 720 * 0.8 + 1)
+        self.assertIn('def zoom_for_radius_km(', source)
+        self.assertIn('shown_landmarks = [item for item in landmarks if item.get', source)
+        self.assertIn('def find_place_near(', source)
+        # Appending the project address made Google return the site itself for every landmark.
+        self.assertNotIn("query = f\"{lm['name']}, {location_context}\"", source)
+        self.assertIn('async function unapproveMapPreview(mapType)', index_source)
+        self.assertIn("(approved ? 'unapprove' : 'approve')", index_source)
+
     def test_map_label_font_never_reapplies_bidi(self):
         from PIL import ImageFont
         import maps_service
@@ -2707,12 +2801,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('<section id="tenantVisualConceptPage" class="tenant-page">', index_source)
         self.assertIn("tenantVisualConceptPage: '/app/projects/visual-concept'", index_source)
         self.assertIn("{ pageId: 'tenantVisualConceptPage', label: 'التصور البصري' }", index_source)
-        self.assertIn('اختاري كرت التصور الخارجي أو الداخلي', index_source)
+        self.assertNotIn('اختاري كرت التصور الخارجي أو الداخلي', index_source)
         self.assertIn('data-visual-concept-target="external"', index_source)
         self.assertIn('data-visual-concept-target="internal"', index_source)
         self.assertIn('visualConceptInteriorComponentSelect', index_source)
         self.assertIn('function uploadVisualConceptInteriorReferences', index_source)
-        self.assertIn('عدد الصور الداخلية يساوي عدد مكونات المشروع', index_source)
+        self.assertIn("'عدد الصور الداخلية يساوي ' + components.length + ' مكونات.'", index_source)
         self.assertIn('function showVisualConceptView(view)', index_source)
         self.assertIn('function persistVisualConceptDraftState()', index_source)
         self.assertIn("data-key=\"visual_concept\"", index_source)
@@ -2737,6 +2831,31 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('tenantMoodboardPage', index_source)
         self.assertNotIn('tenantMainImagePromptInput', index_source)
         self.assertNotIn('tenantMoodboardPreview', index_source)
+
+    def test_ui_carries_no_static_how_to_hints(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        # Owner rule: the screen states what a thing is, never how to operate it.
+        for instruction in (
+            'ولّد الصورة الرئيسية أولًا من بيانات المشروع',
+            'اختياري: ارفع حتى 5 صور لمبانٍ أو واجهات تعجبك',
+            'اختر القسم من القائمة الجانبية',
+            'عمود «إلى» يُحسب تلقائيًا من البداية والمدة',
+            'النطاق يحدد دائرة البحث عن المنافسين',
+            'المدينة والحي مرتبطان بقسم الموقع والخرائط',
+            'توليد المنافسين يمسح الجدول ويضع النتيجة الجديدة',
+            'اضغط على المخطط للتكبير الكامل',
+            'حدد الأقسام التي يمكن للموظف الوصول إليها',
+            'فعّل رسم حدود الموقع ثم أضف النقاط',
+        ):
+            self.assertNotIn(instruction, index_source, instruction)
+        # Status and empty-state text stays: it reports state, it does not teach.
+        for kept in (
+            'لا توجد بنود مدخلة في هذا الجدول.',
+            'زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.',
+            'الإحداثيات تحتاج مراجعة واعتماد',
+            'لم تُرفع صور للأرض.',
+        ):
+            self.assertIn(kept, index_source, kept)
 
     def test_visual_concept_approval_is_one_toggle_per_image(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')

@@ -223,7 +223,7 @@ SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible bene
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
 ACCESS_ROADS_RENDER_VERSION = 'v10-bahij-arabic-labels'
-MAP_HIGHLIGHT_RENDER_VERSION = 'overview-context-v2'
+MAP_HIGHLIGHT_RENDER_VERSION = 'survey-polygon-v3'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
     'feature:poi.business|visibility:off',
@@ -235,6 +235,7 @@ ACCESS_ROADMAP_STYLES = [
     'feature:road.local|element:labels|visibility:off',
 ]
 MAP_REGEN_ZOOM_OFFSETS = (1, -1, 2, -2, 0)
+LANDMARKS_MAX_RADIUS_KM = 8.0
 _MAP_GENERATION_LOCKS = {}
 _MAP_GENERATION_LOCKS_GUARD = threading.Lock()
 
@@ -838,6 +839,58 @@ def classify_landmark_category(types):
     return 'اجتماعي/خدمي'
 
 
+def find_place_near(name, lat, lng, radius_m=20000, language='ar'):
+    """Locate a named landmark around the site with Places text search.
+
+    Geocoding a landmark name together with the project address returns the *address*,
+    so every named landmark landed on the site itself and was then dropped as a duplicate.
+    A text search with a location bias resolves the place instead.
+    """
+    query = str(name or '').strip()
+    if not query or not _has_api_key():
+        return None
+    try:
+        response = requests.post(
+            'https://places.googleapis.com/v1/places:searchText',
+            headers={
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': _get_api_key(),
+                'X-Goog-FieldMask': 'places.displayName,places.location,places.formattedAddress',
+            },
+            json={
+                'textQuery': query,
+                'languageCode': language,
+                'maxResultCount': 1,
+                'locationBias': {
+                    'circle': {
+                        'center': {'latitude': float(lat), 'longitude': float(lng)},
+                        'radius': float(radius_m),
+                    }
+                },
+            },
+            timeout=15,
+        )
+        data = response.json() if response.content else {}
+        if response.status_code >= 400:
+            print(f"[PLACES TEXT] {query}: {(data.get('error') or {}).get('message', response.status_code)}")
+            return None
+        places = data.get('places') or []
+        if not places:
+            return None
+        location = (places[0] or {}).get('location') or {}
+        latitude, longitude = location.get('latitude'), location.get('longitude')
+        if latitude is None or longitude is None:
+            return None
+        return {
+            'lat': float(latitude),
+            'lng': float(longitude),
+            'name': ((places[0].get('displayName') or {}).get('text') or query),
+        }
+    except Exception as error:
+        print(f'[PLACES TEXT ERROR] {query}: {error}')
+        return None
+
+
 def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, include_all=False, included_types=None):
     """Find nearby landmarks using Places API (New).
     Filters out irrelevant place types like gas stations, parking, ATMs, etc."""
@@ -1269,6 +1322,175 @@ def _min_dist_to_polygon_m(plat, plng, coords):
     return best
 
 
+def utm_to_latlng(easting, northing, zone, northern=True):
+    """Inverse UTM on WGS84 so croquis eastings/northings can be drawn on a map."""
+    a = 6378137.0
+    f = 1 / 298.257223563
+    k0 = 0.9996
+    e2 = f * (2 - f)
+    e_prime2 = e2 / (1 - e2)
+    x = easting - 500000.0
+    y = northing if northern else northing - 10000000.0
+    m = y / k0
+    e1 = (1 - math.sqrt(1 - e2)) / (1 + math.sqrt(1 - e2))
+    mu = m / (a * (1 - e2 / 4 - 3 * e2 ** 2 / 64 - 5 * e2 ** 3 / 256))
+    phi1 = (
+        mu
+        + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * math.sin(2 * mu)
+        + (21 * e1 ** 2 / 16 - 55 * e1 ** 4 / 32) * math.sin(4 * mu)
+        + (151 * e1 ** 3 / 96) * math.sin(6 * mu)
+        + (1097 * e1 ** 4 / 512) * math.sin(8 * mu)
+    )
+    sin_phi1 = math.sin(phi1)
+    cos_phi1 = math.cos(phi1)
+    tan_phi1 = math.tan(phi1)
+    c1 = e_prime2 * cos_phi1 ** 2
+    t1 = tan_phi1 ** 2
+    n1 = a / math.sqrt(1 - e2 * sin_phi1 ** 2)
+    r1 = a * (1 - e2) / (1 - e2 * sin_phi1 ** 2) ** 1.5
+    d = x / (n1 * k0)
+    latitude = phi1 - (n1 * tan_phi1 / r1) * (
+        d ** 2 / 2
+        - (5 + 3 * t1 + 10 * c1 - 4 * c1 ** 2 - 9 * e_prime2) * d ** 4 / 24
+        + (61 + 90 * t1 + 298 * c1 + 45 * t1 ** 2 - 252 * e_prime2 - 3 * c1 ** 2) * d ** 6 / 720
+    )
+    longitude = (
+        d
+        - (1 + 2 * t1 + c1) * d ** 3 / 6
+        + (5 - 2 * c1 + 28 * t1 - 3 * c1 ** 2 + 8 * e_prime2 + 24 * t1 ** 2) * d ** 5 / 120
+    ) / cos_phi1
+    central_meridian = (zone - 1) * 6 - 180 + 3
+    return math.degrees(latitude), central_meridian + math.degrees(longitude)
+
+
+def utm_zone_for_longitude(longitude):
+    return int((float(longitude) + 180) / 6) + 1
+
+
+def _survey_points(project_data):
+    """Read the croquis coordinates table, whatever shape the draft stored it in."""
+    raw = (project_data or {}).get('survey_coordinates')
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(raw, list):
+        return []
+    rows = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        easting = item.get('eastings') or item.get('easting') or item.get('x')
+        northing = item.get('northings') or item.get('northing') or item.get('y')
+        try:
+            easting = float(str(easting).replace(',', '').strip())
+            northing = float(str(northing).replace(',', '').strip())
+        except (TypeError, ValueError):
+            continue
+        if easting <= 0 or northing <= 0:
+            continue
+        rows.append({
+            'easting': easting,
+            'northing': northing,
+            'parcel_id': str(item.get('parcel_id') or item.get('parcelId') or '').strip(),
+        })
+    return rows
+
+
+def survey_polygon_from_project(project_data, site_lat, site_lng, tolerance_km=8.0):
+    """Build the site boundary from the croquis survey coordinates.
+
+    No Google Maps API returns a building footprint or a parcel outline — Geocoding and
+    Places expose only a bounds rectangle — so the croquis table is the one authoritative
+    boundary the system actually receives, and it is already in the draft.
+    """
+    rows = _survey_points(project_data)
+    if len(rows) < 3:
+        return None
+    try:
+        zone = utm_zone_for_longitude(site_lng)
+        northern = float(site_lat) >= 0
+    except (TypeError, ValueError):
+        return None
+    parcels = {}
+    for row in rows:
+        parcels.setdefault(row['parcel_id'], []).append(row)
+    best = None
+    for parcel_id, points in parcels.items():
+        if len(points) < 3:
+            continue
+        coords = []
+        for point in points:
+            try:
+                coords.append(utm_to_latlng(point['easting'], point['northing'], zone, northern))
+            except (ValueError, ZeroDivisionError, OverflowError):
+                coords = []
+                break
+        if len(coords) < 3:
+            continue
+        center_lat = sum(item[0] for item in coords) / len(coords)
+        center_lng = sum(item[1] for item in coords) / len(coords)
+        offset_km = math.hypot(
+            (center_lat - float(site_lat)) * 111.32,
+            (center_lng - float(site_lng)) * 111.32 * math.cos(math.radians(float(site_lat))),
+        )
+        # A local or municipal grid converts to somewhere else entirely; reject it rather
+        # than highlighting the wrong place.
+        if offset_km > tolerance_km:
+            print(f'[SURVEY POLYGON] parcel {parcel_id or "-"} lands {offset_km:.1f} km away; ignored')
+            continue
+        if best is None or offset_km < best[0]:
+            best = (offset_km, parcel_id, coords)
+    if not best:
+        return None
+    offset_km, parcel_id, coords = best
+    print(
+        f'[SURVEY POLYGON] parcel {parcel_id or "-"}: {len(coords)} croquis points, '
+        f'centre {offset_km * 1000:.0f} m from the site pin'
+    )
+    return coords
+
+
+def _google_bounds_polygon(lat, lng, tenant_id=None, max_span_m=400):
+    """Last automatic resort: the Geocoding bounds rectangle for the address.
+
+    This is a rectangle, not a real outline, so it is only accepted when it is small
+    enough to plausibly be one plot.
+    """
+    if not _has_api_key():
+        return None
+    try:
+        response = requests.get(
+            'https://maps.googleapis.com/maps/api/geocode/json',
+            params={'latlng': f'{lat},{lng}', 'key': _get_api_key(), 'language': 'ar'}, timeout=15
+        )
+        data = response.json()
+        if data.get('status') != 'OK':
+            return None
+        for result in data.get('results', []):
+            geometry = result.get('geometry') or {}
+            bounds = geometry.get('bounds')
+            if not bounds:
+                continue
+            northeast = bounds.get('northeast') or {}
+            southwest = bounds.get('southwest') or {}
+            try:
+                north, east = float(northeast['lat']), float(northeast['lng'])
+                south, west = float(southwest['lat']), float(southwest['lng'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            height_m = abs(north - south) * 111320.0
+            width_m = abs(east - west) * 111320.0 * math.cos(math.radians(lat))
+            if max(height_m, width_m) > max_span_m or min(height_m, width_m) <= 0:
+                continue
+            print(f'[GOOGLE BOUNDS] rectangle {width_m:.0f}m x {height_m:.0f}m from geocoding')
+            return [(south, west), (south, east), (north, east), (north, west)]
+    except Exception as error:
+        print(f'[GOOGLE BOUNDS ERROR] {error}')
+    return None
+
+
 def _fetch_osm_polygon(lat, lng, radius_m=400):
     """Fetch the real building/compound polygon from OpenStreetMap via Overpass API in a single optimized query."""
     
@@ -1521,6 +1743,61 @@ def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m
         return False
 
 
+def catchment_rings(zones, limit=3):
+    """Collapse the catchment rows into a few concentric drive-time bands.
+
+    The rows the user fills are destinations (airport, station, corniche), not zones, so
+    drawing one ring per row produced nine overlapping circles up to 31 km wide whose
+    labels were unreadable.
+    """
+    candidates = []
+    for zone in zones or []:
+        if not isinstance(zone, dict):
+            continue
+        try:
+            km = float(zone.get('km'))
+        except (TypeError, ValueError):
+            continue
+        if km <= 0:
+            continue
+        minutes = zone.get('minutes')
+        try:
+            minutes = int(float(minutes))
+        except (TypeError, ValueError):
+            minutes = None
+        candidates.append({'km': km, 'minutes': minutes})
+    if not candidates:
+        return []
+    candidates.sort(key=lambda item: item['km'])
+    if len(candidates) <= limit:
+        chosen = candidates
+    else:
+        indexes = {0, len(candidates) // 2, len(candidates) - 1}
+        chosen = [candidates[index] for index in sorted(indexes)][:limit]
+    rings = []
+    for item in chosen:
+        minutes = item['minutes']
+        label = f'{minutes} دقائق' if minutes else f'{item["km"]:.1f} كم'
+        rings.append({'km': item['km'], 'minutes': minutes or 0, 'label': label})
+    return rings
+
+
+def zoom_for_radius_km(lat, radius_km, size=(1280, 720), scale=2, fill=0.8):
+    """Pick the closest zoom that still keeps a radius fully inside the frame."""
+    try:
+        radius_m = float(radius_km) * 1000.0
+    except (TypeError, ValueError):
+        return None
+    if radius_m <= 0:
+        return None
+    allowed_px = min(size[0], size[1]) * scale * 0.5 * fill
+    for zoom in range(20, 7, -1):
+        metres_per_pixel = 156543.03392 * math.cos(math.radians(float(lat))) / (2 ** zoom) / scale
+        if radius_m / metres_per_pixel <= allowed_px:
+            return zoom
+    return 8
+
+
 def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale=2):
     """Draw smooth, anti-aliased concentric catchment rings and elegant label pills using PIL."""
     try:
@@ -1576,17 +1853,19 @@ def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale
             
             # Draw elegant label pill for each zone
             label = zone.get('label') or f"{zone.get('minutes', 5)} دقائق"
-            font = _get_arabic_font(10 * canvas_scale)
+            font = _get_arabic_font(14 * canvas_scale)
             reshaped = _reshape_arabic_text(label)
                 
             bbox = draw.textbbox((0, 0), reshaped, font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
             
-            # Position the label pill on the top edge of the circle (offset upwards)
+            # Spread the pills around the circle: stacking them all straight above the centre
+            # buried the innermost label under the site pin.
             pad_x = 10 * canvas_scale
             pad_y = 5 * canvas_scale
-            ly = ccy - r
-            lx = ccx
+            angle = math.radians(90 + 35 * (idx % 3))
+            lx = int(ccx + r * math.cos(angle))
+            ly = int(ccy - r * math.sin(angle))
             
             rect = [lx - tw // 2 - pad_x, ly - th // 2 - pad_y, lx + tw // 2 + pad_x, ly + th // 2 + pad_y]
             
@@ -2262,6 +2541,11 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
         image_type: meta['zoom'] for image_type, meta in metadata_by_type.items()
         if isinstance(meta, dict) and meta.get('zoom') is not None
     }
+    centers = {
+        image_type: {'lat': item['center_lat'], 'lng': item['center_lng']}
+        for image_type, item in metadata_by_type.items()
+        if isinstance(item, dict) and item.get('center_lat') is not None and item.get('center_lng') is not None
+    }
     return {
         'lat': meta.get('lat'),
         'lng': meta.get('lng'),
@@ -2269,6 +2553,7 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
         'landmarks': landmarks,
         'landmarks_matrix': landmarks_matrix,
         'zooms': zooms,
+        'centers': centers,
         'found_types': found_types,
         'found_base': found_base,
         'cached': True,
@@ -2288,12 +2573,14 @@ def _calculate_map_zooms(polygon_coords):
             return zooms
         target_pixels = 1280 * 2 * 0.45
         suggested_zoom = math.floor(math.log2((target_pixels * 360) / (max_dim * 256 * 2))) - 1
-        overview_zoom = max(13, min(17, suggested_zoom))
+        # A 7,000 sqm plot is invisible at zoom 17, and the croquis boundary is exact, so
+        # the plot view is allowed to go all the way in.
+        overview_zoom = max(13, min(19, suggested_zoom))
         zooms.update({
             'overview': overview_zoom,
-            'landmarks': max(14, overview_zoom - 1),
-            'access': max(15, overview_zoom + 1),
-            'catchment': max(12, overview_zoom - 2),
+            'landmarks': max(14, min(17, overview_zoom - 2)),
+            'access': max(15, min(19, overview_zoom + 1)),
+            'catchment': max(12, min(14, overview_zoom - 4)),
         })
     except (TypeError, ValueError, OverflowError) as error:
         print(f'[DYNAMIC ZOOM ERROR] {error}')
@@ -2419,6 +2706,13 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         except Exception as e:
             print(f"[POLYGON PARSE ERROR] {e}")
 
+    # Croquis coordinates are the real plot boundary, so they outrank any guess.
+    if highlight_site and not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
+        survey_polygon = survey_polygon_from_project(project_data, lat, lng)
+        if survey_polygon and len(survey_polygon) >= 3:
+            polygon_coords = survey_polygon
+            print(f"[POLYGON] Using croquis survey polygon with {len(polygon_coords)} points")
+
     # Try to auto-detect a building/compound polygon from OSM
     if highlight_site and not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
         cache_key = f"{lat:.6f},{lng:.6f}"
@@ -2432,6 +2726,12 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
             polygon_coords = osm_poly
             print(f"[POLYGON] Using OSM building polygon with {len(polygon_coords)} points")
 
+    if highlight_site and not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
+        bounds_polygon = _google_bounds_polygon(lat, lng, tenant_id=tenant_id)
+        if bounds_polygon:
+            polygon_coords = bounds_polygon
+            print('[POLYGON] Using the Google geocoding bounds rectangle')
+
     auto_detected = not user_polygon_used
 
     # Compute presentation-friendly zoom levels from the selected boundary.
@@ -2441,7 +2741,9 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         regen_seed = int(project_data.get('regen_seed') or 0)
     except (TypeError, ValueError):
         regen_seed = 0
-    if project_data.get('refresh_maps') and regen_seed:
+    # A regenerate must not re-frame a map whose extent is derived from a real boundary:
+    # shifting the zoom by two levels shrank the plot back to a dot.
+    if project_data.get('refresh_maps') and regen_seed and not (polygon_coords and len(polygon_coords) >= 3):
         zoom_shift = MAP_REGEN_ZOOM_OFFSETS[regen_seed % len(MAP_REGEN_ZOOM_OFFSETS)]
         for map_key in enabled_maps:
             if map_key in zooms:
@@ -2468,9 +2770,21 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         'access': access_zoom,
         'catchment': catchment_zoom,
     }
+    # The client converts clicks to coordinates against these, so it must know the centre each
+    # image was actually rendered around. Assuming the site pin put every drawn boundary off by
+    # the distance between the pin and the plot centroid.
+    result['centers'] = {
+        'overview': {'lat': map_center_lat, 'lng': map_center_lng},
+        'landmarks': {'lat': map_center_lat, 'lng': map_center_lng},
+        'access': {'lat': map_center_lat, 'lng': map_center_lng},
+        'catchment': {'lat': lat, 'lng': lng},
+    }
 
-    # Keep the site pin anchored to the source coordinates.
+    # The pin belongs on the land. A Maps link often points at the street entrance, and the
+    # croquis boundary for this project sat 240 m away from it, which left the pin off the plot.
     marker_lat, marker_lng = lat, lng
+    if polygon_coords and len(polygon_coords) >= 3:
+        marker_lat, marker_lng = map_center_lat, map_center_lng
 
     # Parse UI element flags (compass, inset map)
     draw_compass = project_data.get('draw_compass', True)
@@ -2536,10 +2850,17 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
     # Geocode text-entered landmarks against the actual project location first,
     # rather than accepting a same-named landmark in another city.
-    location_context = project_data.get('location_detail') or project_data.get('location_address') or project_data.get('location', '')
+    city_context = project_data.get('city') or project_data.get('location', '')
     for lm in landmarks:
         if lm.get('lat') is None or lm.get('lng') is None:
-            query = f"{lm['name']}, {location_context}" if location_context else lm['name']
+            place = find_place_near(lm['name'], lat, lng, radius_m=landmark_radius_m)
+            if place:
+                lm['lat'] = place['lat']
+                lm['lng'] = place['lng']
+                continue
+            # Only the city is appended here: adding the project address made Google
+            # return the project's own coordinates for every landmark.
+            query = f"{lm['name']}, {city_context}" if city_context else lm['name']
             geo = geocode_address(query, tenant_id=tenant_id)
             if geo.get('success'):
                 lm['lat'] = geo['lat']
@@ -2616,11 +2937,22 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 result['placeholders'][placeholder] = overview_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_landmarks (closer zoom)
     if 'landmarks' in enabled_maps:
-        landmarks_markers = _build_markers(marker_lat, marker_lng, landmarks)
+        # The landmark view used to inherit the plot zoom, so every landmark sat outside the
+        # frame and the map showed none of them. Fit the frame to the landmarks it draws.
+        shown_landmarks = [item for item in landmarks if item.get('distance_meters')][:8]
+        if shown_landmarks:
+            radius_km = max(item['distance_meters'] for item in shown_landmarks) / 1000.0
+            radius_km = max(0.6, min(LANDMARKS_MAX_RADIUS_KM, radius_km * 1.1))
+            fitted_zoom = zoom_for_radius_km(lat, radius_km)
+            if fitted_zoom:
+                landmarks_zoom = fitted_zoom
+                result['zooms']['landmarks'] = landmarks_zoom
+                print(f'[LANDMARKS] {len(shown_landmarks)} landmarks within {radius_km:.1f} km, zoom {landmarks_zoom}')
+        landmarks_markers = _build_markers(marker_lat, marker_lng, shown_landmarks or landmarks)
         landmarks_mt = map_styles['landmarks']
         if landmarks_mt == 'both':
             styles_to_gen = [('satellite', '##MAP_LANDMARKS_SATELLITE##', 'landmarks_satellite'),
@@ -2643,7 +2975,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 result['placeholders'][placeholder] = landmarks_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_access
     if 'access' in enabled_maps:
@@ -2689,6 +3021,8 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                         'lat': lat,
                         'lng': lng,
                         'zoom': access_zoom,
+                        'center_lat': map_center_lat,
+                        'center_lng': map_center_lng,
                         'access_roads_version': ACCESS_ROADS_RENDER_VERSION,
                         'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
                         'highlight_site': bool(highlight_site),
@@ -2701,6 +3035,13 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     # Generate map_catchment
     if 'catchment' in enabled_maps:
         # zones were pre-parsed before the cache check
+        rings = catchment_rings(zones)
+        if rings:
+            fitted_zoom = zoom_for_radius_km(lat, max(ring['km'] for ring in rings))
+            if fitted_zoom:
+                catchment_zoom = fitted_zoom
+                result['zooms']['catchment'] = catchment_zoom
+                print(f"[CATCHMENT] {len(rings)} rings, outer {max(ring['km'] for ring in rings):.1f} km, zoom {catchment_zoom}")
         catchment_markers = [{'lat': marker_lat, 'lng': marker_lng, 'color': MARKER_COLOR_SITE, 'type': 'site', 'label': None}]
         catchment_mt = map_styles['catchment']
         if catchment_mt == 'both':
@@ -2718,8 +3059,8 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                     _apply_sepia_tone(catchment_path, intensity=0.35)
                     _apply_map_overlay(catchment_path, dark_factor=0.15)
                 # Draw the anti-aliased concentric rings with time label pills
-                if zones:
-                    _draw_catchment_zones(catchment_path, lat, lng, catchment_zoom, zones, scale=2)
+                if rings:
+                    _draw_catchment_zones(catchment_path, lat, lng, catchment_zoom, rings, scale=2)
                 _overlay_markers(catchment_path, lat, lng, catchment_zoom, catchment_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(catchment_path, position='top-right')
@@ -2728,7 +3069,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 result['placeholders'][placeholder] = catchment_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'center_lat': lat, 'center_lng': lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     return result
 

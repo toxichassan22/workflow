@@ -5632,6 +5632,8 @@ def api_analyze_site():
     )
     fields['location_polygon_source'] = (
         'manual' if project_data.get('location_polygon_source') == 'manual'
+        # 'cleared' is the user switching the highlight off; it must survive a re-analysis.
+        else 'cleared' if project_data.get('location_polygon_source') == 'cleared'
         else 'auto' if fields.get('location_polygon')
         else 'none'
     )
@@ -5861,7 +5863,13 @@ def api_generate_single_map_image():
         if path and os.path.exists(path):
             rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
             placeholders[placeholder] = '/' + rel_path
-    return jsonify({'success': True, 'mapType': map_type, 'placeholders': placeholders, 'zooms': result.get('zooms', {})})
+    return jsonify({
+        'success': True,
+        'mapType': map_type,
+        'placeholders': placeholders,
+        'zooms': result.get('zooms', {}),
+        'centers': result.get('centers', {}),
+    })
 
 
 @app.route('/api/generate-map-images', methods=['POST'])
@@ -5899,6 +5907,7 @@ def api_generate_map_images():
         'landmarks': result.get('landmarks', []),
         'landmarks_matrix': result.get('landmarks_matrix', []),
         'zooms': result.get('zooms', {}),
+        'centers': result.get('centers', {}),
         'lat': result.get('lat'),
         'lng': result.get('lng'),
     })
@@ -5977,6 +5986,7 @@ def api_regenerate_presentation_maps(pres_id):
         'landmarks': result.get('landmarks', []),
         'landmarks_matrix': result.get('landmarks_matrix', []),
         'zooms': result.get('zooms', {}),
+        'centers': result.get('centers', {}),
         'lat': result.get('lat'),
         'lng': result.get('lng'),
     })

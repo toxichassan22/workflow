@@ -23,6 +23,15 @@ cPanel account is `demos`; server paths are `/home/demos/workflow.git`,
 put the cPanel password or `DEPLOY_WEBHOOK_SECRET` in the repo. Keep the
 secret in GitHub Actions secrets and in the server `.env` only.
 
+## No how-to text on screen
+
+The owner asked for the instructional copy to be gone: a screen may state **what** something is
+(section titles, field labels, status, empty states, errors) but never **how** to operate it. No
+«اضغط ...», no «راجع ... أولًا», no «اختر ... ثم», no «اختياري: ارفع ...». `tenant-hint` still exists
+for status and empty-state text — «مقفل حتى اعتماد الصورة الرئيسية», «لا توجد بنود مدخلة في هذا
+الجدول», «لم تُرفع صور للأرض» — and elements that JS writes status into keep their id with an empty
+default. `test_ui_carries_no_static_how_to_hints` guards both directions.
+
 ## No icons, no emojis — anywhere
 
 This is a hard product rule, not a preference. **Never add an emoji or an icon** to this project:
@@ -136,6 +145,31 @@ assertion deliberately, not reflexively.
   drawn after the gold highlight so the stroke never covers the text. Directions, reverse-geocode,
   and route labels use Arabic without diacritics. Pillow uses the real presentation-form font
   `fonts/arabic-overlay.bin`; do not switch map labels to English.
+- **The site boundary comes from the croquis, not from Google.** No Google Maps API returns a
+  building footprint or a parcel outline: Geocoding and Places expose only a `bounds`/`viewport`
+  rectangle, and Roads/Directions return road geometry. `survey_polygon_from_project()` converts the
+  croquis `survey_coordinates` (UTM, zone from the longitude) to lat/lng and is tried first, then the
+  OSM footprint, then `_google_bounds_polygon()` (accepted only under 400 m across), then the manual
+  drawing. On the live project the converted polygon measured 7,205 sqm against an approved
+  7,012 sqm, and it sat 240 m from the Maps pin — which is why the pin is now placed on the polygon
+  centroid. A parcel that converts to somewhere more than 8 km away is refused, not drawn.
+- `location_polygon_source` distinguishes **`none`** (nothing found yet — automatic sources must
+  still run) from **`cleared`** (the user switched the highlight off). It used to default to `none`
+  with `shouldHighlightTenantSite()` returning false for it, so the automatic highlight never ran.
+  `survey_coordinates` must stay in `MAP_PAYLOAD_FIELDS` or the server never sees the boundary.
+- The map API returns `centers` per view and stores `center_lat`/`center_lng` in each image's
+  metadata. The client converts clicks against that centre; assuming the site pin put every manually
+  drawn boundary off by the pin-to-plot distance, which is what made the manual highlight look fake.
+  When a real boundary exists the regenerate zoom shift is skipped, otherwise it re-framed the plot
+  back to a dot.
+- `catchment_rings()` collapses the catchment rows into at most three concentric drive-time bands and
+  `zoom_for_radius_km()` frames the outer one. The rows are destinations, so one ring per row drew
+  nine circles up to 31 km wide with unreadable labels. The landmarks view is framed the same way
+  around the landmarks it draws; it used to inherit the plot zoom, so every landmark fell outside
+  the frame.
+- Landmark names are resolved with `find_place_near()` (Places text search biased to the site).
+  Geocoding `"<name>, <project address>"` returned the project's own coordinates, so 14 of 16
+  landmarks were then dropped by the 50 m duplicate filter and the map showed none.
 - The land analysis reads the complete text and tables from both `اشتراطات1.pdf` and
   `اشتراطات2.pdf` by default. Page numbers may remain in internal evidence metadata, but must never
   be written into user-facing land fields or the narrative summary. `allowed_uses` and
