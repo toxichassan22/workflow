@@ -9738,7 +9738,7 @@
     const MARKET_PRICE_TYPES = {
       'بيع': ['سعر الوحدة', 'سعر المتر المربع', 'متوسط سعر الوحدة', 'متوسط سعر المتر', 'يبدأ من', 'نطاق سعري', 'أخرى'],
       'إيجار': ['إيجار الوحدة الشهري', 'إيجار الوحدة السنوي', 'إيجار المتر الشهري', 'إيجار المتر السنوي', 'متوسط إيجار الوحدة', 'متوسط إيجار المتر', 'يبدأ من', 'نطاق سعري', 'أخرى'],
-      'تشغيل فندقي': ['سعر الليلة', 'متوسط سعر الغرفة ADR', 'الإيراد لكل غرفة RevPAR', 'متوسط الإقامة الشهرية', 'نطاق أسعار الغرف', 'أخرى'],
+      'تشغيل فندقي': ['سعر الليلة', 'متوسط سعر الغرفة ADR', 'الإيراد لكل غرفة RevPAR', 'متوسط الإقامة الشهرية', 'يبدأ من', 'نطاق أسعار الغرف', 'أخرى'],
       'أخرى': ['قيمة واحدة', 'نطاق سعري', 'أخرى']
     };
     const MARKET_RANGE_PRICE_TYPES = ['نطاق سعري', 'نطاق أسعار الغرف'];
@@ -10773,12 +10773,12 @@
     }
 
     function inferCompetitorOperation(row = {}) {
-      const explicit = String(row.operation_type || row.operationType || row.operation || '').trim();
+      const explicit = String(row.operation_type || row.operationType || row.operation || row['نوع العملية'] || row['نوع التشغيل'] || row['التشغيل'] || '').trim();
       if (MARKET_PRICE_TYPES[explicit]) return explicit;
       const folded = explicit.replace(/[أإآ]/g, 'ا').toLowerCase();
       if (folded.includes('بيع') || folded.includes('sale') || folded.includes('sell')) return 'بيع';
       if (folded.includes('ايجار') || folded.includes('تأجير') || folded.includes('rent')) return 'إيجار';
-      if (folded.includes('فندقي') || folded.includes('فندق') || folded.includes('hotel')) return 'تشغيل فندقي';
+      if (folded.includes('فندقي') || folded.includes('فندق') || folded.includes('hotel') || folded === 'تشغيل' || folded.startsWith('تشغيل ')) return 'تشغيل فندقي';
       const priceType = String(row.price_type || row.priceType || '').trim();
       for (const [operation, options] of Object.entries(MARKET_PRICE_TYPES)) {
         if (priceType && options.includes(priceType)) return operation;
@@ -10788,7 +10788,7 @@
     }
 
     function inferCompetitorPriceType(row = {}) {
-      const explicit = String(row.price_type || row.priceType || '').trim();
+      const explicit = String(row.price_type || row.priceType || row['نوع السعر'] || row['نوع التسعير'] || '').trim();
       if (explicit) return explicit;
       if (String(competitorPriceField(row, 'price_from') || '').trim() || String(competitorPriceField(row, 'price_to') || '').trim()) {
         return inferCompetitorOperation(row) === 'تشغيل فندقي' ? 'نطاق أسعار الغرف' : 'نطاق سعري';
@@ -10800,15 +10800,19 @@
       const direct = row && row[key];
       if (direct !== undefined && direct !== null && String(direct).trim()) return direct;
       const aliases = {
-        price_value: ['priceValue', 'value'],
-        price_from: ['priceFrom', 'price_min', 'priceMin', 'min_price', 'minPrice'],
-        price_to: ['priceTo', 'price_max', 'priceMax', 'max_price', 'maxPrice']
+        price_value: ['priceValue', 'value', 'القيمة', 'السعر', 'المبلغ', 'amount'],
+        price_from: ['priceFrom', 'price_min', 'priceMin', 'min_price', 'minPrice', 'from', 'من', 'الحد الأدنى'],
+        price_to: ['priceTo', 'price_max', 'priceMax', 'max_price', 'maxPrice', 'to', 'إلى', 'الى', 'الحد الأعلى']
       };
       for (const alias of aliases[key] || []) {
         if (row && row[alias] !== undefined && row[alias] !== null && String(row[alias]).trim()) return row[alias];
       }
       if (row && row.price && typeof row.price === 'object') {
-        const nested = { price_value: ['value', 'price_value', 'priceValue'], price_from: ['from', 'min', 'minimum'], price_to: ['to', 'max', 'maximum'] };
+        const nested = {
+          price_value: ['value', 'price_value', 'priceValue', 'القيمة', 'السعر', 'amount'],
+          price_from: ['from', 'min', 'minimum', 'من', 'الحد الأدنى'],
+          price_to: ['to', 'max', 'maximum', 'إلى', 'الى', 'الحد الأعلى']
+        };
         for (const alias of nested[key] || []) {
           if (row.price[alias] !== undefined && row.price[alias] !== null && String(row.price[alias]).trim()) return row.price[alias];
         }

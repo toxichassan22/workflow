@@ -153,7 +153,7 @@ PRICE_TYPE_BY_OPERATION = {
     ],
     'تشغيل فندقي': [
         'سعر الليلة', 'متوسط سعر الغرفة ADR', 'الإيراد لكل غرفة RevPAR',
-        'متوسط الإقامة الشهرية', 'نطاق أسعار الغرف', 'أخرى',
+        'متوسط الإقامة الشهرية', 'يبدأ من', 'نطاق أسعار الغرف', 'أخرى',
     ],
     'أخرى': ['قيمة واحدة', 'نطاق سعري', 'أخرى'],
 }
@@ -591,6 +591,8 @@ def _canonical_operation(value, price_type='', project_type=''):
     if folded in {'rent', 'rental', 'leasing'} or any(token in folded for token in ('ايجار', 'تاجير', 'تأجير')):
         return 'إيجار'
     if folded in {'hotel', 'hospitality'} or any(token in folded for token in ('فندقي', 'فندق', 'ليله', 'hotel')):
+        return 'تشغيل فندقي'
+    if folded in {'تشغيل', 'تشغيل فندقي', 'hotel operation'} or folded.startswith('تشغيل '):
         return 'تشغيل فندقي'
     if text:
         return 'أخرى'
@@ -1170,28 +1172,32 @@ def normalize_competitor_row(row, fallback_source='ai'):
     project_type = _norm(row.get('project_type') or row.get('projectType') or row.get('نوع المشروع'))
     price_payload = row.get('price') if isinstance(row.get('price'), dict) else {}
     raw_price_type = _first_nonempty(
-        row.get('price_type'), row.get('priceType'), row.get('نوع السعر'),
+        row.get('price_type'), row.get('priceType'), row.get('نوع السعر'), row.get('نوع التسعير'),
         price_payload.get('type'), price_payload.get('price_type'), price_payload.get('priceType'),
+        price_payload.get('نوع السعر'),
     )
     price_value = _first_nonempty(
         row.get('price_value'), row.get('priceValue'), row.get('value'),
+        row.get('القيمة'), row.get('السعر'), row.get('المبلغ'), row.get('amount'),
         price_payload.get('value'), price_payload.get('price_value'), price_payload.get('priceValue'),
+        price_payload.get('القيمة'), price_payload.get('السعر'), price_payload.get('amount'),
         row.get('price') if not price_payload else '',
     )
     price_from = _first_nonempty(
         row.get('price_from'), row.get('priceFrom'), row.get('price_min'), row.get('priceMin'),
-        row.get('min_price'), row.get('minPrice'), row.get('from'),
+        row.get('min_price'), row.get('minPrice'), row.get('from'), row.get('من'), row.get('الحد الأدنى'),
         price_payload.get('from'), price_payload.get('price_from'), price_payload.get('priceFrom'),
-        price_payload.get('min'), price_payload.get('minimum'),
+        price_payload.get('من'), price_payload.get('min'), price_payload.get('minimum'),
     )
     price_to = _first_nonempty(
         row.get('price_to'), row.get('priceTo'), row.get('price_max'), row.get('priceMax'),
-        row.get('max_price'), row.get('maxPrice'), row.get('to'),
+        row.get('max_price'), row.get('maxPrice'), row.get('to'), row.get('إلى'), row.get('الى'), row.get('الحد الأعلى'),
         price_payload.get('to'), price_payload.get('price_to'), price_payload.get('priceTo'),
-        price_payload.get('max'), price_payload.get('maximum'),
+        price_payload.get('إلى'), price_payload.get('الى'), price_payload.get('max'), price_payload.get('maximum'),
     )
     operation = _canonical_operation(
-        row.get('operation_type') or row.get('operationType') or row.get('operation') or row.get('نوع العملية'),
+        row.get('operation_type') or row.get('operationType') or row.get('operation') or row.get('نوع العملية')
+        or row.get('نوع التشغيل') or row.get('التشغيل'),
         raw_price_type,
         project_type,
     )

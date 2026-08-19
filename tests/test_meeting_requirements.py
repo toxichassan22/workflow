@@ -4001,6 +4001,33 @@ class MeetingRequirementsTests(unittest.TestCase):
         })
         self.assertEqual(derived['operation_type'], 'بيع')
 
+    def test_market_study_accepts_arabic_price_aliases(self):
+        import market_study
+        row = market_study.normalize_competitor_row({
+            'name': 'فندق جدة',
+            'project_type': 'فندقي',
+            'operation': 'تشغيل',
+            'نوع السعر': 'سعر الليلة',
+            'القيمة': '1548',
+            'field_sources': {
+                'price_type': ['https://example.com/price'],
+                'price_value': ['https://example.com/price'],
+            },
+        })
+        self.assertEqual(row['operation_type'], 'تشغيل فندقي')
+        self.assertEqual(row['price_type'], 'سعر الليلة')
+        self.assertEqual(row['price_value'], '1548')
+        ranged = market_study.normalize_competitor_row({
+            'name': 'فندق جدة بنطاق سعري',
+            'operation': 'تشغيل',
+            'نوع السعر': 'نطاق أسعار الغرف',
+            'من': '900',
+            'إلى': '1500',
+        })
+        self.assertEqual(ranged['price_type'], 'نطاق أسعار الغرف')
+        self.assertEqual(ranged['price_from'], '900')
+        self.assertEqual(ranged['price_to'], '1500')
+
     def test_market_study_radius_auto_is_ten_km(self):
         import market_study
         self.assertNotIn('auto', [item['value'] for item in market_study.COMPETITOR_RADIUS_OPTIONS])
