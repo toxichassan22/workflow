@@ -65,7 +65,7 @@ def _is_real_font_file(path):
 
 
 def bundled_arabic_font_path():
-    """Return a real Arabic-capable font, never a Git LFS pointer."""
+    """Return a real Arabic-capable font for PDF text shaping, never an LFS pointer."""
     candidates = [
         os.path.join(FONTS_DIR, 'arabic-text.bin'),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts', 'arabic-text.bin'),
@@ -83,9 +83,29 @@ def bundled_arabic_font_path():
     return None
 
 
+def bundled_arabic_overlay_font_path():
+    """Return a font with presentation-form glyphs for Pillow map overlays."""
+    candidates = [
+        os.path.join(FONTS_DIR, 'arabic-overlay.bin'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts', 'arabic-overlay.bin'),
+        os.path.join(FONTS_DIR, 'BahijTheSansArabic-Bold.ttf'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts', 'BahijTheSansArabic-Bold.ttf'),
+        'C:\\Windows\\Fonts\\arial.ttf',
+        'C:\\Windows\\Fonts\\tahoma.ttf',
+    ]
+    for path in candidates:
+        if _is_real_font_file(path):
+            return path
+    return bundled_arabic_font_path()
+
+
+def _strip_arabic_diacritics(text):
+    return re.sub(r'[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed\u08d3-\u08ff\u0640]', '', str(text or ''))
+
+
 def _get_arabic_font(size=14):
-    """Load an Arabic-compatible TrueType font using absolute paths with fallback."""
-    path = bundled_arabic_font_path()
+    """Load an Arabic-compatible font for Pillow overlays."""
+    path = bundled_arabic_overlay_font_path()
     if path:
         try:
             return ImageFont.truetype(path, int(size))
@@ -98,12 +118,11 @@ def _reshape_arabic_text(text):
     """Reshape Arabic text for proper RTL display in PIL with explicit error logging."""
     if not text:
         return ""
-    text_str = str(text)
+    text_str = _strip_arabic_diacritics(text)
     try:
         import arabic_reshaper
-        # Reshape Arabic characters into connected Presentation Forms-B glyphs for PIL.
-        # Note: Do not pass through bidi get_display() here as PIL draw.text with presentation forms
-        # renders correctly in logical RTL order. Passing get_display reverses the glyph sequence and breaks joiners.
+        # Pillow on the server has no libraqm, so reshape logical Arabic into presentation forms.
+        # The bundled overlay font contains those glyphs; diacritics are removed for clean road names.
         return arabic_reshaper.reshape(text_str)
     except Exception as e:
         print(f"[ARABIC RESHAPE WARN] Reshaping failed for '{text_str}': {e}")
@@ -111,7 +130,7 @@ def _reshape_arabic_text(text):
 
 
 # Professional satellite map style — sepia/greyscale tone matching reference examples
-# Road labels stay on in English so the Google stroke remains readable.
+# Road labels stay on in Arabic; custom overlays use the bundled Arabic presentation-form font.
 SATELLITE_WITH_LABELS_STYLES = [
     'feature:all|saturation:-80|lightness:-10',
     'feature:poi|visibility:off',
@@ -162,7 +181,7 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
-ACCESS_ROADS_RENDER_VERSION = 'v4'
+ACCESS_ROADS_RENDER_VERSION = 'v6-arabic-labels'
 MAP_HIGHLIGHT_RENDER_VERSION = 'overview-context-v2'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
@@ -547,7 +566,7 @@ def _map_cache_path(lat, lng, maptype, zoom, markers=None, paths=None, size=None
 
 
 def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720), output_path=None,
-                   maptype='satellite', styles=None, use_google_markers=False, language='en',
+                   maptype='satellite', styles=None, use_google_markers=False, language='ar',
                    bypass_cache=False):
     """Generate a static map image with optional markers and paths (cached by lat,lng,maptype,zoom)."""
     if not _has_api_key():
@@ -1515,11 +1534,9 @@ def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale
             draw.ellipse([ccx - r, ccy - r, ccx + r, ccy + r], fill=None, outline=(255, 255, 255, 60), width=1 * canvas_scale)
             
             # Draw elegant label pill for each zone
-            label = zone.get('label') or f"{zone.get('minutes', 5)} min"
-            if any('\u0600' <= ch <= '\u06ff' for ch in str(label)):
-                label = f"{zone.get('minutes', 5)} min"
+            label = zone.get('label') or f"{zone.get('minutes', 5)} دقائق"
             font = _get_arabic_font(10 * canvas_scale)
-            reshaped = label
+            reshaped = _reshape_arabic_text(label)
                 
             bbox = draw.textbbox((0, 0), reshaped, font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -1597,14 +1614,14 @@ def _post_process_streetview(image_path, heading, index):
         
         # 5. Add an elegant direction label pill at the bottom-right
         directions = {
-            0: "North view",
-            90: "East view",
-            180: "South view",
-            270: "West view"
+            0: "إطلالة الشمال",
+            90: "إطلالة الشرق",
+            180: "إطلالة الجنوب",
+            270: "إطلالة الغرب"
         }
-        dir_text = directions.get(heading, f"{heading} deg view")
+        dir_text = directions.get(heading, f"إطلالة {heading} درجة")
         font = _get_arabic_font(14)
-        reshaped = dir_text
+        reshaped = _reshape_arabic_text(dir_text)
             
         bbox = draw.textbbox((0, 0), reshaped, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -1650,7 +1667,7 @@ def _draw_compass(image_path, position='top-right', compass_size=60):
                      fill=(240, 230, 210, 220), outline=COMPASS_COLOR + (255,), width=3)
 
         font = _get_arabic_font(compass_size // 2)
-        text = 'N'
+        text = _reshape_arabic_text('ش')
         bbox = draw.textbbox((0, 0), text, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         draw.text((comp_cx - tw // 2, comp_cy - th // 2 - 2), text,
@@ -1861,7 +1878,7 @@ def _google_reverse_geocode_road(lat, lng, tenant_id=None):
     try:
         response = requests.get(
             'https://maps.googleapis.com/maps/api/geocode/json',
-            params={'latlng': f'{lat},{lng}', 'key': _get_api_key(), 'language': 'en'}, timeout=15
+            params={'latlng': f'{lat},{lng}', 'key': _get_api_key(), 'language': 'ar'}, timeout=15
         )
         data = response.json()
         if data.get('status') != 'OK':
@@ -1900,11 +1917,11 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
         if not route:
             return None
         name = (route.get('summary') or '').strip()
-        if not name or not re.search(r'[A-Za-z]', name):
-            english_name = _google_reverse_geocode_road(dest_lat, dest_lng, tenant_id=tenant_id)
-            if english_name and re.search(r'[A-Za-z]', english_name):
-                name = english_name
-        name = name or 'Nearby road'
+        if not name or re.search(r'[A-Za-z]', name):
+            localized_name = _google_reverse_geocode_road(dest_lat, dest_lng, tenant_id=tenant_id)
+            if localized_name:
+                name = localized_name
+        name = name or 'طريق قريب'
         key = (snapped or {}).get('place_id') or name.casefold()
         distance_meters = route.get('distance_meters')
         if distance_meters is None:
@@ -2037,13 +2054,13 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 return None
 
             road_name = (route.get('summary') or '').strip()
-            if not road_name or not re.search(r'[A-Za-z]', road_name):
+            if not road_name or re.search(r'[A-Za-z]', road_name):
                 localized_name = _google_reverse_geocode_road(
                     dest_lat, dest_lng, tenant_id=tenant_id
                 )
-                if localized_name and re.search(r'[A-Za-z]', localized_name):
+                if localized_name:
                     road_name = localized_name
-            road_name = road_name or (fallback_road_names[0] if fallback_road_names else 'Nearby road')
+            road_name = road_name or (fallback_road_names[0] if fallback_road_names else 'طريق قريب')
             road_key = (snapped or {}).get('place_id') or road_name.casefold()
             return route['coords'], road_name, road_key
 

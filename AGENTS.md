@@ -133,9 +133,9 @@ assertion deliberately, not reflexively.
   deletes that view's DB rows, sets `refresh_maps` + `regen_seed`, and skips `_get_cached_map_images`.
   After a successful response, the client must replace the view's placeholders, bust the img cache,
   and call `selectMapPreviewView`. On the access map, Google road labels stay off and our names are
-  drawn after the gold highlight so the stroke never covers the text. Overlay and reverse-geocode
-  labels are requested in English (`language=en`) because Arabic presentation forms still break
-  on the map font.
+  drawn after the gold highlight so the stroke never covers the text. Directions, reverse-geocode,
+  and route labels use Arabic without diacritics. Pillow uses the real presentation-form font
+  `fonts/arabic-overlay.bin`; do not switch map labels to English.
 - The land analysis reads the complete text and tables from both `اشتراطات1.pdf` and
   `اشتراطات2.pdf` by default. Page numbers may remain in internal evidence metadata, but must never
   be written into user-facing land fields or the narrative summary. `allowed_uses` and
@@ -346,9 +346,10 @@ clipped. Strip «ترتيب / حذف» from both the print snapshot and the serv
 `export_files` back on it — employees who can fill the study must be able to download it.
 The financial section itself needs a visible `حفظ كمسودة` next to the PDF button.
 `generate_financial_pdf()` must fall back to PyMuPDF when Playwright is missing on the host.
-Arabic in that PDF and on map overlays must use `fonts/arabic-text.bin` (a real TTF
-stored under a non-LFS name). Hosting cannot use `*.ttf` because those files are Git LFS
-pointers. Do not draw Arabic with Helvetica.
+Arabic in that PDF must use `fonts/arabic-text.bin`; Pillow map overlays must use
+`fonts/arabic-overlay.bin` (both are real fonts stored under non-LFS names). Hosting cannot
+use `*.ttf` because those files are Git LFS pointers. Strip Arabic diacritics from map road
+names before reshaping; do not draw Arabic with Helvetica.
 
 Section approval is one toggle: `اعتماد` / `الغاء الاعتماد`. Approved sections get
 `.section-locked` and every control inside is disabled except the toggle. Two separate
