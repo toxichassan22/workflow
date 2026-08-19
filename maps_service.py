@@ -2309,6 +2309,19 @@ def _road_name_key(name):
     return ' '.join(words).casefold()
 
 
+def is_same_road_name(first, second):
+    """Two labels are the same road when one name is contained in the other.
+
+    The entered list holds compound rows such as «الامير فيصل بن فهد والخليفة المهدي»
+    beside «الامير فيصل بن فهد», so comparing keys for equality drew one street twice.
+    """
+    first_words = set(_road_name_key(first).split())
+    second_words = set(_road_name_key(second).split())
+    if not first_words or not second_words:
+        return False
+    return first_words <= second_words or second_words <= first_words
+
+
 def match_known_road_name(discovered, known_names):
     """Return the road name the user entered when it is the same road Google returned."""
     discovered_key = _road_name_key(discovered)
@@ -2433,9 +2446,11 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             probe_results = list(executor.map(_fetch_probe_route, probe_points))
 
         for result in probe_results:
-            if not result or result[2] in seen_road_keys:
+            if not result:
                 continue
-            seen_road_keys.add(result[2])
+            if any(is_same_road_name(result[1], accepted) for accepted in seen_road_keys):
+                continue
+            seen_road_keys.add(result[1])
             road_route_mapping.append((result[0], result[1]))
             if len(road_route_mapping) >= 3:
                 break

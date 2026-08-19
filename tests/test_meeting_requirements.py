@@ -2383,6 +2383,69 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('def _financial_pdf_shape(text):', source)
         self.assertIn('def split_runs(value):', source)
 
+    def test_parallel_section_approvals_are_not_lost(self):
+        import threading
+
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        sections = [
+            'basic', 'location', 'land_croquis', 'section-timeline',
+            'section-financial-calc', 'section-team', 'section-market-study', 'section-conceptual-2d',
+        ]
+        client.post('/api/project-draft', headers=headers, json={
+            'draftData': {'project_name': 'ملف اعتماد'}, 'sectionStatuses': {}, 'status': 'draft'
+        })
+
+        # One merged call must store every section.
+        response = client.post('/api/project-draft/section-status', headers=headers, json={
+            'sectionStatuses': {key: 'approved' for key in sections}
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        stored = client.get('/api/project-draft', headers=headers).get_json()['draft']['section_statuses']
+        self.assertEqual(sorted(stored), sorted(sections))
+        self.assertTrue(all(value == 'approved' for value in stored.values()), stored)
+
+        # And a race between single-section calls must not drop any of them either.
+        client.post('/api/project-draft/section-status', headers=headers, json={
+            'sectionStatuses': {key: 'draft' for key in sections}
+        })
+        errors = []
+
+        def approve(section_key):
+            try:
+                with self.app.test_client() as parallel:
+                    parallel.post('/api/project-draft/section-status', headers=headers, json={
+                        'sectionKey': section_key, 'sectionStatus': 'approved'
+                    })
+            except Exception as error:  # pragma: no cover - surfaced through the assertion below
+                errors.append(error)
+
+        threads = [threading.Thread(target=approve, args=(key,)) for key in sections]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        stored = client.get('/api/project-draft', headers=headers).get_json()['draft']['section_statuses']
+        self.assertTrue(all(stored.get(key) == 'approved' for key in sections), stored)
+
+        approval = client.post('/api/project-draft/request-approval', headers=headers, json={})
+        self.assertEqual(approval.status_code, 200, approval.get_json())
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        # A section nobody opened had no stored status, and the approval gate walks the stored
+        # map, so the file could be submitted with that section never approved.
+        self.assertIn('applySectionStatuses(initialStatuses);', index_source)
+        self.assertIn("sectionStatuses: statuses", index_source)
+        self.assertIn('def update_draft_section_statuses(', (ROOT / 'db.py').read_text(encoding='utf-8'))
+
+    def test_components_block_shows_the_regulated_uses(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        # The activities are chosen in the components table, so the regulated list belongs there.
+        self.assertIn('id="componentsAllowedUsesNote"', index_source)
+        self.assertIn('function renderComponentsAllowedUsesNote(allowedUses, status)', index_source)
+        self.assertIn("'الاستخدامات المسموحة تنظيميًا: ' + uses", index_source)
+        self.assertIn('renderComponentsAllowedUsesNote(allowedUses, status);', index_source)
+
     def test_access_road_names_do_not_change_between_regenerations(self):
         import maps_service
 
@@ -2409,6 +2472,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(maps_service.match_known_road_name('الكورنيش', known), 'طريق الكورنيش الفرعي')
         self.assertEqual(maps_service.match_known_road_name('طريق مجهول تماما', known), '')
         self.assertEqual(maps_service.match_known_road_name('', known), '')
+        # A compound row and its own street are one road; drawing both repeated the name.
+        self.assertTrue(maps_service.is_same_road_name(
+            'الامير فيصل بن فهد والخليفة المهدي', 'طريق الأمير فيصل بن فهد'
+        ))
+        self.assertTrue(maps_service.is_same_road_name('شارع الشاطئ', 'الشاطئ'))
+        self.assertFalse(maps_service.is_same_road_name('شارع الشاطئ', 'طريق الكورنيش'))
+        self.assertFalse(maps_service.is_same_road_name('', 'شارع الشاطئ'))
+        self.assertIn('is_same_road_name(result[1], accepted)', source)
         self.assertEqual(
             maps_service._road_name_key('طريق الأمير فيصل بن فهد'),
             maps_service._road_name_key('الامير فيصل بن فهد'),

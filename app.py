@@ -6428,8 +6428,20 @@ def api_delete_project_draft_by_id(draft_id):
 @app.route('/api/project-draft/section-status', methods=['POST'])
 @require_auth
 def api_update_section_status():
-    """Update a single section's status in the draft."""
+    """Update one section's status, or several in a single atomic merge."""
     data = request.json or {}
+    bulk = data.get('sectionStatuses')
+    if isinstance(bulk, dict) and bulk:
+        # Approving every section used to fire one request per section in parallel, and the
+        # concurrent read-modify-write on the shared JSON column lost half of them.
+        if any(not isinstance(key, str) or not key or value not in {'draft', 'approved'} for key, value in bulk.items()):
+            return jsonify({'error': 'A valid sectionStatuses map is required'}), 400
+        result = db.update_draft_section_statuses(
+            g.tenant_id, _project_draft_actor_id(), bulk, draft_id=data.get('draftId')
+        )
+        if not result:
+            return jsonify({'error': 'Unable to update section status'}), 400
+        return jsonify({'success': True})
     section_key = data.get('sectionKey')
     section_status = data.get('sectionStatus')
     if not isinstance(section_key, str) or not section_key or section_status not in {'draft', 'approved'}:

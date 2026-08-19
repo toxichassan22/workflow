@@ -2435,31 +2435,53 @@ def delete_project_draft(tenant_id, user_id):
 
 def update_draft_section_status(tenant_id, user_id, section_key, section_status, draft_id=None):
     """Update one section in a unified draft, resetting overall approval if needed."""
-    if section_status not in SECTION_DRAFT_STATUSES:
+    return update_draft_section_statuses(tenant_id, user_id, {section_key: section_status}, draft_id=draft_id)
+
+
+def update_draft_section_statuses(tenant_id, user_id, updates, draft_id=None):
+    """Merge section statuses into a draft without losing a concurrent update.
+
+    The whole statuses map lives in one JSON column, so eight parallel 'approve' calls each
+    read the same snapshot and the last write won: the screen showed every section approved
+    while the database had kept only some. The write is therefore conditional on the value
+    that was read, and retried when another request got there first.
+    """
+    if not isinstance(updates, dict) or not updates:
         return False
-    draft = get_project_draft_by_id(tenant_id, draft_id) if draft_id else get_project_draft(tenant_id, user_id)
-    if draft and draft.get('user_id') != user_id:
-        draft = None
-    if not draft:
-        # A status click can occur before the first explicit Save action.
-        save_project_draft(tenant_id, user_id, {}, {}, 'draft', draft_id=draft_id)
-        draft = get_project_draft_by_id(tenant_id, draft_id) if draft_id else get_project_draft(tenant_id, user_id)
-    statuses = draft.get('section_statuses', {})
-    changed = statuses.get(section_key) != section_status
-    statuses[section_key] = section_status
+    if any(status not in SECTION_DRAFT_STATUSES for status in updates.values()):
+        return False
     conn = get_db()
-    if changed and draft.get('status') in {'pending_approval', 'approved'}:
-        next_status = 'draft'
-    else:
-        next_status = draft.get('status') or 'draft'
-    conn.execute(
-        '''UPDATE project_drafts SET section_statuses = ?, status = ?, updated_at = ? WHERE id = ?''',
-        (json.dumps(statuses, ensure_ascii=False), next_status, datetime.now().isoformat(), draft['id'])
-    )
-    if changed and draft.get('status') in {'pending_approval', 'approved'}:
-        _clear_draft_approval_fields(conn, draft['id'])
-    conn.commit()
-    return True
+    for attempt in range(6):
+        draft = get_project_draft_by_id(tenant_id, draft_id) if draft_id else get_project_draft(tenant_id, user_id)
+        if draft and draft.get('user_id') != user_id:
+            draft = None
+        if not draft:
+            # A status click can occur before the first explicit Save action.
+            save_project_draft(tenant_id, user_id, {}, {}, 'draft', draft_id=draft_id)
+            draft = get_project_draft_by_id(tenant_id, draft_id) if draft_id else get_project_draft(tenant_id, user_id)
+            if not draft:
+                return False
+        statuses = dict(draft.get('section_statuses') or {})
+        expected = json.dumps(statuses, ensure_ascii=False)
+        changed = any(statuses.get(key) != value for key, value in updates.items())
+        statuses.update(updates)
+        resets_approval = changed and draft.get('status') in {'pending_approval', 'approved'}
+        next_status = 'draft' if resets_approval else (draft.get('status') or 'draft')
+        cursor = conn.execute(
+            '''UPDATE project_drafts SET section_statuses = ?, status = ?, updated_at = ?
+               WHERE id = ? AND COALESCE(section_statuses, '') IN (?, ?)''',
+            (json.dumps(statuses, ensure_ascii=False), next_status, datetime.now().isoformat(),
+             draft['id'], expected, '' if expected == '{}' else expected)
+        )
+        if getattr(cursor, 'rowcount', 1) == 0:
+            conn.commit()
+            continue
+        if resets_approval:
+            _clear_draft_approval_fields(conn, draft['id'])
+        conn.commit()
+        return True
+    print(f'[DRAFT SECTIONS] gave up merging {list(updates)} after repeated concurrent writes')
+    return False
 
 
 def request_project_draft_approval(tenant_id, user_id, requested_by, requested_by_name, draft_id=None):

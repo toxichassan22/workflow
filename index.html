@@ -11805,10 +11805,13 @@
         const key = sec.dataset.section;
         statuses[key] = 'approved';
       });
-      const results = await Promise.all(Object.entries(statuses).map(([key, status]) =>
-        api('POST', '/api/project-draft/section-status', { draftId: tenantProjectData.draftId, sectionKey: key, sectionStatus: status })
-      ));
-      if (results.some(result => !result.success)) { toast('تعذر اعتماد قسم أو أكثر'); return; }
+      // One merged request: parallel per-section calls raced on the same JSON column and the
+      // screen ended up showing sections as approved that the server had never stored.
+      const result = await api('POST', '/api/project-draft/section-status', {
+        draftId: tenantProjectData.draftId,
+        sectionStatuses: statuses
+      });
+      if (!result.success) { toast(result.error || 'تعذر اعتماد قسم أو أكثر'); return; }
       applySectionStatuses(statuses);
       toast('تم اعتماد جميع الأقسام');
     }
@@ -12475,6 +12478,10 @@
       projectSections.forEach(section => {
         initialStatuses[section.dataset.section] = tenantProjectSectionStatuses[section.dataset.section] || 'draft';
       });
+      // Every section must carry an explicit status. This was computed and then dropped, so a
+      // section nobody opened had no entry at all and the server's approval gate — which only
+      // walks the stored statuses — let the file through as if that section were approved.
+      applySectionStatuses(initialStatuses);
       form.removeEventListener('input', triggerAutoSaveDraft);
       form.removeEventListener('change', triggerAutoSaveDraft);
       form.addEventListener('input', triggerAutoSaveDraft);
@@ -12489,6 +12496,7 @@
       renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
       renderProjectTeam();
       enhanceProjectClassificationFields();
+      refreshAllowedUsesStatusNote();
       applyMarketStudyState(getMarketStudyState());
       persistVisualConceptDraftState();
     }
@@ -14125,6 +14133,7 @@
 
         <div class="finance-block">
           <h3>3. مكونات المشروع</h3>
+          <div id="componentsAllowedUsesNote" class="tenant-hint" style="margin:0 0 10px;font-weight:700;line-height:1.7" hidden></div>
           <div class="table-wrap">
             <table id="componentsTable">
               <thead><tr><th>اسم المكون</th><th>نوع الاستخدام</th><th>عدد الوحدات</th><th>مساحة الوحدة م²</th><th>المساحة المبنية م²</th><th>المساحة البيعية / التأجيرية م²</th><th>نموذج الاستفادة</th><th>الناتج</th><th>ترتيب / حذف</th></tr></thead>
@@ -16136,6 +16145,24 @@
       const status = resolveLandUseStatus(projectType, allowedUses);
       tenantProjectData.land_use_status = status;
       renderAllowedUsesStatusNote(status);
+      renderComponentsAllowedUsesNote(allowedUses, status);
+    }
+
+    function renderComponentsAllowedUsesNote(allowedUses, status) {
+      // The components table is where the activities are actually chosen, so the regulated
+      // list belongs next to it. This is data read from the land section, not guidance.
+      const note = document.getElementById('componentsAllowedUsesNote');
+      if (!note) return;
+      const uses = stripLandUseStatusFromText(allowedUses ?? tenantProjectData.allowed_uses).text.trim();
+      if (!uses) {
+        note.hidden = true;
+        note.textContent = '';
+        return;
+      }
+      const info = landUseStatusNote(normalizeLandUseStatus(status ?? tenantProjectData.land_use_status));
+      note.hidden = false;
+      note.textContent = 'الاستخدامات المسموحة تنظيميًا: ' + uses + (info ? ' — ' + info.text : '');
+      note.style.color = info && info.tone === 'bad' ? '#9c1d1d' : '';
     }
 
     function renderAllowedUsesStatusNote(status) {

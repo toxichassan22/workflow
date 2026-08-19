@@ -445,6 +445,22 @@ Section approval is one toggle: `اعتماد` / `الغاء الاعتماد`. 
 `.section-locked` and every control inside is disabled except the toggle. Two separate
 approve/unapprove buttons must not come back.
 
+All section statuses live in **one JSON column**, so never write them with parallel requests:
+`approveAllSections()` fired eight calls at once, each read the same snapshot, and the last write
+won — the screen showed eight approved sections while the database had stored four. Bulk changes go
+through `sectionStatuses` on `POST /api/project-draft/section-status`, and
+`update_draft_section_statuses()` writes conditionally on the value it read and retries, so a race
+between single-section calls cannot drop one either.
+
+`renderTenantProjectForm()` must call `applySectionStatuses(initialStatuses)`. It used to compute
+that map and throw it away, so a section nobody opened had no stored status at all — and
+`request_project_draft_approval()` only walks the stored map, so the file could be submitted for
+approval with that section never approved.
+
+The regulated activity list is shown next to the components table
+(`#componentsAllowedUsesNote`, fed by `renderComponentsAllowedUsesNote()` from `allowed_uses` and
+`land_use_status`). That is data, not guidance, so the no-how-to rule does not apply to it.
+
 ## Token budget for the land analysis
 
 `max_tokens` cannot simply be raised: **OpenRouter reserves the whole cap against the account
