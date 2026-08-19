@@ -6851,7 +6851,180 @@ def _financial_pdf_plain_html(html):
     return text
 
 
-def generate_financial_pdf(html, output_path):
+def _financial_pdf_font():
+    path = os.path.join(os.path.dirname(__file__), 'fonts', 'BahijTheSansArabic-Bold.ttf')
+    return path if os.path.isfile(path) else None
+
+
+def _financial_pdf_text(value, key=''):
+    raw = _financial_report_format_number(value, key)
+    return html_lib.unescape(raw).replace('\xa0', ' ')
+
+
+def generate_financial_pdf_from_model(project_name, model, output_path):
+    import fitz
+    inputs = _financial_inputs(model)
+    tables = model.get('tables', {}) if isinstance(model, dict) and isinstance(model.get('tables'), dict) else {}
+    projection = model.get('projection', {}) if isinstance(model, dict) and isinstance(model.get('projection'), dict) else {}
+    font_path = _financial_pdf_font()
+    document = fitz.open()
+    page_size = fitz.paper_rect('a4-l')
+    page = document.new_page(width=page_size.width, height=page_size.height)
+    margin = 28
+    y = margin
+    font_name = 'arabic' if font_path else 'helv'
+    if font_path:
+        page.insert_font(fontname=font_name, fontfile=font_path)
+
+    def ensure_space(needed=24):
+        nonlocal page, y
+        if y + needed < page_size.height - margin:
+            return
+        page = document.new_page(width=page_size.width, height=page_size.height)
+        if font_path:
+            page.insert_font(fontname=font_name, fontfile=font_path)
+        y = margin
+
+    def draw_text(text, size=11, indent=0):
+        nonlocal y
+        ensure_space(size + 8)
+        page.insert_text(
+            fitz.Point(page_size.width - margin - indent, y + size),
+            str(text or ''),
+            fontname=font_name,
+            fontsize=size,
+            color=(0.07, 0.23, 0.43),
+        )
+        y += size + 8
+
+    def draw_kv_table(rows):
+        nonlocal y
+        visible = []
+        for item in rows:
+            label, value, key = (item + ('',))[:3] if len(item) < 3 else item
+            if value in (None, '', [], {}) or isinstance(value, (dict, list)):
+                continue
+            visible.append((str(label), _financial_pdf_text(value, key)))
+        if not visible:
+            draw_text('لا توجد قيم مطبقة في هذا القسم.', 9)
+            return
+        col_w = (page_size.width - margin * 2) / 2
+        for label, value in visible:
+            ensure_space(16)
+            rect = fitz.Rect(margin, y, page_size.width - margin, y + 15)
+            page.draw_rect(rect, color=(0.85, 0.82, 0.8), width=0.4)
+            page.insert_textbox(fitz.Rect(rect.x0 + 4, rect.y0 + 2, rect.x0 + col_w - 4, rect.y1), label, fontname=font_name, fontsize=8, align=fitz.TEXT_ALIGN_RIGHT)
+            page.insert_textbox(fitz.Rect(rect.x0 + col_w + 4, rect.y0 + 2, rect.x1 - 4, rect.y1), value, fontname=font_name, fontsize=8, align=fitz.TEXT_ALIGN_RIGHT)
+            y += 15
+
+    def draw_data_table(rows, title):
+        nonlocal y
+        if not isinstance(rows, list) or not rows:
+            draw_text(title, 12)
+            draw_text('لا توجد بنود مدخلة في هذا الجدول.', 9)
+            return
+        keys = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for key in row:
+                label = FINANCIAL_COLUMN_LABELS.get(key, key)
+                if key in FINANCIAL_REPORT_DROP_COLUMNS or label in FINANCIAL_REPORT_DROP_COLUMNS:
+                    continue
+                if key not in keys:
+                    keys.append(key)
+        if not keys:
+            draw_text(title, 12)
+            draw_text('لا توجد بنود مدخلة في هذا الجدول.', 9)
+            return
+        draw_text(title, 12)
+        usable = page_size.width - margin * 2
+        col_w = usable / max(1, len(keys))
+        row_h = 14
+        def paint_row(values, header=False):
+            nonlocal y
+            ensure_space(row_h)
+            x = margin
+            for value in values:
+                cell = fitz.Rect(x, y, x + col_w, y + row_h)
+                fill = (0.07, 0.23, 0.43) if header else None
+                page.draw_rect(cell, color=(0.85, 0.82, 0.8), fill=fill, width=0.4)
+                color = (1, 1, 1) if header else (0.15, 0.15, 0.15)
+                page.insert_textbox(cell + (2, 1, -2, -1), str(value), fontname=font_name, fontsize=7, color=color, align=fitz.TEXT_ALIGN_RIGHT)
+                x += col_w
+            y += row_h
+        paint_row([FINANCIAL_COLUMN_LABELS.get(key, key) for key in keys], header=True)
+        for row in rows:
+            if isinstance(row, dict):
+                paint_row([_financial_pdf_text(row.get(key), key) for key in keys])
+
+    draw_text(project_name or 'الدراسة المالية', 18)
+    draw_text('التقرير المالي المنظم', 13)
+    draw_text('1. ملخص المشروع', 12)
+    draw_kv_table([
+        ('طبيعة الإيرادات', inputs.get('unitRevenueMode'), 'unitRevenueMode'),
+        ('مدة التطوير', inputs.get('developmentYears'), 'developmentYears'),
+        ('سنوات التشغيل', inputs.get('operationYears'), 'operationYears'),
+        ('مساحة الأرض', inputs.get('landArea'), 'landArea'),
+    ])
+    draw_text('2. الأرض والمساحات', 12)
+    draw_kv_table([
+        ('مساحة الأرض', inputs.get('landArea'), 'landArea'),
+        ('نسبة التغطية', inputs.get('coverageRate'), 'coverageRate'),
+        ('عدد الطوابق', inputs.get('floorCount'), 'floorCount'),
+        ('مسطحات البناء فوق الأرض', inputs.get('builtUpAreaAbove'), 'builtUpAreaAbove'),
+        ('مساحة البدرومات', inputs.get('basementArea'), 'basementArea'),
+        ('حالة الأرض', inputs.get('landStatus'), 'landStatus'),
+    ])
+    for number, title, table_key in (
+        ('3', 'مكونات المشروع', 'componentsTable'),
+        ('4', 'بنود الإيرادات', 'revenueTable'),
+        ('5', 'تكاليف المشروع', 'costTable'),
+        ('6', 'مراحل التطوير', 'scheduleTable'),
+        ('7', 'المصروفات التشغيلية', 'opexTable'),
+    ):
+        draw_data_table(tables.get(table_key), f'{number}. {title}')
+    if inputs.get('financeEnabled') == 'yes':
+        draw_text('8. التمويل', 12)
+        draw_kv_table([
+            ('أساس التمويل', inputs.get('financeBase'), 'financeBase'),
+            ('نسبة التمويل', inputs.get('financingRate'), 'financingRate'),
+            ('معدل الفائدة', inputs.get('annualFinanceRate'), 'annualFinanceRate'),
+            ('قيمة أساس التمويل', inputs.get('financeBaseAmount') or projection.get('financeBaseAmount'), 'financeBaseAmount'),
+            ('قيمة التسهيل التمويلي', inputs.get('facilityAmount') or projection.get('facilityAmount'), 'facilityAmount'),
+        ])
+        draw_data_table(tables.get('financeDrawTable'), 'خطة السحب')
+        draw_data_table(tables.get('financeRepaymentTable'), 'خطة السداد')
+    if inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes':
+        draw_text('9. الصندوق وأتعابه', 12)
+        draw_kv_table([
+            ('أساس الأتعاب', inputs.get('fundFeeBase'), 'fundFeeBase'),
+            ('نسبة الإدارة', inputs.get('fundManagementRate'), 'fundManagementRate'),
+        ])
+        draw_data_table(tables.get('fundAdditionalFeesTable'), 'أتعاب إضافية')
+    if inputs.get('exitEnabled') == 'yes':
+        draw_text('11. التخارج', 12)
+        draw_kv_table([
+            ('التخارج البيعي', inputs.get('saleExitMethod'), 'saleExitMethod'),
+            ('التخارج التشغيلي', inputs.get('exitMethod'), 'exitMethod'),
+            ('سنة التخارج التشغيلي', inputs.get('operatingExitYear'), 'operatingExitYear'),
+        ])
+    draw_text('12. النتائج المالية', 12)
+    draw_kv_table([(label, projection.get(key), key) for key, label in FINANCIAL_RESULT_LABELS])
+    draw_data_table(tables.get('cashflowTable'), '13. التدفقات النقدية السنوية')
+    sensitivity_assumptions = tables.get('sensitivityAssumptionsTable')
+    if not isinstance(sensitivity_assumptions, list) or not sensitivity_assumptions:
+        dynamic_rows = model.get('dynamicRows') if isinstance(model, dict) else {}
+        if isinstance(dynamic_rows, dict) and isinstance(dynamic_rows.get('sensitivity'), list):
+            sensitivity_assumptions = dynamic_rows.get('sensitivity')
+    draw_data_table(sensitivity_assumptions, '14. تحليل الحساسية العام - الافتراضات')
+    draw_data_table(tables.get('sensitivityTable'), '14. تحليل الحساسية العام - النتائج')
+    document.save(output_path)
+    document.close()
+    return output_path
+
+
+def generate_financial_pdf(html, output_path, model=None, project_name=''):
     last_error = None
     try:
         from playwright.sync_api import sync_playwright
@@ -6895,6 +7068,12 @@ def generate_financial_pdf(html, output_path):
         except Exception as error:
             last_error = error
             print(f'[FINANCIAL PDF] PyMuPDF html open failed ({error})')
+    if model is not None:
+        try:
+            return generate_financial_pdf_from_model(project_name, model, output_path)
+        except Exception as error:
+            last_error = error
+            print(f'[FINANCIAL PDF] model fallback failed ({error})')
     raise RuntimeError(str(last_error or 'Could not write financial PDF'))
 
 
@@ -6922,7 +7101,7 @@ def api_export_financial_study():
     try:
         branding = db.get_branding(g.tenant_id) or {}
         report_html = build_financial_report_html(project_name, model, branding, g.tenant_id)
-        generate_financial_pdf(report_html, output_path)
+        generate_financial_pdf(report_html, output_path, model=model, project_name=project_name)
         export_id = db.create_export(data.get('presentationId') or None, g.tenant_id, 'financial_pdf', output_path)
         return jsonify({
             'success': True,

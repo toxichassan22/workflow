@@ -1668,8 +1668,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("Playwright failed ({error}); falling back to PyMuPDF", export_source)
         self.assertIn("str(error).strip() or type(error).__name__", export_source)
         self.assertIn('def _financial_pdf_plain_html(html):', export_source)
+        self.assertIn('def generate_financial_pdf_from_model(project_name, model, output_path):', export_source)
+        self.assertIn("generate_financial_pdf(report_html, output_path, model=model, project_name=project_name)", export_source)
         import tempfile
         from pathlib import Path
+        with self.app.app_context():
+            with tempfile.TemporaryDirectory() as temp_dir:
+                out = Path(temp_dir) / 'model.pdf'
+                self.application_module.generate_financial_pdf_from_model('مشروع مالي', model, out)
+                self.assertTrue(out.exists())
+                self.assertGreater(out.stat().st_size, 1000)
         with self.app.app_context():
             report = self.application_module.build_financial_report_html('مشروع مالي', model, {}, self.tenant_a)
             with tempfile.TemporaryDirectory() as temp_dir:
