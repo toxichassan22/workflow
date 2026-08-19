@@ -326,6 +326,12 @@ plus the JS object). That object must include `dynamicRows.sensitivity` so table
 reload. `collectFinancialStudyModel()` must keep values from fields that are currently hidden by a
 mode switch; otherwise toggling بيع / تأجير wipes the other side on the next save.
 
+Save **raw numbers**, never `money()` strings, in `inputs` and `dynamicRows`. A `type="number"`
+field silently blanks `189,750,000`, so the next `calculateAll()` treats project cost and every
+derived finance total (`financeBaseAmount`, `facilityAmount`, arrangement fees, interest, equity)
+as zero. `parseNumber()` / `financialInputNumber()` / `setFinancialSnapshotInput()` must strip
+commas and Arabic digits before writing a value back into an input.
+
 Server PDF (`build_financial_report_html`) must emit section 14 «تحليل الحساسية العام». Do not wrap
 wide tables (`cashflowTable`, `sensitivityTable`) in `break-inside:avoid` or the last rows are
 clipped. Strip «ترتيب / حذف» from both the print snapshot and the server table renderer.

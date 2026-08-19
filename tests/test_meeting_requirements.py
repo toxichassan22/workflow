@@ -1635,6 +1635,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('sensitivity: collectSensitivityVariables()', index_source)
         self.assertIn("existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')]", index_source)
         self.assertIn('if (source !== \'manual\') updateAutoQtyPreview(tr);', index_source)
+        # Comma-formatted snapshot values used to be written back into type=number inputs,
+        # which blank them, so the finance base and every derived field stayed at zero.
+        self.assertIn("cleaned = cleaned.replace(/[٠-٩]/g, ch => String('٠١٢٣٤٥٦٧٨٩'.indexOf(ch)));", index_source)
+        self.assertIn('function financialInputNumber(value, fallback = 0)', index_source)
+        self.assertIn('if (isFinancialNumericControl(input)) {', index_source)
+        self.assertIn('inputs[el.id] = isFinancialNumericControl(el) ? parseNumber(el.value) : (el.value ?? \'\');', index_source)
+        self.assertIn('value="${financialInputNumber(d.qty, 0)}"', index_source)
         client = self.app.test_client()
         with patch.object(self.application_module, 'generate_financial_pdf') as generate_pdf:
             response = client.post('/api/financial-study/export', headers=self._headers(self.token_a), json={

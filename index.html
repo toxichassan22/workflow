@@ -11529,6 +11529,11 @@
         if (option) input.value = option.value;
         return;
       }
+      if (isFinancialNumericControl(input)) {
+        const raw = String(value ?? '').trim();
+        input.value = raw === '' ? '' : String(parseNumber(raw));
+        return;
+      }
       input.value = String(value);
     }
 
@@ -11542,6 +11547,8 @@
     function hydrateFinancialStudyModel(raw, fallbackComponents = []) {
       const snapshot = parseFinancialStudySnapshot(raw) || (Array.isArray(fallbackComponents) && fallbackComponents.length ? { dynamicRows: { components: fallbackComponents } } : null);
       if (!snapshot) return;
+      const financialRoot = document.getElementById('section-financial-calc');
+      if (typeof enhanceNumericInputs === 'function' && financialRoot) enhanceNumericInputs(financialRoot);
       Object.entries(snapshot.inputs || {}).forEach(([id, value]) => setFinancialSnapshotInput(id, value));
       const rows = { ...(snapshot.dynamicRows || {}) };
       if (!Array.isArray(rows.components) && Array.isArray(fallbackComponents) && fallbackComponents.length) rows.components = fallbackComponents;
@@ -13947,7 +13954,20 @@
     const nf = new Intl.NumberFormat('en-US');
     function money(n) { return nf.format(Math.round(Number(n) || 0)) }
     function rawNum(n) { return Number(n || 0) }
-    function parseNumber(value) { const cleaned = String(value ?? '').replace(/,/g, '').replace(/\s/g, '').trim(); const n = Number(cleaned); return Number.isFinite(n) ? n : 0 }
+    function parseNumber(value) {
+      let cleaned = String(value ?? '').trim();
+      cleaned = cleaned.replace(/[٠-٩]/g, ch => String('٠١٢٣٤٥٦٧٨٩'.indexOf(ch)));
+      cleaned = cleaned.replace(/[٬,]/g, '').replace(/٫/g, '.').replace(/\s/g, '');
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : 0;
+    }
+    function isFinancialNumericControl(el) {
+      return !!el && el.tagName === 'INPUT' && (el.type === 'number' || el.classList.contains('numeric-input') || el.inputMode === 'decimal');
+    }
+    function financialInputNumber(value, fallback = 0) {
+      if (value == null || String(value).trim() === '') return fallback;
+      return parseNumber(value);
+    }
     function num(id) { return parseNumber(document.getElementById(id)?.value) }
     function val(id) { return document.getElementById(id)?.value || '' }
     function reportFieldValue(id) {
@@ -14344,6 +14364,7 @@
         createProjectSectionHeader('section-financial-calc', 'الدراسة المالية والمؤشرات')
       );
       form.appendChild(div);
+      enhanceNumericInputs(div);
 
       setTimeout(() => {
         syncFinancialFromTimeline();
@@ -14353,7 +14374,7 @@
     }
 
     function addComponent(d = {}) {
-      const tb = document.querySelector('#componentsTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.componentKey = d.id || ('p_' + Date.now() + '_' + Math.random().toString(16).slice(2)); const units = d.units ?? 1, unitArea = d.unitArea ?? 0, model = d.investmentModel || (d.leasable === 'no' ? 'nonRevenue' : 'operating'); const suggestedArea = Number(units || 0) * Number(unitArea || 0); const builtArea = d.builtArea ?? d.totalArea ?? suggestedArea; const revenueArea = d.revenueArea ?? (model === 'nonRevenue' ? 0 : (d.totalArea ?? suggestedArea)); tr.innerHTML = `
+      const tb = document.querySelector('#componentsTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.componentKey = d.id || ('p_' + Date.now() + '_' + Math.random().toString(16).slice(2)); const units = financialInputNumber(d.units, 1), unitArea = financialInputNumber(d.unitArea, 0), model = d.investmentModel || (d.leasable === 'no' ? 'nonRevenue' : 'operating'); const suggestedArea = units * unitArea; const builtArea = financialInputNumber(d.builtArea ?? d.totalArea, suggestedArea); const revenueArea = financialInputNumber(d.revenueArea, (model === 'nonRevenue' ? 0 : financialInputNumber(d.totalArea, suggestedArea))); tr.innerHTML = `
     <td data-field="name"><input value="${d.name || ''}" placeholder="مثال: معارض سيارات"></td>
     <td data-field="useType"><select>${selectHtml(useTypes, d.useType || 'retail')}</select></td>
     <td data-field="units"><input type="number" value="${units}"></td>
@@ -14385,10 +14406,10 @@
         <input type="text" value="${d.formula || 'A * B * C * D / 100'}" placeholder="A * B * C * D / 100">
       </div>
     </td>
-    <td data-field="qty"><input type="number" value="${d.qty ?? 0}"><span class="help input miniHelp"></span></td>
-    <td data-field="price"><input type="number" value="${d.price ?? 0}"><span class="help input miniHelp"></span></td>
-    <td data-field="period"><input type="number" value="${d.period ?? 1}"><span class="help input miniHelp"></span></td>
-    <td data-field="occupancy"><input type="number" value="${d.occupancy ?? 100}"><span class="help input miniHelp"></span></td>
+    <td data-field="qty"><input type="number" value="${financialInputNumber(d.qty, 0)}"><span class="help input miniHelp"></span></td>
+    <td data-field="price"><input type="number" value="${financialInputNumber(d.price, 0)}"><span class="help input miniHelp"></span></td>
+    <td data-field="period"><input type="number" value="${financialInputNumber(d.period, 1)}"><span class="help input miniHelp"></span></td>
+    <td data-field="occupancy"><input type="number" value="${financialInputNumber(d.occupancy, 100)}"><span class="help input miniHelp"></span></td>
     <td class="row-result revResult">0</td>
     <td>${rowActionsHtml()}</td>`;
       tb.appendChild(tr);
@@ -14406,8 +14427,8 @@
     function addScheduleStage(d = {}) {
       const tb = document.querySelector('#scheduleTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.stageYear = String(d.year ?? 1); tr.innerHTML = `
     <td data-field="name"><input value="${escapeHtml(d.name || '')}" readonly class="readonly-highlight" title="تُعدّل من قسم الجدول الزمني"></td>
-    <td data-field="costPct"><input type="number" min="0" value="${d.costPct ?? 0}"></td>
-    <td data-field="devPct"><input type="number" min="0" value="${d.devPct ?? 0}"></td>
+    <td data-field="costPct"><input type="number" min="0" value="${financialInputNumber(d.costPct, 0)}"></td>
+    <td data-field="devPct"><input type="number" min="0" value="${financialInputNumber(d.devPct, 0)}"></td>
     <td class="row-result stageCost">0</td>
     <td class="row-result stageDevPayment">0</td>`;
       tb.appendChild(tr);
@@ -14418,7 +14439,7 @@
 
     function addFinanceDrawYear(d = {}) {
       const tb = document.querySelector('#financeDrawTable tbody'); if (!tb) return; const tr = document.createElement('tr');
-      tr.innerHTML = `<td data-field="year"><input type="number" min="1" value="${d.year ?? 1}" readonly></td><td data-field="drawPct"><input type="number" min="0" value="${d.drawPct ?? 0}"></td><td class="row-result financeDrawAmount">0</td>`;
+      tr.innerHTML = `<td data-field="year"><input type="number" min="1" value="${financialInputNumber(d.year, 1)}" readonly></td><td data-field="drawPct"><input type="number" min="0" value="${financialInputNumber(d.drawPct, 0)}"></td><td class="row-result financeDrawAmount">0</td>`;
       tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr);
     }
     function syncFinanceDrawPlan(plan) {
@@ -14430,7 +14451,7 @@
     }
     function addFinanceRepaymentYear(d = {}) {
       const tb = document.querySelector('#financeRepaymentTable tbody'); if (!tb) return; const tr = document.createElement('tr');
-      tr.innerHTML = `<td data-field="year"><input type="number" min="1" value="${d.year ?? 1}" readonly></td><td data-field="repaymentPct"><input type="number" min="0" value="${d.repaymentPct ?? 0}"></td><td class="row-result financeRepaymentAmount">0</td>`;
+      tr.innerHTML = `<td data-field="year"><input type="number" min="1" value="${financialInputNumber(d.year, 1)}" readonly></td><td data-field="repaymentPct"><input type="number" min="0" value="${financialInputNumber(d.repaymentPct, 0)}"></td><td class="row-result financeRepaymentAmount">0</td>`;
       tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr);
     }
     function syncFinanceRepaymentPlan(plan) {
@@ -14450,18 +14471,18 @@
     }
     function addFundAdditionalFee(d = {}) {
       const tb = document.querySelector('#fundAdditionalFeesTable tbody'); if (!tb) return; const tr = document.createElement('tr');
-      tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: أتعاب التأسيس والهيكلة"></td><td data-field="method"><select>${selectHtml(fundAdditionalFeeMethods, d.method || 'fixed')}</select><span class="help formula fundAdditionalFeeFormula"></span></td><td data-field="value"><input type="number" min="0" value="${d.value ?? 0}"></td><td data-field="startYear"><input type="number" min="1" value="${d.startYear ?? 1}"></td><td data-field="endYear"><input type="number" min="1" value="${d.endYear ?? (d.startYear ?? 1)}"></td><td data-field="recurrence"><select><option value="once" ${d.recurrence === 'annual' ? '' : 'selected'}>مرة واحدة</option><option value="annual" ${d.recurrence === 'annual' ? 'selected' : ''}>سنوي</option></select></td><td class="row-result fundAdditionalFeeResult">0</td><td>${rowActionsHtml()}</td>`;
+      tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: أتعاب التأسيس والهيكلة"></td><td data-field="method"><select>${selectHtml(fundAdditionalFeeMethods, d.method || 'fixed')}</select><span class="help formula fundAdditionalFeeFormula"></span></td><td data-field="value"><input type="number" min="0" value="${financialInputNumber(d.value, 0)}"></td><td data-field="startYear"><input type="number" min="1" value="${financialInputNumber(d.startYear, 1)}"></td><td data-field="endYear"><input type="number" min="1" value="${financialInputNumber(d.endYear, financialInputNumber(d.startYear, 1))}"></td><td data-field="recurrence"><select><option value="once" ${d.recurrence === 'annual' ? '' : 'selected'}>مرة واحدة</option><option value="annual" ${d.recurrence === 'annual' ? 'selected' : ''}>سنوي</option></select></td><td class="row-result fundAdditionalFeeResult">0</td><td>${rowActionsHtml()}</td>`;
       tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); tr.querySelectorAll('select').forEach(x => x.addEventListener('change', calculateAll)); enhanceNumericInputs(tr); if (!window.__batchLoading) calculateAll();
     }
     function collectFundAdditionalFees() { return [...document.querySelectorAll('#fundAdditionalFeesTable tbody tr')].map(tr => ({ name: tr.querySelector('[data-field="name"] input')?.value || '', method: tr.querySelector('[data-field="method"] select')?.value || 'fixed', value: parseNumber(tr.querySelector('[data-field="value"] input')?.value), startYear: parseNumber(tr.querySelector('[data-field="startYear"] input')?.value) || 1, endYear: parseNumber(tr.querySelector('[data-field="endYear"] input')?.value) || 1, recurrence: tr.querySelector('[data-field="recurrence"] select')?.value || 'once' })) }
     function fundAdditionalFeeFormulaText(method) { return { fixed: 'المبلغ المدخل مباشرة', percentFundCapital: 'رأس مال الصندوق × النسبة', percentProjectCost: 'إجمالي تكلفة المشروع × النسبة', percentExit: 'إجمالي قيمة التخارج × النسبة', percentProfit: 'الربح السنوي الموجب × النسبة' }[method] || '—' }
     function calculateFundAdditionalFee(method, value, bases = {}) { const entered = Math.max(0, Number(value) || 0); if (method === 'fixed') return entered; if (method === 'percentFundCapital') return Math.max(0, Number(bases.fundCapital) || 0) * entered / 100; if (method === 'percentProjectCost') return Math.max(0, Number(bases.projectCost) || 0) * entered / 100; if (method === 'percentExit') return Math.max(0, Number(bases.exitValue) || 0) * entered / 100; if (method === 'percentProfit') return Math.max(0, Number(bases.profit) || 0) * entered / 100; return 0 }
-    function addOccupancyRampYear(d = {}) { const tb = document.querySelector('#occupancyRampTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="operationYear"><input type="number" value="${d.operationYear ?? 1}" readonly></td><td data-field="studyYear"><input type="number" value="${d.studyYear ?? ((num('developmentYears') || 0) + (d.operationYear || 1))}" readonly></td><td data-field="reachPct"><input type="number" min="0" max="100" value="${d.reachPct ?? 100}"></td><td class="row-result rampRevenue">0</td>`; tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr) }
+    function addOccupancyRampYear(d = {}) { const tb = document.querySelector('#occupancyRampTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="operationYear"><input type="number" value="${financialInputNumber(d.operationYear, 1)}" readonly></td><td data-field="studyYear"><input type="number" value="${financialInputNumber(d.studyYear, ((num('developmentYears') || 0) + financialInputNumber(d.operationYear, 1)))}" readonly></td><td data-field="reachPct"><input type="number" min="0" max="100" value="${financialInputNumber(d.reachPct, 100)}"></td><td class="row-result rampRevenue">0</td>`; tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr) }
     function syncOccupancyRamp(plan) { const years = Math.max(1, Math.min(40, Math.round(num('operationYears') || 1))), developmentYears = Math.max(1, Math.round(num('developmentYears') || 1)), tb = document.querySelector('#occupancyRampTable tbody'); if (!tb) return; const existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')].map(tr => ({ operationYear: parseNumber(tr.querySelector('[data-field="operationYear"] input')?.value), reachPct: parseNumber(tr.querySelector('[data-field="reachPct"] input')?.value) })); tb.innerHTML = ''; const defaults = [60, 75, 90, 100]; for (let operationYear = 1; operationYear <= years; operationYear++) { const found = existing.find(r => Number(r.operationYear) === operationYear); addOccupancyRampYear(found || { operationYear, studyYear: developmentYears + operationYear, reachPct: defaults[operationYear - 1] ?? 100 }); } }
     function occupancyReachForYear(operationYear) { if (operationYear < 1) return 0; const row = [...document.querySelectorAll('#occupancyRampTable tbody tr')].find(tr => parseNumber(tr.querySelector('[data-field="operationYear"] input')?.value) === operationYear); return Math.max(0, Math.min(100, parseNumber(row?.querySelector('[data-field="reachPct"] input')?.value))) / 100 }
-    function addCost(d = {}) { const tb = document.querySelector('#costTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: تكلفة المباني"></td><td data-field="class"><select>${selectHtml(costClasses, d.class || 'execution')}</select></td><td data-field="method"><select>${selectHtml(costMethods, d.method || 'areaCost')}</select><span class="help formula costFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A * B * C'}" placeholder="A * B * C"></div></td><td data-field="qty"><input type="number" value="${d.qty ?? 0}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${d.price ?? 0}"><span class="help input miniHelp"></span></td><td data-field="duration"><input type="number" value="${d.duration ?? 1}"><span class="help input miniHelp"></span></td><td class="row-result costResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
-    function addOpex(d = {}) { const tb = document.querySelector('#opexTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: تشغيل شهري"></td><td data-field="method"><select>${selectHtml(opexMethods, d.method || 'monthlyFixed')}</select><span class="help formula opexFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A * B'}" placeholder="A * B"></div></td><td data-field="qty"><input type="number" value="${d.qty ?? 0}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${d.price ?? 0}"><span class="help input miniHelp"></span></td><td class="row-result opexResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
-    function addExternal(d = {}) { const tb = document.querySelector('#externalTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: رعاية سنوية"></td><td data-field="type"><select>${selectHtml(externalTypes, d.type || 'revenue')}</select></td><td data-field="method"><select>${selectHtml(externalMethods, d.method || 'fixed')}</select><span class="help formula externalFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A'}" placeholder="B * C"></div></td><td data-field="base"><input type="number" value="${d.base ?? 0}"><span class="help input miniHelp"></span></td><td data-field="qty"><input type="number" value="${d.qty ?? 0}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${d.price ?? 0}"><span class="help input miniHelp"></span></td><td data-field="startYear"><input type="number" value="${d.startYear ?? 1}"></td><td data-field="endYear"><input type="number" value="${d.endYear ?? 10}"></td><td data-field="growth"><input type="number" value="${d.growth ?? 0}"></td><td class="row-result externalResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
+    function addCost(d = {}) { const tb = document.querySelector('#costTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: تكلفة المباني"></td><td data-field="class"><select>${selectHtml(costClasses, d.class || 'execution')}</select></td><td data-field="method"><select>${selectHtml(costMethods, d.method || 'areaCost')}</select><span class="help formula costFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A * B * C'}" placeholder="A * B * C"></div></td><td data-field="qty"><input type="number" value="${financialInputNumber(d.qty, 0)}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${financialInputNumber(d.price, 0)}"><span class="help input miniHelp"></span></td><td data-field="duration"><input type="number" value="${financialInputNumber(d.duration, 1)}"><span class="help input miniHelp"></span></td><td class="row-result costResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
+    function addOpex(d = {}) { const tb = document.querySelector('#opexTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: تشغيل شهري"></td><td data-field="method"><select>${selectHtml(opexMethods, d.method || 'monthlyFixed')}</select><span class="help formula opexFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A * B'}" placeholder="A * B"></div></td><td data-field="qty"><input type="number" value="${financialInputNumber(d.qty, 0)}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${financialInputNumber(d.price, 0)}"><span class="help input miniHelp"></span></td><td class="row-result opexResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
+    function addExternal(d = {}) { const tb = document.querySelector('#externalTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: رعاية سنوية"></td><td data-field="type"><select>${selectHtml(externalTypes, d.type || 'revenue')}</select></td><td data-field="method"><select>${selectHtml(externalMethods, d.method || 'fixed')}</select><span class="help formula externalFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A'}" placeholder="B * C"></div></td><td data-field="base"><input type="number" value="${financialInputNumber(d.base, 0)}"><span class="help input miniHelp"></span></td><td data-field="qty"><input type="number" value="${financialInputNumber(d.qty, 0)}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${financialInputNumber(d.price, 0)}"><span class="help input miniHelp"></span></td><td data-field="startYear"><input type="number" value="${financialInputNumber(d.startYear, 1)}"></td><td data-field="endYear"><input type="number" value="${financialInputNumber(d.endYear, 10)}"></td><td data-field="growth"><input type="number" value="${financialInputNumber(d.growth, 0)}"></td><td class="row-result externalResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
 
     function safeCustomFormula(formula, vars = {}) {
       formula = String(formula || '').trim(); if (!formula) return 0;
@@ -14711,7 +14732,7 @@
     }
     function updateGraceRevenueOptions() { const select = document.getElementById('graceRevenueId'); if (!select) return; const current = select.value; const rows = [...document.querySelectorAll('#revenueTable tbody tr')].filter(tr => tr.querySelector('[data-field="method"] select')?.value !== 'areaSale'); select.innerHTML = rows.map((tr, i) => `<option value="${tr.dataset.revenueKey}">${tr.querySelector('[data-field="name"] input')?.value || `إيراد ${i + 1}`}</option>`).join(''); if (rows.some(tr => tr.dataset.revenueKey === current)) select.value = current }
     function graceYearFraction(year) { if (val('graceEnabled') !== 'yes') return 0; const start = (Math.max(1, Math.round(num('graceStartYear') || 1)) - 1) * 12, end = start + Math.max(0, num('graceDurationMonths')), ys = (year - 1) * 12, ye = year * 12; return Math.max(0, Math.min(ye, end) - Math.max(ys, start)) / 12 }
-    function addGraceScheduleRow(d = {}) { const tb = document.querySelector('#graceScheduleTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="year"><input type="number" min="1" value="${d.year ?? 1}"></td><td data-field="amount"><input type="number" min="0" value="${d.amount ?? 0}"></td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr) }
+    function addGraceScheduleRow(d = {}) { const tb = document.querySelector('#graceScheduleTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="year"><input type="number" min="1" value="${financialInputNumber(d.year, 1)}"></td><td data-field="amount"><input type="number" min="0" value="${financialInputNumber(d.amount, 0)}"></td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr) }
     function collectGraceSchedule() { return [...document.querySelectorAll('#graceScheduleTable tbody tr')].map(tr => ({ year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1, amount: Math.max(0, parseNumber(tr.querySelector('[data-field="amount"] input')?.value)) })) }
     function setConditionalVisibility(target, visible) {
       const element = typeof target === 'string' ? document.getElementById(target) : target;
@@ -15131,7 +15152,9 @@
         row.querySelectorAll('[data-field]').forEach(cell => {
           const control = cell.querySelector('input,select,textarea');
           if (!control) return;
-          result[cell.dataset.field] = control.type === 'checkbox' ? Boolean(control.checked) : control.value;
+          result[cell.dataset.field] = control.type === 'checkbox'
+            ? Boolean(control.checked)
+            : (isFinancialNumericControl(control) ? parseNumber(control.value) : control.value);
           if (cell.dataset.field === 'customFormula') result.formula = control.value;
         });
         if (tableId === 'scheduleTable') result.year = row.dataset.stageYear || result.year || 1;
@@ -15174,7 +15197,14 @@
       const inputs = {};
       root?.querySelectorAll('input[id],select[id],textarea[id]').forEach(el => {
         if (el.type === 'hidden') return;
-        inputs[el.id] = el.type === 'checkbox' ? !!el.checked : (el.value ?? '');
+        if (el.type === 'checkbox') {
+          inputs[el.id] = !!el.checked;
+          return;
+        }
+        // Persist raw numbers. money() writes "189,750,000", and putting that back into a
+        // type=number field blanks the value, so the next calculateAll() treats the whole
+        // finance base as zero.
+        inputs[el.id] = isFinancialNumericControl(el) ? parseNumber(el.value) : (el.value ?? '');
       });
       const tables = {};
       root?.querySelectorAll('table[id]').forEach(table => {
