@@ -1756,6 +1756,55 @@
       font-size: 13px;
       line-height: 1.6;
     }
+    #section-executive-content .executive-content-body {
+      grid-column: 1 / -1;
+    }
+    #section-executive-content .executive-block {
+      margin: 0 0 18px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+    #section-executive-content .executive-block h4 {
+      margin: 0 0 10px;
+      color: var(--p);
+      font-size: 15px;
+    }
+    #section-executive-content .executive-facts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    #section-executive-content .executive-fact {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--soft);
+    }
+    #section-executive-content .executive-fact strong {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    #section-executive-content .executive-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 8px 0;
+    }
+    #section-executive-content .executive-note {
+      min-height: 18px;
+      margin: 0 0 8px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    #section-executive-content textarea {
+      width: 100%;
+      min-height: 110px;
+      resize: vertical;
+    }
 
     /* THE VIEW Financial Model Styles - Complete Scoped Copy from THE-VIEW-Financial-Model-FINAL-v2.html */
     .project-form-content #section-financial-calc.tenant-form-section.active,
@@ -9285,21 +9334,231 @@
     let editingProjectLocalTeamId = null;
     let projectLocalTeamDraft = null;
 
+    const EXECUTIVE_CONTENT_BLOCKS = [
+      { key: 'brief', label: 'نبذة المشروع' },
+      { key: 'opportunity', label: 'الفرصة الاستثمارية' },
+      { key: 'features', label: 'المميزات وفرص الاستثمار' },
+      { key: 'swot', label: 'تحليل SWOT' },
+      { key: 'risks', label: 'دراسة المخاطر' },
+      { key: 'summary', label: 'الملخص التنفيذي' }
+    ];
+    const EXECUTIVE_SWOT_FIELDS = [
+      { key: 'strengths', label: 'نقاط القوة' },
+      { key: 'weaknesses', label: 'نقاط الضعف' },
+      { key: 'opportunities', label: 'الفرص' },
+      { key: 'threats', label: 'التهديدات' }
+    ];
+
+    function emptyExecutiveContentState() {
+      return {
+        brief: '',
+        opportunity: '',
+        features: '',
+        swot: { strengths: '', weaknesses: '', opportunities: '', threats: '' },
+        risks: '',
+        summary: ''
+      };
+    }
+
+    function getExecutiveContentState() {
+      const parsed = parseStoredLandTable(tenantProjectData.executive_content);
+      const base = emptyExecutiveContentState();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return base;
+      return {
+        ...base,
+        ...parsed,
+        swot: { ...base.swot, ...((parsed.swot && typeof parsed.swot === 'object') ? parsed.swot : {}) }
+      };
+    }
+
+    function setExecutiveContentState(state) {
+      const next = { ...emptyExecutiveContentState(), ...(state || {}) };
+      next.swot = { ...emptyExecutiveContentState().swot, ...(next.swot || {}) };
+      tenantProjectData.executive_content = next;
+      const hidden = document.getElementById('executiveContentData');
+      if (hidden) hidden.value = JSON.stringify(next);
+      triggerAutoSaveDraft();
+    }
+
+    function collectExecutiveContentFromDom() {
+      const state = emptyExecutiveContentState();
+      EXECUTIVE_CONTENT_BLOCKS.forEach(item => {
+        if (item.key === 'swot') {
+          EXECUTIVE_SWOT_FIELDS.forEach(field => {
+            state.swot[field.key] = document.getElementById('executiveSwot_' + field.key)?.value || '';
+          });
+          return;
+        }
+        state[item.key] = document.getElementById('executiveText_' + item.key)?.value || '';
+      });
+      return state;
+    }
+
+    function persistExecutiveContentFromDom() {
+      setExecutiveContentState(collectExecutiveContentFromDom());
+    }
+
+    function collectExecutiveFinancialIndicators() {
+      const read = (id) => (document.getElementById(id)?.textContent || '').trim();
+      const indicators = {
+        projectCost: read('resProjectCost'),
+        totalInvestment: read('resTotalInvestmentCost'),
+        saleRevenue: read('resSaleRevenue'),
+        noiY1: read('resNOIY1'),
+        roi: read('resROI'),
+        projectIrr: read('resProjectIRR'),
+        equityIrr: read('resIRR'),
+        payback: read('resPayback')
+      };
+      return Object.fromEntries(Object.entries(indicators).filter(([, value]) => value && value !== '0' && value !== '0%'));
+    }
+
+    function collectExecutiveContentFacts() {
+      const market = typeof getMarketStudyState === 'function' ? getMarketStudyState() : {};
+      const components = (typeof getComponentRowsData === 'function' ? getComponentRowsData() : [])
+        .map(row => row.name).filter(Boolean);
+      return {
+        projectName: tenantProjectData.project_name || '',
+        projectType: typeof selectedProjectTypeMains === 'function' ? selectedProjectTypeMains() : (tenantProjectData.project_type || ''),
+        projectSubtype: typeof selectedProjectSubtypes === 'function' ? selectedProjectSubtypes() : (tenantProjectData.project_subtype || ''),
+        activityClass: document.querySelector('#tenantProjectForm [data-key="activity_class"]')?.value || tenantProjectData.activity_class || '',
+        projectLevel: document.querySelector('#tenantProjectForm [data-key="project_level"]')?.value || tenantProjectData.project_level || '',
+        projectStage: document.querySelector('#tenantProjectForm [data-key="project_stage"]')?.value || tenantProjectData.project_stage || '',
+        projectIdea: document.querySelector('#tenantProjectForm [data-key="project_idea"]')?.value || tenantProjectData.project_idea || '',
+        targetAudience: typeof groupedAudienceSelection === 'function' ? groupedAudienceSelection() : (tenantProjectData.target_audience || ''),
+        city: tenantProjectData.city || '',
+        district: tenantProjectData.district || '',
+        locationDetail: tenantProjectData.location_detail || '',
+        allowedUses: tenantProjectData.allowed_uses || '',
+        landUseStatus: tenantProjectData.land_use_status || '',
+        siteAnalysis: tenantProjectData.site_analysis || '',
+        components,
+        financialIndicators: collectExecutiveFinancialIndicators(),
+        marketSummary: market.summary || {},
+        marketSwot: market.swot || {},
+        marketDecision: market.decision || ''
+      };
+    }
+
+    function formatExecutiveFact(value) {
+      if (Array.isArray(value)) return value.filter(Boolean).join('، ');
+      if (value && typeof value === 'object') return Object.values(value).filter(Boolean).join('، ');
+      return String(value || '').trim();
+    }
+
+    function renderExecutiveLinkedFacts() {
+      const host = document.getElementById('executiveLinkedFacts');
+      if (!host) return;
+      const facts = collectExecutiveContentFacts();
+      const rows = [
+        ['اسم المشروع', facts.projectName],
+        ['النوع', formatExecutiveFact(facts.projectType)],
+        ['الأنواع الفرعية', formatExecutiveFact(facts.projectSubtype)],
+        ['تصنيف النشاط', facts.activityClass],
+        ['المستوى', facts.projectLevel],
+        ['المرحلة', facts.projectStage],
+        ['فكرة المشروع', facts.projectIdea],
+        ['الفئة المستهدفة', formatExecutiveFact(facts.targetAudience)]
+      ];
+      host.innerHTML = rows.map(([label, value]) =>
+        '<div class="executive-fact"><strong>' + escapeHtml(label) + '</strong>' +
+        escapeHtml(value || 'غير متوفر من البيانات الأساسية') + '</div>'
+      ).join('');
+    }
+
+    function applyExecutiveContentState(state) {
+      const next = { ...emptyExecutiveContentState(), ...(state || {}) };
+      next.swot = { ...emptyExecutiveContentState().swot, ...(next.swot || {}) };
+      EXECUTIVE_CONTENT_BLOCKS.forEach(item => {
+        if (item.key === 'swot') {
+          EXECUTIVE_SWOT_FIELDS.forEach(field => {
+            const input = document.getElementById('executiveSwot_' + field.key);
+            if (input) input.value = next.swot[field.key] || '';
+          });
+          return;
+        }
+        const input = document.getElementById('executiveText_' + item.key);
+        if (input) input.value = next[item.key] || '';
+      });
+      const hidden = document.getElementById('executiveContentData');
+      if (hidden) hidden.value = JSON.stringify(next);
+      tenantProjectData.executive_content = next;
+      renderExecutiveLinkedFacts();
+    }
+
     function addExecutiveContentSection(form, before) {
-      // Placeholder until the owner specifies the fields. The section is in the sidebar so we
-      // can start filling it, but it stays out of the approval map until it is real work.
       const div = document.createElement('div');
       div.className = 'tenant-form-section';
       div.id = 'section-executive-content';
       div.dataset.section = 'section-executive-content';
-      div.dataset.underConstruction = '1';
-      div.appendChild(createProjectSectionHeader('section-executive-content', 'المحتوى التنفيذي', { underConstruction: true }));
+      div.appendChild(createProjectSectionHeader('section-executive-content', 'المحتوى التنفيذي'));
       const body = document.createElement('div');
-      body.style.gridColumn = '1 / -1';
-      body.innerHTML = '<p class="tenant-hint" id="executiveContentStatus">تحت الإنشاء</p>';
+      body.className = 'executive-content-body';
+      const generated = EXECUTIVE_CONTENT_BLOCKS.map(item => {
+        const fields = item.key === 'swot'
+          ? EXECUTIVE_SWOT_FIELDS.map(field =>
+            '<label>' + field.label + '</label><textarea id="executiveSwot_' + field.key + '" rows="4"></textarea>'
+          ).join('')
+          : '<textarea id="executiveText_' + item.key + '" rows="' + (item.key === 'summary' || item.key === 'brief' ? '7' : '5') + '"></textarea>';
+        return '<div class="executive-block" data-executive-block="' + item.key + '">' +
+          '<h4>' + item.label + '</h4>' +
+          '<div class="executive-actions">' +
+          '<button type="button" class="btn primary small" data-executive-generate="' + item.key + '">توليد</button>' +
+          '</div>' +
+          '<p class="tenant-hint executive-note" id="executiveNote_' + item.key + '"></p>' +
+          fields +
+          '</div>';
+      }).join('');
+      body.innerHTML =
+        '<div class="executive-block"><h4>بيانات مرتبطة من البيانات الأساسية</h4>' +
+        '<div id="executiveLinkedFacts" class="executive-facts"></div></div>' +
+        generated +
+        '<input type="hidden" data-key="executive_content" data-type="text" id="executiveContentData">';
       div.appendChild(body);
       if (before) form.insertBefore(div, before);
       else form.appendChild(div);
+      body.querySelectorAll('textarea').forEach(input => input.addEventListener('input', persistExecutiveContentFromDom));
+      body.querySelectorAll('[data-executive-generate]').forEach(button => {
+        button.addEventListener('click', () => generateExecutiveContentBlock(button.dataset.executiveGenerate));
+      });
+    }
+
+    async function generateExecutiveContentBlock(key) {
+      const spec = EXECUTIVE_CONTENT_BLOCKS.find(item => item.key === key);
+      if (!spec) return;
+      const note = document.getElementById('executiveNote_' + key);
+      const button = document.querySelector('[data-executive-generate="' + key + '"]');
+      persistExecutiveContentFromDom();
+      const state = getExecutiveContentState();
+      if (note) note.textContent = '';
+      if (button) button.disabled = true;
+      showLoader('توليد ' + spec.label, 'جاري صياغة النص من المدخلات المعتمدة...', 18);
+      try {
+        const res = await api('POST', '/api/executive-content/generate', {
+          block: key,
+          facts: collectExecutiveContentFacts(),
+          currentText: key === 'swot' ? state.swot : state[key]
+        });
+        if (!res || !res.success) {
+          const message = (res && res.error) || 'تعذر توليد النص. لم يُستبدل النص الحالي.';
+          if (note) note.textContent = message;
+          toast(message);
+          return;
+        }
+        if (key === 'swot') state.swot = { ...state.swot, ...(res.text || {}) };
+        else state[key] = res.text || '';
+        applyExecutiveContentState(state);
+        persistExecutiveContentFromDom();
+        if (note) note.textContent = 'تم التوليد. يمكن التعديل أو إعادة التوليد دون المساس بباقي النصوص.';
+        toast('تم توليد ' + spec.label);
+        updateLoaderProgress(100, 'اكتمل ' + spec.label);
+      } catch (error) {
+        if (note) note.textContent = error.message || 'تعذر توليد النص';
+        toast(error.message || 'تعذر توليد النص');
+      } finally {
+        hideLoader();
+        if (button) button.disabled = false;
+      }
     }
 
     function addTeamSection(form, before) {
@@ -12477,8 +12736,8 @@
 
       // Append order defines the sidebar order: basic, location, land/croquis, timeline,
       // financial, team, market study, executive content, and conceptual 2D. The timeline
-      // comes before the financial study because it feeds it. Executive content is a
-      // placeholder until the owner specifies the fields.
+      // comes before the financial study because it feeds it. Executive content writes
+      // from earlier sections and never invents facts.
       addTimelineTable(form);
       addFinancialCalculations(form);
       addTeamSection(form);
@@ -12527,6 +12786,7 @@
       enhanceProjectClassificationFields();
       refreshAllowedUsesStatusNote();
       applyMarketStudyState(getMarketStudyState());
+      applyExecutiveContentState(getExecutiveContentState());
       persistVisualConceptDraftState();
     }
 
@@ -15949,6 +16209,9 @@
         if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) {
           persistMarketStudyFromDom();
         }
+        if (typeof persistExecutiveContentFromDom === 'function' && document.getElementById('executiveContentData')) {
+          persistExecutiveContentFromDom();
+        }
         if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
         if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
         if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
@@ -18278,6 +18541,7 @@
     async function collectVisualConceptPayload(slotId) {
       if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
       if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) persistMarketStudyFromDom();
+      if (typeof persistExecutiveContentFromDom === 'function' && document.getElementById('executiveContentData')) persistExecutiveContentFromDom();
       persistVisualConceptDraftState();
       let projectData = { ...tenantProjectData };
       if (typeof collectTenantFormData === 'function' && document.getElementById('tenantProjectForm')) {

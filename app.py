@@ -24,6 +24,7 @@ import db
 import auth
 import maps_service
 import market_study
+import executive_content
 import population_service
 import slide_engine
 from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
@@ -206,6 +207,7 @@ FLOOR_DESIGN_IMAGE_HARD_NEGATIVE = (
     'Do not add decorative symbols, pictograms, three-dimensional perspective, isometric view, photorealism, or unrelated UI.'
 )
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
+EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '2500'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 DEPLOYMENT_MARKER_PATH = os.path.join(os.path.dirname(__file__), '.deployed_commit')
 
@@ -9995,6 +9997,69 @@ def _start_market_job(kind, executor):
         'kind': kind,
         'message': 'بدأت دراسة السوق في الخلفية',
     }), 202
+
+
+@app.route('/api/executive-content/generate', methods=['POST'])
+@require_auth
+def api_generate_executive_content():
+    """Rewrite one executive-content block from already collected project facts."""
+    data = request.json or {}
+    key = str(data.get('block') or '').strip()
+    spec = executive_content.block_spec(key)
+    if not spec:
+        return jsonify({'success': False, 'error': 'عنصر محتوى غير صالح'}), 400
+    facts = data.get('facts') if isinstance(data.get('facts'), dict) else {}
+    ready, missing = executive_content.block_ready(key, facts)
+    if not ready:
+        labels = {
+            'basic': 'البيانات الأساسية',
+            'location': 'الموقع',
+            'financial': 'الدراسة المالية',
+            'market': 'دراسة السوق',
+        }
+        needed = ' و'.join(labels.get(name, name) for name in missing) or 'المدخلات المطلوبة'
+        return jsonify({
+            'success': False,
+            'error': 'استكمل ' + needed + ' قبل توليد هذا النص',
+            'missing': missing,
+        }), 400
+    current = data.get('currentText')
+    prompt = executive_content.build_user_prompt(key, facts, current)
+    try:
+        try:
+            response = call_zai_chat(
+                executive_content.SYSTEM_PROMPT, prompt, temperature=0.2,
+                max_tokens=EXECUTIVE_CONTENT_MAX_TOKENS,
+            )
+            raw = extract_chat_content(response, 'EXECUTIVE-CONTENT')
+        except Exception as primary_error:
+            if not OPENROUTER_KEY:
+                raise
+            print(f'[EXECUTIVE CONTENT PRIMARY ERROR] {primary_error}. Trying OpenRouter fallback...')
+            fallback = call_openrouter_chat(
+                executive_content.SYSTEM_PROMPT,
+                prompt,
+                temperature=0.2,
+                max_tokens=EXECUTIVE_CONTENT_MAX_TOKENS,
+                model=LUNA_TEXT_MODEL,
+                response_format={'type': 'json_object'},
+            )
+            raw = _get_chat_response_text(fallback) or extract_chat_content(fallback, 'EXECUTIVE-CONTENT-FALLBACK')
+        parsed = parse_json_object(raw) or {}
+        text = executive_content.parse_generated_block(key, parsed)
+        if key == 'swot':
+            empty = not any(text.values())
+        else:
+            empty = not str(text or '').strip()
+        if empty:
+            return jsonify({'success': False, 'error': 'عاد النموذج نصًا فارغًا. لم يُستبدل النص الحالي.'}), 422
+        return jsonify({'success': True, 'block': key, 'text': text})
+    except Exception as error:
+        print(f'[EXECUTIVE CONTENT AI ERROR] {error}')
+        return jsonify({
+            'success': False,
+            'error': 'تعذر توليد المحتوى التنفيذي: ' + str(error),
+        }), 503
 
 
 @app.route('/api/market-study/catalog', methods=['GET'])

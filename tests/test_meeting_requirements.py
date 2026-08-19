@@ -2390,7 +2390,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         headers = self._headers(self.token_a)
         sections = [
             'basic', 'location', 'land_croquis', 'section-timeline',
-            'section-financial-calc', 'section-team', 'section-market-study', 'section-conceptual-2d',
+            'section-financial-calc', 'section-team', 'section-market-study',
+            'section-executive-content', 'section-conceptual-2d',
         ]
         client.post('/api/project-draft', headers=headers, json={
             'draftData': {'project_name': 'ملف اعتماد'}, 'sectionStatuses': {}, 'status': 'draft'
@@ -3713,19 +3714,59 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(invalid_reference.status_code, 400, invalid_reference.get_json())
         self.assertEqual(invalid_reference.get_json()['error_code'], 'REFERENCE_INVALID')
 
-    def test_executive_content_section_exists_as_under_construction(self):
+    def test_executive_content_section_generates_each_block_from_existing_facts(self):
+        import executive_content
+
+        facts = {
+            'projectName': 'ذا فيو',
+            'projectType': ['سكني', 'فندقي'],
+            'projectIdea': 'منتجع شاطئي',
+            'targetAudience': ['عائلات', 'سياح وزوار'],
+            'city': 'جدة',
+            'financialIndicators': {'roi': '12%'},
+            'marketSummary': {'decision': 'فرصة واعدة بشروط'},
+        }
+        ready, missing = executive_content.block_ready('brief', facts)
+        self.assertTrue(ready)
+        self.assertEqual(missing, [])
+        blocked, needed = executive_content.block_ready('opportunity', {'projectName': 'ذا فيو', 'projectType': 'سكني'})
+        self.assertFalse(blocked)
+        self.assertIn('financial', needed)
+        parsed = executive_content.parse_generated_block('swot', {
+            'strengths': 'موقع بحري', 'weaknesses': '', 'opportunities': 'طلب سياحي', 'threats': ''
+        })
+        self.assertEqual(parsed['strengths'], 'موقع بحري')
+        self.assertEqual(parsed['weaknesses'], '')
+
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn("function addExecutiveContentSection(form, before)", index_source)
         self.assertIn("addExecutiveContentSection(form);", index_source)
         self.assertIn("id = 'section-executive-content'", index_source)
-        self.assertIn("createProjectSectionHeader('section-executive-content', 'المحتوى التنفيذي', { underConstruction: true })", index_source)
-        self.assertIn('id="executiveContentStatus"', index_source)
-        self.assertIn('data-under-construction="1"', index_source)
-        # A placeholder must not enter the approval map or invent fields.
-        self.assertIn('if (sec.dataset.underConstruction === \'1\') return;', index_source)
-        self.assertIn("if (section.dataset.underConstruction === '1') return;", index_source)
-        self.assertNotIn('data-key="executive_content"', index_source)
-        self.assertNotIn('/api/executive-content', index_source)
+        self.assertIn('data-key="executive_content"', index_source)
+        self.assertIn("function generateExecutiveContentBlock(key)", index_source)
+        self.assertIn("api('POST', '/api/executive-content/generate'", index_source)
+        self.assertIn("createProjectSectionHeader('section-executive-content', 'المحتوى التنفيذي')", index_source)
+        self.assertNotIn("underConstruction: true", index_source)
+        self.assertIn("def api_generate_executive_content():", app_source)
+        self.assertIn('لا تخترع', (ROOT / 'executive_content.py').read_text(encoding='utf-8'))
+
+        client = self.app.test_client()
+        refused = client.post('/api/executive-content/generate', headers=self._headers(self.token_a), json={
+            'block': 'opportunity',
+            'facts': {'projectName': 'ذا فيو', 'projectType': 'سكني'},
+        })
+        self.assertEqual(refused.status_code, 400, refused.get_json())
+        self.assertIn('استكمل', refused.get_json()['error'])
+
+        with patch.object(self.application_module, 'call_zai_chat', return_value={'choices': [{'message': {'content': '{"text":"نبذة من الفكرة فقط"}'}}]}), \
+             patch.object(self.application_module, 'extract_chat_content', return_value='{"text":"نبذة من الفكرة فقط"}'):
+            generated = client.post('/api/executive-content/generate', headers=self._headers(self.token_a), json={
+                'block': 'brief',
+                'facts': facts,
+            })
+        self.assertEqual(generated.status_code, 200, generated.get_json())
+        self.assertEqual(generated.get_json()['text'], 'نبذة من الفكرة فقط')
 
     def test_market_study_fields_and_section_are_wired(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')

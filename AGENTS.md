@@ -208,9 +208,12 @@ authenticated `GET /api/project-files/<id>` preview route. `team_logo` is in
 
 Section order is `basic → location → land_croquis → timeline → financial → team → market study → executive content → conceptual 2D`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order.
-`section-executive-content` is currently a placeholder (`data-under-construction="1"`). It appears in
-the sidebar as «تحت الإنشاء» and must stay out of `initialStatuses`, `approveAllSections()`, and the
-server approval map until the owner specifies its fields. Do not invent those fields.
+`section-executive-content` is a real section after the market study. Linked facts come from the
+basic fields only (name, type, subtypes, class, level, stage, idea, audience). Generated texts —
+brief, opportunity, features, SWOT, risks, executive summary — live in `draft_data.executive_content`
+via the hidden `executive_content` input. Each text generates, edits, and regenerates on its own.
+The model may rephrase facts already collected; it must not invent numbers, uses, or risks. Gate
+generation on the required earlier sections, not on this section's own approval.
 
 ## Market study (دراسة السوق)
 
