@@ -1459,6 +1459,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Empty timeline warns rather than silently zeroing the cost distribution.
         self.assertIn('id="timelineStagesWarning"', index_source)
         self.assertIn('warning.hidden = namedStages.length > 0', index_source)
+        self.assertIn('if (!namedStages.length) return;', index_source)
+        self.assertIn("if (namedStages.length && devYearsInput && Number.isFinite(timelineYears) && timelineYears > 0)", index_source)
 
         # The stage table lost its actions column, so the report must stop dropping the last one.
         self.assertIn("reportTableSnapshot('scheduleTable', false)", index_source)
@@ -1663,6 +1665,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         export_at = export_source.index('def api_export_financial_study()')
         self.assertIn('@require_auth', export_source[export_at - 80:export_at])
         self.assertNotIn('@require_permission(\'export_files\')', export_source[export_at - 80:export_at])
+        self.assertIn("Playwright failed ({error}); falling back to PyMuPDF", export_source)
+        import tempfile
+        from pathlib import Path
+        with self.app.app_context():
+            report = self.application_module.build_financial_report_html('مشروع مالي', model, {}, self.tenant_a)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                out = Path(temp_dir) / 'study.pdf'
+                with patch.dict('sys.modules', {'playwright': None, 'playwright.sync_api': None}):
+                    self.application_module.generate_financial_pdf(report, out)
+                self.assertTrue(out.exists())
+                self.assertGreater(out.stat().st_size, 100)
 
     def test_land_document_normalizer_keeps_each_parcel_and_four_directions(self):
         result = self.application_module._normalize_land_document_result({

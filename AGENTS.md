@@ -310,7 +310,8 @@ block and draft hydration. Timeline years are **calendar** years while the cashf
 **relative** to project start, so the conversion is `calendarYear - tlStartYear + 1`, clamped to
 `[1, developmentYears]`. Developer and development-cost amounts are spread evenly across every
 cashflow year the phase covers (`stageYear` through `stageEndYear` from «إلى»), not dumped into
-the start year only.
+the start year only. If the timeline has no named phases, do not rebuild/wipe `scheduleTable`
+or overwrite `developmentYears`; keep the hydrated financial stages.
 
 Each phase row has a start year/quarter and a duration in months. `computeTimelineEnd()` fills the
 read-only «إلى» cell (`endYear` / `endQuarter` in `timeline_table_data`). Clients only type the
@@ -344,6 +345,7 @@ clipped. Strip «ترتيب / حذف» from both the print snapshot and the serv
 `POST /api/financial-study/export` is authenticated only (`@require_auth`); do not put
 `export_files` back on it — employees who can fill the study must be able to download it.
 The financial section itself needs a visible `حفظ كمسودة` next to the PDF button.
+`generate_financial_pdf()` must fall back to PyMuPDF when Playwright is missing on the host.
 
 Section approval is one toggle: `اعتماد` / `الغاء الاعتماد`. Approved sections get
 `.section-locked` and every control inside is disabled except the toggle. Two separate

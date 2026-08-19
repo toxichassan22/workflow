@@ -6843,17 +6843,38 @@ table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px
 
 
 def generate_financial_pdf(html, output_path):
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'])
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+            )
+            try:
+                page = browser.new_page()
+                page.set_content(html, wait_until='load', timeout=45000)
+                try:
+                    page.evaluate('() => document.fonts && document.fonts.ready')
+                except Exception:
+                    pass
+                page.pdf(
+                    path=str(output_path),
+                    format='A4',
+                    landscape=True,
+                    print_background=True,
+                    margin={'top': '12mm', 'right': '12mm', 'bottom': '12mm', 'left': '12mm'},
+                )
+            finally:
+                browser.close()
+            return output_path
+    except Exception as error:
+        print(f'[FINANCIAL PDF] Playwright failed ({error}); falling back to PyMuPDF')
+        import fitz
+        document = fitz.open('html', html.encode('utf-8'))
         try:
-            page = browser.new_page()
-            page.set_content(html, wait_until='load')
-            page.evaluate('() => document.fonts.ready')
-            page.pdf(path=str(output_path), format='A4', landscape=True, print_background=True,
-                     margin={'top': '12mm', 'right': '12mm', 'bottom': '12mm', 'left': '12mm'})
+            document.save(output_path)
         finally:
-            browser.close()
+            document.close()
+        return output_path
 
 
 @app.route('/api/financial-study/validate', methods=['POST'])
@@ -6893,7 +6914,7 @@ def api_export_financial_study():
         print(f'[FINANCIAL PDF ERROR] {error}')
         if os.path.exists(output_path):
             os.unlink(output_path)
-        return jsonify({'success': False, 'error': 'تعذر إنشاء ملف الدراسة المالية'}), 500
+        return jsonify({'success': False, 'error': 'تعذر إنشاء ملف الدراسة المالية: ' + str(error)}), 500
 
 
 @app.route('/api/export', methods=['POST'])

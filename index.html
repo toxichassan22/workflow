@@ -15741,7 +15741,7 @@
       const startYear = parseInt(document.getElementById('tlStartYear')?.value, 10);
       const namedStages = collectTimelineRows().filter(row => row.name.trim());
 
-      if (devYearsInput && Number.isFinite(timelineYears) && timelineYears > 0) {
+      if (namedStages.length && devYearsInput && Number.isFinite(timelineYears) && timelineYears > 0) {
         devYearsInput.value = String(timelineYears);
       }
       const devYears = Math.max(1, parseInt(devYearsInput?.value, 10) || 1);
@@ -15763,9 +15763,14 @@
         if (!name) return;
         previous.set(name, {
           costPct: tr.querySelector('[data-field="costPct"] input')?.value ?? 0,
-          devPct: tr.querySelector('[data-field="devPct"] input')?.value ?? 0
+          devPct: tr.querySelector('[data-field="devPct"] input')?.value ?? 0,
+          year: tr.dataset.stageYear,
+          endYear: tr.dataset.stageEndYear
         });
       });
+      // An empty timeline used to wipe a just-restored schedule table. Keep the
+      // already-hydrated stages until the user actually names phases.
+      if (!namedStages.length) return;
 
       const wasBatching = window.__batchLoading;
       window.__batchLoading = true;
@@ -15787,8 +15792,8 @@
           name,
           year: startRelative,
           endYear: Math.max(startRelative, Math.min(devYears, endRelative || startRelative)),
-          costPct: kept.costPct ?? 0,
-          devPct: kept.devPct ?? 0
+          costPct: kept.costPct ?? previous.get(name)?.costPct ?? 0,
+          devPct: kept.devPct ?? previous.get(name)?.devPct ?? 0
         });
       });
       window.__batchLoading = wasBatching;
