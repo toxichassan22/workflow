@@ -224,6 +224,7 @@ SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
 ACCESS_ROADS_RENDER_VERSION = 'v11-stable-road-names'
 MAP_HIGHLIGHT_RENDER_VERSION = 'survey-polygon-v3'
+MAP_LABEL_RENDER_VERSION = 'named-labels-v2'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
     'feature:poi.business|visibility:off',
@@ -785,10 +786,79 @@ def _apply_map_overlay(image_path, dark_factor=0.35, gradient=True):
         return False
 
 
+def _draw_marker_name_label(draw, px, anchor_y, text, img_w, img_h, occupied):
+    clean_text = _strip_arabic_diacritics(str(text or '').strip())
+    if not clean_text:
+        return
+
+    max_text_width = min(360, max(180, img_w - 48))
+    font = None
+    shaped_text = ''
+    text_bbox = None
+    for font_size in (22, 20, 18, 16, 14):
+        candidate_font = _get_arabic_font(font_size)
+        candidate_text = _reshape_arabic_text(clean_text)
+        candidate_bbox = draw.textbbox((0, 0), candidate_text, font=candidate_font)
+        if candidate_bbox[2] - candidate_bbox[0] <= max_text_width:
+            font = candidate_font
+            shaped_text = candidate_text
+            text_bbox = candidate_bbox
+            break
+    if font is None:
+        font = _get_arabic_font(14)
+        shaped_text = _reshape_arabic_text(clean_text)
+        text_bbox = draw.textbbox((0, 0), shaped_text, font=font)
+
+    text_width = text_bbox[2] - text_bbox[0]
+    text_height = text_bbox[3] - text_bbox[1]
+    pad_x = 12
+    pad_y = 7
+    label_width = text_width + pad_x * 2
+    label_height = text_height + pad_y * 2
+    candidates = [
+        (px - label_width / 2, anchor_y - label_height - 10),
+        (px - label_width / 2, anchor_y + 10),
+        (px + 46, anchor_y - label_height / 2),
+        (px - label_width - 46, anchor_y - label_height / 2),
+    ]
+    rect = None
+    for left, top in candidates:
+        left = max(8, min(img_w - label_width - 8, left))
+        top = max(8, min(img_h - label_height - 8, top))
+        candidate_rect = (left, top, left + label_width, top + label_height)
+        if not any(
+            not (candidate_rect[2] < other[0] or candidate_rect[0] > other[2]
+                 or candidate_rect[3] < other[1] or candidate_rect[1] > other[3])
+            for other in occupied
+        ):
+            rect = candidate_rect
+            break
+    if rect is None:
+        left = max(8, min(img_w - label_width - 8, px - label_width / 2))
+        top = max(8, min(img_h - label_height - 8, anchor_y - label_height - 10))
+        rect = (left, top, left + label_width, top + label_height)
+
+    left, top, right, bottom = [int(round(value)) for value in rect]
+    draw.rounded_rectangle(
+        [left, top, right, bottom],
+        radius=8,
+        fill=(37, 75, 102, 245),
+        outline=(240, 230, 210, 255),
+        width=2,
+    )
+    draw.text(
+        (left + pad_x - text_bbox[0], top + pad_y - text_bbox[1]),
+        shaped_text,
+        fill='#FFFFFF',
+        font=font,
+    )
+    occupied.append((left, top, right, bottom))
+
+
 def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, size=(1280, 720), scale=2):
     """
     Overlay custom markers on a map image.
-    markers_list: list of dicts with keys: lat, lng, color, label, type ('site' or 'landmark')
+    markers_list: list of dicts with keys: lat, lng, color, label, name, type ('site' or 'landmark')
     """
     try:
         img = Image.open(image_path).convert('RGBA')
@@ -796,6 +866,8 @@ def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, siz
         draw = ImageDraw.Draw(overlay)
         img_w, img_h = img.size
         center_x, center_y = img_w // 2, img_h // 2
+        rendered_markers = []
+        occupied_labels = []
         for m in markers_list:
             m_lat = m.get('lat')
             m_lng = m.get('lng')
@@ -807,13 +879,20 @@ def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, siz
             if 0 <= px <= img_w and 0 <= py <= img_h:
                 color = m.get('color', '#C0392B')
                 label = m.get('label')
+                name = m.get('name') or m.get('label_text')
                 is_site = m.get('type') == 'site'
                 pin_size = 120 if is_site else 72
                 pin_img = _draw_pin_marker(color=color, label=label, size=pin_size, is_site=is_site)
-                
+
                 px_paste = int(px - pin_size // 2)
                 py_paste = int(py - pin_size)
                 overlay.paste(pin_img, (px_paste, py_paste), pin_img)
+                occupied_labels.append((px_paste, py_paste, px_paste + pin_size, py_paste + pin_size))
+                rendered_markers.append((px, py_paste, name, is_site))
+
+        for px, py_paste, name, is_site in rendered_markers:
+            if name and not is_site:
+                _draw_marker_name_label(draw, px, py_paste, name, img_w, img_h, occupied_labels)
         img = Image.alpha_composite(img, overlay)
         img.save(image_path, 'PNG')
         return True
@@ -1194,7 +1273,14 @@ def _build_markers(lat, lng, landmarks=None, label_start=1):
     if landmarks:
         for i, lm in enumerate(landmarks):
             label = str((label_start + i) % 100)
-            markers.append({'lat': lm['lat'], 'lng': lm['lng'], 'color': MARKER_COLOR_LANDMARK, 'type': 'landmark', 'label': label})
+            markers.append({
+                'lat': lm['lat'],
+                'lng': lm['lng'],
+                'color': MARKER_COLOR_LANDMARK,
+                'type': 'landmark',
+                'label': label,
+                'name': str(lm.get('name') or '').strip(),
+            })
     return markers
 
 
@@ -1755,17 +1841,21 @@ def catchment_rings(zones, limit=3):
         if not isinstance(zone, dict):
             continue
         try:
-            km = float(zone.get('km'))
+            km = float(zone.get('km') or zone.get('distance_km') or zone.get('distance'))
         except (TypeError, ValueError):
             continue
         if km <= 0:
             continue
-        minutes = zone.get('minutes')
+        minutes = zone.get('minutes') or zone.get('duration_minutes') or zone.get('duration_min')
         try:
             minutes = int(float(minutes))
         except (TypeError, ValueError):
             minutes = None
-        candidates.append({'km': km, 'minutes': minutes})
+        candidates.append({
+            'km': km,
+            'minutes': minutes,
+            'label': zone.get('label') or zone.get('name') or '',
+        })
     if not candidates:
         return []
     candidates.sort(key=lambda item: item['km'])
@@ -1777,8 +1867,10 @@ def catchment_rings(zones, limit=3):
     rings = []
     for item in chosen:
         minutes = item['minutes']
-        label = f'{minutes} دقائق' if minutes else f'{item["km"]:.1f} كم'
-        rings.append({'km': item['km'], 'minutes': minutes or 0, 'label': label})
+        name = str(item.get('label') or item.get('name') or '').strip()
+        time_label = f'{minutes} دقائق' if minutes else f'{item["km"]:.1f} كم'
+        label = f'{name} — {time_label}' if name else time_label
+        rings.append({'km': item['km'], 'minutes': minutes or 0, 'name': name, 'label': label})
     return rings
 
 
@@ -1867,11 +1959,15 @@ def _draw_catchment_zones(image_path, center_lat, center_lng, zoom, zones, scale
             lx = int(ccx + r * math.cos(angle))
             ly = int(ccy - r * math.sin(angle))
             
-            rect = [lx - tw // 2 - pad_x, ly - th // 2 - pad_y, lx + tw // 2 + pad_x, ly + th // 2 + pad_y]
-            
+            label_width = tw + pad_x * 2
+            label_height = th + pad_y * 2
+            rect_left = max(8 * canvas_scale, min(canvas_w - label_width - 8 * canvas_scale, lx - label_width // 2))
+            rect_top = max(8 * canvas_scale, min(canvas_h - label_height - 8 * canvas_scale, ly - label_height // 2))
+            rect = [rect_left, rect_top, rect_left + label_width, rect_top + label_height]
+
             # Draw pill background and border
             draw.rounded_rectangle(rect, radius=4 * canvas_scale, fill=border_c, outline=(255, 255, 255, 200), width=1 * canvas_scale)
-            draw.text((lx - tw // 2, ly - th // 2 - 2 * canvas_scale), reshaped, fill='#FFFFFF', font=font)
+            draw.text((rect_left + pad_x - bbox[0], rect_top + pad_y - bbox[1]), reshaped, fill='#FFFFFF', font=font)
 
         # Downsample with LANCZOS
         resized = canvas.resize((img_w, img_h), Image.Resampling.LANCZOS)
@@ -2502,11 +2598,15 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             labels_draw = ImageDraw.Draw(labels_overlay)
             for route_segment, label_text in pending_labels:
                 best_p = None
-                candidates = []
+                preferred_candidates = []
+                visible_candidates = []
                 for p in route_segment:
                     distance = math.sqrt((p[0] - origin_px) ** 2 + (p[1] - origin_py) ** 2)
-                    if 120 <= distance and 90 <= p[0] <= img_w - 90 and 60 <= p[1] <= img_h - 60:
-                        candidates.append((distance, p))
+                    if 90 <= p[0] <= img_w - 90 and 60 <= p[1] <= img_h - 60:
+                        visible_candidates.append((distance, p))
+                        if distance >= 120:
+                            preferred_candidates.append((distance, p))
+                candidates = preferred_candidates or visible_candidates
                 candidates.sort(key=lambda candidate: -candidate[0])
 
                 label_half_width = min(240, max(90, len(label_text or '') * 7))
@@ -2570,6 +2670,11 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
         return None
     if any(
         metadata_by_type.get(image_type, {}).get('map_highlight_version') != MAP_HIGHLIGHT_RENDER_VERSION
+        for image_type in found_types
+    ):
+        return None
+    if any(
+        metadata_by_type.get(image_type, {}).get('map_label_version') != MAP_LABEL_RENDER_VERSION
         for image_type in found_types
     ):
         return None
@@ -2710,6 +2815,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
     # Pre-parse landmark/catchment data so the cache check only requires what will actually be generated
     landmarks = _parse_landmarks_text(project_data.get('nearby_landmarks', ''))
+    landmarks = _merge_landmark_data(landmarks, project_data.get('nearby_landmarks_data'))
     zones = _parse_catchment_zones(project_data.get('catchment_areas', ''))
 
     draft_id = draft_id or project_data.get('draft_id') or project_data.get('draftId')
@@ -2997,7 +3103,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 result['placeholders'][placeholder] = overview_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_landmarks (closer zoom)
     if 'landmarks' in enabled_maps:
@@ -3035,7 +3141,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 result['placeholders'][placeholder] = landmarks_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     # Generate map_access
     if 'access' in enabled_maps:
@@ -3084,7 +3190,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                         'center_lat': map_center_lat,
                         'center_lng': map_center_lng,
                         'access_roads_version': ACCESS_ROADS_RENDER_VERSION,
-                        'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
+                        'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION,
                         'highlight_site': bool(highlight_site),
                         'landmarks_matrix': result.get('landmarks_matrix') or [],
                     },
@@ -3129,7 +3235,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 result['placeholders'][placeholder] = catchment_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'center_lat': lat, 'center_lng': lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'center_lat': lat, 'center_lng': lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
 
     return result
 
@@ -3209,6 +3315,66 @@ def _parse_landmarks_text(text):
     return landmarks
 
 
+def _merge_landmark_data(landmarks, structured):
+    if isinstance(structured, str):
+        try:
+            structured = json.loads(structured)
+        except (TypeError, ValueError):
+            return landmarks
+    if not isinstance(structured, list):
+        return landmarks
+
+    def normalized_name(value):
+        return re.sub(r'\s+', ' ', _strip_arabic_diacritics(str(value or '')).strip()).casefold()
+
+    def numeric(value):
+        if value in (None, ''):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    by_name = {normalized_name(item.get('name')): item for item in landmarks if item.get('name')}
+    for item in structured:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get('name') or item.get('title') or item.get('description') or '').strip()
+        key = normalized_name(name)
+        if not key:
+            continue
+        target = by_name.get(key)
+        if target is None:
+            target = {
+                'name': name,
+                'category': item.get('category') or item.get('type') or '',
+                'duration_minutes': item.get('duration_minutes') or item.get('duration_min'),
+                'distance_km': item.get('distance_km') or item.get('distance'),
+                'distance_text': item.get('distance_text'),
+                'lat': None,
+                'lng': None,
+            }
+            landmarks.append(target)
+            by_name[key] = target
+        else:
+            target['name'] = name or target.get('name')
+            if item.get('category') or item.get('type'):
+                target['category'] = item.get('category') or item.get('type')
+            for field in ('duration_minutes', 'duration_min', 'distance_km', 'distance', 'distance_text'):
+                if target.get(field) in (None, '') and item.get(field) not in (None, ''):
+                    target[field] = item[field]
+
+        latitude = numeric(item.get('lat') or item.get('latitude'))
+        longitude = numeric(item.get('lng') or item.get('longitude'))
+        if latitude is not None and longitude is not None:
+            target['lat'] = latitude
+            target['lng'] = longitude
+        distance_meters = numeric(item.get('distance_meters'))
+        if distance_meters is not None:
+            target['distance_meters'] = round(distance_meters)
+    return landmarks
+
+
 def _parse_catchment_zones(text):
     """Parse catchment zones text into zone objects.
 
@@ -3217,8 +3383,33 @@ def _parse_catchment_zones(text):
     default_zones = [{'minutes': 10, 'km': 8}, {'minutes': 20, 'km': 16}, {'minutes': 35, 'km': 28}]
     if not text:
         return default_zones
+    if isinstance(text, list):
+        zones = []
+        for item in text:
+            if not isinstance(item, dict):
+                continue
+            km = item.get('km') or item.get('distance_km') or item.get('distance')
+            minutes = item.get('minutes') or item.get('duration_minutes') or item.get('duration_min')
+            try:
+                minutes = int(float(minutes)) if minutes not in (None, '') else None
+            except (TypeError, ValueError):
+                minutes = None
+            try:
+                km = float(km) if km not in (None, '') else None
+            except (TypeError, ValueError):
+                km = None
+            if km is None and minutes:
+                km = minutes * 0.8 / 1.60934
+            if not km or km <= 0:
+                continue
+            zone = {'minutes': minutes, 'km': km}
+            label = str(item.get('label') or item.get('name') or item.get('area') or '').strip()
+            if label:
+                zone['label'] = label
+            zones.append(zone)
+        return zones or default_zones
     if not isinstance(text, str):
-        return text or default_zones
+        return default_zones
     zones = []
     for line in text.strip().split('\n'):
         line = line.strip().lstrip('-').lstrip('•').strip()

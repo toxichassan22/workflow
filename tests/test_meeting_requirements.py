@@ -2263,6 +2263,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                     'lng': 46.2,
                     'zoom': 17,
                     'map_highlight_version': self.application_module.maps_service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': self.application_module.maps_service.MAP_LABEL_RENDER_VERSION,
                 }
             )
             hydrated = self.application_module._merge_persisted_map_assets(
@@ -2323,6 +2324,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('pending_labels.append((route_segment, label_text))', source)
         self.assertIn('labels_overlay = Image.new', source)
         self.assertIn('distance=52', source)
+        self.assertIn('candidates = preferred_candidates or visible_candidates', source)
         self.assertIn('ly1 = offset_point[1] - 30', source)
         self.assertLess(
             source.index('draw.line(segment, fill=gold_color, width=9)'),
@@ -2331,6 +2333,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function withCacheBust(url)', index_source)
         self.assertIn('payload.refresh_maps = true', index_source)
         self.assertIn('selectMapPreviewView(mapType)', index_source)
+        self.assertIn('selectMapPreviewView(tenantSelectedMapType)', index_source)
         self.assertIn('Regenerating a map is an explicit user action.', index_source)
         self.assertIn('await saveProjectAsDraftNow(true);', index_source)
 
@@ -2559,6 +2562,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len(rings), 3)
         self.assertEqual([ring['km'] for ring in rings], [1.6, 13.6, 30.9])
         self.assertEqual(rings[0]['label'], '5 دقائق')
+        named_rings = maps_service.catchment_rings([{'km': 2.4, 'minutes': 7, 'label': 'حي النرجس'}])
+        self.assertEqual(named_rings[0]['name'], 'حي النرجس')
+        self.assertIn('حي النرجس', named_rings[0]['label'])
+        markers = maps_service._build_markers(24.0, 46.0, [
+            {'name': 'مجمع الراشد', 'lat': 24.01, 'lng': 46.01}
+        ])
+        self.assertEqual(markers[1]['label'], '1')
+        self.assertEqual(markers[1]['name'], 'مجمع الراشد')
+        self.assertIn('def _draw_marker_name_label(', source)
+        self.assertIn("'map_label_version': MAP_LABEL_RENDER_VERSION", source)
+        self.assertIn("'nearby_landmarks_data'", index_source)
         self.assertEqual(maps_service.catchment_rings([]), [])
         near = maps_service.zoom_for_radius_km(21.63, 1.6)
         far = maps_service.zoom_for_radius_km(21.63, 30.9)

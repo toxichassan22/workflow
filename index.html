@@ -7627,6 +7627,7 @@
         lng: d.location_lng || '',
         addr: d.location_address || '',
         landmarks: d.nearby_landmarks || '',
+        landmarksData: d.nearby_landmarks_data || '',
         polygon: d.location_polygon || '',
         roads: d.main_roads || '',
         catchment: d.catchment_areas || '',
@@ -7701,7 +7702,7 @@
       'enabled_maps', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
       'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_maps_link',
       'locationLat', 'locationLng', 'location_polygon', 'location_polygon_source', 'longitude',
-      'main_roads', 'map_styles', 'map_type', 'maps_link', 'nearby_landmarks', 'regen_seed',
+      'main_roads', 'map_styles', 'map_type', 'maps_link', 'nearby_landmarks', 'nearby_landmarks_data', 'regen_seed',
       'refresh_maps', 'secondary_roads',
       // The croquis coordinates are the real plot boundary, so the server needs them to
       // highlight the plot without anyone drawing anything.
@@ -7736,6 +7737,16 @@
       MAP_PAYLOAD_FIELDS.forEach(key => {
         if (src[key] !== undefined && src[key] !== null && src[key] !== '') slim[key] = src[key];
       });
+      if (Array.isArray(slim.nearby_landmarks_data)) {
+        slim.nearby_landmarks_data = slim.nearby_landmarks_data.slice(0, 20).map(item => {
+          if (!item || typeof item !== 'object') return item;
+          return Object.fromEntries(
+            ['name', 'category', 'distance_km', 'distance_meters', 'duration_minutes', 'distance_text', 'lat', 'lng']
+              .filter(key => item[key] !== undefined && item[key] !== null && item[key] !== '')
+              .map(key => [key, item[key]])
+          );
+        });
+      }
       if (slim.location_polygon) slim.location_polygon = decimatePolygon(slim.location_polygon);
       return slim;
     }
@@ -20356,6 +20367,8 @@
       collectMapStylePanel();
       if (!tenantPresentationId) {
         await ensureProjectAssets({ force: true, needImages: false });
+        renderMapPreviewGallery();
+        selectMapPreviewView(tenantSelectedMapType);
         toast('تم إعادة توليد الخرائط');
         return;
       }
@@ -20387,6 +20400,7 @@
         tenantCreativeImages.map_approvals = {};
         replaceCurrentSlideMapAssets(placeholders);
         renderMapPreviewGallery();
+        selectMapPreviewView(tenantSelectedMapType);
         renderTenantSlides();
         triggerAutoSaveDraft();
         toast('تم إعادة توليد خرائط الموقع بالموقع الحالي');

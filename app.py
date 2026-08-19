@@ -6212,6 +6212,8 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
             metadata = {}
         if metadata.get('map_highlight_version') != maps_service.MAP_HIGHLIGHT_RENDER_VERSION:
             continue
+        if metadata.get('map_label_version') != maps_service.MAP_LABEL_RENDER_VERSION:
+            continue
         if image_type in seen_types or placeholder in seen_placeholders:
             continue
         seen_types.add(image_type)
