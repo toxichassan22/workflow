@@ -118,16 +118,35 @@ def _get_arabic_font(size=14):
     return ImageFont.load_default()
 
 
+_ARABIC_RESHAPER = None
+
+
+def _arabic_reshaper_without_ligatures():
+    global _ARABIC_RESHAPER
+    if _ARABIC_RESHAPER is not None:
+        return _ARABIC_RESHAPER
+    import arabic_reshaper
+    configuration = {
+        key: arabic_reshaper.default_reshaper.configuration.get(key)
+        for key in arabic_reshaper.default_reshaper.configuration
+    }
+    configuration['support_ligatures'] = False
+    for key in configuration:
+        if key.startswith('arabic ligature'):
+            configuration[key] = False
+    _ARABIC_RESHAPER = arabic_reshaper.ArabicReshaper(configuration=configuration)
+    return _ARABIC_RESHAPER
+
+
 def _reshape_arabic_text(text):
-    """Reshape Arabic text for proper RTL display in PIL with explicit error logging."""
+    """Reshape clean Arabic text for connected RTL display in PIL."""
     if not text:
         return ""
     text_str = _strip_arabic_diacritics(text)
     try:
-        import arabic_reshaper
-        # Pillow on the server has no libraqm, so reshape logical Arabic into presentation forms.
-        # Apply bidi ordering before drawing; diacritics are removed for clean road names.
-        shaped = arabic_reshaper.reshape(text_str)
+        # Disable optional presentation ligatures such as lam-alef: some deployed fonts
+        # do not contain those compatibility glyphs and render them as square boxes.
+        shaped = _arabic_reshaper_without_ligatures().reshape(text_str)
         try:
             from bidi.algorithm import get_display
             return get_display(shaped)
@@ -191,7 +210,7 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
-ACCESS_ROADS_RENDER_VERSION = 'v8-cairo-arabic-labels'
+ACCESS_ROADS_RENDER_VERSION = 'v9-arabic-no-ligatures'
 MAP_HIGHLIGHT_RENDER_VERSION = 'overview-context-v2'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',

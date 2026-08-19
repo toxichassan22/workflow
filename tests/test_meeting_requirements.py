@@ -2302,9 +2302,11 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v8-cairo-arabic-labels'", source)
+        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v9-arabic-no-ligatures'", source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
         self.assertIn("def _strip_arabic_diacritics(text):", source)
+        self.assertIn("def _arabic_reshaper_without_ligatures():", source)
+        self.assertIn("configuration['support_ligatures'] = False", source)
         self.assertIn('from bidi.algorithm import get_display', source)
         self.assertIn("'language': 'ar'", source)
         overlay_font = ROOT / 'fonts' / 'cairo-overlay.bin'
