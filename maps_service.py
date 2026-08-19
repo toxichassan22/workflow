@@ -86,6 +86,8 @@ def bundled_arabic_font_path():
 def bundled_arabic_overlay_font_path():
     """Return a font with presentation-form glyphs for Pillow map overlays."""
     candidates = [
+        os.path.join(FONTS_DIR, 'arabic-overlay-light.bin'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts', 'arabic-overlay-light.bin'),
         os.path.join(FONTS_DIR, 'arabic-overlay.bin'),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'fonts', 'arabic-overlay.bin'),
         os.path.join(FONTS_DIR, 'BahijTheSansArabic-Bold.ttf'),
@@ -187,7 +189,7 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
-ACCESS_ROADS_RENDER_VERSION = 'v6-arabic-labels'
+ACCESS_ROADS_RENDER_VERSION = 'v7-arabic-light-labels'
 MAP_HIGHLIGHT_RENDER_VERSION = 'overview-context-v2'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
@@ -1969,7 +1971,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
     """Draw only Google Maps-derived access-road geometry and labels."""
     def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 255), border_color=(240, 230, 210, 255)):
         if not font:
-            font = _get_arabic_font(17)
+            font = _get_arabic_font(24)
 
         reshaped_text = _reshape_arabic_text(text)
         bbox = draw.textbbox((0, 0), reshaped_text, font=font)
