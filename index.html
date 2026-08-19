@@ -1595,6 +1595,38 @@
     #section-market-study .table-wrap {
       overflow-x: auto;
     }
+    #section-market-study .market-source-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 8px;
+    }
+    #section-market-study .market-source-tab {
+      width: auto;
+      min-width: 150px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fff;
+      color: var(--ink);
+      padding: 8px 14px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      text-align: center;
+    }
+    #section-market-study .market-source-tab.active {
+      background: var(--p);
+      border-color: var(--p);
+      color: #fff;
+    }
+    #section-market-study .market-source-panel[hidden] {
+      display: none;
+    }
+    #section-market-study .market-source-panel {
+      min-width: 0;
+    }
     #section-market-study table {
       width: max-content;
       min-width: 100%;
@@ -1603,33 +1635,33 @@
       border-collapse: collapse;
     }
     #marketCompetitorsTable,
-    #marketSourcesTable {
+    .market-sources-table {
       min-width: 1450px;
     }
     #marketCompetitorsTable {
       min-width: 2200px;
     }
-    #marketSourcesTable {
+    .market-sources-table {
       min-width: 2100px;
     }
-    #marketSourcesTable th:nth-child(1),
-    #marketSourcesTable td:nth-child(1) {
+    .market-sources-table th:nth-child(1),
+    .market-sources-table td:nth-child(1) {
       min-width: 190px;
     }
-    #marketSourcesTable th:nth-child(2),
-    #marketSourcesTable td:nth-child(2) {
+    .market-sources-table th:nth-child(2),
+    .market-sources-table td:nth-child(2) {
       min-width: 250px;
     }
-    #marketSourcesTable th:nth-child(3),
-    #marketSourcesTable td:nth-child(3) {
+    .market-sources-table th:nth-child(3),
+    .market-sources-table td:nth-child(3) {
       min-width: 320px;
     }
-    #marketSourcesTable th:nth-child(6),
-    #marketSourcesTable td:nth-child(6) {
+    .market-sources-table th:nth-child(6),
+    .market-sources-table td:nth-child(6) {
       min-width: 220px;
     }
-    #marketSourcesTable th:nth-child(7),
-    #marketSourcesTable td:nth-child(7) {
+    .market-sources-table th:nth-child(7),
+    .market-sources-table td:nth-child(7) {
       min-width: 300px;
     }
     #marketCompetitorsTable th:nth-child(1),
@@ -10122,14 +10154,8 @@
           <div class="market-actions">
             <button type="button" class="btn ghost" onclick="addMarketSourceRow()">إضافة مصدر</button>
           </div>
-          <div class="table-wrap">
-            <table id="marketSourcesTable">
-              <thead><tr>
-                <th>المنافس</th><th>المصدر</th><th>الرابط</th><th>تاريخ البيانات</th><th>تاريخ الوصول</th><th>الموثوقية</th><th>ملاحظة</th><th></th>
-              </tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
+          <div id="marketSourcesTabs" class="market-source-tabs" role="tablist"></div>
+          <div id="marketSourcesPanels" class="market-source-panels"></div>
         </div>
         <input type="hidden" data-key="market_study_data" data-type="text" id="marketStudyData">
       `;
@@ -10980,24 +11006,57 @@
       visibleRows.forEach(row => addMarketCompetitorRow(row));
     }
 
-    function addMarketSourceRow(row = {}) {
-      const tb = document.querySelector('#marketSourcesTable tbody');
+    function marketSourcesTableHtml() {
+      return '<div class="table-wrap"><table class="market-sources-table">' +
+        '<thead><tr><th>المنافس</th><th>المصدر</th><th>الرابط</th><th>تاريخ البيانات</th>' +
+        '<th>تاريخ الوصول</th><th>الموثوقية</th><th>ملاحظة</th><th></th></tr></thead><tbody></tbody></table></div>';
+    }
+
+    function selectMarketSourceTab(key) {
+      const value = String(key || 'general');
+      document.querySelectorAll('#marketSourcesTabs .market-source-tab').forEach(button => {
+        const active = button.dataset.sourceTab === value;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      document.querySelectorAll('#marketSourcesPanels .market-source-panel').forEach(panel => {
+        panel.hidden = panel.dataset.sourceTab !== value;
+      });
+    }
+
+    function addMarketSourceRow(row = {}, targetBody) {
+      const sourceRow = { ...(row || {}) };
+      let tb = targetBody;
+      if (!tb) {
+        let panel = document.querySelector('#marketSourcesPanels .market-source-panel:not([hidden])')
+          || document.querySelector('#marketSourcesPanels .market-source-panel');
+        if (!panel) {
+          renderMarketSources([]);
+          panel = document.querySelector('#marketSourcesPanels .market-source-panel');
+        }
+        if (panel && !sourceRow.competitor_id && panel.dataset.competitorId) {
+          sourceRow.competitor_id = panel.dataset.competitorId;
+          sourceRow.competitor_name = panel.dataset.competitorName || '';
+        }
+        tb = panel?.querySelector('tbody');
+      }
       if (!tb) return;
       const tr = document.createElement('tr');
-      tr.dataset.sourceKind = row.source_kind || '';
-      tr.dataset.competitorId = row.competitor_id || '';
-      const safeUrl = safeMarketUrl(row.url || '');
+      tr.dataset.sourceKind = sourceRow.source_kind || '';
+      tr.dataset.competitorId = sourceRow.competitor_id || '';
+      tr.dataset.sourceFields = JSON.stringify(sourceRow.source_fields || {});
+      const safeUrl = safeMarketUrl(sourceRow.url || '');
       const link = safeUrl
-        ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(row.url || '') + '</a>'
+        ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(sourceRow.url || '') + '</a>'
         : '';
       tr.innerHTML =
-        '<td><input data-field="competitor_name" value="' + escapeHtml(row.competitor_name || '') + '" readonly></td>' +
-        '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
-        '<td><input data-field="url" value="' + escapeHtml(row.url || '') + '"><div data-source-link class="market-source-links">' + link + '</div></td>' +
-        '<td><input data-field="data_date" value="' + escapeHtml(row.data_date || '') + '"></td>' +
-        '<td><input data-field="accessed_at" value="' + escapeHtml(row.accessed_at || '') + '"></td>' +
-        '<td><textarea data-field="reliability" rows="2">' + escapeHtml(row.reliability || '') + '</textarea></td>' +
-        '<td><textarea data-field="note" rows="2">' + escapeHtml(row.note || '') + '</textarea></td>' +
+        '<td><input data-field="competitor_name" value="' + escapeHtml(sourceRow.competitor_name || '') + '" readonly></td>' +
+        '<td><textarea data-field="name" rows="2">' + escapeHtml(sourceRow.name || '') + '</textarea></td>' +
+        '<td><input data-field="url" value="' + escapeHtml(sourceRow.url || '') + '"><div data-source-link class="market-source-links">' + link + '</div></td>' +
+        '<td><input data-field="data_date" value="' + escapeHtml(sourceRow.data_date || '') + '"></td>' +
+        '<td><input data-field="accessed_at" value="' + escapeHtml(sourceRow.accessed_at || '') + '"></td>' +
+        '<td><textarea data-field="reliability" rows="2">' + escapeHtml(sourceRow.reliability || '') + '</textarea></td>' +
+        '<td><textarea data-field="note" rows="2">' + escapeHtml(sourceRow.note || '') + '</textarea></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-source>حذف</button></td>';
       tb.appendChild(tr);
       tr.querySelector('[data-remove-source]').addEventListener('click', () => {
@@ -11016,12 +11075,19 @@
     }
 
     function collectMarketSourceRows() {
-      return Array.from(document.querySelectorAll('#marketSourcesTable tbody tr')).map(tr => {
+      return Array.from(document.querySelectorAll('#marketSourcesPanels .market-sources-table tbody tr')).map(tr => {
         const read = (field) => tr.querySelector('[data-field="' + field + '"]')?.value || '';
+        let source_fields = {};
+        try {
+          source_fields = JSON.parse(tr.dataset.sourceFields || '{}') || {};
+        } catch (error) {
+          source_fields = {};
+        }
         return {
           competitor_id: tr.dataset.competitorId || '',
           competitor_name: read('competitor_name'),
           source_kind: tr.dataset.sourceKind || '',
+          source_fields,
           name: read('name'),
           url: read('url'),
           data_date: read('data_date'),
@@ -11033,10 +11099,54 @@
     }
 
     function renderMarketSources(rows) {
-      const tb = document.querySelector('#marketSourcesTable tbody');
-      if (!tb) return;
-      tb.innerHTML = '';
-      (rows || []).forEach(row => addMarketSourceRow(row));
+      const tabs = document.getElementById('marketSourcesTabs');
+      const panels = document.getElementById('marketSourcesPanels');
+      if (!tabs || !panels) return;
+      const currentKey = tabs.querySelector('.market-source-tab.active')?.dataset.sourceTab || '';
+      const groups = new Map();
+      (Array.isArray(rows) ? rows : []).forEach(row => {
+        const key = row.competitor_id || row.competitor_name
+          ? 'competitor|' + (row.competitor_id || row.competitor_name)
+          : 'general';
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            label: row.competitor_name || 'مصادر عامة',
+            competitorId: row.competitor_id || '',
+            competitorName: row.competitor_name || '',
+            rows: []
+          });
+        }
+        groups.get(key).rows.push(row);
+      });
+      if (!groups.size) groups.set('general', {
+        key: 'general', label: 'مصادر عامة', competitorId: '', competitorName: '', rows: []
+      });
+      const selectedKey = groups.has(currentKey) ? currentKey : groups.keys().next().value;
+      tabs.innerHTML = '';
+      panels.innerHTML = '';
+      groups.forEach(group => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'market-source-tab';
+        button.dataset.sourceTab = group.key;
+        button.setAttribute('role', 'tab');
+        button.textContent = group.label;
+        button.addEventListener('click', () => selectMarketSourceTab(group.key));
+        tabs.appendChild(button);
+
+        const panel = document.createElement('section');
+        panel.className = 'market-source-panel';
+        panel.dataset.sourceTab = group.key;
+        panel.dataset.competitorId = group.competitorId;
+        panel.dataset.competitorName = group.competitorName;
+        panel.hidden = group.key !== selectedKey;
+        panel.innerHTML = marketSourcesTableHtml();
+        panels.appendChild(panel);
+        const body = panel.querySelector('tbody');
+        group.rows.forEach(row => addMarketSourceRow(row, body));
+      });
+      selectMarketSourceTab(selectedKey);
     }
 
     function applyMarketStudyState(state) {
