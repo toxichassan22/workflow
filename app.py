@@ -6852,8 +6852,23 @@ def _financial_pdf_plain_html(html):
 
 
 def _financial_pdf_font():
-    path = os.path.join(os.path.dirname(__file__), 'fonts', 'BahijTheSansArabic-Bold.ttf')
-    return path if os.path.isfile(path) else None
+    candidates = [
+        os.path.join(os.path.dirname(__file__), 'fonts', 'BahijTheSansArabic-Bold.ttf'),
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+        '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+    ]
+    for path in candidates:
+        if not os.path.isfile(path) or os.path.getsize(path) < 10000:
+            continue
+        with open(path, 'rb') as handle:
+            header = handle.read(12)
+        if header.startswith(b'version https://') or header.startswith(b'oid sha'):
+            continue
+        if header[:4] not in {b'\x00\x01\x00\x00', b'OTTO', b'true', b'typ1'}:
+            continue
+        return path
+    return None
 
 
 def _financial_pdf_text(value, key=''):
@@ -6872,9 +6887,14 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
     page = document.new_page(width=page_size.width, height=page_size.height)
     margin = 28
     y = margin
-    font_name = 'arabic' if font_path else 'helv'
+    font_name = 'helv'
     if font_path:
-        page.insert_font(fontname=font_name, fontfile=font_path)
+        try:
+            page.insert_font(fontname='arabic', fontfile=font_path)
+            font_name = 'arabic'
+        except Exception as error:
+            print(f'[FINANCIAL PDF] custom font skipped ({error})')
+            font_path = None
 
     def ensure_space(needed=24):
         nonlocal page, y
@@ -6882,7 +6902,10 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             return
         page = document.new_page(width=page_size.width, height=page_size.height)
         if font_path:
-            page.insert_font(fontname=font_name, fontfile=font_path)
+            try:
+                page.insert_font(fontname='arabic', fontfile=font_path)
+            except Exception:
+                pass
         y = margin
 
     def draw_text(text, size=11, indent=0):
