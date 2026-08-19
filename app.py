@@ -9731,7 +9731,13 @@ def _read_market_job(tenant_id, job_id):
 def _call_market_study_model(system_prompt, user_content, max_tokens=None):
     """Search-backed market call with JSON, provider, and credit fallbacks."""
     cap = max(2000, int(max_tokens or MARKET_STUDY_MAX_TOKENS))
-    tools = [{'type': 'openrouter:web_search', 'parameters': {'max_results': 8, 'engine': 'exa'}}]
+    # One search cannot price several competitors, so the model is allowed a search per
+    # competitor plus the market-wide ones; without max_uses it settled for a single call
+    # and left every price blank.
+    tools = [{
+        'type': 'openrouter:web_search',
+        'parameters': {'engine': 'exa', 'max_results': 8, 'max_uses': 10, 'max_total_results': 60},
+    }]
     provider = {'order': ['Google'], 'allow_fallbacks': True}
     # Gemini returns reasoning and no content when tools are combined with JSON mode, so
     # that pair silently dropped the search on every call and the model answered from

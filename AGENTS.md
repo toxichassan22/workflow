@@ -217,6 +217,12 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   citations. `_market_citation_urls()` reads the `url_citation` annotations and
   `market_study.apply_search_citations()` swaps a model-written homepage for the retrieved page on
   the same host. It never touches a row the user typed (`row_source != 'ai'`).
+- One market-wide search cannot price six competitors. The tool is given `max_uses` and
+  `max_total_results`, and `build_competitors_user_prompt()` carries a «بروتوكول البحث الإلزامي»
+  that requires a separate price search per competitor plus the allowed `price_type` list per
+  operation. Without both, every price came back empty (or, before the search worked at all,
+  invented). A row with an empty price and `غير متوفر من مصدر موثوق` is the correct output; a
+  number without the page it came from is not.
 
 ## Performance rules
 

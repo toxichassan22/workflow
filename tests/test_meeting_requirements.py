@@ -3540,7 +3540,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn("import market_study", app_source)
         self.assertIn("@app.route('/api/market-study/competitors'", app_source)
-        self.assertIn("{'type': 'openrouter:web_search'", app_source)
+        self.assertIn("'type': 'openrouter:web_search',", app_source)
         self.assertIn('def _start_market_job(kind, executor):', app_source)
 
         self.assertIn('project_idea', {field['key'] for field in db.PREBUILT_FIELDS})
@@ -3669,6 +3669,22 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('رابط النطاق وحده أو الصفحة الرئيسية غير مقبول', prompt)
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn("market_study.apply_search_citations(merged, _market_citation_urls(res))", app_source)
+
+    def test_market_study_prices_require_a_dedicated_search(self):
+        import market_study
+        prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
+        # One market-wide search cannot price six competitors; every price used to come back
+        # empty because the model searched once and answered the rest from memory.
+        self.assertIn('بروتوكول البحث الإلزامي', prompt)
+        self.assertIn('نفّذ بحثًا منفصلًا لكل منافس على حدة عن سعره الفعلي', prompt)
+        self.assertIn('لا تكتب سعرًا من معرفتك السابقة', prompt)
+        self.assertIn(market_study.MISSING_VALUE_PHRASE, prompt)
+        self.assertIn('سعر الليلة', prompt)
+        self.assertIn('متوسط سعر الغرفة ADR', prompt)
+        self.assertIn('إيجار المتر السنوي', prompt)
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn("'max_uses': 10", app_source)
+        self.assertIn("'engine': 'exa'", app_source)
 
     def test_market_study_lowers_token_cap_when_credit_is_limited(self):
         module = self.application_module
