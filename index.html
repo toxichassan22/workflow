@@ -2375,6 +2375,36 @@
       vertical-align: middle;
     }
 
+    .tenant-client-complete-field {
+      background: #f0fdf4;
+      border: 2px solid #16a34a;
+      box-shadow: 0 0 0 3px rgba(22, 163, 74, .12);
+    }
+
+    .tenant-client-complete-field:hover {
+      border-color: #15803d;
+      box-shadow: 0 0 0 4px rgba(22, 163, 74, .16);
+    }
+
+    .tenant-client-complete-field label {
+      color: #15803d;
+    }
+
+    .tenant-client-complete-field input,
+    .tenant-client-complete-field textarea,
+    .tenant-client-complete-field select,
+    .tenant-client-complete-field input:focus,
+    .tenant-client-complete-field textarea:focus,
+    .tenant-client-complete-field select:focus {
+      border: 2px solid #16a34a;
+      background: #fff;
+      box-shadow: 0 0 0 2px rgba(22, 163, 74, .1);
+    }
+
+    .tenant-client-complete-field .tenant-client-required-badge {
+      background: #16a34a;
+    }
+
     .tenant-field input[type="checkbox"] {
       width: auto;
       margin-left: 8px;
@@ -11943,6 +11973,7 @@
           input.value = String(value);
         }
       });
+      refreshClientEnteredLandFieldStates();
       const timelineRows = parseStoredProjectTable(source.timeline_table_data || source.timelineRows);
       const timelineBody = document.getElementById('timelineTableBody');
       if (timelineBody && timelineRows.length) {
@@ -12381,6 +12412,19 @@
     const TENANT_PROJECT_HIDDEN_FIELDS = new Set(['plot_number', 'land_area', 'built_area', 'building_system', 'infrastructure', 'population_density', 'secondary_roads', 'city_landmarks']);
     const TENANT_CLIENT_ENTERED_LAND_FIELDS = new Set(['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio']);
 
+    function updateClientEnteredLandFieldState(input) {
+      if (!input || !TENANT_CLIENT_ENTERED_LAND_FIELDS.has(input.dataset.key)) return;
+      const field = input.closest('.tenant-field');
+      if (!field) return;
+      const entered = String(input.value ?? '').trim() !== '';
+      field.classList.toggle('tenant-client-required-field', !entered);
+      field.classList.toggle('tenant-client-complete-field', entered);
+    }
+
+    function refreshClientEnteredLandFieldStates() {
+      document.querySelectorAll('#tenantProjectForm [data-key]').forEach(updateClientEnteredLandFieldState);
+    }
+
     function tenantProjectFieldLabel(field) {
       if (field.fieldKey === 'main_roads') return 'الطرق الرئيسية المحيطة';
       if (field.fieldKey === 'secondary_roads') return 'طرق الوصول الفرعية';
@@ -12602,6 +12646,11 @@
           // financial study as soon as they change so the two can never disagree.
           if (f.fieldKey === 'approved_financial_area' || f.fieldKey === 'approved_floor_count' || f.fieldKey === 'approved_coverage_ratio') {
             input.addEventListener('input', syncFinancialFromLand);
+          }
+          if (isClientEnteredLandField) {
+            input.addEventListener('input', () => updateClientEnteredLandFieldState(input));
+            input.addEventListener('change', () => updateClientEnteredLandFieldState(input));
+            updateClientEnteredLandFieldState(input);
           }
 
           if (f.fieldKey === 'site_analysis') {
