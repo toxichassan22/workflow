@@ -10832,15 +10832,13 @@
       const operation = inferCompetitorOperation(row);
       const priceType = inferCompetitorPriceType(row);
       const priceTypes = MARKET_PRICE_TYPES[operation] || MARKET_PRICE_TYPES['أخرى'];
-      const sourceUrls = marketSourceUrls(row);
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(MARKET_PROJECT_TYPES, row.project_type || '') + '</select></td>' +
         '<td><input data-field="area_sqm" value="' + escapeHtml(row.area_sqm || '') + '" inputmode="decimal"></td>' +
         '<td><select data-field="status">' + marketSelectHtml(['قائم', 'تحت الإنشاء', 'على الخارطة'], row.status || '') + '</select></td>' +
         '<td><textarea data-field="source" rows="2" placeholder="المصدر">' + escapeHtml(row.source || '') + '</textarea>' +
-        '<div data-source-links class="market-source-links">' + marketSourceLinksHtml(row) + '</div>' +
-        '<textarea data-field="source_urls" rows="3" placeholder="روابط المصادر">' + escapeHtml(sourceUrls.join('\n')) + '</textarea></td>' +
+        '<div data-source-links class="market-source-links">' + marketSourceLinksHtml(row) + '</div></td>' +
         '<td><select data-field="operation_type">' + marketSelectHtml(['بيع', 'إيجار', 'تشغيل فندقي', 'أخرى'], operation) + '</select></td>' +
         '<td><select data-field="price_type">' + marketSelectHtml(priceTypes, priceType) + '</select></td>' +
         '<td data-field="price_cell"></td>' +
@@ -10860,11 +10858,6 @@
       tr.querySelector('[data-remove-competitor]').addEventListener('click', () => {
         tr.remove();
         persistMarketStudyFromDom();
-      });
-      tr.querySelector('[data-field="source_urls"]')?.addEventListener('input', () => {
-        const links = tr.querySelector('[data-source-links]');
-        if (links) links.innerHTML = marketSourceLinksHtml(collectOneCompetitorRow(tr));
-        syncMarketCompetitorSources();
       });
       tr.querySelectorAll('input,select,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
     }
@@ -10893,7 +10886,10 @@
       } catch (error) {
         field_sources = {};
       }
-      const source_urls = marketSourceUrls({ source_urls: read('source_urls'), field_sources });
+      const source_urls = marketSourceUrls({
+        source_urls: Array.from(tr.querySelectorAll('[data-source-links] a[href]'))
+          .map(anchor => anchor.getAttribute('href') || '')
+      });
       return {
         id: tr.dataset.competitorId,
         name: read('name'),

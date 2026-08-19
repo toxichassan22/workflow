@@ -3820,6 +3820,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("function runMarketSummaryJob()", index_source)
         self.assertIn('<th>القيمة (ر.س)</th>', index_source)
         self.assertIn('source_urls', index_source)
+        self.assertNotIn('<textarea data-field="source_urls"', index_source)
+        self.assertIn("tr.querySelectorAll('[data-source-links] a[href]')", index_source)
         self.assertIn('function mergeMarketSourceRows(existing, incoming)', index_source)
         self.assertIn('const visibleRows = Array.isArray(rows) && rows.length ? rows : [{}];', index_source)
         self.assertIn('function inferCompetitorPriceType(row = {})', index_source)
