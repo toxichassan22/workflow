@@ -6918,10 +6918,7 @@
               <button type="button" class="btn ghost" onclick="toggleMapStylePanel(); closeTenantDropdown()">نوع
                 الخرائط</button>
               <div class="slide-toolbar-menu-divider"></div>
-              <button type="button" class="btn ghost"
-                onclick="closeTenantDropdown(); if(tenantPresentationId){ regeneratePresentationMaps(); } else { ensureProjectAssets({force:true, needImages:false}).then(()=>toast('تم إعادة توليد الخرائط')); }">إعادة
-                توليد الخرائط</button>
-              <button type="button" class="btn ghost"
+                  <button type="button" class="btn ghost"
                 onclick="closeTenantDropdown(); ensureProjectAssets({force:true, needMaps:false}).then(()=>toast('تم إعادة توليد الصور'))">إعادة
                 توليد الصور</button>
             </div>
@@ -7060,9 +7057,8 @@
         <div
           style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px; border-top:1px solid #e8e4e0; padding-top:14px;">
           <button class="btn primary"
-            onclick="collectMapStylePanel(); if(tenantPresentationId){ regeneratePresentationMaps(); } else { ensureProjectAssets({force:true, needImages:false}).then(()=>toast('تم إعادة توليد الخرائط')); } toggleMapStylePanel();"
-            style="background:#3B6E91; color:#fff; border:none; padding:10px 18px; font-weight:700; border-radius:8px; cursor:pointer;">إعادة
-            توليد الخرائط</button>
+            onclick="collectMapStylePanel(); if(tenantPresentationId){ saveExistingPresentation(); } else { saveProjectAsDraft(); } toggleMapStylePanel();"
+            style="background:#3B6E91; color:#fff; border:none; padding:10px 18px; font-weight:700; border-radius:8px; cursor:pointer;">حفظ</button>
           <button class="btn ghost" onclick="toggleMapStylePanel()"
             style="background:#f5f5f5; border:none; padding:10px 18px; border-radius:8px; cursor:pointer;">إلغاء</button>
         </div>
@@ -17162,7 +17158,6 @@
           '<img src="' + escapeHtml(withCacheBust(url)) + '" data-map-select="' + escapeHtml(view.mapType) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;cursor:pointer;">' +
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">' +
           '<button type="button" class="btn small ' + (approved ? 'ghost' : 'primary') + '" data-map-action="' + (approved ? 'unapprove' : 'approve') + '" data-map-type="' + escapeHtml(view.mapType) + '">' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
-          '<button type="button" class="btn small ghost" data-map-action="regenerate" data-map-type="' + escapeHtml(view.mapType) + '" ' + (approved ? 'disabled' : '') + '>إعادة توليد</button>' +
           '</div></figure>';
       }).filter(Boolean).join('');
       gallery.innerHTML = cards;
@@ -17172,7 +17167,6 @@
           const action = button.dataset.mapAction;
           if (action === 'approve') approveMapPreview(mapType);
           else if (action === 'unapprove') unapproveMapPreview(mapType);
-          else regenerateMapPreview(mapType);
         });
       });
       gallery.querySelectorAll('[data-map-select]').forEach(image => {

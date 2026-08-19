@@ -2338,6 +2338,18 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('Regenerating a map is an explicit user action.', index_source)
         self.assertIn('await saveProjectAsDraftNow(true);', index_source)
 
+    def test_map_section_has_no_regeneration_controls(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertNotIn('data-map-action="regenerate"', index_source)
+        self.assertNotIn(
+            "closeTenantDropdown(); if(tenantPresentationId){ regeneratePresentationMaps(); } else { ensureProjectAssets({force:true, needImages:false})",
+            index_source,
+        )
+        self.assertNotIn(
+            "collectMapStylePanel(); if(tenantPresentationId){ regeneratePresentationMaps(); } else { ensureProjectAssets({force:true, needImages:false})",
+            index_source,
+        )
+
     def test_financial_pdf_fallback_writes_real_arabic_text(self):
         import tempfile
         from pathlib import Path
