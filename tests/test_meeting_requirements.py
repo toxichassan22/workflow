@@ -2328,6 +2328,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('Regenerating a map is an explicit user action.', index_source)
         self.assertIn('await saveProjectAsDraftNow(true);', index_source)
 
+    def test_map_label_font_never_reapplies_bidi(self):
+        from PIL import ImageFont
+        import maps_service
+
+        font = maps_service._get_arabic_font(24)
+        self.assertEqual(font.layout_engine, ImageFont.Layout.BASIC)
+        shaped = maps_service._reshape_arabic_text('طريق الشاطئ الشمالي')
+        self.assertEqual(shaped[0], '\ufef2')
+        self.assertEqual(shaped[-1], '\ufec3')
+
     def test_progress_bars_never_jump_backward(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('const value = allowDecrease ? requested : Math.max(loaderProgressValue, requested);', index_source)

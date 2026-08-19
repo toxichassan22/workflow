@@ -110,11 +110,16 @@ def _strip_arabic_diacritics(text):
 
 
 def _get_arabic_font(size=14):
-    """Load an Arabic-compatible font for Pillow overlays."""
+    """Load an Arabic-compatible font for Pillow overlays.
+
+    Layout.BASIC is mandatory: _reshape_arabic_text already produces presentation
+    forms in visual order, so a Pillow built with Raqm would re-run bidi and
+    reverse the label a second time, which renders the name backwards.
+    """
     path = bundled_arabic_overlay_font_path()
     if path:
         try:
-            return ImageFont.truetype(path, int(size))
+            return ImageFont.truetype(path, int(size), layout_engine=ImageFont.Layout.BASIC)
         except Exception as error:
             print(f"[FONT WARN] Failed loading {path}: {error}")
     return ImageFont.load_default()
