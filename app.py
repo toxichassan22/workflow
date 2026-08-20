@@ -6698,24 +6698,18 @@ def _financial_report_plain_number(value):
     text = str(value).strip()
     if not text or text == '—':
         return None
-    percent = text.endswith('%')
     cleaned = text.translate(str.maketrans('٠١٢٣٤٥٦٧٨٩٬،', '0123456789,,'))
-    cleaned = cleaned.replace('%', '').replace('سنة', '').replace(' ', '')
+    cleaned = cleaned.replace('%', '').replace('سنة', '').replace('م²', '').replace(' ', '')
     cleaned = cleaned.replace('(', '-').replace(')', '')
-    if cleaned.count(',') == 1 and '.' not in cleaned:
-        cleaned = cleaned.replace(',', '.')
-    else:
-        cleaned = cleaned.replace(',', '')
+    cleaned = cleaned.replace('٫', '.')
+    cleaned = cleaned.replace(',', '')
     match = re.search(r'-?\d+(?:\.\d+)?', cleaned)
     if not match:
         return None
     try:
-        number = float(match.group(0))
+        return float(match.group(0))
     except ValueError:
         return None
-    if percent and abs(number) > 1:
-        number = number / 100.0
-    return number
 
 
 def _financial_report_format_number(value, key=''):
@@ -6723,18 +6717,27 @@ def _financial_report_format_number(value, key=''):
     if number is None:
         return _financial_report_escape(value)
     field = str(key or '')
-    if field in _FINANCIAL_PERCENT_KEYS or (isinstance(value, str) and '%' in value):
-        display = number * 100 if abs(number) <= 1 else number
+    if field in _FINANCIAL_PERCENT_KEYS or (isinstance(value, str) and '%' in str(value)):
+        if field in {'roi', 'projectIrr', 'equityIrr', 'irr'} and isinstance(value, (int, float)):
+            display = number * 100
+        elif field in {'occupancyReach'} and abs(number) <= 1:
+            display = number * 100
+        else:
+            display = number
         return html_lib.escape(f'{display:,.2f}%')
-    if field in {'payback', 'equityPayback'} or (isinstance(value, str) and 'سنة' in value):
+    if field in {'payback', 'equityPayback'} or (isinstance(value, str) and 'سنة' in str(value)):
+        if float(number).is_integer():
+            return html_lib.escape(f'{int(number):,} سنة')
         return html_lib.escape(f'{number:,.2f} سنة')
     if field in _FINANCIAL_YEAR_KEYS and float(number).is_integer() and abs(number) < 10000:
+        return html_lib.escape(f'{int(number):,}')
+    if float(number).is_integer():
         return html_lib.escape(f'{int(number):,}')
     return html_lib.escape(f'{number:,.2f}')
 
 
-# Section 12 is a results summary, so it lists chosen metrics with Arabic labels instead of dumping
-# the whole projection object, which also carried echoed inputs and raw schedule arrays.
+# Section 12 is a results summary with curated metrics. English acronyms (ROI, Project IRR, Equity IRR, NOI)
+# are preserved directly per business domain standards.
 FINANCIAL_RESULT_LABELS = (
     ('projectCost', 'إجمالي تكلفة المشروع'),
     ('projectCostWithFinance', 'التكلفة شاملة التمويل'),
@@ -6744,9 +6747,9 @@ FINANCIAL_RESULT_LABELS = (
     ('saleRevenueTotal', 'إجمالي إيرادات البيع'),
     ('revenueY1', 'إيرادات السنة الأولى'),
     ('opexY1', 'مصروفات السنة الأولى'),
-    ('noiY1', 'صافي الدخل التشغيلي — السنة الأولى'),
+    ('noiY1', 'NOI — السنة الأولى'),
     ('fullOccupancyRevenue', 'الإيرادات عند الإشغال المستهدف'),
-    ('fullOccupancyNOI', 'صافي الدخل التشغيلي عند الإشغال المستهدف'),
+    ('fullOccupancyNOI', 'NOI عند الإشغال المستهدف'),
     ('totalGraceDiscount', 'إجمالي خصم فترة السماح'),
     ('facilityAmount', 'قيمة التسهيل التمويلي'),
     ('arrangementFee', 'رسوم ترتيب التمويل'),
@@ -6760,16 +6763,108 @@ FINANCIAL_RESULT_LABELS = (
     ('totalCashEquity', 'حقوق الملكية النقدية'),
     ('totalEquityRequired', 'إجمالي حقوق الملكية المطلوبة'),
     ('totalEquityDistributions', 'إجمالي التوزيعات'),
-    ('roi', 'العائد على الاستثمار'),
-    ('projectIrr', 'معدل العائد الداخلي للمشروع'),
-    ('equityIrr', 'معدل العائد على حقوق الملكية'),
+    ('roi', 'ROI'),
+    ('projectIrr', 'Project IRR'),
+    ('equityIrr', 'Equity IRR'),
     ('payback', 'فترة استرداد رأس المال'),
     ('equityPayback', 'فترة استرداد حقوق الملكية'),
 )
 
 
+def _filter_financial_results(inputs, projection):
+    inputs = inputs if isinstance(inputs, dict) else {}
+    projection = projection if isinstance(projection, dict) else {}
+    mode = inputs.get('unitRevenueMode') or 'mixed'
+    sales_on = mode in {'sale', 'mixed'}
+    rental_on = mode in {'rental', 'mixed'}
+    finance_on = inputs.get('financeEnabled') == 'yes'
+    fund_on = inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes'
+    grace_on = rental_on and inputs.get('graceEnabled') == 'yes'
+    exit_on = inputs.get('exitEnabled') == 'yes'
+
+    def has_nonzero(val):
+        num = _financial_report_plain_number(val)
+        return num is not None and abs(num) > 0.0001
+
+    land_in_kind = inputs.get('landContributionType') == 'inKind' or has_nonzero(projection.get('landEquityContribution'))
+    has_land_rent = inputs.get('landStatus') == 'leased' or has_nonzero(projection.get('landRent')) or has_nonzero(inputs.get('annualLandRent'))
+
+    allowed_keys = {'projectCost', 'developerCost', 'totalEquityRequired', 'roi', 'projectIrr', 'payback'}
+
+    if finance_on:
+        allowed_keys.update({'projectCostWithFinance', 'facilityAmount', 'arrangementFee', 'totalFinanceInterest', 'totalFinanceCost', 'totalCashEquity', 'equityIrr', 'equityPayback'})
+    if finance_on or fund_on:
+        allowed_keys.add('adjustedProjectCost')
+    if has_land_rent:
+        allowed_keys.add('landRent')
+    if sales_on:
+        allowed_keys.add('saleRevenueTotal')
+    if rental_on:
+        allowed_keys.update({'revenueY1', 'opexY1', 'noiY1', 'fullOccupancyRevenue', 'fullOccupancyNOI'})
+    if grace_on:
+        allowed_keys.add('totalGraceDiscount')
+    if fund_on:
+        allowed_keys.add('totalFundFees')
+    if exit_on:
+        allowed_keys.add('terminal')
+        if sales_on:
+            allowed_keys.add('saleExitValue')
+        if rental_on:
+            allowed_keys.add('operatingExitValue')
+    if land_in_kind:
+        allowed_keys.add('landEquityContribution')
+    if has_nonzero(projection.get('totalEquityDistributions')):
+        allowed_keys.add('totalEquityDistributions')
+
+    result = []
+    for key, label in FINANCIAL_RESULT_LABELS:
+        if key not in allowed_keys:
+            continue
+        val = projection.get(key)
+        if val in (None, '', [], {}) and inputs.get(key) not in (None, ''):
+            val = inputs.get(key)
+        if val in (None, '', [], {}):
+            continue
+        result.append((label, val, key))
+    return result
+
+
+def _filter_cashflow_columns(rows, inputs):
+    if not isinstance(rows, list) or not rows:
+        return rows
+    inputs = inputs if isinstance(inputs, dict) else {}
+    mode = inputs.get('unitRevenueMode') or 'mixed'
+    sales_on = mode in {'sale', 'mixed'}
+    rental_on = mode in {'rental', 'mixed'}
+    finance_on = inputs.get('financeEnabled') == 'yes'
+    fund_on = inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes'
+    grace_on = rental_on and inputs.get('graceEnabled') == 'yes'
+    exit_on = inputs.get('exitEnabled') == 'yes'
+
+    drop_columns = set(FINANCIAL_REPORT_DROP_COLUMNS)
+    if not sales_on:
+        drop_columns.update({'saleRevenue', 'المبيعات', 'saleExit', 'saleExitGross'})
+    if not rental_on:
+        drop_columns.update({'operatingRevenue', 'إيرادات التأجير', 'opex', 'المصروفات', 'noi', 'NOI', 'operatingExit', 'operatingExitGross', 'occupancyReach', 'الوصول للإشغال %'})
+    if not grace_on:
+        drop_columns.update({'graceDiscount', 'خصم فترة السماح'})
+    if not fund_on:
+        drop_columns.update({'fundFeesAnnual', 'أتعاب الصندوق', 'fundManagementFee', 'additionalFundFees', 'fundExitFee', 'performanceFee'})
+    if not finance_on:
+        drop_columns.update({'financeDraw', 'سحب التمويل', 'financeInterest', 'فائدة التمويل', 'financeFee', 'رسوم التمويل', 'financeRepayment', 'سداد أصل التمويل', 'openingDebt', 'closingDebt', 'فائدة ورسوم التمويل'})
+    if not exit_on:
+        drop_columns.update({'terminal', 'قيمة التخارج', 'saleExit', 'operatingExit'})
+
+    filtered_rows = []
+    for row in rows:
+        if isinstance(row, dict):
+            filtered_rows.append({k: v for k, v in row.items() if k not in drop_columns and FINANCIAL_COLUMN_LABELS.get(k, k) not in drop_columns})
+        else:
+            filtered_rows.append(row)
+    return filtered_rows
+
+
 def _financial_report_rows(rows):
-    # Structured values are dropped rather than stringified: they have their own tables.
     visible = []
     for item in rows:
         if len(item) == 3:
@@ -6788,9 +6883,6 @@ def _financial_report_rows(rows):
     ) + '</tbody></table>'
 
 
-# Table columns arrive keyed by their internal name, which used to be printed as-is, so the client
-# PDF showed headers like "costPct" and "saleRevenue". Unknown keys still fall back to the raw name
-# so a new column shows up rather than silently vanishing.
 FINANCIAL_COLUMN_LABELS = {
     'name': 'البند', 'useType': 'نوع الاستخدام', 'units': 'عدد الوحدات',
     'unitArea': 'مساحة الوحدة م²', 'builtArea': 'المساحة المبنية م²',
@@ -6804,6 +6896,7 @@ FINANCIAL_COLUMN_LABELS = {
     'recurrence': 'التكرار', 'type': 'نوع البند', 'base': 'القيمة الأساسية', 'growth': 'النمو %',
     'amount': 'القيمة', 'phase': 'المرحلة', 'occupancyReach': 'الوصول للإشغال %',
     'saleRevenue': 'المبيعات', 'operatingRevenue': 'إيرادات التأجير',
+    'noi': 'NOI',
     'graceDiscount': 'خصم فترة السماح', 'developmentCost': 'تكلفة التطوير',
     'developerPayment': 'دفعة المطور', 'opex': 'المصروفات', 'landRent': 'إيجار الأرض',
     'fundFeesAnnual': 'أتعاب الصندوق', 'financeDraw': 'سحب التمويل',
@@ -6856,6 +6949,8 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
     inputs = _financial_inputs(model)
     tables = model.get('tables', {}) if isinstance(model, dict) and isinstance(model.get('tables'), dict) else {}
     projection = model.get('projection', {}) if isinstance(model, dict) and isinstance(model.get('projection'), dict) else {}
+    mode = inputs.get('unitRevenueMode') or 'mixed'
+    rental_on = mode in {'rental', 'mixed'}
     primary = (branding or {}).get('primary_color') or '#123B6D'
     secondary = (branding or {}).get('secondary_color') or '#082646'
     accent = (branding or {}).get('accent_color') or '#C4A35A'
@@ -6872,17 +6967,32 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
         ('7', 'المصروفات التشغيلية', 'opexTable'),
     ):
         sections.append(f'<section><h2>{number}. {title}</h2>{_financial_report_table(tables.get(table_key))}</section>')
+    if rental_on and inputs.get('graceEnabled') == 'yes':
+        grace_rows = [
+            ('طريقة احتساب السماح', inputs.get('graceMethod'), 'graceMethod'),
+            ('نطاق فترة السماح', inputs.get('graceScope'), 'graceScope'),
+            ('سنة بداية السماح', inputs.get('graceStartYear'), 'graceStartYear'),
+            ('مدة السماح (شهر)', inputs.get('graceDurationMonths'), 'graceDurationMonths'),
+            ('نسبة الخصم %', inputs.get('graceDiscountRate'), 'graceDiscountRate'),
+            ('إجمالي الخصم', inputs.get('graceTotalDiscount') or projection.get('totalGraceDiscount'), 'graceTotalDiscount'),
+        ]
+        grace_html = '<section><h2>فترة السماح للمستأجرين</h2>' + _financial_report_rows(grace_rows)
+        if inputs.get('graceMethod') == 'schedule' and tables.get('graceScheduleTable'):
+            grace_html += _financial_report_table(tables.get('graceScheduleTable'))
+        grace_html += '</section>'
+        sections.append(grace_html)
     if inputs.get('financeEnabled') == 'yes':
         sections.append('<section><h2>8. التمويل</h2>' + rows([('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'), ('annualFinanceRate', 'معدل الفائدة'), ('financeInterestMethod', 'طريقة الفائدة'), ('financeDrawYears', 'سنوات السحب'), ('financeRepaymentYears', 'سنوات السداد')]) + _financial_report_table(tables.get('financeDrawTable')) + _financial_report_table(tables.get('financeRepaymentTable')) + '</section>')
     if inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes':
         sections.append('<section><h2>9. الصندوق وأتعابه</h2>' + rows([('fundFeeBase', 'أساس الأتعاب'), ('fundCapitalInput', 'رأس مال الصندوق'), ('fundManagementRate', 'نسبة الإدارة'), ('fundFeeStartYear', 'بداية الاحتساب'), ('fundFeeEndYear', 'نهاية الاحتساب')]) + _financial_report_table(tables.get('fundAdditionalFeesTable')) + '</section>')
-    if inputs.get('externalEnabled') == 'yes':
+    if inputs.get('externalEnabled') == 'yes' and tables.get('externalTable'):
         sections.append('<section><h2>10. البنود الخارجية</h2>' + _financial_report_table(tables.get('externalTable')) + '</section>')
     if inputs.get('exitEnabled') == 'yes':
         sections.append('<section><h2>11. التخارج</h2>' + rows([('saleExitMethod', 'التخارج البيعي'), ('saleExitYear', 'سنة التخارج البيعي'), ('exitMethod', 'التخارج التشغيلي'), ('operatingExitYear', 'سنة التخارج التشغيلي'), ('exitInput', 'مدخل التخارج')]) + '</section>')
-    projection_rows = [(label, projection.get(key), key) for key, label in FINANCIAL_RESULT_LABELS]
-    sections.append('<section class="keep-together"><h2>12. النتائج المالية</h2>' + _financial_report_rows(projection_rows) + '</section>')
-    sections.append('<section class="wide-table"><h2>13. التدفقات النقدية السنوية</h2>' + _financial_report_table(tables.get('cashflowTable')) + '</section>')
+    filtered_results = _filter_financial_results(inputs, projection)
+    sections.append('<section class="keep-together"><h2>12. النتائج المالية</h2>' + _financial_report_rows(filtered_results) + '</section>')
+    cf_rows = _filter_cashflow_columns(tables.get('cashflowTable'), inputs)
+    sections.append('<section class="wide-table"><h2>13. التدفقات النقدية السنوية</h2>' + _financial_report_table(cf_rows) + '</section>')
     sensitivity_assumptions = tables.get('sensitivityAssumptionsTable')
     if not isinstance(sensitivity_assumptions, list) or not sensitivity_assumptions:
         dynamic_rows = model.get('dynamicRows') if isinstance(model, dict) else {}
@@ -6957,6 +7067,8 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
     inputs = _financial_inputs(model)
     tables = model.get('tables', {}) if isinstance(model, dict) and isinstance(model.get('tables'), dict) else {}
     projection = model.get('projection', {}) if isinstance(model, dict) and isinstance(model.get('projection'), dict) else {}
+    mode = inputs.get('unitRevenueMode') or 'mixed'
+    rental_on = mode in {'rental', 'mixed'}
     font_path = _financial_pdf_font()
     document = fitz.open()
     page_size = fitz.paper_rect('a4-l')
@@ -7045,7 +7157,6 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             ensure_space(16)
             rect = fitz.Rect(margin, y, page_size.width - margin, y + 15)
             page.draw_rect(rect, color=(0.85, 0.82, 0.8), width=0.4)
-            # Right-to-left reading order: the label owns the right half.
             place(fitz.Rect(rect.x0 + col_w + 4, rect.y0 + 2, rect.x1 - 4, rect.y1), label, 8)
             place(fitz.Rect(rect.x0 + 4, rect.y0 + 2, rect.x0 + col_w - 4, rect.y1), value, 8)
             y += 15
@@ -7094,7 +7205,6 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             nonlocal y
             ensure_space(row_h)
             x = margin
-            # Right-to-left tables: the first column belongs on the right edge.
             for value in reversed(values):
                 cell = fitz.Rect(x, y, x + col_w, y + row_h)
                 fill = (0.07, 0.23, 0.43) if header else None
@@ -7134,6 +7244,18 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
         ('7', 'المصروفات التشغيلية', 'opexTable'),
     ):
         draw_data_table(tables.get(table_key), f'{number}. {title}')
+    if rental_on and inputs.get('graceEnabled') == 'yes':
+        draw_text('فترة السماح للمستأجرين', 12)
+        draw_kv_table([
+            ('طريقة احتساب السماح', inputs.get('graceMethod'), 'graceMethod'),
+            ('نطاق فترة السماح', inputs.get('graceScope'), 'graceScope'),
+            ('سنة بداية السماح', inputs.get('graceStartYear'), 'graceStartYear'),
+            ('مدة السماح (شهر)', inputs.get('graceDurationMonths'), 'graceDurationMonths'),
+            ('نسبة الخصم %', inputs.get('graceDiscountRate'), 'graceDiscountRate'),
+            ('إجمالي الخصم', inputs.get('graceTotalDiscount') or projection.get('totalGraceDiscount'), 'graceTotalDiscount'),
+        ])
+        if inputs.get('graceMethod') == 'schedule' and tables.get('graceScheduleTable'):
+            draw_data_table(tables.get('graceScheduleTable'), 'جدول خصومات فترة السماح')
     if inputs.get('financeEnabled') == 'yes':
         draw_text('8. التمويل', 12)
         draw_kv_table([
@@ -7152,6 +7274,9 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             ('نسبة الإدارة', inputs.get('fundManagementRate'), 'fundManagementRate'),
         ])
         draw_data_table(tables.get('fundAdditionalFeesTable'), 'أتعاب إضافية')
+    if inputs.get('externalEnabled') == 'yes' and tables.get('externalTable'):
+        draw_text('10. البنود الخارجية', 12)
+        draw_data_table(tables.get('externalTable'), 'البنود الخارجية')
     if inputs.get('exitEnabled') == 'yes':
         draw_text('11. التخارج', 12)
         draw_kv_table([
@@ -7160,12 +7285,10 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             ('سنة التخارج التشغيلي', inputs.get('operatingExitYear'), 'operatingExitYear'),
         ])
     draw_text('12. النتائج المالية', 12)
-    result_source = dict(projection or {})
-    for key in ('projectCost', 'projectCostWithFinance', 'facilityAmount', 'arrangementFee', 'totalFinanceInterest', 'landEquityContribution', 'cashEquityRequired', 'equityRequired', 'totalCashEquity', 'totalEquityRequired'):
-        if result_source.get(key) in (None, '', 0) and inputs.get(key) not in (None, ''):
-            result_source[key] = inputs.get(key)
-    draw_kv_table([(label, result_source.get(key), key) for key, label in FINANCIAL_RESULT_LABELS])
-    draw_data_table(tables.get('cashflowTable'), '13. التدفقات النقدية السنوية')
+    filtered_results = _filter_financial_results(inputs, projection)
+    draw_kv_table(filtered_results)
+    cf_rows = _filter_cashflow_columns(tables.get('cashflowTable'), inputs)
+    draw_data_table(cf_rows, '13. التدفقات النقدية السنوية')
     sensitivity_assumptions = tables.get('sensitivityAssumptionsTable')
     if not isinstance(sensitivity_assumptions, list) or not sensitivity_assumptions:
         dynamic_rows = model.get('dynamicRows') if isinstance(model, dict) else {}

@@ -15338,9 +15338,9 @@
             <div class="metric"><span>إجمالي تكلفة التمويل</span><strong id="resFinanceCost">0</strong></div>
             <div class="metric"><span>إجمالي تكاليف الصندوق</span><strong id="resFundFees">0</strong></div>
             <div class="metric"><span>إجمالي تكلفة الاستثمار</span><strong id="resTotalInvestmentCost">0</strong></div>
-            <div class="metric"><span>ROI للفترة المختارة</span><strong id="resROI">0%</strong><small id="resROIScope"></small></div>
-            <div class="metric"><span>IRR المشروع قبل التمويل</span><strong id="resProjectIRR">0%</strong><small id="resProjectIRRScope"></small></div>
-            <div class="metric"><span>IRR حقوق الملكية بعد التمويل</span><strong id="resIRR">0%</strong><small id="resEquityIRRScope"></small></div>
+            <div class="metric"><span>ROI</span><strong id="resROI">0%</strong><small id="resROIScope"></small></div>
+            <div class="metric"><span>Project IRR</span><strong id="resProjectIRR">0%</strong><small id="resProjectIRRScope"></small></div>
+            <div class="metric"><span>Equity IRR</span><strong id="resIRR">0%</strong><small id="resEquityIRRScope"></small></div>
             <div class="metric"><span>فترة استرداد المشروع</span><strong id="resPayback">0</strong></div>
             <div class="metric"><span>فترة استرداد حقوق الملكية</span><strong id="resEquityPayback">0</strong></div>
             <div class="metric"><span>مساهمة الأرض العينية</span><strong id="resLandEquity">0</strong></div>
@@ -15375,7 +15375,7 @@
           <p class="hint">اختر المتغيرات المناسبة لأي مشروع.</p>
           <div class="sensitivity-picker"><div><label>المتغير المراد اختباره</label><select id="sensitivityVariableSelect"><option value="salePrice">سعر بيع الوحدات</option><option value="rentalRate">أسعار الإيجار والتأجير</option><option value="occupancy">الوصول للإشغال المستهدف</option><option value="executionCost">تكلفة التنفيذ</option><option value="developmentYears">مدة التطوير</option><option value="financeRate">معدل التمويل</option><option value="opex">المصروفات التشغيلية</option><option value="capRate">معدل الرسملة عند التخارج</option><option value="fixedExit">قيمة التخارج الثابتة</option></select></div><button type="button" class="btn ghost" onclick="addSensitivityVariable()">+ إضافة المتغير</button></div>
           <div class="table-wrap"><table id="sensitivityAssumptionsTable"><thead><tr><th>المتغير</th><th>متحفظ</th><th>أساسي من الدراسة</th><th>متفائل</th><th>طريقة التطبيق</th><th>ترتيب / حذف</th></tr></thead><tbody></tbody></table></div>
-          <div class="table-wrap"><table id="sensitivityTable"><thead><tr><th>السيناريو</th><th>إجمالي الإيرادات</th><th>NOI عند الوصول 100% للإشغال المستهدف</th><th>إجمالي تكلفة الاستثمار</th><th>صافي الربح</th><th>قيمة التخارج</th><th>ROI كامل الدورة</th><th>Project IRR كامل الدورة</th><th>Equity IRR كامل الدورة</th><th>فترة الاسترداد</th><th>إجمالي حقوق الملكية</th></tr></thead><tbody></tbody></table></div>
+          <div class="table-wrap"><table id="sensitivityTable"><thead><tr><th>السيناريو</th><th>إجمالي الإيرادات</th><th>NOI عند الوصول 100% للإشغال المستهدف</th><th>إجمالي تكلفة الاستثمار</th><th>صافي الربح</th><th>قيمة التخارج</th><th>ROI</th><th>Project IRR</th><th>Equity IRR</th><th>فترة الاسترداد</th><th>إجمالي حقوق الملكية</th></tr></thead><tbody></tbody></table></div>
         </div>
 
         <div class="finance-block" style="text-align:center;padding:20px">
@@ -15827,7 +15827,15 @@
       const container = document.getElementById('resultsCards'); if (!container) return;
       container.querySelectorAll('.result-group-title').forEach(node => node.remove());
       const groups = [['التكاليف والاستثمار', ['resProjectCostBeforeFinance', 'resDevCost', 'resProjectCost', 'resFinanceCost', 'resFundFees', 'resTotalInvestmentCost']], ['الإيرادات وصافي الدخل', ['resSaleRevenue', 'resRevenueY1', 'resNOIY1', 'resFullOccupancyRevenue', 'resFullOccupancyOpex', 'resFullOccupancyNOI']], ['التمويل وحقوق الملكية', ['resLandEquity', 'resCashEquity', 'resEquityRequired']], ['التخارج', ['resSaleExitGross', 'resSaleExit', 'resOperatingExitGross', 'resOperatingExit', 'resTerminal']], ['مؤشرات العائد والاسترداد', ['resROI', 'resProjectIRR', 'resIRR', 'resPayback', 'resEquityPayback']]];
-      groups.forEach(([title, ids]) => { const heading = document.createElement('h4'); heading.className = 'result-group-title'; heading.textContent = title; container.appendChild(heading); ids.forEach(id => { const card = document.getElementById(id)?.closest('.metric'); if (card) container.appendChild(card) }) });
+      groups.forEach(([title, ids]) => {
+        const visibleCards = ids.map(id => document.getElementById(id)?.closest('.metric')).filter(c => c && !c.classList.contains('conditional-off') && !c.classList.contains('hidden'));
+        if (!visibleCards.length) return;
+        const heading = document.createElement('h4');
+        heading.className = 'result-group-title';
+        heading.textContent = title;
+        container.appendChild(heading);
+        visibleCards.forEach(card => container.appendChild(card));
+      });
     }
 
     function calculateAll() {
@@ -16421,36 +16429,68 @@
         ['نسبة المطور من الزيادة في سعر البيع', reportFieldValue('developerUpliftShare') + '%'],
         ['آلية التطبيق', 'تطبق تعاقديًا فقط على فرق الزيادة عند البيع أعلى من السعر أو القيمة المستهدفة، ولا تدخل تلقائيًا ضمن أرقام الدراسة.']
       ]);
-      const resultSummary = reportRows([
-        ['تكلفة المشروع قبل التمويل', reportMetricValue('resProjectCostBeforeFinance')],
-        ['إجمالي تكلفة المشروع شامل التمويل', reportMetricValue('resProjectCost')],
-        ['إجمالي إيرادات البيع', reportMetricValue('resSaleRevenue')],
-        ['إيراد أول سنة تشغيل', reportMetricValue('resRevenueY1')],
-        ['NOI أول سنة تشغيل', reportMetricValue('resNOIY1')],
-        ['إيرادات التشغيل عند الوصول إلى 100% من الإشغال المستهدف', reportMetricValue('resFullOccupancyRevenue')],
-        ['المصروفات عند الوصول إلى 100% من الإشغال المستهدف', reportMetricValue('resFullOccupancyOpex')],
-        ['NOI عند الوصول إلى 100% من الإشغال المستهدف', reportMetricValue('resFullOccupancyNOI')],
-        ['إجمالي التخارج البيعي قبل التكاليف', reportMetricValue('resSaleExitGross')],
-        ['صافي التخارج البيعي', reportMetricValue('resSaleExit')],
-        ['إجمالي التخارج التشغيلي قبل التكاليف', reportMetricValue('resOperatingExitGross')],
-        ['صافي التخارج التشغيلي', reportMetricValue('resOperatingExit')],
-        ['إجمالي صافي التخارج', reportMetricValue('resTerminal')],
-        ['أتعاب المطور', reportMetricValue('resDevCost')],
-        ['إجمالي تكلفة التمويل', reportMetricValue('resFinanceCost')],
-        ['إجمالي تكاليف الصندوق', reportMetricValue('resFundFees')],
-        ['إجمالي تكلفة الاستثمار', reportMetricValue('resTotalInvestmentCost')],
-        ['فترة احتساب ROI', document.getElementById('resROIScope').textContent],
-        ['ROI للفترة المختارة', reportMetricValue('resROI')],
-        ['فترة احتساب IRR', document.getElementById('resProjectIRRScope').textContent],
-        ['IRR المشروع قبل التمويل', reportMetricValue('resProjectIRR')],
-        ['IRR حقوق الملكية بعد التمويل', reportMetricValue('resIRR')],
-        ['فترة استرداد المشروع', reportMetricValue('resPayback')],
-        ['فترة استرداد حقوق الملكية', reportMetricValue('resEquityPayback')],
-        ['مساهمة الأرض العينية', reportMetricValue('resLandEquity')],
-        ['الضخ النقدي المطلوب', reportMetricValue('resCashEquity')],
-        ['إجمالي حقوق الملكية', reportMetricValue('resEquityRequired')]
-      ]);
       const reportFlags = projectModeFlags();
+      const financeOn = val('financeEnabled') === 'yes';
+      const fundOn = val('fundEnabled') === 'yes' && val('fundFeesEnabled') === 'yes';
+      const exitOn = val('exitEnabled') === 'yes';
+
+      const resultsList = [
+        ['تكلفة المشروع قبل التمويل', reportMetricValue('resProjectCostBeforeFinance')],
+      ];
+      if (financeOn) {
+        resultsList.push(['إجمالي تكلفة المشروع شامل التمويل', reportMetricValue('resProjectCost')]);
+      }
+      if (reportFlags.sales) {
+        resultsList.push(['إجمالي إيرادات البيع', reportMetricValue('resSaleRevenue')]);
+      }
+      if (reportFlags.rental) {
+        resultsList.push(['إيراد أول سنة تشغيل', reportMetricValue('resRevenueY1')]);
+        resultsList.push(['NOI — السنة الأولى', reportMetricValue('resNOIY1')]);
+        resultsList.push(['إيرادات التشغيل عند الوصول إلى 100% من الإشغال المستهدف', reportMetricValue('resFullOccupancyRevenue')]);
+        resultsList.push(['المصروفات عند الوصول إلى 100% من الإشغال المستهدف', reportMetricValue('resFullOccupancyOpex')]);
+        resultsList.push(['NOI عند الوصول إلى 100% من الإشغال المستهدف', reportMetricValue('resFullOccupancyNOI')]);
+      }
+      if (exitOn) {
+        if (reportFlags.sales) {
+          resultsList.push(['إجمالي التخارج البيعي قبل التكاليف', reportMetricValue('resSaleExitGross')]);
+          resultsList.push(['صافي التخارج البيعي', reportMetricValue('resSaleExit')]);
+        }
+        if (reportFlags.rental) {
+          resultsList.push(['إجمالي التخارج التشغيلي قبل التكاليف', reportMetricValue('resOperatingExitGross')]);
+          resultsList.push(['صافي التخارج التشغيلي', reportMetricValue('resOperatingExit')]);
+        }
+        resultsList.push(['إجمالي صافي التخارج', reportMetricValue('resTerminal')]);
+      }
+      resultsList.push(['أتعاب المطور', reportMetricValue('resDevCost')]);
+      if (financeOn) {
+        resultsList.push(['إجمالي تكلفة التمويل', reportMetricValue('resFinanceCost')]);
+      }
+      if (fundOn) {
+        resultsList.push(['إجمالي تكاليف الصندوق', reportMetricValue('resFundFees')]);
+      }
+      if (financeOn || fundOn) {
+        resultsList.push(['إجمالي تكلفة الاستثمار', reportMetricValue('resTotalInvestmentCost')]);
+      }
+      resultsList.push(['فترة احتساب ROI', document.getElementById('resROIScope')?.textContent || '']);
+      resultsList.push(['ROI', reportMetricValue('resROI')]);
+      resultsList.push(['فترة احتساب Project IRR', document.getElementById('resProjectIRRScope')?.textContent || '']);
+      resultsList.push(['Project IRR', reportMetricValue('resProjectIRR')]);
+      if (financeOn) {
+        resultsList.push(['Equity IRR', reportMetricValue('resIRR')]);
+      }
+      resultsList.push(['فترة استرداد المشروع', reportMetricValue('resPayback')]);
+      if (financeOn) {
+        resultsList.push(['فترة استرداد حقوق الملكية', reportMetricValue('resEquityPayback')]);
+      }
+      if (val('landContributionType') === 'inKind' || !reportValueIsZero(reportMetricValue('resLandEquity'))) {
+        resultsList.push(['مساهمة الأرض العينية', reportMetricValue('resLandEquity')]);
+      }
+      if (financeOn) {
+        resultsList.push(['الضخ النقدي المطلوب', reportMetricValue('resCashEquity')]);
+      }
+      resultsList.push(['إجمالي حقوق الملكية', reportMetricValue('resEquityRequired')]);
+
+      const resultSummary = reportRows(resultsList);
       const graceReportSection = reportFlags.rental && val('graceEnabled') === 'yes' ? `<section class="section"><h3>5. فترة السماح</h3>${reportRows([['طريقة الاحتساب', reportFieldValue('graceMethod')], ['نطاق السماح', reportFieldValue('graceScope')], ['بداية السماح', reportFieldValue('graceStartYear')], ['مدة السماح بالأشهر', reportFieldValue('graceDurationMonths')], ['إجمالي الخصم', reportFieldValue('graceTotalDiscount')]])}${val('graceMethod') === 'schedule' ? reportTableSnapshot('graceScheduleTable', true, true) : ''}</section>` : '';
       const financeReportSection = val('financeEnabled') === 'yes' ? `<section class="section"><h3>8. هيكل تمويل</h3>${financeSummary}<h4>خطة سحب التمويل</h4>${reportTableSnapshot('financeDrawTable', false)}<h4>خطة سداد أصل التمويل</h4>${reportTableSnapshot('financeRepaymentTable', false)}<h4>حركة رصيد التمويل السنوية</h4>${reportTableSnapshot('debtScheduleTable', false)}</section>` : '';
       const fundReportSection = val('fundEnabled') === 'yes' && val('fundFeesEnabled') === 'yes' ? `<section class="section page-break"><h3>9. أتعاب إدارة الصندوق</h3>${fundSummary}<h4>الأتعاب الإضافية الاختيارية</h4>${reportTableSnapshot('fundAdditionalFeesTable', true, true)}<h4>جدول أتعاب الصندوق السنوي</h4>${reportTableSnapshot('fundFeeScheduleTable', false)}</section>` : '';

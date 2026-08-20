@@ -1021,16 +1021,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('"drawPct"', html)
         self.assertNotIn('[{', html)
 
-        # No internal identifier may be used as a visible header.
-        self.assertEqual(sorted(set(re.findall(r'<th>([A-Za-z]\w*)</th>', html))), [])
+        # No internal identifier may be used as a visible header, allowing only accepted business acronyms (ROI, NOI).
+        self.assertEqual(set(re.findall(r'<th>([A-Za-z]\w*)</th>', html)) - {'ROI', 'NOI'}, set())
 
-        # Curated Arabic results, and the schedules still render as real tables in section 8.
+        # Curated results with business domain acronyms, and the schedules still render as real tables in section 8.
         self.assertIn('12. النتائج المالية', html)
         self.assertIn('إجمالي تكلفة المشروع', html)
-        self.assertIn('500,000,000.00', html)
+        self.assertIn('500,000,000', html)
         self.assertIn('42.00%', html)
         self.assertIn('18.00%', html)
-        self.assertIn('معدل العائد الداخلي للمشروع', html)
+        self.assertIn('Project IRR', html)
         self.assertIn('نسبة السحب %', html)
         self.assertIn('صافي تدفق المشروع', html)
         # Echoed inputs are no longer repeated in the results summary.
@@ -1645,8 +1645,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('13. التدفقات النقدية السنوية', html)
         self.assertIn('14. تحليل الحساسية العام', html)
         self.assertIn('wide-table', html)
-        self.assertIn('1,000.00', html)
-        self.assertIn('90.00', html)
+        self.assertIn('1,000', html)
+        self.assertIn('90', html)
         self.assertIn('12.00%', html)
         self.assertNotIn('ترتيب / حذف', html)
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
@@ -2394,7 +2394,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                 document.close()
             # PyMuPDF applies no shaping, so the report must carry presentation forms.
             self.assertIn('\ufee3', text)
-            self.assertIn('70,000.00', text)
+            self.assertIn('70,000', text)
             empty = Path(temp_dir) / 'empty.pdf'
             blank = fitz.open()
             blank.new_page()
