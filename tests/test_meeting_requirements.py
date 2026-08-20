@@ -1311,7 +1311,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         build_source = index_source[build_start:build_end]
         self.assertLess(build_source.index('addTimelineTable(form);'), build_source.index('addFinancialCalculations(form);'))
         self.assertLess(build_source.index('addFinancialCalculations(form);'), build_source.index('addTeamSection(form);'))
-        self.assertLess(build_source.index('addTeamSection(form);'), build_source.index('addConceptualPlansSection(form)'))
+        self.assertLess(build_source.index('addTeamSection(form);'), build_source.index('addExecutiveContentSection(form)'))
+        self.assertNotIn('addConceptualPlansSection(form)', build_source)
 
         # The three per-file behaviours.
         self.assertIn('function toggleTeamEntityInFile(entityId)', index_source)
@@ -2420,7 +2421,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         sections = [
             'basic', 'location', 'land_croquis', 'section-timeline',
             'section-financial-calc', 'section-team', 'section-market-study',
-            'section-executive-content', 'section-conceptual-2d',
+            'section-executive-content',
         ]
         client.post('/api/project-draft', headers=headers, json={
             'draftData': {'project_name': 'ملف اعتماد'}, 'sectionStatuses': {}, 'status': 'draft'
@@ -2951,9 +2952,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-visual-concept-target="external"', index_source)
         self.assertIn('data-visual-concept-target="internal"', index_source)
         self.assertIn('data-visual-caption', index_source)
-        self.assertIn('data-conceptual-plan-caption', index_source)
+        self.assertNotIn('data-conceptual-plan-caption', index_source)
+        self.assertNotIn('function addConceptualPlansSection(form, before)', index_source)
+        self.assertNotIn('function conceptualPlansNeedCaptions()', index_source)
         self.assertIn('<label>وصف الصورة</label>', index_source)
-        self.assertIn('function conceptualPlansNeedCaptions()', index_source)
         self.assertNotIn('placeholder="وصف الصورة (اختياري)"', index_source)
         self.assertIn('visualConceptInteriorComponentSelect', index_source)
         self.assertIn('function uploadVisualConceptInteriorReferences', index_source)
@@ -3170,9 +3172,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('visualConceptInteriorComponentSelect', index_source)
         self.assertIn('function visualConceptInteriorSlotId', index_source)
-        self.assertIn("function addConceptualPlansSection(form, before)", index_source)
-        self.assertIn('data-key="conceptual_plans"', index_source)
-        self.assertIn('function persistConceptualPlansState()', index_source)
+        self.assertNotIn("function addConceptualPlansSection(form, before)", index_source)
+        self.assertNotIn('data-key="conceptual_plans"', index_source)
         self.assertIn("if (tenantFloorDesignEmbedded) exitTenantFloorDesignPage();", index_source)
         self.assertEqual(self.application_module._visual_concept_interior_component_id('interior_comp-1::3'), 'comp-1')
 

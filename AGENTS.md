@@ -206,13 +206,10 @@ Logos reuse `project_files` with `file_type='team_logo'`, so they inherit tenant
 authenticated `GET /api/project-files/<id>` preview route. `team_logo` is in
 `PROJECT_IMAGE_ONLY_TYPES` because it renders in an `<img>`.
 
-Section order is `basic → location → land_croquis → timeline → financial → team → market study → executive content → conceptual 2D`.
+Section order is `basic → location → land_croquis → timeline → financial → team → market study → executive content`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order.
-`section-conceptual-2d` is optional client plan uploads (`file_type='conceptual_plan'`), not the
-floor-design generator. The user may leave it empty. Every uploaded plan needs a client-written
-caption before the section can be approved. Floor-design generation is not a workflow home card.
-`section-executive-content` is the last
-written-information section, immediately before that upload section.
+There is no conceptual-2D section inside بيانات المشروع. Floor-design generation is not a
+workflow home card. `section-executive-content` is the last information section.
 It gathers already-approved facts from every earlier section (basic, location, land/croquis,
 timeline, financial, team, market study). Generated texts — brief, opportunity, features,
 risks, executive summary — live in `draft_data.executive_content` via the hidden

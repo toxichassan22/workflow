@@ -1909,44 +1909,6 @@
     #section-executive-content textarea#executiveText_summary {
       min-height: 360px;
     }
-    #section-conceptual-2d.tenant-form-section.active,
-    #section-conceptual-2d {
-      display: block;
-    }
-    #section-conceptual-2d .conceptual-plans-body {
-      grid-column: 1 / -1;
-    }
-    #section-conceptual-2d .conceptual-plans-list {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 10px;
-      margin-top: 10px;
-    }
-    #section-conceptual-2d .conceptual-plan-card {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px;
-      background: #fff;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    #section-conceptual-2d .conceptual-plan-card img {
-      width: 100%;
-      max-height: 160px;
-      object-fit: contain;
-      background: #f8fafc;
-      border-radius: 8px;
-    }
-    #section-conceptual-2d .conceptual-plan-card textarea {
-      width: 100%;
-      min-height: 72px;
-      resize: vertical;
-    }
-    #section-conceptual-2d .conceptual-plan-card label {
-      font-size: 13px;
-      font-weight: 700;
-    }
     .visual-concept-card textarea[data-visual-caption] {
       width: 100%;
       min-height: 72px;
@@ -9921,188 +9883,6 @@
       else form.appendChild(div);
     }
 
-    const CONCEPTUAL_PLANS_MAX = 12;
-
-    function getConceptualPlanFiles() {
-      const meta = Array.isArray(tenantProjectData.conceptual_plans_file_meta)
-        ? tenantProjectData.conceptual_plans_file_meta.filter(Boolean)
-        : [];
-      if (meta.length) return meta;
-      const ids = Array.isArray(tenantProjectData.conceptual_plans_file_ids)
-        ? tenantProjectData.conceptual_plans_file_ids.filter(Boolean)
-        : [];
-      if (ids.length) return ids.map(id => ({ id }));
-      const parsed = parseStoredLandTable(tenantProjectData.conceptual_plans);
-      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
-    }
-
-    function persistConceptualPlansState() {
-      if (!document.getElementById('conceptualPlansData') && !Array.isArray(tenantProjectData.conceptual_plans_file_meta)) return;
-      const files = getConceptualPlanFiles();
-      tenantProjectData.conceptual_plans_file_meta = files;
-      tenantProjectData.conceptual_plans_file_ids = files.map(file => file.id).filter(Boolean);
-      const hidden = document.getElementById('conceptualPlansData');
-      if (hidden) hidden.value = JSON.stringify(files);
-    }
-
-    function conceptualPlanCaptionField(fileId, value, pending) {
-      return '<label>وصف الصورة</label>' +
-        '<textarea data-conceptual-plan-caption="' + escapeHtml(fileId || '') + '" rows="3"' +
-        (pending ? ' disabled' : '') + '>' + escapeHtml(value || '') + '</textarea>';
-    }
-
-    function addConceptualPlansSection(form, before) {
-      const div = document.createElement('div');
-      div.className = 'tenant-form-section';
-      div.id = 'section-conceptual-2d';
-      div.dataset.section = 'section-conceptual-2d';
-      div.appendChild(createProjectSectionHeader('section-conceptual-2d', 'المخططات التصورية 2D'));
-      const body = document.createElement('div');
-      body.className = 'conceptual-plans-body';
-      body.innerHTML =
-        '<div class="tenant-field full">' +
-        '<label>ملفات المخططات</label>' +
-        '<input type="file" id="conceptualPlansInput" multiple accept="image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp">' +
-        '<p class="tenant-hint" id="conceptualPlansStatus"></p>' +
-        '<div id="conceptualPlansList" class="conceptual-plans-list"></div>' +
-        '<input type="hidden" data-key="conceptual_plans" data-type="text" id="conceptualPlansData">' +
-        '</div>';
-      div.appendChild(body);
-      if (before) form.insertBefore(div, before);
-      else form.appendChild(div);
-      const input = body.querySelector('#conceptualPlansInput');
-      if (input && !input.dataset.bound) {
-        input.dataset.bound = '1';
-        input.dataset.projectFileType = 'conceptual_plan';
-        input.addEventListener('change', () => uploadConceptualPlans(input));
-      }
-      renderConceptualPlans();
-    }
-
-    function renderConceptualPlans() {
-      persistConceptualPlansState();
-      const host = document.getElementById('conceptualPlansList');
-      const status = document.getElementById('conceptualPlansStatus');
-      if (!host) return;
-      const files = getConceptualPlanFiles();
-      if (status) {
-        if (!files.length) status.textContent = 'لا توجد مخططات مرفوعة';
-        else if (conceptualPlansNeedCaptions()) status.textContent = 'وصف غير مكتمل';
-        else status.textContent = files.length + ' ملف';
-      }
-      if (!files.length) {
-        host.innerHTML = '<div class="conceptual-plan-card">' + conceptualPlanCaptionField('', tenantProjectData.conceptual_plan_draft_caption || '', false) + '</div>';
-        bindConceptualPlanCaptions();
-        return;
-      }
-      host.innerHTML = files.map(file => {
-        const name = file.originalName || file.name || 'مخطط';
-        const safeId = String(file.id || '').replace(/'/g, "\\'");
-        const isPdf = String(file.mimeType || '').includes('pdf') || /\.pdf$/i.test(name);
-        const pending = file.status === 'pending' || !file.id;
-        return '<div class="conceptual-plan-card">' +
-          (pending
-            ? '<strong>' + escapeHtml(name) + '</strong>'
-            : (isPdf
-              ? '<strong>' + escapeHtml(name) + '</strong>'
-              : '<img alt="" data-conceptual-plan-thumb="' + escapeHtml(file.id || '') + '"><strong>' + escapeHtml(name) + '</strong>')) +
-          conceptualPlanCaptionField(file.id || '', file.description || '', pending) +
-          (pending ? '' :
-            '<div style="display:flex;gap:6px">' +
-            '<button type="button" class="btn ghost small" onclick="openProjectFilePreview(\'' + safeId + '\',\'' +
-            escapeHtml(name).replace(/'/g, "\\'") + '\',\'' + escapeHtml(file.mimeType || '') + '\')">معاينة</button>' +
-            '<button type="button" class="btn ghost danger small" onclick="removeConceptualPlan(\'' + safeId + '\')">حذف</button>' +
-            '</div>') +
-          '</div>';
-      }).join('');
-      host.querySelectorAll('[data-conceptual-plan-thumb]').forEach(image => {
-        attachProjectFileThumbnail(image, image.dataset.conceptualPlanThumb);
-      });
-      bindConceptualPlanCaptions();
-    }
-
-    function bindConceptualPlanCaptions() {
-      document.querySelectorAll('#conceptualPlansList [data-conceptual-plan-caption]').forEach(field => {
-        field.addEventListener('input', () => {
-          const value = String(field.value || '').slice(0, 400);
-          const fileId = String(field.dataset.conceptualPlanCaption || '');
-          if (!fileId) {
-            tenantProjectData.conceptual_plan_draft_caption = value;
-            triggerAutoSaveDraft();
-            return;
-          }
-          const files = getConceptualPlanFiles();
-          const entry = files.find(item => String(item.id) === fileId);
-          if (entry) entry.description = value;
-          tenantProjectData.conceptual_plans_file_meta = files;
-          persistConceptualPlansState();
-          triggerAutoSaveDraft();
-        });
-      });
-    }
-
-    async function uploadConceptualPlans(input) {
-      const files = Array.from(input?.files || []);
-      if (!files.length) return;
-      const existing = getConceptualPlanFiles();
-      const remaining = Math.max(0, CONCEPTUAL_PLANS_MAX - existing.length);
-      if (!remaining) {
-        toast('تم الوصول إلى الحد الأقصى لملفات المخططات');
-        input.value = '';
-        return;
-      }
-      const draftCaption = String(tenantProjectData.conceptual_plan_draft_caption || document.querySelector('#conceptualPlansList [data-conceptual-plan-caption=""]')?.value || '').trim();
-      const pending = files.slice(0, remaining).map((file, index) => ({
-        originalName: file.name,
-        mimeType: file.type,
-        status: 'pending',
-        description: index === 0 ? draftCaption : ''
-      }));
-      tenantProjectData.conceptual_plans_file_meta = existing.concat(pending).slice(0, CONCEPTUAL_PLANS_MAX);
-      renderConceptualPlans();
-      const pendingCaption = document.querySelector('#conceptualPlansList [data-conceptual-plan-caption=""]');
-      if (pendingCaption) pendingCaption.focus();
-      try {
-        input.dataset.projectFileType = 'conceptual_plan';
-        const uploaded = await uploadTenantProjectFileInput(input, 'conceptual_plans');
-        const incoming = (Array.isArray(uploaded) ? uploaded : [uploaded]).filter(file => file && file.id);
-        const merged = getConceptualPlanFiles().filter(file => file.id && file.status !== 'pending');
-        incoming.forEach((file, index) => {
-          if (!merged.some(item => String(item.id) === String(file.id))) {
-            merged.push({
-              ...file,
-              description: file.description || (index === 0 ? draftCaption : '') || ''
-            });
-          }
-        });
-        tenantProjectData.conceptual_plan_draft_caption = '';
-        tenantProjectData.conceptual_plans_file_meta = merged.slice(0, CONCEPTUAL_PLANS_MAX);
-        tenantProjectData.conceptual_plans_file_ids = tenantProjectData.conceptual_plans_file_meta.map(file => file.id).filter(Boolean);
-        persistConceptualPlansState();
-        renderConceptualPlans();
-        const emptyCaption = Array.from(document.querySelectorAll('#conceptualPlansList [data-conceptual-plan-caption]'))
-          .find(field => !String(field.value || '').trim());
-        if (emptyCaption) emptyCaption.focus();
-      } catch (error) {
-        tenantProjectData.conceptual_plans_file_meta = existing;
-        tenantProjectData.conceptual_plans_file_ids = existing.map(file => file.id).filter(Boolean);
-        persistConceptualPlansState();
-        renderConceptualPlans();
-        toast(error.message || 'تعذر رفع المخططات');
-      } finally {
-        if (input) input.value = '';
-      }
-    }
-
-    function removeConceptualPlan(fileId) {
-      const next = getConceptualPlanFiles().filter(file => String(file.id) !== String(fileId));
-      tenantProjectData.conceptual_plans_file_meta = next;
-      tenantProjectData.conceptual_plans_file_ids = next.map(file => file.id);
-      persistConceptualPlansState();
-      renderConceptualPlans();
-      triggerAutoSaveDraft();
-    }
-
     const MARKET_STUDY_SUMMARY_SECTIONS = [
       { key: 'market_definition', label: 'تعريف السوق' },
       { key: 'city_position', label: 'وضع المدينة' },
@@ -12991,26 +12771,13 @@
       });
     }
 
-    function conceptualPlansNeedCaptions() {
-      return getConceptualPlanFiles().some(file => !String(file.description || '').trim());
-    }
-
     async function setSectionStatus(sectionKey, status) {
-      if (sectionKey === 'section-conceptual-2d' && status === 'approved' && conceptualPlansNeedCaptions()) {
-        toast('وصف المخطط غير مكتمل');
-        return;
-      }
       const result = await api('POST', '/api/project-draft/section-status', { draftId: tenantProjectData.draftId, sectionKey: sectionKey, sectionStatus: status });
       if (!result.success) { toast(result.error || 'تعذر تحديث حالة القسم'); return; }
       applySectionStatuses({ [sectionKey]: status });
     }
 
     async function approveAllSections() {
-      if (conceptualPlansNeedCaptions()) {
-        toast('وصف المخطط غير مكتمل');
-        showSection('section-conceptual-2d');
-        return;
-      }
       const sections = document.querySelectorAll('.tenant-form-section[data-section]');
       const statuses = {};
       sections.forEach(sec => {
@@ -13690,7 +13457,7 @@
       }
 
       // Append order defines the sidebar order: basic, location, land/croquis, timeline,
-      // financial, team, market study, executive content, and conceptual 2D. The timeline
+      // financial, team, market study, and executive content. The timeline
       // comes before the financial study because it feeds it. Executive content writes
       // from earlier sections and never invents facts.
       addTimelineTable(form);
@@ -13706,8 +13473,6 @@
       form.appendChild(visualConceptField);
       tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept || tenantVisualConceptState);
       persistVisualConceptDraftState();
-
-      addConceptualPlansSection(form);
 
       const projectSections = Array.from(form.querySelectorAll('.tenant-form-section[data-section]'));
       populateProjectSidebar(projectSections);
@@ -13732,7 +13497,6 @@
       renderSurveyDirections(tenantProjectData.directions_table || {});
       renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
       renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
-      renderConceptualPlans();
       renderProjectTeam();
       enhanceProjectClassificationFields();
       refreshAllowedUsesStatusNote();
@@ -14877,8 +14641,8 @@
 
     function mountTenantFloorDesignSectionHeader() {
       const host = document.getElementById('tenantFloorDesignSectionHeader');
-      const source = document.querySelector('#section-conceptual-2d .tenant-section-title');
-      if (host && source && source.parentElement !== host) host.replaceChildren(source);
+      if (!host || host.querySelector('.tenant-section-title')) return;
+      host.replaceChildren(createProjectSectionHeader('section-floor-design', 'تصميم صور الطوابق'));
     }
 
     function initializeTenantFloorDesign() {
@@ -14894,9 +14658,10 @@
 
     function setTenantFloorDesignSidebarActive(active) {
       document.querySelectorAll('#tenantProjectSidebar [data-section-key]').forEach(button => {
-        const isActive = active && button.dataset.sectionKey === 'section-conceptual-2d';
-        button.classList.toggle('active', isActive);
-        button.setAttribute('aria-current', isActive ? 'page' : 'false');
+        if (active) {
+          button.classList.remove('active');
+          button.setAttribute('aria-current', 'false');
+        }
       });
     }
 
@@ -17159,7 +16924,6 @@
         if (typeof persistExecutiveContentFromDom === 'function' && document.getElementById('executiveContentData')) {
           persistExecutiveContentFromDom();
         }
-        if (typeof persistConceptualPlansState === 'function') persistConceptualPlansState();
         if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
         if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
         if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
@@ -19034,8 +18798,7 @@
 
     async function uploadTenantProjectFileInput(input, key) {
       const multiLimit = key === 'land_photos' ? LAND_PHOTOS_MAX
-        : (key === 'visual_style_reference' ? 5
-          : (key === 'conceptual_plans' ? CONCEPTUAL_PLANS_MAX : 2));
+        : (key === 'visual_style_reference' ? 5 : 2);
       const files = Array.from(input?.files || []).slice(0, input?.multiple ? multiLimit : 1);
       const fileType = input?.dataset?.projectFileType;
       if (!files.length || !fileType) {
@@ -19095,7 +18858,6 @@
       if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
       if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
       if (typeof persistExecutiveContentFromDom === 'function') persistExecutiveContentFromDom();
-      if (typeof persistConceptualPlansState === 'function') persistConceptualPlansState();
       const result = {};
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
       for (const input of inputs) {
