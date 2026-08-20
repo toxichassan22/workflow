@@ -10031,7 +10031,7 @@ def api_generate_executive_content():
         }), 400
     current = data.get('currentText')
     prompt = executive_content.build_user_prompt(key, facts, current)
-    max_tokens = EXECUTIVE_SUMMARY_MAX_TOKENS if key == 'summary' else EXECUTIVE_CONTENT_MAX_TOKENS
+    max_tokens = EXECUTIVE_SUMMARY_MAX_TOKENS if key in ('summary', 'risks') else EXECUTIVE_CONTENT_MAX_TOKENS
     try:
         try:
             response = call_zai_chat(

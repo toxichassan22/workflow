@@ -28,7 +28,7 @@ BLOCKS = (
         'key': 'risks',
         'label': 'دراسة المخاطر',
         'requires': ('basic', 'location', 'land', 'financial', 'market'),
-        'output': 'bullets',
+        'output': 'risks',
     },
     {
         'key': 'summary',
@@ -103,7 +103,7 @@ def _join(value):
     return '، '.join(items) if items else ''
 
 
-def _compact_mapping(value, limit=12):
+def _compact_mapping(value, limit=24):
     if not isinstance(value, dict):
         return {}
     compact = {}
@@ -146,14 +146,15 @@ def _block_text(value):
     return normalize_document(value)
 
 
-def compact_facts(facts):
+def compact_facts(facts, for_block=None):
     data = facts if isinstance(facts, dict) else {}
     generated = data.get('generatedBlocks') if isinstance(data.get('generatedBlocks'), dict) else {}
     generated_blocks = {}
-    for key in ('brief', 'opportunity', 'features', 'risks'):
-        text = _block_text(generated.get(key))
-        if text:
-            generated_blocks[key] = text
+    if for_block != 'summary':
+        for key in ('brief', 'opportunity', 'features', 'risks'):
+            text = _block_text(generated.get(key))
+            if text:
+                generated_blocks[key] = text
     return {
         'projectName': normalize_text(data.get('projectName')),
         'projectType': _join(data.get('projectType')),
@@ -172,7 +173,7 @@ def compact_facts(facts):
         'nearbyLandmarks': normalize_text(data.get('nearbyLandmarks')),
         'cityLandmarks': normalize_text(data.get('cityLandmarks')),
         'catchmentAreas': normalize_text(data.get('catchmentAreas')),
-        'siteAnalysis': normalize_text(data.get('siteAnalysis')),
+        'siteAnalysis': normalize_document(data.get('siteAnalysis')),
         'plotNumber': normalize_text(data.get('plotNumber')),
         'planNumber': normalize_text(data.get('planNumber')),
         'deedNumber': normalize_text(data.get('deedNumber')),
@@ -183,15 +184,15 @@ def compact_facts(facts):
         'surroundingStreets': normalize_text(data.get('surroundingStreets')),
         'facadesCount': normalize_text(data.get('facadesCount')),
         'facadesDirections': normalize_text(data.get('facadesDirections')),
-        'buildingRatioCoverage': normalize_text(data.get('buildingRatioCoverage')),
-        'setbacks': normalize_text(data.get('setbacks')),
-        'maxFloorsHeight': normalize_text(data.get('maxFloorsHeight')),
+        'buildingRatioCoverage': normalize_document(data.get('buildingRatioCoverage')),
+        'setbacks': normalize_document(data.get('setbacks')),
+        'maxFloorsHeight': normalize_document(data.get('maxFloorsHeight')),
         'approvedFloorCount': normalize_text(data.get('approvedFloorCount')),
         'approvedCoverageRatio': normalize_text(data.get('approvedCoverageRatio')),
         'allowedUses': normalize_text(data.get('allowedUses')),
         'landUseStatus': normalize_text(data.get('landUseStatus')),
-        'regulatoryConstraints': normalize_text(data.get('regulatoryConstraints')),
-        'landSummary': normalize_text(data.get('landSummary')),
+        'regulatoryConstraints': normalize_document(data.get('regulatoryConstraints')),
+        'landSummary': normalize_document(data.get('landSummary')),
         'timelineStartYear': normalize_text(data.get('timelineStartYear')),
         'timelineYears': normalize_text(data.get('timelineYears')),
         'timelineStages': _compact_items(
@@ -202,15 +203,23 @@ def compact_facts(facts):
             data.get('components'),
             ('name', 'useType', 'units', 'builtArea', 'revenueArea'),
         ),
+        'infrastructure': normalize_text(data.get('infrastructure')),
+        'buildingSystem': normalize_text(data.get('buildingSystem')),
         'financialIndicators': _compact_mapping(data.get('financialIndicators'), limit=24),
         'team': _compact_items(data.get('team'), ('name', 'role', 'brief', 'experienceYears', 'notableProjects')),
-        'marketSummary': _compact_mapping(data.get('marketSummary')),
+        'marketSummary': {
+            str(key): normalize_document(item)
+            for key, item in list((data.get('marketSummary') or {}).items())[:16]
+            if not isinstance(item, (dict, list)) and normalize_document(item)
+        } if isinstance(data.get('marketSummary'), dict) else {},
         'marketSwot': _compact_mapping(data.get('marketSwot')),
         'marketDecision': normalize_text(data.get('marketDecision')),
         'marketDisclaimer': normalize_text(data.get('marketDisclaimer')),
+        'marketOneBlockSummary': normalize_document(data.get('marketOneBlockSummary')),
         'competitors': _compact_items(
             data.get('competitors'),
-            ('name', 'projectType', 'status', 'price', 'operationType'),
+            ('name', 'projectType', 'status', 'price', 'operationType', 'area', 'source'),
+            limit=16,
         ),
         'generatedBlocks': generated_blocks,
     }
@@ -250,11 +259,53 @@ def readiness_from_facts(facts):
     }
 
 
+def _risk_pair(raw):
+    if isinstance(raw, dict):
+        risk = normalize_text(
+            raw.get('risk') or raw.get('name') or raw.get('title') or raw.get('الخطر')
+        )
+        mitigation = normalize_text(
+            raw.get('mitigation') or raw.get('treatment') or raw.get('solution')
+            or raw.get('المعالجة') or raw.get('طريقة المعالجة')
+        )
+        return risk, mitigation
+    text = normalize_text(raw)
+    if not text:
+        return '', ''
+    if 'المعالجة' in text:
+        parts = text.split('المعالجة', 1)
+        risk = normalize_text(parts[0].replace('الخطر', '').strip(' :-—'))
+        mitigation = normalize_text(parts[1].lstrip(' :-—'))
+        return risk, mitigation
+    return text, ''
+
+
+def _format_risk_items(items):
+    lines = []
+    for raw in items:
+        risk, mitigation = _risk_pair(raw)
+        if not risk:
+            continue
+        lines.append('الخطر: ' + risk)
+        if mitigation:
+            lines.append('المعالجة: ' + mitigation)
+        lines.append('')
+    return '\n'.join(lines).strip()
+
+
 def normalize_block(key, value):
     spec = block_spec(key) or {}
     if spec.get('output') == 'document':
         if isinstance(value, list):
             return normalize_document(_sections_to_text(value))
+        return normalize_document(value)
+    if spec.get('output') == 'risks':
+        if isinstance(value, list):
+            return _format_risk_items(value)
+        if isinstance(value, dict):
+            nested = value.get('items') or value.get('risks') or value.get('rows')
+            if isinstance(nested, list):
+                return _format_risk_items(nested)
         return normalize_document(value)
     if isinstance(value, list):
         return '\n'.join(normalize_text(item) for item in value if normalize_text(item))
@@ -299,13 +350,15 @@ def instruction_for(key):
             'المدخلات. كل نقطة حقيقة واحدة. لا تخترع ميزة أو شريحة غير مكتوبة.'
         ),
         'risks': (
-            'اكتب المخاطر المذكورة أو اللازمة منطقيًا من القيود المالية أو السوقية أو '
-            'الموقعية أو التنظيمية الموجودة. لا تضف خطرًا عامًا بلا سند في المدخلات.'
+            'اكتب دراسة المخاطر من القيود المالية أو السوقية أو الموقعية أو التنظيمية '
+            'الموجودة فقط. لكل بند اكتب الخطر ثم طريقة معالجته المرتبطة به من المدخلات '
+            'أو اللازمة منطقيًا منها. لا تضف خطرًا عامًا بلا سند، ولا معالجة عامة بلا صلة بالخطر.'
         ),
         'summary': (
-            'اكتب الملخص التنفيذي الشامل كوثيقة عربية رسمية منظمة. قسّم النص بعناوين '
-            f'واضحة وأسطر فارغة بين الأقسام حسب ما يتوفر فقط من هذه العناوين: {headings}. '
-            'اجمع كل المدخلات المعتمدة ونصوص المحتوى التنفيذي إن وُجدت في ملخص متكامل. '
+            'اكتب الملخص التنفيذي الشامل كوثيقة عربية رسمية مسترسلة تغطي بيانات المشروع '
+            f'كلها من الأقسام السابقة حسب ما يتوفر من هذه العناوين: {headings}. '
+            'المصدر هو حقائق المشروع المعتمدة من كل الأقسام، وليس نصوص المحتوى التنفيذي الأخرى. '
+            'استرسل داخل كل قسم بالأرقام والأسماء والقيود والمؤشرات الموجودة. لا تختصر اختصارًا مخلًا. '
             'لا تُنشئ قسم تحليل SWOT مستقلًا؛ أدمج ما ورد من دراسة السوق داخل قسمها. '
             'لا تُدخل رقمًا أو حكمًا أو جهة غير موجودة في المدخلات.'
         ),
@@ -341,14 +394,20 @@ def build_user_prompt(key, facts, current_text=''):
         'block': key,
         'label': spec['label'],
         'output': spec['output'],
-        'facts': compact_facts(facts),
-        'currentText': normalize_document(current_text) if spec['output'] == 'document' else current_text,
+        'facts': compact_facts(facts, for_block=key),
+        'currentText': normalize_document(current_text) if spec['output'] in ('document', 'risks') else current_text,
     }
     if spec['output'] == 'document':
         shape = '{"text":""}'
         extra = (
             'حافظ على فواصل الأسطر داخل text. ابدأ كل قسم بعنوان في سطر مستقل ثم فقرات '
-            'أو نقاط قصيرة مفصولة بأسطر. لا تستخدم رموزًا أو أيقونات.'
+            'مسترسلة من بيانات المشروع. لا تستخدم رموزًا أو أيقونات.'
+        )
+    elif spec['output'] == 'risks':
+        shape = '{"items":[{"risk":"","mitigation":""}]}'
+        extra = (
+            'كل عنصر في items خطر واحد مع mitigation طريقة معالجته. '
+            'إن غابت معالجة موثوقة اترك mitigation فارغًا ولا تخترع إجراءً عامًا.'
         )
     else:
         shape = '{"text":""}'
@@ -382,6 +441,15 @@ def parse_generated_block(key, parsed):
         if key in data and not isinstance(data.get(key), dict):
             return normalize_block(key, data.get(key))
         return normalize_block(key, data.get('text') or data.get('content') or '')
+    if spec.get('output') == 'risks':
+        items = data.get('items')
+        if not isinstance(items, list):
+            items = data.get('risks') if isinstance(data.get('risks'), list) else None
+        if isinstance(items, list):
+            return normalize_block(key, items)
+        if key in data and not isinstance(data.get(key), dict):
+            return normalize_block(key, data.get(key))
+        return normalize_block(key, data.get('text') or data.get('content') or data)
     if key in data and not isinstance(data.get(key), dict):
         return normalize_block(key, data.get(key))
     return normalize_block(key, data.get('text') or data.get('content') or '')

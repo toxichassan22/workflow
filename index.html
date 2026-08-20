@@ -1900,10 +1900,14 @@
       min-height: 110px;
       resize: vertical;
     }
+    #section-executive-content textarea#executiveText_risks,
     #section-executive-content textarea#executiveText_summary {
-      min-height: 320px;
+      min-height: 220px;
       line-height: 1.8;
       white-space: pre-wrap;
+    }
+    #section-executive-content textarea#executiveText_summary {
+      min-height: 360px;
     }
 
     /* THE VIEW Financial Model Styles - Complete Scoped Copy from THE-VIEW-Financial-Model-FINAL-v2.html */
@@ -9650,7 +9654,9 @@
             projectType: row.project_type || '',
             status: row.status || '',
             price: [row.price_type, priceRange || row.price_value].filter(Boolean).join(' '),
-            operationType: row.operation_type || ''
+            operationType: row.operation_type || '',
+            area: row.area_sqm || '',
+            source: row.source || ''
           };
         });
       return {
@@ -9689,6 +9695,8 @@
         approvedCoverageRatio: field('approved_coverage_ratio'),
         allowedUses: field('allowed_uses'),
         landUseStatus: tenantProjectData.land_use_status || '',
+        infrastructure: field('infrastructure'),
+        buildingSystem: field('building_system'),
         regulatoryConstraints: field('regulatory_constraints'),
         landSummary: field('land_and_building_summary'),
         timelineStartYear: document.getElementById('tlStartYear')?.value || tenantProjectData.timeline_start_year || '',
@@ -9701,6 +9709,7 @@
         marketSwot: market.swot || {},
         marketDecision: market.decision || '',
         marketDisclaimer: market.disclaimer || '',
+        marketOneBlockSummary: market.one_block_summary || '',
         competitors,
         generatedBlocks: {
           brief: executive.brief || '',
@@ -9767,7 +9776,7 @@
       const body = document.createElement('div');
       body.className = 'executive-content-body';
       const generated = EXECUTIVE_CONTENT_BLOCKS.map(item => {
-        const rows = item.key === 'summary' ? '18' : (item.key === 'brief' ? '7' : '5');
+        const rows = item.key === 'summary' ? '22' : (item.key === 'risks' ? '12' : (item.key === 'brief' ? '7' : '5'));
         return '<div class="executive-block" data-executive-block="' + item.key + '">' +
           '<h4>' + item.label + '</h4>' +
           '<div class="executive-actions">' +

@@ -3794,6 +3794,25 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(compact['allowedUses'], 'سكني فندقي')
         self.assertEqual(compact['timelineStages'][0]['name'], 'التصميم')
         self.assertEqual(compact['marketSwot']['strengths'], 'موقع بحري')
+        summary_facts = {
+            **facts,
+            'generatedBlocks': {'brief': 'نص السكشن فقط', 'risks': 'خطر من السكشن'},
+            'marketOneBlockSummary': 'ملخص سوق المشروع من الدراسة',
+        }
+        summary_compact = executive_content.compact_facts(summary_facts, for_block='summary')
+        self.assertEqual(summary_compact['generatedBlocks'], {})
+        self.assertEqual(summary_compact['marketOneBlockSummary'], 'ملخص سوق المشروع من الدراسة')
+        other_compact = executive_content.compact_facts(summary_facts, for_block='brief')
+        self.assertEqual(other_compact['generatedBlocks']['brief'], 'نص السكشن فقط')
+        parsed_risks = executive_content.parse_generated_block('risks', {
+            'items': [
+                {'risk': 'ارتفاع تكلفة التنفيذ', 'mitigation': 'تثبيت عقود المقاولين'},
+                {'risk': 'تأخر التصاريح', 'mitigation': ''},
+            ]
+        })
+        self.assertIn('الخطر: ارتفاع تكلفة التنفيذ', parsed_risks)
+        self.assertIn('المعالجة: تثبيت عقود المقاولين', parsed_risks)
+        self.assertIn('الخطر: تأخر التصاريح', parsed_risks)
         summary_ready, summary_missing = executive_content.block_ready('summary', facts)
         self.assertTrue(summary_ready)
         self.assertEqual(summary_missing, [])
@@ -3819,7 +3838,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('EXECUTIVE_SUMMARY_MAX_TOKENS', app_source)
         self.assertIn('لا تخترع', module_source)
         self.assertIn('الملخص التنفيذي الشامل', module_source)
+        self.assertIn('بيانات المشروع', module_source)
+        self.assertIn('طريقة معالجته', module_source)
         self.assertIn("'output': 'document'", module_source)
+        self.assertIn("'output': 'risks'", module_source)
+        self.assertIn('for_block != \'summary\'', module_source)
+        self.assertIn('marketOneBlockSummary', index_source)
 
         client = self.app.test_client()
         refused = client.post('/api/executive-content/generate', headers=self._headers(self.token_a), json={

@@ -213,8 +213,9 @@ It gathers already-approved facts from every earlier section (basic, location, l
 timeline, financial, team, market study). Generated texts — brief, opportunity, features,
 risks, executive summary — live in `draft_data.executive_content` via the hidden
 `executive_content` input. SWOT is not generated here; it stays only inside دراسة السوق.
-The executive summary is a structured Arabic document (headings, spacing, full coverage of
-prior sections) written by Gemini 3.7 Flash from those facts plus the other generated blocks.
+Risks must pair every stated risk with its mitigation method. The executive summary is a
+structured Arabic document written by Gemini 3.7 Flash from the **full project facts** of
+every earlier section (not from the other texts of this section).
 Each text generates, edits, and regenerates on its own. The model may rephrase facts already
 collected; it must not invent numbers, uses, or risks. Gate generation on the required earlier
 sections, not on this section's own approval.
