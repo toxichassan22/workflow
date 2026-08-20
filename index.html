@@ -8539,7 +8539,6 @@
 
     const TENANT_WORKFLOW_ITEMS = [
       { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
-      { pageId: 'tenantFloorDesignPage', label: 'تصميم صور الطوابق' },
       { pageId: 'tenantVisualConceptPage', label: 'التصور البصري' },
       { pageId: 'tenantSlidesPage', label: 'صفحة التصميم والمعاينة' }
     ];
@@ -8609,7 +8608,6 @@
     /* ===== Tenant Global Rail ===== */
     const TGR_STAGES = [
       { id: 'tenantProjectPage', label: 'بيانات المشروع' },
-      { id: 'tenantFloorDesignPage', label: 'تصميم صور الطوابق' },
       { id: 'tenantVisualConceptPage', label: 'التصور البصري' },
       { id: 'tenantSlidesPage', label: 'معاينة الشرائح' }
     ];
@@ -9972,6 +9970,8 @@
           (isPdf
             ? '<strong>' + escapeHtml(name) + '</strong>'
             : '<img alt="" data-conceptual-plan-thumb="' + escapeHtml(file.id || '') + '"><strong>' + escapeHtml(name) + '</strong>') +
+          '<label>وصف المخطط</label>' +
+          '<textarea data-conceptual-plan-caption="' + escapeHtml(file.id || '') + '" rows="2">' + escapeHtml(file.description || '') + '</textarea>' +
           '<div style="display:flex;gap:6px">' +
           '<button type="button" class="btn ghost small" onclick="openProjectFilePreview(\'' + safeId + '\',\'' +
           escapeHtml(name).replace(/'/g, "\\'") + '\',\'' + escapeHtml(file.mimeType || '') + '\')">معاينة</button>' +
@@ -9980,6 +9980,16 @@
       }).join('');
       host.querySelectorAll('[data-conceptual-plan-thumb]').forEach(image => {
         attachProjectFileThumbnail(image, image.dataset.conceptualPlanThumb);
+      });
+      host.querySelectorAll('[data-conceptual-plan-caption]').forEach(field => {
+        field.addEventListener('input', () => {
+          const files = getConceptualPlanFiles();
+          const entry = files.find(item => String(item.id) === String(field.dataset.conceptualPlanCaption));
+          if (entry) entry.description = String(field.value || '').slice(0, 400);
+          tenantProjectData.conceptual_plans_file_meta = files;
+          persistConceptualPlansState();
+          triggerAutoSaveDraft();
+        });
       });
     }
 
@@ -9999,7 +10009,7 @@
         const incoming = (Array.isArray(uploaded) ? uploaded : [uploaded]).filter(file => file && file.id);
         const merged = existing.slice();
         incoming.forEach(file => {
-          if (!merged.some(item => String(item.id) === String(file.id))) merged.push(file);
+          if (!merged.some(item => String(item.id) === String(file.id))) merged.push({ ...file, description: file.description || '' });
         });
         tenantProjectData.conceptual_plans_file_meta = merged.slice(0, CONCEPTUAL_PLANS_MAX);
         tenantProjectData.conceptual_plans_file_ids = tenantProjectData.conceptual_plans_file_meta.map(file => file.id);
@@ -12910,7 +12920,15 @@
       });
     }
 
+    function conceptualPlansNeedCaptions() {
+      return getConceptualPlanFiles().some(file => !String(file.description || '').trim());
+    }
+
     async function setSectionStatus(sectionKey, status) {
+      if (sectionKey === 'section-conceptual-2d' && status === 'approved' && conceptualPlansNeedCaptions()) {
+        toast('وصف المخطط غير مكتمل');
+        return;
+      }
       const result = await api('POST', '/api/project-draft/section-status', { draftId: tenantProjectData.draftId, sectionKey: sectionKey, sectionStatus: status });
       if (!result.success) { toast(result.error || 'تعذر تحديث حالة القسم'); return; }
       applySectionStatuses({ [sectionKey]: status });
@@ -19221,7 +19239,7 @@
     };
 
     function emptyVisualConceptSlot(id) {
-      return { id, label: visualConceptDefaultSlotLabel(id), prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '' };
+      return { id, label: visualConceptDefaultSlotLabel(id), caption: '', prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '' };
     }
 
     function visualConceptDefaultSlotLabel(slotId) {
@@ -19367,7 +19385,8 @@
           styleReferenceNames: visualConceptReferenceList(slot.styleReferenceNames).slice(0, 5),
           sourceFileId: String(slot.sourceFileId || ''),
           sourceFileName: String(slot.sourceFileName || ''),
-          label: String(slot.label || visualConceptDefaultSlotLabel(id)).slice(0, 80)
+          label: String(slot.label || visualConceptDefaultSlotLabel(id)).slice(0, 80),
+          caption: String(slot.caption || '').slice(0, 400)
         };
       });
       if (!stated.cover && tenantCreativeImages.cover) {
@@ -19613,6 +19632,8 @@
         '<div class="visual-concept-preview">' + preview + '</div>' +
         '<input type="file" accept="' + uploadAccept + '" data-visual-upload="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>' +
         '<label>وصف الصورة</label>' +
+        '<textarea data-visual-caption="' + slotDef.id + '" rows="2" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>' +
+        '<label>وصف التوليد</label>' +
         '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
         '<div class="visual-concept-actions">' +
         '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
@@ -19826,6 +19847,15 @@
           markVisualConceptDirty();
         });
       });
+      bindRoot.querySelectorAll('[data-visual-caption]').forEach(input => {
+        input.addEventListener('input', () => {
+          const slotId = input.getAttribute('data-visual-caption');
+          const slot = tenantVisualConceptState.slots[slotId];
+          if (!slot) return;
+          slot.caption = String(input.value || '').slice(0, 400);
+          markVisualConceptDirty();
+        });
+      });
       bindRoot.querySelectorAll('[data-visual-title]').forEach(input => {
         input.addEventListener('input', () => {
           const slotId = input.getAttribute('data-visual-title');
@@ -19988,6 +20018,11 @@
         toast(isVisualConceptInteriorSlot(slotId) ? 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.' : 'اعتمد الصورة الرئيسية أولاً.');
         return;
       }
+      if (!String(liveSlot().caption || document.querySelector('[data-visual-caption="' + slotId + '"]')?.value || '').trim()) {
+        toast('وصف الصورة غير مكتمل');
+        document.querySelector('[data-visual-caption="' + slotId + '"]')?.focus();
+        return;
+      }
       if (!liveSlot().prompt) {
         await generateVisualConceptPrompt(slotId);
       }
@@ -20031,6 +20066,13 @@
         toast('ولّد الصورة أولاً حتى يمكن اعتمادها');
         return;
       }
+      const caption = String(document.querySelector('[data-visual-caption="' + slotId + '"]')?.value || slot.caption || '').trim();
+      if (!caption) {
+        toast('وصف الصورة غير مكتمل');
+        document.querySelector('[data-visual-caption="' + slotId + '"]')?.focus();
+        return;
+      }
+      slot.caption = caption;
       slot.approvedImageUrl = image;
       slot.status = 'approved';
       markVisualConceptDirty();

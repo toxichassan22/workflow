@@ -209,7 +209,9 @@ authenticated `GET /api/project-files/<id>` preview route. `team_logo` is in
 Section order is `basic → location → land_croquis → timeline → financial → team → market study → executive content → conceptual 2D`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order.
 `section-conceptual-2d` is optional client plan uploads (`file_type='conceptual_plan'`), not the
-floor-design generator. The user may leave it empty. `section-executive-content` is the last
+floor-design generator. The user may leave it empty. Every uploaded plan needs a client-written
+caption before the section can be approved. Floor-design generation is not a workflow home card.
+`section-executive-content` is the last
 written-information section, immediately before that upload section.
 It gathers already-approved facts from every earlier section (basic, location, land/croquis,
 timeline, financial, team, market study). Generated texts — brief, opportunity, features,
@@ -309,7 +311,8 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   groups on a home page of two cards, like floor-design stages: `التصور الخارجي`
   (`cover`, `right`, `left`, `top`, `back`) and `التصور الداخلي`. The four exterior
   angle titles are client-editable and persist on each slot (`slot.label`); defaults
-  remain يمين / شمال / فوق / خلف until changed. The client may
+  remain يمين / شمال / فوق / خلف until changed. Every visual image also has a required
+  client caption (`slot.caption`) separate from the generation prompt. The client may
   upload their own image into any of the five exterior slots, or generate it.
   Internal images are 1–4 per actual financial-study component (`interior_<id>::n`),
   chosen from a dropdown; the client may upload or generate each one. Count is
