@@ -207,8 +207,8 @@ FLOOR_DESIGN_IMAGE_HARD_NEGATIVE = (
     'Do not add decorative symbols, pictograms, three-dimensional perspective, isometric view, photorealism, or unrelated UI.'
 )
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
-EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '2500'))
-EXECUTIVE_SUMMARY_MAX_TOKENS = int(os.environ.get('EXECUTIVE_SUMMARY_MAX_TOKENS', '6000'))
+EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '8000'))
+EXECUTIVE_SUMMARY_MAX_TOKENS = int(os.environ.get('EXECUTIVE_SUMMARY_MAX_TOKENS', '16000'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 DEPLOYMENT_MARKER_PATH = os.path.join(os.path.dirname(__file__), '.deployed_commit')
 
@@ -309,7 +309,7 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
 
 
 def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
-                  reasoning_effort=None):
+                  reasoning_effort=None, response_format=None):
     """Compatibility wrapper: all text/design work now uses Gemini through OpenRouter."""
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is required for the Gemini text model"}}
@@ -321,6 +321,7 @@ def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000,
         model=LUNA_TEXT_MODEL,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
+        response_format=response_format,
     )
 
 
@@ -7957,7 +7958,7 @@ def _get_chat_response_text(res):
 
 
 def parse_json_object(text):
-    """Extract and parse any JSON dict from text string."""
+    """Extract and parse any JSON dict from text string, including auto-repairing truncated JSON."""
     if not text or not isinstance(text, str):
         return {}
     text = text.strip()
@@ -8004,6 +8005,22 @@ def parse_json_object(text):
                         except Exception:
                             pass
                         break
+        # Auto-repair truncated unclosed JSON
+        if depth > 0 or in_str:
+            partial = text[start:]
+            partial = re.sub(r'\\u[0-9a-fA-F]{0,3}$', '', partial)
+            partial = re.sub(r'\\$', '', partial)
+            if in_str:
+                partial += '"'
+            effective_depth = max(1, depth)
+            for d in range(effective_depth, 0, -1):
+                attempt = partial + ('}' * d)
+                try:
+                    parsed = json.loads(attempt)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    pass
     return {}
 
 
@@ -10196,8 +10213,10 @@ def api_generate_executive_content():
             response = call_zai_chat(
                 executive_content.SYSTEM_PROMPT, prompt, temperature=0.2,
                 max_tokens=max_tokens,
+                reasoning_effort='low',
+                response_format={'type': 'json_object'},
             )
-            raw = extract_chat_content(response, 'EXECUTIVE-CONTENT')
+            raw = _get_chat_response_text(response) or extract_chat_content(response, 'EXECUTIVE-CONTENT')
         except Exception as primary_error:
             if not OPENROUTER_KEY:
                 raise
@@ -10208,13 +10227,15 @@ def api_generate_executive_content():
                 temperature=0.2,
                 max_tokens=max_tokens,
                 model=LUNA_TEXT_MODEL,
+                reasoning_effort='low',
                 response_format={'type': 'json_object'},
             )
             raw = _get_chat_response_text(fallback) or extract_chat_content(fallback, 'EXECUTIVE-CONTENT-FALLBACK')
         parsed = parse_json_object(raw) or {}
         text = executive_content.parse_generated_block(key, parsed)
         if not text and raw and isinstance(raw, str):
-            cleaned_raw = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
+            cleaned_raw = executive_content.clean_raw_json_string(raw)
+            cleaned_raw = re.sub(r'^```(?:json)?\s*', '', str(cleaned_raw).strip(), flags=re.MULTILINE)
             cleaned_raw = re.sub(r'\s*```$', '', cleaned_raw.strip(), flags=re.MULTILINE)
             text = executive_content.normalize_document(cleaned_raw) if spec.get('output') in ('document', 'risks') else executive_content.normalize_text(cleaned_raw)
         empty = not str(text or '').strip()

@@ -432,7 +432,37 @@ SYSTEM_PROMPT = (
 )
 
 
+import re
+
+
+def clean_raw_json_string(text):
+    """Strip JSON syntax wrapping (e.g. {"text": "..."}) and return decoded inner string."""
+    if not text or not isinstance(text, str):
+        return text or ''
+    stripped = text.strip()
+    cb = re.search(r'```(?:json)?\s*\n?([\s\S]*?)```', stripped)
+    if cb:
+        stripped = cb.group(1).strip()
+    m = re.search(r'^\s*\{.*?"(?:text|content|summary|body|executive_summary)"\s*:\s*"([\s\S]*)$', stripped)
+    if m:
+        inner = m.group(1)
+        inner = re.sub(r'"\s*\}*\s*$', '', inner)
+        cleaned_trailing = re.sub(r'\\u[0-9a-fA-F]{0,3}$', '', inner)
+        cleaned_trailing = re.sub(r'\\$', '', cleaned_trailing)
+        test_str = cleaned_trailing.replace('\r\n', '\\n').replace('\r', '\\n').replace('\n', '\\n')
+        try:
+            return json.loads(f'"{test_str}"')
+        except Exception:
+            return cleaned_trailing.replace('\\n', '\n').replace('\\"', '"').replace('\\t', '\t').replace('\\\\', '\\')
+    return text
+
+
 def parse_generated_block(key, parsed):
+    if isinstance(parsed, str):
+        cleaned = clean_raw_json_string(parsed)
+        if cleaned != parsed:
+            spec = block_spec(key) or {}
+            return normalize_document(cleaned) if spec.get('output') in ('document', 'risks') else normalize_text(cleaned)
     data = parsed if isinstance(parsed, dict) else {}
     spec = block_spec(key) or {}
     output_type = spec.get('output', 'paragraphs')
@@ -443,7 +473,8 @@ def parse_generated_block(key, parsed):
         for text_key in ('text', 'content', 'summary', 'document', 'body', 'executive_summary', 'الملخص التنفيذي', 'الملخص_التنفيذي', 'ملخص', key):
             val = data.get(text_key)
             if isinstance(val, str) and val.strip():
-                return normalize_block(key, val)
+                cleaned_val = clean_raw_json_string(val)
+                return normalize_block(key, cleaned_val)
             if isinstance(val, list):
                 return normalize_block(key, val)
             if isinstance(val, dict):
@@ -453,7 +484,7 @@ def parse_generated_block(key, parsed):
             sections = []
             for k, v in data.items():
                 if isinstance(v, str) and v.strip():
-                    sections.append({'heading': k, 'text': v})
+                    sections.append({'heading': k, 'text': clean_raw_json_string(v)})
                 elif isinstance(v, (list, dict)):
                     sections.append({'heading': k, 'text': normalize_text(v)})
             if sections:
@@ -471,7 +502,7 @@ def parse_generated_block(key, parsed):
         for text_key in ('text', 'content', 'risks', 'items', 'المخاطر', key):
             val = data.get(text_key)
             if isinstance(val, str) and val.strip():
-                return normalize_block(key, val)
+                return normalize_block(key, clean_raw_json_string(val))
         if key in data and not isinstance(data.get(key), dict):
             return normalize_block(key, data.get(key))
         return normalize_block(key, data.get('text') or data.get('content') or data)
@@ -480,7 +511,7 @@ def parse_generated_block(key, parsed):
     for text_key in ('text', 'content', key, 'paragraphs', 'bullets', 'items', 'output', 'result'):
         val = data.get(text_key)
         if isinstance(val, str) and val.strip():
-            return normalize_block(key, val)
+            return normalize_block(key, clean_raw_json_string(val))
         if isinstance(val, list):
             return normalize_block(key, val)
     return normalize_block(key, data.get('text') or data.get('content') or '')
