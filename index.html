@@ -1900,6 +1900,11 @@
       min-height: 110px;
       resize: vertical;
     }
+    #section-executive-content textarea#executiveText_summary {
+      min-height: 320px;
+      line-height: 1.8;
+      white-space: pre-wrap;
+    }
 
     /* THE VIEW Financial Model Styles - Complete Scoped Copy from THE-VIEW-Financial-Model-FINAL-v2.html */
     .project-form-content #section-financial-calc.tenant-form-section.active,
@@ -9508,15 +9513,8 @@
       { key: 'brief', label: 'نبذة المشروع' },
       { key: 'opportunity', label: 'الفرصة الاستثمارية' },
       { key: 'features', label: 'المميزات وفرص الاستثمار' },
-      { key: 'swot', label: 'تحليل SWOT' },
       { key: 'risks', label: 'دراسة المخاطر' },
       { key: 'summary', label: 'الملخص التنفيذي' }
-    ];
-    const EXECUTIVE_SWOT_FIELDS = [
-      { key: 'strengths', label: 'نقاط القوة' },
-      { key: 'weaknesses', label: 'نقاط الضعف' },
-      { key: 'opportunities', label: 'الفرص' },
-      { key: 'threats', label: 'التهديدات' }
     ];
 
     function emptyExecutiveContentState() {
@@ -9524,7 +9522,6 @@
         brief: '',
         opportunity: '',
         features: '',
-        swot: { strengths: '', weaknesses: '', opportunities: '', threats: '' },
         risks: '',
         summary: ''
       };
@@ -9534,16 +9531,16 @@
       const parsed = parseStoredLandTable(tenantProjectData.executive_content);
       const base = emptyExecutiveContentState();
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return base;
-      return {
-        ...base,
-        ...parsed,
-        swot: { ...base.swot, ...((parsed.swot && typeof parsed.swot === 'object') ? parsed.swot : {}) }
-      };
+      const next = { ...base };
+      EXECUTIVE_CONTENT_BLOCKS.forEach(item => {
+        next[item.key] = typeof parsed[item.key] === 'string' ? parsed[item.key] : (base[item.key] || '');
+      });
+      return next;
     }
 
     function setExecutiveContentState(state) {
       const next = { ...emptyExecutiveContentState(), ...(state || {}) };
-      next.swot = { ...emptyExecutiveContentState().swot, ...(next.swot || {}) };
+      delete next.swot;
       tenantProjectData.executive_content = next;
       const hidden = document.getElementById('executiveContentData');
       if (hidden) hidden.value = JSON.stringify(next);
@@ -9553,60 +9550,164 @@
     function collectExecutiveContentFromDom() {
       const state = emptyExecutiveContentState();
       EXECUTIVE_CONTENT_BLOCKS.forEach(item => {
-        if (item.key === 'swot') {
-          EXECUTIVE_SWOT_FIELDS.forEach(field => {
-            state.swot[field.key] = document.getElementById('executiveSwot_' + field.key)?.value || '';
-          });
-          return;
-        }
         state[item.key] = document.getElementById('executiveText_' + item.key)?.value || '';
       });
       return state;
     }
 
     function persistExecutiveContentFromDom() {
+      if (!document.getElementById('executiveContentData')) return;
       setExecutiveContentState(collectExecutiveContentFromDom());
     }
 
     function collectExecutiveFinancialIndicators() {
       const read = (id) => (document.getElementById(id)?.textContent || '').trim();
       const indicators = {
+        projectCostBeforeFinance: read('resProjectCostBeforeFinance'),
         projectCost: read('resProjectCost'),
         totalInvestment: read('resTotalInvestmentCost'),
         saleRevenue: read('resSaleRevenue'),
+        revenueY1: read('resRevenueY1'),
         noiY1: read('resNOIY1'),
+        fullOccupancyNoi: read('resFullOccupancyNOI'),
+        terminal: read('resTerminal'),
+        financeCost: read('resFinanceCost'),
         roi: read('resROI'),
         projectIrr: read('resProjectIRR'),
         equityIrr: read('resIRR'),
-        payback: read('resPayback')
+        payback: read('resPayback'),
+        equityPayback: read('resEquityPayback'),
+        landEquity: read('resLandEquity'),
+        cashEquity: read('resCashEquity'),
+        equityRequired: read('resEquityRequired')
       };
       return Object.fromEntries(Object.entries(indicators).filter(([, value]) => value && value !== '0' && value !== '0%'));
     }
 
+    function collectExecutiveTeamFacts() {
+      const state = typeof getProjectTeamState === 'function'
+        ? getProjectTeamState()
+        : { excluded: [], roles: {}, local: [] };
+      const excluded = new Set((state.excluded || []).map(String));
+      const library = (Array.isArray(tenantTeamEntities) ? tenantTeamEntities : [])
+        .filter(entity => entity && !excluded.has(String(entity.id)))
+        .map(entity => ({
+          name: entity.name || '',
+          role: (state.roles && (state.roles[entity.id] || state.roles[String(entity.id)])) || entity.role || '',
+          brief: entity.brief || '',
+          experienceYears: entity.experienceYears || '',
+          notableProjects: entity.notableProjects || ''
+        }))
+        .filter(item => item.name);
+      const local = (state.local || [])
+        .map(entity => ({
+          name: entity.name || '',
+          role: entity.role || '',
+          brief: entity.brief || '',
+          experienceYears: entity.experienceYears || '',
+          notableProjects: entity.notableProjects || ''
+        }))
+        .filter(item => item.name);
+      return library.concat(local);
+    }
+
+    function collectExecutiveTimelineFacts() {
+      const rows = typeof collectTimelineRows === 'function' ? collectTimelineRows() : [];
+      return rows.filter(row => (row.name || '').trim()).map(row => ({
+        name: row.name || '',
+        year: row.year || '',
+        quarter: row.quarter || '',
+        duration: row.duration || '',
+        end: [row.endYear, row.endQuarter].filter(Boolean).join(' '),
+        notes: row.notes || ''
+      }));
+    }
+
     function collectExecutiveContentFacts() {
+      const field = (key) => {
+        const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
+        if (input && String(input.value || '').trim()) return input.value;
+        return tenantProjectData[key] || '';
+      };
       const market = typeof getMarketStudyState === 'function' ? getMarketStudyState() : {};
+      const executive = getExecutiveContentState();
       const components = (typeof getComponentRowsData === 'function' ? getComponentRowsData() : [])
-        .map(row => row.name).filter(Boolean);
+        .map(row => ({
+          name: row.name || '',
+          useType: row.useType || '',
+          units: row.units || '',
+          builtArea: row.builtArea || '',
+          revenueArea: row.revenueArea || ''
+        }))
+        .filter(row => row.name);
+      const competitors = (Array.isArray(market.competitors) ? market.competitors : [])
+        .filter(row => row && row.name)
+        .slice(0, 8)
+        .map(row => {
+          const priceRange = [row.price_from, row.price_to].filter(Boolean).join(' إلى ');
+          return {
+            name: row.name || '',
+            projectType: row.project_type || '',
+            status: row.status || '',
+            price: [row.price_type, priceRange || row.price_value].filter(Boolean).join(' '),
+            operationType: row.operation_type || ''
+          };
+        });
       return {
-        projectName: tenantProjectData.project_name || '',
+        projectName: tenantProjectData.project_name || field('project_name'),
         projectType: typeof selectedProjectTypeMains === 'function' ? selectedProjectTypeMains() : (tenantProjectData.project_type || ''),
         projectSubtype: typeof selectedProjectSubtypes === 'function' ? selectedProjectSubtypes() : (tenantProjectData.project_subtype || ''),
-        activityClass: document.querySelector('#tenantProjectForm [data-key="activity_class"]')?.value || tenantProjectData.activity_class || '',
-        projectLevel: document.querySelector('#tenantProjectForm [data-key="project_level"]')?.value || tenantProjectData.project_level || '',
-        projectStage: document.querySelector('#tenantProjectForm [data-key="project_stage"]')?.value || tenantProjectData.project_stage || '',
-        projectIdea: document.querySelector('#tenantProjectForm [data-key="project_idea"]')?.value || tenantProjectData.project_idea || '',
+        activityClass: field('activity_class'),
+        projectLevel: field('project_level'),
+        projectStage: field('project_stage'),
+        projectIdea: field('project_idea'),
         targetAudience: typeof groupedAudienceSelection === 'function' ? groupedAudienceSelection() : (tenantProjectData.target_audience || ''),
-        city: tenantProjectData.city || '',
-        district: tenantProjectData.district || '',
-        locationDetail: tenantProjectData.location_detail || '',
-        allowedUses: tenantProjectData.allowed_uses || '',
+        city: field('city'),
+        district: field('district'),
+        locationAddress: field('location_address'),
+        locationDetail: field('location_detail'),
+        mainRoads: field('main_roads'),
+        secondaryRoads: field('secondary_roads'),
+        nearbyLandmarks: field('nearby_landmarks'),
+        cityLandmarks: field('city_landmarks'),
+        catchmentAreas: field('catchment_areas'),
+        siteAnalysis: field('site_analysis'),
+        plotNumber: field('plot_number_croquis') || field('plot_number'),
+        planNumber: field('plan_number'),
+        deedNumber: field('deed_number'),
+        deedDate: field('deed_date'),
+        croquisLandArea: field('croquis_land_area'),
+        approvedFinancialArea: field('approved_financial_area'),
+        boundaryLengths: field('boundary_lengths'),
+        surroundingStreets: field('surrounding_streets'),
+        facadesCount: field('facades_count'),
+        facadesDirections: field('facades_directions'),
+        buildingRatioCoverage: field('building_ratio_coverage'),
+        setbacks: field('setbacks'),
+        maxFloorsHeight: field('max_floors_height'),
+        approvedFloorCount: field('approved_floor_count'),
+        approvedCoverageRatio: field('approved_coverage_ratio'),
+        allowedUses: field('allowed_uses'),
         landUseStatus: tenantProjectData.land_use_status || '',
-        siteAnalysis: tenantProjectData.site_analysis || '',
+        regulatoryConstraints: field('regulatory_constraints'),
+        landSummary: field('land_and_building_summary'),
+        timelineStartYear: document.getElementById('tlStartYear')?.value || tenantProjectData.timeline_start_year || '',
+        timelineYears: document.getElementById('tlYears')?.value || tenantProjectData.timeline_years || '',
+        timelineStages: collectExecutiveTimelineFacts(),
         components,
         financialIndicators: collectExecutiveFinancialIndicators(),
+        team: collectExecutiveTeamFacts(),
         marketSummary: market.summary || {},
         marketSwot: market.swot || {},
-        marketDecision: market.decision || ''
+        marketDecision: market.decision || '',
+        marketDisclaimer: market.disclaimer || '',
+        competitors,
+        generatedBlocks: {
+          brief: executive.brief || '',
+          opportunity: executive.opportunity || '',
+          features: executive.features || '',
+          risks: executive.risks || ''
+        }
       };
     }
 
@@ -9628,25 +9729,26 @@
         ['المستوى', facts.projectLevel],
         ['المرحلة', facts.projectStage],
         ['فكرة المشروع', facts.projectIdea],
-        ['الفئة المستهدفة', formatExecutiveFact(facts.targetAudience)]
+        ['الفئة المستهدفة', formatExecutiveFact(facts.targetAudience)],
+        ['المدينة', facts.city],
+        ['الحي', facts.district],
+        ['مساحة الأرض', facts.croquisLandArea],
+        ['المساحة المعتمدة', facts.approvedFinancialArea],
+        ['الاستخدامات المسموحة', facts.allowedUses],
+        ['سنة البداية', facts.timelineStartYear],
+        ['مدة المشروع', facts.timelineYears],
+        ['قرار السوق', facts.marketDecision]
       ];
       host.innerHTML = rows.map(([label, value]) =>
         '<div class="executive-fact"><strong>' + escapeHtml(label) + '</strong>' +
-        escapeHtml(value || 'غير متوفر من البيانات الأساسية') + '</div>'
+        escapeHtml(value || 'غير متوفر من المدخلات المعتمدة') + '</div>'
       ).join('');
     }
 
     function applyExecutiveContentState(state) {
       const next = { ...emptyExecutiveContentState(), ...(state || {}) };
-      next.swot = { ...emptyExecutiveContentState().swot, ...(next.swot || {}) };
+      delete next.swot;
       EXECUTIVE_CONTENT_BLOCKS.forEach(item => {
-        if (item.key === 'swot') {
-          EXECUTIVE_SWOT_FIELDS.forEach(field => {
-            const input = document.getElementById('executiveSwot_' + field.key);
-            if (input) input.value = next.swot[field.key] || '';
-          });
-          return;
-        }
         const input = document.getElementById('executiveText_' + item.key);
         if (input) input.value = next[item.key] || '';
       });
@@ -9665,22 +9767,18 @@
       const body = document.createElement('div');
       body.className = 'executive-content-body';
       const generated = EXECUTIVE_CONTENT_BLOCKS.map(item => {
-        const fields = item.key === 'swot'
-          ? EXECUTIVE_SWOT_FIELDS.map(field =>
-            '<label>' + field.label + '</label><textarea id="executiveSwot_' + field.key + '" rows="4"></textarea>'
-          ).join('')
-          : '<textarea id="executiveText_' + item.key + '" rows="' + (item.key === 'summary' || item.key === 'brief' ? '7' : '5') + '"></textarea>';
+        const rows = item.key === 'summary' ? '18' : (item.key === 'brief' ? '7' : '5');
         return '<div class="executive-block" data-executive-block="' + item.key + '">' +
           '<h4>' + item.label + '</h4>' +
           '<div class="executive-actions">' +
           '<button type="button" class="btn primary small" data-executive-generate="' + item.key + '">توليد</button>' +
           '</div>' +
           '<p class="tenant-hint executive-note" id="executiveNote_' + item.key + '"></p>' +
-          fields +
+          '<textarea id="executiveText_' + item.key + '" rows="' + rows + '"></textarea>' +
           '</div>';
       }).join('');
       body.innerHTML =
-        '<div class="executive-block"><h4>بيانات مرتبطة من البيانات الأساسية</h4>' +
+        '<div class="executive-block"><h4>بيانات مرتبطة من الأقسام السابقة</h4>' +
         '<div id="executiveLinkedFacts" class="executive-facts"></div></div>' +
         generated +
         '<input type="hidden" data-key="executive_content" data-type="text" id="executiveContentData">';
@@ -9698,6 +9796,8 @@
       if (!spec) return;
       const note = document.getElementById('executiveNote_' + key);
       const button = document.querySelector('[data-executive-generate="' + key + '"]');
+      if (typeof persistMarketStudyFromDom === 'function') persistMarketStudyFromDom();
+      if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
       persistExecutiveContentFromDom();
       const state = getExecutiveContentState();
       if (note) note.textContent = '';
@@ -9707,7 +9807,7 @@
         const res = await api('POST', '/api/executive-content/generate', {
           block: key,
           facts: collectExecutiveContentFacts(),
-          currentText: key === 'swot' ? state.swot : state[key]
+          currentText: state[key]
         });
         if (!res || !res.success) {
           const message = (res && res.error) || 'تعذر توليد النص. لم يُستبدل النص الحالي.';
@@ -9715,11 +9815,10 @@
           toast(message);
           return;
         }
-        if (key === 'swot') state.swot = { ...state.swot, ...(res.text || {}) };
-        else state[key] = res.text || '';
+        state[key] = res.text || '';
         applyExecutiveContentState(state);
         persistExecutiveContentFromDom();
-        if (note) note.textContent = 'تم التوليد. يمكن التعديل أو إعادة التوليد دون المساس بباقي النصوص.';
+        if (note) note.textContent = 'تم التوليد.';
         toast('تم توليد ' + spec.label);
         updateLoaderProgress(100, 'اكتمل ' + spec.label);
       } catch (error) {
@@ -18736,6 +18835,7 @@
       if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
       if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
       if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
+      if (typeof persistExecutiveContentFromDom === 'function') persistExecutiveContentFromDom();
       const result = {};
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
       for (const input of inputs) {

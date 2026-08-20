@@ -208,6 +208,7 @@ FLOOR_DESIGN_IMAGE_HARD_NEGATIVE = (
 )
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '2500'))
+EXECUTIVE_SUMMARY_MAX_TOKENS = int(os.environ.get('EXECUTIVE_SUMMARY_MAX_TOKENS', '6000'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 DEPLOYMENT_MARKER_PATH = os.path.join(os.path.dirname(__file__), '.deployed_commit')
 
@@ -10017,6 +10018,8 @@ def api_generate_executive_content():
         labels = {
             'basic': 'البيانات الأساسية',
             'location': 'الموقع',
+            'land': 'الأرض والكروكي',
+            'timeline': 'الجدول الزمني',
             'financial': 'الدراسة المالية',
             'market': 'دراسة السوق',
         }
@@ -10028,11 +10031,12 @@ def api_generate_executive_content():
         }), 400
     current = data.get('currentText')
     prompt = executive_content.build_user_prompt(key, facts, current)
+    max_tokens = EXECUTIVE_SUMMARY_MAX_TOKENS if key == 'summary' else EXECUTIVE_CONTENT_MAX_TOKENS
     try:
         try:
             response = call_zai_chat(
                 executive_content.SYSTEM_PROMPT, prompt, temperature=0.2,
-                max_tokens=EXECUTIVE_CONTENT_MAX_TOKENS,
+                max_tokens=max_tokens,
             )
             raw = extract_chat_content(response, 'EXECUTIVE-CONTENT')
         except Exception as primary_error:
@@ -10043,17 +10047,14 @@ def api_generate_executive_content():
                 executive_content.SYSTEM_PROMPT,
                 prompt,
                 temperature=0.2,
-                max_tokens=EXECUTIVE_CONTENT_MAX_TOKENS,
+                max_tokens=max_tokens,
                 model=LUNA_TEXT_MODEL,
                 response_format={'type': 'json_object'},
             )
             raw = _get_chat_response_text(fallback) or extract_chat_content(fallback, 'EXECUTIVE-CONTENT-FALLBACK')
         parsed = parse_json_object(raw) or {}
         text = executive_content.parse_generated_block(key, parsed)
-        if key == 'swot':
-            empty = not any(text.values())
-        else:
-            empty = not str(text or '').strip()
+        empty = not str(text or '').strip()
         if empty:
             return jsonify({'success': False, 'error': 'عاد النموذج نصًا فارغًا. لم يُستبدل النص الحالي.'}), 422
         return jsonify({'success': True, 'block': key, 'text': text})

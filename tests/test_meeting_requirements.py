@@ -3765,8 +3765,13 @@ class MeetingRequirementsTests(unittest.TestCase):
             'projectIdea': 'منتجع شاطئي',
             'targetAudience': ['عائلات', 'سياح وزوار'],
             'city': 'جدة',
+            'allowedUses': 'سكني فندقي',
+            'croquisLandArea': '7012',
+            'timelineStartYear': '2026',
+            'timelineStages': [{'name': 'التصميم', 'year': '2026', 'quarter': 'Q1'}],
             'financialIndicators': {'roi': '12%'},
             'marketSummary': {'decision': 'فرصة واعدة بشروط'},
+            'marketSwot': {'strengths': 'موقع بحري'},
         }
         ready, missing = executive_content.block_ready('brief', facts)
         self.assertTrue(ready)
@@ -3774,14 +3779,28 @@ class MeetingRequirementsTests(unittest.TestCase):
         blocked, needed = executive_content.block_ready('opportunity', {'projectName': 'ذا فيو', 'projectType': 'سكني'})
         self.assertFalse(blocked)
         self.assertIn('financial', needed)
-        parsed = executive_content.parse_generated_block('swot', {
-            'strengths': 'موقع بحري', 'weaknesses': '', 'opportunities': 'طلب سياحي', 'threats': ''
+        self.assertIn('summary', [item['key'] for item in executive_content.BLOCKS])
+        self.assertNotIn('swot', [item['key'] for item in executive_content.BLOCKS])
+        parsed = executive_content.parse_generated_block('summary', {
+            'sections': [
+                {'heading': 'البيانات الأساسية', 'text': 'منتجع شاطئي في جدة'},
+                {'heading': 'دراسة السوق', 'text': 'فرصة واعدة بشروط'},
+            ]
         })
-        self.assertEqual(parsed['strengths'], 'موقع بحري')
-        self.assertEqual(parsed['weaknesses'], '')
+        self.assertIn('البيانات الأساسية', parsed)
+        self.assertIn('منتجع شاطئي في جدة', parsed)
+        self.assertIn('\n\n', parsed)
+        compact = executive_content.compact_facts(facts)
+        self.assertEqual(compact['allowedUses'], 'سكني فندقي')
+        self.assertEqual(compact['timelineStages'][0]['name'], 'التصميم')
+        self.assertEqual(compact['marketSwot']['strengths'], 'موقع بحري')
+        summary_ready, summary_missing = executive_content.block_ready('summary', facts)
+        self.assertTrue(summary_ready)
+        self.assertEqual(summary_missing, [])
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        module_source = (ROOT / 'executive_content.py').read_text(encoding='utf-8')
         self.assertIn("function addExecutiveContentSection(form, before)", index_source)
         self.assertIn("addExecutiveContentSection(form);", index_source)
         self.assertIn("id = 'section-executive-content'", index_source)
@@ -3789,9 +3808,18 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("function generateExecutiveContentBlock(key)", index_source)
         self.assertIn("api('POST', '/api/executive-content/generate'", index_source)
         self.assertIn("createProjectSectionHeader('section-executive-content', 'المحتوى التنفيذي')", index_source)
+        self.assertIn("function collectExecutiveContentFacts()", index_source)
+        self.assertIn("function collectExecutiveTeamFacts()", index_source)
+        self.assertIn("function collectExecutiveTimelineFacts()", index_source)
+        self.assertIn("بيانات مرتبطة من الأقسام السابقة", index_source)
         self.assertNotIn("underConstruction: true", index_source)
+        self.assertNotIn('executiveSwot_', index_source)
+        self.assertNotIn("{ key: 'swot', label: 'تحليل SWOT' }", index_source)
         self.assertIn("def api_generate_executive_content():", app_source)
-        self.assertIn('لا تخترع', (ROOT / 'executive_content.py').read_text(encoding='utf-8'))
+        self.assertIn('EXECUTIVE_SUMMARY_MAX_TOKENS', app_source)
+        self.assertIn('لا تخترع', module_source)
+        self.assertIn('الملخص التنفيذي الشامل', module_source)
+        self.assertIn("'output': 'document'", module_source)
 
         client = self.app.test_client()
         refused = client.post('/api/executive-content/generate', headers=self._headers(self.token_a), json={
@@ -3809,6 +3837,18 @@ class MeetingRequirementsTests(unittest.TestCase):
             })
         self.assertEqual(generated.status_code, 200, generated.get_json())
         self.assertEqual(generated.get_json()['text'], 'نبذة من الفكرة فقط')
+
+        summary_payload = '{"text":"البيانات الأساسية\\nمنتجع شاطئي\\n\\nالدراسة المالية\\nالعائد 12%"}'
+        with patch.object(self.application_module, 'call_zai_chat', return_value={'choices': [{'message': {'content': summary_payload}}]}) as chat_call, \
+             patch.object(self.application_module, 'extract_chat_content', return_value=summary_payload):
+            summary = client.post('/api/executive-content/generate', headers=self._headers(self.token_a), json={
+                'block': 'summary',
+                'facts': facts,
+            })
+        self.assertEqual(summary.status_code, 200, summary.get_json())
+        self.assertIn('البيانات الأساسية', summary.get_json()['text'])
+        self.assertIn('الدراسة المالية', summary.get_json()['text'])
+        self.assertEqual(chat_call.call_args.kwargs.get('max_tokens'), self.application_module.EXECUTIVE_SUMMARY_MAX_TOKENS)
 
     def test_market_study_fields_and_section_are_wired(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
