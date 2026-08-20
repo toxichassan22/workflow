@@ -3091,6 +3091,11 @@
       box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
     }
 
+    .visual-concept-mode-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
     .visual-concept-upload-box {
       border: 2px dashed var(--line);
       border-radius: 12px;
@@ -19681,12 +19686,15 @@
     function renderVisualConceptSlot(slotDef, locked) {
       const slot = tenantVisualConceptState.slots[slotDef.id];
       const image = slot.approvedImageUrl || slot.imageUrl;
+      const hasImage = Boolean(image || slot.sourceFileId);
       // Approval is one toggle per image and it locks that card, exactly like a section.
       const approved = slot.status === 'approved';
       const frozen = approved;
       const waitCover = locked && !approved;
       const generateDisabled = frozen || waitCover || slot.status === 'generating';
       const mode = slot.mode === 'upload' ? 'upload' : 'ai';
+      const disableAiSwitch = frozen || (hasImage && mode === 'upload');
+      const disableUploadSwitch = frozen || (hasImage && mode === 'ai');
       const statusLabel = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد' : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
       const chat = (slot.chat || []).map(item => (
         '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? 'النظام: ' : 'أنت: ') + '</strong>' + escapeHtml(item.text) + '</div>'
@@ -19704,9 +19712,13 @@
         : '<h3>' + escapeHtml(title) + '</h3>';
 
       const modeSelector = '<div class="visual-concept-mode-selector">' +
-        '<button type="button" class="visual-concept-mode-btn' + (mode === 'ai' ? ' active' : '') + '" data-visual-action="set-mode" data-visual-mode="ai" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>توليد بالذكاء الاصطناعي</button>' +
-        '<button type="button" class="visual-concept-mode-btn' + (mode === 'upload' ? ' active' : '') + '" data-visual-action="set-mode" data-visual-mode="upload" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>رفع يدوي</button>' +
+        '<button type="button" class="visual-concept-mode-btn' + (mode === 'ai' ? ' active' : '') + '" data-visual-action="set-mode" data-visual-mode="ai" data-visual-slot="' + slotDef.id + '" ' + (disableAiSwitch ? 'disabled title="احذف الصورة الحالية أولاً لتغيير النمط"' : '') + '>توليد بالذكاء الاصطناعي</button>' +
+        '<button type="button" class="visual-concept-mode-btn' + (mode === 'upload' ? ' active' : '') + '" data-visual-action="set-mode" data-visual-mode="upload" data-visual-slot="' + slotDef.id + '" ' + (disableUploadSwitch ? 'disabled title="احذف الصورة الحالية أولاً لتغيير النمط"' : '') + '>رفع يدوي</button>' +
         '</div>';
+
+      const deleteBtn = hasImage
+        ? '<button type="button" class="btn danger small" data-visual-action="delete-image" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>حذف الصورة</button>'
+        : '';
 
       let bodyControls = '';
       if (mode === 'upload') {
@@ -19719,6 +19731,7 @@
           '<textarea data-visual-caption="' + slotDef.id + '" rows="3" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>' +
           '<div class="visual-concept-actions">' +
           '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
+          deleteBtn +
           '</div>';
       } else {
         bodyControls = '<label>وصف التوليد</label>' +
@@ -19727,6 +19740,7 @@
           '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
           '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
           '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
+          deleteBtn +
           '</div>' +
           '<div class="visual-concept-chat">' + chat + '</div>' +
           '<div class="visual-concept-chat-row">' +
@@ -20017,12 +20031,19 @@
           else if (action === 'generate') generateVisualConceptImage(slotId);
           else if (action === 'approve') approveVisualConceptImage(slotId);
           else if (action === 'unapprove') unapproveVisualConceptImage(slotId);
+          else if (action === 'delete-image') deleteVisualConceptSlotImage(slotId);
           else if (action === 'chat') sendVisualConceptChat(slotId);
           else if (action === 'add-interior') addVisualConceptInteriorView();
           else if (action === 'set-mode') {
-            const mode = button.getAttribute('data-visual-mode');
-            if (slotId && tenantVisualConceptState.slots[slotId] && (mode === 'ai' || mode === 'upload')) {
-              tenantVisualConceptState.slots[slotId].mode = mode;
+            const targetMode = button.getAttribute('data-visual-mode');
+            const slot = tenantVisualConceptState?.slots?.[slotId];
+            if (slotId && slot && (targetMode === 'ai' || targetMode === 'upload')) {
+              const hasImg = Boolean(slot.approvedImageUrl || slot.imageUrl || slot.sourceFileId);
+              if (hasImg && targetMode !== slot.mode) {
+                toast('يجب حذف الصورة الحالية أولاً لتغيير النمط.');
+                return;
+              }
+              slot.mode = targetMode;
               markVisualConceptDirty();
               renderVisualConceptPage();
             }
@@ -20223,6 +20244,26 @@
       markVisualConceptDirty();
       renderVisualConceptPage();
       toast('تم إلغاء اعتماد ' + visualConceptSlotLabel(slotId));
+    }
+
+    function deleteVisualConceptSlotImage(slotId) {
+      const slot = tenantVisualConceptState?.slots?.[slotId];
+      if (!slot) return;
+      slot.imageUrl = '';
+      slot.approvedImageUrl = '';
+      slot.sourceFileId = '';
+      slot.sourceFileName = '';
+      slot.status = 'empty';
+      if (slotId === 'cover' && tenantCreativeImages) {
+        tenantCreativeImages.cover = '';
+        tenantCreativeImages.cover_preview = '';
+      }
+      if ((slotId === 'right' || slotId === 'left' || slotId === 'top' || slotId === 'back') && tenantCreativeImages?.moodboard) {
+        delete tenantCreativeImages.moodboard[slotId];
+      }
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+      toast('تم حذف الصورة');
     }
 
     async function sendVisualConceptChat(slotId) {
