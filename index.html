@@ -9945,6 +9945,12 @@
       if (hidden) hidden.value = JSON.stringify(files);
     }
 
+    function conceptualPlanCaptionField(fileId, value, pending) {
+      return '<label>وصف الصورة</label>' +
+        '<textarea data-conceptual-plan-caption="' + escapeHtml(fileId || '') + '" rows="3"' +
+        (pending ? ' disabled' : '') + '>' + escapeHtml(value || '') + '</textarea>';
+    }
+
     function addConceptualPlansSection(form, before) {
       const div = document.createElement('div');
       div.className = 'tenant-form-section';
@@ -9985,33 +9991,49 @@
         else status.textContent = files.length + ' ملف';
       }
       if (!files.length) {
-        host.innerHTML = '';
+        host.innerHTML = '<div class="conceptual-plan-card">' + conceptualPlanCaptionField('', tenantProjectData.conceptual_plan_draft_caption || '', false) + '</div>';
+        bindConceptualPlanCaptions();
         return;
       }
       host.innerHTML = files.map(file => {
         const name = file.originalName || file.name || 'مخطط';
         const safeId = String(file.id || '').replace(/'/g, "\\'");
         const isPdf = String(file.mimeType || '').includes('pdf') || /\.pdf$/i.test(name);
+        const pending = file.status === 'pending' || !file.id;
         return '<div class="conceptual-plan-card">' +
-          (isPdf
+          (pending
             ? '<strong>' + escapeHtml(name) + '</strong>'
-            : '<img alt="" data-conceptual-plan-thumb="' + escapeHtml(file.id || '') + '"><strong>' + escapeHtml(name) + '</strong>') +
-          '<label>وصف الصورة</label>' +
-          '<textarea data-conceptual-plan-caption="' + escapeHtml(file.id || '') + '" rows="3">' + escapeHtml(file.description || '') + '</textarea>' +
-          '<div style="display:flex;gap:6px">' +
-          '<button type="button" class="btn ghost small" onclick="openProjectFilePreview(\'' + safeId + '\',\'' +
-          escapeHtml(name).replace(/'/g, "\\'") + '\',\'' + escapeHtml(file.mimeType || '') + '\')">معاينة</button>' +
-          '<button type="button" class="btn ghost danger small" onclick="removeConceptualPlan(\'' + safeId + '\')">حذف</button>' +
-          '</div></div>';
+            : (isPdf
+              ? '<strong>' + escapeHtml(name) + '</strong>'
+              : '<img alt="" data-conceptual-plan-thumb="' + escapeHtml(file.id || '') + '"><strong>' + escapeHtml(name) + '</strong>')) +
+          conceptualPlanCaptionField(file.id || '', file.description || '', pending) +
+          (pending ? '' :
+            '<div style="display:flex;gap:6px">' +
+            '<button type="button" class="btn ghost small" onclick="openProjectFilePreview(\'' + safeId + '\',\'' +
+            escapeHtml(name).replace(/'/g, "\\'") + '\',\'' + escapeHtml(file.mimeType || '') + '\')">معاينة</button>' +
+            '<button type="button" class="btn ghost danger small" onclick="removeConceptualPlan(\'' + safeId + '\')">حذف</button>' +
+            '</div>') +
+          '</div>';
       }).join('');
       host.querySelectorAll('[data-conceptual-plan-thumb]').forEach(image => {
         attachProjectFileThumbnail(image, image.dataset.conceptualPlanThumb);
       });
-      host.querySelectorAll('[data-conceptual-plan-caption]').forEach(field => {
+      bindConceptualPlanCaptions();
+    }
+
+    function bindConceptualPlanCaptions() {
+      document.querySelectorAll('#conceptualPlansList [data-conceptual-plan-caption]').forEach(field => {
         field.addEventListener('input', () => {
+          const value = String(field.value || '').slice(0, 400);
+          const fileId = String(field.dataset.conceptualPlanCaption || '');
+          if (!fileId) {
+            tenantProjectData.conceptual_plan_draft_caption = value;
+            triggerAutoSaveDraft();
+            return;
+          }
           const files = getConceptualPlanFiles();
-          const entry = files.find(item => String(item.id) === String(field.dataset.conceptualPlanCaption));
-          if (entry) entry.description = String(field.value || '').slice(0, 400);
+          const entry = files.find(item => String(item.id) === fileId);
+          if (entry) entry.description = value;
           tenantProjectData.conceptual_plans_file_meta = files;
           persistConceptualPlansState();
           triggerAutoSaveDraft();
@@ -10029,22 +10051,43 @@
         input.value = '';
         return;
       }
+      const draftCaption = String(tenantProjectData.conceptual_plan_draft_caption || document.querySelector('#conceptualPlansList [data-conceptual-plan-caption=""]')?.value || '').trim();
+      const pending = files.slice(0, remaining).map((file, index) => ({
+        originalName: file.name,
+        mimeType: file.type,
+        status: 'pending',
+        description: index === 0 ? draftCaption : ''
+      }));
+      tenantProjectData.conceptual_plans_file_meta = existing.concat(pending).slice(0, CONCEPTUAL_PLANS_MAX);
+      renderConceptualPlans();
+      const pendingCaption = document.querySelector('#conceptualPlansList [data-conceptual-plan-caption=""]');
+      if (pendingCaption) pendingCaption.focus();
       try {
         input.dataset.projectFileType = 'conceptual_plan';
         const uploaded = await uploadTenantProjectFileInput(input, 'conceptual_plans');
         const incoming = (Array.isArray(uploaded) ? uploaded : [uploaded]).filter(file => file && file.id);
-        const merged = existing.slice();
-        incoming.forEach(file => {
-          if (!merged.some(item => String(item.id) === String(file.id))) merged.push({ ...file, description: file.description || '' });
+        const merged = getConceptualPlanFiles().filter(file => file.id && file.status !== 'pending');
+        incoming.forEach((file, index) => {
+          if (!merged.some(item => String(item.id) === String(file.id))) {
+            merged.push({
+              ...file,
+              description: file.description || (index === 0 ? draftCaption : '') || ''
+            });
+          }
         });
+        tenantProjectData.conceptual_plan_draft_caption = '';
         tenantProjectData.conceptual_plans_file_meta = merged.slice(0, CONCEPTUAL_PLANS_MAX);
-        tenantProjectData.conceptual_plans_file_ids = tenantProjectData.conceptual_plans_file_meta.map(file => file.id);
+        tenantProjectData.conceptual_plans_file_ids = tenantProjectData.conceptual_plans_file_meta.map(file => file.id).filter(Boolean);
         persistConceptualPlansState();
         renderConceptualPlans();
         const emptyCaption = Array.from(document.querySelectorAll('#conceptualPlansList [data-conceptual-plan-caption]'))
           .find(field => !String(field.value || '').trim());
         if (emptyCaption) emptyCaption.focus();
       } catch (error) {
+        tenantProjectData.conceptual_plans_file_meta = existing;
+        tenantProjectData.conceptual_plans_file_ids = existing.map(file => file.id).filter(Boolean);
+        persistConceptualPlansState();
+        renderConceptualPlans();
         toast(error.message || 'تعذر رفع المخططات');
       } finally {
         if (input) input.value = '';
