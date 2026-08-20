@@ -597,6 +597,7 @@ def persist_generated_image(image, tenant_id):
 
 
 VISUAL_CONCEPT_MAX_REFERENCE_IMAGES = 5
+VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 4
 VISUAL_CONCEPT_SLOTS = ('cover', 'right', 'left', 'top', 'back', 'interior')
 VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')
 VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')
@@ -895,6 +896,17 @@ def _visual_concept_is_internal_slot(slot_id):
     return value == VISUAL_CONCEPT_INTERNAL_PREFIX or value.startswith(VISUAL_CONCEPT_INTERNAL_PREFIX + '_')
 
 
+def _visual_concept_interior_component_id(slot_id):
+    value = str(slot_id or '')
+    prefix = VISUAL_CONCEPT_INTERNAL_PREFIX + '_'
+    if not value.startswith(prefix):
+        return ''
+    rest = value[len(prefix):].strip()
+    if '::' in rest:
+        rest = rest.rsplit('::', 1)[0]
+    return rest
+
+
 def _visual_concept_normalize_slot(slot_id):
     value = str(slot_id or 'cover').strip()
     folded = value.lower()
@@ -1068,19 +1080,38 @@ def call_image_api_with_references(prompt, references=None):
 
 
 def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', instruction='', image_references=None):
-    system_prompt = (
-        'You write one English architectural image prompt for a Saudi real-estate project. '
-        'Use only the supplied project facts and attached references. '
-        'Never invent a generic building style, never copy a previous project signature, '
-        'and never add text, logos, people, or watermarks. '
-        'Match the attached site/map footprint and any attached land photos. '
-        'Return JSON only: {"prompt":"..."}.'
-    )
-    user_prompt = _visual_concept_facts_prompt(facts, slot_id)
-    if current_prompt:
-        user_prompt += '\n\nCurrent prompt to revise:\n' + current_prompt
-    if instruction:
-        user_prompt += '\n\nUser revision request:\n' + instruction
+    current = _visual_concept_sanitize_prompt(current_prompt)
+    request_text = _visual_concept_text(instruction, 4000)
+    if current and request_text:
+        system_prompt = (
+            'You are a smart editor of an existing English architectural image prompt. '
+            'The current prompt is the source of truth. Apply only the user request. '
+            'Keep every other sentence, constraint, material, camera, and fact unless the user '
+            'explicitly asks to rewrite, replace, or start over. '
+            'If the user asks to add something, insert it into the existing prompt. '
+            'If they ask to change one detail, change that detail only. '
+            'Never invent a generic building style, never copy a previous project signature, '
+            'and never add text, logos, people, or watermarks. '
+            'Return JSON only: {"prompt":"...","reply":"..."}.'
+        )
+        user_prompt = (
+            'Current prompt (do not discard):\n' + current
+            + '\n\nUser request:\n' + request_text
+        )
+    else:
+        system_prompt = (
+            'You write one English architectural image prompt for a Saudi real-estate project. '
+            'Use only the supplied project facts and attached references. '
+            'Never invent a generic building style, never copy a previous project signature, '
+            'and never add text, logos, people, or watermarks. '
+            'Match the attached site/map footprint and any attached land photos. '
+            'Return JSON only: {"prompt":"..."}.'
+        )
+        user_prompt = _visual_concept_facts_prompt(facts, slot_id)
+        if current:
+            user_prompt += '\n\nCurrent prompt to keep as the base:\n' + current
+        if request_text:
+            user_prompt += '\n\nUser request:\n' + request_text
     response = call_openrouter_chat(
         system_prompt,
         user_prompt,
@@ -1093,6 +1124,16 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
     parsed = _designer_json_response(_get_chat_response_text(response) or extract_chat_content(response, 'VISUAL-CONCEPT-PROMPT'))
     prompt = _visual_concept_sanitize_prompt(parsed.get('prompt') or parsed.get('cover_prompt'))
     return prompt, parsed.get('reply') or ''
+
+
+def _visual_concept_cover_image(data):
+    cover = str(data.get('coverImage') or data.get('cover_image') or '').strip()
+    if cover:
+        return cover
+    file_id = _visual_concept_text(data.get('coverFileId') or data.get('cover_file_id'), 80)
+    if file_id:
+        return _visual_concept_project_file_data_uri(file_id) or ''
+    return ''
 
 
 def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''):
@@ -1127,8 +1168,8 @@ def _visual_concept_request_bundle(data, slot_id):
     facts = _visual_concept_facts(project_data)
     requested_component_id = _visual_concept_text(data.get('componentId') or data.get('component_id'), 80)
     if _visual_concept_is_internal_slot(slot_id):
-        if not requested_component_id and str(slot_id).startswith(VISUAL_CONCEPT_INTERNAL_PREFIX + '_'):
-            requested_component_id = str(slot_id).split('_', 1)[1]
+        if not requested_component_id:
+            requested_component_id = _visual_concept_interior_component_id(slot_id)
         selected = next((item for item in (facts.get('components') or []) if item.get('id') == requested_component_id), None)
         if not selected and requested_component_id:
             selected = next((item for item in (facts.get('components') or []) if item.get('name') == requested_component_id), None)
@@ -3426,13 +3467,14 @@ def api_visual_concept_prompt():
             'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
             'missingFields': missing,
         }), 400
-    if slot_id != 'cover' and not str(data.get('coverImage') or '').strip():
+    cover_image = _visual_concept_cover_image(data)
+    if slot_id != 'cover' and not cover_image:
         return jsonify({
             'success': False,
             'error': 'اعتمد الصورة الرئيسية قبل إنشاء وصف التصور البصري',
             'error_code': 'COVER_REQUIRED',
         }), 400
-    references = _visual_concept_collect_generation_references(facts, slot_id, data.get('coverImage') or '')
+    references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
     current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
     instruction = _visual_concept_text(data.get('instruction') or data.get('message'), 4000)
     try:
@@ -3472,8 +3514,8 @@ def api_visual_concept_generate():
     prompt = _visual_concept_sanitize_prompt(data.get('prompt'))
     if not prompt:
         return jsonify({'success': False, 'error': 'وصف التصور البصري مطلوب', 'error_code': 'PROMPT_REQUIRED'}), 400
-    cover_image = data.get('coverImage') or ''
-    if slot_id != 'cover' and not str(cover_image).strip():
+    cover_image = _visual_concept_cover_image(data)
+    if slot_id != 'cover' and not cover_image:
         return jsonify({
             'success': False,
             'error': 'اعتمد الصورة الرئيسية قبل توليد التصور البصري',
@@ -3514,8 +3556,8 @@ def api_visual_concept_chat():
             'missingFields': missing,
         }), 400
     current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
-    cover_image = data.get('coverImage') or ''
-    if slot_id != 'cover' and not str(cover_image).strip():
+    cover_image = _visual_concept_cover_image(data)
+    if slot_id != 'cover' and not cover_image:
         return jsonify({
             'success': False,
             'error': 'اعتمد الصورة الرئيسية قبل تعديل التصور البصري',
@@ -10876,7 +10918,7 @@ PROJECT_FILE_EXTENSIONS = {
     '.webp': 'image/webp', '.pdf': 'application/pdf'
 }
 PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license',
-                      'regulation_reference', 'team_logo', 'visual_reference'}
+                      'regulation_reference', 'team_logo', 'visual_reference', 'conceptual_plan'}
 # Types that must be real images: they are rendered in <img> thumbnails, where a PDF shows nothing.
 PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'visual_reference'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024

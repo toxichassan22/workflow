@@ -1909,6 +1909,28 @@
     #section-executive-content textarea#executiveText_summary {
       min-height: 360px;
     }
+    #section-conceptual-2d.tenant-form-section.active,
+    #section-conceptual-2d {
+      display: block;
+    }
+    #section-conceptual-2d .conceptual-plans-body {
+      grid-column: 1 / -1;
+    }
+    #section-conceptual-2d .conceptual-plans-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    #section-conceptual-2d .conceptual-plan-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
 
     /* THE VIEW Financial Model Styles - Complete Scoped Copy from THE-VIEW-Financial-Model-FINAL-v2.html */
     .project-form-content #section-financial-calc.tenant-form-section.active,
@@ -3133,6 +3155,11 @@
 
     .visual-concept-stack > .tenant-hint {
       grid-column: 1 / -1;
+    }
+    .visual-concept-interior-stack {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
     }
 
     .visual-concept-card[data-visual-slot="cover"] .visual-concept-preview img {
@@ -9862,6 +9889,127 @@
       else form.appendChild(div);
     }
 
+    const CONCEPTUAL_PLANS_MAX = 12;
+
+    function getConceptualPlanFiles() {
+      const meta = Array.isArray(tenantProjectData.conceptual_plans_file_meta)
+        ? tenantProjectData.conceptual_plans_file_meta.filter(Boolean)
+        : [];
+      if (meta.length) return meta;
+      const ids = Array.isArray(tenantProjectData.conceptual_plans_file_ids)
+        ? tenantProjectData.conceptual_plans_file_ids.filter(Boolean)
+        : [];
+      if (ids.length) return ids.map(id => ({ id }));
+      const parsed = parseStoredLandTable(tenantProjectData.conceptual_plans);
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    }
+
+    function persistConceptualPlansState() {
+      if (!document.getElementById('conceptualPlansData') && !Array.isArray(tenantProjectData.conceptual_plans_file_meta)) return;
+      const files = getConceptualPlanFiles();
+      tenantProjectData.conceptual_plans_file_meta = files;
+      tenantProjectData.conceptual_plans_file_ids = files.map(file => file.id).filter(Boolean);
+      const hidden = document.getElementById('conceptualPlansData');
+      if (hidden) hidden.value = JSON.stringify(files);
+    }
+
+    function addConceptualPlansSection(form, before) {
+      const div = document.createElement('div');
+      div.className = 'tenant-form-section';
+      div.id = 'section-conceptual-2d';
+      div.dataset.section = 'section-conceptual-2d';
+      div.appendChild(createProjectSectionHeader('section-conceptual-2d', 'المخططات التصورية 2D'));
+      const body = document.createElement('div');
+      body.className = 'conceptual-plans-body';
+      body.innerHTML =
+        '<div class="tenant-field full">' +
+        '<label>ملفات المخططات</label>' +
+        '<input type="file" id="conceptualPlansInput" multiple accept="image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp">' +
+        '<p class="tenant-hint" id="conceptualPlansStatus"></p>' +
+        '<div id="conceptualPlansList" class="conceptual-plans-list"></div>' +
+        '<input type="hidden" data-key="conceptual_plans" data-type="text" id="conceptualPlansData">' +
+        '</div>';
+      div.appendChild(body);
+      if (before) form.insertBefore(div, before);
+      else form.appendChild(div);
+      const input = body.querySelector('#conceptualPlansInput');
+      if (input && !input.dataset.bound) {
+        input.dataset.bound = '1';
+        input.dataset.projectFileType = 'conceptual_plan';
+        input.addEventListener('change', () => uploadConceptualPlans(input));
+      }
+      renderConceptualPlans();
+    }
+
+    function renderConceptualPlans() {
+      persistConceptualPlansState();
+      const host = document.getElementById('conceptualPlansList');
+      const status = document.getElementById('conceptualPlansStatus');
+      if (!host) return;
+      const files = getConceptualPlanFiles();
+      if (status) status.textContent = files.length ? (files.length + ' ملف') : 'لا توجد مخططات مرفوعة';
+      if (!files.length) {
+        host.innerHTML = '';
+        return;
+      }
+      host.innerHTML = files.map(file => {
+        const name = file.originalName || file.name || 'مخطط';
+        const safeId = String(file.id || '').replace(/'/g, "\\'");
+        const isPdf = String(file.mimeType || '').includes('pdf') || /\.pdf$/i.test(name);
+        return '<div class="conceptual-plan-card">' +
+          (isPdf
+            ? '<strong>' + escapeHtml(name) + '</strong>'
+            : '<img alt="" data-conceptual-plan-thumb="' + escapeHtml(file.id || '') + '"><strong>' + escapeHtml(name) + '</strong>') +
+          '<div style="display:flex;gap:6px">' +
+          '<button type="button" class="btn ghost small" onclick="openProjectFilePreview(\'' + safeId + '\',\'' +
+          escapeHtml(name).replace(/'/g, "\\'") + '\',\'' + escapeHtml(file.mimeType || '') + '\')">معاينة</button>' +
+          '<button type="button" class="btn ghost danger small" onclick="removeConceptualPlan(\'' + safeId + '\')">حذف</button>' +
+          '</div></div>';
+      }).join('');
+      host.querySelectorAll('[data-conceptual-plan-thumb]').forEach(image => {
+        attachProjectFileThumbnail(image, image.dataset.conceptualPlanThumb);
+      });
+    }
+
+    async function uploadConceptualPlans(input) {
+      const files = Array.from(input?.files || []);
+      if (!files.length) return;
+      const existing = getConceptualPlanFiles();
+      const remaining = Math.max(0, CONCEPTUAL_PLANS_MAX - existing.length);
+      if (!remaining) {
+        toast('تم الوصول إلى الحد الأقصى لملفات المخططات');
+        input.value = '';
+        return;
+      }
+      try {
+        input.dataset.projectFileType = 'conceptual_plan';
+        const uploaded = await uploadTenantProjectFileInput(input, 'conceptual_plans');
+        const incoming = (Array.isArray(uploaded) ? uploaded : [uploaded]).filter(file => file && file.id);
+        const merged = existing.slice();
+        incoming.forEach(file => {
+          if (!merged.some(item => String(item.id) === String(file.id))) merged.push(file);
+        });
+        tenantProjectData.conceptual_plans_file_meta = merged.slice(0, CONCEPTUAL_PLANS_MAX);
+        tenantProjectData.conceptual_plans_file_ids = tenantProjectData.conceptual_plans_file_meta.map(file => file.id);
+        persistConceptualPlansState();
+        renderConceptualPlans();
+        toast('تم حفظ المخططات');
+      } catch (error) {
+        toast(error.message || 'تعذر رفع المخططات');
+      } finally {
+        if (input) input.value = '';
+      }
+    }
+
+    function removeConceptualPlan(fileId) {
+      const next = getConceptualPlanFiles().filter(file => String(file.id) !== String(fileId));
+      tenantProjectData.conceptual_plans_file_meta = next;
+      tenantProjectData.conceptual_plans_file_ids = next.map(file => file.id);
+      persistConceptualPlansState();
+      renderConceptualPlans();
+      triggerAutoSaveDraft();
+    }
+
     const MARKET_STUDY_SUMMARY_SECTIONS = [
       { key: 'market_definition', label: 'تعريف السوق' },
       { key: 'city_position', label: 'وضع المدينة' },
@@ -13453,12 +13601,7 @@
       tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept || tenantVisualConceptState);
       persistVisualConceptDraftState();
 
-      const conceptual2dSection = document.createElement('div');
-      conceptual2dSection.className = 'tenant-form-section';
-      conceptual2dSection.id = 'section-conceptual-2d';
-      conceptual2dSection.dataset.section = 'section-conceptual-2d';
-      conceptual2dSection.appendChild(createProjectSectionHeader('section-conceptual-2d', 'المخططات التصورية 2D'));
-      form.appendChild(conceptual2dSection);
+      addConceptualPlansSection(form);
 
       const projectSections = Array.from(form.querySelectorAll('.tenant-form-section[data-section]'));
       populateProjectSidebar(projectSections);
@@ -13483,6 +13626,7 @@
       renderSurveyDirections(tenantProjectData.directions_table || {});
       renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
       renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
+      renderConceptualPlans();
       renderProjectTeam();
       enhanceProjectClassificationFields();
       refreshAllowedUsesStatusNote();
@@ -16831,11 +16975,7 @@
     }
 
     function showSection(sectionKey, fromHistory = false) {
-      if (tenantFloorDesignEmbedded && sectionKey !== 'section-conceptual-2d') exitTenantFloorDesignPage();
-      if (sectionKey === 'section-conceptual-2d') {
-        openTenantFloorDesignPage(fromHistory);
-        return;
-      }
+      if (tenantFloorDesignEmbedded) exitTenantFloorDesignPage();
       const sections = Array.from(document.querySelectorAll('#tenantProjectForm .tenant-form-section[data-section]'));
       const target = sections.find(section => section.dataset.section === sectionKey);
       if (!target) return;
@@ -16913,6 +17053,7 @@
         if (typeof persistExecutiveContentFromDom === 'function' && document.getElementById('executiveContentData')) {
           persistExecutiveContentFromDom();
         }
+        if (typeof persistConceptualPlansState === 'function') persistConceptualPlansState();
         if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
         if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
         if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
@@ -18785,7 +18926,9 @@
     }
 
     async function uploadTenantProjectFileInput(input, key) {
-      const multiLimit = key === 'land_photos' ? LAND_PHOTOS_MAX : key === 'visual_style_reference' ? 5 : 2;
+      const multiLimit = key === 'land_photos' ? LAND_PHOTOS_MAX
+        : (key === 'visual_style_reference' ? 5
+          : (key === 'conceptual_plans' ? CONCEPTUAL_PLANS_MAX : 2));
       const files = Array.from(input?.files || []).slice(0, input?.multiple ? multiLimit : 1);
       const fileType = input?.dataset?.projectFileType;
       if (!files.length || !fileType) {
@@ -18845,6 +18988,7 @@
       if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
       if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
       if (typeof persistExecutiveContentFromDom === 'function') persistExecutiveContentFromDom();
+      if (typeof persistConceptualPlansState === 'function') persistConceptualPlansState();
       const result = {};
       const inputs = document.querySelectorAll('#tenantProjectForm input, #tenantProjectForm textarea, #tenantProjectForm select');
       for (const input of inputs) {
@@ -19054,6 +19198,7 @@
     const VISUAL_CONCEPT_EXTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'external');
     const VISUAL_CONCEPT_INTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'internal');
     const VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior';
+    const VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 4;
     const VISUAL_CONCEPT_SLOT_ALIASES = {
       cover: ['cover', 'main', 'hero'],
       right: ['right', 'east', 'east_facade'],
@@ -19064,11 +19209,27 @@
     };
 
     function emptyVisualConceptSlot(id) {
-      return { id, prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [] };
+      return { id, prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '' };
     }
 
-    function visualConceptInteriorSlotId(componentId) {
-      return VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + String(componentId || '').trim();
+    function visualConceptInteriorSlotId(componentId, viewIndex = 1) {
+      const index = Math.max(1, Math.min(VISUAL_CONCEPT_MAX_INTERIOR_IMAGES, Number(viewIndex) || 1));
+      return VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + String(componentId || '').trim() + '::' + index;
+    }
+
+    function visualConceptInteriorComponentIdFromSlot(slotId) {
+      const value = String(slotId || '');
+      const prefix = VISUAL_CONCEPT_INTERNAL_PREFIX + '_';
+      if (!value.startsWith(prefix)) return '';
+      const rest = value.slice(prefix.length);
+      return rest.includes('::') ? rest.split('::')[0] : rest;
+    }
+
+    function visualConceptInteriorViewIndexFromSlot(slotId) {
+      const value = String(slotId || '');
+      if (!value.includes('::')) return 1;
+      const index = Number(value.split('::').pop());
+      return Number.isFinite(index) && index > 0 ? index : 1;
     }
 
     function isVisualConceptInteriorSlot(slotId) {
@@ -19149,9 +19310,22 @@
       Object.keys(source.slots && typeof source.slots === 'object' ? source.slots : {}).forEach(id => {
         if (isVisualConceptInteriorSlot(id)) slotIds.add(id);
       });
-      visualConceptInteriorComponents().forEach(item => slotIds.add(visualConceptInteriorSlotId(item.id)));
+      visualConceptInteriorComponents().forEach(item => {
+        slotIds.add(visualConceptInteriorSlotId(item.id, 1));
+        const legacyId = VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + item.id;
+        if (source.slots && source.slots[legacyId]) slotIds.add(visualConceptInteriorSlotId(item.id, 1));
+        for (let view = 2; view <= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES; view += 1) {
+          const viewId = visualConceptInteriorSlotId(item.id, view);
+          if (source.slots && source.slots[viewId]) slotIds.add(viewId);
+        }
+      });
       slotIds.forEach(id => {
-        const slot = visualConceptSlotSource(source.slots, id) || emptyVisualConceptSlot(id);
+        let sourceId = id;
+        if (isVisualConceptInteriorSlot(id) && id.includes('::') && visualConceptInteriorViewIndexFromSlot(id) === 1) {
+          const legacyId = VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + visualConceptInteriorComponentIdFromSlot(id);
+          if ((!source.slots || !source.slots[id]) && source.slots && source.slots[legacyId]) sourceId = legacyId;
+        }
+        const slot = visualConceptSlotSource(source.slots, sourceId) || visualConceptSlotSource(source.slots, id) || emptyVisualConceptSlot(id);
         const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => ({
           role: entry.role === 'assistant' ? 'assistant' : 'user',
           text: String(entry.text).slice(0, 4000)
@@ -19169,7 +19343,9 @@
             : (approved ? 'approved' : imageUrl ? 'review' : 'pending'),
           chat,
           styleReferenceFileIds: visualConceptReferenceList(slot.styleReferenceFileIds).slice(0, 5),
-          styleReferenceNames: visualConceptReferenceList(slot.styleReferenceNames).slice(0, 5)
+          styleReferenceNames: visualConceptReferenceList(slot.styleReferenceNames).slice(0, 5),
+          sourceFileId: String(slot.sourceFileId || ''),
+          sourceFileName: String(slot.sourceFileName || '')
         };
       });
       if (!stated.cover && tenantCreativeImages.cover) {
@@ -19255,12 +19431,17 @@
         slotId,
         projectData,
         creativeImages: tenantCreativeImages,
-        coverImage: tenantVisualConceptState.slots.cover.approvedImageUrl || '',
-        currentPrompt: tenantVisualConceptState.slots[slotId]?.prompt || '',
-        prompt: tenantVisualConceptState.slots[slotId]?.prompt || '',
-        componentId: isVisualConceptInteriorSlot(slotId) ? selectedVisualConceptInteriorComponentId() : '',
+        coverImage: tenantVisualConceptState.slots.cover.approvedImageUrl || tenantVisualConceptState.slots.cover.imageUrl || '',
+        coverFileId: tenantVisualConceptState.slots.cover.sourceFileId || '',
+        currentPrompt: document.querySelector('[data-visual-prompt="' + slotId + '"]')?.value
+          || tenantVisualConceptState.slots[slotId]?.prompt || '',
+        prompt: document.querySelector('[data-visual-prompt="' + slotId + '"]')?.value
+          || tenantVisualConceptState.slots[slotId]?.prompt || '',
+        componentId: isVisualConceptInteriorSlot(slotId)
+          ? (visualConceptInteriorComponentIdFromSlot(slotId) || selectedVisualConceptInteriorComponentId())
+          : '',
         referenceFileIds: isVisualConceptInteriorSlot(slotId)
-          ? (tenantVisualConceptState.slots[slotId]?.styleReferenceFileIds || [])
+          ? visualConceptInteriorReferenceIds(slotId)
           : []
       };
     }
@@ -19277,10 +19458,45 @@
       return String(select?.value || tenantVisualConceptState?.selectedInteriorComponentId || visualConceptInteriorComponents()[0]?.id || '').trim();
     }
 
+    function visualConceptInteriorReferenceIds(slotId) {
+      const componentId = visualConceptInteriorComponentIdFromSlot(slotId) || selectedVisualConceptInteriorComponentId();
+      const firstId = visualConceptInteriorSlotId(componentId, 1);
+      const slot = tenantVisualConceptState.slots[slotId] || {};
+      const first = tenantVisualConceptState.slots[firstId] || {};
+      const ids = Array.isArray(slot.styleReferenceFileIds) && slot.styleReferenceFileIds.length
+        ? slot.styleReferenceFileIds
+        : (first.styleReferenceFileIds || []);
+      return ids.slice(0, 5);
+    }
+
+    function visualConceptInteriorViewIds(componentId) {
+      const ids = [];
+      for (let view = 1; view <= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES; view += 1) {
+        const id = visualConceptInteriorSlotId(componentId, view);
+        if (view === 1 || tenantVisualConceptState.slots[id]) ids.push(id);
+      }
+      return ids;
+    }
+
+    function addVisualConceptInteriorView() {
+      const componentId = selectedVisualConceptInteriorComponentId();
+      if (!componentId) return;
+      const existing = visualConceptInteriorViewIds(componentId);
+      if (existing.length >= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES) return;
+      const nextId = visualConceptInteriorSlotId(componentId, existing.length + 1);
+      if (!tenantVisualConceptState.slots[nextId]) {
+        tenantVisualConceptState.slots[nextId] = emptyVisualConceptSlot(nextId);
+      }
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+    }
+
     function renderVisualConceptInteriorReferences(slotId) {
       const preview = document.getElementById('visualConceptInteriorReferencePreview');
       if (!preview) return;
-      const slot = tenantVisualConceptState.slots[slotId] || emptyVisualConceptSlot(slotId);
+      const componentId = visualConceptInteriorComponentIdFromSlot(slotId) || selectedVisualConceptInteriorComponentId();
+      const firstId = visualConceptInteriorSlotId(componentId, 1);
+      const slot = tenantVisualConceptState.slots[firstId] || tenantVisualConceptState.slots[slotId] || emptyVisualConceptSlot(firstId);
       const ids = Array.isArray(slot.styleReferenceFileIds) ? slot.styleReferenceFileIds : [];
       const names = Array.isArray(slot.styleReferenceNames) ? slot.styleReferenceNames : [];
       if (!ids.length) {
@@ -19316,31 +19532,34 @@
         tenantVisualConceptState.selectedInteriorComponentId = select.value || '';
       }
       if (hint) {
-        if (!coverApproved) hint.textContent = 'اعتمد الصورة الرئيسية في التصور الخارجي أولًا.';
-        else if (!components.length) hint.textContent = 'أضف مكونات المشروع في الدراسة المالية أولًا.';
-        else hint.textContent = 'عدد الصور الداخلية يساوي ' + components.length + ' مكونات.';
+        if (!components.length) hint.textContent = 'أضف مكونات المشروع في الدراسة المالية أولًا.';
+        else hint.textContent = '';
       }
-      if (referenceCard) referenceCard.hidden = !coverApproved || !components.length;
+      if (referenceCard) referenceCard.hidden = !components.length;
       const selectedId = selectedVisualConceptInteriorComponentId();
-      if (!selectedId || !coverApproved) {
-        host.innerHTML = '<p class="tenant-hint">' + (!coverApproved ? 'التصور الداخلي مقفل حتى اعتماد الصورة الرئيسية.' : 'لا توجد مكونات لتوليد صور داخلية.') + '</p>';
+      if (!selectedId) {
+        host.innerHTML = '<p class="tenant-hint">لا توجد مكونات لتوليد صور داخلية.</p>';
         return;
       }
       const component = components.find(item => item.id === selectedId);
-      const slotId = visualConceptInteriorSlotId(selectedId);
-      if (!tenantVisualConceptState.slots[slotId]) tenantVisualConceptState.slots[slotId] = emptyVisualConceptSlot(slotId);
-      host.innerHTML = renderVisualConceptSlot({
-        id: slotId,
-        label: 'تصور داخلي: ' + (component?.name || 'المكون'),
+      const viewIds = visualConceptInteriorViewIds(selectedId);
+      viewIds.forEach(id => {
+        if (!tenantVisualConceptState.slots[id]) tenantVisualConceptState.slots[id] = emptyVisualConceptSlot(id);
+      });
+      const cards = viewIds.map((id, index) => renderVisualConceptSlot({
+        id,
+        label: 'تصور داخلي: ' + (component?.name || 'المكون') + ' — صورة ' + (index + 1),
         group: 'internal'
-      }, false);
-      renderVisualConceptInteriorReferences(slotId);
-      // The reference card feeds this one component, so an approved interior locks it too.
-      const interiorApproved = tenantVisualConceptState.slots[slotId].status === 'approved';
+      }, !coverApproved)).join('');
+      const canAdd = viewIds.length < VISUAL_CONCEPT_MAX_INTERIOR_IMAGES;
+      host.innerHTML = '<div class="visual-concept-interior-stack">' + cards + '</div>' +
+        (canAdd ? '<div class="visual-concept-actions" style="margin-top:12px"><button type="button" class="btn ghost small" data-visual-action="add-interior">إضافة صورة داخلية</button></div>' : '');
+      renderVisualConceptInteriorReferences(viewIds[0]);
+      const allApproved = viewIds.every(id => tenantVisualConceptState.slots[id]?.status === 'approved');
       if (referenceCard) {
-        referenceCard.classList.toggle('section-locked', interiorApproved);
+        referenceCard.classList.toggle('section-locked', allApproved);
         referenceCard.querySelectorAll('input, button').forEach(control => {
-          control.disabled = interiorApproved;
+          control.disabled = allApproved;
         });
       }
     }
@@ -19350,29 +19569,33 @@
       const image = slot.approvedImageUrl || slot.imageUrl;
       // Approval is one toggle per image and it locks that card, exactly like a section.
       const approved = slot.status === 'approved';
-      const frozen = locked || approved;
+      const frozen = approved;
+      const waitCover = locked && !approved;
+      const generateDisabled = frozen || waitCover || slot.status === 'generating';
       const statusLabel = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد' : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
       const chat = (slot.chat || []).map(item => (
         '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? 'النظام: ' : 'أنت: ') + '</strong>' + escapeHtml(item.text) + '</div>'
       )).join('') || '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
       const preview = image
         ? '<img src="' + escapeHtml(image) + '" alt="' + escapeHtml(slotDef.label) + '">'
-        : (locked ? 'مقفل حتى اعتماد الصورة الرئيسية وإضافة مكونات المشروع.' : 'لم يتم توليد هذه الصورة بعد.');
-      return '<article class="visual-concept-card' + (locked ? ' locked' : '') + (approved ? ' section-locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
+        : 'لم تُرفع أو تُولَّد هذه الصورة بعد.';
+      const uploadAccept = 'image/png,image/jpeg,image/jpg,image/webp';
+      return '<article class="visual-concept-card' + (waitCover ? ' locked' : '') + (approved ? ' section-locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
         '<div class="visual-concept-head"><h3>' + escapeHtml(slotDef.label) + '</h3>' +
         '<span class="visual-concept-status ' + slot.status + '">' + statusLabel + '</span></div>' +
         '<div class="visual-concept-preview">' + preview + '</div>' +
+        '<input type="file" accept="' + uploadAccept + '" data-visual-upload="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>' +
         '<label>وصف الصورة</label>' +
         '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
         '<div class="visual-concept-actions">' +
-        '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
-        '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (frozen || slot.status === 'generating' ? 'disabled' : '') + '>توليد الصورة</button>' +
-        '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + (locked || (!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
+        '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
+        '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
+        '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
         '</div>' +
         '<div class="visual-concept-chat">' + chat + '</div>' +
         '<div class="visual-concept-chat-row">' +
-        '<textarea data-visual-chat="' + slotDef.id + '" rows="2" placeholder="اكتب تعديل هذه الصورة..." ' + (frozen ? 'disabled' : '') + '></textarea>' +
-        '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>إرسال التعديل</button>' +
+        '<textarea data-visual-chat="' + slotDef.id + '" rows="2" ' + (generateDisabled ? 'disabled' : '') + '></textarea>' +
+        '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إرسال التعديل</button>' +
         '</div></article>';
     }
 
@@ -19444,12 +19667,22 @@
     async function uploadVisualConceptInteriorReferences(input) {
       const files = Array.from(input?.files || []);
       if (!files.length) return;
-      const slotId = visualConceptInteriorSlotId(selectedVisualConceptInteriorComponentId());
-      if (!slotId || slotId === VISUAL_CONCEPT_INTERNAL_PREFIX + '_') {
+      const componentId = selectedVisualConceptInteriorComponentId();
+      if (!componentId) {
         toast('اختر مكونًا أولًا');
         return;
       }
-      if (files.length > 5) toast('سيتم رفع أول 5 صور فقط.');
+      const remaining = Math.max(0, VISUAL_CONCEPT_MAX_INTERIOR_IMAGES - visualConceptInteriorViewIds(componentId).filter(id => {
+        const slot = tenantVisualConceptState.slots[id] || {};
+        return slot.imageUrl || slot.approvedImageUrl || slot.sourceFileId;
+      }).length);
+      if (!remaining) {
+        toast('تم الوصول إلى الحد الأقصى لصور هذا المكون');
+        input.value = '';
+        return;
+      }
+      const slotId = visualConceptInteriorSlotId(componentId, 1);
+      if (files.length > 4) toast('سيتم رفع أول 4 صور فقط.');
       try {
         input.dataset.projectFileType = 'visual_reference';
         const uploaded = await uploadTenantProjectFileInput(input, 'visual_style_reference');
@@ -19468,12 +19701,22 @@
           if (found) found.name = found.name || file.name;
           else merged.push(file);
         });
-        const limited = merged.slice(0, 5);
+        const limited = merged.slice(0, 4);
         slot.styleReferenceFileIds = limited.map(file => file.id);
         slot.styleReferenceNames = limited.map(file => file.name);
+        limited.forEach((file, index) => {
+          const viewId = visualConceptInteriorSlotId(componentId, index + 1);
+          if (!tenantVisualConceptState.slots[viewId]) tenantVisualConceptState.slots[viewId] = emptyVisualConceptSlot(viewId);
+          const viewSlot = tenantVisualConceptState.slots[viewId];
+          if (!viewSlot.imageUrl && !viewSlot.approvedImageUrl) {
+            viewSlot.sourceFileId = file.id;
+            viewSlot.sourceFileName = file.name;
+            viewSlot.status = viewSlot.status === 'approved' ? viewSlot.status : 'review';
+          }
+        });
         markVisualConceptDirty();
-        renderVisualConceptInteriorReferences(slotId);
-        toast('تم حفظ ' + limited.length + ' صور مرجعية لهذا المكون.');
+        renderVisualConceptPage();
+        toast('تم حفظ صور هذا المكون.');
       } catch (error) {
         toast(error.message || 'تعذر رفع الصور المرجعية');
       } finally {
@@ -19482,7 +19725,8 @@
     }
 
     function clearVisualConceptInteriorReferences() {
-      const slotId = visualConceptInteriorSlotId(selectedVisualConceptInteriorComponentId());
+      const componentId = selectedVisualConceptInteriorComponentId();
+      const slotId = visualConceptInteriorSlotId(componentId, 1);
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
       if (!tenantVisualConceptState.slots[slotId]) return;
       tenantVisualConceptState.slots[slotId].styleReferenceFileIds = [];
@@ -19564,8 +19808,38 @@
           else if (action === 'approve') approveVisualConceptImage(slotId);
           else if (action === 'unapprove') unapproveVisualConceptImage(slotId);
           else if (action === 'chat') sendVisualConceptChat(slotId);
+          else if (action === 'add-interior') addVisualConceptInteriorView();
         });
       });
+      bindRoot.querySelectorAll('[data-visual-upload]').forEach(input => {
+        input.addEventListener('change', () => uploadVisualConceptSlotImage(input.getAttribute('data-visual-upload'), input));
+      });
+    }
+
+    async function uploadVisualConceptSlotImage(slotId, input) {
+      const file = input?.files?.[0];
+      if (!file || !slotId) return;
+      try {
+        input.dataset.projectFileType = 'visual_reference';
+        const uploaded = await uploadTenantProjectFileInput(input, 'visual_style_reference');
+        const fileRecord = Array.isArray(uploaded) ? uploaded[0] : uploaded;
+        const fileId = fileRecord?.id || fileRecord;
+        if (!fileId) throw new Error('تعذر رفع الصورة');
+        if (!tenantVisualConceptState.slots[slotId]) tenantVisualConceptState.slots[slotId] = emptyVisualConceptSlot(slotId);
+        const liveSlot = () => tenantVisualConceptState.slots[slotId];
+        liveSlot().sourceFileId = fileId;
+        liveSlot().sourceFileName = fileRecord?.originalName || file.name || '';
+        liveSlot().imageUrl = await getProjectFileObjectUrl(fileId);
+        liveSlot().approvedImageUrl = '';
+        liveSlot().status = 'review';
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+        toast('تم رفع الصورة');
+      } catch (error) {
+        toast(error.message || 'تعذر رفع الصورة');
+      } finally {
+        if (input) input.value = '';
+      }
     }
 
     function showVisualConceptView(view) {

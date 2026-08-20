@@ -208,7 +208,9 @@ authenticated `GET /api/project-files/<id>` preview route. `team_logo` is in
 
 Section order is `basic → location → land_croquis → timeline → financial → team → market study → executive content → conceptual 2D`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order.
-`section-executive-content` is the last information section, immediately before conceptual 2D.
+`section-conceptual-2d` is optional client plan uploads (`file_type='conceptual_plan'`), not the
+floor-design generator. The user may leave it empty. `section-executive-content` is the last
+written-information section, immediately before that upload section.
 It gathers already-approved facts from every earlier section (basic, location, land/croquis,
 timeline, financial, team, market study). Generated texts — brief, opportunity, features,
 risks, executive summary — live in `draft_data.executive_content` via the hidden
@@ -305,11 +307,14 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   Visual concept uses `persistVisualConceptDraftState()` for the hidden
   `visual_concept` input plus `tenantCreativeImages`. The page now has two
   groups on a home page of two cards, like floor-design stages: `التصور الخارجي`
-  (`cover`, `right`, `left`, `top`, `back`) and `التصور الداخلي`. Internal
-  images are one per actual financial-study component, chosen from a
-  dropdown. Each component has its own five optional references plus the
-  approved cover as a required sixth image. Clicking a card opens that
-  group's workspace. Legacy
+  (`cover`, `right`, `left`, `top`, `back`) and `التصور الداخلي`. The client may
+  upload their own image into any of the five exterior slots, or generate it.
+  Internal images are 1–4 per actual financial-study component (`interior_<id>::n`),
+  chosen from a dropdown; the client may upload or generate each one. Count is
+  optional — 1 is enough, 4 is the cap. Each component still has optional
+  interior references. Clicking a card opens that group's workspace. Chat
+  revision must edit the current prompt in place, never rewrite it from
+  scratch, unless the user explicitly asks to replace the prompt. Legacy
   ids `east`/`west`/`aerial` hydrate into `right`/`left`/`top`. Rebuilding
   the project form must restore the existing `visual_concept` /
   `target_audience` values before writing those hidden inputs; empty widgets
