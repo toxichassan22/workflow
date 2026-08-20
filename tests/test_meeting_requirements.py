@@ -2944,9 +2944,10 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_visual_concept_replaces_legacy_image_workflow_pages(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn('<section id="tenantVisualConceptPage" class="tenant-page">', index_source)
+        self.assertIn('id="section-visual-concept"', index_source)
+        self.assertIn("createProjectSectionHeader('section-visual-concept', 'التصور البصري')", index_source)
+        self.assertIn('function addVisualConceptSection(form', index_source)
         self.assertIn("tenantVisualConceptPage: '/app/projects/visual-concept'", index_source)
-        self.assertIn("{ pageId: 'tenantVisualConceptPage', label: 'التصور البصري' }", index_source)
         self.assertNotIn("{ pageId: 'tenantFloorDesignPage', label: 'تصميم صور الطوابق' }", index_source)
         self.assertNotIn('اختاري كرت التصور الخارجي أو الداخلي', index_source)
         self.assertIn('data-visual-concept-target="external"', index_source)
@@ -2966,9 +2967,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function persistVisualConceptDraftState()', index_source)
         self.assertIn("data-key=\"visual_concept\"", index_source)
         self.assertIn('function persistVisualConceptDraftState()', index_source)
-        visual_page = index_source[index_source.index('id="tenantVisualConceptPage"'):index_source.index('id="tenantSlidesPage"')]
-        self.assertIn('onclick="saveProjectAsDraft()"', visual_page)
-        self.assertIn('حفظ كمسودة', visual_page)
+        self.assertIn('saveProjectAsDraft', index_source)
         self.assertIn("api('POST', '/api/visual-concept/prompt'", index_source)
         self.assertIn("apiWithTimeout('POST', '/api/visual-concept/generate'", index_source)
         self.assertIn('visual-concept-stack', index_source)
@@ -3855,7 +3854,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("function collectExecutiveContentFacts()", index_source)
         self.assertIn("function collectExecutiveTeamFacts()", index_source)
         self.assertIn("function collectExecutiveTimelineFacts()", index_source)
-        self.assertIn("بيانات مرتبطة من الأقسام السابقة", index_source)
+        self.assertNotIn("بيانات مرتبطة من الأقسام السابقة", index_source)
         self.assertNotIn("underConstruction: true", index_source)
         self.assertNotIn('executiveSwot_', index_source)
         self.assertNotIn("{ key: 'swot', label: 'تحليل SWOT' }", index_source)
@@ -3896,8 +3895,21 @@ class MeetingRequirementsTests(unittest.TestCase):
             })
         self.assertEqual(summary.status_code, 200, summary.get_json())
         self.assertIn('البيانات الأساسية', summary.get_json()['text'])
-        self.assertIn('الدراسة المالية', summary.get_json()['text'])
         self.assertEqual(chat_call.call_args.kwargs.get('max_tokens'), self.application_module.EXECUTIVE_SUMMARY_MAX_TOKENS)
+
+        parsed_dict = executive_content.parse_generated_block('summary', {'البيانات الأساسية': 'منتجع', 'الموقع': 'جدة'})
+        self.assertIn('البيانات الأساسية\nمنتجع', parsed_dict)
+        self.assertIn('الموقع\nجدة', parsed_dict)
+
+        raw_md = 'البيانات الأساسية\nمشروع ذا فيو في جدة\n\nالدراسة المالية\nعائد استثماري متميز'
+        with patch.object(self.application_module, 'call_zai_chat', return_value={'choices': [{'message': {'content': raw_md}}]}), \
+             patch.object(self.application_module, 'extract_chat_content', return_value=raw_md):
+            summary_raw = client.post('/api/executive-content/generate', headers=self._headers(self.token_a), json={
+                'block': 'summary',
+                'facts': {'projectName': 'ذا فيو', 'projectType': 'سكني'},
+            })
+        self.assertEqual(summary_raw.status_code, 200, summary_raw.get_json())
+        self.assertIn('مشروع ذا فيو في جدة', summary_raw.get_json()['text'])
 
     def test_market_study_fields_and_section_are_wired(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')

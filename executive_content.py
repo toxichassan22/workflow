@@ -9,31 +9,31 @@ BLOCKS = (
     {
         'key': 'brief',
         'label': 'نبذة المشروع',
-        'requires': ('basic', 'idea'),
+        'requires': ('basic',),
         'output': 'paragraphs',
     },
     {
         'key': 'opportunity',
         'label': 'الفرصة الاستثمارية',
-        'requires': ('basic', 'location', 'land', 'financial', 'market'),
+        'requires': ('basic', 'financial'),
         'output': 'paragraphs',
     },
     {
         'key': 'features',
         'label': 'المميزات وفرص الاستثمار',
-        'requires': ('basic', 'location', 'market'),
+        'requires': ('basic',),
         'output': 'bullets',
     },
     {
         'key': 'risks',
         'label': 'دراسة المخاطر',
-        'requires': ('basic', 'location', 'land', 'financial', 'market'),
+        'requires': ('basic',),
         'output': 'risks',
     },
     {
         'key': 'summary',
         'label': 'الملخص التنفيذي',
-        'requires': ('basic', 'location', 'land', 'timeline', 'financial', 'market'),
+        'requires': ('basic',),
         'output': 'document',
     },
 )
@@ -435,21 +435,52 @@ SYSTEM_PROMPT = (
 def parse_generated_block(key, parsed):
     data = parsed if isinstance(parsed, dict) else {}
     spec = block_spec(key) or {}
-    if spec.get('output') == 'document':
+    output_type = spec.get('output', 'paragraphs')
+
+    if output_type == 'document':
         if isinstance(data.get('sections'), list):
             return normalize_block(key, data.get('sections'))
-        if key in data and not isinstance(data.get(key), dict):
-            return normalize_block(key, data.get(key))
-        return normalize_block(key, data.get('text') or data.get('content') or '')
-    if spec.get('output') == 'risks':
+        for text_key in ('text', 'content', 'summary', 'document', 'body', 'executive_summary', 'الملخص التنفيذي', 'الملخص_التنفيذي', 'ملخص', key):
+            val = data.get(text_key)
+            if isinstance(val, str) and val.strip():
+                return normalize_block(key, val)
+            if isinstance(val, list):
+                return normalize_block(key, val)
+            if isinstance(val, dict):
+                return normalize_document(_sections_to_text([{'heading': k, 'text': str(v)} for k, v in val.items()]))
+        # Dict with section headings as keys (e.g. {'البيانات الأساسية': '...', 'الموقع': '...'})
+        if data:
+            sections = []
+            for k, v in data.items():
+                if isinstance(v, str) and v.strip():
+                    sections.append({'heading': k, 'text': v})
+                elif isinstance(v, (list, dict)):
+                    sections.append({'heading': k, 'text': normalize_text(v)})
+            if sections:
+                return normalize_document(_sections_to_text(sections))
+        return ''
+
+    if output_type == 'risks':
         items = data.get('items')
         if not isinstance(items, list):
             items = data.get('risks') if isinstance(data.get('risks'), list) else None
+        if not isinstance(items, list):
+            items = data.get('المخاطر') if isinstance(data.get('المخاطر'), list) else None
         if isinstance(items, list):
             return normalize_block(key, items)
+        for text_key in ('text', 'content', 'risks', 'items', 'المخاطر', key):
+            val = data.get(text_key)
+            if isinstance(val, str) and val.strip():
+                return normalize_block(key, val)
         if key in data and not isinstance(data.get(key), dict):
             return normalize_block(key, data.get(key))
         return normalize_block(key, data.get('text') or data.get('content') or data)
-    if key in data and not isinstance(data.get(key), dict):
-        return normalize_block(key, data.get(key))
+
+    # For paragraphs and bullets
+    for text_key in ('text', 'content', key, 'paragraphs', 'bullets', 'items', 'output', 'result'):
+        val = data.get(text_key)
+        if isinstance(val, str) and val.strip():
+            return normalize_block(key, val)
+        if isinstance(val, list):
+            return normalize_block(key, val)
     return normalize_block(key, data.get('text') or data.get('content') or '')

@@ -1544,16 +1544,21 @@
 
     #section-market-study.tenant-form-section.active,
     #section-market-study,
+    #section-visual-concept.tenant-form-section.active,
+    #section-visual-concept,
     #section-executive-content.tenant-form-section.active,
     #section-executive-content {
       display: block !important;
       width: 100%;
     }
     .project-form-content #section-market-study.tenant-form-section:not(.active),
+    .project-form-content #section-visual-concept.tenant-form-section:not(.active),
     .project-form-content #section-executive-content.tenant-form-section:not(.active) {
       display: none !important;
     }
-    #section-market-study .market-study-body {
+    #section-market-study .market-study-body,
+    #section-visual-concept .visual-concept-body,
+    #section-executive-content .executive-content-body {
       grid-column: 1 / -1;
     }
     #section-market-study .market-block {
@@ -3003,12 +3008,12 @@
       padding: 18px;
     }
 
-    .visual-concept-card.locked {
-      opacity: .68;
+    .visual-concept-card.section-locked {
+      background: #fafafa;
     }
 
     .visual-concept-card.section-locked textarea,
-    .visual-concept-card.section-locked input[data-visual-title],
+    .visual-concept-card.section-locked input,
     .visual-concept-card.section-locked button:not([data-visual-action="unapprove"]) {
       opacity: .62;
     }
@@ -3058,8 +3063,65 @@
       color: #92400e;
     }
 
+    .visual-concept-mode-selector {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 14px;
+      background: #f1f5f9;
+      padding: 4px;
+      border-radius: 10px;
+      width: fit-content;
+    }
+
+    .visual-concept-mode-btn {
+      border: none;
+      background: transparent;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      color: var(--muted);
+      transition: all .15s ease;
+    }
+
+    .visual-concept-mode-btn.active {
+      background: #fff;
+      color: var(--p);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+    }
+
+    .visual-concept-upload-box {
+      border: 2px dashed var(--line);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+      background: #f8fafc;
+      margin-bottom: 12px;
+      transition: border-color .2s ease;
+    }
+
+    .visual-concept-upload-box:hover {
+      border-color: var(--p);
+    }
+
+    .visual-concept-upload-label {
+      font-weight: 600;
+      color: var(--p);
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .visual-concept-file-info {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+      word-break: break-all;
+    }
+
     .visual-concept-preview {
-      min-height: 0;
+      position: relative;
+      min-height: 120px;
       border: 1px solid var(--line);
       border-radius: 12px;
       background: #f8fafc;
@@ -3071,6 +3133,11 @@
       color: var(--muted);
       text-align: center;
       padding: 10px;
+      cursor: zoom-in;
+    }
+
+    .visual-concept-preview.empty {
+      cursor: default;
     }
 
     .visual-concept-preview img {
@@ -3080,6 +3147,102 @@
       object-fit: contain;
       object-position: center;
       display: block;
+      transition: transform .2s ease;
+    }
+
+    .visual-concept-preview:not(.empty):hover img {
+      transform: scale(1.015);
+    }
+
+    .visual-concept-zoom-btn {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      background: rgba(15, 23, 42, 0.75);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+      transition: background .15s ease;
+      z-index: 2;
+    }
+
+    .visual-concept-zoom-btn:hover {
+      background: rgba(15, 23, 42, 0.95);
+    }
+
+    .visual-concept-lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 100000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .visual-concept-lightbox[hidden] {
+      display: none !important;
+    }
+
+    .visual-concept-lightbox-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(6px);
+    }
+
+    .visual-concept-lightbox-content {
+      position: relative;
+      background: #fff;
+      border-radius: 16px;
+      max-width: 90vw;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+      z-index: 1;
+    }
+
+    .visual-concept-lightbox-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+      gap: 16px;
+    }
+
+    .visual-concept-lightbox-header h3 {
+      margin: 0;
+      font-size: 16px;
+      color: var(--p);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .visual-concept-lightbox-body {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+      background: #0f172a;
+    }
+
+    .visual-concept-lightbox-body img {
+      max-width: 85vw;
+      max-height: 75vh;
+      object-fit: contain;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     }
 
     .visual-concept-home-card.has-preview {
@@ -3110,6 +3273,7 @@
       color: var(--muted);
       font-size: 10px;
       text-align: center;
+      cursor: zoom-in;
     }
 
     .visual-concept-reference-item img {
@@ -3121,6 +3285,11 @@
       background: #fff;
       border-radius: 8px;
       border: 1px solid var(--line);
+      transition: transform .2s ease;
+    }
+
+    .visual-concept-reference-item:hover img {
+      transform: scale(1.03);
     }
 
     .visual-concept-actions,
@@ -3235,6 +3404,7 @@
       color: #8a8a8a;
     }
 
+    #section-visual-concept [data-visual-concept-view][hidden],
     #tenantVisualConceptPage [data-visual-concept-view][hidden] {
       display: none !important;
     }
@@ -7012,78 +7182,6 @@
 
     </section>
 
-    <section id="tenantVisualConceptPage" class="tenant-page">
-      <div class="workflow-stage-layout">
-        <aside class="project-form-sidebar workflow-stage-sidebar" aria-label="مراحل إنشاء العرض"></aside>
-        <div class="workflow-stage-content">
-          <h2>التصور البصري</h2>
-          <div id="visualConceptHome" class="visual-concept-home" data-visual-concept-view="home">
-            <div class="visual-concept-home-grid">
-              <button type="button" class="visual-concept-home-card" data-visual-concept-target="external">
-                <span class="tenant-floor-design-stage-number">القسم الأول</span>
-                <h3>التصور الخارجي</h3>
-                <img id="visualConceptHomeCoverPreview" class="visual-concept-home-preview" alt="معاينة الصورة الرئيسية" hidden>
-                <span class="visual-concept-home-status" id="visualConceptHomeExternalStatus">جاهز للعمل</span>
-              </button>
-              <button type="button" class="visual-concept-home-card" data-visual-concept-target="internal">
-                <span class="tenant-floor-design-stage-number">القسم الثاني</span>
-                <h3>التصور الداخلي</h3>
-                <span class="visual-concept-home-status" id="visualConceptHomeInternalStatus">جاهز للعمل</span>
-              </button>
-            </div>
-          </div>
-          <div id="visualConceptExternalView" class="visual-concept-section" data-visual-concept-view="external" hidden>
-            <div class="tenant-floor-design-stage-view-head">
-              <div>
-                <h3>التصور الخارجي</h3>
-              </div>
-              <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
-            </div>
-            <div id="visualConceptMissing" class="visual-concept-missing" hidden></div>
-            <div class="visual-concept-card">
-              <div class="visual-concept-head">
-                <h3>الصورة المرجعية</h3>
-              </div>
-              <input id="visualConceptStyleReferenceInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
-              <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="margin-top:12px">لم تُرفع صور مرجعية.</div>
-              <div class="visual-concept-actions">
-                <button type="button" class="btn ghost small" onclick="clearVisualConceptStyleReference()">حذف الصور المرجعية</button>
-              </div>
-            </div>
-            <div id="visualConceptWorkspace" class="visual-concept-page"></div>
-          </div>
-          <div id="visualConceptInternalView" class="visual-concept-section" data-visual-concept-view="internal" hidden>
-            <div class="tenant-floor-design-stage-view-head">
-              <div>
-                <h3>التصور الداخلي</h3>
-              </div>
-              <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
-            </div>
-            <div class="visual-concept-card">
-              <label>المكون</label>
-              <select id="visualConceptInteriorComponentSelect"></select>
-              <p class="tenant-hint" id="visualConceptInteriorHint"></p>
-            </div>
-            <div class="visual-concept-card" id="visualConceptInteriorReferenceCard" hidden>
-              <div class="visual-concept-head">
-                <h3>الصور المرجعية لهذا المكون</h3>
-              </div>
-              <input id="visualConceptInteriorReferenceInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
-              <div id="visualConceptInteriorReferencePreview" class="visual-concept-preview" style="margin-top:12px">لم تُرفع صور مرجعية لهذا المكون.</div>
-              <div class="visual-concept-actions">
-                <button type="button" class="btn ghost small" onclick="clearVisualConceptInteriorReferences()">حذف صور هذا المكون</button>
-              </div>
-            </div>
-            <div id="visualConceptInternalWorkspace" class="visual-concept-page"></div>
-          </div>
-          <div class="tenant-form-actions">
-            <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
-            <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- Slides Preview -->
     <section id="tenantSlidesPage" class="tenant-page">
       <!-- Toolbar at the top -->
@@ -8523,7 +8621,6 @@
 
     const TENANT_WORKFLOW_ITEMS = [
       { pageId: 'tenantProjectPage', label: 'بيانات المشروع' },
-      { pageId: 'tenantVisualConceptPage', label: 'التصور البصري' },
       { pageId: 'tenantSlidesPage', label: 'صفحة التصميم والمعاينة' }
     ];
 
@@ -8592,7 +8689,6 @@
     /* ===== Tenant Global Rail ===== */
     const TGR_STAGES = [
       { id: 'tenantProjectPage', label: 'بيانات المشروع' },
-      { id: 'tenantVisualConceptPage', label: 'التصور البصري' },
       { id: 'tenantSlidesPage', label: 'معاينة الشرائح' }
     ];
 
@@ -9785,7 +9881,99 @@
       const hidden = document.getElementById('executiveContentData');
       if (hidden) hidden.value = JSON.stringify(next);
       tenantProjectData.executive_content = next;
-      renderExecutiveLinkedFacts();
+    }
+
+    function addVisualConceptSection(form, before) {
+      const div = document.createElement('div');
+      div.className = 'tenant-form-section';
+      div.id = 'section-visual-concept'; // id="section-visual-concept"
+      div.dataset.section = 'section-visual-concept';
+      div.appendChild(createProjectSectionHeader('section-visual-concept', 'التصور البصري'));
+
+      const body = document.createElement('div');
+      body.className = 'visual-concept-body';
+      body.style.gridColumn = '1 / -1';
+      body.innerHTML = `
+        <div id="visualConceptHome" class="visual-concept-home" data-visual-concept-view="home">
+          <div class="visual-concept-home-grid">
+            <button type="button" class="visual-concept-home-card" data-visual-concept-target="external">
+              <span class="tenant-floor-design-stage-number">القسم الأول</span>
+              <h3>التصور الخارجي</h3>
+              <img id="visualConceptHomeCoverPreview" class="visual-concept-home-preview" alt="معاينة الصورة الرئيسية" hidden>
+              <span class="visual-concept-home-status" id="visualConceptHomeExternalStatus">جاهز للعمل</span>
+            </button>
+            <button type="button" class="visual-concept-home-card" data-visual-concept-target="internal">
+              <span class="tenant-floor-design-stage-number">القسم الثاني</span>
+              <h3>التصور الداخلي</h3>
+              <span class="visual-concept-home-status" id="visualConceptHomeInternalStatus">جاهز للعمل</span>
+            </button>
+          </div>
+        </div>
+        <div id="visualConceptExternalView" class="visual-concept-section" data-visual-concept-view="external" hidden>
+          <div class="tenant-floor-design-stage-view-head">
+            <div>
+              <h3>التصور الخارجي</h3>
+            </div>
+            <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
+          </div>
+          <div id="visualConceptMissing" class="visual-concept-missing" hidden></div>
+          <div class="visual-concept-card">
+            <div class="visual-concept-head">
+              <h3>الصورة المرجعية</h3>
+            </div>
+            <input id="visualConceptStyleReferenceInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
+            <div id="visualConceptStyleReferencePreview" class="visual-concept-preview" style="margin-top:12px">لم تُرفع صور مرجعية.</div>
+            <div class="visual-concept-actions">
+              <button type="button" class="btn ghost small" onclick="clearVisualConceptStyleReference()">حذف الصور المرجعية</button>
+            </div>
+          </div>
+          <div id="visualConceptWorkspace" class="visual-concept-page"></div>
+        </div>
+        <div id="visualConceptInternalView" class="visual-concept-section" data-visual-concept-view="internal" hidden>
+          <div class="tenant-floor-design-stage-view-head">
+            <div>
+              <h3>التصور الداخلي</h3>
+            </div>
+            <button type="button" class="btn ghost" onclick="showVisualConceptView('home')">العودة إلى أقسام التصور البصري</button>
+          </div>
+          <div class="visual-concept-card">
+            <label>المكون</label>
+            <select id="visualConceptInteriorComponentSelect"></select>
+            <p class="tenant-hint" id="visualConceptInteriorHint"></p>
+          </div>
+          <div class="visual-concept-card" id="visualConceptInteriorReferenceCard" hidden>
+            <div class="visual-concept-head">
+              <h3>الصور المرجعية لهذا المكون</h3>
+            </div>
+            <input id="visualConceptInteriorReferenceInput" type="file" multiple accept="image/png,image/jpeg,image/jpg,image/webp">
+            <div id="visualConceptInteriorReferencePreview" class="visual-concept-preview" style="margin-top:12px">لم تُرفع صور مرجعية لهذا المكون.</div>
+            <div class="visual-concept-actions">
+              <button type="button" class="btn ghost small" onclick="clearVisualConceptInteriorReferences()">حذف صور هذا المكون</button>
+            </div>
+          </div>
+          <div id="visualConceptInternalWorkspace" class="visual-concept-page"></div>
+        </div>
+        <input type="hidden" data-key="visual_concept" data-type="text" id="visualConceptData">
+      `;
+      div.appendChild(body);
+      if (before) form.insertBefore(div, before);
+      else form.appendChild(div);
+
+      body.querySelectorAll('[data-visual-concept-target]').forEach(button => {
+        button.addEventListener('click', () => showVisualConceptView(button.dataset.visualConceptTarget));
+      });
+      const refInput = body.querySelector('#visualConceptStyleReferenceInput');
+      if (refInput) refInput.addEventListener('change', () => uploadVisualConceptStyleReference(refInput));
+      const intInput = body.querySelector('#visualConceptInteriorReferenceInput');
+      if (intInput) intInput.addEventListener('change', () => uploadVisualConceptInteriorReferences(intInput));
+      const intSelect = body.querySelector('#visualConceptInteriorComponentSelect');
+      if (intSelect) {
+        intSelect.addEventListener('change', () => {
+          tenantVisualConceptState.selectedInteriorComponentId = intSelect.value || '';
+          markVisualConceptDirty();
+          renderVisualConceptPage();
+        });
+      }
     }
 
     function addExecutiveContentSection(form, before) {
@@ -9808,8 +9996,6 @@
           '</div>';
       }).join('');
       body.innerHTML =
-        '<div class="executive-block"><h4>بيانات مرتبطة من الأقسام السابقة</h4>' +
-        '<div id="executiveLinkedFacts" class="executive-facts"></div></div>' +
         generated +
         '<input type="hidden" data-key="executive_content" data-type="text" id="executiveContentData">';
       div.appendChild(body);
@@ -9846,6 +10032,8 @@
           return;
         }
         state[key] = res.text || '';
+        const targetInput = document.getElementById('executiveText_' + key);
+        if (targetInput) targetInput.value = state[key];
         applyExecutiveContentState(state);
         persistExecutiveContentFromDom();
         if (note) note.textContent = 'تم التوليد.';
@@ -13457,20 +13645,16 @@
       }
 
       // Append order defines the sidebar order: basic, location, land/croquis, timeline,
-      // financial, team, market study, and executive content. The timeline
+      // financial, team, market study, visual concept, and executive content. The timeline
       // comes before the financial study because it feeds it. Executive content writes
       // from earlier sections and never invents facts.
       addTimelineTable(form);
       addFinancialCalculations(form);
       addTeamSection(form);
       addMarketStudySection(form);
+      addVisualConceptSection(form);
       addExecutiveContentSection(form);
 
-      const visualConceptField = document.createElement('div');
-      visualConceptField.className = 'tenant-field full';
-      visualConceptField.style.display = 'none';
-      visualConceptField.innerHTML = '<input type="hidden" data-key="visual_concept" data-type="text" id="visualConceptData">';
-      form.appendChild(visualConceptField);
       tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept || tenantVisualConceptState);
       persistVisualConceptDraftState();
 
@@ -13501,6 +13685,7 @@
       enhanceProjectClassificationFields();
       refreshAllowedUsesStatusNote();
       applyMarketStudyState(getMarketStudyState());
+      renderVisualConceptPage();
       applyExecutiveContentState(getExecutiveContentState());
       persistVisualConceptDraftState();
     }
@@ -19118,7 +19303,7 @@
     };
 
     function emptyVisualConceptSlot(id) {
-      return { id, label: visualConceptDefaultSlotLabel(id), caption: '', prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '' };
+      return { id, mode: 'ai', label: visualConceptDefaultSlotLabel(id), caption: '', prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '' };
     }
 
     function visualConceptDefaultSlotLabel(slotId) {
@@ -19250,15 +19435,23 @@
         })) : [];
         const approved = String(slot.approvedImageUrl || '');
         const imageUrl = String(slot.imageUrl || '');
+        const mode = ['ai', 'upload'].includes(slot.mode)
+          ? slot.mode
+          : (slot.sourceFileId && !slot.prompt && !(slot.chat && slot.chat.length) ? 'upload' : 'ai');
+        const rawStatus = slot.status;
+        const safeStatus = (rawStatus === 'generating')
+          ? (approved ? 'approved' : imageUrl ? 'review' : 'pending')
+          : (['approved', 'review', 'pending'].includes(rawStatus)
+            ? rawStatus
+            : (approved ? 'approved' : imageUrl ? 'review' : 'pending'));
         stated[id] = Boolean(slot.status || approved || imageUrl);
         slots[id] = {
           id,
+          mode,
           prompt: String(slot.prompt || '').slice(0, 12000),
           imageUrl,
           approvedImageUrl: approved,
-          status: ['approved', 'review', 'generating', 'pending'].includes(slot.status)
-            ? slot.status
-            : (approved ? 'approved' : imageUrl ? 'review' : 'pending'),
+          status: safeStatus,
           chat,
           styleReferenceFileIds: visualConceptReferenceList(slot.styleReferenceFileIds).slice(0, 5),
           styleReferenceNames: visualConceptReferenceList(slot.styleReferenceNames).slice(0, 5),
@@ -19493,37 +19686,109 @@
       const frozen = approved;
       const waitCover = locked && !approved;
       const generateDisabled = frozen || waitCover || slot.status === 'generating';
+      const mode = slot.mode === 'upload' ? 'upload' : 'ai';
       const statusLabel = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد' : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
       const chat = (slot.chat || []).map(item => (
         '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? 'النظام: ' : 'أنت: ') + '</strong>' + escapeHtml(item.text) + '</div>'
       )).join('') || '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
       const title = visualConceptSlotLabel(slotDef.id);
       const preview = image
-        ? '<img src="' + escapeHtml(image) + '" alt="' + escapeHtml(title) + '">'
-        : 'لم تُرفع أو تُولَّد هذه الصورة بعد.';
+        ? '<div class="visual-concept-preview has-image" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '">' +
+          '<img src="' + escapeHtml(image) + '" alt="' + escapeHtml(title) + '">' +
+          '<button type="button" class="visual-concept-zoom-btn" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '">تكبير</button>' +
+          '</div>'
+        : '<div class="visual-concept-preview empty">لم تُرفع أو تُولَّد هذه الصورة بعد.</div>';
       const uploadAccept = 'image/png,image/jpeg,image/jpg,image/webp';
       const heading = visualConceptCanRenameSlot(slotDef.id)
         ? '<input class="visual-concept-title-input" data-visual-title="' + slotDef.id + '" value="' + escapeHtml(title) + '" ' + (frozen ? 'disabled' : '') + '>'
         : '<h3>' + escapeHtml(title) + '</h3>';
+
+      const modeSelector = '<div class="visual-concept-mode-selector">' +
+        '<button type="button" class="visual-concept-mode-btn' + (mode === 'ai' ? ' active' : '') + '" data-visual-action="set-mode" data-visual-mode="ai" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>توليد بالذكاء الاصطناعي</button>' +
+        '<button type="button" class="visual-concept-mode-btn' + (mode === 'upload' ? ' active' : '') + '" data-visual-action="set-mode" data-visual-mode="upload" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>رفع يدوي</button>' +
+        '</div>';
+
+      let bodyControls = '';
+      if (mode === 'upload') {
+        bodyControls = '<div class="visual-concept-upload-box">' +
+          '<label class="visual-concept-upload-label">اختر ملف الصورة من جهازك</label>' +
+          '<input type="file" accept="' + uploadAccept + '" data-visual-upload="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>' +
+          (slot.sourceFileName ? '<div class="visual-concept-file-info">الملف الحالي: ' + escapeHtml(slot.sourceFileName) + '</div>' : '') +
+          '</div>' +
+          '<label>وصف الصورة</label>' +
+          '<textarea data-visual-caption="' + slotDef.id + '" rows="3" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>' +
+          '<div class="visual-concept-actions">' +
+          '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
+          '</div>';
+      } else {
+        bodyControls = '<label>وصف التوليد</label>' +
+          '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
+          '<div class="visual-concept-actions">' +
+          '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
+          '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
+          '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
+          '</div>' +
+          '<div class="visual-concept-chat">' + chat + '</div>' +
+          '<div class="visual-concept-chat-row">' +
+          '<textarea data-visual-chat="' + slotDef.id + '" rows="2" ' + (generateDisabled ? 'disabled' : '') + '></textarea>' +
+          '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إرسال التعديل</button>' +
+          '</div>';
+      }
+
       return '<article class="visual-concept-card' + (waitCover ? ' locked' : '') + (approved ? ' section-locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
         '<div class="visual-concept-head">' + heading +
         '<span class="visual-concept-status ' + slot.status + '">' + statusLabel + '</span></div>' +
-        '<div class="visual-concept-preview">' + preview + '</div>' +
-        '<input type="file" accept="' + uploadAccept + '" data-visual-upload="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>' +
-        '<label>وصف الصورة</label>' +
-        '<textarea data-visual-caption="' + slotDef.id + '" rows="3" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>' +
-        '<label>وصف التوليد</label>' +
-        '<textarea class="visual-concept-prompt" data-visual-prompt="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + ' dir="ltr">' + escapeHtml(slot.prompt || '') + '</textarea>' +
-        '<div class="visual-concept-actions">' +
-        '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
-        '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
-        '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
-        '</div>' +
-        '<div class="visual-concept-chat">' + chat + '</div>' +
-        '<div class="visual-concept-chat-row">' +
-        '<textarea data-visual-chat="' + slotDef.id + '" rows="2" ' + (generateDisabled ? 'disabled' : '') + '></textarea>' +
-        '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إرسال التعديل</button>' +
-        '</div></article>';
+        modeSelector +
+        preview +
+        bodyControls +
+        '</article>';
+    }
+
+    function openVisualConceptLightbox(url, title) {
+      if (!url) return;
+      let modal = document.getElementById('visualConceptLightbox');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'visualConceptLightbox';
+        modal.className = 'visual-concept-lightbox';
+        modal.innerHTML = `
+          <div class="visual-concept-lightbox-backdrop" data-visual-lightbox-close></div>
+          <div class="visual-concept-lightbox-content">
+            <div class="visual-concept-lightbox-header">
+              <h3 id="visualConceptLightboxTitle">معاينة الصورة</h3>
+              <button type="button" class="btn ghost small" data-visual-lightbox-close>إغلاق</button>
+            </div>
+            <div class="visual-concept-lightbox-body">
+              <img id="visualConceptLightboxImg" src="" alt="معاينة مكبرة">
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        modal.querySelectorAll('[data-visual-lightbox-close]').forEach(btn => {
+          btn.addEventListener('click', closeVisualConceptLightbox);
+        });
+      }
+      const img = modal.querySelector('#visualConceptLightboxImg');
+      const titleEl = modal.querySelector('#visualConceptLightboxTitle');
+      if (img) img.src = url;
+      if (titleEl) titleEl.textContent = title || 'معاينة الصورة';
+      modal.hidden = false;
+    }
+
+    function closeVisualConceptLightbox() {
+      const modal = document.getElementById('visualConceptLightbox');
+      if (modal) {
+        modal.hidden = true;
+        const img = modal.querySelector('#visualConceptLightboxImg');
+        if (img) img.src = '';
+      }
+    }
+
+    if (!window._visualConceptLightboxEscapeBound) {
+      window._visualConceptLightboxEscapeBound = true;
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeVisualConceptLightbox();
+      });
     }
 
     function visualConceptImageUrl(url) {
@@ -19718,7 +19983,7 @@
         (coverApproved ? '' : '<p class="tenant-hint">زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.</p>') +
         angleHtml + '</div>';
       renderVisualConceptInteriorWorkspace();
-      const bindRoot = document.getElementById('tenantVisualConceptPage') || host;
+      const bindRoot = document.getElementById('section-visual-concept') || document.getElementById('tenantVisualConceptPage') || host;
       bindRoot.querySelectorAll('[data-visual-prompt]').forEach(input => {
         input.addEventListener('input', () => {
           const slotId = input.getAttribute('data-visual-prompt');
@@ -19754,10 +20019,26 @@
           else if (action === 'unapprove') unapproveVisualConceptImage(slotId);
           else if (action === 'chat') sendVisualConceptChat(slotId);
           else if (action === 'add-interior') addVisualConceptInteriorView();
+          else if (action === 'set-mode') {
+            const mode = button.getAttribute('data-visual-mode');
+            if (slotId && tenantVisualConceptState.slots[slotId] && (mode === 'ai' || mode === 'upload')) {
+              tenantVisualConceptState.slots[slotId].mode = mode;
+              markVisualConceptDirty();
+              renderVisualConceptPage();
+            }
+          }
         });
       });
       bindRoot.querySelectorAll('[data-visual-upload]').forEach(input => {
         input.addEventListener('change', () => uploadVisualConceptSlotImage(input.getAttribute('data-visual-upload'), input));
+      });
+      bindRoot.querySelectorAll('[data-visual-zoom]').forEach(el => {
+        el.addEventListener('click', (e) => {
+          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+          const url = el.getAttribute('data-visual-zoom');
+          const title = el.getAttribute('data-visual-title');
+          if (url) openVisualConceptLightbox(url, title);
+        });
       });
     }
 
@@ -19772,6 +20053,7 @@
         if (!fileId) throw new Error('تعذر رفع الصورة');
         if (!tenantVisualConceptState.slots[slotId]) tenantVisualConceptState.slots[slotId] = emptyVisualConceptSlot(slotId);
         const liveSlot = () => tenantVisualConceptState.slots[slotId];
+        liveSlot().mode = 'upload';
         liveSlot().sourceFileId = fileId;
         liveSlot().sourceFileName = fileRecord?.originalName || file.name || '';
         liveSlot().imageUrl = await getProjectFileObjectUrl(fileId);
@@ -19790,7 +20072,7 @@
     function showVisualConceptView(view) {
       const allowed = new Set(['home', 'external', 'internal']);
       const next = allowed.has(view) ? view : 'home';
-      document.querySelectorAll('#tenantVisualConceptPage [data-visual-concept-view]').forEach(node => {
+      document.querySelectorAll('#section-visual-concept [data-visual-concept-view], #tenantVisualConceptPage [data-visual-concept-view]').forEach(node => {
         node.hidden = node.dataset.visualConceptView !== next;
       });
       if (getTenantNavigationState()?.pageId === 'tenantVisualConceptPage') {
@@ -19826,34 +20108,8 @@
     async function openTenantVisualConceptPage() {
       tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept || tenantVisualConceptState);
       persistVisualConceptDraftState();
-      showTenantPage('tenantVisualConceptPage');
-      const input = document.getElementById('visualConceptStyleReferenceInput');
-      if (input && !input.dataset.bound) {
-        input.dataset.bound = '1';
-        input.addEventListener('change', () => uploadVisualConceptStyleReference(input));
-      }
-      const interiorInput = document.getElementById('visualConceptInteriorReferenceInput');
-      if (interiorInput && !interiorInput.dataset.bound) {
-        interiorInput.dataset.bound = '1';
-        interiorInput.addEventListener('change', () => uploadVisualConceptInteriorReferences(interiorInput));
-      }
-      const interiorSelect = document.getElementById('visualConceptInteriorComponentSelect');
-      if (interiorSelect && !interiorSelect.dataset.bound) {
-        interiorSelect.dataset.bound = '1';
-        interiorSelect.addEventListener('change', () => {
-          tenantVisualConceptState.selectedInteriorComponentId = interiorSelect.value || '';
-          markVisualConceptDirty();
-          renderVisualConceptPage();
-        });
-      }
-      document.querySelectorAll('[data-visual-concept-target]').forEach(button => {
-        if (button.dataset.bound) return;
-        button.dataset.bound = '1';
-        button.addEventListener('click', () => {
-          showVisualConceptView(button.dataset.visualConceptTarget);
-          renderVisualConceptPage();
-        });
-      });
+      showTenantPage('tenantProjectPage');
+      showSection('section-visual-concept');
       renderVisualConceptPage();
       showVisualConceptView(getTenantNavigationState()?.visualConceptView || 'home');
       await refreshVisualConceptPreflight();
@@ -19895,11 +20151,6 @@
       if (!liveSlot() || liveSlot().status === 'generating') return;
       if (visualConceptSlotLocked(slotId)) {
         toast(isVisualConceptInteriorSlot(slotId) ? 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.' : 'اعتمد الصورة الرئيسية أولاً.');
-        return;
-      }
-      if (!String(liveSlot().caption || document.querySelector('[data-visual-caption="' + slotId + '"]')?.value || '').trim()) {
-        toast('وصف الصورة غير مكتمل');
-        document.querySelector('[data-visual-caption="' + slotId + '"]')?.focus();
         return;
       }
       if (!liveSlot().prompt) {
@@ -19946,12 +20197,7 @@
         return;
       }
       const caption = String(document.querySelector('[data-visual-caption="' + slotId + '"]')?.value || slot.caption || '').trim();
-      if (!caption) {
-        toast('وصف الصورة غير مكتمل');
-        document.querySelector('[data-visual-caption="' + slotId + '"]')?.focus();
-        return;
-      }
-      slot.caption = caption;
+      slot.caption = caption || visualConceptSlotLabel(slotId);
       slot.approvedImageUrl = image;
       slot.status = 'approved';
       markVisualConceptDirty();

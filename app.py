@@ -10213,6 +10213,10 @@ def api_generate_executive_content():
             raw = _get_chat_response_text(fallback) or extract_chat_content(fallback, 'EXECUTIVE-CONTENT-FALLBACK')
         parsed = parse_json_object(raw) or {}
         text = executive_content.parse_generated_block(key, parsed)
+        if not text and raw and isinstance(raw, str):
+            cleaned_raw = re.sub(r'^```(?:json)?\s*', '', raw.strip(), flags=re.MULTILINE)
+            cleaned_raw = re.sub(r'\s*```$', '', cleaned_raw.strip(), flags=re.MULTILINE)
+            text = executive_content.normalize_document(cleaned_raw) if spec.get('output') in ('document', 'risks') else executive_content.normalize_text(cleaned_raw)
         empty = not str(text or '').strip()
         if empty:
             return jsonify({'success': False, 'error': 'عاد النموذج نصًا فارغًا. لم يُستبدل النص الحالي.'}), 422
