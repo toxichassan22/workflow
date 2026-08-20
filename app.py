@@ -207,8 +207,8 @@ FLOOR_DESIGN_IMAGE_HARD_NEGATIVE = (
     'Do not add decorative symbols, pictograms, three-dimensional perspective, isometric view, photorealism, or unrelated UI.'
 )
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
-EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '8000'))
-EXECUTIVE_SUMMARY_MAX_TOKENS = int(os.environ.get('EXECUTIVE_SUMMARY_MAX_TOKENS', '16000'))
+EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '32000'))
+EXECUTIVE_SUMMARY_MAX_TOKENS = int(os.environ.get('EXECUTIVE_SUMMARY_MAX_TOKENS', '65536'))
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 DEPLOYMENT_MARKER_PATH = os.path.join(os.path.dirname(__file__), '.deployed_commit')
 
@@ -10207,30 +10207,58 @@ def api_generate_executive_content():
         }), 400
     current = data.get('currentText')
     prompt = executive_content.build_user_prompt(key, facts, current)
-    max_tokens = EXECUTIVE_SUMMARY_MAX_TOKENS if key in ('summary', 'risks') else EXECUTIVE_CONTENT_MAX_TOKENS
+    cap = EXECUTIVE_SUMMARY_MAX_TOKENS if key in ('summary', 'risks') else EXECUTIVE_CONTENT_MAX_TOKENS
+    raw = None
+    last_error = None
     try:
-        try:
-            response = call_zai_chat(
-                executive_content.SYSTEM_PROMPT, prompt, temperature=0.2,
-                max_tokens=max_tokens,
-                reasoning_effort='low',
-                response_format={'type': 'json_object'},
-            )
-            raw = _get_chat_response_text(response) or extract_chat_content(response, 'EXECUTIVE-CONTENT')
-        except Exception as primary_error:
-            if not OPENROUTER_KEY:
-                raise
-            print(f'[EXECUTIVE CONTENT PRIMARY ERROR] {primary_error}. Trying OpenRouter fallback...')
-            fallback = call_openrouter_chat(
-                executive_content.SYSTEM_PROMPT,
-                prompt,
-                temperature=0.2,
-                max_tokens=max_tokens,
-                model=LUNA_TEXT_MODEL,
-                reasoning_effort='low',
-                response_format={'type': 'json_object'},
-            )
-            raw = _get_chat_response_text(fallback) or extract_chat_content(fallback, 'EXECUTIVE-CONTENT-FALLBACK')
+        for attempt in range(3):
+            try:
+                response = call_zai_chat(
+                    executive_content.SYSTEM_PROMPT, prompt, temperature=0.2,
+                    max_tokens=cap,
+                    reasoning_effort='low',
+                    response_format={'type': 'json_object'},
+                )
+                if isinstance(response, dict) and 'error' in response:
+                    msg = _chat_error_message(response)
+                    affordable = _AFFORDABLE_TOKENS_RE.search(msg)
+                    if affordable:
+                        retry_cap = max(8000, int(int(affordable.group(1)) * 0.85))
+                        if retry_cap < cap:
+                            print(f'[EXECUTIVE CONTENT] provider cap refused={cap}; retrying with {retry_cap}')
+                            cap = retry_cap
+                            continue
+                    raise RuntimeError(msg)
+                raw = _get_chat_response_text(response) or extract_chat_content(response, 'EXECUTIVE-CONTENT')
+                break
+            except Exception as primary_error:
+                last_error = primary_error
+                if not OPENROUTER_KEY:
+                    raise
+                print(f'[EXECUTIVE CONTENT PRIMARY ERROR] {primary_error}. Trying OpenRouter fallback...')
+                fallback = call_openrouter_chat(
+                    executive_content.SYSTEM_PROMPT,
+                    prompt,
+                    temperature=0.2,
+                    max_tokens=cap,
+                    model=LUNA_TEXT_MODEL,
+                    reasoning_effort='low',
+                    response_format={'type': 'json_object'},
+                )
+                if isinstance(fallback, dict) and 'error' in fallback:
+                    msg = _chat_error_message(fallback)
+                    affordable = _AFFORDABLE_TOKENS_RE.search(msg)
+                    if affordable:
+                        retry_cap = max(8000, int(int(affordable.group(1)) * 0.85))
+                        if retry_cap < cap:
+                            print(f'[EXECUTIVE CONTENT] fallback cap refused={cap}; retrying with {retry_cap}')
+                            cap = retry_cap
+                            continue
+                raw = _get_chat_response_text(fallback) or extract_chat_content(fallback, 'EXECUTIVE-CONTENT-FALLBACK')
+                if raw:
+                    break
+        if not raw and last_error:
+            raise last_error
         parsed = parse_json_object(raw) or {}
         text = executive_content.parse_generated_block(key, parsed)
         if not text and raw and isinstance(raw, str):
