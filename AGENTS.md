@@ -307,7 +307,9 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   Visual concept uses `persistVisualConceptDraftState()` for the hidden
   `visual_concept` input plus `tenantCreativeImages`. The page now has two
   groups on a home page of two cards, like floor-design stages: `التصور الخارجي`
-  (`cover`, `right`, `left`, `top`, `back`) and `التصور الداخلي`. The client may
+  (`cover`, `right`, `left`, `top`, `back`) and `التصور الداخلي`. The four exterior
+  angle titles are client-editable and persist on each slot (`slot.label`); defaults
+  remain يمين / شمال / فوق / خلف until changed. The client may
   upload their own image into any of the five exterior slots, or generate it.
   Internal images are 1–4 per actual financial-study component (`interior_<id>::n`),
   chosen from a dropdown; the client may upload or generate each one. Count is

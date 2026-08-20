@@ -3024,6 +3024,7 @@
     }
 
     .visual-concept-card.section-locked textarea,
+    .visual-concept-card.section-locked input[data-visual-title],
     .visual-concept-card.section-locked button:not([data-visual-action="unapprove"]) {
       opacity: .62;
     }
@@ -3041,6 +3042,17 @@
     .visual-concept-head h4 {
       margin: 0 0 4px;
       color: var(--p);
+    }
+    .visual-concept-head .visual-concept-title-input {
+      margin: 0;
+      width: min(260px, 100%);
+      font: inherit;
+      font-weight: 700;
+      color: var(--p);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px;
+      background: #fff;
     }
 
     .visual-concept-status {
@@ -19209,7 +19221,16 @@
     };
 
     function emptyVisualConceptSlot(id) {
-      return { id, prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '' };
+      return { id, label: visualConceptDefaultSlotLabel(id), prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '' };
+    }
+
+    function visualConceptDefaultSlotLabel(slotId) {
+      return VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label
+        || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : 'الصورة');
+    }
+
+    function visualConceptCanRenameSlot(slotId) {
+      return VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).some(item => item.id === slotId);
     }
 
     function visualConceptInteriorSlotId(componentId, viewIndex = 1) {
@@ -19345,7 +19366,8 @@
           styleReferenceFileIds: visualConceptReferenceList(slot.styleReferenceFileIds).slice(0, 5),
           styleReferenceNames: visualConceptReferenceList(slot.styleReferenceNames).slice(0, 5),
           sourceFileId: String(slot.sourceFileId || ''),
-          sourceFileName: String(slot.sourceFileName || '')
+          sourceFileName: String(slot.sourceFileName || ''),
+          label: String(slot.label || visualConceptDefaultSlotLabel(id)).slice(0, 80)
         };
       });
       if (!stated.cover && tenantCreativeImages.cover) {
@@ -19433,6 +19455,7 @@
         creativeImages: tenantCreativeImages,
         coverImage: tenantVisualConceptState.slots.cover.approvedImageUrl || tenantVisualConceptState.slots.cover.imageUrl || '',
         coverFileId: tenantVisualConceptState.slots.cover.sourceFileId || '',
+        slotLabel: visualConceptSlotLabel(slotId),
         currentPrompt: document.querySelector('[data-visual-prompt="' + slotId + '"]')?.value
           || tenantVisualConceptState.slots[slotId]?.prompt || '',
         prompt: document.querySelector('[data-visual-prompt="' + slotId + '"]')?.value
@@ -19576,12 +19599,16 @@
       const chat = (slot.chat || []).map(item => (
         '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? 'النظام: ' : 'أنت: ') + '</strong>' + escapeHtml(item.text) + '</div>'
       )).join('') || '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
+      const title = visualConceptSlotLabel(slotDef.id);
       const preview = image
-        ? '<img src="' + escapeHtml(image) + '" alt="' + escapeHtml(slotDef.label) + '">'
+        ? '<img src="' + escapeHtml(image) + '" alt="' + escapeHtml(title) + '">'
         : 'لم تُرفع أو تُولَّد هذه الصورة بعد.';
       const uploadAccept = 'image/png,image/jpeg,image/jpg,image/webp';
+      const heading = visualConceptCanRenameSlot(slotDef.id)
+        ? '<input class="visual-concept-title-input" data-visual-title="' + slotDef.id + '" value="' + escapeHtml(title) + '" ' + (frozen ? 'disabled' : '') + '>'
+        : '<h3>' + escapeHtml(title) + '</h3>';
       return '<article class="visual-concept-card' + (waitCover ? ' locked' : '') + (approved ? ' section-locked' : '') + '" data-visual-slot="' + slotDef.id + '">' +
-        '<div class="visual-concept-head"><h3>' + escapeHtml(slotDef.label) + '</h3>' +
+        '<div class="visual-concept-head">' + heading +
         '<span class="visual-concept-status ' + slot.status + '">' + statusLabel + '</span></div>' +
         '<div class="visual-concept-preview">' + preview + '</div>' +
         '<input type="file" accept="' + uploadAccept + '" data-visual-upload="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>' +
@@ -19799,6 +19826,15 @@
           markVisualConceptDirty();
         });
       });
+      bindRoot.querySelectorAll('[data-visual-title]').forEach(input => {
+        input.addEventListener('input', () => {
+          const slotId = input.getAttribute('data-visual-title');
+          const slot = tenantVisualConceptState.slots[slotId];
+          if (!slot) return;
+          slot.label = String(input.value || '').slice(0, 80);
+          markVisualConceptDirty();
+        });
+      });
       bindRoot.querySelectorAll('[data-visual-action]').forEach(button => {
         button.addEventListener('click', () => {
           const action = button.getAttribute('data-visual-action');
@@ -19935,7 +19971,7 @@
         tenantVisualConceptState.slots[slotId].prompt = response.prompt;
         markVisualConceptDirty();
         renderVisualConceptPage();
-        toast('تم تجهيز وصف ' + (VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label || 'الصورة'));
+        toast('تم تجهيز وصف ' + visualConceptSlotLabel(slotId));
       } catch (error) {
         hideLoader();
         toast(error.message || 'تعذر إنشاء الوصف');
@@ -19959,7 +19995,7 @@
       const previousImage = liveSlot().imageUrl || liveSlot().approvedImageUrl;
       liveSlot().status = 'generating';
       renderVisualConceptPage();
-      showLoader('جاري توليد التصور البصري', 'يتم توليد ' + (VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : 'الصورة')) + '...');
+      showLoader('جاري توليد التصور البصري', 'يتم توليد ' + visualConceptSlotLabel(slotId) + '...');
       try {
         const payload = await collectVisualConceptPayload(slotId);
         const response = await apiWithTimeout('POST', '/api/visual-concept/generate', payload, 180000, 'انتهت مهلة توليد الصورة؛ أعد المحاولة.');
@@ -20003,8 +20039,9 @@
     }
 
     function visualConceptSlotLabel(slotId) {
-      return VISUAL_CONCEPT_SLOTS.find(item => item.id === slotId)?.label
-        || (isVisualConceptInteriorSlot(slotId) ? 'التصور الداخلي' : 'الصورة');
+      const custom = String(tenantVisualConceptState?.slots?.[slotId]?.label || '').trim();
+      if (custom) return custom;
+      return visualConceptDefaultSlotLabel(slotId);
     }
 
     function unapproveVisualConceptImage(slotId) {

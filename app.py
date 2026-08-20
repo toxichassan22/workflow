@@ -926,6 +926,13 @@ def _visual_concept_normalize_slot(slot_id):
     return aliases.get(folded)
 
 
+def _visual_concept_slot_label(slot_id, facts=None):
+    custom = ''
+    if isinstance(facts, dict):
+        custom = _visual_concept_text(facts.get('slot_label'), 80)
+    return custom or VISUAL_CONCEPT_SLOT_LABELS.get(slot_id, 'تصور داخلي للمكون')
+
+
 def _visual_concept_slot_instruction(slot_id, facts):
     name = facts.get('project_name') or 'the project'
     if slot_id == 'cover':
@@ -940,25 +947,11 @@ def _visual_concept_slot_instruction(slot_id, facts):
             + style_note +
             'The composition is a cinematic exterior establishing shot, 16:9.'
         )
-    if slot_id == 'right':
+    if slot_id in VISUAL_CONCEPT_MOODBOARD_SLOTS:
+        view_name = _visual_concept_slot_label(slot_id, facts)
         return (
-            f'Render the RIGHT elevation of the exact same building shown in the attached hero image of {name}. '
-            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the building from the right side.'
-        )
-    if slot_id == 'left':
-        return (
-            f'Render the LEFT elevation of the exact same building shown in the attached hero image of {name}. '
-            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the building from the left side.'
-        )
-    if slot_id == 'top':
-        return (
-            f'Render a true top-down aerial view of the exact same building shown in the attached hero image of {name}. '
-            'Show the roof, overall mass, and the same plot shape. No surrounding invented towers.'
-        )
-    if slot_id == 'back':
-        return (
-            f'Render the REAR elevation of the exact same building shown in the attached hero image of {name}. '
-            'Keep the architecture, materials, height, and massing unchanged. Camera looks at the back of the building.'
+            f'Render the "{view_name}" view of the exact same building shown in the attached hero image of {name}. '
+            'Keep the architecture, materials, height, and massing unchanged. Follow the named viewpoint.'
         )
     if _visual_concept_is_internal_slot(slot_id):
         selected = facts.get('selected_component') if isinstance(facts.get('selected_component'), dict) else {}
@@ -1023,7 +1016,7 @@ def _visual_concept_facts_prompt(facts, slot_id):
         f"صور مرجعية للتصميم: {'مرفقة' if facts.get('style_reference_file_ids') else 'غير مرفوعة — ولّد التصميم من البيانات فقط'}\n"
         f"صور مرجعية للمكون الداخلي: {'مرفقة' if facts.get('interior_reference_file_ids') else 'غير مرفوعة'}\n"
         f"خريطة الأرض / المبنى كخلفية الموقع: {'مرفقة' if facts.get('overview_map_url') else 'غير متوفرة'}\n"
-        f"نوع الصورة المطلوبة: {VISUAL_CONCEPT_SLOT_LABELS.get(slot_id, 'تصور داخلي للمكون')}\n"
+        f"نوع الصورة المطلوبة: {_visual_concept_slot_label(slot_id, facts)}\n"
         f"تعليمات الكادر: {_visual_concept_slot_instruction(slot_id, facts)}"
     )
 
@@ -1166,6 +1159,7 @@ def _visual_concept_request_bundle(data, slot_id):
             'map_placeholders': creative.get('map_placeholders') or project_data.get('map_placeholders'),
         }
     facts = _visual_concept_facts(project_data)
+    facts['slot_label'] = _visual_concept_text(data.get('slotLabel') or data.get('slot_label'), 80)
     requested_component_id = _visual_concept_text(data.get('componentId') or data.get('component_id'), 80)
     if _visual_concept_is_internal_slot(slot_id):
         if not requested_component_id:
