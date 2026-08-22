@@ -5142,6 +5142,8 @@
             للرئيسية</button>
         </div>
         <div class="tenant-btns slide-toolbar-actions">
+          <button type="button" class="btn slide-toolbar-btn primary" style="background:#1a4d6f;color:#fff;font-weight:700"
+            onclick="directGenerateProposalFile()" id="btnGenerateSlidesToolbar">توليد العرض</button>
           <button type="button" class="btn slide-toolbar-btn slide-toolbar-approve"
             onclick="requestPresentationApproval(tenantPresentationId)" id="btnRequestApproval">تعميد</button>
           <button type="button" class="btn slide-toolbar-btn slide-toolbar-primary" onclick="saveProjectAsDraft()">حفظ
@@ -6585,10 +6587,19 @@
       sidebar.appendChild(title);
 
       if (!includeProject && hasPermission('create_presentation')) {
+        const genButton = document.createElement('button');
+        genButton.type = 'button';
+        genButton.className = 'project-section-nav-item workflow-sidebar-action';
+        genButton.style.cssText = 'background:#1a4d6f;color:#fff;font-weight:700;margin-bottom:6px;';
+        genButton.textContent = 'توليد العرض';
+        genButton.addEventListener('click', () => directGenerateProposalFile());
+        sidebar.appendChild(genButton);
+
         const planButton = document.createElement('button');
         planButton.type = 'button';
-        planButton.className = 'project-section-nav-item workflow-sidebar-action';
-        planButton.textContent = tenantSlidePlan ? 'تحديث الهيكل' : 'توليد الهيكل';
+        planButton.className = 'project-section-nav-item';
+        planButton.style.cssText = 'font-size:0.82rem;';
+        planButton.textContent = tenantSlidePlan ? 'تحديث الهيكل المقترح' : 'إعداد الهيكل المقترح';
         planButton.addEventListener('click', () => generateSlidePlanOnly());
         sidebar.appendChild(planButton);
       }
@@ -17724,7 +17735,16 @@
       renderTenantSlides._batchTimer && clearTimeout(renderTenantSlides._batchTimer);
 
       const slides = tenantSlidesData;
-      if (!slides.length) { renderTenantSlidesSidebar(); renderTenantSlidesDesignerChat(); return; }
+      if (!slides.length) {
+        wrap.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:380px;padding:48px 24px;text-align:center;gap:16px;background:#fff;border:1px dashed var(--line);border-radius:16px;margin:32px auto;max-width:540px">' +
+          '<div style="font-size:18px;font-weight:700;color:var(--txt)">لم يتم توليد شرائح هذا العرض بعد</div>' +
+          '<div class="tenant-hint" style="max-width:440px;line-height:1.6">يمكنك بدء توليد كامل الشرائح بالذكاء الاصطناعي بناءً على بيانات المشروع وخطة الهيكل المعتمدة.</div>' +
+          '<button type="button" class="btn primary" style="background:#1a4d6f;color:#fff;padding:10px 32px;font-size:15px;font-weight:700;margin-top:8px" onclick="directGenerateProposalFile()">توليد العرض الآن</button>' +
+          '</div>';
+        renderTenantSlidesSidebar();
+        renderTenantSlidesDesignerChat();
+        return;
+      }
 
       // Phase 1: create lightweight skeletons instantly (no heavy processing)
       const containers = [];
