@@ -850,7 +850,7 @@ def _block_external_images(html):
         return html
     allowed = {'##MAP_OVERVIEW##', '##MAP_LANDMARKS##', '##MAP_ACCESS##', '##MAP_CATCHMENT##',
                '##STREET_VIEW_1##', '##STREET_VIEW_2##', '##STREET_VIEW_3##', '##STREET_VIEW_4##',
-               '##IMAGE_COVER##', '##LOGO##', '##MOODBOARD_IMAGE_1##', '##MOODBOARD_IMAGE_2##',
+               '##IMAGE_COVER##', '##LOGO##', '##PROJECT_LOGO##', '##MOODBOARD_IMAGE_1##', '##MOODBOARD_IMAGE_2##',
                '##MOODBOARD_IMAGE_3##', '##MOODBOARD_IMAGE_4##'}
 
     def _replace_src(match):
@@ -1158,6 +1158,7 @@ def _replace_data_placeholders(html, project_data, branding=None):
         'roi': project_data.get('roi') or project_data.get('return_on_investment') or '—',
         'alqrma_almdafa_almtwqaa__cap_rate': project_data.get('cap_rate') or project_data.get('capRate') or project_data.get('alqrma_almdafa_almtwqaa__cap_rate') or '—',
         'nsba_alashgal_almtwqaa': project_data.get('occupancy_rate') or project_data.get('occupancy') or '—',
+        'PROJECT_LOGO': project_data.get('project_logo') or project_data.get('projectLogo') or '',
     }
 
     for a_key, a_val in aliases.items():
@@ -1215,6 +1216,8 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
 
     def _fix_logo_img(match):
         img_tag = match.group(0)
+        if 'project_logo' in img_tag.lower() or '##project_logo##' in img_tag.lower() or 'project-logo' in img_tag.lower():
+            return img_tag
         if 'logo' in img_tag.lower() or '##LOGO##' in img_tag or 'tenant-assets' in img_tag:
             if 'src=' in img_tag.lower():
                 img_tag = re.sub(r'src=["\'][^"\']*["\']', f'src="{logo_url}"', img_tag, flags=re.IGNORECASE)

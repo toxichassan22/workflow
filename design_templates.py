@@ -440,8 +440,10 @@ CSS inline فقط. ممنوع box-shadow الثقيل أو filter أو backdrop-
     if header_enabled:
         rules += f"""
 ## هيدر إلزامي — يجب أن يوجد في كل شريحة محتوى
-position:absolute;top:0;right:0;left:0;height:{header_h}px;background:#ffffff;border-bottom:1px solid #e2e8f0;
-المحتوى: شعار ##LOGO## height:36px يساراً + خط رأسي {accent} 3px + اسم الشريحة 16px font-weight:600 color:{primary}
+position:absolute;top:0;right:0;left:0;height:{header_h}px;background:#ffffff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 24px;box-sizing:border-box;
+المحتوى:
+- في أحد الجانبين: شعار الشركة ##LOGO## (height:32px-36px) مع شعار المشروع ##PROJECT_LOGO## إن وُجد كصورة متناسقة بجانبه (أو شارة نصية باسم المشروع).
+- في الجانب المقابل: خط رأسي {accent} 3px + اسم الشريحة 16px font-weight:600 color:{primary}.
 """
 
     if footer_enabled:
@@ -476,6 +478,7 @@ top:{content_top}px إلى bottom:{content_bottom}px. padding: 16px 36px.
 - خريطة نطاق التأثير: ##MAP_CATCHMENT## (background-image)
 - صور Street View: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
 - شعار الشركة: ##LOGO## (height:36px في الهيدر، height:80px في الغلاف والختام)
+- شعار المشروع المرفوع (إن وجد): ##PROJECT_LOGO## (يمكن استخدامه بجانب شعار الشركة في الهيدر أو في الغلاف وبطاقة هوية المشروع)
 - ممنوع رسم أي دوائر أو دبابيس أو مؤشرات موقع HTML فوق الخرائط (##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##) لأن هذه الصور تحتوي بالفعل على علامات موقع احترافية ومضلعات تحديد وبوصلة وخرائط مصغرة مرسومة مباشرة بدقة عالية.
 - ممنوع base64 أو روابط صور خارجية — استخدم الـ placeholders فقط
 

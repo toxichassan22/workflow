@@ -1320,6 +1320,8 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
 
     def _fix_logo_img(match):
         img_tag = match.group(0)
+        if 'project_logo' in img_tag.lower() or '##project_logo##' in img_tag.lower() or 'project-logo' in img_tag.lower():
+            return img_tag
         if 'logo' in img_tag.lower() or '##LOGO##' in img_tag or 'tenant-assets' in img_tag:
             if 'src=' in img_tag.lower():
                 img_tag = re.sub(r'src=["\'][^"\']*["\']', f'src="{logo_url}"', img_tag, flags=re.IGNORECASE)
