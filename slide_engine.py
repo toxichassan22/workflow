@@ -361,7 +361,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 
 ## المهمة
 1. حلل كمية ونوع المحتوى المتاح في بيانات المشروع
-2. اقترح عدد شرائح شامل ومتكامل (بين {min_slides} و {max_slides}) يغطي كافة محاور العرض الاستثماري (عادة بين 14 و 20 شريحة)
+2. اقترح عدد شرائح شامل وتفصيلي يبدأ من {min_slides} شريحة كحد أدنى، والحد الأعلى مفتوح ومرن تماماً حسب حجم المشروع وتفاصيله (مثل عدد المكونات الاستثمارية، المخططات، أبعاد السوق، الجداول المالية، إلخ) بحيث تعطي كل محور حقه الكامل دون اختصار أو حصر مصطنع.
 3. وزع المحتوى بحيث:
    - لا توجد شريحة بكلمتين فقط (فارغة بصرياً)
    - لا توجد شريحة مزدحمة بالكلام
@@ -447,7 +447,7 @@ def resolve_slide_bounds(branding):
     if branding.get('lock_slide_count'):
         return default_count, default_count, default_count
     min_slides = int(branding.get('min_slides') or 14)
-    max_slides = int(branding.get('max_slides') or 30)
+    max_slides = int(branding.get('max_slides') or 100)
     if min_slides > max_slides:
         min_slides = max_slides
     return min_slides, max_slides, default_count
