@@ -1224,14 +1224,16 @@ def clean_project_data(data):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def _get_images_info(images):
+    interior_components = []
     if isinstance(images, list):
         has_cover = bool(images[0]) if images else False
-        moodboard_count = sum(1 for img in images[1:] if img) if len(images) > 1 else 0
+        moodboard_count = sum(1 for img in images[1:5] if img) if len(images) > 1 else 0
         interior_count = 0
         plans_count = 0
     elif isinstance(images, dict):
         has_cover = bool(images.get('cover'))
         moodboard_count = sum(1 for img in images.get('moodboard', []) if img)
+        interior_components = images.get('interior_components', [])
         interior_count = sum(1 for img in images.get('interior', []) if img)
         plans_count = sum(1 for img in images.get('plans', []) if img)
     else:
@@ -1242,14 +1244,27 @@ def _get_images_info(images):
 
     info = f"- صورة الغلاف: {'متوفرة (استخدم ##IMAGE_COVER##)' if has_cover else 'لا توجد'}\n"
     if moodboard_count > 0:
-        info += f"- صور المود بورد والزوايا الخارجية (استخدم الرموز ##MOODBOARD_IMAGE_1## حتى ##MOODBOARD_IMAGE_{moodboard_count}##): {moodboard_count} صور متوفرة\n"
+        info += f"- صور المود بورد والتصور الخارجي (استخدم الرموز ##MOODBOARD_IMAGE_1## حتى ##MOODBOARD_IMAGE_{min(moodboard_count, 4)}##): {min(moodboard_count, 4)} صور متوفرة — أنشئ شريحة واحدة فقط للمود بورد تجمع زوايا المشروع الأربع الخارجية (يمين، شمال، فوق، خلف)\n"
     else:
         info += "- صور المود بورد: لا توجد\n"
 
-    if interior_count > 0:
-        info += f"- صور التصميم والتصور الداخلي (استخدم الرموز ##INTERIOR_IMAGE_1## حتى ##INTERIOR_IMAGE_{interior_count}##): {interior_count} صور متوفرة\n"
+    if interior_components:
+        info += f"\n## صور التصور الداخلي موزعة حسب المكونات ({len(interior_components)} مكونات):\n"
+        info += f"قاعدة إلزامية للتصور الداخلي: عدد الشرائح = عدد المكونات ({len(interior_components)} شرائح). كل شريحة تمثل مكوناً واحداً وتضم صوره بالكامل:\n"
+        for c_idx, comp in enumerate(interior_components, 1):
+            c_name = comp.get('name', f'المكون {c_idx}')
+            c_imgs = comp.get('images', [])
+            n_imgs = len(c_imgs)
+            if n_imgs == 1:
+                info += f"- المكون {c_idx} ({c_name}): شريحة واحدة مستقلة بعنوان 'التصور الداخلي — {c_name}' تضم صورة واحدة بمساحة كاملة/بارزة (استخدم الرمز ##INTERIOR_COMP_{c_idx}_IMG_1## أو ##INTERIOR_{c_idx}_1##)\n"
+            else:
+                tokens = [f"##INTERIOR_COMP_{c_idx}_IMG_{j}##" for j in range(1, n_imgs + 1)]
+                info += f"- المكون {c_idx} ({c_name}): شريحة واحدة مستقلة بعنوان 'التصور الداخلي — {c_name}' تضم {n_imgs} صور معاً في شبكة/معرض متناسق (استخدم الرموز: {', '.join(tokens)})\n"
+    elif interior_count > 0:
+        info += f"- صور التصميم والتصور الداخلي (استخدم الرموز ##INTERIOR_IMAGE_1## حتى ##INTERIOR_IMAGE_{interior_count}##): {interior_count} صور متوفرة (شريحة واحدة لكل مكون تضم كافة صوره)\n"
+
     if plans_count > 0:
-        info += f"- صور المخططات المعمارية 2D (استخدم الرموز ##PLAN_IMAGE_1## حتى ##PLAN_IMAGE_{plans_count}##): {plans_count} مخططات متوفرة\n"
+        info += f"- صور المخططات المعمارية 2D (استخدم الرموز ##PLAN_IMAGE_1## حتى ##PLAN_IMAGE_{plans_count}##): {plans_count} مخططات متوفرة (شريحة مخصصة لكل مخطط مع عنوانه وشرحه)\n"
 
     # Map image placeholders (populated when project has location data)
     map_placeholders = {

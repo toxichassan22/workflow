@@ -17179,6 +17179,30 @@
 
         persistVisualConceptDraftState();
         const visualMoodboard = VISUAL_CONCEPT_SLOTS.slice(1).map(item => tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl || tenantVisualConceptState?.slots?.[item.id]?.imageUrl || '');
+        const visualInteriorComponents = visualConceptInteriorComponents().map((comp, compIdx) => {
+          const compImages = [];
+          for (let view = 1; view <= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES; view++) {
+            const slotId = visualConceptInteriorSlotId(comp.id, view);
+            const slot = tenantVisualConceptState?.slots?.[slotId];
+            const url = slot?.approvedImageUrl || slot?.imageUrl || '';
+            if (url) {
+              compImages.push({
+                viewIndex: view,
+                url: url,
+                label: slot?.label || comp.name,
+                caption: slot?.caption || ''
+              });
+            }
+          }
+          return {
+            id: comp.id,
+            index: compIdx + 1,
+            name: comp.name,
+            useType: comp.useType,
+            builtArea: comp.builtArea,
+            images: compImages
+          };
+        }).filter(comp => comp.images.length > 0);
         const visualInteriorImages = Object.entries(tenantVisualConceptState?.slots || {})
           .filter(([k, v]) => isVisualConceptInteriorSlot(k) && (v?.approvedImageUrl || v?.imageUrl))
           .map(([k, v]) => v.approvedImageUrl || v.imageUrl);
@@ -17191,6 +17215,7 @@
           moodboard: visualMoodboard.some(Boolean)
             ? visualMoodboard
             : (Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard.map((image, index) => image || tempMoodboardImages[index] || '') : []),
+          interior_components: visualInteriorComponents,
           interior: visualInteriorImages,
           plans: visualPlans2dImages
         };
@@ -17337,7 +17362,24 @@
         cleanHtml = cleanHtml.replace(mbReg, mbUrl).replace(projReg, mbUrl);
       }
 
-      // Interior Placeholders
+      // Component-Specific Interior Placeholders
+      const interiorCompsList = Array.isArray(creativeImages.interior_components) ? creativeImages.interior_components : [];
+      interiorCompsList.forEach((comp, cIdx) => {
+        const cNum = cIdx + 1;
+        const cImgs = Array.isArray(comp.images) ? comp.images : [];
+        cImgs.forEach((imgItem, jIdx) => {
+          const jNum = jIdx + 1;
+          const url = (typeof imgItem === 'object' && imgItem !== null) ? (imgItem.url || '') : String(imgItem || '');
+          if (url) {
+            const reg1 = new RegExp('#*INTERIOR_COMP_' + cNum + '_(?:IMG|IMAGE)_' + jNum + '#*', 'gi');
+            const reg2 = new RegExp('#*INTERIOR_C' + cNum + '_(?:IMG|IMAGE)_' + jNum + '#*', 'gi');
+            const reg3 = new RegExp('#*INTERIOR_' + cNum + '_' + jNum + '#*', 'gi');
+            cleanHtml = cleanHtml.replace(reg1, url).replace(reg2, url).replace(reg3, url);
+          }
+        });
+      });
+
+      // Flat Interior Placeholders
       const interiorImagesList = Array.isArray(creativeImages.interior) ? creativeImages.interior : [];
       for (let idx = 0; idx < 16; idx++) {
         const intUrl = interiorImagesList[idx] || '';
@@ -17345,7 +17387,7 @@
         const intReg = new RegExp('#*INTERIOR_IMAGE_' + num + '#*', 'gi');
         cleanHtml = cleanHtml.replace(intReg, intUrl);
       }
-      cleanHtml = cleanHtml.replace(/#*INTERIOR_IMAGE_\d+#*/gi, '');
+      cleanHtml = cleanHtml.replace(/#*INTERIOR_(?:COMP_\d+_(?:IMG|IMAGE)_\d+|C\d+_(?:IMG|IMAGE)_\d+|\d+_\d+|IMAGE_\d+|\d+)#*/gi, '');
 
       // 2D Plans Placeholders
       const plansImagesList = Array.isArray(creativeImages.plans) ? creativeImages.plans : [];

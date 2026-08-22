@@ -425,12 +425,11 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
   * الشريحة الأخيرة = type=closing (الختام)
 - **قواعد الشركة في بداية هذه الرسالة (إن وُجدت) إلزامية:** إذا حددت قواعد التدريب ترتيباً أو عدداً أو تصميماً معيناً للشرائح، اتبعه بدقة فوق أي افتراضات أخرى
 - باقي الشرائح متغيرة العدد والترتيب حسب قواعد الشركة وكمية بيانات المشروع
-- لو في صور مود بورد متوفرة، ضع شريحة moodboard قبل الختام
-- لو في إحداثيات + بيانات موقع، يجب أن يتضمن العرض شرائح الموقع الأساسية: site_specs، map_overview، map_access، map_catchment، map_landmarks حسب توفر البيانات، بالإضافة إلى تحليل الموقع من الحقل site_analysis.
-- لا تحذف نوع المعلم أو المسافة أو مدة القيادة من جداول المعالم عند توفرها.
-- لو وُجد جدول زمني (`timeline_table_data`)، ضع شريحة خطة زمنية بنمط timeline واعرض كل مرحلة مع مدتها ونهايتها وملاحظتها. الملاحظات جزء من الشريحة وليست هامشًا داخليًا.
+- **شريحة المود بورد والتصور الخارجي:** شريحة واحدة فقط دائماً (type=moodboard) تضم الصور الأربع للزوايا الخارجية للمشروع (##MOODBOARD_IMAGE_1##، ##MOODBOARD_IMAGE_2##، ##MOODBOARD_IMAGE_3##، ##MOODBOARD_IMAGE_4##) في شبكة 2x2 أو توزيع متناسق مع التسميات (يمين، شمال، فوق، خلف) وتوضع قبل الختام مباشرة.
+- **شرائح التصور الداخلي للمكونات:** عدد شرائح التصور الداخلي = عدد المكونات المتوفرة (شريحة واحدة لكل مكون). كل شريحة تمثل مكوناً واحداً مستقلاً (type=content, design_style=image أو grid) بعنوان "التصور الداخلي — [اسم المكون]":
+  * إذا كان للمكون صورة واحدة فقط متولدة أو مرفوعة: تُستخدم الصورة كما هي في الشريحة كصورة Hero ممتدة وبارزة مع تفاصيل وبيانات المكون (استخدم ##INTERIOR_COMP_1_IMG_1## أو ##INTERIOR_1_1##).
+  * إذا كان للمكون أكثر من صورة (2 إلى 4 صور): تُعرض كافة صور المكون مجتمعة داخل شريحة المكون بتوزيع شبكي فاخر (Grid) (استخدم الرموز ##INTERIOR_COMP_1_IMG_1##، ##INTERIOR_COMP_1_IMG_2##، إلخ).
 - لو وُجدت مخططات 2D مرفوعة، ضع شريحة مخصصة للمخططات المعمارية (type=content, design_style=image أو grid) واستخدم ##PLAN_IMAGE_1## مع عنوان ووصف المخطط.
-- لو وُجدت صور للتصميم الداخلي، ضع شريحة للتصميم والتصور الداخلي (type=content, design_style=image أو grid) واستخدم ##INTERIOR_IMAGE_1## مع أسماء المكونات.
 - في جميع الشرائح: إذا كان لوجو الشركة أو المشروع يحتوي على نصوص بيضاء أو فاتحة، ضعه داخل شارة داكنة أنيقة بخلفية كحلية مؤسسية لضمان تباينه التام.
 - كل شريحة content لازم يكون فيها 3-6 bullets على الأقل
 - وزع المحتوى بحيث كل شريحة تكون ممتلئة بصرياً 60-85%
@@ -858,7 +857,7 @@ def _block_external_images(html):
 
     def _replace_src(match):
         url = match.group(1)
-        if any(url.startswith(p) for p in allowed) or url.startswith('##INTERIOR_IMAGE_') or url.startswith('##PLAN_IMAGE_') or url.startswith('##2D_PLAN_') or url.startswith('/uploads/') or url.startswith('/assets/'):
+        if any(url.startswith(p) for p in allowed) or url.startswith('##INTERIOR_') or url.startswith('##PLAN_IMAGE_') or url.startswith('##2D_PLAN_') or url.startswith('/uploads/') or url.startswith('/assets/'):
             return match.group(0)
         if url.startswith('http://') or url.startswith('https://') or url.startswith('data:'):
             return ''
@@ -1098,7 +1097,21 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
     html = re.sub(r'#*MOODBOARD_IMAGE_(\d+)#*', _replace_moodboard_token, html, flags=re.IGNORECASE)
     html = re.sub(r'#*PROJECT_IMAGE_(\d+)#*', _replace_moodboard_token, html, flags=re.IGNORECASE)
 
-    # Replace interior tokens
+    # Replace component-specific interior tokens
+    interior_comps = []
+    if isinstance(creative_images, dict):
+        interior_comps = creative_images.get('interior_components') or []
+    for c_idx, comp in enumerate(interior_comps, 1):
+        c_imgs = comp.get('images', []) if isinstance(comp, dict) else []
+        for j_idx, img_item in enumerate(c_imgs, 1):
+            url = img_item.get('url', '') if isinstance(img_item, dict) else str(img_item or '')
+            if url:
+                css_u = _css_url(url)
+                html = re.sub(rf'#*INTERIOR_COMP_{c_idx}_(?:IMG|IMAGE)_{j_idx}#*', css_u, html, flags=re.IGNORECASE)
+                html = re.sub(rf'#*INTERIOR_C{c_idx}_(?:IMG|IMAGE)_{j_idx}#*', css_u, html, flags=re.IGNORECASE)
+                html = re.sub(rf'#*INTERIOR_{c_idx}_{j_idx}#*', css_u, html, flags=re.IGNORECASE)
+
+    # Replace flat interior tokens
     interiors = []
     if isinstance(creative_images, dict):
         interiors = creative_images.get('interior') or creative_images.get('interior_images') or []
@@ -1108,7 +1121,7 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
         num = idx + 1
         if url:
             html = re.sub(rf'#*INTERIOR_IMAGE_{num}#*', _css_url(str(url)), html, flags=re.IGNORECASE)
-    html = re.sub(r'#*INTERIOR_IMAGE_\d+#*', '', html, flags=re.IGNORECASE)
+    html = re.sub(r'#*INTERIOR_(?:COMP_\d+_(?:IMG|IMAGE)_\d+|C\d+_(?:IMG|IMAGE)_\d+|\d+_\d+|IMAGE_\d+|\d+)#*', '', html, flags=re.IGNORECASE)
 
     # Replace 2D plan tokens
     plans = []
