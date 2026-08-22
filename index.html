@@ -10727,6 +10727,7 @@
       renderLandDocumentsUploadState(source.land_documents_files_file_meta || []);
       showLandAnalysisDiagnostics(storedAnalysis);
       renderLandPhotos(source.land_photos_file_meta || []);
+      renderProjectLogoState(source.project_logo_file_meta || (source.project_logo_file_id ? { id: source.project_logo_file_id, originalName: 'شعار المشروع' } : (source.project_logo ? { path: source.project_logo, originalName: 'شعار المشروع' } : null)));
       refreshAllowedUsesStatusNote();
       renderProjectTeam();
 
@@ -11428,6 +11429,15 @@
             input.type = 'file';
             input.accept = 'image/*';
             input.dataset.filetype = 'image';
+            input.dataset.projectFileType = f.fieldKey === 'project_logo' ? 'project_logo' : 'visual_reference';
+            if (f.fieldKey === 'project_logo') {
+              uploadStatus = document.createElement('div');
+              uploadStatus.id = 'projectLogoUploadStatus';
+              uploadStatus.style.cssText = 'margin-top:4px;';
+              input.addEventListener('change', () => {
+                uploadProjectLogo(input);
+              });
+            }
           } else if (f.fieldType === 'number') {
             input = document.createElement('input');
             input.type = 'number';
@@ -11573,6 +11583,10 @@
             div.appendChild(uploadStatus);
             renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
           }
+          if (f.fieldKey === 'project_logo' && uploadStatus) {
+            div.appendChild(uploadStatus);
+            renderProjectLogoState(tenantProjectData.project_logo_file_meta || (tenantProjectData.project_logo ? { path: tenantProjectData.project_logo, id: tenantProjectData.project_logo_file_id } : null));
+          }
           if (f.fieldType === 'select' && f.fieldKey !== 'activity_class' && f.fieldKey !== 'project_level' && f.fieldKey !== 'project_type') {
             const otherInput = document.createElement('input');
             otherInput.type = 'text';
@@ -11711,6 +11725,7 @@
       renderSurveyDirections(tenantProjectData.directions_table || {});
       renderLandDocumentsUploadState(tenantProjectData.land_documents_files_file_meta || []);
       renderLandPhotos(tenantProjectData.land_photos_file_meta || []);
+      renderProjectLogoState(tenantProjectData.project_logo_file_meta || (tenantProjectData.project_logo ? { path: tenantProjectData.project_logo, id: tenantProjectData.project_logo_file_id } : null));
       renderProjectTeam();
       enhanceProjectClassificationFields();
       refreshAllowedUsesStatusNote();
@@ -13780,6 +13795,9 @@
         if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
         const formData = await collectTenantFormData();
         const data = { ...tenantProjectData, ...formData };
+        if (!data.project_logo && tenantProjectData.project_logo) data.project_logo = tenantProjectData.project_logo;
+        if (!data.project_logo_file_id && tenantProjectData.project_logo_file_id) data.project_logo_file_id = tenantProjectData.project_logo_file_id;
+        if (!data.project_logo_file_meta && tenantProjectData.project_logo_file_meta) data.project_logo_file_meta = tenantProjectData.project_logo_file_meta;
         if (!data.target_audience && tenantProjectData.target_audience) data.target_audience = tenantProjectData.target_audience;
         if (!data.visual_concept && tenantProjectData.visual_concept) data.visual_concept = tenantProjectData.visual_concept;
         if (typeof persistFinancialStudyDraftState === 'function') {
@@ -15478,6 +15496,76 @@
       triggerAutoSaveDraft();
     }
 
+    function removeProjectLogo() {
+      tenantProjectData.project_logo = '';
+      tenantProjectData.project_logo_file_id = null;
+      tenantProjectData.project_logo_file_meta = null;
+      const input = document.querySelector('#tenantProjectForm [data-key="project_logo"]');
+      if (input) {
+        input.value = '';
+        delete input.dataset.uploadSignature;
+        delete input.dataset.projectFileId;
+      }
+      renderProjectLogoState(null);
+      triggerAutoSaveDraft();
+    }
+
+    function renderProjectLogoState(meta) {
+      const host = document.getElementById('projectLogoUploadStatus');
+      if (!host) return;
+      const fileMeta = meta || tenantProjectData.project_logo_file_meta;
+      const fileId = fileMeta?.id || tenantProjectData.project_logo_file_id;
+      const filePath = tenantProjectData.project_logo || (fileMeta?.path ? ('/' + fileMeta.path.replace(/^\/+/, '')) : '');
+      if (!fileMeta && !fileId && !filePath) {
+        host.innerHTML = '';
+        return;
+      }
+      const name = fileMeta?.originalName || fileMeta?.name || 'شعار المشروع';
+      const pending = fileMeta?.status === 'pending' || (!fileId && !filePath);
+      const safeId = String(fileId || '').replace(/'/g, "\\'");
+      const safeName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+      host.innerHTML = '<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:#fff;display:flex;align-items:center;gap:12px;max-width:380px">' +
+        '<div style="width:48px;height:48px;border-radius:8px;overflow:hidden;background:#f2f4f7;display:flex;align-items:center;justify-content:center;flex-shrink:0">' +
+        (pending
+          ? '<span class="tenant-hint" style="font-size:0.75rem">جاري الحفظ...</span>'
+          : '<img data-project-logo-thumb="' + safeId + '" src="' + (filePath ? escapeHtml(filePath) : '') + '" alt="' + escapeHtml(name) + '" style="width:100%;height:100%;object-fit:contain;padding:2px;cursor:zoom-in">') +
+        '</div>' +
+        '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">' +
+        '<span style="font-size:.82rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(name) + '</span>' +
+        (pending ? '' : '<div style="display:flex;gap:6px">' +
+          (fileId ? '<button type="button" class="btn ghost" style="padding:2px 8px;font-size:.75rem" onclick="openProjectFilePreview(\'' + safeId + '\',\'' + safeName + '\',\'image/*\')">معاينة</button>' : '') +
+          '<button type="button" class="btn ghost danger" style="padding:2px 8px;font-size:.75rem" onclick="removeProjectLogo()">حذف</button></div>') +
+        '</div></div>';
+
+      if (!pending && fileId) {
+        host.querySelectorAll('img[data-project-logo-thumb]').forEach(image => {
+          attachProjectFileThumbnail(image, fileId);
+          image.addEventListener('click', () => openProjectFilePreview(fileId, image.alt, 'image/*'));
+        });
+      }
+    }
+
+    async function uploadProjectLogo(input) {
+      const file = input?.files?.[0];
+      if (!file) return;
+      renderProjectLogoState({ originalName: file.name, status: 'pending' });
+      try {
+        const uploaded = await uploadTenantProjectFileInput(input, 'project_logo');
+        if (uploaded && (uploaded.id || uploaded.path)) {
+          tenantProjectData.project_logo_file_meta = uploaded;
+          tenantProjectData.project_logo_file_id = uploaded.id;
+          const path = uploaded.path ? ('/' + uploaded.path.replace(/^\/+/, '')) : ('/api/project-files/' + uploaded.id);
+          tenantProjectData.project_logo = path;
+          renderProjectLogoState(uploaded);
+          triggerAutoSaveDraft();
+        }
+      } catch (error) {
+        toast('تعذر رفع شعار المشروع: ' + (error.message || error));
+        renderProjectLogoState(tenantProjectData.project_logo_file_meta || (tenantProjectData.project_logo ? { path: tenantProjectData.project_logo } : null));
+      }
+    }
+
     function removeLandPhoto(fileId) {
       tenantProjectData.land_photos_file_meta = (tenantProjectData.land_photos_file_meta || [])
         .filter(item => item && item.id !== fileId);
@@ -15733,7 +15821,9 @@
               result[key + '_file_id'] = uploaded?.id || uploaded || '';
               result[key + '_file_meta'] = uploaded || null;
             }
-            result[key] = tenantProjectData[key] || '';
+            const resolvedPath = uploaded?.path ? ('/' + uploaded.path.replace(/^\/+/, '')) : (uploaded?.id ? ('/api/project-files/' + uploaded.id) : '');
+            result[key] = resolvedPath || tenantProjectData[key] || '';
+            if (resolvedPath) tenantProjectData[key] = resolvedPath;
           } else {
             result[key] = tenantProjectData[key] || '';
             if (input.multiple && tenantProjectData[key + '_file_ids']) {

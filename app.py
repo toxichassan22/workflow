@@ -9666,9 +9666,9 @@ PROJECT_FILE_EXTENSIONS = {
     '.webp': 'image/webp', '.pdf': 'application/pdf'
 }
 PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license',
-                      'regulation_reference', 'team_logo', 'visual_reference', 'conceptual_plan'}
+                      'regulation_reference', 'team_logo', 'visual_reference', 'conceptual_plan', 'project_logo'}
 # Types that must be real images: they are rendered in <img> thumbnails, where a PDF shows nothing.
-PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'visual_reference'}
+PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'visual_reference', 'project_logo'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
 
 
