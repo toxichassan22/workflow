@@ -371,11 +371,11 @@ def build_design_rules(branding):
     """
     template = DESIGN_TEMPLATES.get(branding.get('design_template', 'modern'), DESIGN_TEMPLATES['modern'])
     company_name = branding.get('company_name', '')
-    primary = branding.get('primary_color', '#3B6E91')
-    secondary = branding.get('secondary_color', '#254B66')
-    accent = branding.get('accent_color', '#6DA3C3')
-    bg = branding.get('background_color', '#F4F9FC')
-    text_color = branding.get('text_color', '#333333')
+    primary = branding.get('primary_color', '#0b1f33')
+    secondary = branding.get('secondary_color', '#1e293b')
+    accent = branding.get('accent_color', '#0ea5e9')
+    bg = branding.get('background_color', '#f8fafc')
+    text_color = branding.get('text_color', '#1e293b')
     # Only the family name is needed here, so never read/base64 the font file
     # on every slide prompt build.
     _font_css, font = build_font_css(branding, branding.get('tenant_id'), family_only=True)
@@ -393,38 +393,55 @@ def build_design_rules(branding):
     else:
         slide_w, slide_h = 1280, 720
 
-    rules = f"""أنت مصمم عروض تقديمية احترافية لشركة "{company_name}". صمم كل شريحة كلوحة فنية احترافية.
-
-## الألوان
-- رئيسي: {primary} (العناوين والأزرار)
-- ثانوي: {secondary} (التدرجات)
-- مميز: {accent} (الزخارف والتفاصيل)
-- خلفية: {bg}
-- نص: {text_color}
-- أبيض: #FFFFFF
+    rules = f"""أنت مصمم عروض تقديمية استثمارية فاخرة ورفيعة المستوى لشركة "{company_name}".
+صمم كل شريحة كتحفة تصميمية تنفيذية راقية بأسلوب مسطح أنيق (Flat Crisp Luxury).
 
 ## أبعاد الشريحة وقواعد الاحتواء الصارمة (ممنوع التداخل أو التجاوز إطلاقاً)
 - الأبعاد الكلية: {slide_w}px عرض × {slide_h}px ارتفاع.
 - أقصى ارتفاع للمحتوى داخل الشريحة: {slide_h - header_h - footer_h - 20}px صافي بين الهيدر والفوتر.
 - قانون عدم الخروج عن الحدود: يجب أن يتناسب كل محتوى الشريحة تماماً داخل هذا الارتفاع دون أن يقطع أي جزء منه.
 
+## هوية الألوان المؤسسية الصارمة
+- كحلي استثماري عميق (Primary / Navy): {primary} أو #0b1f33 (للعناوين الرئيسية، الكروت الداكنة الفاخرة، رؤوس الجداول الأساسية).
+- أزرق سماوي راقي (Accent / Cyan): {accent} أو #0ea5e9 (للتمييز، النسب المئوية، الحدود النشطة، الرسوم البيانية).
+- ذهبي / رملي هادئ (Warm Gold / Champagne): #c5a880 (للتفاصيل الفاخرة والإشارات التقديرية).
+- خلفية فاتحة ناصعة ونظيفة: {bg} أو #f8fafc.
+- لون النصوص: {text_color} أو #1e293b، والنصوص الفرعية بلون رمادي أردوازي #64748b.
+- كروت بيضاء نقية: #ffffff (100% صلبة دائماً).
+- ممنوع منعاً باتاً استخدام الألوان الفاقعة أو الوردية أو الفوشيا (Pink / Magenta / Neon) خارج لوحة الألوان المعتمدة.
+
+## معالجة التدرجات والخلفيات لأجهزة Apple وWebKit
+- قاعدة أمان متصفحات Apple (Safari و iOS): في أي CSS linear-gradient أو radial-gradient، لا تستخدم كلمة transparent إطلاقاً، لأن محرك WebKit يحولها إلى أسود شفاف مما يسبب هالات رمادية متسخة.
+- استخدم دائماً اللون الأبيض الشفاف الصريح: rgba(255, 255, 255, 0) أو لون الخلفية بشفافية صفرية.
+- تجنب الخلفيات شبه الشفافة الغائمة مثل rgba(255,255,255,0.7) على شاشات Retina لأنها تبدو رمادية باهتة؛ استخدم #ffffff صريح.
+
+## الظلال والحدود (Flat Crisp Luxury - بدون ظلال ثقيلة)
+- ممنوع استخدام الظلال السوداء الثقيلة أو المعتمة (Heavy Drop Shadows) إطلاقاً.
+- اعتمد التصميم المسطح الراقي (Flat Luxury) باستخدام حدود ناعمة ودقيقة جداً: border: 1px solid #e2e8f0 أو border: 1px solid #edf2f7 مع border-radius: 10px إلى 14px.
+- الظل الوحيد المسموح (إذا لزم الأمر) هو فائق النعومة والخفة: box-shadow: 0 1px 3px rgba(0,0,0,0.02) أو box-shadow: none.
+
 ## الخطوط والأحجام المحددة للتناسب
 font-family: {font}
-- العنوان الرئيسي للشريحة: 24px-28px font-weight:700 color:{primary} (أقصى حد 30px)
-- عناوين البطاقات والأقسام: 15px-17px font-weight:600 color:{primary}
-- النصوص العادية ونصوص البطاقات والجداول: 12px-14px font-weight:400 color:{text_color}
-- الأرقام المالية الكبيرة: 24px-30px font-weight:700 color:{primary} (أقصى حد 32px)
+- العنوان الرئيسي للشريحة: 22px-26px font-weight:700 color:{primary} (أقصى حد 28px)
+- عناوين البطاقات والأقسام: 14px-16px font-weight:600 color:{primary}
+- النصوص العادية ونصوص البطاقات والجداول: 11px-13px font-weight:400 color:{text_color}
+- الأرقام المالية الكبيرة: 22px-28px font-weight:700 color:{primary} مع تسميات واضحة بلون #64748b
+
+## تصميم وعرض الدراسة المالية والجداول (Financial Study)
+- اعتماد الجداول بدقة كاملة: اعتمد بيانات وأرقام الجداول المالية ومكونات المشروع المعتمدة كما هي دون تغيير أو اختصار يخل بالأرقام.
+- قاعدة الرسوم البيانية والجداول المرافقة: إذا تضمنت الشريحة المالية رسماً بيانياً أو مخططاً دائرياً (Donut / Bar Chart / Matrix)، يجب إلزامياً وضع جدول البيانات الكامل بجانب الرسم البياني (جنباً إلى جنب في عمودين متناسقين مثل grid-template-columns: 1fr 1.2fr أو flex) لضمان الجمع بين الجاذبية البصرية والدقة الرقمية.
+- تنسيق الجداول: صمم الجداول بأسلوب تنفيذي مسطح (Clean Hairline Table)، مع رأس جدول أنيق، وخطوط فاصلة دقيقة (border-bottom: 1px solid #e2e8f0)، وتباعد مريح، وأرقام واضحة ومحاذاة مناسبة.
 
 ## الشريحة الأساسية
-<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;font-family:{font};">
-CSS inline فقط. ممنوع box-shadow/filter/backdrop-filter. استخدم box-sizing:border-box لكل العناصر.
+<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;font-family:{font};background:{bg};">
+CSS inline فقط. ممنوع box-shadow الثقيل أو filter أو backdrop-filter. استخدم box-sizing:border-box لكل العناصر.
 """
 
     if header_enabled:
         rules += f"""
 ## هيدر إلزامي — يجب أن يوجد في كل شريحة محتوى
-position:absolute;top:0;right:0;left:0;height:{header_h}px;background:#fff;border-bottom:2px solid {primary};
-المحتوى: شعار ##LOGO## height:40px يساراً + خط رأسي {accent} 4px + اسم الشريحة 16px font-weight:600 color:{primary}
+position:absolute;top:0;right:0;left:0;height:{header_h}px;background:#ffffff;border-bottom:1px solid #e2e8f0;
+المحتوى: شعار ##LOGO## height:36px يساراً + خط رأسي {accent} 3px + اسم الشريحة 16px font-weight:600 color:{primary}
 """
 
     if footer_enabled:
@@ -441,22 +458,13 @@ position:absolute;bottom:0;right:0;left:0;height:{footer_h}px;background:{primar
 top:{content_top}px إلى bottom:{content_bottom}px. padding: 16px 36px.
 - إذا زاد عدد البطاقات أو العناصر عن 4، استخدم شبكة متعددة الأعمدة (grid 2x2 أو 3x2 مع gap:10px) أو توزيع أفقياً لضمان ملاءمة المحتوى كاملاً داخل الارتفاع المتاح.
 
-## البطاقات (Cards) — نمط {card_style}
+## البطاقات (Cards)
+كل بطاقة: background:#ffffff; border:1px solid #e2e8f0; border-radius:10px; padding:12px 16px; box-sizing:border-box; box-shadow:none;
+بدون أيقونات وبدون إيموجي نهائياً. اعتمد على التخطيط والخطوط والمساحات الأنيقة.
 """
-    if card_style == 'bordered':
-        accent_rgb = _hex_to_rgb(accent)
-        rules += f"كل بطاقة: background:#fff border:1px solid rgba({accent_rgb},0.2) border-radius:8px padding:10px 14px; box-sizing:border-box.\n"
-    elif card_style == 'shadow':
-        rules += f"كل بطاقة: background:#fff border-radius:10px padding:10px 14px; box-sizing:border-box. ظل خفيف: box-shadow:0 2px 6px rgba(0,0,0,0.06).\n"
-    elif card_style == 'flat':
-        rules += f"كل بطاقة: background:{bg} border-radius:8px padding:10px 14px; box-sizing:border-box. بدون حدود أو ظلال.\n"
-    elif card_style == 'gradient':
-        rules += f"كل بطاقة: background:linear-gradient(135deg,{primary},{secondary}) border-radius:10px padding:10px 14px color:#fff; box-sizing:border-box.\n"
-
-    rules += "بدون أيقونات. اعتمد على التخطيط والمساحات.\n"
 
     if template['use_gradients']:
-        rules += f"تدرجات: استخدم linear-gradient(135deg,{primary},{secondary}) في الخلفيات والبطاقات المميزة.\n"
+        rules += f"تدرجات: استخدم linear-gradient(135deg,{primary},{secondary}) في الخلفيات والبطاقات المميزة مع استخدام rgba(255,255,255,0) للتلاشي الشفاف.\n"
 
     rules += f"""
 ## الصور Placeholder
@@ -467,7 +475,7 @@ top:{content_top}px إلى bottom:{content_bottom}px. padding: 16px 36px.
 - خريطة الوصول: ##MAP_ACCESS## (background-image)
 - خريطة نطاق التأثير: ##MAP_CATCHMENT## (background-image)
 - صور Street View: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
-- شعار الشركة: ##LOGO## (height:40px في الهيدر، height:80px في الغلاف والختام)
+- شعار الشركة: ##LOGO## (height:36px في الهيدر، height:80px في الغلاف والختام)
 - ممنوع رسم أي دوائر أو دبابيس أو مؤشرات موقع HTML فوق الخرائط (##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##) لأن هذه الصور تحتوي بالفعل على علامات موقع احترافية ومضلعات تحديد وبوصلة وخرائط مصغرة مرسومة مباشرة بدقة عالية.
 - ممنوع base64 أو روابط صور خارجية — استخدم الـ placeholders فقط
 

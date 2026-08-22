@@ -231,6 +231,125 @@ def _location_data_note(project_data):
         "استخدم placeholders ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##، ##STREET_VIEW_1##..."
     )
 
+
+def _parse_financial_dict(val):
+    """Safely parse a JSON string or return dict."""
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str) and val.strip().startswith('{'):
+        try:
+            parsed = json.loads(val)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _financial_data_note(project_data):
+    """Extract and format financial study tables and metrics so they are never lost or distorted."""
+    if not project_data or not isinstance(project_data, dict):
+        return ''
+
+    model = _parse_financial_dict(project_data.get('financial_study_model'))
+    calc = _parse_financial_dict(project_data.get('financial_calc_data'))
+
+    # Extract components
+    components = []
+    dynamic_rows = model.get('dynamicRows') if isinstance(model.get('dynamicRows'), dict) else {}
+    if isinstance(dynamic_rows.get('components'), list):
+        components = dynamic_rows['components']
+    elif isinstance(calc.get('components'), list):
+        components = calc['components']
+
+    tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+    comp_table = tables.get('componentsTable') if isinstance(tables.get('componentsTable'), list) else []
+
+    inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
+    projection = model.get('projection') if isinstance(model.get('projection'), dict) else {}
+
+    # Check if there is meaningful financial content
+    if not components and not comp_table and not inputs and not calc:
+        return ''
+
+    lines = [
+        "\n\n## بيانات وجداول الدراسة المالية المعتمدة (قواعد صارمة وإلزامية)",
+        "- **اعتماد الجداول كما هي:** يجب عرض بيانات ومكونات وأرقام الجداول المالية المعتمدة أدناه بدقة كاملة دون حذف أعمدة أو تغيير مسميات أو اختلاق أرقام.",
+        "- **قاعدة الرسوم البيانية والجداول المرافقة:** إذا تضمنت الشريحة المالية رسماً بيانياً أو دائرياً (Chart / Breakdown)، يجب إلزامياً وضع جدول البيانات الفعلي المكتمل بجانب الرسم البياني (جنباً إلى جنب في تصميم متناسق) لضمان الدقة الرقمية والوضوح البصري معاً.",
+        "- **تصميم مسطح فاخر (Flat Crisp Luxury):** استخدم بطاقات بيضاء ناصعة (#ffffff) بحدود ناعمة (1px solid #e2e8f0) بدون ظلال ثقيلة (box-shadow: none)، وبخطوط واضحة وأرقام مميزة بكحلي وأزرق سماوي راقي.",
+    ]
+
+    # Format components table
+    if comp_table:
+        lines.append("\n### جدول مكونات واستخدامات المشروع المعتمدة:")
+        clean_rows = []
+        for r in comp_table:
+            if isinstance(r, dict):
+                clean_r = {k: v for k, v in r.items() if k not in ('ترتيب / حذف', 'idx', 'id')}
+                if clean_r:
+                    clean_rows.append(clean_r)
+        if clean_rows:
+            lines.append(json.dumps(clean_rows, ensure_ascii=False, indent=2))
+    elif components:
+        lines.append("\n### مكونات واستخدامات المشروع:")
+        clean_comps = []
+        for c in components:
+            if isinstance(c, dict):
+                clean_comps.append({
+                    'اسم المكون': c.get('name') or c.get('component'),
+                    'نوع الاستخدام': c.get('useType') or c.get('type'),
+                    'عدد الوحدات': c.get('units'),
+                    'مساحة الوحدة م²': c.get('unitArea'),
+                    'المساحة المبنية م²': c.get('builtArea') or c.get('totalArea'),
+                    'نموذج الاستفادة': c.get('investmentModel') or c.get('model'),
+                })
+        if clean_comps:
+            lines.append(json.dumps(clean_comps, ensure_ascii=False, indent=2))
+
+    # Format Key Indicators / Capital Structure
+    indicators = {}
+    for key, label in [
+        ('projectCost', 'إجمالي تكلفة المشروع'),
+        ('adjustedProjectCost', 'التكلفة الإجمالية المعدلة'),
+        ('landValue', 'قيمة الأرض'),
+        ('equityRequired', 'رأس المال المطلوب (Equity)'),
+        ('facilityAmount', 'مبلغ التمويل البنكي'),
+        ('roi', 'العائد على الاستثمار (ROI)'),
+        ('irr', 'معدل العائد الداخلي (IRR)'),
+        ('projectIrr', 'معدل العائد الداخلي للمشروع'),
+        ('equityIrr', 'معدل العائد الداخلي لحقوق الملكية'),
+        ('payback', 'فترة الاسترداد (سنوات)'),
+        ('totalBuiltUpArea', 'إجمالي المساحات المبنية م²'),
+        ('developmentYears', 'مدة التطوير (سنوات)'),
+    ]:
+        val = inputs.get(key) or projection.get(key) or calc.get(key)
+        if val not in (None, '', -1):
+            indicators[label] = val
+
+    if indicators:
+        lines.append("\n### المؤشرات وهيكل رأس المال المعتمد:")
+        lines.append(json.dumps(indicators, ensure_ascii=False, indent=2))
+
+    # Add other tables if present (revenue, cashflow, costs, sensitivity)
+    for tbl_key, tbl_title in [
+        ('revenueTable', 'جدول تقدير الإيرادات السنوية'),
+        ('costsTable', 'جدول التكاليف الرأسمالية والإنشائية'),
+        ('cashflowTable', 'جدول التدفقات النقدية السنوية'),
+        ('sensitivityTable', 'جدول تحليل الحساسية'),
+    ]:
+        tbl_data = tables.get(tbl_key)
+        if isinstance(tbl_data, list) and tbl_data:
+            clean_tbl = []
+            for r in tbl_data:
+                if isinstance(r, dict):
+                    clean_r = {k: v for k, v in r.items() if k not in ('ترتيب / حذف', 'idx', 'id')}
+                    if clean_r:
+                        clean_tbl.append(clean_r)
+            if clean_tbl:
+                lines.append(f"\n### {tbl_title}:")
+                lines.append(json.dumps(clean_tbl[:15], ensure_ascii=False, indent=2))
+
+    return '\n'.join(lines)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Slide Plan Proposal
 # ─────────────────────────────────────────────────────────────────────────────
@@ -412,6 +531,9 @@ def build_slide_plan_prompt(project_data, branding):
     timeline_note = _timeline_data_note(project_data)
     if timeline_note:
         prompt += timeline_note
+    financial_note = _financial_data_note(project_data)
+    if financial_note:
+        prompt += financial_note
     return prompt
 
 
@@ -702,6 +824,12 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         timeline_note = _timeline_data_note(project_data)
         if timeline_note:
             notes.append(timeline_note.strip())
+    if design_style in ('dashboard', 'table') or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
+        notes.append('في الشرائح المالية: اعتمد جداول ومكونات وأرقام الدراسة المالية كما هي دون تعديل كبير أو حذف للأرقام.')
+        notes.append('إذا أنشأت رسماً بيانياً أو مخططاً دائرياً، يجب إلزامياً وضع جدول البيانات الفعلي بجانب الرسم البياني (جنباً إلى جنب في تصميم ثنائي) لضمان الدقة والوضوح.')
+        financial_note = _financial_data_note(project_data)
+        if financial_note:
+            notes.append(financial_note.strip())
     notes_text = '\n'.join(f'- {n}' for n in notes)
 
     return f"""أنشئ شريحة {slide_num}/{total_slides}: {title}
@@ -1251,6 +1379,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
             json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
         )
     timeline_note = _timeline_data_note(project_data)
+    financial_note = _financial_data_note(project_data)
 
     system_prompt = f"""{design_rules}
 
@@ -1263,6 +1392,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
 ## بيانات المسافات والأوقات (ممنوع تعديل الأرقام)
 {landmarks_note}
 {timeline_note}
+{financial_note}
 
 ## قواعد عامة
 - كل شريحة 1280x720px (أو حسب نسبة العرض المحددة)

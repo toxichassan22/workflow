@@ -187,8 +187,10 @@ GEMINI_TEXT_MODEL = "google/gemini-3.7-flash"
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 GLM_MODEL = GEMINI_TEXT_MODEL
 GLM_OPENROUTER_MODEL = GEMINI_TEXT_MODEL
+SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-5.6-sol')
 GLM_USE_OPENROUTER = True
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
+print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
 IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '32000'))
@@ -293,23 +295,23 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
 
 
 def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
-                  reasoning_effort=None, response_format=None):
-    """Compatibility wrapper: all text/design work now uses Gemini through OpenRouter."""
+                  reasoning_effort=None, response_format=None, model=None):
+    """Compatibility wrapper: text/design work uses configured models through OpenRouter."""
     if not OPENROUTER_KEY:
-        return {"error": {"message": "OPENROUTER_KEY is required for the Gemini text model"}}
+        return {"error": {"message": "OPENROUTER_KEY is required for the text model"}}
     return call_openrouter_chat(
         system_prompt,
         user_content,
         temperature=None,
         max_tokens=max_tokens,
-        model=LUNA_TEXT_MODEL,
+        model=model or LUNA_TEXT_MODEL,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
         response_format=response_format,
     )
 
 
-def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300):
+def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300, model=None):
     """
     Race multiple identical GLM calls in parallel and return the first valid response.
     Helps when a single model invocation is slow or returns malformed/empty content.
@@ -318,7 +320,7 @@ def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tok
 
     def _attempt():
         try:
-            resp = call_zai_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout)
+            resp = call_zai_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, model=model)
             if not _has_chat_choices(resp):
                 return None
             content = extract_chat_content(resp, 'GLM-PARALLEL')
@@ -1278,6 +1280,7 @@ def build_system_prompt(project_data, images_info, design_rules=None):
     if len(project_json) > 4000:
         project_json = project_json[:4000] + '\n... [تم اختصار البيانات]'
     timeline_note = slide_engine._timeline_data_note(project_data)
+    financial_note = slide_engine._financial_data_note(project_data)
     return f"""{design_rules}
 
 ## بيانات المشروع
@@ -1285,7 +1288,8 @@ def build_system_prompt(project_data, images_info, design_rules=None):
 
 ## الصور المتوفرة
 {images_info}
-{timeline_note}"""
+{timeline_note}
+{financial_note}"""
 
 def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
     """Replace all logo placeholders and broken logo paths with tenant's logo URL."""
@@ -1395,7 +1399,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
                     "ولا تتوقف قبل اكتماله. لا تكتب أي شرح أو markdown."
                 )
             print(f"[SLIDE-{slide_num}] Attempt {attempt}: {slide_title}")
-            response = call_zai_chat(system_prompt, user_msg, max_tokens=7000)
+            response = call_zai_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL)
             if 'choices' not in response or not response.get('choices'):
                 print(f"[SLIDE-{slide_num}] ERROR: no choices (attempt {attempt})")
                 continue
@@ -3490,7 +3494,7 @@ from slide_engine import (
     build_slide_plan_prompt, parse_slide_plan, validate_slide_plan,
     generate_all_slides, extract_html_from_glm, CONTENT_DISTRIBUTION_RULES,
     resolve_slide_bounds, build_fallback_plan, _suggest_design_style,
-    _timeline_data_note,
+    _timeline_data_note, _financial_data_note,
 )
 
 
@@ -4581,6 +4585,7 @@ def api_generate_slide_single():
             json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
         )
     timeline_note = _timeline_data_note(project_data)
+    financial_note = _financial_data_note(project_data)
 
     system_prompt = f"""{design_rules}
 
@@ -4593,6 +4598,7 @@ def api_generate_slide_single():
 ## بيانات المسافات والأوقات (ممنوع تعديل الأرقام)
 {landmarks_note}
 {timeline_note}
+{financial_note}
 
 ## قواعد عامة
 - كل شريحة 1280x720px (أو حسب نسبة العرض المحددة)
@@ -4607,7 +4613,7 @@ def api_generate_slide_single():
     def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
         if training_context:
             sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
-        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2)
+        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL)
 
     slide = slides[slide_index]
     total = len(slides)
@@ -4689,7 +4695,7 @@ def api_generate_slides():
     def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
         if training_context:
             sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
-        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2)
+        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL)
 
     try:
         htmls = generate_all_slides(
