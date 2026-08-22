@@ -2364,6 +2364,49 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('refreshClientEnteredLandFieldStates();', index_source)
         self.assertIn("sectionKey === 'land_croquis' && TENANT_CLIENT_ENTERED_LAND_FIELDS.has(f.fieldKey)", index_source)
 
+    def test_client_entered_land_fields_validation_and_placeholders(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        db_source = (ROOT / 'db.py').read_text(encoding='utf-8')
+
+        # DB prebuilt field placeholders
+        self.assertIn("'placeholder': 'يرجى إدخال عدد الأدوار المعتمدة للمشروع وفقًا للاشتراطات التنظيمية.'", db_source)
+        self.assertIn("'placeholder': 'يرجى إدخال نسبة التغطية المعتمدة للأرض وفقًا للاشتراطات التنظيمية.'", db_source)
+        self.assertIn("'placeholder': 'يرجى إدخال إجمالي المساحة البنائية المعتمدة التي ستُبنى عليها حسابات الدراسة المالية.'", db_source)
+
+        # Validation function in index.html
+        self.assertIn('function validateLandCroquisClientFields()', index_source)
+        self.assertIn("key === 'land_croquis'", index_source)
+        self.assertIn("validateLandCroquisClientFields()", index_source)
+        self.assertIn("يرجى إدخال عدد الأدوار المعتمدة للمشروع وفقًا للاشتراطات التنظيمية.", index_source)
+        self.assertIn("يرجى إدخال نسبة التغطية المعتمدة للأرض وفقًا للاشتراطات التنظيمية.", index_source)
+        self.assertIn("يرجى إدخال إجمالي المساحة البنائية المعتمدة التي ستُبنى عليها حسابات الدراسة المالية.", index_source)
+
+        # toggleApproveCroquisData also validates before approving
+        self.assertIn('function toggleApproveCroquisData()', index_source)
+        self.assertIn('const errors = validateLandCroquisClientFields();', index_source)
+
+    def test_financial_schedule_percentages_and_sales_exit_hiding(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        proto_source = (ROOT / 'THE-VIEW-Financial-Model-FINAL-v2.html').read_text(encoding='utf-8')
+
+        # Schedule table percentage clamping
+        self.assertIn('function enforceSchedulePctInput(input, fieldName)', index_source)
+        self.assertIn('function enforceSchedulePctInput(input, fieldName)', proto_source)
+        self.assertIn('const costPctTotal = Math.min(100, scheduleRows.reduce((s, r) => s + r.costPct, 0))', index_source)
+        self.assertIn('const costPctTotal=Math.min(100,scheduleRows.reduce((s,r)=>s+r.costPct,0));', proto_source)
+        self.assertIn('100 - existingCostSum', index_source)
+        self.assertIn('100 - existingDevSum', index_source)
+
+        # Section 13 sales exit dynamic hiding
+        self.assertIn('id="saleExitYearWrap"', index_source)
+        self.assertIn('id="saleExitCostRateWrap"', index_source)
+        self.assertIn('id="resSaleExitGrossCard"', index_source)
+        self.assertIn('id="resSaleExitCard"', index_source)
+        self.assertIn("setWrapVisible('saleExitYearWrap', saleExitActive);", index_source)
+        self.assertIn("setWrapVisible('saleExitCostRateWrap', saleExitActive);", index_source)
+        self.assertIn("resSaleExitGrossCard.classList.toggle('dynamic-off', !saleExitActive);", index_source)
+        self.assertIn("resSaleExitCard.classList.toggle('dynamic-off', !saleExitActive);", index_source)
+
     def test_financial_pdf_fallback_writes_real_arabic_text(self):
         import tempfile
         from pathlib import Path

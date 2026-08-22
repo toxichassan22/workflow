@@ -3576,6 +3576,11 @@
       display: none !important;
     }
 
+    #section-financial-calc .dynamic-off,
+    .dynamic-off {
+      display: none !important;
+    }
+
 
     .workflow-stage-layout {
       display: grid;
@@ -10929,6 +10934,18 @@
     }
 
     async function setSectionStatus(sectionKey, status) {
+      if (sectionKey === 'land_croquis' && status === 'approved') {
+        const errors = validateLandCroquisClientFields();
+        if (errors.length > 0) {
+          toast(errors[0].message);
+          const firstInput = document.querySelector('#tenantProjectForm [data-key="' + errors[0].key + '"]');
+          if (firstInput) {
+            firstInput.focus();
+            firstInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          return;
+        }
+      }
       const result = await api('POST', '/api/project-draft/section-status', { draftId: tenantProjectData.draftId, sectionKey: sectionKey, sectionStatus: status });
       if (!result.success) { toast(result.error || 'تعذر تحديث حالة القسم'); return; }
       applySectionStatuses({ [sectionKey]: status });
@@ -10937,11 +10954,26 @@
     async function approveAllSections() {
       const sections = document.querySelectorAll('.tenant-form-section[data-section]');
       const statuses = {};
+      let landCroquisBlocked = false;
       sections.forEach(sec => {
         if (sec.dataset.underConstruction === '1') return;
         const key = sec.dataset.section;
+        if (key === 'land_croquis') {
+          const errors = validateLandCroquisClientFields();
+          if (errors.length > 0) {
+            landCroquisBlocked = true;
+            toast(errors[0].message);
+            const firstInput = document.querySelector('#tenantProjectForm [data-key="' + errors[0].key + '"]');
+            if (firstInput) {
+              firstInput.focus();
+              firstInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            return;
+          }
+        }
         statuses[key] = 'approved';
       });
+      if (landCroquisBlocked && Object.keys(statuses).length === 0) return;
       // One merged request: parallel per-section calls raced on the same JSON column and the
       // screen ended up showing sections as approved that the server had never stored.
       const result = await api('POST', '/api/project-draft/section-status', {
@@ -10950,7 +10982,11 @@
       });
       if (!result.success) { toast(result.error || 'تعذر اعتماد قسم أو أكثر'); return; }
       applySectionStatuses(statuses);
-      toast('تم اعتماد جميع الأقسام');
+      if (landCroquisBlocked) {
+        toast('تم اعتماد باقي الأقسام. يرجى استكمال بيانات الأرض والكروكي المطلوبة لاعتمادها');
+      } else {
+        toast('تم اعتماد جميع الأقسام');
+      }
     }
 
     async function requestProjectDraftApproval() {
@@ -11201,6 +11237,24 @@
       document.querySelectorAll('#tenantProjectForm [data-key]').forEach(updateClientEnteredLandFieldState);
     }
 
+    function validateLandCroquisClientFields() {
+      const fieldSpecs = [
+        { key: 'approved_floor_count', label: 'الأدوار المعتمدة', message: 'يرجى إدخال عدد الأدوار المعتمدة للمشروع وفقًا للاشتراطات التنظيمية.' },
+        { key: 'approved_coverage_ratio', label: 'التغطية المعتمدة (%)', message: 'يرجى إدخال نسبة التغطية المعتمدة للأرض وفقًا للاشتراطات التنظيمية.' },
+        { key: 'approved_financial_area', label: 'المساحة المعتمدة للدراسة المالية (م²)', message: 'يرجى إدخال إجمالي المساحة البنائية المعتمدة التي ستُبنى عليها حسابات الدراسة المالية.' }
+      ];
+      const errors = [];
+      for (const spec of fieldSpecs) {
+        const input = document.querySelector('#tenantProjectForm [data-key="' + spec.key + '"]');
+        const val = input ? String(input.value ?? '').trim() : '';
+        const numVal = parseFloat(val.replace(/,/g, ''));
+        if (!val || isNaN(numVal) || numVal <= 0) {
+          errors.push(spec);
+        }
+      }
+      return errors;
+    }
+
     function tenantProjectFieldLabel(field) {
       if (field.fieldKey === 'main_roads') return 'الطرق الرئيسية المحيطة';
       if (field.fieldKey === 'secondary_roads') return 'طرق الوصول الفرعية';
@@ -11388,6 +11442,13 @@
           input.dataset.key = f.fieldKey;
           input.dataset.type = f.fieldType;
           input.placeholder = f.placeholder || '';
+          if (f.fieldKey === 'approved_floor_count' && !input.placeholder) {
+            input.placeholder = 'يرجى إدخال عدد الأدوار المعتمدة للمشروع وفقًا للاشتراطات التنظيمية.';
+          } else if (f.fieldKey === 'approved_coverage_ratio' && !input.placeholder) {
+            input.placeholder = 'يرجى إدخال نسبة التغطية المعتمدة للأرض وفقًا للاشتراطات التنظيمية.';
+          } else if (f.fieldKey === 'approved_financial_area' && !input.placeholder) {
+            input.placeholder = 'يرجى إدخال إجمالي المساحة البنائية المعتمدة التي ستُبنى عليها حسابات الدراسة المالية.';
+          }
           if (f.fieldKey === 'city' || f.fieldKey === 'district') {
             input.readOnly = true;
             input.setAttribute('aria-readonly', 'true');
@@ -11995,11 +12056,11 @@
           <div class="grid four">
             <div><label>تطبيق التخارج؟</label><select id="exitEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
             <div><label>طريقة التخارج البيعي</label><select id="saleExitMethod" onchange="calculateAll()"><option value="none">بدون تخارج بيعي إضافي</option><option value="remainingArea">المساحة المتبقية × سعر البيع</option><option value="fixed">قيمة بيعية ثابتة</option></select></div>
-            <div><label>سنة التخارج البيعي</label><input id="saleExitYear" type="number" min="1" value="14" oninput="calculateAll()"></div>
+            <div id="saleExitYearWrap"><label>سنة التخارج البيعي</label><input id="saleExitYear" type="number" min="1" value="14" oninput="calculateAll()"></div>
             <div id="saleExitRemainingAreaWrap"><label>المساحة البيعية المتبقية م²</label><input id="saleExitRemainingArea" type="number" value="0" oninput="calculateAll()"></div>
             <div id="saleExitPricePerM2Wrap"><label>سعر بيع متر التخارج</label><input id="saleExitPricePerM2" type="number" value="0" oninput="calculateAll()"></div>
             <div id="saleExitFixedValueWrap"><label>قيمة التخارج البيعي الثابتة</label><input id="saleExitFixedValue" type="number" value="0" oninput="calculateAll()"></div>
-            <div><label>تكاليف التخارج البيعي %</label><input id="saleExitCostRate" type="number" min="0" value="0" oninput="calculateAll()"></div>
+            <div id="saleExitCostRateWrap"><label>تكاليف التخارج البيعي %</label><input id="saleExitCostRate" type="number" min="0" value="0" oninput="calculateAll()"></div>
             <div><label>طريقة التخارج التشغيلي</label><select id="exitMethod" onchange="calculateAll()"><option value="capRate">الربح التشغيلي ÷ معدل الرسملة</option><option value="fixed">قيمة تشغيلية ثابتة</option><option value="noiMultiple">الربح التشغيلي × مضاعف</option><option value="revenueMultiple">الإيرادات × مضاعف</option><option value="none">بدون تخارج تشغيلي</option></select></div>
             <div><label>سنة التخارج التشغيلي</label><input id="operatingExitYear" type="number" min="1" value="14" oninput="calculateAll()"></div>
             <div><label>معدل الرسملة % / المضاعف / القيمة</label><input id="exitInput" type="number" value="8" oninput="calculateAll()"></div>
@@ -12020,8 +12081,8 @@
             <div class="metric"><span>إيرادات التشغيل عند 100% إشغال</span><strong id="resFullOccupancyRevenue">0</strong></div>
             <div class="metric"><span>المصروفات عند 100% إشغال</span><strong id="resFullOccupancyOpex">0</strong></div>
             <div class="metric"><span>NOI عند 100% إشغال</span><strong id="resFullOccupancyNOI">0</strong></div>
-            <div class="metric"><span>إجمالي التخارج البيعي</span><strong id="resSaleExitGross">0</strong><small id="resSaleExitScope"></small></div>
-            <div class="metric"><span>صافي التخارج البيعي</span><strong id="resSaleExit">0</strong></div>
+            <div class="metric" id="resSaleExitGrossCard"><span>إجمالي التخارج البيعي</span><strong id="resSaleExitGross">0</strong><small id="resSaleExitScope"></small></div>
+            <div class="metric" id="resSaleExitCard"><span>صافي التخارج البيعي</span><strong id="resSaleExit">0</strong></div>
             <div class="metric"><span>إجمالي التخارج التشغيلي</span><strong id="resOperatingExitGross">0</strong><small id="resOperatingExitScope"></small></div>
             <div class="metric"><span>صافي التخارج التشغيلي</span><strong id="resOperatingExit">0</strong></div>
             <div class="metric"><span>إجمالي صافي التخارج</span><strong id="resTerminal">0</strong></div>
@@ -12141,17 +12202,62 @@
       if (!window.__batchLoading) calculateAll()
     }
 
+    function enforceSchedulePctInput(input, fieldName) {
+      if (!input) return;
+      const val = parseNumber(input.value);
+      if (val < 0) { input.value = 0; return; }
+      const rows = [...document.querySelectorAll('#scheduleTable tbody tr')];
+      let otherSum = 0;
+      rows.forEach(tr => {
+        const inp = tr.querySelector(`[data-field="${fieldName}"] input`);
+        if (inp && inp !== input) {
+          otherSum += Math.max(0, parseNumber(inp.value));
+        }
+      });
+      const maxAllowed = Math.max(0, 100 - otherSum);
+      if (val > maxAllowed) {
+        input.value = maxAllowed;
+      }
+    }
+
     // The stage name and its year mirror the project timeline and are read-only here; only the
     // two financial percentages belong to this study, so only they stay editable.
     function addScheduleStage(d = {}) {
-      const tb = document.querySelector('#scheduleTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.stageYear = String(d.year ?? 1); tr.dataset.stageEndYear = String(d.endYear ?? d.year ?? 1); tr.innerHTML = `
+      const tb = document.querySelector('#scheduleTable tbody'); if (!tb) return;
+      const rows = [...tb.querySelectorAll('tr')];
+      let existingCostSum = 0, existingDevSum = 0;
+      rows.forEach(tr => {
+        existingCostSum += Math.max(0, parseNumber(tr.querySelector('[data-field="costPct"] input')?.value));
+        existingDevSum += Math.max(0, parseNumber(tr.querySelector('[data-field="devPct"] input')?.value));
+      });
+      const costVal = Math.max(0, Math.min(Math.max(0, 100 - existingCostSum), financialInputNumber(d.costPct, 0)));
+      const devVal = Math.max(0, Math.min(Math.max(0, 100 - existingDevSum), financialInputNumber(d.devPct, 0)));
+      const tr = document.createElement('tr');
+      tr.dataset.stageYear = String(d.year ?? 1);
+      tr.dataset.stageEndYear = String(d.endYear ?? d.year ?? 1);
+      tr.innerHTML = `
     <td data-field="name"><input value="${escapeHtml(d.name || '')}" readonly class="readonly-highlight" title="تُعدّل من قسم الجدول الزمني"></td>
-    <td data-field="costPct"><input type="number" min="0" value="${financialInputNumber(d.costPct, 0)}"></td>
-    <td data-field="devPct"><input type="number" min="0" value="${financialInputNumber(d.devPct, 0)}"></td>
+    <td data-field="costPct"><input type="number" min="0" max="100" value="${costVal}"></td>
+    <td data-field="devPct"><input type="number" min="0" max="100" value="${devVal}"></td>
     <td class="row-result stageCost">0</td>
     <td class="row-result stageDevPayment">0</td>`;
       tb.appendChild(tr);
-      tr.querySelectorAll('input:not([readonly])').forEach(x => x.addEventListener('input', calculateAll));
+      tr.querySelectorAll('input:not([readonly])').forEach(x => {
+        const fieldName = x.closest('td')?.dataset?.field;
+        if (fieldName === 'costPct' || fieldName === 'devPct') {
+          const runEnforce = () => {
+            enforceSchedulePctInput(x, fieldName);
+            calculateAll();
+          };
+          x.addEventListener('input', runEnforce);
+          x.addEventListener('change', runEnforce);
+          x.addEventListener('blur', runEnforce);
+          x.addEventListener('keyup', runEnforce);
+          x.addEventListener('paste', () => setTimeout(runEnforce, 0));
+        } else {
+          x.addEventListener('input', calculateAll);
+        }
+      });
       enhanceNumericInputs(tr);
       if (!window.__batchLoading) calculateAll()
     }
@@ -12367,10 +12473,21 @@
       setWrapVisible('landPricePerM2Wrap', landMethod === 'perM2'); setWrapVisible('manualLandValueWrap', landMethod === 'manual');
       const rentMethod = val('landRentMethod');
       setWrapVisible('landRentRateWrap', rentMethod === 'percentLandValue'); setWrapVisible('manualAnnualLandRentWrap', rentMethod === 'annualFixed'); setWrapVisible('monthlyLandRentWrap', rentMethod === 'monthlyFixed');
+      const exitOn = val('exitEnabled') !== 'no';
       const exitMethod = val('exitMethod'); const exitInput = document.getElementById('exitInput');
-      if (exitInput) { exitInput.disabled = exitMethod === 'none'; exitInput.closest('div')?.classList.toggle('dynamic-off', exitMethod === 'none'); const lbl = exitInput.closest('div')?.querySelector('label'); if (lbl) { lbl.textContent = exitMethod === 'capRate' ? 'Cap Rate %' : exitMethod === 'fixed' ? 'قيمة البيع الثابتة' : exitMethod === 'noiMultiple' ? 'مضاعف NOI' : exitMethod === 'revenueMultiple' ? 'مضاعف الإيرادات' : 'مدخل التخارج'; } }
+      if (exitInput) { exitInput.disabled = !exitOn || exitMethod === 'none'; exitInput.closest('div')?.classList.toggle('dynamic-off', !exitOn || exitMethod === 'none'); const lbl = exitInput.closest('div')?.querySelector('label'); if (lbl) { lbl.textContent = exitMethod === 'capRate' ? 'Cap Rate %' : exitMethod === 'fixed' ? 'قيمة البيع الثابتة' : exitMethod === 'noiMultiple' ? 'مضاعف NOI' : exitMethod === 'revenueMultiple' ? 'مضاعف الإيرادات' : 'مدخل التخارج'; } }
       const saleExitMethod = val('saleExitMethod') || 'none';
-      setWrapVisible('saleExitRemainingAreaWrap', saleExitMethod === 'remainingArea'); setWrapVisible('saleExitPricePerM2Wrap', saleExitMethod === 'remainingArea'); setWrapVisible('saleExitFixedValueWrap', saleExitMethod === 'fixed'); setWrapVisible('roiEndYearWrap', val('roiPeriod') === 'custom'); setWrapVisible('irrEndYearWrap', val('irrPeriod') === 'custom');
+      const saleExitActive = exitOn && saleExitMethod !== 'none';
+      setWrapVisible('saleExitYearWrap', saleExitActive);
+      setWrapVisible('saleExitCostRateWrap', saleExitActive);
+      setWrapVisible('saleExitRemainingAreaWrap', saleExitActive && saleExitMethod === 'remainingArea');
+      setWrapVisible('saleExitPricePerM2Wrap', saleExitActive && saleExitMethod === 'remainingArea');
+      setWrapVisible('saleExitFixedValueWrap', saleExitActive && saleExitMethod === 'fixed');
+      const resSaleExitGrossCard = document.getElementById('resSaleExitGrossCard');
+      if (resSaleExitGrossCard) resSaleExitGrossCard.classList.toggle('dynamic-off', !saleExitActive);
+      const resSaleExitCard = document.getElementById('resSaleExitCard');
+      if (resSaleExitCard) resSaleExitCard.classList.toggle('dynamic-off', !saleExitActive);
+      setWrapVisible('roiEndYearWrap', val('roiPeriod') === 'custom'); setWrapVisible('irrEndYearWrap', val('irrPeriod') === 'custom');
       const fundOn = val('fundFeesEnabled') !== 'no'; const fundBase = val('fundFeeBase') || 'fundCapital';
       setWrapVisible('fundCapitalInputWrap', fundOn && ['fundCapital', 'investedCapital'].includes(fundBase)); setWrapVisible('fundNavInputWrap', fundOn && fundBase === 'nav'); setWrapVisible('fundManagementRateWrap', fundOn && fundBase !== 'fixed'); setWrapVisible('fundFixedAnnualFeeWrap', fundOn && fundBase === 'fixed');
       ['fundFeeStartYear', 'fundFeeEndYear', 'fundFeeFrequency', 'fundFeeTiming', 'fundFeeGrowthRate'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = !fundOn });
@@ -12508,18 +12625,22 @@
       setConditionalSelector('.cf-fund', feesOn);
       setConditionalSelector('.cf-grace', graceOn);
 
-      ['resSaleRevenue', 'resSaleExitGross', 'resSaleExit'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), flags.sales));
+      const saleExitMethod = val('saleExitMethod') || 'none';
+      const saleExitActive = exitOn && saleExitMethod !== 'none';
+
+      ['resSaleRevenue'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), flags.sales));
+      ['resSaleExitGross', 'resSaleExit'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), exitOn && saleExitActive && flags.sales));
       ['resRevenueY1', 'resNOIY1', 'resFullOccupancyRevenue', 'resFullOccupancyOpex', 'resFullOccupancyNOI', 'resOperatingExitGross', 'resOperatingExit'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), flags.rental));
       ['resFinanceCost', 'resCashEquity', 'resEquityRequired', 'resIRR', 'resEquityPayback'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), financeOn));
       setConditionalVisibility(document.getElementById('resFundFees')?.closest('.metric'), feesOn);
-      ['resSaleExitGross', 'resSaleExit', 'resOperatingExitGross', 'resOperatingExit', 'resTerminal'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), exitOn));
+      ['resOperatingExitGross', 'resOperatingExit', 'resTerminal'].forEach(id => setConditionalVisibility(document.getElementById(id)?.closest('.metric'), exitOn));
     }
     function reorderResultCards() {
       const container = document.getElementById('resultsCards'); if (!container) return;
       container.querySelectorAll('.result-group-title').forEach(node => node.remove());
       const groups = [['التكاليف والاستثمار', ['resProjectCostBeforeFinance', 'resDevCost', 'resProjectCost', 'resFinanceCost', 'resFundFees', 'resTotalInvestmentCost']], ['الإيرادات وصافي الدخل', ['resSaleRevenue', 'resRevenueY1', 'resNOIY1', 'resFullOccupancyRevenue', 'resFullOccupancyOpex', 'resFullOccupancyNOI']], ['التمويل وحقوق الملكية', ['resLandEquity', 'resCashEquity', 'resEquityRequired']], ['التخارج', ['resSaleExitGross', 'resSaleExit', 'resOperatingExitGross', 'resOperatingExit', 'resTerminal']], ['مؤشرات العائد والاسترداد', ['resROI', 'resProjectIRR', 'resIRR', 'resPayback', 'resEquityPayback']]];
       groups.forEach(([title, ids]) => {
-        const visibleCards = ids.map(id => document.getElementById(id)?.closest('.metric')).filter(c => c && !c.classList.contains('conditional-off') && !c.classList.contains('hidden'));
+        const visibleCards = ids.map(id => document.getElementById(id)?.closest('.metric')).filter(c => c && !c.classList.contains('conditional-off') && !c.classList.contains('dynamic-off') && !c.classList.contains('hidden') && !c.hidden && c.style.display !== 'none');
         if (!visibleCards.length) return;
         const heading = document.createElement('h4');
         heading.className = 'result-group-title';
@@ -12662,7 +12783,7 @@
           devPct: Math.max(0, parseNumber(tr.querySelector('[data-field="devPct"] input')?.value))
         };
       });
-      const costPctTotal = scheduleRows.reduce((s, r) => s + r.costPct, 0), devPctTotal = scheduleRows.reduce((s, r) => s + r.devPct, 0), developmentCostBase = costTotal + externalCost;
+      const costPctTotal = Math.min(100, scheduleRows.reduce((s, r) => s + r.costPct, 0)), devPctTotal = Math.min(100, scheduleRows.reduce((s, r) => s + r.devPct, 0)), developmentCostBase = costTotal + externalCost;
       scheduleRows.forEach(r => { const stageCost = costPctTotal ? developmentCostBase * (r.costPct / costPctTotal) : 0, stageDev = devPctTotal ? developerCost * (r.devPct / devPctTotal) : 0; const c1 = r.tr.querySelector('.stageCost'), c2 = r.tr.querySelector('.stageDevPayment'); if (c1) c1.textContent = money(stageCost); if (c2) c2.textContent = money(stageDev); });
 
       const projected = [];
@@ -14345,6 +14466,16 @@
       if (!btn) return;
       const isApproved = btn.classList.contains('approved');
       if (!isApproved) {
+        const errors = validateLandCroquisClientFields();
+        if (errors.length > 0) {
+          toast(errors[0].message);
+          const firstInput = document.querySelector('#tenantProjectForm [data-key="' + errors[0].key + '"]');
+          if (firstInput) {
+            firstInput.focus();
+            firstInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          return;
+        }
         inputs.forEach(inp => {
           if (!['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio'].includes(inp.dataset.key)) {
             inp.disabled = true;
