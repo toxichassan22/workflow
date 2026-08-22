@@ -208,8 +208,10 @@ authenticated `GET /api/project-files/<id>` preview route. `team_logo` is in
 
 Section order is `basic → location → land_croquis → timeline → financial → team → market study → executive content`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order.
-There is no conceptual-2D section inside بيانات المشروع. Floor-design generation is not a
-workflow home card. `section-executive-content` is the last information section.
+There is no conceptual-2D section inside بيانات المشروع. The old floor-design page is gone
+entirely: `تصميم صور الطوابق`, its route, its state, and the `/api/floor-design/*` endpoints were
+deleted, and 2D plans plus isometric now live as cards inside التصور البصري.
+`section-executive-content` is the last information section.
 It gathers already-approved facts from every earlier section (basic, location, land/croquis,
 timeline, financial, team, market study). Generated texts — brief, opportunity, features,
 risks, executive summary — live in `draft_data.executive_content` via the hidden
@@ -304,9 +306,17 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   value. Classification currently uses `persistClassificationDraftState()` for
   `project_type`, `project_subtype`, `target_audience`, and `activity_class`.
   Visual concept uses `persistVisualConceptDraftState()` for the hidden
-  `visual_concept` input plus `tenantCreativeImages`. The page now has two
-  groups on a home page of two cards, like floor-design stages: `التصور الخارجي`
-  (`cover`, `right`, `left`, `top`, `back`) and `التصور الداخلي`. The four exterior
+  `visual_concept` input plus `tenantCreativeImages`. The home page has four
+  cards: `التصور الخارجي` (`cover`, `right`, `left`, `top`, `back`),
+  `التصور الداخلي`, `المخططات 2D`, and `مخططات الإيزومتريك`. The last two came from
+  the deleted floor-design page. الإيزومتريك is entirely under construction — its
+  card is `disabled` and `#visualConceptIsometricView` states that only. المخططات 2D
+  is client uploads only: an unbounded `plans2d` array (capped at
+  `VISUAL_CONCEPT_MAX_PLANS = 30`) where each entry carries a client-written title and
+  description, `normalizeVisualConceptPlans()` drops entries with no image, and
+  `#visualConceptPlansGenerateButton` stays `disabled` because AI generation for plans
+  is not built yet. Plans are flat records, not fixed slots, so they have no
+  approval toggle and no prompt. The four exterior
   angle titles are client-editable and persist on each slot (`slot.label`); defaults
   remain يمين / شمال / فوق / خلف until changed. Every visual image also has a required
   client caption (`slot.caption`) separate from the generation prompt. The client may
