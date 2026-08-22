@@ -444,6 +444,7 @@ position:absolute;top:0;right:0;left:0;height:{header_h}px;background:#ffffff;bo
 المحتوى:
 - في أحد الجانبين: شعار الشركة ##LOGO## (height:32px-36px) مع شعار المشروع ##PROJECT_LOGO## إن وُجد كصورة متناسقة بجانبه (أو شارة نصية باسم المشروع).
 - في الجانب المقابل: خط رأسي {accent} 3px + اسم الشريحة 16px font-weight:600 color:{primary}.
+- **قاعدة وضوح وتباين الشعارات:** إذا كان شعار الشركة (##LOGO##) أو شعار المشروع (##PROJECT_LOGO##) يحتوي على نصوص أو عناصر بيضاء أو فاتحة، ضعه داخل حاوية شارة داكنة أنيقة (مثل: `background:{primary}; padding:4px 12px; border-radius:6px; display:inline-flex; align-items:center;`) لضمان ظهوره بوضوح تام وتباين فخم ومقروء على الخلفية الفاتحة.
 """
 
     if footer_enabled:
@@ -471,14 +472,16 @@ top:{content_top}px إلى bottom:{content_bottom}px. padding: 16px 36px.
     rules += f"""
 ## الصور Placeholder
 - صورة الغلاف: ##IMAGE_COVER## (background-image فقط)
-- صور المود بورد: ##MOODBOARD_IMAGE_1## إلى ##MOODBOARD_IMAGE_4##
+- صور المود بورد (الزوايا الخارجية): ##MOODBOARD_IMAGE_1## إلى ##MOODBOARD_IMAGE_4##
+- صور التصميم والتصور الداخلي: ##INTERIOR_IMAGE_1## إلى ##INTERIOR_IMAGE_4##
+- المخططات المعمارية 2D: ##PLAN_IMAGE_1## إلى ##PLAN_IMAGE_4##
 - خريطة الموقع العام: ##MAP_OVERVIEW## (background-image)
 - خريطة المعالم: ##MAP_LANDMARKS## (background-image)
 - خريطة الوصول: ##MAP_ACCESS## (background-image)
 - خريطة نطاق التأثير: ##MAP_CATCHMENT## (background-image)
 - صور Street View: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
-- شعار الشركة: ##LOGO## (height:36px في الهيدر، height:80px في الغلاف والختام)
-- شعار المشروع المرفوع (إن وجد): ##PROJECT_LOGO## (يمكن استخدامه بجانب شعار الشركة في الهيدر أو في الغلاف وبطاقة هوية المشروع)
+- شعار الشركة: ##LOGO## (height:36px في الهيدر، height:80px في الغلاف والختام، ضعه داخل شارة داكنة إذا كانت نصوصه بيضاء)
+- شعار المشروع المرفوع (إن وجد): ##PROJECT_LOGO## (ضعه في الهيدر أو الغلاف أو بطاقة هوية المشروع، واستخدم شارة داكنة إذا كان أبيض/فاتح)
 - ممنوع رسم أي دوائر أو دبابيس أو مؤشرات موقع HTML فوق الخرائط (##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##) لأن هذه الصور تحتوي بالفعل على علامات موقع احترافية ومضلعات تحديد وبوصلة وخرائط مصغرة مرسومة مباشرة بدقة عالية.
 - ممنوع base64 أو روابط صور خارجية — استخدم الـ placeholders فقط
 

@@ -429,6 +429,9 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - لو في إحداثيات + بيانات موقع، يجب أن يتضمن العرض شرائح الموقع الأساسية: site_specs، map_overview، map_access، map_catchment، map_landmarks حسب توفر البيانات، بالإضافة إلى تحليل الموقع من الحقل site_analysis.
 - لا تحذف نوع المعلم أو المسافة أو مدة القيادة من جداول المعالم عند توفرها.
 - لو وُجد جدول زمني (`timeline_table_data`)، ضع شريحة خطة زمنية بنمط timeline واعرض كل مرحلة مع مدتها ونهايتها وملاحظتها. الملاحظات جزء من الشريحة وليست هامشًا داخليًا.
+- لو وُجدت مخططات 2D مرفوعة، ضع شريحة مخصصة للمخططات المعمارية (type=content, design_style=image أو grid) واستخدم ##PLAN_IMAGE_1## مع عنوان ووصف المخطط.
+- لو وُجدت صور للتصميم الداخلي، ضع شريحة للتصميم والتصور الداخلي (type=content, design_style=image أو grid) واستخدم ##INTERIOR_IMAGE_1## مع أسماء المكونات.
+- في جميع الشرائح: إذا كان لوجو الشركة أو المشروع يحتوي على نصوص بيضاء أو فاتحة، ضعه داخل شارة داكنة أنيقة بخلفية كحلية مؤسسية لضمان تباينه التام.
 - كل شريحة content لازم يكون فيها 3-6 bullets على الأقل
 - وزع المحتوى بحيث كل شريحة تكون ممتلئة بصرياً 60-85%
 """
@@ -855,7 +858,7 @@ def _block_external_images(html):
 
     def _replace_src(match):
         url = match.group(1)
-        if any(url.startswith(p) for p in allowed) or url.startswith('/uploads/') or url.startswith('/assets/'):
+        if any(url.startswith(p) for p in allowed) or url.startswith('##INTERIOR_IMAGE_') or url.startswith('##PLAN_IMAGE_') or url.startswith('##2D_PLAN_') or url.startswith('/uploads/') or url.startswith('/assets/'):
             return match.group(0)
         if url.startswith('http://') or url.startswith('https://') or url.startswith('data:'):
             return ''
@@ -1094,6 +1097,31 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
 
     html = re.sub(r'#*MOODBOARD_IMAGE_(\d+)#*', _replace_moodboard_token, html, flags=re.IGNORECASE)
     html = re.sub(r'#*PROJECT_IMAGE_(\d+)#*', _replace_moodboard_token, html, flags=re.IGNORECASE)
+
+    # Replace interior tokens
+    interiors = []
+    if isinstance(creative_images, dict):
+        interiors = creative_images.get('interior') or creative_images.get('interior_images') or []
+        if not isinstance(interiors, list):
+            interiors = [interiors]
+    for idx, url in enumerate(interiors):
+        num = idx + 1
+        if url:
+            html = re.sub(rf'#*INTERIOR_IMAGE_{num}#*', _css_url(str(url)), html, flags=re.IGNORECASE)
+    html = re.sub(r'#*INTERIOR_IMAGE_\d+#*', '', html, flags=re.IGNORECASE)
+
+    # Replace 2D plan tokens
+    plans = []
+    if isinstance(creative_images, dict):
+        plans = creative_images.get('plans') or creative_images.get('plans2d') or []
+        if not isinstance(plans, list):
+            plans = [plans]
+    for idx, url in enumerate(plans):
+        num = idx + 1
+        if url:
+            html = re.sub(rf'#*PLAN_IMAGE_{num}#*', _css_url(str(url)), html, flags=re.IGNORECASE)
+            html = re.sub(rf'#*2D_PLAN_{num}#*', _css_url(str(url)), html, flags=re.IGNORECASE)
+    html = re.sub(r'#*(?:PLAN_IMAGE|2D_PLAN)_\d+#*', '', html, flags=re.IGNORECASE)
 
     # Do not leave the cover blank simply because the model forgot its token.
     if slide_type == 'cover' and cover and cover not in html:

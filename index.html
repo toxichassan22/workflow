@@ -17179,12 +17179,20 @@
 
         persistVisualConceptDraftState();
         const visualMoodboard = VISUAL_CONCEPT_SLOTS.slice(1).map(item => tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl || tenantVisualConceptState?.slots?.[item.id]?.imageUrl || '');
+        const visualInteriorImages = Object.entries(tenantVisualConceptState?.slots || {})
+          .filter(([k, v]) => isVisualConceptInteriorSlot(k) && (v?.approvedImageUrl || v?.imageUrl))
+          .map(([k, v]) => v.approvedImageUrl || v.imageUrl);
+        const visualPlans2dImages = (tenantVisualConceptState?.plans2d || [])
+          .map(p => p?.imageUrl || '')
+          .filter(Boolean);
         const generationImages = {
           ...tenantCreativeImages,
           cover: tenantVisualConceptState?.slots?.cover?.approvedImageUrl || tenantCreativeImages.cover || tempCoverImage || '',
           moodboard: visualMoodboard.some(Boolean)
             ? visualMoodboard
-            : (Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard.map((image, index) => image || tempMoodboardImages[index] || '') : [])
+            : (Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard.map((image, index) => image || tempMoodboardImages[index] || '') : []),
+          interior: visualInteriorImages,
+          plans: visualPlans2dImages
         };
         const hasUnapprovedImages = !!tempCoverImage || Object.keys(tempMoodboardImages || {}).length > 0;
         if (hasUnapprovedImages) toast('سيتم استخدام الصور المولدة غير المعتمدة مع استمرار إمكانية اعتمادها لاحقًا.');
@@ -17328,6 +17336,27 @@
         const projReg = new RegExp('#*PROJECT_IMAGE_' + num + '#*', 'gi');
         cleanHtml = cleanHtml.replace(mbReg, mbUrl).replace(projReg, mbUrl);
       }
+
+      // Interior Placeholders
+      const interiorImagesList = Array.isArray(creativeImages.interior) ? creativeImages.interior : [];
+      for (let idx = 0; idx < 16; idx++) {
+        const intUrl = interiorImagesList[idx] || '';
+        const num = idx + 1;
+        const intReg = new RegExp('#*INTERIOR_IMAGE_' + num + '#*', 'gi');
+        cleanHtml = cleanHtml.replace(intReg, intUrl);
+      }
+      cleanHtml = cleanHtml.replace(/#*INTERIOR_IMAGE_\d+#*/gi, '');
+
+      // 2D Plans Placeholders
+      const plansImagesList = Array.isArray(creativeImages.plans) ? creativeImages.plans : [];
+      for (let idx = 0; idx < 16; idx++) {
+        const planUrl = plansImagesList[idx] || '';
+        const num = idx + 1;
+        const planReg1 = new RegExp('#*PLAN_IMAGE_' + num + '#*', 'gi');
+        const planReg2 = new RegExp('#*2D_PLAN_' + num + '#*', 'gi');
+        cleanHtml = cleanHtml.replace(planReg1, planUrl).replace(planReg2, planUrl);
+      }
+      cleanHtml = cleanHtml.replace(/#*(?:PLAN_IMAGE|2D_PLAN)_\d+#*/gi, '');
 
       // Map Placeholders
       if (creativeImages.map_placeholders && typeof creativeImages.map_placeholders === 'object') {

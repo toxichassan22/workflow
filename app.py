@@ -1227,18 +1227,29 @@ def _get_images_info(images):
     if isinstance(images, list):
         has_cover = bool(images[0]) if images else False
         moodboard_count = sum(1 for img in images[1:] if img) if len(images) > 1 else 0
+        interior_count = 0
+        plans_count = 0
     elif isinstance(images, dict):
         has_cover = bool(images.get('cover'))
         moodboard_count = sum(1 for img in images.get('moodboard', []) if img)
+        interior_count = sum(1 for img in images.get('interior', []) if img)
+        plans_count = sum(1 for img in images.get('plans', []) if img)
     else:
         has_cover = False
         moodboard_count = 0
+        interior_count = 0
+        plans_count = 0
 
     info = f"- صورة الغلاف: {'متوفرة (استخدم ##IMAGE_COVER##)' if has_cover else 'لا توجد'}\n"
     if moodboard_count > 0:
-        info += f"- صور المود بورد (استخدم الرموز ##MOODBOARD_IMAGE_1## حتى ##MOODBOARD_IMAGE_{moodboard_count}##): {moodboard_count} صور متوفرة\n"
+        info += f"- صور المود بورد والزوايا الخارجية (استخدم الرموز ##MOODBOARD_IMAGE_1## حتى ##MOODBOARD_IMAGE_{moodboard_count}##): {moodboard_count} صور متوفرة\n"
     else:
         info += "- صور المود بورد: لا توجد\n"
+
+    if interior_count > 0:
+        info += f"- صور التصميم والتصور الداخلي (استخدم الرموز ##INTERIOR_IMAGE_1## حتى ##INTERIOR_IMAGE_{interior_count}##): {interior_count} صور متوفرة\n"
+    if plans_count > 0:
+        info += f"- صور المخططات المعمارية 2D (استخدم الرموز ##PLAN_IMAGE_1## حتى ##PLAN_IMAGE_{plans_count}##): {plans_count} مخططات متوفرة\n"
 
     # Map image placeholders (populated when project has location data)
     map_placeholders = {
