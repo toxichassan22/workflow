@@ -295,7 +295,7 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
 
 
 def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
-                  reasoning_effort=None, response_format=None, model=None):
+                  reasoning_effort=None, response_format=None, model=None, image_references=None):
     """Compatibility wrapper: text/design work uses configured models through OpenRouter."""
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is required for the text model"}}
@@ -308,10 +308,11 @@ def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
         response_format=response_format,
+        image_references=image_references,
     )
 
 
-def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300, model=None):
+def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300, model=None, image_references=None):
     """
     Race multiple identical GLM calls in parallel and return the first valid response.
     Helps when a single model invocation is slow or returns malformed/empty content.
@@ -320,7 +321,7 @@ def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tok
 
     def _attempt():
         try:
-            resp = call_zai_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, model=model)
+            resp = call_zai_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, model=model, image_references=image_references)
             if not _has_chat_choices(resp):
                 return None
             content = extract_chat_content(resp, 'GLM-PARALLEL')
@@ -2226,14 +2227,31 @@ def api_generate_content():
 
 @app.route('/api/ai-edit-slide', methods=['POST'])
 def api_ai_edit_slide():
-    """Compatibility: AI edit a slide"""
+    """Compatibility: AI edit a slide with Playwright Vision guidance"""
     data = request.json
     instruction = data.get('instruction', '') or data.get('editRequest', '') or data.get('message', '')
     slide_html = data.get('slideHtml', '') or data.get('slideContent', '') or data.get('currentSlideHtml', '')
     project_data = clean_project_data(data.get('projectData', {}))
     presentation_id = data.get('presentationId')
 
-    prompt = f"""عدّل الشريحة التالية حسب التعليمات:
+    from auth import get_optional_tenant_id
+    tenant_id = get_optional_tenant_id() or 'default'
+    branding = db.get_branding(tenant_id) or {}
+
+    vision_image_uri = None
+    try:
+        from generate_pdf_from_preview import render_slide_to_image_base64
+        vision_image_uri = render_slide_to_image_base64(slide_html, branding=branding, tenant_id=tenant_id)
+    except Exception as ve:
+        print(f"[AI-EDIT VISION] Screenshot failed: {ve}")
+
+    image_refs = [{"data_uri": vision_image_uri}] if vision_image_uri else None
+    vision_note = (
+        "\nتم تزويدك بلقطة شاشة مرئية فعلية للشريحة الحالية كما تظهر للمستخدم (1280x720). انظر للتنسيق ونفذ التعديل المطلوب بتناسق بصري."
+        if vision_image_uri else ""
+    )
+
+    prompt = f"""عدّل الشريحة التالية حسب التعليمات:{vision_note}
 التعليمات: {instruction}
 
 الشريحة الحالية:
@@ -2245,13 +2263,11 @@ def api_ai_edit_slide():
 أعد الشريحة بالـ HTML المعدّل."""
 
     try:
-        response = call_zai_chat(prompt, "عدّل الشريحة.", max_tokens=4000)
+        response = call_zai_chat(prompt, "عدّل الشريحة.", max_tokens=4000, model=SLIDE_TEXT_MODEL, image_references=image_refs)
         html = extract_chat_content(response, "EDIT")
         html = extract_html_from_glm({'choices': [{'message': {'content': html}}]})
         
         # Post-process and resolve placeholders
-        from auth import get_optional_tenant_id
-        tenant_id = get_optional_tenant_id() or 'default'
         # Preserve the actual slide semantics. In particular, a closing slide
         # must not be treated as content and receive a header/footer.
         slide_number = data.get('slideNumber') or data.get('slide_number')
@@ -2401,8 +2417,19 @@ def api_pdf_chat_upload():
 
 @app.route('/api/render-slide-image', methods=['POST'])
 def api_render_slide_image():
-    """Compatibility: Render slide as image (return HTML)"""
-    slide_html = request.json.get('html', '')
+    """Render slide as image (returns base64 data URI via Playwright)"""
+    data = request.json or {}
+    slide_html = data.get('html', '')
+    from auth import get_optional_tenant_id
+    tenant_id = get_optional_tenant_id() or 'default'
+    branding = db.get_branding(tenant_id) or {}
+    try:
+        from generate_pdf_from_preview import render_slide_to_image_base64
+        uri = render_slide_to_image_base64(slide_html, branding=branding, tenant_id=tenant_id)
+        if uri:
+            return jsonify({'success': True, 'imageDataUri': uri, 'html': slide_html})
+    except Exception as e:
+        print(f"[RENDER-SLIDE-IMAGE ERROR] {e}")
     return jsonify({'success': True, 'html': slide_html})
 
 
@@ -2597,7 +2624,7 @@ def _designer_target_indexes(action, count, current_index, force_all=False):
 
 
 def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None):
-    """Ask GLM for one complete slide and retry malformed responses."""
+    """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
         try:
             tenant_id = g.tenant_id
@@ -2616,6 +2643,29 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
         if training_context else ''
     )
 
+    # Capture Playwright vision screenshot of the current slide if available
+    vision_image_uri = None
+    try:
+        from generate_pdf_from_preview import render_slide_to_image_base64
+        vision_image_uri = render_slide_to_image_base64(html, branding=branding, tenant_id=tenant_id)
+    except Exception as ve:
+        print(f"[DESIGNER-EDIT VISION] Screenshot failed: {ve}")
+
+    image_refs = None
+    vision_note = ""
+    if vision_image_uri:
+        image_refs = [{"data_uri": vision_image_uri}]
+        vision_note = (
+            "\n\n## الرؤية البصرية للشريحة الحالية (Visual Vision Snapshot):\n"
+            "لقد تم تزويدك بلقطة شاشة مرئية فعلية للشريحة الحالية بدقة 1280x720 كما تظهر للمستخدم تماماً.\n"
+            "- انظر بدقة إلى اللقطة المرفقة لتفهم:\n"
+            "  1. التوزيع البصري، الهوامش، والمسافات البينية (spacing / padding / margins).\n"
+            "  2. أحجام الخطوط والتسلسل الهرمي للنصوص وعناوين البطاقات.\n"
+            "  3. تموضع وحجم الصور والبطاقات والشعارات.\n"
+            "  4. درجات الألوان وتناسق الخلفية مع النصوص والبطاقات.\n"
+            "- نفّذ التعديل المطلوب بدقة جراحية مع الحفاظ على التناسق البصري والجمالي والتوازن وبدون تداخل نصوص."
+        )
+
     # Store base64 data URIs to avoid inflating prompt with hundreds of thousands of tokens
     base64_map = {}
     def _preserve_base64(match):
@@ -2628,8 +2678,8 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
     if len(clean_html) > 30000:
         clean_html = clean_html[:30000]
 
-    prompt = f"""{rules}{training_note}
-أنت محرر شرائح. عدّل الشريحة التالية حسب الطلب، وأعد JSON فقط بالشكل:
+    prompt = f"""{rules}{training_note}{vision_note}
+أنت Sol، مصمم ومحرر شرائح فائق الذوق والدقة. عدّل الشريحة التالية حسب الطلب، وأعد JSON فقط بالشكل:
 {{"html":"<div class=\\"slide\\">...</div>","response":"رسالة عربية قصيرة"}}
 حافظ على كل المحتوى المفيد والهوية البصرية. لا تستخدم روابط صور خارجية أو base64.
 عنوان الشريحة: {title}
@@ -2640,7 +2690,7 @@ HTML الحالي:
 
     for attempt in range(1, 4):
         try:
-            raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=7000), 'DESIGNER-EDIT')
+            raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=7000, model=SLIDE_TEXT_MODEL, image_references=image_refs), 'DESIGNER-EDIT')
             parsed = _designer_json_response(raw)
             output = parsed.get('html') or parsed.get('content') or parsed.get('slide_html')
             if output and ('slide' in output and '<div' in output):

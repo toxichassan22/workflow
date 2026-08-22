@@ -214,5 +214,96 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+
+def render_slide_to_image_base64(slide_html, branding=None, tenant_id=None, width=1280, height=720):
+    """
+    Render a single slide HTML into a base64 PNG data URI via Playwright Chromium.
+    Used for Vision-guided AI slide editing so multimodal models (Sol) can visually inspect layout.
+    """
+    if not slide_html or not isinstance(slide_html, str):
+        return None
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[VISION] Playwright not available; skipping vision snapshot")
+        return None
+
+    import base64
+    tmp_dir = tempfile.mkdtemp(prefix='slide_vision_')
+    try:
+        tenant_id = tenant_id or (branding or {}).get('tenant_id')
+        html = resolve_logo_in_html(slide_html, tenant_id)
+
+        def _local_logo_uri(tid):
+            if not tid:
+                return None
+            for ext in ('.png', '.jpg', '.jpeg', '.webp'):
+                p = BASE_DIR / 'uploads' / str(tid) / f'logo{ext}'
+                if p.exists():
+                    return p.as_uri()
+            return None
+
+        logo_uri = _local_logo_uri(tenant_id)
+        if logo_uri and tenant_id:
+            html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/logo(?:\?[^\s"\'\\)]+)?', logo_uri, html)
+
+        html = _resolve_asset_urls(html)
+        html = sanitize_slide_html_for_export(html)
+        slides = extract_slide_elements(html)
+        if slides:
+            html = slides[0]
+
+        font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
+        layout_css = f"""
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+html, body {{ margin:0; padding:0; background:#fff; direction:rtl; width:{width}px; height:{height}px; overflow:hidden; }}
+.slide {{ width:{width}px !important; height:{height}px !important; direction:rtl; position:relative; overflow:hidden; }}
+img {{ max-width:100%; max-height:100%; object-fit:cover; }}
+"""
+
+        full_html = f"""<!DOCTYPE html>
+<html dir="rtl">
+<head>
+<meta charset="utf-8">
+<style>{layout_css}</style>
+<style>{font_css}</style>
+</head>
+<body style="margin:0;padding:0;background:#fff;">
+{html}
+</body>
+</html>"""
+
+        resolved_html_path = Path(tmp_dir) / 'slide_preview.html'
+        with open(resolved_html_path, "w", encoding="utf-8") as f:
+            f.write(full_html)
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--font-render-hinting=none"
+                ]
+            )
+            page = browser.new_page(viewport={"width": width, "height": height})
+            page.goto(resolved_html_path.as_uri(), wait_until="load", timeout=15000)
+            try:
+                page.evaluate("() => document.fonts.ready")
+            except Exception:
+                pass
+            buf = page.screenshot(type='png')
+            browser.close()
+            return f"data:image/png;base64,{base64.b64encode(buf).decode('utf-8')}"
+    except Exception as e:
+        print(f"[VISION ERROR] Failed to render slide snapshot: {e}")
+        return None
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     generate_pdf(["<div class='slide'>test</div>"], {}, "outputs/test.pdf")
+
