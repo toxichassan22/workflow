@@ -5901,20 +5901,7 @@
     function showGenProgress() {
       genStartMs = Date.now();
       genProgressValue = 0;
-      const stepsEl = document.getElementById('genSteps');
-      if (stepsEl) {
-        stepsEl.innerHTML = GEN_STEPS.map((s, idx) =>
-          '<div id="genStep_' + s.id + '" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;transition:all .3s ease">' +
-          '<div class="gen-dot-wrapper" style="width:22px;height:22px;border-radius:50%;background:#e2e8f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:#64748b">' + (idx + 1) + '</div>' +
-          '<div style="flex:1;display:flex;flex-direction:column;gap:1px">' +
-          '<span style="font-size:13px;font-weight:600;color:#475569;transition:color .3s">' + s.label + '</span>' +
-          '<span class="gen-step-status" style="font-size:11px;color:#94a3b8">قيد الانتظار</span>' +
-          '</div>' +
-          '</div>'
-        ).join('');
-      }
-      setGenPct(0, 'جاري التحضير...');
-      showTenantPage('tenantGenerationPage');
+      showTenantPage('tenantSlidesPage');
     }
 
     function setGenPct(pct, subtitle) {
@@ -7106,7 +7093,7 @@
             clearTenantNavigationState();
             return false;
           }
-          if (state.pageId === 'tenantGenerationPage') showGenProgress();
+          if (state.pageId === 'tenantGenerationPage') showTenantPage('tenantSlidesPage');
           else if (state.pageId !== 'tenantSlidesPage') {
             await navigateTenantWorkflow(state.pageId);
             if (state.pageId === 'tenantProjectPage' && state.activeSection) showSection(state.activeSection, true);
@@ -7120,7 +7107,7 @@
             if (state.mode === 'new') {
               await startTenantProject();
               if (state.pageId === 'tenantProjectPage') return true;
-              if (state.pageId === 'tenantGenerationPage') showGenProgress();
+              if (state.pageId === 'tenantGenerationPage') showTenantPage('tenantSlidesPage');
               else await navigateTenantWorkflow(state.pageId);
               return true;
             }
@@ -7132,7 +7119,7 @@
             showTenantPage(state.pageId);
             if (tenantActiveProjectSection) showSection(tenantActiveProjectSection, true);
           } else if (state.pageId === 'tenantGenerationPage') {
-            showGenProgress();
+            showTenantPage('tenantSlidesPage');
           } else {
             await navigateTenantWorkflow(state.pageId);
           }
@@ -7142,7 +7129,7 @@
         if (TENANT_NAVIGATION_CONTEXT_PAGES.has(state.pageId)) {
           await startTenantProject();
           if (state.pageId === 'tenantProjectPage') return true;
-          if (state.pageId === 'tenantGenerationPage') showGenProgress();
+          if (state.pageId === 'tenantGenerationPage') showTenantPage('tenantSlidesPage');
           else await navigateTenantWorkflow(state.pageId);
           return true;
         }
@@ -16064,33 +16051,7 @@
     }
 
     async function submitTenantProject() {
-      const formData = await collectTenantFormData();
-      tenantProjectData = { ...tenantProjectData, ...formData };
-      if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
-      tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-      tenantProjectData.tenantCreativeImages = tenantCreativeImages;
-      if (!(await validateFinancialStudyBeforeProceed())) return;
-
-      showGenProgress();
-      setGenStep('plan', 'active');
-      setGenPct(3, 'حفظ البيانات...');
-      await saveProjectAsDraft(true);
-      setGenPct(8, 'تحليل بيانات المشروع...');
-      const data = await requestTenantSlidePlan(tenantProjectData);
-      if (data.success && data.plan) {
-        tenantSlidePlan = data.plan;
-        tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-        setGenStep('plan', 'done');
-        setGenPct(20, 'تم إعداد خطة الشرائح — جاري توليد الصور...');
-        triggerAutoSaveDraft();
-        openTenantVisualConceptPage();
-      } else {
-        const errorMessage = data.error || 'فشل إعداد خطة العرض';
-        setGenStep('plan', 'error');
-        setGenPct(8, errorMessage);
-        console.error('[SLIDE PLAN]', data);
-        toast(errorMessage);
-      }
+      return directGenerateProposalFile();
     }
 
     function renderTenantSlidePlan() {
