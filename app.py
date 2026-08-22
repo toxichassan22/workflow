@@ -3684,11 +3684,12 @@ def api_slide_plan():
     for attempt in range(1, max_attempts + 1):
         try:
             response = call_zai_chat_parallel(
-                "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية.",
+                "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية الاستثمارية.",
                 prompt,
-                max_tokens=4000,
+                max_tokens=6000,
                 attempts=1,
-                timeout=20
+                timeout=45,
+                model=SLIDE_TEXT_MODEL
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
             plan = parse_slide_plan(content, effective_branding, project_data)
@@ -11637,8 +11638,13 @@ HTML الحالي:
                 for _attempt in range(3):
                     try:
                         plan_resp = call_zai_chat_parallel(
-                            "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية.",
-                            plan_prompt, max_tokens=4000, attempts=2)
+                            "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية الاستثمارية.",
+                            plan_prompt,
+                            max_tokens=6000,
+                            attempts=2,
+                            timeout=45,
+                            model=SLIDE_TEXT_MODEL
+                        )
                         plan = slide_engine.parse_slide_plan(extract_chat_content(plan_resp, "AGENT-SLIDE-PLAN"), plan_branding, project_data)
                         break
                     except Exception as plan_err:
