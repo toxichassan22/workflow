@@ -1460,6 +1460,124 @@
       display: block;
     }
 
+    #tenantGenerationPage.active {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 480px;
+      padding: 48px 24px;
+    }
+
+    .tenant-live-gen-banner {
+      background: linear-gradient(135deg, #102a43 0%, #1a4d6f 100%);
+      color: #fff;
+      padding: 12px 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      animation: slideDownBanner 0.3s ease-out;
+      z-index: 10;
+      position: sticky;
+      top: 0;
+    }
+    @keyframes slideDownBanner {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .tenant-live-gen-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .tenant-live-gen-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .tenant-live-gen-tag {
+      background: rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #f1f5f9;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+      letter-spacing: 0.3px;
+    }
+    .tenant-live-gen-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+    .tenant-live-gen-details {
+      font-size: 13px;
+      color: #cbd5e1;
+    }
+    .tenant-live-gen-progress {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 240px;
+    }
+    .tenant-live-gen-bar {
+      flex: 1;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .tenant-live-gen-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #c5a880 0%, #e2c9a6 100%);
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+    .tenant-live-gen-pct {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f8fafc;
+      min-width: 40px;
+      text-align: left;
+    }
+    .ge-slide-card.generating-live {
+      border: 2px solid #3b82f6 !important;
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15) !important;
+    }
+    .ge-thumb.generating-live {
+      border-color: #3b82f6 !important;
+      background: #eff6ff !important;
+    }
+    .ge-thumb.generating-live .ge-thumb-num {
+      background: #3b82f6 !important;
+      color: #fff !important;
+    }
+    .live-gen-skeleton-stage {
+      padding: 48px;
+      background: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      text-align: center;
+      height: 100%;
+      min-height: 400px;
+      border-radius: 8px;
+      box-sizing: border-box;
+    }
+    .live-gen-skeleton-pulse {
+      background: linear-gradient(135deg, #f0f7ff 0%, #e0f2fe 100%);
+      border: 2px dashed #93c5fd;
+    }
+    @keyframes pulseDot {
+      from { opacity: 0.3; transform: scale(0.8); }
+      to { opacity: 1; transform: scale(1.2); }
+    }
+
     .tenant-page h2 {
       margin: 0 0 18px;
       color: var(--p);
@@ -5181,6 +5299,23 @@
         </div>
       </div>
 
+      <!-- Live Generation Banner -->
+      <div id="tenantLiveGenBanner" class="tenant-live-gen-banner" style="display:none;">
+        <div class="tenant-live-gen-main">
+          <div class="tenant-live-gen-info">
+            <span class="tenant-live-gen-tag">توليد حي ومباشر</span>
+            <span id="liveGenSlideTitle" class="tenant-live-gen-title">جاري توليد العرض...</span>
+            <span id="liveGenSlideDetails" class="tenant-live-gen-details"></span>
+          </div>
+          <div class="tenant-live-gen-progress">
+            <div class="tenant-live-gen-bar">
+              <div id="liveGenProgressBar" class="tenant-live-gen-fill" style="width: 0%;"></div>
+            </div>
+            <span id="liveGenProgressPct" class="tenant-live-gen-pct">0%</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Main split body container -->
       <div class="ge-body">
         <!-- Right Sidebar: Thumbnails -->
@@ -5572,24 +5707,27 @@
     <!-- GENERATION PROGRESS PAGE                                       -->
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <section id="tenantGenerationPage" class="tenant-page">
-      <div style="max-width:520px;width:100%;text-align:center;padding:20px 0">
-        <h2 id="genTitle" style="margin:0 0 8px;font-size:20px;font-weight:700;color:var(--txt)">جاري التوليد...</h2>
-        <p id="genSubtitle" style="margin:0 0 24px;color:var(--muted);font-size:14px"></p>
+      <div style="max-width:640px;width:100%;text-align:center;margin:0 auto;">
+        <div style="display:inline-flex;align-items:center;gap:6px;padding:4px 16px;border-radius:999px;background:rgba(26,77,111,0.08);color:#1a4d6f;font-size:12px;font-weight:700;margin-bottom:16px;">
+          معالجة وتصميم العرض الاستثماري
+        </div>
+        <h2 id="genTitle" style="margin:0 0 8px;font-size:24px;font-weight:800;color:#1a4d6f;">جاري بناء وتصميم العرض...</h2>
+        <p id="genSubtitle" style="margin:0 0 24px;color:var(--muted);font-size:14px;min-height:20px;font-weight:500;">جاري تحليل بيانات المشروع وإعداد الهيكل...</p>
 
         <!-- Main progress bar -->
-        <div style="background:var(--soft);border-radius:8px;height:10px;overflow:hidden;margin-bottom:12px">
+        <div style="background:#eef2f6;border-radius:999px;height:12px;overflow:hidden;margin-bottom:10px;padding:2px;box-shadow:inset 0 1px 2px rgba(0,0,0,0.06);">
           <div id="genBar"
-            style="height:100%;width:0%;background:linear-gradient(90deg,var(--p),var(--pd));transition:width .5s ease;border-radius:8px">
+            style="height:100%;width:0%;background:linear-gradient(90deg,#1a4d6f,#3b82f6);border-radius:999px;transition:width .4s ease;">
           </div>
         </div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:32px">
-          <span id="genPct" style="font-size:22px;font-weight:800;color:var(--p)">0%</span>
-          <span id="genEta" style="font-size:13px;color:var(--muted);align-self:center"></span>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;padding:0 4px;">
+          <span id="genPct" style="font-size:26px;font-weight:800;color:#1a4d6f;font-feature-settings:'tnum';">0%</span>
+          <span id="genEta" style="font-size:12px;color:var(--muted);font-weight:600;background:#f8fafc;padding:3px 10px;border-radius:6px;border:1px solid #e2e8f0;"></span>
         </div>
 
         <!-- Steps checklist -->
         <div id="genSteps"
-          style="text-align:right;max-width:400px;margin:0 auto;background:#fafafa;border-radius:12px;padding:12px;border:1px solid var(--line)">
+          style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;text-align:right;">
         </div>
       </div>
     </section>
@@ -5765,10 +5903,13 @@
       genProgressValue = 0;
       const stepsEl = document.getElementById('genSteps');
       if (stepsEl) {
-        stepsEl.innerHTML = GEN_STEPS.map(s =>
-          '<div id="genStep_' + s.id + '" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;margin-bottom:4px;transition:background .3s">' +
-          '<span class="gen-dot" style="width:10px;height:10px;border-radius:50%;background:#ddd;flex-shrink:0;transition:background .3s"></span>' +
-          '<span style="font-size:13px;color:#888;transition:color .3s">' + s.label + '</span>' +
+        stepsEl.innerHTML = GEN_STEPS.map((s, idx) =>
+          '<div id="genStep_' + s.id + '" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;transition:all .3s ease">' +
+          '<div class="gen-dot-wrapper" style="width:22px;height:22px;border-radius:50%;background:#e2e8f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:#64748b">' + (idx + 1) + '</div>' +
+          '<div style="flex:1;display:flex;flex-direction:column;gap:1px">' +
+          '<span style="font-size:13px;font-weight:600;color:#475569;transition:color .3s">' + s.label + '</span>' +
+          '<span class="gen-step-status" style="font-size:11px;color:#94a3b8">قيد الانتظار</span>' +
+          '</div>' +
           '</div>'
         ).join('');
       }
@@ -5797,20 +5938,30 @@
     function setGenStep(stepId, state) {
       const el = document.getElementById('genStep_' + stepId);
       if (!el) return;
-      const dot = el.querySelector('.gen-dot');
-      const label = el.querySelector('span:last-child');
+      const dot = el.querySelector('.gen-dot-wrapper');
+      const label = el.querySelector('span:first-child');
+      const status = el.querySelector('.gen-step-status');
       if (state === 'active') {
         el.style.background = '#f0f7ff';
-        if (dot) dot.style.background = 'var(--p)';
-        if (label) { label.style.color = 'var(--p)'; label.style.fontWeight = '700'; }
+        el.style.borderColor = '#93c5fd';
+        el.style.boxShadow = '0 2px 6px rgba(59,130,246,0.08)';
+        if (dot) { dot.style.background = '#1a4d6f'; dot.style.color = '#fff'; }
+        if (label) { label.style.color = '#1a4d6f'; label.style.fontWeight = '700'; }
+        if (status) { status.textContent = 'جاري التنفيذ...'; status.style.color = '#2563eb'; status.style.fontWeight = '600'; }
       } else if (state === 'done') {
         el.style.background = '#f0fdf4';
-        if (dot) dot.style.background = '#22c55e';
-        if (label) { label.style.color = '#16a34a'; label.style.fontWeight = '400'; }
+        el.style.borderColor = '#bbf7d0';
+        el.style.boxShadow = 'none';
+        if (dot) { dot.style.background = '#16a34a'; dot.style.color = '#fff'; }
+        if (label) { label.style.color = '#166534'; label.style.fontWeight = '600'; }
+        if (status) { status.textContent = 'مكتمل'; status.style.color = '#16a34a'; status.style.fontWeight = '500'; }
       } else if (state === 'error') {
         el.style.background = '#fef2f2';
-        if (dot) dot.style.background = '#ef4444';
-        if (label) { label.style.color = '#dc2626'; }
+        el.style.borderColor = '#fecaca';
+        el.style.boxShadow = 'none';
+        if (dot) { dot.style.background = '#dc2626'; dot.style.color = '#fff'; }
+        if (label) { label.style.color = '#991b1b'; }
+        if (status) { status.textContent = 'تخطي / غير متاح'; status.style.color = '#dc2626'; }
       }
     }
 
@@ -5821,6 +5972,27 @@
       setTimeout(() => {
         hideLoader();
       }, 600);
+    }
+
+    function setLiveGenBanner(visible, title, details, pct) {
+      const banner = document.getElementById('tenantLiveGenBanner');
+      if (!banner) return;
+      if (!visible) {
+        banner.style.display = 'none';
+        return;
+      }
+      banner.style.display = 'block';
+      const titleEl = document.getElementById('liveGenSlideTitle');
+      const detailsEl = document.getElementById('liveGenSlideDetails');
+      const barEl = document.getElementById('liveGenProgressBar');
+      const pctEl = document.getElementById('liveGenProgressPct');
+      if (titleEl && title) titleEl.textContent = title;
+      if (detailsEl) detailsEl.textContent = details || '';
+      if (typeof pct === 'number') {
+        const clampedPct = Math.max(0, Math.min(100, Math.round(pct)));
+        if (barEl) barEl.style.width = clampedPct + '%';
+        if (pctEl) pctEl.textContent = clampedPct + '%';
+      }
     }
 
     //  TENANT UI (Multi-Tenant Frontend)
@@ -15868,20 +16040,20 @@
       // Auto-save draft
       await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
 
-      showGenProgress();
+      // Navigate directly to presentation preview page
+      showTenantPage('tenantSlidesPage');
+
       if (!tenantSlidePlan) {
-        setGenStep('plan', 'active');
-        setGenPct(5, 'تحليل بيانات المشروع...');
+        setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...', 'تحليل متطلبات المشروع والهيكل الأنسب', 5);
         const data = await requestTenantSlidePlan(tenantProjectData);
         if (data.success && data.plan) {
           tenantSlidePlan = data.plan;
-          setGenStep('plan', 'done');
-          setGenPct(20, 'تم إعداد خطة الشرائح');
+          tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', 'بدء التوليد المباشر للشرائح', 12);
           triggerAutoSaveDraft();
         } else {
           const errorMessage = data.error || 'تعذر إعداد خطة الشرائح';
-          setGenStep('plan', 'error');
-          setGenPct(5, errorMessage);
+          setLiveGenBanner(true, 'تعذر إعداد الخطة', errorMessage, 5);
           console.error('[SLIDE PLAN]', data);
           toast(errorMessage);
           return;
@@ -17246,10 +17418,50 @@
         }
         if (!(await validateFinancialStudyBeforeProceed())) return;
 
-        // Show generation page if not already visible
-        if (!document.getElementById('tenantGenerationPage').classList.contains('active')) {
-          showGenProgress();
-          setGenStep('plan', 'done');
+        // Ensure we are on the presentation page
+        showTenantPage('tenantSlidesPage');
+
+        // Set up live generation banner
+        setLiveGenBanner(true, 'بدء توليد الشرائح بالذكاء الاصطناعي...', 'إجمالي ' + totalSlides + ' شريحة', 10);
+
+        // Pre-render skeleton cards in main preview area
+        const wrap = document.getElementById('tenantSlidesMain');
+        if (wrap) {
+          wrap.innerHTML = '';
+          tenantSlidePlan.slides.forEach((plan, i) => {
+            const container = document.createElement('div');
+            container.className = 'ge-slide-card' + (i === 0 ? ' active-slide' : '');
+            container.id = 'slide-card-' + i;
+            container.style.cssText = 'margin-bottom:24px; position:relative;';
+            container.onclick = () => selectTenantSlide(i);
+            const stage = document.createElement('div');
+            stage.className = 'tenant-slide-stage';
+            stage.style.setProperty('--stage-w', '960px');
+            stage.style.setProperty('--stage-h', '540px');
+            stage.style.setProperty('--slide-scale', '0.75');
+            stage.innerHTML = '<div class="slide live-gen-skeleton-stage" id="slide-stage-inner-' + i + '">' +
+              '<div style="font-size:12px;font-weight:700;color:#94a3b8;letter-spacing:1px">الشريحة ' + (i + 1) + ' من ' + totalSlides + '</div>' +
+              '<div style="font-size:22px;font-weight:700;color:#1e293b;margin:6px 0">' + escapeHtml(plan.title || ('شريحة ' + (i + 1))) + '</div>' +
+              '<div style="font-size:13px;color:#64748b;background:#f1f5f9;padding:6px 16px;border-radius:20px">قيد الانتظار للتوليد</div>' +
+              '</div>';
+            container.appendChild(stage);
+            wrap.appendChild(container);
+          });
+        }
+
+        // Pre-render sidebar planned thumbnails
+        const sidebar = document.getElementById('tenantSlidesSidebar');
+        if (sidebar) {
+          sidebar.innerHTML = '';
+          tenantSlidePlan.slides.forEach((plan, i) => {
+            const thumb = document.createElement('div');
+            thumb.className = 'ge-thumb' + (i === 0 ? ' active' : '');
+            thumb.id = 'thumb-slide-' + i;
+            thumb.onclick = () => selectTenantSlide(i);
+            thumb.innerHTML = '<span class="ge-thumb-num">' + (i + 1) + '</span>' +
+              '<span class="ge-thumb-title" title="' + escapeHtml(plan.title || '') + '">' + escapeHtml(plan.title || ('شريحة ' + (i + 1))) + '</span>';
+            sidebar.appendChild(thumb);
+          });
         }
 
         const hasLocation = Boolean(
@@ -17260,22 +17472,15 @@
           tenantProjectData.location
         );
         if (hasLocation) {
-          setGenStep('maps', 'active');
-          setGenPct(25, 'جاري توليد خرائط الموقع...');
+          setLiveGenBanner(true, 'توليد خرائط وموقع المشروع...', 'جاري تحضير الخرائط المعتمدة والمعالم', 15);
           try {
             await ensureProjectAssets({ needImages: false, needMaps: true });
             if (tenantCreativeImages.map_landmarks && tenantCreativeImages.map_landmarks.length) {
               tenantProjectData.landmarks_matrix = tenantCreativeImages.map_landmarks;
             }
-            setGenStep('maps', 'done');
-            setGenPct(40, 'اكتمل توليد الخرائط');
           } catch (mapErr) {
             console.warn('[MAPS AUTO-GEN] Maps generation skipped:', mapErr);
-            setGenStep('maps', 'error');
           }
-        } else {
-          setGenStep('maps', 'done');
-          setGenPct(40, 'لا توجد خرائط مطلوبة');
         }
 
         persistVisualConceptDraftState();
@@ -17324,13 +17529,38 @@
         if (hasUnapprovedImages) toast('سيتم استخدام الصور المولدة غير المعتمدة مع استمرار إمكانية اعتمادها لاحقًا.');
         tenantSlidesData = [];
         activeSlideIndex = 0;
-        setGenStep('slides', 'active');
-        setGenPct(45, 'جاري توليد الشرائح...');
 
         for (let i = 0; i < totalSlides; i++) {
           const plan = tenantSlidePlan.slides[i] || {};
-          const slidePct = Math.round(45 + (i / totalSlides) * 45);
-          setGenPct(slidePct, 'الشريحة ' + (i + 1) + ' من ' + totalSlides + ': ' + (plan.title || ''));
+          const slidePct = Math.round(20 + (i / totalSlides) * 75);
+          setLiveGenBanner(true, 'الشريحة ' + (i + 1) + ' من ' + totalSlides + ': ' + (plan.title || ''), 'جاري الصياغة والتصميم بالذكاء الاصطناعي...', slidePct);
+
+          // Update active card & thumb styling
+          document.querySelectorAll('.ge-slide-card').forEach((c, idx) => {
+            c.classList.toggle('active-slide', idx === i);
+            c.classList.toggle('generating-live', idx === i);
+          });
+          document.querySelectorAll('.ge-thumb').forEach((t, idx) => {
+            t.classList.toggle('active', idx === i);
+            t.classList.toggle('generating-live', idx === i);
+          });
+
+          // Pulse the generating stage and scroll into view
+          const cardEl = document.getElementById('slide-card-' + i);
+          if (cardEl) {
+            cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            const stageInner = document.getElementById('slide-stage-inner-' + i);
+            if (stageInner) {
+              stageInner.className = 'slide live-gen-skeleton-stage live-gen-skeleton-pulse';
+              stageInner.innerHTML = '<div style="font-size:12px;font-weight:700;color:#2563eb;letter-spacing:1px">جاري توليد الشريحة ' + (i + 1) + ' من ' + totalSlides + '</div>' +
+                '<div style="font-size:24px;font-weight:700;color:#1a4d6f;margin:8px 0">' + escapeHtml(plan.title || '') + '</div>' +
+                '<div style="font-size:14px;color:#2563eb;font-weight:600;display:flex;align-items:center;gap:8px">' +
+                '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#2563eb;animation:pulseDot 1s infinite alternate"></span>' +
+                'جاري صياغة المحتوى وبناء التصميم...' +
+                '</div>';
+            }
+          }
+
           let generated = null;
           let lastError = '';
 
@@ -17355,45 +17585,62 @@
               console.error('Slide generation error for index', i, 'attempt', attempt, err);
             }
             if (!generated && attempt < 3) {
-              setGenPct(slidePct, 'إعادة المحاولة ' + (attempt + 1) + ': ' + (plan.title || ''));
+              setLiveGenBanner(true, 'إعادة المحاولة ' + (attempt + 1) + ' للشريحة ' + (i + 1), plan.title || '', slidePct);
             }
           }
 
           if (!generated) {
-            setGenStep('slides', 'error');
-            renderTenantSlides();
+            setLiveGenBanner(true, 'توقف التوليد عند الشريحة ' + (i + 1), lastError, slidePct);
             toast('توقف التوليد عند الشريحة ' + (i + 1) + ': ' + lastError);
             return;
           }
 
-          tenantSlidesData.push({
+          const slideObj = {
             title: generated.title || plan.title,
             type: generated.type || plan.type || 'content',
             html: generated.html,
             designStyle: generated.designStyle || plan.design_style || 'cards',
             bullets: plan.bullets || [],
             metrics: plan.metrics || []
-          });
-          renderTenantSlides();
+          };
+          tenantSlidesData.push(slideObj);
+
+          // Live populate the slide card right in front of the user!
+          if (cardEl) {
+            cardEl.classList.remove('generating-live');
+            const stage = cardEl.querySelector('.tenant-slide-stage');
+            if (stage) {
+              const slideHtml = processSlideHtmlClient(generated.html, generated.type);
+              stage.innerHTML = slideHtml || '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(slideObj.title || '') + '</div>';
+              autoFitSlideContent(stage);
+              enableSlideInlineEditing(stage, i);
+            }
+          }
+
+          // Update sidebar thumb
+          const thumbEl = document.getElementById('thumb-slide-' + i);
+          if (thumbEl) {
+            thumbEl.classList.remove('generating-live');
+            thumbEl.title = slideObj.title;
+          }
         }
 
         if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !s.html.includes('class="slide"'))) {
-          setGenStep('slides', 'error');
+          setLiveGenBanner(true, 'لم يكتمل التوليد', 'حدث خطأ في بعض الشرائح ولم يتم الحفظ', 90);
           toast('لم يكتمل توليد العرض، لذلك لم يتم حفظه.');
           return;
         }
 
-        setGenStep('slides', 'done');
-        setGenStep('save', 'active');
-        setGenPct(95, 'جاري حفظ العرض...');
+        setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', 'إجمالي ' + totalSlides + ' شريحة معتمدة', 100);
+        renderTenantSlidesSidebar();
+        renderTenantDesignerChat();
         await saveTenantPresentation();
-        setGenStep('save', 'done');
-        setGenPct(100, 'اكتمل!');
-        await new Promise(r => setTimeout(r, 800));
-        renderTenantSlides();
-        showTenantPage('tenantSlidesPage');
         triggerAutoSaveDraft();
-        toast('تم توليد كل الشرائح (' + totalSlides + ')');
+        selectTenantSlide(0);
+        toast('تم توليد جميع الشرائح (' + totalSlides + ' شريحة) بنجاح');
+        setTimeout(() => {
+          setLiveGenBanner(false);
+        }, 3500);
       } finally {
         isGeneratingTenantSlides = false;
       }
