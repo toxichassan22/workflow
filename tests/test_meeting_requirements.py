@@ -3,6 +3,8 @@
 The suite uses a temporary SQLite database and never calls Google or an AI API.
 """
 
+import base64
+import gzip
 import math
 import os
 import re
@@ -700,6 +702,112 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(draft['has_slides'])
         self.assertTrue(draft['has_maps'])
         self.assertGreater(draft['data_bytes'], 5000)
+
+    def test_a_save_carrying_no_data_cannot_empty_a_stored_draft(self):
+        """A draft is only ever emptied by DELETE.
+
+        Saving used to store whatever arrived and answer success, and an absent ``draftData``
+        became "{}". A payload with no ``draftId`` is applied to the row this actor updated most
+        recently, so one mangled request emptied the project that was being worked on.
+        """
+        client = self.app.test_client()
+        stored = {
+            'draftId': 'draft-wipe-guard',
+            'project_name': 'برج المشرق',
+            'location_address': 'https://maps.google.com/?q=24,46',
+            'approved_financial_area': '7012',
+            'market_study_data': 'x' * 2000,
+        }
+        self.assertEqual(
+            client.post('/api/project-draft', headers=self._headers(self.token_a),
+                        json={'draftData': stored}).status_code, 200)
+
+        def remaining():
+            response = client.get('/api/project-draft/draft-wipe-guard',
+                                  headers=self._headers(self.token_a))
+            self.assertEqual(response.status_code, 200, response.get_json())
+            return response.get_json()['draft']['draft_data']
+
+        no_payload = client.post('/api/project-draft', headers=self._headers(self.token_a),
+                                 json={'status': 'draft'})
+        self.assertEqual(no_payload.status_code, 400, no_payload.get_json())
+        empty_payload = client.post('/api/project-draft', headers=self._headers(self.token_a),
+                                    json={'draftData': {}})
+        self.assertEqual(empty_payload.status_code, 400, empty_payload.get_json())
+
+        # A form that was rebuilt but never filled reports every field as an empty string.
+        blanked = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {
+                'draftId': 'draft-wipe-guard', 'project_name': '', 'location_address': '',
+                'approved_financial_area': '', 'market_study_data': '',
+                'pageDrafts': {'project': {'status': 'draft'}}, 'map_styles': {}, 'map_type': '',
+            }
+        })
+        self.assertEqual(blanked.status_code, 409, blanked.get_json())
+        self.assertEqual(blanked.get_json()['error_code'], 'DRAFT_EMPTY_OVERWRITE')
+
+        self.assertEqual(remaining()['project_name'], 'برج المشرق')
+        self.assertEqual(remaining()['approved_financial_area'], '7012')
+
+        # A save that names no draft lands on the newest one, so it must be refused too.
+        unnamed = client.post('/api/project-draft', headers=self._headers(self.token_a),
+                              json={'draftData': {'project_name': '', 'city': ''}})
+        self.assertEqual(unnamed.status_code, 409, unnamed.get_json())
+        self.assertEqual(remaining()['project_name'], 'برج المشرق')
+
+    def test_project_form_blanks_are_not_collected_before_it_is_filled(self):
+        """The form is built empty and filled afterwards, so its blank inputs must not be
+        reported as the project's values while hydration has not completed."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function tenantProjectFormIsFilled()', index_source)
+        self.assertIn("form.dataset.projectFormFilled = ''", index_source)
+        self.assertIn('markTenantProjectFormFilled();', index_source)
+        self.assertIn('if (!tenantProjectFormIsFilled()) {', index_source)
+        self.assertIn(
+            'if (isBlankProjectValue(result[key]) && !isBlankProjectValue(tenantProjectData[key])) {',
+            index_source)
+        # The marker is written after hydration finishes, so a throw part-way leaves it unset.
+        hydrate_body = index_source.split('function hydrateTenantProjectForm(data) {')[1]
+        hydrate_body = hydrate_body.split('\n    function ')[0]
+        self.assertLess(hydrate_body.index("form.querySelectorAll('[data-key]')"),
+                        hydrate_body.index('markTenantProjectFormFilled();'))
+
+    def test_an_unreassembled_chunked_reference_never_reaches_a_route(self):
+        """The reassembly hook used to return silently when it could not read the reference, and
+        the route then saw a request with no data at all."""
+        client = self.app.test_client()
+        refused = client.post('/api/project-draft', headers=self._headers(self.token_a),
+                              json={'__chunked_body': {'id': 'a' * 12, 'total': 4, 'gzip': False}})
+        self.assertEqual(refused.status_code, 400, refused.get_json())
+        self.assertEqual(refused.get_json()['error'], 'Missing uploaded body chunks')
+
+        # The marker appearing inside ordinary content is not a reference.
+        saved = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftData': {'draftId': 'draft-chunk-marker',
+                          'project_idea': 'يشرح النص كيف يعمل __chunked_body في الحفظ'}
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+
+        # Every large save goes through this path, so the round trip has to keep working.
+        payload = {'draftData': {'draftId': 'draft-chunked-save',
+                                 'project_name': 'برج مجمّع من أجزاء',
+                                 'project_idea': 'وصف طويل ' * 400}}
+        wire = gzip.compress(json.dumps(payload, ensure_ascii=False).encode('utf-8'))
+        parts = [wire[start:start + 12 * 1024] for start in range(0, len(wire), 12 * 1024)]
+        upload_id = 'chunked-save-1'
+        for index, part in enumerate(parts):
+            uploaded = client.post('/api/body-chunk', headers=self._headers(self.token_a), json={
+                'id': upload_id, 'idx': index, 'total': len(parts),
+                'data': base64.b64encode(part).decode('ascii'),
+            })
+            self.assertEqual(uploaded.status_code, 200, uploaded.get_json())
+        assembled = client.post('/api/project-draft', headers=self._headers(self.token_a),
+                                json={'__chunked_body': {'id': upload_id, 'total': len(parts),
+                                                         'gzip': True}})
+        self.assertEqual(assembled.status_code, 200, assembled.get_json())
+        stored = client.get('/api/project-draft/draft-chunked-save',
+                            headers=self._headers(self.token_a)).get_json()['draft']
+        self.assertEqual(stored['draft_data']['project_name'], 'برج مجمّع من أجزاء')
 
     def test_missing_map_asset_does_not_regenerate_on_static_request(self):
         client = self.app.test_client()

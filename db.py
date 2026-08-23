@@ -2223,6 +2223,52 @@ def get_approval_status(presentation_id):
 PROJECT_DRAFT_STATUSES = {'draft', 'submitted', 'pending_approval', 'approved'}
 SECTION_DRAFT_STATUSES = {'draft', 'approved'}
 
+# Keys every save carries as bookkeeping: they say nothing about whether the payload still
+# holds the project itself, so they are ignored when judging a destructive overwrite.
+DRAFT_BOOKKEEPING_KEYS = {
+    'draftId', 'draft_id', 'pageDrafts', 'sectionStatuses',
+    'map_styles', 'map_type', 'calculate_landmark_driving', 'site_analysis_approved',
+}
+
+# Below this many stored fields a draft is still being started, and blanking it can be a real
+# edit. Above it, a payload that would leave nothing behind is a fault, not an instruction.
+DRAFT_EMPTY_OVERWRITE_FLOOR = 3
+
+
+class DraftOverwriteRefused(Exception):
+    """Raised instead of blanking a stored draft that still holds project content."""
+
+    def __init__(self, draft_id, stored_keys, incoming_keys):
+        super().__init__(f'Refusing to empty project draft {draft_id}')
+        self.draft_id = draft_id
+        self.stored_keys = stored_keys
+        self.incoming_keys = incoming_keys
+
+
+def _has_content(value):
+    """True when a stored value carries something a user would recognise as their data."""
+    if value is None or value is False:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, dict):
+        return any(_has_content(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_has_content(item) for item in value)
+    return True
+
+
+def _draft_content_keys(payload):
+    """Field names in a draft payload that actually carry project content."""
+    if not isinstance(payload, dict):
+        return set()
+    return {
+        key for key, value in payload.items()
+        if key not in DRAFT_BOOKKEEPING_KEYS and _has_content(value)
+    }
+
 
 def _json_object(value):
     """Decode a JSON object safely; malformed historical data becomes empty."""
@@ -2262,6 +2308,10 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
 
     ``user_id`` is an actor identifier.  Company administrators use a stable
     tenant-admin identifier supplied by the API because their JWT has no user id.
+
+    A save that does not name its draft still lands on the row this actor updated most recently,
+    which is the single-draft contract older clients rely on.  That is also why an unnamed save
+    reaching the wrong project is possible, so it is logged: a current client always sends an id.
     """
     conn = get_db()
     if draft_id:
@@ -2274,6 +2324,9 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
             'SELECT * FROM project_drafts WHERE tenant_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1',
             (tenant_id, user_id)
         ).fetchone()
+        if existing:
+            print(f'[DRAFT SAVE] Save without a draft id applied to newest draft {existing["id"]} '
+                  f'of actor {user_id}')
 
     # Determine the stable draft id before serializing
     draft_id = existing['id'] if existing else (draft_id or str(uuid.uuid4()))
@@ -2306,6 +2359,20 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         old_data = _json_object(existing['draft_data']) or {}
         old_data.pop('draftId', None)
         old_data.pop('draft_id', None)
+
+        # A save that would leave the row with no project content at all is never a real edit:
+        # emptying a project file is DELETE /api/project-draft/<id>.  Writing it used to answer
+        # success, which is how a saved project could appear to empty itself with no error.
+        stored_content = _draft_content_keys(old_data)
+        incoming_content = _draft_content_keys(save_data)
+        if len(stored_content) >= DRAFT_EMPTY_OVERWRITE_FLOOR and not incoming_content:
+            raise DraftOverwriteRefused(existing['id'], sorted(stored_content), sorted(save_data))
+        if stored_content and len(incoming_content) * 2 < len(stored_content):
+            print(f'[DRAFT SAVE] Draft {existing["id"]} shrank from {len(stored_content)} to '
+                  f'{len(incoming_content)} filled fields, '
+                  f'{existing["data_bytes"] or 0} to {data_bytes} bytes. Dropped: '
+                  f'{sorted(stored_content - incoming_content)[:12]}')
+
         data_changed = save_data != old_data
         statuses_changed = statuses_json != (existing['section_statuses'] or '{}')
         old_overall_status = existing['status'] or 'draft'

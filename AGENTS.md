@@ -373,6 +373,25 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   previously saved creative assets (`cover`, `moodboard`,
   `moodboard_prompts`) when a slot is empty. A later agent adding a custom
   field must assume this wipe will happen unless they copy that pattern.
+- **A save can never empty a draft, and the server enforces it.** `POST /api/project-draft` used to
+  store whatever arrived and answer `success`, so a request whose `draftData` was absent or `{}`
+  wrote `{}` over the row — and because a payload with no `draftId` lands on the actor's *newest*
+  draft, one stray request emptied whichever project the user had just been working on, with no
+  error anywhere. That is the bug behind "the draft emptied itself while I was generating". The
+  endpoint now rejects an absent/empty `draftData` (400), `db.save_project_draft()` raises
+  `DraftOverwriteRefused` (409, `DRAFT_EMPTY_OVERWRITE`) rather than blanking a draft that still
+  holds content, and a save that halves the number of filled fields prints a `[DRAFT SAVE]` line
+  with the dropped keys and byte counts. `_has_content()` ignores `DRAFT_BOOKKEEPING_KEYS`
+  (`pageDrafts`, `map_styles`, `draftId`, …) and looks inside containers, so
+  `{'tenantCreativeImages': {'cover': '', 'moodboard': []}}` still counts as empty. Emptying a
+  project is `DELETE /api/project-draft/<id>`, never a save. Do not relax these guards.
+- **`collectTenantFormData()` only trusts a form that was filled.** `renderTenantProjectForm()`
+  clears `form.dataset.projectFormFilled`, `hydrateTenantProjectForm()` sets it as its very last
+  statement, and `startTenantProject()` sets it because a new project is legitimately blank. While
+  it is unset, `collectTenantFormData()` drops blank values for keys where `tenantProjectData` still
+  has one. So hydration that throws part-way — `storeLandDocumentAnalysis()`, `renderProjectTeam()`,
+  `hydrateFinancialStudyModel()` all run before the value loop — can no longer turn into a save that
+  blanks every field. Keep the marker as the last line of hydration; moving it earlier defeats it.
 - **Every new section or page gets an explicit draft save.** Give it a `data-key` in
   `#tenantProjectForm`, persist it from `saveProjectAsDraftNow()` /
   `collectTenantFormData()`, and put a visible `حفظ كمسودة` button on that page. Do not

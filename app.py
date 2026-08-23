@@ -103,9 +103,16 @@ def reassemble_chunked_request_body():
         data = request.get_data(cache=True)
         if not data or b'__chunked_body' not in data:
             return
-        meta = (json.loads(data) or {}).get('__chunked_body') or {}
+        payload = json.loads(data)
     except Exception:
+        # An unreadable body is not a reassembly reference. Leave it alone so the route reports the
+        # real parse failure instead of this hook turning it into a request that carries no data.
         return
+    # The marker can also appear inside ordinary content, and treating that as a reference used to
+    # reject the request; only a real top-level reference is reassembled.
+    if not isinstance(payload, dict) or '__chunked_body' not in payload:
+        return
+    meta = payload.get('__chunked_body') or {}
     upload_id = str(meta.get('id', ''))
     total = meta.get('total')
     use_gzip = bool(meta.get('gzip'))
@@ -4998,6 +5005,14 @@ def api_save_project_draft():
     draft_data = data.get('draftData', {})
     if not isinstance(draft_data, dict):
         return jsonify({'error': 'draftData must be an object'}), 400
+    # A request that carries no payload used to store "{}" over the draft and answer success, so a
+    # single mangled or half-initialised save emptied the project with nothing to show why.
+    if not draft_data:
+        app.logger.warning(
+            '[DRAFT SAVE] Refused a save with no draftData: tenant=%s actor=%s keys=%s',
+            g.tenant_id, _project_draft_actor_id(), sorted(data.keys())[:20]
+        )
+        return jsonify({'error': 'لم يتم الحفظ: لم تصل بيانات المشروع إلى الخادم'}), 400
     # Absence or {} means preserve already-reviewed sections (legacy clients send {}).
     section_statuses = data.get('sectionStatuses')
     if section_statuses is not None and not isinstance(section_statuses, dict):
@@ -5005,10 +5020,21 @@ def api_save_project_draft():
     status = data.get('status', 'draft')
     if status not in {'draft', 'submitted'}:
         status = 'draft'
-    draft_id = db.save_project_draft(
-        g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
-        draft_id=draft_data.get('draftId') or draft_data.get('draft_id')
-    )
+    try:
+        draft_id = db.save_project_draft(
+            g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
+            draft_id=draft_data.get('draftId') or draft_data.get('draft_id')
+        )
+    except db.DraftOverwriteRefused as refused:
+        app.logger.warning(
+            '[DRAFT SAVE] Refused to empty draft %s: tenant=%s actor=%s stored=%d fields received=%s',
+            refused.draft_id, g.tenant_id, _project_draft_actor_id(),
+            len(refused.stored_keys), refused.incoming_keys[:20]
+        )
+        return jsonify({
+            'error': 'لم يتم الحفظ: البيانات المرسلة فارغة والمسودة المحفوظة تحتوي بيانات المشروع',
+            'error_code': 'DRAFT_EMPTY_OVERWRITE'
+        }), 409
     return jsonify({'success': True, 'draftId': draft_id})
 
 

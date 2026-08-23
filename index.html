@@ -10878,6 +10878,27 @@
       calculateAll();
     }
 
+    // A rebuilt form is empty until hydrateTenantProjectForm() fills it from the draft. Its blank
+    // inputs are unknown values, not cleared ones, so collectTenantFormData() must not report them
+    // as the project's data — that is how one save could blank every field of a stored draft.
+    function markTenantProjectFormFilled() {
+      const form = document.getElementById('tenantProjectForm');
+      if (form) form.dataset.projectFormFilled = '1';
+    }
+
+    function tenantProjectFormIsFilled() {
+      const form = document.getElementById('tenantProjectForm');
+      if (!form || !form.querySelector('[data-key]')) return true;
+      return form.dataset.projectFormFilled === '1';
+    }
+
+    function isBlankProjectValue(value) {
+      if (value === null || value === undefined || value === 0) return true;
+      if (typeof value === 'string') return !value.trim();
+      if (Array.isArray(value)) return value.length === 0;
+      return false;
+    }
+
     function hydrateTenantProjectForm(data) {
       const form = document.getElementById('tenantProjectForm');
       if (!form) return;
@@ -10965,6 +10986,9 @@
       window._lastAnalyzedAddress = (source.location_address || '').trim();
       enhanceProjectClassificationFields();
       applyMarketStudyState(parseStoredLandTable(source.market_study_data) || getMarketStudyState());
+      // Marked last on purpose: if anything above throws, the form stays unfilled and a save keeps
+      // the stored values instead of writing this form's blanks over them.
+      markTenantProjectFormFilled();
     }
 
     function recoverTenantSlidePlan(projectData, slidesData) {
@@ -11005,7 +11029,11 @@
       tenantProjectDraftApproval = null;
       tenantActiveProjectSection = null;
       showTenantPage('tenantProjectPage');
-      if (await loadTenantProjectForm()) refreshGlobalRail();
+      if (await loadTenantProjectForm()) {
+        // A new project is legitimately blank, so its freshly built form counts as filled.
+        markTenantProjectFormFilled();
+        refreshGlobalRail();
+      }
     }
 
     function getProjectSectionElement(sectionKey) {
@@ -11453,6 +11481,7 @@
       if (!form) return;
       fields = (fields || []).filter(field => !TENANT_PROJECT_HIDDEN_FIELDS.has(field.fieldKey));
       form.innerHTML = '';
+      form.dataset.projectFormFilled = '';
       if (!fields.length) {
         form.innerHTML = '<p class="tenant-hint">لا توجد حقول مفعّلة</p>';
         const sidebar = document.getElementById('tenantProjectSidebar');
@@ -16012,6 +16041,18 @@
         } else {
           result[key] = input.value || '';
         }
+      }
+      if (!tenantProjectFormIsFilled()) {
+        // Every caller merges this over tenantProjectData, and the draft save then writes the
+        // result, so blanks from a form that was built but never filled would erase saved fields.
+        let kept = 0;
+        Object.keys(result).forEach(key => {
+          if (isBlankProjectValue(result[key]) && !isBlankProjectValue(tenantProjectData[key])) {
+            delete result[key];
+            kept += 1;
+          }
+        });
+        console.warn('[PROJECT FORM] Form is not filled from the draft yet; kept ' + kept + ' stored values.');
       }
       return result;
     }
