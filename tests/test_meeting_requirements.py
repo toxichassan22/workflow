@@ -1961,9 +1961,37 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function syncFinancialFromTimeline()', index_source)
 
         # Development duration is taken from the timeline's year count and is not editable here.
-        self.assertIn('id="developmentYears" type="number" min="1" value="4" readonly', index_source)
+        self.assertIn('id="developmentYears" type="number" min="1" value="" readonly', index_source)
         self.assertNotIn('id="developmentYears" type="number" min="1" value="4" oninput', index_source)
         self.assertIn("مأخوذة من «عدد السنوات» في قسم الجدول الزمني", index_source)
+
+        # The year count mirrors on its own: gating it on the stage list left «مدة تطوير المشروع»
+        # showing 4 while the timeline said 5, in a box the user cannot edit.
+        self.assertNotIn('if (namedStages.length && devYearsInput', index_source)
+        self.assertIn("const nextDevYears = Number.isFinite(timelineYears) && timelineYears > 0 ? String(timelineYears) : '';",
+                      index_source)
+        self.assertIn('if (devYearsChanged) recalculate();', index_source)
+
+    def test_mirrored_financial_inputs_never_show_a_figure_their_source_lacks(self):
+        """These four boxes are read-only and say they come from another section, so a value the
+        source does not have is invented data the user cannot correct. The study used to open on
+        70,000 م², 35% تغطية, دور واحد and 4 سنوات that nobody entered, and clearing a source left
+        the previous number behind because the mirror only wrote when the source was non-zero."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        for element in ('id="landArea" type="number" value=""',
+                        'id="coverageRate" type="number" value=""',
+                        'id="floorCount" type="number" min="1" value=""',
+                        'id="developmentYears" type="number" min="1" value=""'):
+            self.assertIn(element + ' readonly class="readonly-highlight"', index_source)
+        self.assertNotIn('id="landArea" type="number" value="70000"', index_source)
+        self.assertNotIn('id="coverageRate" type="number" value="35"', index_source)
+
+        # An empty source clears the mirror instead of leaving the last value.
+        self.assertIn("const next = raw !== '' && number > 0 ? String(number) : '';", index_source)
+        self.assertIn("mirrorApproved(landAreaInput, 'approved_financial_area');", index_source)
+        self.assertIn("mirrorApproved(floorInput, 'approved_floor_count');", index_source)
+        self.assertIn("mirrorApproved(coverageInput, 'approved_coverage_ratio');", index_source)
+        self.assertNotIn('if (landAreaInput && area > 0) landAreaInput.value', index_source)
 
         # Stage name and year are locked; only the two percentages remain editable.
         self.assertIn('<td data-field="name"><input value="${escapeHtml(d.name || \'\')}" readonly', index_source)
@@ -1988,8 +2016,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Empty timeline warns rather than silently zeroing the cost distribution.
         self.assertIn('id="timelineStagesWarning"', index_source)
         self.assertIn('warning.hidden = namedStages.length > 0', index_source)
-        self.assertIn('if (!namedStages.length) return;', index_source)
-        self.assertIn("if (namedStages.length && devYearsInput && Number.isFinite(timelineYears) && timelineYears > 0)", index_source)
+        # The stage list still guards the schedule rebuild — but not the year count, which is the
+        # timeline's own field and mirrors on its own.
+        self.assertIn('if (!namedStages.length) {\n        if (devYearsChanged) recalculate();\n        return;\n      }',
+                      index_source)
 
         # The stage table lost its actions column, so the report must stop dropping the last one.
         self.assertIn("reportTableSnapshot('scheduleTable', false)", index_source)
@@ -2007,10 +2037,11 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertIn('function syncFinancialFromLand()', index_source)
 
-        # The three approved-build fields come from the land/croquis section and are locked.
-        self.assertIn('id="landArea" type="number" value="70000" readonly', index_source)
-        self.assertIn('id="coverageRate" type="number" value="35" readonly', index_source)
-        self.assertIn('id="floorCount" type="number" min="1" value="1" readonly', index_source)
+        # The three approved-build fields come from the land/croquis section and are locked. They
+        # start empty: a read-only box must never show a figure its source does not have.
+        self.assertIn('id="landArea" type="number" value="" readonly', index_source)
+        self.assertIn('id="coverageRate" type="number" value="" readonly', index_source)
+        self.assertIn('id="floorCount" type="number" min="1" value="" readonly', index_source)
         self.assertIn('مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي', index_source)
         self.assertIn('مأخوذة من «التغطية المعتمدة» في قسم الأرض والكروكي', index_source)
         self.assertIn('مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي', index_source)
@@ -2019,7 +2050,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn(
             "f.fieldKey === 'approved_financial_area' || f.fieldKey === 'approved_floor_count' || f.fieldKey === 'approved_coverage_ratio'",
             index_source)
-        self.assertIn("readLand('approved_coverage_ratio')", index_source)
+        self.assertIn("mirrorApproved(coverageInput, 'approved_coverage_ratio');", index_source)
+        self.assertIn('const raw = readLand(key);', index_source)
         self.assertNotIn('parseCoverageFromLandText', index_source)
 
     def test_timeline_starts_blank_with_a_quarter_picker_and_row_delete(self):

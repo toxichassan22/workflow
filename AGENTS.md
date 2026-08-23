@@ -557,8 +557,22 @@ block and draft hydration. Timeline years are **calendar** years while the cashf
 **relative** to project start, so the conversion is `calendarYear - tlStartYear + 1`, clamped to
 `[1, developmentYears]`. Developer and development-cost amounts are spread evenly across every
 cashflow year the phase covers (`stageYear` through `stageEndYear` from «إلى»), not dumped into
-the start year only. If the timeline has no named phases, do not rebuild/wipe `scheduleTable`
-or overwrite `developmentYears`; keep the hydrated financial stages.
+the start year only. If the timeline has no named phases, do not rebuild/wipe `scheduleTable`;
+keep the hydrated financial stages. **That guard covers the stage table only.** It used to cover
+`developmentYears` as well, so a timeline that said 5 سنوات left «مدة تطوير المشروع» showing its
+own default 4 — in a read-only box whose hint says the number comes from the timeline. The year
+count is the timeline's own field and mirrors regardless of the stage list, and the
+`calculateAll()` at the end of `syncFinancialFromTimeline()` must also run on the early-return
+paths (`recalculate()`), or the mirrored duration never reaches «إجمالي سنوات المشروع»,
+«سنة بدء التشغيل» or the cashflow.
+
+**A mirrored read-only input must never show a figure its source does not have.** `landArea`,
+`coverageRate`, `floorCount` and `developmentYears` ship with `value=""`; they used to ship with
+`70000`, `35`, `1` and `4`, so a fresh study opened on invented land data the user could not edit
+and every derived number was built on it. `mirrorApproved()` in `syncFinancialFromLand()` also
+writes the empty string when the source is cleared — the old `if (area > 0)` form left the last
+value behind. The same applies to any field added to `TENANT_CLIENT_ENTERED_LAND_FIELDS` or to a
+new mirror: carry the source's emptiness, do not invent a placeholder number.
 
 Each phase row has a start year/quarter and a duration in months. `computeTimelineEnd()` fills the
 read-only «إلى» cell (`endYear` / `endQuarter` in `timeline_table_data`). Clients only type the

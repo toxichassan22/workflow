@@ -12201,16 +12201,16 @@
         <div class="finance-block">
           <h3>2. مدة المشروع والأرض ومساحات البناء</h3>
           <div class="grid four">
-            <div><label>مدة تطوير المشروع (سنة)</label><input id="developmentYears" type="number" min="1" value="4" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «عدد السنوات» في قسم الجدول الزمني — عدّلها من هناك.</span></div>
+            <div><label>مدة تطوير المشروع (سنة)</label><input id="developmentYears" type="number" min="1" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «عدد السنوات» في قسم الجدول الزمني — عدّلها من هناك.</span></div>
             <div id="salesStartYearWrap"><label>سنة بدء بيع الوحدات</label><input id="salesStartYear" type="number" min="1" value="1" oninput="calculateAll()"><span class="help input">يظهر للمشروع البيعي أو المختلط.</span></div>
             <div id="salesYearsWrap"><label>عدد سنوات بيع الوحدات</label><input id="salesYears" type="number" min="1" value="4" oninput="calculateAll()"><span class="help input">توزع المبيعات على هذه السنوات.</span></div>
             <div id="operationYearsWrap"><label>عدد سنوات التشغيل</label><input id="operationYears" type="number" min="1" value="10" oninput="calculateAll()"><span class="help input">يظهر للمشروع التأجيري أو المختلط.</span></div>
             <div id="operationStartYearWrap"><label>سنة بدء التشغيل</label><input id="operationStartYear" readonly><span class="help formula">مدة التطوير + 1.</span></div>
             <div><label>إجمالي سنوات المشروع</label><input id="totalProjectYearsDisplay" readonly><span class="help formula">مدة التطوير + مدة التشغيل.</span></div>
 
-            <div><label>مساحة الأرض م²</label><input id="landArea" type="number" value="70000" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
-            <div><label>نسبة التغطية %</label><input id="coverageRate" type="number" value="35" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «التغطية المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
-            <div><label>عدد الطوابق</label><input id="floorCount" type="number" min="1" value="1" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
+            <div><label>مساحة الأرض م²</label><input id="landArea" type="number" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «المساحة المعتمدة للدراسة المالية» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
+            <div><label>نسبة التغطية %</label><input id="coverageRate" type="number" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «التغطية المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
+            <div><label>عدد الطوابق</label><input id="floorCount" type="number" min="1" value="" readonly class="readonly-highlight"><span class="help formula">مأخوذة من «الأدوار المعتمدة» في قسم الأرض والكروكي — عدّلها من هناك.</span></div>
             <div><label>مسطحات البناء فوق الأرض م²</label><input id="builtUpAreaAbove" type="number" value="100000" oninput="calculateAll()"><span class="help input">إجمالي مسطحات الأدوار فوق الأرض.</span></div>
             <div><label>مساحة البدرومات م²</label><input id="basementArea" type="number" value="30078" oninput="calculateAll()"><span class="help input">إجمالي مسطحات البدرومات.</span></div>
 
@@ -14053,10 +14053,23 @@
       const startYear = parseInt(document.getElementById('tlStartYear')?.value, 10);
       const namedStages = collectTimelineRows().filter(row => row.name.trim());
 
-      if (namedStages.length && devYearsInput && Number.isFinite(timelineYears) && timelineYears > 0) {
-        devYearsInput.value = String(timelineYears);
+      // «عدد السنوات» is the timeline's own field, so it mirrors whether or not a stage has been
+      // named yet. Gating it on the stage list left «مدة تطوير المشروع» showing its own default 4
+      // while the timeline said 5, in a box the user cannot edit and a hint that says the value
+      // comes from there.
+      const nextDevYears = Number.isFinite(timelineYears) && timelineYears > 0 ? String(timelineYears) : '';
+      let devYearsChanged = false;
+      if (devYearsInput && devYearsInput.value !== nextDevYears) {
+        devYearsInput.value = nextDevYears;
+        devYearsChanged = true;
       }
       const devYears = Math.max(1, parseInt(devYearsInput?.value, 10) || 1);
+      // The recalculation used to sit past both early returns, so a duration mirrored on its own
+      // never reached «إجمالي سنوات المشروع», «سنة بدء التشغيل» or the cashflow.
+      const recalculate = () => {
+        if (window.__batchLoading || typeof calculateAll !== 'function') return;
+        try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
+      };
 
       const warning = document.getElementById('timelineStagesWarning');
       if (warning) warning.hidden = namedStages.length > 0;
@@ -14066,7 +14079,10 @@
       if (startYearWarning) {
         startYearWarning.hidden = Number.isFinite(startYear) || !namedStages.length;
       }
-      if (!scheduleBody) return;
+      if (!scheduleBody) {
+        if (devYearsChanged) recalculate();
+        return;
+      }
 
       // Percentages are this study's own data, so carry them over by stage name on every rebuild.
       const previous = new Map();
@@ -14082,7 +14098,10 @@
       });
       // An empty timeline used to wipe a just-restored schedule table. Keep the
       // already-hydrated stages until the user actually names phases.
-      if (!namedStages.length) return;
+      if (!namedStages.length) {
+        if (devYearsChanged) recalculate();
+        return;
+      }
 
       const wasBatching = window.__batchLoading;
       window.__batchLoading = true;
@@ -14109,9 +14128,7 @@
         });
       });
       window.__batchLoading = wasBatching;
-      if (!wasBatching && typeof calculateAll === 'function') {
-        try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
-      }
+      recalculate();
     }
 
     // The land/croquis section is the single source of truth for the approved area, floor count
@@ -14127,12 +14144,21 @@
         return String(input?.value ?? tenantProjectData?.[key] ?? '').trim();
       };
 
-      const area = parseNumber(readLand('approved_financial_area'));
-      const floors = parseNumber(readLand('approved_floor_count'));
-      const coverage = parseNumber(readLand('approved_coverage_ratio'));
-      if (landAreaInput && area > 0) landAreaInput.value = String(area);
-      if (floorInput && floors > 0) floorInput.value = String(floors);
-      if (coverageInput && coverage > 0) coverageInput.value = String(coverage);
+      // A mirror carries the source's emptiness too. Writing only when the source held a number
+      // left the previous value — or the markup's own invented default — sitting in a read-only
+      // box under a hint that says the figure comes from the land section. The study then ran on
+      // 70,000 م² and 35% that nobody had entered.
+      const mirrorApproved = (input, key) => {
+        if (!input) return;
+        const raw = readLand(key);
+        const number = parseNumber(raw);
+        const next = raw !== '' && number > 0 ? String(number) : '';
+        if (parseNumber(input.value) === number && (next !== '' || input.value === '')) return;
+        input.value = next;
+      };
+      mirrorApproved(landAreaInput, 'approved_financial_area');
+      mirrorApproved(floorInput, 'approved_floor_count');
+      mirrorApproved(coverageInput, 'approved_coverage_ratio');
 
       if (typeof calculateAll === 'function') {
         try { calculateAll(); } catch (e) { console.warn('calculateAll failed:', e); }
