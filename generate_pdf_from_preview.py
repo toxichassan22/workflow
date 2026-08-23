@@ -215,17 +215,26 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
 
 
 
+# Why the last snapshot failed. The reason used to exist only as a print, so a host where the
+# editor works blind reported nothing more useful than "no image".
+LAST_VISION_ERROR = ''
+
+
 def render_slide_to_image_base64(slide_html, branding=None, tenant_id=None, width=1280, height=720):
     """
     Render a single slide HTML into a base64 PNG data URI via Playwright Chromium.
     Used for Vision-guided AI slide editing so multimodal models (Sol) can visually inspect layout.
     """
+    global LAST_VISION_ERROR
+    LAST_VISION_ERROR = ''
     if not slide_html or not isinstance(slide_html, str):
+        LAST_VISION_ERROR = 'no slide html supplied'
         return None
 
     try:
         from playwright.sync_api import sync_playwright
-    except ImportError:
+    except ImportError as exc:
+        LAST_VISION_ERROR = f'playwright package is not importable: {exc}'
         print("[VISION] Playwright not available; skipping vision snapshot")
         return None
 
@@ -298,6 +307,7 @@ img {{ max-width:100%; max-height:100%; object-fit:cover; }}
             browser.close()
             return f"data:image/png;base64,{base64.b64encode(buf).decode('utf-8')}"
     except Exception as e:
+        LAST_VISION_ERROR = f'{type(e).__name__}: {e}'
         print(f"[VISION ERROR] Failed to render slide snapshot: {e}")
         return None
     finally:

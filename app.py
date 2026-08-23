@@ -2699,10 +2699,10 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
     vision_image_uri = None
     vision_error = ''
     try:
-        from generate_pdf_from_preview import render_slide_to_image_base64
-        vision_image_uri = render_slide_to_image_base64(html, branding=branding, tenant_id=tenant_id)
+        import generate_pdf_from_preview as renderer
+        vision_image_uri = renderer.render_slide_to_image_base64(html, branding=branding, tenant_id=tenant_id)
         if not vision_image_uri:
-            vision_error = 'no_snapshot'
+            vision_error = getattr(renderer, 'LAST_VISION_ERROR', '') or 'no_snapshot'
     except Exception as ve:
         vision_error = str(ve)
         print(f"[DESIGNER-EDIT VISION] Screenshot failed: {ve}")
@@ -12556,11 +12556,11 @@ def _slide_vision_probe(force=False):
         return dict(_SLIDE_VISION_STATE)
     state = {'available': False, 'error': '', 'source': 'probe'}
     try:
-        from generate_pdf_from_preview import render_slide_to_image_base64
-        state['available'] = bool(render_slide_to_image_base64(
+        import generate_pdf_from_preview as renderer
+        state['available'] = bool(renderer.render_slide_to_image_base64(
             '<div class="slide" style="width:1280px;height:720px;">فحص</div>'))
         if not state['available']:
-            state['error'] = 'renderer_returned_nothing'
+            state['error'] = getattr(renderer, 'LAST_VISION_ERROR', '') or 'renderer_returned_nothing'
     except Exception as exc:
         state['error'] = str(exc)[:300]
     _record_slide_vision_state(state['available'], state['error'], source='probe')
