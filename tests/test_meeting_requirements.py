@@ -1563,6 +1563,20 @@ class MeetingRequirementsTests(unittest.TestCase):
                           'lt-dist', 'lt-dur', 'lt-actions'},
                          'a new class on a <th> needs its background rule scoped to td')
 
+    def test_grouped_classification_dropdowns_fill_their_field(self):
+        """`.project-choice-grid` is a flex row. The grouped fields wrap each dropdown in its own
+        div, and a flex item shrinks to fit, so the dropdown's `width:100%` resolved against that
+        shrunken box: «الأنواع الفرعية للمشروع» and «الفئة المستهدفة» rendered as a narrow box and
+        their menus broke every option onto two lines."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('.project-choice-grid>div {\n      flex: 1 1 100%;', index_source)
+        # Those are the wrappers that need it, and the dropdown still spans whatever holds it.
+        self.assertIn("'<div style=\"margin-top:10px\"><label>' + (showSubtypeLabels", index_source)
+        self.assertIn("return '<div style=\"margin-top:10px\"><label>' + label + subtypeText +",
+                      index_source)
+        self.assertIn('.project-multi-select {\n      position: relative;\n      width: 100%;',
+                      index_source)
+
     def test_ui_contains_no_emojis_or_icon_glyphs(self):
         """Product rule: the app ships no emojis and no icon glyphs, including arrows used as
         button labels. Generated slides are covered separately by the icon stripper."""

@@ -1957,6 +1957,15 @@
       margin-top: 8px;
     }
 
+    /* The grouped classification fields wrap each dropdown in its own div. A flex item shrinks to
+       fit, and the dropdown's own width:100% then resolved against that shrunken box, so
+       «الأنواع الفرعية للمشروع» and «الفئة المستهدفة» rendered as a narrow box whose menu broke
+       every option onto two lines. */
+    .project-choice-grid>div {
+      flex: 1 1 100%;
+      min-width: 0;
+    }
+
     .location-derived-input,
     #marketCityMirror,
     #marketDistrictMirror {
