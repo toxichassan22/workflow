@@ -586,6 +586,24 @@ derived finance total (`financeBaseAmount`, `facilityAmount`, arrangement fees, 
 as zero. `parseNumber()` / `financialInputNumber()` / `setFinancialSnapshotInput()` must strip
 commas and Arabic digits before writing a value back into an input.
 
+**The exported PDF is the screen, verbatim, laid out as tables — nothing else changes.** The owner
+asked for exactly that. `collectFinancialStudyReport()` (client, export only — never stored in the
+draft) walks `#section-financial-calc` in DOM order and sends `report.parts`: `heading` /
+`fields` / `table` entries carrying the **visible label** of each input, the **selected option
+text** of each list, and the **displayed figure**. `_financial_screen_sections()` renders those
+as-is. Do not reintroduce a server-side label map or number reformatter on that path: the report
+used to be rebuilt from `FINANCIAL_RESULT_LABELS` / `FINANCIAL_COLUMN_LABELS`, so «هل وحدات
+المشروع بيعية أم تأجيرية؟» printed as «طبيعة الإيرادات» and its value printed as the raw option
+id `mixed`. Those maps stay only for drafts saved before `report.parts` existed.
+
+A field is skipped when it is off on screen: `hidden`, `.conditional-off`, `.dynamic-off`,
+`.hidden`, or `display:none`. Those are the same markers `applyConditionalVisibility()` and
+`setWrapVisible()` set, so no `getComputedStyle` walk is needed.
+
+The report is deliberately **monochrome** (`_financial_report_document`). It used to be painted
+from branding, and a light `secondary_color` printed the whole label column as pale text on a pale
+tint — unreadable. Do not put branding colours back into it.
+
 Server PDF (`build_financial_report_html`) must emit section 14 «تحليل الحساسية العام». Do not wrap
 wide tables (`cashflowTable`, `sensitivityTable`) in `break-inside:avoid` or the last rows are
 clipped. Strip «ترتيب / حذف» from both the print snapshot and the server table renderer.

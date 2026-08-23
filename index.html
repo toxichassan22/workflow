@@ -13447,6 +13447,124 @@
       };
     }
 
+    // The exported PDF must be the financial study exactly as the screen shows it — same field
+    // labels, same option wording, same numbers — only laid out as tables. The server used to
+    // rebuild it from its own label map, so «هل وحدات المشروع بيعية أم تأجيرية؟» printed as
+    // «طبيعة الإيرادات» and its value printed as the raw option id «mixed».
+    const FINANCIAL_REPORT_SKIP_COLUMNS = new Set(['ترتيب / حذف', 'ترتيب', 'حذف']);
+    const FINANCIAL_REPORT_SKIP_IDS = new Set([
+      'componentAreaValidation', 'timelineStagesWarning', 'analysisWarnings',
+      'componentsAllowedUsesNote', 'sensitivityVariableSelect',
+    ]);
+    const FINANCIAL_REPORT_SKIP_CLASSES = [
+      'help', 'hint', 'formula-tag', 'calculation-note', 'validation-panel', 'analysis-warning',
+      'row-actions', 'sensitivity-picker', 'tenant-section-title', 'section-status-badge',
+    ];
+
+    function financialReportText(node) {
+      return String(node?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    }
+
+    function financialReportIsHidden(el) {
+      return el.hidden
+        || el.classList.contains('conditional-off')
+        || el.classList.contains('dynamic-off')
+        || el.classList.contains('hidden')
+        || el.style.display === 'none';
+    }
+
+    function financialReportControlValue(control) {
+      if (!control) return '';
+      if (control.tagName === 'SELECT') return financialReportText(control.selectedOptions?.[0]) || String(control.value ?? '').trim();
+      if (control.type === 'checkbox') return control.checked ? 'نعم' : 'لا';
+      return String(control.value ?? '').trim();
+    }
+
+    function financialReportCellText(cell) {
+      const controls = Array.from(cell.querySelectorAll('input,select,textarea')).filter(control =>
+        control.type !== 'hidden' && !control.disabled
+        && !control.closest('.dynamic-off,.conditional-off,.hidden,[hidden]'));
+      if (!controls.length) return financialReportText(cell);
+      return controls.map(financialReportControlValue).filter(value => value !== '').join(' — ');
+    }
+
+    function financialReportTablePart(table) {
+      const headerCells = Array.from(table.querySelectorAll('thead th'));
+      if (!headerCells.length) return null;
+      const kept = headerCells
+        .map((th, index) => ({ index, text: financialReportText(th) }))
+        .filter(({ index, text }) => !FINANCIAL_REPORT_SKIP_COLUMNS.has(text) && !financialReportIsHidden(headerCells[index]));
+      if (!kept.length) return null;
+      const rows = Array.from(table.querySelectorAll('tbody tr'))
+        .filter(tr => !financialReportIsHidden(tr))
+        .map(tr => kept.map(({ index }) => (tr.cells[index] ? financialReportCellText(tr.cells[index]) : '')))
+        .filter(cells => cells.some(text => text !== '' && text !== '—'));
+      return { type: 'table', headers: kept.map(({ text }) => text), rows };
+    }
+
+    function collectFinancialStudyReport() {
+      const root = document.getElementById('section-financial-calc');
+      if (!root) return null;
+      if (typeof calculateAll === 'function') {
+        try { calculateAll(); } catch (error) { console.warn('calculateAll failed during report collect:', error); }
+      }
+      const parts = [];
+      let fields = null;
+      const addField = (label, value) => {
+        if (!label || value === '') return;
+        if (!fields) { fields = { type: 'fields', rows: [] }; parts.push(fields); }
+        fields.rows.push([label, value]);
+      };
+      const walk = node => {
+        for (const el of node.children) {
+          if (!(el instanceof HTMLElement)) continue;
+          if (financialReportIsHidden(el)) continue;
+          if (FINANCIAL_REPORT_SKIP_IDS.has(el.id)) continue;
+          if (FINANCIAL_REPORT_SKIP_CLASSES.some(name => el.classList.contains(name))) continue;
+          const tag = el.tagName;
+          if (tag === 'BUTTON' || tag === 'BR' || tag === 'SMALL' || tag === 'P' || tag === 'OPTION') continue;
+          if (tag === 'H2' || tag === 'H3' || tag === 'H4' || tag === 'H5') {
+            const text = financialReportText(el);
+            fields = null;
+            if (text) parts.push({ type: 'heading', level: tag === 'H2' || tag === 'H3' ? 2 : 3, text });
+            continue;
+          }
+          if (tag === 'TABLE') {
+            fields = null;
+            const part = financialReportTablePart(el);
+            if (part) parts.push(part);
+            continue;
+          }
+          if (el.classList.contains('metric')) {
+            const scope = financialReportText(el.querySelector('small'));
+            const value = financialReportText(el.querySelector('strong'));
+            addField(financialReportText(el.querySelector('span')), scope ? value + ' — ' + scope : value);
+            continue;
+          }
+          const label = Array.from(el.children).find(child => child.tagName === 'LABEL');
+          const control = label ? el.querySelector('input,select,textarea') : null;
+          if (label && control && control.type !== 'hidden') {
+            addField(financialReportText(label), financialReportControlValue(control));
+            continue;
+          }
+          if (tag === 'SPAN' || tag === 'LABEL') continue;
+          walk(el);
+        }
+      };
+      walk(root);
+      // A heading with nothing under it is a section the current settings switched off. A block
+      // title still counts as filled when only its own sub-headings carry the tables.
+      const trimmed = parts.filter((part, index) => {
+        if (part.type !== 'heading') return true;
+        for (let next = index + 1; next < parts.length; next += 1) {
+          if (parts[next].type !== 'heading') return true;
+          if (parts[next].level <= part.level) return false;
+        }
+        return false;
+      });
+      return { title: 'الدراسة المالية والمؤشرات', parts: trimmed };
+    }
+
     function focusFinancialValidation(validation) {
       const first = Array.isArray(validation) ? validation[0] : null;
       if (!first?.field) return;
@@ -13466,6 +13584,8 @@
 
     async function exportFinancialStudyPdf() {
       const model = collectFinancialStudyModel();
+      // Sent for the export only, never stored in the draft.
+      model.report = collectFinancialStudyReport();
       const projectName = String(tenantProjectData?.project_name || tenantProjectData?.projectName || 'الدراسة المالية').trim();
       showLoader('جاري إنشاء الدراسة المالية', 'جاري التحقق من المدخلات وبناء ملف PDF منظم...', 8);
       try {

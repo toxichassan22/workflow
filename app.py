@@ -5973,20 +5973,76 @@ def _financial_report_table(rows):
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table>'
 
 
+def _financial_screen_parts(model):
+    """The study as the screen sent it, or None for a draft saved before that was captured."""
+    report = model.get('report') if isinstance(model, dict) else None
+    parts = report.get('parts') if isinstance(report, dict) else None
+    return parts if isinstance(parts, list) and parts else None
+
+
+def _financial_screen_sections(parts):
+    """Same labels, same values, same order as the screen — only laid out as tables.
+
+    Nothing here renames a field or reformats a number: the client already sent the visible
+    label of every input, the selected option text of every list, and the displayed figure.
+    """
+    sections = []
+    body = []
+
+    def flush():
+        if body:
+            sections.append('<section>' + ''.join(body) + '</section>')
+            body.clear()
+
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        kind = part.get('type')
+        if kind == 'heading':
+            level = 3 if part.get('level') == 3 else 2
+            if level == 2:
+                flush()
+            body.append(f'<h{level}>{_financial_report_escape(part.get("text"))}</h{level}>')
+        elif kind == 'fields':
+            rows = [row for row in (part.get('rows') or []) if isinstance(row, (list, tuple)) and len(row) >= 2]
+            if not rows:
+                continue
+            body.append('<table class="summary-table"><tbody>' + ''.join(
+                f'<tr><th>{_financial_report_escape(row[0])}</th><td>{_financial_report_escape(row[1])}</td></tr>'
+                for row in rows) + '</tbody></table>')
+        elif kind == 'table':
+            headers = [header for header in (part.get('headers') or [])]
+            if not headers:
+                continue
+            rows = [row for row in (part.get('rows') or []) if isinstance(row, (list, tuple))]
+            if not rows:
+                body.append('<p class="empty">لا توجد بنود مدخلة في هذا الجدول.</p>')
+                continue
+            head = ''.join(f'<th>{_financial_report_escape(header)}</th>' for header in headers)
+            cells = ''.join(
+                '<tr>' + ''.join(f'<td>{_financial_report_escape(cell)}</td>' for cell in row) + '</tr>'
+                for row in rows)
+            wide = ' wide' if len(headers) > 8 else ''
+            body.append(f'<table class="data-table{wide}"><thead><tr>{head}</tr></thead><tbody>{cells}</tbody></table>')
+    flush()
+    return sections
+
+
 def build_financial_report_html(project_name, model, branding, tenant_id):
     inputs = _financial_inputs(model)
     tables = model.get('tables', {}) if isinstance(model, dict) and isinstance(model.get('tables'), dict) else {}
     projection = model.get('projection', {}) if isinstance(model, dict) and isinstance(model.get('projection'), dict) else {}
     mode = inputs.get('unitRevenueMode') or 'mixed'
     rental_on = mode in {'rental', 'mixed'}
-    primary = (branding or {}).get('primary_color') or '#123B6D'
-    secondary = (branding or {}).get('secondary_color') or '#082646'
-    accent = (branding or {}).get('accent_color') or '#C4A35A'
     font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
     font_css = (font_css or '').replace('.slide', '.financial-report')
     rows = lambda keys: _financial_report_rows([(label, inputs.get(key), key) for key, label in keys])
     sections = []
     sections.append(f'<section class="cover"><div class="eyebrow">دراسة مالية</div><h1>{_financial_report_escape(project_name)}</h1><h2>التقرير المالي المنظم</h2><p>تم إنشاء التقرير من النسخة المعتمدة للمدخلات والافتراضات.</p></section>')
+    screen_parts = _financial_screen_parts(model)
+    if screen_parts:
+        sections.extend(_financial_screen_sections(screen_parts))
+        return _financial_report_document(sections, font_css, font_family)
     sections.append('<section><h2>1. ملخص المشروع</h2>' + rows([('unitRevenueMode', 'طبيعة الإيرادات'), ('developmentYears', 'مدة التطوير'), ('operationYears', 'سنوات التشغيل'), ('landArea', 'مساحة الأرض')]) + '</section>')
     sections.append('<section><h2>2. الأرض والمساحات</h2>' + rows([('landArea', 'مساحة الأرض'), ('coverageRate', 'نسبة التغطية'), ('floorCount', 'عدد الطوابق'), ('builtUpAreaAbove', 'مسطحات البناء فوق الأرض'), ('basementArea', 'مساحة البدرومات'), ('landValueMethod', 'طريقة احتساب قيمة الأرض'), ('landStatus', 'حالة الأرض')]) + '</section>')
     for number, title, table_key in (
@@ -6032,17 +6088,27 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
         + '<h3>النتائج المقارنة</h3>' + _financial_report_table(tables.get('sensitivityTable'))
         + '</section>'
     )
+    return _financial_report_document(sections, font_css, font_family)
+
+
+def _financial_report_document(sections, font_css, font_family):
+    """One readable monochrome sheet.
+
+    Branding colours used to paint this: a light `secondary_color` printed the label column of
+    every summary table as pale text on a pale tint, which is unreadable. A financial table is
+    read for its figures, so the report is deliberately black on white with grey chrome.
+    """
     return f'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
 {font_css}
 @page {{ size: A4 landscape; margin: 10mm; }}
-* {{ box-sizing:border-box; }} body {{ margin:0; color:#252525; background:#fff; font-family:{font_family}; direction:rtl; line-height:1.5; }}
+* {{ box-sizing:border-box; }} body {{ margin:0; color:#1a1a1a; background:#fff; font-family:{font_family}; direction:rtl; line-height:1.5; }}
 .financial-report {{ max-width:none; margin:0; }} section {{ margin:0 0 16px; page-break-inside:auto; }}
 .keep-together {{ break-inside:avoid; page-break-inside:avoid; }}
-.wide-table table {{ font-size:8px; }} .wide-table th,.wide-table td {{ padding:4px; white-space:normal; word-break:break-word; }}
-.cover {{ min-height:175mm; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; border:2px solid {primary}; padding:30px; page-break-after:always; }}
-.eyebrow {{ color:{accent}; font-weight:700; }} h1 {{ color:{secondary}; font-size:32px; margin:18px 0 6px; }} h2 {{ color:{primary}; font-size:20px; border-bottom:2px solid {primary}; padding-bottom:6px; }}
-h3 {{ color:{secondary}; font-size:14px; margin:12px 0 6px; }}
-table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px; }} th,td {{ border:1px solid #d9d1cb; padding:6px; text-align:right; vertical-align:top; }} thead {{ display:table-header-group; }} tr {{ break-inside:avoid; page-break-inside:avoid; }} thead th {{ background:{primary}; color:#fff; }} .summary-table th {{ width:34%; background:#EAF2F8; color:{secondary}; }} .summary-table td {{ font-weight:700; }} .empty {{ color:#777; border:1px dashed #ccc; padding:10px; }}
+.wide-table table, table.wide {{ font-size:8px; }} .wide-table th,.wide-table td, table.wide th, table.wide td {{ padding:4px; white-space:normal; word-break:break-word; }}
+.cover {{ min-height:175mm; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; border:2px solid #1a1a1a; padding:30px; page-break-after:always; }}
+.eyebrow {{ color:#4a4a4a; font-weight:700; }} h1 {{ color:#1a1a1a; font-size:32px; margin:18px 0 6px; }} h2 {{ color:#1a1a1a; font-size:20px; border-bottom:2px solid #1a1a1a; padding-bottom:6px; }}
+h3 {{ color:#1a1a1a; font-size:14px; margin:12px 0 6px; }}
+table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px; }} th,td {{ border:1px solid #b3b3b3; padding:6px; text-align:right; vertical-align:top; color:#1a1a1a; }} thead {{ display:table-header-group; }} tr {{ break-inside:avoid; page-break-inside:avoid; }} thead th {{ background:#e6e6e6; font-weight:700; }} .summary-table th {{ width:38%; background:#f2f2f2; font-weight:400; }} .summary-table td {{ font-weight:700; }} .empty {{ color:#555; border:1px dashed #b3b3b3; padding:10px; }}
 </style></head><body><main class="financial-report">{''.join(sections)}</main></body></html>'''
 
 
@@ -6162,21 +6228,38 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             page.insert_text((x, baseline), part, fontname=name, fontsize=size, color=color)
             x += font.text_length(part, size)
 
+    def place_wrapped(rect, text, size, color=(0.1, 0.1, 0.1), max_lines=2):
+        """Header cells carry whole Arabic phrases, so a single truncated line loses the column."""
+        words = str(text or '').split(' ')
+        lines, current = [], ''
+        for word in words:
+            candidate = (current + ' ' + word).strip()
+            if current and metrics.text_length(_financial_pdf_shape(candidate), size) > rect.width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        for index, line in enumerate(lines[:max_lines]):
+            top = rect.y0 + index * (size + 1)
+            place(fitz.Rect(rect.x0, top, rect.x1, top + size + 1), line, size, color=color)
+
     def draw_text(text, size=11, indent=0):
         nonlocal y
         ensure_space(size + 8)
         box = fitz.Rect(margin + indent, y, page_size.width - margin, y + size + 6)
-        place(box, text, size, color=(0.07, 0.23, 0.43))
+        place(box, text, size, color=(0.1, 0.1, 0.1))
         y += size + 8
 
-    def draw_kv_table(rows):
+    def draw_kv_table(rows, raw=False):
         nonlocal y
         visible = []
         for item in rows:
             label, value, key = (item + ('',))[:3] if len(item) < 3 else item
             if value in (None, '', [], {}) or isinstance(value, (dict, list)):
                 continue
-            visible.append((str(label), _financial_pdf_text(value, key)))
+            visible.append((str(label), str(value).strip() if raw else _financial_pdf_text(value, key)))
         if not visible:
             draw_text('لا توجد قيم مطبقة في هذا القسم.', 9)
             return
@@ -6245,6 +6328,66 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
         for row in rows:
             if isinstance(row, dict):
                 paint_row([_financial_pdf_text(row.get(key), key) for key in keys])
+
+    def draw_grid(headers, rows):
+        """Draw a screen table verbatim. Columns beyond a readable page width continue in a
+        second band that repeats the first column, so no entered figure is dropped."""
+        nonlocal y
+        if not headers:
+            return
+        if not rows:
+            draw_text('لا توجد بنود مدخلة في هذا الجدول.', 9)
+            return
+        cell = lambda row, index: str(row[index]).strip() if index < len(row) else ''
+        max_columns = 9
+        bands = [(headers, rows)]
+        if len(headers) > max_columns:
+            bands = []
+            for start in range(1, len(headers), max_columns - 1):
+                picked = list(range(start, min(start + max_columns - 1, len(headers))))
+                bands.append(([headers[0]] + [headers[index] for index in picked],
+                              [[cell(row, 0)] + [cell(row, index) for index in picked] for row in rows]))
+        for band_headers, band_rows in bands:
+            col_w = (page_size.width - margin * 2) / len(band_headers)
+            ensure_space(38)
+            top = y
+            x = margin
+            for header in reversed(band_headers):
+                box = fitz.Rect(x, top, x + col_w, top + 22)
+                page.draw_rect(box, color=(0.7, 0.7, 0.7), fill=(0.9, 0.9, 0.9), width=0.4)
+                place_wrapped(box + (2, 2, -2, -2), header, 7)
+                x += col_w
+            y = top + 22
+            for row in band_rows:
+                ensure_space(14)
+                top = y
+                x = margin
+                for index in reversed(range(len(band_headers))):
+                    box = fitz.Rect(x, top, x + col_w, top + 14)
+                    page.draw_rect(box, color=(0.7, 0.7, 0.7), width=0.4)
+                    place(box + (2, 1, -2, -1), cell(row, index), 7)
+                    x += col_w
+                y = top + 14
+            y += 8
+
+    screen_parts = _financial_screen_parts(model)
+    if screen_parts:
+        draw_text(project_name or 'الدراسة المالية', 18)
+        for part in screen_parts:
+            if not isinstance(part, dict):
+                continue
+            kind = part.get('type')
+            if kind == 'heading':
+                draw_text(str(part.get('text') or ''), 10 if part.get('level') == 3 else 12)
+            elif kind == 'fields':
+                draw_kv_table([(row[0], row[1], '') for row in (part.get('rows') or [])
+                               if isinstance(row, (list, tuple)) and len(row) >= 2], raw=True)
+            elif kind == 'table':
+                draw_grid([str(header) for header in (part.get('headers') or [])],
+                          [list(row) for row in (part.get('rows') or []) if isinstance(row, (list, tuple))])
+        document.save(output_path)
+        document.close()
+        return output_path
 
     draw_text(project_name or 'الدراسة المالية', 18)
     draw_text('التقرير المالي المنظم', 13)

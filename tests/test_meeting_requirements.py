@@ -1472,6 +1472,67 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Echoed inputs are no longer repeated in the results summary.
         self.assertNotIn('developerRate', html)
 
+    def test_financial_pdf_prints_the_screen_verbatim_in_tables(self):
+        """The export is the study as the screen shows it, only laid out as tables.
+
+        The server used to rebuild the report from its own label map, so «هل وحدات المشروع بيعية
+        أم تأجيرية؟» printed as «طبيعة الإيرادات» and its value printed as the raw option id
+        «mixed», and a light branding colour painted the label column unreadable.
+        """
+        model = {
+            'inputs': {'unitRevenueMode': 'mixed', 'developmentYears': 4, 'landArea': 70000,
+                       'financeEnabled': 'no', 'fundEnabled': 'no', 'fundFeesEnabled': 'no',
+                       'externalEnabled': 'no', 'exitEnabled': 'no', 'builtUpAreaAbove': 100000},
+            'tables': {}, 'projection': {},
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': '1. طبيعة وحدات المشروع'},
+                {'type': 'fields', 'rows': [['هل وحدات المشروع بيعية أم تأجيرية؟', 'مختلطة: بيعية وتأجيرية'],
+                                            ['حالة الأرض', 'مستأجرة ولا تدخل ضمن تكلفة المشروع']]},
+                {'type': 'heading', 'level': 2, 'text': '9. التمويل'},
+                {'type': 'heading', 'level': 3, 'text': 'خطة سحب التمويل'},
+                {'type': 'table', 'headers': ['سنة السحب', 'نسبة السحب من التسهيل %'], 'rows': [['1', '25%']]},
+            ]},
+        }
+        branding = {'primary_color': '#EAF2F8', 'secondary_color': '#F0E9DF', 'accent_color': '#FFFFFF'}
+        with self.app.app_context():
+            html = self.application_module.build_financial_report_html('مشروع مالي', model, branding, self.tenant_a)
+
+        # Screen wording, screen values — nothing renamed, nothing reformatted, nothing dropped.
+        self.assertIn('هل وحدات المشروع بيعية أم تأجيرية؟', html)
+        self.assertIn('مختلطة: بيعية وتأجيرية', html)
+        self.assertIn('مستأجرة ولا تدخل ضمن تكلفة المشروع', html)
+        self.assertIn('<th>نسبة السحب من التسهيل %</th>', html)
+        self.assertIn('25%', html)
+        self.assertNotIn('mixed', html)
+        self.assertNotIn('leased', html)
+        self.assertNotIn('طبيعة الإيرادات', html)
+
+        # A sub-heading keeps its block title, and every value sits in a table cell.
+        self.assertLess(html.index('9. التمويل'), html.index('خطة سحب التمويل'))
+        self.assertNotIn('<p>مختلطة', html)
+
+        # The branding palette no longer paints the report, so a light tenant colour cannot
+        # print pale text on a pale tint.
+        for colour in branding.values():
+            self.assertNotIn(colour, html)
+
+        # The fallback engine renders the same parts rather than the old label map.
+        with tempfile.TemporaryDirectory() as folder:
+            output = os.path.join(folder, 'screen.pdf')
+            with self.app.app_context():
+                self.application_module.generate_financial_pdf_from_model('مشروع مالي', model, output)
+            self.assertTrue(self.application_module._financial_pdf_has_text(output, minimum=20))
+
+        # The client is what supplies those parts, and only for the export.
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function collectFinancialStudyReport()', index_source)
+        self.assertIn('model.report = collectFinancialStudyReport();', index_source)
+        self.assertNotIn('report: collectFinancialStudyReport()', index_source)
+        # Selected option text, not the option id, and hidden inputs stay out.
+        self.assertIn("if (control.tagName === 'SELECT') return financialReportText(control.selectedOptions?.[0])",
+                      index_source)
+        self.assertIn("FINANCIAL_REPORT_SKIP_COLUMNS = new Set(['ترتيب / حذف', 'ترتيب', 'حذف'])", index_source)
+
     def test_cashflow_column_tints_do_not_override_the_table_header(self):
         """The cf-* classes also sit on the <th> so whole columns can be hidden by project mode.
         An unscoped class rule outranks "#section-financial-calc th" on specificity, which left
