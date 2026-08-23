@@ -2675,7 +2675,7 @@ def _designer_target_indexes(action, count, current_index, force_all=False):
     return [max(0, min(idx, count - 1))] if count else []
 
 
-def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None):
+def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None):
     """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
         try:
@@ -2725,6 +2725,15 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
             "  3. تموضع وحجم الصور والبطاقات والشعارات.\n"
             "  4. درجات الألوان وتناسق الخلفية مع النصوص والبطاقات.\n"
             "- نفّذ التعديل المطلوب بدقة جراحية مع الحفاظ على التناسق البصري والجمالي والتوازن وبدون تداخل نصوص."
+        )
+
+    if user_image_refs:
+        # The user's own attachment comes after the snapshot, so the order matches the note below.
+        image_refs = (image_refs or []) + list(user_image_refs)
+        vision_note += (
+            "\n\n## صورة أرفقها المستخدم مع طلبه\n"
+            "الصورة الأخيرة المرفقة هي صورة المستخدم، لا لقطة الشريحة. استخدمها كما يوضح طلبه"
+            " (مرجع تصميم أو محتوى مطلوب أو خلل يشير إليه)، ولا تنسخ نصوصها إلى الشريحة إلا إن طلب ذلك."
         )
 
     # Store base64 data URIs to avoid inflating prompt with hundreds of thousands of tokens
@@ -2854,13 +2863,21 @@ def api_designer_chat():
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
 أنت وكيل تصميم عروض متميز ذكي يفهم كافة اللهجات العربية، المترادفات، الأرقام، وأوامر إضافة وتحديث الخرائط والتنسيقات.
 حلل طلب المستخدم وخطط لتنفيذه على العرض.{all_note} أعد JSON فقط:
-{{"response":"رسالة عربية تشرح ما ستفعله", "actions":[{{"tool":"edit_slides|generate_image|create_slide|chat_only", "params":{{}}}}]}}
+{{"response":"رسالة عربية تشرح ما ستفعله", "actions":[{{"tool":"edit_slides|generate_image|create_slide|ask|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل المطلوبة"}}
 - generate_image: params={{"prompt":"وصف الصورة", "slideIndex":1, "position":"background|right|left|inline"}}
 - create_slide: params={{"title":"العنوان", "type":"content", "instruction":"محتوى الشريحة"}}
 - regenerate_maps: params={{"maptype":"roadmap|satellite|hybrid|terrain"}} (استخدمها عند طلب التبديل إلى شوارع/مرور/قمر صناعي)
+- ask: params={{"question":"سؤال عربي واحد قصير"}} — استخدمها عندما لا يكون الطلب واضحًا.
+
+متى تسأل بدل أن تنفّذ (مهم):
+- الطلب غامض أو يقبل أكثر من تنفيذ مختلف النتيجة (مثل «حسّن الشريحة» أو «غيّر التصميم» بلا تحديد).
+- لا تعرف أي شريحة يقصد ولم تحدده الرسالة ولا سياق العرض.
+- التنفيذ سيحذف أو يستبدل محتوى قائمًا ولست متأكدًا أنه مقصود.
+- أرفق المستخدم صورة ولم يوضح المطلوب منها (مرجع تصميم؟ صورة تُدرَج؟ خلل يشير إليه؟).
+في هذه الحالات أعد action واحدًا فقط: ask مع سؤال واحد محدد يمكن الإجابة عليه بكلمة أو سطر، وممنوع تنفيذ أي تعديل في نفس الرد. التخمين ثم تعديل خاطئ أسوأ من سؤال واحد.
 
 قواعد إضافة الخرائط عند طلب المستخدم (خريطة شوارع، خريطة منطقة، معالم، نطاق):
 إذا طلب المستخدم إضافة خريطة أو تعديل خريطة الشريحة، يرجى توجيه edit_slides بتضمين أحد الرموز التالية داخل كود HTML للشريحة:
@@ -2878,10 +2895,38 @@ def api_designer_chat():
 
 قائمة الشرائح الحالية في العرض ({len(slides)} شريحة):
 {json.dumps(summary, ensure_ascii=False)}"""
+    # An image the user attached in the chat: a design reference, something to insert, or the
+    # problem they are pointing at. The attach button used to open the training page's file input,
+    # so it never reached this endpoint at all.
+    attached_image = str(data.get('attachedImage') or '').strip()
+    user_image_refs = [{'data_uri': attached_image}] if attached_image.startswith('data:image/') else None
+    if user_image_refs:
+        planner_prompt += ("\n\nأرفق المستخدم صورة مع رسالته. انظر إليها قبل التخطيط، وإن لم يكن دورها"
+                          " واضحًا فاسأل عنه بأداة ask.")
     try:
-        planner_raw = extract_chat_content(call_zai_chat(planner_prompt, message, max_tokens=2500), 'DESIGNER-PLANNER')
+        planner_raw = extract_chat_content(
+            call_zai_chat(planner_prompt, message, max_tokens=2500, image_references=user_image_refs),
+            'DESIGNER-PLANNER')
         plan = _designer_json_response(planner_raw)
         actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
+
+        # A question is an answer on its own: nothing is edited until the user replies.
+        question = ''
+        for action in actions if isinstance(actions, list) else []:
+            if isinstance(action, dict) and action.get('tool') == 'ask':
+                params = action.get('params') if isinstance(action.get('params'), dict) else {}
+                question = str(params.get('question') or '').strip()
+                if question:
+                    break
+        if question:
+            return jsonify({'success': True, 'data': {
+                'action': 'ask',
+                'response': question,
+                'slidesData': slides,
+                'creativeImages': data.get('creativeImages') if isinstance(data.get('creativeImages'), dict) else {},
+                'actions': [{'tool': 'ask', 'status': 'success'}],
+            }})
+
         if not actions:
             if is_all_slides_request:
                 target = 'all'
@@ -2914,7 +2959,7 @@ def api_designer_chat():
         for action in actions:
             tool = action.get('tool') if isinstance(action, dict) else ''
             params = action.get('params') if isinstance(action.get('params'), dict) else {}
-            if tool in ('chat_only', 'validate_design_workspace', 'save_design_workspace'):
+            if tool in ('ask', 'chat_only', 'validate_design_workspace', 'save_design_workspace'):
                 continue
             if tool in ('edit_slides', 'edit_design_slide', 'edit_design_slides'):
                 indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
@@ -2932,7 +2977,8 @@ def api_designer_chat():
                                 presentation_id,
                                 branding,
                                 tenant_id=tenant_id,
-                                creative_images=creative_images
+                                creative_images=creative_images,
+                                user_image_refs=user_image_refs
                             )
                             return idx, h, r
 
@@ -2953,7 +2999,7 @@ def api_designer_chat():
                 else:
                     for idx in indexes:
                         slide = slides[idx] if isinstance(slides[idx], dict) else {}
-                        html, response_text = _designer_edit_slide(slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'), instruction, idx, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images)
+                        html, response_text = _designer_edit_slide(slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'), instruction, idx, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs)
                         slide['html'] = html
                         slides[idx] = slide
                         if response_text:
@@ -2983,7 +3029,7 @@ def api_designer_chat():
                 title = params.get('title') or 'شريحة جديدة'
                 slide_type = params.get('type') or 'content'
                 plan_slide = {'title': title, 'type': slide_type, 'design_style': params.get('designStyle', 'cards'), 'bullets': []}
-                html, _ = _designer_edit_slide('<div class="slide" style="width:1280px;height:720px;"><h1>' + title + '</h1></div>', title, params.get('instruction') or message, len(slides), project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images)
+                html, _ = _designer_edit_slide('<div class="slide" style="width:1280px;height:720px;"><h1>' + title + '</h1></div>', title, params.get('instruction') or message, len(slides), project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs)
                 slides.append({'html': html, 'title': title, 'type': slide_type, 'designStyle': plan_slide['design_style'], 'bullets': [], 'metrics': []})
                 executed.append({'tool': tool, 'status': 'success', 'index': len(slides) - 1})
             elif tool in ('regenerate_maps', 'update_map_style', 'change_map_type'):

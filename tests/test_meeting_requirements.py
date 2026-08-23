@@ -3189,6 +3189,49 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(response.get_json()['success'])
         self.assertTrue(response.get_json()['plan']['slides'])
 
+    def test_designer_asks_instead_of_guessing_and_the_chat_is_one_line(self):
+        client = self.app.test_client()
+        slides = [{'html': '<div class="slide">شريحة</div>', 'title': 'الغلاف', 'type': 'cover'}]
+        plan = json.dumps({
+            'response': 'الطلب غير واضح',
+            'actions': [{'tool': 'ask', 'params': {'question': 'أي شريحة تقصد؟'}}],
+        }, ensure_ascii=False)
+        with patch.object(self.application_module, 'call_zai_chat',
+                          return_value={'choices': [{'message': {'content': plan}}]}) as chat:
+            response = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
+                'message': 'حسّن الشريحة', 'slidesData': slides, 'slideIndex': 0,
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        reply = response.get_json()['data']
+        self.assertEqual(reply['action'], 'ask')
+        self.assertEqual(reply['response'], 'أي شريحة تقصد؟')
+        # Nothing was edited: one model call for the plan, and no edit call after it.
+        self.assertEqual(chat.call_count, 1)
+        self.assertEqual(reply['slidesData'], slides)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        # One chat line: attach, write, send. The suggestions drawer is gone.
+        self.assertNotIn('اقتراحات سريعة', index_source)
+        self.assertNotIn('function setTenantChatExample', index_source)
+        self.assertIn('id="tenantChatImageFile"', index_source)
+        self.assertIn('function attachTenantChatImage(input)', index_source)
+        self.assertIn("attachedImage: attachedImage ? attachedImage.dataUri : ''", index_source)
+        self.assertIn("if (reply.action === 'ask') {", index_source)
+        # The designer chat must not reuse the training page's file input.
+        composer = index_source[index_source.index('id="tenantChatComposer"'):
+                                index_source.index('id="tenantChatComposer"') + 1400]
+        self.assertNotIn('trainingChatImageFile', composer)
+
+    def test_refresh_on_the_slides_route_reopens_its_presentation(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        # The route carries no identity, and it used to be shown as-is: an empty workspace.
+        self.assertIn('} else if (TENANT_NAVIGATION_CONTEXT_PAGES.has(requestedPage)) {', index_source)
+        self.assertIn('if (!(await restoreTenantNavigation(requestedPage))) {', index_source)
+        self.assertIn('async function restoreTenantNavigation(preferredPageId = null)', index_source)
+        self.assertIn('if (preferredPageId && document.getElementById(preferredPageId)) state.pageId = preferredPageId;',
+                      index_source)
+
     def test_designer_edit_keeps_the_presentation_images(self):
         """An edited slide used to come back with its image markers unresolved, so cards rendered empty."""
         module = self.application_module
