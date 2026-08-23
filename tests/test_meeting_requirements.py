@@ -680,6 +680,23 @@ class MeetingRequirementsTests(unittest.TestCase):
         _valid, issues = engine.validate_slide_plan(plan, {'min_slides': 1, 'max_slides': 60})
         self.assertFalse([issue for issue in issues if 'section_divider' in issue], issues)
 
+    def test_slides_workspace_can_return_to_the_project_form_without_losing_it(self):
+        """There was no way back from the slides page to بيانات المشروع: the only navigation was
+        the dashboard, and from there "عرض جديد" calls startTenantProject(), which resets the
+        state and shows a blank form as if the project were gone."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        toolbar = index_source.split('<section id="tenantSlidesPage"')[1].split('</div>\n\n      <!-- Live')[0]
+        self.assertIn("navigateTenantWorkflow('tenantProjectPage')", toolbar)
+        self.assertIn('بيانات المشروع', toolbar)
+
+        # Going back only shows the page again: it must not rebuild or reload the form, because the
+        # rendered form already holds the hydrated values.
+        nav = index_source.split('async function navigateTenantWorkflow(pageId) {')[1]
+        nav = nav.split('\n    function ')[0]
+        self.assertIn("if (pageId === 'tenantProjectPage') {\n        showTenantPage(pageId);", nav)
+        self.assertNotIn('startTenantProject', nav)
+        self.assertNotIn('loadTenantProjectForm', nav)
+
     def test_slide_rules_forbid_invented_content_and_drawn_2d_plans(self):
         """Every number has to come from the project, and plans are uploaded images only."""
         rules = self.application_module.build_design_rules(

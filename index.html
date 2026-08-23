@@ -5256,6 +5256,11 @@
             <h2>معاينة وتعديل الشرائح</h2>
             <span id="slidesEditorInfo"></span>
           </div>
+          <!-- The only way back used to be the dashboard, and from there "عرض جديد" resets the
+               state, so returning to the form showed it blank. The project page is already
+               rendered and filled, so showing it again keeps every value. -->
+          <button type="button" class="slide-toolbar-back"
+            onclick="navigateTenantWorkflow('tenantProjectPage')">بيانات المشروع</button>
           <button type="button" class="slide-toolbar-back" onclick="showTenantPage('tenantDashboardPage')">عودة
             للرئيسية</button>
         </div>
