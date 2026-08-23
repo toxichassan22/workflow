@@ -618,6 +618,68 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('height:56px', cover)
         self.assertNotIn('height:36px', cover)
 
+    def test_section_dividers_are_built_from_one_fixed_layout(self):
+        """Every divider is the same layout over the approved main image with only the text
+        changing, so it is rendered in code: identical on every divider and no model call."""
+        engine = self.application_module.slide_engine
+        branding = {'primary_color': '#0b1f33', 'accent_color': '#22b6e8', 'company_name': 'منافع'}
+        project = {'project_name': 'THE VIEW', 'project_logo': '/api/project-files/logo-1'}
+        slide = {
+            'title': 'فريق التطوير والتصميم', 'type': 'section_divider',
+            'title_en': 'Development & Design Team',
+            'subtitle': 'شراكة تجمع خبرة التطوير العقاري السعودي مع التصميم والهندسة العالمية.',
+        }
+
+        # No model call: call_glm_fn must not be touched for a divider.
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError('a section divider must not call the model')
+
+        html = engine.generate_single_slide(
+            'system', slide, 6, 60, branding, fail_if_called, project_data=project)
+
+        self.assertEqual(html.count('class="slide"'), 1)
+        self.assertIn('فريق التطوير والتصميم', html)
+        self.assertIn('DEVELOPMENT & DESIGN TEAM', html)          # English, upper-cased
+        self.assertIn('شراكة تجمع خبرة التطوير العقاري', html)
+        self.assertIn('url(##IMAGE_COVER##)', html)               # the approved main image
+        self.assertIn('06 — 60', html)                            # slide number, as in the reference
+        self.assertIn('THE VIEW', html)
+        self.assertIn('##PROJECT_LOGO##', html)                   # both logos
+        self.assertIn('##LOGO##', html)
+        self.assertIn('#22b6e8', html)                            # tenant accent, not a fixed colour
+
+        # Finalizing must not add the content header/footer to it.
+        finished = engine.finalize_slide_html(
+            html, 'section_divider', project, branding,
+            creative_images={'cover': '/uploads/creative/cover.jpg'},
+            slide_num=6, slide_title=slide['title'], total_slides=60,
+        )
+        self.assertNotIn('height:56px', finished)
+        self.assertNotIn('height:36px', finished)
+        self.assertIn('/uploads/creative/cover.jpg', finished)
+        self.assertIn('/api/project-files/logo-1', finished)
+
+        # A divider with no English line or description still renders.
+        bare = engine.generate_single_slide(
+            'system', {'title': 'مكونات المشروع', 'type': 'section_divider'},
+            15, 60, branding, fail_if_called, project_data=project)
+        self.assertIn('مكونات المشروع', bare)
+        self.assertIn('15 — 60', bare)
+
+        # The planner knows the type, and the validator accepts it.
+        prompt = engine.build_slide_plan_prompt({'project_name': 'THE VIEW'}, branding)
+        self.assertIn('section_divider', prompt)
+        self.assertIn('title_en', prompt)
+        plan = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'مكونات المشروع', 'type': 'section_divider'},
+            {'title': 'المكونات', 'type': 'content', 'bullets': ['1', '2', '3']},
+            {'title': 'الختام', 'type': 'closing'},
+        ]}
+        _valid, issues = engine.validate_slide_plan(plan, {'min_slides': 1, 'max_slides': 60})
+        self.assertFalse([issue for issue in issues if 'section_divider' in issue], issues)
+
     def test_slide_rules_forbid_invented_content_and_drawn_2d_plans(self):
         """Every number has to come from the project, and plans are uploaded images only."""
         rules = self.application_module.build_design_rules(

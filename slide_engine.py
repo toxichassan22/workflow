@@ -52,6 +52,7 @@ def _suggest_design_style(title, bullets=None, slide_type='content'):
     fixed = {
         'cover': 'image',
         'index': 'flow',
+        'section_divider': 'divider',
         'moodboard': 'grid',
         'closing': 'minimal',
     }
@@ -652,6 +653,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - cover: شريحة الغلاف (1 فقط، في البداية)
 - index: شريحة الفهرس (1 فقط، بعد الغلاف)
 - content: شريحة محتوى (عدد متغير)
+- section_divider: شريحة فاصلة تسبق كل محور رئيسي، تحمل اسم المحور فقط على خلفية الصورة الرئيسية
 - moodboard: شريحة المود بورد (0 أو 1، قبل الختام)
 - closing: شريحة الختام (1 فقط، في النهاية)
 - map_overview: خريطة الموقع + المعالم المحيطة (يتطلب إحداثيات)
@@ -684,12 +686,14 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
   "slides": [
     {{
       "title": "عنوان الشريحة بالعربي",
-      "type": "cover|index|content|moodboard|closing|map_overview|map_landmarks|map_access|map_catchment|site_specs|site_photos",
+      "type": "cover|index|content|section_divider|moodboard|closing|map_overview|map_landmarks|map_access|map_catchment|site_specs|site_photos",
       "content_density": "low|medium|high",
-      "design_style": "dashboard|cards|timeline|table|text|image|flow|swot|map",
+      "design_style": "dashboard|cards|timeline|table|text|image|flow|swot|map|divider",
       "bullets": ["نقطة 1", "نقطة 2", "نقطة 3"],
       "requires_image": true أو false,
-      "content_source": "<أي حقل من بيانات المشروع يغذي هذه الشريحة>"
+      "content_source": "<أي حقل من بيانات المشروع يغذي هذه الشريحة>",
+      "title_en": "<للفواصل فقط: ترجمة العنوان بالإنجليزية>",
+      "subtitle": "<للفواصل فقط: سطر واحد يصف المحور من بيانات المشروع>"
     }}
   ]
 }}
@@ -700,6 +704,11 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
   * الشريحة 2 = type=index (الفهرس)
   * الشريحة قبل الأخيرة = type=moodboard (المود بورد)
   * الشريحة الأخيرة = type=closing (الختام)
+- **فاصل قبل كل محور رئيسي:** ضع `type=section_divider` قبل أول شريحة من كل محور من محاور العرض
+  (المشروع والفكرة، الموقع والخرائط، الأرض والاشتراطات، مكونات المشروع، الجدول الزمني، الدراسة
+  المالية، دراسة السوق، فريق العمل، التصور البصري). الفاصل يحمل اسم المحور بالعربي في `title`،
+  وترجمته في `title_en`، وسطرًا واحدًا من بيانات المشروع في `subtitle`، و`bullets` فارغة. لا تضع
+  فاصلًا قبل الغلاف أو الفهرس أو الختام، ولا فاصلين متتاليين، ولا فاصلًا لمحور بلا شرائح بعده.
 - **قواعد الشركة في بداية هذه الرسالة (إن وُجدت) إلزامية:** إذا حددت قواعد التدريب ترتيباً أو عدداً أو تصميماً معيناً للشرائح، اتبعه بدقة فوق أي افتراضات أخرى
 - باقي الشرائح متغيرة العدد والترتيب حسب قواعد الشركة وكمية بيانات المشروع
 - **شريحة المود بورد والتصور الخارجي:** شريحة واحدة فقط دائماً (type=moodboard) تضم الصور الأربع للزوايا الخارجية للمشروع (##MOODBOARD_IMAGE_1##، ##MOODBOARD_IMAGE_2##، ##MOODBOARD_IMAGE_3##، ##MOODBOARD_IMAGE_4##) في شبكة 2x2 أو توزيع متناسق مع التسميات (يمين، شمال، فوق، خلف) وتوضع قبل الختام مباشرة.
@@ -975,7 +984,7 @@ def parse_slide_plan(response_text, branding=None, project_data=None):
             slide['content_density'] = 'medium'
         if 'requires_image' not in slide:
             slide['requires_image'] = (
-                slide_type in ('cover', 'moodboard')
+                slide_type in ('cover', 'moodboard', 'section_divider')
                 or slide_type.startswith('map_')
                 or slide_type == 'site_photos'
                 or slide.get('design_style') == 'image'
@@ -1005,7 +1014,7 @@ def validate_slide_plan(plan, branding):
         issues.append(f"Too many slides: {count} (max: {max_s})")
 
     # Check fixed-position slides
-    valid_types = {'cover', 'index', 'content', 'moodboard', 'closing',
+    valid_types = {'cover', 'index', 'content', 'section_divider', 'moodboard', 'closing',
                    'map_overview', 'map_landmarks', 'map_access', 'map_catchment',
                    'site_specs', 'site_photos'}
 
@@ -1180,6 +1189,11 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     Generate a single slide's HTML.
     call_glm_fn: function(system_prompt, user_msg, max_tokens) -> response_dict
     """
+    # A section divider is one fixed layout with different text, so it is rendered here instead of
+    # being asked from the model on every deck: identical on every divider, and no call at all.
+    if (slide or {}).get('type') == 'section_divider':
+        return build_section_divider_slide(slide, slide_num, total_slides, branding, project_data)
+
     user_msg = build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=project_data)
     slide_title = slide.get('title', f'شريحة {slide_num}')
     slide_type = slide.get('type', 'content')
@@ -1356,6 +1370,85 @@ def _build_moodboard_fallback(images):
         '<div style="width:170px;height:4px;background:#C2A176;"></div></div>'
         f'<div style="height:560px;display:grid;grid-template-columns:{cols};grid-template-rows:{rows};gap:8px;">'
         + ''.join(tiles) + '</div></div>'
+    )
+
+
+def _hex_to_rgba(color, alpha):
+    """CSS rgba() from a #rgb/#rrggbb brand colour, so the veil follows the tenant's palette."""
+    value = str(color or '').strip().lstrip('#')
+    if len(value) == 3:
+        value = ''.join(part * 2 for part in value)
+    if len(value) != 6:
+        value = '0b1f33'
+    try:
+        red, green, blue = (int(value[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        red, green, blue = 11, 31, 51
+    return f'rgba({red},{green},{blue},{alpha})'
+
+
+def build_section_divider_slide(slide, slide_num, total_slides, branding=None, project_data=None):
+    """Render a section divider: the main image, darkened, with the section name over it.
+
+    The layout is identical on every divider and only the text changes, so it is built here
+    instead of being asked from the model on every deck: that keeps all dividers pixel-identical,
+    costs no tokens, and cannot drift between slides.
+    """
+    branding = branding or {}
+    project_data = project_data or {}
+    slide = slide or {}
+    primary = branding.get('primary_color') or '#0b1f33'
+    accent = branding.get('accent_color') or '#0ea5e9'
+    slide_ratio = branding.get('slide_ratio', '16:9')
+    width, height = (1280, 960) if slide_ratio == '4:3' else (1280, 720)
+
+    title = str(slide.get('title') or 'القسم').strip()
+    title_en = str(slide.get('title_en') or '').strip().upper()
+    subtitle = str(slide.get('subtitle') or '').strip()
+    project_name = str(project_data.get('project_name') or project_data.get('projectName') or '').strip()
+    project_logo = str(project_data.get('project_logo') or '').strip()
+
+    logos = '<img src="##LOGO##" alt="" style="height:78px;width:auto;object-fit:contain;" />'
+    if project_logo:
+        logos += (
+            # Not 56px: postprocess_slide() reads that height as "this slide already has a header".
+            f'<div style="width:1px;height:52px;background:rgba(255,255,255,0.35);margin:0 18px;"></div>'
+            '<img src="##PROJECT_LOGO##" alt="" style="height:78px;width:auto;object-fit:contain;" />'
+        )
+
+    english = (
+        f'<div style="font-size:15px;font-weight:700;letter-spacing:2.5px;color:{accent};margin-top:14px;">{title_en}</div>'
+    ) if title_en else ''
+    rule = f'<div style="width:200px;height:3px;background:{accent};margin:18px 0 0 auto;"></div>'
+    description = (
+        f'<div style="font-size:17px;line-height:1.75;color:rgba(255,255,255,0.86);margin-top:22px;">{subtitle}</div>'
+    ) if subtitle else ''
+    footer_number = f'{slide_num:02d} — {int(total_slides or slide_num):02d}' if slide_num else ''
+
+    return (
+        f'<div class="slide" dir="rtl" style="width:{width}px;height:{height}px;position:relative;'
+        f'overflow:hidden;box-sizing:border-box;background:{primary};">'
+        # The approved main image, full bleed.
+        '<div style="position:absolute;top:0;right:0;left:0;bottom:0;background-image:url(##IMAGE_COVER##);'
+        'background-size:cover;background-position:center;"></div>'
+        # Navy veil: dark enough for white text on any photo, light enough that the photo shows.
+        f'<div style="position:absolute;top:0;right:0;left:0;bottom:0;background:linear-gradient(160deg,'
+        f'{_hex_to_rgba(primary, "0.94")} 0%,{_hex_to_rgba(primary, "0.82")} 45%,'
+        f'{_hex_to_rgba(primary, "0.62")} 100%);"></div>'
+        f'<div style="position:absolute;top:0;bottom:0;left:0;width:10px;background:{accent};"></div>'
+        f'<div style="position:absolute;top:44px;left:48px;display:flex;align-items:center;">{logos}</div>'
+        # padding-bottom biases the block slightly above the optical centre, as in the reference.
+        '<div style="position:absolute;top:0;bottom:0;right:64px;width:58%;display:flex;flex-direction:column;'
+        'justify-content:center;text-align:right;padding-bottom:56px;box-sizing:border-box;">'
+        f'<div style="font-size:58px;line-height:1.15;font-weight:800;color:#ffffff;">{title}</div>'
+        f'{english}{rule}{description}'
+        '</div>'
+        # dir="ltr": inside the RTL slide "06 — 60" would be reordered into "60 — 06".
+        f'<div dir="ltr" style="position:absolute;bottom:34px;left:48px;font-size:13px;letter-spacing:1px;'
+        f'color:rgba(255,255,255,0.55);">{footer_number}</div>'
+        f'<div style="position:absolute;bottom:34px;right:48px;font-size:13px;font-weight:700;'
+        f'letter-spacing:1.5px;color:{accent};">{project_name}</div>'
+        '</div>'
     )
 
 
@@ -1554,9 +1647,11 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None, project_log
             else:
                 img_tag = img_tag.replace('<img', f'<img src="{logo_url}"')
 
-            # Only add the logo sizing style once
+            # Only add the logo sizing style once, and never over an explicit height: the cover,
+            # closing and section dividers set a much larger logo on purpose.
             _LOGO_STYLE = 'max-height:50px;width:auto;object-fit:contain;display:inline-block;'
-            if _LOGO_STYLE not in img_tag:
+            has_explicit_height = re.search(r'(?:max-)?height\s*:', img_tag, flags=re.IGNORECASE)
+            if _LOGO_STYLE not in img_tag and not has_explicit_height:
                 if 'style=' in img_tag.lower():
                     img_tag = re.sub(
                         r'style=["\']([^"\']*)["\']',
@@ -1627,8 +1722,9 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         return tag
     html = re.sub(r'<img\s[^>]*>', _strip_srcless_img, html, flags=re.IGNORECASE)
 
-    # Content/map/site slides get a header/footer; cover, moodboard and closing never do.
-    if slide_type not in ('cover', 'closing', 'moodboard') and not is_cover_or_closing:
+    # Content/map/site slides get a header/footer; cover, dividers, moodboard and closing never do:
+    # a divider carries its own logo, section name, slide number and project name.
+    if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
         has_header = bool(re.search(r'height:\s*56px', html))
         has_footer = bool(re.search(r'height:\s*36px', html))
 
