@@ -2414,6 +2414,72 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     return draft_id
 
 
+def find_draft_snapshots(tenant_id):
+    """Snapshots of project data that survive an emptied draft, newest first.
+
+    Every generated presentation stored the whole ``tenantProjectData`` of the moment, and it
+    carries its own draft id, so a draft that lost its fields can be read back from here.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        '''SELECT id, title, project_data, slide_count, created_at, updated_at
+           FROM presentations WHERE tenant_id = ? ORDER BY created_at DESC''',
+        (tenant_id,)
+    ).fetchall()
+    snapshots = []
+    for row in rows:
+        payload = _json_object(row['project_data'])
+        if not payload:
+            continue
+        snapshots.append({
+            'presentation_id': row['id'],
+            'title': row['title'] or '',
+            'draft_id': payload.get('draftId') or payload.get('draft_id') or '',
+            'slide_count': row['slide_count'] or 0,
+            'created_at': row['created_at'],
+            'field_count': len(_draft_content_keys(payload)),
+            'project_data': payload,
+        })
+    return snapshots
+
+
+def restore_draft_from_snapshot(tenant_id, draft_id, snapshot_data):
+    """Fill a draft's missing fields from a snapshot without overwriting what it still holds."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM project_drafts WHERE id = ? AND tenant_id = ?', (draft_id, tenant_id)
+    ).fetchone()
+    if not row or not isinstance(snapshot_data, dict):
+        return None
+    current = _json_object(row['draft_data'])
+    merged = dict(current)
+    restored = []
+    for key, value in snapshot_data.items():
+        if key in ('draftId', 'draft_id'):
+            continue
+        if _has_content(current.get(key)) or not _has_content(value):
+            continue
+        merged[key] = value
+        restored.append(key)
+    if not restored:
+        return []
+    merged.pop('draftId', None)
+    merged.pop('draft_id', None)
+    draft_json = json.dumps(merged, ensure_ascii=False)
+    title = str(merged.get('project_name') or merged.get('projectName')
+                or row['title'] or 'مسودة مشروع بدون عنوان').strip()[:200]
+    conn.execute(
+        '''UPDATE project_drafts
+           SET title = ?, draft_data = ?, data_bytes = ?,
+               revision = COALESCE(revision, 0) + 1, updated_at = ?
+           WHERE id = ?''',
+        (title, draft_json, len(draft_json.encode('utf-8')), datetime.now().isoformat(), draft_id)
+    )
+    conn.commit()
+    print(f'[DRAFT RESTORE] Draft {draft_id} regained {len(restored)} fields: {sorted(restored)[:12]}')
+    return restored
+
+
 def get_project_draft(tenant_id, user_id):
     """Get the latest unified draft for one tenant actor."""
     conn = get_db()

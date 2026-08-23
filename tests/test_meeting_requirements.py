@@ -697,6 +697,71 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('startTenantProject', nav)
         self.assertNotIn('loadTenantProjectForm', nav)
 
+    def test_an_emptied_draft_can_be_refilled_from_a_presentation_snapshot(self):
+        """Every generated presentation stored the whole project data of its moment, so a draft
+        that was emptied by a bad save is recoverable from it."""
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        full = {
+            'draftId': 'draft-recover', 'project_name': 'برج المشرق', 'city': 'الرياض',
+            'croquis_land_area': '7012', 'allowed_uses': 'سكني وتجاري',
+        }
+        self.assertEqual(client.post('/api/project-draft', headers=headers,
+                                     json={'draftData': full}).status_code, 200)
+        created = client.post('/api/presentations', headers=headers, json={
+            'title': 'عرض برج المشرق', 'projectData': full,
+            'slidesData': [{'html': '<div class="slide">1</div>'}], 'slideCount': 1,
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        presentation_id = created.get_json()['presentationId']
+
+        # Simulate the historic wipe directly in the database, past the new guard.
+        with self.app.app_context():
+            conn = db.get_db()
+            conn.execute("UPDATE project_drafts SET draft_data = '{}', title = 'مسودة مشروع بدون عنوان' "
+                         'WHERE id = ?', ('draft-recover',))
+            conn.commit()
+
+        report = client.get('/api/project-drafts/recovery', headers=headers).get_json()
+        entry = next(item for item in report['drafts'] if item['draftId'] == 'draft-recover')
+        self.assertTrue(entry['isEmpty'])
+        self.assertEqual(entry['fieldCount'], 0)
+        self.assertEqual(entry['snapshot']['presentationId'], presentation_id)
+        self.assertTrue(entry['snapshot']['recoverable'])
+        self.assertGreaterEqual(entry['snapshot']['fieldCount'], 4)
+
+        restored = client.post('/api/project-draft/draft-recover/restore', headers=headers,
+                               json={'presentationId': presentation_id})
+        self.assertEqual(restored.status_code, 200, restored.get_json())
+        self.assertGreaterEqual(restored.get_json()['restoredCount'], 4)
+
+        draft = client.get('/api/project-draft/draft-recover', headers=headers).get_json()['draft']
+        self.assertEqual(draft['draft_data']['project_name'], 'برج المشرق')
+        self.assertEqual(draft['draft_data']['croquis_land_area'], '7012')
+        self.assertEqual(draft['title'], 'برج المشرق')
+
+        # Restoring never overwrites what the draft still holds.
+        client.post('/api/project-draft', headers=headers, json={'draftData': {
+            'draftId': 'draft-recover', 'project_name': 'اسم محدّث', 'city': 'الرياض',
+            'croquis_land_area': '7012', 'allowed_uses': 'سكني وتجاري',
+        }})
+        again = client.post('/api/project-draft/draft-recover/restore', headers=headers,
+                            json={'presentationId': presentation_id})
+        self.assertEqual(again.get_json()['restoredCount'], 0)
+        kept = client.get('/api/project-draft/draft-recover', headers=headers).get_json()['draft']
+        self.assertEqual(kept['draft_data']['project_name'], 'اسم محدّث')
+
+        # A snapshot from another tenant is never reachable.
+        cross = client.post('/api/project-draft/draft-recover/restore',
+                            headers=self._headers(self.token_b),
+                            json={'presentationId': presentation_id})
+        self.assertEqual(cross.status_code, 404)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('/api/project-drafts/recovery', index_source)
+        self.assertIn('async function restoreProjectDraft(draftId, presentationId)', index_source)
+        self.assertIn('حقل ممتلئ', index_source)
+
     def test_slide_rules_forbid_invented_content_and_drawn_2d_plans(self):
         """Every number has to come from the project, and plans are uploaded images only."""
         rules = self.application_module.build_design_rules(

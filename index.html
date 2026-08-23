@@ -18654,11 +18654,16 @@
       }
       showInlineLoader(list, 'جاري تحميل الملخص...');
 
-      const [presData, expData, draftsData] = await Promise.all([
+      const [presData, expData, draftsData, recoveryData] = await Promise.all([
         api('GET', '/api/presentations'),
         api('GET', '/api/exports'),
-        api('GET', '/api/project-drafts').catch(() => ({ success: false }))
+        api('GET', '/api/project-drafts').catch(() => ({ success: false })),
+        api('GET', '/api/project-drafts/recovery').catch(() => ({ success: false }))
       ]);
+      const recoveryByDraft = {};
+      if (recoveryData && recoveryData.success) {
+        (recoveryData.drafts || []).forEach(item => { recoveryByDraft[item.draftId] = item; });
+      }
 
       const presentations = (presData.success && presData.presentations) ? presData.presentations : [];
       const exports = (expData.success && expData.exports) ? expData.exports : [];
@@ -18679,11 +18684,26 @@
           const title = d.title || 'مسودة مشروع بدون عنوان';
           const statusText = d.status === 'pending_approval' ? 'في انتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
           const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
-          return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid #cbd5e1;margin-bottom:12px;">' +
+          // A card used to show only a title and a date, so an emptied draft looked normal.
+          const recovery = recoveryByDraft[d.id] || null;
+          const fields = recovery ? recovery.fieldCount + ' حقل ممتلئ' : '';
+          const snapshot = recovery && recovery.snapshot;
+          const restorable = snapshot && snapshot.recoverable;
+          const note = restorable
+            ? '<div class="meta" style="color:#92400e">نسخة أقدم من هذه البيانات محفوظة في العرض «' +
+              escapeHtml(snapshot.title || '') + '» وتحتوي ' + snapshot.fieldCount + ' حقلًا</div>'
+            : '';
+          return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid ' +
+            (recovery && recovery.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px;">' +
             '<div><h3>' + escapeHtml(title) + '</h3>' +
-            '<div class="meta">' + statusText + ' | آخر تحديث: ' + date + '</div></div>' +
+            '<div class="meta">' + statusText + ' | آخر تحديث: ' + date +
+            (fields ? ' | ' + fields : '') + '</div>' + note + '</div>' +
             '<div class="tenant-actions">' +
             '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح وإكمال المسودة</button>' +
+            (restorable
+              ? '<button class="btn small" style="background:#b45309;color:#fff" onclick="restoreProjectDraft(\'' +
+                d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>'
+              : '') +
             '<button class="btn small danger" onclick="deleteProjectDraftById(\'' + d.id + '\')">حذف المسودة</button>' +
             '</div></div>';
         }).join('');
@@ -18713,6 +18733,22 @@
 
       list.innerHTML = html;
       tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html };
+    }
+
+    async function restoreProjectDraft(draftId, presentationId) {
+      const resp = await api('POST', '/api/project-draft/' + encodeURIComponent(draftId) + '/restore',
+        { presentationId });
+      if (!resp || !resp.success) {
+        toast(resp?.error || 'تعذر استرجاع البيانات');
+        return;
+      }
+      tenantArchiveCache = null;
+      if (!resp.restoredCount) {
+        toast('لا توجد حقول ناقصة يمكن استرجاعها في هذه المسودة');
+        return;
+      }
+      toast('تم استرجاع ' + resp.restoredCount + ' حقلًا');
+      await openProjectDraftById(draftId);
     }
 
     async function openProjectDraftById(draftId) {

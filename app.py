@@ -5070,6 +5070,79 @@ def api_get_project_draft_by_id(draft_id):
     return jsonify({'success': True, 'draft': draft})
 
 
+@app.route('/api/project-drafts/recovery', methods=['GET'])
+@require_auth
+def api_project_draft_recovery():
+    """Report which drafts lost their fields and what can be read back into them.
+
+    A save with no readable payload used to overwrite a draft with "{}" and answer success, so
+    drafts were emptied silently. Every generated presentation kept a full snapshot of the project
+    data of its moment, which is what makes those drafts recoverable.
+    """
+    snapshots = db.find_draft_snapshots(g.tenant_id)
+    by_draft = {}
+    for snapshot in snapshots:
+        key = snapshot['draft_id']
+        if key and (key not in by_draft or snapshot['field_count'] > by_draft[key]['field_count']):
+            by_draft[key] = snapshot
+    report = []
+    for draft in db.get_all_project_draft_summaries(g.tenant_id, limit=200):
+        stored = db.get_project_draft_by_id(g.tenant_id, draft['id'])
+        field_count = len(db._draft_content_keys((stored or {}).get('draft_data') or {}))
+        snapshot = by_draft.get(draft['id'])
+        report.append({
+            'draftId': draft['id'],
+            'title': draft['title'],
+            'updatedAt': draft.get('updated_at'),
+            'dataBytes': draft.get('data_bytes') or 0,
+            'revision': draft.get('revision') or 0,
+            'fieldCount': field_count,
+            'isEmpty': field_count == 0,
+            'snapshot': {
+                'presentationId': snapshot['presentation_id'],
+                'title': snapshot['title'],
+                'createdAt': snapshot['created_at'],
+                'slideCount': snapshot['slide_count'],
+                'fieldCount': snapshot['field_count'],
+                'recoverable': snapshot['field_count'] > field_count,
+            } if snapshot else None,
+        })
+    orphans = [
+        {
+            'presentationId': snapshot['presentation_id'],
+            'title': snapshot['title'],
+            'createdAt': snapshot['created_at'],
+            'fieldCount': snapshot['field_count'],
+        }
+        for snapshot in snapshots
+        if snapshot['field_count'] > 0 and snapshot['draft_id'] not in {item['draftId'] for item in report}
+    ]
+    return jsonify({'success': True, 'drafts': report, 'orphanSnapshots': orphans})
+
+
+@app.route('/api/project-draft/<draft_id>/restore', methods=['POST'])
+@require_auth
+def api_restore_project_draft(draft_id):
+    """Refill a draft's missing fields from a presentation snapshot. Never overwrites."""
+    data = request.json or {}
+    presentation_id = data.get('presentationId')
+    if not isinstance(presentation_id, str) or not presentation_id:
+        return jsonify({'error': 'presentationId is required'}), 400
+    presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
+    if not presentation:
+        return jsonify({'error': 'Presentation not found'}), 404
+    try:
+        snapshot = json.loads(presentation.get('project_data') or '{}')
+    except (TypeError, ValueError):
+        snapshot = {}
+    if not isinstance(snapshot, dict) or not snapshot:
+        return jsonify({'error': 'لا توجد بيانات مشروع في هذا العرض'}), 400
+    restored = db.restore_draft_from_snapshot(g.tenant_id, draft_id, snapshot)
+    if restored is None:
+        return jsonify({'error': 'Draft not found'}), 404
+    return jsonify({'success': True, 'restoredFields': restored, 'restoredCount': len(restored)})
+
+
 @app.route('/api/project-draft/<draft_id>', methods=['DELETE'])
 @require_auth
 def api_delete_project_draft_by_id(draft_id):
