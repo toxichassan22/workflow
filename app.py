@@ -2294,7 +2294,8 @@ def api_ai_edit_slide():
             slide_title=data.get('slideTitle') or data.get('currentSlideTitle') or '',
             total_slides=data.get('totalSlides') or data.get('total_slides'),
         )
-        html = resolve_designer_chat_placeholders(html, project_data, presentation_id, tenant_id)
+        html = resolve_designer_chat_placeholders(html, project_data, presentation_id, tenant_id,
+                                                 data.get('creativeImages'))
         
         return jsonify({'success': True, 'data': {'action': 'edit', 'html': html, 'response': 'تم تعديل الشريحة '}})
     except Exception as e:
@@ -2446,13 +2447,34 @@ def api_render_slide_image():
     return jsonify({'success': True, 'html': slide_html})
 
 
-def resolve_designer_chat_placeholders(html_out, project_data, presentation_id, tenant_id):
+def _designer_creative_images(project_data, creative_images=None):
+    """The cover, moodboard and map images of the open presentation.
+
+    `clean_project_data()` strips `creativeImages`, `mainImageData` and `moodboardImages` from
+    project data, so reading them off `project_data` could never work: an edited slide kept its
+    `##MOODBOARD_IMAGE_N##` markers and rendered as empty cards. The client sends the images in
+    `creativeImages`, and a draft carries them under `tenantCreativeImages`.
+    """
+    if isinstance(creative_images, dict) and creative_images:
+        return creative_images
+    nested = project_data.get('tenantCreativeImages') if isinstance(project_data, dict) else None
+    return nested if isinstance(nested, dict) else {}
+
+
+def resolve_designer_chat_placeholders(html_out, project_data, presentation_id, tenant_id,
+                                       creative_images=None):
     """Resolve map and creative image placeholders to their actual URLs."""
     if not html_out or '<div' not in html_out:
         return html_out
 
+    creative = _designer_creative_images(project_data, creative_images)
+
     # 1. Gather all map placeholders
     map_placeholders = {}
+    supplied_maps = creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {}
+    for placeholder, url in supplied_maps.items():
+        if placeholder and url:
+            map_placeholders[placeholder] = url
     
     draft_id = project_data.get('draft_id') or project_data.get('draftId') if isinstance(project_data, dict) else None
     db_maps = []
@@ -2478,8 +2500,10 @@ def resolve_designer_chat_placeholders(html_out, project_data, presentation_id, 
             html_out = html_out.replace(placeholder, url)
 
     # 3. Replace creative image placeholders (cover & moodboard)
-    cover_url = project_data.get('cover') or project_data.get('mainImageData') or ''
-    moodboard = project_data.get('moodboard') or project_data.get('moodboardImages') or []
+    cover_url = (creative.get('cover') or creative.get('mainImageData')
+                 or project_data.get('cover') or project_data.get('mainImageData') or '')
+    moodboard = (creative.get('moodboard') or project_data.get('moodboard')
+                 or project_data.get('moodboardImages') or [])
     
     if cover_url:
         html_out = html_out.replace('##IMAGE_COVER##', cover_url)
@@ -2636,7 +2660,7 @@ def _designer_target_indexes(action, count, current_index, force_all=False):
     return [max(0, min(idx, count - 1))] if count else []
 
 
-def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None):
+def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None):
     """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
         try:
@@ -2658,11 +2682,19 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
 
     # Capture Playwright vision screenshot of the current slide if available
     vision_image_uri = None
+    vision_error = ''
     try:
         from generate_pdf_from_preview import render_slide_to_image_base64
         vision_image_uri = render_slide_to_image_base64(html, branding=branding, tenant_id=tenant_id)
+        if not vision_image_uri:
+            vision_error = 'no_snapshot'
     except Exception as ve:
+        vision_error = str(ve)
         print(f"[DESIGNER-EDIT VISION] Screenshot failed: {ve}")
+    if vision_error:
+        # Without the snapshot the model edits the markup blind, and it still claims success. The
+        # user was left believing a layout was inspected and fixed when it was never seen.
+        print(f"[DESIGNER-EDIT VISION] Editing slide {slide_index + 1} without a visual snapshot ({vision_error})")
 
     image_refs = None
     vision_note = ""
@@ -2715,8 +2747,12 @@ HTML الحالي:
                     output = output.replace(ph, b64_str)
 
                 output = postprocess_slide(output, slide_index + 1, tenant_id)
-                output = resolve_designer_chat_placeholders(output, project_data, presentation_id, tenant_id)
-                return output, parsed.get('response') or 'تم تحديث الشريحة بنجاح.'
+                output = resolve_designer_chat_placeholders(output, project_data, presentation_id,
+                                                           tenant_id, creative_images)
+                response_text = parsed.get('response') or 'تم تحديث الشريحة بنجاح.'
+                if vision_error:
+                    response_text += ' التعديل جرى على الكود بدون معاينة بصرية للشريحة.'
+                return output, response_text
             print(f'[DESIGNER-EDIT] invalid HTML on attempt {attempt}')
         except Exception as exc:
             print(f'[DESIGNER-EDIT] attempt {attempt} failed: {exc}')
@@ -2879,7 +2915,8 @@ def api_designer_chat():
                                 project_data,
                                 presentation_id,
                                 branding,
-                                tenant_id=tenant_id
+                                tenant_id=tenant_id,
+                                creative_images=creative_images
                             )
                             return idx, h, r
 
@@ -2900,7 +2937,7 @@ def api_designer_chat():
                 else:
                     for idx in indexes:
                         slide = slides[idx] if isinstance(slides[idx], dict) else {}
-                        html, response_text = _designer_edit_slide(slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'), instruction, idx, project_data, presentation_id, branding, tenant_id=tenant_id)
+                        html, response_text = _designer_edit_slide(slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'), instruction, idx, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images)
                         slide['html'] = html
                         slides[idx] = slide
                         if response_text:
@@ -2930,7 +2967,7 @@ def api_designer_chat():
                 title = params.get('title') or 'شريحة جديدة'
                 slide_type = params.get('type') or 'content'
                 plan_slide = {'title': title, 'type': slide_type, 'design_style': params.get('designStyle', 'cards'), 'bullets': []}
-                html, _ = _designer_edit_slide('<div class="slide" style="width:1280px;height:720px;"><h1>' + title + '</h1></div>', title, params.get('instruction') or message, len(slides), project_data, presentation_id, branding)
+                html, _ = _designer_edit_slide('<div class="slide" style="width:1280px;height:720px;"><h1>' + title + '</h1></div>', title, params.get('instruction') or message, len(slides), project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images)
                 slides.append({'html': html, 'title': title, 'type': slide_type, 'designStyle': plan_slide['design_style'], 'bullets': [], 'metrics': []})
                 executed.append({'tool': tool, 'status': 'success', 'index': len(slides) - 1})
             elif tool in ('regenerate_maps', 'update_map_style', 'change_map_type'):

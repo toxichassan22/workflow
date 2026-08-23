@@ -3189,6 +3189,38 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(response.get_json()['success'])
         self.assertTrue(response.get_json()['plan']['slides'])
 
+    def test_designer_edit_keeps_the_presentation_images(self):
+        """An edited slide used to come back with its image markers unresolved, so cards rendered empty."""
+        module = self.application_module
+        html = ('<div class="slide"><img src="##MOODBOARD_IMAGE_1##"><img src="##MOODBOARD_IMAGE_2##">'
+                '<img src="##IMAGE_COVER##"><img src="##MAP_OVERVIEW##"></div>')
+        creative = {
+            'cover': '/uploads/creative/cover.png',
+            'moodboard': ['/uploads/creative/mb1.png', '/uploads/creative/mb2.png'],
+            'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/overview.png'},
+        }
+        # clean_project_data() strips creativeImages, so reading the images off project data
+        # could never work; they arrive in their own key, or under tenantCreativeImages.
+        self.assertNotIn('creativeImages', module.clean_project_data({'creativeImages': creative}))
+
+        resolved = module.resolve_designer_chat_placeholders(html, {}, None, 'tenant-x', creative)
+        self.assertIn('/uploads/creative/mb1.png', resolved)
+        self.assertIn('/uploads/creative/mb2.png', resolved)
+        self.assertIn('/uploads/creative/cover.png', resolved)
+        self.assertIn('/uploads/maps/overview.png', resolved)
+        self.assertNotIn('##MOODBOARD_IMAGE_1##', resolved)
+        self.assertNotIn('##IMAGE_COVER##', resolved)
+
+        from_draft = module.resolve_designer_chat_placeholders(
+            html, {'tenantCreativeImages': creative}, None, 'tenant-x')
+        self.assertIn('/uploads/creative/mb1.png', from_draft)
+        self.assertNotIn('##IMAGE_COVER##', from_draft)
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        # Every edit path must carry the images, and a blind edit must say it was blind.
+        self.assertIn('creative_images=creative_images', app_source)
+        self.assertIn('التعديل جرى على الكود بدون معاينة بصرية للشريحة.', app_source)
+
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""
         import slide_engine as engine
