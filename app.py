@@ -3644,22 +3644,9 @@ def _ensure_required_location_slides(plan, project_data):
     return plan
 
 
-@app.route('/api/slide-plan', methods=['POST'])
-@require_permission('create_presentation')
-def api_slide_plan():
-    """
-    AI analyzes project data and proposes a slide plan.
-    Input: {projectData: {...}}
-    Output: {proposed_count, reasoning, slides: [...]}
-    """
-    data = request.json or {}
-    project_data = clean_project_data(data.get('projectData', {}))
-    branding = db.get_branding(g.tenant_id)
-
-    if not branding:
-        return jsonify({'error': 'Branding not configured'}), 400
-
-    training_context = db.get_training_context(g.tenant_id) or ''
+def _execute_slide_plan(project_data, tenant_id, branding):
+    """Ask the planner for a slide plan, then enforce the company's slide bounds on it."""
+    training_context = db.get_training_context(tenant_id) or ''
     slide_count_locked = bool(branding.get('lock_slide_count'))
     configured_min, configured_max, locked_count = resolve_slide_bounds(branding)
 
@@ -3687,13 +3674,16 @@ def api_slide_plan():
     elif effective_branding.get('default_slide_count', 0) > effective_max_slides:
         effective_branding['default_slide_count'] = effective_max_slides
 
-    prompt = build_slide_plan_prompt(project_data, effective_branding, tenant_id=g.tenant_id)
+    prompt = build_slide_plan_prompt(project_data, effective_branding, tenant_id=tenant_id)
     if training_context:
         prompt = f"## بيانات خاصة بالشركة والتزام بحد الشرائح\nتنبيه هام جداً: التزم بحد الشرائح لهذه الشركة ({effective_min_slides} إلى {effective_max_slides} شريحة كحد أقصى).\n{training_context}\n\n---\n\n{prompt}"
 
     plan = None
     last_error = None
-    max_attempts = 1
+    # The planner reads every section, so its prompt is long and the answer is slow. This runs in a
+    # background job now, not inside the request, so it can wait for a real plan instead of falling
+    # back to the generic one after 45 seconds.
+    max_attempts = 2
     for attempt in range(1, max_attempts + 1):
         try:
             response = call_zai_chat_parallel(
@@ -3701,7 +3691,7 @@ def api_slide_plan():
                 prompt,
                 max_tokens=6000,
                 attempts=1,
-                timeout=45,
+                timeout=150,
                 model=SLIDE_TEXT_MODEL
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
@@ -3768,11 +3758,93 @@ def api_slide_plan():
     if not is_valid:
         print(f"[SLIDE-PLAN] Validation issues: {issues}")
 
-    return jsonify({
+    return {
         'success': True,
         'plan': plan,
         'validation': {'isValid': is_valid, 'issues': issues},
+    }
+
+
+def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, job_id):
+    with flask_app.app_context():
+        _write_job('.plan_jobs', tenant_id, job_id, {
+            'status': 'running',
+            'success': True,
+            'message': 'جاري تحليل بيانات المشروع وإعداد هيكل العرض...',
+        })
+        try:
+            payload = _execute_slide_plan(project_data, tenant_id, branding)
+            _write_job('.plan_jobs', tenant_id, job_id, {
+                **payload,
+                'status': 'completed',
+                'message': 'تم إعداد خطة الشرائح',
+            })
+        except Exception as exc:
+            print(f'[SLIDE-PLAN JOB FAILED] {exc}')
+            _write_job('.plan_jobs', tenant_id, job_id, {
+                'status': 'failed',
+                'success': False,
+                'error': f'تعذر إعداد خطة الشرائح: {exc}',
+                'failureReason': 'job_failed',
+            })
+
+
+@app.route('/api/slide-plan', methods=['POST'])
+@require_permission('create_presentation')
+def api_slide_plan():
+    """
+    AI analyzes project data and proposes a slide plan.
+    Input: {projectData: {...}}
+    Output: {jobId} in production, or {proposed_count, reasoning, slides: [...]} in tests.
+
+    The planner needs minutes on a full project, and the live hosting proxy drops a request that
+    stays open that long — the browser then saw a timeout for work the server had completed. So the
+    plan is queued and polled, the same way the croquis and market-study jobs are.
+    """
+    data = request.json or {}
+    project_data = clean_project_data(data.get('projectData', {}))
+    branding = db.get_branding(g.tenant_id)
+
+    if not branding:
+        return jsonify({'error': 'Branding not configured'}), 400
+
+    use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
+    if not use_background:
+        return jsonify(_execute_slide_plan(project_data, g.tenant_id, branding))
+
+    job_id = str(_uuid.uuid4())
+    _write_job('.plan_jobs', g.tenant_id, job_id, {
+        'status': 'queued',
+        'success': True,
+        'message': 'تم استلام طلب إعداد هيكل العرض',
     })
+    threading.Thread(
+        target=_slide_plan_job_worker,
+        args=(current_app._get_current_object(), g.tenant_id, project_data, dict(branding), job_id),
+        daemon=True,
+    ).start()
+    return jsonify({
+        'success': True,
+        'jobId': job_id,
+        'status': 'queued',
+        'message': 'بدأ إعداد هيكل العرض في الخلفية',
+    }), 202
+
+
+@app.route('/api/slide-plan/jobs/<job_id>', methods=['GET'])
+@require_permission('create_presentation')
+def api_slide_plan_job(job_id):
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', str(job_id or '')):
+        return jsonify({'success': False, 'error': 'معرف مهمة غير صالح'}), 400
+    job = _read_job('.plan_jobs', g.tenant_id, job_id)
+    if not job:
+        return jsonify({
+            'success': False,
+            'status': 'not_found',
+            'error': 'المهمة غير موجودة أو انتهت صلاحيتها',
+            'failureReason': 'job_not_found',
+        }), 404
+    return jsonify(job)
 
 
 @app.route('/api/geocode', methods=['POST'])
@@ -8573,18 +8645,18 @@ MARKET_STUDY_MODEL = os.environ.get('MARKET_STUDY_MODEL') or GEMINI_TEXT_MODEL
 _MARKET_JOB_LOCK = threading.Lock()
 
 
-def _market_job_dir(tenant_id):
-    path = os.path.join(UPLOADS_DIR, '.market_jobs', str(tenant_id))
+def _job_dir(namespace, tenant_id):
+    path = os.path.join(UPLOADS_DIR, namespace, str(tenant_id))
     os.makedirs(path, exist_ok=True)
     return path
 
 
-def _market_job_path(tenant_id, job_id):
-    return os.path.join(_market_job_dir(tenant_id), f'{job_id}.json')
+def _job_path(namespace, tenant_id, job_id):
+    return os.path.join(_job_dir(namespace, tenant_id), f'{job_id}.json')
 
 
-def _write_market_job(tenant_id, job_id, payload):
-    path = _market_job_path(tenant_id, job_id)
+def _write_job(namespace, tenant_id, job_id, payload):
+    path = _job_path(namespace, tenant_id, job_id)
     payload = dict(payload)
     payload['updatedAt'] = time.time()
     body = json.dumps(payload, ensure_ascii=False)
@@ -8602,8 +8674,8 @@ def _write_market_job(tenant_id, job_id, payload):
             raise last_error
 
 
-def _read_market_job(tenant_id, job_id):
-    path = _market_job_path(tenant_id, job_id)
+def _read_job(namespace, tenant_id, job_id):
+    path = _job_path(namespace, tenant_id, job_id)
     if not os.path.isfile(path):
         return None
     with _MARKET_JOB_LOCK:
@@ -8613,6 +8685,22 @@ def _read_market_job(tenant_id, job_id):
         except Exception:
             return None
     return payload if isinstance(payload, dict) else None
+
+
+def _market_job_dir(tenant_id):
+    return _job_dir('.market_jobs', tenant_id)
+
+
+def _market_job_path(tenant_id, job_id):
+    return _job_path('.market_jobs', tenant_id, job_id)
+
+
+def _write_market_job(tenant_id, job_id, payload):
+    _write_job('.market_jobs', tenant_id, job_id, payload)
+
+
+def _read_market_job(tenant_id, job_id):
+    return _read_job('.market_jobs', tenant_id, job_id)
 
 
 def _call_market_study_model(system_prompt, user_content, max_tokens=None):

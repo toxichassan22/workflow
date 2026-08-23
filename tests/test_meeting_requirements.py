@@ -3189,6 +3189,34 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(response.get_json()['success'])
         self.assertTrue(response.get_json()['plan']['slides'])
 
+    def test_slide_plan_runs_as_a_polled_job_so_the_proxy_cannot_drop_it(self):
+        """A full project needs minutes to plan, and the live proxy kills a request held that long."""
+        client = self.app.test_client()
+        with patch.object(self.application_module, 'call_zai_chat_parallel', side_effect=RuntimeError('AI unavailable')):
+            queued = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
+                'projectData': {'project_name': 'مشروع تجريبي', 'project_type': 'سكني'},
+                'background': True,
+            })
+            self.assertEqual(queued.status_code, 202, queued.get_json())
+            job_id = queued.get_json()['jobId']
+
+            job = {}
+            for _ in range(80):
+                time.sleep(0.05)
+                polled = client.get('/api/slide-plan/jobs/' + job_id, headers=self._headers(self.token_a))
+                self.assertEqual(polled.status_code, 200, polled.get_json())
+                job = polled.get_json()
+                if job.get('status') in ('completed', 'failed'):
+                    break
+
+        self.assertEqual(job.get('status'), 'completed', job)
+        self.assertTrue(job['plan']['slides'])
+
+        missing = client.get('/api/slide-plan/jobs/00000000-0000-0000-0000-000000000000',
+                             headers=self._headers(self.token_a))
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.get_json()['failureReason'], 'job_not_found')
+
     def test_site_analysis_endpoint_returns_ai_text_without_large_creative_payload(self):
         client = self.app.test_client()
         enriched = {

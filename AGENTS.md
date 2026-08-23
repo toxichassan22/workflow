@@ -561,6 +561,16 @@ Some OpenRouter fallbacks (especially Anthropic) reject `response_format: json_o
 pins to Google with `allow_fallbacks: false` and retries once without JSON mode if that block
 (or empty content) comes back.
 `_get_chat_response_text()` also reads `reasoning` / `reasoning_content` when `content` is empty.
+
+**Any AI call that can outlast the hosting proxy must be a queued job, not a held request.** The
+three that are: `POST /api/extract-croquis`, `POST /api/market-study/{competitors,summary}`, and
+`POST /api/slide-plan` — the last one because the planner reads every section, so its prompt runs to
+tens of thousands of characters and the answer takes minutes; the browser reported
+`CLIENT_REQUEST_TIMEOUT` for plans the server had produced. Each answers `202 {jobId}` and the
+client polls (`GET /api/slide-plan/jobs/<id>`, 2.5 s, 10 min ceiling). `_write_job` / `_read_job`
+are the shared tenant-scoped file store; `.plan_jobs` and `.market_jobs` are the namespaces. Keep
+the unittest path synchronous (`TESTING`) unless a test passes `background: true`.
+
 The live hosting proxy fabricates a 404 if `POST /api/extract-croquis` stays open for the whole
 pipeline. Production therefore queues the job and the client polls `GET /api/extract-croquis/<id>`.
 Keep the unittest path synchronous (`TESTING`) unless a test passes `background: true`.

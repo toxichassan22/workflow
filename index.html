@@ -6558,12 +6558,34 @@
       }
     }
 
+    // The planner reads every section of the project, so it can take minutes. The server queues it
+    // and answers with a job id, because the hosting proxy drops a request held open that long and
+    // the browser then reported a timeout for a plan the server had actually produced.
+    async function pollTenantSlidePlanJob(jobId, onProgress) {
+      const started = Date.now();
+      let res = null;
+      while (Date.now() - started < 10 * 60 * 1000) {
+        await new Promise(resolve => setTimeout(resolve, 2500));
+        res = await apiWithTimeout('GET', '/api/slide-plan/jobs/' + encodeURIComponent(jobId), null,
+          30000);
+        const status = String(res && res.status || '');
+        if (typeof onProgress === 'function') onProgress(res);
+        if (status === 'completed' || status === 'failed' || (res && res.plan)) break;
+        if (!res || res.failureReason === 'job_not_found') break;
+      }
+      if (res && !res.plan && !res.error) {
+        res = { success: false, error: 'تعذر إعداد خطة الشرائح في الوقت المتاح', error_code: 'PLAN_JOB_TIMEOUT' };
+      }
+      return res;
+    }
+
     let tenantSlidePlanRequest = null;
-    function requestTenantSlidePlan(projectData) {
+    function requestTenantSlidePlan(projectData, onProgress) {
       if (tenantSlidePlanRequest) return tenantSlidePlanRequest;
       const payload = typeof slimGenerationProjectData === 'function'
         ? slimGenerationProjectData(projectData) : projectData;
       tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', { projectData: payload })
+        .then(res => (res && res.jobId && !res.plan) ? pollTenantSlidePlanJob(res.jobId, onProgress) : res)
         .finally(() => { tenantSlidePlanRequest = null; });
       return tenantSlidePlanRequest;
     }
@@ -16111,7 +16133,10 @@
 
       if (!tenantSlidePlan) {
         setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...', 'تحليل متطلبات المشروع والهيكل الأنسب', 5);
-        const data = await requestTenantSlidePlan(tenantProjectData);
+        const data = await requestTenantSlidePlan(tenantProjectData, job => {
+          setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...',
+            (job && job.message) || 'تحليل متطلبات المشروع والهيكل الأنسب', 8);
+        });
         if (data.success && data.plan) {
           tenantSlidePlan = data.plan;
           tenantProjectData.tenantSlidePlan = tenantSlidePlan;
@@ -16171,7 +16196,10 @@
         updateLoaderProgress(25, 'جاري حفظ بيانات المشروع...');
         await saveProjectAsDraft(true);
         updateLoaderProgress(35, 'جاري إرسال بيانات المشروع إلى AI...');
-        const result = await requestTenantSlidePlan(tenantProjectData);
+        const result = await requestTenantSlidePlan(tenantProjectData, job => {
+          updateLoaderProgress(job && job.status === 'running' ? 65 : 45,
+            (job && job.message) || 'جاري تحليل بيانات المشروع...');
+        });
         if (result.error) {
           console.error('[SLIDE PLAN]', result);
           toast(result.error);
@@ -17427,7 +17455,10 @@
     async function regenerateTenantSlidePlan() {
       if (!tenantProjectData) return;
       showLoader('جاري إعادة الاقتراح', 'AI يعيد تحليل بيانات المشروع');
-      const data = await requestTenantSlidePlan(tenantProjectData);
+      const data = await requestTenantSlidePlan(tenantProjectData, job => {
+        updateLoaderProgress(job && job.status === 'running' ? 65 : 45,
+          (job && job.message) || 'AI يعيد تحليل بيانات المشروع');
+      });
       hideLoader();
       if (data.success && data.plan) {
         tenantSlidePlan = data.plan;
