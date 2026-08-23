@@ -1306,13 +1306,10 @@ def _get_images_info(images):
     return info
 
 def build_system_prompt(project_data, images_info, design_rules=None):
-    """Build the shared system prompt ONCE for all slides (~3K chars)."""
+    """Build the shared system prompt ONCE for all slides."""
     if design_rules is None:
         design_rules = build_design_rules({})
-    project_json = json.dumps(project_data, ensure_ascii=False, indent=2)
-    # Truncate project data if too long to keep system prompt compact
-    if len(project_json) > 4000:
-        project_json = project_json[:4000] + '\n... [تم اختصار البيانات]'
+    project_json = slide_engine.build_project_facts(project_data, getattr(g, 'tenant_id', None))
     timeline_note = slide_engine._timeline_data_note(project_data)
     financial_note = slide_engine._financial_data_note(project_data)
     return f"""{design_rules}
@@ -3681,7 +3678,7 @@ def api_slide_plan():
     elif effective_branding.get('default_slide_count', 0) > effective_max_slides:
         effective_branding['default_slide_count'] = effective_max_slides
 
-    prompt = build_slide_plan_prompt(project_data, effective_branding)
+    prompt = build_slide_plan_prompt(project_data, effective_branding, tenant_id=g.tenant_id)
     if training_context:
         prompt = f"## بيانات خاصة بالشركة والتزام بحد الشرائح\nتنبيه هام جداً: التزم بحد الشرائح لهذه الشركة ({effective_min_slides} إلى {effective_max_slides} شريحة كحد أقصى).\n{training_context}\n\n---\n\n{prompt}"
 
@@ -4657,9 +4654,9 @@ def api_generate_slide_single():
     training_context = db.get_training_context(g.tenant_id)
 
     design_rules = build_design_rules(branding)
-    project_json = json.dumps(project_data, ensure_ascii=False, indent=2)
-    if len(project_json) > 4000:
-        project_json = project_json[:4000] + '\n... [تم اختصار البيانات]'
+    # Every collected fact, grouped by section. This used to be the raw draft cut at 4,000
+    # characters, which silently dropped the market study, the executive content and the team.
+    project_json = slide_engine.build_project_facts(project_data, g.tenant_id)
 
     landmarks_matrix = project_data.get('landmarks_matrix')
     landmarks_note = ''
@@ -11656,7 +11653,8 @@ HTML الحالي:
             else:
                 plan_branding = db.get_branding(tenant_id) or {}
                 training_context = db.get_training_context(tenant_id) or ''
-                plan_prompt = slide_engine.build_slide_plan_prompt(project_data, plan_branding)
+                plan_prompt = slide_engine.build_slide_plan_prompt(
+                    project_data, plan_branding, tenant_id=tenant_id)
                 if training_context:
                     plan_prompt = f"## بيانات خاصة بالشركة\n{training_context}\n\n---\n\n{plan_prompt}"
                 plan = None

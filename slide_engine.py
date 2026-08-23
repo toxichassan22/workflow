@@ -350,6 +350,283 @@ def _financial_data_note(project_data):
 
     return '\n'.join(lines)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Project facts for the prompt
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The payload of a real project file is ~230,000 characters. It used to be dumped as raw JSON and
+# cut at 4,000 characters, so 98% of it never reached the model: the market study, the executive
+# content, the team, and most of the location section were always beyond the cut, and which fields
+# survived depended on the draft's key order. The model now receives every fact under an Arabic
+# heading, with the noise removed instead of the facts.
+
+# Sent to the model by another route, so repeating them here only burns context:
+#   financial/timeline    -> _financial_data_note / _timeline_data_note
+#   images                -> _get_images_info
+#   landmark drive times  -> the landmarks matrix note
+#   the slide plan        -> the user message
+PROMPT_COVERED_ELSEWHERE = {
+    'financial_study_model', 'financial_calc_data', 'project_components_data',
+    'timeline_table_data', 'timelineRows',
+    'tenantCreativeImages', 'visual_concept', 'tenantSlidePlan', 'slidePlan',
+    'landmarks_matrix', 'nearby_landmarks_data', 'street_view_images', 'company_branding',
+}
+
+# The deck itself. Feeding a model the slides it produced last time invites it to copy them.
+PROMPT_PREVIOUS_OUTPUT = {'tenantSlidesData', 'pageDrafts', 'slides'}
+
+# Machine artefacts of the land analysis and the map pipeline: the facts they produced are already
+# in the visible land and location fields.
+PROMPT_INTERNAL_KEYS = {
+    'land_documents_analysis', 'land_documents_analysis_status', 'regulation_evidence',
+    'regulation_coordinates', 'coordinate_tables', 'survey_coordinates', 'directions_table',
+    'parcels', 'conflicts', 'warnings', 'extraction_diagnostics', 'document_processing',
+    'land_document_processing', 'document_summary', 'source_priority',
+    'location_polygon', 'location_polygon_source', 'location_coordinates_confirmed',
+    'location_coordinates_source', 'refresh_maps', 'regen_seed', 'enabled_maps',
+    'map_styles', 'map_type', 'north_direction', '_resolved_location',
+    'draftId', 'draft_id', 'sectionStatuses', 'site_analysis_approved',
+    'conceptual_plans', 'land_documents_files', 'land_photos', 'project_logo',
+    # Superseded by building_ratio_coverage / setbacks and allowed_uses; kept in drafts for
+    # backwards compatibility only.
+    'building_ratio_setbacks', 'allowed_uses_restrictions',
+}
+
+PROMPT_SKIPPED_KEYS = PROMPT_COVERED_ELSEWHERE | PROMPT_PREVIOUS_OUTPUT | PROMPT_INTERNAL_KEYS
+PROMPT_SKIPPED_SUFFIXES = ('_file_id', '_file_ids', '_file_meta')
+
+# Facts with no PREBUILT_FIELDS entry, so they carry no label of their own.
+EXTRA_FIELD_LABELS = {
+    'site_analysis': 'تحليل الموقع',
+    'location_detail': 'تفصيل الموقع',
+    'land_use': 'استخدام الأرض',
+    'land_use_status': 'حالة الاستخدام مقابل نوع المشروع',
+    'zoning_code': 'كود التنظيم',
+    'population_density': 'الكثافة السكانية',
+    'population_density_source': 'مصدر الكثافة السكانية',
+    'timeline_start_year': 'سنة بداية المشروع',
+    'timeline_years': 'عدد سنوات المشروع',
+}
+
+# A single field cannot flood the brief, and the brief cannot flood the request.
+FACT_VALUE_LIMIT = 6000
+PROJECT_FACTS_LIMIT = 120000
+
+
+def _field_label_map():
+    """key -> (Arabic label, section key, sort order) for every prebuilt field."""
+    labels = {}
+    for field in getattr(db, 'PREBUILT_FIELDS', []) or []:
+        key = field.get('key')
+        if key:
+            labels[key] = (field.get('label') or key,
+                           field.get('section_key') or 'basic',
+                           field.get('sort_order') or 0)
+    return labels
+
+
+def _readable_fact(value):
+    """Render one stored value as text a writer can read."""
+    if value is None or isinstance(value, bool):
+        return '' if value is None else ('نعم' if value else '')
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith('{') or text.startswith('['):
+            decoded = _decode_json_fact(text)
+            if decoded is not None:
+                return _readable_fact(decoded)
+        return text[:FACT_VALUE_LIMIT]
+    if isinstance(value, dict):
+        parts = []
+        for key, item in value.items():
+            text = _readable_fact(item)
+            # Multi-select groups are stored under internal keys such as "audience::سكني".
+            label = str(key).split('::')[-1]
+            if text:
+                parts.append(f'{label}: {text}')
+        return ' | '.join(parts)[:FACT_VALUE_LIMIT]
+    if isinstance(value, (list, tuple)):
+        parts = [_readable_fact(item) for item in value]
+        parts = [part for part in parts if part]
+        if not parts:
+            return ''
+        inline = '، '.join(parts)
+        if len(inline) <= 200 and '\n' not in inline:
+            return inline[:FACT_VALUE_LIMIT]
+        return '\n'.join(f'  - {part}' for part in parts)[:FACT_VALUE_LIMIT]
+    return str(value)[:FACT_VALUE_LIMIT]
+
+
+def _decode_json_fact(value):
+    """Sections are stored as JSON strings inside the draft, so they must be decoded first."""
+    if isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _market_study_facts(project_data):
+    """The market study: the written summary, the competitor rows, SWOT and the decision."""
+    state = _decode_json_fact(project_data.get('market_study_data'))
+    if not isinstance(state, dict):
+        return ''
+    lines = []
+    summary = str(state.get('one_block_summary') or '').strip()
+    if summary:
+        lines.append(summary)
+    competitors = state.get('competitors') if isinstance(state.get('competitors'), list) else []
+    rows = []
+    for competitor in competitors:
+        if not isinstance(competitor, dict):
+            continue
+        # Per-field source URLs are provenance for the study screen, not slide content.
+        row = {key: value for key, value in competitor.items()
+               if key not in ('id', 'field_sources', 'source_urls', 'row_source') and value not in (None, '', [])}
+        if row:
+            rows.append(row)
+    if rows:
+        lines.append('### المنافسون (أرقامهم كما هي، ممنوع تعديلها)')
+        lines.append(json.dumps(rows, ensure_ascii=False, indent=2))
+    for key, title in (('summary', 'محاور دراسة السوق'), ('swot', 'تحليل SWOT')):
+        block = state.get(key)
+        if isinstance(block, dict):
+            filled = {k: v for k, v in block.items() if str(v or '').strip()}
+            if filled and not (key == 'summary' and summary):
+                lines.append(f'### {title}')
+                lines.append(json.dumps(filled, ensure_ascii=False, indent=2))
+    for key, title in (('decision', 'تصنيف القرار'), ('disclaimer', 'إخلاء المسؤولية')):
+        text = str(state.get(key) or '').strip()
+        if text:
+            lines.append(f'{title}: {text}')
+    if not lines:
+        return ''
+    return '### دراسة السوق\n' + '\n'.join(lines)
+
+
+def _executive_content_facts(project_data):
+    """The approved executive texts, each under its own Arabic label."""
+    state = _decode_json_fact(project_data.get('executive_content'))
+    if not isinstance(state, dict):
+        return ''
+    try:
+        import executive_content
+        blocks = [(item['key'], item['label']) for item in executive_content.BLOCKS]
+    except Exception:
+        blocks = [(key, key) for key in state]
+    lines = []
+    for key, label in blocks:
+        text = str(state.get(key) or '').strip()
+        if text:
+            lines.append(f'#### {label}\n{text[:FACT_VALUE_LIMIT]}')
+    if not lines:
+        return ''
+    return ('### المحتوى التنفيذي المعتمد (نصوص معتمدة — أعد صياغتها للشرائح ولا تخترع غيرها)\n'
+            + '\n\n'.join(lines))
+
+
+def _team_facts(project_data, tenant_id=None):
+    """The team actually chosen for this file: the company library minus exclusions, plus locals.
+
+    The library lives in ``tenant_team_entities`` and the draft only stores ids, so without
+    resolving it the prompt would carry no names at all.
+    """
+    selection = _decode_json_fact(project_data.get('team_selection'))
+    selection = selection if isinstance(selection, dict) else {}
+    excluded = set(selection.get('excluded') or [])
+    overrides = selection.get('roles') if isinstance(selection.get('roles'), dict) else {}
+    entries = []
+    if tenant_id:
+        try:
+            library = db.get_team_entities(tenant_id) or []
+        except Exception:
+            library = []
+        for entity in library:
+            if entity.get('id') in excluded:
+                continue
+            entries.append({
+                'الجهة': entity.get('name') or '',
+                'الدور': overrides.get(entity.get('id')) or entity.get('role') or '',
+                'نبذة': entity.get('brief') or '',
+                'سنوات الخبرة': entity.get('experienceYears') or '',
+                'أعمال سابقة': entity.get('notableProjects') or '',
+            })
+    for local in selection.get('local') or []:
+        if not isinstance(local, dict):
+            continue
+        entries.append({
+            'الجهة': local.get('name') or '',
+            'الدور': local.get('role') or '',
+            'نبذة': local.get('brief') or '',
+            'سنوات الخبرة': local.get('experienceYears') or '',
+            'أعمال سابقة': local.get('notableProjects') or '',
+        })
+    entries = [{k: v for k, v in entry.items() if str(v or '').strip()}
+               for entry in entries if str(entry.get('الجهة') or '').strip()]
+    if not entries:
+        return ''
+    return '### فريق العمل\n' + json.dumps(entries, ensure_ascii=False, indent=2)
+
+
+def build_project_facts(project_data, tenant_id=None):
+    """Every collected fact, grouped by its section and labelled in Arabic.
+
+    Replaces dumping the raw draft and cutting it at a character count.
+    """
+    if not isinstance(project_data, dict) or not project_data:
+        return 'لا توجد بيانات مشروع.'
+    labels = _field_label_map()
+    section_titles = {item['key']: item['label']
+                      for item in (getattr(db, 'FIELD_SECTIONS', []) or [])}
+    grouped = {key: [] for key in section_titles}
+    extra = []
+    for key, value in project_data.items():
+        if key in PROMPT_SKIPPED_KEYS or key.startswith('_'):
+            continue
+        if key.endswith(PROMPT_SKIPPED_SUFFIXES):
+            continue
+        if key in ('market_study_data', 'executive_content', 'team_selection'):
+            continue
+        text = _readable_fact(value)
+        if not text:
+            continue
+        if key in labels:
+            label, section, order = labels[key]
+            grouped.setdefault(section, []).append((order, label, text))
+        else:
+            label = EXTRA_FIELD_LABELS.get(key)
+            if not label and key.endswith('_other'):
+                base = labels.get(key[:-6])
+                label = f'{base[0]} (أخرى)' if base else None
+            extra.append((label or key, text))
+
+    blocks = []
+    for section_key, title in section_titles.items():
+        # Same order as the form, so the brief reads the way the client filled it.
+        rows = sorted(grouped.get(section_key) or [], key=lambda row: row[0])
+        if rows:
+            blocks.append(f'### {title}\n'
+                          + '\n'.join(f'- {label}: {text}' for _order, label, text in rows))
+    if extra:
+        blocks.append('### بيانات إضافية\n'
+                      + '\n'.join(f'- {label}: {text}' for label, text in extra))
+    for note in (_team_facts(project_data, tenant_id),
+                 _market_study_facts(project_data),
+                 _executive_content_facts(project_data)):
+        if note:
+            blocks.append(note)
+    facts = '\n\n'.join(blocks) or 'لا توجد بيانات مشروع.'
+    if len(facts) > PROJECT_FACTS_LIMIT:
+        facts = facts[:PROJECT_FACTS_LIMIT] + '\n... [تم اختصار البيانات]'
+    return facts
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Slide Plan Proposal
 # ─────────────────────────────────────────────────────────────────────────────
@@ -513,11 +790,14 @@ def build_fallback_plan(branding):
     return {'proposed_count': len(slides), 'slides': slides}
 
 
-def build_slide_plan_prompt(project_data, branding):
-    """Build the prompt for AI to propose a slide plan."""
-    project_json = json.dumps(project_data, ensure_ascii=False, indent=2)
-    if len(project_json) > 6000:
-        project_json = project_json[:6000] + '\n... [تم اختصار البيانات]'
+def build_slide_plan_prompt(project_data, branding, tenant_id=None):
+    """Build the prompt for AI to propose a slide plan.
+
+    The plan decides which slides exist, so it has to see every section. Cutting the payload at
+    6,000 characters meant the market study, the executive content and the team never reached the
+    planner, and it could not propose slides for facts it was never shown.
+    """
+    project_json = build_project_facts(project_data, tenant_id)
 
     min_slides, max_slides, _default_count = resolve_slide_bounds(branding)
 

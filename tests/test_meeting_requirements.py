@@ -447,6 +447,136 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn(logo_path + '?t=1', html)
         self.assertNotIn('/assets/logo.png', html)
 
+    FULL_PROJECT = {
+        'project_name': 'THE VIEW',
+        'project_type': ['سكني', 'فندقي'],
+        'project_idea': 'برج على كورنيش جدة يجمع الشقق السكنية والغرف الفندقية.',
+        'target_audience': {'audience::سكني': ['أصحاب الثروات'], 'audience::فندقي': ['سياح الأعمال']},
+        'location_address': 'https://maps.google.com/?q=21.6,39.1',
+        'location_lat': '21.6', 'location_lng': '39.1', 'city': 'جدة', 'district': 'الشاطئ',
+        'main_roads': 'طريق الكورنيش — 1.6 كم',
+        'secondary_roads': 'شارع غير نافذ 20م',
+        'nearby_landmarks': 'ريد سي مول — 1.9 كم — 4 دقائق',
+        'city_landmarks': 'جدة التاريخية — 21.9 كم',
+        'catchment_areas': 'مطار الملك عبدالعزيز — 25.9 كم — 37 دقائق',
+        'croquis_land_area': '7012',
+        'approved_financial_area': '7012',
+        'building_ratio_coverage': 'نسبة البناء 400% والتغطية 60%',
+        'setbacks': 'ارتداد أمامي 6م',
+        'allowed_uses': 'سكني وفندقي وتجاري',
+        'regulatory_constraints': 'مواقف بمعدل موقف لكل وحدة',
+        'land_and_building_summary': 'ملخص الأرض والمبنى المعتمد.',
+        'timeline_table_data': json.dumps([{
+            'name': 'التصميم', 'year': '2026', 'quarter': 'Q1', 'duration': '6',
+            'endYear': '2026', 'endQuarter': 'Q3', 'notes': 'يشمل الاعتمادات',
+        }], ensure_ascii=False),
+        'financial_study_model': json.dumps({
+            'inputs': {'projectCost': 480000000, 'roi': '18%'},
+            'dynamicRows': {'components': [{'name': 'شقق سكنية', 'useType': 'سكني',
+                                            'units': 120, 'builtArea': 24000}]},
+        }, ensure_ascii=False),
+        'market_study_data': json.dumps({
+            'one_block_summary': 'تعريف السوق: قطاع الضيافة الفاخرة في جدة.',
+            'competitors': [{
+                'id': 'c1', 'name': 'فور سيزونز جدة', 'price_value': '9700000',
+                'field_sources': {'name': ['https://example.test/a']},
+                'source_urls': ['https://example.test/a'],
+            }],
+            'swot': {'strengths': 'موقع بحري مباشر'},
+            'decision': 'فرصة جاذبة',
+        }, ensure_ascii=False),
+        'executive_content': json.dumps({
+            'brief': 'نبذة المشروع المعتمدة.',
+            'opportunity': 'الفرصة الاستثمارية المعتمدة.',
+            'features': 'الميزات المعتمدة.',
+            'risks': 'خطر التأخير ومعالجته بجدول ملزم.',
+            'summary': 'الملخص التنفيذي المعتمد للمشروع.',
+        }, ensure_ascii=False),
+        'team_selection': json.dumps({
+            'excluded': [], 'roles': {},
+            'local': [{'localId': 'l1', 'name': 'مكتب تصميم محلي', 'role': 'التصميم المعماري'}],
+        }, ensure_ascii=False),
+        # Noise the model must never receive.
+        'tenantSlidesData': [{'title': 'شريحة سابقة',
+                              'html': '<div class="slide">ديك قديم</div>'}],
+        'pageDrafts': {'slides': {'generated': True}},
+        'visual_concept': {'slots': {'cover': {'prompt': 'Cinematic wide-angle shot'}}},
+        'tenantCreativeImages': {'cover': '/uploads/creative/a.jpg'},
+        'land_documents_files_file_meta': [{'id': 'f1', 'originalName': 'krooki.pdf'}],
+        'survey_coordinates': json.dumps([{'eastings': '511085.849', 'northings': '2392264.840'}]),
+    }
+
+    def test_slide_prompt_carries_every_section_instead_of_a_truncated_dump(self):
+        """A real project payload is ~230,000 characters and was cut at 4,000, so the market study,
+        the executive content, the team and most of the location section never reached the model."""
+        # The library is company-wide, so it is removed again: other cases assert it is empty.
+        with self.app.app_context():
+            entity_id = db.create_team_entity(self.tenant_a, 'شركة الاستشارات الهندسية',
+                                              role='المستشار الهندسي',
+                                              brief='خبرة في الأبراج الفاخرة')
+            try:
+                facts = self.application_module.slide_engine.build_project_facts(
+                    self.FULL_PROJECT, tenant_id=self.tenant_a)
+            finally:
+                db.delete_team_entity(self.tenant_a, entity_id)
+
+        for heading in ('معلومات أساسية', 'الموقع والخرائط', 'الأرض والكروكي',
+                        'فريق العمل', 'دراسة السوق', 'المحتوى التنفيذي'):
+            self.assertIn(heading, facts)
+        for fact in ('THE VIEW', 'جدة', 'طريق الكورنيش', 'مطار الملك عبدالعزيز',
+                     'ارتداد أمامي 6م', 'سكني وفندقي وتجاري', 'فور سيزونز جدة',
+                     'الملخص التنفيذي المعتمد للمشروع.', 'خطر التأخير ومعالجته بجدول ملزم.',
+                     'شركة الاستشارات الهندسية', 'مكتب تصميم محلي', 'فرصة جاذبة'):
+            self.assertIn(fact, facts)
+        # Multi-select groups are stored under internal keys; the model must not see them.
+        self.assertIn('أصحاب الثروات', facts)
+        self.assertNotIn('audience::', facts)
+        # Noise: the previous deck, image prompts, per-field provenance, file metadata.
+        for noise in ('class="slide"', 'ديك قديم', 'Cinematic wide-angle shot', 'field_sources',
+                      'source_urls', 'krooki.pdf', '511085.849', 'tenantSlidesData'):
+            self.assertNotIn(noise, facts)
+        # A complete project fits without being cut at all.
+        self.assertNotIn('[تم اختصار البيانات]', facts)
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        engine_source = (ROOT / 'slide_engine.py').read_text(encoding='utf-8')
+        self.assertNotIn('project_json[:4000]', app_source)
+        self.assertNotIn('project_json[:6000]', engine_source)
+        self.assertIn('slide_engine.build_project_facts(project_data, g.tenant_id)', app_source)
+        self.assertIn('project_json = build_project_facts(project_data, tenant_id)', engine_source)
+
+    def test_generated_slide_request_sends_the_sections_and_not_the_previous_deck(self):
+        """End to end: what the endpoint hands to the model for one slide."""
+        captured = {}
+
+        def fake_generate(system_prompt, slide, slide_num, total, branding, call_fn, **kwargs):
+            captured['system_prompt'] = system_prompt
+            return '<div class="slide" style="width:1280px;height:720px">ok</div>'
+
+        client = self.app.test_client()
+        with patch.object(self.application_module.slide_engine, 'generate_single_slide',
+                          side_effect=fake_generate), \
+                patch.object(self.application_module.maps_service, 'generate_all_map_images',
+                             return_value={}):
+            response = client.post('/api/generate-slide-single', headers=self._headers(self.token_a), json={
+                'projectData': self.FULL_PROJECT,
+                'slidePlan': {'slides': [{'title': 'دراسة السوق', 'type': 'content'}]},
+                'slideIndex': 0,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        prompt = captured['system_prompt']
+        for fact in ('THE VIEW', 'دراسة السوق', 'المحتوى التنفيذي', 'فريق العمل',
+                     'فور سيزونز جدة', 'التصميم', 'شقق سكنية'):
+            self.assertIn(fact, prompt)
+        self.assertNotIn('ديك قديم', prompt)
+
+        # The client must not upload the previous deck or the image state with every slide either.
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function slimGenerationProjectData(data)', index_source)
+        self.assertIn('projectData: slimGenerationProjectData(tenantProjectData)', index_source)
+        for dropped in ('tenantSlidesData', 'pageDrafts', 'tenantCreativeImages', 'visual_concept'):
+            self.assertIn(f"'{dropped}'", index_source.split('const GENERATION_PAYLOAD_DROPPED')[1][:900])
+
     def test_local_generated_image_reference_is_embedded_for_moodboard_generation(self):
         """Generated cover URLs must be converted before the vision request uses them."""
         response = Mock(status_code=200)

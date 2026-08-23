@@ -6139,6 +6139,32 @@
       return slim;
     }
 
+    // Slide generation is one request per slide, so whatever rides in projectData is re-uploaded
+    // for every slide. Two thirds of it was the previously generated deck and the image state,
+    // which the server never reads here: images travel in `images`, the plan in `slidePlan`.
+    // A drop list is used rather than a keep list so a new project field is never lost silently.
+    const GENERATION_PAYLOAD_DROPPED = [
+      'tenantSlidesData', 'pageDrafts', 'tenantSlidePlan', 'tenantCreativeImages', 'visual_concept',
+      'land_documents_analysis', 'regulation_evidence', 'regulation_coordinates', 'coordinate_tables',
+      'survey_coordinates', 'directions_table', 'parcels', 'conflicts', 'warnings',
+      'extraction_diagnostics', 'document_processing', 'land_document_processing',
+      'document_summary', 'source_priority', 'nearby_landmarks_data', 'company_branding',
+      'location_polygon'
+    ];
+
+    function slimGenerationProjectData(data) {
+      const src = data || {};
+      const slim = {};
+      Object.keys(src).forEach(key => {
+        if (GENERATION_PAYLOAD_DROPPED.includes(key)) return;
+        if (key.endsWith('_file_meta')) return;
+        const value = src[key];
+        if (value === undefined || value === null || value === '') return;
+        slim[key] = value;
+      });
+      return slim;
+    }
+
     function slimLandAnalysisSiteContext(context) {
       const source = context || {};
       const slim = {};
@@ -6530,7 +6556,9 @@
     let tenantSlidePlanRequest = null;
     function requestTenantSlidePlan(projectData) {
       if (tenantSlidePlanRequest) return tenantSlidePlanRequest;
-      tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', { projectData })
+      const payload = typeof slimGenerationProjectData === 'function'
+        ? slimGenerationProjectData(projectData) : projectData;
+      tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', { projectData: payload })
         .finally(() => { tenantSlidePlanRequest = null; });
       return tenantSlidePlanRequest;
     }
@@ -17569,7 +17597,7 @@
           for (let attempt = 1; attempt <= 3 && !generated; attempt++) {
             try {
               const genPayload = {
-                projectData: tenantProjectData,
+                projectData: slimGenerationProjectData(tenantProjectData),
                 slidePlan: tenantSlidePlan,
                 images: generationImages,
                 slideIndex: i

@@ -279,6 +279,41 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   invented). A row with an empty price and `غير متوفر من مصدر موثوق` is the correct output; a
   number without the page it came from is not.
 
+## What the slide model receives
+
+`slide_engine.build_project_facts(project_data, tenant_id)` builds the `## بيانات المشروع` block for
+`/api/generate-slide-single`, `/api/slide-plan` and `build_system_prompt()`. **Never go back to
+dumping the draft as raw JSON with a character cut.** It used to be
+`json.dumps(project_data)[:4000]` (and `[:6000]` for the plan). A real project file is ~230,000
+characters, so the model saw 1.7% of it: the market study, the executive content, the team and most
+of the location section were always past the cut, and *which* fields survived depended on the
+draft's key order, so it changed between projects and after edits. The brief is 32,550 characters for
+that same file — complete **and** smaller than the old raw dump.
+
+- Facts are grouped by `db.FIELD_SECTIONS` and labelled from `PREBUILT_FIELDS` (`label`,
+  `sort_order`), so adding a prebuilt field needs no change here. Unknown keys land in
+  `بيانات إضافية`; `EXTRA_FIELD_LABELS` names the ones with no field entry.
+- `market_study_data`, `executive_content`, `team_selection`, `timeline_table_data` are stored as
+  **JSON strings inside the draft**, so they are decoded first — dumping them raw fed the model
+  escaped `\"` soup.
+- The team library lives in `tenant_team_entities` and the draft stores only ids, so `_team_facts()`
+  resolves it with `db.get_team_entities(tenant_id)` minus `excluded`, plus `local`. Without the
+  `tenant_id` the prompt carries no names at all.
+- `PROMPT_SKIPPED_KEYS` is the only place noise is dropped: things sent by another route
+  (`_financial_data_note`, `_timeline_data_note`, `_get_images_info`, the landmarks matrix, the slide
+  plan), the previously generated deck, and machine artefacts of the land/map pipelines. Anything
+  else is included, because a keep list would silently lose custom tenant fields.
+- Multi-select values are stored under internal keys such as `audience::سكني`; `_readable_fact()`
+  strips the `::` prefix and joins short lists inline.
+- The client slims the generation payload with `slimGenerationProjectData()` (`index.html`,
+  `GENERATION_PAYLOAD_DROPPED`). Generation is one request per slide, so the previous deck and the
+  image state used to be re-uploaded for every slide: 196KB raw / 48.8KB gzipped per slide, which is
+  4 chunk uploads each. It is now 111KB / 30.3KB, i.e. 3. Images travel in `images` and the plan in
+  `slidePlan`, so `projectData` never needs them. It is a **drop** list, not a keep list, for the
+  same reason.
+- `test_slide_prompt_carries_every_section_instead_of_a_truncated_dump` and
+  `test_generated_slide_request_sends_the_sections_and_not_the_previous_deck` guard both ends.
+
 ## Performance rules
 
 - `compress_response()` gzips text responses (`app.py`). The SPA shell is ~740KB uncompressed and
