@@ -75,26 +75,42 @@ fi
 # AI slide editor looks at. Installing is not enough: on shared hosting the download succeeds and the
 # launch then fails on missing system libraries, which used to leave the editor working blind with
 # the reason buried in /tmp. So the launch is verified and the reason printed into deploy.log.
-if ! "$PYTHON" -m playwright install chromium >/tmp/playwright_install.log 2>&1; then
-  echo "WARNING: Playwright Chromium install failed or skipped; check /tmp/playwright_install.log"
-  tail -n 15 /tmp/playwright_install.log || true
-fi
-if "$PYTHON" - <<'PY'
-import sys
+> /tmp/playwright_install.log
+# chromium.launch() resolves to chrome-headless-shell, which is a separate download: installing
+# "chromium" alone left the host with no launchable browser and the editor working blind.
+for browser_target in chromium chromium-headless-shell; do
+  echo "--- playwright install $browser_target ---" >> /tmp/playwright_install.log
+  "$PYTHON" -m playwright install "$browser_target" >> /tmp/playwright_install.log 2>&1 \
+    || echo "WARNING: playwright install $browser_target failed" | tee -a /tmp/playwright_install.log
+done
+
+# The result is written where the app can report it, because the install log lives on the server
+# and a silent failure here is exactly what hid the missing browser.
+"$PYTHON" - > "$APP_DIR/.vision_status" <<'PY' || true
+import json
+detail = ''
+try:
+    with open('/tmp/playwright_install.log', encoding='utf-8', errors='replace') as fh:
+        detail = fh.read()[-1200:]
+except OSError as exc:
+    detail = f'no install log: {exc}'
+available, error = False, ''
 try:
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        print(f"Chromium OK: {browser.version}")
+        available, version = True, browser.version
         browser.close()
+    error = f'chromium {version}'
 except Exception as exc:
-    print(f"Chromium cannot launch: {exc}")
-    sys.exit(1)
+    error = str(exc)[:600]
+print(json.dumps({'available': available, 'error': error, 'installLog': detail}, ensure_ascii=False))
 PY
-then
+if grep -q '"available": true' "$APP_DIR/.vision_status" 2>/dev/null; then
   echo "Slide vision available: the AI editor sees a rendered snapshot of each slide."
 else
   echo "WARNING: no slide vision on this host — the AI editor will edit slide markup blind."
+  cat "$APP_DIR/.vision_status" 2>/dev/null || true
 fi
 
 echo "===== 6. Run database migrations ====="

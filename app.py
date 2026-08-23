@@ -12545,6 +12545,27 @@ def _read_deployment_metadata():
     return metadata
 
 
+def _deployed_vision_status():
+    """What the deployment recorded about the slide renderer, including the install log tail."""
+    for directory in ('/home/demos/proposal-generator', os.path.dirname(__file__)):
+        path = os.path.join(directory, '.vision_status')
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding='utf-8') as handle:
+                status = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        if isinstance(status, dict):
+            return {
+                'available': bool(status.get('available')),
+                'error': str(status.get('error') or '')[:400],
+                'installLog': str(status.get('installLog') or '')[:600],
+                'source': 'deploy',
+            }
+    return None
+
+
 def _slide_vision_probe(force=False):
     """Whether this host can render a slide to an image at all.
 
@@ -12574,7 +12595,7 @@ def health():
         _slide_vision_probe(force=True)
     return jsonify({
         'status': 'ok',
-        'slide_vision': dict(_SLIDE_VISION_STATE) or None,
+        'slide_vision': dict(_SLIDE_VISION_STATE) or _deployed_vision_status(),
         'commit': metadata.get('commit', 'unknown'),
         'deployed_commit': metadata.get('deployed_commit', 'unknown'),
         'deployed_at': metadata.get('deployed_at'),
