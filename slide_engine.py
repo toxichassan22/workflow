@@ -1508,10 +1508,17 @@ def _replace_data_placeholders(html, project_data, branding=None):
     return html
 
 
-def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
-    """Replace all logo placeholders and broken logo paths with tenant's logo URL."""
+def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None, project_logo=None):
+    """Replace all logo placeholders and broken logo paths with tenant's logo URL.
+
+    ``project_logo`` is the already-resolved path of the project's own logo. It has to be known
+    here: this function rewrites the ``src`` of every ``<img>`` whose tag mentions "logo", and by
+    the time it runs ``##PROJECT_LOGO##`` has already been replaced with a real path. A project
+    logo stored at a path containing the word "logo" was therefore replaced by the company logo.
+    """
     if not html:
         return html
+    project_logo = str(project_logo or '').strip()
     logo_url = '/assets/logo.png'
     if tenant_id:
         branding = _branding_cache if _branding_cache is not None else (db.get_branding(tenant_id) or {})
@@ -1538,6 +1545,8 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
     def _fix_logo_img(match):
         img_tag = match.group(0)
         if 'project_logo' in img_tag.lower() or '##project_logo##' in img_tag.lower() or 'project-logo' in img_tag.lower():
+            return img_tag
+        if project_logo and project_logo in img_tag:
             return img_tag
         if 'logo' in img_tag.lower() or '##LOGO##' in img_tag or 'tenant-assets' in img_tag:
             if 'src=' in img_tag.lower():
@@ -1580,7 +1589,7 @@ def _strip_presentation_icons(html):
 
 
 def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_slides=None,
-                       tenant_id=None, branding=None):
+                       tenant_id=None, branding=None, project_data=None):
     """Post-process a slide while keeping cover and closing free of header/footer.
 
     slide_type is the semantic type (cover, index, content, closing, ...).
@@ -1639,9 +1648,17 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
                 company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
 
         if not has_header:
+            # The project logo belongs next to the company logo. This fallback used to carry the
+            # company logo alone, so a slide the model built without a header lost it entirely.
+            project_logo = str((project_data or {}).get('project_logo') or '').strip()
+            project_logo_html = (
+                f'<div style="width:1px;height:26px;background:#e2e8f0;margin:0 10px;"></div>'
+                f'<img src="{project_logo}" alt="" style="height:36px;width:auto;object-fit:contain;" />'
+            ) if project_logo else ''
             header_html = (
                 f'<div style="position:absolute;top:0;right:0;left:0;height:56px;background:#fff;border-bottom:2px solid {primary};display:flex;align-items:center;padding:0 20px;z-index:10;">'
                 '<img src="##LOGO##" style="height:40px;margin-right:12px;" />'
+                + project_logo_html +
                 f'<div style="width:3px;height:28px;background:{accent};margin:0 12px;"></div>'
                 f'<span style="font-size:16px;font-weight:600;color:{primary};">{title}</span>'
                 '</div>'
@@ -1667,13 +1684,16 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     """Unified post-processing pipeline for every generated slide."""
     html = postprocess_slide(
         html, slide_type, slide_num=slide_num, slide_title=slide_title,
-        total_slides=total_slides, tenant_id=tenant_id, branding=branding
+        total_slides=total_slides, tenant_id=tenant_id, branding=branding,
+        project_data=project_data
     )
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
     html = _replace_creative_image_placeholders(html, creative_images, slide_type)
     html = _replace_data_placeholders(html, project_data, branding)
-    html = resolve_logo_in_html(html, tenant_id)
+    html = resolve_logo_in_html(
+        html, tenant_id, project_logo=(project_data or {}).get('project_logo')
+    )
     return html
 
 
@@ -1689,9 +1709,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
 
     # Build system prompt with tenant's design rules
     design_rules = build_design_rules(branding)
-    project_json = json.dumps(project_data, ensure_ascii=False, indent=2)
-    if len(project_json) > 4000:
-        project_json = project_json[:4000] + '\n... [تم اختصار البيانات]'
+    project_json = build_project_facts(project_data, branding.get('tenant_id'))
 
     landmarks_matrix = project_data.get('landmarks_matrix')
     landmarks_note = ''

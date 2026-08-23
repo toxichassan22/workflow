@@ -577,6 +577,60 @@ class MeetingRequirementsTests(unittest.TestCase):
         for dropped in ('tenantSlidesData', 'pageDrafts', 'tenantCreativeImages', 'visual_concept'):
             self.assertIn(f"'{dropped}'", index_source.split('const GENERATION_PAYLOAD_DROPPED')[1][:900])
 
+    def test_project_logo_is_used_next_to_the_company_logo(self):
+        """An uploaded project logo was never used: the model was not told it exists, the fallback
+        header carried the company logo alone, and resolve_logo_in_html() rewrote the project
+        logo's src to the company logo whenever its path contained the word "logo"."""
+        engine = self.application_module.slide_engine
+        project_logo = '/api/project-files/proj-logo-1'
+        project = {'project_name': 'THE VIEW', 'project_logo': project_logo}
+
+        # 1. The prompt states whether a project logo exists, so "if it exists" is answerable.
+        with_logo = self.application_module._get_images_info({}, project)
+        self.assertIn('شعار المشروع: متوفر', with_logo)
+        self.assertIn('##PROJECT_LOGO##', with_logo)
+        without_logo = self.application_module._get_images_info({}, {'project_name': 'x'})
+        self.assertIn('لا يوجد', without_logo)
+
+        # 2. A content slide with no header of its own gets both logos.
+        branding = {'primary_color': '#0b1f33', 'accent_color': '#0ea5e9', 'company_name': 'منافع'}
+        finished = engine.finalize_slide_html(
+            '<div class="slide" style="width:1280px;height:720px"><p>محتوى</p></div>',
+            'content', project, branding, slide_num=3, slide_title='الموقع', total_slides=8,
+        )
+        self.assertIn(project_logo, finished)
+        self.assertIn('##LOGO##'.replace('##LOGO##', '/assets/logo.png'), finished)
+
+        # 3. A project logo whose own path contains "logo" keeps its src.
+        risky = '/uploads/project-files/tenant-a/logo.png'
+        kept = engine.resolve_logo_in_html(
+            f'<img src="{risky}" alt="project" />', None, project_logo=risky)
+        self.assertIn(risky, kept)
+
+        # 4. Cover and closing ask for both logos, and never get a header or footer.
+        rules = self.application_module.build_design_rules(branding)
+        self.assertIn('##PROJECT_LOGO##', rules)
+        self.assertIn('الغلاف والختام', rules)
+        cover = engine.finalize_slide_html(
+            '<div class="slide" style="width:1280px;height:720px"><h1>THE VIEW</h1></div>',
+            'cover', project, branding, slide_num=1, slide_title='الغلاف', total_slides=8,
+        )
+        self.assertNotIn('height:56px', cover)
+        self.assertNotIn('height:36px', cover)
+
+    def test_slide_rules_forbid_invented_content_and_drawn_2d_plans(self):
+        """Every number has to come from the project, and plans are uploaded images only."""
+        rules = self.application_module.build_design_rules(
+            {'primary_color': '#0b1f33', 'company_name': 'منافع'})
+        self.assertIn('ممنوع اختراع أي معلومة', rules)
+        self.assertIn('ممنوع منعًا باتًا رسم أو تركيب أي مخطط معماري', rules)
+        self.assertIn('##PLAN_IMAGE_1##', rules)
+        self.assertIn('الرسوم البيانية عند الحاجة', rules)
+        # The batch path had its own copy of the 4,000-character cut.
+        engine_source = (ROOT / 'slide_engine.py').read_text(encoding='utf-8')
+        self.assertNotIn("project_json[:4000]", engine_source)
+        self.assertEqual(engine_source.count('build_project_facts(project_data'), 3)
+
     def test_local_generated_image_reference_is_embedded_for_moodboard_generation(self):
         """Generated cover URLs must be converted before the vision request uses them."""
         response = Mock(status_code=200)

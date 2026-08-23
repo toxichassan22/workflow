@@ -1231,7 +1231,7 @@ def clean_project_data(data):
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def _get_images_info(images):
+def _get_images_info(images, project_data=None):
     interior_components = []
     if isinstance(images, list):
         has_cover = bool(images[0]) if images else False
@@ -1250,7 +1250,16 @@ def _get_images_info(images):
         interior_count = 0
         plans_count = 0
 
-    info = f"- صورة الغلاف: {'متوفرة (استخدم ##IMAGE_COVER##)' if has_cover else 'لا توجد'}\n"
+    # The design rules say to place ##PROJECT_LOGO## "if it exists", and the model had no way of
+    # knowing whether it does, so an uploaded project logo was simply never used.
+    project_logo = str((project_data or {}).get('project_logo') or '').strip()
+    if project_logo:
+        info = ("- شعار المشروع: متوفر ومرفوع من العميل. ضع ##PROJECT_LOGO## بجانب شعار الشركة "
+                "##LOGO## في هيدر كل شريحة محتوى، وفي الغلاف والختام معًا جنبًا إلى جنب بفاصل "
+                "رأسي رقيق بينهما. هذا إلزامي وليس اختياريًا.\n")
+    else:
+        info = "- شعار المشروع: لا يوجد — استخدم شعار الشركة ##LOGO## وحده ولا تكتب ##PROJECT_LOGO##.\n"
+    info += f"- صورة الغلاف: {'متوفرة (استخدم ##IMAGE_COVER##)' if has_cover else 'لا توجد'}\n"
     if moodboard_count > 0:
         info += f"- صور المود بورد والتصور الخارجي (استخدم الرموز ##MOODBOARD_IMAGE_1## حتى ##MOODBOARD_IMAGE_{min(moodboard_count, 4)}##): {min(moodboard_count, 4)} صور متوفرة — أنشئ شريحة واحدة فقط للمود بورد تجمع زوايا المشروع الأربع الخارجية (يمين، شمال، فوق، خلف)\n"
     else:
@@ -1453,7 +1462,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
 def build_glm_prompt(project_data, images, branding=None):
     """Legacy single-shot prompt builder (kept for /api/generate compatibility)."""
     project_data = clean_project_data(project_data)
-    images_info = _get_images_info(images)
+    images_info = _get_images_info(images, project_data)
 
     # Resolve dynamic brand rules
     if branding is None:
@@ -2115,7 +2124,7 @@ def api_designer_generate():
     project_data = clean_project_data(request.json.get('projectData', {}))
     outline = request.json.get('outline', [])
     images = request.json.get('images', {})
-    images_info = _get_images_info(images)
+    images_info = _get_images_info(images, project_data)
 
     # Build system prompt ONCE — shared across all slides
     branding = db.get_branding(g.tenant_id) or {}
@@ -4650,7 +4659,7 @@ def api_generate_slide_single():
                 'lng': resolved_location.get('lng') or project_data.get('location_lng'),
             }
 
-    images_info = _get_images_info(images)
+    images_info = _get_images_info(images, project_data)
     training_context = db.get_training_context(g.tenant_id)
 
     design_rules = build_design_rules(branding)
@@ -4770,7 +4779,7 @@ def api_generate_slides():
     elif isinstance(images, list):
         images = {'cover': images[0] if images else None, 'moodboard': []}
 
-    images_info = _get_images_info(images)
+    images_info = _get_images_info(images, project_data)
 
     training_context = db.get_training_context(g.tenant_id)
 
@@ -11707,7 +11716,7 @@ HTML الحالي:
                         sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
                     return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2)
                 htmls = generate_all_slides(
-                    slide_plan, project_data, branding, _get_images_info(images), call_glm_fn,
+                    slide_plan, project_data, branding, _get_images_info(images, project_data), call_glm_fn,
                     map_placeholders=(images.get('map_placeholders', {}) if isinstance(images, dict) else {}),
                     creative_images=images,
                 )
