@@ -11061,6 +11061,7 @@
       tenantProjectSectionStatuses = {};
       tenantProjectDraftApproval = null;
       tenantActiveProjectSection = null;
+      clearSlidesEditorSurface();
       showTenantPage('tenantProjectPage');
       if (await loadTenantProjectForm()) {
         // A new project is legitimately blank, so its freshly built form counts as filled.
@@ -16101,8 +16102,12 @@
       // Auto-save draft
       await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
 
-      // Navigate directly to presentation preview page
+      // Navigate directly to presentation preview page. Render this file's own slides first, so
+      // the page can never show the previously opened presentation while the plan is being built.
       showTenantPage('tenantSlidesPage');
+      renderTenantSlides();
+      setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '',
+        tenantSlidesData.length);
 
       if (!tenantSlidePlan) {
         setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...', 'تحليل متطلبات المشروع والهيكل الأنسب', 5);
@@ -17998,6 +18003,24 @@
       autoFitSlideContent(stage);
     }
 
+    function setSlidesEditorInfo(title, count) {
+      const editorInfo = document.getElementById('slidesEditorInfo');
+      if (!editorInfo) return;
+      const name = String(title || '').trim();
+      editorInfo.textContent = name ? 'عرض: ' + name + ' | ' + (count || 0) + ' شريحة' : '';
+    }
+
+    // Opening a saved presentation leaves its slides, its thumbnails and its title in this page's
+    // markup, and nothing else cleared them: a new project file that reached the slides page then
+    // displayed the previous proposal until the first generated slide overwrote it.
+    function clearSlidesEditorSurface() {
+      const wrap = document.getElementById('tenantSlidesMain');
+      if (wrap) wrap.innerHTML = '';
+      const sidebar = document.getElementById('tenantSlidesSidebar');
+      if (sidebar) sidebar.innerHTML = '';
+      setSlidesEditorInfo('', 0);
+    }
+
     function renderTenantSlides() {
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
@@ -18634,10 +18657,7 @@
       applySectionStatuses(tenantProjectSectionStatuses);
       renderTenantSlidePlan();
       renderTenantSlides();
-      const editorInfo = document.getElementById('slidesEditorInfo');
-      if (editorInfo) {
-        editorInfo.textContent = 'عرض: ' + (p.title || '') + ' | ' + (p.slideCount || tenantSlidesData.length) + ' شريحة';
-      }
+      setSlidesEditorInfo(p.title || '', p.slideCount || tenantSlidesData.length);
       showTenantPage('tenantSlidesPage');
       refreshGlobalRail();
       toast('تم فتح العرض: ' + (p.title || ''));
@@ -18832,6 +18852,9 @@
         hydrateTenantProjectForm(tenantProjectData);
         applySectionStatuses(sectionStatuses);
         renderTenantSlidePlan();
+        renderTenantSlides();
+        setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '',
+          tenantSlidesData.length);
         refreshGlobalRail();
         toast('تم فتح المسودة المحفوظة بنجاح');
         return true;
