@@ -2447,6 +2447,21 @@ def api_render_slide_image():
     return jsonify({'success': True, 'html': slide_html})
 
 
+# Last observed state of the slide renderer on this host, so /health can report whether the
+# designer is editing with vision or blind instead of leaving it in a log file.
+_SLIDE_VISION_STATE = {}
+
+
+def _record_slide_vision_state(available, error='', source='edit'):
+    _SLIDE_VISION_STATE.clear()
+    _SLIDE_VISION_STATE.update({
+        'available': bool(available),
+        'error': str(error or '')[:300],
+        'source': source,
+        'checkedAt': datetime.now().isoformat(timespec='seconds'),
+    })
+
+
 def _designer_creative_images(project_data, creative_images=None):
     """The cover, moodboard and map images of the open presentation.
 
@@ -2691,6 +2706,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
     except Exception as ve:
         vision_error = str(ve)
         print(f"[DESIGNER-EDIT VISION] Screenshot failed: {ve}")
+    _record_slide_vision_state(bool(vision_image_uri), vision_error)
     if vision_error:
         # Without the snapshot the model edits the markup blind, and it still claims success. The
         # user was left believing a layout was inspected and fixed when it was never seen.
@@ -12529,11 +12545,36 @@ def _read_deployment_metadata():
     return metadata
 
 
+def _slide_vision_probe(force=False):
+    """Whether this host can render a slide to an image at all.
+
+    `deploy.sh` installs Chromium best-effort and logs a failure to /tmp, and a missing snapshot
+    only ever reached the server log, so nobody could tell whether the designer was editing with
+    vision or blind. The probe is cached, and every real edit records its outcome here.
+    """
+    if _SLIDE_VISION_STATE and not force:
+        return dict(_SLIDE_VISION_STATE)
+    state = {'available': False, 'error': '', 'source': 'probe'}
+    try:
+        from generate_pdf_from_preview import render_slide_to_image_base64
+        state['available'] = bool(render_slide_to_image_base64(
+            '<div class="slide" style="width:1280px;height:720px;">فحص</div>'))
+        if not state['available']:
+            state['error'] = 'renderer_returned_nothing'
+    except Exception as exc:
+        state['error'] = str(exc)[:300]
+    _record_slide_vision_state(state['available'], state['error'], source='probe')
+    return dict(_SLIDE_VISION_STATE)
+
+
 @app.route('/health')
 def health():
     metadata = _read_deployment_metadata()
+    if request.args.get('vision'):
+        _slide_vision_probe(force=True)
     return jsonify({
         'status': 'ok',
+        'slide_vision': dict(_SLIDE_VISION_STATE) or None,
         'commit': metadata.get('commit', 'unknown'),
         'deployed_commit': metadata.get('deployed_commit', 'unknown'),
         'deployed_at': metadata.get('deployed_at'),

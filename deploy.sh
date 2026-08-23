@@ -71,9 +71,30 @@ fi
 "$PIP" install -r "$APP_DIR/requirements.txt" || true
 "$PIP" install gunicorn || true
 
-# Ensure headless Chromium is available for Playwright PDF/PPTX export
+# Ensure headless Chromium is available for Playwright PDF export and for the visual snapshot the
+# AI slide editor looks at. Installing is not enough: on shared hosting the download succeeds and the
+# launch then fails on missing system libraries, which used to leave the editor working blind with
+# the reason buried in /tmp. So the launch is verified and the reason printed into deploy.log.
 if ! "$PYTHON" -m playwright install chromium >/tmp/playwright_install.log 2>&1; then
   echo "WARNING: Playwright Chromium install failed or skipped; check /tmp/playwright_install.log"
+  tail -n 15 /tmp/playwright_install.log || true
+fi
+if "$PYTHON" - <<'PY'
+import sys
+try:
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        print(f"Chromium OK: {browser.version}")
+        browser.close()
+except Exception as exc:
+    print(f"Chromium cannot launch: {exc}")
+    sys.exit(1)
+PY
+then
+  echo "Slide vision available: the AI editor sees a rendered snapshot of each slide."
+else
+  echo "WARNING: no slide vision on this host — the AI editor will edit slide markup blind."
 fi
 
 echo "===== 6. Run database migrations ====="
