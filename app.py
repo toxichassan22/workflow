@@ -3265,6 +3265,29 @@ def api_branding_font_status():
         source = 'legacy upload'
     else:
         source = 'platform default'
+
+    # Arabic and Latin resolve independently, and a script with no selection keeps the platform
+    # default. Picking a Latin-only font therefore left every Arabic word unchanged, which read as
+    # "the font does nothing" — so the resolved pair is reported.
+    scripts = {}
+    for script in ('arabic', 'latin'):
+        chosen_faces = [item for item in selections if item.get('script') == script]
+        if chosen_faces:
+            names = []
+            for item in chosen_faces:
+                if item.get('custom_font_path') or item.get('custom_font_data'):
+                    names.append(os.path.basename(str(item.get('custom_font_path') or 'خط مرفوع')))
+                else:
+                    font = db.get_sag_font(item.get('font_id')) or {}
+                    names.append(font.get('font_name') or font.get('font_family') or 'خط مختار')
+            scripts[script] = {'chosen': True, 'font': names[0],
+                               'weights': sorted({item.get('weight') for item in chosen_faces if item.get('weight')})}
+        else:
+            defaults = [font for font in (db.get_sag_fonts(script=script) or []) if font.get('is_default')]
+            default = next((font for font in defaults if font.get('weight') == 'regular'), None) or (defaults[0] if defaults else None)
+            scripts[script] = {'chosen': False,
+                               'font': (default or {}).get('font_name') or (default or {}).get('font_family') or 'الخط الافتراضي',
+                               'weights': []}
     return jsonify({
         'success': True,
         'status': {
@@ -3279,6 +3302,7 @@ def api_branding_font_status():
             'servedFiles': served,
             'googleImport': google_import,
             'renders': renders,
+            'scripts': scripts,
             'localNameOnly': local_only,
             'cssBytes': len(css),
             'bundledFaces': sorted(_load_bundled_fonts().keys()),

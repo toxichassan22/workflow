@@ -5470,10 +5470,20 @@
           <button type="button" class="presentation-font-close" onclick="closePresentationFontSettings()"
             aria-label="إغلاق">×</button>
         </div>
-        <label for="presentationFontSelect">الخط المستخدم</label>
-        <select id="presentationFontSelect" onchange="selectPresentationFont(this.value)" disabled>
+        <!-- Arabic and Latin resolve independently: a single selector meant that picking a
+             Latin-only font left every Arabic word on the platform default, so the deck looked
+             unchanged. Each script is chosen and reported on its own. -->
+        <label for="presentationFontArabic">خط النص العربي</label>
+        <select id="presentationFontArabic" onchange="selectPresentationScriptFont('arabic', this.value)"
+          disabled>
           <option value="">جاري تحميل الخطوط...</option>
         </select>
+        <label for="presentationFontLatin">خط النص اللاتيني والأرقام</label>
+        <select id="presentationFontLatin" onchange="selectPresentationScriptFont('latin', this.value)"
+          disabled>
+          <option value="">جاري تحميل الخطوط...</option>
+        </select>
+        <p id="presentationFontStatus" class="tenant-hint" style="margin:10px 0 0"></p>
       </div>
     </div>
 
@@ -18675,23 +18685,69 @@
       if (tenantPresentationId && !reply.saved) await saveExistingPresentation();
     }
 
+    const PRESENTATION_FONT_SELECTS = { arabic: 'presentationFontArabic', latin: 'presentationFontLatin' };
+
+    async function renderPresentationFontStatus() {
+      const line = document.getElementById('presentationFontStatus');
+      if (!line) return;
+      const data = await api('GET', '/api/branding/font-status');
+      const status = (data && data.status) || null;
+      if (!status) { line.textContent = ''; return; }
+      const scripts = status.scripts || {};
+      const label = key => {
+        const item = scripts[key] || {};
+        return (item.font || 'الافتراضي') + (item.chosen ? '' : ' (افتراضي)');
+      };
+      const renders = {
+        'embedded file': 'ملف خط مضمّن',
+        'served file': 'ملف خط من الخادم',
+        'google web font': 'خط ويب من Google — يحتاج اتصالًا',
+        'installed name only': 'اسم خط فقط — يظهر على الأجهزة المثبَّت عليها',
+        'nothing': 'لا يوجد خط'
+      }[status.renders] || status.renders;
+      line.textContent = 'المطبَّق الآن — عربي: ' + label('arabic') + ' | لاتيني: ' + label('latin') +
+        ' | طريقة التحميل: ' + renders;
+    }
+
     async function openPresentationFontSettings() {
       const panel = document.getElementById('presentationFontSettingsPanel');
-      const select = document.getElementById('presentationFontSelect');
-      if (!panel || !select) return;
+      const arabicSelect = document.getElementById(PRESENTATION_FONT_SELECTS.arabic);
+      const latinSelect = document.getElementById(PRESENTATION_FONT_SELECTS.latin);
+      if (!panel || !arabicSelect || !latinSelect) return;
       panel.style.display = 'flex';
-      select.disabled = true;
-      select.innerHTML = '<option value="">جاري تحميل الخطوط...</option>';
+      [arabicSelect, latinSelect].forEach(select => {
+        select.disabled = true;
+        select.innerHTML = '<option value="">جاري تحميل الخطوط...</option>';
+      });
       try {
-        await loadTenantFonts();
-        const source = document.getElementById('tenantPrimaryFontSelect');
-        if (!source || !source.options.length) throw new Error('Font list unavailable');
-        select.innerHTML = Array.from(source.options).map(option => option.outerHTML).join('');
-        select.value = source.value || '';
-        select.disabled = false;
+        const data = await api('GET', '/api/branding/fonts');
+        if (!data.success) throw new Error(data.error || 'Font list unavailable');
+        const available = (data.available || []).concat(data.custom_uploaded || []);
+        const selections = data.selections || [];
+        Object.entries(PRESENTATION_FONT_SELECTS).forEach(([script, id]) => {
+          const select = document.getElementById(id);
+          const scriptFonts = available.filter(font => (font.script || 'arabic') === script);
+          const seen = new Set();
+          const current = selections.find(item => item.script === script) || {};
+          select.innerHTML = '<option value="">الخط الافتراضي</option>' + scriptFonts.filter(font => {
+            const key = (font.font_family || font.font_name || font.id) + '|' + (font.weight || '');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          }).map(font => {
+            const selected = current.font_id && font.id === current.font_id;
+            return '<option value="' + escapeHtml(font.id) + '"' + (selected ? ' selected' : '') + '>' +
+              escapeHtml((font.font_name || font.font_family || '') +
+                (font.weight ? ' — ' + font.weight : '')) + '</option>';
+          }).join('');
+          select.disabled = false;
+        });
+        await renderPresentationFontStatus();
       } catch (error) {
         console.warn('[PRESENTATION FONT] load failed:', error);
-        select.innerHTML = '<option value="">تعذر تحميل الخطوط</option>';
+        [arabicSelect, latinSelect].forEach(select => {
+          select.innerHTML = '<option value="">تعذر تحميل الخطوط</option>';
+        });
       }
     }
 
@@ -18700,14 +18756,36 @@
       if (panel) panel.style.display = 'none';
     }
 
-    async function selectPresentationFont(fontId) {
-      const select = document.getElementById('presentationFontSelect');
+    // One script at a time, applied to every weight of the chosen family, so the change is visible
+    // in the deck instead of being swallowed by the other script's default.
+    async function selectPresentationScriptFont(script, fontId) {
+      const select = document.getElementById(PRESENTATION_FONT_SELECTS[script]);
       if (!select || select.disabled) return;
       select.disabled = true;
       try {
-        await selectTenantPrimaryFont(fontId);
+        const weights = ['light', 'regular', 'medium', 'bold', 'black'];
+        await Promise.all(weights.map(weight =>
+          api('DELETE', '/api/branding/fonts/' + script + '/' + weight)));
+        if (fontId) {
+          const data = await api('GET', '/api/branding/fonts');
+          const available = (data.available || []).concat(data.custom_uploaded || []);
+          const picked = available.find(font => font.id === fontId);
+          const family = picked && (picked.font_family || picked.font_name);
+          const faces = available.filter(font => (font.script || 'arabic') === script &&
+            (font.font_family || font.font_name) === family);
+          for (const face of (faces.length ? faces : [picked].filter(Boolean))) {
+            if (face.custom_font_path) {
+              await api('PUT', '/api/branding/fonts', { script, weight: face.weight || 'regular', custom_font_path: face.custom_font_path });
+            } else {
+              await api('PUT', '/api/branding/fonts', { script, weight: face.weight || 'regular', font_id: face.id });
+            }
+          }
+          if (family) await api('PUT', '/api/branding', { font_family: family, font_arabic: family });
+        }
+        await loadTenantBranding();
+        await renderPresentationFontStatus();
         if (typeof renderTenantSlides === 'function') renderTenantSlides();
-        toast('تم تحديث خط العرض');
+        toast(fontId ? 'تم تحديث الخط' : 'تم الرجوع للخط الافتراضي');
       } catch (error) {
         console.error('[PRESENTATION FONT] save failed:', error);
         toast('تعذر تحديث خط العرض');

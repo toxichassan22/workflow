@@ -241,6 +241,37 @@ class FontWorkflowTests(unittest.TestCase):
         self.assertEqual(status['renders'], 'google web font')
         self.assertTrue(status['willRenderRealFont'], status)
 
+    def test_the_font_picker_is_per_script_and_states_what_is_applied(self):
+        """One dropdown offering the two platform defaults could not change anything, ever.
+
+        Arabic and Latin resolve independently, and a script with no selection keeps the platform
+        default — so picking the default Latin face left every Arabic word exactly as it was.
+        """
+        client = self.app.test_client()
+        status = client.get('/api/branding/font-status',
+                            headers=self._headers(self.token)).get_json()['status']
+        self.assertFalse(status['scripts']['arabic']['chosen'])
+        self.assertFalse(status['scripts']['latin']['chosen'])
+        self.assertTrue(status['scripts']['arabic']['font'])
+        self.assertTrue(status['scripts']['latin']['font'])
+
+        with self.app.app_context():
+            db.set_tenant_font_selection(self.tenant, 'arabic', 'regular', font_id=self.font_ar)
+        status = client.get('/api/branding/font-status',
+                            headers=self._headers(self.token)).get_json()['status']
+        self.assertTrue(status['scripts']['arabic']['chosen'])
+        self.assertEqual(status['scripts']['arabic']['font'], 'Cairo')
+        # The other script is untouched, and the reader is told so instead of guessing.
+        self.assertFalse(status['scripts']['latin']['chosen'])
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('id="presentationFontArabic"', index_source)
+        self.assertIn('id="presentationFontLatin"', index_source)
+        self.assertIn('async function selectPresentationScriptFont(script, fontId)', index_source)
+        self.assertIn('async function renderPresentationFontStatus()', index_source)
+        # The single combined picker is gone.
+        self.assertNotIn('id="presentationFontSelect"', index_source)
+
     def test_a_font_name_with_no_source_still_renders_a_real_face(self):
         """A stored name with no file behind it silently fell back to the reader's Tahoma."""
         from design_templates import build_font_css

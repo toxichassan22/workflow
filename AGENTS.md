@@ -90,10 +90,18 @@ from `build_font_css(embed=True)` in every export. Three things used to break th
   explain it. That branch now ships the bundled `platform-fallback-arabic` face behind the requested
   name.
 
+**Arabic and Latin resolve independently**, and a script with no selection keeps the platform
+default. The presentation panel used to offer one dropdown holding exactly the two families that are
+already those defaults, so choosing either changed nothing at all — measured identical text widths
+for both picks. The panel is now one selector per script (`presentationFontArabic`,
+`presentationFontLatin`), it lists uploaded faces too, and it states the applied pair. Keep it that
+way: a single "presentation font" cannot be honest about a two-script model.
+
 `GET /api/branding/font-status` reports how the glyphs actually arrive: `embedded file`,
 `served file`, `google web font` (needs the network) or `installed name only` (renders only where
-that font is installed). The bundled faces come from `fonts_bundle.json`, which is committed
-normally — `fonts/*.ttf|otf` are **Git LFS** files and may be pointers on the server.
+that font is installed), plus the resolved face per script. The bundled faces come from
+`fonts_bundle.json`, which is committed normally — `fonts/*.ttf|otf` are **Git LFS** files and may be
+pointers on the server.
 
 ## Change history (who changed what)
 
