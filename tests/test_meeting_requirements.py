@@ -3200,12 +3200,35 @@ class MeetingRequirementsTests(unittest.TestCase):
             'tables': {'componentsTable': []},
         }
         self.assertFalse(engine.financial_study_has_real_input(defaults_only))
-        self.assertEqual(engine._financial_data_note({'financial_study_model': defaults_only}), '')
+        # Silence is not neutral: the absence is stated so the model cannot fill the gap.
+        absent_note = engine._financial_data_note({'financial_study_model': defaults_only})
+        self.assertEqual(absent_note, engine.FINANCIAL_ABSENT_NOTE)
+        self.assertNotIn('الجداول المالية المعتمدة أدناه', absent_note)
 
         entered = dict(defaults_only, inputs=dict(defaults_only['inputs'], projectCost=480000000))
         self.assertTrue(engine.financial_study_has_real_input(entered))
-        self.assertIn('المؤشرات وهيكل رأس المال المعتمد',
-                      engine._financial_data_note({'financial_study_model': entered}))
+        entered_note = engine._financial_data_note({'financial_study_model': entered})
+        self.assertIn('المؤشرات وهيكل رأس المال المعتمد', entered_note)
+        # An entered study is copied, never recomputed or extended.
+        self.assertIn('نقل الرقم حرفيًا', entered_note)
+        self.assertIn('الرقم غير الموجود لا يُكتب', entered_note)
+        self.assertIn('ممنوع التوسيع', entered_note)
+
+        # A plan for a project with no figures carries no financial slide from any source.
+        plan = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover', 'design_style': 'image'},
+            {'title': 'التحليل المالي والجدوى', 'type': 'content', 'design_style': 'dashboard'},
+            {'title': 'مؤشرات الأداء والقيمة المضافة', 'type': 'content', 'design_style': 'dashboard'},
+            {'title': 'الموقع والمميزات', 'type': 'content', 'design_style': 'map'},
+        ]}
+        stripped = engine.strip_financial_slides(json.loads(json.dumps(plan)),
+                                                 {'financial_study_model': defaults_only})
+        self.assertEqual([slide['title'] for slide in stripped['slides']],
+                         ['الغلاف', 'الموقع والمميزات'])
+        self.assertEqual(stripped['proposed_count'], 2)
+        kept = engine.strip_financial_slides(json.loads(json.dumps(plan)),
+                                            {'financial_study_model': entered})
+        self.assertEqual(len(kept['slides']), 4)
 
         by_components = dict(defaults_only,
                              dynamicRows={'components': [{'name': 'شقق سكنية', 'builtArea': 24000}]})

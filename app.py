@@ -3709,6 +3709,9 @@ def _execute_slide_plan(project_data, tenant_id, branding):
         plan = build_fallback_plan(effective_branding)
 
     plan = _ensure_required_location_slides(plan, project_data)
+    # A project with no financial study gets no financial slides at all, from any source.
+    plan = slide_engine.strip_financial_slides(plan, project_data)
+    has_financial = slide_engine.project_has_financial_study(project_data)
 
     # Enforce min and max slide counts strictly on generated plan
     slides = plan.get('slides', [])
@@ -3717,11 +3720,12 @@ def _execute_slide_plan(project_data, tenant_id, branding):
         print(f"[SLIDE-PLAN ENFORCE] Plan returned {len(slides)} slides, auto-padding to effective_min_slides ({effective_min_slides})")
         needed_extra = effective_min_slides - len(slides)
         extra_topics = [
-            {'title': 'مؤشرات الأداء والقيمة المضافة', 'style': 'dashboard', 'bullets': ['تحليل العائد الاستثماري المتوقع', 'معدل الإشغال والاستدامة', 'قيمة الأصول على المدى الطويل']},
             {'title': 'المواصفات الفنية وجودة المواد', 'style': 'cards', 'bullets': ['جودة التشطيبات والمواد المستخدمة', 'أنظمة التكييف والعزل الحراري', 'الضمانات وخدمات ما بعد البيع']},
             {'title': 'التحليل البيئي والمحيط المباشر', 'style': 'text', 'bullets': ['سهولة الوصول والمحاور الرئيسية', 'قرب المشروع من المرافق والمراكز الحيوية', 'جودة البيئة العمرانية المحيطة']},
             {'title': 'الخطة الزمنية ومراحل التطوير', 'style': 'timeline', 'bullets': ['مرحلة التخطيط والدراسات الأولية', 'مرحلة التنفيذ والإنشاءات', 'مرحلة التسليم والتشغيل']},
         ]
+        if has_financial:
+            extra_topics.insert(0, {'title': 'مؤشرات الأداء والقيمة المضافة', 'style': 'dashboard', 'bullets': ['تحليل العائد الاستثماري المتوقع', 'معدل الإشغال والاستدامة', 'قيمة الأصول على المدى الطويل']})
         insert_idx = max(1, len(slides) - 1)
         if len(slides) >= 2 and slides[-2].get('type') == 'moodboard':
             insert_idx = max(1, len(slides) - 2)

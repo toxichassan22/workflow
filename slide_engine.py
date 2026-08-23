@@ -288,6 +288,62 @@ def financial_study_has_real_input(model, calc=None):
     return False
 
 
+# Saying nothing about an empty financial study is not neutral: the model treats the gap as
+# something to fill, which is where invented costs and returns came from. The absence is stated.
+FINANCIAL_ABSENT_NOTE = (
+    "\n\n## الدراسة المالية غير مُدخلة في هذا الملف"
+    "\n- لا توجد أي أرقام مالية: لا تكلفة ولا قيمة أرض ولا رأس مال ولا تمويل ولا إيرادات ولا عائد"
+    " ولا مؤشرات ولا مساحات مبنية ولا جداول."
+    "\n- ممنوع إنشاء شريحة مالية أو شريحة مؤشرات أو رسم بياني مالي أو جدول أرقام."
+    "\n- ممنوع ذكر أي رقم أو نسبة أو عائد أو تكلفة في أي شريحة أخرى، ولو كتقدير أو مدى أو مثال"
+    " أو من معرفة عامة عن السوق."
+)
+
+# Fifteen rows of a longer table left the model completing the rest from nothing.
+FINANCIAL_TABLE_ROW_LIMIT = 40
+
+# A financial title in a plan that has no financial data can only be filled by inventing numbers.
+FINANCIAL_SLIDE_TITLE_RE = re.compile(
+    r'(?:مالي|ماليّ|تكلفة|تكاليف|إيراد|ايراد|عائد|عوائد|ربح|أرباح|جدوى|ميزانية|تمويل|استثمار|'
+    r'مؤشرات|مؤشر|قيمة مضافة|هيكل رأس المال|روي|financial|cost|revenue|profit|roi|irr|noi|'
+    r'budget|feasibility|metrics|dashboard)'
+)
+
+
+def project_has_financial_study(project_data):
+    """True when this project file carries entered financial figures."""
+    source = project_data if isinstance(project_data, dict) else {}
+    return financial_study_has_real_input(source.get('financial_study_model'),
+                                         source.get('financial_calc_data'))
+
+
+def strip_financial_slides(plan, project_data):
+    """Drop financial slides from a plan for a project that has no financial study.
+
+    The planner, the fallback plan and the minimum-count padding all offer titles such as
+    «التحليل المالي والجدوى» and «مؤشرات الأداء والقيمة المضافة», and a slide with that title and no
+    figures behind it can only be written by inventing them.
+    """
+    if not isinstance(plan, dict) or project_has_financial_study(project_data):
+        return plan
+    slides = plan.get('slides') if isinstance(plan.get('slides'), list) else []
+    kept = []
+    for slide in slides:
+        if not isinstance(slide, dict):
+            continue
+        text = f"{slide.get('title') or ''} {' '.join(str(b or '') for b in (slide.get('bullets') or []))}"
+        financial = (slide.get('design_style') == 'dashboard'
+                     or slide.get('content_source') == 'financial'
+                     or bool(FINANCIAL_SLIDE_TITLE_RE.search(text.lower())))
+        if financial and slide.get('type') not in ('cover', 'index', 'moodboard', 'closing'):
+            print(f"[SLIDE-PLAN] Dropped financial slide «{slide.get('title')}»: no financial study entered")
+            continue
+        kept.append(slide)
+    plan['slides'] = kept
+    plan['proposed_count'] = len(kept)
+    return plan
+
+
 def _financial_data_note(project_data):
     """Extract and format financial study tables and metrics so they are never lost or distorted."""
     if not project_data or not isinstance(project_data, dict):
@@ -297,7 +353,7 @@ def _financial_data_note(project_data):
     calc = _parse_financial_dict(project_data.get('financial_calc_data'))
 
     if not financial_study_has_real_input(model, calc):
-        return ''
+        return FINANCIAL_ABSENT_NOTE
 
     # Extract components
     components = []
@@ -320,6 +376,9 @@ def _financial_data_note(project_data):
     lines = [
         "\n\n## بيانات وجداول الدراسة المالية المعتمدة (قواعد صارمة وإلزامية)",
         "- **اعتماد الجداول كما هي:** يجب عرض بيانات ومكونات وأرقام الجداول المالية المعتمدة أدناه بدقة كاملة دون حذف أعمدة أو تغيير مسميات أو اختلاق أرقام.",
+        "- **نقل الرقم حرفيًا:** كل رقم يُكتب بنفس القيمة ونفس الوحدة ونفس العملة ونفس عدد الخانات كما ورد أدناه. ممنوع التقريب، وممنوع التحويل إلى مليون أو ألف، وممنوع إعادة الحساب أو الجمع أو الطرح أو استخراج نسبة أو متوسط أو إجمالي غير مكتوب أدناه.",
+        "- **الرقم غير الموجود لا يُكتب:** إن لم يوجد المؤشر أو الصف أو السنة في البيانات أدناه فلا تكتبه إطلاقًا — لا تقدير ولا نطاق ولا مثال ولا رقم من معرفة عامة عن السوق، ولا خانة بعلامة استفهام أو صفر بديل. اكتب الحقائق المتاحة فقط.",
+        "- **ممنوع التوسيع:** ممنوع إضافة مكوّن أو بند إيراد أو تكلفة أو سنة أو صف غير موجود أدناه، وممنوع استكمال جدول ناقص من عندك.",
         "- **قاعدة الرسوم البيانية والجداول المرافقة:** إذا تضمنت الشريحة المالية رسماً بيانياً أو دائرياً (Chart / Breakdown)، يجب إلزامياً وضع جدول البيانات الفعلي المكتمل بجانب الرسم البياني (جنباً إلى جنب في تصميم متناسق) لضمان الدقة الرقمية والوضوح البصري معاً.",
         "- **تصميم مسطح فاخر (Flat Crisp Luxury):** استخدم بطاقات بيضاء ناصعة (#ffffff) بحدود ناعمة (1px solid #e2e8f0) بدون ظلال ثقيلة (box-shadow: none)، وبخطوط واضحة وأرقام مميزة بكحلي وأزرق سماوي راقي.",
     ]
@@ -391,8 +450,14 @@ def _financial_data_note(project_data):
                     if clean_r:
                         clean_tbl.append(clean_r)
             if clean_tbl:
-                lines.append(f"\n### {tbl_title}:")
-                lines.append(json.dumps(clean_tbl[:15], ensure_ascii=False, indent=2))
+                lines.append(f"\n### {tbl_title} ({len(clean_tbl)} صفًا):")
+                lines.append(json.dumps(clean_tbl[:FINANCIAL_TABLE_ROW_LIMIT], ensure_ascii=False, indent=2))
+                # A table cut without saying so is an invitation to complete it from nothing.
+                if len(clean_tbl) > FINANCIAL_TABLE_ROW_LIMIT:
+                    lines.append(
+                        f"(مُعروض أول {FINANCIAL_TABLE_ROW_LIMIT} صفًا من {len(clean_tbl)}. "
+                        "الصفوف غير المعروضة ممنوع كتابتها أو تخمينها؛ اذكر أن الجدول مطوّل واعرض المعروض فقط.)"
+                    )
 
     return '\n'.join(lines)
 
@@ -1161,7 +1226,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         if timeline_note:
             notes.append(timeline_note.strip())
     if design_style in ('dashboard', 'table') or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
-        notes.append('في الشرائح المالية: اعتمد جداول ومكونات وأرقام الدراسة المالية كما هي دون تعديل كبير أو حذف للأرقام.')
+        notes.append('في الشرائح المالية: انقل جداول ومكونات وأرقام الدراسة المالية حرفيًا كما هي — لا تقريب ولا تحويل وحدات ولا إعادة حساب ولا حذف صفوف، ولا رقم واحد من عندك.')
         notes.append('إذا أنشأت رسماً بيانياً أو مخططاً دائرياً، يجب إلزامياً وضع جدول البيانات الفعلي بجانب الرسم البياني (جنباً إلى جنب في تصميم ثنائي) لضمان الدقة والوضوح.')
         financial_note = _financial_data_note(project_data)
         if financial_note:

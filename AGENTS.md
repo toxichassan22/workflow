@@ -206,6 +206,23 @@ Logos reuse `project_files` with `file_type='team_logo'`, so they inherit tenant
 authenticated `GET /api/project-files/<id>` preview route. `team_logo` is in
 `PROJECT_IMAGE_ONLY_TYPES` because it renders in an `<img>`.
 
+## Financial figures are copied, never produced
+
+Two states, and both are stated to the model explicitly — silence made it invent.
+
+- **No study entered.** `collectFinancialStudyModel()` snapshots every control of the section plus
+  the computed projection, so an untouched project still carries a ~35KB model of markup defaults
+  and zeros. `financial_study_has_real_input()` (an entered row, or a real money/area figure — rates,
+  years and counts are markup defaults and do not count) gates it: the payload drops
+  `financial_study_model`, `_financial_data_note()` returns `FINANCIAL_ABSENT_NOTE` which forbids any
+  financial slide or figure, and `strip_financial_slides()` removes financial slides that the
+  planner, the fallback plan or the minimum-count padding proposed anyway.
+- **Study entered.** Every figure is transcribed verbatim: same value, unit, currency and digits. No
+  rounding, no million/thousand conversion, no recomputing or summing, no new ratio, no added row or
+  year, and a figure that is not in the data is not written at all. Tables are sent up to
+  `FINANCIAL_TABLE_ROW_LIMIT` rows and a truncated one **says** it was truncated — a silent cut had
+  the model completing the rest from nothing.
+
 Section order is `basic → location → land_croquis → timeline → financial → team → market study → executive content`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order.
 There is no conceptual-2D section inside بيانات المشروع. The old floor-design page is gone
