@@ -15,6 +15,7 @@ import threading
 
 import db_driver
 import concurrent.futures
+import copy
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app
 
@@ -27,6 +28,7 @@ import market_study
 import executive_content
 import population_service
 import slide_engine
+import change_tracking
 from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
 from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules, extract_slide_elements, build_font_css
 
@@ -1202,6 +1204,26 @@ def generate_pdf_with_playwright(html, project_name, branding=None, output_dir=N
     out_path = os.path.join(out_dir, f"{safe_name}_{int(time.time())}.pdf")
     generate_pdf(html, branding, out_path, tenant_id)
     return out_path
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Helper: record who changed what, on a presentation or a project file
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _record_change(target_type, target_id, action, details, source='manual', summary=''):
+    """Write one history entry with its individual differences. Never fails a request."""
+    try:
+        lines = [line for line in (details or []) if str(line or '').strip()]
+        if not lines and not summary:
+            return None
+        return db.log_change(
+            g.tenant_id, target_type, target_id,
+            getattr(g, 'user_id', None),
+            getattr(g, 'user_name', None) or ('الذكاء الاصطناعي' if source == 'ai' else 'مستخدم غير معروف'),
+            action, summary=summary, details=lines, source=source,
+        )
+    except Exception as exc:
+        print(f'[CHANGE LOG] Could not record {action} on {target_type} {target_id}: {exc}')
+        return None
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Clean base64 and large image data from project data
@@ -2824,6 +2846,10 @@ def api_designer_chat():
     if not slides:
         return jsonify({'success': False, 'error': 'لا توجد شرائح مفتوحة لتنفيذ الطلب'}), 400
 
+    # Kept so the history can state what the AI actually changed. An AI edit used to leave no trace
+    # at all: no log entry, no version, and no record of the instruction behind it.
+    slides_before = copy.deepcopy(slides)
+
     # Automatic map type change detection (satellite, roadmap, hybrid, terrain)
     msg_lowered = message.lower()
     requested_map_type = None
@@ -3053,8 +3079,22 @@ def api_designer_chat():
         validation = _validate_workspace_data({'slidesData': slides})
         if not validation['valid']:
             return jsonify({'success': False, 'error': 'تم رفض التعديل لأن العرض يحتوي على شرائح غير صالحة', 'validation': validation}), 422
+        slide_changes = change_tracking.describe_slide_changes(slides_before, slides)
         if presentation_id:
+            if slide_changes:
+                db.save_presentation_version(presentation_id, g.user_id, g.user_name or 'System',
+                                             slides_before, action='pre-ai-edit')
             db.update_presentation(presentation_id, slides_data=slides, slide_count=len(slides), status='edited')
+        if slide_changes:
+            tools_used = ', '.join(sorted({str(item.get('tool')) for item in executed
+                                           if isinstance(item, dict) and item.get('tool')}))
+            _record_change(
+                'presentation' if presentation_id else 'draft',
+                presentation_id or (project_data.get('draftId') or project_data.get('draft_id')),
+                'تعديل بالذكاء الاصطناعي',
+                [f'الطلب: «{message[:300]}»'] + ([f'الأدوات: {tools_used}'] if tools_used else []) + slide_changes,
+                source='ai',
+            )
         response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
         if assistant_messages:
             response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
@@ -4785,6 +4825,11 @@ def api_regenerate_presentation_maps(pres_id):
     else:
         db.update_presentation(pres_id, project_data=project_data)
 
+    _record_change('presentation', pres_id, 'إعادة توليد الخرائط',
+                   ['أُعيد توليد صور الخرائط: '
+                    + '، '.join(sorted(key.strip('#').replace('MAP_', '').lower()
+                                       for key, value in placeholders.items() if value))])
+
     return jsonify({
         'success': True,
         'placeholders': placeholders,
@@ -5095,6 +5140,8 @@ def api_save_presentation():
         slides_data=slides_data,
         slide_count=slide_count,
     )
+    _record_change('presentation', pres_id, 'إنشاء العرض',
+                   [f'العنوان: «{title}»', f'عدد الشرائح: {slide_count}'])
     return jsonify({'success': True, 'presentationId': pres_id}), 201
 
 
@@ -5134,20 +5181,14 @@ def api_update_presentation(pres_id):
 
     # Save version snapshot before update if slides_data is changing
     if 'slides_data' in updates:
-        import json as _json
-        current_slides = _json.loads(pres['slides_data']) if pres.get('slides_data') else []
+        current_slides = change_tracking.parse_slides(pres.get('slides_data'))
         db.save_presentation_version(pres_id, g.user_id, g.user_name or 'System', current_slides, action='edit')
-        # Build detailed log entry
-        details_parts = []
+        # What actually changed, slide by slide. This used to be one line reading «تعديل المحتوى».
+        details = []
         if 'title' in updates and updates['title'] != pres.get('title'):
-            details_parts.append(f'العنوان: "{pres.get("title","")}" إلى "{updates["title"]}"')
-        new_count = len(updates['slides_data']) if isinstance(updates['slides_data'], list) else 0
-        old_count = len(current_slides) if isinstance(current_slides, list) else 0
-        if new_count != old_count:
-            details_parts.append(f'عدد الشرائح: {old_count} إلى {new_count}')
-        if not details_parts:
-            details_parts.append('تعديل المحتوى')
-        db.log_edit(pres_id, g.user_id, g.user_name or 'System', 'edit', ' | '.join(details_parts))
+            details.append(f'عنوان العرض: من «{pres.get("title") or "بدون"}» إلى «{updates["title"]}»')
+        details.extend(change_tracking.describe_slide_changes(current_slides, updates['slides_data']))
+        _record_change('presentation', pres_id, 'تعديل الشرائح', details, source='manual')
 
     db.update_presentation(pres_id, **updates)
     return jsonify({'success': True})
@@ -5164,6 +5205,14 @@ def _project_draft_actor_id():
 
 def _project_draft_actor_name():
     return g.user_name or 'Company administrator'
+
+
+def _resolve_draft_id(explicit=None):
+    """The draft a request acts on: the id it names, else this actor's current draft."""
+    if explicit:
+        return explicit
+    draft = db.get_project_draft(g.tenant_id, _project_draft_actor_id())
+    return (draft or {}).get('id')
 
 @app.route('/api/project-draft', methods=['GET'])
 @require_auth
@@ -5201,6 +5250,12 @@ def api_save_project_draft():
     status = data.get('status', 'draft')
     if status not in {'draft', 'submitted'}:
         status = 'draft'
+    # Read the stored version before writing over it, so the history can name every field that
+    # changed instead of only counting a revision.
+    previous_id = draft_data.get('draftId') or draft_data.get('draft_id')
+    previous = db.get_project_draft_by_id(g.tenant_id, previous_id) if previous_id else None
+    previous_data = (previous or {}).get('draft_data') if isinstance(previous, dict) else {}
+    previous_statuses = (previous or {}).get('section_statuses') if isinstance(previous, dict) else {}
     try:
         draft_id = db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
@@ -5216,6 +5271,13 @@ def api_save_project_draft():
             'error': 'لم يتم الحفظ: البيانات المرسلة فارغة والمسودة المحفوظة تحتوي بيانات المشروع',
             'error_code': 'DRAFT_EMPTY_OVERWRITE'
         }), 409
+
+    details = change_tracking.describe_draft_changes(previous_data, draft_data)
+    if isinstance(section_statuses, dict) and section_statuses:
+        details.extend(change_tracking.describe_section_status_changes(previous_statuses, section_statuses))
+    _record_change('draft', draft_id, 'حفظ بيانات المشروع' if previous else 'إنشاء ملف مشروع',
+                   details, source='manual',
+                   summary='' if previous else 'تم إنشاء ملف المشروع')
     return jsonify({'success': True, 'draftId': draft_id})
 
 
@@ -5337,21 +5399,32 @@ def api_update_section_status():
         # concurrent read-modify-write on the shared JSON column lost half of them.
         if any(not isinstance(key, str) or not key or value not in {'draft', 'approved'} for key, value in bulk.items()):
             return jsonify({'error': 'A valid sectionStatuses map is required'}), 400
+        draft_id = _resolve_draft_id(data.get('draftId'))
+        before = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
         result = db.update_draft_section_statuses(
             g.tenant_id, _project_draft_actor_id(), bulk, draft_id=data.get('draftId')
         )
         if not result:
             return jsonify({'error': 'Unable to update section status'}), 400
+        _record_change('draft', draft_id or _resolve_draft_id(), 'اعتماد الأقسام',
+                       change_tracking.describe_section_status_changes(
+                           (before or {}).get('section_statuses') if isinstance(before, dict) else {}, bulk))
         return jsonify({'success': True})
     section_key = data.get('sectionKey')
     section_status = data.get('sectionStatus')
     if not isinstance(section_key, str) or not section_key or section_status not in {'draft', 'approved'}:
         return jsonify({'error': 'A valid sectionKey and sectionStatus are required'}), 400
+    draft_id = _resolve_draft_id(data.get('draftId'))
+    before = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
     result = db.update_draft_section_status(
         g.tenant_id, _project_draft_actor_id(), section_key, section_status, draft_id=data.get('draftId')
     )
     if not result:
         return jsonify({'error': 'Unable to update section status'}), 400
+    _record_change('draft', draft_id or _resolve_draft_id(), 'اعتماد قسم',
+                   change_tracking.describe_section_status_changes(
+                       (before or {}).get('section_statuses') if isinstance(before, dict) else {},
+                       {section_key: section_status}))
     return jsonify({'success': True})
 
 
@@ -6311,7 +6384,8 @@ def api_export():
             # Record export
             export_id = db.create_export(presentation_id, g.tenant_id, 'pdf', pdf_path)
             if presentation_id:
-                db.log_edit(presentation_id, g.user_id, g.user_name or 'System', 'export', f'Exported as PDF')
+                _record_change('presentation', presentation_id, 'تصدير',
+                               [f'صُدّر العرض بصيغة PDF ({len(slides_html)} شريحة)'])
             return jsonify({'success': True, 'url': f'/api/exports/{export_id}/download', 'exportId': export_id, 'format': 'pdf'})
 
         elif fmt == 'pptx':
@@ -6339,7 +6413,8 @@ def api_export():
 
             export_id = db.create_export(data.get('presentationId'), g.tenant_id, 'pptx', pptx_path)
             if data.get('presentationId'):
-                db.log_edit(data['presentationId'], g.user_id, g.user_name or 'System', 'export', f'Exported as PPTX')
+                _record_change('presentation', data['presentationId'], 'تصدير',
+                               [f'صُدّر العرض بصيغة PPTX ({len(slides_data)} شريحة)'])
             return jsonify({'success': True, 'url': f'/api/exports/{export_id}/download', 'exportId': export_id, 'format': 'pptx'})
 
         else:
@@ -9899,7 +9974,9 @@ def api_restore_version(pres_id, version_id):
     # Restore the old version
     old_slides = _json.loads(version['slides_data']) if version.get('slides_data') else []
     db.update_presentation(pres_id, slides_data=old_slides)
-    db.log_edit(pres_id, g.user_id, g.user_name or 'System', 'restore', f'Restored version from {version["created_at"]}')
+    _record_change('presentation', pres_id, 'استرجاع نسخة',
+                   [f'رجع العرض إلى نسخة {version["created_at"]}']
+                   + change_tracking.describe_slide_changes(current_slides, old_slides))
 
     return jsonify({'success': True, 'slidesData': old_slides})
 
@@ -9907,12 +9984,21 @@ def api_restore_version(pres_id, version_id):
 @app.route('/api/presentations/<pres_id>/edit-log', methods=['GET'])
 @require_auth
 def api_get_edit_log(pres_id):
-    """Get edit history for a presentation."""
+    """Get edit history for a presentation: who changed what, by hand or by the AI."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404
-    log = db.get_edit_log(pres_id)
-    return jsonify({'success': True, 'log': log})
+    return jsonify({'success': True, 'log': db.get_change_log(g.tenant_id, 'presentation', pres_id)})
+
+
+@app.route('/api/project-draft/<draft_id>/edit-log', methods=['GET'])
+@require_auth
+def api_get_draft_edit_log(draft_id):
+    """Edit history for one project file. Drafts had no history at all before."""
+    draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+    if not draft:
+        return jsonify({'error': 'Draft not found'}), 404
+    return jsonify({'success': True, 'log': db.get_change_log(g.tenant_id, 'draft', draft_id)})
 
 
 @app.route('/api/presentations/<pres_id>/log', methods=['POST'])
@@ -9925,7 +10011,8 @@ def api_log_presentation_edit(pres_id):
     data = request.json or {}
     action = data.get('action', 'edit')
     details = data.get('details', '')
-    db.log_edit(pres_id, g.user_id, g.user_name or 'System', action, details)
+    lines = details if isinstance(details, list) else [details]
+    _record_change('presentation', pres_id, action, lines, source=data.get('source') or 'manual')
     return jsonify({'success': True})
 
 

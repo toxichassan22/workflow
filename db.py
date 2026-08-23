@@ -280,6 +280,21 @@ def _create_tables(conn):
     );
     CREATE INDEX IF NOT EXISTS idx_editlog_pres ON edit_log(presentation_id);
 
+    CREATE TABLE IF NOT EXISTS change_log (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        user_id TEXT,
+        user_name TEXT,
+        source TEXT NOT NULL DEFAULT 'manual',
+        action TEXT NOT NULL,
+        summary TEXT,
+        details TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_changelog_target ON change_log(target_type, target_id, created_at);
+
     CREATE TABLE IF NOT EXISTS invite_links (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -1928,6 +1943,93 @@ def get_edit_log(presentation_id):
         (presentation_id,)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Change log: what changed, by whom, by hand or by the AI — for a presentation
+# or a project draft. `edit_log` could only reference presentations and recorded
+# one generic line such as "تعديل المحتوى", so a reader could not tell what had
+# actually changed, and AI edits were not recorded at all.
+# ─────────────────────────────────────────────────────────────────────────────
+
+CHANGE_TARGETS = ('presentation', 'draft')
+CHANGE_SOURCES = ('manual', 'ai', 'system')
+
+
+def log_change(tenant_id, target_type, target_id, user_id, user_name, action,
+               summary='', details=None, source='manual'):
+    """Record one change with the individual differences it produced.
+
+    ``details`` is a list of human-readable Arabic lines; it is stored as JSON so the reader can
+    show them one per line instead of a single sentence.
+    """
+    if target_type not in CHANGE_TARGETS or not target_id:
+        return None
+    lines = [str(line).strip() for line in (details or []) if str(line or '').strip()]
+    summary = str(summary or '').strip()
+    if not summary and not lines:
+        return None
+    conn = get_db()
+    change_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO change_log
+           (id, tenant_id, target_type, target_id, user_id, user_name, source, action, summary, details, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (change_id, tenant_id, target_type, str(target_id), user_id, user_name,
+         source if source in CHANGE_SOURCES else 'manual', action, summary,
+         json.dumps(lines, ensure_ascii=False), datetime.now().isoformat())
+    )
+    conn.commit()
+    return change_id
+
+
+def get_change_log(tenant_id, target_type, target_id, limit=200):
+    """Newest-first history for one presentation or draft, including legacy edit_log rows."""
+    conn = get_db()
+    rows = conn.execute(
+        '''SELECT user_name, source, action, summary, details, created_at
+           FROM change_log
+           WHERE tenant_id = ? AND target_type = ? AND target_id = ?
+           ORDER BY created_at DESC LIMIT ?''',
+        (tenant_id, target_type, str(target_id), max(1, min(int(limit or 200), 500)))
+    ).fetchall()
+    entries = []
+    for row in rows:
+        item = dict(row)
+        item['details'] = _json_list(item.get('details'))
+        entries.append(item)
+    if target_type == 'presentation':
+        # History written before this table existed still belongs to the reader.
+        legacy = conn.execute(
+            '''SELECT user_name, action, details, created_at FROM edit_log
+               WHERE presentation_id = ? ORDER BY created_at DESC''',
+            (str(target_id),)
+        ).fetchall()
+        for row in legacy:
+            item = dict(row)
+            entries.append({
+                'user_name': item.get('user_name'),
+                'source': 'manual',
+                'action': item.get('action'),
+                'summary': item.get('details') or '',
+                'details': [],
+                'created_at': item.get('created_at'),
+                'legacy': True,
+            })
+    entries.sort(key=lambda entry: str(entry.get('created_at') or ''), reverse=True)
+    return entries
+
+
+def _json_list(value):
+    if isinstance(value, list):
+        return list(value)
+    if not value:
+        return []
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return decoded if isinstance(decoded, list) else []
 
 
 # ─────────────────────────────────────────────────────────────────────────────

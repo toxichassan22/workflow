@@ -18086,9 +18086,13 @@
       if (liveNodes.length !== rawNodes.length) return;
 
       let changed = false;
+      const textChanges = [];
       liveNodes.forEach((node, i) => {
         if (editedEl && !editedEl.contains(node)) return;
         if (rawNodes[i].nodeValue !== node.nodeValue) {
+          // Recorded before the overwrite, so the history can quote both sides of the edit.
+          textChanges.push('من «' + String(rawNodes[i].nodeValue || '').trim().slice(0, 120) +
+            '» إلى «' + String(node.nodeValue || '').trim().slice(0, 120) + '»');
           rawNodes[i].nodeValue = node.nodeValue;
           changed = true;
         }
@@ -18101,8 +18105,8 @@
       // Record an edit log entry when a saved presentation is open.
       if (tenantPresentationId) {
         api('POST', '/api/presentations/' + tenantPresentationId + '/log', {
-          action: 'inline_text',
-          details: 'تعديل نص مباشر على شريحة ' + (index + 1)
+          action: 'تعديل نص مباشر',
+          details: textChanges.map(line => 'الشريحة ' + (index + 1) + ': ' + line)
         }).catch(() => { });
       }
       toast('تم تعديل النص. اضغط "حفظ التعديلات" للحفظ النهائي.');
@@ -18895,6 +18899,7 @@
             (fields ? ' | ' + fields : '') + '</div>' + note + '</div>' +
             '<div class="tenant-actions">' +
             '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح وإكمال المسودة</button>' +
+            '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
             (restorable
               ? '<button class="btn small" style="background:#b45309;color:#fff" onclick="restoreProjectDraft(\'' +
                 d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>'
@@ -20412,16 +20417,32 @@
       }
     }
 
+    // Every entry names its author, whether it was done by hand or by the AI, and the individual
+    // differences it produced. It used to read «تعديل نصي» with nothing behind it.
+    function renderChangeLogEntry(entry) {
+      const source = entry.source === 'ai' ? 'الذكاء الاصطناعي' : entry.source === 'system' ? 'النظام' : 'يدوي';
+      const lines = Array.isArray(entry.details) ? entry.details : [];
+      const stamp = String(entry.created_at || '').slice(0, 19).replace('T', ' ');
+      return '<div style="padding:12px 0;border-bottom:1px solid var(--line)">' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<strong>' + escapeHtml(entry.user_name || 'نظام') + '</strong>' +
+        '<span class="tenant-hint">' + escapeHtml(entry.action || '') + '</span>' +
+        '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:' +
+        (entry.source === 'ai' ? '#eef5fb;color:#123B6D' : '#f1f5f9;color:#475569') + '">' +
+        source + '</span></div>' +
+        (entry.summary ? '<div style="margin-top:4px">' + escapeHtml(entry.summary) + '</div>' : '') +
+        (lines.length
+          ? '<ul style="margin:6px 0 0;padding-inline-start:18px;font-size:13px;line-height:1.9">' +
+            lines.map(line => '<li>' + escapeHtml(line) + '</li>').join('') + '</ul>'
+          : '') +
+        '<div class="meta" style="margin-top:4px">' + escapeHtml(stamp) + '</div></div>';
+    }
+
     async function showEditLog(presId) {
       const data = await api('GET', '/api/presentations/' + presId + '/edit-log');
       if (!data.success) { toast('فشل تحميل السجل'); return; }
       if (!data.log.length) { toast('لا يوجد سجل تعديلات'); return; }
-      const html = data.log.map(l => {
-        return '<div style="padding:10px 0;border-bottom:1px solid var(--line)">' +
-          '<strong>' + escapeHtml(l.user_name || 'نظام') + '</strong> - ' + escapeHtml(l.action) +
-          (l.details ? ' <span class="tenant-hint">(' + escapeHtml(l.details) + ')</span>' : '') +
-          '<div class="meta">' + escapeHtml(l.created_at) + '</div></div>';
-      }).join('');
+      const html = data.log.map(renderChangeLogEntry).join('');
       const existing = document.getElementById('editLogModal');
       if (existing) existing.remove();
       const modal = document.createElement('div');
@@ -20431,6 +20452,22 @@
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
         '<h3>سجل التعديلات</h3><button class="btn ghost" onclick="this.closest(\'#editLogModal\').remove()">إغلاق</button></div>' +
         html + '</div>';
+      document.body.appendChild(modal);
+    }
+
+    async function showDraftEditLog(draftId) {
+      const data = await api('GET', '/api/project-draft/' + encodeURIComponent(draftId) + '/edit-log');
+      if (!data.success) { toast(data.error || 'فشل تحميل السجل'); return; }
+      if (!data.log.length) { toast('لا يوجد سجل تعديلات لهذه المسودة'); return; }
+      const existing = document.getElementById('editLogModal');
+      if (existing) existing.remove();
+      const modal = document.createElement('div');
+      modal.id = 'editLogModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:24px;max-width:600px;width:100%;max-height:80vh;overflow:auto">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
+        '<h3>سجل تعديلات المشروع</h3><button class="btn ghost" onclick="this.closest(\'#editLogModal\').remove()">إغلاق</button></div>' +
+        data.log.map(renderChangeLogEntry).join('') + '</div>';
       document.body.appendChild(modal);
     }
 

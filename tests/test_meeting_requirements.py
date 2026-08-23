@@ -3189,6 +3189,102 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(response.get_json()['success'])
         self.assertTrue(response.get_json()['plan']['slides'])
 
+    def test_change_lines_name_the_difference_not_just_that_something_changed(self):
+        import change_tracking as tracking
+        old = [
+            {'title': 'الغلاف', 'html': '<div class="slide"><h1>THE VIEW</h1><img src="/uploads/a.png"></div>'},
+            {'title': 'الموقع', 'html': '<div class="slide"><p>الرياض. حي الملقا.</p></div>'},
+            {'title': 'المالية', 'html': '<div class="slide"><p>تكلفة 480 مليون</p></div>'},
+        ]
+        new = [
+            {'title': 'الغلاف الرئيسي', 'html': '<div class="slide"><h1>THE VIEW</h1><img src="/uploads/b.png"></div>'},
+            {'title': 'الموقع', 'html': '<div class="slide" style="color:red"><p>الرياض. حي الملقا.</p></div>'},
+            {'title': 'المالية', 'html': '<div class="slide"><p>تكلفة 500 مليون</p></div>'},
+            {'title': 'شكراً', 'html': '<div class="slide"><h2>شكراً</h2></div>'},
+        ]
+        lines = tracking.describe_slide_changes(old, new)
+        joined = '\n'.join(lines)
+        self.assertIn('عدد الشرائح: من 3 إلى 4', joined)
+        self.assertIn('العنوان: من «الغلاف» إلى «الغلاف الرئيسي»', joined)
+        self.assertIn('استُبدلت صورة أو خريطة', joined)
+        self.assertIn('تغيّر التنسيق والألوان بدون تغيير النص', joined)
+        self.assertIn('تكلفة 480 مليون', joined)
+        self.assertIn('تكلفة 500 مليون', joined)
+        self.assertIn('أُضيفت الشريحة 4', joined)
+        self.assertNotIn('تعديل المحتوى', joined)
+
+        draft_lines = '\n'.join(tracking.describe_draft_changes(
+            {'project_name': 'the view', 'city': 'جدة', 'financial_study_model': {'inputs': {'a': 1}}},
+            {'project_name': 'THE VIEW', 'district': 'الشاطئ', 'financial_study_model': {'inputs': {'a': 2}}},
+        ))
+        self.assertIn('من «the view» إلى «THE VIEW»', draft_lines)
+        self.assertIn('أُفرغ (كان «جدة»)', draft_lines)
+        self.assertIn('أُضيف «الشاطئ»', draft_lines)
+        self.assertIn('الدراسة المالية: تم تحديث البيانات', draft_lines)
+        # A blob is named, never dumped as a value.
+        self.assertNotIn('inputs', draft_lines)
+
+    def test_history_records_who_changed_what_for_drafts_and_ai_edits(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+
+        saved = client.post('/api/project-draft', headers=headers, json={'draftData': {
+            'draftId': 'history-draft', 'project_name': 'THE VIEW', 'city': 'جدة',
+        }})
+        self.assertTrue(saved.get_json()['success'], saved.get_json())
+        client.post('/api/project-draft', headers=headers, json={'draftData': {
+            'draftId': 'history-draft', 'project_name': 'THE VIEW 2', 'city': 'جدة', 'district': 'الشاطئ',
+        }})
+        client.post('/api/project-draft/section-status', headers=headers, json={
+            'draftId': 'history-draft', 'sectionKey': 'basic', 'sectionStatus': 'approved',
+        })
+
+        draft_log = client.get('/api/project-draft/history-draft/edit-log', headers=headers).get_json()
+        self.assertTrue(draft_log['success'], draft_log)
+        actions = [entry['action'] for entry in draft_log['log']]
+        self.assertIn('حفظ بيانات المشروع', actions)
+        self.assertIn('اعتماد قسم', actions)
+        details = '\n'.join(line for entry in draft_log['log'] for line in entry['details'])
+        self.assertIn('من «THE VIEW» إلى «THE VIEW 2»', details)
+        self.assertIn('أُضيف «الشاطئ»', details)
+        self.assertIn('معتمد', details)
+        self.assertTrue(all(entry['user_name'] for entry in draft_log['log']), draft_log['log'])
+
+        created = client.post('/api/presentations', headers=headers, json={
+            'title': 'THE VIEW', 'projectData': {'project_name': 'THE VIEW'},
+            'slidesData': [{'title': 'الغلاف', 'html': '<div class="slide"><h1>THE VIEW</h1></div>'}],
+        })
+        pres_id = created.get_json()['presentationId']
+
+        # An AI edit used to leave no trace at all.
+        edited = '<div class="slide"><h1>THE VIEW</h1><p>واجهة بحرية</p></div>'
+        plan = json.dumps({'response': 'تم', 'actions': [
+            {'tool': 'edit_slides', 'params': {'target': 'current', 'instruction': 'أضف سطر الواجهة'}}]},
+            ensure_ascii=False)
+        with patch.object(self.application_module, 'call_zai_chat',
+                          return_value={'choices': [{'message': {'content': plan}}]}), \
+                patch.object(self.application_module, '_designer_edit_slide',
+                             return_value=(edited, 'تم تحديث الشريحة')):
+            chat = client.post('/api/designer-chat', headers=headers, json={
+                'message': 'أضف سطر الواجهة البحرية', 'presentationId': pres_id, 'slideIndex': 0,
+                'slidesData': [{'title': 'الغلاف', 'html': '<div class="slide"><h1>THE VIEW</h1></div>'}],
+            })
+        self.assertTrue(chat.get_json()['success'], chat.get_json())
+
+        log = client.get('/api/presentations/' + pres_id + '/edit-log', headers=headers).get_json()['log']
+        ai_entries = [entry for entry in log if entry['source'] == 'ai']
+        self.assertTrue(ai_entries, log)
+        ai_details = '\n'.join(ai_entries[0]['details'])
+        self.assertIn('الطلب: «أضف سطر الواجهة البحرية»', ai_details)
+        self.assertIn('واجهة بحرية', ai_details)
+        self.assertEqual(ai_entries[0]['action'], 'تعديل بالذكاء الاصطناعي')
+        self.assertIn('إنشاء العرض', [entry['action'] for entry in log])
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function renderChangeLogEntry(entry)', index_source)
+        self.assertIn('async function showDraftEditLog(draftId)', index_source)
+        self.assertIn('showDraftEditLog(', index_source)
+
     def test_designer_asks_instead_of_guessing_and_the_chat_is_one_line(self):
         client = self.app.test_client()
         slides = [{'html': '<div class="slide">شريحة</div>', 'title': 'الغلاف', 'type': 'cover'}]
