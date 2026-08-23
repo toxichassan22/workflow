@@ -600,6 +600,14 @@ A field is skipped when it is off on screen: `hidden`, `.conditional-off`, `.dyn
 `.hidden`, or `display:none`. Those are the same markers `applyConditionalVisibility()` and
 `setWrapVisible()` set, so no `getComputedStyle` walk is needed.
 
+**A figure needs an LTR cell.** `money()` writes `-13,125,000`, and in an RTL cell the bidi
+algorithm has no strong direction to attach the leading sign to, so it takes the paragraph
+direction and prints as `13,125,000-`. `_financial_report_cell()` emits `<td dir="ltr">` for cells
+that are pure figures, and the screen plus the print window use `unicode-bidi: plaintext` on `td`,
+`input` and `.metric strong`. Do not apply either to a cell that can hold Arabic prose, and do not
+switch to `direction: ltr` on all cells. The PyMuPDF engine needs none of this: it applies no bidi,
+so `place()` already draws the sign first.
+
 The report is deliberately **monochrome** (`_financial_report_document`). It used to be painted
 from branding, and a light `secondary_color` printed the whole label column as pale text on a pale
 tint — unreadable. Do not put branding colours back into it.

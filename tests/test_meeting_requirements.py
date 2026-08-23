@@ -1491,6 +1491,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                 {'type': 'heading', 'level': 2, 'text': '9. التمويل'},
                 {'type': 'heading', 'level': 3, 'text': 'خطة سحب التمويل'},
                 {'type': 'table', 'headers': ['سنة السحب', 'نسبة السحب من التسهيل %'], 'rows': [['1', '25%']]},
+                {'type': 'fields', 'rows': [['صافي تدفق المشروع', '-13,125,000'], ['فترة الاسترداد', '4 سنة']]},
             ]},
         }
         branding = {'primary_color': '#EAF2F8', 'secondary_color': '#F0E9DF', 'accent_color': '#FFFFFF'}
@@ -1511,6 +1512,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertLess(html.index('9. التمويل'), html.index('خطة سحب التمويل'))
         self.assertNotIn('<p>مختلطة', html)
 
+        # A figure is an LTR run: in an RTL cell the bidi algorithm moved the leading minus to the
+        # right of the digits, so «-13,125,000» printed as «13,125,000-».
+        self.assertIn('<td dir="ltr">-13,125,000</td>', html)
+        self.assertIn('<td dir="ltr">25%</td>', html)
+        # Text that happens to start with a figure stays in the cell's own direction.
+        self.assertIn('<td>4 سنة</td>', html)
+        self.assertIn('<td>مستأجرة ولا تدخل ضمن تكلفة المشروع</td>', html)
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('unicode-bidi: plaintext;', index_source)
+        self.assertIn('td{unicode-bidi:plaintext}', index_source)
+
         # The branding palette no longer paints the report, so a light tenant colour cannot
         # print pale text on a pale tint.
         for colour in branding.values():
@@ -1524,7 +1536,6 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertTrue(self.application_module._financial_pdf_has_text(output, minimum=20))
 
         # The client is what supplies those parts, and only for the export.
-        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('function collectFinancialStudyReport()', index_source)
         self.assertIn('model.report = collectFinancialStudyReport();', index_source)
         self.assertNotIn('report: collectFinancialStudyReport()', index_source)

@@ -5706,6 +5706,21 @@ def _financial_report_escape(value):
     return html_lib.escape(str(value))
 
 
+_FINANCIAL_NUMERIC_CELL = re.compile(r'^[\s\-+()0-9.,%٠-٩٬٫]+$')
+
+
+def _financial_report_cell(rendered, value=None):
+    """A figure is an LTR run, so it needs an LTR cell.
+
+    In an RTL cell the bidi algorithm has no strong direction to attach the leading sign to and
+    gives it the paragraph direction, so `-13,125,000` printed as `13,125,000-`.
+    """
+    text = str(value if value is not None else rendered).strip()
+    if text and any(char.isdigit() for char in text) and _FINANCIAL_NUMERIC_CELL.match(text):
+        return f'<td dir="ltr">{rendered}</td>'
+    return f'<td>{rendered}</td>'
+
+
 _FINANCIAL_PERCENT_KEYS = {
     'coverageRate', 'occupancy', 'costPct', 'devPct', 'drawPct', 'repaymentPct',
     'growth', 'occupancyReach', 'reachPct', 'financingRate', 'annualFinanceRate',
@@ -5906,7 +5921,8 @@ def _financial_report_rows(rows):
     if not visible:
         return '<p class="empty">لا توجد قيم مطبقة في هذا القسم.</p>'
     return '<table class="summary-table"><tbody>' + ''.join(
-        f'<tr><th>{_financial_report_escape(label)}</th><td>{_financial_report_format_number(value, key)}</td></tr>'
+        f'<tr><th>{_financial_report_escape(label)}</th>'
+        + _financial_report_cell(_financial_report_format_number(value, key)) + '</tr>'
         for label, value, key in visible
     ) + '</tbody></table>'
 
@@ -5968,7 +5984,7 @@ def _financial_report_table(rows):
         return '<p class="empty">لا توجد بنود مدخلة في هذا الجدول.</p>'
     headers = ''.join(
         f'<th>{_financial_report_escape(FINANCIAL_COLUMN_LABELS.get(key, key))}</th>' for key in keys)
-    body = ''.join('<tr>' + ''.join(f'<td>{_financial_report_format_number(row.get(key), key)}</td>' for key in keys) + '</tr>'
+    body = ''.join('<tr>' + ''.join(_financial_report_cell(_financial_report_format_number(row.get(key), key)) for key in keys) + '</tr>'
                    for row in rows if isinstance(row, dict))
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table>'
 
@@ -6008,7 +6024,8 @@ def _financial_screen_sections(parts):
             if not rows:
                 continue
             body.append('<table class="summary-table"><tbody>' + ''.join(
-                f'<tr><th>{_financial_report_escape(row[0])}</th><td>{_financial_report_escape(row[1])}</td></tr>'
+                f'<tr><th>{_financial_report_escape(row[0])}</th>'
+                + _financial_report_cell(_financial_report_escape(row[1]), row[1]) + '</tr>'
                 for row in rows) + '</tbody></table>')
         elif kind == 'table':
             headers = [header for header in (part.get('headers') or [])]
@@ -6020,7 +6037,7 @@ def _financial_screen_sections(parts):
                 continue
             head = ''.join(f'<th>{_financial_report_escape(header)}</th>' for header in headers)
             cells = ''.join(
-                '<tr>' + ''.join(f'<td>{_financial_report_escape(cell)}</td>' for cell in row) + '</tr>'
+                '<tr>' + ''.join(_financial_report_cell(_financial_report_escape(cell), cell) for cell in row) + '</tr>'
                 for row in rows)
             wide = ' wide' if len(headers) > 8 else ''
             body.append(f'<table class="data-table{wide}"><thead><tr>{head}</tr></thead><tbody>{cells}</tbody></table>')

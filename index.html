@@ -4515,6 +4515,16 @@
       font-size: 14px !important;
     }
 
+    /* A figure is an LTR run. In an RTL cell the bidi algorithm has no strong direction to attach
+       the leading sign to and gives it the paragraph direction, so money() output "-13,125,000"
+       displayed as "13,125,000-". plaintext picks the direction from the content itself, so a
+       number reads LTR and an Arabic name still reads RTL. */
+    #section-financial-calc td,
+    #section-financial-calc input,
+    #section-financial-calc .metric strong {
+      unicode-bidi: plaintext;
+    }
+
     #section-financial-calc td input,
     #section-financial-calc td select {
       padding: 8px 10px !important;
@@ -13804,6 +13814,8 @@
       thead{display:table-header-group}
       tr{break-inside:avoid}
       th,td{border:1px solid #d9d1cb;padding:6px;text-align:right;vertical-align:top;white-space:normal}
+      /* Otherwise the leading minus of a money() figure lands to the right of the digits. */
+      td{unicode-bidi:plaintext}
       thead th{background:#123B6D!important;color:#fff!important;font-weight:700;text-align:center}
       tbody tr:nth-child(even) td{background:#fbf7f4}
       .summary-table{font-size:11px}
