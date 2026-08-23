@@ -71,12 +71,50 @@ existing installs** — a 500 from whichever endpoint touched it, with a healthy
 otherwise. Every statement is `IF NOT EXISTS`, so it now runs unconditionally. Do not reintroduce
 that guard; `test_new_tables_are_created_on_an_existing_database` covers it.
 
+## Change history (who changed what)
+
+`change_log` is the single history for a **presentation or a project file**, and
+`change_tracking.py` produces its lines. `edit_log` came first, could only reference a presentation,
+and stored one sentence such as «تعديل المحتوى»; it is still read for old rows and never written to.
+
+- `describe_slide_changes(old, new)` names the difference: a title from one value to another, which
+  phrases left and which arrived, a replaced image or map, an added or removed slide, and a styling
+  change that left the text untouched. `describe_draft_changes` does the same per field, and names a
+  data area (`financial_study_model` → «الدراسة المالية») instead of dumping its JSON.
+- Every flow that changes either target writes one entry with `source` = `manual` or `ai`: the
+  manual slide edit, inline text editing (quoting both sides), the AI designer chat (with the
+  request and the tools it ran), draft save, section approval, version restore, creation, export and
+  map regeneration. Add a `_record_change(...)` call to any new flow that mutates them.
+- Read with `GET /api/presentations/<id>/edit-log` or `GET /api/project-draft/<id>/edit-log`.
+
+## The admin agent (`/api/training-chat`)
+
+It runs on `SLIDE_TEXT_MODEL` (`openai/gpt-5.6-sol`) with `reasoning_effort='medium'`, because it
+changes company settings; it used to run on the fast text model with 2,000 tokens and no reasoning.
+
+- **It asks instead of guessing.** The `ask` tool short-circuits the turn: if the reply contains it,
+  no other action runs, and the response carries `awaitingAnswer`.
+- **It reads what is attached.** `_agent_attachment_context()` passes an image to the model as an
+  image reference and extracts the text of a PDF (or a text file) into the prompt. The old path
+  uploaded the image to a separate endpoint, stored the analysis as training text, and ended the
+  turn, so the agent answering the message never saw the file.
+- **Fields:** it adds, edits and disables freely, and `delete_field` refuses anything that is not
+  `is_custom` — an original field is disabled with `update_field {is_active: 0}`, never deleted.
+- **Team library:** `list_team` / `add_team_entity` / `update_team_entity` / `delete_team_entity`
+  act on `tenant_team_entities`, which is shared by every project file. Per-file exclusions stay in
+  the project's own team screen.
+- **The generation prompt** is `tenant_branding.generation_rules`, read and written with
+  `get_generation_rules` / `set_generation_rules` and appended by `build_design_rules()` to every
+  slide prompt and design edit. It is the only way to change the generation prompt without a code
+  change, and it cannot license inventing facts, icons or rewritten numbers — that is stated in the
+  appended block itself.
+
 ## Verification
 
-There is no pytest; the suites use `unittest` and must be run as **modules from the repo root** (`tests/` is not an importable package, so `unittest discover` fails).
+There is no pytest; the suites use `unittest` and must be run as **modules from the repo root** (`tests/` is not an importable package, so `unittest discover` fails). Run them **one suite per process**: each redirects `db.DB_PATH` before importing `app`, so two suites in one command leave the second without tables.
 
 ```powershell
-# Main suite (50 tests) — run this for any land/croquis/draft/AI change
+# Main suite — run this for any land/croquis/draft/AI change
 D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_meeting_requirements
 
 # Other suites
@@ -84,6 +122,7 @@ D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_location_data_parsin
 D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_project_draft_isolation
 D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_export_slide_sanitization
 D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_font_workflows
+D:\workflow\.venv\Scripts\python.exe -m unittest tests.test_admin_agent
 ```
 
 `tests.test_full_flow` contains no unittest cases (reports "Ran 0 tests") — that is expected.

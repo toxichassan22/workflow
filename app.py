@@ -10975,6 +10975,47 @@ def api_get_training_image(entry_id):
     return response
 
 
+def _agent_attachment_context(data):
+    """Read what the admin attached to a chat message: an image to look at, or a PDF to read.
+
+    Returns a prompt note and the image references for the model. Reading the file is the point:
+    the agent is asked to act on documents, and it cannot act on a file it never received.
+    """
+    notes = []
+    images = []
+    image_uri = str(data.get('attachedImage') or '').strip()
+    if image_uri.startswith('data:image/'):
+        images.append({'data_uri': image_uri})
+        notes.append('أرفق المستخدم صورة مع رسالته. انظر إليها قبل الرد.')
+
+    document = data.get('attachedFile') if isinstance(data.get('attachedFile'), dict) else {}
+    name = str(document.get('name') or 'ملف').strip()
+    document_uri = str(document.get('dataUri') or '').strip()
+    if document_uri.startswith('data:application/pdf'):
+        try:
+            payload = base64.b64decode(document_uri.split(',', 1)[1])
+            import fitz
+            with fitz.open(stream=payload, filetype='pdf') as pdf:
+                pages = [page.get_text() for page in pdf]
+            text = '\n'.join(pages).strip()
+            if text:
+                notes.append(f'## محتوى الملف المرفق «{name}» ({len(pages)} صفحة)\n'
+                             f'{text[:20000]}')
+            else:
+                notes.append(f'الملف المرفق «{name}» لا يحتوي نصًا قابلًا للقراءة (صور ممسوحة).')
+        except Exception as exc:
+            print(f'[SUPER-AGENT] Could not read the attached PDF: {exc}')
+            notes.append(f'تعذر قراءة الملف المرفق «{name}».')
+    elif document_uri.startswith('data:text/'):
+        try:
+            payload = base64.b64decode(document_uri.split(',', 1)[1]).decode('utf-8', 'replace')
+            notes.append(f'## محتوى الملف المرفق «{name}»\n{payload[:20000]}')
+        except Exception as exc:
+            print(f'[SUPER-AGENT] Could not read the attached text file: {exc}')
+
+    return ('\n\n'.join(notes), images)
+
+
 @app.route('/api/training-chat', methods=['POST'])
 @require_permission('training_data')
 def api_training_chat():
@@ -10993,6 +11034,11 @@ def api_training_chat():
         role = 'المستخدم' if turn.get('role') == 'user' else 'المساعد'
         history_lines.append(f"{role}: {turn.get('text', '')}")
     context = '\n'.join(history_lines)
+
+    # A file the admin attached to this message. Images used to be analysed by a separate endpoint
+    # and stored as training text, so the agent answering the message never saw them, and a PDF
+    # could not be attached at all.
+    attachment_note, attachment_images = _agent_attachment_context(data)
 
     # ── Build real-time system state ──────────────────────────────────────
     system_state = _build_agent_system_state(g.tenant_id)
@@ -11153,6 +11199,39 @@ def api_training_chat():
 - استخدم "default" في font_query للرجوع للخط الافتراضي.
 - رفع ملف خط جديد يتم فقط من إعدادات الشركة (منطقة السحب والإفلات) — إذا طلب المستخدم خطاً غير موجود في القائمة، أخبره برفعه أولاً من الإعدادات.
 
+### 27. فريق العمل (مكتبة الشركة المشتركة):
+```action
+{{"tool": "list_team"}}
+```
+```action
+{{"tool": "add_team_entity", "params": {{"name": "...", "role": "...", "brief": "...", "experience_years": "...", "notable_projects": "..."}}}}
+```
+```action
+{{"tool": "update_team_entity", "params": {{"name": "الاسم الحالي أو معرفه", "updates": {{"role": "...", "brief": "...", "experience_years": "...", "notable_projects": "..."}}}}}}
+```
+```action
+{{"tool": "delete_team_entity", "params": {{"name": "الاسم أو المعرف"}}}}
+```
+- المكتبة مشتركة بين كل ملفات المشاريع، فأي تعديل هنا يظهر في كل عرض جديد.
+- الاستبعاد لملف واحد فقط يتم من صفحة فريق العمل داخل المشروع، لا من هنا.
+
+### 28. قواعد التوليد الخاصة بالشركة (تُضاف إلى برومبت توليد الشرائح):
+```action
+{{"tool": "get_generation_rules"}}
+```
+```action
+{{"tool": "set_generation_rules", "params": {{"rules": "نص القواعد الملزمة لتوليد الشرائح"}}}}
+```
+- هذه القواعد تُرسل حرفيًا مع كل توليد شريحة وكل تعديل تصميم، فوق قواعد التصميم الأساسية.
+- اكتبها أوامر واضحة وقابلة للتنفيذ (ترتيب المحاور، ما يُعرض وما لا يُعرض، صيغة الأرقام، لغة العناوين).
+- ممنوع أن تخالف قواعد المنصة الثابتة: ممنوع اختراع معلومة، وممنوع الأيقونات والإيموجي، والأرقام تُنقل كما هي.
+- استخدم set_generation_rules لتعديل «برومبت التوليد»؛ لا توجد طريقة أخرى لتغييره.
+
+### 29. سؤال المستخدم عند عدم الوضوح:
+```action
+{{"tool": "ask", "params": {{"question": "سؤال عربي واحد قصير"}}}}
+```
+
 ## سير العمل الكامل لإنشاء عرض جديد من المحادثة:
 1. اجمع بيانات المشروع من كلام المستخدم (اسم المشروع، النوع، الموقع، المساحات، الميزانية...) ونفّذ `update_workspace`
 2. نفّذ `generate_slide_plan` لإنشاء خطة الشرائح
@@ -11171,12 +11250,29 @@ def api_training_chat():
 5. كن مباشراً، ودياً، وذكياً. لا تتظاهر بعدم معرفة النظام.
 6. بعد تنفيذ أي action اذكر القيمة القديمة والجديدة.
 7. إذا طلب المستخدم شيء خطير (حذف عروض، تعطيل موظفين)، نفذه مباشرة لكن حذّره بوضوح.
+8. **اسأل بدل أن تخمّن:** إذا كان الطلب غامضًا أو يقبل تنفيذين مختلفين، أو لم تعرف الحقل أو القسم أو
+   الجهة أو الموظف المقصود، أو كان التنفيذ سيحذف أو يستبدل شيئًا قائمًا ولست متأكدًا أنه مقصود، أو
+   أرفق المستخدم ملفًا دون أن يوضح المطلوب منه — أعد `ask` بسؤال واحد محدد ولا تنفّذ أي action آخر
+   في نفس الرد. تنفيذ خاطئ على إعدادات الشركة أسوأ من سؤال واحد.
+9. **الحقول الأصلية للنظام لا تُحذف.** `delete_field` تعمل على الحقول المضافة فقط؛ الحقل الأصلي
+   يُعطَّل بـ `update_field` مع `is_active: 0` ويمكن إعادة تفعيله. لا تَعِد المستخدم بحذف حقل أصلي.
+10. عند طلب تعديل «شكل العرض» أو «قواعد التوليد» أو «برومبت التوليد» استخدم `set_generation_rules`،
+   وعند طلب تعديل الألوان والخطوط وأبعاد الشريحة استخدم `update_branding`. لا تخلط بينهما.
+11. إذا أرفق المستخدم ملفًا أو صورة: اقرأها فعلًا واستخرج منها ما يخص الطلب، واذكر في ردك ما فهمته
+   منها قبل التنفيذ. إن كان الملف غير مقروء فقل ذلك بصراحة ولا تخمّن محتواه.
 """
+
+    if attachment_note:
+        system_prompt += f'\n\n## ملف أرفقه المستخدم مع رسالته\n{attachment_note}'
 
     user_prompt = (context + '\n\nالمستخدم: ' + message + '\n\nوكيل الإدارة:') if context else ('المستخدم: ' + message + '\n\nوكيل الإدارة:')
 
     try:
-        response = call_zai_chat(system_prompt, user_prompt, max_tokens=2000)
+        # This agent changes the company's settings, so it runs on the strong model with real
+        # reasoning instead of the fast text model, and with room to plan several tool calls.
+        response = call_zai_chat(system_prompt, user_prompt, max_tokens=6000,
+                                 model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+                                 image_references=attachment_images or None)
         reply = extract_chat_content(response, 'SUPER-AGENT')
     except Exception as e:
         print(f'[SUPER-AGENT] AI reply failed: {e}')
@@ -11289,6 +11385,13 @@ def api_training_chat():
                 parsed_actions.append({'tool': 'set_font', 'params': {'font_query': 'default'}})
                 reply = 'تم الرجوع للخط الافتراضي للشركة. '
 
+    # A question is the whole answer: nothing else runs in that turn, so an ambiguous request cannot
+    # half-apply while the agent is still asking what was meant.
+    question = next((action for action in parsed_actions
+                     if isinstance(action, dict) and action.get('tool') == 'ask'), None)
+    if question:
+        parsed_actions = [question]
+
     for action in parsed_actions:
         try:
             result = _execute_agent_action(g.tenant_id, action, reply_text=reply, workspace=workspace)
@@ -11313,6 +11416,11 @@ def api_training_chat():
     # Remove leftover empty lines
     clean_reply = re.sub(r'\n{3,}', '\n\n', clean_reply).strip()
 
+    if question:
+        asked = next((item.get('message') for item in actions_executed
+                      if isinstance(item, dict) and item.get('status') == 'question'), '')
+        if asked and asked not in clean_reply:
+            clean_reply = (clean_reply + '\n\n' + asked).strip() if clean_reply else asked
     if not clean_reply and actions_executed:
         clean_reply = ' تم تنفيذ الإجراء بنجاح.'
 
@@ -11320,6 +11428,7 @@ def api_training_chat():
         'success': True,
         'reply': clean_reply,
         'actions': actions_executed,
+        'awaitingAnswer': bool(question),
     })
 
 
@@ -11377,6 +11486,14 @@ def _build_agent_system_state(tenant_id):
             font_label = os.path.basename(sel.get('custom_font_path') or 'خط مخصص')
         script_label = 'عربي' if sel.get('script') == 'arabic' else 'لاتيني'
         current_font_lines.append(f"  • {script_label} / {sel.get('weight', 'regular')}: {font_label}")
+
+    # The team library and the company generation rules are things the agent can change, so it has
+    # to see their current state instead of guessing that they are empty.
+    team_entities = db.get_team_entities(tenant_id) or []
+    team_lines = [f"  • {item.get('name')} — {item.get('role') or 'بدون دور محدد'}"
+                  f"{(' — خبرة ' + str(item.get('experienceYears'))) if item.get('experienceYears') else ''}"
+                  for item in team_entities[:20]]
+    generation_rules = str(branding.get('generation_rules') or '').strip()
 
     available_fonts = db.get_sag_fonts()
     available_font_lines = []
@@ -11443,6 +11560,17 @@ def _build_agent_system_state(tenant_id):
 
 ###  قوالب الشرائح المخصصة ({len(templates)} قالب):
 {chr(10).join([f"  • {t.get('slide_name', t.get('slide_type', '?'))}" for t in templates[:10]]) if templates else '  لا توجد قوالب مخصصة.'}
+
+###  مكتبة فريق العمل ({len(team_entities)} جهة):
+{chr(10).join(team_lines) if team_lines else '  لا توجد جهات في المكتبة.'}
+
+###  إعدادات الخرائط:
+- نوع الخريطة الافتراضي: {branding.get('default_map_type', 'satellite')}
+- نظرة عامة/معالم/طرق/نطاق: {branding.get('map_style_overview', 'satellite')} / {branding.get('map_style_landmarks', 'satellite')} / {branding.get('map_style_access', 'satellite')} / {branding.get('map_style_catchment', 'satellite')}
+- بوصلة: {'مفعلة' if branding.get('draw_compass') else 'معطلة'} — خريطة مصغّرة: {'مفعلة' if branding.get('draw_inset') else 'معطلة'}
+
+###  قواعد التوليد الخاصة بالشركة (تُرسل مع كل توليد شريحة):
+{generation_rules if generation_rules else '  لا توجد قواعد مخصصة — التوليد يتبع قواعد المنصة فقط.'}
 """
 
 
@@ -11616,12 +11744,18 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
                 'slide_ratio', 'header_enabled', 'footer_enabled', 'header_height',
                 'footer_height', 'moodboard_enabled', 'cover_image_enabled', 'moodboard_count',
                 'default_slide_count', 'min_slides', 'max_slides', 'tagline', 'company_name',
+                # Map appearance is a company setting like any other; it was in the database and in
+                # db.update_branding, but the agent could not reach it.
+                'default_map_type', 'map_style_overview', 'map_style_landmarks',
+                'map_style_access', 'map_style_catchment', 'draw_compass', 'draw_inset',
+                'lock_slide_count',
             }
             updates = {}
             for k, v in params.items():
                 if k in allowed_keys:
                     # Cast integers for boolean/numeric fields
-                    if k in ('header_enabled', 'footer_enabled', 'moodboard_enabled', 'cover_image_enabled'):
+                    if k in ('header_enabled', 'footer_enabled', 'moodboard_enabled',
+                             'cover_image_enabled', 'draw_compass', 'draw_inset', 'lock_slide_count'):
                         v = 1 if v in (True, 1, '1', 'true', 'نعم') else 0
                     elif k in ('header_height', 'footer_height', 'moodboard_count', 'default_slide_count', 'min_slides', 'max_slides'):
                         try:
@@ -11824,6 +11958,89 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
                 db.delete_field(target['id'])
                 db.log_ai_rule_change(tenant_id, 'agent_field', 'delete_field', target['field_label'], None, risk_level='red')
                 result['message'] = f'تم حذف الحقل "{target["field_label"]}" ({target["field_key"]}) نهائياً'
+
+        # ── Team library ──────────────────────────────────────────────
+        # The company team is shared by every project file, and the agent had no way to touch it
+        # although the database functions and the REST endpoints already existed.
+        elif tool == 'list_team':
+            entities = db.get_team_entities(tenant_id) or []
+            result['data'] = [{
+                'id': item.get('id'),
+                'name': item.get('name'),
+                'role': item.get('role'),
+                'experienceYears': item.get('experienceYears'),
+            } for item in entities]
+            result['message'] = f'عدد جهات فريق العمل: {len(entities)}'
+
+        elif tool == 'add_team_entity':
+            name = str(params.get('name') or params.get('entity_name') or '').strip()
+            if not name:
+                result['status'] = 'error'
+                result['message'] = 'اسم الجهة مطلوب'
+            else:
+                entity_id = db.create_team_entity(
+                    tenant_id, name,
+                    role=str(params.get('role') or '').strip() or None,
+                    brief=str(params.get('brief') or '').strip(),
+                    experience_years=params.get('experience_years') or params.get('experienceYears'),
+                    notable_projects=params.get('notable_projects') or params.get('notableProjects'),
+                )
+                db.log_ai_rule_change(tenant_id, 'agent_team', 'add_team_entity', None, name, risk_level='yellow')
+                result['data'] = {'id': entity_id, 'name': name}
+                result['message'] = f'تمت إضافة «{name}» إلى مكتبة فريق العمل'
+
+        elif tool in ('update_team_entity', 'delete_team_entity'):
+            query = str(params.get('name') or params.get('entity_id') or params.get('id') or '').strip()
+            entities = db.get_team_entities(tenant_id) or []
+            target = next((item for item in entities if str(item.get('id')) == query), None)
+            if not target:
+                normalized = query.casefold()
+                target = next((item for item in entities
+                               if str(item.get('name') or '').strip().casefold() == normalized), None)
+            if not target:
+                result['status'] = 'error'
+                result['message'] = f'الجهة «{query}» غير موجودة في مكتبة فريق العمل'
+            elif tool == 'delete_team_entity':
+                db.delete_team_entity(tenant_id, target['id'])
+                db.log_ai_rule_change(tenant_id, 'agent_team', 'delete_team_entity', target.get('name'), None, risk_level='red')
+                result['message'] = f'تم حذف «{target.get("name")}» من مكتبة فريق العمل'
+            else:
+                updates = params.get('updates') if isinstance(params.get('updates'), dict) else {}
+                key_map = {
+                    'role': 'role', 'brief': 'brief', 'sort_order': 'sort_order',
+                    'experience_years': 'experience_years', 'experienceYears': 'experience_years',
+                    'notable_projects': 'notable_projects', 'notableProjects': 'notable_projects',
+                }
+                fields = {key_map[key]: value for key, value in updates.items() if key in key_map}
+                if not fields:
+                    result['status'] = 'no_changes'
+                    result['message'] = 'لم يتم تحديد بيانات صالحة للتعديل'
+                else:
+                    db.update_team_entity(tenant_id, target['id'], **fields)
+                    db.log_ai_rule_change(tenant_id, 'agent_team', f'update_{target.get("name")}',
+                                          str({k: target.get(k) for k in fields}), str(fields), risk_level='yellow')
+                    result['changes'] = fields
+                    result['message'] = f'تم تحديث بيانات «{target.get("name")}»'
+
+        # ── Generation rules that ride with every slide prompt ────────
+        elif tool == 'get_generation_rules':
+            rules = (db.get_branding(tenant_id) or {}).get('generation_rules') or ''
+            result['data'] = {'rules': rules}
+            result['message'] = ('قواعد التوليد الحالية:\n' + rules) if rules else 'لا توجد قواعد توليد مخصصة بعد'
+
+        elif tool == 'set_generation_rules':
+            rules = str(params.get('rules') or params.get('text') or '').strip()
+            old_rules = (db.get_branding(tenant_id) or {}).get('generation_rules') or ''
+            db.update_branding(tenant_id, generation_rules=rules[:8000])
+            db.log_ai_rule_change(tenant_id, 'agent_generation_rules', 'set_generation_rules',
+                                  old_rules[:500] or None, rules[:500] or None, risk_level='yellow')
+            result['changes'] = {'generation_rules': {'old': old_rules, 'new': rules}}
+            result['message'] = 'تم تحديث قواعد التوليد الخاصة بالشركة' if rules else 'تم إلغاء قواعد التوليد المخصصة'
+
+        # ── Ask instead of guessing ───────────────────────────────────
+        elif tool == 'ask':
+            result['status'] = 'question'
+            result['message'] = str(params.get('question') or '').strip() or 'وضّح المطلوب.'
 
         # ── List Users ────────────────────────────────────────────────
         elif tool == 'list_users':

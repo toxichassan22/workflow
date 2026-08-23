@@ -511,6 +511,19 @@ top:{content_top}px إلى bottom:{content_bottom}px. padding: 16px 36px.
 {company_name}
 """
 
+    # Rules the company wrote for itself through the admin agent. They ride with every slide prompt
+    # and every design edit, because that is the only way to change the generation prompt without a
+    # code change. They add to the rules above; they never license inventing a fact, an icon or an
+    # emoji, nor rewriting a stated number.
+    company_rules = str(branding.get('generation_rules') or '').strip()
+    if company_rules:
+        rules += (
+            "\n\n## قواعد التوليد الملزمة لهذه الشركة (كتبها الأدمن — التزم بها فوق ما سبق)\n"
+            f"{company_rules[:8000]}\n"
+            "إن تعارضت هذه القواعد مع منع اختراع المعلومات أو منع الأيقونات والإيموجي أو نقل الأرقام"
+            " كما هي، فالقواعد الأساسية أعلاه هي التي تُطبَّق.\n"
+        )
+
     return rules
 
 

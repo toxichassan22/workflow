@@ -5640,7 +5640,8 @@
             <div id="aiRulesChatLog" class="chatlog" style="height:350px;"></div>
 
             <div style="display:flex;gap:10px;align-items:flex-end;margin-top:10px;">
-              <input type="file" id="trainingChatImageFile" accept="image/png,image/jpeg,image/jpg,image/webp"
+              <input type="file" id="trainingChatImageFile"
+                accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf,text/plain"
                 style="display:none" onchange="handleChatImageSelected(this)">
               <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()"
                 title="إرفاق صورة للشات"
@@ -20010,102 +20011,115 @@
       log.scrollTop = log.scrollHeight;
     }
 
+    const AGENT_FILE_LIMIT = 4 * 1024 * 1024;
+
+    function readFileAsDataUri(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('تعذر قراءة الملف'));
+        reader.readAsDataURL(file);
+      });
+    }
+
     async function sendAIRulesChat() {
       const input = document.getElementById('aiRulesChatInput');
       const text = input ? input.value.trim() : '';
       const fileInput = document.getElementById('trainingChatImageFile');
-      const consentInput = document.getElementById('trainingChatImageConsent');
       const typeInput = document.getElementById('trainingChatImageType');
-      const titleInput = document.getElementById('trainingChatImageTitle');
       const statusEl = document.getElementById('trainingChatImageStatus');
+      const file = fileInput && fileInput.files && fileInput.files[0];
 
-      const hasFile = fileInput && fileInput.files && fileInput.files[0];
+      if (!text && !file) return;
+      if (file && file.size > AGENT_FILE_LIMIT) {
+        toast('حجم الملف أكبر من 4 م.ب');
+        return;
+      }
 
-      if (!text && !hasFile) return;
+      // An attached file used to be uploaded, analysed and stored as training text, and the turn
+      // ended there: the agent that answers the message never received the file, so it could not
+      // act on what the file said. The file now travels with the message.
+      let attachedImage = '';
+      let attachedFile = null;
+      let displayText = text;
+      let previewUrl = '';
 
-      if (hasFile) {
-        const file = fileInput.files[0];
-        const localPreviewUrl = URL.createObjectURL(file);
-        const title = file.name;
-        const displayUserText = text ? ('[' + escapeHtml(title) + ']\n' + text) : ('[' + escapeHtml(title) + ']');
+      if (file) {
+        const isImage = file.type.startsWith('image/');
+        previewUrl = isImage ? URL.createObjectURL(file) : '';
+        displayText = (text ? '[' + file.name + ']\n' + text : '[' + file.name + ']');
+        if (statusEl) statusEl.textContent = 'جاري قراءة الملف...';
+        try {
+          const dataUri = await readFileAsDataUri(file);
+          if (isImage) attachedImage = dataUri;
+          else attachedFile = { name: file.name, dataUri };
+        } catch (error) {
+          if (statusEl) statusEl.textContent = '';
+          toast(error.message || 'تعذر قراءة الملف');
+          return;
+        }
+        if (statusEl) statusEl.textContent = '';
+      }
 
-        aiRulesChatHistory.push({ role: 'user', text: displayUserText, imageUrl: localPreviewUrl });
-        saveCurrentSessionState('ai_rules', aiRulesChatHistory);
-        renderAIRulesChat();
-        if (input) input.value = '';
-        clearAttachedChatImage();
+      if (input) input.value = '';
+      clearAttachedChatImage();
+      aiRulesChatHistory.push({ role: 'user', text: displayText, imageUrl: previewUrl || undefined });
+      saveCurrentSessionState('ai_rules', aiRulesChatHistory);
+      aiRulesChatHistory.push({ role: 'ai', text: ' جاري التفكير والتنفيذ...', _typing: true });
+      renderAIRulesChat();
 
-        if (statusEl) statusEl.textContent = 'جاري رفع وتحليل الصورة...';
-
+      // An image the admin wants kept as a company reference is still stored as training data.
+      if (file && attachedImage) {
         const formData = new FormData();
         formData.append('image', file);
-        formData.append('title', title);
+        formData.append('title', file.name);
         formData.append('category', 'chat');
         formData.append('imageType', typeInput ? typeInput.value : 'reference');
         formData.append('description', text || 'Uploaded via AI Training Chat');
         formData.append('companyDataConsent', 'true');
-
         try {
-          const resp = await api('POST', '/api/training/upload-image', formData, true);
-          if (statusEl) statusEl.textContent = '';
-          if (resp && resp.success) {
-            const aiMsg = 'تم تحليل الصورة وحفظها كبيانات تدريب بنجاح:\n\n' + (resp.analysis || 'تم حفظ الصورة كمرجع.');
-            aiRulesChatHistory.push({ role: 'ai', text: aiMsg });
-            saveCurrentSessionState('ai_rules', aiRulesChatHistory);
-            toast('تم رفع الصورة وتحليلها بنجاح');
-            await loadAIRules();
-          } else {
-            aiRulesChatHistory.push({ role: 'ai', text: '' + (resp && resp.error ? resp.error : 'فشل رفع الصورة') });
-            saveCurrentSessionState('ai_rules', aiRulesChatHistory);
-          }
-        } catch (e) {
-          if (statusEl) statusEl.textContent = '';
-          aiRulesChatHistory.push({ role: 'ai', text: 'خطأ: ' + e.message });
-          saveCurrentSessionState('ai_rules', aiRulesChatHistory);
-        }
-        renderAIRulesChat();
-      } else {
-        if (input) input.value = '';
-        aiRulesChatHistory.push({ role: 'user', text });
-        saveCurrentSessionState('ai_rules', aiRulesChatHistory);
-        aiRulesChatHistory.push({ role: 'ai', text: ' جاري التفكير والتنفيذ...', _typing: true });
-        renderAIRulesChat();
-
-        let data;
-        try {
-          data = await api('POST', '/api/training-chat', {
-            message: text,
-            history: aiRulesChatHistory.filter(m => !m._typing).slice(0, -1),
-            workspace: buildAgentWorkspacePayload()
-          });
+          await api('POST', '/api/training/upload-image', formData, true);
         } catch (error) {
-          data = { success: false, error: error.message || 'تعذر الاتصال بخادم التدريب.' };
-        } finally {
-          aiRulesChatHistory = aiRulesChatHistory.filter(m => !m._typing);
+          console.warn('[AGENT] Could not store the attached image as training data:', error);
         }
-
-        if (data && data.success) {
-          const msg = { role: 'ai', text: data.reply || 'تم استلام رسالتك.' };
-          if (data.actions && data.actions.length) {
-            msg.actions = data.actions;
-          }
-          aiRulesChatHistory.push(msg);
-          saveCurrentSessionState('ai_rules', aiRulesChatHistory);
-          if (data.actions && data.actions.length) {
-            const successCount = data.actions.filter(a => a.status === 'success').length;
-            if (successCount) {
-              toast('تم تنفيذ ' + successCount + ' إجراء بنجاح');
-              await applyAgentWorkspaceActions(data.actions);
-              await loadAIRules();
-              await refreshSystemDataAfterAgentAction();
-            }
-          }
-        } else {
-          aiRulesChatHistory.push({ role: 'ai', text: (data && data.error) || 'فشل الرد.' });
-          saveCurrentSessionState('ai_rules', aiRulesChatHistory);
-        }
-        renderAIRulesChat();
       }
+
+      let data;
+      try {
+        data = await api('POST', '/api/training-chat', {
+          message: text || 'اقرأ الملف المرفق وأخبرني بما فيه وما تقترح تنفيذه.',
+          history: aiRulesChatHistory.filter(m => !m._typing).slice(0, -1),
+          workspace: buildAgentWorkspacePayload(),
+          attachedImage,
+          attachedFile
+        });
+      } catch (error) {
+        data = { success: false, error: error.message || 'تعذر الاتصال بخادم التدريب.' };
+      } finally {
+        aiRulesChatHistory = aiRulesChatHistory.filter(m => !m._typing);
+      }
+
+      if (data && data.success) {
+        const msg = { role: 'ai', text: data.reply || 'تم استلام رسالتك.' };
+        if (data.actions && data.actions.length) {
+          msg.actions = data.actions;
+        }
+        aiRulesChatHistory.push(msg);
+        saveCurrentSessionState('ai_rules', aiRulesChatHistory);
+        if (data.actions && data.actions.length) {
+          const successCount = data.actions.filter(a => a.status === 'success').length;
+          if (successCount) {
+            toast('تم تنفيذ ' + successCount + ' إجراء بنجاح');
+            await applyAgentWorkspaceActions(data.actions);
+            await loadAIRules();
+            await refreshSystemDataAfterAgentAction();
+          }
+        }
+      } else {
+        aiRulesChatHistory.push({ role: 'ai', text: (data && data.error) || 'فشل الرد.' });
+        saveCurrentSessionState('ai_rules', aiRulesChatHistory);
+      }
+      renderAIRulesChat();
     }
 
     async function saveLastAIRulesChatMessage() {
