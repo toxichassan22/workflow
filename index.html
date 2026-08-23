@@ -6157,6 +6157,33 @@
       'location_polygon'
     ];
 
+    // Mirrors slide_engine.financial_study_has_real_input(). The financial section is rendered for
+    // every project and its snapshot holds every control plus the computed projection, so a project
+    // where nobody entered a figure still carries ~35KB of markup defaults and zeros — re-uploaded
+    // with every single slide request, and worthless to the model.
+    const FINANCIAL_REAL_INPUT_KEYS = [
+      'projectCost', 'adjustedProjectCost', 'landValue', 'manualLandValue', 'equityRequired',
+      'facilityAmount', 'totalBuiltUpArea', 'builtUpAreaAbove', 'basementArea', 'landArea',
+      'totalRevenue', 'netProfit'
+    ];
+
+    function financialStudyHasRealInput(model) {
+      const snapshot = (typeof parseFinancialStudySnapshot === 'function'
+        ? parseFinancialStudySnapshot(model) : model) || {};
+      const rows = snapshot.dynamicRows || {};
+      const tables = snapshot.tables || {};
+      const hasRow = [rows.components, tables.componentsTable, tables.revenueTable, tables.costsTable]
+        .some(set => Array.isArray(set) && set.some(row => row && typeof row === 'object'
+          && Object.values(row).some(value => String(value ?? '').trim())));
+      if (hasRow) return true;
+      const inputs = snapshot.inputs || {};
+      const projection = snapshot.projection || {};
+      return FINANCIAL_REAL_INPUT_KEYS.some(key => {
+        const raw = inputs[key] !== undefined ? inputs[key] : projection[key];
+        return parseFloat(String(raw ?? '').replace(/[^\d.\-]/g, '')) > 0;
+      });
+    }
+
     function slimGenerationProjectData(data) {
       const src = data || {};
       const slim = {};
@@ -6165,9 +6192,29 @@
         if (key.endsWith('_file_meta')) return;
         const value = src[key];
         if (value === undefined || value === null || value === '') return;
+        if (key === 'financial_study_model' && !financialStudyHasRealInput(value)) return;
         slim[key] = value;
       });
       return slim;
+    }
+
+    // Generating from a name alone leaves the model nothing to work from, and the design rules
+    // forbid inventing facts, so the deck comes back fabricated. The button still works.
+    const GENERATION_MIN_FACTS = 6;
+
+    function countProjectFacts(data) {
+      const src = data || {};
+      return Object.keys(src).filter(key => {
+        if (GENERATION_PAYLOAD_DROPPED.includes(key)) return false;
+        if (key === 'financial_study_model' || key === 'financial_calc_data') return false;
+        if (key === 'draftId' || key === 'draft_id' || key === 'sectionStatuses') return false;
+        if (key.startsWith('map_') || key.endsWith('_file_meta') || key.endsWith('_file_ids')) return false;
+        const value = src[key];
+        if (value === undefined || value === null || value === '' || value === false) return false;
+        if (Array.isArray(value)) return value.length > 0;
+        if (typeof value === 'object') return Object.keys(value).length > 0;
+        return String(value).trim() !== '';
+      }).length;
     }
 
     function slimLandAnalysisSiteContext(context) {
@@ -16120,6 +16167,10 @@
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
       if (!(await validateFinancialStudyBeforeProceed())) return;
+
+      const factCount = countProjectFacts(tenantProjectData);
+      if (factCount < GENERATION_MIN_FACTS && !confirm('بيانات المشروع المحفوظة ' + factCount +
+          ' حقل. الذكاء الاصطناعي سيكتب محتوى الشرائح من عنده لأن الحقائق غير موجودة. متابعة؟')) return;
 
       // Auto-save draft
       await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });

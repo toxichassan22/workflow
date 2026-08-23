@@ -246,6 +246,48 @@ def _parse_financial_dict(val):
     return {}
 
 
+def _financial_number(value):
+    """A stored financial value as a number; text such as "18%" or "1,200" still counts."""
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = re.sub(r'[^\d.\-]', '', str(value or ''))
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def financial_study_has_real_input(model, calc=None):
+    """True only when someone actually entered figures in the financial study.
+
+    The financial section is rendered for every project and `collectFinancialStudyModel()` snapshots
+    every one of its controls plus the computed projection, so an untouched project still carries a
+    ~35KB model of markup defaults and zeros. Sending that made the prompt state that zero-value
+    tables were "الجداول المالية المعتمدة", which is worse than saying nothing.
+    """
+    model = _parse_financial_dict(model)
+    calc = _parse_financial_dict(calc)
+    dynamic_rows = model.get('dynamicRows') if isinstance(model.get('dynamicRows'), dict) else {}
+    tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+    for rows in (dynamic_rows.get('components'), tables.get('componentsTable'),
+                 tables.get('revenueTable'), tables.get('costsTable'), calc.get('components')):
+        if isinstance(rows, list) and any(isinstance(row, dict) and any(
+                str(value or '').strip() for value in row.values()) for row in rows):
+            return True
+    inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
+    projection = model.get('projection') if isinstance(model.get('projection'), dict) else {}
+    # Rates, durations and counts carry markup defaults, so only the money and area figures
+    # distinguish an entered study from an untouched one.
+    for key in ('projectCost', 'adjustedProjectCost', 'landValue', 'manualLandValue',
+                'equityRequired', 'facilityAmount', 'totalBuiltUpArea', 'builtUpAreaAbove',
+                'basementArea', 'landArea', 'totalRevenue', 'netProfit'):
+        if _financial_number(inputs.get(key) or projection.get(key) or calc.get(key)) > 0:
+            return True
+    return False
+
+
 def _financial_data_note(project_data):
     """Extract and format financial study tables and metrics so they are never lost or distorted."""
     if not project_data or not isinstance(project_data, dict):
@@ -253,6 +295,9 @@ def _financial_data_note(project_data):
 
     model = _parse_financial_dict(project_data.get('financial_study_model'))
     calc = _parse_financial_dict(project_data.get('financial_calc_data'))
+
+    if not financial_study_has_real_input(model, calc):
+        return ''
 
     # Extract components
     components = []

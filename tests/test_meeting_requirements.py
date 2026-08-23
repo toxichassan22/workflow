@@ -3189,6 +3189,35 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(response.get_json()['success'])
         self.assertTrue(response.get_json()['plan']['slides'])
 
+    def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
+        """The section snapshots itself for every project, so defaults must not become facts."""
+        import slide_engine as engine
+        defaults_only = {
+            'inputs': {'developmentYears': 4, 'developerRate': 10, 'annualFinanceRate': 6,
+                       'projectCost': 0, 'landValue': 0, 'totalBuiltUpArea': 0},
+            'projection': {'roi': 0, 'irr': 0},
+            'dynamicRows': {'components': [], 'revenue': []},
+            'tables': {'componentsTable': []},
+        }
+        self.assertFalse(engine.financial_study_has_real_input(defaults_only))
+        self.assertEqual(engine._financial_data_note({'financial_study_model': defaults_only}), '')
+
+        entered = dict(defaults_only, inputs=dict(defaults_only['inputs'], projectCost=480000000))
+        self.assertTrue(engine.financial_study_has_real_input(entered))
+        self.assertIn('المؤشرات وهيكل رأس المال المعتمد',
+                      engine._financial_data_note({'financial_study_model': entered}))
+
+        by_components = dict(defaults_only,
+                             dynamicRows={'components': [{'name': 'شقق سكنية', 'builtArea': 24000}]})
+        self.assertTrue(engine.financial_study_has_real_input(by_components))
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("if (key === 'financial_study_model' && !financialStudyHasRealInput(value)) return;",
+                      index_source)
+        # Generating from a name alone can only produce invented content, so it is stated, not hidden.
+        self.assertIn('const GENERATION_MIN_FACTS = 6;', index_source)
+        self.assertIn('const factCount = countProjectFacts(tenantProjectData);', index_source)
+
     def test_slide_plan_runs_as_a_polled_job_so_the_proxy_cannot_drop_it(self):
         """A full project needs minutes to plan, and the live proxy kills a request held that long."""
         client = self.app.test_client()
