@@ -91,11 +91,17 @@ from `build_font_css(embed=True)` in every export. Three things used to break th
   name.
 
 **Arabic and Latin resolve independently**, and a script with no selection keeps the platform
-default. The presentation panel used to offer one dropdown holding exactly the two families that are
-already those defaults, so choosing either changed nothing at all — measured identical text widths
-for both picks. The panel is now one selector per script (`presentationFontArabic`,
-`presentationFontLatin`), it lists uploaded faces too, and it states the applied pair. Keep it that
-way: a single "presentation font" cannot be honest about a two-script model.
+default. The panel used to offer one dropdown holding exactly the two families that already are
+those defaults, so choosing either changed nothing — measured identical text widths for both picks.
+One font is chosen for the whole deck (owner's rule: a font applies to everything, not to text and
+numbers separately), so `selectPresentationFont()` writes the chosen family to **both** scripts and
+every weight, and falls back to the family's own faces when it ships only one script.
+
+A system font is a legitimate choice (Arial for everything) but it is only a **name**: the export
+runs on the server, which has neither Arial nor Tahoma, so `_managed_font_css()` appends the bundled
+`platform-fallback-arabic` face whenever no shipped face covers Arabic. `font-status` then reports
+`installed name only with shipped fallback` — the company's own face is a name, and that is stated
+rather than dressed up as embedded.
 
 `GET /api/branding/font-status` reports how the glyphs actually arrive: `embedded file`,
 `served file`, `google web font` (needs the network) or `installed name only` (renders only where

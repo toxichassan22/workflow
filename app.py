@@ -3245,15 +3245,20 @@ def api_branding_font_status():
     google_import = '@import' in css
     # How the glyphs actually arrive decides whether the font can be trusted: a file we ship or
     # serve always renders, a Google import needs the network, and a bare local() name renders only
-    # on a machine that happens to have that font installed.
-    if embedded:
+    # on a machine that happens to have that font installed. The shipped Arabic safety net is not
+    # counted as the company's own face, otherwise choosing Arial would report itself as embedded.
+    shipped_fallback = 'platform-fallback-arabic' in css
+    own_embedded = max(0, embedded - (1 if shipped_fallback else 0))
+    if own_embedded:
         renders = 'embedded file'
     elif served:
         renders = 'served file'
     elif google_import:
         renders = 'google web font'
-    elif 'src:local(' in css or css:
-        renders = 'installed name only'
+    elif 'src:local(' in css:
+        renders = 'installed name only with shipped fallback' if shipped_fallback else 'installed name only'
+    elif css:
+        renders = 'embedded file' if embedded else 'installed name only'
     else:
         renders = 'nothing'
     local_only = renders == 'installed name only'
@@ -3303,10 +3308,12 @@ def api_branding_font_status():
             'googleImport': google_import,
             'renders': renders,
             'scripts': scripts,
+            'shippedArabicFallback': shipped_fallback,
             'localNameOnly': local_only,
             'cssBytes': len(css),
             'bundledFaces': sorted(_load_bundled_fonts().keys()),
-            'willRenderRealFont': renders in ('embedded file', 'served file', 'google web font'),
+            'willRenderRealFont': renders in ('embedded file', 'served file', 'google web font',
+                                             'installed name only with shipped fallback'),
         },
     })
 

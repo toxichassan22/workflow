@@ -241,12 +241,63 @@ class FontWorkflowTests(unittest.TestCase):
         self.assertEqual(status['renders'], 'google web font')
         self.assertTrue(status['willRenderRealFont'], status)
 
-    def test_the_font_picker_is_per_script_and_states_what_is_applied(self):
-        """One dropdown offering the two platform defaults could not change anything, ever.
+    def test_one_font_choice_covers_both_scripts(self):
+        """A font chosen for the deck must move Arabic and Latin together.
 
-        Arabic and Latin resolve independently, and a script with no selection keeps the platform
-        default — so picking the default Latin face left every Arabic word exactly as it was.
+        Arabic and Latin resolve independently and a script with no selection keeps the platform
+        default, so the old single picker — which offered exactly those two defaults — could not
+        change anything at all. One choice is now written to both scripts.
         """
+        from design_templates import build_font_css
+
+        client = self.app.test_client()
+        with self.app.app_context():
+            for script in ('arabic', 'latin'):
+                db.set_tenant_font_selection(self.tenant, script, 'regular', font_id=self.font_lat)
+            branding = db.get_branding(self.tenant)
+            css, family_list = build_font_css(branding, self.tenant, embed=False)
+
+        status = client.get('/api/branding/font-status',
+                            headers=self._headers(self.token)).get_json()['status']
+        self.assertTrue(status['scripts']['arabic']['chosen'])
+        self.assertTrue(status['scripts']['latin']['chosen'])
+        self.assertEqual(status['scripts']['arabic']['font'], status['scripts']['latin']['font'])
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('async function selectPresentationFont(familyName)', index_source)
+        self.assertIn("for (const script of ['arabic', 'latin'])", index_source)
+        # The two-selector version is gone: the owner asked for one font for everything.
+        self.assertNotIn('id="presentationFontArabic"', index_source)
+        self.assertNotIn('selectPresentationScriptFont', index_source)
+
+    def test_a_system_font_choice_keeps_a_shipped_arabic_face_for_export(self):
+        """Arial renders where it is installed; the export machine has no Arial and no Tahoma."""
+        from design_templates import build_font_css
+
+        with self.app.app_context():
+            for script in ('arabic', 'latin'):
+                for weight in ('light', 'regular', 'medium', 'bold', 'black'):
+                    db.delete_tenant_font_selection(self.tenant, script, weight)
+            system_font = db.create_sag_font('SystemOnly', 'SystemOnly', 'latin', 'regular',
+                                             source_type='system', source_data='Arial')
+            for script in ('arabic', 'latin'):
+                db.set_tenant_font_selection(self.tenant, script, 'regular', font_id=system_font)
+            css, family_list = build_font_css(db.get_branding(self.tenant), self.tenant, embed=False)
+
+        self.assertIn('src:local(', css)
+        self.assertIn("'platform-fallback-arabic'", family_list)
+        self.assertIn('@font-face', css)
+        self.assertIn('base64,', css)
+
+        client = self.app.test_client()
+        status = client.get('/api/branding/font-status',
+                            headers=self._headers(self.token)).get_json()['status']
+        # The company's own face is a name, and that is stated rather than dressed up as embedded.
+        self.assertEqual(status['renders'], 'installed name only with shipped fallback')
+        self.assertTrue(status['shippedArabicFallback'])
+        self.assertTrue(status['willRenderRealFont'])
+
+    def test_font_status_reports_the_face_chosen_per_script(self):
         client = self.app.test_client()
         status = client.get('/api/branding/font-status',
                             headers=self._headers(self.token)).get_json()['status']
@@ -265,12 +316,9 @@ class FontWorkflowTests(unittest.TestCase):
         self.assertFalse(status['scripts']['latin']['chosen'])
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn('id="presentationFontArabic"', index_source)
-        self.assertIn('id="presentationFontLatin"', index_source)
-        self.assertIn('async function selectPresentationScriptFont(script, fontId)', index_source)
+        self.assertIn('id="presentationFontSelect"', index_source)
         self.assertIn('async function renderPresentationFontStatus()', index_source)
-        # The single combined picker is gone.
-        self.assertNotIn('id="presentationFontSelect"', index_source)
+        self.assertIn('المطبَّق الآن', index_source)
 
     def test_a_font_name_with_no_source_still_renders_a_real_face(self):
         """A stored name with no file behind it silently fell back to the reader's Tahoma."""

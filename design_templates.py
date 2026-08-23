@@ -652,9 +652,15 @@ def _managed_font_css(branding, tenant_id, fallback):
             return "@import url('https://fonts.googleapis.com/css2?family=" + source['encoded'] + ":wght@300;400;500;700;900&display=swap');"
         return ''
 
+    def kind_of_face(face):
+        return face[0] if face else ''
+
     rules = []
     import_rules = []
     imported_google_families = []
+    # Which scripts got a face whose file travels with the deck, rather than a name the reading
+    # machine must already have.
+    shipped_scripts = set()
     tenant_selections = get_tenant_font_selections(tenant_id) if tenant_id else []
     legacy_family = branding.get('font_family') or ''
     if not tenant_selections and (branding.get('font_file_path') or branding.get('font_file_data')):
@@ -708,11 +714,27 @@ def _managed_font_css(branding, tenant_id, fallback):
                     imported_google_families.append(source['family'])
             else:
                 rules.append(rule)
+                if kind_of_face(face) == 'data':
+                    shipped_scripts.add(script)
 
     if not rules and not import_rules:
         return None
     families = [f"'{script_families['arabic']}'", f"'{script_families['latin']}'"]
     families.extend(f"'{family}'" for family in imported_google_families)
+    # A company can legitimately choose a system font such as Arial for the whole deck. It renders
+    # wherever it is installed, but the PDF is rendered on the server, which has no Arial and no
+    # Tahoma — Arabic then landed on whatever Chromium had, usually DejaVu. So a shipped Arabic face
+    # is appended last: the choice still wins where it exists, and the export stays readable.
+    if 'arabic' not in shipped_scripts:
+        bundled = _load_bundled_fonts().get('TheSansArabic-Light') or _load_bundled_fonts().get('TheSansArabic-Bold')
+        if bundled:
+            data, fmt = bundled
+            mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+            rules.append(
+                f"@font-face{{font-family:'platform-fallback-arabic';src:url(data:{mime};base64,{data})"
+                f" format('{fmt}');font-weight:100 900;font-display:swap;}}"
+            )
+            families.append("'platform-fallback-arabic'")
     family_list = ', '.join(families) + ', ' + fallback
     rules.append(f'.slide,.slide *{{font-family:{family_list} !important;}}')
     return '\n'.join(import_rules + rules), family_list
