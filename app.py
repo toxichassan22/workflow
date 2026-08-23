@@ -3223,6 +3223,70 @@ def api_design_templates():
     return jsonify({'success': True, 'templates': get_all_templates()})
 
 
+@app.route('/api/branding/font-status', methods=['GET'])
+@require_auth
+def api_branding_font_status():
+    """Say whether this company's font is really loadable, and from where.
+
+    A font that silently falls back looks identical to a font that was never chosen, so this reports
+    the resolved source instead of leaving it to guesswork: a real @font-face with an embedded or
+    served file, a `src:local()` name that only works if the machine has that font installed, a
+    Google import that needs the network, or nothing at all.
+    """
+    from design_templates import build_font_css, _load_bundled_fonts
+    branding = db.get_branding(g.tenant_id) or {}
+    selections = db.get_tenant_font_selections(g.tenant_id) or []
+    result = build_font_css(branding, g.tenant_id, embed=False)
+    css = (result[0] if result else '') or ''
+    family = (result[1] if result else '') or ''
+    faces = css.count('@font-face')
+    embedded = css.count('base64,')
+    served = len(re.findall(r"url\('/tenant-assets/", css))
+    google_import = '@import' in css
+    # How the glyphs actually arrive decides whether the font can be trusted: a file we ship or
+    # serve always renders, a Google import needs the network, and a bare local() name renders only
+    # on a machine that happens to have that font installed.
+    if embedded:
+        renders = 'embedded file'
+    elif served:
+        renders = 'served file'
+    elif google_import:
+        renders = 'google web font'
+    elif 'src:local(' in css or css:
+        renders = 'installed name only'
+    else:
+        renders = 'nothing'
+    local_only = renders == 'installed name only'
+    if not css:
+        source = 'none'
+    elif selections:
+        source = 'company selection'
+    elif branding.get('font_file_path') or branding.get('font_file_data'):
+        source = 'legacy upload'
+    else:
+        source = 'platform default'
+    return jsonify({
+        'success': True,
+        'status': {
+            'source': source,
+            'familyList': family,
+            'brandingFontFamily': branding.get('font_family'),
+            'selections': [{'script': item.get('script'), 'weight': item.get('weight'),
+                            'uploaded': bool(item.get('custom_font_path') or item.get('custom_font_data')),
+                            'fontFamily': item.get('font_family')} for item in selections],
+            'fontFaces': faces,
+            'embeddedFiles': embedded,
+            'servedFiles': served,
+            'googleImport': google_import,
+            'renders': renders,
+            'localNameOnly': local_only,
+            'cssBytes': len(css),
+            'bundledFaces': sorted(_load_bundled_fonts().keys()),
+            'willRenderRealFont': renders in ('embedded file', 'served file', 'google web font'),
+        },
+    })
+
+
 @app.route('/api/branding/font.css', methods=['GET'])
 @require_auth
 def api_branding_font_css():

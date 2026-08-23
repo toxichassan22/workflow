@@ -71,6 +71,30 @@ existing installs** — a 500 from whichever endpoint touched it, with a healthy
 otherwise. Every statement is `IF NOT EXISTS`, so it now runs unconditionally. Do not reintroduce
 that guard; `test_new_tables_are_created_on_an_existing_database` covers it.
 
+## Fonts
+
+The company font is injected as `.slide,.slide *{font-family:… !important}` with the face carried
+under a per-tenant alias (`tenant-managed-<id>`), from `/api/branding/font.css` in the preview and
+from `build_font_css(embed=True)` in every export. Three things used to break that:
+
+- **A slide could out-shout it.** A slide carrying `font-family` in its own `<style>` block with
+  `!important` beat the injected rule in the preview, while every export stripped it — so the preview
+  and the PDF disagreed. `stripSlideFontDeclarations()` in `index.html` is the mirror of
+  `sanitize_slide_html_for_export()`; keep the two in step.
+- **The prompt told the model to write a font name.** It received the display family
+  (`'The Sans Arabic'`) while the loaded face is the alias, so the two never matched. The rules now
+  forbid `font-family` in generated slides entirely.
+- **A stored name with nothing behind it fell back silently.** Any `font_family` saved without a
+  matching selection or file — including one the admin agent types — reached the last branch of
+  `build_font_css()`, which emitted the bare name; the reader then got Tahoma with nothing to
+  explain it. That branch now ships the bundled `platform-fallback-arabic` face behind the requested
+  name.
+
+`GET /api/branding/font-status` reports how the glyphs actually arrive: `embedded file`,
+`served file`, `google web font` (needs the network) or `installed name only` (renders only where
+that font is installed). The bundled faces come from `fonts_bundle.json`, which is committed
+normally — `fonts/*.ttf|otf` are **Git LFS** files and may be pointers on the server.
+
 ## Change history (who changed what)
 
 `change_log` is the single history for a **presentation or a project file**, and

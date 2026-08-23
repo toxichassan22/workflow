@@ -17813,9 +17813,27 @@
     let activeSlideIndex = 0;
     const slideInlineEditStates = {};
 
+    // Mirror of design_templates.sanitize_slide_html_for_export(): every export strips the font
+    // declarations a slide carries so the company font wins, and the preview must show the same
+    // thing — its whole promise is that what you see is what the PDF holds.
+    function stripSlideFontDeclarations(html) {
+      if (!html) return html;
+      let out = String(html).replace(/\sstyle\s*=\s*(["'])([\s\S]*?)\1/gi, (match, quote, value) => {
+        let cleaned = value.replace(/\s*font-family\s*:\s*[^;]+;?\s*/gi, '')
+          .replace(/;\s*;/g, ';').trim().replace(/^;|;$/g, '');
+        return cleaned ? ' style=' + quote + cleaned + quote : '';
+      });
+      out = out.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (match, block) => {
+        if (block.indexOf('@font-face') !== -1) return match;
+        return '<style>' + block.replace(/\s*font-family\s*:\s*[^;]+;?\s*/gi, '')
+          .replace(/;\s*;/g, ';') + '</style>';
+      });
+      return out;
+    }
+
     function processSlideHtmlClient(html, slideType) {
       if (!html) return '';
-      let cleanHtml = html;
+      let cleanHtml = stripSlideFontDeclarations(html);
       const projectData = tenantProjectData || {};
       const logoUrl = (tenantBranding && (tenantBranding.logo_path || tenantBranding.logo || tenantBranding.logo_url)) || '/assets/logo.png';
 

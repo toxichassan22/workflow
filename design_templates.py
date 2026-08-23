@@ -376,9 +376,10 @@ def build_design_rules(branding):
     accent = branding.get('accent_color', '#0ea5e9')
     bg = branding.get('background_color', '#f8fafc')
     text_color = branding.get('text_color', '#1e293b')
-    # Only the family name is needed here, so never read/base64 the font file
-    # on every slide prompt build.
-    _font_css, font = build_font_css(branding, branding.get('tenant_id'), family_only=True)
+    # The prompt no longer states a font name: the slide used to be told to write
+    # `font-family:'The Sans Arabic'` inline, while the face actually loaded is a per-tenant alias
+    # (`tenant-managed-<id>`) that carries the uploaded file. The two never matched, and any surface
+    # that renders a slide without the injected stylesheet showed the wrong font.
     header_enabled = branding.get('header_enabled', 1)
     footer_enabled = branding.get('footer_enabled', 1)
     header_h = branding.get('header_height', 56)
@@ -421,7 +422,9 @@ def build_design_rules(branding):
 - الظل الوحيد المسموح (إذا لزم الأمر) هو فائق النعومة والخفة: box-shadow: 0 1px 3px rgba(0,0,0,0.02) أو box-shadow: none.
 
 ## الخطوط والأحجام المحددة للتناسب
-font-family: {font}
+**ممنوع كتابة font-family في أي عنصر أو في أي style.** خط الشركة يُطبَّق تلقائيًا على الشريحة كلها من
+إعدادات الشركة (قد يكون خطًا مرفوعًا لا يعرفه أي جهاز)، فأي font-family تكتبه يخالف الخط المعتمد.
+حدّد الأحجام والأوزان فقط:
 - العنوان الرئيسي للشريحة: 22px-26px font-weight:700 color:{primary} (أقصى حد 28px)
 - عناوين البطاقات والأقسام: 14px-16px font-weight:600 color:{primary}
 - النصوص العادية ونصوص البطاقات والجداول: 11px-13px font-weight:400 color:{text_color}
@@ -433,8 +436,8 @@ font-family: {font}
 - تنسيق الجداول: صمم الجداول بأسلوب تنفيذي مسطح (Clean Hairline Table)، مع رأس جدول أنيق، وخطوط فاصلة دقيقة (border-bottom: 1px solid #e2e8f0)، وتباعد مريح، وأرقام واضحة ومحاذاة مناسبة.
 
 ## الشريحة الأساسية
-<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;font-family:{font};background:{bg};">
-CSS inline فقط. ممنوع box-shadow الثقيل أو filter أو backdrop-filter. استخدم box-sizing:border-box لكل العناصر.
+<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;background:{bg};">
+CSS inline فقط، وبدون font-family. ممنوع box-shadow الثقيل أو filter أو backdrop-filter. استخدم box-sizing:border-box لكل العناصر.
 """
 
     if header_enabled:
@@ -759,8 +762,24 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
         print(f"[FONT DEBUG] preset source for '{chosen}': {source['type']}, family={source['family']}")
         return css, family_list
 
-    # 4) No source available: keep the name and warn loudly
-    print(f"[FONT] ERROR: no bundled or Google font source for '{chosen}'; PDF may fall back to system fonts")
+    # 4) The stored name has no loadable source anywhere. Emitting the bare name meant the slide fell
+    # back to whatever the reading machine happened to have — usually Tahoma — with nothing to show
+    # why. This is not a rare corner: any name saved without a matching file or selection lands here,
+    # including one the admin agent typed. Ship the bundled platform face behind the requested name
+    # so the slides and the PDF always carry a real Arabic font.
+    print(f"[FONT] no bundled or Google source for '{chosen}'; falling back to the bundled platform face")
+    bundled = _load_bundled_fonts().get('TheSansArabic-Light') or _load_bundled_fonts().get('TheSansArabic-Bold')
+    if bundled:
+        data, fmt = bundled
+        mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+        family = 'platform-fallback-arabic'
+        family_list = f"{_font_family_list(chosen).rsplit(', ' + FALLBACK_FONTS, 1)[0]}, '{family}', {fallback}"
+        css = (
+            f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{data}) format('{fmt}');"
+            f"font-weight:100 900;font-display:swap;}}\n"
+            f".slide,.slide *{{font-family:{family_list} !important;}}"
+        )
+        return css, family_list
     family_list = _font_family_list(chosen)
     return f".slide,.slide *{{font-family:{family_list} !important;}}", family_list
 

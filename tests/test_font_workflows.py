@@ -193,6 +193,79 @@ class FontWorkflowTests(unittest.TestCase):
         self.assertIn('U+0000-024F', css)
         self.assertTrue(family.startswith(f"'{alias}'"))
 
+    # ── The font must survive the slide it is applied to ──────────────────
+
+    def test_slide_font_declarations_never_beat_the_company_font(self):
+        """A slide carried its own font, and in the preview an !important block won."""
+        from design_templates import build_design_rules, sanitize_slide_html_for_export
+
+        with self.app.app_context():
+            rules = build_design_rules(db.get_branding(self.tenant) or {})
+        # The prompt used to bake a display font name into every slide while the loaded face is a
+        # per-tenant alias, so the two never matched.
+        self.assertIn('ممنوع كتابة font-family', rules)
+        base_slide = rules[rules.index('## الشريحة الأساسية'):]
+        self.assertNotIn('font-family:', base_slide.split('CSS inline')[0])
+
+        hostile = ('<div class="slide" style="font-family:Arial;padding:10px">'
+                   '<style>.slide,.slide *{font-family:"Courier New" !important}</style>'
+                   '<h1 style="font-size:48px;font-family:Tahoma">عنوان</h1></div>')
+        cleaned = sanitize_slide_html_for_export(hostile)
+        self.assertNotIn('font-family', cleaned)
+        self.assertIn('padding:10px', cleaned)
+        self.assertIn('font-size:48px', cleaned)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function stripSlideFontDeclarations(html)', index_source)
+        self.assertIn('let cleanHtml = stripSlideFontDeclarations(html);', index_source)
+
+    def test_font_status_reports_whether_a_real_face_will_render(self):
+        client = self.app.test_client()
+        response = client.get('/api/branding/font-status', headers=self._headers(self.token))
+        self.assertEqual(response.status_code, 200, response.get_json())
+        status = response.get_json()['status']
+        # The platform default resolves to the bundled faces, which are not Git LFS files.
+        self.assertEqual(status['source'], 'platform default')
+        self.assertTrue(status['willRenderRealFont'], status)
+        self.assertEqual(status['renders'], 'embedded file')
+        self.assertGreater(status['embeddedFiles'], 0)
+        self.assertFalse(status['localNameOnly'])
+        self.assertIn('TheSansArabic-Light', status['bundledFaces'])
+
+        with self.app.app_context():
+            db.set_tenant_font_selection(self.tenant, 'arabic', 'regular', font_id=self.font_ar)
+        status = client.get('/api/branding/font-status',
+                            headers=self._headers(self.token)).get_json()['status']
+        self.assertEqual(status['source'], 'company selection')
+        # Cairo is a Google face: it renders, but over the network rather than from a shipped file.
+        self.assertEqual(status['renders'], 'google web font')
+        self.assertTrue(status['willRenderRealFont'], status)
+
+    def test_a_font_name_with_no_source_still_renders_a_real_face(self):
+        """A stored name with no file behind it silently fell back to the reader's Tahoma."""
+        from design_templates import build_font_css
+
+        with self.app.app_context():
+            for script in ('arabic', 'latin'):
+                for weight in ('light', 'regular', 'medium', 'bold', 'black'):
+                    db.delete_tenant_font_selection(self.tenant, script, weight)
+            db.update_branding(self.tenant, font_family='NoSuchFontAnywhere Bold')
+            branding = db.get_branding(self.tenant)
+            css, family_list = build_font_css(branding, self.tenant, embed=False)
+
+        self.assertIn('@font-face', css)
+        self.assertIn('base64,', css)
+        # The requested name stays first in case the reading machine has it installed.
+        self.assertTrue(family_list.startswith("'NoSuchFontAnywhere Bold'"), family_list)
+        self.assertIn("'platform-fallback-arabic'", family_list)
+
+        client = self.app.test_client()
+        status = client.get('/api/branding/font-status',
+                            headers=self._headers(self.token)).get_json()['status']
+        self.assertTrue(status['willRenderRealFont'], status)
+        with self.app.app_context():
+            db.update_branding(self.tenant, font_family='The Sans Arabic')
+
     # ── Training-agent font tools ─────────────────────────────────────────
 
     def test_agent_list_fonts_tool(self):
