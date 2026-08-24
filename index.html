@@ -5030,10 +5030,6 @@
             <input type="number" id="settingsMinSlides" value="8">
           </div>
           <div class="tenant-field">
-            <label>أقصى عدد شرائح</label>
-            <input type="number" id="settingsMaxSlides" value="30">
-          </div>
-          <div class="tenant-field">
             <label>عدد الشرائح الافتراضي</label>
             <input type="number" id="settingsDefaultSlideCount" value="16">
           </div>
@@ -7675,7 +7671,6 @@
       setValue('settingsHeaderHeight', b.header_height || 56);
       setValue('settingsFooterHeight', b.footer_height || 36);
       setValue('settingsMinSlides', b.min_slides || 8);
-      setValue('settingsMaxSlides', b.max_slides || 30);
       setValue('settingsDefaultSlideCount', b.default_slide_count || 16);
       setChecked('settingsLockSlideCount', b.lock_slide_count !== 0);
       setValue('settingsMoodboardCount', b.moodboard_count || 4);
@@ -7722,7 +7717,6 @@
         header_height: parseInt(getValue('settingsHeaderHeight') || '56', 10),
         footer_height: parseInt(getValue('settingsFooterHeight') || '36', 10),
         min_slides: parseInt(getValue('settingsMinSlides') || '8', 10),
-        max_slides: parseInt(getValue('settingsMaxSlides') || '30', 10),
         default_slide_count: parseInt(getValue('settingsDefaultSlideCount') || '16', 10),
         lock_slide_count: getChecked('settingsLockSlideCount') ? 1 : 0,
         moodboard_count: parseInt(getValue('settingsMoodboardCount') || '4', 10),
@@ -16390,31 +16384,42 @@
       // Auto-save draft
       await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
 
-      // Navigate directly to presentation preview page. Render this file's own slides first, so
-      // the page can never show the previously opened presentation while the plan is being built.
+      // Navigate to the presentation page with the stage empty. Rendering the file's saved slides
+      // here showed the previous deck for the whole planning wait, so the reader watched an old
+      // presentation while a new one was being built.
       showTenantPage('tenantSlidesPage');
-      renderTenantSlides();
-      setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '',
-        tenantSlidesData.length);
+      clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
+      setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
 
-      if (!tenantSlidePlan) {
-        setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...', 'تحليل متطلبات المشروع والهيكل الأنسب', 5);
-        const data = await requestTenantSlidePlan(tenantProjectData, job => {
-          setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...',
-            (job && job.message) || 'تحليل متطلبات المشروع والهيكل الأنسب', 8);
-        });
-        if (data.success && data.plan) {
-          tenantSlidePlan = data.plan;
-          tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', 'بدء التوليد المباشر للشرائح', 12);
-          triggerAutoSaveDraft();
+      // The plan is always rebuilt from the current project data. Reusing the saved plan meant a
+      // regenerated file kept the previous structure and slide count no matter how much the
+      // project had changed, which read as a fixed slide count that nobody had asked for.
+      setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...', 'تحليل متطلبات المشروع والهيكل الأنسب', 5);
+      const planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
+        setLiveGenBanner(true, 'إعداد خطة وهيكل العرض الاستثماري...',
+          (job && job.message) || 'تحليل متطلبات المشروع والهيكل الأنسب', 8);
+      });
+      if (planResponse.success && planResponse.plan) {
+        tenantSlidePlan = planResponse.plan;
+        tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+        const planCount = (tenantSlidePlan.slides || []).length;
+        // A fallback plan is a failed planner, not a proposal: it always has the same generic
+        // titles and the same count, so it is stated instead of passing as the model's work.
+        if (tenantSlidePlan.source === 'fallback') {
+          setLiveGenBanner(true, 'تعذر تحليل بيانات المشروع — هيكل عام',
+            planCount + ' شريحة بعناوين عامة لا تعبّر عن هذا المشروع', 12);
+          toast('لم ينتج المحلل خطة لهذا المشروع، والهيكل المستخدم عام.');
         } else {
-          const errorMessage = data.error || 'تعذر إعداد خطة الشرائح';
-          setLiveGenBanner(true, 'تعذر إعداد الخطة', errorMessage, 5);
-          console.error('[SLIDE PLAN]', data);
-          toast(errorMessage);
-          return;
+          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', planCount + ' شريحة — بدء التوليد المباشر', 12);
         }
+        triggerAutoSaveDraft();
+      } else {
+        const errorMessage = planResponse.error || 'تعذر إعداد خطة الشرائح';
+        setLiveGenBanner(true, 'تعذر إعداد الخطة', errorMessage, 5);
+        console.error('[SLIDE PLAN]', planResponse);
+        toast(errorMessage);
+        renderTenantSlides();
+        return;
       }
 
       await generateTenantSlides();
@@ -16432,6 +16437,9 @@
       if (!plan || !plan.slides) { list.innerHTML = ''; return; }
       info.innerHTML = '<strong>عدد الشرائح المقترح:</strong> ' + plan.slides.length +
         (plan.proposed_count ? ' (مقترح: ' + plan.proposed_count + ')' : '') +
+        (plan.source === 'fallback'
+          ? '<br><span style="color:#b71c1c">هيكل عام: لم ينتج المحلل خطة لبيانات هذا المشروع.</span>'
+          : '') +
         '<br><strong>المنطق:</strong> ' + escapeHtml(plan.reasoning || '') +
         '<br><em>النوع ونمط التصميم تم اختيارهما تلقائياً بواسطة الذكاء الاصطناعي.</em>' +
         (plan.validation && !plan.validation.isValid ? '<br><span style="color:#b71c1c">ملاحظات: ' + (plan.validation.issues || []).join(' | ') + '</span>' : '');
@@ -18391,6 +18399,20 @@
       const sidebar = document.getElementById('tenantSlidesSidebar');
       if (sidebar) sidebar.innerHTML = '';
       setSlidesEditorInfo('', 0);
+    }
+
+    // The stage while a new deck is being planned: empty, with the status only. The previously
+    // generated slides stay in memory and in the saved file until the new ones replace them.
+    function clearTenantSlidesStage(statusText) {
+      clearSlidesEditorSurface();
+      const wrap = document.getElementById('tenantSlidesMain');
+      if (!wrap) return;
+      wrap.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+        'min-height:380px;padding:48px 24px;text-align:center;gap:12px;background:#fff;border:1px dashed var(--line);' +
+        'border-radius:16px;margin:32px auto;max-width:540px">' +
+        '<div style="font-size:18px;font-weight:700;color:var(--txt)">' + escapeHtml(statusText || '') + '</div>' +
+        '<div class="tenant-hint">تحليل بيانات المشروع وتحديد عدد الشرائح</div>' +
+        '</div>';
     }
 
     function renderTenantSlides() {

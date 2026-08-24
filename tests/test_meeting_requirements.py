@@ -3359,6 +3359,47 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertTrue(response.get_json()['success'])
         self.assertTrue(response.get_json()['plan']['slides'])
+        # A failed planner ships the generic structure, and that is stated rather than passing as
+        # the model's own proposal — every such file otherwise came out with identical titles.
+        self.assertEqual(response.get_json()['plan']['source'], 'fallback')
+        self.assertEqual(response.get_json()['planSource'], 'fallback')
+
+    def test_slide_count_has_no_upper_limit(self):
+        """The plan follows the amount of content: a stored max_slides used to trim the surplus."""
+        engine = self.application_module.slide_engine
+        # Only a locked count binds the plan; otherwise the ceiling is open.
+        self.assertEqual(engine.resolve_slide_bounds({'min_slides': 8, 'max_slides': 30})[1],
+                         engine.SLIDE_COUNT_OPEN)
+        self.assertEqual(engine.resolve_slide_bounds(
+            {'min_slides': 8, 'max_slides': 30, 'lock_slide_count': 1, 'default_slide_count': 12}),
+            (12, 12, 12))
+        # A 120-slide plan survives intact.
+        long_plan = {'slides': (
+            [{'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'}]
+            + [{'title': f'محور {i}', 'type': 'content', 'bullets': ['1', '2', '3']} for i in range(117)]
+            + [{'title': 'الختام', 'type': 'closing'}]
+        )}
+        with patch.object(self.application_module, 'call_zai_chat_parallel', return_value={}), \
+                patch.object(self.application_module, 'extract_chat_content', return_value='{}'), \
+                patch.object(self.application_module, 'parse_slide_plan', return_value=long_plan), \
+                self.application_module.app.test_request_context():
+            self.application_module.g.tenant_id = self.tenant_a
+            result = self.application_module._execute_slide_plan(
+                {'project_name': 'THE VIEW'}, self.tenant_a, {'min_slides': 8, 'max_slides': 30})
+        self.assertEqual(len(result['plan']['slides']), 120)
+        self.assertEqual(result['plan']['source'], 'model')
+        self.assertNotIn('Too many slides', ' '.join(result['validation']['issues']))
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('max_tokens=40000', app_source)
+        self.assertNotIn('شريحة كحد أقصى)', app_source)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        # Regeneration always re-plans, and the previous deck is never displayed while it runs.
+        self.assertIn("clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض')", index_source)
+        self.assertIn('const planResponse = await requestTenantSlidePlan(tenantProjectData', index_source)
+        self.assertNotIn('if (!tenantSlidePlan) {', index_source)
+        self.assertNotIn('settingsMaxSlides', index_source)
 
     def test_change_lines_name_the_difference_not_just_that_something_changed(self):
         import change_tracking as tracking

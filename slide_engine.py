@@ -832,21 +832,26 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 """
 
 
+# There is no upper limit on how many slides a project may need. The stored max_slides used to
+# trim the plan — a project with more content than the number allowed simply lost the surplus
+# slides, and the planner was told to obey a ceiling the prompt itself calls open. Only
+# lock_slide_count still binds the count, and then it binds it exactly.
+SLIDE_COUNT_OPEN = 100000
+
+
 def resolve_slide_bounds(branding):
     """Resolve (min_slides, max_slides, default_count) from branding.
 
     When lock_slide_count is enabled the tenant's default_slide_count becomes an
-    exact requirement, otherwise min/max act as the allowed range.
+    exact requirement. Otherwise only the minimum applies and the upper end is open:
+    the planner decides the count from the amount of content.
     """
     branding = branding or {}
     default_count = int(branding.get('default_slide_count') or 16)
     if branding.get('lock_slide_count'):
         return default_count, default_count, default_count
     min_slides = int(branding.get('min_slides') or 14)
-    max_slides = int(branding.get('max_slides') or 100)
-    if min_slides > max_slides:
-        min_slides = max_slides
-    return min_slides, max_slides, default_count
+    return min(min_slides, SLIDE_COUNT_OPEN), SLIDE_COUNT_OPEN, default_count
 
 
 def build_fallback_plan(branding):

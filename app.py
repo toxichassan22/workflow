@@ -3926,7 +3926,14 @@ def _execute_slide_plan(project_data, tenant_id, branding):
 
     prompt = build_slide_plan_prompt(project_data, effective_branding, tenant_id=tenant_id)
     if training_context:
-        prompt = f"## بيانات خاصة بالشركة والتزام بحد الشرائح\nتنبيه هام جداً: التزم بحد الشرائح لهذه الشركة ({effective_min_slides} إلى {effective_max_slides} شريحة كحد أقصى).\n{training_context}\n\n---\n\n{prompt}"
+        # Only a locked count is a ceiling. Otherwise the count follows the content, and this
+        # header used to contradict the prompt by naming a maximum the prompt calls open.
+        count_rule = (f"عدد الشرائح لهذه الشركة مقفل على {locked_count} شريحة بالضبط."
+                      if slide_count_locked
+                      else f"لا يقل عدد الشرائح عن {effective_min_slides} شريحة، ولا يوجد حد أعلى: "
+                           "وزّع كل المحتوى المتاح على ما يحتاجه من شرائح دون اختصار أو دمج، "
+                           "وابقِ كل شريحة بفكرة واحدة غير مزدحمة.")
+        prompt = f"## بيانات خاصة بالشركة وقاعدة عدد الشرائح\nتنبيه هام جداً: {count_rule}\n{training_context}\n\n---\n\n{prompt}"
 
     plan = None
     last_error = None
@@ -3939,9 +3946,12 @@ def _execute_slide_plan(project_data, tenant_id, branding):
             response = call_zai_chat_parallel(
                 "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية الاستثمارية.",
                 prompt,
-                max_tokens=6000,
+                # The plan is one JSON document holding every slide, so its length grows with the
+                # slide count. 6,000 tokens cut a long plan mid-object, the JSON failed to parse
+                # and the generic fallback plan took over — which is what capped a big project.
+                max_tokens=40000,
                 attempts=1,
-                timeout=150,
+                timeout=600,
                 model=SLIDE_TEXT_MODEL
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
@@ -3954,9 +3964,16 @@ def _execute_slide_plan(project_data, tenant_id, branding):
             if attempt < max_attempts:
                 time.sleep(1)
 
+    # A failed planner used to be invisible: the generic fallback structure shipped as if the model
+    # had produced it, so every such file came out with the same titles and the same count and it
+    # looked like a fixed slide count instead of a failure.
+    plan_source = 'model'
+    plan_error = ''
     if not plan:
         print(f"[SLIDE-PLAN FALLBACK] Using fallback plan after {max_attempts} attempts. Last error: {last_error}")
         plan = build_fallback_plan(effective_branding)
+        plan_source = 'fallback'
+        plan_error = str(last_error or '')
 
     plan = _ensure_required_location_slides(plan, project_data)
     # A project with no financial study gets no financial slides at all, from any source.
@@ -3993,7 +4010,8 @@ def _execute_slide_plan(project_data, tenant_id, branding):
             slides.insert(insert_idx, new_slide)
             insert_idx += 1
 
-    # Strictly trim slides if LLM generated more slides than max_slides
+    # Trimming only happens for a tenant who locked the count: without a lock the maximum is
+    # SLIDE_COUNT_OPEN, so a long plan is kept exactly as the planner produced it.
     if len(slides) > effective_max_slides:
         print(f"[SLIDE-PLAN TRIM] Plan returned {len(slides)} slides, trimming strictly to effective_max_slides ({effective_max_slides})")
         if effective_max_slides == 1:
@@ -4007,6 +4025,9 @@ def _execute_slide_plan(project_data, tenant_id, branding):
 
     plan['proposed_count'] = len(slides)
     plan['slides'] = slides
+    plan['source'] = plan_source
+    if plan_error:
+        plan['source_error'] = plan_error[:400]
 
     is_valid, issues = validate_slide_plan(plan, effective_branding)
     if not is_valid:
@@ -4015,6 +4036,7 @@ def _execute_slide_plan(project_data, tenant_id, branding):
     return {
         'success': True,
         'plan': plan,
+        'planSource': plan_source,
         'validation': {'isValid': is_valid, 'issues': issues},
     }
 
@@ -11352,8 +11374,9 @@ def api_training_chat():
 
 ### 2. تعديل إعدادات الشرائح:
 ```action
-{{"tool": "update_branding", "params": {{"min_slides": N, "max_slides": N, "default_slide_count": N, "moodboard_count": N}}}}
+{{"tool": "update_branding", "params": {{"min_slides": N, "default_slide_count": N, "lock_slide_count": 0, "moodboard_count": N}}}}
 ```
+ملاحظة: لا يوجد حد أعلى لعدد الشرائح؛ `min_slides` هو الحد الأدنى فقط والعدد النهائي يتبع حجم محتوى المشروع. لقفل العدد على رقم بالضبط استخدم `lock_slide_count: 1` مع `default_slide_count`.
 
 ### 3. عرض الحقول:
 ```action
@@ -11590,11 +11613,13 @@ def api_training_chat():
             try:
                 num = int(slide_match.group(1))
                 if 1 <= num <= 50:
+                    # Only the minimum binds the planner; the upper end is open, so a requested
+                    # number is stored as the default and the floor, never as a ceiling.
                     parsed_actions.append({
                         'tool': 'update_branding',
-                        'params': {'default_slide_count': num, 'min_slides': max(1, num - 2), 'max_slides': min(50, num + 3)}
+                        'params': {'default_slide_count': num, 'min_slides': num}
                     })
-                    reply = f"تم التعديل!  عدد الشرائح الافتراضي تم تغييره إلى **{num} شرائح**. الحد الأدنى: {max(1, num - 2)}، الحد الأقصى: {min(50, num + 3)}."
+                    reply = f"تم التعديل!  عدد الشرائح الافتراضي تم تغييره إلى **{num} شريحة**، وهو الحد الأدنى أيضًا. لا يوجد حد أعلى: العدد النهائي يتبع حجم محتوى المشروع، ولقفله على {num} بالضبط فعّل «قفل عدد الشرائح»."
             except ValueError:
                 pass
 
@@ -11821,7 +11846,7 @@ def _build_agent_system_state(tenant_id):
 ###  إعدادات الشرائح والصور:
 - عدد الشرائح الافتراضي: {branding.get('default_slide_count', 16)}
 - الحد الأدنى: {branding.get('min_slides', 8)}
-- الحد الأقصى: {branding.get('max_slides', 30)}
+- الحد الأقصى: {f"مقفل على {branding.get('default_slide_count', 16)} شريحة بالضبط" if branding.get('lock_slide_count') else 'لا يوجد حد أعلى — العدد يتبع حجم المحتوى'}
 - عدد صور المود بورد: {branding.get('moodboard_count', 4)}
 - المود بورد: {'مفعل' if branding.get('moodboard_enabled') else 'معطل'}
 - صورة الغلاف: {'مفعلة' if branding.get('cover_image_enabled') else 'معطلة'}

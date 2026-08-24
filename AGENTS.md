@@ -408,6 +408,38 @@ that same file — complete **and** smaller than the old raw dump.
 - `test_slide_prompt_carries_every_section_instead_of_a_truncated_dump` and
   `test_generated_slide_request_sends_the_sections_and_not_the_previous_deck` guard both ends.
 
+## Slide count is not capped
+
+Owner's rule: the planner decides how many slides a project needs, and the only hard rule is a
+minimum. Three separate things used to bind it, and together they made every deck look like it had
+a fixed slide count:
+
+- **A stored ceiling trimmed the plan.** `max_slides` (30 by default) was passed to the planner as
+  «التزم بحد الشرائح … كحد أقصى» — contradicting `SLIDE_PLAN_PROMPT`, which calls the upper end
+  open — and `_execute_slide_plan` then trimmed the surplus slides away. `resolve_slide_bounds()`
+  now returns `SLIDE_COUNT_OPEN` as the maximum and ignores the stored `max_slides`; the trim block
+  is reachable only for a tenant with `lock_slide_count`, which is the one honest way to fix a count
+  exactly. The «أقصى عدد شرائح» settings input is gone, and the admin agent stores a requested
+  number as `default_slide_count` + `min_slides`, never as a ceiling.
+- **The plan request was capped at 6,000 tokens.** The plan is one JSON document holding every
+  slide, so a large project's plan was cut mid-object, `parse_slide_plan` raised, and
+  `build_fallback_plan()` took over. That is why a real file came out as exactly the generic 15
+  slides (`الغلاف`, `الفهرس`, `نظرة عامة على المشروع` … `شكراً لكم`) — those titles are the
+  fallback's, not the model's. It is now 40,000 tokens with a 600s timeout.
+- **A regenerated file reused its saved plan.** `directGenerateProposalFile()` asked for a plan only
+  `if (!tenantSlidePlan)`, and opening a draft restores the previous plan, so pressing «توليد العرض»
+  again rebuilt the same structure and count regardless of how the project had changed. It now
+  always re-plans.
+
+A fallback plan carries `plan.source === 'fallback'` (plus `planSource` on the response) and both
+the banner and the plan panel state it. Never let the fallback pass as the model's proposal — the
+generic titles are the signal that the planner failed.
+
+**The stage is emptied before a regeneration.** `clearTenantSlidesStage()` runs before the plan
+request; rendering the file's saved slides there showed the old deck for the whole planning wait.
+Slides are still generated one request at a time in a sequential loop, so time and cost grow
+linearly with the count.
+
 ## Performance rules
 
 - `compress_response()` gzips text responses (`app.py`). The SPA shell is ~740KB uncompressed and
