@@ -471,7 +471,7 @@ frames**. Three rules came out of it:
 
 ## The export must contain the whole deck
 
-Three separate faults each dropped pages, and every one of them reported success:
+Four separate faults each dropped pages, and every one of them reported success:
 
 - **A broken slide ended the walk.** `extract_slide_elements()` required a balanced `</div>` per
   slide and **`break`ed** when it could not find one, so one model-generated slide with a missing
@@ -488,6 +488,12 @@ Three separate faults each dropped pages, and every one of them reported success
   `break-after:page` with `!important`, which beats an inline style that has no `!important`.
   (Measured as harmless: a slide redefining `@page`, cancelling the break with its own `!important`,
   or shrinking `.slide` height — Playwright's own page size and break rules hold.)
+- **A global page layout combines separate slides.** A `<style>` inside one slide still applies to
+  the whole document. `body{display:grid;grid-template-columns:1fr 1fr}` or `columns:2` produced
+  exactly **25 pages for 50 slides** while every slide itself measured 1280 by 720. The generated
+  document now gives its body the unique `pdf-export-root` id and resets it to one block column;
+  direct-child slide rules use the same id specificity, so later class and body rules cannot turn
+  the deck back into shared rows or columns.
 
 `_verify_pdf_page_count()` then **raises** when the produced file has fewer pages than the deck has
 slides: a short file is a failed export, not a smaller export. `tests/test_export_slide_sanitization.py`

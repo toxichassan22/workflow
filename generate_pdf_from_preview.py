@@ -116,9 +116,9 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
 .slide { width:1280px; height:720px; direction:rtl; position:relative; overflow:hidden; }
 img { max-width:100%; max-height:100%; object-fit:cover; }
 @media print {
-    body { background:white !important; margin:0 !important; padding:0 !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
-    .slide { margin:0 !important; border:none !important; page-break-after:always !important; break-after:page !important; page-break-inside:avoid !important; break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; }
-    .slide:last-child { page-break-after:auto !important; break-after:auto !important; }
+    body#pdf-export-root { background:white !important; margin:0 !important; padding:0 !important; width:1280px !important; height:auto !important; display:block !important; columns:auto !important; column-count:auto !important; column-width:auto !important; grid-template-columns:none !important; grid-template-rows:none !important; gap:0 !important; overflow:visible !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+    body#pdf-export-root > .slide { margin:0 !important; border:none !important; page-break-after:always !important; break-after:page !important; page-break-inside:avoid !important; break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; }
+    body#pdf-export-root > .slide:last-child { page-break-after:auto !important; break-after:auto !important; }
 }
 """
 
@@ -130,7 +130,7 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
 <meta charset="utf-8">
 <style>{layout_css}</style>
 </head>
-<body style="margin:0;padding:0;background:#fff;">{html}<style>{font_css}</style></body>
+<body id="pdf-export-root" style="margin:0;padding:0;background:#fff;">{html}<style>{font_css}</style></body>
 </html>"""
     else:
         if "</head>" in html:

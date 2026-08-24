@@ -84,6 +84,27 @@ class ExportSlideSanitizationTests(unittest.TestCase):
                      'page-break-after:always !important'):
             self.assertIn(rule, print_block, rule)
 
+    def test_body_grid_cannot_combine_two_slides_on_one_page(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import fitz
+        import generate_pdf_from_preview as engine
+
+        slides = '\n'.join(
+            '<div class="slide"><style>'
+            'body{display:grid!important;grid-template-columns:1fr 1fr!important;columns:2!important}'
+            '</style><p>slide</p></div>'
+            for _ in range(6)
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / 'body-grid.pdf'
+            with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                engine.generate_pdf(slides, {}, pdf_path)
+            with fitz.open(pdf_path) as document:
+                self.assertEqual(document.page_count, 6)
+
     def test_a_short_pdf_is_an_error_not_a_smaller_export(self):
         import generate_pdf_from_preview as engine
 
