@@ -11,6 +11,17 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FALLBACK_FONTS = "'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif"
 
 
+# The class attribute is read as a token list, never as a substring: `\bslide\b` also matches
+# `slide-inner`, `slide-footer` and `slide-title`, because `-` is a word boundary. With the
+# bounded reader below that chopped one real slide into three fragments — an empty
+# `<div class="slide"></div>` plus its own inner blocks — so the export both miscounted the deck
+# and printed it in pieces.
+_SLIDE_OPEN_RE = re.compile(
+    r'<div\b[^>]*\bclass\s*=\s*(?:"([^"]*)"|\'([^\']*)\')[^>]*>',
+    re.I,
+)
+
+
 def extract_slide_elements(html):
     """Return every root .slide element, repairing one whose own tags do not balance.
 
@@ -22,12 +33,9 @@ def extract_slide_elements(html):
     """
     if not html:
         return []
-    slide_open = re.compile(
-        r'<div\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\1[^>]*>',
-        re.I,
-    )
     div_token = re.compile(r'<div\b[^>]*>|</div\s*>', re.I)
-    starts = [match.start() for match in slide_open.finditer(html)]
+    starts = [match.start() for match in _SLIDE_OPEN_RE.finditer(html)
+              if 'slide' in (match.group(1) or match.group(2) or '').split()]
     slides = []
     for position, start in enumerate(starts):
         boundary = starts[position + 1] if position + 1 < len(starts) else len(html)

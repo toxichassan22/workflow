@@ -471,13 +471,27 @@ frames**. Three rules came out of it:
 
 ## The export must contain the whole deck
 
-`extract_slide_elements()` used to require a balanced `</div>` per slide and **`break`** when it
-could not find one, so **one** model-generated slide with a missing closing tag silently dropped
-every slide after it — a 49-slide deck exported as a 24-page PDF, reported as success. Each slide is
-now bounded by the next slide's opening tag and repaired in place, so a broken slide can only damage
-itself. `_verify_pdf_page_count()` then **raises** when the produced file has fewer pages than the
-deck has slides: a short file is a failed export, not a smaller export. `tests/test_export_slide_sanitization.py`
-guards both, and the old `test_ignores_unbalanced_slide` (which asserted the dropping) is gone.
+Three separate faults each dropped pages, and every one of them reported success:
+
+- **A broken slide ended the walk.** `extract_slide_elements()` required a balanced `</div>` per
+  slide and **`break`ed** when it could not find one, so one model-generated slide with a missing
+  closing tag dropped every slide after it — 21 in, 10 out. Each slide is now bounded by the next
+  slide's opening tag and repaired in place, so a broken slide can only damage itself.
+- **`\bslide\b` is not a class match.** A hyphen is a word boundary, so `slide-inner`,
+  `slide-footer` and `slide-title` all matched, and with the bounded reader one real slide became
+  three fragments: an empty `<div class="slide"></div>` plus its own inner blocks. `_SLIDE_OPEN_RE`
+  captures the class attribute and the token list is checked for exactly `slide`.
+- **An out-of-flow slide gets no page.** A slide carrying `position:absolute` (or `float`) in its
+  own inline style leaves the flow and shares a page: measured 5 pages for 6 slides with one such
+  slide, and **1 page for 6** when all of them had it. The `@media print` block now forces
+  `position:relative`, `display:block`, `float:none`, `inset:auto`, `transform:none` and
+  `break-after:page` with `!important`, which beats an inline style that has no `!important`.
+  (Measured as harmless: a slide redefining `@page`, cancelling the break with its own `!important`,
+  or shrinking `.slide` height — Playwright's own page size and break rules hold.)
+
+`_verify_pdf_page_count()` then **raises** when the produced file has fewer pages than the deck has
+slides: a short file is a failed export, not a smaller export. `tests/test_export_slide_sanitization.py`
+guards all of it, and the old `test_ignores_unbalanced_slide` (which asserted the dropping) is gone.
 
 ## The designer chat has a memory
 

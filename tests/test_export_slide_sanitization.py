@@ -1,6 +1,9 @@
 import unittest
+from pathlib import Path
 
 from design_templates import extract_slide_elements
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ExportSlideSanitizationTests(unittest.TestCase):
@@ -56,6 +59,30 @@ class ExportSlideSanitizationTests(unittest.TestCase):
 
         self.assertEqual(len(slides), 2)
         self.assertIn('two', slides[1])
+
+    def test_a_slide_class_is_a_whole_class_not_a_substring(self):
+        """`\\bslide\\b` also matches `slide-inner` (a hyphen is a word boundary), so one real slide
+        was read as three fragments: an empty `<div class="slide"></div>` plus its own blocks."""
+        html = ('<div class="slide"><div class="slide-inner"><p>one</p></div>'
+                '<div class="slide-footer">f</div></div>')
+
+        slides = extract_slide_elements(html)
+
+        self.assertEqual(len(slides), 1)
+        self.assertEqual(slides[0], html)
+        # A class list still counts, and an unrelated class does not.
+        self.assertEqual(len(extract_slide_elements('<div class="printable slide x"><i>a</i></div>')), 1)
+        self.assertEqual(extract_slide_elements('<div class="slideshow"><i>a</i></div>'), [])
+
+    def test_print_css_puts_every_slide_back_in_flow(self):
+        """An out-of-flow slide gets no page of its own: measured 5 pages for 6 slides with one
+        `position:absolute` slide, and 1 page for 6 when all of them had it."""
+        source = (ROOT / 'generate_pdf_from_preview.py').read_text(encoding='utf-8')
+        print_block = source[source.index('@media print {'):source.index('.slide:last-child')]
+        for rule in ('position:relative !important', 'float:none !important',
+                     'display:block !important', 'break-after:page !important',
+                     'page-break-after:always !important'):
+            self.assertIn(rule, print_block, rule)
 
     def test_a_short_pdf_is_an_error_not_a_smaller_export(self):
         import generate_pdf_from_preview as engine

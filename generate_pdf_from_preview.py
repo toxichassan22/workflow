@@ -107,14 +107,18 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
 
     # Build tenant font CSS and layout/print CSS
     font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
+    # A slide carrying `position:absolute` or `float` in its own inline style leaves the flow, and
+    # an out-of-flow element gets no page of its own: measured 5 pages for 6 slides with one such
+    # slide, and 1 page for 6 when every slide had it. The print rules therefore put every slide
+    # back in flow with !important, which beats an inline style that has no !important of its own.
     layout_css = """
 * { margin:0; padding:0; box-sizing:border-box; }
 .slide { width:1280px; height:720px; direction:rtl; position:relative; overflow:hidden; }
 img { max-width:100%; max-height:100%; object-fit:cover; }
 @media print {
     body { background:white !important; margin:0 !important; padding:0 !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
-    .slide { margin:0 !important; border:none !important; page-break-after:always !important; page-break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; }
-    .slide:last-child { page-break-after:auto !important; }
+    .slide { margin:0 !important; border:none !important; page-break-after:always !important; break-after:page !important; page-break-inside:avoid !important; break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; }
+    .slide:last-child { page-break-after:auto !important; break-after:auto !important; }
 }
 """
 
