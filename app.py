@@ -13307,7 +13307,10 @@ def _build_fingerprint():
         path = os.path.join(root, name)
         try:
             with open(path, 'rb') as source:
-                fingerprint[name] = hashlib.sha256(source.read()).hexdigest()[:12]
+                # Line endings are normalised: a Windows checkout is CRLF and the server is LF, so
+                # the raw hash reported a difference where the code was identical.
+                data = source.read().replace(b'\r\n', b'\n')
+            fingerprint[name] = hashlib.sha256(data).hexdigest()[:12]
         except OSError:
             fingerprint[name] = 'missing'
     return fingerprint
