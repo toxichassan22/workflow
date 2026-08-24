@@ -448,6 +448,55 @@ its own — the «تحديث الهيكل المقترح» sidebar button, `gene
 `directGenerateProposalFile()` and travels to the server as `slidePlan`; do not re-expose it.
 `test_the_slide_structure_is_not_client_facing` guards this.
 
+## Never advertise an image that does not exist
+
+`##STREET_VIEW_1..4##` was listed in the design rules, in `SLIDE_PLAN_PROMPT` (type `site_photos`)
+and in `_get_images_info`, but **nothing produces a street photograph**: the Street View fetch in
+`maps_service.get_street_view()` is only reachable from `run_regeneration_all.py`, and `streetview`
+is never in `enabled_maps`. The model duly built a «قراءة بصرية للموقع» slide out of four such
+tokens, `_replace_data_placeholders`'s catch-all blanked them, and the slide shipped as **four empty
+frames**. Three rules came out of it:
+
+- `slide_engine.NO_STREET_VIEW_RULE` is appended to the plan prompt, the slide prompt, the location
+  note and `_get_images_info`. The `site_photos` type is gone, and `strip_street_view_slides()`
+  drops one that an old draft still carries.
+- **State what is missing.** `_get_images_info` now names every map as available or as forbidden
+  (`ممنوع كتابة ##MAP_CATCHMENT##`), and does the same for the cover, the moodboard, the interior
+  images and the 2D plans. Silence made the model assume the token existed.
+- **An unresolved image token never becomes an empty box.** `IMAGE_TOKEN_RE` is skipped by the
+  catch-all replacer, and `_drop_unresolved_image_placeholders()` (end of `finalize_slide_html` and
+  of `resolve_designer_chat_placeholders`) removes the `<img>` or the `background-image` that
+  carried it, plus any `src=""` / `url()` left by an older pass. An image that does not exist must
+  leave nothing behind, not a hole.
+
+## The export must contain the whole deck
+
+`extract_slide_elements()` used to require a balanced `</div>` per slide and **`break`** when it
+could not find one, so **one** model-generated slide with a missing closing tag silently dropped
+every slide after it — a 49-slide deck exported as a 24-page PDF, reported as success. Each slide is
+now bounded by the next slide's opening tag and repaired in place, so a broken slide can only damage
+itself. `_verify_pdf_page_count()` then **raises** when the produced file has fewer pages than the
+deck has slides: a short file is a failed export, not a smaller export. `tests/test_export_slide_sanitization.py`
+guards both, and the old `test_ignores_unbalanced_slide` (which asserted the dropping) is gone.
+
+## The designer chat has a memory
+
+`/api/designer-chat` used to send the planner nothing but the current message: it asked
+«أي شريحة؟», the user answered «8», and that answer reached a model which had never asked — so it
+asked again. Now:
+
+- The client keeps `tenantDesignerMessages` (with each turn's slide numbers),
+  `tenantDesignerChatMemory` and `tenantChatFocusIndexes`, sends them as `history` / `memory` /
+  `focusIndexes`, and stores them in the draft under `designerChat` — `restoreDesignerChat()` brings
+  the conversation back when the file is reopened instead of wiping it.
+- The server keeps `DESIGNER_CHAT_VERBATIM_TURNS` (10) turns verbatim and folds anything older into
+  one Arabic summary once it passes `DESIGNER_CHAT_MEMORY_CHARS`, so a long session cannot push the
+  actual request out of context. It returns the updated `memory` and `focusIndexes` every turn.
+- **Sticky slide focus:** a message with no slide number falls back to `focus_indexes` (the slides
+  the previous turn was about) before falling back to the current slide, and the prompt says so.
+- `designerChat` is in `GENERATION_PAYLOAD_DROPPED`, `PROMPT_PREVIOUS_OUTPUT` and
+  `DRAFT_BOOKKEEPING_KEYS`: it never reaches a slide prompt and never counts as draft content.
+
 ## Performance rules
 
 - `compress_response()` gzips text responses (`app.py`). The SPA shell is ~740KB uncompressed and

@@ -2334,6 +2334,7 @@ SECTION_DRAFT_STATUSES = {'draft', 'approved'}
 DRAFT_BOOKKEEPING_KEYS = {
     'draftId', 'draft_id', 'pageDrafts', 'sectionStatuses',
     'map_styles', 'map_type', 'calculate_landmark_driving', 'site_analysis_approved',
+    'designerChat',
 }
 
 # Below this many stored fields a draft is still being started, and blanking it can be a real

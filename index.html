@@ -6143,7 +6143,7 @@
       'survey_coordinates', 'directions_table', 'parcels', 'conflicts', 'warnings',
       'extraction_diagnostics', 'document_processing', 'land_document_processing',
       'document_summary', 'source_priority', 'nearby_landmarks_data', 'company_branding',
-      'location_polygon'
+      'location_polygon', 'designerChat'
     ];
 
     // Mirrors slide_engine.financial_study_has_real_input(). The financial section is rendered for
@@ -6402,7 +6402,28 @@
       return tenantCreativeImages;
     }
 
+    // The designer chat keeps its conversation: the turns, the compressed memory of the older ones,
+    // and the slides the conversation is currently about. It used to send the current message alone,
+    // so it asked «أي شريحة؟», the answer arrived at a model that had never asked, and it asked again.
     let tenantDesignerMessages = [];
+    let tenantDesignerChatMemory = '';
+    let tenantChatFocusIndexes = [];
+    const DESIGNER_CHAT_HISTORY_KEPT = 40;
+
+    function restoreDesignerChat(source) {
+      const stored = source && typeof source === 'object' ? (source.designerChat || {}) : {};
+      tenantDesignerMessages = Array.isArray(stored.messages)
+        ? stored.messages.filter(item => item && typeof item.content === 'string').map(item => ({
+          role: item.role === 'user' ? 'user' : 'assistant',
+          content: String(item.content).slice(0, 2000),
+          slides: Array.isArray(item.slides) ? item.slides : []
+        })).slice(-DESIGNER_CHAT_HISTORY_KEPT * 2)
+        : [];
+      tenantDesignerChatMemory = typeof stored.memory === 'string' ? stored.memory.slice(0, 4000) : '';
+      tenantChatFocusIndexes = Array.isArray(stored.focusIndexes)
+        ? stored.focusIndexes.map(Number).filter(value => Number.isInteger(value) && value >= 1).slice(0, 30)
+        : [];
+    }
     let tenantChatSlideIndex = 0;
     let tenantChatSlideScope = 'auto';
     let tenantMapPreviewState = null;
@@ -11111,7 +11132,7 @@
       tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
       tempCoverImage = null;
       tempMoodboardImages = {};
-      tenantDesignerMessages = [];
+      restoreDesignerChat(null);
       tenantChatSlideIndex = 0;
       tenantMapPreviewState = null;
       tenantMapPolygonPoints = [];
@@ -14258,6 +14279,17 @@
         }
         data.tenantCreativeImages = tenantCreativeImages;
         data.tenantSlidesData = tenantSlidesData;
+        // The designer conversation belongs to the file, not to the tab: reopening it used to wipe
+        // the chat and the agent lost track of the slide it had just been told about.
+        data.designerChat = {
+          messages: tenantDesignerMessages.slice(-DESIGNER_CHAT_HISTORY_KEPT * 2).map(item => ({
+            role: item.role === 'user' ? 'user' : 'assistant',
+            content: String(item.content || '').slice(0, 2000),
+            slides: Array.isArray(item.slides) ? item.slides : []
+          })),
+          memory: tenantDesignerChatMemory || '',
+          focusIndexes: tenantChatFocusIndexes || []
+        };
         data.site_analysis_approved = !!tenantProjectData.site_analysis_approved;
         collectMapStylePanel();
         data.map_styles = tenantProjectData.map_styles || {};
@@ -18641,6 +18673,23 @@
       reader.readAsDataURL(file);
     }
 
+    // The server compresses the older turns into one memory string and reports which slides the
+    // conversation is on; both are kept here and travel with the file, so a reload does not reset
+    // the conversation to «أي شريحة؟».
+    function applyDesignerChatMemory(reply) {
+      if (!reply || typeof reply !== 'object') return;
+      if (typeof reply.memory === 'string') tenantDesignerChatMemory = reply.memory.slice(0, 4000);
+      if (Array.isArray(reply.focusIndexes) && reply.focusIndexes.length) {
+        tenantChatFocusIndexes = reply.focusIndexes
+          .map(value => Number(value))
+          .filter(value => Number.isInteger(value) && value >= 1)
+          .slice(0, 30);
+      }
+      if (tenantDesignerMessages.length > DESIGNER_CHAT_HISTORY_KEPT * 2) {
+        tenantDesignerMessages = tenantDesignerMessages.slice(-DESIGNER_CHAT_HISTORY_KEPT * 2);
+      }
+    }
+
     async function sendTenantDesignerChat() {
       const input = document.getElementById('tenantChatInput');
       const message = input ? input.value.trim() : '';
@@ -18681,7 +18730,8 @@
       tenantDesignerMessages.push({
         role: 'user',
         content: message,
-        image: attachedImage ? attachedImage.dataUri : ''
+        image: attachedImage ? attachedImage.dataUri : '',
+        slides: target1BasedIndexes
       });
       if (input) { input.value = ''; growTenantChatInput(input); }
       clearTenantChatAttachment();
@@ -18698,11 +18748,21 @@
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
       }
 
+      // The turn is sent with the conversation behind it: recent turns verbatim, the older ones as
+      // the memory the server compressed, and the slides under discussion.
+      if (target1BasedIndexes.length) tenantChatFocusIndexes = target1BasedIndexes.slice();
       const data = await api('POST', '/api/designer-chat', {
         message,
         target: targetScope,
         scope: targetScope,
         indexes: target1BasedIndexes,
+        history: tenantDesignerMessages.slice(0, -1).slice(-DESIGNER_CHAT_HISTORY_KEPT).map(item => ({
+          role: item.role === 'user' ? 'user' : 'assistant',
+          content: String(item.content || '').slice(0, 2000),
+          slides: Array.isArray(item.slides) ? item.slides : []
+        })),
+        memory: tenantDesignerChatMemory,
+        focusIndexes: tenantChatFocusIndexes,
         slideHtml: tenantSlidesData[tenantChatSlideIndex]?.html || '',
         slideTitle: tenantSlidesData[tenantChatSlideIndex]?.title || '',
         slideIndex: tenantChatSlideIndex,
@@ -18726,11 +18786,18 @@
         return;
       }
 
+      applyDesignerChatMemory(reply);
+
       // The designer asked instead of guessing: show the question, change nothing, keep the answer
       // in the input's turn. Guessing and then editing wrongly is worse than one question.
       if (reply.action === 'ask') {
-        tenantDesignerMessages.push({ role: 'assistant', content: reply.response || 'وضّح المطلوب.' });
+        tenantDesignerMessages.push({
+          role: 'assistant',
+          content: reply.response || 'وضّح المطلوب.',
+          slides: tenantChatFocusIndexes.slice()
+        });
         renderTenantDesignerChat();
+        triggerAutoSaveDraft();
         if (input) input.focus();
         return;
       }
@@ -18766,7 +18833,8 @@
       }
       tenantDesignerMessages.push({
         role: 'assistant',
-        content: reply.response || 'تم تنفيذ الطلب وتحديث العرض.'
+        content: reply.response || 'تم تنفيذ الطلب وتحديث العرض.',
+        slides: tenantChatFocusIndexes.slice()
       });
       renderTenantSlides();
       renderTenantDesignerChat();
@@ -18997,7 +19065,7 @@
         : (Array.isArray(tenantProjectData.tenantSlidesData) ? tenantProjectData.tenantSlidesData : []);
       tenantSlidePlan = recoverTenantSlidePlan(tenantProjectData, tenantSlidesData);
       if (tenantSlidePlan) tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-      tenantDesignerMessages = [];
+      restoreDesignerChat(tenantProjectData);
       tenantChatSlideIndex = 0;
       activeSlideIndex = 0;
       tempCoverImage = null;
@@ -19166,7 +19234,7 @@
         tenantSlidesData = Array.isArray(draftData.tenantSlidesData) ? draftData.tenantSlidesData : [];
         tenantSlidePlan = recoverTenantSlidePlan(tenantProjectData, tenantSlidesData);
         if (tenantSlidePlan) tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-        tenantDesignerMessages = [];
+        restoreDesignerChat(draftData);
         tenantChatSlideIndex = 0;
         tenantMapPreviewState = null;
         tenantMapPolygonPoints = [];

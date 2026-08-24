@@ -12,7 +12,14 @@ FALLBACK_FONTS = "'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif"
 
 
 def extract_slide_elements(html):
-    """Return only balanced root .slide elements, discarding AI chatter around them."""
+    """Return every root .slide element, repairing one whose own tags do not balance.
+
+    This walked the whole document looking for a balanced `</div>` per slide and **`break`ed** when
+    it could not find one, so a single model-generated slide with a missing closing tag silently
+    dropped every slide after it: 21 slides in, 10 out, and the exported PDF simply stopped in the
+    middle of the deck with no error anywhere. Each slide is now bounded by the next slide's
+    opening tag, so a broken slide can only damage itself.
+    """
     if not html:
         return []
     slide_open = re.compile(
@@ -20,26 +27,28 @@ def extract_slide_elements(html):
         re.I,
     )
     div_token = re.compile(r'<div\b[^>]*>|</div\s*>', re.I)
+    starts = [match.start() for match in slide_open.finditer(html)]
     slides = []
-    cursor = 0
-    while True:
-        match = slide_open.search(html, cursor)
-        if not match:
-            break
-        depth = 1
-        end = None
-        for token in div_token.finditer(html, match.end()):
+    for position, start in enumerate(starts):
+        boundary = starts[position + 1] if position + 1 < len(starts) else len(html)
+        fragment = html[start:boundary]
+        depth = 0
+        cut = None
+        for token in div_token.finditer(fragment):
             if token.group(0).lower().startswith('</div'):
                 depth -= 1
-                if depth == 0:
-                    end = token.end()
+                if depth <= 0:
+                    cut = token.end()
                     break
             else:
                 depth += 1
-        if end is None:
-            break
-        slides.append(html[match.start():end].strip())
-        cursor = end
+        if cut is not None:
+            slides.append(fragment[:cut].strip())
+            continue
+        # The slide never closes itself: keep it up to the next slide and close what it left open.
+        depth = sum(-1 if token.group(0).lower().startswith('</div') else 1
+                    for token in div_token.finditer(fragment))
+        slides.append(fragment.strip() + ('</div>' * depth if depth > 0 else ''))
     return slides
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -484,7 +493,7 @@ top:{content_top}px إلى bottom:{content_bottom}px. padding: 16px 36px.
 - خريطة المعالم: ##MAP_LANDMARKS## (background-image)
 - خريطة الوصول: ##MAP_ACCESS## (background-image)
 - خريطة نطاق التأثير: ##MAP_CATCHMENT## (background-image)
-- صور Street View: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
+- لا توجد صور فوتوغرافية للشوارع أو لمحيط الموقع، ولا تُولَّد من الخرائط ولا من التصور البصري: ممنوع كتابة ##STREET_VIEW_1## أو أي رمز مشابه، وممنوع إنشاء شريحة صور موقع أو بطاقات صور للمحيط. الموقع يُعرض بالخرائط والبيانات.
 - شعار الشركة: ##LOGO## (height:36px في الهيدر، height:80px في الغلاف والختام، ضعه داخل شارة داكنة إذا كانت نصوصه بيضاء)
 - شعار المشروع ##PROJECT_LOGO##: إذا ذُكر في «الصور المتوفرة» أنه متوفر فوضعه **إلزامي** — في هيدر كل شريحة محتوى بجانب شعار الشركة، وفي الغلاف والختام كذلك. الشعاران جنبًا إلى جنب بفاصل رأسي رقيق (1px solid #e2e8f0) وبارتفاع واحد متساوٍ (36px في الهيدر، 72px-80px في الغلاف والختام). استخدم شارة داكنة إذا كان أحدهما أبيض أو فاتح. إذا ذُكر أنه غير متوفر فلا تكتب ##PROJECT_LOGO## إطلاقًا.
 - ممنوع رسم أي دوائر أو دبابيس أو مؤشرات موقع HTML فوق الخرائط (##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##) لأن هذه الصور تحتوي بالفعل على علامات موقع احترافية ومضلعات تحديد وبوصلة وخرائط مصغرة مرسومة مباشرة بدقة عالية.

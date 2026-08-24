@@ -3592,6 +3592,94 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('creative_images=creative_images', app_source)
         self.assertIn('التعديل جرى على الكود بدون معاينة بصرية للشريحة.', app_source)
 
+    def test_no_slide_can_be_built_from_images_that_do_not_exist(self):
+        """A slide came out as four empty frames: it used ##STREET_VIEW_1..4##, which nothing
+        produces, and the unresolved tokens were blanked into src="" / url() — an empty card."""
+        import slide_engine as engine
+        self.assertIn('لا تكتب ##STREET_VIEW_1##', engine.NO_STREET_VIEW_RULE)
+        for source in ('slide_engine.py', 'app.py', 'design_templates.py'):
+            text = (ROOT / source).read_text(encoding='utf-8')
+            # No line may still offer the token to the model.
+            for line in text.splitlines():
+                if 'STREET_VIEW' not in line:
+                    continue
+                self.assertNotIn('استخدم', line, f'{source}: {line.strip()}')
+                self.assertNotIn('لصور الموقع', line, f'{source}: {line.strip()}')
+        # The plan can no longer ask for such a slide, and one from an old draft is dropped.
+        self.assertNotIn('site_photos', engine.SLIDE_PLAN_PROMPT)
+        plan = engine.strip_street_view_slides({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'قراءة بصرية للموقع', 'type': 'site_photos'},
+            {'title': 'الختام', 'type': 'closing'},
+        ]})
+        self.assertEqual([s['type'] for s in plan['slides']], ['cover', 'closing'])
+        self.assertNotIn('site_photos', engine.validate_slide_plan(
+            {'slides': [{'title': 'x', 'type': 'site_photos'}]}, {})[1].__str__().replace(
+                "unknown type 'site_photos'", ''))
+
+        # An image token that reaches the end of the pipeline takes its carrier with it.
+        html = ('<div class="slide">'
+                '<div style="background-image:url(##STREET_VIEW_1##);width:200px"></div>'
+                '<img src="##STREET_VIEW_2##" alt="">'
+                '<div style="background-image:url();width:200px"></div>'
+                '<img src="" alt="">'
+                '<img src="/uploads/creative/cover.png" alt="">'
+                '</div>')
+        cleaned = engine._drop_unresolved_image_placeholders(html)
+        self.assertNotIn('##STREET_VIEW', cleaned)
+        self.assertNotIn('url()', cleaned)
+        self.assertNotIn('src=""', cleaned)
+        self.assertIn('/uploads/creative/cover.png', cleaned)
+        # An unavailable map is stated as forbidden instead of being left unmentioned.
+        with self.application_module.app.test_request_context():
+            self.application_module.g.tenant_id = self.tenant_a
+            info = self.application_module._get_images_info(
+                {'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/overview.png'}}, {})
+        self.assertIn('##MAP_OVERVIEW##', info)
+        self.assertIn('ممنوع كتابة ##MAP_CATCHMENT##', info)
+        self.assertIn('ممنوع كتابة ##PLAN_IMAGE_N##', info)
+        self.assertIn('##STREET_VIEW_1##', info)
+
+    def test_designer_chat_remembers_the_conversation_and_the_slide(self):
+        """It used to receive the current message alone: it asked «أي شريحة؟», the answer arrived at
+        a model that had never asked, and the next turn asked again."""
+        module = self.application_module
+        history = [
+            {'role': 'user', 'content': 'الشريحة 8 فيها مشكلة', 'slides': [8]},
+            {'role': 'assistant', 'content': 'ما هي المشكلة تحديدًا؟', 'slides': [8]},
+        ]
+        memory, recent = module._designer_chat_memory(history, '')
+        self.assertEqual(memory, '')
+        self.assertEqual(len(recent), 2)
+        lines = module._designer_chat_history_lines(recent)
+        self.assertIn('المستخدم [شرائح: 8]: الشريحة 8 فيها مشكلة', lines[0])
+
+        # A long conversation is compressed once, not carried whole.
+        long_history = [{'role': 'user', 'content': 'ك' * 900, 'slides': [3]} for _ in range(20)]
+        with patch.object(module, 'call_zai_chat',
+                          return_value={'choices': [{'message': {'content': 'ملخص: الحديث عن الشريحة 3.'}}]}) as chat:
+            compressed, kept = module._designer_chat_memory(long_history, '')
+        self.assertTrue(chat.called)
+        self.assertIn('الشريحة 3', compressed)
+        self.assertEqual(len(kept), module.DESIGNER_CHAT_VERBATIM_TURNS)
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn('## ذاكرة المحادثة (ملخص ما سبق)', app_source)
+        self.assertIn('## آخر رسائل المحادثة بالترتيب', app_source)
+        self.assertIn('## الشرائح التي تدور عنها المحادثة الآن', app_source)
+        self.assertIn("req_indexes = list(focus_indexes)", app_source)
+        self.assertIn("'memory': chat_memory", app_source)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('memory: tenantDesignerChatMemory,', index_source)
+        self.assertIn('focusIndexes: tenantChatFocusIndexes,', index_source)
+        self.assertIn('function applyDesignerChatMemory(reply)', index_source)
+        self.assertIn('function restoreDesignerChat(source)', index_source)
+        self.assertIn('data.designerChat = {', index_source)
+        # The conversation is restored with the file instead of being wiped on open.
+        self.assertNotIn('tenantDesignerMessages = [];\n      tenantChatSlideIndex', index_source)
+        self.assertIn("'designerChat'", (ROOT / 'db.py').read_text(encoding='utf-8'))
+
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""
         import slide_engine as engine

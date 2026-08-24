@@ -95,9 +95,15 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
 
     # Strip any previously-baked font-family declarations so the tenant font wins
     html = sanitize_slide_html_for_export(html)
+    slide_tags = len(re.findall(r'<div\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\1', html, re.I))
     slides = extract_slide_elements(html)
     if slides:
         html = "\n".join(slides)
+    if slide_tags and len(slides) != slide_tags:
+        # Losing a slide between the deck and the file is exactly the failure that shipped a
+        # 24-page PDF for a 49-slide deck, so it is stated loudly instead of being joined over.
+        print(f"[PDF] WARNING: {slide_tags} slide elements in the html but {len(slides)} extracted")
+    print(f"[PDF] slides to print: {len(slides)}")
 
     # Build tenant font CSS and layout/print CSS
     font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
@@ -205,13 +211,38 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
             )
             browser.close()
         print("[PDF] Generation complete!")
-        return str(out_path)
+        produced = str(out_path)
     except Exception as e:
         print(f"[PDF] Playwright failed ({e}); falling back to PyMuPDF.")
         traceback.print_exc()
-        return _generate_pdf_with_fitz(html, out_path)
+        produced = _generate_pdf_with_fitz(html, out_path)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+    _verify_pdf_page_count(produced, len(slides))
+    return produced
+
+
+def _verify_pdf_page_count(pdf_path, expected_slides):
+    """Refuse to hand back a PDF with fewer pages than the deck has slides.
+
+    A missing slide used to reach the reader as a finished file: the export answered success and
+    the PDF simply ended early. A short file is a failed export, not a smaller export.
+    """
+    if not pdf_path or not expected_slides:
+        return
+    try:
+        import fitz
+        with fitz.open(str(pdf_path)) as document:
+            pages = document.page_count
+    except Exception as error:
+        print(f"[PDF] page count check skipped: {error}")
+        return
+    print(f"[PDF] pages={pages} slides={expected_slides}")
+    if pages < expected_slides:
+        raise RuntimeError(
+            f'تعذر تصدير العرض كاملاً: الملف يحتوي {pages} صفحة مقابل {expected_slides} شريحة.')
+    if pages > expected_slides:
+        print(f"[PDF] WARNING: {pages} pages for {expected_slides} slides — a slide overflowed its page")
 
 
 

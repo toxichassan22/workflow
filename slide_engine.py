@@ -39,7 +39,7 @@ CONTENT_DISTRIBUTION_RULES = """
    - شرائح محتوى (N) — العدد يحدده المحتوى
 7. **تنوع التصميم:** لا تجعل شريحتين متتاليتين بنفس نمط التصميم (مثلاً لا تجعل شريحتين متتاليتين كلتيهما bullets)
 8. **الشرائح الثابتة:** الغلاف (1)، الفهرس (2)، المود بورد (قبل الأخيرة)، الختام (الأخيرة)
-9. **شرائح تحليل الموقع:** إذا وُجدت بيانات موقع (location_lat/lng) أو (location_address)، أضف شرائح map_overview إلى map_landmarks إلى map_access إلى site_specs إلى site_photos إلى map_catchment متسلسلة بعد الفهرس
+9. **شرائح تحليل الموقع:** إذا وُجدت بيانات موقع (location_lat/lng) أو (location_address)، أضف شرائح map_overview إلى map_landmarks إلى map_access إلى site_specs إلى map_catchment متسلسلة بعد الفهرس
 """
 
 
@@ -58,7 +58,7 @@ def _suggest_design_style(title, bullets=None, slide_type='content'):
     }
     if slide_type in fixed:
         return fixed[slide_type]
-    if slide_type.startswith('map_') or slide_type in ('site_specs', 'site_photos'):
+    if slide_type.startswith('map_') or slide_type == 'site_specs':
         return 'map'
 
     if re.search(r'(?:مؤشر|أداء|قيمة مضافة|عائد|roi|noi|ربح|تكلفة|مالي|جدوى|إيراد|نسبة|رقم|إحصائية|تكلفة|دخل|استثمار|profit|cost|financial|revenue)', text):
@@ -99,8 +99,6 @@ def _maybe_map_slide_type(title, project_data):
         return 'map_access'
     if re.search(r'(?:نطاق|catchment|دوائر)', t):
         return 'map_catchment'
-    if re.search(r'(?:صور الموقع|street view)', t):
-        return 'site_photos'
     if re.search(r'(?:خصائص|مواصفات|site specs)', t):
         return 'site_specs'
     return None
@@ -193,6 +191,19 @@ def _timeline_data_note(project_data):
     )
 
 
+# The system never produces photographs of the streets around a site: the Street View fetch is
+# not part of any workflow the user can run, and the visual-concept board holds renders of the
+# project itself, not its surroundings. The rules used to advertise ##STREET_VIEW_1..4## anyway,
+# the model built a four-card «قراءة بصرية للموقع» slide out of them, and the unresolved tokens
+# were blanked — the slide shipped as four empty frames. Say it, do not imply it.
+NO_STREET_VIEW_RULE = (
+    "ممنوع نهائياً: لا توجد صور فوتوغرافية للشوارع أو للموقع أو لمحيط الأرض، ولا تُولَّد من الخرائط "
+    "ولا من التصور البصري. لا تكتب ##STREET_VIEW_1## أو أي رمز مشابه، ولا تنشئ شريحة صور موقع أو "
+    "«قراءة بصرية للمحيط» أو بطاقات صور للواجهات المحيطة. الصور المتوفرة هي المذكورة في «الصور "
+    "المتوفرة» فقط، والموقع يُعرض بالخرائط والبيانات لا بالصور."
+)
+
+
 def _location_data_note(project_data):
     """Build an extra prompt note when map/location data is present."""
     if not project_data:
@@ -214,8 +225,6 @@ def _location_data_note(project_data):
         parts.append('بيانات الطرق الرئيسية متاحة.')
     if project_data.get('catchment_areas'):
         parts.append('بيانات نطاق التأثير متاحة.')
-    if project_data.get('street_view_images'):
-        parts.append('صور Street View متاحة.')
     if not parts:
         return ''
     return (
@@ -227,9 +236,9 @@ def _location_data_note(project_data):
         "- map_landmarks (يتطلب landmarks_matrix)\n"
         "- map_access (يتطلب main_roads)\n"
         "- site_specs (يتطلب بيانات الموقع)\n"
-        "- site_photos (يتطلب street_view_images)\n"
         "- map_catchment (يتطلب catchment_areas)\n"
-        "استخدم placeholders ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##، ##STREET_VIEW_1##..."
+        "استخدم placeholders ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##\n"
+        + NO_STREET_VIEW_RULE
     )
 
 
@@ -315,6 +324,23 @@ def project_has_financial_study(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     return financial_study_has_real_input(source.get('financial_study_model'),
                                          source.get('financial_calc_data'))
+
+
+def strip_street_view_slides(plan):
+    """Drop a site-photos slide from a plan: there are no photographs of the site to put in it.
+
+    The type is gone from the prompt, but an older draft can still carry a plan that has one, and a
+    model can still guess the name. Left in, it becomes a slide of empty image frames.
+    """
+    if not isinstance(plan, dict) or not isinstance(plan.get('slides'), list):
+        return plan
+    kept = [slide for slide in plan['slides']
+            if not (isinstance(slide, dict) and slide.get('type') == 'site_photos')]
+    if len(kept) != len(plan['slides']):
+        print(f"[SLIDE-PLAN] dropped {len(plan['slides']) - len(kept)} site_photos slide(s): no site photographs exist")
+        plan['slides'] = kept
+        plan['proposed_count'] = len(kept)
+    return plan
 
 
 def strip_financial_slides(plan, project_data):
@@ -485,7 +511,8 @@ PROMPT_COVERED_ELSEWHERE = {
 }
 
 # The deck itself. Feeding a model the slides it produced last time invites it to copy them.
-PROMPT_PREVIOUS_OUTPUT = {'tenantSlidesData', 'pageDrafts', 'slides'}
+# `designerChat` is the editing conversation: it belongs to the chat, never to a slide prompt.
+PROMPT_PREVIOUS_OUTPUT = {'tenantSlidesData', 'pageDrafts', 'slides', 'designerChat'}
 
 # Machine artefacts of the land analysis and the map pipeline: the facts they produced are already
 # in the visible land and location fields.
@@ -771,7 +798,6 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - map_access: خريطة الطرق + المداخل (يتطلب main_roads)
 - map_catchment: خريطة نطاق التأثير + دوائر القيادة (يتطلب catchment_areas)
 - site_specs: جدول خصائص الموقع (يتطلب location data)
-- site_photos: صور Street View للموقع (يتطلب street view images)
 
 ## أنماط تصميم الشرائح (design_style)
 - dashboard: بطاقات أرقام مالية كبيرة (metrics)
@@ -796,7 +822,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
   "slides": [
     {{
       "title": "عنوان الشريحة بالعربي",
-      "type": "cover|index|content|section_divider|moodboard|closing|map_overview|map_landmarks|map_access|map_catchment|site_specs|site_photos",
+      "type": "cover|index|content|section_divider|moodboard|closing|map_overview|map_landmarks|map_access|map_catchment|site_specs",
       "content_density": "low|medium|high",
       "design_style": "dashboard|cards|timeline|table|text|image|flow|swot|map|divider",
       "bullets": ["نقطة 1", "نقطة 2", "نقطة 3"],
@@ -829,6 +855,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - في جميع الشرائح: إذا كان لوجو الشركة أو المشروع يحتوي على نصوص بيضاء أو فاتحة، ضعه داخل شارة داكنة أنيقة بخلفية كحلية مؤسسية لضمان تباينه التام.
 - كل شريحة content لازم يكون فيها 3-6 bullets على الأقل
 - وزع المحتوى بحيث كل شريحة تكون ممتلئة بصرياً 60-85%
+- {no_street_view}
 """
 
 
@@ -930,6 +957,7 @@ def build_slide_plan_prompt(project_data, branding, tenant_id=None):
         min_slides=min_slides,
         max_slides=max_slides,
         distribution_rules=CONTENT_DISTRIBUTION_RULES,
+        no_street_view=NO_STREET_VIEW_RULE,
     )
     location_note = _location_data_note(project_data)
     if location_note:
@@ -1101,7 +1129,6 @@ def parse_slide_plan(response_text, branding=None, project_data=None):
             slide['requires_image'] = (
                 slide_type in ('cover', 'moodboard', 'section_divider')
                 or slide_type.startswith('map_')
-                or slide_type == 'site_photos'
                 or slide.get('design_style') == 'image'
             )
 
@@ -1131,7 +1158,7 @@ def validate_slide_plan(plan, branding):
     # Check fixed-position slides
     valid_types = {'cover', 'index', 'content', 'section_divider', 'moodboard', 'closing',
                    'map_overview', 'map_landmarks', 'map_access', 'map_catchment',
-                   'site_specs', 'site_photos'}
+                   'site_specs'}
 
     if slides[0].get('type') != 'cover':
         issues.append("First slide must be 'cover'")
@@ -1206,8 +1233,6 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         placeholder_note = 'يجب استخدام ##MAP_ACCESS## لعرض خريطة الطرق والمداخل.'
     elif slide_type == 'map_catchment':
         placeholder_note = 'يجب استخدام ##MAP_CATCHMENT## لعرض دوائر نطاق التأثير.'
-    elif slide_type == 'site_photos':
-        placeholder_note = 'يجب استخدام ##STREET_VIEW_1## إلى ##STREET_VIEW_4## لعرض صور الموقع.'
     elif slide_type == 'site_specs':
         placeholder_note = 'استخدم جدول بيانات احترافي لخصائص الموقع.'
     elif slide_type == 'moodboard':
@@ -1254,8 +1279,9 @@ def _block_external_images(html):
     """Block external image URLs (http/https) except allowed placeholders."""
     if not html:
         return html
+    # ##STREET_VIEW_N## is deliberately absent: no such image exists, so an <img> carrying one is
+    # removed here instead of surviving to be blanked into an empty frame.
     allowed = {'##MAP_OVERVIEW##', '##MAP_LANDMARKS##', '##MAP_ACCESS##', '##MAP_CATCHMENT##',
-               '##STREET_VIEW_1##', '##STREET_VIEW_2##', '##STREET_VIEW_3##', '##STREET_VIEW_4##',
                '##IMAGE_COVER##', '##LOGO##', '##PROJECT_LOGO##', '##MOODBOARD_IMAGE_1##', '##MOODBOARD_IMAGE_2##',
                '##MOODBOARD_IMAGE_3##', '##MOODBOARD_IMAGE_4##'}
 
@@ -1281,7 +1307,6 @@ def _ensure_map_placeholder(html, slide_type):
         'map_landmarks': '##MAP_LANDMARKS##',
         'map_access': '##MAP_ACCESS##',
         'map_catchment': '##MAP_CATCHMENT##',
-        'site_photos': '##STREET_VIEW',
     }
     if slide_type not in expected:
         return html
@@ -1289,8 +1314,6 @@ def _ensure_map_placeholder(html, slide_type):
     if marker in html:
         return html
     # Inject a background-image fallback if placeholder is missing
-    if marker == '##STREET_VIEW':
-        marker = '##STREET_VIEW_1##'
     fallback = f'<div style="position:absolute;top:0;left:0;right:0;bottom:0;z-index:-1;background-image:url({marker});background-size:cover;background-position:center;"></div>'
     html = html.replace('class="slide"', 'class="slide"')
     # Insert fallback before closing of slide div
@@ -1705,6 +1728,11 @@ def _replace_data_placeholders(html, project_data, branding=None):
     # Regex search for any custom tokens generated by LLM (e.g. ##custom_key##)
     def token_replacer(match):
         token_str = match.group(0)
+        # An image token is left standing for _drop_unresolved_image_placeholders to deal with.
+        # Blanking it here is what produced empty framed boxes: src="" / url() render as a card
+        # with nothing in it, and the reader saw it as part of the design.
+        if IMAGE_TOKEN_RE.fullmatch(token_str):
+            return token_str
         raw_key = token_str.replace('##', '').strip()
         for k, v in project_data.items():
             if k.lower() == raw_key.lower() and v is not None:
@@ -1714,6 +1742,36 @@ def _replace_data_placeholders(html, project_data, branding=None):
     html = re.sub(r'##[a-zA-Z0-9_]+##', token_replacer, html)
 
     return html
+
+
+# A token naming an image. Anything matching this that survives the whole pipeline has no image
+# behind it, so its carrier is removed rather than emptied.
+IMAGE_TOKEN_RE = re.compile(
+    r'##[A-Za-z0-9_]*(?:IMAGE|IMG|PHOTO|STREET_VIEW|MAP_|PLAN|INTERIOR|MOODBOARD|COVER|LOGO)[A-Za-z0-9_]*##',
+    re.IGNORECASE,
+)
+
+
+def _drop_unresolved_image_placeholders(html):
+    """Remove image carriers that ended up with no image, instead of leaving an empty frame.
+
+    A slide came out with four empty cards because it used ##STREET_VIEW_1..4##, which no workflow
+    produces: the tokens were blanked into `src=""` / `url()` and the frames stayed. An image that
+    does not exist must leave nothing behind, not a hole.
+    """
+    if not html:
+        return html
+    html = re.sub(r'<img\b[^>]*>',
+                  lambda m: '' if IMAGE_TOKEN_RE.search(m.group(0)) else m.group(0),
+                  html, flags=re.IGNORECASE)
+    # background / background-image declarations pointing at a leftover token or at nothing.
+    html = re.sub(r'background(?:-image)?\s*:\s*url\(\s*["\']?[^)"\']*##[^)"\']*["\']?\s*\)\s*;?',
+                  '', html, flags=re.IGNORECASE)
+    html = re.sub(r'background(?:-image)?\s*:\s*url\(\s*["\']?\s*["\']?\s*\)\s*;?',
+                  '', html, flags=re.IGNORECASE)
+    html = re.sub(r'<img\b[^>]*src=["\']\s*["\'][^>]*>', '', html, flags=re.IGNORECASE)
+    # Whatever token text is left is not an image reference the reader should see.
+    return IMAGE_TOKEN_RE.sub('', html)
 
 
 def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None, project_logo=None):
@@ -1905,7 +1963,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     html = resolve_logo_in_html(
         html, tenant_id, project_logo=(project_data or {}).get('project_logo')
     )
-    return html
+    return _drop_unresolved_image_placeholders(html)
 
 
 
@@ -1953,8 +2011,8 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
 - ممنوع box-shadow/filter/backdrop-filter
 - استخدم ##LOGO## للشعار، ##IMAGE_COVER## لصورة الغلاف، ##MOODBOARD_IMAGE_N## لصور المود بورد
 - للخرائط: ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##
-- لصور الموقع: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
 - ممنوع base64 أو روابط صور خارجية
+- """ + NO_STREET_VIEW_RULE + """
 """
 
     results = [None] * total

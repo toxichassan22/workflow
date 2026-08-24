@@ -1321,22 +1321,32 @@ def _get_images_info(images, project_data=None):
     if plans_count > 0:
         info += f"- صور المخططات المعمارية 2D (استخدم الرموز ##PLAN_IMAGE_1## حتى ##PLAN_IMAGE_{plans_count}##): {plans_count} مخططات متوفرة (شريحة مخصصة لكل مخطط مع عنوانه وشرحه)\n"
 
-    # Map image placeholders (populated when project has location data)
+    # Map image placeholders (populated when project has location data). An absent map used to be
+    # simply unmentioned, and the rules list every token, so the model wrote one anyway; the
+    # unresolved token was then blanked and the slide shipped with an empty frame. Every map is
+    # now named as available or as forbidden, exactly like ##PROJECT_LOGO##.
     map_placeholders = {
         '##MAP_OVERVIEW##': 'خريطة الموقع العامة',
         '##MAP_LANDMARKS##': 'خريطة المعالم المحيطة',
         '##MAP_ACCESS##': 'خريطة الوصول والطرق',
         '##MAP_CATCHMENT##': 'خريطة نطاق التأثير',
-        '##STREET_VIEW_1##': 'صورة الموقع 1',
-        '##STREET_VIEW_2##': 'صورة الموقع 2',
-        '##STREET_VIEW_3##': 'صورة الموقع 3',
-        '##STREET_VIEW_4##': 'صورة الموقع 4',
     }
-    if isinstance(images, dict) and images.get('map_placeholders'):
-        for placeholder, path in images['map_placeholders'].items():
-            if path:
-                label = map_placeholders.get(placeholder, placeholder)
-                info += f"- {label}: {placeholder}\n"
+    supplied_maps = images.get('map_placeholders') if isinstance(images, dict) else None
+    available_maps = {placeholder for placeholder, path in (supplied_maps or {}).items() if path}
+    for placeholder, label in map_placeholders.items():
+        if placeholder in available_maps:
+            info += f"- {label}: {placeholder}\n"
+        else:
+            info += f"- {label}: غير متوفرة — ممنوع كتابة {placeholder}\n"
+    info += f"- {slide_engine.NO_STREET_VIEW_RULE}\n"
+    if not has_cover:
+        info += "- ممنوع كتابة ##IMAGE_COVER## أو ##MAIN_IMAGE## لعدم وجود صورة رئيسية معتمدة\n"
+    if moodboard_count <= 0:
+        info += "- ممنوع كتابة ##MOODBOARD_IMAGE_N## لعدم وجود صور للزوايا الخارجية\n"
+    if not interior_components and interior_count <= 0:
+        info += "- ممنوع كتابة ##INTERIOR_...## لعدم وجود صور تصور داخلي\n"
+    if plans_count <= 0:
+        info += "- ممنوع كتابة ##PLAN_IMAGE_N## أو ##2D_PLAN_N## لعدم وجود مخططات مرفوعة\n"
     
     # Landmark driving times and distances
     if isinstance(images, dict) and images.get('map_landmarks'):
@@ -2567,8 +2577,10 @@ def resolve_designer_chat_placeholders(html_out, project_data, presentation_id, 
         for idx, mb_img in enumerate(moodboard):
             if mb_img:
                 html_out = html_out.replace(f'##MOODBOARD_IMAGE_{idx + 1}##', mb_img)
-                
-    return html_out
+
+    # An edited slide goes to the reader as it is, so a token with no image behind it must not
+    # survive as an empty frame here either.
+    return slide_engine._drop_unresolved_image_placeholders(html_out)
 
 
 def _designer_json_response(text):
@@ -2823,6 +2835,65 @@ HTML الحالي:
     return html, f'تم الحفاظ على تصميم الشريحة {slide_index + 1} لتعذر التعديل التلقائي عليها.'
 
 
+DESIGNER_CHAT_VERBATIM_TURNS = 10
+DESIGNER_CHAT_MEMORY_CHARS = 6000
+DESIGNER_CHAT_MEMORY_MAX = 1800
+
+
+def _designer_chat_history_lines(history):
+    """The conversation as prompt lines, with each turn's slide numbers attached."""
+    lines = []
+    for entry in history if isinstance(history, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        text = str(entry.get('content') or '').strip()
+        if not text:
+            continue
+        role = 'المستخدم' if entry.get('role') == 'user' else 'المصمم'
+        slides = [str(int(n)) for n in (entry.get('slides') or []) if str(n).strip().isdigit()]
+        scope = f" [شرائح: {'، '.join(slides)}]" if slides else ''
+        lines.append(f"{role}{scope}: {text[:1500]}")
+    return lines
+
+
+def _designer_chat_memory(history, memory):
+    """Keep the conversation whole: recent turns verbatim, older ones compressed into one memory.
+
+    The chat used to receive nothing but the current message, so it asked «أي شريحة؟», the user
+    answered «8», and the next turn had no idea what «8» referred to. History is now carried, and
+    once it grows past DESIGNER_CHAT_MEMORY_CHARS the older half is folded into a short Arabic
+    summary so a long session cannot push the actual request out of the context.
+    """
+    memory = str(memory or '').strip()
+    entries = [e for e in (history if isinstance(history, list) else []) if isinstance(e, dict)]
+    recent = entries[-DESIGNER_CHAT_VERBATIM_TURNS:]
+    older = entries[:-DESIGNER_CHAT_VERBATIM_TURNS] if len(entries) > DESIGNER_CHAT_VERBATIM_TURNS else []
+    older_lines = _designer_chat_history_lines(older)
+    if not older_lines:
+        return memory, recent
+
+    older_text = '\n'.join(older_lines)
+    if len(memory) + len(older_text) <= DESIGNER_CHAT_MEMORY_CHARS:
+        merged = (memory + '\n' + older_text).strip() if memory else older_text
+        return merged[-DESIGNER_CHAT_MEMORY_CHARS:], recent
+
+    try:
+        summary = extract_chat_content(call_zai_chat(
+            "أنت تلخّص محادثة تصميم عرض تقديمي. أعد ملخصاً عربياً موجزاً يحفظ: أي شريحة كان الحديث "
+            "عنها بأرقامها، والمشاكل التي ذُكرت، والتعديلات التي نُفّذت، والقرارات وتفضيلات المستخدم، "
+            "وأي سؤال لم يُجب عليه بعد. بلا مقدمات وبلا تنسيق زائد.",
+            f"الذاكرة السابقة:\n{memory or 'لا توجد'}\n\nالمحادثة الأقدم:\n{older_text}",
+            max_tokens=700, model=SLIDE_TEXT_MODEL), 'DESIGNER-MEMORY')
+        summary = str(summary or '').strip()
+    except Exception as error:
+        print(f"[DESIGNER MEMORY] compression failed: {error}")
+        summary = ''
+    if not summary:
+        # Compression failed: keep the tail of the raw text rather than losing the conversation.
+        summary = (memory + '\n' + older_text).strip()
+    return summary[-DESIGNER_CHAT_MEMORY_MAX:], recent
+
+
 @app.route('/api/designer-chat', methods=['POST'])
 @require_auth
 def api_designer_chat():
@@ -2897,10 +2968,30 @@ def api_designer_chat():
         any(kw in message.lower() for kw in ALL_SLIDES_KEYWORDS)
     )
 
+    # The conversation so far. Without it every turn started from nothing: the designer asked which
+    # slide, the user answered, and the answer arrived at a model that had never asked.
+    chat_memory, recent_history = _designer_chat_memory(data.get('history'), data.get('memory'))
+    history_lines = _designer_chat_history_lines(recent_history)
+    focus_indexes = []
+    for value in (data.get('focusIndexes') if isinstance(data.get('focusIndexes'), list) else []):
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= number <= len(slides) and number not in focus_indexes:
+            focus_indexes.append(number)
+
     branding = db.get_branding(g.tenant_id) or {}
     training_context = db.get_training_context(g.tenant_id) or ''
     summary = [{'index': i + 1, 'title': s.get('title', '') if isinstance(s, dict) else ''} for i, s in enumerate(slides)]
     all_note = "\n تنبيه هام جداً: المستخدم طلب صراحة تعديل جميع الشرائح دون استثناء! يجب أن تعيد target='all' في الأداة edit_slides." if is_all_slides_request else ""
+    memory_note = f"\n\n## ذاكرة المحادثة (ملخص ما سبق)\n{chat_memory}" if chat_memory else ""
+    history_note = ("\n\n## آخر رسائل المحادثة بالترتيب\n" + '\n'.join(history_lines)) if history_lines else ""
+    focus_note = (
+        f"\n\n## الشرائح التي تدور عنها المحادثة الآن: {'، '.join(str(n) for n in focus_indexes)}\n"
+        "إذا لم تذكر الرسالة الحالية رقم شريحة فهي تكمل الحديث عن هذه الشرائح نفسها — استخدمها في "
+        "indexes ولا تسأل عن رقم الشريحة من جديد، ولا تعتبرها الشريحة الحالية بالمصادفة."
+    ) if focus_indexes else ""
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
 أنت وكيل تصميم عروض متميز ذكي يفهم كافة اللهجات العربية، المترادفات، الأرقام، وأوامر إضافة وتحديث الخرائط والتنسيقات.
@@ -2936,7 +3027,8 @@ def api_designer_chat():
 5. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
 
 قائمة الشرائح الحالية في العرض ({len(slides)} شريحة):
-{json.dumps(summary, ensure_ascii=False)}"""
+{json.dumps(summary, ensure_ascii=False)}
+{memory_note}{history_note}{focus_note}"""
     # An image the user attached in the chat: a design reference, something to insert, or the
     # problem they are pointing at. The attach button used to open the training page's file input,
     # so it never reached this endpoint at all.
@@ -2967,6 +3059,8 @@ def api_designer_chat():
                 'slidesData': slides,
                 'creativeImages': data.get('creativeImages') if isinstance(data.get('creativeImages'), dict) else {},
                 'actions': [{'tool': 'ask', 'status': 'success'}],
+                'memory': chat_memory,
+                'focusIndexes': focus_indexes,
             }})
 
         if not actions:
@@ -2977,6 +3071,10 @@ def api_designer_chat():
                 req_indexes = data.get('indexes') if isinstance(data.get('indexes'), list) else []
                 if not req_indexes:
                     req_indexes = [idx + 1 for idx in detect_slide_indexes_from_message_py(message, slides)]
+                if not req_indexes:
+                    # «صحّحها» after «الشريحة 8 فيها مشكلة» means slide 8, not whichever slide the
+                    # preview happens to be scrolled to.
+                    req_indexes = list(focus_indexes)
                 if req_indexes:
                     target = 'indexes'
                     target_indexes = req_indexes
@@ -3114,7 +3212,18 @@ def api_designer_chat():
         response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
         if assistant_messages:
             response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
-        return jsonify({'success': True, 'data': {'action': 'workspace_update', 'response': response_text, 'slidesData': slides, 'creativeImages': creative_images, 'actions': executed, 'validation': validation}})
+        # The slides this turn actually touched become the conversation's focus, so the next
+        # message («وطلعها أوضح») lands on them without asking again.
+        # Both keys carry 0-based indexes; the chat speaks in 1-based slide numbers.
+        touched = [item.get('index') + 1 for item in executed
+                   if isinstance(item, dict) and isinstance(item.get('index'), int)]
+        touched += [n + 1 for item in executed if isinstance(item, dict)
+                    for n in (item.get('indexes') or []) if isinstance(n, int)]
+        turn_focus = sorted(dict.fromkeys(touched)) or focus_indexes
+        return jsonify({'success': True, 'data': {'action': 'workspace_update', 'response': response_text,
+                                                  'slidesData': slides, 'creativeImages': creative_images,
+                                                  'actions': executed, 'validation': validation,
+                                                  'memory': chat_memory, 'focusIndexes': turn_focus}})
     except Exception as exc:
         print(f'[DESIGNER-CHAT ERROR] {exc}')
         return jsonify({'success': False, 'error': str(exc)}), 500
@@ -3978,6 +4087,8 @@ def _execute_slide_plan(project_data, tenant_id, branding):
     plan = _ensure_required_location_slides(plan, project_data)
     # A project with no financial study gets no financial slides at all, from any source.
     plan = slide_engine.strip_financial_slides(plan, project_data)
+    # There are no photographs of the site, so a slide built to hold them holds empty frames.
+    plan = slide_engine.strip_street_view_slides(plan)
     has_financial = slide_engine.project_has_financial_study(project_data)
 
     # Enforce min and max slide counts strictly on generated plan
@@ -5051,8 +5162,8 @@ def api_generate_slide_single():
 - ممنوع box-shadow/filter/backdrop-filter
 - استخدم ##LOGO## للشعار، ##IMAGE_COVER## لصورة الغلاف، ##MOODBOARD_IMAGE_N## لصور المود بورد
 - للخرائط: ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##
-- لصور الموقع: ##STREET_VIEW_1## إلى ##STREET_VIEW_4##
 -  ممنوع base64 أو روابط صور خارجية
+- {slide_engine.NO_STREET_VIEW_RULE}
 """
 
     def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
@@ -6671,6 +6782,9 @@ def api_export():
 
             safe_name = ''.join(c for c in project_name if c.isalnum() or c in '-_ ')[:50].strip() or 'presentation'
             pdf_path = os.path.join(tenant_output_dir, f"{safe_name}_{int(time.time())}.pdf")
+            # The deck's own count, so a file that came out short is visible here too. This used to
+            # log len(slides_html) — the character count — as the number of slides.
+            slide_count = len(slides_data) if slides_data else slides_html.count('class="slide"')
             generate_pdf(slides_html, branding, pdf_path, g.tenant_id)
             relative_url = f'/outputs/{g.tenant_id}/{os.path.basename(pdf_path)}'
 
@@ -6678,7 +6792,7 @@ def api_export():
             export_id = db.create_export(presentation_id, g.tenant_id, 'pdf', pdf_path)
             if presentation_id:
                 _record_change('presentation', presentation_id, 'تصدير',
-                               [f'صُدّر العرض بصيغة PDF ({len(slides_html)} شريحة)'])
+                               [f'صُدّر العرض بصيغة PDF ({slide_count} شريحة)'])
             return jsonify({'success': True, 'url': f'/api/exports/{export_id}/download', 'exportId': export_id, 'format': 'pdf'})
 
         elif fmt == 'pptx':
