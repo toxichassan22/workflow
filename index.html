@@ -2847,49 +2847,6 @@
       font-size: 12px;
     }
 
-    .tenant-slide-plan-card {
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 14px 16px;
-      margin-bottom: 10px;
-      display: grid;
-      grid-template-columns: 40px 1fr auto;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .tenant-slide-plan-card .num {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: var(--p);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-      font-weight: 900;
-    }
-
-    .tenant-slide-plan-card input {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 9px 12px;
-      font-family: inherit;
-      font-size: 14px;
-    }
-
-    .tenant-slide-plan-card select {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 8px 10px;
-      font-family: inherit;
-      font-size: 13px;
-      min-width: 120px;
-    }
-
     .tenant-slide-preview-wrap {
       display: flex;
       flex-direction: column;
@@ -6887,14 +6844,6 @@
         genButton.textContent = 'توليد العرض';
         genButton.addEventListener('click', () => directGenerateProposalFile());
         sidebar.appendChild(genButton);
-
-        const planButton = document.createElement('button');
-        planButton.type = 'button';
-        planButton.className = 'project-section-nav-item';
-        planButton.style.cssText = 'font-size:0.82rem;';
-        planButton.textContent = tenantSlidePlan ? 'تحديث الهيكل المقترح' : 'إعداد الهيكل المقترح';
-        planButton.addEventListener('click', () => generateSlidePlanOnly());
-        sidebar.appendChild(planButton);
       }
 
       const items = [...TENANT_WORKFLOW_ITEMS];
@@ -16429,106 +16378,9 @@
       return directGenerateProposalFile();
     }
 
-    function renderTenantSlidePlan() {
-      const plan = tenantSlidePlan;
-      const info = document.getElementById('slidePlanInfo');
-      const list = document.getElementById('tenantSlidePlanList');
-      if (!info || !list) return;
-      if (!plan || !plan.slides) { list.innerHTML = ''; return; }
-      info.innerHTML = '<strong>عدد الشرائح المقترح:</strong> ' + plan.slides.length +
-        (plan.proposed_count ? ' (مقترح: ' + plan.proposed_count + ')' : '') +
-        (plan.source === 'fallback'
-          ? '<br><span style="color:#b71c1c">هيكل عام: لم ينتج المحلل خطة لبيانات هذا المشروع.</span>'
-          : '') +
-        '<br><strong>المنطق:</strong> ' + escapeHtml(plan.reasoning || '') +
-        '<br><em>النوع ونمط التصميم تم اختيارهما تلقائياً بواسطة الذكاء الاصطناعي.</em>' +
-        (plan.validation && !plan.validation.isValid ? '<br><span style="color:#b71c1c">ملاحظات: ' + (plan.validation.issues || []).join(' | ') + '</span>' : '');
-      list.innerHTML = plan.slides.map((s, i) =>
-        '<div class="tenant-slide-plan-card">' +
-        '<div class="num">' + (i + 1) + '</div>' +
-        '<div style="display:grid;gap:8px;">' +
-        '<input value="' + escapeHtml(s.title || '') + '" onchange="updatePlanSlideTitle(' + i + ', this.value)" placeholder="عنوان الشريحة">' +
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-        '<span style="font-size:12px;color:#666;">النوع:</span>' +
-        '<span style="font-size:13px;color:#333;font-weight:700;">' + escapeHtml(slideTypeText(s.type || 'content')) + '</span>' +
-        '</div>' +
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-        '<span style="font-size:12px;color:#666;">النمط:</span>' +
-        '<span style="font-size:13px;color:#333;font-weight:700;">' + escapeHtml(slideStyleText(s.designStyle || s.design_style || 'cards')) + '</span>' +
-        '</div>' +
-        '</div>' +
-        '</div>'
-      ).join('');
-    }
-
-    async function generateSlidePlanOnly() {
-      showLoader('جاري إعداد خطة الشرائح', 'جاري حفظ البيانات وتحليل المشروع...', 5);
-      try {
-        const formData = await collectTenantFormData();
-        tenantProjectData = { ...tenantProjectData, ...formData };
-        if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
-        updateLoaderProgress(25, 'جاري حفظ بيانات المشروع...');
-        await saveProjectAsDraft(true);
-        updateLoaderProgress(35, 'جاري إرسال بيانات المشروع إلى AI...');
-        const result = await requestTenantSlidePlan(tenantProjectData, job => {
-          updateLoaderProgress(job && job.status === 'running' ? 65 : 45,
-            (job && job.message) || 'جاري تحليل بيانات المشروع...');
-        });
-        if (result.error) {
-          console.error('[SLIDE PLAN]', result);
-          toast(result.error);
-          return;
-        }
-        if (result.plan) {
-          tenantSlidePlan = result.plan;
-          tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-          updateLoaderProgress(95, 'تم إعداد الهيكل، جاري حفظه...');
-          await saveProjectAsDraft(true);
-          updateLoaderProgress(100, 'تم توليد الهيكل — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
-          toast('تم توليد الهيكل بنجاح — ' + (tenantSlidePlan.slides || []).length + ' شرائح');
-        } else {
-          toast('فشل توليد الهيكل');
-        }
-      } catch (e) {
-        console.error('generateSlidePlanOnly error:', e);
-        toast(e?.message || 'خطأ في الاتصال بالخادم');
-      } finally {
-        hideLoader();
-      }
-    }
-
-    function updatePlanSlideTitle(index, title) {
-      if (!tenantSlidePlan || !tenantSlidePlan.slides || !tenantSlidePlan.slides[index]) return;
-      tenantSlidePlan.slides[index].title = title;
-      triggerAutoSaveDraft();
-    }
-
-    function slideTypeText(type) {
-      const map = {
-        cover: 'غلاف',
-        index: 'فهرس',
-        content: 'محتوى',
-        moodboard: 'مود بورد',
-        closing: 'ختام',
-      };
-      return map[type] || type;
-    }
-
-    function slideStyleText(style) {
-      const map = {
-        dashboard: 'أرقام',
-        cards: 'بطاقات',
-        timeline: 'زمني',
-        table: 'جدول',
-        text: 'نقاط',
-        image: 'صورة + نص',
-        flow: 'تدفق',
-        swot: 'SWOT',
-        map: 'خريطة',
-        split: 'مقسم',
-      };
-      return map[style] || style;
-    }
+    // The slide structure is not a client-facing object: there is no panel that lists it, no
+    // editable plan titles and no button that rebuilds it on its own. It is produced inside
+    // «توليد العرض» from the project data and never shown as something to operate.
 
     const VISUAL_CONCEPT_SLOTS = [
       { id: 'cover', label: 'الصورة الرئيسية', group: 'external' },
@@ -17779,23 +17631,6 @@
 
 
 
-    async function regenerateTenantSlidePlan() {
-      if (!tenantProjectData) return;
-      showLoader('جاري إعادة الاقتراح', 'AI يعيد تحليل بيانات المشروع');
-      const data = await requestTenantSlidePlan(tenantProjectData, job => {
-        updateLoaderProgress(job && job.status === 'running' ? 65 : 45,
-          (job && job.message) || 'AI يعيد تحليل بيانات المشروع');
-      });
-      hideLoader();
-      if (data.success && data.plan) {
-        tenantSlidePlan = data.plan;
-        renderTenantSlidePlan();
-        triggerAutoSaveDraft();
-      } else {
-        toast(data.error || 'فشل إعادة الاقتراح');
-      }
-    }
-
     let tempCoverImage = null;
     let tempMoodboardImages = {};
 
@@ -18437,7 +18272,6 @@
       if (!slides.length) {
         wrap.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:380px;padding:48px 24px;text-align:center;gap:16px;background:#fff;border:1px dashed var(--line);border-radius:16px;margin:32px auto;max-width:540px">' +
           '<div style="font-size:18px;font-weight:700;color:var(--txt)">لم يتم توليد شرائح هذا العرض بعد</div>' +
-          '<div class="tenant-hint" style="max-width:440px;line-height:1.6">يمكنك بدء توليد كامل الشرائح بالذكاء الاصطناعي بناءً على بيانات المشروع وخطة الهيكل المعتمدة.</div>' +
           '<button type="button" class="btn primary" style="background:#1a4d6f;color:#fff;padding:10px 32px;font-size:15px;font-weight:700;margin-top:8px" onclick="directGenerateProposalFile()">توليد العرض الآن</button>' +
           '</div>';
         renderTenantSlidesSidebar();
@@ -19196,7 +19030,6 @@
       await loadTenantProjectForm();
       hydrateTenantProjectForm(tenantProjectData);
       applySectionStatuses(tenantProjectSectionStatuses);
-      renderTenantSlidePlan();
       renderTenantSlides();
       setSlidesEditorInfo(p.title || '', p.slideCount || tenantSlidesData.length);
       showTenantPage('tenantSlidesPage');
@@ -19393,7 +19226,6 @@
         await loadTenantProjectForm();
         hydrateTenantProjectForm(tenantProjectData);
         applySectionStatuses(sectionStatuses);
-        renderTenantSlidePlan();
         renderTenantSlides();
         setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '',
           tenantSlidesData.length);
@@ -20006,9 +19838,6 @@
           });
           refreshLocationTables();
         }
-      }
-      if (planChanged && typeof renderTenantSlidePlan === 'function') {
-        renderTenantSlidePlan();
       }
       if (changed) {
         renderTenantSlides();

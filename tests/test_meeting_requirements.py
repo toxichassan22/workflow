@@ -3401,6 +3401,26 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('if (!tenantSlidePlan) {', index_source)
         self.assertNotIn('settingsMaxSlides', index_source)
 
+    def test_the_slide_structure_is_not_client_facing(self):
+        """Owner rule: the client never operates the structure — no plan panel, no editable plan
+        titles, and no button that builds or rebuilds it outside «توليد العرض»."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        for gone in (
+            'تحديث الهيكل المقترح',
+            'إعداد الهيكل المقترح',
+            'generateSlidePlanOnly',
+            'regenerateTenantSlidePlan',
+            'renderTenantSlidePlan',
+            'updatePlanSlideTitle',
+            'tenantSlidePlanList',
+            'slidePlanInfo',
+            'tenant-slide-plan-card',
+        ):
+            self.assertNotIn(gone, index_source, gone)
+        # The plan itself still exists — it is produced inside the generation flow.
+        self.assertIn('const planResponse = await requestTenantSlidePlan(tenantProjectData', index_source)
+        self.assertIn('slidePlan: tenantSlidePlan', index_source)
+
     def test_change_lines_name_the_difference_not_just_that_something_changed(self):
         import change_tracking as tracking
         old = [

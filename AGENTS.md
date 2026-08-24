@@ -440,6 +440,14 @@ request; rendering the file's saved slides there showed the old deck for the who
 Slides are still generated one request at a time in a sequential loop, so time and cost grow
 linearly with the count.
 
+**The structure is not a client-facing object.** Owner's rule: the client has no contact with it.
+There is no plan panel, no editable plan titles, and no button that builds or rebuilds the plan on
+its own — the «تحديث الهيكل المقترح» sidebar button, `generateSlidePlanOnly()`,
+`renderTenantSlidePlan()`, `updatePlanSlideTitle()`, `regenerateTenantSlidePlan()` and the
+`.tenant-slide-plan-card` styles are all gone. The plan is produced inside
+`directGenerateProposalFile()` and travels to the server as `slidePlan`; do not re-expose it.
+`test_the_slide_structure_is_not_client_facing` guards this.
+
 ## Performance rules
 
 - `compress_response()` gzips text responses (`app.py`). The SPA shell is ~740KB uncompressed and
