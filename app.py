@@ -13291,6 +13291,28 @@ def _build_commit():
     return _BUILD_COMMIT
 
 
+BUILD_FINGERPRINT_FILES = ('app.py', 'index.html', 'slide_engine.py', 'design_templates.py',
+                           'generate_pdf_from_preview.py', 'db.py')
+
+
+def _build_fingerprint():
+    """A hash per source file, so the live code can be compared with a checkout.
+
+    The commit alone is not enough: the deploy checks the tree out without a `.git` beside it, so
+    `git rev-parse` on the server answers nothing and «هل نزل الإصلاح؟» stayed unanswered.
+    """
+    fingerprint = {}
+    root = os.path.dirname(os.path.abspath(__file__))
+    for name in BUILD_FINGERPRINT_FILES:
+        path = os.path.join(root, name)
+        try:
+            with open(path, 'rb') as source:
+                fingerprint[name] = hashlib.sha256(source.read()).hexdigest()[:12]
+        except OSError:
+            fingerprint[name] = 'missing'
+    return fingerprint
+
+
 @app.route('/api/build', methods=['GET'])
 def api_build():
     """Which build is actually live.
@@ -13298,7 +13320,8 @@ def api_build():
     «هل نزل الإصلاح؟» had no answer but guessing: the frontend could be checked by fetching the
     page, and a server-side fix could not be checked at all.
     """
-    return jsonify({'commit': _build_commit(), 'startedAt': APP_STARTED_AT})
+    return jsonify({'commit': _build_commit(), 'startedAt': APP_STARTED_AT,
+                    'sources': _build_fingerprint()})
 
 
 @app.route('/api/deploy-webhook', methods=['GET', 'POST'])
