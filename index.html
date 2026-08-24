@@ -15969,6 +15969,25 @@
       }
     }
 
+    // A blob URL lives only inside the tab that created it, so it must never be saved into a
+    // draft: every uploaded image then pointed at nothing once the file was reopened. This
+    // publishes the stored file under /uploads/creative/... — the same durable place a
+    // generated image goes — and reports a failure instead of storing a dead reference.
+    async function publishProjectFileImageUrl(fileId) {
+      if (!fileId) return '';
+      const response = await api('POST', '/api/project-files/' + encodeURIComponent(fileId) + '/publish-image');
+      if (!response?.success || !response.url) throw new Error(response?.error || 'تعذر حفظ الصورة على السيرفر');
+      return response.url;
+    }
+
+    function isSessionOnlyImageUrl(url) {
+      return String(url || '').toLowerCase().startsWith('blob:');
+    }
+
+    function durableImageUrl(url) {
+      return isSessionOnlyImageUrl(url) ? '' : String(url || '');
+    }
+
     const LAND_PHOTOS_MAX = 4;
 
     // Thumbnails render through the authenticated preview route, so each card needs a blob URL.
@@ -16626,7 +16645,7 @@
           description: String(source.description || '').slice(0, 2000),
           fileId: String(source.fileId || source.file_id || ''),
           fileName: String(source.fileName || source.file_name || ''),
-          imageUrl: String(source.imageUrl || source.image_url || '')
+          imageUrl: durableImageUrl(source.imageUrl || source.image_url)
         };
       }).filter(item => item.fileId || item.imageUrl).slice(0, VISUAL_CONCEPT_MAX_PLANS);
     }
@@ -16682,8 +16701,10 @@
           role: entry.role === 'assistant' ? 'assistant' : 'user',
           text: String(entry.text).slice(0, 4000)
         })) : [];
-        const approved = String(slot.approvedImageUrl || '');
-        const imageUrl = String(slot.imageUrl || '');
+        // A blob: URL is a handle into the tab that created it, so a stored one is dead and is
+        // dropped here; repairVisualConceptStoredImages republishes it from the file id.
+        const approved = durableImageUrl(slot.approvedImageUrl);
+        const imageUrl = durableImageUrl(slot.imageUrl);
         const mode = ['ai', 'upload'].includes(slot.mode)
           ? slot.mode
           : (slot.sourceFileId && !slot.prompt && !(slot.chat && slot.chat.length) ? 'upload' : 'ai');
@@ -16751,11 +16772,13 @@
       tenantProjectData.visual_style_reference_file_id = referenceIds[0] || '';
       const cover = tenantVisualConceptState.slots.cover || {};
       tenantCreativeImages = previousImages;
-      tenantCreativeImages.cover = cover.approvedImageUrl || tenantCreativeImages.cover || '';
+      // These mirrors reach the export and the slide prompts, so a session-only blob URL is
+      // dropped here: it would arrive on the server as an image that can never be read.
+      tenantCreativeImages.cover = durableImageUrl(cover.approvedImageUrl) || durableImageUrl(tenantCreativeImages.cover);
       tenantCreativeImages.cover_prompt = cover.prompt || tenantCreativeImages.cover_prompt || '';
       tenantCreativeImages.moodboard = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map((item, index) => {
         const slot = tenantVisualConceptState.slots[item.id] || {};
-        return slot.approvedImageUrl || slot.imageUrl || previousMoodboard[index] || '';
+        return durableImageUrl(slot.approvedImageUrl) || durableImageUrl(slot.imageUrl) || durableImageUrl(previousMoodboard[index]);
       });
       tenantCreativeImages.moodboard_prompts = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map((item, index) => {
         const slot = tenantVisualConceptState.slots[item.id] || {};
@@ -16930,7 +16953,8 @@
 
     function renderVisualConceptSlot(slotDef, locked) {
       const slot = tenantVisualConceptState.slots[slotDef.id];
-      const image = slot.approvedImageUrl || slot.imageUrl;
+      const stored = slot.approvedImageUrl || slot.imageUrl;
+      const image = isSessionOnlyImageUrl(stored) ? '' : stored;
       const hasImage = Boolean(image || slot.sourceFileId);
       // Approval is one toggle per image and it locks that card, exactly like a section.
       const approved = slot.status === 'approved';
@@ -17155,16 +17179,18 @@
         const limited = merged.slice(0, 4);
         slot.styleReferenceFileIds = limited.map(file => file.id);
         slot.styleReferenceNames = limited.map(file => file.name);
-        limited.forEach((file, index) => {
+        for (let index = 0; index < limited.length; index += 1) {
+          const file = limited[index];
           const viewId = visualConceptInteriorSlotId(componentId, index + 1);
           if (!tenantVisualConceptState.slots[viewId]) tenantVisualConceptState.slots[viewId] = emptyVisualConceptSlot(viewId);
           const viewSlot = tenantVisualConceptState.slots[viewId];
           if (!viewSlot.imageUrl && !viewSlot.approvedImageUrl) {
             viewSlot.sourceFileId = file.id;
             viewSlot.sourceFileName = file.name;
+            viewSlot.imageUrl = await publishProjectFileImageUrl(file.id);
             viewSlot.status = viewSlot.status === 'approved' ? viewSlot.status : 'review';
           }
-        });
+        }
         markVisualConceptDirty();
         renderVisualConceptPage();
         toast('تم حفظ صور هذا المكون.');
@@ -17220,6 +17246,7 @@
       }
       host.innerHTML = '<div class="visual-concept-stack">' + plans.map((plan, index) => {
         const title = plan.title || plan.fileName || ('مخطط ' + (index + 1));
+        if (isSessionOnlyImageUrl(plan.imageUrl)) plan.imageUrl = '';
         const image = plan.imageUrl
           ? '<div class="visual-concept-preview has-image" data-visual-zoom="' + escapeHtml(plan.imageUrl) + '" data-visual-title="' + escapeHtml(title) + '">' +
           '<img src="' + escapeHtml(plan.imageUrl) + '" alt="' + escapeHtml(title) + '">' +
@@ -17307,7 +17334,7 @@
             description: '',
             fileId: String(file.id),
             fileName: file.name,
-            imageUrl: await getProjectFileObjectUrl(file.id)
+            imageUrl: await publishProjectFileImageUrl(file.id)
           });
         }
         markVisualConceptDirty();
@@ -17339,7 +17366,8 @@
 
     function updateVisualConceptHomeCards() {
       const cover = tenantVisualConceptState?.slots?.cover || {};
-      const image = cover.approvedImageUrl || cover.imageUrl || tenantCreativeImages?.cover || '';
+      const stored = cover.approvedImageUrl || cover.imageUrl || tenantCreativeImages?.cover || '';
+      const image = isSessionOnlyImageUrl(stored) ? '' : stored;
       const preview = document.getElementById('visualConceptHomeCoverPreview');
       const externalStatus = document.getElementById('visualConceptHomeExternalStatus');
       const internalStatus = document.getElementById('visualConceptHomeInternalStatus');
@@ -17451,6 +17479,50 @@
           if (url) openVisualConceptLightbox(url, title);
         });
       });
+      repairVisualConceptStoredImages();
+    }
+
+    // A file saved before uploads were published carries blob: URLs, which are dead in every
+    // later session. The uploaded image itself is still on the server, so each slot and plan
+    // is republished from its file id and the stored URL is healed in place.
+    let visualConceptImageRepairRunning = false;
+    async function repairVisualConceptStoredImages() {
+      if (visualConceptImageRepairRunning) return;
+      const slots = tenantVisualConceptState?.slots || {};
+      const slotIds = Object.keys(slots).filter(id => {
+        const slot = slots[id];
+        if (!slot || !slot.sourceFileId) return false;
+        if (isSessionOnlyImageUrl(slot.imageUrl) || isSessionOnlyImageUrl(slot.approvedImageUrl)) return true;
+        return !slot.imageUrl && !slot.approvedImageUrl;
+      });
+      const plans = visualConceptPlans().filter(plan => plan.fileId && !plan.imageUrl);
+      if (!slotIds.length && !plans.length) return;
+      visualConceptImageRepairRunning = true;
+      let healed = 0;
+      try {
+        for (const id of slotIds) {
+          const slot = tenantVisualConceptState.slots[id];
+          if (!slot) continue;
+          let url = '';
+          try { url = await publishProjectFileImageUrl(slot.sourceFileId); } catch (error) { url = ''; }
+          if (!url) continue;
+          slot.imageUrl = url;
+          if (slot.status === 'approved' || isSessionOnlyImageUrl(slot.approvedImageUrl)) slot.approvedImageUrl = url;
+          healed += 1;
+        }
+        for (const plan of plans) {
+          let url = '';
+          try { url = await publishProjectFileImageUrl(plan.fileId); } catch (error) { url = ''; }
+          if (!url) continue;
+          plan.imageUrl = url;
+          healed += 1;
+        }
+      } finally {
+        visualConceptImageRepairRunning = false;
+      }
+      if (!healed) return;
+      markVisualConceptDirty();
+      renderVisualConceptPage();
     }
 
     async function uploadVisualConceptSlotImage(slotId, input) {
@@ -17467,7 +17539,7 @@
         liveSlot().mode = 'upload';
         liveSlot().sourceFileId = fileId;
         liveSlot().sourceFileName = fileRecord?.originalName || file.name || '';
-        liveSlot().imageUrl = await getProjectFileObjectUrl(fileId);
+        liveSlot().imageUrl = await publishProjectFileImageUrl(fileId);
         liveSlot().approvedImageUrl = '';
         liveSlot().status = 'review';
         markVisualConceptDirty();

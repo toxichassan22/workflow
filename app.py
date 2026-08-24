@@ -583,7 +583,7 @@ def persist_generated_image(image, tenant_id):
         return image
     digest = hashlib.sha256(raw).hexdigest()[:24]
     safe_tenant = re.sub(r'[^A-Za-z0-9_-]', '', str(tenant_id or 'public')) or 'public'
-    image_dir = os.path.join(os.path.dirname(__file__), 'uploads', 'creative', safe_tenant)
+    image_dir = os.path.join(UPLOADS_DIR, 'creative', safe_tenant)
     os.makedirs(image_dir, exist_ok=True)
     filename = digest + extension
     path = os.path.join(image_dir, filename)
@@ -784,7 +784,7 @@ def _visual_concept_project_file_data_uri(file_id):
     mime_type = stored.get('mime_type') or ''
     if not mime_type.startswith('image/'):
         return None
-    tenant_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'uploads', str(tenant_id)))
+    tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(tenant_id)))
     storage_path = os.path.realpath(stored['storage_path'])
     try:
         if os.path.commonpath([tenant_root, storage_path]) != tenant_root:
@@ -799,6 +799,20 @@ def _visual_concept_project_file_data_uri(file_id):
     except OSError:
         return None
     return f'data:{mime_type};base64,{encoded}'
+
+
+def _publish_project_file_as_creative_image(file_id):
+    """Copy an uploaded image into the tenant's creative folder and return its public URL.
+
+    An uploaded slot image used to be shown from a ``blob:`` URL, which exists only inside
+    the tab that created it. That URL was saved into the draft, so after a reload every
+    client-uploaded image rendered broken and every export shipped a dead reference.
+    """
+    data_uri = _visual_concept_project_file_data_uri(file_id)
+    if not data_uri:
+        return None
+    url = persist_generated_image(data_uri, getattr(g, 'tenant_id', None))
+    return url if isinstance(url, str) and url.startswith('/uploads/') else None
 
 
 def _visual_concept_reference_uris(urls=None, file_ids=None, max_images=None, urls_first=False):
@@ -1118,7 +1132,9 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
 
 def _visual_concept_cover_image(data):
     cover = str(data.get('coverImage') or data.get('cover_image') or '').strip()
-    if cover:
+    # A blob: URL is meaningless outside the browser tab that made it, so an old draft
+    # carrying one must fall back to the stored file instead of losing the cover reference.
+    if cover and not cover.lower().startswith('blob:'):
         return cover
     file_id = _visual_concept_text(data.get('coverFileId') or data.get('cover_file_id'), 80)
     if file_id:
@@ -10433,6 +10449,21 @@ def api_get_project_file(file_id):
     response.headers['Content-Security-Policy'] = "default-src 'none'; object-src 'none'"
     response.headers['Cache-Control'] = 'private, max-age=300'
     return response
+
+
+@app.route('/api/project-files/<file_id>/publish-image', methods=['POST'])
+@require_permission('create_presentation')
+def api_publish_project_file_image(file_id):
+    """Return a durable URL for an uploaded image so a saved draft can point at it.
+
+    The preview route needs an Authorization header, so the client had to read it into a
+    ``blob:`` URL — which dies with the tab. This publishes the same bytes under
+    ``/uploads/creative/<tenant>/`` exactly like a generated image.
+    """
+    url = _publish_project_file_as_creative_image(file_id)
+    if not url:
+        return jsonify({'success': False, 'error': 'الملف غير متاح أو ليس صورة'}), 404
+    return jsonify({'success': True, 'url': url})
 
 
 @app.route('/api/upload/logo', methods=['POST'])

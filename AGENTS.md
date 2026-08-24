@@ -485,6 +485,17 @@ that same file — complete **and** smaller than the old raw dump.
   rebuilding from them re-approved an image on the next render or reload. The `stated[id]` guard
   keeps the mirrors as a fallback for old drafts only, and unapproving the cover clears
   `tenantCreativeImages.cover` because slides read that as the approved cover.
+- **A `blob:` URL must never be stored.** An uploaded slot image was previewed from
+  `URL.createObjectURL()` and that URL went straight into `visual_concept`, so every image the
+  client had uploaded rendered broken the moment the file was reopened in another tab or another
+  day — and the export shipped a reference the server could never read. Uploads now go through
+  `publishProjectFileImageUrl()` → `POST /api/project-files/<id>/publish-image`, which copies the
+  stored file into `/uploads/creative/<tenant>/` exactly like a generated image, and it throws
+  rather than falling back to a blob URL. `durableImageUrl()` drops any stored `blob:` on load,
+  `repairVisualConceptStoredImages()` republishes it from `sourceFileId` / `plan.fileId` and heals
+  the file in place, and `_visual_concept_cover_image()` ignores a `blob:` cover so it falls back to
+  `coverFileId`. `/api/project-files/<id>` needs an Authorization header, so it can only ever feed a
+  session thumbnail (`attachProjectFileThumbnail`) — never a saved value.
 - **Rebuilding the form can wipe a saved draft.** `renderTenantProjectForm()`
   recreates every `data-key` input empty, then persist helpers run immediately.
   If a helper reads the new empty widget instead of `tenantProjectData`, the

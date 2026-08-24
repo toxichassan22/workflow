@@ -1202,6 +1202,59 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("'/api/project-files/' + encodeURIComponent(fileId)", index_source)
         self.assertIn('onclick="openProjectFilePreview(', index_source)
 
+    def test_uploaded_slot_images_are_published_to_a_durable_url(self):
+        """A client upload was previewed from a blob: URL and that URL was saved into the file.
+
+        A blob: URL only resolves inside the tab that created it, so every image the client
+        had uploaded rendered broken once the file was reopened, and the export shipped a
+        reference the server could never read.
+        """
+        client = self.app.test_client()
+        png_bytes = (
+            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+            b'\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82'
+        )
+        created = client.post('/api/project-files', headers=self._headers(self.token_a), data={
+            'fileType': 'visual_reference',
+            'file': (io.BytesIO(png_bytes), 'cover.png'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(created.status_code, 201, created.get_json())
+        file_id = created.get_json()['file']['id']
+
+        published = client.post(f'/api/project-files/{file_id}/publish-image',
+                                headers=self._headers(self.token_a))
+        self.assertEqual(published.status_code, 200, published.get_json())
+        url = published.get_json()['url']
+        self.assertTrue(url.startswith('/uploads/creative/'), url)
+        # The published copy is served without an Authorization header, which is the whole
+        # point: it can sit in a saved draft and in an exported deck.
+        self.assertEqual(client.get(url).status_code, 200)
+
+        # Another tenant cannot publish a file it does not own.
+        self.assertEqual(
+            client.post(f'/api/project-files/{file_id}/publish-image',
+                        headers=self._headers(self.token_b)).status_code, 404)
+
+        # A blob: cover reaching the server falls back to the stored file instead of being used.
+        with self.application_module.app.test_request_context():
+            self.application_module.g.tenant_id = self.tenant_a
+            fallback = self.application_module._visual_concept_cover_image(
+                {'coverImage': 'blob:https://example.test/abc', 'coverFileId': file_id})
+        self.assertTrue(fallback.startswith('data:image/'), fallback[:32])
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("'/api/project-files/' + encodeURIComponent(fileId) + '/publish-image'", index_source)
+        self.assertIn('liveSlot().imageUrl = await publishProjectFileImageUrl(fileId);', index_source)
+        self.assertIn('imageUrl: await publishProjectFileImageUrl(file.id)', index_source)
+        self.assertIn('viewSlot.imageUrl = await publishProjectFileImageUrl(file.id);', index_source)
+        # A stored blob: URL is dropped on load and republished from the file id.
+        self.assertIn('const approved = durableImageUrl(slot.approvedImageUrl);', index_source)
+        self.assertIn('const imageUrl = durableImageUrl(slot.imageUrl);', index_source)
+        self.assertIn('imageUrl: durableImageUrl(source.imageUrl || source.image_url)', index_source)
+        self.assertIn('async function repairVisualConceptStoredImages()', index_source)
+        self.assertIn('repairVisualConceptStoredImages();', index_source)
+        self.assertNotIn('liveSlot().imageUrl = await getProjectFileObjectUrl(fileId)', index_source)
+
     def test_land_photos_are_optional_images_with_per_photo_descriptions(self):
         client = self.app.test_client()
         fields = client.get('/api/fields', headers=self._headers(self.token_a)).get_json()['fields']
