@@ -3,7 +3,7 @@ import sys
 import json
 import time
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 import base64
 import hashlib
@@ -6738,6 +6738,53 @@ def api_export_financial_study():
         return jsonify({'success': False, 'error': 'تعذر إنشاء ملف الدراسة المالية: ' + detail}), 500
 
 
+def _export_html_from_slides(slides_data):
+    """Join the deck for export, making sure every entry contributes exactly one page.
+
+    Joining the stored html and hoping for the best is how a 50-slide deck exported as 25 pages
+    with nothing to point at. Each entry is inspected on its own: an entry whose html carries no
+    root `.slide` element is wrapped in one (it would otherwise print as loose content sharing a
+    neighbour's page), and an entry carrying several is reported. The notes are logged and returned
+    with the error, so the failure names the slide instead of only counting.
+    """
+    from design_templates import extract_slide_elements
+
+    pieces = []
+    empty = []
+    wrapped = []
+    multiple = []
+    for index, item in enumerate(slides_data if isinstance(slides_data, list) else [], 1):
+        html = str((item or {}).get('html') or '').strip() if isinstance(item, dict) else str(item or '').strip()
+        title = str((item or {}).get('title') or '').strip() if isinstance(item, dict) else ''
+        if not html:
+            empty.append(index)
+            continue
+        roots = extract_slide_elements(html)
+        if len(roots) == 1:
+            pieces.append(roots[0])
+        elif len(roots) > 1:
+            multiple.append(index)
+            pieces.extend(roots)
+        else:
+            wrapped.append(index)
+            pieces.append(
+                '<div class="slide" style="width:1280px;height:720px;position:relative;'
+                'overflow:hidden;background:#fff;">' + html + '</div>'
+            )
+        if not html.strip():
+            print(f'[EXPORT] slide {index} ({title}) has no html')
+
+    notes = []
+    if empty:
+        notes.append('شرائح بلا محتوى: ' + '، '.join(str(n) for n in empty))
+    if wrapped:
+        notes.append('شرائح بلا إطار شريحة (أُضيف لها إطار): ' + '، '.join(str(n) for n in wrapped))
+    if multiple:
+        notes.append('شرائح تحتوي أكثر من شريحة: ' + '، '.join(str(n) for n in multiple))
+    print(f'[EXPORT] entries={len(slides_data or [])} printable={len(pieces)}')
+    return '\n'.join(pieces), notes
+
+
 @app.route('/api/export', methods=['POST'])
 @require_permission('export_files')
 def api_export():
@@ -6748,6 +6795,7 @@ def api_export():
     data = request.json or {}
     fmt = data.get('format', 'pdf').lower()
     project_name = data.get('projectName', 'presentation')
+    export_notes = []
     branding = db.get_branding(g.tenant_id)
     print(f"[EXPORT] format={fmt} tenant={g.tenant_id} font_family={branding.get('font_family')!r} font_file_path={branding.get('font_file_path')!r}")
 
@@ -6776,7 +6824,9 @@ def api_export():
 
             if not slides_html:
                 if slides_data:
-                    slides_html = '\n'.join(str(s.get('html', '')) for s in slides_data)
+                    slides_html, export_notes = _export_html_from_slides(slides_data)
+                    if export_notes:
+                        print('[EXPORT] ' + ' | '.join(export_notes))
                 if not slides_html:
                     return jsonify({'error': 'slidesHtml or slidesData is required for PDF export'}), 400
 
@@ -6829,7 +6879,12 @@ def api_export():
 
     except Exception as e:
         print(f"[EXPORT ERROR] {e}")
-        return jsonify({'error': str(e)}), 500
+        # The notes name which slides the deck could not print, so the failure is actionable
+        # instead of being a page count the user cannot act on.
+        message = str(e)
+        if export_notes:
+            message += ' — ' + '؛ '.join(export_notes)
+        return jsonify({'error': message, 'notes': export_notes}), 500
 
 
 @app.route('/api/exports', methods=['GET'])
@@ -13217,6 +13272,34 @@ def static_uploads(path):
     if os.path.isfile(possible_map):
         return send_from_directory(maps_dir, filename)
     return jsonify({'error': 'Not found'}), 404
+
+APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
+_BUILD_COMMIT = None
+
+
+def _build_commit():
+    """The commit the running code came from, read once."""
+    global _BUILD_COMMIT
+    if _BUILD_COMMIT is None:
+        try:
+            _BUILD_COMMIT = subprocess.check_output(
+                ['git', 'rev-parse', '--short', 'HEAD'],
+                cwd=os.path.dirname(os.path.abspath(__file__)),
+                stderr=subprocess.DEVNULL, timeout=5).decode().strip()
+        except Exception:
+            _BUILD_COMMIT = os.environ.get('DEPLOY_COMMIT') or 'unknown'
+    return _BUILD_COMMIT
+
+
+@app.route('/api/build', methods=['GET'])
+def api_build():
+    """Which build is actually live.
+
+    «هل نزل الإصلاح؟» had no answer but guessing: the frontend could be checked by fetching the
+    page, and a server-side fix could not be checked at all.
+    """
+    return jsonify({'commit': _build_commit(), 'startedAt': APP_STARTED_AT})
+
 
 @app.route('/api/deploy-webhook', methods=['GET', 'POST'])
 def deploy_webhook():

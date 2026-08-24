@@ -493,6 +493,18 @@ Three separate faults each dropped pages, and every one of them reported success
 slides: a short file is a failed export, not a smaller export. `tests/test_export_slide_sanitization.py`
 guards all of it, and the old `test_ignores_unbalanced_slide` (which asserted the dropping) is gone.
 
+The failure also has to be actionable, so a page count alone is not enough:
+
+- `_export_html_from_slides()` inspects **each** entry of `slides_data`: an entry whose html has no
+  root `.slide` is wrapped in one (it would otherwise print as loose content sharing a neighbour's
+  page), an empty one and one carrying several are reported, and the notes travel with the 500.
+- `generate_pdf()` measures the printed layout with `page.emulate_media(media='print')` and
+  `describe_slide_layout_faults()` names every slide that cannot own a page —
+  `الشريحة 7 (position:absolute، height:360px)` — in the log and in the error text.
+- `GET /api/build` reports the commit the live code came from. «هل نزل الإصلاح؟» previously had no
+  answer for a server-side fix; the frontend could at least be checked by fetching the page and
+  grepping for a new function name.
+
 ## The designer chat has a memory
 
 `/api/designer-chat` used to send the planner nothing but the current message: it asked

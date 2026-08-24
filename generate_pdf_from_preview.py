@@ -147,6 +147,7 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
     with open(resolved_html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
+    layout_report = []
     try:
         from playwright.sync_api import sync_playwright
         print("[PDF] Launching Playwright...")
@@ -204,6 +205,30 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
                 # Don't fail export because an image hung; print what we have.
                 pass
 
+            # Measure the printed layout before printing. A slide that is out of flow, hidden or
+            # not one page tall shares a page with its neighbour, and the page count alone cannot
+            # say which slide did it.
+            try:
+                page.emulate_media(media='print')
+                layout_report = page.evaluate(
+                    """() => Array.from(document.querySelectorAll('.slide')).map((el, i) => {
+                        const cs = getComputedStyle(el);
+                        const rect = el.getBoundingClientRect();
+                        return {
+                            index: i + 1,
+                            position: cs.position,
+                            display: cs.display,
+                            cssFloat: cs.float,
+                            breakAfter: cs.breakAfter || cs.pageBreakAfter,
+                            height: Math.round(rect.height),
+                            width: Math.round(rect.width),
+                        };
+                    })"""
+                )
+            except Exception as error:
+                print(f"[PDF] layout probe failed: {error}")
+                layout_report = []
+
             # Generate the PDF
             print(f"[PDF] Printing to {out_path.name}...")
             page.pdf(
@@ -220,17 +245,40 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
         print(f"[PDF] Playwright failed ({e}); falling back to PyMuPDF.")
         traceback.print_exc()
         produced = _generate_pdf_with_fitz(html, out_path)
+        layout_report = []
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    _verify_pdf_page_count(produced, len(slides))
+    _verify_pdf_page_count(produced, len(slides), layout_report)
     return produced
 
 
-def _verify_pdf_page_count(pdf_path, expected_slides):
+def describe_slide_layout_faults(layout_report, page_height=720):
+    """Name the slides that cannot own a printed page, and why."""
+    faults = []
+    for item in layout_report or []:
+        if not isinstance(item, dict):
+            continue
+        reasons = []
+        if str(item.get('position')) in ('absolute', 'fixed'):
+            reasons.append(f"position:{item.get('position')}")
+        if str(item.get('display')) == 'none':
+            reasons.append('display:none')
+        if str(item.get('cssFloat')) in ('left', 'right'):
+            reasons.append(f"float:{item.get('cssFloat')}")
+        height = item.get('height')
+        if isinstance(height, (int, float)) and abs(height - page_height) > 2:
+            reasons.append(f"height:{int(height)}px")
+        if reasons:
+            faults.append(f"الشريحة {item.get('index')} ({'، '.join(reasons)})")
+    return faults
+
+
+def _verify_pdf_page_count(pdf_path, expected_slides, layout_report=None):
     """Refuse to hand back a PDF with fewer pages than the deck has slides.
 
     A missing slide used to reach the reader as a finished file: the export answered success and
-    the PDF simply ended early. A short file is a failed export, not a smaller export.
+    the PDF simply ended early. A short file is a failed export, not a smaller export — and the
+    error names the slides whose printed layout cannot hold a page of their own.
     """
     if not pdf_path or not expected_slides:
         return
@@ -241,10 +289,13 @@ def _verify_pdf_page_count(pdf_path, expected_slides):
     except Exception as error:
         print(f"[PDF] page count check skipped: {error}")
         return
-    print(f"[PDF] pages={pages} slides={expected_slides}")
+    faults = describe_slide_layout_faults(layout_report)
+    print(f"[PDF] pages={pages} slides={expected_slides}"
+          + (f" faults={len(faults)}: {'; '.join(faults[:20])}" if faults else ''))
     if pages < expected_slides:
+        detail = (' الشرائح التي لا تشغل صفحة كاملة: ' + '، '.join(faults[:12])) if faults else ''
         raise RuntimeError(
-            f'تعذر تصدير العرض كاملاً: الملف يحتوي {pages} صفحة مقابل {expected_slides} شريحة.')
+            f'تعذر تصدير العرض كاملاً: الملف يحتوي {pages} صفحة مقابل {expected_slides} شريحة.{detail}')
     if pages > expected_slides:
         print(f"[PDF] WARNING: {pages} pages for {expected_slides} slides — a slide overflowed its page")
 

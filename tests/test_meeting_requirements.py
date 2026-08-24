@@ -3640,6 +3640,42 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('ممنوع كتابة ##PLAN_IMAGE_N##', info)
         self.assertIn('##STREET_VIEW_1##', info)
 
+    def test_export_names_the_slide_it_could_not_print(self):
+        """«25 صفحة مقابل 50 شريحة» is not actionable on its own: the deck is inspected per entry and
+        the printed layout is measured, so the failure names the slides behind it."""
+        import generate_pdf_from_preview as engine
+
+        html, notes = self.application_module._export_html_from_slides([
+            {'title': 'الغلاف', 'html': '<div class="slide"><h1>THE VIEW</h1></div>'},
+            {'title': 'بلا إطار', 'html': '<h1>محتوى بلا إطار شريحة</h1>'},
+            {'title': 'فارغة', 'html': ''},
+            {'title': 'مدمجة', 'html': '<div class="slide">أ</div><div class="slide">ب</div>'},
+        ])
+        # The entry with no .slide root is wrapped so it still owns a page, and it is reported.
+        # 1 cover + 1 wrapped + 2 from the merged entry; the empty entry contributes nothing.
+        self.assertEqual(html.count('class="slide"'), 4)
+        self.assertIn('محتوى بلا إطار شريحة', html)
+        joined = ' | '.join(notes)
+        self.assertIn('شرائح بلا محتوى: 3', joined)
+        self.assertIn('شرائح بلا إطار شريحة', joined)
+        self.assertIn('شرائح تحتوي أكثر من شريحة: 4', joined)
+
+        faults = engine.describe_slide_layout_faults([
+            {'index': 1, 'position': 'relative', 'display': 'block', 'cssFloat': 'none', 'height': 720},
+            {'index': 2, 'position': 'absolute', 'display': 'block', 'cssFloat': 'none', 'height': 720},
+            {'index': 3, 'position': 'static', 'display': 'none', 'cssFloat': 'none', 'height': 720},
+            {'index': 4, 'position': 'static', 'display': 'block', 'cssFloat': 'left', 'height': 360},
+        ])
+        self.assertEqual(len(faults), 3)
+        self.assertIn('الشريحة 2 (position:absolute)', faults)
+        self.assertIn('display:none', faults[1])
+        self.assertIn('height:360px', faults[2])
+
+        # The build in use is reportable, so "is the fix deployed" has an answer.
+        build = self.app.test_client().get('/api/build').get_json()
+        self.assertTrue(build['commit'])
+        self.assertTrue(build['startedAt'])
+
     def test_designer_chat_remembers_the_conversation_and_the_slide(self):
         """It used to receive the current message alone: it asked «أي شريحة؟», the answer arrived at
         a model that had never asked, and the next turn asked again."""
