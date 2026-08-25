@@ -53,14 +53,17 @@ def _pdf_page_count(pdf_path):
 
 def _generate_pdf_pages_with_playwright(page, slides, layout_css, font_css, out_path, tmp_dir):
     page_paths = []
-    html_path = Path(tmp_dir) / 'isolated.html'
+    font_path = Path(tmp_dir) / 'isolated-font.css'
+    font_path.write_text(font_css, encoding='utf-8')
     for index, slide in enumerate(slides):
+        html_path = Path(tmp_dir) / f'isolated-{index + 1}.html'
         page_html = f'''<!DOCTYPE html>
-<html dir="rtl"><head><meta charset="utf-8"><style>{layout_css}</style></head>
+<html dir="rtl"><head><meta charset="utf-8"><style>{layout_css}</style>
+<link rel="stylesheet" href="{font_path.as_uri()}"></head>
 <body id="pdf-export-root" style="margin:0;padding:0;background:#fff;">
-<div class="pdf-export-page">{slide}</div><style>{font_css}</style></body></html>'''
+<div class="pdf-export-page">{slide}</div></body></html>'''
         html_path.write_text(page_html, encoding='utf-8')
-        page.goto(html_path.as_uri() + f'?slide={index + 1}', wait_until='load', timeout=30000)
+        page.goto(html_path.as_uri(), wait_until='load', timeout=30000)
         page.emulate_media(media='print')
         try:
             page.evaluate("() => document.fonts.ready")
@@ -249,6 +252,7 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
         f.write(html)
 
     layout_report = []
+    chromium_pdf_written = False
     try:
         from playwright.sync_api import sync_playwright
         print("[PDF] Launching Playwright...")
@@ -339,6 +343,7 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
                 print_background=True,
                 margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
             )
+            chromium_pdf_written = True
             if slides and _pdf_page_count(out_path) < len(slides):
                 print('[PDF] Chromium produced a short deck; printing isolated Chromium pages.')
                 _generate_pdf_pages_with_playwright(page, slides, layout_css, font_css, out_path, tmp_dir)
@@ -346,6 +351,10 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
         print("[PDF] Generation complete!")
         produced = str(out_path)
     except Exception as e:
+        if chromium_pdf_written:
+            print(f"[PDF] Isolated Chromium recovery failed ({e}); refusing a degraded PyMuPDF file.")
+            traceback.print_exc()
+            raise
         print(f"[PDF] Playwright failed ({e}); falling back to PyMuPDF.")
         traceback.print_exc()
         produced = _generate_pdf_with_fitz(html, out_path, slides, layout_css, font_css)

@@ -500,13 +500,15 @@ Five separate faults each dropped pages, and every one of them reported success:
 
 `_verify_pdf_page_count()` then **raises** when the produced file has fewer pages than the deck has
 slides: a short file is a failed export, not a smaller export. Before that error can leave
-`generate_pdf()`, each original slide string is loaded as its own temporary Chromium document,
-printed, and merged. This keeps the browser's CSS, images and fonts without trusting the corrupted
-combined DOM; rebuilding a short Chromium file with PyMuPDF completed the page count but lost the
-presentation design. PyMuPDF is used only when Chromium itself throws, and that fallback also
-renders one isolated slide per page; sending the whole deck through it produced 7 pages for 6 simple
-slides and could vary in either
-direction. `tests/test_export_slide_sanitization.py` guards all of it, and the old
+`generate_pdf()`, each original slide string is written to its own temporary HTML file, loaded in
+Chromium, printed, and merged. Do not append a query string to one reused `file://` path: it works on
+Windows Chromium and fails on the Linux host. Separate files keep the browser's CSS, images and fonts
+without trusting the corrupted combined DOM. Rebuilding a short Chromium file with PyMuPDF completed
+the page count but lost the presentation design, so PyMuPDF is used only when Chromium fails before
+writing any PDF. Once Chromium writes a short file, an isolated-render failure is returned as an
+error rather than silently handing back a plain document. The PyMuPDF fallback still renders one
+isolated slide per page; sending the whole deck through it produced 7 pages for 6 simple slides and
+could vary in either direction. `tests/test_export_slide_sanitization.py` guards all of it, and the old
 `test_ignores_unbalanced_slide` (which asserted the dropping) is gone.
 
 The failure also has to be actionable, so a page count alone is not enough:

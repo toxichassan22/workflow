@@ -197,6 +197,28 @@ class ExportSlideSanitizationTests(unittest.TestCase):
                 self.assertGreater(green, 60)
                 self.assertGreater(blue, 90)
 
+    def test_failed_isolated_chromium_never_returns_plain_fitz_output(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import generate_pdf_from_preview as engine
+
+        slides = '\n'.join(
+            '<div class="slide"><style>'
+            'body#pdf-export-root>.pdf-export-page{position:absolute!important}'
+            '</style><p>slide</p></div>'
+            for _ in range(6)
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / 'failed-isolation.pdf'
+            with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                with patch.object(engine, '_generate_pdf_pages_with_playwright', side_effect=RuntimeError('isolated failed')):
+                    with patch.object(engine, '_generate_pdf_with_fitz', side_effect=AssertionError('unexpected fallback')) as fallback:
+                        with self.assertRaisesRegex(RuntimeError, 'isolated failed'):
+                            engine.generate_pdf(slides, {}, pdf_path)
+                        fallback.assert_not_called()
+
     def test_a_short_pdf_is_an_error_not_a_smaller_export(self):
         import generate_pdf_from_preview as engine
 
