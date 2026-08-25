@@ -147,7 +147,7 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             with fitz.open(pdf_path) as document:
                 self.assertEqual(document.page_count, 6)
 
-    def test_short_chromium_result_uses_page_isolated_fallback(self):
+    def test_short_chromium_result_uses_isolated_playwright_pages(self):
         import tempfile
         from pathlib import Path
         from unittest.mock import patch
@@ -156,17 +156,22 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         import generate_pdf_from_preview as engine
 
         slides = '\n'.join(
-            '<div class="slide"><style>'
+            '<div class="slide" style="background:#0b4f6c!important"><style>'
             'body#pdf-export-root>.pdf-export-page{position:absolute!important}'
             '</style><p>slide</p></div>'
             for _ in range(6)
         )
         with tempfile.TemporaryDirectory() as tmp_dir:
             pdf_path = Path(tmp_dir) / 'short-chromium.pdf'
-            with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
-                engine.generate_pdf(slides, {}, pdf_path)
+            with patch.object(engine, '_generate_pdf_with_fitz', side_effect=AssertionError('unexpected fallback')):
+                with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                    engine.generate_pdf(slides, {}, pdf_path)
             with fitz.open(pdf_path) as document:
                 self.assertEqual(document.page_count, 6)
+                red, green, blue = document[0].get_pixmap(alpha=False).pixel(20, 20)
+                self.assertLess(red, 30)
+                self.assertGreater(green, 60)
+                self.assertGreater(blue, 90)
 
     def test_a_short_pdf_is_an_error_not_a_smaller_export(self):
         import generate_pdf_from_preview as engine

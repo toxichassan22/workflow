@@ -45,6 +45,76 @@ def _generate_pdf_with_fitz(html, out_path, slides=None, layout_css='', font_css
     return str(out_path)
 
 
+def _pdf_page_count(pdf_path):
+    import fitz
+    with fitz.open(str(pdf_path)) as document:
+        return document.page_count
+
+
+def _generate_pdf_pages_with_playwright(page, slide_count, out_path, tmp_dir):
+    page_paths = []
+    for index in range(slide_count):
+        page.evaluate(
+            """({active}) => {
+                const force = (element, rules) => {
+                    for (const [name, value] of Object.entries(rules)) {
+                        element.style.setProperty(name, value, 'important');
+                    }
+                };
+                const root = document.getElementById('pdf-export-root');
+                if (!root) throw new Error('pdf export root is missing');
+                const rootRules = {
+                    display: 'block', position: 'static', float: 'none', margin: '0', padding: '0',
+                    width: '1280px', height: '720px', overflow: 'hidden', columns: 'auto',
+                    'column-count': 'auto', 'column-width': 'auto', 'grid-template-columns': 'none',
+                    'grid-template-rows': 'none', gap: '0', transform: 'none', zoom: '1'
+                };
+                force(document.documentElement, rootRules);
+                force(root, rootRules);
+                const sheets = Array.from(root.children).filter(
+                    element => element.classList.contains('pdf-export-page')
+                );
+                if (active >= sheets.length) throw new Error('pdf export page is missing');
+                sheets.forEach((sheet, sheetIndex) => {
+                    if (sheetIndex !== active) {
+                        force(sheet, {display: 'none'});
+                        return;
+                    }
+                    force(sheet, {
+                        display: 'block', position: 'relative', float: 'none', margin: '0', padding: '0',
+                        width: '1280px', height: '720px', inset: 'auto', transform: 'none', zoom: '1',
+                        overflow: 'hidden', visibility: 'visible', opacity: '1', 'break-before': 'auto',
+                        'break-after': 'auto', 'page-break-before': 'auto', 'page-break-after': 'auto'
+                    });
+                });
+            }""",
+            {"active": index},
+        )
+        page_path = Path(tmp_dir) / f'isolated-{index + 1}.pdf'
+        page.pdf(
+            path=str(page_path),
+            width="1280px",
+            height="720px",
+            print_background=True,
+            margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
+            page_ranges="1",
+        )
+        page_paths.append(page_path)
+
+    import fitz
+    merged_path = Path(tmp_dir) / 'isolated-merged.pdf'
+    output = fitz.open()
+    try:
+        for page_path in page_paths:
+            with fitz.open(str(page_path)) as source:
+                output.insert_pdf(source, from_page=0, to_page=0)
+        output.save(str(merged_path))
+    finally:
+        output.close()
+    os.replace(merged_path, out_path)
+    return str(out_path)
+
+
 def _resolve_asset_urls(html):
     """Convert relative uploads/, assets/, and tenant-assets/ references to absolute file URIs."""
     if not html:
@@ -173,7 +243,6 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
         f.write(html)
 
     layout_report = []
-    used_fitz = False
     try:
         from playwright.sync_api import sync_playwright
         print("[PDF] Launching Playwright...")
@@ -264,6 +333,9 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
                 print_background=True,
                 margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
             )
+            if slides and _pdf_page_count(out_path) < len(slides):
+                print('[PDF] Chromium produced a short deck; printing isolated Chromium pages.')
+                _generate_pdf_pages_with_playwright(page, len(slides), out_path, tmp_dir)
             browser.close()
         print("[PDF] Generation complete!")
         produced = str(out_path)
@@ -272,17 +344,9 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
         traceback.print_exc()
         produced = _generate_pdf_with_fitz(html, out_path, slides, layout_css, font_css)
         layout_report = []
-        used_fitz = True
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    try:
-        _verify_pdf_page_count(produced, len(slides), layout_report)
-    except RuntimeError:
-        if used_fitz or not slides:
-            raise
-        print('[PDF] Chromium produced a short deck; rebuilding one isolated page per slide with PyMuPDF.')
-        produced = _generate_pdf_with_fitz(html, out_path, slides, layout_css, font_css)
-        _verify_pdf_page_count(produced, len(slides))
+    _verify_pdf_page_count(produced, len(slides), layout_report)
     return produced
 
 
