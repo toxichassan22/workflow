@@ -471,7 +471,7 @@ frames**. Three rules came out of it:
 
 ## The export must contain the whole deck
 
-Four separate faults each dropped pages, and every one of them reported success:
+Five separate faults each dropped pages, and every one of them reported success:
 
 - **A broken slide ended the walk.** `extract_slide_elements()` required a balanced `</div>` per
   slide and **`break`ed** when it could not find one, so one model-generated slide with a missing
@@ -481,6 +481,11 @@ Four separate faults each dropped pages, and every one of them reported success:
   `slide-footer` and `slide-title` all matched, and with the bounded reader one real slide became
   three fragments: an empty `<div class="slide"></div>` plus its own inner blocks. `_SLIDE_OPEN_RE`
   captures the class attribute and the token list is checked for exactly `slide`.
+- **Balancing only `<div>` does not repair a table.** Two live slides left `<table>`, `<tbody>` and
+  `<tr>` open. The source still contained 50 `.pdf-export-page` strings, but Chromium's combined DOM
+  had only 48 wrappers in total and 25 direct children because the HTML parser nested the remaining
+  deck inside those tables. Recovery must load each original slide string into its own document;
+  querying or cloning wrappers from the already-corrupted combined DOM cannot recover what vanished.
 - **An out-of-flow slide gets no page.** A slide carrying `position:absolute` (or `float`) in its
   own inline style leaves the flow and shares a page: measured 5 pages for 6 slides with one such
   slide, and **1 page for 6** when all of them had it. A root inline declaration with `!important`
@@ -495,11 +500,12 @@ Four separate faults each dropped pages, and every one of them reported success:
 
 `_verify_pdf_page_count()` then **raises** when the produced file has fewer pages than the deck has
 slides: a short file is a failed export, not a smaller export. Before that error can leave
-`generate_pdf()`, the same loaded Chromium page hides every wrapper except one, prints that wrapper,
-and merges the isolated PDFs. This keeps the browser's CSS, images and fonts; rebuilding a short
-Chromium file with PyMuPDF completed the page count but lost the presentation design. PyMuPDF is now
-used only when Chromium itself throws, and that fallback also renders one isolated slide per page;
-sending the whole deck through it produced 7 pages for 6 simple slides and could vary in either
+`generate_pdf()`, each original slide string is loaded as its own temporary Chromium document,
+printed, and merged. This keeps the browser's CSS, images and fonts without trusting the corrupted
+combined DOM; rebuilding a short Chromium file with PyMuPDF completed the page count but lost the
+presentation design. PyMuPDF is used only when Chromium itself throws, and that fallback also
+renders one isolated slide per page; sending the whole deck through it produced 7 pages for 6 simple
+slides and could vary in either
 direction. `tests/test_export_slide_sanitization.py` guards all of it, and the old
 `test_ignores_unbalanced_slide` (which asserted the dropping) is gone.
 

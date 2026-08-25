@@ -173,6 +173,30 @@ class ExportSlideSanitizationTests(unittest.TestCase):
                 self.assertGreater(green, 60)
                 self.assertGreater(blue, 90)
 
+    def test_unclosed_table_cannot_swallow_following_chromium_pages(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import fitz
+        import generate_pdf_from_preview as engine
+
+        good = '<div class="slide" style="background:#0b4f6c!important"><p>good</p></div>'
+        broken = ('<div class="slide" style="background:#0b4f6c!important">'
+                  '<table><tbody><tr><td>broken</td>')
+        slides = '\n'.join([good, broken, good, broken, good, good])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / 'unclosed-table.pdf'
+            with patch.object(engine, '_generate_pdf_with_fitz', side_effect=AssertionError('unexpected fallback')):
+                with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                    engine.generate_pdf(slides, {}, pdf_path)
+            with fitz.open(pdf_path) as document:
+                self.assertEqual(document.page_count, 6)
+                red, green, blue = document[1].get_pixmap(alpha=False).pixel(20, 20)
+                self.assertLess(red, 30)
+                self.assertGreater(green, 60)
+                self.assertGreater(blue, 90)
+
     def test_a_short_pdf_is_an_error_not_a_smaller_export(self):
         import generate_pdf_from_preview as engine
 
