@@ -51,6 +51,20 @@ def _pdf_page_count(pdf_path):
         return document.page_count
 
 
+def _replace_output_file(source_path, out_path):
+    out_path = Path(out_path)
+    descriptor, staged_path = tempfile.mkstemp(
+        dir=str(out_path.parent), prefix=out_path.stem + '-', suffix='.tmp'
+    )
+    os.close(descriptor)
+    try:
+        shutil.copyfile(source_path, staged_path)
+        os.replace(staged_path, out_path)
+    finally:
+        if os.path.exists(staged_path):
+            os.unlink(staged_path)
+
+
 def _generate_pdf_pages_with_playwright(page, slides, layout_css, font_css, out_path, tmp_dir):
     page_paths = []
     font_path = Path(tmp_dir) / 'isolated-font.css'
@@ -120,7 +134,7 @@ def _generate_pdf_pages_with_playwright(page, slides, layout_css, font_css, out_
         output.save(str(merged_path))
     finally:
         output.close()
-    os.replace(merged_path, out_path)
+    _replace_output_file(merged_path, out_path)
     return str(out_path)
 
 

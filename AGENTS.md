@@ -503,7 +503,10 @@ slides: a short file is a failed export, not a smaller export. Before that error
 `generate_pdf()`, each original slide string is written to its own temporary HTML file, loaded in
 Chromium, printed, and merged. Do not append a query string to one reused `file://` path: it works on
 Windows Chromium and fails on the Linux host. Separate files keep the browser's CSS, images and fonts
-without trusting the corrupted combined DOM. Rebuilding a short Chromium file with PyMuPDF completed
+without trusting the corrupted combined DOM. The merged file lives under `/tmp`, while `outputs/` can
+be another filesystem; `_replace_output_file()` stages a copy beside the destination before
+`os.replace()` so Linux does not fail with `Invalid cross-device link`. Rebuilding a short Chromium
+file with PyMuPDF completed
 the page count but lost the presentation design, so PyMuPDF is used only when Chromium fails before
 writing any PDF. Once Chromium writes a short file, an isolated-render failure is returned as an
 error rather than silently handing back a plain document. The PyMuPDF fallback still renders one

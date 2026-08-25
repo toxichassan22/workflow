@@ -197,6 +197,27 @@ class ExportSlideSanitizationTests(unittest.TestCase):
                 self.assertGreater(green, 60)
                 self.assertGreater(blue, 90)
 
+    def test_isolated_pdf_is_staged_on_the_output_filesystem(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import generate_pdf_from_preview as engine
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source_dir = Path(tmp_dir) / 'source'
+            output_dir = Path(tmp_dir) / 'output'
+            source_dir.mkdir()
+            output_dir.mkdir()
+            source_path = source_dir / 'merged.pdf'
+            output_path = output_dir / 'deck.pdf'
+            source_path.write_bytes(b'chromium pdf')
+            original_replace = engine.os.replace
+            with patch.object(engine.os, 'replace', wraps=original_replace) as replace:
+                engine._replace_output_file(source_path, output_path)
+            self.assertEqual(output_path.read_bytes(), b'chromium pdf')
+            self.assertEqual(Path(replace.call_args.args[0]).parent, output_dir)
+
     def test_failed_isolated_chromium_never_returns_plain_fitz_output(self):
         import tempfile
         from pathlib import Path
