@@ -11,10 +11,34 @@ from slide_engine import resolve_logo_in_html
 BASE_DIR = Path(__file__).resolve().parent
 
 
-def _generate_pdf_with_fitz(html, out_path):
+def _generate_pdf_with_fitz(html, out_path, slides=None, layout_css='', font_css=''):
     """Pure-Python fallback using PyMuPDF when Playwright is unavailable."""
     print("[FONT] WARNING: PyMuPDF fallback cannot render @font-face/base64 fonts; custom font may not apply")
     import fitz
+    if slides:
+        output = fitz.open()
+        try:
+            for slide in slides:
+                page_html = f'''<!DOCTYPE html>
+<html dir="rtl"><head><meta charset="utf-8"><style>{layout_css}</style></head>
+<body id="pdf-export-root" style="margin:0;padding:0;background:#fff;">
+<div class="pdf-export-page">{slide}</div><style>{font_css}</style></body></html>'''
+                source = fitz.open('html', page_html.encode('utf-8'), width=1280, height=720)
+                page_pdf = None
+                try:
+                    if source.page_count:
+                        page_pdf = fitz.open('pdf', source.convert_to_pdf())
+                        output.insert_pdf(page_pdf, from_page=0, to_page=0)
+                finally:
+                    if page_pdf is not None:
+                        page_pdf.close()
+                    source.close()
+            if os.path.exists(out_path):
+                os.unlink(out_path)
+            output.save(out_path)
+        finally:
+            output.close()
+        return str(out_path)
     # Render HTML to a 1280x720 pt page; may not be pixel-perfect but avoids 502s.
     src = fitz.open('html', html.encode('utf-8'), width=1280, height=720)
     src.save(out_path)
@@ -98,7 +122,7 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     slide_tags = len(re.findall(r'<div\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\1', html, re.I))
     slides = extract_slide_elements(html)
     if slides:
-        html = "\n".join(slides)
+        html = "\n".join(f'<div class="pdf-export-page">{slide}</div>' for slide in slides)
     if slide_tags and len(slides) != slide_tags:
         # Losing a slide between the deck and the file is exactly the failure that shipped a
         # 24-page PDF for a 49-slide deck, so it is stated loudly instead of being joined over.
@@ -107,18 +131,19 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
 
     # Build tenant font CSS and layout/print CSS
     font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
-    # A slide carrying `position:absolute` or `float` in its own inline style leaves the flow, and
-    # an out-of-flow element gets no page of its own: measured 5 pages for 6 slides with one such
-    # slide, and 1 page for 6 when every slide had it. The print rules therefore put every slide
-    # back in flow with !important, which beats an inline style that has no !important of its own.
+    # A slide carrying `position:absolute` or `float` can leave the flow, and an inline declaration
+    # with !important beats the export stylesheet. Pagination therefore belongs to a generated page
+    # wrapper outside the slide: its fixed size and break remain in flow even when the slide itself
+    # does not.
     layout_css = """
 * { margin:0; padding:0; box-sizing:border-box; }
-.slide { width:1280px; height:720px; direction:rtl; position:relative; overflow:hidden; }
+.pdf-export-page, .slide { width:1280px; height:720px; direction:rtl; position:relative; overflow:hidden; }
 img { max-width:100%; max-height:100%; object-fit:cover; }
 @media print {
     body#pdf-export-root { background:white !important; margin:0 !important; padding:0 !important; width:1280px !important; height:auto !important; display:block !important; columns:auto !important; column-count:auto !important; column-width:auto !important; grid-template-columns:none !important; grid-template-rows:none !important; gap:0 !important; overflow:visible !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
-    body#pdf-export-root > .slide { margin:0 !important; border:none !important; page-break-after:always !important; break-after:page !important; page-break-inside:avoid !important; break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; }
-    body#pdf-export-root > .slide:last-child { page-break-after:auto !important; break-after:auto !important; }
+    body#pdf-export-root > .pdf-export-page { margin:0 !important; border:none !important; page-break-after:always !important; break-after:page !important; page-break-inside:avoid !important; break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; overflow:hidden !important; }
+    body#pdf-export-root > .pdf-export-page:last-of-type { page-break-after:auto !important; break-after:auto !important; }
+    body#pdf-export-root > .pdf-export-page > .slide { margin:0 !important; border:none !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; }
 }
 """
 
@@ -148,6 +173,7 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
         f.write(html)
 
     layout_report = []
+    used_fitz = False
     try:
         from playwright.sync_api import sync_playwright
         print("[PDF] Launching Playwright...")
@@ -244,11 +270,19 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
     except Exception as e:
         print(f"[PDF] Playwright failed ({e}); falling back to PyMuPDF.")
         traceback.print_exc()
-        produced = _generate_pdf_with_fitz(html, out_path)
+        produced = _generate_pdf_with_fitz(html, out_path, slides, layout_css, font_css)
         layout_report = []
+        used_fitz = True
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    _verify_pdf_page_count(produced, len(slides), layout_report)
+    try:
+        _verify_pdf_page_count(produced, len(slides), layout_report)
+    except RuntimeError:
+        if used_fitz or not slides:
+            raise
+        print('[PDF] Chromium produced a short deck; rebuilding one isolated page per slide with PyMuPDF.')
+        produced = _generate_pdf_with_fitz(html, out_path, slides, layout_css, font_css)
+        _verify_pdf_page_count(produced, len(slides))
     return produced
 
 

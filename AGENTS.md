@@ -483,21 +483,23 @@ Four separate faults each dropped pages, and every one of them reported success:
   captures the class attribute and the token list is checked for exactly `slide`.
 - **An out-of-flow slide gets no page.** A slide carrying `position:absolute` (or `float`) in its
   own inline style leaves the flow and shares a page: measured 5 pages for 6 slides with one such
-  slide, and **1 page for 6** when all of them had it. The `@media print` block now forces
-  `position:relative`, `display:block`, `float:none`, `inset:auto`, `transform:none` and
-  `break-after:page` with `!important`, which beats an inline style that has no `!important`.
-  (Measured as harmless: a slide redefining `@page`, cancelling the break with its own `!important`,
-  or shrinking `.slide` height — Playwright's own page size and break rules hold.)
+  slide, and **1 page for 6** when all of them had it. A root inline declaration with `!important`
+  also beats the export stylesheet. Every slide is therefore placed inside a generated
+  `.pdf-export-page`; that trusted 1280 by 720 wrapper owns the page break even when the slide inside
+  it remains absolute, floated or transformed.
 - **A global page layout combines separate slides.** A `<style>` inside one slide still applies to
   the whole document. `body{display:grid;grid-template-columns:1fr 1fr}` or `columns:2` produced
   exactly **25 pages for 50 slides** while every slide itself measured 1280 by 720. The generated
-  document now gives its body the unique `pdf-export-root` id and resets it to one block column;
-  direct-child slide rules use the same id specificity, so later class and body rules cannot turn
-  the deck back into shared rows or columns.
+  document gives its body the unique `pdf-export-root` id, resets it to one block column, and puts
+  only the trusted `.pdf-export-page` wrappers in that flow. Slide CSS no longer owns pagination.
 
 `_verify_pdf_page_count()` then **raises** when the produced file has fewer pages than the deck has
-slides: a short file is a failed export, not a smaller export. `tests/test_export_slide_sanitization.py`
-guards all of it, and the old `test_ignores_unbalanced_slide` (which asserted the dropping) is gone.
+slides: a short file is a failed export, not a smaller export. Before that error can leave
+`generate_pdf()`, a short Chromium file is rebuilt with `_generate_pdf_with_fitz()` one isolated
+slide at a time. The fallback also always renders and merges one page per slide; sending the whole
+deck through PyMuPDF produced 7 pages for 6 simple slides and could vary in either direction.
+`tests/test_export_slide_sanitization.py` guards all of it, and the old
+`test_ignores_unbalanced_slide` (which asserted the dropping) is gone.
 
 The failure also has to be actionable, so a page count alone is not enough:
 

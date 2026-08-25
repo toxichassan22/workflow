@@ -78,7 +78,7 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         """An out-of-flow slide gets no page of its own: measured 5 pages for 6 slides with one
         `position:absolute` slide, and 1 page for 6 when all of them had it."""
         source = (ROOT / 'generate_pdf_from_preview.py').read_text(encoding='utf-8')
-        print_block = source[source.index('@media print {'):source.index('.slide:last-child')]
+        print_block = source[source.index('@media print {'):source.index('.pdf-export-page:last-of-type')]
         for rule in ('position:relative !important', 'float:none !important',
                      'display:block !important', 'break-after:page !important',
                      'page-break-after:always !important'):
@@ -100,6 +100,69 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp_dir:
             pdf_path = Path(tmp_dir) / 'body-grid.pdf'
+            with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                engine.generate_pdf(slides, {}, pdf_path)
+            with fitz.open(pdf_path) as document:
+                self.assertEqual(document.page_count, 6)
+
+    def test_inline_important_position_cannot_remove_slide_pages(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import fitz
+        import generate_pdf_from_preview as engine
+
+        slides = '\n'.join(
+            '<div class="slide"'
+            + ('' if index % 2 == 0 else ' style="position:absolute!important"')
+            + f'><p>{index}</p></div>'
+            for index in range(6)
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / 'position-important.pdf'
+            with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                engine.generate_pdf(slides, {}, pdf_path)
+            with fitz.open(pdf_path) as document:
+                self.assertEqual(document.page_count, 6)
+
+    def test_fitz_fallback_keeps_one_page_per_slide(self):
+        import sys
+        import tempfile
+        import types
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import fitz
+        import generate_pdf_from_preview as engine
+
+        playwright_stub = types.ModuleType('playwright.sync_api')
+        playwright_stub.sync_playwright = lambda: (_ for _ in ()).throw(RuntimeError('forced failure'))
+        slides = '\n'.join(f'<div class="slide"><p>{index}</p></div>' for index in range(6))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / 'fitz-fallback.pdf'
+            with patch.dict(sys.modules, {'playwright.sync_api': playwright_stub}):
+                with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                    engine.generate_pdf(slides, {}, pdf_path)
+            with fitz.open(pdf_path) as document:
+                self.assertEqual(document.page_count, 6)
+
+    def test_short_chromium_result_uses_page_isolated_fallback(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import fitz
+        import generate_pdf_from_preview as engine
+
+        slides = '\n'.join(
+            '<div class="slide"><style>'
+            'body#pdf-export-root>.pdf-export-page{position:absolute!important}'
+            '</style><p>slide</p></div>'
+            for _ in range(6)
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / 'short-chromium.pdf'
             with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
                 engine.generate_pdf(slides, {}, pdf_path)
             with fitz.open(pdf_path) as document:
