@@ -7,6 +7,7 @@ import json
 import os
 import re
 import concurrent.futures
+import html as html_lib
 from design_templates import build_design_rules, extract_slide_elements
 import db
 # emoji_icons is intentionally not imported: it converted emojis into inline SVG icons, which the
@@ -20,27 +21,514 @@ _ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
 
 CONTENT_DISTRIBUTION_RULES = """
 ## قواعد توزيع المحتوى (إلزامية — اتبعها بدقة)
-1. **التوازن البصري:** كل شريحة يجب أن تكون ممتلئة بصرياً بنسبة 60-85%
-2. **الحد الأدنى للمحتوى:** كل شريحة محتوى يجب أن تحتوي على:
-   - عنوان واضح
-   - 3-6 نقاط أساسية (bullets) أو 2-4 بطاقات (cards) أو 3-5 أرقام (metrics)
-   - ممنوع تماماً شريحة بكلمة أو كلمتين فقط (فارغة بصرياً)
-3. **الحد الأقصى للمحتوى:** لا تزدحم شريحة بأكثر من:
-   - 6 bullets
-   - 4 بطاقات
-   - 5 metrics
-4. **التقسيم الذكي:** لو المحتوى كتير لشريحة واحدة، قسمه على شريحتين منفصلتين
-5. **الدمج الذكي:** لو المحتوى قليل لشريحة، ادمجه مع شريحة مجاورة ذات صلة
-6. **الأنواع الإلزامية:**
-   - شريحة غلاف (1) — دائماً في البداية
-   - شريحة فهرس (1) — بعد الغلاف
-   - شريحة ختام (1) — دائماً في النهاية
-   - شريحة مود بورد (0-1) — اختياري حسب توفر الصور
-   - شرائح محتوى (N) — العدد يحدده المحتوى
-7. **تنوع التصميم:** لا تجعل شريحتين متتاليتين بنفس نمط التصميم (مثلاً لا تجعل شريحتين متتاليتين كلتيهما bullets)
-8. **الشرائح الثابتة:** الغلاف (1)، الفهرس (2)، المود بورد (قبل الأخيرة)، الختام (الأخيرة)
-9. **شرائح تحليل الموقع:** إذا وُجدت بيانات موقع (location_lat/lng) أو (location_address)، أضف شرائح map_overview إلى map_landmarks إلى map_access إلى site_specs إلى map_catchment متسلسلة بعد الفهرس
+1. الغلاف أولاً، ثم فهرس الأقسام مع رقم صفحة بداية كل قسم، ثم أقسام المحتوى، والخاتمة أخيراً.
+2. ترتيب الأقسام لا يتغير: نبذة عن المشروع، مكونات المشروع، تحليل الأرض، تحليل الموقع الجغرافي، تحليل السوق، الجدول الزمني، الدراسة المالية، تحليل SWOT وتحليل المخاطر، فريق العمل، المخططات، التصورات الخارجية، التصورات الداخلية، الملخص التنفيذي، الخاتمة.
+3. الفهرس يعرض أسماء الأقسام فقط مع أرقام الصفحات؛ لا يعرض عناوين الشرائح الفرعية ولا يستخدم مخطط محاور أو تدفق أو بطاقات صغيرة.
+4. صفحة بداية كل قسم تحمل اسم القسم وحده بلا وصف وبلا ترجمة وبلا نقاط.
+5. كل شريحة لها فكرة واحدة، ويُقسّم المحتوى الطويل على صفحات إضافية بدلاً من تصغيره أو حذفه.
+6. لا تكرر المعلومة أو مكونات المشروع في أكثر من موضع. الإحالة المختصرة مسموحة، أما إعادة الجدول أو القائمة نفسها فممنوعة.
+7. اختر الشكل بحسب طبيعة المحتوى: نص متصل للنبذات والملخصات، جدول للصفوف المنظمة، رسم بياني للأرقام القابلة للمقارنة، وصورة كبيرة للصور والمخططات. استخدم البطاقات فقط لعناصر مستقلة قصيرة ومتوازية، وبحد أقصى ثلاث بطاقات عند الحاجة.
+8. يوضع ملخص نهائي مستند إلى بيانات البرنامج بعد جداول كل قسم تحليلي، ولا تُضاف تحسينات إنشائية أو استرسال لا يحمل معلومة واضحة.
+9. شرائح الصور تستخدم صورة واحدة كبيرة أو صورتين واضحتين في الصفحة؛ يمكن زيادة الصفحات ولا يجوز ضغط الصور في مربعات صغيرة.
+10. شرائح الموقع والخرائط تبقى داخل قسم تحليل الموقع الجغرافي، وشرائح الأرض وصورها وملخصها داخل قسم تحليل الأرض.
 """
+
+PRESENTATION_SECTION_ORDER = (
+    'overview', 'components', 'land', 'location', 'market', 'timeline', 'financial',
+    'swot_risks', 'team', 'plans', 'exterior', 'interior', 'executive_summary', 'closing',
+)
+
+PRESENTATION_SECTION_TITLES = {
+    'overview': 'نبذة عن المشروع',
+    'components': 'مكونات المشروع',
+    'land': 'تحليل الأرض',
+    'location': 'تحليل الموقع الجغرافي',
+    'market': 'تحليل السوق',
+    'timeline': 'الجدول الزمني',
+    'financial': 'الدراسة المالية',
+    'swot_risks': 'تحليل SWOT وتحليل المخاطر',
+    'team': 'فريق العمل',
+    'plans': 'المخططات',
+    'exterior': 'التصورات الخارجية',
+    'interior': 'التصورات الداخلية',
+    'executive_summary': 'الملخص التنفيذي',
+    'closing': 'الخاتمة',
+}
+
+_SECTION_KEY_ALIASES = {
+    'project': 'overview', 'project_overview': 'overview', 'project_idea': 'overview',
+    'project_components': 'components', 'land_analysis': 'land', 'site': 'location',
+    'geographic_location': 'location', 'market_analysis': 'market', 'schedule': 'timeline',
+    'finance': 'financial', 'financial_study': 'financial', 'swot': 'swot_risks',
+    'risks': 'swot_risks', 'team_members': 'team', 'floorplans': 'plans',
+    'moodboard': 'exterior', 'external': 'exterior', 'internal': 'interior',
+    'executive': 'executive_summary', 'summary': 'executive_summary', 'conclusion': 'closing',
+}
+
+_SECTION_MATCHERS = (
+    ('closing', r'(?:الخاتمة|الختام|شكرا|شكراً|closing|conclusion|thanks)'),
+    ('executive_summary', r'(?:الملخص التنفيذي|executive summary)'),
+    ('interior', r'(?:التصورات? الداخلية|التصميم الداخلي|interior)'),
+    ('exterior', r'(?:التصورات? الخارجية|المود بورد|mood ?board|واجهات المشروع|exterior|التصور البصري)'),
+    ('plans', r'(?:المخططات|المساقط|مخطط معماري|2d|floor ?plans?)'),
+    ('team', r'(?:فريق العمل|فريق التطوير|المطور|الاستشاري|team)'),
+    ('swot_risks', r'(?:swot|نقاط القوة|نقاط الضعف|الفرص والتهديدات|المخاطر|إدارة المخاطر|risk)'),
+    ('financial', r'(?:الدراسة المالية|التحليل المالي|الجدوى|التدفقات النقدية|الإيرادات|التكاليف|العائد|roi|irr|financial|cash ?flow)'),
+    ('timeline', r'(?:الجدول الزمني|الخطة الزمنية|مراحل التطوير|مراحل التنفيذ|timeline|schedule)'),
+    ('market', r'(?:تحليل السوق|دراسة السوق|المنافسين|الطلب السوقي|market|competitor)'),
+    ('location', r'(?:الموقع الجغرافي|تحليل الموقع|الموقع الاستراتيجي|خريطة|الطرق|المعالم|نطاق التأثير|site|location|map|access|landmarks|catchment)'),
+    ('land', r'(?:تحليل الأرض|الأرض والاشتراطات|الأرض والكروكي|الكروكي|اشتراطات البناء|حدود الأرض|صور الأرض|land|croquis)'),
+    ('components', r'(?:مكونات المشروع|الوحدات والمساحات|المكونات|components|units)'),
+    ('overview', r'(?:نبذة عن المشروع|المشروع والفكرة|فكرة المشروع|نظرة عامة|تعريف المشروع|project overview|project brief)'),
+)
+
+
+def _slide_section_key(slide, current=''):
+    slide = slide if isinstance(slide, dict) else {}
+    explicit = str(slide.get('section_key') or slide.get('section') or '').strip().lower()
+    explicit = _SECTION_KEY_ALIASES.get(explicit, explicit)
+    if explicit in PRESENTATION_SECTION_ORDER:
+        return explicit
+    slide_type = str(slide.get('type') or '').strip().lower()
+    if slide_type == 'closing':
+        return 'closing'
+    if slide_type == 'moodboard':
+        return 'exterior'
+    if slide_type.startswith('map_') or slide_type == 'site_specs':
+        return 'location'
+    text = ' '.join(str(value or '') for value in (
+        slide.get('title'), slide.get('content_source'), slide.get('source_table'),
+        ' '.join(str(item or '') for item in (slide.get('bullets') or [])),
+    )).lower()
+    for key, pattern in _SECTION_MATCHERS:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return key
+    return current if current in PRESENTATION_SECTION_ORDER else 'overview'
+
+
+def _plan_slide_signature(slide):
+    title = re.sub(r'[\W_]+', '', str(slide.get('title') or '').lower(), flags=re.UNICODE)
+    source = re.sub(r'\s+', '', str(slide.get('content_source') or slide.get('source_table') or '').lower())
+    tokens = '|'.join(str(item or '') for item in (slide.get('image_tokens') or []))
+    return title, source, tokens
+
+
+_FINANCIAL_PLAN_TABLES = (
+    ('revenueTable', 'بنود الإيرادات', 'chart'),
+    ('costTable', 'تكاليف المشروع', 'chart'),
+    ('scheduleTable', 'مراحل التطوير المالية', 'table'),
+    ('opexTable', 'المصروفات التشغيلية', 'chart'),
+    ('graceScheduleTable', 'جدول فترة السماح', 'table'),
+    ('financeDrawTable', 'جدول سحب التمويل', 'chart'),
+    ('financeRepaymentTable', 'جدول سداد التمويل', 'chart'),
+    ('fundAdditionalFeesTable', 'أتعاب الصندوق الإضافية', 'table'),
+    ('externalTable', 'البنود الخارجية', 'table'),
+    ('cashflowTable', 'التدفقات النقدية السنوية', 'chart'),
+    ('sensitivityAssumptionsTable', 'افتراضات تحليل الحساسية', 'table'),
+    ('sensitivityTable', 'نتائج تحليل الحساسية', 'chart'),
+)
+
+
+def _project_component_rows(project_data):
+    model = _parse_financial_dict((project_data or {}).get('financial_study_model'))
+    dynamic = model.get('dynamicRows') if isinstance(model.get('dynamicRows'), dict) else {}
+    rows = dynamic.get('components') if isinstance(dynamic.get('components'), list) else []
+    if not rows:
+        decoded = _decode_json_fact((project_data or {}).get('project_components_data'))
+        rows = decoded if isinstance(decoded, list) else []
+    return [row for row in rows if isinstance(row, dict) and any(str(value or '').strip() for value in row.values())]
+
+
+def _available_asset_items(values):
+    items = []
+    for index, value in enumerate(values if isinstance(values, list) else [], 1):
+        source = value if isinstance(value, dict) else {'url': value}
+        url = str(source.get('url') or source.get('imageUrl') or '').strip()
+        if url:
+            items.append((index, source))
+    return items
+
+
+def _rows_have_comparable_numbers(rows):
+    values = []
+    for row in rows if isinstance(rows, list) else []:
+        cells = row.values() if isinstance(row, dict) else row if isinstance(row, (list, tuple)) else []
+        for value in cells:
+            text = str(value or '').replace(',', '').replace('٬', '').strip()
+            if re.fullmatch(r'-?\d+(?:\.\d+)?%?', text):
+                values.append(text)
+    return len(values) >= 2
+
+
+def _ensure_required_plan_content(groups, project_data=None, images=None, tenant_id=None):
+    source = project_data if isinstance(project_data, dict) else {}
+    images = images if isinstance(images, dict) else {}
+
+    def add(section_key, slide, replace=False):
+        slide = dict(slide)
+        slide['section_key'] = section_key
+        if replace:
+            groups[section_key] = []
+        signature = _plan_slide_signature(slide)
+        if any(_plan_slide_signature(existing) == signature for existing in groups.get(section_key, [])):
+            return
+        groups.setdefault(section_key, []).append(slide)
+
+    if not groups.get('overview') and source:
+        add('overview', {
+            'title': 'نبذة عن المشروع', 'type': 'content', 'design_style': 'text',
+            'content_density': 'medium', 'requires_image': False,
+            'content_source': 'project_overview', 'bullets': [],
+        })
+    elif groups.get('overview'):
+        groups['overview'][0]['title'] = 'نبذة عن المشروع'
+        groups['overview'][0]['content_source'] = groups['overview'][0].get('content_source') or 'project_overview'
+
+    moodboard_items = _available_asset_items(images.get('moodboard'))
+    moodboard_meta = images.get('moodboard_meta') if isinstance(images.get('moodboard_meta'), list) else []
+    if moodboard_items:
+        groups['exterior'] = [slide for slide in groups.get('exterior', []) if slide.get('image_tokens')]
+    if moodboard_items and groups.get('overview'):
+        groups['overview'][0]['image_tokens'] = [f'##MOODBOARD_IMAGE_{index}##' for index, _item in moodboard_items[:2]]
+        groups['overview'][0]['design_style'] = 'image'
+        groups['overview'][0]['requires_image'] = True
+    for index, item in moodboard_items:
+        meta = moodboard_meta[index - 1] if index <= len(moodboard_meta) and isinstance(moodboard_meta[index - 1], dict) else {}
+        title = str(meta.get('label') or item.get('label') or f'التصور الخارجي {index}').strip()
+        caption = str(meta.get('caption') or item.get('caption') or '').strip()
+        add('exterior', {
+            'title': title, 'type': 'content', 'design_style': 'image',
+            'content_density': 'low', 'requires_image': True,
+            'content_source': f'exterior_image:{index}',
+            'image_tokens': [f'##MOODBOARD_IMAGE_{index}##'],
+            'bullets': [caption] if caption else [],
+        })
+
+    land_items = _available_asset_items(images.get('land_photos'))
+    for index, item in land_items:
+        description = str(item.get('description') or item.get('caption') or '').strip()
+        title = str(item.get('name') or f'صورة الأرض {index}').strip()
+        add('land', {
+            'title': title, 'type': 'content', 'design_style': 'image',
+            'content_density': 'low', 'requires_image': True,
+            'content_source': f'land_photo:{index}',
+            'image_tokens': [f'##LAND_PHOTO_{index}##'],
+            'bullets': [description] if description else [],
+        })
+
+    plans = _available_asset_items(images.get('plans'))
+    plan_meta = images.get('plan_meta') if isinstance(images.get('plan_meta'), list) else []
+    if plans:
+        groups['plans'] = [slide for slide in groups.get('plans', []) if slide.get('image_tokens')]
+    for index, item in plans:
+        meta = plan_meta[index - 1] if index <= len(plan_meta) and isinstance(plan_meta[index - 1], dict) else {}
+        title = str(meta.get('title') or meta.get('name') or item.get('title') or f'المخطط {index}').strip()
+        description = str(meta.get('description') or item.get('description') or '').strip()
+        add('plans', {
+            'title': title, 'type': 'content', 'design_style': 'image',
+            'content_density': 'low', 'requires_image': True,
+            'content_source': f'plan_image:{index}', 'source_table': 'conceptual_plans',
+            'image_tokens': [f'##PLAN_IMAGE_{index}##'],
+            'bullets': [description] if description else [],
+        })
+
+    interior_components = images.get('interior_components') if isinstance(images.get('interior_components'), list) else []
+    if interior_components:
+        groups['interior'] = [slide for slide in groups.get('interior', []) if slide.get('image_tokens')]
+    for component_index, component in enumerate(interior_components, 1):
+        if not isinstance(component, dict):
+            continue
+        component_name = str(component.get('name') or f'المكون {component_index}').strip()
+        for image_index, item in _available_asset_items(component.get('images')):
+            label = str(item.get('label') or component_name).strip()
+            caption = str(item.get('caption') or '').strip()
+            add('interior', {
+                'title': f'{component_name} — {label}' if label != component_name else component_name,
+                'type': 'content', 'design_style': 'image', 'content_density': 'low',
+                'requires_image': True,
+                'content_source': f'interior_image:{component_index}:{image_index}',
+                'image_tokens': [f'##INTERIOR_COMP_{component_index}_IMG_{image_index}##'],
+                'bullets': [caption] if caption else [],
+            })
+
+    components = _project_component_rows(source)
+    if components:
+        groups['components'] = []
+        for start in range(0, len(components), 6):
+            chunk = components[start:start + 6]
+            number = start // 6 + 1
+            add('components', {
+                'title': 'مكونات المشروع' + (f' — {number}' if len(components) > 6 else ''),
+                'type': 'content', 'design_style': 'table', 'content_density': 'high',
+                'requires_image': False, 'content_source': f'project_components:{start}:{start + len(chunk)}',
+                'bullets': [],
+            })
+
+    phases = parse_timeline_phases(source)
+    if phases and not groups.get('timeline'):
+        add('timeline', {
+            'title': 'الجدول الزمني ومراحل التطوير', 'type': 'content',
+            'design_style': 'timeline', 'content_density': 'high', 'requires_image': False,
+            'content_source': 'timeline_table_data', 'bullets': [],
+        })
+
+    model = _parse_financial_dict(source.get('financial_study_model'))
+    has_report_components = False
+    if financial_study_has_real_input(model, _parse_financial_dict(source.get('financial_calc_data'))):
+        tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+        report = model.get('report') if isinstance(model.get('report'), dict) else {}
+        report_parts = report.get('parts') if isinstance(report.get('parts'), list) else []
+        groups['financial'] = []
+        if report_parts:
+            heading = 'الدراسة المالية'
+            subheading = ''
+            report_components_added = False
+            for part_index, part in enumerate(report_parts):
+                if not isinstance(part, dict):
+                    continue
+                if part.get('type') == 'heading':
+                    text = str(part.get('text') or '').strip()
+                    if part.get('level') == 3:
+                        subheading = text
+                    else:
+                        heading = text or heading
+                        subheading = ''
+                    continue
+                rows = part.get('rows') if isinstance(part.get('rows'), list) else []
+                chunk_size = 8 if part.get('type') == 'table' else 6
+                if not rows:
+                    continue
+                target_section = 'components' if 'مكونات المشروع' in heading else 'financial'
+                if target_section == 'components' and not report_components_added:
+                    groups['components'] = []
+                    report_components_added = True
+                    has_report_components = True
+                for start in range(0, len(rows), chunk_size):
+                    end = min(start + chunk_size, len(rows))
+                    title = subheading or heading
+                    number = start // chunk_size + 1
+                    add(target_section, {
+                        'title': title + (f' — {number}' if len(rows) > chunk_size else ''),
+                        'type': 'content',
+                        'design_style': ('chart' if target_section == 'financial' and part.get('type') == 'table'
+                                         and _rows_have_comparable_numbers(rows) else 'table'),
+                        'content_density': 'high', 'requires_image': False,
+                        'content_source': f'financial_report:{part_index}:{start}:{end}',
+                        'source_table': f'report_part_{part_index}', 'bullets': [],
+                    })
+        else:
+            add('financial', {
+                'title': 'المؤشرات المالية', 'type': 'content', 'design_style': 'dashboard',
+                'content_density': 'high', 'requires_image': False,
+                'content_source': 'financial_indicators', 'bullets': [],
+            })
+            for table_key, title, style in _FINANCIAL_PLAN_TABLES:
+                rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
+                for start in range(0, len(rows), 8):
+                    end = min(start + 8, len(rows))
+                    number = start // 8 + 1
+                    add('financial', {
+                        'title': title + (f' — {number}' if len(rows) > 8 else ''),
+                        'type': 'content', 'design_style': style,
+                        'content_density': 'high', 'requires_image': False,
+                        'content_source': f'financial_table:{table_key}:{start}:{end}',
+                        'source_table': table_key, 'bullets': [],
+                    })
+
+    team_entries = _selected_team_entries(source, tenant_id)
+    if team_entries:
+        groups['team'] = []
+        for index, entry in enumerate(team_entries, 1):
+            bullets = [str(entry.get(key) or '').strip() for key in ('الدور', 'نبذة', 'سنوات الخبرة', 'أعمال سابقة')]
+            add('team', {
+                'title': str(entry.get('الجهة') or f'الجهة {index}').strip(),
+                'type': 'content', 'design_style': 'image' if entry.get('_logo_file_id') else 'text',
+                'content_density': 'medium', 'requires_image': bool(entry.get('_logo_file_id')),
+                'content_source': f'team_member:{index}',
+                'image_tokens': [f'##TEAM_LOGO_{index}##'] if entry.get('_logo_file_id') else [],
+                'bullets': [value for value in bullets if value],
+            })
+
+    market = _decode_json_fact(source.get('market_study_data'))
+    market = market if isinstance(market, dict) else {}
+    swot = market.get('swot') if isinstance(market.get('swot'), dict) else {}
+    if any(str(value or '').strip() for value in swot.values()):
+        add('swot_risks', {
+            'title': 'تحليل SWOT', 'type': 'content', 'design_style': 'swot',
+            'content_density': 'high', 'requires_image': False,
+            'content_source': 'market_study_data.swot', 'bullets': [],
+        })
+    executive = _decode_json_fact(source.get('executive_content'))
+    executive = executive if isinstance(executive, dict) else {}
+    if str(executive.get('risks') or '').strip():
+        add('swot_risks', {
+            'title': 'تحليل المخاطر وطرق المعالجة', 'type': 'content', 'design_style': 'table',
+            'content_density': 'medium', 'requires_image': False,
+            'content_source': 'executive_content.risks', 'bullets': [],
+        })
+    if str(executive.get('summary') or '').strip() and not groups.get('executive_summary'):
+        add('executive_summary', {
+            'title': 'الملخص التنفيذي', 'type': 'content', 'design_style': 'text',
+            'content_density': 'high', 'requires_image': False,
+            'content_source': 'executive_content.summary', 'bullets': [],
+        })
+
+    summaries = (
+        ('land', 'ملخص تحليل الأرض', 'land_and_building_summary', str(source.get('land_and_building_summary') or '').strip()),
+        ('location', 'ملخص الموقع الجغرافي', 'site_analysis', str(source.get('site_analysis') or '').strip()),
+        ('market', 'ملخص تحليل السوق', 'market_study_data.one_block_summary', str(market.get('one_block_summary') or '').strip()),
+    )
+    for section_key, title, content_source, value in summaries:
+        if not value:
+            continue
+        existing = next((slide for slide in groups.get(section_key, [])
+                         if slide.get('content_source') == content_source or 'ملخص' in str(slide.get('title') or '')), None)
+        if existing:
+            groups[section_key].remove(existing)
+            existing.update({'title': title, 'content_source': content_source,
+                             'design_style': 'text', 'section_key': section_key})
+            groups[section_key].append(existing)
+        else:
+            add(section_key, {
+                'title': title, 'type': 'content', 'design_style': 'text',
+                'content_density': 'medium', 'requires_image': False,
+                'content_source': content_source, 'bullets': [],
+            })
+
+    land_keys = ('croquis_land_area', 'approved_financial_area', 'boundary_lengths',
+                 'surrounding_streets', 'facades_count', 'facades_directions',
+                 'building_ratio_coverage', 'setbacks', 'max_floors_height',
+                 'allowed_uses', 'regulatory_constraints', 'land_and_building_summary')
+    location_keys = ('location_address', 'location_lat', 'location_lng', 'city', 'district',
+                     'main_roads', 'secondary_roads', 'nearby_landmarks', 'city_landmarks',
+                     'catchment_areas', 'site_analysis')
+    has_interior = any(_available_asset_items(component.get('images'))
+                       for component in interior_components if isinstance(component, dict))
+    map_placeholders = images.get('map_placeholders') if isinstance(images.get('map_placeholders'), dict) else {}
+    has_location = (any(str(source.get(key) or '').strip() for key in location_keys)
+                    or any(map_placeholders.values()))
+    availability = {
+        'overview': bool(source),
+        'components': bool(components or has_report_components),
+        'land': bool(land_items or any(str(source.get(key) or '').strip() for key in land_keys)),
+        'location': bool(has_location),
+        'market': bool(_readable_fact(market)),
+        'timeline': bool(phases),
+        'financial': financial_study_has_real_input(model, _parse_financial_dict(source.get('financial_calc_data'))),
+        'swot_risks': bool(any(str(value or '').strip() for value in swot.values())
+                           or str(executive.get('risks') or '').strip()),
+        'team': bool(team_entries),
+        'plans': bool(plans),
+        'exterior': bool(moodboard_items),
+        'interior': has_interior,
+        'executive_summary': bool(str(executive.get('summary') or '').strip()),
+    }
+    for section_key, available in availability.items():
+        if not available:
+            groups[section_key] = []
+
+
+def refresh_index_entries(plan):
+    if not isinstance(plan, dict) or not isinstance(plan.get('slides'), list):
+        return plan
+    entries = []
+    seen = set()
+    for page, slide in enumerate(plan['slides'], 1):
+        if not isinstance(slide, dict):
+            continue
+        section_key = _slide_section_key(slide)
+        if slide.get('type') == 'section_divider' or section_key == 'closing':
+            if section_key in seen:
+                continue
+            seen.add(section_key)
+            entries.append({'section_key': section_key,
+                            'title': PRESENTATION_SECTION_TITLES[section_key], 'page': page})
+    for slide in plan['slides']:
+        if isinstance(slide, dict) and slide.get('type') == 'index':
+            slide['title'] = 'محتويات العرض'
+            slide['design_style'] = 'text'
+            slide['index_entries'] = entries
+            slide['bullets'] = []
+            break
+    plan['proposed_count'] = len(plan['slides'])
+    return plan
+
+
+def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=None):
+    if not isinstance(plan, dict):
+        plan = {}
+    source_slides = plan.get('slides') if isinstance(plan.get('slides'), list) else []
+    source_slides = [dict(slide) for slide in source_slides if isinstance(slide, dict)]
+    cover = next((slide for slide in source_slides if slide.get('type') == 'cover'), None)
+    if cover is None and source_slides:
+        cover = source_slides[0]
+    cover = dict(cover or {})
+    cover.update({'title': 'الغلاف', 'type': 'cover', 'section_key': 'cover',
+                  'design_style': 'image', 'requires_image': True})
+    index = next((slide for slide in source_slides if slide.get('type') == 'index'), None)
+    index = dict(index or {})
+    index.update({'title': 'محتويات العرض', 'type': 'index', 'section_key': 'index',
+                  'design_style': 'text', 'requires_image': False, 'bullets': []})
+    closing = next((slide for slide in reversed(source_slides) if slide.get('type') == 'closing'), None)
+    if closing is None and source_slides:
+        closing = source_slides[-1]
+    closing = dict(closing or {})
+    closing.update({'title': PRESENTATION_SECTION_TITLES['closing'], 'type': 'closing',
+                    'section_key': 'closing', 'design_style': 'minimal',
+                    'requires_image': False, 'bullets': []})
+
+    groups = {key: [] for key in PRESENTATION_SECTION_ORDER if key != 'closing'}
+    signatures = set()
+    current = ''
+    for slide in source_slides:
+        slide_type = str(slide.get('type') or 'content')
+        if slide is cover or slide is index or slide is closing or slide_type in ('cover', 'index', 'closing'):
+            continue
+        section_key = _slide_section_key(slide, current)
+        if slide_type == 'section_divider':
+            current = section_key
+            continue
+        current = section_key
+        if section_key == 'closing':
+            continue
+        item = dict(slide)
+        item['section_key'] = section_key
+        if item.get('type') == 'moodboard':
+            if not _available_asset_items((images or {}).get('moodboard') if isinstance(images, dict) else []):
+                continue
+            item['type'] = 'content'
+            item['design_style'] = 'image'
+        signature = (section_key,) + _plan_slide_signature(item)
+        if signature in signatures:
+            continue
+        signatures.add(signature)
+        groups.setdefault(section_key, []).append(item)
+
+    _ensure_required_plan_content(groups, project_data, images, tenant_id)
+
+    if not any(groups.values()) and project_data:
+        groups['overview'].append({
+            'title': PRESENTATION_SECTION_TITLES['overview'], 'type': 'content',
+            'section_key': 'overview', 'design_style': 'text', 'content_density': 'medium',
+            'requires_image': False,
+            'bullets': ['تعريف المشروع من البيانات المعتمدة', 'الفكرة والاستخدامات المعتمدة',
+                        'ملخص موجز دون تكرار'],
+        })
+
+    slides = [cover, index]
+    for section_key in PRESENTATION_SECTION_ORDER:
+        if section_key == 'closing' or not groups.get(section_key):
+            continue
+        slides.append({
+            'title': PRESENTATION_SECTION_TITLES[section_key], 'type': 'section_divider',
+            'section_key': section_key, 'design_style': 'divider', 'content_density': 'low',
+            'requires_image': True, 'bullets': [],
+        })
+        slides.extend(groups[section_key])
+    slides.append(closing)
+    normalized = dict(plan)
+    normalized['slides'] = slides
+    return refresh_index_entries(normalized)
 
 
 def _suggest_design_style(title, bullets=None, slide_type='content'):
@@ -51,9 +539,9 @@ def _suggest_design_style(title, bullets=None, slide_type='content'):
 
     fixed = {
         'cover': 'image',
-        'index': 'flow',
+        'index': 'text',
         'section_divider': 'divider',
-        'moodboard': 'grid',
+        'moodboard': 'image',
         'closing': 'minimal',
     }
     if slide_type in fixed:
@@ -77,7 +565,7 @@ def _suggest_design_style(title, bullets=None, slide_type='content'):
         return 'image'
     if re.search(r'(?:نظرة|نبذة|مقدمة|شرح|وصف|ملخص|تعريف|رؤية|رسالة|فلسفة|overview|introduction|description|summary|vision|mission)', text):
         return 'text'
-    return 'cards'
+    return 'text'
 
 
 def _maybe_map_slide_type(title, project_data):
@@ -186,7 +674,7 @@ def _timeline_data_note(project_data):
     return (
         "\n\n## الجدول الزمني للمشروع — إلزامي في شريحة الجدول الزمني\n"
         "هذه المراحل مصدر الحقيقة. اعرض كل مرحلة مع بدايتها ومدتها ونهايتها المحسوبة.\n"
-        "عمود الملاحظات جزء من الشريحة: إذا وُجدت ملاحظة فاعرضها تحت المرحلة أو بجانبها، ولا تحذفها ولا تختصرها.\n"
+        "إذا وُجدت ملاحظة لمرحلة فاعرضها تحتها أو بجانبها دون حذف أو اختصار. إذا كانت الملاحظة فارغة فلا تعرض عنوانًا أو حقلًا أو مساحة للملاحظات في تلك المرحلة.\n"
         + '\n'.join(f'- {format_timeline_phase_line(phase)}' for phase in phases)
     )
 
@@ -280,8 +768,8 @@ def financial_study_has_real_input(model, calc=None):
     calc = _parse_financial_dict(calc)
     dynamic_rows = model.get('dynamicRows') if isinstance(model.get('dynamicRows'), dict) else {}
     tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
-    for rows in (dynamic_rows.get('components'), tables.get('componentsTable'),
-                 tables.get('revenueTable'), tables.get('costsTable'), calc.get('components')):
+    row_sets = list(dynamic_rows.values()) + list(tables.values()) + [calc.get('components')]
+    for rows in row_sets:
         if isinstance(rows, list) and any(isinstance(row, dict) and any(
                 str(value or '').strip() for value in row.values()) for row in rows):
             return True
@@ -307,9 +795,6 @@ FINANCIAL_ABSENT_NOTE = (
     "\n- ممنوع ذكر أي رقم أو نسبة أو عائد أو تكلفة في أي شريحة أخرى، ولو كتقدير أو مدى أو مثال"
     " أو من معرفة عامة عن السوق."
 )
-
-# Fifteen rows of a longer table left the model completing the rest from nothing.
-FINANCIAL_TABLE_ROW_LIMIT = 40
 
 # A financial title in a plan that has no financial data can only be filled by inventing numbers.
 FINANCIAL_SLIDE_TITLE_RE = re.compile(
@@ -370,120 +855,113 @@ def strip_financial_slides(plan, project_data):
     return plan
 
 
+_FINANCIAL_INDICATOR_LABELS = (
+    ('projectCost', 'إجمالي تكلفة المشروع'),
+    ('projectCostWithFinance', 'التكلفة شاملة التمويل'),
+    ('adjustedProjectCost', 'إجمالي تكلفة الاستثمار'),
+    ('developerCost', 'أتعاب المطور'),
+    ('landValue', 'قيمة الأرض'),
+    ('landRent', 'إيجار الأرض السنوي'),
+    ('saleRevenueTotal', 'إجمالي إيرادات البيع'),
+    ('revenueY1', 'إيرادات السنة الأولى'),
+    ('opexY1', 'مصروفات السنة الأولى'),
+    ('noiY1', 'NOI — السنة الأولى'),
+    ('fullOccupancyRevenue', 'الإيرادات عند الإشغال المستهدف'),
+    ('fullOccupancyNOI', 'NOI عند الإشغال المستهدف'),
+    ('totalGraceDiscount', 'إجمالي خصم فترة السماح'),
+    ('facilityAmount', 'قيمة التسهيل التمويلي'),
+    ('arrangementFee', 'رسوم ترتيب التمويل'),
+    ('totalFinanceInterest', 'إجمالي فوائد التمويل'),
+    ('totalFinanceCost', 'إجمالي كلفة التمويل'),
+    ('totalFundFees', 'إجمالي أتعاب الصندوق'),
+    ('saleExitValue', 'صافي التخارج البيعي'),
+    ('operatingExitValue', 'صافي التخارج التشغيلي'),
+    ('terminal', 'إجمالي قيمة التخارج'),
+    ('landEquityContribution', 'مساهمة الأرض العينية'),
+    ('totalCashEquity', 'حقوق الملكية النقدية'),
+    ('totalEquityRequired', 'إجمالي حقوق الملكية المطلوبة'),
+    ('totalEquityDistributions', 'إجمالي التوزيعات'),
+    ('roi', 'ROI'),
+    ('projectIrr', 'Project IRR'),
+    ('equityIrr', 'Equity IRR'),
+    ('payback', 'فترة استرداد رأس المال'),
+    ('equityPayback', 'فترة استرداد حقوق الملكية'),
+    ('totalBuiltUpArea', 'إجمالي المساحات المبنية م²'),
+    ('developmentYears', 'مدة التطوير (سنوات)'),
+)
+
+_FINANCIAL_TABLE_TITLES = {
+    'componentsTable': 'مكونات المشروع',
+    **{key: title for key, title, _style in _FINANCIAL_PLAN_TABLES},
+}
+
+
 def _financial_data_note(project_data):
     """Extract and format financial study tables and metrics so they are never lost or distorted."""
     if not project_data or not isinstance(project_data, dict):
         return ''
-
     model = _parse_financial_dict(project_data.get('financial_study_model'))
     calc = _parse_financial_dict(project_data.get('financial_calc_data'))
-
     if not financial_study_has_real_input(model, calc):
         return FINANCIAL_ABSENT_NOTE
 
-    # Extract components
-    components = []
-    dynamic_rows = model.get('dynamicRows') if isinstance(model.get('dynamicRows'), dict) else {}
-    if isinstance(dynamic_rows.get('components'), list):
-        components = dynamic_rows['components']
-    elif isinstance(calc.get('components'), list):
-        components = calc['components']
-
-    tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
-    comp_table = tables.get('componentsTable') if isinstance(tables.get('componentsTable'), list) else []
-
     inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
     projection = model.get('projection') if isinstance(model.get('projection'), dict) else {}
-
-    # Check if there is meaningful financial content
-    if not components and not comp_table and not inputs and not calc:
-        return ''
-
+    tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+    report = model.get('report') if isinstance(model.get('report'), dict) else {}
+    report_parts = report.get('parts') if isinstance(report.get('parts'), list) else []
     lines = [
-        "\n\n## بيانات وجداول الدراسة المالية المعتمدة (قواعد صارمة وإلزامية)",
-        "- **اعتماد الجداول كما هي:** يجب عرض بيانات ومكونات وأرقام الجداول المالية المعتمدة أدناه بدقة كاملة دون حذف أعمدة أو تغيير مسميات أو اختلاق أرقام.",
-        "- **نقل الرقم حرفيًا:** كل رقم يُكتب بنفس القيمة ونفس الوحدة ونفس العملة ونفس عدد الخانات كما ورد أدناه. ممنوع التقريب، وممنوع التحويل إلى مليون أو ألف، وممنوع إعادة الحساب أو الجمع أو الطرح أو استخراج نسبة أو متوسط أو إجمالي غير مكتوب أدناه.",
-        "- **الرقم غير الموجود لا يُكتب:** إن لم يوجد المؤشر أو الصف أو السنة في البيانات أدناه فلا تكتبه إطلاقًا — لا تقدير ولا نطاق ولا مثال ولا رقم من معرفة عامة عن السوق، ولا خانة بعلامة استفهام أو صفر بديل. اكتب الحقائق المتاحة فقط.",
-        "- **ممنوع التوسيع:** ممنوع إضافة مكوّن أو بند إيراد أو تكلفة أو سنة أو صف غير موجود أدناه، وممنوع استكمال جدول ناقص من عندك.",
-        "- **قاعدة الرسوم البيانية والجداول المرافقة:** إذا تضمنت الشريحة المالية رسماً بيانياً أو دائرياً (Chart / Breakdown)، يجب إلزامياً وضع جدول البيانات الفعلي المكتمل بجانب الرسم البياني (جنباً إلى جنب في تصميم متناسق) لضمان الدقة الرقمية والوضوح البصري معاً.",
-        "- **تصميم مسطح فاخر (Flat Crisp Luxury):** استخدم بطاقات بيضاء ناصعة (#ffffff) بحدود ناعمة (1px solid #e2e8f0) بدون ظلال ثقيلة (box-shadow: none)، وبخطوط واضحة وأرقام مميزة بكحلي وأزرق سماوي راقي.",
+        "\n\n## الدراسة المالية المعتمدة — نفس محتوى تقرير PDF",
+        "- اعرض جميع الأقسام والجداول والمؤشرات الموجودة أدناه، وبالترتيب والمسميات والقيم والوحدات نفسها. لا تختصر الدراسة في لوحة مؤشرات واحدة.",
+        "- أضف فواصل الآلاف بصرياً فقط من دون تقريب أو تحويل إلى ألف أو مليون أو تغيير عدد الخانات العشرية.",
+        "- لا تغيّر أسماء المؤشرات، وبخاصة ROI وProject IRR وEquity IRR وNOI، ولا تستبدلها بتسميات جديدة.",
+        "- لا تحذف صفاً أو عموداً أو سنة. قسّم الجدول على صفحات إضافية عند الحاجة، ولا تعِد عرض مكونات المشروع خارج قسمها المخصص.",
+        "- عند وجود قيم قابلة للمقارنة أضف رسماً بيانياً بألوان الهوية، مع جدول القيم الأصلي الكامل بجانبه.",
+        "- الرقم أو المؤشر غير الموجود لا يُكتب، ولا يُقدّر، ولا يُعاد حسابه أو اشتقاقه.",
     ]
 
-    # Format components table
-    if comp_table:
-        lines.append("\n### جدول مكونات واستخدامات المشروع المعتمدة:")
-        clean_rows = []
-        for r in comp_table:
-            if isinstance(r, dict):
-                clean_r = {k: v for k, v in r.items() if k not in ('ترتيب / حذف', 'idx', 'id')}
-                if clean_r:
-                    clean_rows.append(clean_r)
-        if clean_rows:
-            lines.append(json.dumps(clean_rows, ensure_ascii=False, indent=2))
-    elif components:
-        lines.append("\n### مكونات واستخدامات المشروع:")
-        clean_comps = []
-        for c in components:
-            if isinstance(c, dict):
-                clean_comps.append({
-                    'اسم المكون': c.get('name') or c.get('component'),
-                    'نوع الاستخدام': c.get('useType') or c.get('type'),
-                    'عدد الوحدات': c.get('units'),
-                    'مساحة الوحدة م²': c.get('unitArea'),
-                    'المساحة المبنية م²': c.get('builtArea') or c.get('totalArea'),
-                    'نموذج الاستفادة': c.get('investmentModel') or c.get('model'),
-                })
-        if clean_comps:
-            lines.append(json.dumps(clean_comps, ensure_ascii=False, indent=2))
+    if report_parts:
+        lines.append("\n### نسخة الشاشة المعتمدة بالترتيب والمسميات الظاهرة للمستخدم:")
+        lines.append(json.dumps(report_parts, ensure_ascii=False, indent=2))
+        return '\n'.join(lines)
 
-    # Format Key Indicators / Capital Structure
     indicators = {}
-    for key, label in [
-        ('projectCost', 'إجمالي تكلفة المشروع'),
-        ('adjustedProjectCost', 'التكلفة الإجمالية المعدلة'),
-        ('landValue', 'قيمة الأرض'),
-        ('equityRequired', 'رأس المال المطلوب (Equity)'),
-        ('facilityAmount', 'مبلغ التمويل البنكي'),
-        ('roi', 'العائد على الاستثمار (ROI)'),
-        ('irr', 'معدل العائد الداخلي (IRR)'),
-        ('projectIrr', 'معدل العائد الداخلي للمشروع'),
-        ('equityIrr', 'معدل العائد الداخلي لحقوق الملكية'),
-        ('payback', 'فترة الاسترداد (سنوات)'),
-        ('totalBuiltUpArea', 'إجمالي المساحات المبنية م²'),
-        ('developmentYears', 'مدة التطوير (سنوات)'),
-    ]:
-        val = inputs.get(key) or projection.get(key) or calc.get(key)
-        if val not in (None, '', -1):
-            indicators[label] = val
-
+    for key, label in _FINANCIAL_INDICATOR_LABELS:
+        value = projection.get(key)
+        if value in (None, '', [], {}) and inputs.get(key) not in (None, '', [], {}):
+            value = inputs.get(key)
+        if value in (None, '', [], {}) and calc.get(key) not in (None, '', [], {}):
+            value = calc.get(key)
+        if value not in (None, '', [], {}, -1):
+            indicators[label] = value
     if indicators:
-        lines.append("\n### المؤشرات وهيكل رأس المال المعتمد:")
+        lines.append("\n### المؤشرات المالية بمسمياتها الأصلية:")
         lines.append(json.dumps(indicators, ensure_ascii=False, indent=2))
 
-    # Add other tables if present (revenue, cashflow, costs, sensitivity)
-    for tbl_key, tbl_title in [
-        ('revenueTable', 'جدول تقدير الإيرادات السنوية'),
-        ('costsTable', 'جدول التكاليف الرأسمالية والإنشائية'),
-        ('cashflowTable', 'جدول التدفقات النقدية السنوية'),
-        ('sensitivityTable', 'جدول تحليل الحساسية'),
-    ]:
-        tbl_data = tables.get(tbl_key)
-        if isinstance(tbl_data, list) and tbl_data:
-            clean_tbl = []
-            for r in tbl_data:
-                if isinstance(r, dict):
-                    clean_r = {k: v for k, v in r.items() if k not in ('ترتيب / حذف', 'idx', 'id')}
-                    if clean_r:
-                        clean_tbl.append(clean_r)
-            if clean_tbl:
-                lines.append(f"\n### {tbl_title} ({len(clean_tbl)} صفًا):")
-                lines.append(json.dumps(clean_tbl[:FINANCIAL_TABLE_ROW_LIMIT], ensure_ascii=False, indent=2))
-                # A table cut without saying so is an invitation to complete it from nothing.
-                if len(clean_tbl) > FINANCIAL_TABLE_ROW_LIMIT:
-                    lines.append(
-                        f"(مُعروض أول {FINANCIAL_TABLE_ROW_LIMIT} صفًا من {len(clean_tbl)}. "
-                        "الصفوف غير المعروضة ممنوع كتابتها أو تخمينها؛ اذكر أن الجدول مطوّل واعرض المعروض فقط.)"
-                    )
+    dynamic_rows = model.get('dynamicRows') if isinstance(model.get('dynamicRows'), dict) else {}
+    components = dynamic_rows.get('components') if isinstance(dynamic_rows.get('components'), list) else []
+    if components and not tables.get('componentsTable'):
+        lines.append("\n### مكونات المشروع كما أُدخلت في الدراسة:")
+        lines.append(json.dumps(components, ensure_ascii=False, indent=2))
+
+    ordered_keys = list(_FINANCIAL_TABLE_TITLES)
+    ordered_keys.extend(key for key in tables if key not in ordered_keys)
+    for table_key in ordered_keys:
+        rows = tables.get(table_key)
+        if not isinstance(rows, list) or not rows:
+            continue
+        clean_rows = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            cleaned = {key: value for key, value in row.items()
+                       if key not in ('ترتيب / حذف', 'ترتيب', 'حذف', 'idx', 'id')}
+            if any(str(value or '').strip() for value in cleaned.values()):
+                clean_rows.append(cleaned)
+        if clean_rows:
+            title = _FINANCIAL_TABLE_TITLES.get(table_key, table_key)
+            lines.append(f"\n### {title} ({len(clean_rows)} صفًا) — المفتاح {table_key}:")
+            lines.append(json.dumps(clean_rows, ensure_ascii=False, indent=2))
 
     return '\n'.join(lines)
 
@@ -669,13 +1147,8 @@ def _executive_content_facts(project_data):
             + '\n\n'.join(lines))
 
 
-def _team_facts(project_data, tenant_id=None):
-    """The team actually chosen for this file: the company library minus exclusions, plus locals.
-
-    The library lives in ``tenant_team_entities`` and the draft only stores ids, so without
-    resolving it the prompt would carry no names at all.
-    """
-    selection = _decode_json_fact(project_data.get('team_selection'))
+def _selected_team_entries(project_data, tenant_id=None):
+    selection = _decode_json_fact((project_data or {}).get('team_selection'))
     selection = selection if isinstance(selection, dict) else {}
     excluded = set(selection.get('excluded') or [])
     overrides = selection.get('roles') if isinstance(selection.get('roles'), dict) else {}
@@ -694,6 +1167,7 @@ def _team_facts(project_data, tenant_id=None):
                 'نبذة': entity.get('brief') or '',
                 'سنوات الخبرة': entity.get('experienceYears') or '',
                 'أعمال سابقة': entity.get('notableProjects') or '',
+                '_logo_file_id': entity.get('logoFileId') or '',
             })
     for local in selection.get('local') or []:
         if not isinstance(local, dict):
@@ -704,12 +1178,54 @@ def _team_facts(project_data, tenant_id=None):
             'نبذة': local.get('brief') or '',
             'سنوات الخبرة': local.get('experienceYears') or '',
             'أعمال سابقة': local.get('notableProjects') or '',
+            '_logo_file_id': local.get('logoFileId') or '',
         })
-    entries = [{k: v for k, v in entry.items() if str(v or '').strip()}
-               for entry in entries if str(entry.get('الجهة') or '').strip()]
+    return [{key: value for key, value in entry.items() if str(value or '').strip()}
+            for entry in entries if str(entry.get('الجهة') or '').strip()]
+
+
+def _team_facts(project_data, tenant_id=None):
+    """The team actually chosen for this file: the company library minus exclusions, plus locals.
+
+    The library lives in ``tenant_team_entities`` and the draft only stores ids, so without
+    resolving it the prompt would carry no names at all.
+    """
+    entries = []
+    for index, source in enumerate(_selected_team_entries(project_data, tenant_id), 1):
+        entry = {key: value for key, value in source.items() if not key.startswith('_')}
+        if source.get('_logo_file_id'):
+            entry['الشعار'] = f'##TEAM_LOGO_{index}##'
+        entries.append(entry)
     if not entries:
         return ''
-    return '### فريق العمل\n' + json.dumps(entries, ensure_ascii=False, indent=2)
+    return '### فريق العمل (بنفس الترتيب والحقول، وشعار كل جهة إلزامي عند توفره)\n' + json.dumps(entries, ensure_ascii=False, indent=2)
+
+
+def _contact_facts(project_data, tenant_id=None):
+    source = project_data if isinstance(project_data, dict) else {}
+    fields = (
+        ('الهاتف', ('contact_phone', 'company_phone', 'phone', 'mobile')),
+        ('البريد الإلكتروني', ('contact_email', 'company_email', 'email')),
+        ('الموقع الإلكتروني', ('contact_website', 'company_website', 'website')),
+        ('العنوان', ('contact_address', 'company_address')),
+    )
+    values = {}
+    for label, keys in fields:
+        value = next((str(source.get(key) or '').strip() for key in keys if str(source.get(key) or '').strip()), '')
+        if value:
+            values[label] = value
+    if tenant_id:
+        try:
+            tenant = db.get_tenant_by_id(tenant_id) or {}
+        except Exception:
+            tenant = {}
+        if tenant.get('email') and 'البريد الإلكتروني' not in values:
+            values['البريد الإلكتروني'] = str(tenant['email']).strip()
+        if tenant.get('domain') and 'الموقع الإلكتروني' not in values:
+            values['الموقع الإلكتروني'] = str(tenant['domain']).strip()
+    if not values:
+        return ''
+    return '### بيانات التواصل المعتمدة للخاتمة (انقل المتاح فقط كما هو)\n' + json.dumps(values, ensure_ascii=False, indent=2)
 
 
 def build_project_facts(project_data, tenant_id=None):
@@ -756,7 +1272,8 @@ def build_project_facts(project_data, tenant_id=None):
                       + '\n'.join(f'- {label}: {text}' for label, text in extra))
     for note in (_team_facts(project_data, tenant_id),
                  _market_study_facts(project_data),
-                 _executive_content_facts(project_data)):
+                 _executive_content_facts(project_data),
+                 _contact_facts(project_data, tenant_id)):
         if note:
             blocks.append(note)
     facts = '\n\n'.join(blocks) or 'لا توجد بيانات مشروع.'
@@ -778,21 +1295,21 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 1. حلل كمية ونوع المحتوى المتاح في بيانات المشروع
 2. اقترح عدد شرائح شامل وتفصيلي يبدأ من {min_slides} شريحة كحد أدنى، والحد الأعلى مفتوح ومرن تماماً حسب حجم المشروع وتفاصيله (مثل عدد المكونات الاستثمارية، المخططات، أبعاد السوق، الجداول المالية، إلخ) بحيث تعطي كل محور حقه الكامل دون اختصار أو حصر مصطنع.
 3. وزع المحتوى بحيث:
-   - لا توجد شريحة بكلمتين فقط (فارغة بصرياً)
-   - لا توجد شريحة مزدحمة بالكلام
-   - كل شريحة لها فكرة واحدة واضحة
-   - المحتوى المالي/الرقمي في شرائح منفصلة (dashboard style)
-   - المحتوى الوصفي في شرائح بطاقات (card style)
+   - لا توجد شريحة فارغة أو مزدحمة
+   - كل شريحة لها فكرة واحدة واضحة ومصدر بيانات محدد
+   - الجداول تبقى جداول كاملة، والأرقام القابلة للمقارنة تجمع بين جدول ورسم بياني
+   - النبذات والملخصات نصوص واضحة وليست شبكات مربعات
+   - الصور والمخططات كبيرة وواضحة، بحد أقصى صورتين في الصفحة عند الحاجة
 
 {distribution_rules}
 
 ## أنواع الشرائح المسموحة
 - cover: شريحة الغلاف (1 فقط، في البداية)
-- index: شريحة الفهرس (1 فقط، بعد الغلاف)
+- index: فهرس الأقسام مع أرقام صفحات بدايتها (1 فقط، بعد الغلاف)
 - content: شريحة محتوى (عدد متغير)
-- section_divider: شريحة فاصلة تسبق كل محور رئيسي، تحمل اسم المحور فقط على خلفية الصورة الرئيسية
-- moodboard: شريحة المود بورد (0 أو 1، قبل الختام)
-- closing: شريحة الختام (1 فقط، في النهاية)
+- section_divider: صفحة بداية قسم تحمل الاسم العربي وحده بلا وصف أو ترجمة
+- moodboard: صورة خارجية كبيرة؛ يمكن توزيع الصور على أكثر من صفحة داخل قسم التصورات الخارجية
+- closing: الخاتمة وبيانات التواصل (1 فقط، في النهاية)
 - map_overview: خريطة الموقع + المعالم المحيطة (يتطلب إحداثيات)
 - map_landmarks: خريطة + جدول أوقات القيادة (يتطلب nearby_landmarks)
 - map_access: خريطة الطرق + المداخل (يتطلب main_roads)
@@ -800,15 +1317,16 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - site_specs: جدول خصائص الموقع (يتطلب location data)
 
 ## أنماط تصميم الشرائح (design_style)
-- dashboard: بطاقات أرقام مالية كبيرة (metrics)
-- cards: شبكة بطاقات 2×2 أو 2×3
-- timeline: خط زمني أفقي
-- table: جدول بيانات
-- text: نص + نقاط (bullets)
-- image: صورة + نص قصير
-- flow: مخطط تدفق (flow diagram)
-- swot: تحليل SWOT في grid 2×2
-- map: خريطة كخلفية + طبقة نص شفافة
+- dashboard: مؤشرات رقمية محدودة بمسميات الدراسة الأصلية
+- cards: بطاقتان أو ثلاث فقط لعناصر مستقلة قصيرة
+- timeline: مراحل زمنية مع الملاحظات الموجودة فقط
+- table: جدول بيانات كامل
+- chart: رسم بياني مبني على أرقام موجودة مع جدول البيانات بجانبه
+- text: فقرة أو قائمة منظمة للنبذات والملخصات
+- image: صورة كبيرة + وصفها الصحيح
+- flow: تسلسل نصي بسيط عند وجود خطوات فعلية
+- swot: تحليل SWOT بألوان الهوية
+- map: خريطة مع جدول أو ملخص دون تكرار البيانات
 
 ## تنبيه مهم
 - اختر نوع الشريحة (`type`) ونمط التصميم (`design_style`) تلقائياً بناءً على بيانات المشروع وسياق التدريب الخاص بالشركة.
@@ -823,38 +1341,31 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
     {{
       "title": "عنوان الشريحة بالعربي",
       "type": "cover|index|content|section_divider|moodboard|closing|map_overview|map_landmarks|map_access|map_catchment|site_specs",
+      "section_key": "overview|components|land|location|market|timeline|financial|swot_risks|team|plans|exterior|interior|executive_summary|closing",
       "content_density": "low|medium|high",
-      "design_style": "dashboard|cards|timeline|table|text|image|flow|swot|map|divider",
+      "design_style": "dashboard|cards|timeline|table|chart|text|image|flow|swot|map|divider",
       "bullets": ["نقطة 1", "نقطة 2", "نقطة 3"],
       "requires_image": true أو false,
-      "content_source": "<أي حقل من بيانات المشروع يغذي هذه الشريحة>",
-      "title_en": "<للفواصل فقط: ترجمة العنوان بالإنجليزية>",
-      "subtitle": "<للفواصل فقط: سطر واحد يصف المحور من بيانات المشروع>"
+      "content_source": "<الحقل أو الجدول الذي يغذي هذه الشريحة>",
+      "image_tokens": ["<رموز الصور المتاحة لهذه الشريحة فقط>"]
     }}
   ]
 }}
 
 ## قواعد إضافية:
-- **الشرائح الثابتة في موضعها دائماً مهما تغيّر العدد:**
-  * الشريحة 1 = type=cover (الغلاف)
-  * الشريحة 2 = type=index (الفهرس)
-  * الشريحة قبل الأخيرة = type=moodboard (المود بورد)
-  * الشريحة الأخيرة = type=closing (الختام)
-- **فاصل قبل كل محور رئيسي:** ضع `type=section_divider` قبل أول شريحة من كل محور من محاور العرض
-  (المشروع والفكرة، الموقع والخرائط، الأرض والاشتراطات، مكونات المشروع، الجدول الزمني، الدراسة
-  المالية، دراسة السوق، فريق العمل، التصور البصري). الفاصل يحمل اسم المحور بالعربي في `title`،
-  وترجمته في `title_en`، وسطرًا واحدًا من بيانات المشروع في `subtitle`، و`bullets` فارغة. لا تضع
-  فاصلًا قبل الغلاف أو الفهرس أو الختام، ولا فاصلين متتاليين، ولا فاصلًا لمحور بلا شرائح بعده.
-- **قواعد الشركة في بداية هذه الرسالة (إن وُجدت) إلزامية:** إذا حددت قواعد التدريب ترتيباً أو عدداً أو تصميماً معيناً للشرائح، اتبعه بدقة فوق أي افتراضات أخرى
-- باقي الشرائح متغيرة العدد والترتيب حسب قواعد الشركة وكمية بيانات المشروع
-- **شريحة المود بورد والتصور الخارجي:** شريحة واحدة فقط دائماً (type=moodboard) تضم الصور الأربع للزوايا الخارجية للمشروع (##MOODBOARD_IMAGE_1##، ##MOODBOARD_IMAGE_2##، ##MOODBOARD_IMAGE_3##، ##MOODBOARD_IMAGE_4##) في شبكة 2x2 أو توزيع متناسق مع التسميات (يمين، شمال، فوق، خلف) وتوضع قبل الختام مباشرة.
-- **شرائح التصور الداخلي للمكونات:** عدد شرائح التصور الداخلي = عدد المكونات المتوفرة (شريحة واحدة لكل مكون). كل شريحة تمثل مكوناً واحداً مستقلاً (type=content, design_style=image أو grid) بعنوان "التصور الداخلي — [اسم المكون]":
-  * إذا كان للمكون صورة واحدة فقط متولدة أو مرفوعة: تُستخدم الصورة كما هي في الشريحة كصورة Hero ممتدة وبارزة مع تفاصيل وبيانات المكون (استخدم ##INTERIOR_COMP_1_IMG_1## أو ##INTERIOR_1_1##).
-  * إذا كان للمكون أكثر من صورة (2 إلى 4 صور): تُعرض كافة صور المكون مجتمعة داخل شريحة المكون بتوزيع شبكي فاخر (Grid) (استخدم الرموز ##INTERIOR_COMP_1_IMG_1##، ##INTERIOR_COMP_1_IMG_2##، إلخ).
-- لو وُجدت مخططات 2D مرفوعة، ضع شريحة مخصصة للمخططات المعمارية (type=content, design_style=image أو grid) واستخدم ##PLAN_IMAGE_1## مع عنوان ووصف المخطط.
-- في جميع الشرائح: إذا كان لوجو الشركة أو المشروع يحتوي على نصوص بيضاء أو فاتحة، ضعه داخل شارة داكنة أنيقة بخلفية كحلية مؤسسية لضمان تباينه التام.
-- كل شريحة content لازم يكون فيها 3-6 bullets على الأقل
-- وزع المحتوى بحيث كل شريحة تكون ممتلئة بصرياً 60-85%
+- الشريحة الأولى غلاف، والثانية فهرس أقسام، والأخيرة خاتمة. لا يوجد موضع ثابت لأي صورة أو مود بورد خارج ترتيب الأقسام المحدد.
+- استخدم `section_key` في كل شريحة، والتزم بترتيب الأقسام الوارد أعلاه دون تقديم أو تأخير.
+- ضع `section_divider` واحدًا قبل محتوى كل قسم موجود. عنوانه هو اسم القسم العربي المعتمد فقط، وحقول `title_en` و`subtitle` غير مستخدمة ويجب ألا تظهر.
+- لا تكرر مكونات المشروع أو جداول الموقع أو السوق. اعرض الجدول مرة واحدة، ثم اختم القسم بملخصه النهائي بعد الجداول.
+- نبذة عن المشروع تستخدم، عند توفرها، صورة أو صورتين من صور التصورات الخارجية غير الصورة الرئيسية لتغذية التصميم دون تحويل النبذة إلى معرض صور.
+- صور الأرض تُعرض مع الوصف المحفوظ لكل صورة، ثم ملخص تحليل الأرض المعتمد. لا تستخدم صورة أرض بلا وصف إن كان الوصف متاحًا.
+- الدراسة المالية تأخذ عدد الشرائح الذي تحتاجه جميع جداولها ومؤشراتها. تنقل المسميات والقيم كما هي، وتستخدم فواصل الآلاف للعرض فقط دون تقريب أو تغيير قيمة، وتضيف رسومًا بيانية مبنية على البيانات مع الجداول الأصلية بجانبها.
+- فريق العمل يحافظ على ترتيب الجهات وحقولها كما أُدخلت، ويستخدم شعار كل جهة عند الحديث عنها. لا ينشئ فئات أو مسميات جديدة.
+- كل مخطط مرفوع له صفحة مستقلة أو مساحة كبيرة مع عنوانه ووصفه؛ ممنوع جمع مخططات كثيرة في شبكة صغيرة.
+- التصورات الخارجية والداخلية تُعرض بصورة واحدة كبيرة أو صورتين في الصفحة مع التسمية والوصف الصحيحين، ويمكن زيادة عدد الصفحات.
+- الملخصات والتحسينات لا تتجاوز الحقائق المعتمدة، ولا تستخدم عبارات عامة أو استرسالًا لا يضيف قيمة واضحة.
+- الخاتمة تعرض بيانات التواصل المتاحة، وتمنع عبارات «فرصة واعدة بشروط» أو أي تقييم مشروط مشابه.
+- قواعد الشركة في بداية الرسالة ملزمة ما لم تخالف ترتيب الأقسام أو دقة البيانات أو منع الأيقونات.
 - {no_street_view}
 """
 
@@ -890,58 +1401,68 @@ def build_fallback_plan(branding):
     count = max(min_s, min(default_count, max_s))
     slides = [
         {'title': 'الغلاف', 'type': 'cover', 'design_style': 'image', 'requires_image': True, 'bullets': [], 'content_density': 'low'},
-        {'title': 'الفهرس', 'type': 'index', 'design_style': 'flow', 'requires_image': False, 'bullets': [], 'content_density': 'low'},
+        {'title': 'محتويات العرض', 'type': 'index', 'design_style': 'text', 'requires_image': False, 'bullets': [], 'content_density': 'low'},
     ]
-    content_titles = [
-        'نظرة عامة على المشروع',
-        'الموقع والمميزات',
-        'الوحدات والمساحات',
-        'العائد الاستثماري',
-        'الخدمات والمرافق',
-        'لماذا هذا المشروع؟',
-        'التحليل المالي والجدوى',
-        'دراسة السوق والطلب',
-        'الفرص والمزايا التنافسية',
-        'خطة التنفيذ والجدول الزمني',
-        'إدارة المخاطر والاستدامة',
-        'المواصفات الفنية والهندسية',
-    ]
-    needed = max(0, count - 4)  # cover + index + moodboard + closing
-    for i, title in enumerate(content_titles):
-        if len(slides) - 1 >= needed:
-            break
-        style = _suggest_design_style(title, slide_type='content')
-        # Avoid long runs of the same style
-        if slides and slides[-1].get('design_style') == style and style == 'cards':
-            style = 'text'
+    content_sections = PRESENTATION_SECTION_ORDER[:-1]
+    needed = max(0, count - 3)
+    for section_key in content_sections[:needed]:
+        title = PRESENTATION_SECTION_TITLES[section_key]
         slides.append({
             'title': title,
             'type': 'content',
-            'design_style': style,
-            'requires_image': False,
-            'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
+            'section_key': section_key,
+            'design_style': _suggest_design_style(title, slide_type='content'),
+            'requires_image': section_key in {'plans', 'exterior', 'interior'},
+            'bullets': ['المحتوى المعتمد لهذا القسم', 'التفاصيل المتاحة في بيانات المشروع',
+                        'الملخص النهائي دون تكرار'],
             'content_density': 'medium',
         })
-    while len(slides) - 1 < needed:
-        idx = len(slides) - 1
-        title = f'تفاصيل محتوى فرعي {idx}'
-        style = _suggest_design_style(title, slide_type='content')
-        if slides and slides[-1].get('design_style') == style and style == 'cards':
-            style = 'text'
+    while len(slides) < count - 1:
         slides.append({
-            'title': title,
-            'type': 'content',
-            'design_style': style,
-            'requires_image': False,
-            'bullets': ['نقطة رئيسية أولى', 'نقطة رئيسية ثانية', 'نقطة رئيسية ثالثة'],
+            'title': PRESENTATION_SECTION_TITLES['overview'], 'type': 'content',
+            'section_key': 'overview', 'design_style': 'text', 'requires_image': False,
+            'bullets': ['تفصيل إضافي من بيانات المشروع', 'صياغة موجزة', 'دون اختراع معلومات'],
             'content_density': 'medium',
         })
-    slides.append({'title': 'مود بورد', 'type': 'moodboard', 'design_style': 'grid', 'requires_image': True, 'bullets': [], 'content_density': 'low'})
-    slides.append({'title': 'شكراً لكم', 'type': 'closing', 'design_style': 'minimal', 'requires_image': False, 'bullets': [], 'content_density': 'low'})
+    slides.append({'title': 'الخاتمة', 'type': 'closing', 'section_key': 'closing', 'design_style': 'minimal', 'requires_image': False, 'bullets': [], 'content_density': 'low'})
     return {'proposed_count': len(slides), 'slides': slides}
 
 
-def build_slide_plan_prompt(project_data, branding, tenant_id=None):
+def _plan_asset_note(images):
+    if not isinstance(images, dict):
+        return ''
+    moodboard = _available_asset_items(images.get('moodboard'))
+    land_photos = _available_asset_items(images.get('land_photos'))
+    plans = _available_asset_items(images.get('plans'))
+    interiors = []
+    for component_index, component in enumerate(images.get('interior_components') or [], 1):
+        if not isinstance(component, dict):
+            continue
+        for image_index, item in _available_asset_items(component.get('images')):
+            interiors.append({
+                'component': component.get('name') or f'المكون {component_index}',
+                'token': f'##INTERIOR_COMP_{component_index}_IMG_{image_index}##',
+                'label': item.get('label') or '', 'caption': item.get('caption') or '',
+            })
+    summary = {
+        'التصورات الخارجية': [f'##MOODBOARD_IMAGE_{index}##' for index, _item in moodboard],
+        'صور الأرض': [{
+            'token': f'##LAND_PHOTO_{index}##',
+            'description': item.get('description') or item.get('caption') or '',
+        } for index, item in land_photos],
+        'المخططات': [f'##PLAN_IMAGE_{index}##' for index, _item in plans],
+        'التصورات الداخلية': interiors,
+        'فريق العمل': [{
+            'name': item.get('name') or '', 'has_logo': bool(item.get('logo')),
+            'token': f'##TEAM_LOGO_{index}##' if item.get('logo') else '',
+        } for index, item in enumerate(images.get('team_members') or [], 1) if isinstance(item, dict)],
+    }
+    if not any(summary.values()):
+        return ''
+    return '\n\n## وسائط العرض المتوفرة وتوزيعها الإلزامي\n' + json.dumps(summary, ensure_ascii=False, indent=2)
+
+
+def build_slide_plan_prompt(project_data, branding, tenant_id=None, images=None):
     """Build the prompt for AI to propose a slide plan.
 
     The plan decides which slides exist, so it has to see every section. Cutting the payload at
@@ -959,6 +1480,9 @@ def build_slide_plan_prompt(project_data, branding, tenant_id=None):
         distribution_rules=CONTENT_DISTRIBUTION_RULES,
         no_street_view=NO_STREET_VIEW_RULE,
     )
+    asset_note = _plan_asset_note(images)
+    if asset_note:
+        prompt += asset_note
     location_note = _location_data_note(project_data)
     if location_note:
         prompt += location_note
@@ -1030,13 +1554,13 @@ def _extract_json_from_text(response_text):
 def _enforce_slide_count(slides, target_count):
     """Trim or pad a slide list to exactly target_count, keeping fixed slides intact.
 
-    The cover, index, moodboard and closing slides keep their reserved positions;
+    The cover, index and closing slides keep their reserved positions;
     only content slides are removed or appended.
     """
     if target_count < 1 or len(slides) == target_count:
         return slides
 
-    reserved_tail_types = {'moodboard', 'closing'}
+    reserved_tail_types = {'closing'}
 
     if len(slides) > target_count:
         head = slides[:2]                      # cover + index
@@ -1167,12 +1691,6 @@ def validate_slide_plan(plan, branding):
     if slides[-1].get('type') != 'closing':
         issues.append("Last slide must be 'closing'")
 
-    # If a moodboard slide exists, ensure it is placed immediately before the closing slide
-    moodboard_indices = [i for i, slide in enumerate(slides) if slide.get('type') == 'moodboard']
-    if moodboard_indices:
-        if moodboard_indices[-1] != len(slides) - 2:
-            issues.append("Moodboard slide must be second-to-last if present")
-
     # Check each slide type and content
     for i, slide in enumerate(slides):
         slide_type = slide.get('type', 'content')
@@ -1181,7 +1699,8 @@ def validate_slide_plan(plan, branding):
 
         if slide_type in ('content', 'site_specs', 'map_landmarks'):
             bullets = slide.get('bullets', [])
-            if len(bullets) < 3:
+            has_structured_source = bool(slide.get('content_source') or slide.get('source_table') or slide.get('image_tokens'))
+            if len(bullets) < 3 and not has_structured_source:
                 issues.append(f"Slide {i+1} '{slide.get('title', '?')}' has only {len(bullets)} bullets (min: 3)")
             if len(bullets) > 6:
                 issues.append(f"Slide {i+1} '{slide.get('title', '?')}' has {len(bullets)} bullets (max: 6)")
@@ -1193,6 +1712,44 @@ def validate_slide_plan(plan, branding):
 # Single Slide Generation
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _slide_source_data_note(slide, project_data):
+    source = str((slide or {}).get('content_source') or '')
+    project_data = project_data if isinstance(project_data, dict) else {}
+    model = _parse_financial_dict(project_data.get('financial_study_model'))
+    match = re.fullmatch(r'financial_report:(\d+):(\d+):(\d+)', source)
+    if match:
+        part_index, start, end = map(int, match.groups())
+        report = model.get('report') if isinstance(model.get('report'), dict) else {}
+        parts = report.get('parts') if isinstance(report.get('parts'), list) else []
+        if part_index < len(parts) and isinstance(parts[part_index], dict):
+            part = dict(parts[part_index])
+            rows = part.get('rows') if isinstance(part.get('rows'), list) else []
+            part['rows'] = rows[start:end]
+            return 'المحتوى الحرفي المطلوب في هذه الشريحة فقط:\n' + json.dumps(part, ensure_ascii=False, indent=2)
+    match = re.fullmatch(r'financial_table:([^:]+):(\d+):(\d+)', source)
+    if match:
+        table_key, start, end = match.group(1), int(match.group(2)), int(match.group(3))
+        tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+        rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
+        return f'جدول هذه الشريحة فقط ({table_key}):\n' + json.dumps(rows[start:end], ensure_ascii=False, indent=2)
+    if source == 'financial_indicators':
+        inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
+        projection = model.get('projection') if isinstance(model.get('projection'), dict) else {}
+        indicators = {}
+        for key, label in _FINANCIAL_INDICATOR_LABELS:
+            value = projection.get(key)
+            if value in (None, '', [], {}) and inputs.get(key) not in (None, '', [], {}):
+                value = inputs.get(key)
+            if value not in (None, '', [], {}, -1):
+                indicators[label] = value
+        return 'المؤشرات المطلوبة بمسمياتها الأصلية:\n' + json.dumps(indicators, ensure_ascii=False, indent=2)
+    match = re.fullmatch(r'project_components:(\d+):(\d+)', source)
+    if match:
+        start, end = map(int, match.groups())
+        return 'مكونات هذه الشريحة فقط:\n' + json.dumps(_project_component_rows(project_data)[start:end], ensure_ascii=False, indent=2)
+    return ''
+
+
 def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=None):
     """Build the user message for generating a single slide."""
     title = slide.get('title', f'شريحة {slide_num}')
@@ -1200,32 +1757,37 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     design_style = slide.get('design_style', 'cards')
     bullets = slide.get('bullets', [])
     density = slide.get('content_density', 'medium')
+    section_key = _slide_section_key(slide)
 
     bullets_text = '\n'.join(f'- {b}' for b in bullets) if bullets else '(لا توجد نقاط محددة — استخرج من بيانات المشروع)'
 
     style_instructions = {
-        'dashboard': 'بطاقات أرقام مالية كبيرة (metrics) — كل رقم في بطاقة كبيرة 32-48px',
-        'cards': 'بطاقات متعددة (2-6 بطاقات) بتخطيط مرن يناسب المحتوى — لا تلجأ تلقائياً إلى 4 بطاقات متساوية',
-        'timeline': 'خط زمني أفقي — نقاط لكل مرحلة مع أشرطة ملونة، واعرض الملاحظة تحت المرحلة إن وُجدت',
-        'table': 'جدول احترافي — header ملون + صفوف متبادلة + صف إجمالي بارز',
-        'text': 'نص + نقاط (bullets) في قائمة منظمة',
-        'image': 'صورة رئيسية + نص قصير — استخدم placeholder الصورة المحدد',
-        'flow': 'مخطط تدفق أفقي — بطاقات مع أسهم تربطها',
-        'swot': 'تحليل SWOT في grid 2×2 — كل ربع بلون مميز: القوة (أخضر)، الضعف (أحمر)، الفرص (أزرق)، التحديات (برتقالي)',
-        'map': 'خريطة كخلفية مع طبقة شفافة للنص — استخدم placeholder الخريطة المحدد',
-        'grid': 'شبكة صور المود بورد — استخدم placeholders ##MOODBOARD_IMAGE_1## إلى ##MOODBOARD_IMAGE_4##',
-        'minimal': 'شريحة ختام بسيطة — "شكراً لكم" + بيانات التواصل',
-    }.get(design_style, 'بطاقات احترافية')
+        'dashboard': 'مؤشرات رقمية محدودة بمسمياتها الأصلية، من دون شبكة مربعات كثيرة',
+        'cards': 'بطاقتان أو ثلاث فقط لعناصر مستقلة قصيرة؛ استخدم النص أو الجدول إذا كانت العناصر مترابطة',
+        'timeline': 'مراحل زمنية واضحة، واعرض الملاحظة فقط تحت المرحلة التي تحتوي ملاحظة فعلية',
+        'table': 'جدول احترافي كامل بالمسميات والقيم الأصلية وفواصل آلاف للأرقام دون تقريب',
+        'chart': 'رسم بياني بألوان الهوية مبني على الأرقام الفعلية مع جدول البيانات الكامل بجانبه',
+        'text': 'عنوان وفقرة أو قائمة موجزة ثم ملخص نهائي واضح بلا بطاقات',
+        'image': 'صورة واحدة كبيرة أو صورتان واضحتان مع التسمية والوصف الصحيحين',
+        'flow': 'تسلسل نصي بسيط بخطوط ربط عند وجود خطوات فعلية فقط',
+        'swot': 'تحليل SWOT وتحليل المخاطر بتقسيم واضح وبألوان الهوية وحدها',
+        'map': 'خريطة واضحة مع جدول أو ملخص واحد دون إعادة الأرقام في أكثر من شكل',
+        'grid': 'صورتان واضحتان كحد أقصى في الصفحة مع الوصف الصحيح لكل صورة',
+        'minimal': 'خاتمة بسيطة تتضمن بيانات التواصل المتاحة بلا تقييمات أو عبارات مشروطة',
+    }.get(design_style, 'نص منظم يناسب طبيعة المحتوى')
 
     density_instructions = {
-        'low': 'محتوى خفيف — 3-4 عناصر بصرياً متوازنة',
+        'low': 'محتوى خفيف — صورة كبيرة أو عنصران واضحان مع وصف موجز',
         'medium': 'محتوى متوسط — 4-5 عناصر ممتلئة بصرياً',
         'high': 'محتوى كثيف — 5-6 عناصر بدون ازدحام',
     }.get(density, 'محتوى متوسط')
 
     # Explicit image/map placeholder for this slide
     placeholder_note = ''
-    if slide_type == 'map_overview':
+    image_tokens = [str(token) for token in (slide.get('image_tokens') or []) if str(token or '').strip()]
+    if image_tokens:
+        placeholder_note = 'استخدم رموز الصور التالية فقط وبحجم واضح، ولا تستبدلها بصورة الغلاف: ' + '، '.join(image_tokens)
+    elif slide_type == 'map_overview':
         placeholder_note = 'يجب استخدام ##MAP_OVERVIEW## كخلفية رئيسية لهذه الشريحة.'
     elif slide_type == 'map_landmarks':
         placeholder_note = 'يجب استخدام ##MAP_LANDMARKS## كخلفية مع جدول أوقات القيادة والمسافات من البيانات.'
@@ -1236,30 +1798,42 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     elif slide_type == 'site_specs':
         placeholder_note = 'استخدم جدول بيانات احترافي لخصائص الموقع.'
     elif slide_type == 'moodboard':
-        placeholder_note = 'يجب استخدام ##MOODBOARD_IMAGE_1## إلى ##MOODBOARD_IMAGE_4## في شبكة صور المود بورد.'
+        placeholder_note = 'استخدم فقط رموز صور التصورات الخارجية المذكورة في الصور المتوفرة، بصورة واحدة كبيرة أو صورتين بحد أقصى.'
     elif design_style == 'image':
-        placeholder_note = 'يمكن استخدام ##IMAGE_COVER## أو ##MOODBOARD_IMAGE_1## إذا كانت مناسبة للموضوع.'
+        placeholder_note = 'لا تستخدم صورة ما لم يكن رمزها محددًا في خطة هذه الشريحة أو في الصور المتوفرة لموضوعها.'
 
     notes = [
         f'أنشئ فقط الشريحة {slide_num} لا غير',
         'اكتب HTML في div class="slide" واحد فقط',
         'لا تكتب شرح أو markdown أو كود إضافي',
-        'التصميم يجب أن يكون احترافي وفاخر',
-        'املأ الشريحة بصرياً بنسبة 60-85% — لا تتركها فارغة ولا تزدحمها',
-        'لا تلجأ تلقائياً إلى تقسيم 2×2 — اختر التخطيط الأنسب للمحتوى',
+        'استخدم خط الشركة نفسه في كل العناصر من دون font-family، بوزن 700 للعناوين و600 للعناوين الفرعية و400 للنصوص والقيم الوصفية',
+        'استخدم لون الهوية الأساسي للعناوين، ولون التمييز للنسب والعناصر المهمة فقط، وخلفية فاتحة ونصًا داكنًا لباقي المحتوى',
+        'لا تكرر معلومة وردت في شريحة أخرى، ولا تحول كل فقرة أو قيمة إلى مربع مستقل',
+        'اختر بين النص والجدول والرسم البياني والصورة وفق طبيعة المحتوى، ولا تستخدم البطاقات إلا لعناصر مستقلة قصيرة وبحد أقصى ثلاث',
+        'املأ الشريحة بالمحتوى الضروري فقط؛ إذا لم يتسع المحتوى فوزعه على صفحة أخرى ولا تصغره أو تحذفه',
     ]
     if placeholder_note:
         notes.insert(0, placeholder_note)
+    source_note = _slide_source_data_note(slide, project_data)
+    if source_note:
+        notes.append(source_note)
+    if section_key == 'overview':
+        notes.append('استخدم صورة أو صورتين من صور التصورات الخارجية غير الصورة الرئيسية إن كانت متاحة، مع نبذة المشروع المعتمدة وبلا تكرار مكونات المشروع التفصيلية.')
+    if section_key in ('land', 'location', 'market'):
+        notes.append('بعد الجداول أو البيانات، اكتب الملخص النهائي المحفوظ لهذا القسم مرة واحدة في نهاية الشريحة أو في آخر شريحة من القسم.')
+    if section_key == 'closing':
+        notes.append('اعرض بيانات التواصل المتاحة كما هي. ممنوع كتابة «فرصة واعدة بشروط» أو «فرصة مشروطة» أو أي تقييم استثماري عام في الخاتمة.')
     if design_style == 'timeline' or re.search(r'(?:خطة|زمن|جدول|مراحل)', title):
-        notes.append('اعرض مراحل الجدول الزمني كما وردت، بما في ذلك عمود الملاحظات داخل الشريحة.')
+        notes.append('اعرض مراحل الجدول الزمني كما وردت. أظهر الملاحظة بجانب مرحلتها فقط عندما يكون نصها موجودًا، ولا تنشئ حقل ملاحظات فارغًا لأي مرحلة.')
         timeline_note = _timeline_data_note(project_data)
         if timeline_note:
             notes.append(timeline_note.strip())
-    if design_style in ('dashboard', 'table') or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
-        notes.append('في الشرائح المالية: انقل جداول ومكونات وأرقام الدراسة المالية حرفيًا كما هي — لا تقريب ولا تحويل وحدات ولا إعادة حساب ولا حذف صفوف، ولا رقم واحد من عندك.')
-        notes.append('إذا أنشأت رسماً بيانياً أو مخططاً دائرياً، يجب إلزامياً وضع جدول البيانات الفعلي بجانب الرسم البياني (جنباً إلى جنب في تصميم ثنائي) لضمان الدقة والوضوح.')
+    if design_style in ('dashboard', 'table', 'chart') or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
+        notes.append('في الشرائح المالية: انقل جميع الجداول والمؤشرات المطلوبة بمسمياتها الأصلية وبالقيم والوحدات نفسها، من دون حذف صف أو عمود أو إعادة حساب.')
+        notes.append('نسّق الأعداد بفواصل الآلاف للعرض فقط، من دون تقريب أو تحويل إلى ألف أو مليون أو تغيير عدد الخانات العشرية.')
+        notes.append('أضف رسماً بيانياً عندما توجد قيم فعلية قابلة للمقارنة، وضع جدول البيانات الكامل بجانبه بألوان الهوية فقط.')
         financial_note = _financial_data_note(project_data)
-        if financial_note:
+        if financial_note and not source_note:
             notes.append(financial_note.strip())
     notes_text = '\n'.join(f'- {n}' for n in notes)
 
@@ -1329,6 +1903,8 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     """
     # A section divider is one fixed layout with different text, so it is rendered here instead of
     # being asked from the model on every deck: identical on every divider, and no call at all.
+    if (slide or {}).get('type') == 'index':
+        return build_index_slide(slide, slide_num, total_slides, branding, project_data)
     if (slide or {}).get('type') == 'section_divider':
         return build_section_divider_slide(slide, slide_num, total_slides, branding, project_data)
 
@@ -1435,33 +2011,22 @@ def _replace_map_placeholders(html, map_placeholders):
     return html
 
 
-DEFAULT_MOODBOARD_IMAGES = [
-    '/uploads/moodboard_exterior.png',
-    '/uploads/moodboard_materials.png',
-    '/uploads/moodboard_interior.png',
-    '/uploads/moodboard_urban_lifestyle.png'
-]
-
-
 def _creative_image_values(images):
     """Return the generated cover and moodboard image URLs in a safe shape with fallbacks."""
-    default_cover = '/uploads/luxury_skyscraper_cover.png'
     if not isinstance(images, dict):
-        return default_cover, DEFAULT_MOODBOARD_IMAGES[:]
-    cover = images.get('cover') or images.get('mainImageData') or default_cover
+        return '', []
+    cover = images.get('cover') or images.get('mainImageData') or ''
     moodboard = images.get('moodboard') or images.get('moodboardImages') or []
-    if not isinstance(moodboard, list) or not any(moodboard):
-        moodboard = DEFAULT_MOODBOARD_IMAGES[:]
+    if not isinstance(moodboard, list):
+        moodboard = []
     return str(cover), [str(img) if img else '' for img in moodboard]
 
 
 def _moodboard_url(index, moodboard):
-    """Pick an image for a moodboard token, falling back to the default set if needed."""
+    """Pick the exact uploaded/generated image for a moodboard token."""
     if index < len(moodboard) and moodboard[index]:
         return moodboard[index]
-    if index < len(DEFAULT_MOODBOARD_IMAGES):
-        return DEFAULT_MOODBOARD_IMAGES[index]
-    return DEFAULT_MOODBOARD_IMAGES[0] if DEFAULT_MOODBOARD_IMAGES else ''
+    return ''
 
 
 def _css_url(image_url):
@@ -1471,12 +2036,7 @@ def _css_url(image_url):
 
 def _build_moodboard_fallback(images):
     """Build a deterministic moodboard layout matching the exact number of images."""
-    if not images or not any(images):
-        images = DEFAULT_MOODBOARD_IMAGES[:]
-    # Prefer generated images; for missing slots use the first default image instead of
-    # cycling 4 assets, which produced 4 images repeated many times for large counts.
-    fallback_img = DEFAULT_MOODBOARD_IMAGES[0] if DEFAULT_MOODBOARD_IMAGES else ''
-    images = [img if img else (DEFAULT_MOODBOARD_IMAGES[i] if i < len(DEFAULT_MOODBOARD_IMAGES) else fallback_img) for i, img in enumerate(images)]
+    images = [str(image) for image in (images or []) if image]
     count = len(images)
 
     # Dynamic CSS grid layout calculation based on image count
@@ -1525,6 +2085,48 @@ def _hex_to_rgba(color, alpha):
     return f'rgba({red},{green},{blue},{alpha})'
 
 
+def build_index_slide(slide, slide_num, total_slides, branding=None, project_data=None):
+    branding = branding or {}
+    slide = slide or {}
+    primary = branding.get('primary_color') or '#0b1f33'
+    accent = branding.get('accent_color') or '#0ea5e9'
+    background = branding.get('background_color') or '#f8fafc'
+    text_color = branding.get('text_color') or '#1e293b'
+    slide_ratio = branding.get('slide_ratio', '16:9')
+    width, height = (1280, 960) if slide_ratio == '4:3' else (1280, 720)
+    entries = [entry for entry in (slide.get('index_entries') or []) if isinstance(entry, dict)]
+    midpoint = (len(entries) + 1) // 2
+
+    def column(items):
+        rows = []
+        for entry in items:
+            title = html_lib.escape(str(entry.get('title') or '').strip())
+            try:
+                page = int(entry.get('page'))
+            except (TypeError, ValueError):
+                page = 0
+            rows.append(
+                '<div style="min-height:48px;display:flex;align-items:center;gap:18px;'
+                'border-bottom:1px solid #dbe3ea;padding:9px 2px;box-sizing:border-box;">'
+                f'<div style="font-size:16px;font-weight:600;color:{text_color};flex:1;">{title}</div>'
+                f'<div dir="ltr" style="font-size:16px;font-weight:700;color:{accent};min-width:34px;'
+                f'text-align:left;">{page:02d}</div></div>'
+            )
+        return ''.join(rows)
+
+    columns = [entries[:midpoint], entries[midpoint:]]
+    return (
+        f'<div class="slide" dir="rtl" style="width:{width}px;height:{height}px;position:relative;'
+        f'overflow:hidden;box-sizing:border-box;background:{background};color:{text_color};">'
+        f'<div style="position:absolute;top:82px;right:52px;left:52px;bottom:58px;box-sizing:border-box;">'
+        f'<div style="font-size:30px;font-weight:700;color:{primary};margin-bottom:24px;">محتويات العرض</div>'
+        f'<div style="width:86px;height:3px;background:{accent};margin-bottom:24px;"></div>'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:26px 54px;align-items:start;">'
+        f'<div>{column(columns[0])}</div><div>{column(columns[1])}</div>'
+        '</div></div></div>'
+    )
+
+
 def build_section_divider_slide(slide, slide_num, total_slides, branding=None, project_data=None):
     """Render a section divider: the main image, darkened, with the section name over it.
 
@@ -1540,10 +2142,8 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
     slide_ratio = branding.get('slide_ratio', '16:9')
     width, height = (1280, 960) if slide_ratio == '4:3' else (1280, 720)
 
-    title = str(slide.get('title') or 'القسم').strip()
-    title_en = str(slide.get('title_en') or '').strip().upper()
-    subtitle = str(slide.get('subtitle') or '').strip()
-    project_name = str(project_data.get('project_name') or project_data.get('projectName') or '').strip()
+    title = html_lib.escape(str(slide.get('title') or 'القسم').strip())
+    project_name = html_lib.escape(str(project_data.get('project_name') or project_data.get('projectName') or '').strip())
     project_logo = str(project_data.get('project_logo') or '').strip()
 
     logos = '<img src="##LOGO##" alt="" style="height:78px;width:auto;object-fit:contain;" />'
@@ -1554,13 +2154,7 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
             '<img src="##PROJECT_LOGO##" alt="" style="height:78px;width:auto;object-fit:contain;" />'
         )
 
-    english = (
-        f'<div style="font-size:15px;font-weight:700;letter-spacing:2.5px;color:{accent};margin-top:14px;">{title_en}</div>'
-    ) if title_en else ''
     rule = f'<div style="width:200px;height:3px;background:{accent};margin:18px 0 0 auto;"></div>'
-    description = (
-        f'<div style="font-size:17px;line-height:1.75;color:rgba(255,255,255,0.86);margin-top:22px;">{subtitle}</div>'
-    ) if subtitle else ''
     footer_number = f'{slide_num:02d} — {int(total_slides or slide_num):02d}' if slide_num else ''
 
     return (
@@ -1578,8 +2172,8 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
         # padding-bottom biases the block slightly above the optical centre, as in the reference.
         '<div style="position:absolute;top:0;bottom:0;right:64px;width:58%;display:flex;flex-direction:column;'
         'justify-content:center;text-align:right;padding-bottom:56px;box-sizing:border-box;">'
-        f'<div style="font-size:58px;line-height:1.15;font-weight:800;color:#ffffff;">{title}</div>'
-        f'{english}{rule}{description}'
+        f'<div style="font-size:58px;line-height:1.15;font-weight:700;color:#ffffff;">{title}</div>'
+        f'{rule}'
         '</div>'
         # dir="ltr": inside the RTL slide "06 — 60" would be reordered into "60 — 06".
         f'<div dir="ltr" style="position:absolute;bottom:34px;left:48px;font-size:13px;letter-spacing:1px;'
@@ -1607,6 +2201,20 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
 
     html = re.sub(r'#*MOODBOARD_IMAGE_(\d+)#*', _replace_moodboard_token, html, flags=re.IGNORECASE)
     html = re.sub(r'#*PROJECT_IMAGE_(\d+)#*', _replace_moodboard_token, html, flags=re.IGNORECASE)
+
+    land_photos = creative_images.get('land_photos') if isinstance(creative_images, dict) else []
+    for index, item in enumerate(land_photos if isinstance(land_photos, list) else [], 1):
+        source = item if isinstance(item, dict) else {'url': item}
+        url = str(source.get('url') or source.get('imageUrl') or '').strip()
+        if url:
+            html = re.sub(rf'#*LAND_(?:PHOTO|IMAGE)_{index}#*', _css_url(url), html, flags=re.IGNORECASE)
+
+    team_members = creative_images.get('team_members') if isinstance(creative_images, dict) else []
+    for index, item in enumerate(team_members if isinstance(team_members, list) else [], 1):
+        source = item if isinstance(item, dict) else {'logo': item}
+        url = str(source.get('logo') or source.get('url') or '').strip()
+        if url:
+            html = re.sub(rf'#*TEAM_LOGO_{index}#*', _css_url(url), html, flags=re.IGNORECASE)
 
     # Replace component-specific interior tokens
     interior_comps = []
@@ -1657,7 +2265,7 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
 
     # A moodboard slide should show the exact moodboard images
     if slide_type == 'moodboard' or 'moodboard' in str(slide_type).lower() or 'مودبورد' in html:
-        if not re.search(r'<img|background-image', html, re.IGNORECASE):
+        if any(moodboard) and not re.search(r'<img|background-image', html, re.IGNORECASE):
             html = _build_moodboard_fallback(moodboard)
     return html
 
@@ -1814,6 +2422,8 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None, project_log
             return img_tag
         if project_logo and project_logo in img_tag:
             return img_tag
+        if '/uploads/creative/' in img_tag.lower():
+            return img_tag
         if 'logo' in img_tag.lower() or '##LOGO##' in img_tag or 'tenant-assets' in img_tag:
             if 'src=' in img_tag.lower():
                 img_tag = re.sub(r'src=["\'][^"\']*["\']', f'src="{logo_url}"', img_tag, flags=re.IGNORECASE)
@@ -1879,6 +2489,11 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         re.search(r'ختام|closing|شكراً|thanks', normalized_title)
     ) or (total_slides is not None and int(slide_num or 0) == int(total_slides))
     is_cover_or_closing = is_cover or is_closing
+    if is_closing:
+        html = re.sub(
+            r'<(p|h[1-6]|span)\b[^>]*>[^<]*(?:فرصة\s+(?:واعدة|مشروطة)|واعدة\s+بشروط|بشروط)[^<]*</\1\s*>',
+            '', html, flags=re.IGNORECASE,
+        )
 
     # Clean out empty/broken img tags across all slides
     html = re.sub(
@@ -1939,7 +2554,7 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
                 f'<div style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{primary};display:flex;align-items:center;padding:0 16px;z-index:10;">'
                 f'<span style="font-size:13px;color:#fff;">{title}</span>'
                 f'<span style="font-size:13px;color:rgba(255,255,255,0.7);margin-right:auto;margin-left:8px;">{company_name}</span>'
-                f'<div style="width:24px;height:24px;border-radius:50%;background:{accent};color:{primary};font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;">{slide_num}</div>'
+                f'<span style="color:{accent};font-size:12px;font-weight:700;min-width:24px;text-align:left;">{slide_num}</span>'
                 '</div>'
             )
             html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)

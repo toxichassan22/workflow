@@ -639,8 +639,8 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertEqual(html.count('class="slide"'), 1)
         self.assertIn('فريق التطوير والتصميم', html)
-        self.assertIn('DEVELOPMENT & DESIGN TEAM', html)          # English, upper-cased
-        self.assertIn('شراكة تجمع خبرة التطوير العقاري', html)
+        self.assertNotIn('DEVELOPMENT & DESIGN TEAM', html)
+        self.assertNotIn('شراكة تجمع خبرة التطوير العقاري', html)
         self.assertIn('url(##IMAGE_COVER##)', html)               # the approved main image
         self.assertIn('06 — 60', html)                            # slide number, as in the reference
         self.assertIn('THE VIEW', html)
@@ -669,7 +669,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # The planner knows the type, and the validator accepts it.
         prompt = engine.build_slide_plan_prompt({'project_name': 'THE VIEW'}, branding)
         self.assertIn('section_divider', prompt)
-        self.assertIn('title_en', prompt)
+        self.assertIn('بلا وصف أو ترجمة', prompt)
         plan = {'slides': [
             {'title': 'الغلاف', 'type': 'cover'},
             {'title': 'الفهرس', 'type': 'index'},
@@ -679,6 +679,203 @@ class MeetingRequirementsTests(unittest.TestCase):
         ]}
         _valid, issues = engine.validate_slide_plan(plan, {'min_slides': 1, 'max_slides': 60})
         self.assertFalse([issue for issue in issues if 'section_divider' in issue], issues)
+
+    def test_final_deck_plan_has_canonical_sections_page_index_and_exact_media(self):
+        engine = self.application_module.slide_engine
+        financial = {
+            'inputs': {'projectCost': 1200000},
+            'dynamicRows': {'components': [{'name': 'فندق', 'units': 20}]},
+            'tables': {
+                'componentsTable': [{'المكون': 'فندق', 'الوحدات': '20'}],
+                'revenueTable': [
+                    {'السنة': '2027', 'الإيراد': '1,200,000'},
+                    {'السنة': '2028', 'الإيراد': '1,500,000'},
+                ],
+            },
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': 'مكونات المشروع'},
+                {'type': 'table', 'headers': ['المكون', 'الوحدات'], 'rows': [['فندق', '20']]},
+                {'type': 'heading', 'level': 2, 'text': 'النتائج المالية'},
+                {'type': 'fields', 'rows': [['ROI', '18%'], ['إجمالي التكلفة', '1,200,000']]},
+                {'type': 'heading', 'level': 2, 'text': 'الإيرادات'},
+                {'type': 'table', 'headers': ['السنة', 'الإيراد'],
+                 'rows': [['2027', '1,200,000'], ['2028', '1,500,000']]},
+            ]},
+        }
+        project = {
+            'project_name': 'المشروع', 'project_idea': 'نبذة المشروع',
+            'contact_email': 'info@example.test', 'contact_phone': '0110000000',
+            'land_and_building_summary': 'ملخص الأرض النهائي',
+            'site_analysis': 'ملخص الموقع النهائي',
+            'timeline_table_data': json.dumps([
+                {'name': 'التصميم', 'year': '2027', 'quarter': 'Q1', 'duration': '3', 'notes': ''},
+                {'name': 'التنفيذ', 'year': '2027', 'quarter': 'Q2', 'duration': '9',
+                 'notes': 'بعد الاعتماد'},
+            ], ensure_ascii=False),
+            'financial_study_model': financial,
+            'market_study_data': json.dumps({
+                'one_block_summary': 'ملخص السوق النهائي',
+                'swot': {'strengths': 'موقع قوي', 'weaknesses': 'تكلفة مرتفعة'},
+            }, ensure_ascii=False),
+            'executive_content': json.dumps({
+                'risks': 'خطر التأخير ومعالجته بجدول ملزم.',
+                'summary': 'الملخص التنفيذي المعتمد.',
+            }, ensure_ascii=False),
+            'team_selection': json.dumps({'excluded': [], 'roles': {}, 'local': [{
+                'localId': 'local-1', 'name': 'المكتب الهندسي', 'role': 'التصميم',
+                'brief': 'خبرة متخصصة', 'logoFileId': 'team-logo-1',
+            }]}, ensure_ascii=False),
+        }
+        images = {
+            'moodboard': ['/uploads/creative/right.jpg', '/uploads/creative/left.jpg'],
+            'moodboard_meta': [
+                {'label': 'الواجهة اليمنى', 'caption': 'التكوين الحجري'},
+                {'label': 'الواجهة الشمالية', 'caption': 'المدخل الرئيسي'},
+            ],
+            'land_photos': [{
+                'url': '/uploads/creative/land.jpg', 'name': 'واجهة الأرض',
+                'description': 'الحد الشمالي للأرض',
+            }],
+            'plans': ['/uploads/creative/plan.jpg'],
+            'plan_meta': [{'title': 'مخطط الدور الأرضي', 'description': 'توزيع الدور الأرضي'}],
+            'interior_components': [{
+                'name': 'الفندق', 'images': [{
+                    'url': '/uploads/creative/lobby.jpg', 'label': 'الاستقبال',
+                    'caption': 'منطقة الاستقبال الرئيسية',
+                }],
+            }],
+            'team_members': [{'name': 'المكتب الهندسي', 'role': 'التصميم',
+                              'logo': '/uploads/creative/team.jpg'}],
+        }
+        raw = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'تحليل السوق', 'type': 'content', 'section_key': 'market',
+             'bullets': ['أ', 'ب', 'ج']},
+            {'title': 'المشروع والفكرة', 'type': 'content', 'section_key': 'overview',
+             'bullets': ['أ', 'ب', 'ج']},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}
+        plan = engine.normalize_presentation_plan(raw, project, images)
+        dividers = [slide for slide in plan['slides'] if slide.get('type') == 'section_divider']
+        self.assertEqual([slide['section_key'] for slide in dividers],
+                         list(engine.PRESENTATION_SECTION_ORDER[:-1]))
+        self.assertTrue(all('subtitle' not in slide and 'title_en' not in slide for slide in dividers))
+
+        entries = plan['slides'][1]['index_entries']
+        self.assertEqual([entry['section_key'] for entry in entries],
+                         list(engine.PRESENTATION_SECTION_ORDER))
+        for entry in entries:
+            self.assertEqual(plan['slides'][entry['page'] - 1].get('section_key'), entry['section_key'])
+        index_html = engine.build_index_slide(plan['slides'][1], 2, len(plan['slides']), {}, project)
+        self.assertIn('محتويات العرض', index_html)
+        self.assertIn('نبذة عن المشروع', index_html)
+        self.assertIn('الخاتمة', index_html)
+        self.assertNotIn('محور', index_html)
+
+        divider_html = engine.build_section_divider_slide({
+            'title': 'تحليل الأرض', 'subtitle': 'وصف يجب ألا يظهر', 'title_en': 'LAND',
+        }, 3, len(plan['slides']), {}, project)
+        self.assertNotIn('وصف يجب ألا يظهر', divider_html)
+        self.assertNotIn('LAND', divider_html)
+
+        overview = next(slide for slide in plan['slides'] if slide.get('content_source') == 'project_overview')
+        self.assertEqual(overview['image_tokens'], ['##MOODBOARD_IMAGE_1##', '##MOODBOARD_IMAGE_2##'])
+        land = [slide for slide in plan['slides'] if slide.get('section_key') == 'land'
+                and slide.get('type') == 'content']
+        self.assertEqual(land[0]['image_tokens'], ['##LAND_PHOTO_1##'])
+        self.assertEqual(land[0]['bullets'], ['الحد الشمالي للأرض'])
+        self.assertEqual(land[-1]['content_source'], 'land_and_building_summary')
+        self.assertTrue(any(slide.get('image_tokens') == ['##PLAN_IMAGE_1##'] for slide in plan['slides']))
+        self.assertTrue(any(slide.get('image_tokens') == ['##INTERIOR_COMP_1_IMG_1##']
+                            for slide in plan['slides']))
+        self.assertTrue(any(slide.get('image_tokens') == ['##TEAM_LOGO_1##'] for slide in plan['slides']))
+        self.assertEqual(sum(slide.get('section_key') == 'components' and slide.get('type') == 'content'
+                             for slide in plan['slides']), 1)
+        component_slide = next(slide for slide in plan['slides']
+                               if slide.get('section_key') == 'components' and slide.get('type') == 'content')
+        self.assertTrue(component_slide['content_source'].startswith('financial_report:'))
+        financial_slides = [slide for slide in plan['slides'] if slide.get('section_key') == 'financial'
+                            and slide.get('type') == 'content']
+        self.assertTrue(financial_slides)
+        self.assertTrue(all(str(slide.get('content_source')).startswith('financial_report:')
+                            for slide in financial_slides))
+        self.assertTrue(any(slide.get('design_style') == 'chart' for slide in financial_slides))
+        source_note = engine._slide_source_data_note(financial_slides[-1], project)
+        self.assertIn('1,500,000', source_note)
+        financial_note = engine._financial_data_note(project)
+        self.assertIn('نفس محتوى تقرير PDF', financial_note)
+        self.assertIn('ROI', financial_note)
+        self.assertIn('1,500,000', financial_note)
+        self.assertIn('فواصل الآلاف', financial_note)
+        facts = engine.build_project_facts(project)
+        self.assertIn('بيانات التواصل المعتمدة للخاتمة', facts)
+        self.assertIn('info@example.test', facts)
+        closing_message = engine.build_slide_user_msg(
+            plan['slides'][-1], len(plan['slides']), len(plan['slides']), {}, project)
+        self.assertIn('فرصة واعدة بشروط', closing_message)
+        cleaned_closing = engine.postprocess_slide(
+            '<div class="slide"><p>فرصة واعدة بشروط</p><p>شكراً لكم</p></div>',
+            'closing', slide_num=len(plan['slides']), total_slides=len(plan['slides']),
+            slide_title='الخاتمة',
+        )
+        self.assertNotIn('فرصة واعدة بشروط', cleaned_closing)
+        self.assertIn('شكراً لكم', cleaned_closing)
+
+        gated = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'المخططات', 'type': 'content', 'section_key': 'plans'},
+            {'title': 'الدراسة المالية', 'type': 'content', 'section_key': 'financial'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, {'project_name': 'مشروع بلا وسائط'}, {})
+        self.assertNotIn('plans', [slide.get('section_key') for slide in gated['slides']])
+        self.assertNotIn('financial', [slide.get('section_key') for slide in gated['slides']])
+
+    def test_media_manifest_carries_land_descriptions_and_keeps_team_logos(self):
+        project = {
+            'team_selection': json.dumps({'local': [{
+                'name': 'المصمم', 'role': 'التصميم', 'logoFileId': 'team-file',
+            }], 'excluded': [], 'roles': {}}, ensure_ascii=False),
+            'land_photos_file_meta': [{
+                'id': 'land-file', 'originalName': 'land.jpg', 'description': 'الشارع الشمالي',
+            }],
+        }
+        with patch.object(self.application_module, '_generation_project_image_url',
+                          side_effect=lambda _tenant, file_id: '/uploads/creative/' + file_id + '.jpg'):
+            augmented = self.application_module._augment_generation_images({}, project, self.tenant_a)
+        self.assertEqual(augmented['team_members'][0]['logo'], '/uploads/creative/team-file.jpg')
+        self.assertEqual(augmented['land_photos'][0]['url'], '/uploads/creative/land-file.jpg')
+        self.assertEqual(augmented['land_photos'][0]['description'], 'الشارع الشمالي')
+
+        images = {
+            'cover': '/uploads/creative/cover.jpg',
+            'moodboard': ['/uploads/creative/right.jpg'],
+            'moodboard_meta': [{'label': 'الواجهة اليمنى', 'caption': 'تفاصيل الواجهة'}],
+            'land_photos': [{'url': '/uploads/creative/land.jpg',
+                             'name': 'صورة الأرض', 'description': 'الشارع الشمالي'}],
+            'plans': ['/uploads/creative/plan.jpg'],
+            'plan_meta': [{'title': 'المخطط العام', 'description': 'توزيع المشروع'}],
+            'team_members': [{'name': 'المصمم', 'role': 'التصميم',
+                              'logo': '/uploads/creative/team.jpg'}],
+        }
+        info = self.application_module._get_images_info(images, {'project_name': 'المشروع'})
+        for expected in ('##MOODBOARD_IMAGE_1##', 'تفاصيل الواجهة', '##LAND_PHOTO_1##',
+                         'الشارع الشمالي', '##PLAN_IMAGE_1##', 'توزيع المشروع',
+                         '##TEAM_LOGO_1##'):
+            self.assertIn(expected, info)
+
+        html = self.application_module.slide_engine.finalize_slide_html(
+            '<div class="slide" style="width:1280px;height:720px">'
+            '<img class="team-logo" src="##TEAM_LOGO_1##">'
+            '<img src="##LAND_PHOTO_1##"></div>',
+            'content', {'project_name': 'المشروع'},
+            {'primary_color': '#123456', 'accent_color': '#abcdef'},
+            creative_images=images, slide_num=3, slide_title='الوسائط', total_slides=5,
+        )
+        self.assertIn('/uploads/creative/team.jpg', html)
+        self.assertIn('/uploads/creative/land.jpg', html)
+        self.assertNotIn('##TEAM_LOGO_1##', html)
+        self.assertNotIn('##LAND_PHOTO_1##', html)
 
     def test_slides_workspace_can_return_to_the_project_form_without_losing_it(self):
         """There was no way back from the slides page to بيانات المشروع: the only navigation was
@@ -770,6 +967,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('ممنوع منعًا باتًا رسم أو تركيب أي مخطط معماري', rules)
         self.assertIn('##PLAN_IMAGE_1##', rules)
         self.assertIn('الرسوم البيانية عند الحاجة', rules)
+        self.assertIn('بحد أقصى 10% من لون التمييز', rules)
+        self.assertIn('الوزن لخدمة التسلسل البصري', rules)
+        self.assertIn('عنصرين أو ثلاثة مستقلين', rules)
+        self.assertIn('صورة واحدة كبيرة أو صورتان', rules)
+        self.assertIn('ممنوع إضافة ترجمة أو وصف', rules)
         # The batch path had its own copy of the 4,000-character cut.
         engine_source = (ROOT / 'slide_engine.py').read_text(encoding='utf-8')
         self.assertNotIn("project_json[:4000]", engine_source)
@@ -2167,6 +2369,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('التراخيص', note)
         self.assertIn('بانتظار الأمانة', note)
         self.assertIn('2027 Q4', note)
+        self.assertIn('إذا كانت الملاحظة فارغة فلا تعرض', note)
+        empty_note_line = self.application_module.slide_engine.format_timeline_phase_line({
+            'name': 'التصميم', 'year': '2027', 'quarter': 'Q1',
+            'endYear': '2027', 'endQuarter': 'Q2', 'duration': '3', 'notes': '',
+        })
+        self.assertNotIn(' — ', empty_note_line)
 
     def test_components_live_only_inside_the_financial_study(self):
         """The standalone components section duplicated id="componentsTable", and duplicate ids
@@ -3373,7 +3581,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(engine.resolve_slide_bounds(
             {'min_slides': 8, 'max_slides': 30, 'lock_slide_count': 1, 'default_slide_count': 12}),
             (12, 12, 12))
-        # A 120-slide plan survives intact.
+        # Every one of the 117 content slides survives; the canonical section divider is added.
         long_plan = {'slides': (
             [{'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'}]
             + [{'title': f'محور {i}', 'type': 'content', 'bullets': ['1', '2', '3']} for i in range(117)]
@@ -3386,7 +3594,8 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.application_module.g.tenant_id = self.tenant_a
             result = self.application_module._execute_slide_plan(
                 {'project_name': 'THE VIEW'}, self.tenant_a, {'min_slides': 8, 'max_slides': 30})
-        self.assertEqual(len(result['plan']['slides']), 120)
+        self.assertEqual(len(result['plan']['slides']), 121)
+        self.assertEqual(sum(slide.get('type') == 'content' for slide in result['plan']['slides']), 117)
         self.assertEqual(result['plan']['source'], 'model')
         self.assertNotIn('Too many slides', ' '.join(result['validation']['issues']))
 
@@ -3735,11 +3944,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         entered = dict(defaults_only, inputs=dict(defaults_only['inputs'], projectCost=480000000))
         self.assertTrue(engine.financial_study_has_real_input(entered))
         entered_note = engine._financial_data_note({'financial_study_model': entered})
-        self.assertIn('المؤشرات وهيكل رأس المال المعتمد', entered_note)
+        self.assertIn('المؤشرات المالية بمسمياتها الأصلية', entered_note)
         # An entered study is copied, never recomputed or extended.
-        self.assertIn('نقل الرقم حرفيًا', entered_note)
-        self.assertIn('الرقم غير الموجود لا يُكتب', entered_note)
-        self.assertIn('ممنوع التوسيع', entered_note)
+        self.assertIn('فواصل الآلاف', entered_note)
+        self.assertIn('الرقم أو المؤشر غير الموجود لا يُكتب', entered_note)
+        self.assertIn('لا تحذف صفاً أو عموداً أو سنة', entered_note)
 
         # A plan for a project with no figures carries no financial slide from any source.
         plan = {'slides': [
@@ -3762,8 +3971,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(engine.financial_study_has_real_input(by_components))
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn("if (key === 'financial_study_model' && !financialStudyHasRealInput(value)) return;",
-                      index_source)
+        self.assertIn("if (key === 'financial_study_model') {", index_source)
+        self.assertIn('const report = tenantFinancialPresentationReport', index_source)
+        self.assertIn("tenantFinancialPresentationReport = financialStudyHasRealInput", index_source)
         # Generating from a name alone can only produce invented content, so it is stated, not hidden.
         self.assertIn('const GENERATION_MIN_FACTS = 6;', index_source)
         self.assertIn('const factCount = countProjectFacts(tenantProjectData);', index_source)

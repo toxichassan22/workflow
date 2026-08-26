@@ -774,8 +774,8 @@ def _visual_concept_overview_map_url(project_data):
     return ''
 
 
-def _visual_concept_project_file_data_uri(file_id):
-    tenant_id = getattr(g, 'tenant_id', None)
+def _visual_concept_project_file_data_uri(file_id, tenant_id=None):
+    tenant_id = tenant_id or getattr(g, 'tenant_id', None)
     if not tenant_id or not file_id:
         return None
     stored = db.get_project_file(tenant_id, str(file_id))
@@ -801,17 +801,18 @@ def _visual_concept_project_file_data_uri(file_id):
     return f'data:{mime_type};base64,{encoded}'
 
 
-def _publish_project_file_as_creative_image(file_id):
+def _publish_project_file_as_creative_image(file_id, tenant_id=None):
     """Copy an uploaded image into the tenant's creative folder and return its public URL.
 
     An uploaded slot image used to be shown from a ``blob:`` URL, which exists only inside
     the tab that created it. That URL was saved into the draft, so after a reload every
     client-uploaded image rendered broken and every export shipped a dead reference.
     """
-    data_uri = _visual_concept_project_file_data_uri(file_id)
+    tenant_id = tenant_id or getattr(g, 'tenant_id', None)
+    data_uri = _visual_concept_project_file_data_uri(file_id, tenant_id)
     if not data_uri:
         return None
-    url = persist_generated_image(data_uri, getattr(g, 'tenant_id', None))
+    url = persist_generated_image(data_uri, tenant_id)
     return url if isinstance(url, str) and url.startswith('/uploads/') else None
 
 
@@ -1269,19 +1270,78 @@ def clean_project_data(data):
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_GENERATION_PROJECT_IMAGE_CACHE = {}
+
+
+def _generation_project_image_url(tenant_id, file_id):
+    key = (str(tenant_id or ''), str(file_id or ''))
+    if not all(key):
+        return ''
+    cached = _GENERATION_PROJECT_IMAGE_CACHE.get(key)
+    if cached:
+        return cached
+    url = _publish_project_file_as_creative_image(file_id, tenant_id) or ''
+    if url:
+        _GENERATION_PROJECT_IMAGE_CACHE[key] = url
+    return url
+
+
+def _augment_generation_images(images, project_data, tenant_id):
+    result = dict(images) if isinstance(images, dict) else {}
+    team_members = []
+    for entry in slide_engine._selected_team_entries(project_data or {}, tenant_id):
+        file_id = entry.get('_logo_file_id') or ''
+        team_members.append({
+            'name': entry.get('الجهة') or '',
+            'role': entry.get('الدور') or '',
+            'logo': _generation_project_image_url(tenant_id, file_id) if file_id else '',
+        })
+    result['team_members'] = team_members
+    land_source = result.get('land_photos')
+    if not isinstance(land_source, list):
+        land_source = (project_data or {}).get('land_photos_file_meta')
+    land_photos = []
+    for item in land_source if isinstance(land_source, list) else []:
+        source = item if isinstance(item, dict) else {}
+        url = str(source.get('url') or source.get('imageUrl') or source.get('path') or '').strip()
+        if url and not url.startswith('/') and not url.startswith('http'):
+            url = '/' + url.lstrip('/')
+        if not url and source.get('id'):
+            url = _generation_project_image_url(tenant_id, source['id'])
+        if url:
+            land_photos.append({
+                'url': url,
+                'description': str(source.get('description') or source.get('caption') or '').strip(),
+                'name': str(source.get('originalName') or source.get('name') or '').strip(),
+            })
+    result['land_photos'] = land_photos
+    return result
+
+
 def _get_images_info(images, project_data=None):
     interior_components = []
+    moodboard_meta = []
+    moodboard_items = []
+    plan_meta = []
+    land_photos = []
+    team_members = []
     if isinstance(images, list):
         has_cover = bool(images[0]) if images else False
-        moodboard_count = sum(1 for img in images[1:5] if img) if len(images) > 1 else 0
+        moodboard_items = [(index, image) for index, image in enumerate(images[1:], 1) if image]
+        moodboard_count = len(moodboard_items)
         interior_count = 0
         plans_count = 0
     elif isinstance(images, dict):
         has_cover = bool(images.get('cover'))
-        moodboard_count = sum(1 for img in images.get('moodboard', []) if img)
+        moodboard_items = [(index, image) for index, image in enumerate(images.get('moodboard', []), 1) if image]
+        moodboard_count = len(moodboard_items)
+        moodboard_meta = images.get('moodboard_meta') if isinstance(images.get('moodboard_meta'), list) else []
         interior_components = images.get('interior_components', [])
         interior_count = sum(1 for img in images.get('interior', []) if img)
         plans_count = sum(1 for img in images.get('plans', []) if img)
+        plan_meta = images.get('plan_meta') if isinstance(images.get('plan_meta'), list) else []
+        land_photos = images.get('land_photos') if isinstance(images.get('land_photos'), list) else []
+        team_members = images.get('team_members') if isinstance(images.get('team_members'), list) else []
     else:
         has_cover = False
         moodboard_count = 0
@@ -1299,27 +1359,60 @@ def _get_images_info(images, project_data=None):
         info = "- شعار المشروع: لا يوجد — استخدم شعار الشركة ##LOGO## وحده ولا تكتب ##PROJECT_LOGO##.\n"
     info += f"- صورة الغلاف: {'متوفرة (استخدم ##IMAGE_COVER##)' if has_cover else 'لا توجد'}\n"
     if moodboard_count > 0:
-        info += f"- صور المود بورد والتصور الخارجي (استخدم الرموز ##MOODBOARD_IMAGE_1## حتى ##MOODBOARD_IMAGE_{min(moodboard_count, 4)}##): {min(moodboard_count, 4)} صور متوفرة — أنشئ شريحة واحدة فقط للمود بورد تجمع زوايا المشروع الأربع الخارجية (يمين، شمال، فوق، خلف)\n"
+        info += f"\n## التصورات الخارجية المتوفرة ({moodboard_count} صور)\n"
+        info += "استخدم صورة واحدة كبيرة أو صورتين بحد أقصى في الصفحة، ويمكن استخدام أول صورتين غير رئيسيتين داخل نبذة عن المشروع. أنشئ صفحات إضافية حتى تظهر جميع الصور بوضوح:\n"
+        for token_index, _image in moodboard_items:
+            meta = moodboard_meta[token_index - 1] if token_index <= len(moodboard_meta) and isinstance(moodboard_meta[token_index - 1], dict) else {}
+            label = str(meta.get('label') or f'التصور الخارجي {token_index}').strip()
+            caption = str(meta.get('caption') or '').strip()
+            info += f"- ##MOODBOARD_IMAGE_{token_index}## — {label}" + (f": {caption}" if caption else '') + "\n"
     else:
-        info += "- صور المود بورد: لا توجد\n"
+        info += "- صور التصورات الخارجية: لا توجد\n"
 
     if interior_components:
-        info += f"\n## صور التصور الداخلي موزعة حسب المكونات ({len(interior_components)} مكونات):\n"
-        info += f"قاعدة إلزامية للتصور الداخلي: عدد الشرائح = عدد المكونات ({len(interior_components)} شرائح). كل شريحة تمثل مكوناً واحداً وتضم صوره بالكامل:\n"
+        info += f"\n## صور التصورات الداخلية موزعة حسب المكونات ({len(interior_components)} مكونات)\n"
+        info += "اعرض صورة واحدة كبيرة أو صورتين بحد أقصى في الصفحة، ووزع بقية الصور على صفحات إضافية مع التسمية والوصف الصحيحين:\n"
         for c_idx, comp in enumerate(interior_components, 1):
-            c_name = comp.get('name', f'المكون {c_idx}')
-            c_imgs = comp.get('images', [])
-            n_imgs = len(c_imgs)
-            if n_imgs == 1:
-                info += f"- المكون {c_idx} ({c_name}): شريحة واحدة مستقلة بعنوان 'التصور الداخلي — {c_name}' تضم صورة واحدة بمساحة كاملة/بارزة (استخدم الرمز ##INTERIOR_COMP_{c_idx}_IMG_1## أو ##INTERIOR_{c_idx}_1##)\n"
-            else:
-                tokens = [f"##INTERIOR_COMP_{c_idx}_IMG_{j}##" for j in range(1, n_imgs + 1)]
-                info += f"- المكون {c_idx} ({c_name}): شريحة واحدة مستقلة بعنوان 'التصور الداخلي — {c_name}' تضم {n_imgs} صور معاً في شبكة/معرض متناسق (استخدم الرموز: {', '.join(tokens)})\n"
+            c_name = str(comp.get('name') or f'المكون {c_idx}').strip()
+            c_imgs = comp.get('images', []) if isinstance(comp.get('images'), list) else []
+            for image_index, image in enumerate(c_imgs, 1):
+                source = image if isinstance(image, dict) else {}
+                label = str(source.get('label') or c_name).strip()
+                caption = str(source.get('caption') or '').strip()
+                info += f"- ##INTERIOR_COMP_{c_idx}_IMG_{image_index}## — {c_name} — {label}" + (f": {caption}" if caption else '') + "\n"
     elif interior_count > 0:
-        info += f"- صور التصميم والتصور الداخلي (استخدم الرموز ##INTERIOR_IMAGE_1## حتى ##INTERIOR_IMAGE_{interior_count}##): {interior_count} صور متوفرة (شريحة واحدة لكل مكون تضم كافة صوره)\n"
+        info += f"- صور التصورات الداخلية: ##INTERIOR_IMAGE_1## حتى ##INTERIOR_IMAGE_{interior_count}##، صورة واحدة كبيرة أو صورتان بحد أقصى في الصفحة.\n"
 
     if plans_count > 0:
-        info += f"- صور المخططات المعمارية 2D (استخدم الرموز ##PLAN_IMAGE_1## حتى ##PLAN_IMAGE_{plans_count}##): {plans_count} مخططات متوفرة (شريحة مخصصة لكل مخطط مع عنوانه وشرحه)\n"
+        info += f"\n## المخططات المعمارية المرفوعة ({plans_count} مخططات)\n"
+        for index in range(1, plans_count + 1):
+            meta = plan_meta[index - 1] if index <= len(plan_meta) and isinstance(plan_meta[index - 1], dict) else {}
+            title = str(meta.get('title') or meta.get('name') or f'المخطط {index}').strip()
+            description = str(meta.get('description') or '').strip()
+            info += f"- ##PLAN_IMAGE_{index}## — {title}" + (f": {description}" if description else '') + "\n"
+        info += "كل مخطط له صفحة مستقلة أو مساحة كبيرة، ولا يجوز ضغط عدة مخططات في شبكة صغيرة.\n"
+
+    if land_photos:
+        info += f"\n## صور الأرض المرفوعة ({len(land_photos)} صور)\n"
+        info += "اعرضها داخل قسم تحليل الأرض بصورة واحدة كبيرة أو صورتين بحد أقصى في الصفحة، ثم اعرض ملخص الأرض النهائي بعد صفحات الصور:\n"
+        for index, photo in enumerate(land_photos, 1):
+            source = photo if isinstance(photo, dict) else {}
+            description = str(source.get('description') or '').strip()
+            name = str(source.get('name') or f'صورة الأرض {index}').strip()
+            info += f"- ##LAND_PHOTO_{index}## — {name}" + (f": {description}" if description else ': لا يوجد وصف محفوظ') + "\n"
+    else:
+        info += "- صور الأرض: لا توجد\n"
+
+    if team_members:
+        info += f"\n## شعارات فريق العمل ({len(team_members)} جهات مرتبة)\n"
+        for index, member in enumerate(team_members, 1):
+            source = member if isinstance(member, dict) else {}
+            name = str(source.get('name') or f'الجهة {index}').strip()
+            role = str(source.get('role') or '').strip()
+            if source.get('logo'):
+                info += f"- {name}" + (f" — {role}" if role else '') + f": الشعار متوفر ويجب استخدام ##TEAM_LOGO_{index}## عند ذكر الجهة.\n"
+            else:
+                info += f"- {name}" + (f" — {role}" if role else '') + ": لا يوجد شعار مرفوع؛ لا تنشئ بديلاً مصورًا.\n"
 
     # Map image placeholders (populated when project has location data). An absent map used to be
     # simply unmentioned, and the rules list every token, so the model wrote one anyway; the
@@ -1347,6 +1440,10 @@ def _get_images_info(images, project_data=None):
         info += "- ممنوع كتابة ##INTERIOR_...## لعدم وجود صور تصور داخلي\n"
     if plans_count <= 0:
         info += "- ممنوع كتابة ##PLAN_IMAGE_N## أو ##2D_PLAN_N## لعدم وجود مخططات مرفوعة\n"
+    if not land_photos:
+        info += "- ممنوع كتابة ##LAND_PHOTO_N## لعدم وجود صور أرض مرفوعة\n"
+    if not any(isinstance(member, dict) and member.get('logo') for member in team_members):
+        info += "- ممنوع كتابة ##TEAM_LOGO_N## لعدم وجود شعارات فريق متاحة\n"
     
     # Landmark driving times and distances
     if isinstance(images, dict) and images.get('map_landmarks'):
@@ -3956,8 +4053,9 @@ def _ensure_required_location_slides(plan, project_data):
     required = []
     if project_data.get('location_lat') and project_data.get('location_lng'):
         required.append({
-            'title': 'الموقع الاستراتيجي والإحداثيات',
+            'title': 'بيانات الموقع والإحداثيات',
             'type': 'site_specs',
+            'section_key': 'location',
             'design_style': 'table',
             'requires_image': False,
             'content_density': 'medium',
@@ -3974,6 +4072,7 @@ def _ensure_required_location_slides(plan, project_data):
                 required.append({
                     'title': title,
                     'type': slide_type,
+                    'section_key': 'location',
                     'design_style': 'map',
                     'requires_image': True,
                     'content_density': 'medium',
@@ -3981,8 +4080,9 @@ def _ensure_required_location_slides(plan, project_data):
                     'content_source': source,
                 })
         required.append({
-            'title': 'تحليل AI للموقع',
+            'title': 'ملخص الموقع الجغرافي',
             'type': 'content',
+            'section_key': 'location',
             'design_style': 'text',
             'requires_image': False,
             'content_density': 'medium',
@@ -4003,7 +4103,7 @@ def _ensure_required_location_slides(plan, project_data):
     return plan
 
 
-def _execute_slide_plan(project_data, tenant_id, branding):
+def _execute_slide_plan(project_data, tenant_id, branding, images=None):
     """Ask the planner for a slide plan, then enforce the company's slide bounds on it."""
     training_context = db.get_training_context(tenant_id) or ''
     slide_count_locked = bool(branding.get('lock_slide_count'))
@@ -4033,7 +4133,7 @@ def _execute_slide_plan(project_data, tenant_id, branding):
     elif effective_branding.get('default_slide_count', 0) > effective_max_slides:
         effective_branding['default_slide_count'] = effective_max_slides
 
-    prompt = build_slide_plan_prompt(project_data, effective_branding, tenant_id=tenant_id)
+    prompt = build_slide_plan_prompt(project_data, effective_branding, tenant_id=tenant_id, images=images)
     if training_context:
         # Only a locked count is a ceiling. Otherwise the count follows the content, and this
         # header used to contradict the prompt by naming a maximum the prompt calls open.
@@ -4089,6 +4189,7 @@ def _execute_slide_plan(project_data, tenant_id, branding):
     plan = slide_engine.strip_financial_slides(plan, project_data)
     # There are no photographs of the site, so a slide built to hold them holds empty frames.
     plan = slide_engine.strip_street_view_slides(plan)
+    plan = slide_engine.normalize_presentation_plan(plan, project_data, images, tenant_id=tenant_id)
     has_financial = slide_engine.project_has_financial_study(project_data)
 
     # Enforce min and max slide counts strictly on generated plan
@@ -4121,6 +4222,10 @@ def _execute_slide_plan(project_data, tenant_id, branding):
             slides.insert(insert_idx, new_slide)
             insert_idx += 1
 
+    plan['slides'] = slides
+    plan = slide_engine.normalize_presentation_plan(plan, project_data, images, tenant_id=tenant_id)
+    slides = plan['slides']
+
     # Trimming only happens for a tenant who locked the count: without a lock the maximum is
     # SLIDE_COUNT_OPEN, so a long plan is kept exactly as the planner produced it.
     if len(slides) > effective_max_slides:
@@ -4136,6 +4241,7 @@ def _execute_slide_plan(project_data, tenant_id, branding):
 
     plan['proposed_count'] = len(slides)
     plan['slides'] = slides
+    plan = slide_engine.refresh_index_entries(plan)
     plan['source'] = plan_source
     if plan_error:
         plan['source_error'] = plan_error[:400]
@@ -4152,7 +4258,7 @@ def _execute_slide_plan(project_data, tenant_id, branding):
     }
 
 
-def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, job_id):
+def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images, job_id):
     with flask_app.app_context():
         _write_job('.plan_jobs', tenant_id, job_id, {
             'status': 'running',
@@ -4160,7 +4266,7 @@ def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, job_id)
             'message': 'جاري تحليل بيانات المشروع وإعداد هيكل العرض...',
         })
         try:
-            payload = _execute_slide_plan(project_data, tenant_id, branding)
+            payload = _execute_slide_plan(project_data, tenant_id, branding, images)
             _write_job('.plan_jobs', tenant_id, job_id, {
                 **payload,
                 'status': 'completed',
@@ -4190,6 +4296,7 @@ def api_slide_plan():
     """
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
+    images = _augment_generation_images(data.get('images', {}), project_data, g.tenant_id)
     branding = db.get_branding(g.tenant_id)
 
     if not branding:
@@ -4197,7 +4304,7 @@ def api_slide_plan():
 
     use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
     if not use_background:
-        return jsonify(_execute_slide_plan(project_data, g.tenant_id, branding))
+        return jsonify(_execute_slide_plan(project_data, g.tenant_id, branding, images))
 
     job_id = str(_uuid.uuid4())
     _write_job('.plan_jobs', g.tenant_id, job_id, {
@@ -4207,7 +4314,7 @@ def api_slide_plan():
     })
     threading.Thread(
         target=_slide_plan_job_worker,
-        args=(current_app._get_current_object(), g.tenant_id, project_data, dict(branding), job_id),
+        args=(current_app._get_current_object(), g.tenant_id, project_data, dict(branding), images, job_id),
         daemon=True,
     ).start()
     return jsonify({
@@ -5094,7 +5201,7 @@ def api_generate_slide_single():
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
     slide_plan = data.get('slidePlan', {})
-    images = data.get('images', {})
+    images = _augment_generation_images(data.get('images', {}), project_data, g.tenant_id)
     slide_index = int(data.get('slideIndex', 0))
 
     if not slide_plan or 'slides' not in slide_plan:
@@ -5223,7 +5330,7 @@ def api_generate_slides():
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
     slide_plan = data.get('slidePlan', {})
-    images = data.get('images', {})
+    images = _augment_generation_images(data.get('images', {}), project_data, g.tenant_id)
     presentation_id = data.get('presentationId')
 
     branding = db.get_branding(g.tenant_id)

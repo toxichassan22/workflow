@@ -5997,6 +5997,7 @@
     let tenantPresentationId = null;
     let tenantProjectMode = 'new';
     let tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
+    let tenantFinancialPresentationReport = null;
     let tenantVisualConceptState = null;
     let tenantArchiveCache = null;
     let tenantLocationGeocodeRequest = null;
@@ -6161,7 +6162,7 @@
         ? parseFinancialStudySnapshot(model) : model) || {};
       const rows = snapshot.dynamicRows || {};
       const tables = snapshot.tables || {};
-      const hasRow = [rows.components, tables.componentsTable, tables.revenueTable, tables.costsTable]
+      const hasRow = [...Object.values(rows), ...Object.values(tables)]
         .some(set => Array.isArray(set) && set.some(row => row && typeof row === 'object'
           && Object.values(row).some(value => String(value ?? '').trim())));
       if (hasRow) return true;
@@ -6178,10 +6179,27 @@
       const slim = {};
       Object.keys(src).forEach(key => {
         if (GENERATION_PAYLOAD_DROPPED.includes(key)) return;
-        if (key.endsWith('_file_meta')) return;
         const value = src[key];
         if (value === undefined || value === null || value === '') return;
-        if (key === 'financial_study_model' && !financialStudyHasRealInput(value)) return;
+        if (key === 'land_photos_file_meta') {
+          slim[key] = (Array.isArray(value) ? value : []).map(photo => ({
+            id: photo?.id || '',
+            imageUrl: durableImageUrl(photo?.imageUrl || photo?.url || ''),
+            originalName: photo?.originalName || photo?.name || '',
+            description: photo?.description || ''
+          }));
+          return;
+        }
+        if (key.endsWith('_file_meta')) return;
+        if (key === 'financial_study_model') {
+          if (!financialStudyHasRealInput(value)) return;
+          const model = (typeof parseFinancialStudySnapshot === 'function'
+            ? parseFinancialStudySnapshot(value) : value) || {};
+          const report = tenantFinancialPresentationReport
+            || (typeof collectFinancialStudyReport === 'function' ? collectFinancialStudyReport() : null);
+          slim[key] = report ? { ...model, report } : model;
+          return;
+        }
         slim[key] = value;
       });
       return slim;
@@ -6636,12 +6654,99 @@
       return res;
     }
 
+    function buildPresentationGenerationImages() {
+      const externalSlots = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1);
+      const visualMoodboard = externalSlots.map(item => tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl || tenantVisualConceptState?.slots?.[item.id]?.imageUrl || '');
+      const fallbackMoodboard = Array.isArray(tenantCreativeImages?.moodboard) ? tenantCreativeImages.moodboard : [];
+      const moodboard = visualMoodboard.some(Boolean)
+        ? visualMoodboard
+        : fallbackMoodboard.map((image, index) => image || tempMoodboardImages[index] || '');
+      const moodboardMeta = externalSlots.map((item, index) => {
+        const slot = tenantVisualConceptState?.slots?.[item.id] || {};
+        return {
+          label: slot.label || visualConceptDefaultSlotLabel(item.id),
+          caption: slot.caption || '',
+          url: moodboard[index] || ''
+        };
+      });
+      const interiorComponents = visualConceptInteriorComponents().map((component, componentIndex) => {
+        const images = [];
+        for (let view = 1; view <= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES; view += 1) {
+          const slot = tenantVisualConceptState?.slots?.[visualConceptInteriorSlotId(component.id, view)];
+          const url = slot?.approvedImageUrl || slot?.imageUrl || '';
+          if (url) images.push({
+            viewIndex: view,
+            url,
+            label: slot?.label || component.name,
+            caption: slot?.caption || ''
+          });
+        }
+        return {
+          id: component.id,
+          index: componentIndex + 1,
+          name: component.name,
+          useType: component.useType,
+          builtArea: component.builtArea,
+          images
+        };
+      }).filter(component => component.images.length);
+      const interior = interiorComponents.flatMap(component => component.images.map(image => image.url));
+      const plansState = typeof visualConceptPlans === 'function' ? visualConceptPlans() : [];
+      const plans = plansState.map(plan => plan?.imageUrl || '').filter(Boolean);
+      const planMeta = plansState.filter(plan => plan?.imageUrl).map(plan => ({
+        title: plan.title || plan.fileName || '',
+        description: plan.description || '',
+        url: plan.imageUrl
+      }));
+      const landPhotos = (Array.isArray(tenantProjectData?.land_photos_file_meta)
+        ? tenantProjectData.land_photos_file_meta : []).map(photo => ({
+          id: photo?.id || '',
+          url: durableImageUrl(photo?.imageUrl || photo?.url || (photo?.path ? '/' + String(photo.path).replace(/^\/+/, '') : '')),
+          name: photo?.originalName || photo?.name || '',
+          description: photo?.description || ''
+        }));
+      return {
+        ...(tenantCreativeImages || {}),
+        cover: tenantVisualConceptState?.slots?.cover?.approvedImageUrl || tenantVisualConceptState?.slots?.cover?.imageUrl || tenantCreativeImages?.cover || tempCoverImage || '',
+        moodboard,
+        moodboard_meta: moodboardMeta,
+        interior_components: interiorComponents,
+        interior,
+        plans,
+        plan_meta: planMeta,
+        land_photos: landPhotos
+      };
+    }
+
+    function buildPresentationPlanAssets() {
+      const assets = buildPresentationGenerationImages();
+      return {
+        cover: assets.cover ? 'available' : '',
+        moodboard: (assets.moodboard || []).map(image => image ? 'available' : ''),
+        moodboard_meta: (assets.moodboard_meta || []).map(item => ({
+          label: item.label || '', caption: item.caption || ''
+        })),
+        interior_components: (assets.interior_components || []).map(component => ({
+          ...component,
+          images: (component.images || []).map(image => ({ ...image, url: image.url ? 'available' : '' }))
+        })),
+        plans: (assets.plans || []).map(image => image ? 'available' : ''),
+        plan_meta: (assets.plan_meta || []).map(item => ({
+          title: item.title || '', description: item.description || ''
+        })),
+        land_photos: assets.land_photos || []
+      };
+    }
+
     let tenantSlidePlanRequest = null;
     function requestTenantSlidePlan(projectData, onProgress) {
       if (tenantSlidePlanRequest) return tenantSlidePlanRequest;
       const payload = typeof slimGenerationProjectData === 'function'
         ? slimGenerationProjectData(projectData) : projectData;
-      tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', { projectData: payload })
+      tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', {
+        projectData: payload,
+        images: buildPresentationPlanAssets()
+      })
         .then(res => (res && res.jobId && !res.plan) ? pollTenantSlidePlanJob(res.jobId, onProgress) : res)
         .finally(() => { tenantSlidePlanRequest = null; });
       return tenantSlidePlanRequest;
@@ -11130,6 +11235,7 @@
       tenantSlidesData = [];
       tenantSlidePlan = null;
       tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
+      tenantFinancialPresentationReport = null;
       tempCoverImage = null;
       tempMoodboardImages = {};
       restoreDesignerChat(null);
@@ -16119,10 +16225,11 @@
         const previous = Array.isArray(tenantProjectData.land_photos_file_meta)
           ? tenantProjectData.land_photos_file_meta : [];
         // Keep any caption the user already typed for a re-selected photo.
-        const merged = (Array.isArray(uploaded) ? uploaded : []).slice(0, LAND_PHOTOS_MAX).map(file => ({
+        const merged = await Promise.all((Array.isArray(uploaded) ? uploaded : []).slice(0, LAND_PHOTOS_MAX).map(async file => ({
           ...file,
+          imageUrl: previous.find(item => item && item.id === file.id)?.imageUrl || await publishProjectFileImageUrl(file.id),
           description: previous.find(item => item && item.id === file.id)?.description || ''
-        }));
+        })));
         tenantProjectData.land_photos_file_meta = merged;
         tenantProjectData.land_photos_file_ids = merged.map(file => file.id);
         renderLandPhotos(merged);
@@ -16357,6 +16464,8 @@
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
       if (!(await validateFinancialStudyBeforeProceed())) return;
+      tenantFinancialPresentationReport = financialStudyHasRealInput(tenantProjectData.financial_study_model)
+        && typeof collectFinancialStudyReport === 'function' ? collectFinancialStudyReport() : null;
 
       const factCount = countProjectFacts(tenantProjectData);
       if (factCount < GENERATION_MIN_FACTS && !confirm('بيانات المشروع المحفوظة ' + factCount +
@@ -17749,47 +17858,7 @@
         }
 
         persistVisualConceptDraftState();
-        const visualMoodboard = VISUAL_CONCEPT_SLOTS.slice(1).map(item => tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl || tenantVisualConceptState?.slots?.[item.id]?.imageUrl || '');
-        const visualInteriorComponents = visualConceptInteriorComponents().map((comp, compIdx) => {
-          const compImages = [];
-          for (let view = 1; view <= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES; view++) {
-            const slotId = visualConceptInteriorSlotId(comp.id, view);
-            const slot = tenantVisualConceptState?.slots?.[slotId];
-            const url = slot?.approvedImageUrl || slot?.imageUrl || '';
-            if (url) {
-              compImages.push({
-                viewIndex: view,
-                url: url,
-                label: slot?.label || comp.name,
-                caption: slot?.caption || ''
-              });
-            }
-          }
-          return {
-            id: comp.id,
-            index: compIdx + 1,
-            name: comp.name,
-            useType: comp.useType,
-            builtArea: comp.builtArea,
-            images: compImages
-          };
-        }).filter(comp => comp.images.length > 0);
-        const visualInteriorImages = Object.entries(tenantVisualConceptState?.slots || {})
-          .filter(([k, v]) => isVisualConceptInteriorSlot(k) && (v?.approvedImageUrl || v?.imageUrl))
-          .map(([k, v]) => v.approvedImageUrl || v.imageUrl);
-        const visualPlans2dImages = (tenantVisualConceptState?.plans2d || [])
-          .map(p => p?.imageUrl || '')
-          .filter(Boolean);
-        const generationImages = {
-          ...tenantCreativeImages,
-          cover: tenantVisualConceptState?.slots?.cover?.approvedImageUrl || tenantCreativeImages.cover || tempCoverImage || '',
-          moodboard: visualMoodboard.some(Boolean)
-            ? visualMoodboard
-            : (Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard.map((image, index) => image || tempMoodboardImages[index] || '') : []),
-          interior_components: visualInteriorComponents,
-          interior: visualInteriorImages,
-          plans: visualPlans2dImages
-        };
+        const generationImages = buildPresentationGenerationImages();
         const hasUnapprovedImages = !!tempCoverImage || Object.keys(tempMoodboardImages || {}).length > 0;
         if (hasUnapprovedImages) toast('سيتم استخدام الصور المولدة غير المعتمدة مع استمرار إمكانية اعتمادها لاحقًا.');
         tenantSlidesData = [];

@@ -417,8 +417,12 @@ def _verify_pdf_page_count(pdf_path, expected_slides, layout_report=None):
         print(f"[PDF] page count check skipped: {error}")
         return
     faults = describe_slide_layout_faults(layout_report)
-    print(f"[PDF] pages={pages} slides={expected_slides}"
-          + (f" faults={len(faults)}: {'; '.join(faults[:20])}" if faults else ''))
+    log_message = (f"[PDF] pages={pages} slides={expected_slides}"
+                   + (f" faults={len(faults)}: {'; '.join(faults[:20])}" if faults else ''))
+    try:
+        print(log_message)
+    except UnicodeEncodeError:
+        print(log_message.encode('ascii', errors='backslashreplace').decode('ascii'))
     if pages < expected_slides:
         detail = (' الشرائح التي لا تشغل صفحة كاملة: ' + '، '.join(faults[:12])) if faults else ''
         raise RuntimeError(

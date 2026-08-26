@@ -294,17 +294,28 @@ Two states, and both are stated to the model explicitly — silence made it inve
   `financial_study_model`, `_financial_data_note()` returns `FINANCIAL_ABSENT_NOTE` which forbids any
   financial slide or figure, and `strip_financial_slides()` removes financial slides that the
   planner, the fallback plan or the minimum-count padding proposed anyway.
-- **Study entered.** Every figure is transcribed verbatim: same value, unit, currency and digits. No
-  rounding, no million/thousand conversion, no recomputing or summing, no new ratio, no added row or
-  year, and a figure that is not in the data is not written at all. Tables are sent up to
-  `FINANCIAL_TABLE_ROW_LIMIT` rows and a truncated one **says** it was truncated — a silent cut had
-  the model completing the rest from nothing.
+- **Study entered.** Every figure is transcribed with the same value, unit, currency and decimal
+  precision; thousands separators are display-only. No rounding, million/thousand conversion,
+  recomputing, new ratio, row or year is allowed. Slide generation attaches
+  `collectFinancialStudyReport()` to the generation-only copy of `financial_study_model`, so
+  `_financial_data_note()` receives the same visible headings, labels, option text, metrics and
+  complete tables as the financial PDF. The canonical plan splits report fields six rows per slide
+  and tables eight rows per slide, adding a chart only when at least two numeric values exist.
 
 Section order is `basic → location → land_croquis → timeline → financial → team → market study → executive content`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order.
 There is no conceptual-2D section inside بيانات المشروع. The old floor-design page is gone
 entirely: `تصميم صور الطوابق`, its route, its state, and the `/api/floor-design/*` endpoints were
 deleted, and 2D plans plus isometric now live as cards inside التصور البصري.
+
+The **generated deck** has its own fixed order, enforced by
+`slide_engine.normalize_presentation_plan()`: نبذة عن المشروع → مكونات المشروع → تحليل الأرض →
+تحليل الموقع الجغرافي → تحليل السوق → الجدول الزمني → الدراسة المالية → تحليل SWOT وتحليل المخاطر
+→ فريق العمل → المخططات → التصورات الخارجية → التصورات الداخلية → الملخص التنفيذي → الخاتمة.
+Only sections backed by data or media are emitted. Every emitted section has one deterministic
+`section_divider` showing its Arabic title only; no subtitle or English line. The deterministic
+index lists those section starts plus the conclusion with their actual one-based page numbers.
+
 `section-executive-content` is the last information section.
 It gathers already-approved facts from every earlier section (basic, location, land/croquis,
 timeline, financial, team, market study). Generated texts — brief, opportunity, features,
@@ -460,9 +471,11 @@ frames**. Three rules came out of it:
 - `slide_engine.NO_STREET_VIEW_RULE` is appended to the plan prompt, the slide prompt, the location
   note and `_get_images_info`. The `site_photos` type is gone, and `strip_street_view_slides()`
   drops one that an old draft still carries.
-- **State what is missing.** `_get_images_info` now names every map as available or as forbidden
-  (`ممنوع كتابة ##MAP_CATCHMENT##`), and does the same for the cover, the moodboard, the interior
-  images and the 2D plans. Silence made the model assume the token existed.
+- **State what is missing.** `_get_images_info` names every map as available or forbidden and does
+  the same for the cover, external/interior images, land photos, team logos and 2D plans. Land-photo
+  descriptions, plan titles/descriptions and visual captions travel in `images`; team logo file ids
+  are resolved and published server-side. The plan emits one clear image per slide (two only when
+  explicitly appropriate), never a compressed four-image moodboard before the conclusion.
 - **An unresolved image token never becomes an empty box.** `IMAGE_TOKEN_RE` is skipped by the
   catch-all replacer, and `_drop_unresolved_image_placeholders()` (end of `finalize_slide_html` and
   of `resolve_designer_chat_placeholders`) removes the `<img>` or the `background-image` that
