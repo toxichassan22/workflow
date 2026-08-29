@@ -10067,7 +10067,7 @@ def _execute_extract_croquis():
             '    "north_direction": "", "setbacks": "", "building_ratio": "", "coverage_ratio": "",\n'
             '    "building_ratio_coverage": "", "floor_area_ratio": "", "table_floors": "", "max_floors_height": "",\n'
             '    "parking_requirements": "", "entrances_exits_requirements": "",\n'
-            '    "allowed_uses": "", "land_use_status": "", "regulatory_constraints": "",\n'
+            '    "allowed_uses": "", "regulatory_constraints": "",\n'
             '    "allowed_uses_restrictions": "", "zoning_code": "",\n'
             '    "coordinates": {"lat": null, "lng": null, "source": "", "confidence": ""},\n'
             '    "coordinates_table_name": "إحداثيات التنظيم", "coordinates_table_source_page": "",\n'
@@ -10105,7 +10105,7 @@ def _execute_extract_croquis():
             "واذكر في uses أن الحد يجاور قطعة/جار للحدود غير المطلة على شارع.\n"
             "قواعد منع التكرار:\n"
             "- لا تكرر نفس المعلومة في أكثر من حقل. building_ratio_coverage لنسب البناء والتغطية وFAR والأدوار، وsetbacks للارتدادات فقط.\n"
-            "- allowed_uses للاستخدامات وحالة توافق نوع المشروع، وregulatory_constraints للقيود فقط.\n"
+            "- allowed_uses للاستخدامات، وregulatory_constraints للقيود فقط.\n"
             "- أطوال الحدود وأسماء الشوارع تُكتب داخل directions فقط، ولا تُعاد في summary كقائمة.\n"
             "قواعد الاشتراطات — ممنوع إعادة رقم مجرد أو إحالة المستخدم إلى مكان داخل ملف:\n"
             "- zoning_code: كود التنظيم/الاستخدام كما هو في الرخصة أو جدول التنظيم إن وُجد.\n"
@@ -10120,8 +10120,6 @@ def _execute_extract_croquis():
             "- allowed_uses: اكتب قائمة الاستخدامات المسموحة تنظيميًا لهذه الأرض من جدول التنظيم وملفي الاشتراطات "
             "(مثل: سكني، تجاري، فندقي، صناعي ولوجستي). لا تكتب حالة توافق نوع المشروع، ولا تكتب «حالة استخدام المشروع». "
             "إذا لم تُستخرج استخدامات واضحة فاكتب «غير محددة في المرجع المتاح».\n"
-            "- land_use_status: أعد قيمة واحدة فقط بعد مقارنة نوع المشروع المدخل في بيانات العميل مع الاستخدامات المستخرجة: «مسموح» أو «غير مسموح» أو «غير محسوم». "
-            "إذا كان نوع المشروع مكتوبًا في بيانات العميل فلا تقل إنه غير مدخل. لا تستخدم «مسموح» إذا لم يوجد دليل كافٍ.\n"
             "- regulatory_constraints: اذكر القيود التنظيمية المنطبقة على الموقع والمشروع، واجمع فيها المواقف والمداخل والمخارج والتحميل والخدمات عند وجودها، دون تكرار قائمة الاستخدامات.\n"
             "- allowed_uses_restrictions: اجمع allowed_uses وregulatory_constraints للتوافق مع البيانات القديمة فقط.\n"
             "- استخدم مساحة الأرض المستخرجة لاختيار الشريحة الصحيحة من جدول التنظيم؛ الجداول مفتاحها مساحة الأرض ونوع المحور/المنطقة.\n"

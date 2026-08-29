@@ -155,13 +155,13 @@ def _format_component_row(row):
     if not isinstance(row, dict):
         return {}
     name = row.get('name') or row.get('اسم المكون') or row.get('المكون') or ''
-    use_type = row.get('useType') or row.get('نوع الاستخدام') or ''
+    use_type = row.get('useType') or row.get('use_type') or row.get('نوع الاستخدام') or ''
     use_type_label = USE_TYPE_LABELS.get(use_type, use_type)
-    units_count = row.get('unitsCount') or row.get('عدد الوحدات') or ''
-    unit_area = row.get('unitArea') or row.get('مساحة الوحدة') or row.get('مساحة الوحدة م²') or ''
-    built_area = row.get('builtArea') or row.get('المساحة المبنية') or row.get('المساحة المبنية م²') or ''
-    leasable_area = row.get('leasableArea') or row.get('المساحة البيعية / التأجيرية') or row.get('المساحة البيعية / التأجيرية م²') or row.get('المساحة التأجيرية') or ''
-    inv_model = row.get('investmentModel') or row.get('نموذج الاستفادة') or row.get('نموذج الاستثمار') or ''
+    units_count = row.get('units') or row.get('unitsCount') or row.get('units_count') or row.get('عدد الوحدات') or ''
+    unit_area = row.get('unitArea') or row.get('unit_area') or row.get('مساحة الوحدة') or row.get('مساحة الوحدة م²') or ''
+    built_area = row.get('builtArea') or row.get('built_area') or row.get('المساحة المبنية') or row.get('المساحة المبنية م²') or ''
+    leasable_area = row.get('revenueArea') or row.get('revenue_area') or row.get('leasableArea') or row.get('leasable_area') or row.get('totalArea') or row.get('المساحة البيعية / التأجيرية') or row.get('المساحة البيعية / التأجيرية م²') or row.get('المساحة التأجيرية') or ''
+    inv_model = row.get('investmentModel') or row.get('investment_model') or row.get('نموذج الاستفادة') or row.get('نموذج الاستثمار') or ''
     inv_model_label = INVESTMENT_MODEL_LABELS.get(inv_model, inv_model)
 
     formatted = {}
@@ -181,7 +181,9 @@ def _format_component_row(row):
         formatted['نموذج الاستفادة'] = inv_model_label
 
     for k, v in row.items():
-        if k not in ('name', 'useType', 'unitsCount', 'unitArea', 'builtArea', 'leasableArea', 'investmentModel',
+        if k not in ('name', 'useType', 'use_type', 'units', 'unitsCount', 'units_count', 'unitArea', 'unit_area',
+                     'builtArea', 'built_area', 'leasableArea', 'leasable_area', 'revenueArea', 'revenue_area',
+                     'totalArea', 'total_area', 'investmentModel', 'investment_model', 'idx', 'id', 'leasable',
                      'اسم المكون', 'نوع الاستخدام', 'عدد الوحدات', 'مساحة الوحدة', 'مساحة الوحدة م²',
                      'المساحة المبنية', 'المساحة المبنية م²', 'المساحة البيعية / التأجيرية',
                      'المساحة البيعية / التأجيرية م²', 'المساحة التأجيرية', 'نموذج الاستفادة', 'نموذج الاستثمار') and k not in formatted:
@@ -239,24 +241,24 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             return
         groups.setdefault(section_key, []).append(slide)
 
+    moodboard_tokens = [f'##MOODBOARD_IMAGE_{index}##' for index, _item in _available_asset_items(images.get('moodboard'))]
     if not groups.get('overview') and source:
         add('overview', {
             'title': 'نبذة عن المشروع', 'type': 'content', 'design_style': 'text',
-            'content_density': 'medium', 'requires_image': False,
-            'content_source': 'project_overview', 'bullets': [],
+            'content_density': 'medium', 'requires_image': bool(moodboard_tokens),
+            'content_source': 'project_overview',
+            'image_tokens': moodboard_tokens[:2], 'bullets': [],
         })
     elif groups.get('overview'):
         groups['overview'][0]['title'] = 'نبذة عن المشروع'
         groups['overview'][0]['content_source'] = groups['overview'][0].get('content_source') or 'project_overview'
+        if not groups['overview'][0].get('image_tokens') and moodboard_tokens:
+            groups['overview'][0]['image_tokens'] = moodboard_tokens[:2]
 
     moodboard_items = _available_asset_items(images.get('moodboard'))
     moodboard_meta = images.get('moodboard_meta') if isinstance(images.get('moodboard_meta'), list) else []
     if moodboard_items:
         groups['exterior'] = [slide for slide in groups.get('exterior', []) if slide.get('image_tokens')]
-    if moodboard_items and groups.get('overview'):
-        groups['overview'][0]['image_tokens'] = [f'##MOODBOARD_IMAGE_{index}##' for index, _item in moodboard_items[:2]]
-        groups['overview'][0]['design_style'] = 'image'
-        groups['overview'][0]['requires_image'] = True
     for index, item in moodboard_items:
         meta = moodboard_meta[index - 1] if index <= len(moodboard_meta) and isinstance(moodboard_meta[index - 1], dict) else {}
         title = str(meta.get('label') or item.get('label') or f'التصور الخارجي {index}').strip()
@@ -1135,14 +1137,15 @@ def _readable_fact(value):
                 return _readable_fact(decoded)
         return text[:FACT_VALUE_LIMIT]
     if isinstance(value, dict):
+        if len(value) == 1 and 'general' in value:
+            return _readable_fact(value['general'])
         parts = []
         for key, item in value.items():
             text = _readable_fact(item)
-            # Multi-select groups are stored under internal keys such as "audience::سكني".
             raw_label = str(key).split('::')[-1]
             label = USE_TYPE_LABELS.get(raw_label, INVESTMENT_MODEL_LABELS.get(raw_label, raw_label))
             if text:
-                parts.append(f'{label}: {text}')
+                parts.append(f'{label}: {text}' if label != 'general' else text)
         return ' | '.join(parts)[:FACT_VALUE_LIMIT]
     if isinstance(value, (list, tuple)):
         parts = [_readable_fact(item) for item in value]
@@ -1886,24 +1889,24 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     bullets_text = '\n'.join(f'- {b}' for b in bullets) if bullets else '(لا توجد نقاط محددة — استخرج من بيانات المشروع)'
 
     style_instructions = {
-        'dashboard': 'لوحة مؤشرات مالية مقسمة إلى جدولين منظمين (التكاليف والاستثمار + مؤشرات العائد والاسترداد) مع إبراز الأرقام الكبرى بوزن 800',
-        'cards': 'بطاقتان أو ثلاث فقط لعناصر مستقلة قصيرة؛ استخدم النص أو الجدول إذا كانت العناصر مترابطة',
-        'timeline': 'مراحل زمنية واضحة، واعرض الملاحظة فقط تحت المرحلة التي تحتوي ملاحظة فعلية',
-        'table': 'جدول احترافي كامل بالمسميات والقيم الأصلية وفواصل آلاف للأرقام دون تقريب',
+        'dashboard': 'لوحة مؤشرات مالية تتضمن جدولاً منظماً شاملاً للتكاليف والاستثمار ومؤشرات العائد والاسترداد مع إبراز الأرقام الكبرى بوزن 800',
+        'cards': 'بطاقتان أو ثلاث فقط لعناصر مستقلة عريضة وغنية؛ استخدم الفقرات النصية أو الجداول بدلاً من التقطيع المفرط إلى مربعات صغيرة',
+        'timeline': 'مراحل زمنية واضحة ومسار تدفق زمني، واعرض الملاحظة فقط تحت المرحلة التي تحتوي ملاحظة فعلية',
+        'table': 'جدول احترافي كامل بالمسميات والقيم الأصلية وفواصل آلاف للأرقام دون تقريب مع رؤوس جداول عريضة 700',
         'chart': 'رسم بياني بألوان الهوية مبني على الأرقام الفعلية مع جدول البيانات الكامل بجانبه',
-        'text': 'عنوان وفقرة أو قائمة موجزة ثم ملخص نهائي واضح بلا بطاقات',
+        'text': 'عنوان وفقرة غنية ووافية أو قائمة منظمة تشرح الفكرة بالكامل بلا اختصار مخل وبلا تجزئة لمربعات فارغة',
         'image': 'صورة واحدة كبيرة أو صورتان واضحتان مع التسمية والوصف الصحيحين',
-        'flow': 'مخطط تدفق بصري هندسي راقٍ (Flowchart / Visual Pipeline) يربط الكتل بأسهم وخطوط وصل واضحة ومسارات تدفق بالألوان المؤسسية مع إبراز القيم والمراحل',
+        'flow': 'مخطط تدفق بصري هندسي راقٍ (Flowchart / Visual Pipeline) يربط الكتل بمسارات تدفق واضحة وبألوان الهوية مع إبراز القيم والمراحل والمبالغ',
         'swot': 'تحليل SWOT وتحليل المخاطر بتقسيم واضح وبألوان الهوية وحدها',
-        'map': 'خريطة واضحة مضبوطة في المنتصف تماماً مع جدول أو ملخص واحد دون إعادة الأرقام في أكثر من شكل',
+        'map': 'خريطة واضحة مضبوطة في المنتصف تماماً (center center) مع جدول أو ملخص واحد دون إعادة الأرقام في أكثر من شكل',
         'grid': 'صورتان واضحتان كحد أقصى في الصفحة مع الوصف الصحيح لكل صورة',
         'minimal': 'خاتمة بسيطة تتضمن بيانات التواصل المتاحة بلا تقييمات أو عبارات مشروطة',
     }.get(design_style, 'نص منظم يناسب طبيعة المحتوى')
 
     density_instructions = {
-        'low': 'محتوى خفيف — صورة كبيرة أو عنصران واضحان مع وصف موجز',
-        'medium': 'محتوى متوسط — 4-5 عناصر ممتلئة بصرياً',
-        'high': 'محتوى كثيف — 5-6 عناصر بدون ازدحام',
+        'low': 'محتوى خفيف — صورة كبيرة أو عنصران وافيان مع شرح تفصيلي',
+        'medium': 'محتوى متوسط — نص غني أو جدول كامل ممتلئ بصرياً',
+        'high': 'محتوى كثيف — جدول بيانات متكامل أو مخطط تدفق شامل بدون ازدحام',
     }.get(density, 'محتوى متوسط')
 
     # Explicit image/map placeholder for this slide
@@ -1912,7 +1915,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     if image_tokens:
         placeholder_note = 'استخدم رموز الصور التالية فقط وبحجم واضح، ولا تستبدلها بصورة الغلاف: ' + '، '.join(image_tokens)
     elif slide_type == 'cover':
-        placeholder_note = 'يجب استخدام ##IMAGE_COVER## كخلفية كاملة على كامل الشريحة (Full Bleed Background: position:absolute; inset:0; background-size:cover; background-position:center;) مع تدرج لوني داكن فخم وتوسيط تام للصورة.'
+        placeholder_note = 'يجب استخدام ##IMAGE_COVER## كخلفية كاملة على كامل الشريحة (Full Bleed Background: position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background-size:cover; background-position:center center; z-index:0;) مع تدرج لوني داكن فخم وتوسيط تام للصورة وضمان وضوح نصوص الغلاف.'
     elif slide_type == 'map_overview':
         placeholder_note = 'يجب استخدام ##MAP_OVERVIEW## كخلفية رئيسية لهذه الشريحة مع ضبط الصورة في المنتصف تماماً (center center) بدون أي إزاحة أو قطع.'
     elif slide_type == 'map_landmarks':
@@ -1934,10 +1937,11 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'لا تكتب شرح أو markdown أو كود إضافي',
         'استخدم خط الشركة نفسه في كل العناصر من دون font-family، بوزن 800 للعناوين الرئيسية والأرقام والمؤشرات الكبرى، و700 للعناوين الفرعية ورؤوس الجداول، و600 للتسميات، و400 للنصوص مع إبراز الكلمات المفتاحية بوزن 700',
         'استخدم لون الهوية الأساسي للعناوين، ولون التمييز للنسب والعناصر المهمة فقط، وخلفية فاتحة ونصًا داكنًا لباقي المحتوى',
-        'لا تكرر معلومة وردت في شريحة أخرى، ولا تحول كل فقرة أو قيمة إلى مربع مستقل',
-        'ممنوع وضع شارات أو مربعات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
-        'اختر بين النص والجدول والرسم البياني ومخطط التدفق والصورة وفق طبيعة المحتوى، ولا تستخدم البطاقات إلا لعناصر مستقلة قصيرة وبحد أقصى ثلاث',
-        'املأ الشريحة بالمحتوى الضروري فقط؛ إذا لم يتسع المحتوى فوزعه على صفحة أخرى ولا تصغره أو تحذفه',
+        'لا تختصر الكلام اختصاراً مخلاً ولا تقسم الشريحة إلى 4 أو 6 مربعات صغيرة فارغة؛ اعتمد على فقرات وافية وجداول متكاملة وتدفقات بصرية منظمة',
+        'لا تكرر معلومة وردت في شريحة أخرى أو قسم آخر (تحليل SWOT يقتصر على دراسة السوق، والمكونات على قسم المكونات)',
+        'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
+        'اختر بين النص والجدول والرسم البياني ومخطط التدفق والصورة وفق طبيعة المحتوى، ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
+        'املأ الشريحة بالمحتوى الضروري والوافي؛ وإذا كانت الشريحة للملخص المالي، ضع جدولاً هيكلياً رسمياً يوضح التكاليف والاستثمار ومؤشرات العائد والاسترداد',
     ]
     if placeholder_note:
         notes.insert(0, placeholder_note)
@@ -2274,12 +2278,17 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
     project_name = html_lib.escape(str(project_data.get('project_name') or project_data.get('projectName') or '').strip())
     project_logo = str(project_data.get('project_logo') or '').strip()
 
-    logos = '<img src="##LOGO##" alt="" style="height:78px;width:auto;object-fit:contain;" />'
+    logos = (
+        '<div style="background:rgba(255,255,255,0.92);padding:6px 14px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);">'
+        '<img src="##LOGO##" alt="" style="height:64px;width:auto;object-fit:contain;" />'
+        '</div>'
+    )
     if project_logo:
         logos += (
-            # Not 56px: postprocess_slide() reads that height as "this slide already has a header".
             f'<div style="width:1px;height:52px;background:rgba(255,255,255,0.35);margin:0 18px;"></div>'
-            '<img src="##PROJECT_LOGO##" alt="" style="height:78px;width:auto;object-fit:contain;" />'
+            '<div style="background:rgba(255,255,255,0.92);padding:6px 14px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);">'
+            '<img src="##PROJECT_LOGO##" alt="" style="height:64px;width:auto;object-fit:contain;" />'
+            '</div>'
         )
 
     rule = f'<div style="width:200px;height:3px;background:{accent};margin:18px 0 0 auto;"></div>'
@@ -2290,7 +2299,7 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
         f'overflow:hidden;box-sizing:border-box;background:{primary};">'
         # The approved main image, full bleed.
         '<div style="position:absolute;top:0;right:0;left:0;bottom:0;background-image:url(##IMAGE_COVER##);'
-        'background-size:cover;background-position:center;"></div>'
+        'background-size:cover;background-position:center center;"></div>'
         # Navy veil: dark enough for white text on any photo, light enough that the photo shows.
         f'<div style="position:absolute;top:0;right:0;left:0;bottom:0;background:linear-gradient(160deg,'
         f'{_hex_to_rgba(primary, "0.94")} 0%,{_hex_to_rgba(primary, "0.82")} 45%,'
@@ -2623,23 +2632,27 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
             '', html, flags=re.IGNORECASE,
         )
 
-    # Strip repetitive badges like "* مشروع متعدد الاستخدامات *" from content slides
+    # Strip repetitive badges like "* مشروع متعدد الاستخدامات *" or floating project type chips from content slides
     if not is_cover and slide_type not in ('cover', 'overview'):
         html = re.sub(
-            r'<(?:div|span|p|small)\b[^>]*>\s*(?:[*•-]?\s*مشروع\s+متعدد\s+الاستخدامات\s*[*•-]?)\s*</(?:div|span|p|small)>',
+            r'<(?:div|span|p|small)\b[^>]*>\s*(?:[*•-]?\s*(?:مشروع\s+)?متعدد\s+الاستخدامات\s*[*•-]?)\s*</(?:div|span|p|small)>',
+            '', html, flags=re.IGNORECASE
+        )
+        html = re.sub(
+            r'<(?:div|span|p|small|button|a)\b[^>]*class=["\']?[^"\'>]*(?:badge|tag|chip|pill|meta-pill|type-tag)[^"\'>]*[^>]*>[\s\S]*?(?:مشروع\s+متعدد\s+الاستخدامات|متعدد\s+الاستخدامات)[\s\S]*?</(?:div|span|p|small|button|a)>',
             '', html, flags=re.IGNORECASE
         )
 
     # Ensure map containers are centered without awkward crop shifts
     if 'MAP_' in html or (isinstance(slide_type, str) and slide_type.startswith('map_')):
         html = re.sub(
-            r'(object-position\s*:\s*)(?:top|bottom|left|right)[^;]*;',
-            r'\1center center;',
+            r'object-position\s*:\s*[^;]+;',
+            'object-position: center center !important;',
             html, flags=re.IGNORECASE
         )
         html = re.sub(
-            r'(background-position\s*:\s*)(?:top|bottom|left|right)[^;]*;',
-            r'\1center center;',
+            r'background-position\s*:\s*[^;]+;',
+            'background-position: center center !important;',
             html, flags=re.IGNORECASE
         )
 
