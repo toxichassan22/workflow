@@ -2082,7 +2082,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-key="team_selection"', index_source)
 
         # The project form keeps the requested order, with the timeline feeding the financial study.
-        self.assertIn("const sectionOrder = ['basic', 'location', 'land_croquis'];", index_source)
+        self.assertIn("const sectionOrder = ['basic', 'location', 'land_croquis', 'contact'];", index_source)
         build_start = index_source.index('addTimelineTable(form);')
         build_end = index_source.index('const projectSections = Array.from', build_start)
         build_source = index_source[build_start:build_end]
@@ -5141,6 +5141,56 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('ابدأ المخرجات بعنوان: الملخص التنفيذي لسوق المشروع.', market_study.build_summary_user_prompt({}, []))
         self.assertIn('في حدود 500 كلمة', market_study.build_summary_user_prompt({}, []))
         self.assertIn('مصادر حالية إن وُجدت', market_study.build_summary_user_prompt({}, []))
+
+    def test_contact_section_and_fields_registered_and_piped(self):
+        """Contact information section and its 7 fields are registered in schema and piped to slide engine."""
+        import slide_engine
+
+        # Section exists in FIELD_SECTIONS
+        contact_sec = next((s for s in db.FIELD_SECTIONS if s['key'] == 'contact'), None)
+        self.assertIsNotNone(contact_sec)
+        self.assertEqual(contact_sec['label'], 'بيانات التواصل')
+
+        # 7 prebuilt fields exist in PREBUILT_FIELDS
+        prebuilt_by_key = {f['key']: f for f in db.PREBUILT_FIELDS}
+        expected_keys = [
+            'contact_name', 'contact_position', 'contact_email', 'contact_phone',
+            'contact_website', 'contact_address', 'contact_social_media'
+        ]
+        for key in expected_keys:
+            self.assertIn(key, prebuilt_by_key)
+            self.assertEqual(prebuilt_by_key[key]['section_key'], 'contact')
+
+        # slide_engine._contact_facts formats all 7 fields
+        facts = slide_engine._contact_facts({
+            'contact_name': 'سعد الأحمد',
+            'contact_position': 'المدير التنفيذي',
+            'contact_phone': '0500000000',
+            'contact_email': 'info@project.sa',
+            'contact_website': 'https://project.sa',
+            'contact_address': 'الرياض - طريق الملك فهد',
+            'contact_social_media': '@project_sa',
+        })
+        self.assertIn('سعد الأحمد', facts)
+        self.assertIn('المدير التنفيذي', facts)
+        self.assertIn('0500000000', facts)
+        self.assertIn('info@project.sa', facts)
+        self.assertIn('https://project.sa', facts)
+        self.assertIn('الرياض - طريق الملك فهد', facts)
+        self.assertIn('@project_sa', facts)
+
+        # When no contact data is entered, _contact_facts returns empty string
+        empty_facts = slide_engine._contact_facts({})
+        self.assertEqual(empty_facts, '')
+
+        # Closing slide prompt instructions
+        closing_msg = slide_engine.build_slide_user_msg({'type': 'closing', 'title': 'الخاتمة'}, 10, 10, {}, {})
+        self.assertIn('اقتصر على عبارة الشكر والختام فقط', closing_msg)
+        self.assertIn('دون اختلاق أو كتابة أي أرقام أو بريد أو عناوين وهمية', closing_msg)
+
+        # Form sectionOrder in index.html contains contact
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("const sectionOrder = ['basic', 'location', 'land_croquis', 'contact'];", index_source)
 
 
 if __name__ == '__main__':

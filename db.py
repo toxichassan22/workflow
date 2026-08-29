@@ -644,6 +644,7 @@ FIELD_SECTIONS = [
     {'key': 'basic', 'label': 'معلومات أساسية'},
     {'key': 'location', 'label': 'الموقع والخرائط'},
     {'key': 'land_croquis', 'label': 'الأرض والكروكي'},
+    {'key': 'contact', 'label': 'بيانات التواصل'},
 ]
 
 DEFAULT_FIELD_SECTIONS = {s['key']: True for s in FIELD_SECTIONS}
@@ -701,6 +702,13 @@ PREBUILT_FIELDS = [
     {'key': 'nearby_landmarks', 'label': 'أهم المعالم القريبة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'قائمة المعالم القريبة مع أوقات القيادة (مثلاً: ميدان السارية - 1 دقيقة)', 'sort_order': 42},
     {'key': 'city_landmarks', 'label': 'المعالم الرئيسية في المدينة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'أهم المعالم الرئيسية في المدينة والمناطق المحيطة', 'sort_order': 43},
     {'key': 'catchment_areas', 'label': 'مناطق نطاق التأثير', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'المناطق الرئيسية والثانوية المتأثرة بالمشروع', 'sort_order': 44},
+    {'key': 'contact_name', 'label': 'الاسم', 'type': 'text', 'required': False, 'section_key': 'contact', 'ai_hint': 'اسم مسؤول التواصل بالمشروع', 'sort_order': 45},
+    {'key': 'contact_position', 'label': 'المنصب', 'type': 'text', 'required': False, 'section_key': 'contact', 'ai_hint': 'المسمى الوظيفي أو المنصب لمسؤول التواصل', 'sort_order': 46},
+    {'key': 'contact_email', 'label': 'البريد الإلكتروني', 'type': 'text', 'required': False, 'section_key': 'contact', 'ai_hint': 'البريد الإلكتروني للتواصل', 'sort_order': 47},
+    {'key': 'contact_phone', 'label': 'الهاتف', 'type': 'text', 'required': False, 'section_key': 'contact', 'ai_hint': 'رقم هاتف أو جوال التواصل', 'sort_order': 48},
+    {'key': 'contact_website', 'label': 'الموقع الإلكتروني', 'type': 'text', 'required': False, 'section_key': 'contact', 'ai_hint': 'رابط الموقع الإلكتروني الرسمي', 'sort_order': 49},
+    {'key': 'contact_address', 'label': 'الموقع الجغرافي', 'type': 'text', 'required': False, 'section_key': 'contact', 'ai_hint': 'العنوان الجغرافي أو المقر الرئيسي', 'sort_order': 50},
+    {'key': 'contact_social_media', 'label': 'السوشل ميديا (X, LinkedIn, Instagram, TikTok)', 'type': 'textarea', 'required': False, 'section_key': 'contact', 'ai_hint': 'حسابات التواصل الاجتماعي للمشروع أو الشركة', 'sort_order': 51},
 ]
 
 

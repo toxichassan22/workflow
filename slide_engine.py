@@ -1204,10 +1204,13 @@ def _team_facts(project_data, tenant_id=None):
 def _contact_facts(project_data, tenant_id=None):
     source = project_data if isinstance(project_data, dict) else {}
     fields = (
+        ('الاسم', ('contact_name', 'name')),
+        ('المنصب', ('contact_position', 'position', 'job_title')),
         ('الهاتف', ('contact_phone', 'company_phone', 'phone', 'mobile')),
         ('البريد الإلكتروني', ('contact_email', 'company_email', 'email')),
         ('الموقع الإلكتروني', ('contact_website', 'company_website', 'website')),
-        ('العنوان', ('contact_address', 'company_address')),
+        ('الموقع الجغرافي', ('contact_address', 'company_address', 'address')),
+        ('السوشل ميديا', ('contact_social_media', 'social_media')),
     )
     values = {}
     for label, keys in fields:
@@ -1822,7 +1825,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     if section_key in ('land', 'location', 'market'):
         notes.append('بعد الجداول أو البيانات، اكتب الملخص النهائي المحفوظ لهذا القسم مرة واحدة في نهاية الشريحة أو في آخر شريحة من القسم.')
     if section_key == 'closing':
-        notes.append('اعرض بيانات التواصل المتاحة كما هي. ممنوع كتابة «فرصة واعدة بشروط» أو «فرصة مشروطة» أو أي تقييم استثماري عام في الخاتمة.')
+        notes.append('اعرض بيانات التواصل المتاحة المعتمدة كما هي (الاسم، المنصب، الهاتف، البريد الإلكتروني، الموقع الإلكتروني، الموقع الجغرافي، السوشل ميديا). إذا لم تتوفر أي بيانات تواصل، اقتصر على عبارة الشكر والختام فقط وشعار المشروع دون اختلاق أو كتابة أي أرقام أو بريد أو عناوين وهمية. ممنوع كتابة «فرصة واعدة بشروط» أو «فرصة مشروطة» أو أي تقييم استثماري عام في الخاتمة.')
     if design_style == 'timeline' or re.search(r'(?:خطة|زمن|جدول|مراحل)', title):
         notes.append('اعرض مراحل الجدول الزمني كما وردت. أظهر الملاحظة بجانب مرحلتها فقط عندما يكون نصها موجودًا، ولا تنشئ حقل ملاحظات فارغًا لأي مرحلة.')
         timeline_note = _timeline_data_note(project_data)
