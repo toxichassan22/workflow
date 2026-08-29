@@ -5192,6 +5192,51 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn("const sectionOrder = ['basic', 'location', 'land_croquis', 'contact'];", index_source)
 
+    def test_empty_sections_are_completely_omitted_from_prompt_and_deck_plan(self):
+        """Any section with no real data is completely excluded from prompt facts and deck plan."""
+        import slide_engine
+
+        basic_only_draft = {
+            'project_name': 'مشروع تجريبي',
+            'project_type': 'تجاري',
+            'financial_study_model': '{}',
+            'market_study_data': '{}',
+            'team_selection': '{}',
+            'executive_content': '{}',
+            'timeline_table_data': '[]',
+        }
+
+        # 1. Facts omit all empty sections
+        facts = slide_engine.build_project_facts(basic_only_draft)
+        self.assertIn('### معلومات أساسية', facts)
+        self.assertNotIn('### الدراسة المالية', facts)
+        self.assertNotIn('### دراسة السوق', facts)
+        self.assertNotIn('### فريق العمل', facts)
+        self.assertNotIn('### المحتوى التنفيذي المعتمد', facts)
+        self.assertNotIn('### بيانات التواصل المعتمدة للخاتمة', facts)
+
+        # 2. Deck plan omits all empty sections and their dividers
+        plan = slide_engine.normalize_presentation_plan({}, project_data=basic_only_draft, images={})
+        emitted_sections = {s.get('section_key') for s in plan['slides']}
+        self.assertNotIn('financial', emitted_sections)
+        self.assertNotIn('team', emitted_sections)
+        self.assertNotIn('market', emitted_sections)
+        self.assertNotIn('timeline', emitted_sections)
+        self.assertNotIn('swot_risks', emitted_sections)
+        self.assertNotIn('plans', emitted_sections)
+        self.assertNotIn('exterior', emitted_sections)
+        self.assertNotIn('interior', emitted_sections)
+        self.assertNotIn('executive_summary', emitted_sections)
+
+        # 3. Index slide entries match only emitted sections
+        index_slide = next(s for s in plan['slides'] if s.get('type') == 'index')
+        index_titles = [e['title'] for e in index_slide.get('index_entries', [])]
+        self.assertNotIn('الدراسة المالية', index_titles)
+        self.assertNotIn('فريق العمل', index_titles)
+        self.assertNotIn('تحليل السوق', index_titles)
+        self.assertNotIn('الجدول الزمني', index_titles)
+        self.assertIn('الخاتمة', index_titles)
+
 
 if __name__ == '__main__':
     unittest.main()
