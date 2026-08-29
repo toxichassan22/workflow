@@ -302,8 +302,8 @@ Two states, and both are stated to the model explicitly — silence made it inve
   complete tables as the financial PDF. The canonical plan splits report fields six rows per slide
   and tables eight rows per slide, adding a chart only when at least two numeric values exist.
 
-Section order is `basic → location → land_croquis → contact → timeline → financial → team → market study → visual concept → executive content`.
-The first four come from the `sectionOrder` loop; the remaining sections are appended in that order.
+Section order is `basic → location → land_croquis → timeline → financial → team → market study → visual concept → executive content → contact`.
+The first three come from the `sectionOrder` loop; the remaining sections are appended in that order with contact information placed at the end.
 There is no conceptual-2D section inside بيانات المشروع. The old floor-design page is gone
 entirely: `تصميم صور الطوابق`, its route, its state, and the `/api/floor-design/*` endpoints were
 deleted, and 2D plans plus isometric now live as cards inside التصور البصري.

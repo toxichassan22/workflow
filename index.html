@@ -11727,12 +11727,10 @@
       let lngInput = null;
       let locationSection = null;
 
-      const sectionOrder = ['basic', 'location', 'land_croquis', 'contact'];
-      sectionOrder.forEach(sectionKey => {
-
+      function renderFormSection(sectionKey) {
         const sectionFields = grouped[sectionKey];
-        if (!sectionFields || !sectionFields.length) return;
-        if (sectionKey !== 'general' && !tenantAllowedFieldSections[sectionKey]) return; // hide unauthorized section
+        if (!sectionFields || !sectionFields.length) return null;
+        if (sectionKey !== 'general' && !tenantAllowedFieldSections[sectionKey]) return null; // hide unauthorized section
 
         const sectionDiv = document.createElement('div');
         sectionDiv.className = 'tenant-form-section';
@@ -12074,7 +12072,13 @@
           sectionDiv.appendChild(directionsField);
         }
 
-        form.appendChild(sectionDiv);
+        return sectionDiv;
+      }
+
+      const sectionOrder = ['basic', 'location', 'land_croquis'];
+      sectionOrder.forEach(sectionKey => {
+        const sectionDiv = renderFormSection(sectionKey);
+        if (sectionDiv) form.appendChild(sectionDiv);
       });
 
       // Add map preview section
@@ -12109,15 +12113,18 @@
       }
 
       // Append order defines the sidebar order: basic, location, land/croquis, timeline,
-      // financial, team, market study, visual concept, and executive content. The timeline
+      // financial, team, market study, visual concept, executive content, and contact. The timeline
       // comes before the financial study because it feeds it. Executive content writes
-      // from earlier sections and never invents facts.
+      // from earlier sections and never invents facts. Contact information is at the end.
       addTimelineTable(form);
       addFinancialCalculations(form);
       addTeamSection(form);
       addMarketStudySection(form);
       addVisualConceptSection(form);
       addExecutiveContentSection(form);
+
+      const contactSectionDiv = renderFormSection('contact');
+      if (contactSectionDiv) form.appendChild(contactSectionDiv);
 
       tenantVisualConceptState = normalizeVisualConceptState(tenantProjectData.visual_concept || tenantVisualConceptState);
       persistVisualConceptDraftState();

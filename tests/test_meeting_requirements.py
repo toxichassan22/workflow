@@ -2081,14 +2081,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("createProjectSectionHeader('section-team', 'فريق العمل')", index_source)
         self.assertIn('data-key="team_selection"', index_source)
 
-        # The project form keeps the requested order, with the timeline feeding the financial study.
-        self.assertIn("const sectionOrder = ['basic', 'location', 'land_croquis', 'contact'];", index_source)
+        # The project form keeps the requested order, with the timeline feeding the financial study and contact at the end.
+        self.assertIn("const sectionOrder = ['basic', 'location', 'land_croquis'];", index_source)
         build_start = index_source.index('addTimelineTable(form);')
         build_end = index_source.index('const projectSections = Array.from', build_start)
         build_source = index_source[build_start:build_end]
         self.assertLess(build_source.index('addTimelineTable(form);'), build_source.index('addFinancialCalculations(form);'))
         self.assertLess(build_source.index('addFinancialCalculations(form);'), build_source.index('addTeamSection(form);'))
         self.assertLess(build_source.index('addTeamSection(form);'), build_source.index('addExecutiveContentSection(form)'))
+        self.assertLess(build_source.index('addExecutiveContentSection(form)'), build_source.index("renderFormSection('contact')"))
         self.assertNotIn('addConceptualPlansSection(form)', build_source)
 
         # The three per-file behaviours.
@@ -5188,9 +5189,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('اقتصر على عبارة الشكر والختام فقط', closing_msg)
         self.assertIn('دون اختلاق أو كتابة أي أرقام أو بريد أو عناوين وهمية', closing_msg)
 
-        # Form sectionOrder in index.html contains contact
+        # Form renders contact section at the end of the form and sidebar
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn("const sectionOrder = ['basic', 'location', 'land_croquis', 'contact'];", index_source)
+        self.assertIn("renderFormSection('contact')", index_source)
+        exec_pos = index_source.index('addExecutiveContentSection(form);')
+        contact_pos = index_source.index("renderFormSection('contact')", exec_pos)
+        self.assertGreater(contact_pos, exec_pos)
 
     def test_empty_sections_are_completely_omitted_from_prompt_and_deck_plan(self):
         """Any section with no real data is completely excluded from prompt facts and deck plan."""
