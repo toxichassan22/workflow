@@ -1500,10 +1500,19 @@
       position: sticky;
       top: 0;
     }
+
     @keyframes slideDownBanner {
-      from { opacity: 0; transform: translateY(-10px); }
-      to { opacity: 1; transform: translateY(0); }
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
+
     .tenant-live-gen-main {
       display: flex;
       align-items: center;
@@ -1512,12 +1521,14 @@
       max-width: 1400px;
       margin: 0 auto;
     }
+
     .tenant-live-gen-info {
       display: flex;
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
     }
+
     .tenant-live-gen-tag {
       background: rgba(255, 255, 255, 0.18);
       border: 1px solid rgba(255, 255, 255, 0.3);
@@ -1528,21 +1539,25 @@
       border-radius: 20px;
       letter-spacing: 0.3px;
     }
+
     .tenant-live-gen-title {
       font-size: 14px;
       font-weight: 700;
       color: #ffffff;
     }
+
     .tenant-live-gen-details {
       font-size: 13px;
       color: #cbd5e1;
     }
+
     .tenant-live-gen-progress {
       display: flex;
       align-items: center;
       gap: 12px;
       min-width: 240px;
     }
+
     .tenant-live-gen-bar {
       flex: 1;
       height: 8px;
@@ -1550,12 +1565,14 @@
       border-radius: 4px;
       overflow: hidden;
     }
+
     .tenant-live-gen-fill {
       height: 100%;
       background: linear-gradient(90deg, #c5a880 0%, #e2c9a6 100%);
       border-radius: 4px;
       transition: width 0.4s ease;
     }
+
     .tenant-live-gen-pct {
       font-size: 13px;
       font-weight: 700;
@@ -1563,18 +1580,22 @@
       min-width: 40px;
       text-align: left;
     }
+
     .ge-slide-card.generating-live {
       border: 2px solid #3b82f6 !important;
       box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15) !important;
     }
+
     .ge-thumb.generating-live {
       border-color: #3b82f6 !important;
       background: #eff6ff !important;
     }
+
     .ge-thumb.generating-live .ge-thumb-num {
       background: #3b82f6 !important;
       color: #fff !important;
     }
+
     .live-gen-skeleton-stage {
       padding: 48px;
       background: #f8fafc;
@@ -1589,13 +1610,22 @@
       border-radius: 8px;
       box-sizing: border-box;
     }
+
     .live-gen-skeleton-pulse {
       background: linear-gradient(135deg, #f0f7ff 0%, #e0f2fe 100%);
       border: 2px dashed #93c5fd;
     }
+
     @keyframes pulseDot {
-      from { opacity: 0.3; transform: scale(0.8); }
-      to { opacity: 1; transform: scale(1.2); }
+      from {
+        opacity: 0.3;
+        transform: scale(0.8);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1.2);
+      }
     }
 
     .tenant-page h2 {
@@ -5251,14 +5281,13 @@
           <!-- The only way back used to be the dashboard, and from there "عرض جديد" resets the
                state, so returning to the form showed it blank. The project page is already
                rendered and filled, so showing it again keeps every value. -->
-          <button type="button" class="slide-toolbar-back"
-            onclick="navigateTenantWorkflow('tenantProjectPage')">بيانات المشروع</button>
-          <button type="button" class="slide-toolbar-back" onclick="showTenantPage('tenantDashboardPage')">عودة
-            للرئيسية</button>
+          <button type="button" class="slide-toolbar-back" onclick="navigateTenantWorkflow('tenantProjectPage')">بيانات المشروع</button>
+          <button type="button" class="slide-toolbar-back" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
         </div>
         <div class="tenant-btns slide-toolbar-actions">
-          <button type="button" class="btn slide-toolbar-btn primary" style="background:#1a4d6f;color:#fff;font-weight:700"
-            onclick="directGenerateProposalFile()" id="btnGenerateSlidesToolbar">توليد العرض</button>
+          <button type="button" class="btn slide-toolbar-btn primary"
+            style="background:#1a4d6f;color:#fff;font-weight:700" onclick="directGenerateProposalFile()"
+            id="btnGenerateSlidesToolbar">توليد العرض</button>
           <button type="button" class="btn slide-toolbar-btn slide-toolbar-approve"
             onclick="requestPresentationApproval(tenantPresentationId)" id="btnRequestApproval">تعميد</button>
           <button type="button" class="btn slide-toolbar-btn slide-toolbar-primary" onclick="saveProjectAsDraft()">حفظ
@@ -5341,8 +5370,8 @@
               <button type="button" class="btn small ghost" onclick="clearTenantChatAttachment()">حذف</button>
             </div>
             <div class="tenant-chat-input-row">
-              <input type="file" id="tenantChatImageFile" accept="image/png,image/jpeg,image/jpg,image/webp"
-                hidden onchange="attachTenantChatImage(this)">
+              <input type="file" id="tenantChatImageFile" accept="image/png,image/jpeg,image/jpg,image/webp" hidden
+                onchange="attachTenantChatImage(this)">
               <button type="button" class="btn ghost tenant-chat-attach"
                 onclick="document.getElementById('tenantChatImageFile').click()">صورة</button>
               <textarea id="tenantChatInput" placeholder="اكتب التعديل المطلوب..." rows="1"
@@ -5617,8 +5646,8 @@
 
             <div style="display:flex;gap:10px;align-items:flex-end;margin-top:10px;">
               <input type="file" id="trainingChatImageFile"
-                accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf,text/plain"
-                style="display:none" onchange="handleChatImageSelected(this)">
+                accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf,text/plain" style="display:none"
+                onchange="handleChatImageSelected(this)">
               <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()"
                 title="إرفاق صورة للشات"
                 style="padding:10px 14px;font-size:16px;border:1px solid var(--line);border-radius:10px;background:#f9f9f9;">إرفاق
@@ -5702,21 +5731,26 @@
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <section id="tenantGenerationPage" class="tenant-page">
       <div style="max-width:640px;width:100%;text-align:center;margin:0 auto;">
-        <div style="display:inline-flex;align-items:center;gap:6px;padding:4px 16px;border-radius:999px;background:rgba(26,77,111,0.08);color:#1a4d6f;font-size:12px;font-weight:700;margin-bottom:16px;">
+        <div
+          style="display:inline-flex;align-items:center;gap:6px;padding:4px 16px;border-radius:999px;background:rgba(26,77,111,0.08);color:#1a4d6f;font-size:12px;font-weight:700;margin-bottom:16px;">
           معالجة وتصميم العرض الاستثماري
         </div>
-        <h2 id="genTitle" style="margin:0 0 8px;font-size:24px;font-weight:800;color:#1a4d6f;">جاري بناء وتصميم العرض...</h2>
-        <p id="genSubtitle" style="margin:0 0 24px;color:var(--muted);font-size:14px;min-height:20px;font-weight:500;">جاري تحليل بيانات المشروع وإعداد الهيكل...</p>
+        <h2 id="genTitle" style="margin:0 0 8px;font-size:24px;font-weight:800;color:#1a4d6f;">جاري بناء وتصميم العرض...
+        </h2>
+        <p id="genSubtitle" style="margin:0 0 24px;color:var(--muted);font-size:14px;min-height:20px;font-weight:500;">
+          جاري تحليل بيانات المشروع وإعداد الهيكل...</p>
 
         <!-- Main progress bar -->
-        <div style="background:#eef2f6;border-radius:999px;height:12px;overflow:hidden;margin-bottom:10px;padding:2px;box-shadow:inset 0 1px 2px rgba(0,0,0,0.06);">
+        <div
+          style="background:#eef2f6;border-radius:999px;height:12px;overflow:hidden;margin-bottom:10px;padding:2px;box-shadow:inset 0 1px 2px rgba(0,0,0,0.06);">
           <div id="genBar"
             style="height:100%;width:0%;background:linear-gradient(90deg,#1a4d6f,#3b82f6);border-radius:999px;transition:width .4s ease;">
           </div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;padding:0 4px;">
           <span id="genPct" style="font-size:26px;font-weight:800;color:#1a4d6f;font-feature-settings:'tnum';">0%</span>
-          <span id="genEta" style="font-size:12px;color:var(--muted);font-weight:600;background:#f8fafc;padding:3px 10px;border-radius:6px;border:1px solid #e2e8f0;"></span>
+          <span id="genEta"
+            style="font-size:12px;color:var(--muted);font-weight:600;background:#f8fafc;padding:3px 10px;border-radius:6px;border:1px solid #e2e8f0;"></span>
         </div>
 
         <!-- Steps checklist -->
@@ -12405,10 +12439,12 @@
           <h3>7. مراحل التطوير ودفعات المطور</h3>
           <p class="hint">المراحل وسنواتها تُعدّل من قسم الجدول الزمني. النسبتان فقط تُدخلان هنا، وتُوزَّع دفعة المطور على كل سنوات المرحلة في التدفقات.</p>
           <div id="timelineStagesWarning" class="validation-panel error" hidden>لا توجد مراحل في الجدول الزمني بعد، فلن تُوزَّع تكاليف التطوير على السنوات.</div>
+          <div id="scheduleTotalsNote" class="calculation-note" hidden></div>
           <div class="table-wrap">
             <table id="scheduleTable">
               <thead><tr><th>المرحلة</th><th>نسبة تكلفة التطوير %</th><th>نسبة دفعة المطور %</th><th>قيمة تكلفة المرحلة</th><th>قيمة دفعة المطور</th></tr></thead>
               <tbody></tbody>
+              <tfoot><tr><th>الإجمالي</th><th id="scheduleCostPctTotal">0%</th><th id="scheduleDevPctTotal">0%</th><th id="scheduleCostTotalValue">0</th><th id="scheduleDevTotalValue">0</th></tr></tfoot>
             </table>
           </div>
         </div>
@@ -12497,9 +12533,10 @@
           <h3>13. التخارج والنتائج</h3>
           <div class="grid four">
             <div><label>تطبيق التخارج؟</label><select id="exitEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
-            <div><label>طريقة التخارج البيعي</label><select id="saleExitMethod" onchange="calculateAll()"><option value="none">بدون تخارج بيعي إضافي</option><option value="remainingArea">المساحة المتبقية × سعر البيع</option><option value="fixed">قيمة بيعية ثابتة</option></select></div>
+            <div id="saleExitMethodWrap"><label>طريقة التخارج البيعي</label><select id="saleExitMethod" onchange="calculateAll()"><option value="none">بدون تخارج بيعي إضافي</option><option value="remainingArea">المساحة المتبقية × سعر البيع</option><option value="fixed">قيمة بيعية ثابتة</option></select></div>
             <div id="saleExitYearWrap"><label>سنة التخارج البيعي</label><input id="saleExitYear" type="number" min="1" value="14" oninput="calculateAll()"></div>
             <div id="saleExitRemainingAreaWrap"><label>المساحة البيعية المتبقية م²</label><input id="saleExitRemainingArea" type="number" value="0" oninput="calculateAll()"></div>
+            <div id="saleExitAreaReferenceWrap"><label>المساحة البيعية في بنود الإيرادات م²</label><input id="saleExitAreaReference" readonly class="readonly-highlight"></div>
             <div id="saleExitPricePerM2Wrap"><label>سعر بيع متر التخارج</label><input id="saleExitPricePerM2" type="number" value="0" oninput="calculateAll()"></div>
             <div id="saleExitFixedValueWrap"><label>قيمة التخارج البيعي الثابتة</label><input id="saleExitFixedValue" type="number" value="0" oninput="calculateAll()"></div>
             <div id="saleExitCostRateWrap"><label>تكاليف التخارج البيعي %</label><input id="saleExitCostRate" type="number" min="0" value="0" oninput="calculateAll()"></div>
@@ -12513,6 +12550,7 @@
             <div><label>فترة احتساب IRR</label><select id="irrPeriod" onchange="calculateAll()"><option value="full">كامل دورة الاستثمار</option><option value="development">مدة التطوير فقط</option><option value="custom">حتى سنة محددة</option></select></div>
             <div id="irrEndYearWrap"><label>آخر سنة في IRR</label><input id="irrEndYear" type="number" min="1" value="14" oninput="calculateAll()"></div>
           </div>
+          <div id="saleExitStatusNote" class="calculation-note" hidden></div>
           <div id="analysisWarnings" class="analysis-warning"></div>
           <div class="cards" id="resultsCards">
             <div class="metric"><span>تكلفة المشروع قبل التمويل</span><strong id="resProjectCostBeforeFinance">0</strong></div>
@@ -12570,6 +12608,11 @@
           <div class="sensitivity-picker"><div><label>المتغير المراد اختباره</label><select id="sensitivityVariableSelect"><option value="salePrice">سعر بيع الوحدات</option><option value="rentalRate">أسعار الإيجار والتأجير</option><option value="occupancy">الوصول للإشغال المستهدف</option><option value="executionCost">تكلفة التنفيذ</option><option value="developmentYears">مدة التطوير</option><option value="financeRate">معدل التمويل</option><option value="opex">المصروفات التشغيلية</option><option value="capRate">معدل الرسملة عند التخارج</option><option value="fixedExit">قيمة التخارج الثابتة</option></select></div><button type="button" class="btn ghost" onclick="addSensitivityVariable()">+ إضافة المتغير</button></div>
           <div class="table-wrap"><table id="sensitivityAssumptionsTable"><thead><tr><th>المتغير</th><th>متحفظ</th><th>أساسي من الدراسة</th><th>متفائل</th><th>طريقة التطبيق</th><th>ترتيب / حذف</th></tr></thead><tbody></tbody></table></div>
           <div class="table-wrap"><table id="sensitivityTable"><thead><tr><th>السيناريو</th><th>إجمالي الإيرادات</th><th>NOI عند الوصول 100% للإشغال المستهدف</th><th>إجمالي تكلفة الاستثمار</th><th>صافي الربح</th><th>قيمة التخارج</th><th>ROI</th><th>Project IRR</th><th>Equity IRR</th><th>فترة الاسترداد</th><th>إجمالي حقوق الملكية</th></tr></thead><tbody></tbody></table></div>
+        </div>
+
+        <div class="finance-block" id="clarificationsBlock">
+          <h3>15. الإيضاحات</h3>
+          <div class="table-wrap"><table id="clarificationsTable"><thead><tr><th>البند</th><th>طريقة الاحتساب بالأرقام المُدخلة</th><th>الناتج</th></tr></thead><tbody></tbody></table></div>
         </div>
 
         <div class="finance-block" style="text-align:center;padding:20px">
@@ -12662,6 +12705,34 @@
       }
     }
 
+    // The two percentage columns are the whole of what this study adds to a timeline stage, and
+    // they are only meaningful as a share of 100%. Each cell was capped on its own, so a table
+    // whose columns summed to 70% still looked complete while 30% of the development cost and of
+    // the developer fee silently never entered the cashflow. The footer states both sums and the
+    // note states what is still unassigned.
+    function schedulePercentText(value) {
+      const number = Number(value) || 0;
+      return (Math.round(number * 100) / 100) + '%';
+    }
+    function renderSchedulePercentTotals(rows, costValueTotal, devValueTotal) {
+      const costPct = rows.reduce((sum, row) => sum + Math.max(0, Number(row.costPct) || 0), 0);
+      const devPct = rows.reduce((sum, row) => sum + Math.max(0, Number(row.devPct) || 0), 0);
+      const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+      setText('scheduleCostPctTotal', schedulePercentText(costPct));
+      setText('scheduleDevPctTotal', schedulePercentText(devPct));
+      setText('scheduleCostTotalValue', money(costValueTotal));
+      setText('scheduleDevTotalValue', money(devValueTotal));
+      const note = document.getElementById('scheduleTotalsNote');
+      if (!note) return;
+      if (!rows.length) { note.hidden = true; note.textContent = ''; return; }
+      const costLeft = 100 - costPct, devLeft = 100 - devPct;
+      const parts = [];
+      if (Math.abs(costLeft) > 0.01) parts.push(`غير موزَّع من نسبة تكلفة التطوير: ${schedulePercentText(costLeft)}`);
+      if (Math.abs(devLeft) > 0.01) parts.push(`غير موزَّع من نسبة دفعة المطور: ${schedulePercentText(devLeft)}`);
+      note.hidden = parts.length === 0;
+      note.textContent = parts.join(' — ');
+    }
+
     // The stage name and its year mirror the project timeline and are read-only here; only the
     // two financial percentages belong to this study, so only they stay editable.
     function addScheduleStage(d = {}) {
@@ -12747,6 +12818,29 @@
     function addOccupancyRampYear(d = {}) { const tb = document.querySelector('#occupancyRampTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="operationYear"><input type="number" value="${financialInputNumber(d.operationYear, 1)}" readonly></td><td data-field="studyYear"><input type="number" value="${financialInputNumber(d.studyYear, ((num('developmentYears') || 0) + financialInputNumber(d.operationYear, 1)))}" readonly></td><td data-field="reachPct"><input type="number" min="0" max="100" value="${financialInputNumber(d.reachPct, 100)}"></td><td class="row-result rampRevenue">0</td>`; tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr) }
     function syncOccupancyRamp(plan) { const years = Math.max(1, Math.min(40, Math.round(num('operationYears') || 1))), developmentYears = Math.max(1, Math.round(num('developmentYears') || 1)), tb = document.querySelector('#occupancyRampTable tbody'); if (!tb) return; const existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')].map(tr => ({ operationYear: parseNumber(tr.querySelector('[data-field="operationYear"] input')?.value), reachPct: parseNumber(tr.querySelector('[data-field="reachPct"] input')?.value) })); tb.innerHTML = ''; const defaults = [60, 75, 90, 100]; for (let operationYear = 1; operationYear <= years; operationYear++) { const found = existing.find(r => Number(r.operationYear) === operationYear); addOccupancyRampYear(found || { operationYear, studyYear: developmentYears + operationYear, reachPct: defaults[operationYear - 1] ?? 100 }); } }
     function occupancyReachForYear(operationYear) { if (operationYear < 1) return 0; const row = [...document.querySelectorAll('#occupancyRampTable tbody tr')].find(tr => parseNumber(tr.querySelector('[data-field="operationYear"] input')?.value) === operationYear); return Math.max(0, Math.min(100, parseNumber(row?.querySelector('[data-field="reachPct"] input')?.value))) / 100 }
+
+    // A schedule table must stop where its own period stops. Both tables used to render one row
+    // per project year, so a 20-year study printed 20 rows of zeros after a 10-year facility or a
+    // 4-year fee period. The tail is trimmed to the entered period, and a later year is kept only
+    // when it still carries a real figure, so no computed amount is hidden by the trim.
+    const FINANCIAL_ROW_EPSILON = 0.5;
+    function lastYearCarryingValue(projected, fields) {
+      return projected.reduce((last, row) => fields.some(field => Math.abs(Number(row[field]) || 0) > FINANCIAL_ROW_EPSILON) ? row.year : last, 0);
+    }
+    function financeMovementRows(projected, financeOn, repaymentStartYear, repaymentYears) {
+      if (!financeOn) return [];
+      const plannedEnd = Math.max(1, Math.round(repaymentStartYear || 1)) + Math.max(1, Math.round(repaymentYears || 1)) - 1;
+      const activeEnd = lastYearCarryingValue(projected, ['openingDebt', 'financeDraw', 'financeInterest', 'financeFee', 'financeRepayment', 'closingDebt']);
+      const lastYear = Math.max(plannedEnd, activeEnd);
+      return projected.filter(row => row.year <= lastYear);
+    }
+    function fundFeeScheduleRows(projected, fundFeesOn, feeEndYear) {
+      if (!fundFeesOn) return [];
+      const plannedEnd = Math.max(1, Math.ceil(feeEndYear || 1));
+      const activeEnd = lastYearCarryingValue(projected, ['fundManagementFee', 'additionalFundFees', 'fundExitFee', 'performanceFee', 'fundFeesAnnual']);
+      const lastYear = Math.max(plannedEnd, activeEnd);
+      return projected.filter(row => row.year <= lastYear);
+    }
     function addCost(d = {}) { const tb = document.querySelector('#costTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: تكلفة المباني"></td><td data-field="class"><select>${selectHtml(costClasses, d.class || 'execution')}</select></td><td data-field="method"><select>${selectHtml(costMethods, d.method || 'areaCost')}</select><span class="help formula costFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A * B * C'}" placeholder="A * B * C"></div></td><td data-field="qty"><input type="number" value="${financialInputNumber(d.qty, 0)}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${financialInputNumber(d.price, 0)}"><span class="help input miniHelp"></span></td><td data-field="duration"><input type="number" value="${financialInputNumber(d.duration, 1)}"><span class="help input miniHelp"></span></td><td class="row-result costResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
     function addOpex(d = {}) { const tb = document.querySelector('#opexTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: تشغيل شهري"></td><td data-field="method"><select>${selectHtml(opexMethods, d.method || 'monthlyFixed')}</select><span class="help formula opexFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A * B'}" placeholder="A * B"></div></td><td data-field="qty"><input type="number" value="${financialInputNumber(d.qty, 0)}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${financialInputNumber(d.price, 0)}"><span class="help input miniHelp"></span></td><td class="row-result opexResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
     function addExternal(d = {}) { const tb = document.querySelector('#externalTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: رعاية سنوية"></td><td data-field="type"><select>${selectHtml(externalTypes, d.type || 'revenue')}</select></td><td data-field="method"><select>${selectHtml(externalMethods, d.method || 'fixed')}</select><span class="help formula externalFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A'}" placeholder="B * C"></div></td><td data-field="base"><input type="number" value="${financialInputNumber(d.base, 0)}"><span class="help input miniHelp"></span></td><td data-field="qty"><input type="number" value="${financialInputNumber(d.qty, 0)}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${financialInputNumber(d.price, 0)}"><span class="help input miniHelp"></span></td><td data-field="startYear"><input type="number" value="${financialInputNumber(d.startYear, 1)}"></td><td data-field="endYear"><input type="number" value="${financialInputNumber(d.endYear, 10)}"></td><td data-field="growth"><input type="number" value="${financialInputNumber(d.growth, 0)}"></td><td class="row-result externalResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
@@ -12908,6 +13002,29 @@
     function updateAutoQtyPreview(tr) { const source = tr.querySelector('[data-field="qtySource"] select')?.value || 'manual'; const comp = getLinkedComponentForRevenueRow(tr); const qtyInput = tr.querySelector('[data-field="qty"] input'); if (!qtyInput) return; if ((source === 'componentRevenueArea' || source === 'componentArea') && comp) qtyInput.value = money(comp.revenueArea); if (source === 'componentBuiltArea' && comp) qtyInput.value = money(comp.builtArea); if (source === 'componentUnits' && comp) qtyInput.value = money(comp.units); }
 
     function setWrapVisible(id, visible) { const el = document.getElementById(id); if (!el) return; el.classList.toggle('dynamic-off', !visible); el.querySelectorAll('input,select,textarea').forEach(x => x.disabled = !visible); }
+
+    // A sale exit worth zero is indistinguishable from a sale exit nobody set up, so the reason is
+    // stated: no sellable units in the project, the method left off, or a figure still missing. The
+    // reference cell carries the sellable area already entered in بنود الإيرادات so the remaining
+    // area is typed against a real number instead of guessed.
+    function renderSaleExitStatus({ modeFlags, exitOn, saleExitMethod, saleAreaTotal, saleExitGross, saleExitValue }) {
+      const reference = document.getElementById('saleExitAreaReference');
+      if (reference) reference.value = saleAreaTotal > 0 ? money(saleAreaTotal) : '';
+      const note = document.getElementById('saleExitStatusNote');
+      if (!note) return;
+      let text = '';
+      if (!modeFlags.sales) text = 'لا يوجد تخارج بيعي: وحدات المشروع تأجيرية بالكامل.';
+      else if (!exitOn) text = 'التخارج غير مطبق في هذه الدراسة.';
+      else if (saleExitMethod === 'none') text = 'التخارج البيعي غير مطبق: لم تُختر طريقة احتساب.';
+      else if (!(saleExitGross > 0)) text = 'التخارج البيعي مطبق بقيمة صفر: القيمة أو المساحة أو سعر المتر غير مُدخل.';
+      else if (saleExitMethod === 'remainingArea' && saleAreaTotal > 0) {
+        const entered = Math.max(0, num('saleExitRemainingArea'));
+        if (entered > saleAreaTotal) text = `المساحة المتبقية المُدخلة ${money(entered)} م² تتجاوز المساحة البيعية في بنود الإيرادات ${money(saleAreaTotal)} م².`;
+      }
+      if (!text && saleExitValue > 0) text = `صافي التخارج البيعي ${money(saleExitValue)} من إجمالي ${money(saleExitGross)} بعد تكاليف التخارج.`;
+      note.hidden = text === '';
+      note.textContent = text;
+    }
     function setCellVisible(tr, field, visible, helpText = '') { const cell = tr.querySelector(`[data-field="${field}"]`); if (!cell) return; cell.classList.toggle('off-cell', !visible); cell.querySelectorAll('input,select').forEach(x => x.disabled = !visible); const h = cell.querySelector('.miniHelp'); if (h) h.textContent = helpText || ''; }
 
     function updateDynamicFields() {
@@ -12918,11 +13035,113 @@
       const exitOn = val('exitEnabled') !== 'no';
       const exitMethod = val('exitMethod'); const exitInput = document.getElementById('exitInput');
       if (exitInput) { exitInput.disabled = !exitOn || exitMethod === 'none'; exitInput.closest('div')?.classList.toggle('dynamic-off', !exitOn || exitMethod === 'none'); const lbl = exitInput.closest('div')?.querySelector('label'); if (lbl) { lbl.textContent = exitMethod === 'capRate' ? 'Cap Rate %' : exitMethod === 'fixed' ? 'قيمة البيع الثابتة' : exitMethod === 'noiMultiple' ? 'مضاعف NOI' : exitMethod === 'revenueMultiple' ? 'مضاعف الإيرادات' : 'مدخل التخارج'; } }
-      const saleExitMethod = val('saleExitMethod') || 'none';
-      const saleExitActive = exitOn && saleExitMethod !== 'none';
+      // Every readonly figure on this screen is the product of inputs the user typed, but the screen
+      // showed only the result — so a number that looked wrong could not be traced without reading
+      // the code. This states each derived figure as its own arithmetic, with the actual entered
+      // values in it, and it is data rather than instruction: no step tells anyone what to press.
+      function renderClarifications(facts) {
+        const body = document.querySelector('#clarificationsTable tbody');
+        if (!body) return;
+        const rows = [];
+        const add = (label, method, result) => { if (method) rows.push([label, method, result]); };
+        const m = value => money(value);
+        const pctText = value => (Math.round((Number(value) || 0) * 100) / 100) + '%';
+
+        if (facts.landValue > 0) {
+          add('قيمة الأرض',
+            facts.landMethod === 'perM2'
+              ? `${m(facts.landArea)} م² × ${m(facts.landPricePerM2)}`
+              : 'قيمة مُدخلة مباشرة',
+            m(facts.landValue));
+        }
+        if (facts.landRent > 0) {
+          add('إيجار الأرض السنوي',
+            facts.landRentMethod === 'percentLandValue' ? `${m(facts.landValue)} × ${pctText(facts.landRentRate)}`
+              : facts.landRentMethod === 'monthlyFixed' ? `${m(facts.monthlyLandRent)} × 12`
+                : 'قيمة سنوية مُدخلة مباشرة',
+            m(facts.landRent));
+        }
+        if (facts.developerCost > 0) {
+          add('أتعاب المطور', `${m(facts.developerBaseAmount)} × ${pctText(facts.developerRate)}`, m(facts.developerCost));
+        }
+        if (facts.projectCost > 0) {
+          add('إجمالي تكلفة المشروع',
+            `بنود التكلفة ${m(facts.costTotal)} + أتعاب المطور ${m(facts.developerCost)} + بنود خارجية ${m(facts.externalCost)} + الأرض ${m(facts.landCostIncluded)}`,
+            m(facts.projectCost));
+        }
+        if (facts.financeOn && facts.facilityAmount > 0) {
+          add('قيمة التسهيل التمويلي', `${m(facts.financeBaseAmount)} × ${pctText(facts.financingRate)}`, m(facts.facilityAmount));
+          if (facts.arrangementFee > 0) add('رسوم ترتيب التمويل', `${m(facts.facilityAmount)} × ${pctText(facts.arrangementFeeRate)}`, m(facts.arrangementFee));
+          if (facts.totalFinanceInterest > 0) {
+            add('إجمالي فوائد التمويل',
+              facts.financeInterestMethod === 'fixed'
+                ? `${pctText(facts.annualFinanceRate)} سنويًا على أصل التسهيل ${m(facts.facilityAmount)} خلال سنوات التمويل`
+                : `${pctText(facts.annualFinanceRate)} سنويًا على الرصيد المتبقي في كل سنة`,
+              m(facts.totalFinanceInterest));
+          }
+        }
+        if (facts.totalFundFees > 0) {
+          add('إجمالي تكاليف الصندوق',
+            `أتعاب الإدارة ${m(facts.totalFundManagementFees)} + أتعاب إضافية ${m(facts.totalAdditionalFundFees)} + أتعاب التخارج ${m(facts.fundExitFeeTotal)} + حافز الأداء ${m(facts.performanceFeeTotal)}`,
+            m(facts.totalFundFees));
+        }
+        if (facts.adjustedProjectCost > 0) {
+          add('إجمالي تكلفة الاستثمار',
+            `تكلفة المشروع ${m(facts.projectCost)} + تكلفة التمويل ${m(facts.totalFinanceCost)} + تكاليف الصندوق ${m(facts.totalFundFees)}`,
+            m(facts.adjustedProjectCost));
+        }
+        if (facts.saleRevenueTotal > 0) {
+          add('إجمالي إيرادات البيع', `مجموع بنود الإيرادات البيعية، موزَّعة على ${facts.salesYears} سنة بدءًا من السنة ${facts.salesStartYear}`, m(facts.saleRevenueTotal));
+        }
+        if (facts.saleExitGross > 0) {
+          add('إجمالي التخارج البيعي',
+            facts.saleExitMethod === 'remainingArea'
+              ? `${m(facts.saleExitRemainingArea)} م² × ${m(facts.saleExitPricePerM2)} في السنة ${facts.saleExitYear}`
+              : `قيمة بيعية ثابتة مُدخلة في السنة ${facts.saleExitYear}`,
+            m(facts.saleExitGross));
+          add('صافي التخارج البيعي', `${m(facts.saleExitGross)} − تكاليف التخارج ${pctText(facts.saleExitCostRate * 100)}`, m(facts.saleExitValue));
+        }
+        if (facts.operatingExitGross > 0) {
+          add('إجمالي التخارج التشغيلي',
+            facts.exitMethod === 'capRate' ? `الربح التشغيلي في السنة ${facts.operatingExitYear} ÷ ${pctText(facts.exitInput)}`
+              : facts.exitMethod === 'noiMultiple' ? `الربح التشغيلي في السنة ${facts.operatingExitYear} × ${facts.exitInput}`
+                : facts.exitMethod === 'revenueMultiple' ? `إيرادات السنة ${facts.operatingExitYear} × ${facts.exitInput}`
+                  : `قيمة تشغيلية ثابتة مُدخلة في السنة ${facts.operatingExitYear}`,
+            m(facts.operatingExitGross));
+          add('صافي التخارج التشغيلي', `${m(facts.operatingExitGross)} − تكاليف التخارج ${pctText(facts.operatingExitCostRate * 100)}`, m(facts.operatingExitValue));
+        }
+        if (facts.totalEquityRequired > 0) {
+          add('إجمالي حقوق الملكية', `مساهمة الأرض العينية ${m(facts.landEquityContribution)} + الضخ النقدي ${m(facts.totalCashEquity)}`, m(facts.totalEquityRequired));
+        }
+        if (facts.roi !== null && facts.roiOutflows > 0) {
+          add('ROI', `(التدفقات الداخلة ${m(facts.roiInflows)} − التدفقات الخارجة ${m(facts.roiOutflows)}) ÷ ${m(facts.roiOutflows)} — ${facts.roiScope}`, (facts.roi * 100).toFixed(2) + '%');
+        }
+        add('Project IRR', `معدل الخصم الذي يصفّر صافي تدفقات المشروع قبل التمويل وأتعاب الصندوق — ${facts.irrScope}`,
+          facts.projectIrr === null ? 'غير متاح' : (facts.projectIrr * 100).toFixed(2) + '%');
+        if (facts.financeOn) {
+          add('Equity IRR', `معدل الخصم الذي يصفّر تدفقات حقوق الملكية بعد التمويل وأتعاب الصندوق — ${facts.irrScope}`,
+            facts.equityIrr === null ? 'غير متاح' : (facts.equityIrr * 100).toFixed(2) + '%');
+        }
+        add('فترة استرداد المشروع', 'أول سنة يصبح فيها الرصيد التراكمي لتدفقات المشروع موجبًا، مع احتساب الكسر داخل السنة',
+          facts.payback === null ? 'لا يسترد خلال الفترة' : facts.payback.toFixed(2) + ' سنة');
+
+        body.innerHTML = rows.map(([label, method, result]) =>
+          `<tr><td>${escapeReportHtml(label)}</td><td>${escapeReportHtml(method)}</td><td class="row-result">${escapeReportHtml(result)}</td></tr>`).join('');
+        setConditionalVisibility('clarificationsBlock', rows.length > 0);
+      }
+
+      // A sale exit is the disposal of unsold sellable area, so it exists only in a project that
+      // has sellable units at all. The selector used to stay open on a rental-only project, where
+      // `calculateAll()` forces saleExitMethod to 'none' — so a user could pick a method, enter an
+      // area and a price, and every sale-exit figure stayed zero with nothing saying why.
+      const saleModeOn = projectModeFlags().sales;
+      const saleExitMethod = saleModeOn ? (val('saleExitMethod') || 'none') : 'none';
+      const saleExitActive = exitOn && saleModeOn && saleExitMethod !== 'none';
+      setWrapVisible('saleExitMethodWrap', exitOn && saleModeOn);
       setWrapVisible('saleExitYearWrap', saleExitActive);
       setWrapVisible('saleExitCostRateWrap', saleExitActive);
       setWrapVisible('saleExitRemainingAreaWrap', saleExitActive && saleExitMethod === 'remainingArea');
+      setWrapVisible('saleExitAreaReferenceWrap', saleExitActive && saleExitMethod === 'remainingArea');
       setWrapVisible('saleExitPricePerM2Wrap', saleExitActive && saleExitMethod === 'remainingArea');
       setWrapVisible('saleExitFixedValueWrap', saleExitActive && saleExitMethod === 'fixed');
       const resSaleExitGrossCard = document.getElementById('resSaleExitGrossCard');
@@ -13226,7 +13445,9 @@
         };
       });
       const costPctTotal = Math.min(100, scheduleRows.reduce((s, r) => s + r.costPct, 0)), devPctTotal = Math.min(100, scheduleRows.reduce((s, r) => s + r.devPct, 0)), developmentCostBase = costTotal + externalCost;
-      scheduleRows.forEach(r => { const stageCost = costPctTotal ? developmentCostBase * (r.costPct / costPctTotal) : 0, stageDev = devPctTotal ? developerCost * (r.devPct / devPctTotal) : 0; const c1 = r.tr.querySelector('.stageCost'), c2 = r.tr.querySelector('.stageDevPayment'); if (c1) c1.textContent = money(stageCost); if (c2) c2.textContent = money(stageDev); });
+      let scheduleCostValueTotal = 0, scheduleDevValueTotal = 0;
+      scheduleRows.forEach(r => { const stageCost = costPctTotal ? developmentCostBase * (r.costPct / costPctTotal) : 0, stageDev = devPctTotal ? developerCost * (r.devPct / devPctTotal) : 0; scheduleCostValueTotal += stageCost; scheduleDevValueTotal += stageDev; const c1 = r.tr.querySelector('.stageCost'), c2 = r.tr.querySelector('.stageDevPayment'); if (c1) c1.textContent = money(stageCost); if (c2) c2.textContent = money(stageDev); });
+      renderSchedulePercentTotals(scheduleRows, scheduleCostValueTotal, scheduleDevValueTotal);
 
       const projected = [];
       const initialProjectLandFlow = landContributionType === 'inKind' ? -landCostIncluded : 0, initialEquityLandFlow = landContributionType === 'inKind' ? -landCostIncluded : 0;
@@ -13357,6 +13578,23 @@
       setTxt('resOperatingExitGross', money(operatingExitGross));
       setTxt('resOperatingExit', money(operatingExitValue));
       setTxt('resSaleExitScope', saleExitMethod === 'none' ? 'غير مفعل' : `السنة ${saleExitYear} | تكلفة التخارج ${(saleExitCostRate * 100).toFixed(2)}%`);
+      renderSaleExitStatus({ modeFlags, exitOn, saleExitMethod, saleAreaTotal, saleExitGross, saleExitValue });
+      renderClarifications({
+        landMethod, landArea, landPricePerM2: num('landPricePerM2'), landValue,
+        landRentMethod: rentMethod, landRentRate: num('landRentRate'), monthlyLandRent: num('monthlyLandRent'), landRent,
+        developerBaseAmount, developerRate: num('developerRate'), developerCost,
+        costTotal, externalCost, landCostIncluded, projectCost,
+        financeOn, financeBaseAmount, financingRate: num('financingRate'), facilityAmount,
+        arrangementFeeRate: num('financeArrangementFeeRate'), arrangementFee,
+        financeInterestMethod, annualFinanceRate: annualFinanceRate * 100, totalFinanceInterest, totalFinanceCost,
+        totalFundManagementFees, totalAdditionalFundFees, fundExitFeeTotal, performanceFeeTotal, totalFundFees,
+        adjustedProjectCost, saleRevenueTotal, salesStartYear, salesYears,
+        saleExitMethod, saleExitYear, saleExitRemainingArea: num('saleExitRemainingArea'),
+        saleExitPricePerM2: num('saleExitPricePerM2'), saleExitCostRate, saleExitGross, saleExitValue,
+        exitMethod, exitInput, operatingExitYear, operatingExitCostRate, operatingExitGross, operatingExitValue,
+        landEquityContribution, totalCashEquity, totalEquityRequired,
+        roi, roiInflows, roiOutflows, roiScope, irrScope, projectIrr, equityIrr: irrVal, payback
+      });
       setTxt('resOperatingExitScope', exitMethod === 'none' ? 'غير مفعل' : `السنة ${operatingExitYear} | تكلفة التخارج ${(operatingExitCostRate * 100).toFixed(2)}%`);
       setTxt('resTerminal', money(terminal));
       setTxt('resYear0', '0');
@@ -13410,9 +13648,9 @@
         </tr>`).join('');
       }
       const debtTb = document.querySelector('#debtScheduleTable tbody');
-      if (debtTb) debtTb.innerHTML = projected.map(r => `<tr><td>${r.year}</td><td>${money(r.openingDebt)}</td><td>${money(r.financeDraw)}</td><td>${money(r.financeInterest)}</td><td>${money(r.financeFee)}</td><td>${money(r.financeRepayment)}</td><td>${money(r.closingDebt)}</td></tr>`).join('');
+      if (debtTb) debtTb.innerHTML = financeMovementRows(projected, financeOn, financeRepaymentStartYear, financeRepaymentYears).map(r => `<tr><td>${r.year}</td><td>${money(r.openingDebt)}</td><td>${money(r.financeDraw)}</td><td>${money(r.financeInterest)}</td><td>${money(r.financeFee)}</td><td>${money(r.financeRepayment)}</td><td>${money(r.closingDebt)}</td></tr>`).join('');
       const fundTb = document.querySelector('#fundFeeScheduleTable tbody');
-      if (fundTb) fundTb.innerHTML = projected.map(r => `<tr><td>${r.year}</td><td>${money(r.fundManagementFee)}</td><td>${money(r.additionalFundFees)}</td><td>${money(r.fundExitFee)}</td><td>${money(r.performanceFee)}</td><td>${money(r.fundFeesAnnual)}</td><td>${reportFieldValue('fundFeeFrequency')}</td><td>${reportFieldValue('fundFeeTiming')}</td></tr>`).join('');
+      if (fundTb) fundTb.innerHTML = fundFeeScheduleRows(projected, fundFeesOn, fundFeeEndYear).map(r => `<tr><td>${r.year}</td><td>${money(r.fundManagementFee)}</td><td>${money(r.additionalFundFees)}</td><td>${money(r.fundExitFee)}</td><td>${money(r.performanceFee)}</td><td>${money(r.fundFeesAnnual)}</td><td>${reportFieldValue('fundFeeFrequency')}</td><td>${reportFieldValue('fundFeeTiming')}</td></tr>`).join('');
 
       document.querySelectorAll('#occupancyRampTable tbody tr').forEach((tr, index) => {
         const row = projected.find(r => r.operationYear === index + 1);
@@ -13591,7 +13829,9 @@
         .map((th, index) => ({ index, text: financialReportText(th) }))
         .filter(({ index, text }) => !FINANCIAL_REPORT_SKIP_COLUMNS.has(text) && !financialReportIsHidden(headerCells[index]));
       if (!kept.length) return null;
-      const rows = Array.from(table.querySelectorAll('tbody tr'))
+      // A totals row lives in `tfoot`, and reading only `tbody` dropped it from the exported PDF —
+      // so the stage table printed its percentages with no statement of what they summed to.
+      const rows = Array.from(table.querySelectorAll('tbody tr,tfoot tr'))
         .filter(tr => !financialReportIsHidden(tr))
         .map(tr => kept.map(({ index }) => (tr.cells[index] ? financialReportCellText(tr.cells[index]) : '')))
         .filter(cells => cells.some(text => text !== '' && text !== '—'));
@@ -13940,8 +14180,9 @@
         <section class="section page-break"><h3>12. ملخص النتائج المالية</h3>${resultSummary}</section>
         <section class="section wide-table"><h3>13. التدفقات النقدية السنوية</h3>${reportTableSnapshot('cashflowTable', false)}</section>
         <section class="section wide-table"><h3>14. تحليل الحساسية العام</h3><h4>افتراضات السيناريوهات</h4>${reportTableSnapshot('sensitivityAssumptionsTable', false)}<h4>النتائج المقارنة</h4>${reportTableSnapshot('sensitivityTable', false)}</section>
+        <section class="section wide-table"><h3>15. الإيضاحات</h3>${reportTableSnapshot('clarificationsTable', false)}</section>
         ${exitReportSection}
-        <section class="section conditional-off"><h3>15. التخارج والافتراضات المالية</h3>${reportRows([
+        <section class="section conditional-off"><h3>16. التخارج والافتراضات المالية</h3>${reportRows([
         ['طريقة التخارج البيعي', reportFieldValue('saleExitMethod')],
         ['سنة التخارج البيعي', reportFieldValue('saleExitYear')],
         ['المساحة البيعية المتبقية', reportFieldValue('saleExitRemainingArea') + ' م²'],
@@ -16476,7 +16717,7 @@
 
       const factCount = countProjectFacts(tenantProjectData);
       if (factCount < GENERATION_MIN_FACTS && !confirm('بيانات المشروع المحفوظة ' + factCount +
-          ' حقل. الذكاء الاصطناعي سيكتب محتوى الشرائح من عنده لأن الحقائق غير موجودة. متابعة؟')) return;
+        ' حقل. الذكاء الاصطناعي سيكتب محتوى الشرائح من عنده لأن الحقائق غير موجودة. متابعة؟')) return;
 
       // Auto-save draft
       await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
@@ -19229,7 +19470,7 @@
           const restorable = snapshot && snapshot.recoverable;
           const note = restorable
             ? '<div class="meta" style="color:#92400e">نسخة أقدم من هذه البيانات محفوظة في العرض «' +
-              escapeHtml(snapshot.title || '') + '» وتحتوي ' + snapshot.fieldCount + ' حقلًا</div>'
+            escapeHtml(snapshot.title || '') + '» وتحتوي ' + snapshot.fieldCount + ' حقلًا</div>'
             : '';
           return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid ' +
             (recovery && recovery.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px;">' +
@@ -19241,7 +19482,7 @@
             '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
             (restorable
               ? '<button class="btn small" style="background:#b45309;color:#fff" onclick="restoreProjectDraft(\'' +
-                d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>'
+              d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>'
               : '') +
             '<button class="btn small danger" onclick="deleteProjectDraftById(\'' + d.id + '\')">حذف المسودة</button>' +
             '</div></div>';
@@ -20781,7 +21022,7 @@
         (entry.summary ? '<div style="margin-top:4px">' + escapeHtml(entry.summary) + '</div>' : '') +
         (lines.length
           ? '<ul style="margin:6px 0 0;padding-inline-start:18px;font-size:13px;line-height:1.9">' +
-            lines.map(line => '<li>' + escapeHtml(line) + '</li>').join('') + '</ul>'
+          lines.map(line => '<li>' + escapeHtml(line) + '</li>').join('') + '</ul>'
           : '') +
         '<div class="meta" style="margin-top:4px">' + escapeHtml(stamp) + '</div></div>';
     }

@@ -2518,6 +2518,63 @@ class MeetingRequirementsTests(unittest.TestCase):
                 self.assertTrue(out.exists())
                 self.assertGreater(out.stat().st_size, 100)
 
+    def test_financial_schedules_state_their_own_totals_and_stop_at_their_own_period(self):
+        """Five faults in the financial study, each of which showed a wrong figure as a right one.
+
+        A percentage column that summed to less than 100% still looked complete; a schedule table
+        printed one row per project year regardless of the period entered for it; a sale exit could
+        be configured on a project that has no sellable units and stayed silently zero; and no
+        screen stated how any derived figure had been arrived at.
+        """
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+
+        # 1. Both percentage columns of the stage table state their sum and what is unassigned.
+        self.assertIn('id="scheduleCostPctTotal"', index_source)
+        self.assertIn('id="scheduleDevPctTotal"', index_source)
+        self.assertIn('id="scheduleCostTotalValue"', index_source)
+        self.assertIn('id="scheduleDevTotalValue"', index_source)
+        self.assertIn('function renderSchedulePercentTotals(rows, costValueTotal, devValueTotal)',
+                      index_source)
+        self.assertIn('غير موزَّع من نسبة تكلفة التطوير:', index_source)
+        self.assertIn('غير موزَّع من نسبة دفعة المطور:', index_source)
+        self.assertIn('renderSchedulePercentTotals(scheduleRows, scheduleCostValueTotal, scheduleDevValueTotal);',
+                      index_source)
+        # A tfoot row must reach the exported PDF, or the totals exist only on screen.
+        self.assertIn("table.querySelectorAll('tbody tr,tfoot tr')", index_source)
+
+        # 2. The sale exit belongs to a project that has sellable units, and its state is stated.
+        self.assertIn('const saleModeOn = projectModeFlags().sales;', index_source)
+        self.assertIn("const saleExitMethod = saleModeOn ? (val('saleExitMethod') || 'none') : 'none';",
+                      index_source)
+        self.assertIn("setWrapVisible('saleExitMethodWrap', exitOn && saleModeOn);", index_source)
+        self.assertIn('id="saleExitAreaReference"', index_source)
+        self.assertIn('function renderSaleExitStatus({', index_source)
+        self.assertIn('لا يوجد تخارج بيعي: وحدات المشروع تأجيرية بالكامل.', index_source)
+        self.assertIn('التخارج البيعي مطبق بقيمة صفر:', index_source)
+
+        # 3. الإيضاحات states each derived figure as its own arithmetic, and reaches the report.
+        self.assertIn('<h3>15. الإيضاحات</h3>', index_source)
+        self.assertIn('id="clarificationsTable"', index_source)
+        self.assertIn('function renderClarifications(facts)', index_source)
+        self.assertIn("<th>طريقة الاحتساب بالأرقام المُدخلة</th>", index_source)
+        self.assertIn("reportTableSnapshot('clarificationsTable', false)", index_source)
+        self.assertIn("setConditionalVisibility('clarificationsBlock', rows.length > 0);", index_source)
+
+        # 4 and 5. A schedule stops where its own period stops, and a later year survives the trim
+        # only when it still carries a figure — a computed amount must never be hidden by it.
+        self.assertIn('function financeMovementRows(projected, financeOn, repaymentStartYear, repaymentYears)',
+                      index_source)
+        self.assertIn('function fundFeeScheduleRows(projected, fundFeesOn, feeEndYear)', index_source)
+        self.assertIn('function lastYearCarryingValue(projected, fields)', index_source)
+        self.assertIn('financeMovementRows(projected, financeOn, financeRepaymentStartYear, financeRepaymentYears)',
+                      index_source)
+        self.assertIn('fundFeeScheduleRows(projected, fundFeesOn, fundFeeEndYear)', index_source)
+        # The tables must no longer render straight from the full projection.
+        self.assertNotIn(
+            "if (debtTb) debtTb.innerHTML = projected.map(r => `<tr><td>${r.year}</td>", index_source)
+        self.assertNotIn(
+            "if (fundTb) fundTb.innerHTML = projected.map(r => `<tr><td>${r.year}</td>", index_source)
+
     def test_land_document_normalizer_keeps_each_parcel_and_four_directions(self):
         result = self.application_module._normalize_land_document_result({
             'parcels': [{
