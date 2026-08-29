@@ -283,6 +283,20 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'bullets': [description] if description else [],
         })
 
+    has_boundary_data = any(str(source.get(k) or '').strip() for k in (
+        'boundary_lengths', 'surrounding_streets', 'facades_count', 'facades_directions'
+    ))
+    if has_boundary_data:
+        add('land', {
+            'title': 'مخطط اتجاهي لحدود الأرض',
+            'type': 'content',
+            'design_style': 'diagram',
+            'content_density': 'medium',
+            'requires_image': False,
+            'content_source': 'land_boundary_diagram',
+            'bullets': [],
+        })
+
     plans = _available_asset_items(images.get('plans'))
     plan_meta = images.get('plan_meta') if isinstance(images.get('plan_meta'), list) else []
     if plans:
@@ -642,6 +656,8 @@ def _suggest_design_style(title, bullets=None, slide_type='content'):
         return 'swot'
     if re.search(r'(?:عملية|تدفق|خطوات|عملاء|رحلة|عمل|process|flow|customer journey|steps)', text):
         return 'flow'
+    if re.search(r'(?:مخطط اتجاهي|حدود الأرض|اتجاهي|أبعاد الأرض|diagram|boundary)', text):
+        return 'diagram'
     if re.search(r'(?:صورة|واجهة|تصميم معماري|انطباع|visual|image|facade|architectural|render)', text):
         return 'image'
     if re.search(r'(?:نظرة|نبذة|مقدمة|شرح|وصف|ملخص|تعريف|رؤية|رسالة|فلسفة|overview|introduction|description|summary|vision|mission)', text):
@@ -1429,7 +1445,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
       "type": "cover|index|content|section_divider|moodboard|closing|map_overview|map_landmarks|map_access|map_catchment|site_specs",
       "section_key": "overview|components|land|location|market|timeline|financial|swot_risks|team|plans|exterior|interior|executive_summary|closing",
       "content_density": "low|medium|high",
-      "design_style": "dashboard|cards|timeline|table|chart|text|image|flow|swot|map|divider",
+      "design_style": "dashboard|cards|timeline|table|chart|text|image|flow|swot|map|diagram|divider",
       "bullets": ["نقطة 1", "نقطة 2", "نقطة 3"],
       "requires_image": true أو false,
       "content_source": "<الحقل أو الجدول الذي يغذي هذه الشريحة>",
@@ -1445,6 +1461,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - لا تكرر مكونات المشروع أو جداول الموقع أو السوق. اعرض الجدول مرة واحدة، ثم اختم القسم بملخصه النهائي بعد الجداول.
 - نبذة عن المشروع تستخدم، عند توفرها، صورة أو صورتين من صور التصورات الخارجية غير الصورة الرئيسية لتغذية التصميم دون تحويل النبذة إلى معرض صور.
 - صور الأرض تُعرض مع الوصف المحفوظ لكل صورة، ثم ملخص تحليل الأرض المعتمد. لا تستخدم صورة أرض بلا وصف إن كان الوصف متاحًا.
+- عند توفر أبعاد وحدود للأرض والشوارع المحيطة، يتم تضمين شريحة «مخطط اتجاهي لحدود الأرض» بنمط diagram لتمثيل الأرض والجهات الأربع والشوارع والإطلالات بيانياً بالـ CSS و HTML النقي دون الحاجة لرسومات خارجية.
 - الدراسة المالية تأخذ عدد الشرائح الذي تحتاجه جميع جداولها ومؤشراتها. تنقل المسميات والقيم كما هي، وتستخدم فواصل الآلاف للعرض فقط دون تقريب أو تغيير قيمة، وتضيف رسومًا بيانية مبنية على البيانات مع الجداول الأصلية بجانبها.
 - فريق العمل يحافظ على ترتيب الجهات وحقولها كما أُدخلت، ويستخدم شعار كل جهة عند الحديث عنها. لا ينشئ فئات أو مسميات جديدة.
 - كل مخطط مرفوع له صفحة مستقلة أو مساحة كبيرة مع عنوانه ووصفه؛ ممنوع جمع مخططات كثيرة في شبكة صغيرة.
@@ -1874,7 +1891,143 @@ def _slide_source_data_note(slide, project_data):
     if match:
         start, end = map(int, match.groups())
         return 'مكونات هذه الشريحة فقط:\n' + json.dumps(_project_component_rows(project_data)[start:end], ensure_ascii=False, indent=2)
+    if source == 'land_boundary_diagram':
+        data = _extract_land_boundary_diagram_data(project_data)
+        return (
+            'بيانات المخطط الاتجاهي لحدود الأرض والواجهات — أنشئ مخططاً اتجاهياً هندسياً راقياً (Directional Boundary Diagram) '
+            'يتوسطه صندوق عريض يمثل «أرض المشروع» مع أطوال الأضلاع على حوافه الأربع وملخص الواجهات في وسطه، وتحيط به بطاقات '
+            'الاتجاهات الأربعة (شمال، جنوب، شرق، غرب) مبيناً عليها أطوال الأضلاع وعروض الشوارع والواجهات مع تمييز الشوارع بلون التمييز (مثل الذهبي) '
+            'وبطاقة بارزة ومميزة لجهة الإطلالة أو الطريق الرئيسي إن وجدت:\n'
+            + json.dumps(data, ensure_ascii=False, indent=2)
+        )
     return ''
+
+
+def _extract_land_boundary_diagram_data(project_data):
+    """Extract structured data for the directional land boundary diagram."""
+    source = project_data if isinstance(project_data, dict) else {}
+
+    facades_count = str(source.get('facades_count') or '').strip()
+    facades_directions = str(source.get('facades_directions') or '').strip()
+
+    facades_summary = ''
+    if facades_count and facades_directions:
+        if facades_count in ('2', 'واجهتان'):
+            count_text = 'واجهتان'
+        elif facades_count in ('1', 'واجهة'):
+            count_text = 'واجهة واحدة'
+        elif facades_count.isdigit() and int(facades_count) > 2:
+            count_text = f'{facades_count} واجهات'
+        else:
+            count_text = f'{facades_count} واجهات' if 'واجه' not in facades_count else facades_count
+        facades_summary = f'{count_text} ({facades_directions})'
+    elif facades_directions:
+        facades_summary = f'الواجهات: {facades_directions}'
+    elif facades_count:
+        facades_summary = f'عدد الواجهات: {facades_count}'
+
+    directions = {
+        'north': {'label': 'الشمال', 'length': '', 'description': '', 'is_facade': False},
+        'south': {'label': 'الجنوب', 'length': '', 'description': '', 'is_facade': False},
+        'east': {'label': 'الشرق', 'length': '', 'description': '', 'is_facade': False},
+        'west': {'label': 'الغرب', 'length': '', 'description': '', 'is_facade': False},
+    }
+    dir_aliases = {
+        'north': ('north', 'شمال', 'الشمال'),
+        'south': ('south', 'جنوب', 'الجنوب'),
+        'east': ('east', 'شرق', 'الشرق'),
+        'west': ('west', 'غرب', 'الغرب'),
+    }
+
+    raw_dt = source.get('directions_table')
+    dt_rows = _decode_json_fact(raw_dt) if isinstance(raw_dt, str) else raw_dt
+    if isinstance(dt_rows, list):
+        for row in dt_rows:
+            if not isinstance(row, dict):
+                continue
+            dir_key = str(row.get('direction') or row.get('label') or '').strip().lower()
+            reg_text = str(row.get('regulation_text') or row.get('text') or row.get('description') or '').strip()
+            for std_key, aliases in dir_aliases.items():
+                if dir_key in aliases or any(a in dir_key for a in aliases):
+                    directions[std_key]['description'] = reg_text
+                    break
+
+    land_analysis = _decode_json_fact(source.get('land_documents_analysis_data') or source.get('landDocumentsAnalysisData') or source.get('land_documents_analysis'))
+    if isinstance(land_analysis, dict):
+        parcels = land_analysis.get('parcels') if isinstance(land_analysis.get('parcels'), list) else []
+        parcel_dirs = parcels[0].get('directions') if parcels and isinstance(parcels[0], dict) and isinstance(parcels[0].get('directions'), dict) else {}
+        if not parcel_dirs and isinstance(land_analysis.get('directions'), dict):
+            parcel_dirs = land_analysis.get('directions')
+        for std_key, aliases in dir_aliases.items():
+            for alias in aliases:
+                if alias in parcel_dirs and isinstance(parcel_dirs[alias], dict):
+                    p_info = parcel_dirs[alias]
+                    desc = str(p_info.get('regulation_text') or p_info.get('uses') or p_info.get('street_name') or '').strip()
+                    length = p_info.get('boundary_length_m') or p_info.get('length')
+                    width = p_info.get('street_width_m') or p_info.get('width')
+                    street = str(p_info.get('street_name') or '').strip()
+                    if desc and not directions[std_key]['description']:
+                        directions[std_key]['description'] = desc
+                    if length and not directions[std_key]['length']:
+                        directions[std_key]['length'] = f"{length} م"
+                    if street and not directions[std_key].get('street_name'):
+                        directions[std_key]['street_name'] = street
+                    if width and not directions[std_key].get('street_width'):
+                        directions[std_key]['street_width'] = f"{width} م"
+                    break
+
+    raw_lengths = str(source.get('boundary_lengths') or '').strip()
+    if raw_lengths:
+        for part in re.split(r'[|,\n،]', raw_lengths):
+            part = part.strip()
+            if not part:
+                continue
+            for std_key, aliases in dir_aliases.items():
+                if any(part.startswith(a) or f"{a}:" in part or f"{a} :" in part for a in aliases):
+                    val = re.sub(r'^(?:' + '|'.join(aliases) + r')\s*[:=\-—]\s*', '', part).strip()
+                    if val and not directions[std_key]['length']:
+                        directions[std_key]['length'] = val if 'م' in val else f"{val} م"
+                    break
+
+    raw_streets = str(source.get('surrounding_streets') or '').strip()
+    for std_key, d in directions.items():
+        desc = f"{d.get('description', '')} {d.get('street_name', '')} {raw_streets}"
+        if re.search(r'(?:شارع|طريق|ممر|ميدان|نافذ|street|road|avenue|boulevard)', desc):
+            d['is_facade'] = True
+            d['type'] = 'street'
+        else:
+            d['type'] = 'neighbor'
+
+    key_view = ''
+    full_text = f"{raw_streets} {json.dumps(directions, ensure_ascii=False)}"
+    if re.search(r'(?:كورنيش|بحر|إطلالة بحرية|شاطئ|واجهة بحرية|sea view|corniche)', full_text, re.IGNORECASE):
+        for std_key in ('west', 'north', 'east', 'south'):
+            dir_text = json.dumps(directions.get(std_key, {}), ensure_ascii=False)
+            if re.search(r'(?:كورنيش|بحر|إطلالة بحرية|شاطئ|واجهة بحرية)', dir_text):
+                lbl = directions[std_key]['label']
+                key_view = f"جهة {lbl} — جهة الإطلالة البحرية وطريق الكورنيش"
+                break
+        if not key_view:
+            key_view = "جهة الإطلالة البحرية وطريق الكورنيش"
+    elif re.search(r'(?:طريق رئيسي|محور|بوليفارد|شريان)', full_text):
+        for std_key in ('west', 'north', 'east', 'south'):
+            dir_text = json.dumps(directions.get(std_key, {}), ensure_ascii=False)
+            if re.search(r'(?:طريق رئيسي|محور|طريق|بوليفارد)', dir_text):
+                lbl = directions[std_key]['label']
+                key_view = f"جهة {lbl} — واجهة الطريق الرئيسي"
+                break
+
+    return {
+        'plot_name': 'أرض المشروع',
+        'facades_summary': facades_summary or 'الواجهات المحيطة بالأرض',
+        'north': directions['north'],
+        'south': directions['south'],
+        'east': directions['east'],
+        'west': directions['west'],
+        'key_view': key_view,
+        'boundary_lengths_summary': raw_lengths,
+        'surrounding_streets_summary': raw_streets,
+    }
 
 
 def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=None):
@@ -1897,6 +2050,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'text': 'عنوان وفقرة غنية ووافية أو قائمة منظمة تشرح الفكرة بالكامل بلا اختصار مخل وبلا تجزئة لمربعات فارغة',
         'image': 'صورة واحدة كبيرة أو صورتان واضحتان مع التسمية والوصف الصحيحين',
         'flow': 'مخطط تدفق بصري هندسي راقٍ (Flowchart / Visual Pipeline) يربط الكتل بمسارات تدفق واضحة وبألوان الهوية مع إبراز القيم والمراحل والمبالغ',
+        'diagram': 'مخطط اتجاهي هندسي راقٍ (Directional Diagram) لأرض المشروع وحدودها الأربعة والواجهات والشوارع المحيطة والإطلالة وفق الهيكل المعتمد',
         'swot': 'تحليل SWOT وتحليل المخاطر بتقسيم واضح وبألوان الهوية وحدها',
         'map': 'خريطة واضحة مضبوطة في المنتصف تماماً (center center) مع جدول أو ملخص واحد دون إعادة الأرقام في أكثر من شكل',
         'grid': 'صورتان واضحتان كحد أقصى في الصفحة مع الوصف الصحيح لكل صورة',
@@ -1954,6 +2108,14 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         notes.append('بعد الجداول أو البيانات، اكتب الملخص النهائي المحفوظ لهذا القسم مرة واحدة في نهاية الشريحة أو في آخر شريحة من القسم.')
     if section_key == 'closing':
         notes.append('اعرض بيانات التواصل المتاحة المعتمدة كما هي (الاسم، المنصب، الهاتف، البريد الإلكتروني، الموقع الإلكتروني، الموقع الجغرافي، السوشل ميديا). إذا لم تتوفر أي بيانات تواصل، اقتصر على عبارة الشكر والختام فقط وشعار المشروع دون اختلاق أو كتابة أي أرقام أو بريد أو عناوين وهمية. ممنوع كتابة «فرصة واعدة بشروط» أو «فرصة مشروطة» أو أي تقييم استثماري عام في الخاتمة.')
+    if design_style == 'diagram' or slide.get('content_source') == 'land_boundary_diagram' or re.search(r'(?:مخطط اتجاهي|حدود الأرض|اتجاهي)', title):
+        notes.append(
+            'في شريحة المخطط الاتجاهي لحدود الأرض: صمّم هيكلاً اتجاهياً متناسقاً وراقياً بـ HTML و CSS النقي بألوان الهوية فقط ودون أيقونات أو إيموجي. '
+            'يتوسط الشريحة صندوق عريض يمثل «أرض المشروع» مع أطوال الأضلاع الأربعة على حوافه وملخص الواجهات في وسطه، '
+            'وتحيط به بطاقات واضحة للاتجاهات الأربعة (شمال، جنوب، شرق، غرب) توضح أطوال الأضلاع والمجاورات وعروض الشوارع والواجهات مع تمييز الشوارع بلون التمييز (مثل الذهبي)، '
+            'وبطاقة بارزة ومميزة لجهة الإطلالة البحرية أو الطريق الرئيسي إن وجدت، '
+            'مع كتابة «الأبعاد بالمتر» في الزاوية العلوية المقابلة للعنوان، وملاحظة توضيحية أسفل الشريحة: «تمثل القراءة اتجاهات الحدود وعلاقتها بالشوارع دون محاكاة مساحية للنسب.»'
+        )
     if design_style == 'timeline' or re.search(r'(?:خطة|زمن|جدول|مراحل)', title):
         notes.append('اعرض مراحل الجدول الزمني كما وردت. أظهر الملاحظة بجانب مرحلتها فقط عندما يكون نصها موجودًا، ولا تنشئ حقل ملاحظات فارغًا لأي مرحلة.')
         timeline_note = _timeline_data_note(project_data)
