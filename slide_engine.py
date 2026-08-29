@@ -27,7 +27,7 @@ CONTENT_DISTRIBUTION_RULES = """
 4. صفحة بداية كل قسم تحمل اسم القسم وحده بلا وصف وبلا ترجمة وبلا نقاط.
 5. كل شريحة لها فكرة واحدة، ويُقسّم المحتوى الطويل على صفحات إضافية بدلاً من تصغيره أو حذفه.
 6. لا تكرر المعلومة أو مكونات المشروع في أكثر من موضع. الإحالة المختصرة مسموحة، أما إعادة الجدول أو القائمة نفسها فممنوعة.
-7. اختر الشكل بحسب طبيعة المحتوى: نص متصل للنبذات والملخصات، جدول للصفوف المنظمة، رسم بياني للأرقام القابلة للمقارنة، وصورة كبيرة للصور والمخططات. استخدم البطاقات فقط لعناصر مستقلة قصيرة ومتوازية، وبحد أقصى ثلاث بطاقات عند الحاجة.
+7. اختر الشكل بحسب طبيعة المحتوى: نص متصل للنبذات والملخصات، جدول للصفوف المنظمة، رسم بياني أو مخطط تدفق للأرقام والمراحل، وصورة كبيرة للصور والمخططات. استخدم البطاقات فقط لعناصر مستقلة قصيرة ومتوازية، وبحد أقصى ثلاث بطاقات عند الحاجة.
 8. يوضع ملخص نهائي مستند إلى بيانات البرنامج بعد جداول كل قسم تحليلي، ولا تُضاف تحسينات إنشائية أو استرسال لا يحمل معلومة واضحة.
 9. شرائح الصور تستخدم صورة واحدة كبيرة أو صورتين واضحتين في الصفحة؛ يمكن زيادة الصفحات ولا يجوز ضغط الصور في مربعات صغيرة.
 10. شرائح الموقع والخرائط تبقى داخل قسم تحليل الموقع الجغرافي، وشرائح الأرض وصورها وملخصها داخل قسم تحليل الأرض.
@@ -115,12 +115,12 @@ def _plan_slide_signature(slide):
 
 _FINANCIAL_PLAN_TABLES = (
     ('revenueTable', 'بنود الإيرادات', 'chart'),
-    ('costTable', 'تكاليف المشروع', 'chart'),
-    ('scheduleTable', 'مراحل التطوير المالية', 'table'),
+    ('costTable', 'تكاليف المشروع', 'flow'),
+    ('scheduleTable', 'مراحل التطوير المالية', 'flow'),
     ('opexTable', 'المصروفات التشغيلية', 'chart'),
     ('graceScheduleTable', 'جدول فترة السماح', 'table'),
-    ('financeDrawTable', 'جدول سحب التمويل', 'chart'),
-    ('financeRepaymentTable', 'جدول سداد التمويل', 'chart'),
+    ('financeDrawTable', 'جدول سحب التمويل', 'flow'),
+    ('financeRepaymentTable', 'جدول سداد التمويل', 'flow'),
     ('fundAdditionalFeesTable', 'أتعاب الصندوق الإضافية', 'table'),
     ('externalTable', 'البنود الخارجية', 'table'),
     ('cashflowTable', 'التدفقات النقدية السنوية', 'chart'),
@@ -128,15 +128,80 @@ _FINANCIAL_PLAN_TABLES = (
     ('sensitivityTable', 'نتائج تحليل الحساسية', 'chart'),
 )
 
+USE_TYPE_LABELS = {
+    'retail': 'تجاري / تجزئة',
+    'residential': 'سكني',
+    'hospitality': 'فندقي / ضيافة',
+    'office': 'مكاتب / إداري',
+    'entertainment': 'ترفيهي',
+    'services': 'خدمات ومرافق',
+    'parking': 'مواقف سيارات',
+    'industrial': 'صناعي',
+    'logistics': 'لوجستي / مستودعات',
+    'other': 'أخرى',
+}
+
+INVESTMENT_MODEL_LABELS = {
+    'sale': 'بيع وحدات',
+    'dailyRent': 'إيجار يومي',
+    'monthlyRent': 'إيجار شهري',
+    'annualRent': 'إيجار سنوي',
+    'operating': 'تشغيل / تأجير آخر',
+    'nonRevenue': 'بدون إيراد / مرافق عامة',
+}
+
+
+def _format_component_row(row):
+    if not isinstance(row, dict):
+        return {}
+    name = row.get('name') or row.get('اسم المكون') or row.get('المكون') or ''
+    use_type = row.get('useType') or row.get('نوع الاستخدام') or ''
+    use_type_label = USE_TYPE_LABELS.get(use_type, use_type)
+    units_count = row.get('unitsCount') or row.get('عدد الوحدات') or ''
+    unit_area = row.get('unitArea') or row.get('مساحة الوحدة') or row.get('مساحة الوحدة م²') or ''
+    built_area = row.get('builtArea') or row.get('المساحة المبنية') or row.get('المساحة المبنية م²') or ''
+    leasable_area = row.get('leasableArea') or row.get('المساحة البيعية / التأجيرية') or row.get('المساحة البيعية / التأجيرية م²') or row.get('المساحة التأجيرية') or ''
+    inv_model = row.get('investmentModel') or row.get('نموذج الاستفادة') or row.get('نموذج الاستثمار') or ''
+    inv_model_label = INVESTMENT_MODEL_LABELS.get(inv_model, inv_model)
+
+    formatted = {}
+    if name:
+        formatted['اسم المكون'] = name
+    if use_type_label:
+        formatted['نوع الاستخدام'] = use_type_label
+    if units_count:
+        formatted['عدد الوحدات'] = units_count
+    if unit_area:
+        formatted['مساحة الوحدة م²'] = unit_area
+    if built_area:
+        formatted['المساحة المبنية م²'] = built_area
+    if leasable_area:
+        formatted['المساحة البيعية / التأجيرية م²'] = leasable_area
+    if inv_model_label:
+        formatted['نموذج الاستفادة'] = inv_model_label
+
+    for k, v in row.items():
+        if k not in ('name', 'useType', 'unitsCount', 'unitArea', 'builtArea', 'leasableArea', 'investmentModel',
+                     'اسم المكون', 'نوع الاستخدام', 'عدد الوحدات', 'مساحة الوحدة', 'مساحة الوحدة م²',
+                     'المساحة المبنية', 'المساحة المبنية م²', 'المساحة البيعية / التأجيرية',
+                     'المساحة البيعية / التأجيرية م²', 'المساحة التأجيرية', 'نموذج الاستفادة', 'نموذج الاستثمار') and k not in formatted:
+            if v not in (None, '', [], {}):
+                formatted[k] = v
+    return formatted if formatted else row
+
 
 def _project_component_rows(project_data):
     model = _parse_financial_dict((project_data or {}).get('financial_study_model'))
     dynamic = model.get('dynamicRows') if isinstance(model.get('dynamicRows'), dict) else {}
     rows = dynamic.get('components') if isinstance(dynamic.get('components'), list) else []
     if not rows:
+        tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+        rows = tables.get('componentsTable') if isinstance(tables.get('componentsTable'), list) else []
+    if not rows:
         decoded = _decode_json_fact((project_data or {}).get('project_components_data'))
         rows = decoded if isinstance(decoded, list) else []
-    return [row for row in rows if isinstance(row, dict) and any(str(value or '').strip() for value in row.values())]
+    valid_rows = [row for row in rows if isinstance(row, dict) and any(str(value or '').strip() for value in row.values())]
+    return [_format_component_row(row) for row in valid_rows]
 
 
 def _available_asset_items(values):
@@ -299,10 +364,24 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 if not rows:
                     continue
                 target_section = 'components' if 'مكونات المشروع' in heading else 'financial'
-                if target_section == 'components' and not report_components_added:
-                    groups['components'] = []
-                    report_components_added = True
-                    has_report_components = True
+                if target_section == 'components':
+                    if not report_components_added:
+                        groups['components'] = []
+                        report_components_added = True
+                        has_report_components = True
+                    for start in range(0, len(rows), chunk_size):
+                        end = min(start + chunk_size, len(rows))
+                        title = subheading or heading
+                        number = start // chunk_size + 1
+                        add('components', {
+                            'title': title + (f' — {number}' if len(rows) > chunk_size else ''),
+                            'type': 'content',
+                            'design_style': 'table',
+                            'content_density': 'high', 'requires_image': False,
+                            'content_source': f'financial_report:{part_index}:{start}:{end}',
+                            'source_table': f'report_part_{part_index}', 'bullets': [],
+                        })
+                    continue
                 for start in range(0, len(rows), chunk_size):
                     end = min(start + chunk_size, len(rows))
                     title = subheading or heading
@@ -1004,6 +1083,7 @@ PROMPT_INTERNAL_KEYS = {
     'map_styles', 'map_type', 'north_direction', '_resolved_location',
     'draftId', 'draft_id', 'sectionStatuses', 'site_analysis_approved',
     'conceptual_plans', 'land_documents_files', 'land_photos', 'project_logo',
+    'land_use_status',
     # Superseded by building_ratio_coverage / setbacks and allowed_uses; kept in drafts for
     # backwards compatibility only.
     'building_ratio_setbacks', 'allowed_uses_restrictions',
@@ -1017,7 +1097,6 @@ EXTRA_FIELD_LABELS = {
     'site_analysis': 'تحليل الموقع',
     'location_detail': 'تفصيل الموقع',
     'land_use': 'استخدام الأرض',
-    'land_use_status': 'حالة الاستخدام مقابل نوع المشروع',
     'zoning_code': 'كود التنظيم',
     'population_density': 'الكثافة السكانية',
     'population_density_source': 'مصدر الكثافة السكانية',
@@ -1060,7 +1139,8 @@ def _readable_fact(value):
         for key, item in value.items():
             text = _readable_fact(item)
             # Multi-select groups are stored under internal keys such as "audience::سكني".
-            label = str(key).split('::')[-1]
+            raw_label = str(key).split('::')[-1]
+            label = USE_TYPE_LABELS.get(raw_label, INVESTMENT_MODEL_LABELS.get(raw_label, raw_label))
             if text:
                 parts.append(f'{label}: {text}')
         return ' | '.join(parts)[:FACT_VALUE_LIMIT]
@@ -1738,14 +1818,55 @@ def _slide_source_data_note(slide, project_data):
     if source == 'financial_indicators':
         inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
         projection = model.get('projection') if isinstance(model.get('projection'), dict) else {}
-        indicators = {}
-        for key, label in _FINANCIAL_INDICATOR_LABELS:
-            value = projection.get(key)
-            if value in (None, '', [], {}) and inputs.get(key) not in (None, '', [], {}):
-                value = inputs.get(key)
-            if value not in (None, '', [], {}, -1):
-                indicators[label] = value
-        return 'المؤشرات المطلوبة بمسمياتها الأصلية:\n' + json.dumps(indicators, ensure_ascii=False, indent=2)
+        calc = _parse_financial_dict(project_data.get('financial_calc_data'))
+
+        cost_investment_keys = (
+            ('projectCost', 'إجمالي تكلفة المشروع'),
+            ('projectCostWithFinance', 'التكلفة شاملة التمويل'),
+            ('adjustedProjectCost', 'إجمالي تكلفة الاستثمار'),
+            ('developerCost', 'أتعاب المطور'),
+            ('landValue', 'قيمة الأرض'),
+            ('landRent', 'إيجار الأرض السنوي'),
+            ('totalCashEquity', 'حقوق الملكية النقدية المطلوبة'),
+            ('facilityAmount', 'قيمة التسهيل التمويلي'),
+            ('totalFinanceCost', 'إجمالي كلفة التمويل'),
+            ('totalFundFees', 'إجمالي أتعاب الصندوق'),
+        )
+        returns_payback_keys = (
+            ('roi', 'معدل العائد على الاستثمار (ROI)'),
+            ('projectIrr', 'معدل العائد الداخلي للمشروع (Project IRR)'),
+            ('equityIrr', 'معدل العائد الداخلي للملكية (Equity IRR)'),
+            ('payback', 'فترة استرداد رأس المال (سنوات)'),
+            ('equityPayback', 'فترة استرداد حقوق الملكية (سنوات)'),
+            ('totalEquityDistributions', 'إجمالي توزيعات الأرباح'),
+            ('saleExitValue', 'صافي التخارج البيعي'),
+            ('operatingExitValue', 'صافي التخارج التشغيلي'),
+            ('terminal', 'إجمالي قيمة التخارج'),
+        )
+
+        def _extract_group(keys):
+            res = {}
+            for key, label in keys:
+                value = projection.get(key)
+                if value in (None, '', [], {}) and inputs.get(key) not in (None, '', [], {}):
+                    value = inputs.get(key)
+                if value in (None, '', [], {}) and calc.get(key) not in (None, '', [], {}):
+                    value = calc.get(key)
+                if value not in (None, '', [], {}, -1):
+                    res[label] = value
+            return res
+
+        cost_investment_table = _extract_group(cost_investment_keys)
+        returns_payback_table = _extract_group(returns_payback_keys)
+
+        payload = {
+            'جدول التكاليف والاستثمار': cost_investment_table,
+            'جدول مؤشرات العائد والاسترداد': returns_payback_table,
+        }
+        return (
+            'المؤشرات المالية المطلوبة — نسّقها في جدولين منظمين متجاورين أو متتاليين (جدول التكاليف والاستثمار + جدول مؤشرات العائد والاسترداد) مع إبراز المؤشرات الكبرى بخط عريض 800:\n'
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+        )
     match = re.fullmatch(r'project_components:(\d+):(\d+)', source)
     if match:
         start, end = map(int, match.groups())
@@ -1765,16 +1886,16 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     bullets_text = '\n'.join(f'- {b}' for b in bullets) if bullets else '(لا توجد نقاط محددة — استخرج من بيانات المشروع)'
 
     style_instructions = {
-        'dashboard': 'مؤشرات رقمية محدودة بمسمياتها الأصلية، من دون شبكة مربعات كثيرة',
+        'dashboard': 'لوحة مؤشرات مالية مقسمة إلى جدولين منظمين (التكاليف والاستثمار + مؤشرات العائد والاسترداد) مع إبراز الأرقام الكبرى بوزن 800',
         'cards': 'بطاقتان أو ثلاث فقط لعناصر مستقلة قصيرة؛ استخدم النص أو الجدول إذا كانت العناصر مترابطة',
         'timeline': 'مراحل زمنية واضحة، واعرض الملاحظة فقط تحت المرحلة التي تحتوي ملاحظة فعلية',
         'table': 'جدول احترافي كامل بالمسميات والقيم الأصلية وفواصل آلاف للأرقام دون تقريب',
         'chart': 'رسم بياني بألوان الهوية مبني على الأرقام الفعلية مع جدول البيانات الكامل بجانبه',
         'text': 'عنوان وفقرة أو قائمة موجزة ثم ملخص نهائي واضح بلا بطاقات',
         'image': 'صورة واحدة كبيرة أو صورتان واضحتان مع التسمية والوصف الصحيحين',
-        'flow': 'تسلسل نصي بسيط بخطوط ربط عند وجود خطوات فعلية فقط',
+        'flow': 'مخطط تدفق بصري هندسي راقٍ (Flowchart / Visual Pipeline) يربط الكتل بأسهم وخطوط وصل واضحة ومسارات تدفق بالألوان المؤسسية مع إبراز القيم والمراحل',
         'swot': 'تحليل SWOT وتحليل المخاطر بتقسيم واضح وبألوان الهوية وحدها',
-        'map': 'خريطة واضحة مع جدول أو ملخص واحد دون إعادة الأرقام في أكثر من شكل',
+        'map': 'خريطة واضحة مضبوطة في المنتصف تماماً مع جدول أو ملخص واحد دون إعادة الأرقام في أكثر من شكل',
         'grid': 'صورتان واضحتان كحد أقصى في الصفحة مع الوصف الصحيح لكل صورة',
         'minimal': 'خاتمة بسيطة تتضمن بيانات التواصل المتاحة بلا تقييمات أو عبارات مشروطة',
     }.get(design_style, 'نص منظم يناسب طبيعة المحتوى')
@@ -1790,14 +1911,16 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     image_tokens = [str(token) for token in (slide.get('image_tokens') or []) if str(token or '').strip()]
     if image_tokens:
         placeholder_note = 'استخدم رموز الصور التالية فقط وبحجم واضح، ولا تستبدلها بصورة الغلاف: ' + '، '.join(image_tokens)
+    elif slide_type == 'cover':
+        placeholder_note = 'يجب استخدام ##IMAGE_COVER## كخلفية كاملة على كامل الشريحة (Full Bleed Background: position:absolute; inset:0; background-size:cover; background-position:center;) مع تدرج لوني داكن فخم وتوسيط تام للصورة.'
     elif slide_type == 'map_overview':
-        placeholder_note = 'يجب استخدام ##MAP_OVERVIEW## كخلفية رئيسية لهذه الشريحة.'
+        placeholder_note = 'يجب استخدام ##MAP_OVERVIEW## كخلفية رئيسية لهذه الشريحة مع ضبط الصورة في المنتصف تماماً (center center) بدون أي إزاحة أو قطع.'
     elif slide_type == 'map_landmarks':
-        placeholder_note = 'يجب استخدام ##MAP_LANDMARKS## كخلفية مع جدول أوقات القيادة والمسافات من البيانات.'
+        placeholder_note = 'يجب استخدام ##MAP_LANDMARKS## كخلفية مع ضبطها في المنتصف (center center) مع جدول أوقات القيادة والمسافات من البيانات.'
     elif slide_type == 'map_access':
-        placeholder_note = 'يجب استخدام ##MAP_ACCESS## لعرض خريطة الطرق والمداخل.'
+        placeholder_note = 'يجب استخدام ##MAP_ACCESS## لعرض خريطة الطرق والمداخل مع ضبط الصورة في المنتصف (center center).'
     elif slide_type == 'map_catchment':
-        placeholder_note = 'يجب استخدام ##MAP_CATCHMENT## لعرض دوائر نطاق التأثير.'
+        placeholder_note = 'يجب استخدام ##MAP_CATCHMENT## لعرض دوائر نطاق التأثير مع ضبط الصورة في المنتصف (center center).'
     elif slide_type == 'site_specs':
         placeholder_note = 'استخدم جدول بيانات احترافي لخصائص الموقع.'
     elif slide_type == 'moodboard':
@@ -1809,10 +1932,11 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         f'أنشئ فقط الشريحة {slide_num} لا غير',
         'اكتب HTML في div class="slide" واحد فقط',
         'لا تكتب شرح أو markdown أو كود إضافي',
-        'استخدم خط الشركة نفسه في كل العناصر من دون font-family، بوزن 700 للعناوين و600 للعناوين الفرعية و400 للنصوص والقيم الوصفية',
+        'استخدم خط الشركة نفسه في كل العناصر من دون font-family، بوزن 800 للعناوين الرئيسية والأرقام والمؤشرات الكبرى، و700 للعناوين الفرعية ورؤوس الجداول، و600 للتسميات، و400 للنصوص مع إبراز الكلمات المفتاحية بوزن 700',
         'استخدم لون الهوية الأساسي للعناوين، ولون التمييز للنسب والعناصر المهمة فقط، وخلفية فاتحة ونصًا داكنًا لباقي المحتوى',
         'لا تكرر معلومة وردت في شريحة أخرى، ولا تحول كل فقرة أو قيمة إلى مربع مستقل',
-        'اختر بين النص والجدول والرسم البياني والصورة وفق طبيعة المحتوى، ولا تستخدم البطاقات إلا لعناصر مستقلة قصيرة وبحد أقصى ثلاث',
+        'ممنوع وضع شارات أو مربعات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
+        'اختر بين النص والجدول والرسم البياني ومخطط التدفق والصورة وفق طبيعة المحتوى، ولا تستخدم البطاقات إلا لعناصر مستقلة قصيرة وبحد أقصى ثلاث',
         'املأ الشريحة بالمحتوى الضروري فقط؛ إذا لم يتسع المحتوى فوزعه على صفحة أخرى ولا تصغره أو تحذفه',
     ]
     if placeholder_note:
@@ -1831,8 +1955,9 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         timeline_note = _timeline_data_note(project_data)
         if timeline_note:
             notes.append(timeline_note.strip())
-    if design_style in ('dashboard', 'table', 'chart') or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
+    if design_style in ('dashboard', 'table', 'chart', 'flow') or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
         notes.append('في الشرائح المالية: انقل جميع الجداول والمؤشرات المطلوبة بمسمياتها الأصلية وبالقيم والوحدات نفسها، من دون حذف صف أو عمود أو إعادة حساب.')
+        notes.append('نوّع في أسلوب العرض بين جداول البيانات المنظمة ومخططات التدفق البصرية (Flowcharts) المناسبة للتدفقات وجدول سحب وسداد التمويل ومراحل التطوير.')
         notes.append('نسّق الأعداد بفواصل الآلاف للعرض فقط، من دون تقريب أو تحويل إلى ألف أو مليون أو تغيير عدد الخانات العشرية.')
         notes.append('أضف رسماً بيانياً عندما توجد قيم فعلية قابلة للمقارنة، وضع جدول البيانات الكامل بجانبه بألوان الهوية فقط.')
         financial_note = _financial_data_note(project_data)
@@ -2496,6 +2621,26 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         html = re.sub(
             r'<(p|h[1-6]|span)\b[^>]*>[^<]*(?:فرصة\s+(?:واعدة|مشروطة)|واعدة\s+بشروط|بشروط)[^<]*</\1\s*>',
             '', html, flags=re.IGNORECASE,
+        )
+
+    # Strip repetitive badges like "* مشروع متعدد الاستخدامات *" from content slides
+    if not is_cover and slide_type not in ('cover', 'overview'):
+        html = re.sub(
+            r'<(?:div|span|p|small)\b[^>]*>\s*(?:[*•-]?\s*مشروع\s+متعدد\s+الاستخدامات\s*[*•-]?)\s*</(?:div|span|p|small)>',
+            '', html, flags=re.IGNORECASE
+        )
+
+    # Ensure map containers are centered without awkward crop shifts
+    if 'MAP_' in html or (isinstance(slide_type, str) and slide_type.startswith('map_')):
+        html = re.sub(
+            r'(object-position\s*:\s*)(?:top|bottom|left|right)[^;]*;',
+            r'\1center center;',
+            html, flags=re.IGNORECASE
+        )
+        html = re.sub(
+            r'(background-position\s*:\s*)(?:top|bottom|left|right)[^;]*;',
+            r'\1center center;',
+            html, flags=re.IGNORECASE
         )
 
     # Clean out empty/broken img tags across all slides

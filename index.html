@@ -14856,10 +14856,8 @@
         note.textContent = '';
         return;
       }
-      const info = landUseStatusNote(normalizeLandUseStatus(status ?? tenantProjectData.land_use_status));
       note.hidden = false;
-      note.textContent = 'الاستخدامات المسموحة تنظيميًا: ' + uses + (info ? ' — ' + info.text : '');
-      note.style.color = info && info.tone === 'bad' ? '#9c1d1d' : '';
+      note.textContent = 'الاستخدامات المسموحة تنظيميًا: ' + uses;
     }
 
     function renderAllowedUsesStatusNote(status) {
@@ -14919,7 +14917,6 @@
         .join('\n');
 
       const strippedUses = stripLandUseStatusFromText(parcel.allowed_uses || parcel.allowed_uses_restrictions || '');
-      const landUseStatus = normalizeLandUseStatus(parcel.land_use_status) || strippedUses.status;
       const allowedUsesText = strippedUses.text;
       const constraintsText = String(parcel.regulatory_constraints || '').trim();
       const legacyRestrictionsText = [allowedUsesText, constraintsText]
@@ -14944,7 +14941,6 @@
         max_floors_height: parcel.max_floors_height,
         allowed_uses: allowedUsesText,
         regulatory_constraints: constraintsText,
-        land_use_status: landUseStatus,
         allowed_uses_restrictions: parcel.allowed_uses_restrictions || legacyRestrictionsText,
         // The whole-document summary is the detailed narrative; parcel.summary is only a
         // per-parcel note and must never replace it.
@@ -14960,6 +14956,7 @@
       delete fields.approved_floor_count;
       delete fields.approved_floors;
       delete fields.approved_coverage_ratio;
+      delete fields.land_use_status;
       return fields;
     }
 
