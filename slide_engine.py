@@ -27,9 +27,9 @@ CONTENT_DISTRIBUTION_RULES = """
 4. صفحة بداية كل قسم تحمل اسم القسم وحده بلا وصف وبلا ترجمة وبلا نقاط.
 5. كل شريحة لها فكرة واحدة، ويُقسّم المحتوى الطويل على صفحات إضافية بدلاً من تصغيره أو حذفه.
 6. لا تكرر المعلومة أو مكونات المشروع في أكثر من موضع. الإحالة المختصرة مسموحة، أما إعادة الجدول أو القائمة نفسها فممنوعة.
-7. اختر الشكل بحسب طبيعة المحتوى: نص متصل للنبذات والملخصات، جدول للصفوف المنظمة، رسم بياني أو مخطط تدفق للأرقام والمراحل، وصورة كبيرة للصور والمخططات. استخدم البطاقات فقط لعناصر مستقلة قصيرة ومتوازية، وبحد أقصى ثلاث بطاقات عند الحاجة.
+7. اختر الشكل بحسب طبيعة المحتوى: نص متصل للنبذات والملخصات، جدول للصفوف المنظمة، رسم بياني متنوع (أعمدة، خطوط، كعكة Pie/Donut بـ conic-gradient، مخطط نطاقات Candlestick، أو مخطط تدفق Flowchart للأرقام والمراحل والمبالغ)، وصورة كبيرة للصور والمخططات. استخدم البطاقات فقط لعناصر مستقلة قصيرة ومتوازية، وبحد أقصى ثلاث بطاقات عند الحاجة.
 8. يوضع ملخص نهائي مستند إلى بيانات البرنامج بعد جداول كل قسم تحليلي، ولا تُضاف تحسينات إنشائية أو استرسال لا يحمل معلومة واضحة.
-9. شرائح الصور تستخدم صورة واحدة كبيرة أو صورتين واضحتين في الصفحة؛ يمكن زيادة الصفحات ولا يجوز ضغط الصور في مربعات صغيرة.
+9. شرائح الصور تستخدم صورة واحدة كبيرة أو صورتين واضحتين في الصفحة؛ وكل صورة تظهر مرة واحدة فقط في العرض التقديمي بأكمله ولا يجوز تكرار نفس الصورة في شرائح متعددة (ممنوع تكرار الصورة في شريحة مجمعة ثم إعادتها في شريحة منفردة).
 10. شرائح الموقع والخرائط تبقى داخل قسم تحليل الموقع الجغرافي، وشرائح الأرض وصورها وملخصها داخل قسم تحليل الأرض.
 """
 
@@ -227,6 +227,37 @@ def _rows_have_comparable_numbers(rows):
     return len(values) >= 2
 
 
+def _is_substantive_financial_cell(val, label=''):
+    s = str(val or '').strip()
+    if not s or s in ('—', '-', 'null', 'undefined'):
+        return False
+    if s in ('لا', 'no', 'غير مفعل', 'غير مطبق', 'معطل', 'لا يوجد'):
+        return False
+    if s in ('0', '0.00', '0%', '0.0%', '0 ر.س', '0 م²') and any(k in str(label) for k in ('سماح', 'خصم', 'أتعاب إضافية')):
+        return False
+    return True
+
+
+def _filter_substantive_financial_rows(rows, part_type='table'):
+    if not isinstance(rows, list):
+        return []
+    filtered = []
+    for row in rows:
+        if isinstance(row, (list, tuple)):
+            if len(row) >= 2:
+                label, val = row[0], row[1]
+                if _is_substantive_financial_cell(val, label):
+                    filtered.append(row)
+            elif any(_is_substantive_financial_cell(c) for c in row):
+                filtered.append(row)
+        elif isinstance(row, dict):
+            if any(_is_substantive_financial_cell(v, k) for k, v in row.items()):
+                filtered.append(row)
+        elif _is_substantive_financial_cell(row):
+            filtered.append(row)
+    return filtered
+
+
 def _ensure_required_plan_content(groups, project_data=None, images=None, tenant_id=None):
     source = project_data if isinstance(project_data, dict) else {}
     images = images if isinstance(images, dict) else {}
@@ -257,31 +288,67 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
 
     moodboard_items = _available_asset_items(images.get('moodboard'))
     moodboard_meta = images.get('moodboard_meta') if isinstance(images.get('moodboard_meta'), list) else []
-    if moodboard_items:
-        groups['exterior'] = [slide for slide in groups.get('exterior', []) if slide.get('image_tokens')]
-    for index, item in moodboard_items:
-        meta = moodboard_meta[index - 1] if index <= len(moodboard_meta) and isinstance(moodboard_meta[index - 1], dict) else {}
-        title = str(meta.get('label') or item.get('label') or f'التصور الخارجي {index}').strip()
-        caption = str(meta.get('caption') or item.get('caption') or '').strip()
-        add('exterior', {
-            'title': title, 'type': 'content', 'design_style': 'image',
-            'content_density': 'low', 'requires_image': True,
-            'content_source': f'exterior_image:{index}',
-            'image_tokens': [f'##MOODBOARD_IMAGE_{index}##'],
-            'bullets': [caption] if caption else [],
-        })
+    existing_ext_tokens = {tok for slide in groups.get('exterior', []) for tok in (slide.get('image_tokens') or [])}
+    uncovered_ext = [(idx, item) for idx, item in moodboard_items if f'##MOODBOARD_IMAGE_{idx}##' not in existing_ext_tokens]
+    if not existing_ext_tokens and len(moodboard_items) > 1:
+        for start in range(0, len(moodboard_items), 2):
+            chunk = moodboard_items[start:start + 2]
+            tokens = [f'##MOODBOARD_IMAGE_{idx}##' for idx, _ in chunk]
+            titles = [str(moodboard_meta[idx - 1].get('label') if idx <= len(moodboard_meta) and isinstance(moodboard_meta[idx - 1], dict) else it.get('label') or f'التصور الخارجي {idx}').strip() for idx, it in chunk]
+            combined_title = ' — '.join(titles) if len(titles) > 1 else titles[0]
+            if len(moodboard_items) > 2:
+                combined_title = f'التصورات الخارجية — {start // 2 + 1}'
+            bullets = [str(moodboard_meta[idx - 1].get('caption') if idx <= len(moodboard_meta) and isinstance(moodboard_meta[idx - 1], dict) else it.get('caption') or '').strip() for idx, it in chunk]
+            add('exterior', {
+                'title': combined_title, 'type': 'content', 'design_style': 'image',
+                'content_density': 'medium' if len(chunk) > 1 else 'low', 'requires_image': True,
+                'content_source': f'exterior_images_group:{start + 1}:{start + len(chunk)}',
+                'image_tokens': tokens,
+                'bullets': [b for b in bullets if b],
+            })
+    else:
+        for index, item in uncovered_ext:
+            meta = moodboard_meta[index - 1] if index <= len(moodboard_meta) and isinstance(moodboard_meta[index - 1], dict) else {}
+            title = str(meta.get('label') or item.get('label') or f'التصور الخارجي {index}').strip()
+            caption = str(meta.get('caption') or item.get('caption') or '').strip()
+            add('exterior', {
+                'title': title, 'type': 'content', 'design_style': 'image',
+                'content_density': 'low', 'requires_image': True,
+                'content_source': f'exterior_image:{index}',
+                'image_tokens': [f'##MOODBOARD_IMAGE_{index}##'],
+                'bullets': [caption] if caption else [],
+            })
 
     land_items = _available_asset_items(images.get('land_photos'))
-    for index, item in land_items:
-        description = str(item.get('description') or item.get('caption') or '').strip()
-        title = str(item.get('name') or f'صورة الأرض {index}').strip()
-        add('land', {
-            'title': title, 'type': 'content', 'design_style': 'image',
-            'content_density': 'low', 'requires_image': True,
-            'content_source': f'land_photo:{index}',
-            'image_tokens': [f'##LAND_PHOTO_{index}##'],
-            'bullets': [description] if description else [],
-        })
+    existing_land_tokens = {tok for slide in groups.get('land', []) for tok in (slide.get('image_tokens') or [])}
+    uncovered_land = [(idx, item) for idx, item in land_items if f'##LAND_PHOTO_{idx}##' not in existing_land_tokens]
+    if not existing_land_tokens and len(land_items) > 1:
+        for start in range(0, len(land_items), 2):
+            chunk = land_items[start:start + 2]
+            tokens = [f'##LAND_PHOTO_{idx}##' for idx, _ in chunk]
+            titles = [str(it.get('name') or f'صورة الأرض {idx}').strip() for idx, it in chunk]
+            combined_title = ' — '.join(titles) if len(titles) > 1 else titles[0]
+            if len(land_items) > 2:
+                combined_title = f'صور الأرض — {start // 2 + 1}'
+            bullets = [str(it.get('description') or it.get('caption') or '').strip() for _, it in chunk]
+            add('land', {
+                'title': combined_title, 'type': 'content', 'design_style': 'image',
+                'content_density': 'medium' if len(chunk) > 1 else 'low', 'requires_image': True,
+                'content_source': f'land_photos_group:{start + 1}:{start + len(chunk)}',
+                'image_tokens': tokens,
+                'bullets': [b for b in bullets if b],
+            })
+    else:
+        for index, item in uncovered_land:
+            description = str(item.get('description') or item.get('caption') or '').strip()
+            title = str(item.get('name') or f'صورة الأرض {index}').strip()
+            add('land', {
+                'title': title, 'type': 'content', 'design_style': 'image',
+                'content_density': 'low', 'requires_image': True,
+                'content_source': f'land_photo:{index}',
+                'image_tokens': [f'##LAND_PHOTO_{index}##'],
+                'bullets': [description] if description else [],
+            })
 
     has_boundary_data = any(str(source.get(k) or '').strip() for k in (
         'boundary_lengths', 'surrounding_streets', 'facades_count', 'facades_directions'
@@ -299,38 +366,75 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
 
     plans = _available_asset_items(images.get('plans'))
     plan_meta = images.get('plan_meta') if isinstance(images.get('plan_meta'), list) else []
-    if plans:
-        groups['plans'] = [slide for slide in groups.get('plans', []) if slide.get('image_tokens')]
-    for index, item in plans:
-        meta = plan_meta[index - 1] if index <= len(plan_meta) and isinstance(plan_meta[index - 1], dict) else {}
-        title = str(meta.get('title') or meta.get('name') or item.get('title') or f'المخطط {index}').strip()
-        description = str(meta.get('description') or item.get('description') or '').strip()
-        add('plans', {
-            'title': title, 'type': 'content', 'design_style': 'image',
-            'content_density': 'low', 'requires_image': True,
-            'content_source': f'plan_image:{index}', 'source_table': 'conceptual_plans',
-            'image_tokens': [f'##PLAN_IMAGE_{index}##'],
-            'bullets': [description] if description else [],
-        })
+    existing_plan_tokens = {tok for slide in groups.get('plans', []) for tok in (slide.get('image_tokens') or [])}
+    uncovered_plans = [(idx, item) for idx, item in plans if f'##PLAN_IMAGE_{idx}##' not in existing_plan_tokens]
+    if not existing_plan_tokens and len(plans) > 1:
+        for start in range(0, len(plans), 2):
+            chunk = plans[start:start + 2]
+            tokens = [f'##PLAN_IMAGE_{idx}##' for idx, _ in chunk]
+            titles = [str(plan_meta[idx - 1].get('title') if idx <= len(plan_meta) and isinstance(plan_meta[idx - 1], dict) else it.get('title') or f'المخطط {idx}').strip() for idx, it in chunk]
+            combined_title = ' — '.join(titles) if len(titles) > 1 else titles[0]
+            if len(plans) > 2:
+                combined_title = f'المخططات المعمارية — {start // 2 + 1}'
+            bullets = [str(plan_meta[idx - 1].get('description') if idx <= len(plan_meta) and isinstance(plan_meta[idx - 1], dict) else it.get('description') or '').strip() for idx, it in chunk]
+            add('plans', {
+                'title': combined_title, 'type': 'content', 'design_style': 'image',
+                'content_density': 'medium' if len(chunk) > 1 else 'low', 'requires_image': True,
+                'content_source': f'plan_images_group:{start + 1}:{start + len(chunk)}',
+                'source_table': 'conceptual_plans',
+                'image_tokens': tokens,
+                'bullets': [b for b in bullets if b],
+            })
+    else:
+        for index, item in uncovered_plans:
+            meta = plan_meta[index - 1] if index <= len(plan_meta) and isinstance(plan_meta[index - 1], dict) else {}
+            title = str(meta.get('title') or meta.get('name') or item.get('title') or f'المخطط {index}').strip()
+            description = str(meta.get('description') or item.get('description') or '').strip()
+            add('plans', {
+                'title': title, 'type': 'content', 'design_style': 'image',
+                'content_density': 'low', 'requires_image': True,
+                'content_source': f'plan_image:{index}', 'source_table': 'conceptual_plans',
+                'image_tokens': [f'##PLAN_IMAGE_{index}##'],
+                'bullets': [description] if description else [],
+            })
 
     interior_components = images.get('interior_components') if isinstance(images.get('interior_components'), list) else []
-    if interior_components:
-        groups['interior'] = [slide for slide in groups.get('interior', []) if slide.get('image_tokens')]
+    existing_interior_tokens = {tok for slide in groups.get('interior', []) for tok in (slide.get('image_tokens') or [])}
     for component_index, component in enumerate(interior_components, 1):
         if not isinstance(component, dict):
             continue
         component_name = str(component.get('name') or f'المكون {component_index}').strip()
-        for image_index, item in _available_asset_items(component.get('images')):
-            label = str(item.get('label') or component_name).strip()
-            caption = str(item.get('caption') or '').strip()
-            add('interior', {
-                'title': f'{component_name} — {label}' if label != component_name else component_name,
-                'type': 'content', 'design_style': 'image', 'content_density': 'low',
-                'requires_image': True,
-                'content_source': f'interior_image:{component_index}:{image_index}',
-                'image_tokens': [f'##INTERIOR_COMP_{component_index}_IMG_{image_index}##'],
-                'bullets': [caption] if caption else [],
-            })
+        comp_items = _available_asset_items(component.get('images'))
+        uncovered_comp_items = [
+            (j, it) for j, it in comp_items
+            if f'##INTERIOR_COMP_{component_index}_IMG_{j}##' not in existing_interior_tokens
+        ]
+        if not any(f'##INTERIOR_COMP_{component_index}_IMG_' in tok for tok in existing_interior_tokens) and len(comp_items) > 1:
+            for start in range(0, len(comp_items), 2):
+                chunk = comp_items[start:start + 2]
+                tokens = [f'##INTERIOR_COMP_{component_index}_IMG_{j}##' for j, _ in chunk]
+                labels = [str(it.get('label') or component_name).strip() for _, it in chunk]
+                combined_title = f'{component_name} — ' + ' / '.join(labels) if len(labels) > 1 else f'{component_name} — {labels[0]}'
+                bullets = [str(it.get('caption') or '').strip() for _, it in chunk]
+                add('interior', {
+                    'title': combined_title, 'type': 'content', 'design_style': 'image',
+                    'content_density': 'medium' if len(chunk) > 1 else 'low', 'requires_image': True,
+                    'content_source': f'interior_images_group:{component_index}:{start + 1}:{start + len(chunk)}',
+                    'image_tokens': tokens,
+                    'bullets': [b for b in bullets if b],
+                })
+        else:
+            for image_index, item in uncovered_comp_items:
+                label = str(item.get('label') or component_name).strip()
+                caption = str(item.get('caption') or '').strip()
+                add('interior', {
+                    'title': f'{component_name} — {label}' if label != component_name else component_name,
+                    'type': 'content', 'design_style': 'image', 'content_density': 'low',
+                    'requires_image': True,
+                    'content_source': f'interior_image:{component_index}:{image_index}',
+                    'image_tokens': [f'##INTERIOR_COMP_{component_index}_IMG_{image_index}##'],
+                    'bullets': [caption] if caption else [],
+                })
 
     components = _project_component_rows(source)
     if components:
@@ -376,6 +480,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                         subheading = ''
                     continue
                 rows = part.get('rows') if isinstance(part.get('rows'), list) else []
+                rows = _filter_substantive_financial_rows(rows, part.get('type'))
                 chunk_size = 8 if part.get('type') == 'table' else 6
                 if not rows:
                     continue
@@ -645,7 +750,17 @@ def _suggest_design_style(title, bullets=None, slide_type='content'):
         return 'map'
 
     if re.search(r'(?:مؤشر|أداء|قيمة مضافة|عائد|roi|noi|ربح|تكلفة|مالي|جدوى|إيراد|نسبة|رقم|إحصائية|تكلفة|دخل|استثمار|profit|cost|financial|revenue)', text):
+        if re.search(r'(?:توزيع|مساحات|حصص|نسب الاستخدام|مصادر التمويل|pie|donut)', text):
+            return 'pie'
+        if re.search(r'(?:حساسية|سيناريو|نطاق|مخاطر العائد|candlestick)', text):
+            return 'candlestick'
+        if re.search(r'(?:سحب|سداد|تدفق نقدي|قنوات|pipeline|flow)', text):
+            return 'flow'
         return 'dashboard'
+    if re.search(r'(?:توزيع الوحدات|فئات المساحات|مدرج تكراري|histogram)', text):
+        return 'histogram'
+    if re.search(r'(?:انتشار|علاقة|مقارنة السوق|scatter)', text):
+        return 'scatter'
     if re.search(r'(?:وحدات|مساحات|مواصفات|جدول|مقارنة|أنواع|تفاصيل|مكونات|قائمة|بيانات|units|areas|specs|table|components|details|list|data)', text):
         return 'table'
     if re.search(r'(?:خطة|زمن|جدول|مراحل|تنفيذ|تطوير|خطوات|مدة|timeline|schedule|phases|plan|stages|duration)', text):
@@ -2046,7 +2161,12 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'cards': 'بطاقتان أو ثلاث فقط لعناصر مستقلة عريضة وغنية؛ استخدم الفقرات النصية أو الجداول بدلاً من التقطيع المفرط إلى مربعات صغيرة',
         'timeline': 'مراحل زمنية واضحة ومسار تدفق زمني، واعرض الملاحظة فقط تحت المرحلة التي تحتوي ملاحظة فعلية',
         'table': 'جدول احترافي كامل بالمسميات والقيم الأصلية وفواصل آلاف للأرقام دون تقريب مع رؤوس جداول عريضة 700',
-        'chart': 'رسم بياني بألوان الهوية مبني على الأرقام الفعلية مع جدول البيانات الكامل بجانبه',
+        'chart': 'رسم بياني إحصائي احترافي (أعمدة، خطوط، كعكة Pie/Donut بـ conic-gradient، مخطط نطاقات Candlestick، أو مخطط تدفق Flowchart) بـ HTML و CSS النقي مع جدول الأرقام بجانبه وبألوان الهوية',
+        'pie': 'مخطط دائري / كعكة (Pie / Donut Chart) احترافي باستخدام conic-gradient في CSS مع دليل ألوان (Legend) وجدول الأرقام بجانبه',
+        'donut': 'مخطط كعكة مجوف (Donut Chart) احترافي باستخدام conic-gradient ومركز أبيض لعرض الإجمالي مع دليل ألوان وجدول الأرقام',
+        'scatter': 'مخطط نقاط انتشار (Scatter Plot) بـ HTML/CSS يوضح توزع النقاط على محورين مع تسميات واضحة ومقارنة معيارية',
+        'histogram': 'مخطط توزيع تكراري (Histogram) بأعمدة متلاصقة توضح توزيع الفئات ونسبها بدقة',
+        'candlestick': 'مخطط نطاقات وسيناريوهات (Candlestick / Range Plot) يوضح الحد الأدنى والمتوقع والأعلى لكل بند أو مرحلة',
         'text': 'عنوان وفقرة غنية ووافية أو قائمة منظمة تشرح الفكرة بالكامل بلا اختصار مخل وبلا تجزئة لمربعات فارغة',
         'image': 'صورة واحدة كبيرة أو صورتان واضحتان مع التسمية والوصف الصحيحين',
         'flow': 'مخطط تدفق بصري هندسي راقٍ (Flowchart / Visual Pipeline) يربط الكتل بمسارات تدفق واضحة وبألوان الهوية مع إبراز القيم والمراحل والمبالغ',
@@ -2121,9 +2241,9 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         timeline_note = _timeline_data_note(project_data)
         if timeline_note:
             notes.append(timeline_note.strip())
-    if design_style in ('dashboard', 'table', 'chart', 'flow') or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
+    if design_style in ('dashboard', 'table', 'chart', 'pie', 'donut', 'scatter', 'histogram', 'candlestick', 'flow') or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
         notes.append('في الشرائح المالية: انقل جميع الجداول والمؤشرات المطلوبة بمسمياتها الأصلية وبالقيم والوحدات نفسها، من دون حذف صف أو عمود أو إعادة حساب.')
-        notes.append('نوّع في أسلوب العرض بين جداول البيانات المنظمة ومخططات التدفق البصرية (Flowcharts) المناسبة للتدفقات وجدول سحب وسداد التمويل ومراحل التطوير.')
+        notes.append('نوّع في أسلوب العرض بين جداول البيانات المنظمة والرسوم البيانية المتنوعة (Pie / Donut بـ conic-gradient، الأعمدة، الخطوط، النطاقات Candlestick، ومخططات التدفق Flowcharts) المناسبة للتدفقات وجدول سحب وسداد التمويل ومراحل التطوير.')
         notes.append('نسّق الأعداد بفواصل الآلاف للعرض فقط، من دون تقريب أو تحويل إلى ألف أو مليون أو تغيير عدد الخانات العشرية.')
         notes.append('أضف رسماً بيانياً عندما توجد قيم فعلية قابلة للمقارنة، وضع جدول البيانات الكامل بجانبه بألوان الهوية فقط.')
         financial_note = _financial_data_note(project_data)

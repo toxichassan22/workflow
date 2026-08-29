@@ -13888,13 +13888,35 @@
         }
       };
       walk(root);
+      const isSubstantiveFieldRow = row => {
+        if (!Array.isArray(row) || row.length < 2) return false;
+        const label = String(row[0] ?? '');
+        const val = String(row[1] ?? '').trim();
+        if (!val || val === '—' || val === '-' || val === 'null' || val === 'undefined') return false;
+        if (val === 'لا' || val === 'غير مفعل' || val === 'غير مطبق' || val === 'معطل' || val === 'لا يوجد') return false;
+        if (['0', '0.00', '0%', '0.0%', '0 ر.س', '0 م²'].includes(val) && /سماح|خصم|أتعاب إضافية/.test(label)) return false;
+        return true;
+      };
+
+      const cleanParts = [];
+      for (const part of parts) {
+        if (part.type === 'fields') {
+          const substantiveRows = (part.rows || []).filter(isSubstantiveFieldRow);
+          if (substantiveRows.length > 0) {
+            cleanParts.push({ ...part, rows: substantiveRows });
+          }
+        } else {
+          cleanParts.push(part);
+        }
+      }
+
       // A heading with nothing under it is a section the current settings switched off. A block
       // title still counts as filled when only its own sub-headings carry the tables.
-      const trimmed = parts.filter((part, index) => {
+      const trimmed = cleanParts.filter((part, index) => {
         if (part.type !== 'heading') return true;
-        for (let next = index + 1; next < parts.length; next += 1) {
-          if (parts[next].type !== 'heading') return true;
-          if (parts[next].level <= part.level) return false;
+        for (let next = index + 1; next < cleanParts.length; next += 1) {
+          if (cleanParts[next].type !== 'heading') return true;
+          if (cleanParts[next].level <= part.level) return false;
         }
         return false;
       });
