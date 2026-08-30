@@ -8,6 +8,7 @@ import os
 import re
 import concurrent.futures
 import html as html_lib
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from design_templates import (
     build_design_rules, contrast_ratio, dark_surface_color, extract_slide_elements,
@@ -2568,6 +2569,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
         'خارج قسم الدراسة المالية استخدم النص أو الجدول أو الصورة المناسبة فقط، وممنوع إنشاء رسم بياني؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
+        'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
         'املأ الشريحة بالمحتوى الضروري والوافي؛ وشرائح الملخص المالي تستخدم جداول التقرير نفسها دون ضغط أو حذف',
     ]
     company_tone = str((project_data or {}).get('_company_logo_tone') or (branding or {}).get('_logo_tone') or '').strip().lower()
@@ -2748,6 +2750,30 @@ def _ensure_map_summary_structure(html):
     return opening + background + inner + closing
 
 
+def _location_data_timestamp(project_data):
+    value = str((project_data or {}).get('location_data_fetched_at') or '').strip()
+    if not value:
+        return ''
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        saudi = parsed.astimezone(timezone(timedelta(hours=3)))
+        return saudi.strftime('%Y-%m-%d %H:%M') + ' بتوقيت السعودية'
+    except (TypeError, ValueError):
+        return value
+
+
+def _inject_location_data_timestamp(html, project_data):
+    timestamp = _location_data_timestamp(project_data)
+    if not timestamp or timestamp in html:
+        return html
+    label = html_lib.escape('آخر تحديث لبيانات الموقع: ' + timestamp)
+    marker = (f'<div data-location-data-timestamp style="position:absolute;bottom:40px;right:24px;z-index:20;'
+              f'font-size:11px;background:#ffffff;color:#172033;padding:4px 8px;border-radius:5px;">{label}</div>')
+    return re.sub(r'(</div>\s*)$', marker + r'\1', html, count=1)
+
+
 def _normalize_map_summary_layout(html, marker_side='right'):
     def normalize_background(match):
         return _set_tag_style(
@@ -2772,6 +2798,21 @@ def _normalize_map_summary_layout(html, marker_side='right'):
                   normalize_background, html, flags=re.IGNORECASE)
     return re.sub(r'<[a-z][^>]*\bdata-map-summary-card\b[^>]*>',
                   normalize_card, html, flags=re.IGNORECASE)
+
+
+def _format_presentation_numeric_text(html):
+    parts = re.split(r'(<[^>]+>)', html)
+    def format_number(match):
+        value = match.group(1)
+        if '.' not in value and 1900 <= abs(int(value)) <= 2100:
+            return value
+        return ((f'{int(value.split(".", 1)[0]):,}.' + value.split('.', 1)[1])
+                if '.' in value else f'{int(value):,}')
+
+    for index in range(0, len(parts), 2):
+        parts[index] = re.sub(r'(?<![\d,٬])(-?\d{4,}(?:\.\d+)?)(?![\d,٬])',
+                              format_number, parts[index])
+    return ''.join(parts)
 
 
 def _normalize_table_readability(html):
@@ -3924,6 +3965,11 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
         total_slides=total_slides, tenant_id=tenant_id, branding=branding,
         project_data=project_data
     )
+    if (isinstance(slide_type, str) and (slide_type.startswith('map_') or slide_type == 'site_specs')
+            or content_source in ('site_analysis', 'executive_content.summary', 'location_detail')):
+        html = _inject_location_data_timestamp(html, project_data)
+    if str(content_source or '').startswith(('financial_', 'market_study_data.')):
+        html = _format_presentation_numeric_text(html)
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
     if (isinstance(slide_type, str) and slide_type.startswith('map_')) or content_source in ('site_analysis', 'executive_content.summary'):

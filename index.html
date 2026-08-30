@@ -6437,6 +6437,7 @@
             };
             tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData, highlightSite);
             tenantCreativeImages.maps_persisted = true;
+            setLocationDataFetchedAt();
             tenantCreativeImages.map_highlight_site = highlightSite !== false;
             if (replaceCurrentSlideMapAssets(res.placeholders)) renderTenantSlides();
             tenantCreativeImages.last_error = null;
@@ -8123,7 +8124,9 @@
             status: row.status || '',
             price: [row.price_type, priceRange || row.price_value].filter(Boolean).join(' '),
             operationType: row.operation_type || '',
-            area: row.area_sqm || '',
+            area: row.area_mode === 'range' || row.area_from || row.area_to
+              ? [row.area_from, row.area_to].filter(Boolean).join(' إلى ')
+              : (row.area_sqm || ''),
             source: row.source || ''
           };
         });
@@ -8762,12 +8765,15 @@
           if (!row || !text(row.name)) return;
           const price = row.price_type
             ? row.price_type + ': ' + (row.price_from || row.price_to
-              ? [row.price_from, row.price_to].filter(Boolean).join(' إلى ')
-              : (row.price_value || ''))
-            : (row.price_value || '');
+              ? [formatMarketNumber(row.price_from), formatMarketNumber(row.price_to)].filter(Boolean).join(' إلى ')
+              : formatMarketNumber(row.price_value))
+            : formatMarketNumber(row.price_value);
+          const area = row.area_mode === 'range' || row.area_from || row.area_to
+            ? [formatMarketNumber(row.area_from), formatMarketNumber(row.area_to)].filter(Boolean).join(' إلى ')
+            : formatMarketNumber(row.area_sqm);
           const details = [
             row.project_type ? 'النوع: ' + row.project_type : '',
-            row.area_sqm ? 'مساحة الوحدة: ' + row.area_sqm + ' م²' : '',
+            area ? 'مساحة الوحدة: ' + area + ' م²' : '',
             row.status ? 'الحالة: ' + row.status : '',
             row.operation_type ? 'نوع العملية: ' + row.operation_type : '',
             price ? 'السعر: ' + price : '',
@@ -9543,6 +9549,8 @@
         name: 'اسم المشروع', project_name: 'اسم المشروع',
         project_type: 'نوع المشروع', projectType: 'نوع المشروع',
         area_sqm: 'مساحة الوحدة', areaSqm: 'مساحة الوحدة', area: 'مساحة الوحدة',
+        area_from: 'مساحة الوحدة من', areaFrom: 'مساحة الوحدة من',
+        area_to: 'مساحة الوحدة إلى', areaTo: 'مساحة الوحدة إلى',
         status: 'الحالة', project_status: 'الحالة',
         operation_type: 'نوع العملية', operationType: 'نوع العملية', operation: 'نوع العملية',
         price_type: 'نوع السعر', priceType: 'نوع السعر',
@@ -9590,6 +9598,15 @@
       }).join('<br>');
     }
 
+    function marketOfficialSourceReliability(entityName, sourceName, url) {
+      const source = String(sourceName || '').replace(/[أإآ]/g, 'ا').toLowerCase();
+      let host = '';
+      try { host = new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch (error) { host = ''; }
+      if (host && /(رسمي|المشروع|المطور|official)/.test(source)) return 'مصدر رسمي للجهة';
+      const tokens = String(entityName || '').toLowerCase().match(/[a-z0-9]{4,}/g) || [];
+      return host && tokens.some(token => host.includes(token)) ? 'مصدر رسمي للجهة' : '';
+    }
+
     function buildMarketCompetitorSourceRows(competitors) {
       const rows = [];
       (Array.isArray(competitors) ? competitors : []).forEach(competitor => {
@@ -9606,7 +9623,7 @@
             url,
             data_date: '',
             accessed_at: '',
-            reliability: '',
+            reliability: marketOfficialSourceReliability(competitor.name, competitor.source, url),
             note: marketSourceNote(competitor, sourceFields)
           });
         });
@@ -9615,8 +9632,11 @@
     }
 
     function mergeMarketSourceRows(existing, incoming) {
-      const base = (Array.isArray(existing) ? existing : [])
-        .filter(row => row && row.source_kind !== 'competitor');
+      const existingRows = Array.isArray(existing) ? existing : [];
+      const base = existingRows.filter(row => row && row.source_kind !== 'competitor');
+      const byKey = new Map(existingRows.filter(Boolean).map(row => [[
+        row.source_kind || 'source', row.competitor_id || '', String(row.url || '').trim().toLowerCase()
+      ].join('|'), row]));
       const rows = [];
       const seen = new Set();
       (Array.isArray(incoming) ? incoming : []).forEach(row => {
@@ -9624,7 +9644,8 @@
         const key = [row.source_kind || 'source', row.competitor_id || '', String(row.url).trim().toLowerCase()].join('|');
         if (seen.has(key)) return;
         seen.add(key);
-        rows.push(row);
+        const previous = byKey.get(key) || {};
+        rows.push({ ...row, ...previous, reliability: previous.reliability || row.reliability || '' });
       });
       return base.concat(rows);
     }
@@ -9690,6 +9711,57 @@
       return '';
     }
 
+    function cleanMarketNumber(value) {
+      let text = String(value ?? '').trim();
+      if (!text) return '';
+      text = text.replace(/[٠-٩]/g, ch => String('٠١٢٣٤٥٦٧٨٩'.indexOf(ch)))
+        .replace(/[٬،,]/g, '').replace(/٫/g, '.').replace(/\s/g, '');
+      return /^-?\d+(?:\.\d+)?$/.test(text) ? text : String(value ?? '').trim();
+    }
+
+    function formatMarketNumber(value) {
+      const clean = cleanMarketNumber(value);
+      if (clean === '') return '';
+      const number = Number(clean);
+      if (!Number.isFinite(number)) return clean;
+      const decimals = clean.includes('.') ? clean.split('.')[1].length : 0;
+      return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: decimals, maximumFractionDigits: decimals
+      }).format(number);
+    }
+
+    function formatMarketNumericInput(input) {
+      if (!input || input.dataset.marketNumericReady) return;
+      input.dataset.marketNumericReady = '1';
+      input.addEventListener('focus', () => { input.value = cleanMarketNumber(input.value); });
+      input.addEventListener('blur', () => { input.value = formatMarketNumber(input.value); });
+      input.value = formatMarketNumber(input.value);
+    }
+
+    function renderCompetitorAreaInputs(tr, row = {}) {
+      const cell = tr.querySelector('[data-field="area_cell"]');
+      if (!cell) return;
+      const from = row.area_from ?? row.areaFrom ?? '';
+      const to = row.area_to ?? row.areaTo ?? '';
+      const mode = row.area_mode === 'range' || from !== '' || to !== '' ? 'range' : 'fixed';
+      cell.innerHTML = '<select data-field="area_mode"><option value="fixed"' + (mode === 'fixed' ? ' selected' : '') + '>مساحة ثابتة</option><option value="range"' + (mode === 'range' ? ' selected' : '') + '>من — إلى</option></select>' +
+        (mode === 'range'
+          ? '<input data-field="area_from" value="' + escapeHtml(from) + '" placeholder="من (م²)" inputmode="decimal"><input data-field="area_to" value="' + escapeHtml(to) + '" placeholder="إلى (م²)" inputmode="decimal" style="margin-top:6px">'
+          : '<input data-field="area_sqm" value="' + escapeHtml(row.area_sqm || '') + '" placeholder="المساحة (م²)" inputmode="decimal" style="margin-top:6px">');
+      cell.querySelector('[data-field="area_mode"]').addEventListener('change', event => {
+        const current = collectOneCompetitorRow(tr);
+        current.area_mode = event.target.value;
+        if (current.area_mode === 'range' && !current.area_from) current.area_from = current.area_sqm;
+        if (current.area_mode === 'fixed' && !current.area_sqm) current.area_sqm = current.area_from || current.area_to;
+        renderCompetitorAreaInputs(tr, current);
+        persistMarketStudyFromDom();
+      });
+      cell.querySelectorAll('input').forEach(input => {
+        formatMarketNumericInput(input);
+        input.addEventListener('input', persistMarketStudyFromDom);
+      });
+    }
+
     function addMarketCompetitorRow(row = {}) {
       const tb = document.querySelector('#marketCompetitorsTable tbody');
       if (!tb) return;
@@ -9705,7 +9777,7 @@
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(MARKET_PROJECT_TYPES, row.project_type || '') + '</select></td>' +
-        '<td><input data-field="area_sqm" value="' + escapeHtml(row.area_sqm || '') + '" inputmode="decimal"></td>' +
+        '<td data-field="area_cell"></td>' +
         '<td><select data-field="status">' + marketSelectHtml(['قائم', 'تحت الإنشاء', 'على الخارطة'], row.status || '') + '</select></td>' +
         '<td><textarea data-field="source" rows="2" placeholder="المصدر">' + escapeHtml(row.source || '') + '</textarea>' +
         '<div data-source-links class="market-source-links">' + marketSourceLinksHtml(row) + '</div></td>' +
@@ -9714,6 +9786,7 @@
         '<td data-field="price_cell"></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-competitor>حذف</button></td>';
       tb.appendChild(tr);
+      renderCompetitorAreaInputs(tr, row);
       renderCompetitorPriceInputs(tr, row);
       tr.querySelector('[data-field="operation_type"]').addEventListener('change', () => {
         const nextOp = tr.querySelector('[data-field="operation_type"]').value;
@@ -9745,7 +9818,10 @@
       } else {
         cell.innerHTML = '<input data-field="price_value" data-currency="SAR" value="' + escapeHtml(priceValue) + '" placeholder="القيمة (ر.س)" inputmode="decimal">';
       }
-      cell.querySelectorAll('input').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+      cell.querySelectorAll('input').forEach(input => {
+        formatMarketNumericInput(input);
+        input.addEventListener('input', persistMarketStudyFromDom);
+      });
     }
 
     function collectOneCompetitorRow(tr) {
@@ -9764,15 +9840,18 @@
         id: tr.dataset.competitorId,
         name: read('name'),
         project_type: read('project_type'),
-        area_sqm: read('area_sqm'),
+        area_mode: read('area_mode') || 'fixed',
+        area_sqm: cleanMarketNumber(read('area_sqm')),
+        area_from: cleanMarketNumber(read('area_from')),
+        area_to: cleanMarketNumber(read('area_to')),
         status: read('status'),
         classification: tr.dataset.classification || '',
         operation_type: read('operation_type'),
         price_type: read('price_type'),
         price_currency: tr.dataset.priceCurrency || 'SAR',
-        price_value: read('price_value'),
-        price_from: read('price_from'),
-        price_to: read('price_to'),
+        price_value: cleanMarketNumber(read('price_value')),
+        price_from: cleanMarketNumber(read('price_from')),
+        price_to: cleanMarketNumber(read('price_to')),
         source: read('source'),
         source_url: source_urls[0] || '',
         source_urls,
@@ -9822,6 +9901,49 @@
       });
     }
 
+    function marketCompetitorDomRow(competitorId) {
+      return Array.from(document.querySelectorAll('#marketCompetitorsTable tbody tr'))
+        .find(row => row.dataset.competitorId === String(competitorId || ''));
+    }
+
+    function attachMarketSourceToCompetitor(sourceRow) {
+      const competitor = marketCompetitorDomRow(sourceRow?.dataset?.competitorId);
+      const url = String(sourceRow?.querySelector('[data-field="url"]')?.value || '').trim();
+      if (!competitor || !safeMarketUrl(url)) return;
+      const host = competitor.querySelector('[data-source-links]');
+      const urls = marketSourceUrls({
+        source_urls: Array.from(host?.querySelectorAll('a[href]') || []).map(anchor => anchor.getAttribute('href'))
+      });
+      if (!urls.some(item => item.toLowerCase() === url.toLowerCase())) urls.push(url);
+      if (host) host.innerHTML = urls.map(item => '<a href="' + escapeHtml(item) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item) + '</a>').join('<br>');
+    }
+
+    function removeMarketSourcePermanently(sourceRow) {
+      if (!sourceRow) return;
+      const url = String(sourceRow.querySelector('[data-field="url"]')?.value || '').trim();
+      const competitor = marketCompetitorDomRow(sourceRow.dataset.competitorId);
+      if (competitor && url) {
+        const host = competitor.querySelector('[data-source-links]');
+        host?.querySelectorAll('a[href]').forEach(anchor => {
+          if (String(anchor.getAttribute('href') || '').trim().toLowerCase() === url.toLowerCase()) anchor.remove();
+        });
+        let fieldSources = {};
+        try { fieldSources = JSON.parse(competitor.dataset.fieldSources || '{}') || {}; } catch (error) { fieldSources = {}; }
+        Object.keys(fieldSources).forEach(field => {
+          const remaining = marketValueList(fieldSources[field]).filter(item => String(item).toLowerCase() !== url.toLowerCase());
+          if (remaining.length) fieldSources[field] = remaining;
+          else delete fieldSources[field];
+        });
+        competitor.dataset.fieldSources = JSON.stringify(fieldSources);
+        const sourceInput = competitor.querySelector('[data-field="source"]');
+        if (sourceInput && String(sourceInput.value || '').toLowerCase().includes(url.toLowerCase())) {
+          sourceInput.value = String(sourceInput.value || '').replace(new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), '').trim();
+        }
+      }
+      sourceRow.remove();
+      persistMarketStudyFromDom();
+    }
+
     function addMarketSourceRow(row = {}, targetBody) {
       const sourceRow = { ...(row || {}) };
       let tb = targetBody;
@@ -9844,6 +9966,8 @@
       tr.dataset.competitorId = sourceRow.competitor_id || '';
       tr.dataset.sourceFields = JSON.stringify(sourceRow.source_fields || {});
       const safeUrl = safeMarketUrl(sourceRow.url || '');
+      sourceRow.reliability = sourceRow.reliability || marketOfficialSourceReliability(
+        sourceRow.competitor_name, sourceRow.name, sourceRow.url);
       const link = safeUrl
         ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(sourceRow.url || '') + '</a>'
         : '';
@@ -9857,10 +9981,7 @@
         '<td><textarea data-field="note" rows="2">' + escapeHtml(sourceRow.note || '') + '</textarea></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-source>حذف</button></td>';
       tb.appendChild(tr);
-      tr.querySelector('[data-remove-source]').addEventListener('click', () => {
-        tr.remove();
-        persistMarketStudyFromDom();
-      });
+      tr.querySelector('[data-remove-source]').addEventListener('click', () => removeMarketSourcePermanently(tr));
       tr.querySelector('[data-field="url"]').addEventListener('input', () => {
         const value = tr.querySelector('[data-field="url"]')?.value || '';
         const current = safeMarketUrl(value);
@@ -9868,6 +9989,14 @@
         if (host) host.innerHTML = current
           ? '<a href="' + escapeHtml(current) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(value) + '</a>'
           : '';
+        attachMarketSourceToCompetitor(tr);
+        const reliability = tr.querySelector('[data-field="reliability"]');
+        if (reliability && !reliability.value) {
+          reliability.value = marketOfficialSourceReliability(
+            tr.querySelector('[data-field="competitor_name"]')?.value,
+            tr.querySelector('[data-field="name"]')?.value,
+            value);
+        }
       });
       tr.querySelectorAll('input,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
     }
@@ -11502,6 +11631,42 @@
       return rows;
     }
 
+    function normalizeAccessRoadNames(value) {
+      const values = Array.isArray(value) ? value : String(value || '').split(/[\n,،;|]+/);
+      const seen = new Set();
+      const result = [];
+      values.forEach(raw => {
+        const name = String(raw || '').trim();
+        if (!name) return;
+        const prefix = name.match(/^(طريق|شارع|جادة|ممر)\s+/)?.[1] || '';
+        name.split(/\s+و(?=\s|ال|شارع|طريق|جادة|ممر)\s*/).map(part => part.trim()).filter(Boolean).forEach(part => {
+          if (prefix && !/^(طريق|شارع|جادة|ممر)\s+/.test(part)) part = prefix + ' ' + part;
+          const key = part.replace(/^(طريق|شارع|جادة|ممر)\s+/, '').replace(/[\sـ]+/g, ' ').trim().toLowerCase();
+          if (!key || seen.has(key)) return;
+          seen.add(key);
+          result.push(part);
+        });
+      });
+      return result;
+    }
+
+    function formatLocationDataFetchedAt(value) {
+      const date = new Date(value || '');
+      if (!Number.isFinite(date.getTime())) return '';
+      return new Intl.DateTimeFormat('ar-SA-u-ca-gregory', {
+        timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+      }).format(date) + ' بتوقيت السعودية';
+    }
+
+    function setLocationDataFetchedAt(value = new Date().toISOString()) {
+      tenantProjectData.location_data_fetched_at = value;
+      const input = document.getElementById('locationDataFetchedAt');
+      if (input) input.value = value;
+      const display = document.getElementById('locationDataFetchedAtDisplay');
+      if (display) display.textContent = value ? 'آخر تحديث لبيانات الموقع: ' + formatLocationDataFetchedAt(value) : '';
+    }
+
     function serializeLocationTable(key) {
       const table = document.querySelector('#tenantProjectForm table.location-table[data-location-table="' + key + '"]');
       const hidden = document.querySelector('#tenantProjectForm [data-key="' + key + '"].location-table-value');
@@ -11519,7 +11684,7 @@
         if (dur) parts.push(dur + ' دقائق');
         lines.push(parts.join(' — '));
       });
-      hidden.value = lines.join('\n');
+      hidden.value = (key === 'main_roads' ? normalizeAccessRoadNames(lines) : lines).join('\n');
       if (key === 'nearby_landmarks') {
         const known = Array.isArray(tenantNearbyLandmarks) ? tenantNearbyLandmarks : [];
         tenantNearbyLandmarks = parseLocationFieldText(key, hidden.value).map(row => {
@@ -11604,7 +11769,8 @@
       if (!table) return;
       const tbody = table.querySelector('tbody');
       tbody.innerHTML = '';
-      const rows = parseLocationFieldText(key, value);
+      let rows = parseLocationFieldText(key, value);
+      if (key === 'main_roads') rows = normalizeAccessRoadNames(rows.map(row => row.name)).map(name => ({ name }));
       (rows.length ? rows : [{}]).forEach(r => addLocationTableRow(key, r));
       serializeLocationTable(key);
     }
@@ -11651,15 +11817,20 @@
       });
       wrap.appendChild(addBtn);
       if (key === 'nearby_landmarks') {
-        const infoBtn = document.createElement('button');
-        infoBtn.type = 'button';
-        infoBtn.className = 'btn primary small';
-        infoBtn.textContent = 'جلب معلومات المسافة والمدة';
-        infoBtn.style.marginTop = '8px';
-        infoBtn.onclick = () => fetchNearbyLandmarkDetails();
-        wrap.appendChild(infoBtn);
+        const fetchedAt = tenantProjectData.location_data_fetched_at || '';
+        const display = document.createElement('div');
+        display.id = 'locationDataFetchedAtDisplay';
+        display.className = 'location-table-hint';
+        display.textContent = fetchedAt ? 'آخر تحديث لبيانات الموقع: ' + formatLocationDataFetchedAt(fetchedAt) : '';
+        wrap.appendChild(display);
+        const fetchedInput = document.createElement('input');
+        fetchedInput.type = 'hidden';
+        fetchedInput.id = 'locationDataFetchedAt';
+        fetchedInput.dataset.key = 'location_data_fetched_at';
+        fetchedInput.dataset.type = 'text';
+        fetchedInput.value = fetchedAt;
+        wrap.appendChild(fetchedInput);
       }
-
       const hint = document.createElement('div');
       hint.className = 'location-table-hint';
       hint.textContent = 'تُملأ تلقائيًا من تحليل الموقع — يمكنك التعديل أو الإضافة أو الحذف.';
@@ -11677,7 +11848,7 @@
       return wrap;
     }
 
-    const TENANT_PROJECT_HIDDEN_FIELDS = new Set(['plot_number', 'land_area', 'built_area', 'building_system', 'infrastructure', 'population_density', 'secondary_roads', 'city_landmarks']);
+    const TENANT_PROJECT_HIDDEN_FIELDS = new Set(['plot_number', 'land_area', 'built_area', 'building_system', 'infrastructure', 'population_density', 'secondary_roads', 'city_landmarks', 'location_data_fetched_at']);
     const TENANT_CLIENT_ENTERED_LAND_FIELDS = new Set(['approved_financial_area', 'approved_floor_count', 'approved_coverage_ratio']);
 
     function updateClientEnteredLandFieldState(input) {
@@ -12208,12 +12379,12 @@
 
     // S4: Financial Study Model (Extracted from THE-VIEW-Financial-Model-FINAL-v2.html)
     const nf = new Intl.NumberFormat('en-US');
-    function money(n) { return nf.format(Math.round(Number(n) || 0)) }
+    function money(n) { return new Intl.NumberFormat('en-US', { maximumFractionDigits: 10 }).format(Number(n) || 0) }
     function rawNum(n) { return Number(n || 0) }
     function parseNumber(value) {
       let cleaned = String(value ?? '').trim();
       cleaned = cleaned.replace(/[٠-٩]/g, ch => String('٠١٢٣٤٥٦٧٨٩'.indexOf(ch)));
-      cleaned = cleaned.replace(/[٬,]/g, '').replace(/٫/g, '.').replace(/\s/g, '');
+      cleaned = cleaned.replace(/[٬،,]/g, '').replace(/٫/g, '.').replace(/\s/g, '');
       const n = Number(cleaned);
       return Number.isFinite(n) ? n : 0;
     }
@@ -12283,8 +12454,13 @@
     function rowActionsHtml() { return `<div class="row-actions"><button type="button" class="btn ghost small" onclick="moveRow(this,-1)" title="تحريك لأعلى">أعلى</button><button type="button" class="btn ghost small" onclick="moveRow(this,1)" title="تحريك لأسفل">أسفل</button><button type="button" class="btn danger small" onclick="this.closest('tr').remove();calculateAll()">حذف</button></div>` }
     function moveRow(button, direction) { const row = button.closest('tr'), body = row?.parentElement; if (!row || !body) return; const target = direction < 0 ? row.previousElementSibling : row.nextElementSibling; if (!target) return; if (direction < 0) body.insertBefore(row, target); else body.insertBefore(target, row); updateRevenueComponentOptions(); calculateAll() }
     function autoSizeField(input) { if (!input?.closest('.table-wrap')) return; const length = Math.max(10, String(input.value || input.placeholder || '').length); input.style.width = Math.min(320, Math.max(145, length * 9 + 34)) + 'px' }
-    function formatNumericInput(input) { const n = parseNumber(input.value); input.value = input.value.trim() === '' ? '' : nf.format(n); autoSizeField(input) }
-    function enhanceNumericInputs(root = document) { root.querySelectorAll('input[type="number"],input.numeric-input').forEach(input => { if (input.dataset.numericReady) { formatNumericInput(input); return } input.type = 'text'; input.inputMode = 'decimal'; input.classList.add('numeric-input'); input.dataset.numericReady = '1'; input.addEventListener('focus', () => { input.value = String(input.value || '').replace(/,/g, ''); autoSizeField(input) }); input.addEventListener('blur', () => formatNumericInput(input)); input.addEventListener('input', () => autoSizeField(input)); formatNumericInput(input) }); root.querySelectorAll('.table-wrap input:not(.numeric-input)').forEach(autoSizeField) }
+    function numericInputUsesGrouping(input) {
+      const label = input?.closest('div,td')?.querySelector('label')?.textContent || '';
+      const identity = [input?.id, input?.dataset?.field, input?.dataset?.key, label].filter(Boolean).join(' ');
+      return !/(year|date|phone|mobile|deed|plot|lat|lng|longitude|latitude|pct|percent|rate|ratio|سنة|سنوات|تاريخ|هاتف|جوال|صك|مخطط|قطعة|إحداث)/i.test(identity);
+    }
+    function formatNumericInput(input) { const raw = String(input.value || '').replace(/[٬،,]/g, '').replace(/٫/g, '.').trim(); const n = parseNumber(raw); const decimals = raw.includes('.') ? raw.split('.')[1].length : 0; input.value = raw === '' ? '' : (numericInputUsesGrouping(input) ? new Intl.NumberFormat('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n) : raw); autoSizeField(input) }
+    function enhanceNumericInputs(root = document) { root.querySelectorAll('input[type="number"],input.numeric-input').forEach(input => { if (input.dataset.numericReady) { formatNumericInput(input); return } input.type = 'text'; input.inputMode = 'decimal'; input.classList.add('numeric-input'); input.dataset.numericReady = '1'; input.addEventListener('focus', () => { if (numericInputUsesGrouping(input)) input.value = String(input.value || '').replace(/,/g, ''); autoSizeField(input) }); input.addEventListener('blur', () => formatNumericInput(input)); input.addEventListener('input', () => autoSizeField(input)); formatNumericInput(input) }); root.querySelectorAll('.table-wrap input:not(.numeric-input)').forEach(autoSizeField) }
     function selectHtml(options, selected) { return options.map(o => `<option value="${o.v}" ${selected === o.v ? 'selected' : ''}>${o.t}</option>`).join('') }
 
     const useTypes = [{ v: 'retail', t: 'تجاري / تجزئة' }, { v: 'entertainment', t: 'ترفيهي' }, { v: 'services', t: 'خدمات ومرافق' }, { v: 'parking', t: 'مواقف' }, { v: 'residential', t: 'سكني' }, { v: 'hospitality', t: 'فندقي' }, { v: 'industrial', t: 'صناعي' }, { v: 'logistics', t: 'لوجستي' }, { v: 'office', t: 'مكاتب' }, { v: 'other', t: 'أخرى' }];
@@ -12689,10 +12865,11 @@
       if (!window.__batchLoading) calculateAll()
     }
 
+    let schedulePercentExceededMessage = '';
     function enforceSchedulePctInput(input, fieldName) {
       if (!input) return;
       const val = parseNumber(input.value);
-      if (val < 0) { input.value = 0; return; }
+      if (val < 0) { input.value = input.dataset.lastValidValue || '0'; return; }
       const rows = [...document.querySelectorAll('#scheduleTable tbody tr')];
       let otherSum = 0;
       rows.forEach(tr => {
@@ -12702,9 +12879,14 @@
         }
       });
       const maxAllowed = Math.max(0, 100 - otherSum);
-      if (val > maxAllowed) {
-        input.value = maxAllowed;
+      if (val > maxAllowed + 0.0001) {
+        input.value = input.dataset.lastValidValue || '0';
+        const label = fieldName === 'costPct' ? 'نسبة تكلفة التطوير' : 'نسبة دفعة المطور';
+        schedulePercentExceededMessage = `تعذر قبول القيمة لأن مجموع ${label} تجاوز 100%.`;
+        return;
       }
+      input.dataset.lastValidValue = String(val);
+      schedulePercentExceededMessage = '';
     }
 
     // The two percentage columns are the whole of what this study adds to a timeline stage, and
@@ -12728,11 +12910,12 @@
       if (!note) return;
       if (!rows.length) { note.hidden = true; note.textContent = ''; return; }
       const costLeft = 100 - costPct, devLeft = 100 - devPct;
-      const parts = [];
-      if (Math.abs(costLeft) > 0.01) parts.push(`غير موزَّع من نسبة تكلفة التطوير: ${schedulePercentText(costLeft)}`);
-      if (Math.abs(devLeft) > 0.01) parts.push(`غير موزَّع من نسبة دفعة المطور: ${schedulePercentText(devLeft)}`);
+      const parts = schedulePercentExceededMessage ? [schedulePercentExceededMessage] : [];
+      if (costLeft > 0.01) parts.push(`غير موزَّع من نسبة تكلفة التطوير: ${schedulePercentText(costLeft)}`);
+      if (devLeft > 0.01) parts.push(`غير موزَّع من نسبة دفعة المطور: ${schedulePercentText(devLeft)}`);
       note.hidden = parts.length === 0;
       note.textContent = parts.join(' — ');
+      note.classList.toggle('error', !!schedulePercentExceededMessage);
     }
 
     // The stage name and its year mirror the project timeline and are read-only here; only the
@@ -12760,15 +12943,12 @@
       tr.querySelectorAll('input:not([readonly])').forEach(x => {
         const fieldName = x.closest('td')?.dataset?.field;
         if (fieldName === 'costPct' || fieldName === 'devPct') {
+          x.dataset.lastValidValue = String(parseNumber(x.value));
           const runEnforce = () => {
             enforceSchedulePctInput(x, fieldName);
             calculateAll();
           };
           x.addEventListener('input', runEnforce);
-          x.addEventListener('change', runEnforce);
-          x.addEventListener('blur', runEnforce);
-          x.addEventListener('keyup', runEnforce);
-          x.addEventListener('paste', () => setTimeout(runEnforce, 0));
         } else {
           x.addEventListener('input', calculateAll);
         }
@@ -12821,10 +13001,9 @@
     function syncOccupancyRamp(plan) { const years = Math.max(1, Math.min(40, Math.round(num('operationYears') || 1))), developmentYears = Math.max(1, Math.round(num('developmentYears') || 1)), tb = document.querySelector('#occupancyRampTable tbody'); if (!tb) return; const existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')].map(tr => ({ operationYear: parseNumber(tr.querySelector('[data-field="operationYear"] input')?.value), reachPct: parseNumber(tr.querySelector('[data-field="reachPct"] input')?.value) })); tb.innerHTML = ''; const defaults = [60, 75, 90, 100]; for (let operationYear = 1; operationYear <= years; operationYear++) { const found = existing.find(r => Number(r.operationYear) === operationYear); addOccupancyRampYear(found || { operationYear, studyYear: developmentYears + operationYear, reachPct: defaults[operationYear - 1] ?? 100 }); } }
     function occupancyReachForYear(operationYear) { if (operationYear < 1) return 0; const row = [...document.querySelectorAll('#occupancyRampTable tbody tr')].find(tr => parseNumber(tr.querySelector('[data-field="operationYear"] input')?.value) === operationYear); return Math.max(0, Math.min(100, parseNumber(row?.querySelector('[data-field="reachPct"] input')?.value))) / 100 }
 
-    // A schedule table must stop where its own period stops. Both tables used to render one row
-    // per project year, so a 20-year study printed 20 rows of zeros after a 10-year facility or a
-    // 4-year fee period. The tail is trimmed to the entered period, and a later year is kept only
-    // when it still carries a real figure, so no computed amount is hidden by the trim.
+    // A schedule table must stop where its own entered period stops. Both tables used to render one
+    // row per project year, so a 20-year study printed rows beyond a 10-year facility or a 4-year fee
+    // period. Financing and fund fees now use their entered end years as strict display boundaries.
     const FINANCIAL_ROW_EPSILON = 0.5;
     function lastYearCarryingValue(projected, fields) {
       return projected.reduce((last, row) => fields.some(field => Math.abs(Number(row[field]) || 0) > FINANCIAL_ROW_EPSILON) ? row.year : last, 0);
@@ -12832,16 +13011,12 @@
     function financeMovementRows(projected, financeOn, repaymentStartYear, repaymentYears) {
       if (!financeOn) return [];
       const plannedEnd = Math.max(1, Math.round(repaymentStartYear || 1)) + Math.max(1, Math.round(repaymentYears || 1)) - 1;
-      const activeEnd = lastYearCarryingValue(projected, ['openingDebt', 'financeDraw', 'financeInterest', 'financeFee', 'financeRepayment', 'closingDebt']);
-      const lastYear = Math.max(plannedEnd, activeEnd);
-      return projected.filter(row => row.year <= lastYear);
+      return projected.filter(row => row.year <= plannedEnd);
     }
     function fundFeeScheduleRows(projected, fundFeesOn, feeEndYear) {
       if (!fundFeesOn) return [];
       const plannedEnd = Math.max(1, Math.ceil(feeEndYear || 1));
-      const activeEnd = lastYearCarryingValue(projected, ['fundManagementFee', 'additionalFundFees', 'fundExitFee', 'performanceFee', 'fundFeesAnnual']);
-      const lastYear = Math.max(plannedEnd, activeEnd);
-      return projected.filter(row => row.year <= lastYear);
+      return projected.filter(row => row.year <= plannedEnd);
     }
     function addCost(d = {}) { const tb = document.querySelector('#costTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: تكلفة المباني"></td><td data-field="class"><select>${selectHtml(costClasses, d.class || 'execution')}</select></td><td data-field="method"><select>${selectHtml(costMethods, d.method || 'areaCost')}</select><span class="help formula costFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A * B * C'}" placeholder="A * B * C"></div></td><td data-field="qty"><input type="number" value="${financialInputNumber(d.qty, 0)}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${financialInputNumber(d.price, 0)}"><span class="help input miniHelp"></span></td><td data-field="duration"><input type="number" value="${financialInputNumber(d.duration, 1)}"><span class="help input miniHelp"></span></td><td class="row-result costResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
     function addOpex(d = {}) { const tb = document.querySelector('#opexTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: تشغيل شهري"></td><td data-field="method"><select>${selectHtml(opexMethods, d.method || 'monthlyFixed')}</select><span class="help formula opexFormula"></span><div data-field="customFormula" class="custom-formula-row dynamic-off"><label>الفورملا المخصصة</label><input type="text" value="${d.formula || 'A * B'}" placeholder="A * B"></div></td><td data-field="qty"><input type="number" value="${financialInputNumber(d.qty, 0)}"><span class="help input miniHelp"></span></td><td data-field="price"><input type="number" value="${financialInputNumber(d.price, 0)}"><span class="help input miniHelp"></span></td><td class="row-result opexResult">0</td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr); updateDynamicFields(); if (!window.__batchLoading) calculateAll() }
@@ -16072,6 +16247,7 @@
           calculate_landmark_driving: true
         };
         setLocationTableValue('nearby_landmarks', lines);
+        setLocationDataFetchedAt();
         await saveProjectAsDraft(true);
         toast('تم جلب المسافات ومدة القيادة للمعالم المختارة وحفظها في المسودة');
       } finally {
@@ -16089,6 +16265,7 @@
       if (!box) return;
       const list = data.landmarks || data.landmarks_matrix || [];
       if (data.success && list && list.length) {
+        setLocationDataFetchedAt();
         const itemsHtml = list.map((l, i) => {
           const dist = l.distance_km ? `${l.distance_km} كم` : (l.distance_text || '');
           const dur = l.duration_min ? `${l.duration_min} دقائق` : (l.duration_minutes ? `${l.duration_minutes} دقائق` : '');
@@ -16931,6 +17108,8 @@
         try { value = JSON.parse(value); } catch (error) { value = null; }
       }
       const source = value && typeof value === 'object' ? value : {};
+      const deletedInteriorSlots = new Set(visualConceptReferenceList(
+        source.deletedInteriorSlots || source.deleted_interior_slots));
       const hasStateReferenceIds = ['styleReferenceFileIds', 'style_reference_file_ids', 'styleReferenceFileId', 'style_reference_file_id']
         .some(key => Object.prototype.hasOwnProperty.call(source, key));
       const savedReferenceIds = visualConceptReferenceList(source.styleReferenceFileIds || source.style_reference_file_ids);
@@ -16954,15 +17133,16 @@
       const stated = {};
       const slotIds = new Set(VISUAL_CONCEPT_SLOTS.map(item => item.id));
       Object.keys(source.slots && typeof source.slots === 'object' ? source.slots : {}).forEach(id => {
-        if (isVisualConceptInteriorSlot(id)) slotIds.add(id);
+        if (isVisualConceptInteriorSlot(id) && !deletedInteriorSlots.has(id)) slotIds.add(id);
       });
       visualConceptInteriorComponents().forEach(item => {
-        slotIds.add(visualConceptInteriorSlotId(item.id, 1));
+        const firstId = visualConceptInteriorSlotId(item.id, 1);
+        if (!deletedInteriorSlots.has(firstId)) slotIds.add(firstId);
         const legacyId = VISUAL_CONCEPT_INTERNAL_PREFIX + '_' + item.id;
         if (source.slots && source.slots[legacyId]) slotIds.add(visualConceptInteriorSlotId(item.id, 1));
         for (let view = 2; view <= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES; view += 1) {
           const viewId = visualConceptInteriorSlotId(item.id, view);
-          if (source.slots && source.slots[viewId]) slotIds.add(viewId);
+          if (source.slots && source.slots[viewId] && !deletedInteriorSlots.has(viewId)) slotIds.add(viewId);
         }
       });
       slotIds.forEach(id => {
@@ -17031,6 +17211,7 @@
         styleReferenceFileId: styleReferenceFileIds[0] || '',
         styleReferenceNames,
         styleReferenceName: styleReferenceNames[0] || '',
+        deletedInteriorSlots: Array.from(deletedInteriorSlots),
         selectedInteriorComponentId: String(source.selectedInteriorComponentId || '').trim()
       };
     }
@@ -17132,10 +17313,11 @@
     }
 
     function visualConceptInteriorViewIds(componentId) {
+      const deleted = new Set(tenantVisualConceptState.deletedInteriorSlots || []);
       const ids = [];
       for (let view = 1; view <= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES; view += 1) {
         const id = visualConceptInteriorSlotId(componentId, view);
-        if (view === 1 || tenantVisualConceptState.slots[id]) ids.push(id);
+        if (tenantVisualConceptState.slots[id] && !deleted.has(id)) ids.push(id);
       }
       return ids;
     }
@@ -17145,10 +17327,15 @@
       if (!componentId) return;
       const existing = visualConceptInteriorViewIds(componentId);
       if (existing.length >= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES) return;
-      const nextId = visualConceptInteriorSlotId(componentId, existing.length + 1);
-      if (!tenantVisualConceptState.slots[nextId]) {
-        tenantVisualConceptState.slots[nextId] = emptyVisualConceptSlot(nextId);
+      let nextId = '';
+      for (let view = 1; view <= VISUAL_CONCEPT_MAX_INTERIOR_IMAGES; view += 1) {
+        const candidate = visualConceptInteriorSlotId(componentId, view);
+        if (!tenantVisualConceptState.slots[candidate]) { nextId = candidate; break; }
       }
+      if (!nextId) return;
+      tenantVisualConceptState.deletedInteriorSlots = (tenantVisualConceptState.deletedInteriorSlots || [])
+        .filter(id => id !== nextId);
+      tenantVisualConceptState.slots[nextId] = emptyVisualConceptSlot(nextId);
       markVisualConceptDirty();
       renderVisualConceptPage();
     }
@@ -17217,7 +17404,7 @@
       host.innerHTML = '<div class="visual-concept-interior-stack">' + cards + '</div>' +
         (canAdd ? '<div class="visual-concept-actions" style="margin-top:12px"><button type="button" class="btn ghost small" data-visual-action="add-interior">إضافة صورة داخلية</button></div>' : '');
       renderVisualConceptInteriorReferences(viewIds[0]);
-      const allApproved = viewIds.every(id => tenantVisualConceptState.slots[id]?.status === 'approved');
+      const allApproved = viewIds.length > 0 && viewIds.every(id => tenantVisualConceptState.slots[id]?.status === 'approved');
       if (referenceCard) {
         referenceCard.classList.toggle('section-locked', allApproved);
         referenceCard.querySelectorAll('input, button').forEach(control => {
@@ -17263,6 +17450,9 @@
       const deleteBtn = hasImage
         ? '<button type="button" class="btn danger small" data-visual-action="delete-image" data-visual-slot="' + slotDef.id + '" ' + (frozen ? 'disabled' : '') + '>حذف الصورة</button>'
         : '';
+      const deleteFieldBtn = isVisualConceptInteriorSlot(slotDef.id)
+        ? '<button type="button" class="btn danger small" data-visual-action="delete-interior-field" data-visual-slot="' + slotDef.id + '">حذف الحقل</button>'
+        : '';
 
       let bodyControls = '';
       if (mode === 'upload') {
@@ -17275,7 +17465,7 @@
           '<textarea data-visual-caption="' + slotDef.id + '" rows="3" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>' +
           '<div class="visual-concept-actions">' +
           '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
-          deleteBtn +
+          deleteBtn + deleteFieldBtn +
           '</div>';
       } else {
         bodyControls = '<label>وصف التوليد</label>' +
@@ -17284,7 +17474,7 @@
           '<button type="button" class="btn ghost small" data-visual-action="prompt" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إنشاء / إعادة توليد الوصف</button>' +
           '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
           '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
-          deleteBtn +
+          deleteBtn + deleteFieldBtn +
           '</div>' +
           '<div class="visual-concept-chat">' + chat + '</div>' +
           '<div class="visual-concept-chat-row">' +
@@ -17454,9 +17644,11 @@
         const limited = merged.slice(0, 4);
         slot.styleReferenceFileIds = limited.map(file => file.id);
         slot.styleReferenceNames = limited.map(file => file.name);
+        const revivedViewIds = [];
         for (let index = 0; index < limited.length; index += 1) {
           const file = limited[index];
           const viewId = visualConceptInteriorSlotId(componentId, index + 1);
+          revivedViewIds.push(viewId);
           if (!tenantVisualConceptState.slots[viewId]) tenantVisualConceptState.slots[viewId] = emptyVisualConceptSlot(viewId);
           const viewSlot = tenantVisualConceptState.slots[viewId];
           if (!viewSlot.imageUrl && !viewSlot.approvedImageUrl) {
@@ -17466,6 +17658,8 @@
             viewSlot.status = viewSlot.status === 'approved' ? viewSlot.status : 'review';
           }
         }
+        tenantVisualConceptState.deletedInteriorSlots = (tenantVisualConceptState.deletedInteriorSlots || [])
+          .filter(id => !revivedViewIds.includes(id));
         markVisualConceptDirty();
         renderVisualConceptPage();
         toast('تم حفظ صور هذا المكون.');
@@ -17725,6 +17919,7 @@
           else if (action === 'approve') approveVisualConceptImage(slotId);
           else if (action === 'unapprove') unapproveVisualConceptImage(slotId);
           else if (action === 'delete-image') deleteVisualConceptSlotImage(slotId);
+          else if (action === 'delete-interior-field') deleteVisualConceptInteriorField(slotId);
           else if (action === 'chat') sendVisualConceptChat(slotId);
           else if (action === 'add-interior') addVisualConceptInteriorView();
           else if (action === 'set-mode') {
@@ -17984,6 +18179,18 @@
       markVisualConceptDirty();
       renderVisualConceptPage();
       toast('تم إلغاء اعتماد ' + visualConceptSlotLabel(slotId));
+    }
+
+    function deleteVisualConceptInteriorField(slotId) {
+      if (!isVisualConceptInteriorSlot(slotId) || !slotId.includes('::')) return;
+      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+      delete tenantVisualConceptState.slots[slotId];
+      const deleted = new Set(tenantVisualConceptState.deletedInteriorSlots || []);
+      deleted.add(slotId);
+      tenantVisualConceptState.deletedInteriorSlots = Array.from(deleted);
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+      toast('تم حذف حقل الصورة الداخلية');
     }
 
     function deleteVisualConceptSlotImage(slotId) {

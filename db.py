@@ -702,6 +702,7 @@ PREBUILT_FIELDS = [
     {'key': 'nearby_landmarks', 'label': 'أهم المعالم القريبة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'قائمة المعالم القريبة مع أوقات القيادة (مثلاً: ميدان السارية - 1 دقيقة)', 'sort_order': 42},
     {'key': 'city_landmarks', 'label': 'المعالم الرئيسية في المدينة', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'أهم المعالم الرئيسية في المدينة والمناطق المحيطة', 'sort_order': 43},
     {'key': 'catchment_areas', 'label': 'مناطق نطاق التأثير', 'type': 'textarea', 'section_key': 'location', 'ai_hint': 'المناطق الرئيسية والثانوية المتأثرة بالمشروع', 'sort_order': 44},
+    {'key': 'location_data_fetched_at', 'label': 'وقت آخر تحديث بيانات الموقع', 'type': 'text', 'section_key': 'location', 'ai_hint': 'وقت آخر جلب لبيانات الموقع والمعالم بتوقيت السعودية', 'sort_order': 44},
     {'key': 'contact_name', 'label': 'الاسم', 'type': 'text', 'required': False, 'section_key': 'contact', 'ai_hint': 'اسم مسؤول التواصل بالمشروع', 'sort_order': 45},
     {'key': 'contact_position', 'label': 'المنصب', 'type': 'text', 'required': False, 'section_key': 'contact', 'ai_hint': 'المسمى الوظيفي أو المنصب لمسؤول التواصل', 'sort_order': 46},
     {'key': 'contact_email', 'label': 'البريد الإلكتروني', 'type': 'text', 'required': False, 'section_key': 'contact', 'ai_hint': 'البريد الإلكتروني للتواصل', 'sort_order': 47},

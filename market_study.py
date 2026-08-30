@@ -430,6 +430,15 @@ def _norm(value):
     return re.sub(r'\s+', ' ', str(value or '').strip())
 
 
+def _clean_numeric(value):
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    text = text.translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    text = text.replace('٬', '').replace('،', '').replace(',', '').replace('٫', '.').replace(' ', '')
+    return text if re.fullmatch(r'-?\d+(?:\.\d+)?', text) else str(value or '').strip()
+
+
 def _first_nonempty(*values):
     for value in values:
         if isinstance(value, (dict, list, tuple, set)):
@@ -498,6 +507,12 @@ _COMPETITOR_SOURCE_FIELD_ALIASES = {
     'area_sqm': 'area_sqm',
     'areaSqm': 'area_sqm',
     'المساحة': 'area_sqm',
+    'area_from': 'area_from',
+    'areaFrom': 'area_from',
+    'المساحة من': 'area_from',
+    'area_to': 'area_to',
+    'areaTo': 'area_to',
+    'المساحة إلى': 'area_to',
     'status': 'status',
     'project_status': 'status',
     'حالة المشروع': 'status',
@@ -521,6 +536,8 @@ _COMPETITOR_SOURCE_FIELD_LABELS = {
     'name': 'اسم المشروع',
     'project_type': 'نوع المشروع',
     'area_sqm': 'مساحة الوحدة',
+    'area_from': 'مساحة الوحدة من',
+    'area_to': 'مساحة الوحدة إلى',
     'status': 'الحالة',
     'operation_type': 'نوع العملية',
     'price_type': 'نوع السعر',
@@ -771,7 +788,10 @@ def empty_competitor(source='manual'):
         'id': str(uuid.uuid4()),
         'name': '',
         'project_type': '',
+        'area_mode': 'fixed',
         'area_sqm': '',
+        'area_from': '',
+        'area_to': '',
         'status': '',
         'classification': '',
         'operation_type': '',
@@ -841,6 +861,32 @@ def prefer_specific_source_url(*candidates):
         if value.startswith(('http://', 'https://')) and not is_generic_source_homepage(value):
             return value
     return next((value for value in values if value.startswith(('http://', 'https://'))), values[0] if values else '')
+
+
+def official_source_reliability(entity_name='', source_name='', url=''):
+    source = _fold_choice(source_name)
+    if any(token in source for token in ('رسمي', 'المشروع', 'المطور', 'official')) and _source_host(url):
+        return 'مصدر رسمي للجهة'
+    entity_tokens = [token for token in re.findall(r'[a-z0-9]+', _fold_choice(entity_name)) if len(token) >= 4]
+    host = _source_host(url)
+    return 'مصدر رسمي للجهة' if host and entity_tokens and any(token in host for token in entity_tokens) else ''
+
+
+def remove_url_from_competitor(competitor, url):
+    result = dict(competitor or {})
+    target = str(url or '').strip().casefold()
+    result['source_urls'] = [item for item in competitor_source_urls(result)
+                             if str(item).strip().casefold() != target]
+    result['source_url'] = (result['source_urls'][0] if str(result.get('source_url') or '').strip().casefold() == target
+                            and result['source_urls'] else '' if str(result.get('source_url') or '').strip().casefold() == target
+                            else result.get('source_url', ''))
+    fields = {}
+    for field, values in competitor_field_sources(result).items():
+        remaining = [item for item in values if str(item).strip().casefold() != target]
+        if remaining:
+            fields[field] = remaining
+    result['field_sources'] = fields
+    return result
 
 
 def empty_source_row():
@@ -958,12 +1004,13 @@ def build_consultant_system_prompt():
         '6. صنّف المنافسين إلى: منافس مباشر، منافس غير مباشر، مشروع مرجعي.\n'
         '7. اذكر سبب اختيار كل منافس داخليًا في التحليل حتى لو لم يظهر عمود السبب في الجدول.\n'
         '8. لكل منافس أعد جميع روابط الصفحات التي استخدمت منها البيانات في source_urls، وليس رابطًا واحدًا فقط.\n'
-        '9. area_sqm تعني مساحة الوحدة القابلة للبيع أو الإيجار أو الوحدة النموذجية فقط، لا مساحة الأرض أو المبنى أو البرج أو المشروع الكلية.\n'
+        '9. مساحة الوحدة تكون area_mode=fixed مع area_sqm، أو area_mode=range مع area_from وarea_to؛ ولا تستخدم مساحة الأرض أو المبنى أو البرج أو المشروع الكلية.\n'
         '10. في الفندق استخدم مساحة الغرفة أو الجناح أو الشقة الفندقية، وإذا لم توجد مساحة وحدة موثوقة اترك area_sqm فارغة ولا تستخدم Tower GFA أو Gross Floor Area.\n'
         'إذا كان الطلب تحليلًا أو ملخصًا والسوق يعتمد على جدول المنافسين الحالي:\n'
         '1. اعتمد قائمة المنافسين الموجودة في الجدول ولا تحذف أي منافس منها.\n'
         '2. استخدم البيانات التي أدخلها العميل أو وُلدت سابقًا كأساس للتحليل.\n\n'
         'ثانيًا ترتيب أولوية المصادر:\n'
+        'الموقع الرسمي للمشروع أو المطور مصدر موثوق لبيانات الجهة نفسها، وسجّل موثوقيته «مصدر رسمي للجهة».\n'
         + '\n\n'.join(source_blocks)
         + '\n\nثالثًا التحليل حسب نوع المشروع:\n'
         + '\n\n'.join(type_blocks)
@@ -1086,7 +1133,10 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "id": "أبق المعرف إن وُجد وإلا اتركه فارغًا",\n'
         '      "name": "",\n'
         '      "project_type": "سكني أو تجاري أو فندقي أو صناعي ولوجستي أو متعدد الاستخدامات أو أخرى",\n'
+        '      "area_mode": "fixed أو range",\n'
         '      "area_sqm": "",\n'
+        '      "area_from": "",\n'
+        '      "area_to": "",\n'
         '      "status": "قائم أو تحت الإنشاء أو على الخارطة",\n'
         '      "classification": "مباشر أو غير مباشر أو مرجعي",\n'
         '      "operation_type": "بيع أو إيجار أو تشغيل فندقي أو أخرى",\n'
@@ -1097,7 +1147,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "source": "",\n'
         '      "source_url": "",\n'
         '      "source_urls": [],\n'
-        '      "field_sources": {"name": [], "project_type": [], "area_sqm": [], "status": [], "operation_type": [], "price_type": [], "price_value": [], "price_from": [], "price_to": []},\n'
+        '      "field_sources": {"name": [], "project_type": [], "area_sqm": [], "area_from": [], "area_to": [], "status": [], "operation_type": [], "price_type": [], "price_value": [], "price_from": [], "price_to": []},\n'
         '      "notes": "",\n'
         '      "row_source": "ai"\n'
         '    }\n'
@@ -1200,6 +1250,14 @@ def normalize_competitor_row(row, fallback_source='ai'):
         price_payload.get('to'), price_payload.get('price_to'), price_payload.get('priceTo'),
         price_payload.get('إلى'), price_payload.get('الى'), price_payload.get('max'), price_payload.get('maximum'),
     )
+    price_value = _clean_numeric(price_value)
+    price_from = _clean_numeric(price_from)
+    price_to = _clean_numeric(price_to)
+    area_sqm = _clean_numeric(_first_nonempty(row.get('area_sqm'), row.get('areaSqm'), row.get('area'), row.get('المساحة')))
+    area_from = _clean_numeric(_first_nonempty(row.get('area_from'), row.get('areaFrom'), row.get('المساحة من')))
+    area_to = _clean_numeric(_first_nonempty(row.get('area_to'), row.get('areaTo'), row.get('المساحة إلى')))
+    area_mode = _norm(row.get('area_mode') or row.get('areaMode'))
+    area_mode = 'range' if area_mode == 'range' or area_from or area_to else 'fixed' if area_mode == 'fixed' or area_sqm else ''
     operation = _canonical_operation(
         row.get('operation_type') or row.get('operationType') or row.get('operation') or row.get('نوع العملية')
         or row.get('نوع التشغيل') or row.get('التشغيل'),
@@ -1225,7 +1283,10 @@ def normalize_competitor_row(row, fallback_source='ai'):
         'id': _norm(row.get('id')) or str(uuid.uuid4()),
         'name': name,
         'project_type': project_type,
-        'area_sqm': _first_nonempty(row.get('area_sqm'), row.get('areaSqm'), row.get('area'), row.get('المساحة')),
+        'area_mode': area_mode,
+        'area_sqm': area_sqm,
+        'area_from': area_from,
+        'area_to': area_to,
         'status': status,
         'classification': classification,
         'operation_type': operation,
@@ -1317,7 +1378,7 @@ def competitor_source_rows(competitors):
                 'url': url,
                 'data_date': '',
                 'accessed_at': date.today().isoformat(),
-                'reliability': '',
+                'reliability': official_source_reliability(name, source_name, url),
                 'note': source_note,
             })
     return rows
@@ -1382,13 +1443,14 @@ def normalize_summary(raw):
             name = _norm(row.get('name'))
             if not name:
                 continue
+            url = prefer_specific_source_url(row.get('url'), row.get('source_url'), row.get('sourceUrl'))
             sources.append({
                 'id': _norm(row.get('id')) or str(uuid.uuid4()),
                 'name': name,
-                'url': prefer_specific_source_url(row.get('url'), row.get('source_url'), row.get('sourceUrl')),
+                'url': url,
                 'data_date': _norm(row.get('data_date') or row.get('dataDate')),
                 'accessed_at': _norm(row.get('accessed_at') or row.get('accessedAt')) or date.today().isoformat(),
-                'reliability': _norm(row.get('reliability')),
+                'reliability': _norm(row.get('reliability')) or official_source_reliability('', name, url),
                 'note': _norm(row.get('note')),
             })
     disclaimer = _norm(data.get('disclaimer')) or (

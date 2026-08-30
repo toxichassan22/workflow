@@ -1305,6 +1305,29 @@ def _build_catchment_paths(lat, lng, zones):
     return paths if paths else None
 
 
+def normalize_access_road_names(value):
+    values = value if isinstance(value, list) else re.split(r'[\n,،;|]+', str(value or ''))
+    result = []
+    seen = set()
+    for raw in values:
+        name = str(raw or '').strip()
+        if not name:
+            continue
+        name = re.split(r'\s+[—–-]\s+(?=\d|\d*[.]\d|\D*دقيقة)', name, maxsplit=1)[0].strip()
+        prefix_match = re.match(r'^(طريق|شارع|جادة|ممر)\s+', name)
+        prefix = prefix_match.group(1) if prefix_match else ''
+        parts = [part.strip() for part in re.split(r'\s+و(?=\s|ال|شارع|طريق|جادة|ممر)\s*', name) if part.strip()]
+        for part in parts:
+            if prefix and not re.match(r'^(طريق|شارع|جادة|ممر)\s+', part):
+                part = f'{prefix} {part}'
+            key = re.sub(r'^(?:طريق|شارع|جادة|ممر)\s+', '', part)
+            key = re.sub(r'[\sـ]+', ' ', key).strip().casefold()
+            if key and key not in seen:
+                seen.add(key)
+                result.append(part)
+    return result
+
+
 def _build_road_paths(lat, lng, main_roads=None, secondary_roads=None):
     """No longer draws random lines. Roads are highlighted via map styles instead."""
     # Previously this drew star-pattern lines from center which looked terrible.
@@ -2513,6 +2536,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                     )
                 elif isinstance(val, list):
                     fallback_road_names.extend(str(value).strip() for value in val if str(value).strip())
+        fallback_road_names = normalize_access_road_names(fallback_road_names)
 
         # Find actual nearby access roads through Google Roads + Directions.
         # The target points are only geographic probes; Google returns the road

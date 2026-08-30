@@ -247,7 +247,11 @@ assertion deliberately, not reflexively.
   `map_landmarks` slide carries `##MAP_LANDMARKS##`; omission triggers the same required-image retry.
   Location and executive map summaries must carry `data-map-summary-background` and
   `data-map-summary-card`; the server pins the card to the side opposite `_map_marker_side` and
-  normalizes the full map to the content holder.
+  normalizes the full map to the content holder. `normalize_access_road_names()` splits compound
+  road labels and removes duplicates before access-map labeling. `location_data_fetched_at` stores
+  the latest data-fetch time, is shown in the location screen, and is injected into location slides
+  in Saudi time. The manual «جلب معلومات المسافة والمدة» button is intentionally absent; those
+  columns remain editable while the separate map/content generation flow is pending owner detail.
 - `catchment_rings()` collapses the catchment rows into at most three concentric drive-time bands and
   `zoom_for_radius_km()` frames the outer one. The rows are destinations, so one ring per row drew
   nine circles up to 31 km wide with unreadable labels. The landmarks view is framed the same way
@@ -317,6 +321,11 @@ Two states, and both are stated to the model explicitly — silence made it inve
   every other candidate stays a table. Auto-selection uses safe Bar/Column/Line variants instead of
   the broken Treemap/Heatmap overlays. Every source header, label and value is required in generated
   HTML; tables are normalized to 13px headers and 12px cells, and fitted HTML is saved for export.
+  In «مراحل التطوير ودفعات المطور», each percentage column is independently capped at 100%; an
+  over-limit edit reverts to its last valid value and leaves an error under the table, while an
+  under-100 total is warning-only. Finance movement stops strictly at repayment start + repayment
+  years - 1, and the annual fund-fee table stops strictly at `fundFeeEndYear`; later nonzero values
+  no longer extend either display table.
 - **Approved sections have disabled controls, but their values remain data.** Report and sidebar
   collectors must exclude hidden/inactive wrappers, not `control.disabled`. Ignoring disabled table
   controls makes a select fall back to the cell's `textContent` (all options concatenated) and makes
@@ -392,6 +401,12 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   `غير متوفر من مصدر موثوق`. Competitor `source_url` and summary `url` must be the exact
   page that contained the figure, not the site homepage. `prefer_specific_source_url()`
   drops a bare domain/home path when a deeper URL is also present.
+- Competitor unit area supports `area_mode=fixed` with `area_sqm` or `area_mode=range` with
+  `area_from` / `area_to`. Market prices and areas are stored without separators and displayed with
+  separators while preserving decimals. An official project/developer site is labeled
+  `مصدر رسمي للجهة` for that entity's own data. Deleting a source removes its URL from
+  `source_urls` and every `field_sources` association but keeps the competitor values; manual values
+  and source rows remain supported.
 - **Never send the search tool together with `response_format: json_object`.** Gemini answers that
   pair with reasoning and empty content, the JSON parse fails, and the retry ladder then drops the
   tool — so no search ever ran and every link was a homepage recalled from memory. The first attempt
@@ -653,10 +668,12 @@ asked again. Now:
   remain يمين / شمال / فوق / خلف until changed. Every visual image also has a required
   client caption (`slot.caption`) separate from the generation prompt. The client may
   upload their own image into any of the five exterior slots, or generate it.
-  Internal images are 1–4 per actual financial-study component (`interior_<id>::n`),
-  chosen from a dropdown; the client may upload or generate each one. Count is
-  optional — 1 is enough, 4 is the cap. Each component still has optional
-  interior references. Clicking a card opens that group's workspace. Chat
+  Internal images are stored per actual financial-study component (`interior_<id>::n`),
+  chosen from a dropdown; the client may upload or generate each one, up to the configured cap.
+  `deletedInteriorSlots` persists intentionally removed image fields, including view 1, so
+  normalization does not recreate them. `deleteVisualConceptInteriorField()` removes only the slot
+  reference, never the underlying project file, and add/upload removes the deletion marker. Each
+  component still has optional interior references. Clicking a card opens that group's workspace. Chat
   revision must edit the current prompt in place, never rewrite it from
   scratch, unless the user explicitly asks to replace the prompt. Legacy
   ids `east`/`west`/`aerial` hydrate into `right`/`left`/`top`. Rebuilding

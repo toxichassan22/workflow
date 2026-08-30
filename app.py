@@ -4851,6 +4851,7 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         name = road.get('name')
         if name and name not in road_names:
             road_names.append(name)
+    road_names = maps_service.normalize_access_road_names(road_names)
     if road_names:
         fields['main_roads'] = '\n'.join(road_names)
 

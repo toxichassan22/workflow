@@ -3241,12 +3241,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertLess(index_source.index('function renderClarifications(facts)'),
                         index_source.index('function updateDynamicFieldDetails(exitOn)'))
 
-        # 4 and 5. A schedule stops where its own period stops, and a later year survives the trim
-        # only when it still carries a figure — a computed amount must never be hidden by it.
+        # 4 and 5. Each schedule stops strictly at the end year entered for that schedule.
         self.assertIn('function financeMovementRows(projected, financeOn, repaymentStartYear, repaymentYears)',
                       index_source)
         self.assertIn('function fundFeeScheduleRows(projected, fundFeesOn, feeEndYear)', index_source)
-        self.assertIn('function lastYearCarryingValue(projected, fields)', index_source)
+        self.assertIn('return projected.filter(row => row.year <= plannedEnd);', index_source)
         self.assertIn('financeMovementRows(projected, financeOn, financeRepaymentStartYear, financeRepaymentYears)',
                       index_source)
         self.assertIn('fundFeeScheduleRows(projected, fundFeesOn, fundFeeEndYear)', index_source)
@@ -3255,6 +3254,31 @@ class MeetingRequirementsTests(unittest.TestCase):
             "if (debtTb) debtTb.innerHTML = projected.map(r => `<tr><td>${r.year}</td>", index_source)
         self.assertNotIn(
             "if (fundTb) fundTb.innerHTML = projected.map(r => `<tr><td>${r.year}</td>", index_source)
+
+    def test_location_roads_timestamp_and_financial_schedule_guards(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertNotIn("infoBtn.textContent = 'جلب معلومات المسافة والمدة'", index_source)
+        self.assertIn('location_data_fetched_at', index_source)
+        self.assertIn('formatLocationDataFetchedAt', index_source)
+        self.assertEqual(
+            self.application_module.maps_service.normalize_access_road_names(
+                'شارع الشمس\nشارع الشاطئ و الشمس\nشارع الشمس'),
+            ['شارع الشمس', 'شارع الشاطئ'])
+        self.assertIn("'location_data_fetched_at'", (ROOT / 'db.py').read_text(encoding='utf-8'))
+        stamped = self.application_module.slide_engine.finalize_slide_html(
+            '<div class="slide"><img src="##MAP_OVERVIEW##"></div>', 'map_overview',
+            {'location_data_fetched_at': '2026-01-02T10:30:00Z'}, {'primary_color': '#123456'},
+            map_placeholders={'##MAP_OVERVIEW##': '/uploads/maps/overview.png'})
+        self.assertIn('آخر تحديث لبيانات الموقع', stamped)
+        self.assertIn('2026-01-02 13:30', stamped)
+        self.assertIn('input.dataset.lastValidValue', index_source)
+        self.assertIn('تجاوز 100%', index_source)
+        finance_body = index_source.split('function financeMovementRows(', 1)[1].split('function fundFeeScheduleRows(', 1)[0]
+        self.assertNotIn('activeEnd', finance_body)
+        self.assertIn('row.year <= plannedEnd', finance_body)
+        fund_body = index_source.split('function fundFeeScheduleRows(', 1)[1].split('function addCost(', 1)[0]
+        self.assertNotIn('activeEnd', fund_body)
+        self.assertIn('row.year <= plannedEnd', fund_body)
 
     def test_land_document_normalizer_keeps_each_parcel_and_four_directions(self):
         result = self.application_module._normalize_land_document_result({
@@ -4996,6 +5020,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function uploadVisualConceptInteriorReferences', index_source)
         self.assertIn('function uploadVisualConceptSlotImage(slotId, input)', index_source)
         self.assertIn('VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 30', index_source)
+        self.assertIn('deletedInteriorSlots', index_source)
+        self.assertIn('function deleteVisualConceptInteriorField', index_source)
+        self.assertIn('data-visual-action="delete-interior-field"', index_source)
         self.assertIn("data-visual-action=\"add-interior\"", index_source)
         self.assertIn('function showVisualConceptView(view)', index_source)
         self.assertIn('function persistVisualConceptDraftState()', index_source)
@@ -5596,6 +5623,37 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(ranged['price_type'], 'نطاق أسعار الغرف')
         self.assertEqual(ranged['price_from'], '900')
         self.assertEqual(ranged['price_to'], '1500')
+
+    def test_market_study_official_sources_area_ranges_and_permanent_source_deletion(self):
+        import market_study
+        row = market_study.normalize_competitor_row({
+            'id': 'c1', 'name': 'مشروع النخيل', 'area_mode': 'range',
+            'area_from': '١،٢٠٠.5', 'area_to': '2,500',
+            'price_value': '1,500,000', 'source': 'الموقع الرسمي للمشروع',
+            'source_urls': ['https://nakheel.example/project'],
+            'field_sources': {'price_value': ['https://nakheel.example/project']},
+        })
+        self.assertEqual(row['area_mode'], 'range')
+        self.assertEqual(row['area_from'], '1200.5')
+        self.assertEqual(row['area_to'], '2500')
+        self.assertEqual(row['price_value'], '1500000')
+        sources = market_study.competitor_source_rows([row])
+        self.assertEqual(sources[0]['reliability'], 'مصدر رسمي للجهة')
+        cleaned = market_study.remove_url_from_competitor(row, 'https://nakheel.example/project')
+        self.assertEqual(cleaned['name'], 'مشروع النخيل')
+        self.assertEqual(cleaned['price_value'], '1500000')
+        self.assertEqual(cleaned['source_urls'], [])
+        self.assertEqual(cleaned['field_sources'], {})
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        for expected in ('data-field="area_mode"', 'data-field="area_from"', 'data-field="area_to"',
+                         'removeMarketSourcePermanently', 'formatMarketNumericInput'):
+            self.assertIn(expected, index_source)
+        formatted = self.application_module.slide_engine.finalize_slide_html(
+            '<div class="slide"><table><tr><td>2027</td><td>1500000</td></tr></table></div>',
+            'content', {}, {'primary_color': '#123456'}, content_source='financial_report:1:0:1')
+        self.assertIn('1,500,000', formatted)
+        self.assertIn('2027', formatted)
+        self.assertNotIn('2,027', formatted)
 
     def test_market_study_radius_auto_is_ten_km(self):
         import market_study
