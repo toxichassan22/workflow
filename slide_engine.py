@@ -2731,6 +2731,23 @@ def _map_media_contain(html):
                   normalize_background, html, flags=re.IGNORECASE)
 
 
+def _ensure_map_summary_structure(html):
+    opening_end = html.find('>')
+    closing_start = html.rfind('</div>')
+    if opening_end < 0 or closing_start <= opening_end:
+        return html
+    opening = html[:opening_end + 1]
+    inner = html[opening_end + 1:closing_start]
+    closing = html[closing_start:]
+    inner = re.sub(r'<img\b[^>]*(?:##MAP_OVERVIEW##|/uploads/maps/|/api/map-images/)[^>]*>',
+                   '', inner, flags=re.IGNORECASE)
+    if 'data-map-summary-card' not in inner:
+        inner = f'<div data-map-summary-card>{inner}</div>'
+    background = ('<div data-map-summary-background '
+                  'style="background-image:url(##MAP_OVERVIEW##);"></div>')
+    return opening + background + inner + closing
+
+
 def _normalize_map_summary_layout(html, marker_side='right'):
     def normalize_background(match):
         return _set_tag_style(
@@ -2968,6 +2985,118 @@ def _missing_required_slide_texts(html, slide, project_data):
             if normalized(text) and normalized(text) not in compact]
 
 
+def _fallback_table_data(slide, project_data):
+    source = str((slide or {}).get('content_source') or '')
+    model = _parse_financial_dict((project_data or {}).get('financial_study_model'))
+    match = re.fullmatch(r'financial_report:(\d+):(\d+):(\d+)(?::(\d+):(\d+))?', source)
+    if match:
+        part_index, start, end = map(int, match.groups()[:3])
+        column_start = int(match.group(4)) if match.group(4) is not None else None
+        column_end = int(match.group(5)) if match.group(5) is not None else None
+        report = model.get('report') if isinstance(model.get('report'), dict) else {}
+        parts = report.get('parts') if isinstance(report.get('parts'), list) else []
+        if part_index < len(parts) and isinstance(parts[part_index], dict):
+            part = _financial_report_part_slice(parts[part_index], start, end, column_start, column_end)
+            return part.get('headers') or ['البند', 'القيمة'], part.get('rows') or []
+    match = re.fullmatch(r'financial_summary:(costs|returns):(\d+):(\d+)', source)
+    if match:
+        key, start, end = match.group(1), int(match.group(2)), int(match.group(3))
+        name = 'التكاليف والاستثمار' if key == 'costs' else 'مؤشرات العائد والاسترداد'
+        return ['البند', 'القيمة'], _financial_summary_from_report(model).get(name, [])[start:end]
+    match = re.fullmatch(r'financial_table:([^:]+):(\d+):(\d+)', source)
+    if match:
+        key, start, end = match.group(1), int(match.group(2)), int(match.group(3))
+        tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+        rows = tables.get(key) if isinstance(tables.get(key), list) else []
+        selected = rows[start:end]
+        if selected and isinstance(selected[0], dict):
+            headers = list(selected[0].keys())
+            return headers, [[row.get(header, '') for header in headers] for row in selected]
+        return [], selected
+    match = re.fullmatch(r'project_components:(\d+):(\d+)', source)
+    if match:
+        start, end = map(int, match.groups())
+        rows = _project_component_rows(project_data)[start:end]
+        headers = list(rows[0].keys()) if rows else []
+        return headers, [[row.get(header, '') for header in headers] for row in rows]
+    return [], []
+
+
+def _render_fallback_table(headers, rows, primary):
+    header_html = ''.join(
+        f'<th style="background:{primary};color:#fff;padding:8px;font-size:13px;">{html_lib.escape(str(value))}</th>'
+        for value in headers)
+    body = []
+    for row in rows:
+        values = list(row.values()) if isinstance(row, dict) else list(row) if isinstance(row, (list, tuple)) else [row]
+        body.append('<tr>' + ''.join(
+            f'<td style="border:1px solid #dbe3ea;padding:7px;font-size:12px;overflow-wrap:anywhere;">{html_lib.escape(str(value))}</td>'
+            for value in values) + '</tr>')
+    return ('<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+            f'<thead><tr>{header_html}</tr></thead><tbody>{"".join(body)}</tbody></table>')
+
+
+def _build_structured_fallback_slide(slide, project_data, branding):
+    source = project_data if isinstance(project_data, dict) else {}
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
+    title = html_lib.escape(str((slide or {}).get('title') or 'المحتوى'))
+    slide_type = str((slide or {}).get('type') or 'content')
+    content_source = str((slide or {}).get('content_source') or '')
+    tokens = [str(token) for token in ((slide or {}).get('image_tokens') or []) if str(token or '').strip()]
+    if slide_type == 'cover':
+        name = html_lib.escape(str(source.get('project_name') or source.get('projectName') or title))
+        project_logo = '<img src="##PROJECT_LOGO##" style="height:80px;width:auto;object-fit:contain;">' if source.get('project_logo') else ''
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:{primary};color:#fff;">'
+                '<div style="position:absolute;inset:0;background-image:url(##IMAGE_COVER##);background-size:cover;background-position:center;"></div>'
+                '<div data-cover-overlay></div>'
+                f'<div style="position:absolute;z-index:2;inset:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;">'
+                f'<div style="display:flex;align-items:center;gap:18px;"><img src="##LOGO##" style="height:80px;width:auto;object-fit:contain;">{project_logo}</div>'
+                f'<div style="font-size:48px;font-weight:800;">{name}</div></div></div>')
+    if slide_type == 'closing':
+        name = html_lib.escape(str(source.get('project_name') or source.get('projectName') or title))
+        contact = html_lib.escape(_slide_source_data_note({'content_source': 'contact_closing'}, source)).replace('\n', '<br>')
+        project_logo = '<img src="##PROJECT_LOGO##" style="height:80px;width:auto;object-fit:contain;">' if source.get('project_logo') else ''
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:{primary};color:#fff;">'
+                '<div style="position:absolute;inset:0;background-image:url(##IMAGE_COVER##);background-size:cover;background-position:center;"></div>'
+                '<div data-cover-overlay></div><div style="position:absolute;z-index:2;inset:70px;display:flex;flex-direction:column;justify-content:center;">'
+                f'<div style="display:flex;gap:18px;align-items:center;"><img src="##LOGO##" style="height:80px;width:auto;object-fit:contain;">{project_logo}</div>'
+                f'<h2 style="font-size:42px;margin:28px 0 16px;">{name}</h2><div style="font-size:18px;line-height:1.8;">{contact}</div></div></div>')
+    if content_source in ('site_analysis', 'executive_content.summary'):
+        note = html_lib.escape(_slide_source_data_note(slide, source)).replace('\n', '<br>')
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;">'
+                '<div data-map-summary-background style="background-image:url(##MAP_OVERVIEW##);"></div>'
+                f'<div data-map-summary-card style="background:{primary};color:#fff;padding:24px;overflow:hidden;">'
+                f'<h2 style="font-size:28px;margin:0 0 18px;">{title}</h2><div style="font-size:14px;line-height:1.7;">{note}</div></div></div>')
+    if slide_type == 'map_landmarks':
+        matrix = source.get('landmarks_matrix') if isinstance(source.get('landmarks_matrix'), list) else []
+        headers = list(matrix[0].keys()) if matrix and isinstance(matrix[0], dict) else []
+        rows = [[row.get(header, '') for header in headers] for row in matrix if isinstance(row, dict)]
+        table = _render_fallback_table(headers, rows, primary)
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
+                f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
+                f'<img src="##MAP_LANDMARKS##" style="width:100%;height:100%;object-fit:contain;">'
+                f'<div style="overflow:hidden;">{table}</div></div></div>')
+    if tokens:
+        columns = 1 if len(tokens) == 1 else len(tokens)
+        images = ''.join(
+            f'<img src="{html_lib.escape(token)}" style="width:100%;height:100%;object-fit:contain;min-width:0;min-height:0;">'
+            for token in tokens)
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
+                f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2>'
+                f'<div style="display:grid;grid-template-columns:repeat({columns},1fr);gap:12px;height:540px;">{images}</div></div>')
+    headers, rows = _fallback_table_data(slide, source)
+    if rows:
+        table = _render_fallback_table(headers, rows, primary)
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
+                f'<h2 style="font-size:26px;margin:0 0 16px;color:{primary};">{title}</h2>{table}</div>')
+    note = _slide_source_data_note(slide, source) or '\n'.join(str(item) for item in ((slide or {}).get('bullets') or []))
+    if note:
+        content = html_lib.escape(note).replace('\n', '<br>')
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:90px 48px 60px;box-sizing:border-box;">'
+                f'<h2 style="font-size:28px;color:{primary};">{title}</h2><div style="font-size:16px;line-height:1.8;">{content}</div></div>')
+    return None
+
+
 def generate_single_slide(system_prompt, slide, slide_num, total_slides, branding, call_glm_fn, max_retries=2, project_data=None):
     """
     Generate a single slide's HTML.
@@ -3000,17 +3129,6 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                 retry_note = '\n\nإعادة المحاولة: لم يصل HTML صالح. أخرج div class="slide" واحدًا مكتملًا فقط.'
                 continue
             content_source = str(slide.get('content_source') or '')
-            if slide.get('type') == 'cover' and 'data-cover-overlay' not in html:
-                print(f"[SLIDE-{slide_num}] ERROR: missing brand cover overlay (attempt {attempt})")
-                retry_note = '\n\nإعادة المحاولة: أضف عنصر طبقة الغلاف الإلزامي data-cover-overlay فوق الصورة.'
-                continue
-            if content_source in ('site_analysis', 'executive_content.summary'):
-                missing_layout = [name for name in ('data-map-summary-background', 'data-map-summary-card') if name not in html]
-                if missing_layout:
-                    missing = '، '.join(missing_layout)
-                    print(f"[SLIDE-{slide_num}] ERROR: missing map summary layout: {missing} (attempt {attempt})")
-                    retry_note = f'\n\nإعادة المحاولة: أضف السمات الإلزامية التالية إلى عنصري الخريطة والبطاقة: {missing}.'
-                    continue
             if not slide.get('chart_type') and re.search(
                     r'(?:data-chart|class\s*=\s*["\'][^"\']*(?:chart|treemap|heatmap)|conic-gradient\s*\()',
                     html, flags=re.IGNORECASE):
@@ -3058,6 +3176,16 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         except Exception as e:
             print(f"[SLIDE-{slide_num}] Exception: {e}")
 
+    fallback = _build_structured_fallback_slide(slide, project_data, branding)
+    if fallback:
+        fallback = postprocess_slide(
+            fallback, slide_type, slide_num=slide_num, slide_title=slide_title,
+            total_slides=total_slides, tenant_id=branding.get('tenant_id'),
+            branding=branding, project_data=project_data)
+        roots = extract_slide_elements(fallback)
+        if len(roots) == 1:
+            print(f"[SLIDE-{slide_num}] Using deterministic fallback after {max_retries + 1} attempts")
+            return roots[0]
     print(f"[SLIDE-{slide_num}] FAILED after {max_retries + 1} attempts")
     return None
 
@@ -3789,6 +3917,8 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
                         total_slides=None, content_source=None):
     """Unified post-processing pipeline for every generated slide."""
     html = _canonicalize_slide_root_class(html)
+    if content_source in ('site_analysis', 'executive_content.summary'):
+        html = _ensure_map_summary_structure(html)
     html = postprocess_slide(
         html, slide_type, slide_num=slide_num, slide_title=slide_title,
         total_slides=total_slides, tenant_id=tenant_id, branding=branding,

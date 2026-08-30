@@ -1175,11 +1175,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertEqual(app_source.count("project_data['_map_marker_side'] = _generation_map_marker_side(images, project_data)"), 2)
 
-    def test_map_summary_retries_without_required_overlay_structure(self):
+    def test_map_summary_structure_is_repaired_without_rejecting_the_slide(self):
         engine = self.application_module.slide_engine
         responses = iter([
             '<div class="slide" style="background:#fff;color:#111"><img src="##MAP_OVERVIEW##"><p>ملخص الموقع</p></div>',
-            '<div class="slide" style="background:#fff;color:#111"><img data-map-summary-background src="##MAP_OVERVIEW##"><div data-map-summary-card>ملخص الموقع</div></div>',
         ])
         prompts = []
 
@@ -1192,8 +1191,13 @@ class MeetingRequirementsTests(unittest.TestCase):
                        'content_source': 'site_analysis', 'image_tokens': ['##MAP_OVERVIEW##']},
             3, 5, {'primary_color': '#123456'}, generated,
             project_data={'site_analysis': 'ملخص الموقع', '_map_marker_side': 'right'})
-        self.assertIn('data-map-summary-card', html)
-        self.assertEqual(len(prompts), 2)
+        repaired = engine.finalize_slide_html(
+            html, 'content', {'_map_marker_side': 'right'}, {'primary_color': '#123456'},
+            map_placeholders={'##MAP_OVERVIEW##': '/uploads/maps/overview.png'},
+            content_source='site_analysis')
+        self.assertIn('data-map-summary-card', repaired)
+        self.assertIn('data-map-summary-background', repaired)
+        self.assertEqual(len(prompts), 1)
 
     def test_swot_section_keeps_one_canonical_slide_without_risk_register(self):
         engine = self.application_module.slide_engine
@@ -1273,6 +1277,29 @@ class MeetingRequirementsTests(unittest.TestCase):
             {'project_logo': '/logo.png'})
         self.assertGreaterEqual(divider.count('height:80px'), 2)
 
+    def test_deterministic_fallback_prevents_media_and_financial_503(self):
+        engine = self.application_module.slide_engine
+
+        def incomplete(_system, _user_message, **_kwargs):
+            return {'choices': [{'message': {'content': '<div class="slide">ناقص</div>'}}]}
+
+        media = engine.generate_single_slide(
+            'system', {'title': 'صور الأرض', 'type': 'content', 'design_style': 'image',
+                       'image_tokens': ['##LAND_PHOTO_1##', '##LAND_PHOTO_2##']},
+            3, 5, {'primary_color': '#123456'}, incomplete, max_retries=0, project_data={})
+        self.assertIn('##LAND_PHOTO_1##', media)
+        self.assertIn('##LAND_PHOTO_2##', media)
+        project = {'financial_study_model': {'inputs': {'projectCost': 1}, 'report': {'parts': [
+            {'type': 'heading', 'level': 2, 'text': 'الإيرادات'},
+            {'type': 'table', 'headers': ['السنة', 'الإيراد'], 'rows': [['2027', '1,500,000']]},
+        ]}}}
+        financial = engine.generate_single_slide(
+            'system', {'title': 'الإيرادات', 'type': 'content', 'section_key': 'financial',
+                       'content_source': 'financial_report:1:0:1', 'design_style': 'table'},
+            4, 5, {'primary_color': '#123456'}, incomplete, max_retries=0, project_data=project)
+        self.assertIn('2027', financial)
+        self.assertIn('1,500,000', financial)
+
     def test_unplanned_chart_retries_as_table(self):
         engine = self.application_module.slide_engine
         responses = iter([
@@ -1292,11 +1319,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('<table', html)
         self.assertEqual(len(prompts), 2)
 
-    def test_cover_retries_without_brand_overlay_marker(self):
+    def test_cover_without_overlay_marker_does_not_stop_generation(self):
         engine = self.application_module.slide_engine
         responses = iter([
             '<div class="slide" style="background:#fff;color:#111"><div>الغلاف</div></div>',
-            '<div class="slide" style="background:#fff;color:#111"><div data-cover-overlay></div><div>الغلاف</div></div>',
         ])
         prompts = []
 
@@ -1307,8 +1333,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         html = engine.generate_single_slide(
             'system', {'title': 'الغلاف', 'type': 'cover'}, 1, 5,
             {'primary_color': '#7a0c0c'}, generated, project_data={})
-        self.assertIn('data-cover-overlay', html)
-        self.assertEqual(len(prompts), 2)
+        self.assertIn('class="slide"', html)
+        self.assertIn('data-cover-overlay', prompts[0])
+        self.assertEqual(len(prompts), 1)
 
     def test_generic_repeated_badges_and_placeholder_slides_are_removed(self):
         engine = self.application_module.slide_engine

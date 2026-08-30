@@ -530,6 +530,11 @@ frames**. Three rules came out of it:
   of `resolve_designer_chat_placeholders`) removes the `<img>` or the `background-image` that
   carried it, plus any `src=""` / `url()` left by an older pass. An image that does not exist must
   leave nothing behind, not a hole.
+- **Validation cannot stop the whole deck.** Missing model-authored helper attributes such as
+  `data-cover-overlay` or the map-summary wrappers are repaired in `finalize_slide_html()`, not
+  rejected. After model retries, `_build_structured_fallback_slide()` renders every assigned media
+  token or exact financial table itself, so one stubborn slide cannot turn the whole generation into
+  repeated HTTP 503 responses.
 
 ## The export must contain the whole deck
 
