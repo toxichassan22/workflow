@@ -3880,46 +3880,119 @@
 
     .location-table {
       width: 100%;
-      min-width: 500px;
+      min-width: 760px;
     }
 
-    .location-table th:first-child,
-    .location-table td:first-child {
-      width: auto;
+    .location-road-table {
+      min-width: 520px;
+      table-layout: fixed;
+    }
+
+    .location-road-table th:first-child,
+    .location-road-table td:first-child {
+      width: 65%;
     }
 
     .location-table th.lt-dist,
-    .location-table td.lt-dist {
-      width: 100px;
-    }
-
+    .location-table td.lt-dist,
     .location-table th.lt-dur,
     .location-table td.lt-dur {
-      width: 100px;
+      width: 92px;
+    }
+
+    .location-table th.lt-map-toggle,
+    .location-table td.lt-map-toggle {
+      width: 72px;
+      padding-left: 4px;
+      padding-right: 4px;
+      text-align: center;
     }
 
     .location-table th.lt-actions,
     .location-table td.lt-actions {
-      width: 40px;
+      width: 176px;
     }
 
     .location-table td {
       vertical-align: middle;
     }
 
-    .location-table input {
+    .location-table input,
+    .location-table textarea {
       width: 100%;
       box-sizing: border-box;
     }
 
+    .location-table textarea.lt-name-input {
+      min-height: 34px;
+      resize: vertical;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 8px;
+      line-height: 1.45;
+      text-align: right;
+    }
+
+    .location-table .lt-map-select {
+      display: block;
+      width: 17px;
+      height: 17px;
+      margin: 0 auto;
+    }
+
+    .lt-action-group {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 6px;
+      flex-wrap: nowrap;
+    }
+
+    .lt-action-group .btn {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
     .location-table .lt-del {
-      padding: 2px 8px;
-      font-size: 15px;
+      padding: 4px 10px;
+      font-size: 13px;
       line-height: 1.4;
     }
 
     .location-table-add {
       margin-top: 8px;
+    }
+
+    .map-active-controls {
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f8fbfd;
+    }
+
+    .map-active-controls-title {
+      margin-bottom: 8px;
+      color: var(--p);
+      font-weight: 800;
+    }
+
+    .map-active-controls-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tenant-map-preview-card {
+      cursor: pointer;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+
+    .tenant-map-preview-card.active {
+      border-color: var(--p) !important;
+      box-shadow: 0 0 0 2px rgba(0, 95, 120, .12);
     }
 
     .land-documents-actions {
@@ -11545,9 +11618,9 @@
     // "name — X كم — Y دقائق") so maps/AI keep working, but the UI edits them
     // as proper tables with add/delete rows.
     const LOCATION_TABLE_FIELDS = {
-      main_roads: { nameLabel: 'الطريق الرئيسي', nameHint: 'مثال: طريق الملك فهد', nameOnly: true, road: true },
-      nearby_landmarks: { nameLabel: 'المَعلم القريب', nameHint: 'مثال: مجمع الراشد', categoryLabel: 'النوع', mapSelectable: true },
-      city_landmarks: { nameLabel: 'مَعلم المدينة', nameHint: 'مثال: الواجهة البحرية', categoryLabel: 'النوع', mapSelectable: true },
+      main_roads: { nameLabel: 'الطريق الرئيسي', nameHint: 'مثال: طريق الملك فهد', nameOnly: true, road: true, mapType: 'access' },
+      nearby_landmarks: { nameLabel: 'المَعلم القريب', nameHint: 'مثال: مجمع الراشد', categoryLabel: 'النوع', mapSelectable: true, mapType: 'landmarks' },
+      city_landmarks: { nameLabel: 'مَعلم المدينة', nameHint: 'مثال: الواجهة البحرية', categoryLabel: 'النوع', mapSelectable: true, mapType: 'catchment' },
     };
 
     function parseLocationFieldText(key, value) {
@@ -11559,7 +11632,6 @@
           duration_minutes: item && (item.duration_minutes ?? item.duration_min ?? item.minutes ?? ''),
           lat: item && (item.lat ?? item.latitude ?? ''),
           lng: item && (item.lng ?? item.longitude ?? ''),
-          location_url: item && (item.location_url || item.locationUrl || item.url || ''),
           show_on_map: !!(item && (item.show_on_map || item.selected)),
           row_source: item && (item.row_source || item.rowSource || 'manual'),
         })).filter(r => r.name);
@@ -11575,7 +11647,7 @@
         if (dist) name = name.replace(dist[0], '');
         name = name.replace(/^[\s:：\-—–,،]+|[\s:：\-—–,،]+$/g, '').trim();
         let category = '';
-        if (key === 'nearby_landmarks' || key === 'catchment_areas') {
+        if (key === 'nearby_landmarks' || key === 'city_landmarks') {
           const categoryMatch = name.match(/\s+-\s+(ترفيهي|تعليمي|صحي|تجاري|ديني(?: ومركزي)?|ثقافي\/سياحي|حكومي\/خدمي|اجتماعي\/خدمي|النقل(?: العام)?|المشاعر|المحاور)\s*$/);
           if (categoryMatch) {
             category = categoryMatch[1];
@@ -11650,7 +11722,6 @@
         structuredRows.push({
           name, category, distance_km: dist, duration_minutes: dur,
           lat: tr.dataset.lat || '', lng: tr.dataset.lng || '',
-          location_url: tr.querySelector('.lt-location-input')?.value?.trim() || '',
           show_on_map: !!tr.querySelector('.lt-map-select')?.checked,
           row_source: tr.dataset.rowSource || 'manual'
         });
@@ -11678,8 +11749,9 @@
       tr.dataset.lng = row.lng ?? row.longitude ?? '';
 
       const nameTd = document.createElement('td');
-      const nameInput = document.createElement('input');
-      nameInput.type = 'text';
+      const nameInput = document.createElement(cfg.road ? 'textarea' : 'input');
+      if (!cfg.road) nameInput.type = 'text';
+      if (cfg.road) nameInput.rows = 1;
       nameInput.className = 'lt-name-input';
       nameInput.placeholder = cfg.nameHint || 'الاسم';
       nameInput.value = row.name || '';
@@ -11719,19 +11791,11 @@
       if (cfg.nameOnly) durTd.style.display = 'none';
       durTd.appendChild(durInput);
 
-      let locationTd = null;
-      let locationInput = null;
       let selectTd = null;
       let selectInput = null;
       if (cfg.mapSelectable) {
-        locationTd = document.createElement('td');
-        locationInput = document.createElement('input');
-        locationInput.type = 'url';
-        locationInput.className = 'lt-location-input';
-        locationInput.placeholder = 'رابط Google Maps';
-        locationInput.value = row.location_url || row.locationUrl || '';
-        locationTd.appendChild(locationInput);
         selectTd = document.createElement('td');
+        selectTd.className = 'lt-map-toggle';
         selectInput = document.createElement('input');
         selectInput.type = 'checkbox';
         selectInput.className = 'lt-map-select';
@@ -11749,6 +11813,9 @@
       }
 
       const delTd = document.createElement('td');
+      delTd.className = 'lt-actions';
+      const actionGroup = document.createElement('div');
+      actionGroup.className = 'lt-action-group';
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
       delBtn.className = 'btn small danger lt-del';
@@ -11768,9 +11835,9 @@
         const drawBtn = document.createElement('button');
         drawBtn.type = 'button';
         drawBtn.className = 'btn small ghost';
-        drawBtn.textContent = 'رسم المسار';
+        drawBtn.textContent = 'تحديد المسار';
         drawBtn.addEventListener('click', () => startManualRoadDrawing(nameInput.value));
-        delTd.appendChild(drawBtn);
+        actionGroup.appendChild(drawBtn);
       }
       if (cfg.mapSelectable) {
         const placeBtn = document.createElement('button');
@@ -11778,12 +11845,12 @@
         placeBtn.className = 'btn small ghost';
         placeBtn.textContent = 'تحديد الموقع';
         placeBtn.addEventListener('click', () => startLandmarkPlacement(key, tr));
-        delTd.appendChild(placeBtn);
-        locationInput.addEventListener('blur', () => geocodeLocationTableRow(key, tr));
+        actionGroup.appendChild(placeBtn);
       }
-      delTd.appendChild(delBtn);
+      actionGroup.appendChild(delBtn);
+      delTd.appendChild(actionGroup);
 
-      [nameInput, categoryInput, distInput, durInput, locationInput].filter(Boolean).forEach(inp => inp.addEventListener('input', () => {
+      [nameInput, categoryInput, distInput, durInput].filter(Boolean).forEach(inp => inp.addEventListener('input', () => {
         serializeLocationTable(key);
         invalidateLocationAnalysisApproval();
       }));
@@ -11792,7 +11859,6 @@
       if (categoryTd) tr.appendChild(categoryTd);
       tr.appendChild(distTd);
       tr.appendChild(durTd);
-      if (locationTd) tr.appendChild(locationTd);
       if (selectTd) tr.appendChild(selectTd);
       tr.appendChild(delTd);
       tbody.appendChild(tr);
@@ -11842,14 +11908,14 @@
       const tableWrap = document.createElement('div');
       tableWrap.className = 'fin-table-wrap';
       const table = document.createElement('table');
-      table.className = 'fin-table location-table';
+      table.className = 'fin-table location-table' + (cfg.road ? ' location-road-table' : '');
       table.dataset.locationTable = key;
       const categoryHeader = cfg.categoryLabel ? '<th>' + cfg.categoryLabel + '</th>' : '';
       const metricHeaders = cfg.nameOnly ? '' : '<th class="lt-dist">المسافة (كم)</th><th class="lt-dur">المدة (دقائق)</th>';
-      const mapHeaders = cfg.mapSelectable ? '<th>رابط الموقع</th><th>إظهار في الخريطة</th>' : '';
+      const mapHeaders = cfg.mapSelectable ? '<th class="lt-map-toggle">إظهار في الخريطة</th>' : '';
       table.innerHTML = '<thead><tr>' +
         '<th>' + cfg.nameLabel + '</th>' + categoryHeader + metricHeaders + mapHeaders +
-        '<th class="lt-actions"></th>' +
+        '<th class="lt-actions">الإجراءات</th>' +
         '</tr></thead><tbody></tbody>';
       tableWrap.appendChild(table);
       wrap.appendChild(tableWrap);
@@ -11911,7 +11977,6 @@
         category: tr.querySelector('.lt-category-input')?.value?.trim() || '',
         distance: tr.querySelector('.lt-dist-input')?.value?.trim() || '',
         duration: tr.querySelector('.lt-dur-input')?.value?.trim() || '',
-        locationUrl: tr.querySelector('.lt-location-input')?.value?.trim() || '',
         lat: tr.dataset.lat || '', lng: tr.dataset.lng || '',
         rowSource: tr.dataset.rowSource || 'manual'
       })).filter(row => row.name);
@@ -11970,7 +12035,7 @@
         if (input && input.type !== 'hidden') input.disabled = approved;
       });
       Object.keys(LOCATION_TABLE_FIELDS).forEach(key => {
-        document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] input, #tenantProjectForm table[data-location-table="' + key + '"] button')
+        document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] input, #tenantProjectForm table[data-location-table="' + key + '"] textarea, #tenantProjectForm table[data-location-table="' + key + '"] button')
           .forEach(control => { control.disabled = approved; });
         const add = document.querySelector('#tenantProjectForm table[data-location-table="' + key + '"]')?.closest('.location-table-field')?.querySelector('.location-table-add');
         if (add) add.disabled = approved;
@@ -11979,47 +12044,69 @@
       if (controls && typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined') {
         const approvals = tenantCreativeImages.map_approvals || {};
         const placeholders = tenantCreativeImages.map_placeholders || {};
-        controls.innerHTML = MAP_PREVIEW_VIEW_DEFS.map(view => {
-          const generated = view.keys.some(key => !!placeholders[key]);
-          const locked = !approved || (view.mapType !== 'overview' && !approvals.overview) || !!approvals[view.mapType];
-          const label = generated ? 'إعادة توليد ' + view.title : 'توليد ' + view.title;
-          return '<button type="button" class="btn small ' + (view.mapType === 'overview' ? 'primary' : 'ghost') + '" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'' + view.mapType + '\')" ' + (locked ? 'disabled' : '') + '>' + label + '</button>';
-        }).join(' ');
+        const view = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === tenantSelectedMapType) || MAP_PREVIEW_VIEW_DEFS[0];
+        tenantSelectedMapType = view.mapType;
+        const generated = view.keys.some(key => !!placeholders[key]);
+        const mapApproved = !!approvals[view.mapType];
+        const generationLocked = !approved || (view.mapType !== 'overview' && !approvals.overview) || mapApproved;
+        const approvalLocked = !approved || (view.mapType !== 'overview' && !approvals.overview);
+        const generationLabel = generated ? 'إعادة توليد ' + view.title : 'توليد ' + view.title;
+        const approvalButton = generated
+          ? '<button type="button" class="btn small ' + (mapApproved ? 'ghost' : 'primary') + '" data-section-lock-ignore="1" onclick="' + (mapApproved ? 'unapproveMapPreview' : 'approveMapPreview') + '(\'' + view.mapType + '\')" ' + (!mapApproved && approvalLocked ? 'disabled' : '') + '>' + (mapApproved ? 'إلغاء الاعتماد' : 'اعتماد الخريطة') + '</button>'
+          : '';
+        const overviewControls = view.mapType === 'overview'
+          ? '<button type="button" class="btn ghost small" id="toggleTenantPolygonButton" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>' +
+            '<button type="button" class="btn ghost small" id="removeLastTenantPolygonPointButton" onclick="removeLastTenantPolygonPoint()">تراجع عن آخر نقطة</button>' +
+            '<button type="button" class="btn primary small" id="confirmTenantPolygonButton" onclick="confirmTenantPolygon()">اعتماد حدود الأرض</button>' +
+            '<button type="button" class="btn ghost danger small" id="clearTenantPolygonButton" onclick="clearTenantPolygon(true)">مسح الحدود</button>'
+          : '';
+        const roadControls = view.mapType === 'access' && tenantRoadDrawingTarget
+          ? '<div id="manualRoadDrawingControls" class="map-active-controls-actions" style="margin-top:8px;">' +
+            '<span id="manualRoadDrawingStatus" class="tenant-hint">رسم مسار: ' + escapeHtml(tenantRoadDrawingTarget.name) + '</span>' +
+            '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="finishManualRoadDrawing()">اعتماد مسار الطريق</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelManualRoadDrawing()">إلغاء رسم الطريق</button></div>'
+          : '';
+        controls.innerHTML = '<div class="map-active-controls"><div class="map-active-controls-title">' + escapeHtml(view.title) + '</div>' +
+          '<div class="map-active-controls-actions"><button type="button" class="btn small primary" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'' + view.mapType + '\')" ' + (generationLocked ? 'disabled' : '') + '>' + generationLabel + '</button>' +
+          approvalButton + overviewControls + '</div>' + roadControls + '</div>';
+        updateTenantPolygonControls();
       }
       renderMapPreviewGallery();
     }
 
-    async function geocodeLocationTableRow(key, tr) {
-      const input = tr?.querySelector('.lt-location-input');
-      const value = String(input?.value || '').trim();
-      if (!value) return;
-      const result = await api('POST', '/api/geocode', { address: value, maps_link: value });
-      if (!result?.success) { toast(result?.error || 'تعذر تحديد موقع المعلم'); return; }
-      tr.dataset.lat = result.lat;
-      tr.dataset.lng = result.lng;
-      serializeLocationTable(key);
-      invalidateLocationAnalysisApproval();
-      triggerAutoSaveDraft();
+    function openLocationTableMap(mapType) {
+      const view = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === mapType);
+      if (!view) return false;
+      tenantSelectedMapType = mapType;
+      renderLocationWorkflowState();
+      const placeholders = tenantCreativeImages.map_placeholders || {};
+      if (!view.keys.some(key => !!placeholders[key])) {
+        document.getElementById('tenantMapPreview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        toast(view.title + ' غير مولدة');
+        return false;
+      }
+      selectMapPreviewView(mapType);
+      return true;
     }
 
     function startLandmarkPlacement(key, tr) {
-      if (!tenantMapPreviewState) { toast('يجب توليد خريطة الأرض أولًا'); return; }
+      const mapType = LOCATION_TABLE_FIELDS[key]?.mapType;
+      if (!openLocationTableMap(mapType)) return;
+      tenantRoadDrawingTarget = null;
+      tenantMapPolygonMode = false;
       tenantLandmarkPlacementTarget = { key, tr };
-      selectMapPreviewView('overview');
-      toast('تم تفعيل تحديد موقع المعلم على الخريطة');
+      renderLocationWorkflowState();
+      toast('تم تفعيل تحديد موقع المعلم على ' + (mapType === 'landmarks' ? 'خريطة المعالم' : 'خريطة المنطقة'));
     }
 
     function startManualRoadDrawing(name) {
       const roadName = String(name || '').trim();
       if (!roadName) { toast('اسم الطريق مطلوب'); return; }
-      if (!tenantMapPreviewState) { toast('يجب توليد خريطة الأرض أولًا'); return; }
+      if (!openLocationTableMap('access')) return;
+      tenantLandmarkPlacementTarget = null;
       tenantRoadDrawingTarget = { name: roadName, points: [] };
       tenantMapPolygonMode = false;
-      selectMapPreviewView('overview');
-      const controls = document.getElementById('manualRoadDrawingControls');
-      const status = document.getElementById('manualRoadDrawingStatus');
-      if (controls) controls.style.display = 'flex';
-      if (status) status.textContent = 'رسم مسار: ' + roadName;
+      renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
     }
 
@@ -12032,16 +12119,14 @@
       tenantProjectData.manual_road_paths = paths.filter(item => item?.name !== tenantRoadDrawingTarget.name)
         .concat([{ name: tenantRoadDrawingTarget.name, points: tenantRoadDrawingTarget.points }]);
       tenantRoadDrawingTarget = null;
-      const controls = document.getElementById('manualRoadDrawingControls');
-      if (controls) controls.style.display = 'none';
+      renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
       triggerAutoSaveDraft();
     }
 
     function cancelManualRoadDrawing() {
       tenantRoadDrawingTarget = null;
-      const controls = document.getElementById('manualRoadDrawingControls');
-      if (controls) controls.style.display = 'none';
+      renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
     }
 
@@ -12497,19 +12582,8 @@
             <span id="locationAnalysisApprovalStatus" class="tenant-hint">تحليل الموقع يحتاج اعتمادًا قبل توليد الخرائط</span>
           </div>
           <input type="hidden" id="locationAnalysisApproved" data-key="location_analysis_approved" data-type="text" value="">
-          <div id="locationMapGenerationControls" style="margin-bottom:12px;"></div>
+          <div id="locationMapGenerationControls"></div>
           <input type="hidden" id="tenantCoordinatesConfirmed" data-key="location_coordinates_confirmed" data-type="text" value="">
-          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-            <button type="button" class="btn ghost" id="toggleTenantPolygonButton" onclick="toggleTenantPolygonMode()">رسم حدود الموقع</button>
-            <button type="button" class="btn ghost" id="removeLastTenantPolygonPointButton" onclick="removeLastTenantPolygonPoint()" disabled>تراجع عن آخر نقطة</button>
-            <button type="button" class="btn primary" id="confirmTenantPolygonButton" onclick="confirmTenantPolygon()" disabled>اعتماد حدود الأرض</button>
-            <button type="button" class="btn ghost danger" onclick="clearTenantPolygon(true)" title="مسح الحدود الحالية وإتاحة رسم حدود جديدة">مسح الحدود</button>
-          </div>
-          <div id="manualRoadDrawingControls" style="display:none;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">
-            <span id="manualRoadDrawingStatus" class="tenant-hint"></span>
-            <button type="button" class="btn primary" data-section-lock-ignore="1" onclick="finishManualRoadDrawing()">اعتماد مسار الطريق</button>
-            <button type="button" class="btn ghost" data-section-lock-ignore="1" onclick="cancelManualRoadDrawing()">إلغاء رسم الطريق</button>
-          </div>
           <div id="mapPreviewImage" style="display:none;max-width:100%;border-radius:8px;overflow:hidden;border:1px solid #ddd;position:relative;">
             <img src="" alt="Map preview" style="width:100%;display:block;cursor:crosshair;" onclick="setTenantMapPointFromClick(event)" />
             <svg id="mapPolygonOverlay" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>
@@ -15962,27 +16036,16 @@
       const cards = views.map(view => {
         const url = view.keys.map(key => placeholders[key]).find(Boolean);
         const approved = !!approvals[view.mapType];
-        const canApprove = !!tenantProjectData.location_analysis_approved && (view.mapType === 'overview' || !!approvals.overview);
+        const status = approved ? 'معتمدة' : (url ? 'بانتظار الاعتماد' : 'غير مولدة');
         const preview = url
-          ? '<img src="' + escapeHtml(withCacheBust(url)) + '" data-map-select="' + escapeHtml(view.mapType) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:contain;object-position:center center;background:#f4f6f8;border-radius:8px;cursor:pointer;">'
+          ? '<img src="' + escapeHtml(withCacheBust(url)) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:contain;object-position:center center;background:#f4f6f8;border-radius:8px;">'
           : '<div style="display:flex;align-items:center;justify-content:center;aspect-ratio:16/9;background:#f4f6f8;border-radius:8px;color:var(--muted);">لم تُولد الخريطة</div>';
-        return '<figure style="margin:0;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;">' +
-          '<figcaption style="font-weight:700;font-size:12px;color:var(--p);margin-bottom:6px;">' + escapeHtml(view.title) + '</figcaption>' + preview +
-          (url ? '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">' +
-            '<button type="button" class="btn small ' + (approved ? 'ghost' : 'primary') + '" data-section-lock-ignore="1" data-map-action="' + (approved ? 'unapprove' : 'approve') + '" data-map-type="' + escapeHtml(view.mapType) + '"' + (!approved && !canApprove ? ' disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
-            '</div>' : '') + '</figure>';
+        return '<figure class="tenant-map-preview-card' + (tenantSelectedMapType === view.mapType ? ' active' : '') + '" data-map-select="' + escapeHtml(view.mapType) + '" style="margin:0;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;">' +
+          '<figcaption style="display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:12px;color:var(--p);margin-bottom:6px;"><span>' + escapeHtml(view.title) + '</span><span style="color:var(--muted);font-weight:600;">' + status + '</span></figcaption>' + preview + '</figure>';
       }).join('');
       gallery.innerHTML = cards;
-      gallery.querySelectorAll('[data-map-action]').forEach(button => {
-        button.addEventListener('click', () => {
-          const mapType = button.dataset.mapType;
-          const action = button.dataset.mapAction;
-          if (action === 'approve') approveMapPreview(mapType);
-          else if (action === 'unapprove') unapproveMapPreview(mapType);
-        });
-      });
-      gallery.querySelectorAll('[data-map-select]').forEach(image => {
-        image.addEventListener('click', () => selectMapPreviewView(image.dataset.mapSelect));
+      gallery.querySelectorAll('[data-map-select]').forEach(card => {
+        card.addEventListener('click', () => selectMapPreviewView(card.dataset.mapSelect));
       });
       gallery.style.display = cards ? 'grid' : 'none';
     }
@@ -16004,13 +16067,20 @@
 
     function selectMapPreviewView(mapType) {
       const view = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === mapType);
-      if (!view) return;
+      if (!view) return false;
       tenantSelectedMapType = mapType;
+      renderLocationWorkflowState();
       const placeholders = tenantCreativeImages.map_placeholders || {};
       const url = view.keys.map(key => placeholders[key]).find(Boolean);
       const previewBox = document.getElementById('mapPreviewImage');
       const image = previewBox?.querySelector('img');
-      if (!url || !previewBox || !image) return;
+      if (!url || !previewBox || !image) {
+        if (previewBox) previewBox.style.display = 'none';
+        if (image) image.removeAttribute('src');
+        tenantMapPreviewState = null;
+        renderTenantMapPolygonOverlay();
+        return false;
+      }
       image.onload = () => { renderTenantMapPolygonOverlay(); applyTenantPolygonZoom(); };
       image.src = withCacheBust(url);
       image.alt = view.title;
@@ -16024,6 +16094,7 @@
       if (Number.isFinite(lat) && Number.isFinite(lng)) tenantMapPreviewState = { lat, lng, zoom };
       renderTenantMapPolygonOverlay();
       previewBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
     }
 
     async function saveMapPreviewState() {
@@ -16144,21 +16215,22 @@
       const nextY = centerY + (y * img.naturalHeight) / world;
       const nextLng = tenantMapPreviewState.lng + (x * img.naturalWidth) * 360 / world;
       const nextLat = (Math.atan(Math.sinh(Math.PI * (1 - 2 * nextY))) * 180 / Math.PI);
-      if (tenantMapPolygonMode) {
+      if (tenantMapPolygonMode && tenantSelectedMapType === 'overview') {
         tenantMapDraftPolygonPoints.push([nextLat, nextLng]);
         renderTenantMapPolygonOverlay();
         updateTenantPolygonControls();
         toast('تمت إضافة نقطة مؤقتة ' + tenantMapDraftPolygonPoints.length + '.');
         return;
       }
-      if (tenantRoadDrawingTarget) {
+      if (tenantRoadDrawingTarget && tenantSelectedMapType === 'access') {
         tenantRoadDrawingTarget.points.push([nextLat, nextLng]);
         renderTenantMapPolygonOverlay();
         const status = document.getElementById('manualRoadDrawingStatus');
         if (status) status.textContent = 'رسم مسار: ' + tenantRoadDrawingTarget.name + ' — ' + tenantRoadDrawingTarget.points.length + ' نقاط';
         return;
       }
-      if (tenantLandmarkPlacementTarget) {
+      const landmarkMapType = LOCATION_TABLE_FIELDS[tenantLandmarkPlacementTarget?.key]?.mapType;
+      if (tenantLandmarkPlacementTarget && tenantSelectedMapType === landmarkMapType) {
         tenantLandmarkPlacementTarget.tr.dataset.lat = nextLat.toFixed(6);
         tenantLandmarkPlacementTarget.tr.dataset.lng = nextLng.toFixed(6);
         serializeLocationTable(tenantLandmarkPlacementTarget.key);
@@ -16186,10 +16258,18 @@
       const toggleButton = document.getElementById('toggleTenantPolygonButton');
       const undoButton = document.getElementById('removeLastTenantPolygonPointButton');
       const confirmButton = document.getElementById('confirmTenantPolygonButton');
+      const clearButton = document.getElementById('clearTenantPolygonButton');
       const activePoints = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
-      if (toggleButton) toggleButton.textContent = tenantMapPolygonMode ? 'إلغاء الرسم' : 'رسم حدود الموقع';
-      if (undoButton) undoButton.disabled = !activePoints.length;
-      if (confirmButton) confirmButton.disabled = !tenantMapPolygonMode || tenantMapDraftPolygonPoints.length < 3;
+      const overview = MAP_PREVIEW_VIEW_DEFS.find(view => view.mapType === 'overview');
+      const overviewGenerated = overview?.keys.some(key => !!tenantCreativeImages.map_placeholders?.[key]);
+      const locked = !overviewGenerated || !!tenantCreativeImages.map_approvals?.overview;
+      if (toggleButton) {
+        toggleButton.textContent = tenantMapPolygonMode ? 'إلغاء الرسم' : 'رسم حدود الموقع';
+        toggleButton.disabled = locked;
+      }
+      if (undoButton) undoButton.disabled = locked || !activePoints.length;
+      if (confirmButton) confirmButton.disabled = locked || !tenantMapPolygonMode || tenantMapDraftPolygonPoints.length < 3;
+      if (clearButton) clearButton.disabled = locked;
     }
 
     function resetTenantMapZoom() {
@@ -16337,7 +16417,9 @@
       );
       const roadPaths = Array.isArray(tenantProjectData.manual_road_paths) ? [...tenantProjectData.manual_road_paths] : [];
       if (tenantRoadDrawingTarget?.points?.length) roadPaths.push(tenantRoadDrawingTarget);
-      if (tenantSelectedMapType !== 'overview' || !overlay || !img || !tenantMapPreviewState || !img.naturalWidth || !img.naturalHeight || (!drawingBoundary && !roadPaths.length)) {
+      const showBoundary = tenantSelectedMapType === 'overview' && drawingBoundary;
+      const showRoads = tenantSelectedMapType === 'access';
+      if (!overlay || !img || !tenantMapPreviewState || !img.naturalWidth || !img.naturalHeight || (!showBoundary && (!showRoads || !roadPaths.length))) {
         if (overlay) overlay.innerHTML = '';
         return;
       }
@@ -16352,7 +16434,7 @@
         const yOffset = (pointY - centerY) * world;
         return ((0.5 + lngOffset / img.naturalWidth) * 100).toFixed(3) + ',' + ((0.5 + yOffset / img.naturalHeight) * 100).toFixed(3);
       };
-      const points = drawingBoundary ? polygonPoints.map(toPoint) : [];
+      const points = showBoundary ? polygonPoints.map(toPoint) : [];
       const line = points.length > 2 ? points.concat(points[0]).join(' ') : points.join(' ');
       let pointMarkup = '';
       if (tenantMapPolygonMode) {
@@ -16366,10 +16448,10 @@
       const boundaryMarkup = points.length
         ? '<polyline points="' + line + '" fill="' + (points.length > 2 ? 'rgba(107,28,35,.24)' : 'none') + '" stroke="#6B1C23" stroke-width="0.55" pointer-events="none"></polyline>' + pointMarkup
         : '';
-      const roadMarkup = roadPaths.map(path => {
+      const roadMarkup = showRoads ? roadPaths.map(path => {
         const roadPoints = (path.points || []).map(toPoint).join(' ');
         return roadPoints ? '<polyline points="' + roadPoints + '" fill="none" stroke="#d4a359" stroke-width="0.8"><title>' + escapeHtml(path.name || 'طريق') + '</title></polyline>' : '';
-      }).join('');
+      }).join('') : '';
       overlay.innerHTML = boundaryMarkup + roadMarkup;
       if (tenantMapPolygonMode) {
         overlay.querySelectorAll('[data-polygon-index]').forEach(point => {

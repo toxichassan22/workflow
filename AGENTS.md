@@ -261,9 +261,10 @@ assertion deliberately, not reflexively.
   auto-generates missing maps. The retired `/api/generate-map-images` and saved-presentation bulk
   regeneration routes reject requests before any map-provider call.
 - Nearby and city landmark tables persist structured rows. `show_on_map` selects at most seven;
-  when none are selected, table order supplies the first seven. Landmarks uses nearby rows only;
-  catchment keeps its rings and adds city rows. Access uses approved `main_roads` only, never hidden
-  secondary roads; `manual_road_paths` supplies client-drawn geometry for a named approved road.
+  when none are selected, table order supplies the first seven. The tables have no per-row URL field:
+  nearby placement opens the landmarks map and city placement opens the catchment map. Access uses
+  approved `main_roads` only, never hidden secondary roads; `manual_road_paths` supplies client-drawn
+  geometry on the access map. The map toolbar renders only the currently selected map's actions.
 - `catchment_rings()` collapses the catchment rows into at most three concentric drive-time bands and
   `zoom_for_radius_km()` frames the outer one. The rows are destinations, so one ring per row drew
   nine circles up to 31 km wide with unreadable labels. The landmarks view is framed the same way

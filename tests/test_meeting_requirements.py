@@ -2507,7 +2507,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         header_classes = set(re.findall(r'<th[^>]*class="([^"]+)"', index_source))
         self.assertEqual(header_classes,
                          {'cf-sales', 'cf-rental', 'cf-grace', 'cf-fund', 'cf-finance',
-                          'lt-dist', 'lt-dur', 'lt-actions'},
+                          'lt-dist', 'lt-dur', 'lt-map-toggle', 'lt-actions'},
                          'a new class on a <th> needs its background rule scoped to td')
 
     def test_grouped_classification_dropdowns_fill_their_field(self):
@@ -3968,6 +3968,30 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('marker_lat, marker_lng = map_center_lat, map_center_lng', maps_source)
         access_body = maps_source.split('def _draw_access_roads(', 1)[1].split('def _get_cached_map_images(', 1)[0]
         self.assertNotIn("('main_roads', 'secondary_roads')", access_body)
+
+    def test_location_tables_and_controls_are_scoped_to_their_maps(self):
+        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertNotIn('lt-location-input', source)
+        self.assertNotIn('location_url', source)
+        self.assertNotIn('<th>رابط الموقع</th>', source)
+        self.assertIn("selectTd.className = 'lt-map-toggle';", source)
+        self.assertIn('.location-table .lt-map-select {', source)
+        self.assertIn('width: 17px;', source)
+        self.assertIn("actionGroup.className = 'lt-action-group';", source)
+        self.assertIn("document.createElement(cfg.road ? 'textarea' : 'input')", source)
+        self.assertIn('resize: vertical;', source)
+        self.assertIn("main_roads: { nameLabel: 'الطريق الرئيسي', nameHint: 'مثال: طريق الملك فهد', nameOnly: true, road: true, mapType: 'access' }", source)
+        self.assertIn("nearby_landmarks: { nameLabel: 'المَعلم القريب', nameHint: 'مثال: مجمع الراشد', categoryLabel: 'النوع', mapSelectable: true, mapType: 'landmarks' }", source)
+        self.assertIn("city_landmarks: { nameLabel: 'مَعلم المدينة', nameHint: 'مثال: الواجهة البحرية', categoryLabel: 'النوع', mapSelectable: true, mapType: 'catchment' }", source)
+        workflow_body = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
+        self.assertIn('MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === tenantSelectedMapType)', workflow_body)
+        self.assertNotIn('MAP_PREVIEW_VIEW_DEFS.map(view =>', workflow_body)
+        landmark_body = source.split('function startLandmarkPlacement(key, tr)', 1)[1].split('function startManualRoadDrawing', 1)[0]
+        self.assertIn('openLocationTableMap(mapType)', landmark_body)
+        road_body = source.split('function startManualRoadDrawing(name)', 1)[1].split('function finishManualRoadDrawing', 1)[0]
+        self.assertIn("openLocationTableMap('access')", road_body)
+        overlay_body = source.split('function renderTenantMapPolygonOverlay()', 1)[1].split('function removeTenantPolygonPoint', 1)[0]
+        self.assertIn("const showRoads = tenantSelectedMapType === 'access';", overlay_body)
 
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
