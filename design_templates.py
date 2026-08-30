@@ -3,6 +3,7 @@ Design templates for Multi-Tenant SaaS.
 Pre-built design styles that companies can choose from.
 """
 import base64
+import io
 import json
 import os
 import re
@@ -110,6 +111,59 @@ def _font_family_list(chosen):
     return f"{chosen}, {FALLBACK_FONTS}"
 
 
+def _css_static_weight(value):
+    weight = int(value or 400)
+    if weight <= 300:
+        return 300
+    if weight <= 450:
+        return 400
+    if weight <= 550:
+        return 500
+    if weight <= 750:
+        return 700
+    return 900
+
+
+def _resolved_static_weight(value, fallback):
+    actual = _css_static_weight(value)
+    requested = _css_static_weight(fallback)
+    if requested >= 700 and actual < requested:
+        return requested
+    if requested <= 300 and actual > requested:
+        return requested
+    return actual
+
+
+def _font_weight_descriptor(raw, fallback=400):
+    try:
+        table_count = int.from_bytes(raw[4:6], 'big')
+        tables = {}
+        for index in range(table_count):
+            record = 12 + index * 16
+            tag = raw[record:record + 4].decode('latin-1')
+            tables[tag] = int.from_bytes(raw[record + 8:record + 12], 'big')
+        if 'fvar' in tables:
+            return '100 900'
+        offset = tables.get('OS/2')
+        if offset is not None and offset + 6 <= len(raw):
+            weight = int.from_bytes(raw[offset + 4:offset + 6], 'big')
+            return str(_resolved_static_weight(weight, fallback))
+    except Exception:
+        pass
+    try:
+        from fontTools.ttLib import TTFont
+        font = TTFont(io.BytesIO(raw), lazy=True)
+        try:
+            if 'fvar' in font:
+                return '100 900'
+            weight = int(font['OS/2'].usWeightClass) if 'OS/2' in font else int(fallback)
+        finally:
+            font.close()
+        return str(_resolved_static_weight(weight, fallback))
+    except Exception:
+        return str(fallback)
+
+
 def _resolve_preset_font_source(name):
     """Map a chosen font-family name to a real bundled or Google Fonts source."""
     if not name:
@@ -162,15 +216,17 @@ def _build_font_face_from_file(abs_path, family, fallback, embed=True, tenant_id
     fmt = {'.ttf': 'truetype', '.otf': 'opentype', '.woff2': 'woff2', '.woff': 'woff'}.get(ext, 'truetype')
     mime_map = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}
     mime = mime_map.get(fmt, 'font/ttf')
+    with open(abs_path, 'rb') as font_file:
+        raw = font_file.read()
+    weight = _font_weight_descriptor(raw)
     served_url = None
     if not embed and tenant_id:
         served_url = f"/tenant-assets/{tenant_id}/fonts/{os.path.basename(abs_path)}"
     if served_url:
         src = f"url('{served_url}') format('{fmt}')"
     else:
-        with open(abs_path, 'rb') as f:
-            src = f"url(data:{mime};base64,{base64.b64encode(f.read()).decode()}) format('{fmt}')"
-    css = f"@font-face{{font-family:'{family}';src:{src};font-weight:100 900;font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
+        src = f"url(data:{mime};base64,{base64.b64encode(raw).decode()}) format('{fmt}')"
+    css = f"@font-face{{font-family:'{family}';src:{src};font-weight:{weight};font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;font-synthesis:weight;}}"
     return css, f"'{family}', {fallback}"
 
 
@@ -185,7 +241,8 @@ def _build_font_face_from_data(font_file_data, family, fallback):
     mime_map = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}
     mime = mime_map.get(fmt, 'font/ttf')
     src = f"url(data:{mime};base64,{data}) format('{fmt}')"
-    css = f"@font-face{{font-family:'{family}';src:{src};font-weight:100 900;font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;}}"
+    weight = _font_weight_descriptor(base64.b64decode(data))
+    css = f"@font-face{{font-family:'{family}';src:{src};font-weight:{weight};font-display:swap;}}\n.slide,.slide *{{font-family:'{family}',{fallback} !important;font-synthesis:weight;}}"
     return css, f"'{family}', {fallback}"
 
 
@@ -195,9 +252,10 @@ def _build_preset_css(source, fallback):
     if source['type'] == 'bundled':
         data, fmt = source['data'], source['format']
         mime = {'truetype':'font/ttf','opentype':'font/otf','woff2':'font/woff2','woff':'font/woff'}.get(fmt,'font/ttf')
+        weight = _font_weight_descriptor(base64.b64decode(data))
         css = (
-            f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{data}) format('{fmt}');font-weight:100 900;font-display:swap;}}\n"
-            f".slide,.slide *{{font-family:{family_list} !important;}}"
+            f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{data}) format('{fmt}');font-weight:{weight};font-display:swap;}}\n"
+            f".slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}"
         )
     elif source['type'] == 'google':
         encoded = source['encoded']
@@ -206,9 +264,9 @@ def _build_preset_css(source, fallback):
             + encoded
             + ":wght@400;700&display=swap');\n"
         )
-        css = import_line + f".slide,.slide *{{font-family:{family_list} !important;}}"
+        css = import_line + f".slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}"
     else:  # system
-        css = f".slide,.slide *{{font-family:{family_list} !important;}}"
+        css = f".slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}"
     return css, family_list
 
 
@@ -530,8 +588,8 @@ def build_design_rules(branding):
 
 ## توسيط صور الخرائط والموقع (Centered Maps - No Crop Shift)
 - صور الخرائط (##MAP_OVERVIEW##, ##MAP_LANDMARKS##, ##MAP_ACCESS##, ##MAP_CATCHMENT##) يجب أن تُضبط دائماً في المنتصف تماماً:
-  `background-position: center center !important; background-size: cover !important;` أو عند استخدام وسم img: `object-fit: cover !important; object-position: center center !important;`
-- ممنوع إزاحة أو اقتطاع أطراف الخريطة بشكل غير متوازن.
+  `background-position: center center !important; background-size: contain !important; background-repeat:no-repeat;` أو عند استخدام وسم img: `object-fit: contain !important; object-position: center center !important;`
+- ممنوع قص صورة الخريطة أو استخدام cover؛ يجب أن تظهر الصورة كاملة بحيث تبقى علامة الموقع في موضعها الحقيقي.
 
 ## منظومة الرسوم البيانية الشاملة وتنوع أنماط العرض (Pure HTML/CSS Executive Charts)
 يجب التنويع الذكي في استخدام أنواع الرسوم البيانية حسب طبيعة البيانات المعروضة، مع تنفيذها بـ HTML و CSS نقي فائق الجودة والنعومة ومتوافق بالكامل:
@@ -556,6 +614,15 @@ def build_design_rules(branding):
 7. **الأعمدة والأشرطة والمقارنات (Bar & Column / Stacked Charts):**
    - **الاستخدام الأنسب:** مقارنة الإيرادات بالتكاليف، ومقارنة التكاليف الرأسمالية للمكونات.
    - **طريقة التنفيذ:** أشرطة أفقية أو أعمدة رأسية بنسب دقيقة وألوان الهوية مع جدول البيانات الأصلي الكامل بجانبها.
+8. **الأعمدة والأشرطة المجمعة (Grouped Bar & Grouped Column):**
+   - **الاستخدام الأنسب:** مقارنة أكثر من سلسلة أو سيناريو داخل كل فئة أو سنة.
+   - **طريقة التنفيذ:** مجموعات متجاورة واضحة بنفس مقياس المحور مع دليل ألوان وتسميات القيم.
+9. **الخريطة الشجرية (Treemap):**
+   - **الاستخدام الأنسب:** توزيع بنود التكلفة أو الإيراد حسب الحجم النسبي.
+   - **طريقة التنفيذ:** مستطيلات متناسبة المساحة تحمل اسم البند وقيمته ونسبته دون إخفاء الجدول الأصلي.
+10. **الخريطة الحرارية (Heatmap):**
+   - **الاستخدام الأنسب:** مصفوفات الحساسية ومقارنة المتغيرات بالسيناريوهات.
+   - **طريقة التنفيذ:** شبكة خلايا بدرجات الهوية مع القيمة مكتوبة داخل كل خلية ومفتاح واضح للدرجات.
 
 - اعرض جميع أقسام وجداول ومؤشرات الدراسة الموجودة في البيانات، بالترتيب والمسميات نفسها المستخدمة في تقرير الدراسة المالية، ولا تختصرها في لوحة مؤشرات واحدة.
 - انقل كل قيمة ووحدة وعدد خانات عشرية كما هو. أضف فواصل الآلاف بصرياً فقط، من دون تقريب أو تحويل إلى آلاف أو ملايين أو إعادة حساب.
@@ -711,7 +778,8 @@ def _managed_font_face(font_data, family, weight):
         if not data:
             return ''
         mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
-        css_weight = '100 900' if weight == 'all' else {'light': 300, 'regular': 400, 'medium': 500, 'bold': 700, 'black': 900}.get(weight, 400)
+        fallback_weight = {'light': 300, 'regular': 400, 'medium': 500, 'bold': 700, 'black': 900}.get(weight, 400)
+        css_weight = _font_weight_descriptor(base64.b64decode(data), fallback_weight)
         return f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{data}) format('{fmt}');font-weight:{css_weight};font-style:normal;font-display:swap;}}"
     except Exception:
         return ''
@@ -787,7 +855,10 @@ def _managed_font_css(branding, tenant_id, fallback):
         selected_family = font.get('font_family') or ('Arial' if script == 'latin' else 'The Sans Arabic')
         if font.get('file_data'):
             return 'data', font['file_data']
-        source = _resolve_preset_font_source(font.get('source_data') or selected_family)
+        source_name = font.get('source_data') or selected_family
+        if selected_family == 'The Sans Arabic' and font.get('weight') in {'bold', 'black'}:
+            source_name = font.get('font_name') or source_name
+        source = _resolve_preset_font_source(source_name)
         if source and source.get('type') == 'bundled':
             payload = json.dumps({'data': source['data'], 'format': source.get('format', 'truetype')})
             return 'data', payload
@@ -846,19 +917,7 @@ def _managed_font_css(branding, tenant_id, fallback):
                 available_faces[weight] = face
         if not available_faces:
             continue
-        if len(available_faces) == 1:
-            face = next(iter(available_faces.values()))
-            generated_rules = [('all', face)]
-        else:
-            generated_rules = []
-            for weight in weights:
-                face = available_faces.get(weight)
-                if face is None:
-                    face = min(
-                        available_faces.items(),
-                        key=lambda item: abs(_MANAGED_FONT_WEIGHTS[item[0]] - _MANAGED_FONT_WEIGHTS[weight]),
-                    )[1]
-                generated_rules.append((weight, face))
+        generated_rules = list(available_faces.items())
         for weight, face in generated_rules:
             rule = _build_rule(face, script_families[script], weight, script)
             if not rule:
@@ -887,13 +946,14 @@ def _managed_font_css(branding, tenant_id, fallback):
         if bundled:
             data, fmt = bundled
             mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+            weight = _font_weight_descriptor(base64.b64decode(data))
             rules.append(
                 f"@font-face{{font-family:'platform-fallback-arabic';src:url(data:{mime};base64,{data})"
-                f" format('{fmt}');font-weight:100 900;font-display:swap;}}"
+                f" format('{fmt}');font-weight:{weight};font-display:swap;}}"
             )
             families.append("'platform-fallback-arabic'")
     family_list = ', '.join(families) + ', ' + fallback
-    rules.append(f'.slide,.slide *{{font-family:{family_list} !important;}}')
+    rules.append(f'.slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}')
     return '\n'.join(import_rules + rules), family_list
 
 
@@ -909,7 +969,7 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
 
     if family_only:
         family_list = _font_family_list(chosen)
-        return f".slide,.slide *{{font-family:{family_list} !important;}}", family_list
+        return f".slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}", family_list
 
     # Managed per-weight selections take precedence over the legacy one-file setting.
     managed = _managed_font_css(branding, tenant_id, fallback)
@@ -951,16 +1011,17 @@ def build_font_css(branding, tenant_id=None, embed=True, family_only=False):
     if bundled:
         data, fmt = bundled
         mime = {'truetype': 'font/ttf', 'opentype': 'font/otf', 'woff2': 'font/woff2', 'woff': 'font/woff'}.get(fmt, 'font/ttf')
+        weight = _font_weight_descriptor(base64.b64decode(data))
         family = 'platform-fallback-arabic'
         family_list = f"{_font_family_list(chosen).rsplit(', ' + FALLBACK_FONTS, 1)[0]}, '{family}', {fallback}"
         css = (
             f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{data}) format('{fmt}');"
-            f"font-weight:100 900;font-display:swap;}}\n"
-            f".slide,.slide *{{font-family:{family_list} !important;}}"
+            f"font-weight:{weight};font-display:swap;}}\n"
+            f".slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}"
         )
         return css, family_list
     family_list = _font_family_list(chosen)
-    return f".slide,.slide *{{font-family:{family_list} !important;}}", family_list
+    return f".slide,.slide *{{font-family:{family_list} !important;font-synthesis:weight;}}", family_list
 
 
 def _hex_to_rgb(hex_color):

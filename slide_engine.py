@@ -114,12 +114,124 @@ def _plan_slide_signature(slide):
     title = re.sub(r'[\W_]+', '', str(slide.get('title') or '').lower(), flags=re.UNICODE)
     source = re.sub(r'\s+', '', str(slide.get('content_source') or slide.get('source_table') or '').lower())
     tokens = '|'.join(str(item or '') for item in (slide.get('image_tokens') or []))
-    return title, source, tokens
+    return ('source', source) if source else ('tokens', tokens) if tokens else ('title', title)
+
+
+def _canonical_image_token(token):
+    value = str(token or '').strip()
+    patterns = (
+        (r'#*(?:PROJECT_IMAGE|MOODBOARD_IMAGE)_(\d+)#*', 'MOODBOARD_IMAGE'),
+        (r'#*(?:LAND_IMAGE|LAND_PHOTO)_(\d+)#*', 'LAND_PHOTO'),
+        (r'#*(?:2D_PLAN|PLAN_IMAGE)_(\d+)#*', 'PLAN_IMAGE'),
+    )
+    for pattern, prefix in patterns:
+        match = re.fullmatch(pattern, value, re.IGNORECASE)
+        if match:
+            return f'##{prefix}_{int(match.group(1))}##'
+    for pattern in (
+        r'#*INTERIOR_COMP_(\d+)_(?:IMG|IMAGE)_(\d+)#*',
+        r'#*INTERIOR_C(\d+)_(?:IMG|IMAGE)_(\d+)#*',
+        r'#*INTERIOR_(\d+)_(\d+)#*',
+    ):
+        match = re.fullmatch(pattern, value, re.IGNORECASE)
+        if match:
+            return f'##INTERIOR_COMP_{int(match.group(1))}_IMG_{int(match.group(2))}##'
+    return value
+
+
+def _canonicalize_slide_image_tokens(slide):
+    if not isinstance(slide, dict):
+        return slide
+    normalized = []
+    raw_tokens = slide.get('image_tokens') or []
+    if not isinstance(raw_tokens, (list, tuple)):
+        raw_tokens = [raw_tokens]
+    for token in raw_tokens:
+        canonical = _canonical_image_token(token)
+        if canonical and canonical not in normalized:
+            normalized.append(canonical)
+    slide['image_tokens'] = normalized
+    return slide
+
+
+def _deduplicate_plan_media(groups):
+    used = set()
+    prefixes = ('##MOODBOARD_IMAGE_', '##LAND_PHOTO_', '##PLAN_IMAGE_', '##INTERIOR_COMP_')
+    for section_key in PRESENTATION_SECTION_ORDER:
+        kept = []
+        for slide in groups.get(section_key, []):
+            _canonicalize_slide_image_tokens(slide)
+            tokens = slide.get('image_tokens') or []
+            unique_tokens = [token for token in tokens if not token.startswith(prefixes) or token not in used]
+            if tokens and not unique_tokens:
+                continue
+            slide['image_tokens'] = unique_tokens
+            used.update(token for token in unique_tokens if token.startswith(prefixes))
+            kept.append(slide)
+        groups[section_key] = kept
+    return used
+
+
+def _drop_redundant_generic_slides(groups):
+    generic = {
+        'المحتوى المعتمد لهذا القسم', 'التفاصيل المتاحة في بيانات المشروع',
+        'الملخص النهائي دون تكرار', 'تعريف المشروع من البيانات المعتمدة',
+        'الفكرة والاستخدامات المعتمدة', 'ملخص موجز دون تكرار',
+    }
+    for section_key, slides in groups.items():
+        concrete = any(slide.get('content_source') or slide.get('source_table') or slide.get('image_tokens')
+                       for slide in slides)
+        if concrete:
+            groups[section_key] = [
+                slide for slide in slides
+                if slide.get('content_source') or slide.get('source_table') or slide.get('image_tokens')
+                or not generic.intersection(str(item or '').strip() for item in (slide.get('bullets') or []))
+            ]
+
+
+FINANCIAL_CHART_TYPES = (
+    'bar', 'column', 'grouped_bar', 'grouped_column', 'line', 'area',
+    'pie', 'donut', 'treemap', 'scatter', 'histogram', 'heatmap', 'candlestick',
+)
+
+
+def _financial_chart_type(title='', table_key='', index=0):
+    text = f'{title} {table_key}'.lower()
+    if re.search(r'حساسي|سيناريو|sensitivity', text):
+        return 'heatmap'
+    if re.search(r'تدفق|cashflow|cash flow', text):
+        return 'area'
+    if re.search(r'تكال|تكلف|cost|مصروف|opex', text):
+        return 'treemap'
+    if re.search(r'إيراد|revenue|مبيعات|sales', text):
+        return 'column'
+    if re.search(r'تمويل|سحب|سداد|finance|repayment', text):
+        return 'line'
+    cycle = ('bar', 'grouped_column', 'line', 'pie', 'donut', 'scatter', 'histogram')
+    return cycle[index % len(cycle)]
+
+
+def _financial_summary_from_report(model):
+    report = model.get('report') if isinstance(model, dict) and isinstance(model.get('report'), dict) else {}
+    parts = report.get('parts') if isinstance(report.get('parts'), list) else []
+    groups = {'التكاليف والاستثمار': [], 'مؤشرات العائد والاسترداد': []}
+    current = ''
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if part.get('type') == 'heading':
+            current = str(part.get('text') or '').strip()
+            continue
+        target = next((name for name in groups if name in current), None)
+        if target and part.get('type') == 'fields':
+            groups[target].extend(row for row in (part.get('rows') or [])
+                                  if isinstance(row, (list, tuple)) and len(row) >= 2)
+    return groups if any(groups.values()) else {}
 
 
 _FINANCIAL_PLAN_TABLES = (
     ('revenueTable', 'بنود الإيرادات', 'chart'),
-    ('costTable', 'تكاليف المشروع', 'flow'),
+    ('costTable', 'تكاليف المشروع', 'chart'),
     ('scheduleTable', 'مراحل التطوير المالية', 'flow'),
     ('opexTable', 'المصروفات التشغيلية', 'chart'),
     ('graceScheduleTable', 'جدول فترة السماح', 'table'),
@@ -212,10 +324,13 @@ def _project_component_rows(project_data):
 
 def _available_asset_items(values):
     items = []
+    seen = set()
     for index, value in enumerate(values if isinstance(values, list) else [], 1):
         source = value if isinstance(value, dict) else {'url': value}
         url = str(source.get('url') or source.get('imageUrl') or '').strip()
-        if url:
+        identity = str(source.get('id') or url).split('?', 1)[0]
+        if url and identity not in seen:
+            seen.add(identity)
             items.append((index, source))
     return items
 
@@ -267,7 +382,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     images = images if isinstance(images, dict) else {}
 
     def add(section_key, slide, replace=False):
-        slide = dict(slide)
+        slide = _canonicalize_slide_image_tokens(dict(slide))
         slide['section_key'] = section_key
         if replace:
             groups[section_key] = []
@@ -276,23 +391,27 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             return
         groups.setdefault(section_key, []).append(slide)
 
+    used_media_tokens = _deduplicate_plan_media(groups)
     moodboard_tokens = [f'##MOODBOARD_IMAGE_{index}##' for index, _item in _available_asset_items(images.get('moodboard'))]
+    available_overview_tokens = [token for token in moodboard_tokens if token not in used_media_tokens]
     if not groups.get('overview') and source:
         add('overview', {
             'title': 'نبذة عن المشروع', 'type': 'content', 'design_style': 'text',
-            'content_density': 'medium', 'requires_image': bool(moodboard_tokens),
+            'content_density': 'medium', 'requires_image': bool(available_overview_tokens),
             'content_source': 'project_overview',
-            'image_tokens': moodboard_tokens[:2], 'bullets': [],
+            'image_tokens': available_overview_tokens[:2], 'bullets': [],
         })
     elif groups.get('overview'):
         groups['overview'][0]['title'] = 'نبذة عن المشروع'
         groups['overview'][0]['content_source'] = groups['overview'][0].get('content_source') or 'project_overview'
-        if not groups['overview'][0].get('image_tokens') and moodboard_tokens:
-            groups['overview'][0]['image_tokens'] = moodboard_tokens[:2]
+        if not groups['overview'][0].get('image_tokens') and available_overview_tokens:
+            groups['overview'][0]['image_tokens'] = available_overview_tokens[:2]
+    if groups.get('overview'):
+        used_media_tokens.update(groups['overview'][0].get('image_tokens') or [])
 
     moodboard_items = _available_asset_items(images.get('moodboard'))
     moodboard_meta = images.get('moodboard_meta') if isinstance(images.get('moodboard_meta'), list) else []
-    existing_ext_tokens = {tok for slide in groups.get('exterior', []) for tok in (slide.get('image_tokens') or [])}
+    existing_ext_tokens = {token for token in used_media_tokens if token.startswith('##MOODBOARD_IMAGE_')}
     uncovered_ext = [(idx, item) for idx, item in moodboard_items if f'##MOODBOARD_IMAGE_{idx}##' not in existing_ext_tokens]
     if not existing_ext_tokens and len(moodboard_items) > 1:
         for start in range(0, len(moodboard_items), 2):
@@ -468,6 +587,11 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         report = model.get('report') if isinstance(model.get('report'), dict) else {}
         report_parts = report.get('parts') if isinstance(report.get('parts'), list) else []
         groups['financial'] = []
+        add('financial', {
+            'title': 'الملخص المالي', 'type': 'content', 'design_style': 'dashboard',
+            'chart_type': 'bar', 'content_density': 'high', 'requires_image': False,
+            'content_source': 'financial_indicators', 'bullets': [],
+        })
         if report_parts:
             heading = 'الدراسة المالية'
             subheading = ''
@@ -487,6 +611,10 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 rows = _filter_substantive_financial_rows(rows, part.get('type'))
                 chunk_size = 8 if part.get('type') == 'table' else 6
                 if not rows:
+                    continue
+                part_title = subheading or heading
+                if part.get('type') == 'fields' and any(name in part_title for name in (
+                        'التكاليف والاستثمار', 'مؤشرات العائد والاسترداد')):
                     continue
                 target_section = 'components' if 'مكونات المشروع' in heading else 'financial'
                 if target_section == 'components':
@@ -509,23 +637,18 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     continue
                 for start in range(0, len(rows), chunk_size):
                     end = min(start + chunk_size, len(rows))
-                    title = subheading or heading
+                    title = part_title
                     number = start // chunk_size + 1
+                    chartable = target_section == 'financial' and part.get('type') == 'table' and _rows_have_comparable_numbers(rows)
                     add(target_section, {
                         'title': title + (f' — {number}' if len(rows) > chunk_size else ''),
-                        'type': 'content',
-                        'design_style': ('chart' if target_section == 'financial' and part.get('type') == 'table'
-                                         and _rows_have_comparable_numbers(rows) else 'table'),
+                        'type': 'content', 'design_style': 'chart' if chartable else 'table',
+                        'chart_type': _financial_chart_type(title, index=part_index) if chartable else '',
                         'content_density': 'high', 'requires_image': False,
                         'content_source': f'financial_report:{part_index}:{start}:{end}',
                         'source_table': f'report_part_{part_index}', 'bullets': [],
                     })
         else:
-            add('financial', {
-                'title': 'المؤشرات المالية', 'type': 'content', 'design_style': 'dashboard',
-                'content_density': 'high', 'requires_image': False,
-                'content_source': 'financial_indicators', 'bullets': [],
-            })
             for table_key, title, style in _FINANCIAL_PLAN_TABLES:
                 rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
                 for start in range(0, len(rows), 8):
@@ -534,6 +657,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     add('financial', {
                         'title': title + (f' — {number}' if len(rows) > 8 else ''),
                         'type': 'content', 'design_style': style,
+                        'chart_type': _financial_chart_type(title, table_key, number - 1) if style == 'chart' else '',
                         'content_density': 'high', 'requires_image': False,
                         'content_source': f'financial_table:{table_key}:{start}:{end}',
                         'source_table': table_key, 'bullets': [],
@@ -599,6 +723,8 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 'content_source': content_source, 'bullets': [],
             })
 
+    _deduplicate_plan_media(groups)
+
     land_keys = ('croquis_land_area', 'approved_financial_area', 'boundary_lengths',
                  'surrounding_streets', 'facades_count', 'facades_directions',
                  'building_ratio_coverage', 'setbacks', 'max_floors_height',
@@ -662,7 +788,8 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
     if not isinstance(plan, dict):
         plan = {}
     source_slides = plan.get('slides') if isinstance(plan.get('slides'), list) else []
-    source_slides = [dict(slide) for slide in source_slides if isinstance(slide, dict)]
+    source_slides = [_canonicalize_slide_image_tokens(dict(slide))
+                     for slide in source_slides if isinstance(slide, dict)]
     cover = next((slide for slide in source_slides if slide.get('type') == 'cover'), None)
     if cover is None and source_slides:
         cover = source_slides[0]
@@ -709,6 +836,7 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
         groups.setdefault(section_key, []).append(item)
 
     _ensure_required_plan_content(groups, project_data, images, tenant_id)
+    _drop_redundant_generic_slides(groups)
 
     if not any(groups.values()) and project_data:
         groups['overview'].append({
@@ -1542,7 +1670,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - cards: بطاقتان أو ثلاث فقط لعناصر مستقلة قصيرة
 - timeline: مراحل زمنية مع الملاحظات الموجودة فقط
 - table: جدول بيانات كامل
-- chart: رسم بياني مبني على أرقام موجودة مع جدول البيانات بجانبه
+- chart: رسم بياني مبني على أرقام موجودة مع جدول البيانات بجانبه، ويحدد chart_type من bar أو column أو grouped_bar أو grouped_column أو line أو area أو pie أو donut أو treemap أو scatter أو histogram أو heatmap أو candlestick
 - text: فقرة أو قائمة منظمة للنبذات والملخصات
 - image: صورة كبيرة + وصفها الصحيح
 - flow: تسلسل نصي بسيط عند وجود خطوات فعلية
@@ -1565,6 +1693,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
       "section_key": "overview|components|land|location|market|timeline|financial|swot_risks|team|plans|exterior|interior|executive_summary|closing",
       "content_density": "low|medium|high",
       "design_style": "dashboard|cards|timeline|table|chart|text|image|flow|swot|map|diagram|divider",
+      "chart_type": "bar|column|grouped_bar|grouped_column|line|area|pie|donut|treemap|scatter|histogram|heatmap|candlestick أو فارغ",
       "bullets": ["نقطة 1", "نقطة 2", "نقطة 3"],
       "requires_image": true أو false,
       "content_source": "<الحقل أو الجدول الذي يغذي هذه الشريحة>",
@@ -1955,6 +2084,12 @@ def _slide_source_data_note(slide, project_data):
         rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
         return f'جدول هذه الشريحة فقط ({table_key}):\n' + json.dumps(rows[start:end], ensure_ascii=False, indent=2)
     if source == 'financial_indicators':
+        report_summary = _financial_summary_from_report(model)
+        if report_summary:
+            return (
+                'الملخص المالي من نفس بيانات تقرير PDF — أنشئ جدول التكاليف والاستثمار وجدول مؤشرات العائد والاسترداد بالقيم والمسميات نفسها دون حذف أو إعادة حساب:\n'
+                + json.dumps(report_summary, ensure_ascii=False, indent=2)
+            )
         inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
         projection = model.get('projection') if isinstance(model.get('projection'), dict) else {}
         calc = _parse_financial_dict(project_data.get('financial_calc_data'))
@@ -2154,6 +2289,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     title = slide.get('title', f'شريحة {slide_num}')
     slide_type = slide.get('type', 'content')
     design_style = slide.get('design_style', 'cards')
+    chart_type = str(slide.get('chart_type') or '').strip().lower()
     bullets = slide.get('bullets', [])
     density = slide.get('content_density', 'medium')
     section_key = _slide_section_key(slide)
@@ -2180,10 +2316,26 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'flow': 'مخطط تدفق بصري هندسي راقٍ (Flowchart / Visual Pipeline) يربط الكتل بمسارات تدفق واضحة وبألوان الهوية مع إبراز القيم والمراحل والمبالغ',
         'diagram': 'مخطط اتجاهي هندسي راقٍ (Directional Diagram) لأرض المشروع وحدودها الأربعة والواجهات والشوارع المحيطة والإطلالة وفق الهيكل المعتمد',
         'swot': 'تحليل SWOT وتحليل المخاطر بتقسيم واضح وبألوان الهوية وحدها',
-        'map': 'خريطة واضحة مضبوطة في المنتصف تماماً (center center) مع جدول أو ملخص واحد دون إعادة الأرقام في أكثر من شكل',
+        'map': 'خريطة كاملة بلا قص باستخدام contain ومضبوطة في المنتصف تماماً (center center) مع جدول أو ملخص واحد دون إعادة الأرقام في أكثر من شكل',
         'grid': 'صورتان واضحتان كحد أقصى في الصفحة مع الوصف الصحيح لكل صورة',
         'minimal': 'خاتمة بسيطة تتضمن بيانات التواصل المتاحة بلا تقييمات أو عبارات مشروطة',
     }.get(design_style, 'نص منظم يناسب طبيعة المحتوى')
+    chart_instructions = {
+        'bar': 'أشرطة أفقية للمقارنة بين البنود',
+        'column': 'أعمدة رأسية للمقارنة الزمنية أو بين الفئات',
+        'grouped_bar': 'أشرطة أفقية مجمعة تقارن أكثر من سلسلة لكل فئة',
+        'grouped_column': 'أعمدة رأسية مجمعة تقارن السيناريوهات أو السلاسل',
+        'line': 'خط زمني بنقاط وقيم واضحة لكل فترة',
+        'area': 'مساحة زمنية متدرجة توضح التدفق والتراكم',
+        'pie': 'دائرة نسبية للفئات التي تكوّن إجماليًا واحدًا',
+        'donut': 'دائرة مجوفة للنسب مع الإجمالي في المنتصف',
+        'treemap': 'مستطيلات مساحية متناسبة لتوزيع بنود التكلفة أو الإيراد',
+        'scatter': 'نقاط على محورين لبيان العلاقة بين متغيرين',
+        'histogram': 'أعمدة متلاصقة لتوزيع القيم على نطاقات',
+        'heatmap': 'مصفوفة خلايا لونية للمقارنة بين السيناريوهات والمتغيرات',
+        'candlestick': 'نطاق رأسي يوضح الأدنى والأساسي والأعلى',
+    }
+    chart_note = chart_instructions.get(chart_type, '')
 
     density_instructions = {
         'low': 'محتوى خفيف — صورة كبيرة أو عنصران وافيان مع شرح تفصيلي',
@@ -2261,9 +2413,9 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         timeline_note = _timeline_data_note(project_data)
         if timeline_note:
             notes.append(timeline_note.strip())
-    if design_style in ('dashboard', 'table', 'chart', 'pie', 'donut', 'scatter', 'histogram', 'candlestick', 'flow') or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
+    if design_style in ('dashboard', 'table', 'chart', 'pie', 'donut', 'scatter', 'histogram', 'candlestick', 'flow') or chart_type in FINANCIAL_CHART_TYPES or re.search(r'(?:مالي|تكلفة|إيراد|عوائد|مكونات|مؤشرات|جدوى|ميزانية|financial|cost|revenue|irr|roi)', title.lower()):
         notes.append('في الشرائح المالية: انقل جميع الجداول والمؤشرات المطلوبة بمسمياتها الأصلية وبالقيم والوحدات نفسها، من دون حذف صف أو عمود أو إعادة حساب.')
-        notes.append('نوّع في أسلوب العرض بين جداول البيانات المنظمة والرسوم البيانية المتنوعة (Pie / Donut بـ conic-gradient، الأعمدة، الخطوط، النطاقات Candlestick، ومخططات التدفق Flowcharts) المناسبة للتدفقات وجدول سحب وسداد التمويل ومراحل التطوير.')
+        notes.append('نوّع في أسلوب العرض حسب طبيعة البيانات بين Bar وColumn وGrouped Bar/Column وLine وArea وPie وDonut وTreemap وScatter وHistogram وHeatmap وCandlestick ومخططات التدفق، مع بقاء جدول القيم الأصلي كاملًا.')
         notes.append('نسّق الأعداد بفواصل الآلاف للعرض فقط، من دون تقريب أو تحويل إلى ألف أو مليون أو تغيير عدد الخانات العشرية.')
         notes.append('أضف رسماً بيانياً عندما توجد قيم فعلية قابلة للمقارنة، وضع جدول البيانات الكامل بجانبه بألوان الهوية فقط.')
         financial_note = _financial_data_note(project_data)
@@ -2274,6 +2426,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     return f"""أنشئ شريحة {slide_num}/{total_slides}: {title}
 النوع: {slide_type}
 نمط التصميم: {design_style} — {style_instructions}
+{f'نوع الرسم المطلوب: {chart_type} — {chart_note}' if chart_note else ''}
 كثافة المحتوى: {density} — {density_instructions}
 
 النقاط الأساسية:
@@ -2322,12 +2475,54 @@ def _ensure_map_placeholder(html, slide_type):
     if marker in html:
         return html
     # Inject a background-image fallback if placeholder is missing
-    fallback = f'<div style="position:absolute;top:0;left:0;right:0;bottom:0;z-index:-1;background-image:url({marker});background-size:cover;background-position:center;"></div>'
+    fallback = f'<div style="position:absolute;top:0;left:0;right:0;bottom:0;z-index:-1;background-image:url({marker});background-size:contain;background-position:center center;background-repeat:no-repeat;"></div>'
     html = html.replace('class="slide"', 'class="slide"')
     # Insert fallback before closing of slide div
     html = re.sub(r'(</div>\s*)$', fallback + r'\1', html, count=1)
     print(f"[POST] Injected fallback placeholder {marker} into slide")
     return html
+
+
+def _set_tag_style(tag, property_names, declarations):
+    style_match = re.search(r'style\s*=\s*(["\'])(.*?)\1', tag, re.IGNORECASE)
+    if style_match:
+        style = style_match.group(2)
+        names = '|'.join(re.escape(name) for name in property_names)
+        style = re.sub(rf'(?:^|;)\s*(?:{names})\s*:[^;]*;?', ';', style, flags=re.IGNORECASE)
+        style = style.strip('; ')
+        style = (style + ';' if style else '') + declarations
+        return tag[:style_match.start(2)] + style + tag[style_match.end(2):]
+    if tag.rstrip().endswith('/>'):
+        position = tag.rfind('/>')
+        return tag[:position].rstrip() + f' style="{declarations}" />'
+    return tag.replace('>', f' style="{declarations}">', 1)
+
+
+def _map_media_contain(html):
+    indicators = ('MAP_', '/uploads/maps/', '/api/map-images/')
+
+    def normalize_img(match):
+        tag = match.group(0)
+        if not any(indicator.lower() in tag.lower() for indicator in indicators):
+            return tag
+        return _set_tag_style(
+            tag, ('object-fit', 'object-position', 'object-position-x', 'object-position-y'),
+            'object-fit:contain!important;object-position:center center!important;')
+
+    def normalize_background(match):
+        tag = match.group(0)
+        lowered = tag.lower()
+        if 'background' not in lowered or not any(indicator.lower() in lowered for indicator in indicators):
+            return tag
+        return _set_tag_style(
+            tag, ('background-size', 'background-position', 'background-position-x',
+                  'background-position-y', 'background-repeat'),
+            'background-size:contain!important;background-position:center center!important;'
+            'background-repeat:no-repeat!important;')
+
+    html = re.sub(r'<img\b[^>]*>', normalize_img, html, flags=re.IGNORECASE)
+    return re.sub(r'<[a-z][^>]*\bstyle\s*=\s*["\'][^"\']*["\'][^>]*>',
+                  normalize_background, html, flags=re.IGNORECASE)
 
 
 def _css_solid_color(value):
@@ -2408,6 +2603,27 @@ def slide_contrast_issues(html):
     return parser.issues
 
 
+def _required_slide_texts(slide, project_data):
+    source = str((slide or {}).get('content_source') or '')
+    project_data = project_data if isinstance(project_data, dict) else {}
+    match = re.fullmatch(r'project_components:(\d+):(\d+)', source)
+    if match:
+        start, end = map(int, match.groups())
+        return [str(row.get('اسم المكون') or '').strip()
+                for row in _project_component_rows(project_data)[start:end]
+                if str(row.get('اسم المكون') or '').strip()]
+    if source == 'financial_indicators':
+        summary = _financial_summary_from_report(_parse_financial_dict(project_data.get('financial_study_model')))
+        return [str(row[0]).strip() for rows in summary.values() for row in rows if row and str(row[0]).strip()]
+    return []
+
+
+def _missing_required_slide_texts(html, slide, project_data):
+    visible = html_lib.unescape(re.sub(r'<[^>]+>', ' ', str(html or '')))
+    compact = re.sub(r'\s+', ' ', visible).strip()
+    return [text for text in _required_slide_texts(slide, project_data) if text not in compact]
+
+
 def generate_single_slide(system_prompt, slide, slide_num, total_slides, branding, call_glm_fn, max_retries=2, project_data=None):
     """
     Generate a single slide's HTML.
@@ -2438,6 +2654,15 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             if not html:
                 print(f"[SLIDE-{slide_num}] ERROR: no HTML extracted (attempt {attempt})")
                 retry_note = '\n\nإعادة المحاولة: لم يصل HTML صالح. أخرج div class="slide" واحدًا مكتملًا فقط.'
+                continue
+            missing_texts = _missing_required_slide_texts(html, slide, project_data)
+            if missing_texts:
+                missing = '، '.join(missing_texts[:12])
+                print(f"[SLIDE-{slide_num}] ERROR: missing required content: {missing} (attempt {attempt})")
+                retry_note = (
+                    f'\n\nإعادة المحاولة: الاستجابة السابقة حذفت البنود الإلزامية التالية: {missing}. '
+                    'أعد الشريحة كاملة وانقل كل صف مطلوب دون اختصار أو حذف.'
+                )
                 continue
             contrast_issues = slide_contrast_issues(html)
             if contrast_issues:
@@ -3079,16 +3304,7 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
 
     # Ensure map containers are centered without awkward crop shifts
     if 'MAP_' in html or (isinstance(slide_type, str) and slide_type.startswith('map_')):
-        html = re.sub(
-            r'object-position\s*:\s*[^;]+;',
-            'object-position: center center !important;',
-            html, flags=re.IGNORECASE
-        )
-        html = re.sub(
-            r'background-position\s*:\s*[^;]+;',
-            'background-position: center center !important;',
-            html, flags=re.IGNORECASE
-        )
+        html = _map_media_contain(html)
 
     # Clean out empty/broken img tags across all slides
     html = re.sub(
@@ -3176,6 +3392,8 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     )
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
+    if isinstance(slide_type, str) and slide_type.startswith('map_'):
+        html = _map_media_contain(html)
     html = _apply_logo_contrast_styles(html, branding, project_data)
     html = _replace_creative_image_placeholders(html, creative_images, slide_type)
     html = _replace_data_placeholders(html, project_data, branding)

@@ -5,6 +5,7 @@ The suite uses a temporary SQLite database and never calls Google or an AI API.
 
 import io
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -148,7 +149,7 @@ class FontWorkflowTests(unittest.TestCase):
         self.assertTrue(all(s['font_id'] is None for s in selections))
         self.assertEqual({s['weight'] for s in selections}, {detected['weight']})
 
-    def test_pdf_css_uses_single_uploaded_weight_for_all_text_weights(self):
+    def test_pdf_css_keeps_single_static_face_at_its_real_weight_for_bold_synthesis(self):
         font_file = ROOT / 'assets' / 'fonts' / 'BahijTheSansArabic-Bold.ttf'
         raw = font_file.read_bytes()
         import base64
@@ -162,24 +163,40 @@ class FontWorkflowTests(unittest.TestCase):
             css, family = build_font_css({'font_family': 'Custom Company Font'}, self.tenant, embed=True)
         alias = f'tenant-managed-{self.tenant}'
         self.assertIn(f"font-family:'{alias}'", css)
-        self.assertIn('font-weight:100 900', css)
+        self.assertIn('font-weight:500', css)
+        self.assertNotIn('font-weight:100 900', css)
+        self.assertIn('font-synthesis:weight', css)
         self.assertNotIn("font-family:'The Sans Arabic'", css)
         self.assertTrue(family.startswith(f"'{alias}'"))
 
     def test_pdf_css_combines_uploaded_weights_under_one_family(self):
-        font_file = ROOT / 'assets' / 'fonts' / 'BahijTheSansArabic-Bold.ttf'
-        raw = font_file.read_bytes()
         import base64
         import json
-        payload = json.dumps({'data': base64.b64encode(raw).decode('ascii'), 'format': 'truetype'})
+        light_file = ROOT / 'assets' / 'fonts' / 'TheSansArabic-Light.otf'
+        bold_file = ROOT / 'assets' / 'fonts' / 'BahijTheSansArabic-Bold.ttf'
+        light_payload = json.dumps({'data': base64.b64encode(light_file.read_bytes()).decode('ascii'), 'format': 'opentype'})
+        bold_payload = json.dumps({'data': base64.b64encode(bold_file.read_bytes()).decode('ascii'), 'format': 'truetype'})
         with self.app.app_context():
-            db.set_tenant_font_selection(self.tenant, 'arabic', 'regular', custom_font_data=payload)
-            db.set_tenant_font_selection(self.tenant, 'arabic', 'bold', custom_font_data=payload)
+            db.set_tenant_font_selection(self.tenant, 'arabic', 'light', custom_font_data=light_payload)
+            db.set_tenant_font_selection(self.tenant, 'arabic', 'bold', custom_font_data=bold_payload)
             css, _family = build_font_css({}, self.tenant, embed=True)
         alias = f'tenant-managed-{self.tenant}'
         self.assertGreaterEqual(css.count(f"font-family:'{alias}'"), 2)
-        self.assertIn('font-weight:400', css)
+        self.assertIn('font-weight:300', css)
         self.assertIn('font-weight:700', css)
+
+    def test_default_arabic_family_uses_distinct_regular_and_bold_faces(self):
+        with self.app.app_context():
+            css, _family = build_font_css({}, self.tenant, embed=True)
+        self.assertIn('font-weight:300', css)
+        self.assertIn('font-weight:700', css)
+        self.assertNotIn('font-weight:100 900', css)
+        self.assertIn('font-synthesis:weight', css)
+        regular = re.search(r"font-family:'[^']+';src:url\(data:[^;]+;base64,([^)]+)\).*?font-weight:300", css)
+        bold = re.search(r"font-family:'[^']+';src:url\(data:[^;]+;base64,([^)]+)\).*?font-weight:700", css)
+        self.assertIsNotNone(regular)
+        self.assertIsNotNone(bold)
+        self.assertNotEqual(regular.group(1), bold.group(1))
 
     def test_pdf_css_keeps_arabic_and_latin_system_faces_in_one_unicode_family(self):
         with self.app.app_context():
@@ -188,7 +205,9 @@ class FontWorkflowTests(unittest.TestCase):
             css, family = build_font_css({}, self.tenant, embed=True)
         alias = f'tenant-managed-{self.tenant}'
         self.assertIn("src:local('Arial')", css)
-        self.assertIn('font-weight:100 900', css)
+        self.assertIn('font-weight:400', css)
+        self.assertNotIn('font-weight:100 900', css)
+        self.assertIn('font-synthesis:weight', css)
         self.assertIn('U+0600-06FF', css)
         self.assertIn('U+0000-024F', css)
         self.assertTrue(family.startswith(f"'{alias}'"))

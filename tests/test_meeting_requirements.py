@@ -857,13 +857,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         ]}
         plan = engine.normalize_presentation_plan(raw, project, images)
         dividers = [slide for slide in plan['slides'] if slide.get('type') == 'section_divider']
-        self.assertEqual([slide['section_key'] for slide in dividers],
-                         list(engine.PRESENTATION_SECTION_ORDER[:-1]))
+        expected_sections = [section for section in engine.PRESENTATION_SECTION_ORDER[:-1]
+                             if section != 'exterior']
+        self.assertEqual([slide['section_key'] for slide in dividers], expected_sections)
         self.assertTrue(all('subtitle' not in slide and 'title_en' not in slide for slide in dividers))
 
         entries = plan['slides'][1]['index_entries']
-        self.assertEqual([entry['section_key'] for entry in entries],
-                         list(engine.PRESENTATION_SECTION_ORDER))
+        self.assertEqual([entry['section_key'] for entry in entries], expected_sections + ['closing'])
         for entry in entries:
             self.assertEqual(plan['slides'][entry['page'] - 1].get('section_key'), entry['section_key'])
         index_html = engine.build_index_slide(plan['slides'][1], 2, len(plan['slides']), {}, project)
@@ -897,9 +897,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         financial_slides = [slide for slide in plan['slides'] if slide.get('section_key') == 'financial'
                             and slide.get('type') == 'content']
         self.assertTrue(financial_slides)
-        self.assertTrue(all(str(slide.get('content_source')).startswith('financial_report:')
+        self.assertTrue(all(slide.get('content_source') == 'financial_indicators'
+                            or str(slide.get('content_source')).startswith('financial_report:')
                             for slide in financial_slides))
-        self.assertTrue(any(slide.get('design_style') == 'chart' for slide in financial_slides))
+        self.assertTrue(any(slide.get('design_style') == 'chart' and slide.get('chart_type')
+                            for slide in financial_slides))
         source_note = engine._slide_source_data_note(financial_slides[-1], project)
         self.assertIn('1,500,000', source_note)
         financial_note = engine._financial_data_note(project)
@@ -929,6 +931,188 @@ class MeetingRequirementsTests(unittest.TestCase):
         ]}, {'project_name': 'مشروع بلا وسائط'}, {})
         self.assertNotIn('plans', [slide.get('section_key') for slide in gated['slides']])
         self.assertNotIn('financial', [slide.get('section_key') for slide in gated['slides']])
+
+    def test_canonical_plan_assigns_each_media_asset_to_one_slide(self):
+        engine = self.application_module.slide_engine
+        images = {
+            'moodboard': ['/uploads/m1.jpg', '/uploads/m2.jpg'],
+            'moodboard_meta': [{'label': 'يمين'}, {'label': 'شمال'}],
+            'land_photos': [
+                {'url': '/uploads/l1.jpg', 'name': 'شمال'},
+                {'url': '/uploads/l2.jpg', 'name': 'جنوب'},
+            ],
+            'plans': ['/uploads/p1.jpg', '/uploads/p2.jpg', '/uploads/p3.jpg'],
+            'plan_meta': [{}, {}, {}],
+            'interior_components': [{'name': 'الفندق', 'images': [
+                {'url': '/uploads/i1.jpg', 'label': 'الاستقبال'},
+                {'url': '/uploads/i2.jpg', 'label': 'الغرف'},
+            ]}],
+        }
+        raw = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'نبذة', 'type': 'content', 'section_key': 'overview', 'bullets': ['أ', 'ب', 'ج']},
+            {'title': 'الخارجي مجمع', 'type': 'content', 'section_key': 'exterior',
+             'image_tokens': ['##PROJECT_IMAGE_1##', '##PROJECT_IMAGE_2##']},
+            {'title': 'الخارجي 1', 'type': 'content', 'section_key': 'exterior',
+             'image_tokens': ['##MOODBOARD_IMAGE_1##']},
+            {'title': 'الأرض مجمعة', 'type': 'content', 'section_key': 'land',
+             'image_tokens': ['##LAND_IMAGE_1##', '##LAND_IMAGE_2##']},
+            {'title': 'الأرض شمال', 'type': 'content', 'section_key': 'land',
+             'image_tokens': ['##LAND_PHOTO_1##']},
+            {'title': 'المخططات', 'type': 'content', 'section_key': 'plans',
+             'image_tokens': ['##2D_PLAN_1##', '##2D_PLAN_2##', '##2D_PLAN_3##']},
+            {'title': 'المخطط الأول', 'type': 'content', 'section_key': 'plans',
+             'image_tokens': ['##PLAN_IMAGE_1##']},
+            {'title': 'الداخلي', 'type': 'content', 'section_key': 'interior',
+             'image_tokens': ['##INTERIOR_C1_IMAGE_1##', '##INTERIOR_1_2##']},
+            {'title': 'الاستقبال', 'type': 'content', 'section_key': 'interior',
+             'image_tokens': ['##INTERIOR_COMP_1_IMG_1##']},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}
+        plan = engine.normalize_presentation_plan(raw, {'project_name': 'المشروع'}, images)
+        used = []
+        for slide in plan['slides']:
+            used.extend(slide.get('image_tokens') or [])
+        self.assertEqual(len(used), len(set(used)), used)
+        self.assertTrue(all(token.startswith('##') and token.endswith('##') for token in used))
+        self.assertNotIn('##PROJECT_IMAGE_1##', used)
+        self.assertNotIn('##2D_PLAN_1##', used)
+        self.assertNotIn('##LAND_IMAGE_1##', used)
+        self.assertNotIn('##INTERIOR_1_2##', used)
+
+    def test_generic_repeated_badges_and_placeholder_slides_are_removed(self):
+        engine = self.application_module.slide_engine
+        cleaned = engine.postprocess_slide(
+            '<div class="slide"><div class="badge">* مشروع متعدد الاستخدامات *</div><p>المحتوى</p></div>',
+            'content', slide_num=3, slide_title='تحليل الأرض', total_slides=5)
+        self.assertNotIn('مشروع متعدد الاستخدامات', cleaned)
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'تحليل الأرض', 'type': 'content', 'section_key': 'land',
+             'bullets': ['المحتوى المعتمد لهذا القسم', 'التفاصيل المتاحة في بيانات المشروع',
+                         'الملخص النهائي دون تكرار']},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, {'project_name': 'المشروع', 'land_and_building_summary': 'الملخص المعتمد'}, {})
+        land = [slide for slide in plan['slides']
+                if slide.get('section_key') == 'land' and slide.get('type') == 'content']
+        self.assertEqual(len(land), 1, land)
+        self.assertEqual(land[0].get('content_source'), 'land_and_building_summary')
+
+    def test_component_plan_keeps_every_row_and_selected_values(self):
+        engine = self.application_module.slide_engine
+        components = [{
+            'name': f'المكون {index}', 'useType': 'hospitality' if index % 2 else 'retail',
+            'units': index, 'unitArea': index * 10, 'builtArea': index * 100,
+            'revenueArea': index * 80, 'investmentModel': 'dailyRent' if index % 2 else 'sale',
+        } for index in range(1, 15)]
+        project = {'project_name': 'المشروع', 'financial_study_model': {
+            'inputs': {'projectCost': 1000000}, 'dynamicRows': {'components': components},
+        }}
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {})
+        slides = [slide for slide in plan['slides']
+                  if str(slide.get('content_source') or '').startswith('project_components:')]
+        self.assertEqual([slide['content_source'] for slide in slides],
+                         ['project_components:0:6', 'project_components:6:12', 'project_components:12:14'])
+        notes = '\n'.join(engine._slide_source_data_note(slide, project) for slide in slides)
+        for index in range(1, 15):
+            self.assertIn(f'المكون {index}', notes)
+        self.assertIn('إيجار يومي', notes)
+        self.assertIn('بيع وحدات', notes)
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("control.selectedOptions?.[0]", index_source)
+        self.assertIn('const compatibleComponents = parseStoredProjectTable(source.project_components_data);', index_source)
+
+    def test_component_slide_retries_when_a_required_component_is_missing(self):
+        engine = self.application_module.slide_engine
+        project = {'financial_study_model': {'inputs': {'projectCost': 1}, 'dynamicRows': {'components': [
+            {'name': 'الفندق', 'investmentModel': 'dailyRent'},
+            {'name': 'المطاعم', 'investmentModel': 'annualRent'},
+        ]}}}
+        responses = iter([
+            '<div class="slide" style="background:#fff;color:#111"><p>الفندق</p></div>',
+            '<div class="slide" style="background:#fff;color:#111"><p>الفندق</p><p>المطاعم</p></div>',
+        ])
+        prompts = []
+
+        def generated(_system, user_message, **_kwargs):
+            prompts.append(user_message)
+            return {'choices': [{'message': {'content': next(responses)}}]}
+
+        html = engine.generate_single_slide(
+            'system', {'title': 'مكونات المشروع', 'type': 'content',
+                       'content_source': 'project_components:0:2'},
+            3, 5, {'primary_color': '#123456'}, generated, project_data=project)
+        self.assertIn('المطاعم', html)
+        self.assertEqual(len(prompts), 2)
+        self.assertIn('المطاعم', prompts[1])
+
+    def test_financial_summary_uses_pdf_report_and_varied_chart_types(self):
+        engine = self.application_module.slide_engine
+        report = {'parts': [
+            {'type': 'heading', 'level': 2, 'text': 'النتائج المالية'},
+            {'type': 'heading', 'level': 3, 'text': 'التكاليف والاستثمار'},
+            {'type': 'fields', 'rows': [['إجمالي تكلفة الاستثمار', '1,234,567'], ['قيمة التسهيل', '500,000']]},
+            {'type': 'heading', 'level': 3, 'text': 'مؤشرات العائد والاسترداد'},
+            {'type': 'fields', 'rows': [['ROI', '18.25%'], ['فترة الاسترداد', '6.5 سنة']]},
+            {'type': 'heading', 'level': 2, 'text': 'الإيرادات السنوية'},
+            {'type': 'table', 'headers': ['السنة', 'الإيراد'], 'rows': [['2027', '100'], ['2028', '150']]},
+            {'type': 'heading', 'level': 2, 'text': 'هيكل التكاليف'},
+            {'type': 'table', 'headers': ['البند', 'القيمة'], 'rows': [['تنفيذ', '70'], ['تصميم', '30']]},
+            {'type': 'heading', 'level': 2, 'text': 'التدفقات النقدية السنوية'},
+            {'type': 'table', 'headers': ['السنة', 'التدفق'], 'rows': [['2027', '-50'], ['2028', '80']]},
+            {'type': 'heading', 'level': 2, 'text': 'تحليل الحساسية'},
+            {'type': 'table', 'headers': ['السيناريو', 'ROI'], 'rows': [['متحفظ', '12%'], ['أساسي', '18%']]},
+        ]}
+        project = {'project_name': 'المشروع', 'financial_study_model': {
+            'inputs': {'projectCost': 1234567}, 'report': report,
+        }}
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {})
+        financial = [slide for slide in plan['slides']
+                     if slide.get('section_key') == 'financial' and slide.get('type') == 'content']
+        summary = next(slide for slide in financial if slide.get('content_source') == 'financial_indicators')
+        summary_note = engine._slide_source_data_note(summary, project)
+        for value in ('التكاليف والاستثمار', '1,234,567', 'مؤشرات العائد والاسترداد', '18.25%', '6.5 سنة'):
+            self.assertIn(value, summary_note)
+        chart_types = {slide.get('chart_type') for slide in financial if slide.get('chart_type')}
+        self.assertTrue({'column', 'treemap', 'area', 'heatmap'}.issubset(chart_types), chart_types)
+        self.assertTrue({'bar', 'column', 'grouped_bar', 'grouped_column', 'line', 'area', 'pie',
+                         'donut', 'treemap', 'scatter', 'histogram', 'heatmap'}
+                        .issubset(set(engine.FINANCIAL_CHART_TYPES)))
+        chart_slide = next(slide for slide in financial if slide.get('chart_type') == 'column')
+        self.assertIn('نوع الرسم المطلوب: column', engine.build_slide_user_msg(
+            chart_slide, 3, len(plan['slides']), {}, project))
+
+    def test_map_slide_uses_contain_without_crop(self):
+        engine = self.application_module.slide_engine
+        html = engine.finalize_slide_html(
+            '<div class="slide" style="width:1280px;height:720px"><img src="##MAP_OVERVIEW##" '
+            'style="width:52%;height:100%;object-fit:cover;object-position:right center"></div>',
+            'map_overview', {}, {'primary_color': '#123456'},
+            map_placeholders={'##MAP_OVERVIEW##': '/uploads/maps/overview.png'},
+            slide_num=3, slide_title='الموقع', total_slides=5)
+        map_tag = next(tag for tag in re.findall(r'<img\b[^>]*>', html)
+                       if '/uploads/maps/overview.png' in tag)
+        self.assertIn('object-fit:contain!important', map_tag)
+        self.assertIn('object-position:center center!important', map_tag)
+        self.assertNotIn('object-fit:cover', map_tag)
+        self.assertNotIn('object-position:right', map_tag)
+
+    def test_build_commit_falls_back_to_deployment_marker(self):
+        module = self.application_module
+        marker = Path(self.temp_dir.name) / '.deployed-commit-test'
+        marker.write_text(json.dumps({'commit': 'abcdef1234567890', 'source': 'github'}), encoding='utf-8')
+        with patch.object(module, 'DEPLOYMENT_MARKER_PATH', str(marker)), \
+                patch.object(module.subprocess, 'check_output', side_effect=OSError('no git')):
+            module._BUILD_COMMIT = None
+            self.assertEqual(module._build_commit(), 'abcdef1')
+        module._BUILD_COMMIT = None
 
     def test_media_manifest_carries_land_descriptions_and_keeps_team_logos(self):
         project = {

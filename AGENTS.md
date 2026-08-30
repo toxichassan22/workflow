@@ -94,8 +94,11 @@ from `build_font_css(embed=True)` in every export. Three things used to break th
 default. The panel used to offer one dropdown holding exactly the two families that already are
 those defaults, so choosing either changed nothing — measured identical text widths for both picks.
 One font is chosen for the whole deck (owner's rule: a font applies to everything, not to text and
-numbers separately), so `selectPresentationFont()` writes the chosen family to **both** scripts and
-every weight, and falls back to the family's own faces when it ships only one script.
+numbers separately), so `selectPresentationFont()` writes the chosen family's available faces to
+**both** scripts and falls back to those faces when the family ships only one script. A static file
+must be declared only at its real weight: claiming `100 900` for a Regular or Light file prevents the
+browser from synthesizing bold headings. Real Regular/Bold files share the alias when both exist;
+otherwise `font-synthesis:weight` supplies the missing visual weight without a second heading family.
 
 A system font is a legitimate choice (Arial for everything) but it is only a **name**: the export
 runs on the server, which has neither Arial nor Tahoma, so `_managed_font_css()` appends the bundled
@@ -238,7 +241,9 @@ assertion deliberately, not reflexively.
   metadata. The client converts clicks against that centre; assuming the site pin put every manually
   drawn boundary off by the pin-to-plot distance, which is what made the manual highlight look fake.
   When a real boundary exists the regenerate zoom shift is skipped, otherwise it re-framed the plot
-  back to a dot.
+  back to a dot. Generated slide HTML and the preview gallery render map images with `contain` and
+  `center center`, never `cover`: cropping a 16:9 map into a narrow content column moved the baked
+  centre pin to the visible edge even though the source PNG itself was centred.
 - `catchment_rings()` collapses the catchment rows into at most three concentric drive-time bands and
   `zoom_for_radius_km()` frames the outer one. The rows are destinations, so one ring per row drew
   nine circles up to 31 km wide with unreadable labels. The landmarks view is framed the same way
@@ -299,8 +304,12 @@ Two states, and both are stated to the model explicitly — silence made it inve
   recomputing, new ratio, row or year is allowed. Slide generation attaches
   `collectFinancialStudyReport()` to the generation-only copy of `financial_study_model`, so
   `_financial_data_note()` receives the same visible headings, labels, option text, metrics and
-  complete tables as the financial PDF. The canonical plan splits report fields six rows per slide
-  and tables eight rows per slide, adding a chart only when at least two numeric values exist.
+  complete tables as the financial PDF. The canonical plan always builds `financial_indicators`
+  from the report's exact «التكاليف والاستثمار» and «مؤشرات العائد والاسترداد» groups, then splits
+  the remaining fields six rows per slide and tables eight rows per slide. Numeric tables carry an
+  explicit `chart_type` chosen from Bar/Column, grouped comparisons, Line/Area, Pie/Donut, Treemap,
+  Scatter, Histogram, Heatmap or Candlestick according to the table meaning; the original table stays
+  beside the visualization.
 
 Section order is `basic → location → land_croquis → timeline → financial → team → market study → visual concept → executive content → contact`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order with contact information placed at the end.
@@ -490,6 +499,11 @@ frames**. Three rules came out of it:
   descriptions, plan titles/descriptions and visual captions travel in `images`; team logo file ids
   are resolved and published server-side. The plan emits one clear image per slide (two only when
   explicitly appropriate), never a compressed four-image moodboard before the conclusion.
+- **One physical image has one owner slide.** Plan normalization canonicalizes `PROJECT_IMAGE` to
+  `MOODBOARD_IMAGE`, `2D_PLAN` to `PLAN_IMAGE`, `LAND_IMAGE` to `LAND_PHOTO`, and the historical
+  interior aliases before checking coverage. `_deduplicate_plan_media()` removes a token already
+  owned by an earlier slide, including the grouped-then-single pattern; do not return to comparing
+  whole slide signatures as the only media deduplication.
 - **An unresolved image token never becomes an empty box.** `IMAGE_TOKEN_RE` is skipped by the
   catch-all replacer, and `_drop_unresolved_image_placeholders()` (end of `finalize_slide_html` and
   of `resolve_designer_chat_placeholders`) removes the `<img>` or the `background-image` that

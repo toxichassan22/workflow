@@ -13506,7 +13506,9 @@ def _build_commit():
                 cwd=os.path.dirname(os.path.abspath(__file__)),
                 stderr=subprocess.DEVNULL, timeout=5).decode().strip()
         except Exception:
-            _BUILD_COMMIT = os.environ.get('DEPLOY_COMMIT') or 'unknown'
+            metadata = _read_deployment_metadata()
+            deployed = metadata.get('deployed_commit') or metadata.get('commit')
+            _BUILD_COMMIT = str(os.environ.get('DEPLOY_COMMIT') or deployed or 'unknown')[:7]
     return _BUILD_COMMIT
 
 
