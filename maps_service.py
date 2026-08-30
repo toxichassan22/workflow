@@ -2454,31 +2454,72 @@ def is_same_road_name(first, second):
 
 
 def match_known_road_name(discovered, known_names):
-    """Return the road name the user entered when it is the same road Google returned."""
+    """Return an approved label only when its normalized name matches Google's name."""
     discovered_key = _road_name_key(discovered)
     if not discovered_key:
         return ''
     discovered_words = set(discovered_key.split())
-    best = ''
-    best_score = 0
-    for candidate in known_names or []:
+    candidates = []
+    for index, candidate in enumerate(known_names or []):
         candidate_key = _road_name_key(candidate)
         if not candidate_key:
             continue
         if candidate_key == discovered_key:
             return str(candidate).strip()
         candidate_words = set(candidate_key.split())
-        shared = discovered_words & candidate_words
-        # One shared word is enough only when it is not a bare generic token.
-        score = sum(len(word) for word in shared if len(word) > 2)
-        if score > best_score:
-            best_score, best = score, str(candidate).strip()
-    return best if best_score >= 4 else ''
+        if discovered_words <= candidate_words or candidate_words <= discovered_words:
+            difference = discovered_words ^ candidate_words
+            if difference & {'غير', 'بدون', 'ليس'}:
+                continue
+            candidates.append((len(difference), index, str(candidate).strip()))
+    return min(candidates)[2] if candidates else ''
+
+
+def _approved_manual_road_paths(value, approved_names):
+    """Validate manual geometry and keep only roads named in the approved main-road list."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(value, list):
+        return []
+
+    approved_by_key = {
+        _road_name_key(name): name for name in approved_names or [] if _road_name_key(name)
+    }
+    paths = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        normalized_names = normalize_access_road_names([item.get('name')])
+        if len(normalized_names) != 1:
+            continue
+        approved_name = approved_by_key.get(_road_name_key(normalized_names[0]))
+        if not approved_name:
+            continue
+        points = []
+        for point in item.get('points') or []:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                point_lat = float(point[0])
+                point_lng = float(point[1])
+            except (TypeError, ValueError):
+                continue
+            if not (math.isfinite(point_lat) and math.isfinite(point_lng)):
+                continue
+            if not (-90 <= point_lat <= 90 and -180 <= point_lng <= 180):
+                continue
+            points.append((point_lat, point_lng))
+        if len(points) >= 2:
+            paths.append((points, approved_name))
+    return paths
 
 
 def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, project_data=None, tenant_id=None,
                        origin_lat=None, origin_lng=None):
-    """Draw only Google Maps-derived access-road geometry and labels."""
+    """Draw only approved main-road geometry and labels."""
     def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 255), border_color=(240, 230, 210, 255)):
         if not font:
             font = _get_arabic_font(24)
@@ -2521,33 +2562,37 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         
         gold_color = (212, 163, 89, 180) # Premium gold/bronze color matching branding
         
-        # Road geometry is discovered via Google APIs, but labels prefer the
-        # main_roads / secondary_roads the tenant/user provided in project data.
+        # main_roads is the authoritative approval list. Secondary roads and
+        # unmatched Google route names must never be introduced into this view.
         route_origin_lat = origin_lat if origin_lat is not None else center_lat
         route_origin_lng = origin_lng if origin_lng is not None else center_lng
-        fallback_road_names = []
-        if project_data:
-            for key in ('main_roads', 'secondary_roads'):
-                val = project_data.get(key) or project_data.get(key.replace('_', ''))
-                if isinstance(val, str):
-                    fallback_road_names.extend(
-                        re.split(r'\s+[—–]\s+', name.strip())[0].strip()
-                        for name in re.split(r'[\n,،]+', val) if name.strip()
-                    )
-                elif isinstance(val, list):
-                    fallback_road_names.extend(str(value).strip() for value in val if str(value).strip())
-        fallback_road_names = normalize_access_road_names(fallback_road_names)
+        approved_road_names = normalize_access_road_names(
+            (project_data or {}).get('main_roads')
+        )
+        road_data = (project_data or {}).get('main_roads_data')
+        if isinstance(road_data, str):
+            try:
+                road_data = json.loads(road_data)
+            except (TypeError, ValueError):
+                road_data = []
+        manual_road_keys = {
+            _road_name_key(item.get('name')) for item in (road_data if isinstance(road_data, list) else [])
+            if isinstance(item, dict) and item.get('row_source') == 'manual'
+        }
+        discoverable_road_names = [name for name in approved_road_names if _road_name_key(name) not in manual_road_keys]
+
+        # Manual geometry is already reviewed by the user, but its label must still
+        # match a normalized main-road name. The provided point sequence is kept intact.
+        road_route_mapping = _approved_manual_road_paths(
+            (project_data or {}).get('manual_road_paths'), approved_road_names
+        )
+        seen_road_keys = {name for _, name in road_route_mapping}
 
         # Find actual nearby access roads through Google Roads + Directions.
-        # The target points are only geographic probes; Google returns the road
-        # snap, route geometry, and road name used in the final map.
-        road_route_mapping = []  # stores (coords, road_name)
-        print("[ACCESS ROADS] Discovering nearby roads through Google Maps APIs...")
         # The probes are fixed on purpose. They used to be shifted and rotated by regen_seed,
         # so every regeneration snapped to different roads and the map came back with a
         # different set of street names for the same site.
         probe_points = access_probe_points(route_origin_lat, route_origin_lng)
-        seen_road_keys = set()
 
         def _fetch_probe_route(probe):
             p_lat, p_lng = probe
@@ -2560,23 +2605,30 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             if not route:
                 return None
 
-            road_name = (route.get('summary') or '').strip()
-            if not road_name or re.search(r'[A-Za-z]', road_name):
+            discovered_name = (route.get('summary') or '').strip()
+            if not discovered_name or re.search(r'[A-Za-z]', discovered_name):
                 localized_name = _google_reverse_geocode_road(
                     dest_lat, dest_lng, tenant_id=tenant_id
                 )
                 if localized_name:
-                    road_name = localized_name
-            # The road names the user entered in the location section are the authoritative
-            # ones; Google's route summary wording varies between identical requests.
-            road_name = match_known_road_name(road_name, fallback_road_names) or road_name
-            road_name = road_name or (fallback_road_names[0] if fallback_road_names else 'طريق قريب')
-            return route['coords'], road_name, _road_name_key(road_name)
+                    discovered_name = localized_name
+            approved_name = match_known_road_name(discovered_name, discoverable_road_names)
+            if not approved_name:
+                return None
+            return route['coords'], approved_name, _road_name_key(approved_name)
 
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            probe_results = list(executor.map(_fetch_probe_route, probe_points))
+        remaining_approved_names = [
+            name for name in discoverable_road_names
+            if not any(is_same_road_name(name, accepted) for accepted in seen_road_keys)
+        ]
+        probe_results = []
+        if remaining_approved_names:
+            print("[ACCESS ROADS] Discovering approved nearby roads through Google Maps APIs...")
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                probe_results = list(executor.map(_fetch_probe_route, probe_points))
 
+        discovered_count = 0
         for result in probe_results:
             if not result:
                 continue
@@ -2584,7 +2636,8 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 continue
             seen_road_keys.add(result[1])
             road_route_mapping.append((result[0], result[1]))
-            if len(road_route_mapping) >= 3:
+            discovered_count += 1
+            if discovered_count >= 3:
                 break
         print(f"[ACCESS ROADS] labels: {[name for _, name in road_route_mapping]}")
 
@@ -2666,11 +2719,11 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
 
             img = Image.alpha_composite(img, labels_overlay)
             img.save(image_path, 'PNG')
-            print("[ACCESS ROADS] Successfully drew Google Maps road routes")
+            print("[ACCESS ROADS] Successfully drew approved road routes")
             return True
 
-        # Never invent a schematic road grid when Google has no verified route.
-        print("[ACCESS ROADS] No Google-derived road route available; leaving the base map unchanged")
+        # Never invent a schematic road grid when there is no approved geometry.
+        print("[ACCESS ROADS] No approved road route available; leaving the base map unchanged")
         return False
     except Exception as e:
         print(f"[DRAW ACCESS ROADS ERROR] {e}")
@@ -2849,9 +2902,20 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
     if not isinstance(enabled_maps, list):
         enabled_maps = ['overview', 'landmarks', 'access', 'catchment']
 
-    # Pre-parse landmark/catchment data so the cache check only requires what will actually be generated
-    landmarks = _parse_landmarks_text(project_data.get('nearby_landmarks', ''))
-    landmarks = _merge_landmark_data(landmarks, project_data.get('nearby_landmarks_data'))
+    # Select each map's structured rows before any geocoding. A structured table is
+    # authoritative when present; legacy text remains a compatibility fallback.
+    nearby_structured = project_data.get('nearby_landmarks_data')
+    city_structured = project_data.get('city_landmarks_data')
+    nearby_rows = select_map_landmark_rows(nearby_structured)
+    city_rows = select_map_landmark_rows(city_structured)
+    if nearby_structured is None:
+        nearby_text = project_data.get('nearby_landmarks', '')
+        nearby_rows = _parse_landmarks_text(nearby_text)[:7] if isinstance(nearby_text, str) else []
+    if city_structured is None:
+        city_text = project_data.get('city_landmarks', '')
+        city_rows = _parse_landmarks_text(city_text)[:7] if isinstance(city_text, str) else []
+    landmarks = _merge_landmark_data([], nearby_rows) if 'landmarks' in enabled_maps else []
+    city_landmarks = _merge_landmark_data([], city_rows) if 'catchment' in enabled_maps else []
     zones = _parse_catchment_zones(project_data.get('catchment_areas', ''))
 
     draft_id = draft_id or project_data.get('draft_id') or project_data.get('draftId')
@@ -2982,11 +3046,9 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         'catchment': {'lat': lat, 'lng': lng},
     }
 
-    # The pin belongs on the land. A Maps link often points at the street entrance, and the
-    # croquis boundary for this project sat 240 m away from it, which left the pin off the plot.
+    # The approved latitude/longitude is the user-controlled pin for every map. The boundary may
+    # center the viewport, but it must never move that saved pin implicitly.
     marker_lat, marker_lng = lat, lng
-    if polygon_coords and len(polygon_coords) >= 3:
-        marker_lat, marker_lng = map_center_lat, map_center_lng
 
     # Parse UI element flags (compass, inset map)
     draw_compass = project_data.get('draw_compass', True)
@@ -3038,70 +3100,80 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
             val = 'auto'
         map_styles[key] = 'roadmap' if val == 'auto' and key == 'access' else 'satellite' if val == 'auto' else val
 
-    # Landmarks were pre-parsed before the cache check.
-    city_landmarks = _parse_landmarks_text(project_data.get('city_landmarks', ''))
-    if city_landmarks:
-        existing_names = {item.get('name', '').casefold() for item in landmarks}
-        landmarks.extend(item for item in city_landmarks if item.get('name', '').casefold() not in existing_names)
     landmark_radius_m = 20000
-    if not landmarks:
-        places = get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True)
+    city_context = project_data.get('city') or project_data.get('location', '')
+
+    # Preserve the selected table order through geocoding and filtering so marker
+    # numbering stays aligned with the approved rows.
+    def _resolve_map_landmarks(rows, search_radius_m, maximum_distance_m=None):
+        resolved = []
+        for landmark in rows:
+            if landmark.get('lat') is None or landmark.get('lng') is None:
+                place = find_place_near(landmark.get('name'), lat, lng, radius_m=search_radius_m)
+                if place:
+                    landmark['lat'] = place['lat']
+                    landmark['lng'] = place['lng']
+                else:
+                    # Only the city is appended here: adding the project address made Google
+                    # return the project's own coordinates for every landmark.
+                    query = f"{landmark.get('name')}, {city_context}" if city_context else landmark.get('name')
+                    geo = geocode_address(query, tenant_id=tenant_id)
+                    if geo.get('success'):
+                        landmark['lat'] = geo['lat']
+                        landmark['lng'] = geo['lng']
+            if landmark.get('lat') is None or landmark.get('lng') is None:
+                continue
+            distance_meters = _distance_meters(lat, lng, landmark['lat'], landmark['lng'])
+            if distance_meters < 50:
+                continue
+            if maximum_distance_m is not None and distance_meters > maximum_distance_m:
+                continue
+            landmark['distance_meters'] = round(distance_meters)
+            resolved.append(landmark)
+        return resolved
+
+    # Retain automatic discovery only for old projects that have no structured
+    # nearby-landmark table. An explicit table, including an empty one, is authoritative.
+    if 'landmarks' in enabled_maps and nearby_structured is None and not landmarks:
+        places = get_nearby_landmarks(
+            lat, lng, radius=landmark_radius_m, max_results=7, include_all=True
+        )
         if places.get('success'):
-            landmarks = places['landmarks']
+            landmarks = (places.get('landmarks') or [])[:7]
             _record_maps_call(tenant_id)
 
-    # Geocode text-entered landmarks against the actual project location first,
-    # rather than accepting a same-named landmark in another city.
-    city_context = project_data.get('city') or project_data.get('location', '')
-    for lm in landmarks:
-        if lm.get('lat') is None or lm.get('lng') is None:
-            place = find_place_near(lm['name'], lat, lng, radius_m=landmark_radius_m)
-            if place:
-                lm['lat'] = place['lat']
-                lm['lng'] = place['lng']
-                continue
-            # Only the city is appended here: adding the project address made Google
-            # return the project's own coordinates for every landmark.
-            query = f"{lm['name']}, {city_context}" if city_context else lm['name']
-            geo = geocode_address(query, tenant_id=tenant_id)
-            if geo.get('success'):
-                lm['lat'] = geo['lat']
-                lm['lng'] = geo['lng']
+    if landmarks:
+        landmarks = _resolve_map_landmarks(
+            landmarks, landmark_radius_m, maximum_distance_m=landmark_radius_m
+        )
+    if city_landmarks:
+        city_search_radius_m = min(
+            50000,
+            max([landmark_radius_m] + [float(zone.get('km') or 0) * 1000 for zone in zones]),
+        )
+        city_landmarks = _resolve_map_landmarks(city_landmarks, city_search_radius_m)
+    result['landmarks'] = landmarks
 
-    # Keep the maps truthful: reject duplicate/site pins and distant geocoding hits.
-    filtered_landmarks = []
-    for lm in landmarks:
-        if lm.get('lat') is None or lm.get('lng') is None:
-            continue
-        distance_meters = _distance_meters(lat, lng, lm['lat'], lm['lng'])
-        if distance_meters < 50 or distance_meters > landmark_radius_m:
-            continue
-        lm['distance_meters'] = round(distance_meters)
-        filtered_landmarks.append(lm)
-    landmarks = sorted(filtered_landmarks, key=lambda item: item.get('distance_meters', float('inf')))
-
-    # Get driving times and distances only when the project explicitly requests them.
-    geocoded_landmarks = [lm for lm in landmarks if lm.get('lat') is not None and lm.get('lng') is not None]
-    if geocoded_landmarks and project_data.get('calculate_landmark_driving', True) is not False:
-        matrix = get_drive_matrix((lat, lng), geocoded_landmarks)
+    # Get driving times and distances only for the nearby rows used by the landmarks map.
+    if landmarks and project_data.get('calculate_landmark_driving', True) is not False:
+        matrix = get_drive_matrix((lat, lng), landmarks)
         if matrix:
-            for i, lm in enumerate(geocoded_landmarks):
+            for i, landmark in enumerate(landmarks):
                 if i >= len(matrix):
                     break
                 entry = matrix[i]
                 if not entry.get('name'):
-                    entry['name'] = lm.get('name', '')
+                    entry['name'] = landmark.get('name', '')
                 if entry['duration_min'] is None:
                     continue
-                lm['duration_minutes'] = entry['duration_min']
-                lm['distance_text'] = entry.get('distance_text') or f"{entry['distance_km']} كم"
+                landmark['duration_minutes'] = entry['duration_min']
+                landmark['distance_text'] = entry.get('distance_text') or f"{entry['distance_km']} كم"
             # Only rows with real Google numbers are handed to the AI prompt.
-            usable = [m for m in matrix if m.get('duration_min') is not None]
+            usable = [item for item in matrix if item.get('duration_min') is not None]
             if usable:
                 project_data['landmarks_matrix'] = usable
                 result['landmarks_matrix'] = usable
             _record_maps_call(tenant_id)
-        result['landmarks'] = landmarks
 
     # Helper: pick styles based on maptype
     def _styles_for(maptype, default_styles, map_kind=None):
@@ -3112,9 +3184,9 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
             return ACCESS_ROADMAP_STYLES
         return []
 
-    # Generate map_overview
+    # Generate map_overview. This view contains only the site pin/highlight.
     if 'overview' in enabled_maps:
-        overview_markers = _build_markers(marker_lat, marker_lng, landmarks)
+        overview_markers = _build_markers(marker_lat, marker_lng)
         overview_mt = map_styles['overview']
         if overview_mt == 'both':
             styles_to_gen = [('satellite', '##MAP_OVERVIEW_SATELLITE##', 'overview_satellite'),
@@ -3143,9 +3215,8 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
     # Generate map_landmarks (closer zoom)
     if 'landmarks' in enabled_maps:
-        # The landmark view used to inherit the plot zoom, so every landmark sat outside the
-        # frame and the map showed none of them. Fit the frame to the landmarks it draws.
-        shown_landmarks = [item for item in landmarks if item.get('distance_meters')][:8]
+        # The landmark view uses only the selected nearby table rows and fits that content.
+        shown_landmarks = [item for item in landmarks if item.get('distance_meters')]
         if shown_landmarks:
             radius_km = max(item['distance_meters'] for item in shown_landmarks) / 1000.0
             radius_km = max(0.6, min(LANDMARKS_MAX_RADIUS_KM, radius_km * 1.1))
@@ -3244,7 +3315,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 catchment_zoom = fitted_zoom
                 result['zooms']['catchment'] = catchment_zoom
                 print(f"[CATCHMENT] {len(rings)} rings, outer {max(ring['km'] for ring in rings):.1f} km, zoom {catchment_zoom}")
-        catchment_markers = [{'lat': marker_lat, 'lng': marker_lng, 'color': MARKER_COLOR_SITE, 'type': 'site', 'label': None}]
+        catchment_markers = _build_markers(marker_lat, marker_lng, city_landmarks)
         catchment_mt = map_styles['catchment']
         if catchment_mt == 'both':
             styles_to_gen = [('satellite', '##MAP_CATCHMENT_SATELLITE##', 'catchment_satellite'),
@@ -3349,6 +3420,28 @@ def _parse_landmarks_text(text):
             'lng': None,
         })
     return landmarks
+
+
+def select_map_landmark_rows(structured, limit=7):
+    """Return the approved landmark rows for a map without changing their input order."""
+    if isinstance(structured, str):
+        try:
+            structured = json.loads(structured)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(structured, list):
+        return []
+
+    rows = [dict(item) for item in structured if isinstance(item, dict)]
+    selected = [
+        item for item in rows
+        if item.get('show_on_map') is True or item.get('selected') is True
+    ]
+    try:
+        row_limit = max(0, min(7, int(limit)))
+    except (TypeError, ValueError):
+        row_limit = 7
+    return (selected or rows)[:row_limit]
 
 
 def _merge_landmark_data(landmarks, structured):

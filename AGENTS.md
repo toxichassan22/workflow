@@ -231,8 +231,9 @@ assertion deliberately, not reflexively.
   croquis `survey_coordinates` (UTM, zone from the longitude) to lat/lng and is tried first, then the
   OSM footprint, then `_google_bounds_polygon()` (accepted only under 400 m across), then the manual
   drawing. On the live project the converted polygon measured 7,205 sqm against an approved
-  7,012 sqm, and it sat 240 m from the Maps pin — which is why the pin is now placed on the polygon
-  centroid. A parcel that converts to somewhere more than 8 km away is refused, not drawn.
+  7,012 sqm, and it sat 240 m from the original Maps pin. The viewport may center on the polygon,
+  but the marker now remains at the client-approved latitude/longitude; moving it must never be
+  undone by the polygon centroid. A parcel converting more than 8 km away is refused, not drawn.
 - `location_polygon_source` distinguishes **`none`** (nothing found yet — automatic sources must
   still run) from **`cleared`** (the user switched the highlight off). It used to default to `none`
   with `shouldHighlightTenantSite()` returning false for it, so the automatic highlight never ran.
@@ -250,8 +251,19 @@ assertion deliberately, not reflexively.
   normalizes the full map to the content holder. `normalize_access_road_names()` splits compound
   road labels and removes duplicates before access-map labeling. `location_data_fetched_at` stores
   the latest data-fetch time, is shown in the location screen, and is injected into location slides
-  in Saudi time. The manual «جلب معلومات المسافة والمدة» button is intentionally absent; those
-  columns remain editable while the separate map/content generation flow is pending owner detail.
+  in Saudi time. The manual «جلب معلومات المسافة والمدة» button is intentionally absent.
+- **Location analysis and map rendering are separate approvals.** `/api/analyze-site` fills location
+  data only. `location_analysis_approved` gates individual `/api/generate-map-image` calls; overview
+  must be generated and approved before access, catchment, or landmarks. Each image keeps its own
+  `map_approvals` lock. Moving the unapproved overview pin updates latitude/longitude, preserves the
+  independently editable plot polygon, and releases location-analysis approval without invalidating
+  map images already approved. Presentation generation reuses the four approved images and never
+  auto-generates missing maps. The retired `/api/generate-map-images` and saved-presentation bulk
+  regeneration routes reject requests before any map-provider call.
+- Nearby and city landmark tables persist structured rows. `show_on_map` selects at most seven;
+  when none are selected, table order supplies the first seven. Landmarks uses nearby rows only;
+  catchment keeps its rings and adds city rows. Access uses approved `main_roads` only, never hidden
+  secondary roads; `manual_road_paths` supplies client-drawn geometry for a named approved road.
 - `catchment_rings()` collapses the catchment rows into at most three concentric drive-time bands and
   `zoom_for_radius_km()` frames the outer one. The rows are destinations, so one ring per row drew
   nine circles up to 31 km wide with unreadable labels. The landmarks view is framed the same way
@@ -262,8 +274,9 @@ assertion deliberately, not reflexively.
   site came back with different street names. The label also prefers the road names the user entered
   in the location section: `match_known_road_name()` normalises hamza/ال/ة and the
   «طريق»/«شارع» prefix, so Google's varying wording («طريق الأمير فيصل بن فهد») resolves to the
-  stored name («الامير فيصل بن فهد»). Roads are de-duplicated on `_road_name_key()`, not on the
-  snapped `place_id`, which differed per probe for one road.
+  stored name («الامير فيصل بن فهد»). A discovered route with no approved-name match is discarded.
+  Roads are de-duplicated on `_road_name_key()`, not on the snapped `place_id`, which differed per
+  probe for one road.
 - Landmark names are resolved with `find_place_near()` (Places text search biased to the site).
   Geocoding `"<name>, <project address>"` returned the project's own coordinates, so 14 of 16
   landmarks were then dropped by the 50 m duplicate filter and the map showed none.

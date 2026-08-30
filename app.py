@@ -3148,25 +3148,6 @@ def api_designer_chat():
     # at all: no log entry, no version, and no record of the instruction behind it.
     slides_before = copy.deepcopy(slides)
 
-    # Automatic map type change detection (satellite, roadmap, hybrid, terrain)
-    msg_lowered = message.lower()
-    requested_map_type = None
-    if any(k in msg_lowered for k in ('مروري', 'مرورية', 'عادي', 'عادية', 'جرافيك', 'roadmap')):
-        requested_map_type = 'roadmap'
-    elif any(k in msg_lowered for k in ('قمر صناعي', 'ساتلايت', 'satellite')):
-        requested_map_type = 'satellite'
-    elif any(k in msg_lowered for k in ('هجين', 'هايبريد', 'hybrid')):
-        requested_map_type = 'hybrid'
-    elif any(k in msg_lowered for k in ('تضاريس', 'terrain')):
-        requested_map_type = 'terrain'
-
-    if requested_map_type and any(k in msg_lowered for k in ('خريطة', 'خريطه', 'خرائط', 'خرايط', 'map')):
-        project_data['map_type'] = requested_map_type
-        try:
-            maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=presentation_id, force=True)
-        except Exception as me:
-            print(f"[MAP TYPE REGEN ERROR] {me}")
-
     ALL_SLIDES_KEYWORDS = (
         'كل الشرائح', 'كل الشرايح', 'جميع الشرائح', 'كافة الشرائح', 
         'كل شريحة', 'كل السلايدات', 'الشرائح كلها', 'الشرايح كلها',
@@ -3385,19 +3366,8 @@ def api_designer_chat():
                 executed.append({'tool': tool, 'status': 'success', 'index': len(slides) - 1})
             elif tool in ('regenerate_maps', 'update_map_style', 'change_map_type'):
                 maptype = params.get('maptype') or params.get('style') or 'roadmap'
-                map_styles = {'overview': maptype, 'landmarks': maptype, 'access': maptype, 'catchment': maptype}
-                project_data['map_styles'] = map_styles
-                map_res = maps_service.generate_all_map_images(project_data, tenant_id, presentation_id=presentation_id, force=True, branding=branding)
-                if map_res.get('placeholders'):
-                    slides_json = json.dumps(slides, ensure_ascii=False)
-                    for placeholder, ppath in map_res['placeholders'].items():
-                        if ppath and os.path.exists(ppath):
-                            rel_p = '/' + os.path.relpath(ppath, os.path.dirname(__file__)).replace('\\', '/')
-                            ptype = placeholder.replace('##MAP_', '').replace('##STREET_VIEW_', 'streetview_').replace('##', '').lower()
-                            pattern = r'/uploads/maps/[^/]+_[^/]+_' + ptype + r'_[^/]+\.png'
-                            slides_json = re.sub(pattern, lambda m, rp=rel_p: rp, slides_json)
-                    slides = json.loads(slides_json)
-                executed.append({'tool': tool, 'status': 'success', 'maptype': maptype})
+                executed.append({'tool': tool, 'status': 'deferred', 'maptype': maptype})
+                assistant_messages.append('لم تتغير خرائط الموقع المعتمدة؛ توليد الخرائط منفصل لكل خريطة.')
             else:
                 executed.append({'tool': tool, 'status': 'skipped', 'message': 'أداة غير معروفة'})
 
@@ -4910,10 +4880,15 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
 @app.route('/api/analyze-site', methods=['POST'])
 @require_permission('create_presentation')
 def api_analyze_site():
-    """Resolve and enrich site data; map image generation is opt-in only."""
+    """Resolve and enrich site data without generating map images."""
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
-    branding = db.get_branding(g.tenant_id) or {}
+    if data.get('generateMaps') is True:
+        return jsonify({
+            'success': False,
+            'error': 'توليد الخرائط متاح لكل خريطة على حدة بعد اعتماد تحليل الموقع',
+            'error_code': 'INDIVIDUAL_MAP_GENERATION_REQUIRED',
+        }), 400
 
     address = project_data.get('location_address') or project_data.get('location') or ''
     link = address if isinstance(address, str) and address.startswith('http') else (
@@ -4949,6 +4924,7 @@ def api_analyze_site():
     fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon, diagnostics = _collect_site_fields(
         project_data, g.tenant_id, lat, lng
     )
+    fields.pop('secondary_roads', None)
     fields['location_polygon_source'] = (
         'manual' if project_data.get('location_polygon_source') == 'manual'
         # 'cleared' is the user switching the highlight off; it must survive a re-analysis.
@@ -4957,74 +4933,25 @@ def api_analyze_site():
         else 'none'
     )
 
-    analyzed_project = {
-        **project_data,
-        **fields,
-        'location_lat': lat,
-        'location_lng': lng,
-        'calculate_landmark_driving': False,
-        'enabled_maps': ['overview', 'landmarks', 'access', 'catchment'],
-    }
-    generate_maps = data.get('generateMaps') is True
-    estimate_boundary = data.get('estimateBoundary') is True
-    map_result = {'placeholders': {}, 'zooms': {}, 'error': None}
-    estimated_polygon = None
-    if generate_maps:
-        map_result = maps_service.generate_all_map_images(
-            analyzed_project,
-            g.tenant_id,
-            presentation_id=data.get('presentationId'),
-            force=data.get('force', True) is not False,
-            branding=branding,
-        )
-        if estimate_boundary and not polygon:
-            overview_path = (
-                map_result.get('placeholders', {}).get('##MAP_OVERVIEW##')
-                or map_result.get('placeholders', {}).get('##MAP_OVERVIEW_SATELLITE##')
-                or map_result.get('placeholders', {}).get('##MAP_OVERVIEW_ROADMAP##')
-            )
-            estimated_polygon = _estimate_site_polygon_from_satellite(
-                overview_path,
-                lat,
-                lng,
-                int((map_result.get('zooms') or {}).get('overview') or 17),
-            ) if overview_path else None
-            if estimated_polygon:
-                polygon = estimated_polygon
-                fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
-                analyzed_project = {**analyzed_project, 'location_polygon': fields['location_polygon']}
-                map_result = maps_service.generate_all_map_images(
-                    analyzed_project,
-                    g.tenant_id,
-                    presentation_id=data.get('presentationId'),
-                    force=True,
-                    branding=branding,
-                )
-    placeholders = {}
-    for placeholder, path in map_result.get('placeholders', {}).items():
-        if path and os.path.exists(path):
-            rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
-            placeholders[placeholder] = f'/{rel_path}'
-
     return jsonify({
         'success': True,
         'fields': fields,
-        'mapPlaceholders': placeholders,
-        'mapsDeferred': not generate_maps,
+        'mapPlaceholders': {},
+        'mapsDeferred': True,
         'landmarks': nearby_items,
         'landmarksMatrix': nearby_matrix,
         'cityLandmarks': city_items,
         'roads': roads,
-        'zooms': map_result.get('zooms', {}),
+        'zooms': {},
         'lat': lat,
         'lng': lng,
         'source': source,
         'boundary': {
-            'status': 'verified_building' if polygon and not estimated_polygon else ('estimated_building' if estimated_polygon else 'needs_review'),
-            'estimated': bool(estimated_polygon),
+            'status': 'verified_building' if polygon else 'needs_review',
+            'estimated': False,
             'manual_edit_available': True,
         },
-        'warning': map_result.get('error'),
+        'warning': None,
         'landmarksWarning': diagnostics.get('nearby_landmarks_error') or diagnostics.get('nearby_landmarks_warning'),
         'cityLandmarksWarning': diagnostics.get('city_landmarks_error') or diagnostics.get('city_landmarks_warning'),
     })
@@ -5040,7 +4967,7 @@ def api_site_analysis():
         'project_goal', 'project_stage', 'initial_features', 'initial_strengths',
         'project_features', 'investment_opportunities', 'target_audience', 'location_address',
         'location_maps_link', 'maps_link', 'location_detail', 'location_lat', 'location_lng',
-        'city', 'district', 'main_roads', 'secondary_roads', 'nearby_landmarks', 'nearby_landmarks_data',
+        'city', 'district', 'main_roads', 'nearby_landmarks', 'nearby_landmarks_data',
         'city_landmarks', 'catchment_areas', 'population_density', 'population_density_source',
         'land_area', 'built_area', 'building_system', 'infrastructure', 'location_polygon'
     )
@@ -5062,8 +4989,8 @@ def api_site_analysis():
     needs_enrichment = any(
         project_data.get(key) in (None, '', [], {})
         for key in (
-            'location_detail', 'main_roads', 'secondary_roads', 'nearby_landmarks',
-            'nearby_landmarks_data', 'city_landmarks', 'catchment_areas', 'population_density',
+            'location_detail', 'main_roads', 'nearby_landmarks', 'nearby_landmarks_data',
+            'city_landmarks', 'catchment_areas', 'population_density',
             'location_polygon',
         )
     )
@@ -5095,7 +5022,7 @@ def api_site_analysis():
   3. طبيعة الموقع وموقعه الاستراتيجي والعنوان التفصيلي والإحداثيات.
   4. الكثافة السكانية ومصدرها إن وجدت.
   5. البنية التحتية والخدمات العامة المتاحة.
-  6. الطرق الرئيسية والثانوية وطبيعة الوصول.
+  6. الطرق الرئيسية وطبيعة الوصول.
   7. المعالم القريبة ومعالم المدينة، مع ذكر المسافات وأوقات القيادة كدليل لا كموضوع رئيسي.
   8. نطاق التأثير ومناطق الالتقاط إن وجدت.
 - اربط كل فئة بصلاحية الموقع لنوع المشروع وفكرته وهدفه ومرحلته والجمهور المستهدف ومميزات المشروع وفرصه.
@@ -5153,7 +5080,25 @@ def api_generate_single_map_image():
     map_type = str(data.get('mapType') or '').strip().lower()
     if map_type not in {'overview', 'landmarks', 'access', 'catchment'}:
         return jsonify({'success': False, 'error': 'نوع خريطة غير صالح'}), 400
-    project_data = clean_project_data(data.get('projectData', {}))
+    project_data = clean_project_data(data.get('projectData', {})) or {}
+    if project_data.get('location_analysis_approved') is not True:
+        return jsonify({
+            'success': False,
+            'error': 'يجب اعتماد تحليل الموقع قبل إنشاء الخريطة',
+            'error_code': 'LOCATION_ANALYSIS_NOT_APPROVED',
+        }), 400
+    if map_type in {'landmarks', 'access', 'catchment'} and data.get('overviewApproved') is not True:
+        return jsonify({
+            'success': False,
+            'error': 'يجب اعتماد خريطة الموقع العامة قبل إنشاء هذه الخريطة',
+            'error_code': 'OVERVIEW_MAP_NOT_APPROVED',
+        }), 400
+    if data.get('mapApproved') is True:
+        return jsonify({
+            'success': False,
+            'error': 'يجب إلغاء اعتماد الخريطة قبل إعادة توليدها',
+            'error_code': 'MAP_ALREADY_APPROVED',
+        }), 400
     presentation_id = data.get('presentationId')
     draft_id = project_data.get('draftId') or project_data.get('draft_id')
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None)
@@ -5186,6 +5131,8 @@ def api_generate_single_map_image():
         'success': True,
         'mapType': map_type,
         'placeholders': placeholders,
+        'landmarks': result.get('landmarks', []),
+        'landmarks_matrix': result.get('landmarks_matrix', []),
         'zooms': result.get('zooms', {}),
         'centers': result.get('centers', {}),
     })
@@ -5194,126 +5141,27 @@ def api_generate_single_map_image():
 @app.route('/api/generate-map-images', methods=['POST'])
 @require_auth
 def api_generate_map_images():
-    """Generate all map images for a project and return placeholders."""
-    data = request.json or {}
-    project_data = clean_project_data(data.get('projectData', {}))
-    project_data['enabled_maps'] = ['overview', 'landmarks', 'access', 'catchment']
-    presentation_id = data.get('presentationId')
-    force = bool(data.get('force'))
-    highlight_site = data.get('highlightSite', True) is not False
-    branding = db.get_branding(g.tenant_id) or {}
-    result = maps_service.generate_all_map_images(
-        project_data,
-        g.tenant_id,
-        presentation_id=presentation_id,
-        force=force,
-        branding=branding,
-        highlight_site=highlight_site,
-    )
-    if result.get('error'):
-        return jsonify({'success': False, 'error': result['error']}), 200
-    # Convert absolute paths to public URLs
-    placeholders = {}
-    for placeholder, path in result.get('placeholders', {}).items():
-        if path and os.path.exists(path):
-            rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
-            placeholders[placeholder] = f"/{rel_path}"
-        else:
-            placeholders[placeholder] = None
+    """Reject the retired bulk path so maps can only be generated individually."""
     return jsonify({
-        'success': True,
-        'placeholders': placeholders,
-        'landmarks': result.get('landmarks', []),
-        'landmarks_matrix': result.get('landmarks_matrix', []),
-        'zooms': result.get('zooms', {}),
-        'centers': result.get('centers', {}),
-        'lat': result.get('lat'),
-        'lng': result.get('lng'),
-    })
+        'success': False,
+        'error': 'توليد الخرائط متاح لكل خريطة على حدة',
+        'error_code': 'INDIVIDUAL_MAP_GENERATION_REQUIRED',
+    }), 400
 
 
 @app.route('/api/presentations/<pres_id>/regenerate-maps', methods=['POST'])
 @require_permission('create_presentation')
 def api_regenerate_presentation_maps(pres_id):
-    """Regenerate map images for a saved presentation."""
+    """Reject the retired saved-presentation bulk regeneration path."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404
 
-    req_data = request.json or {}
-    stored_project_data = json.loads(pres['project_data']) if pres.get('project_data') else {}
-    submitted_project_data = req_data.get('projectData')
-    if isinstance(submitted_project_data, dict):
-        project_data = {**stored_project_data, **clean_project_data(submitted_project_data)}
-        existing_creative = project_data.get('tenantCreativeImages')
-        if isinstance(existing_creative, dict):
-            project_data['tenantCreativeImages'] = {
-                **existing_creative,
-                'map_placeholders': {},
-                'map_zooms': {},
-                'map_landmarks': [],
-                'map_lat': None,
-                'map_lng': None,
-                'map_approvals': {},
-                'maps_persisted': False,
-                'maps_signature': None,
-            }
-    else:
-        project_data = stored_project_data
-    project_data['enabled_maps'] = ['overview', 'landmarks', 'access', 'catchment']
-    branding = db.get_branding(g.tenant_id) or {}
-    if req_data.get('map_styles'):
-        project_data['map_styles'] = req_data['map_styles']
-    result = maps_service.generate_all_map_images(project_data, g.tenant_id, presentation_id=pres_id, force=True, branding=branding)
-    if result.get('error'):
-        return jsonify({'success': False, 'error': result['error']}), 400
-
-    placeholders = {}
-    for placeholder, path in result.get('placeholders', {}).items():
-        if path and os.path.exists(path):
-            rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
-            placeholders[placeholder] = f"/{rel_path}"
-        else:
-            placeholders[placeholder] = None
-
-    # Update slide HTML in database with new map paths
-    slides_data = json.loads(pres['slides_data']) if pres.get('slides_data') else []
-    if slides_data:
-        slides_json = json.dumps(slides_data, ensure_ascii=False)
-        updated = False
-        for placeholder, rel_path in placeholders.items():
-            if not rel_path:
-                continue
-            # Derive the map type name from the placeholder
-            # ##MAP_OVERVIEW## -> overview, ##STREET_VIEW_1## -> streetview_1
-            ptype = placeholder.replace('##MAP_', '').replace('##STREET_VIEW_', 'streetview_').replace('##', '').lower()
-            pattern = r'/uploads/maps/[^/]+_[^/]+_' + ptype + r'_[^/]+\.png'
-            if re.search(pattern, slides_json):
-                slides_json = re.sub(pattern, lambda m, rp=rel_path: rp, slides_json)
-                updated = True
-        if updated:
-            slides_data = json.loads(slides_json)
-            db.update_presentation(pres_id, project_data=project_data, slides_data=slides_data)
-        else:
-            db.update_presentation(pres_id, project_data=project_data)
-    else:
-        db.update_presentation(pres_id, project_data=project_data)
-
-    _record_change('presentation', pres_id, 'إعادة توليد الخرائط',
-                   ['أُعيد توليد صور الخرائط: '
-                    + '، '.join(sorted(key.strip('#').replace('MAP_', '').lower()
-                                       for key, value in placeholders.items() if value))])
-
     return jsonify({
-        'success': True,
-        'placeholders': placeholders,
-        'landmarks': result.get('landmarks', []),
-        'landmarks_matrix': result.get('landmarks_matrix', []),
-        'zooms': result.get('zooms', {}),
-        'centers': result.get('centers', {}),
-        'lat': result.get('lat'),
-        'lng': result.get('lng'),
-    })
+        'success': False,
+        'error': 'إعادة توليد الخرائط متاحة لكل خريطة على حدة',
+        'error_code': 'INDIVIDUAL_MAP_GENERATION_REQUIRED',
+    }), 400
 
 
 def _generation_map_marker_side(images, project_data, view='overview'):
@@ -5880,6 +5728,20 @@ def api_delete_project_draft_by_id(draft_id):
     return jsonify({'success': True})
 
 
+def _location_workflow_complete(draft):
+    project = (draft or {}).get('draft_data') if isinstance(draft, dict) else {}
+    if isinstance(project, str):
+        try:
+            project = json.loads(project)
+        except (TypeError, ValueError):
+            project = {}
+    if not isinstance(project, dict) or project.get('location_analysis_approved') not in (True, 'true', 1):
+        return False
+    creative = project.get('tenantCreativeImages') if isinstance(project.get('tenantCreativeImages'), dict) else {}
+    approvals = creative.get('map_approvals') if isinstance(creative.get('map_approvals'), dict) else {}
+    return all(approvals.get(key) is True for key in ('overview', 'access', 'catchment', 'landmarks'))
+
+
 @app.route('/api/project-draft/section-status', methods=['POST'])
 @require_auth
 def api_update_section_status():
@@ -5893,6 +5755,9 @@ def api_update_section_status():
             return jsonify({'error': 'A valid sectionStatuses map is required'}), 400
         draft_id = _resolve_draft_id(data.get('draftId'))
         before = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
+        if bulk.get('location') == 'approved' and not _location_workflow_complete(before):
+            return jsonify({'error': 'Location analysis and all four maps must be approved first',
+                            'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
         result = db.update_draft_section_statuses(
             g.tenant_id, _project_draft_actor_id(), bulk, draft_id=data.get('draftId')
         )
@@ -5908,6 +5773,9 @@ def api_update_section_status():
         return jsonify({'error': 'A valid sectionKey and sectionStatus are required'}), 400
     draft_id = _resolve_draft_id(data.get('draftId'))
     before = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
+    if section_key == 'location' and section_status == 'approved' and not _location_workflow_complete(before):
+        return jsonify({'error': 'Location analysis and all four maps must be approved first',
+                        'error_code': 'LOCATION_WORKFLOW_NOT_APPROVED'}), 400
     result = db.update_draft_section_status(
         g.tenant_id, _project_draft_actor_id(), section_key, section_status, draft_id=data.get('draftId')
     )

@@ -1763,6 +1763,20 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(response.get_json()['mapsDeferred'])
         generate_maps.assert_not_called()
 
+    def test_site_analysis_rejects_legacy_map_generation_before_analysis_calls(self):
+        client = self.app.test_client()
+        with patch.object(self.application_module, '_collect_site_fields') as collect_fields, \
+                patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps:
+            response = client.post('/api/analyze-site', headers=self._headers(self.token_a), json={
+                'projectData': {'location_address': 'https://www.google.com/maps/@25.1,47.6,17z'},
+                'generateMaps': True,
+            })
+
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json()['error_code'], 'INDIVIDUAL_MAP_GENERATION_REQUIRED')
+        collect_fields.assert_not_called()
+        generate_maps.assert_not_called()
+
     def test_land_document_form_uses_one_multi_file_field(self):
         fields = self.app.test_client().get('/api/fields', headers=self._headers(self.token_a)).get_json()['fields']
         keys = {field['fieldKey'] for field in fields}
@@ -2354,7 +2368,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('id="siteAnalysisWarnings"', index_source)
         self.assertIn('const reasons = [data.landmarksWarning, data.cityLandmarksWarning].filter(Boolean);',
                       index_source)
-        self.assertIn('تعذر جلب المعالم — التفصيل أسفل الخريطة', index_source)
+        self.assertIn('تم تحليل بيانات الموقع، لكن تعذر جلب بعض المعالم', index_source)
 
     def test_financial_pdf_has_no_raw_identifiers_or_json(self):
         """Section 12 used to dump the whole projection object, so schedule arrays landed in the
@@ -3801,29 +3815,27 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_site_analysis_prefers_google_link_over_stale_coordinates(self):
         client = self.app.test_client()
-        map_result = {'placeholders': {}, 'zooms': {'overview': 17}}
         with patch.object(self.application_module.maps_service, 'extract_coords_from_maps_link', return_value={'lat': 25.123456, 'lng': 47.654321}), \
                 patch.object(self.application_module.maps_service, 'get_nearby_landmarks', return_value={'success': True, 'landmarks': []}), \
                 patch.object(self.application_module.maps_service, 'get_drive_matrix', return_value=[]), \
                 patch.object(self.application_module.maps_service, 'discover_nearby_roads', return_value=[]), \
                 patch.object(self.application_module.maps_service, '_fetch_osm_polygon', return_value=None), \
-                patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value=map_result) as generate_maps:
+                patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps:
             response = client.post('/api/analyze-site', headers=self._headers(self.token_a), json={
                 'projectData': {
                     'location_lat': '24.000000',
                     'location_lng': '46.000000',
                     'location_address': 'https://www.google.com/maps/@25.123456,47.654321,17z'
                 },
-                'generateMaps': True,
+                'generateMaps': False,
             })
 
         self.assertEqual(response.status_code, 200, response.get_json())
         payload = response.get_json()
         self.assertEqual(payload['fields']['location_lat'], 25.123456)
         self.assertEqual(payload['fields']['location_lng'], 47.654321)
-        generated_project = generate_maps.call_args.args[0]
-        self.assertEqual(generated_project['location_lat'], 25.123456)
-        self.assertEqual(generated_project['location_lng'], 47.654321)
+        self.assertTrue(payload['mapsDeferred'])
+        generate_maps.assert_not_called()
 
     def test_saved_map_assets_hydrate_by_draft_id(self):
         map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='.png', delete=False)
@@ -3853,18 +3865,21 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(hydrated['tenantCreativeImages']['map_lat'], 24.1)
         self.assertEqual(hydrated['tenantCreativeImages']['map_lng'], 46.2)
 
-    def test_full_map_generation_always_requests_all_four_views(self):
+    def test_bulk_map_generation_is_rejected_before_provider_calls(self):
         client = self.app.test_client()
-        with patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={
-            'placeholders': {}, 'landmarks': [], 'landmarks_matrix': [], 'zooms': {}
-        }) as generate_maps:
+        with patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps:
             response = client.post('/api/generate-map-images', headers=self._headers(self.token_a), json={
-                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'maps-draft'}
+                'projectData': {
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'draftId': 'maps-draft',
+                    'location_analysis_approved': True,
+                }
             })
 
-        self.assertEqual(response.status_code, 200, response.get_json())
-        generated_project = generate_maps.call_args.args[0]
-        self.assertEqual(generated_project['enabled_maps'], ['overview', 'landmarks', 'access', 'catchment'])
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json()['error_code'], 'INDIVIDUAL_MAP_GENERATION_REQUIRED')
+        generate_maps.assert_not_called()
 
     def test_single_map_regeneration_bypasses_cached_assets(self):
         client = self.app.test_client()
@@ -3875,8 +3890,10 @@ class MeetingRequirementsTests(unittest.TestCase):
             'zooms': {'access': 16},
         }) as generate_maps:
             response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
-                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'one-map'},
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'one-map',
+                                'location_analysis_approved': True},
                 'mapType': 'access',
+                'overviewApproved': True,
                 'regenSeed': 17,
             })
 
@@ -3886,6 +3903,71 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(generated_project['refresh_maps'])
         self.assertEqual(generated_project['regen_seed'], 17)
         self.assertFalse(generate_maps.call_args.kwargs.get('force'))
+
+    def test_location_analysis_approval_gates_individual_map_generation(self):
+        client = self.app.test_client()
+        base = {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'approval-map'}
+        response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+            'projectData': base, 'mapType': 'overview'})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error_code'], 'LOCATION_ANALYSIS_NOT_APPROVED')
+        response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+            'projectData': {**base, 'location_analysis_approved': True}, 'mapType': 'access'})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error_code'], 'OVERVIEW_MAP_NOT_APPROVED')
+        with patch.object(self.application_module.db, 'delete_map_images') as delete_images:
+            response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+                'projectData': {**base, 'location_analysis_approved': True},
+                'mapType': 'overview',
+                'mapApproved': True,
+            })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error_code'], 'MAP_ALREADY_APPROVED')
+        delete_images.assert_not_called()
+        self.assertFalse(self.application_module._location_workflow_complete({'draft_data': {}}))
+        self.assertTrue(self.application_module._location_workflow_complete({'draft_data': {
+            'location_analysis_approved': True,
+            'tenantCreativeImages': {'map_approvals': {
+                'overview': True, 'access': True, 'catchment': True, 'landmarks': True}}
+        }}))
+        rows = [{'name': f'معلم {index}', 'show_on_map': index in (2, 4)} for index in range(1, 10)]
+        self.assertEqual([row['name'] for row in self.application_module.maps_service.select_map_landmark_rows(rows)],
+                         ['معلم 2', 'معلم 4'])
+        self.assertEqual(len(self.application_module.maps_service.select_map_landmark_rows(
+            [{'name': f'معلم {index}'} for index in range(1, 10)])), 7)
+        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        analyze_body = source.split('async function analyzeTenantSiteOnce()', 1)[1].split('const MAP_PREVIEW_VIEW_DEFS', 1)[0]
+        self.assertIn('generateMaps: false', analyze_body)
+        self.assertNotIn('await previewProjectMap(', analyze_body)
+        self.assertIn('location_analysis_approved', source)
+        self.assertIn('function toggleLocationAnalysisApproval()', source)
+        self.assertIn('function startManualRoadDrawing(name)', source)
+        self.assertIn('function startLandmarkPlacement(key, tr)', source)
+        self.assertIn('main_roads_data', source)
+        self.assertIn("overviewApproved: !!approvals.overview", source)
+        self.assertIn("mapApproved: !!approvals[mapType]", source)
+        self.assertIn("if (mapType !== 'overview' && !approvals.overview)", source)
+        self.assertIn('اعتماد الخرائط الأربع مطلوب قبل توليد العرض', source)
+        self.assertIn("city_landmarks: { nameLabel: 'مَعلم المدينة'", source)
+        self.assertNotIn("secondary_roads: { nameLabel:", source)
+        self.assertIn('tenantProjectData.location_lat = nextLat.toFixed(6)', source)
+        pin_body = source.split('function setTenantMapPointFromClick(event)', 1)[1].split('function updateTenantPolygonControls()', 1)[0]
+        self.assertNotIn("tenantProjectData.location_polygon = ''", pin_body)
+        self.assertIn("return regenerateMapPreview('overview');", source)
+        self.assertNotIn("'/api/generate-map-images'", source)
+        self.assertIn('({ ...row, name })', source)
+        self.assertIn('tenantProjectData.manual_road_paths', source)
+        self.assertIn('show_on_map', source)
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        designer_body = app_source.split('def api_designer_chat():', 1)[1].split("@app.route('/api/files'", 1)[0]
+        self.assertNotIn('generate_all_map_images(', designer_body)
+        self.assertEqual(app_source.count('generate_all_map_images('), 1)
+        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        self.assertIn('overview_markers = _build_markers(marker_lat, marker_lng)', maps_source)
+        self.assertIn('catchment_markers = _build_markers(marker_lat, marker_lng, city_landmarks)', maps_source)
+        self.assertNotIn('marker_lat, marker_lng = map_center_lat, map_center_lng', maps_source)
+        access_body = maps_source.split('def _draw_access_roads(', 1)[1].split('def _get_cached_map_images(', 1)[0]
+        self.assertNotIn("('main_roads', 'secondary_roads')", access_body)
 
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
@@ -3913,7 +3995,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function withCacheBust(url)', index_source)
         self.assertIn('payload.refresh_maps = true', index_source)
         self.assertIn('selectMapPreviewView(mapType)', index_source)
-        self.assertIn('selectMapPreviewView(tenantSelectedMapType)', index_source)
+        self.assertIn("return regenerateMapPreview(tenantSelectedMapType || 'overview');", index_source)
         self.assertIn('Regenerating a map is an explicit user action.', index_source)
         self.assertIn('await saveProjectAsDraftNow(true);', index_source)
 
@@ -4045,7 +4127,12 @@ class MeetingRequirementsTests(unittest.TestCase):
             'section-executive-content',
         ]
         client.post('/api/project-draft', headers=headers, json={
-            'draftData': {'project_name': 'ملف اعتماد'}, 'sectionStatuses': {}, 'status': 'draft'
+            'draftData': {
+                'project_name': 'ملف اعتماد', 'location_analysis_approved': True,
+                'tenantCreativeImages': {'map_approvals': {
+                    'overview': True, 'access': True, 'catchment': True, 'landmarks': True}}
+            },
+            'sectionStatuses': {}, 'status': 'draft'
         })
 
         # One merged call must store every section.
@@ -4200,7 +4287,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("result['centers'] = {", source)
         self.assertIn("'center_lat': map_center_lat", source)
         self.assertIn('const center = (tenantCreativeImages.map_centers || {})[mapType] || {};', index_source)
-        self.assertIn('tenantCreativeImages.map_centers = data.centers || {};', index_source)
+        self.assertIn('tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };', index_source)
 
         # Nine destination rows became nine rings up to 31 km wide; keep three and frame them.
         rings = maps_service.catchment_rings([
@@ -4255,7 +4342,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const value = Math.max(genProgressValue, requested);', index_source)
         self.assertIn('let genProgressValue = 0;', index_source)
 
-    def test_presentation_map_regeneration_uses_current_project_data(self):
+    def test_presentation_bulk_map_regeneration_is_rejected_without_mutation(self):
         with self.app.app_context():
             pres_id = db.create_presentation(
                 self.tenant_a,
@@ -4272,24 +4359,21 @@ class MeetingRequirementsTests(unittest.TestCase):
                 slides_data=[],
             )
         client = self.app.test_client()
-        with patch.object(self.application_module.maps_service, 'generate_all_map_images', return_value={
-            'placeholders': {}, 'landmarks': [], 'landmarks_matrix': [], 'zooms': {}, 'lat': 25.0, 'lng': 47.0
-        }) as generate_maps:
+        with patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps:
             response = client.post(
                 f'/api/presentations/{pres_id}/regenerate-maps',
                 headers=self._headers(self.token_a),
                 json={'projectData': {'location_lat': 25.0, 'location_lng': 47.0}}
             )
 
-        self.assertEqual(response.status_code, 200, response.get_json())
-        generated_project = generate_maps.call_args.args[0]
-        self.assertEqual(generated_project['location_lat'], 25.0)
-        self.assertEqual(generated_project['location_lng'], 47.0)
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json()['error_code'], 'INDIVIDUAL_MAP_GENERATION_REQUIRED')
+        generate_maps.assert_not_called()
         with self.app.app_context():
             stored = db.get_presentation(pres_id, tenant_id=self.tenant_a)
         stored_data = json.loads(stored['project_data'])
-        self.assertEqual(stored_data['location_lat'], 25.0)
-        self.assertEqual(stored_data['tenantCreativeImages']['map_placeholders'], {})
+        self.assertEqual(stored_data['location_lat'], 24.0)
+        self.assertEqual(stored_data['tenantCreativeImages']['map_placeholders'], {'##MAP_OVERVIEW##': '/old-map.png'})
 
     def test_site_analysis_fills_google_site_fields_without_touching_unknown_fields(self):
         client = self.app.test_client()
@@ -5091,7 +5175,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         for kept in (
             'لا توجد بنود مدخلة في هذا الجدول.',
             'زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.',
-            'الإحداثيات تحتاج مراجعة واعتماد',
+            'تحليل الموقع يحتاج اعتمادًا قبل توليد الخرائط',
             'لم تُرفع صور للأرض.',
         ):
             self.assertIn(kept, index_source, kept)

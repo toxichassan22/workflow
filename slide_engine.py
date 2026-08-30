@@ -889,7 +889,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                  'building_ratio_coverage', 'setbacks', 'max_floors_height',
                  'allowed_uses', 'regulatory_constraints', 'land_and_building_summary')
     location_keys = ('location_address', 'location_lat', 'location_lng', 'city', 'district',
-                     'main_roads', 'secondary_roads', 'nearby_landmarks', 'city_landmarks',
+                     'main_roads', 'nearby_landmarks', 'city_landmarks',
                      'catchment_areas', 'site_analysis')
     has_interior = any(_available_asset_items(component.get('images'))
                        for component in interior_components if isinstance(component, dict))
@@ -1511,7 +1511,7 @@ PROMPT_INTERNAL_KEYS = {
     'land_use_status',
     # Superseded by building_ratio_coverage / setbacks and allowed_uses; kept in drafts for
     # backwards compatibility only.
-    'building_ratio_setbacks', 'allowed_uses_restrictions',
+    'building_ratio_setbacks', 'allowed_uses_restrictions', 'secondary_roads',
 }
 
 PROMPT_SKIPPED_KEYS = PROMPT_COVERED_ELSEWHERE | PROMPT_PREVIOUS_OUTPUT | PROMPT_INTERNAL_KEYS
