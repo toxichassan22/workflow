@@ -7137,7 +7137,8 @@
         const title = (t && t.textContent.trim()) || 'بيانات';
         let rows = '';
         sec.querySelectorAll('input, select, textarea').forEach(el => {
-          if (el.type === 'file' || el.type === 'hidden' || el.disabled) return;
+          if (el.type === 'file' || el.type === 'hidden'
+            || el.closest('.dynamic-off,.conditional-off,.hidden,[hidden]')) return;
           const fieldId = el.dataset.key || el.id;
           if (!fieldId) return;
           const fieldWrap = el.closest('.tenant-field');
@@ -13821,7 +13822,7 @@
 
     function financialReportCellText(cell) {
       const controls = Array.from(cell.querySelectorAll('input,select,textarea')).filter(control =>
-        control.type !== 'hidden' && !control.disabled
+        control.type !== 'hidden'
         && !control.closest('.dynamic-off,.conditional-off,.hidden,[hidden]'));
       if (!controls.length) return financialReportText(cell);
       return controls.map(financialReportControlValue).filter(value => value !== '').join(' — ');

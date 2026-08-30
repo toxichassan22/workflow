@@ -581,7 +581,6 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         })
 
     model = _parse_financial_dict(source.get('financial_study_model'))
-    has_report_components = False
     if financial_study_has_real_input(model, _parse_financial_dict(source.get('financial_calc_data'))):
         tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
         report = model.get('report') if isinstance(model.get('report'), dict) else {}
@@ -595,7 +594,6 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         if report_parts:
             heading = 'الدراسة المالية'
             subheading = ''
-            report_components_added = False
             for part_index, part in enumerate(report_parts):
                 if not isinstance(part, dict):
                     continue
@@ -618,22 +616,6 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     continue
                 target_section = 'components' if 'مكونات المشروع' in heading else 'financial'
                 if target_section == 'components':
-                    if not report_components_added:
-                        groups['components'] = []
-                        report_components_added = True
-                        has_report_components = True
-                    for start in range(0, len(rows), chunk_size):
-                        end = min(start + chunk_size, len(rows))
-                        title = subheading or heading
-                        number = start // chunk_size + 1
-                        add('components', {
-                            'title': title + (f' — {number}' if len(rows) > chunk_size else ''),
-                            'type': 'content',
-                            'design_style': 'table',
-                            'content_density': 'high', 'requires_image': False,
-                            'content_source': f'financial_report:{part_index}:{start}:{end}',
-                            'source_table': f'report_part_{part_index}', 'bullets': [],
-                        })
                     continue
                 for start in range(0, len(rows), chunk_size):
                     end = min(start + chunk_size, len(rows))
@@ -739,7 +721,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     or any(map_placeholders.values()))
     availability = {
         'overview': bool(source),
-        'components': bool(components or has_report_components),
+        'components': bool(components),
         'land': bool(land_items or any(str(source.get(key) or '').strip() for key in land_keys)),
         'location': bool(has_location),
         'market': bool(_readable_fact(market)),

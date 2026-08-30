@@ -893,7 +893,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                              for slide in plan['slides']), 1)
         component_slide = next(slide for slide in plan['slides']
                                if slide.get('section_key') == 'components' and slide.get('type') == 'content')
-        self.assertTrue(component_slide['content_source'].startswith('financial_report:'))
+        self.assertTrue(component_slide['content_source'].startswith('project_components:'))
         financial_slides = [slide for slide in plan['slides'] if slide.get('section_key') == 'financial'
                             and slide.get('type') == 'content']
         self.assertTrue(financial_slides)
@@ -1008,6 +1008,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         } for index in range(1, 15)]
         project = {'project_name': 'المشروع', 'financial_study_model': {
             'inputs': {'projectCost': 1000000}, 'dynamicRows': {'components': components},
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': '3. مكونات المشروع'},
+                {'type': 'table', 'headers': ['اسم المكون', 'نوع الاستخدام', 'عدد الوحدات', 'نموذج الاستفادة'],
+                 'rows': [['', 'تجاري ترفيهي خدمات مواقف سكني فندقي', '',
+                           'بيع وحدات إيجار يومي إيجار شهري إيجار سنوي']]},
+            ]},
         }}
         plan = engine.normalize_presentation_plan({'slides': [
             {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
@@ -1022,8 +1028,12 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertIn(f'المكون {index}', notes)
         self.assertIn('إيجار يومي', notes)
         self.assertIn('بيع وحدات', notes)
+        self.assertNotIn('تجاري ترفيهي خدمات مواقف', notes)
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn("control.selectedOptions?.[0]", index_source)
+        self.assertNotIn("control.type !== 'hidden' && !control.disabled", index_source)
+        self.assertNotIn("el.type === 'file' || el.type === 'hidden' || el.disabled", index_source)
+        self.assertIn("el.closest('.dynamic-off,.conditional-off,.hidden,[hidden]')", index_source)
         self.assertIn('const compatibleComponents = parseStoredProjectTable(source.project_components_data);', index_source)
 
     def test_component_slide_retries_when_a_required_component_is_missing(self):

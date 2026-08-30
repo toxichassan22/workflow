@@ -310,6 +310,11 @@ Two states, and both are stated to the model explicitly — silence made it inve
   explicit `chart_type` chosen from Bar/Column, grouped comparisons, Line/Area, Pie/Donut, Treemap,
   Scatter, Histogram, Heatmap or Candlestick according to the table meaning; the original table stays
   beside the visualization.
+- **Approved sections have disabled controls, but their values remain data.** Report and sidebar
+  collectors must exclude hidden/inactive wrappers, not `control.disabled`. Ignoring disabled table
+  controls makes a select fall back to the cell's `textContent` (all options concatenated) and makes
+  input cells blank. Presentation component slides always use `_project_component_rows()` and
+  `project_components:*` sources, never the rendered financial-report copy.
 
 Section order is `basic → location → land_croquis → timeline → financial → team → market study → visual concept → executive content → contact`.
 The first three come from the `sectionOrder` loop; the remaining sections are appended in that order with contact information placed at the end.
