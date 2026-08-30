@@ -384,6 +384,20 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   invented). A row with an empty price and `غير متوفر من مصدر موثوق` is the correct output; a
   number without the page it came from is not.
 
+## Presentation color and logo contrast
+
+The stored branding palette is an identity input, not proof that any two colors are readable together.
+`design_templates.readable_text_color()` resolves every foreground against its actual surface at a
+minimum 4.5:1 ratio. The deterministic index, section dividers and fallback header/footer use those
+resolved roles; do not return them to raw `background_color` / `text_color` pairs.
+
+`/api/generate-slide-single` calls `_prepare_generation_logo_context()` before building prompts. It
+classifies the visible pixels of the company and project logos independently as light or dark, sends
+the two decisions to the slide prompt, and `finalize_slide_html()` applies the matching background to
+each logo image itself. A light logo gets the dark readable brand surface; a dark logo gets white.
+Never infer both logos from one shared container. Generated text is also audited before acceptance;
+a foreground/background pair below 4.5:1 causes a model retry with the failed pair named.
+
 ## What the slide model receives
 
 `slide_engine.build_project_facts(project_data, tenant_id)` builds the `## بيانات المشروع` block for

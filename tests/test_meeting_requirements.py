@@ -618,6 +618,105 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('height:56px', cover)
         self.assertNotIn('height:36px', cover)
 
+    def test_palette_contrast_and_logo_backgrounds_are_resolved_before_rendering(self):
+        from PIL import Image, ImageDraw
+        from design_templates import build_design_rules, contrast_ratio
+
+        tenant_dir = Path(self.application_module.UPLOADS_DIR) / self.tenant_a
+        tenant_dir.mkdir(parents=True, exist_ok=True)
+        company_path = tenant_dir / 'logo.png'
+        company_logo = Image.new('RGBA', (160, 80), (0, 0, 0, 0))
+        ImageDraw.Draw(company_logo).rectangle((12, 20, 148, 60), fill=(250, 250, 250, 255))
+        company_logo.save(company_path)
+
+        project_path = tenant_dir / 'project-documents' / 'dark-project.png'
+        project_path.parent.mkdir(parents=True, exist_ok=True)
+        project_logo = Image.new('RGBA', (160, 80), (0, 0, 0, 0))
+        ImageDraw.Draw(project_logo).rectangle((12, 20, 148, 60), fill=(10, 30, 45, 255))
+        project_logo.save(project_path)
+
+        with self.app.app_context():
+            file_id = db.create_project_file(
+                self.tenant_a, 'project_logo', 'dark-project.png', str(project_path),
+                'image/png', project_path.stat().st_size, 'dark-project-sha')
+            db.update_branding(
+                self.tenant_a, logo_path=f'/tenant-assets/{self.tenant_a}/logo',
+                primary_color='#005f78', secondary_color='#003d50', accent_color='#d8c49a',
+                background_color='#005f78', text_color='#111111')
+            branding = db.get_branding(self.tenant_a)
+            project = {
+                'project_name': 'THE VIEW',
+                'project_logo': f'/api/project-files/{file_id}',
+                'project_logo_file_id': file_id,
+            }
+            self.application_module._prepare_generation_logo_context(project, branding, self.tenant_a)
+
+        self.assertEqual(branding['_logo_tone'], 'light')
+        self.assertEqual(project['_project_logo_tone'], 'dark')
+        info = self.application_module._get_images_info({}, project)
+        self.assertIn('شعار الشركة فاتح', info)
+        self.assertIn('خلفية داكنة', info)
+        self.assertIn('شعار المشروع داكن', info)
+        self.assertIn('خلفية بيضاء', info)
+
+        rules = build_design_rules(branding)
+        self.assertIn('4.5:1', rules)
+        self.assertIn('شعار الشركة فاتح', rules)
+        index_html = self.application_module.slide_engine.build_index_slide({
+            'index_entries': [{'title': 'نبذة عن المشروع', 'page': 3}],
+        }, 2, 5, branding, project)
+        self.assertIn('background:#005f78', index_html)
+        self.assertIn('color:#ffffff', index_html)
+        self.assertGreaterEqual(contrast_ratio('#ffffff', '#005f78'), 4.5)
+        self.assertNotIn('color:#111111', index_html)
+
+        finished = self.application_module.slide_engine.finalize_slide_html(
+            '<div class="slide" style="width:1280px;height:720px;background:#ffffff;color:#111111"><p>محتوى</p></div>',
+            'content', project, branding, tenant_id=self.tenant_a,
+            slide_num=3, slide_title='نبذة عن المشروع', total_slides=5)
+        logo_tags = re.findall(r'<img\b[^>]*>', finished, re.IGNORECASE)
+        company_tag = next(tag for tag in logo_tags if f'/tenant-assets/{self.tenant_a}/logo' in tag)
+        project_tag = next(tag for tag in logo_tags if f'/api/project-files/{file_id}' in tag)
+        self.assertIn('background:#005f78', company_tag)
+        self.assertIn('background:#ffffff', project_tag)
+
+    def test_single_slide_accepts_any_valid_slide_class_attribute(self):
+        engine = self.application_module.slide_engine
+
+        def generated(*_args, **_kwargs):
+            return {'choices': [{'message': {'content': (
+                "<div class='slide generated' style='width:1280px;height:720px;"
+                "background:#ffffff;color:#111827'><p>محتوى</p></div>"
+            )}}]}
+
+        html = engine.generate_single_slide(
+            'system', {'title': 'نبذة', 'type': 'content'}, 3, 8,
+            {'primary_color': '#0b1f33'}, generated, project_data={})
+        self.assertEqual(len(self.application_module.extract_slide_elements(html)), 1)
+        self.assertIn('class="slide"', html)
+        self.assertIn('height:56px', html)
+
+    def test_single_slide_retries_severely_unreadable_text(self):
+        engine = self.application_module.slide_engine
+        responses = iter([
+            "<div class='slide' style='width:1280px;height:720px;background:#005f78;color:#111111'><p>نص غير مقروء</p></div>",
+            "<div class='slide' style='width:1280px;height:720px;background:#005f78;color:#ffffff'><p>نص مقروء</p></div>",
+        ])
+        prompts = []
+
+        def generated(_system, user_message, **_kwargs):
+            prompts.append(user_message)
+            return {'choices': [{'message': {'content': next(responses)}}]}
+
+        html = engine.generate_single_slide(
+            'system', {'title': 'نبذة', 'type': 'content'}, 3, 8,
+            {'primary_color': '#005f78'}, generated, project_data={})
+        self.assertIn('color:#ffffff', html)
+        self.assertEqual(len(prompts), 2)
+        self.assertIn('فشل التباين', prompts[1])
+        self.assertTrue(engine.slide_contrast_issues(
+            "<div class='slide' style='background:#005f78'><p>لون المتصفح الافتراضي</p></div>"))
+
     def test_section_dividers_are_built_from_one_fixed_layout(self):
         """Every divider is the same layout over the approved main image with only the text
         changing, so it is rendered in code: identical on every divider and no model call."""
@@ -2559,6 +2658,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("<th>طريقة الاحتساب بالأرقام المُدخلة</th>", index_source)
         self.assertIn("reportTableSnapshot('clarificationsTable', false)", index_source)
         self.assertIn("setConditionalVisibility('clarificationsBlock', rows.length > 0);", index_source)
+        self.assertIn('updateDynamicFieldDetails(exitOn);\n    }\n\n    // Every readonly figure', index_source)
+        self.assertLess(index_source.index('function renderClarifications(facts)'),
+                        index_source.index('function updateDynamicFieldDetails(exitOn)'))
 
         # 4 and 5. A schedule stops where its own period stops, and a later year survives the trim
         # only when it still carries a figure — a computed amount must never be hidden by it.

@@ -1271,6 +1271,110 @@ def clean_project_data(data):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 _GENERATION_PROJECT_IMAGE_CACHE = {}
+_LOGO_APPEARANCE_CACHE = {}
+
+
+def _tenant_logo_storage_path(tenant_id):
+    tenant_dir = os.path.realpath(os.path.join(UPLOADS_DIR, str(tenant_id or '')))
+    candidates = [os.path.join(tenant_dir, f'logo{extension}')
+                  for extension in ('.png', '.jpg', '.jpeg', '.webp')]
+    candidates = [path for path in candidates if os.path.isfile(path)]
+    if candidates:
+        return max(candidates, key=os.path.getmtime)
+    fallback = os.path.join(os.path.dirname(__file__), 'assets', 'logo.png')
+    return fallback if os.path.isfile(fallback) else ''
+
+
+def _project_logo_storage_path(project_data, tenant_id):
+    source = project_data if isinstance(project_data, dict) else {}
+    meta = source.get('project_logo_file_meta') if isinstance(source.get('project_logo_file_meta'), dict) else {}
+    file_id = source.get('project_logo_file_id') or meta.get('id')
+    logo_value = str(source.get('project_logo') or '').strip()
+    if not file_id and logo_value:
+        match = re.search(r'/api/project-files/([^/?#]+)', logo_value)
+        if match:
+            file_id = match.group(1)
+    if file_id:
+        stored = db.get_project_file(tenant_id, str(file_id))
+        if stored and stored.get('mime_type', '').startswith('image/'):
+            path = os.path.realpath(stored.get('storage_path') or '')
+            tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(tenant_id)))
+            try:
+                if os.path.commonpath([tenant_root, path]) == tenant_root and os.path.isfile(path):
+                    return path
+            except ValueError:
+                pass
+    relative = logo_value.split('?', 1)[0].lstrip('/')
+    if relative.startswith('uploads/'):
+        path = os.path.realpath(os.path.join(os.path.dirname(__file__), relative.replace('/', os.sep)))
+        tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(tenant_id)))
+        try:
+            if os.path.commonpath([tenant_root, path]) == tenant_root and os.path.isfile(path):
+                return path
+        except ValueError:
+            pass
+    return ''
+
+
+def _logo_pixel_luminance(red, green, blue):
+    channels = [value / 255 for value in (red, green, blue)]
+    linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+              for channel in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _logo_appearance_from_path(path):
+    if not path or not os.path.isfile(path):
+        return 'unknown'
+    stat = os.stat(path)
+    key = (os.path.realpath(path), stat.st_mtime_ns, stat.st_size)
+    cached = _LOGO_APPEARANCE_CACHE.get(key)
+    if cached:
+        return cached
+    try:
+        from PIL import Image
+        with Image.open(path) as source:
+            image = source.convert('RGBA')
+            image.thumbnail((256, 256))
+            width, height = image.size
+            pixel_data = image.get_flattened_data() if hasattr(image, 'get_flattened_data') else image.getdata()
+            pixels = list(pixel_data)
+    except (OSError, ValueError):
+        return 'unknown'
+    visible = [pixel for pixel in pixels if pixel[3] >= 40]
+    if not visible:
+        return 'unknown'
+    if len(visible) >= len(pixels) * 0.98 and width > 1 and height > 1:
+        border = []
+        for x in range(width):
+            border.extend((image.getpixel((x, 0)), image.getpixel((x, height - 1))))
+        for y in range(1, height - 1):
+            border.extend((image.getpixel((0, y)), image.getpixel((width - 1, y))))
+        background = tuple(sorted(pixel[channel] for pixel in border)[len(border) // 2]
+                           for channel in range(3))
+        foreground = [pixel for pixel in visible
+                      if sum((pixel[channel] - background[channel]) ** 2 for channel in range(3)) >= 900]
+        if len(foreground) >= max(12, len(visible) // 200):
+            visible = foreground
+    luminances = sorted(_logo_pixel_luminance(*pixel[:3]) for pixel in visible)
+    median = luminances[len(luminances) // 2]
+    light_share = sum(value >= 0.68 for value in luminances) / len(luminances)
+    dark_share = sum(value <= 0.32 for value in luminances) / len(luminances)
+    mean = sum(luminances) / len(luminances)
+    tone = 'light' if median >= 0.58 or light_share >= 0.52 or (light_share >= 0.35 and dark_share < 0.25) else 'dark'
+    if 0.48 < median < 0.58 and light_share < 0.35 and dark_share < 0.35:
+        tone = 'light' if mean >= 0.55 else 'dark'
+    _LOGO_APPEARANCE_CACHE[key] = tone
+    return tone
+
+
+def _prepare_generation_logo_context(project_data, branding, tenant_id):
+    company_tone = _logo_appearance_from_path(_tenant_logo_storage_path(tenant_id))
+    project_tone = _logo_appearance_from_path(_project_logo_storage_path(project_data, tenant_id))
+    branding['_logo_tone'] = company_tone
+    project_data['_company_logo_tone'] = company_tone
+    project_data['_project_logo_tone'] = project_tone
+    return company_tone, project_tone
 
 
 def _generation_project_image_url(tenant_id, file_id):
@@ -1350,13 +1454,23 @@ def _get_images_info(images, project_data=None):
 
     # The design rules say to place ##PROJECT_LOGO## "if it exists", and the model had no way of
     # knowing whether it does, so an uploaded project logo was simply never used.
-    project_logo = str((project_data or {}).get('project_logo') or '').strip()
+    project_source = project_data or {}
+    company_tone = str(project_source.get('_company_logo_tone') or '').strip().lower()
+    project_tone = str(project_source.get('_project_logo_tone') or '').strip().lower()
+    tone_rules = {
+        'light': 'فاتح — خلفية داكنة إلزامية، وممنوع وضعه مباشرة على الأبيض',
+        'dark': 'داكن — خلفية بيضاء إلزامية، وممنوع وضعه مباشرة على الكحلي أو الأسود',
+        'unknown': 'غير محسوم — لا تفترض لونًا مماثلًا لخلفيته',
+    }
+    info = f"- نتيجة تحليل شعار الشركة: شعار الشركة {tone_rules.get(company_tone, tone_rules['unknown'])}.\n"
+    project_logo = str(project_source.get('project_logo') or '').strip()
     if project_logo:
-        info = ("- شعار المشروع: متوفر ومرفوع من العميل. ضع ##PROJECT_LOGO## بجانب شعار الشركة "
-                "##LOGO## في هيدر كل شريحة محتوى، وفي الغلاف والختام معًا جنبًا إلى جنب بفاصل "
-                "رأسي رقيق بينهما. هذا إلزامي وليس اختياريًا.\n")
+        info += ("- شعار المشروع: متوفر ومرفوع من العميل. ضع ##PROJECT_LOGO## بجانب شعار الشركة "
+                 "##LOGO## في هيدر كل شريحة محتوى، وفي الغلاف والختام معًا جنبًا إلى جنب بفاصل "
+                 "رأسي رقيق بينهما. هذا إلزامي وليس اختياريًا. "
+                 f"نتيجة التحليل: شعار المشروع {tone_rules.get(project_tone, tone_rules['unknown'])}.\n")
     else:
-        info = "- شعار المشروع: لا يوجد — استخدم شعار الشركة ##LOGO## وحده ولا تكتب ##PROJECT_LOGO##.\n"
+        info += "- شعار المشروع: لا يوجد — استخدم شعار الشركة ##LOGO## وحده ولا تكتب ##PROJECT_LOGO##.\n"
     info += f"- صورة الغلاف: {'متوفرة (استخدم ##IMAGE_COVER##)' if has_cover else 'لا توجد'}\n"
     if moodboard_count > 0:
         info += f"\n## التصورات الخارجية المتوفرة ({moodboard_count} صور)\n"
@@ -5214,6 +5328,7 @@ def api_generate_slide_single():
     branding = db.get_branding(g.tenant_id)
     if not branding:
         return jsonify({'error': 'Branding not configured'}), 400
+    _prepare_generation_logo_context(project_data, branding, g.tenant_id)
 
     # Map generation is explicit. A single-slide request may reuse supplied
     # persisted assets, but it must never trigger a hidden Google/OSM call.
@@ -5284,7 +5399,7 @@ def api_generate_slide_single():
 
     # Never turn a failed generation into a fake successful slide. The client
     # can retry the request, but it must not save an incomplete presentation.
-    if not html or html.count('class="slide"') != 1:
+    if len(extract_slide_elements(html or '')) != 1:
         title = slide.get('title', f'شريحة {slide_index + 1}')
         return jsonify({
             'success': False,
@@ -11206,15 +11321,14 @@ def api_analyze_reference():
 def serve_tenant_logo(tenant_id):
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', str(tenant_id or '')):
         return jsonify({'error': 'Logo not found'}), 404
-    tenant_dir = os.path.join(UPLOADS_DIR, tenant_id)
-    if os.path.isdir(tenant_dir):
-        for extension in ALLOWED_IMAGE_EXTENSIONS:
-            logo_path = os.path.join(tenant_dir, f'logo{extension}')
-            if os.path.isfile(logo_path):
-                mimetype = 'image/png' if extension == '.png' else 'image/jpeg' if extension in ('.jpg', '.jpeg') else 'image/webp'
-                resp = send_file(logo_path, mimetype=mimetype)
-                resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
-                return resp
+    logo_path = _tenant_logo_storage_path(tenant_id)
+    tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, tenant_id))
+    if logo_path and os.path.commonpath([tenant_root, os.path.realpath(logo_path)]) == tenant_root:
+        extension = os.path.splitext(logo_path)[1].lower()
+        mimetype = 'image/png' if extension == '.png' else 'image/jpeg' if extension in ('.jpg', '.jpeg') else 'image/webp'
+        resp = send_file(logo_path, mimetype=mimetype)
+        resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
+        return resp
     # Fallback to default system logo if no tenant logo was uploaded yet
     default_logo = os.path.join(os.path.dirname(__file__), 'assets', 'logo.png')
     if os.path.isfile(default_logo):

@@ -381,6 +381,49 @@ def apply_template_colors(template_key):
 # Dynamic Design Rules Builder
 # ─────────────────────────────────────────────────────────────────────────────
 
+def normalize_hex_color(value, fallback='#000000'):
+    text = str(value or '').strip().lower()
+    if re.fullmatch(r'#[0-9a-f]{3}', text):
+        text = '#' + ''.join(character * 2 for character in text[1:])
+    if re.fullmatch(r'#[0-9a-f]{6}', text):
+        return text
+    return fallback
+
+
+def _relative_luminance(value):
+    color = normalize_hex_color(value)
+    channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+    linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+              for channel in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrast_ratio(foreground, background):
+    lighter, darker = sorted((_relative_luminance(foreground), _relative_luminance(background)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def readable_text_color(preferred, background, alternatives=(), minimum=4.5):
+    surface = normalize_hex_color(background, '#ffffff')
+    candidates = []
+    for value in (preferred, *alternatives, '#ffffff', '#0f172a'):
+        color = normalize_hex_color(value, '')
+        if color and color not in candidates:
+            candidates.append(color)
+    for color in candidates:
+        if contrast_ratio(color, surface) >= minimum:
+            return color
+    return max(candidates, key=lambda color: contrast_ratio(color, surface))
+
+
+def dark_surface_color(*colors):
+    for value in (*colors, '#0b1f33'):
+        color = normalize_hex_color(value, '')
+        if color and contrast_ratio('#ffffff', color) >= 4.5:
+            return color
+    return '#0b1f33'
+
+
 def build_design_rules(branding):
     """
     Build DESIGN_RULES string dynamically from tenant's branding settings.
@@ -388,11 +431,26 @@ def build_design_rules(branding):
     """
     template = DESIGN_TEMPLATES.get(branding.get('design_template', 'modern'), DESIGN_TEMPLATES['modern'])
     company_name = branding.get('company_name', '')
-    primary = branding.get('primary_color', '#0b1f33')
-    secondary = branding.get('secondary_color', '#1e293b')
-    accent = branding.get('accent_color', '#0ea5e9')
-    bg = branding.get('background_color', '#f8fafc')
-    text_color = branding.get('text_color', '#1e293b')
+    primary = normalize_hex_color(branding.get('primary_color'), '#0b1f33')
+    secondary = normalize_hex_color(branding.get('secondary_color'), '#1e293b')
+    accent = normalize_hex_color(branding.get('accent_color'), '#0ea5e9')
+    bg = normalize_hex_color(branding.get('background_color'), '#f8fafc')
+    text_color = normalize_hex_color(branding.get('text_color'), '#1e293b')
+    body_on_bg = readable_text_color(text_color, bg)
+    heading_on_bg = readable_text_color(primary, bg, (body_on_bg,))
+    accent_on_bg = readable_text_color(accent, bg, (heading_on_bg, body_on_bg))
+    body_on_white = readable_text_color(text_color, '#ffffff')
+    heading_on_white = readable_text_color(primary, '#ffffff', (body_on_white,))
+    dark_surface = dark_surface_color(primary, secondary)
+    text_on_primary = readable_text_color('#ffffff', primary, ('#0f172a',))
+    text_on_secondary = readable_text_color('#ffffff', secondary, ('#0f172a',))
+    footer_text = readable_text_color('#ffffff', dark_surface, ('#0f172a',))
+    footer_accent = readable_text_color(accent, dark_surface, (footer_text,))
+    logo_tone = str(branding.get('_logo_tone') or '').strip().lower()
+    company_logo_rule = {
+        'light': f'- نتيجة التحليل الفعلي: شعار الشركة فاتح؛ خلفيته الإلزامية {dark_surface} في كل موضع، ولا يوضع على الأبيض مباشرة.',
+        'dark': '- نتيجة التحليل الفعلي: شعار الشركة داكن؛ خلفيته الإلزامية #ffffff في كل موضع، ولا يوضع على مساحة داكنة مباشرة.',
+    }.get(logo_tone, '- لم تتوفر نتيجة تحليل شعار الشركة؛ لا تفترض لونه ولا تضعه على خلفية مساوية لألوانه.')
     # The prompt no longer states a font name: the slide used to be told to write
     # `font-family:'The Sans Arabic'` inline, while the face actually loaded is a per-tenant alias
     # (`tenant-managed-<id>`) that carries the uploaded file. The two never matched, and any surface
@@ -424,8 +482,10 @@ def build_design_rules(branding):
 - اللون الثانوي: {secondary} للعناوين الفرعية أو خلفية واحدة مساندة عند الحاجة.
 - لون التمييز: {accent} للنسب والعناصر المهمة وخطوط الرسوم البيانية فقط.
 - الخلفية: {bg}، مع الأبيض #ffffff لمساحات القراءة والجداول.
-- لون النص: {text_color}، والنص الفرعي #64748b.
-- اجعل 70-80% من الصفحة خلفية فاتحة أو بيضاء، و15-20% من اللون الأساسي، وبحد أقصى 10% من لون التمييز. لا توزع الألوان بالتساوي ولا تجعل كل مربع بلون مختلف.
+- لون النص المسجل في الهوية: {text_color}. لا تستخدمه آليًا قبل فحص الخلفية.
+- ألوان القراءة المحسوبة والملزمة: النص فوق {bg} هو {body_on_bg}، والعنوان فوقها {heading_on_bg}، والتمييز المقروء فوقها {accent_on_bg}. فوق الأبيض استخدم {body_on_white} للنص و{heading_on_white} للعناوين. فوق {primary} استخدم {text_on_primary}، وفوق {secondary} استخدم {text_on_secondary}.
+- افحص كل زوج لون نص وخلفية قبل إخراج HTML، والحد الأدنى لنسبة التباين هو 4.5:1. ممنوع نص أسود أو داكن فوق خلفية داكنة، وممنوع نص أبيض أو فاتح فوق خلفية فاتحة، حتى لو كان اللونان موجودين في الهوية.
+- اجعل 70-80% من الصفحة مساحة قراءة موحدة، و15-20% من اللون الأساسي، وبحد أقصى 10% من لون التمييز. لا توزع الألوان بالتساوي ولا تجعل كل مربع بلون مختلف.
 - الرسوم البيانية تستخدم درجات اللون الأساسي والثانوي ولون التمييز فقط، مع الرمادي المحايد عند الحاجة. لا تستخدم أخضر أو أحمر أو برتقالي تلقائياً.
 - ممنوع إدخال أي لون خارج لوحة الهوية والمحايدات المذكورة، وممنوع الألوان الفاقعة أو النيون.
 
@@ -443,11 +503,11 @@ def build_design_rules(branding):
 **ممنوع كتابة font-family في أي عنصر أو في أي style.** خط الشركة يُطبَّق تلقائيًا على الشريحة كلها من
 إعدادات الشركة (قد يكون خطًا مرفوعًا لا يعرفه أي جهاز)، فأي font-family تكتبه يخالف الخط المعتمد.
 حدّد الأحجام والوزن لخدمة التسلسل البصري الواضح مع استخدام خط عريض وبارز للعناوين والمؤشرات:
-- عنوان الشريحة الرئيسي: 24px-28px وfont-weight:800 (Bold قوي وبارز) باللون {primary}.
-- عنوان القسم أو الجدول: 16px-18px وfont-weight:700 باللون {primary}.
-- تسمية الحقل أو المؤشر: 12px-14px وfont-weight:600 باللون {text_color}.
-- الفقرات والقيم والوصف وخلايا الجدول: 11px-13px وfont-weight:400 باللون {text_color}، مع تمييز الكلمات المفتاحية بوزن 700.
-- الأرقام المالية الرئيسية والمؤشرات الكبرى: 24px-30px وfont-weight:800 باللون {primary} أو {accent}.
+- عنوان الشريحة الرئيسي: 24px-28px وfont-weight:800 (Bold قوي وبارز) باللون {heading_on_bg} فوق الخلفية المعتمدة، أو {heading_on_white} فوق الأبيض.
+- عنوان القسم أو الجدول: 16px-18px وfont-weight:700 باللون المقروء نفسه حسب خلفيته.
+- تسمية الحقل أو المؤشر: 12px-14px وfont-weight:600 باللون {body_on_bg} فوق الخلفية المعتمدة، أو {body_on_white} فوق الأبيض.
+- الفقرات والقيم والوصف وخلايا الجدول: 11px-13px وfont-weight:400 بلون يحقق 4.5:1 مع الخلفية، مع تمييز الكلمات المفتاحية بوزن 700.
+- الأرقام المالية الرئيسية والمؤشرات الكبرى: 24px-30px وfont-weight:800 باللون {heading_on_bg} أو {accent_on_bg} فوق الخلفية المعتمدة.
 - ممنوع خلط أكثر من عائلة خط واحدة.
 
 ## شريحة الغلاف (Cover Slide - Full Bleed Background)
@@ -458,7 +518,8 @@ def build_design_rules(branding):
 - وضع المحتوى النصي والعناوين والشعارات فوق التدرج (`z-index:2`) بلون أبيض ناصع وتباين فخم.
 
 ## معالجة تباين وخلفيات الشعارات الذكية (Adaptive Independent Logo Containers)
-- **مبدأ تباين الشعارات المستقل:** يجب أن يظهر كل شعار (سواء شعار الشركة ##LOGO## أو شعار المشروع ##PROJECT_LOGO##) بوضوح تام وتباين عالٍ ومقروء 100%، ويتم تقييم كل شعار باستقلالية تامة حسب ألوانه والخلفية الموضوع عليها:
+{company_logo_rule}
+- **مبدأ تباين الشعارات المستقل:** يجب أن يظهر كل شعار (سواء شعار الشركة ##LOGO## أو شعار المشروع ##PROJECT_LOGO##) بوضوح تام وتباين عالٍ ومقروء 100%. نتيجة التحليل المرفقة لكل شعار هي القرار النهائي، ولا يجوز عكسها أو توحيد خلفية الشعارين:
   - **في هيدر شرائح المحتوى (الخلفية فاتحة/بيضاء #ffffff):**
     - **الشعار الداكن أو الملون** (مثل الأخضر، الكحلي، الأسود، الذهبي الداكن): يوضع مباشرة وبشكل طبيعي على الهيدر الأبيض دون أي حاوية أو شارة داكنة إطلاقاً (خلفية شفافة `background: transparent;`).
     - **الشعار ذو النصوص أو العناصر البيضاء/الفاتحة جداً** (التي لا تُقرأ على الأبيض): يُوضع **هذا الشعار الفاتح فقط** داخل شارة داكنة أنيقة ناعمة (`background:{primary}; padding:4px 10px; border-radius:6px; display:inline-flex; align-items:center;`).
@@ -507,7 +568,7 @@ def build_design_rules(branding):
 - ممنوع وضع شارات أو كبسولات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية.
 
 ## الشريحة الأساسية
-<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;background:{bg};">
+<div class="slide" dir="rtl" style="width:{slide_w}px;height:{slide_h}px;position:relative;overflow:hidden;box-sizing:border-box;background:{bg};color:{body_on_bg};">
 CSS inline فقط، وبدون font-family. ممنوع box-shadow الثقيل أو filter أو backdrop-filter. استخدم box-sizing:border-box لكل العناصر.
 """
 
@@ -517,7 +578,7 @@ CSS inline فقط، وبدون font-family. ممنوع box-shadow الثقيل �
 position:absolute;top:0;right:0;left:0;height:{header_h}px;background:#ffffff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 24px;box-sizing:border-box;
 المحتوى:
 - في أحد الجانبين: شعار الشركة ##LOGO## (height:32px-36px) مع شعار المشروع ##PROJECT_LOGO## إن وُجد كصورة متناسقة بجانبه (أو شارة نصية باسم المشروع).
-- في الجانب المقابل: خط رأسي {accent} 3px + اسم الشريحة 16px font-weight:700 color:{primary}.
+- في الجانب المقابل: خط رأسي {accent} 3px + اسم الشريحة 16px font-weight:700 color:{heading_on_white}.
 - **قاعدة وضوح وتباين الشعارات في الهيدر:**
   - إذا كان الشعار داكناً أو ملوناً: يوضع مباشرة على الهيدر الأبيض دون أي خلفية داكنة.
   - إذا كان الشعار أبيض أو فاتح جداً: يوضع هذا الشعار الفاتح فقط داخل شارة داكنة (`background:{primary}; padding:4px 10px; border-radius:6px; display:inline-flex; align-items:center;`).
@@ -526,8 +587,8 @@ position:absolute;top:0;right:0;left:0;height:{header_h}px;background:#ffffff;bo
     if footer_enabled:
         rules += f"""
 ## فوتر إلزامي — يجب أن يوجد في كل شريحة محتوى
-position:absolute;bottom:0;right:0;left:0;height:{footer_h}px;background:{primary};display:flex;align-items:center;padding:0 16px;
-المحتوى: اسم المشروع 13px أبيض + '{company_name}' opacity:0.7 + رقم الصفحة كنص واضح بلون {accent} من دون دائرة أو شارة
+position:absolute;bottom:0;right:0;left:0;height:{footer_h}px;background:{dark_surface};display:flex;align-items:center;padding:0 16px;
+المحتوى: اسم المشروع 13px بلون {footer_text} + '{company_name}' باللون نفسه مع opacity:0.7 + رقم الصفحة كنص واضح بلون {footer_accent} من دون دائرة أو شارة
 """
 
     content_top = header_h if header_enabled else 0
@@ -542,7 +603,7 @@ top:{content_top}px إلى bottom:{content_bottom}px. padding: 16px 36px.
 - لا تستخدم شبكة مربعات لمجرد ملء الصفحة، ولا تكرر العنصر نفسه كنص وبطاقة ومؤشر.
 
 ## البطاقات (Cards)
-تستخدم فقط لعنصرين أو ثلاثة مستقلين وقصيرين. كل بطاقة: background:#ffffff; border:1px solid #e2e8f0; border-radius:10px; padding:12px 16px; box-sizing:border-box; box-shadow:none;
+تستخدم فقط لعنصرين أو ثلاثة مستقلين وقصيرين. كل بطاقة: background:#ffffff; color:{body_on_white}; border:1px solid #e2e8f0; border-radius:10px; padding:12px 16px; box-sizing:border-box; box-shadow:none;
 بدون أيقونات وبدون إيموجي نهائياً. إذا تجاوز المحتوى ثلاثة عناصر أو احتوى فقرات مترابطة فاستخدم نصاً أو جدولاً بدلاً من البطاقات.
 """
 

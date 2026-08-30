@@ -8,7 +8,11 @@ import os
 import re
 import concurrent.futures
 import html as html_lib
-from design_templates import build_design_rules, extract_slide_elements
+from html.parser import HTMLParser
+from design_templates import (
+    build_design_rules, contrast_ratio, dark_surface_color, extract_slide_elements,
+    normalize_hex_color, readable_text_color,
+)
 import db
 # emoji_icons is intentionally not imported: it converted emojis into inline SVG icons, which the
 # icon stripper then removed. The product rule is that no icon is ever generated.
@@ -2153,6 +2157,10 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     bullets = slide.get('bullets', [])
     density = slide.get('content_density', 'medium')
     section_key = _slide_section_key(slide)
+    background = normalize_hex_color((branding or {}).get('background_color'), '#f8fafc')
+    preferred_text = normalize_hex_color((branding or {}).get('text_color'), '#1e293b')
+    readable_body = readable_text_color(preferred_text, background)
+    readable_heading = readable_text_color((branding or {}).get('primary_color'), background, (readable_body,))
 
     bullets_text = '\n'.join(f'- {b}' for b in bullets) if bullets else '(لا توجد نقاط محددة — استخرج من بيانات المشروع)'
 
@@ -2210,13 +2218,25 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'اكتب HTML في div class="slide" واحد فقط',
         'لا تكتب شرح أو markdown أو كود إضافي',
         'استخدم خط الشركة نفسه في كل العناصر من دون font-family، بوزن 800 للعناوين الرئيسية والأرقام والمؤشرات الكبرى، و700 للعناوين الفرعية ورؤوس الجداول، و600 للتسميات، و400 للنصوص مع إبراز الكلمات المفتاحية بوزن 700',
-        'استخدم لون الهوية الأساسي للعناوين، ولون التمييز للنسب والعناصر المهمة فقط، وخلفية فاتحة ونصًا داكنًا لباقي المحتوى',
+        f'استخدم {readable_heading} للعناوين و{readable_body} للنص فوق الخلفية {background}. لا تستخدم أي لون نص قبل التحقق أن نسبة تباينه مع خلفيته 4.5:1 على الأقل، ولا تضع نصًا داكنًا فوق مساحة داكنة أو نصًا فاتحًا فوق مساحة فاتحة',
         'لا تختصر الكلام اختصاراً مخلاً ولا تقسم الشريحة إلى 4 أو 6 مربعات صغيرة فارغة؛ اعتمد على فقرات وافية وجداول متكاملة وتدفقات بصرية منظمة',
         'لا تكرر معلومة وردت في شريحة أخرى أو قسم آخر (تحليل SWOT يقتصر على دراسة السوق، والمكونات على قسم المكونات)',
         'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
         'اختر بين النص والجدول والرسم البياني ومخطط التدفق والصورة وفق طبيعة المحتوى، ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
         'املأ الشريحة بالمحتوى الضروري والوافي؛ وإذا كانت الشريحة للملخص المالي، ضع جدولاً هيكلياً رسمياً يوضح التكاليف والاستثمار ومؤشرات العائد والاسترداد',
     ]
+    company_tone = str((project_data or {}).get('_company_logo_tone') or (branding or {}).get('_logo_tone') or '').strip().lower()
+    project_tone = str((project_data or {}).get('_project_logo_tone') or '').strip().lower()
+    logo_dark_background = dark_surface_color(
+        (branding or {}).get('primary_color'), (branding or {}).get('secondary_color'))
+    if company_tone == 'light':
+        notes.append(f'شعار الشركة فاتح: ضع ##LOGO## على خلفية {logo_dark_background} فقط، ولا تعكس القرار ولا تضعه على الأبيض')
+    elif company_tone == 'dark':
+        notes.append('شعار الشركة داكن: ضع ##LOGO## على خلفية #ffffff فقط، ولا تعكس القرار ولا تضعه على خلفية داكنة')
+    if project_tone == 'light':
+        notes.append(f'شعار المشروع فاتح: ضع ##PROJECT_LOGO## على خلفية {logo_dark_background} مستقلة عن شعار الشركة')
+    elif project_tone == 'dark':
+        notes.append('شعار المشروع داكن: ضع ##PROJECT_LOGO## على خلفية #ffffff مستقلة عن شعار الشركة')
     if placeholder_note:
         notes.insert(0, placeholder_note)
     source_note = _slide_source_data_note(slide, project_data)
@@ -2310,6 +2330,84 @@ def _ensure_map_placeholder(html, slide_type):
     return html
 
 
+def _css_solid_color(value):
+    text = re.sub(r'\s*!important\s*$', '', str(value or '').strip().lower())
+    named = {'white': '#ffffff', 'black': '#000000', 'navy': '#000080'}
+    if text in named:
+        return named[text]
+    if re.fullmatch(r'#[0-9a-f]{3}|#[0-9a-f]{6}', text):
+        return normalize_hex_color(text)
+    match = re.fullmatch(r'rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([\d.]+))?\s*\)', text)
+    if not match or (match.group(4) is not None and float(match.group(4)) < 0.95):
+        return None
+    channels = [max(0, min(255, int(match.group(index)))) for index in (1, 2, 3)]
+    return '#' + ''.join(f'{channel:02x}' for channel in channels)
+
+
+def _inline_style_properties(style):
+    properties = {}
+    for declaration in str(style or '').split(';'):
+        if ':' not in declaration:
+            continue
+        name, value = declaration.split(':', 1)
+        properties[name.strip().lower()] = value.strip()
+    return properties
+
+
+class _SlideContrastAudit(HTMLParser):
+    _VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.issues = []
+
+    def handle_starttag(self, tag, attrs):
+        parent = self.stack[-1] if self.stack else ('', '#000000', '#ffffff')
+        foreground, background = parent[1], parent[2]
+        attributes = dict(attrs)
+        styles = _inline_style_properties(attributes.get('style'))
+        if 'color' in styles:
+            foreground = _css_solid_color(styles['color'])
+        background_value = styles.get('background-color') or styles.get('background')
+        if background_value and background_value.lower() != 'transparent':
+            background = _css_solid_color(background_value)
+        state = (tag.lower(), foreground, background)
+        if tag.lower() not in self._VOID_TAGS:
+            self.stack.append(state)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag.lower() not in self._VOID_TAGS:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        lowered = tag.lower()
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == lowered:
+                del self.stack[index:]
+                break
+
+    def handle_data(self, data):
+        text = re.sub(r'\s+', ' ', data).strip()
+        if not text or not self.stack or self.stack[-1][0] in ('style', 'script'):
+            return
+        foreground, background = self.stack[-1][1], self.stack[-1][2]
+        if foreground and background:
+            ratio = contrast_ratio(foreground, background)
+            if ratio < 4.5:
+                self.issues.append((text[:40], foreground, background, ratio))
+
+
+def slide_contrast_issues(html):
+    parser = _SlideContrastAudit()
+    try:
+        parser.feed(str(html or ''))
+    except Exception:
+        return []
+    return parser.issues
+
+
 def generate_single_slide(system_prompt, slide, slide_num, total_slides, branding, call_glm_fn, max_retries=2, project_data=None):
     """
     Generate a single slide's HTML.
@@ -2325,11 +2423,12 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     user_msg = build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=project_data)
     slide_title = slide.get('title', f'شريحة {slide_num}')
     slide_type = slide.get('type', 'content')
+    retry_note = ''
 
     for attempt in range(1, max_retries + 2):
         try:
             print(f"[SLIDE-{slide_num}] Attempt {attempt}: {slide_title}")
-            response = call_glm_fn(system_prompt, user_msg, max_tokens=6000)
+            response = call_glm_fn(system_prompt, user_msg + retry_note, max_tokens=6000)
             if 'choices' not in response or not response['choices']:
                 print(f"[SLIDE-{slide_num}] ERROR: no choices (attempt {attempt})")
                 continue
@@ -2338,20 +2437,42 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             html = extract_html_from_glm(content)
             if not html:
                 print(f"[SLIDE-{slide_num}] ERROR: no HTML extracted (attempt {attempt})")
+                retry_note = '\n\nإعادة المحاولة: لم يصل HTML صالح. أخرج div class="slide" واحدًا مكتملًا فقط.'
+                continue
+            contrast_issues = slide_contrast_issues(html)
+            if contrast_issues:
+                sample, foreground, surface, ratio = contrast_issues[0]
+                print(f"[SLIDE-{slide_num}] ERROR: contrast {ratio:.2f}:1 for {foreground} on {surface} (attempt {attempt})")
+                retry_note = (
+                    f'\n\nإعادة المحاولة: فشل التباين في النص «{sample}»: اللون {foreground} فوق {surface} '
+                    f'بنسبة {ratio:.2f}:1. أعد الشريحة كاملة واجعل كل نص 4.5:1 على الأقل، ولا تغيّر المحتوى.'
+                )
                 continue
 
-            html = postprocess_slide(html, slide_type, slide_num=slide_num, slide_title=slide_title, total_slides=total_slides, tenant_id=branding.get('tenant_id'), branding=branding)
-            count = html.count('class="slide"')
-            if count >= 1:
+            html = postprocess_slide(
+                html, slide_type, slide_num=slide_num, slide_title=slide_title,
+                total_slides=total_slides, tenant_id=branding.get('tenant_id'),
+                branding=branding, project_data=project_data)
+            roots = extract_slide_elements(html)
+            if len(roots) == 1:
                 print(f"[SLIDE-{slide_num}] OK: {len(html)} chars")
-                return html
-            else:
-                print(f"[SLIDE-{slide_num}] ERROR: no slide div found (attempt {attempt})")
+                return roots[0]
+            print(f"[SLIDE-{slide_num}] ERROR: expected one slide div, found {len(roots)} (attempt {attempt})")
+            retry_note = f'\n\nإعادة المحاولة: أخرج جذر شريحة واحدًا فقط؛ الاستجابة السابقة احتوت {len(roots)} جذور.'
         except Exception as e:
             print(f"[SLIDE-{slide_num}] Exception: {e}")
 
     print(f"[SLIDE-{slide_num}] FAILED after {max_retries + 1} attempts")
     return None
+
+
+def _canonicalize_slide_root_class(html):
+    match = re.match(r'^(<div\b[^>]*?)\bclass\s*=\s*(["\'])([^"\']*)\2', str(html or '').lstrip(), re.IGNORECASE)
+    if not match or 'slide' not in match.group(3).split():
+        return html
+    stripped = str(html or '').lstrip()
+    leading = str(html or '')[:len(str(html or '')) - len(stripped)]
+    return leading + match.group(1) + 'class="slide"' + stripped[match.end():]
 
 
 def extract_html_from_glm(content):
@@ -2371,7 +2492,7 @@ def extract_html_from_glm(content):
 
     slides = extract_slide_elements(html)
     if slides:
-        return '\n'.join(slides)
+        return '\n'.join(_canonicalize_slide_root_class(slide) for slide in slides)
 
     # If no slide div, wrap the whole HTML in one as a fallback
     if 'class="slide"' not in html and "class='slide'" not in html:
@@ -2502,10 +2623,11 @@ def _hex_to_rgba(color, alpha):
 def build_index_slide(slide, slide_num, total_slides, branding=None, project_data=None):
     branding = branding or {}
     slide = slide or {}
-    primary = branding.get('primary_color') or '#0b1f33'
-    accent = branding.get('accent_color') or '#0ea5e9'
-    background = branding.get('background_color') or '#f8fafc'
-    text_color = branding.get('text_color') or '#1e293b'
+    background = normalize_hex_color(branding.get('background_color'), '#f8fafc')
+    text_color = readable_text_color(branding.get('text_color'), background)
+    primary = readable_text_color(branding.get('primary_color'), background, (text_color,))
+    accent = readable_text_color(branding.get('accent_color'), background, (primary, text_color))
+    separator = _hex_to_rgba(text_color, '0.30')
     slide_ratio = branding.get('slide_ratio', '16:9')
     width, height = (1280, 960) if slide_ratio == '4:3' else (1280, 720)
     entries = [entry for entry in (slide.get('index_entries') or []) if isinstance(entry, dict)]
@@ -2521,7 +2643,7 @@ def build_index_slide(slide, slide_num, total_slides, branding=None, project_dat
                 page = 0
             rows.append(
                 '<div style="min-height:48px;display:flex;align-items:center;gap:18px;'
-                'border-bottom:1px solid #dbe3ea;padding:9px 2px;box-sizing:border-box;">'
+                f'border-bottom:1px solid {separator};padding:9px 2px;box-sizing:border-box;">'
                 f'<div style="font-size:16px;font-weight:600;color:{text_color};flex:1;">{title}</div>'
                 f'<div dir="ltr" style="font-size:16px;font-weight:700;color:{accent};min-width:34px;'
                 f'text-align:left;">{page:02d}</div></div>'
@@ -2551,8 +2673,9 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
     branding = branding or {}
     project_data = project_data or {}
     slide = slide or {}
-    primary = branding.get('primary_color') or '#0b1f33'
-    accent = branding.get('accent_color') or '#0ea5e9'
+    primary = normalize_hex_color(branding.get('primary_color'), '#0b1f33')
+    divider_background = dark_surface_color(primary, branding.get('secondary_color'))
+    accent = readable_text_color(branding.get('accent_color'), divider_background, ('#ffffff',))
     slide_ratio = branding.get('slide_ratio', '16:9')
     width, height = (1280, 960) if slide_ratio == '4:3' else (1280, 720)
 
@@ -2560,17 +2683,11 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
     project_name = html_lib.escape(str(project_data.get('project_name') or project_data.get('projectName') or '').strip())
     project_logo = str(project_data.get('project_logo') or '').strip()
 
-    logos = (
-        '<div style="background:rgba(255,255,255,0.92);padding:6px 14px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);">'
-        '<img src="##LOGO##" alt="" style="height:64px;width:auto;object-fit:contain;" />'
-        '</div>'
-    )
+    logos = '<img src="##LOGO##" alt="" style="height:64px;width:auto;object-fit:contain;" />'
     if project_logo:
         logos += (
             f'<div style="width:1px;height:52px;background:rgba(255,255,255,0.35);margin:0 18px;"></div>'
-            '<div style="background:rgba(255,255,255,0.92);padding:6px 14px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);">'
             '<img src="##PROJECT_LOGO##" alt="" style="height:64px;width:auto;object-fit:contain;" />'
-            '</div>'
         )
 
     rule = f'<div style="width:200px;height:3px;background:{accent};margin:18px 0 0 auto;"></div>'
@@ -2578,14 +2695,14 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
 
     return (
         f'<div class="slide" dir="rtl" style="width:{width}px;height:{height}px;position:relative;'
-        f'overflow:hidden;box-sizing:border-box;background:{primary};">'
+        f'overflow:hidden;box-sizing:border-box;background:{divider_background};">'
         # The approved main image, full bleed.
         '<div style="position:absolute;top:0;right:0;left:0;bottom:0;background-image:url(##IMAGE_COVER##);'
         'background-size:cover;background-position:center center;"></div>'
         # Navy veil: dark enough for white text on any photo, light enough that the photo shows.
         f'<div style="position:absolute;top:0;right:0;left:0;bottom:0;background:linear-gradient(160deg,'
-        f'{_hex_to_rgba(primary, "0.94")} 0%,{_hex_to_rgba(primary, "0.82")} 45%,'
-        f'{_hex_to_rgba(primary, "0.62")} 100%);"></div>'
+        f'{_hex_to_rgba(divider_background, "0.94")} 0%,{_hex_to_rgba(divider_background, "0.82")} 45%,'
+        f'{_hex_to_rgba(divider_background, "0.62")} 100%);"></div>'
         f'<div style="position:absolute;top:0;bottom:0;left:0;width:10px;background:{accent};"></div>'
         f'<div style="position:absolute;top:44px;left:48px;display:flex;align-items:center;">{logos}</div>'
         # padding-bottom biases the block slightly above the optical centre, as in the reference.
@@ -2801,6 +2918,41 @@ def _drop_unresolved_image_placeholders(html):
     return IMAGE_TOKEN_RE.sub('', html)
 
 
+def _apply_logo_contrast_styles(html, branding, project_data):
+    if not html:
+        return html
+    branding = branding or {}
+    project_data = project_data or {}
+    dark_background = dark_surface_color(
+        branding.get('primary_color'), branding.get('secondary_color'))
+    profiles = {
+        '##LOGO##': str(project_data.get('_company_logo_tone') or branding.get('_logo_tone') or 'unknown').lower(),
+        '##PROJECT_LOGO##': str(project_data.get('_project_logo_tone') or 'unknown').lower(),
+    }
+
+    def style_token(source, token, tone):
+        background = dark_background if tone == 'light' else '#ffffff'
+        declarations = (
+            f'background:{background}!important;padding:6px 12px!important;'
+            'border-radius:8px!important;box-sizing:border-box!important;object-fit:contain!important;'
+        )
+
+        def apply(match):
+            tag = match.group(0)
+            style_match = re.search(r'style\s*=\s*(["\'])(.*?)\1', tag, re.IGNORECASE)
+            if style_match:
+                style = style_match.group(2).rstrip(';') + ';' + declarations
+                return tag[:style_match.start(2)] + style + tag[style_match.end(2):]
+            return tag.replace('<img', f'<img style="{declarations}"', 1)
+
+        pattern = rf'<img\b(?=[^>]*\bsrc\s*=\s*["\'][^"\']*{re.escape(token)}[^"\']*["\'])[^>]*>'
+        return re.sub(pattern, apply, source, flags=re.IGNORECASE)
+
+    for token, tone in profiles.items():
+        html = style_token(html, token, tone)
+    return html
+
+
 def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None, project_logo=None):
     """Replace all logo placeholders and broken logo paths with tenant's logo URL.
 
@@ -2974,30 +3126,37 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
                 tenant = db.get_tenant(tenant_id) if tenant_id else None
                 company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
 
+        primary = normalize_hex_color(primary, '#7a0c0c')
+        accent = normalize_hex_color(accent, '#c4a35a')
+        header_title = readable_text_color(primary, '#ffffff', ('#0f172a',))
+        footer_background = dark_surface_color(primary, branding.get('secondary_color') if branding else None)
+        footer_text = readable_text_color('#ffffff', footer_background, ('#0f172a',))
+        footer_accent = readable_text_color(accent, footer_background, (footer_text,))
+
         if not has_header:
             # The project logo belongs next to the company logo. This fallback used to carry the
             # company logo alone, so a slide the model built without a header lost it entirely.
             project_logo = str((project_data or {}).get('project_logo') or '').strip()
             project_logo_html = (
                 f'<div style="width:1px;height:26px;background:#e2e8f0;margin:0 10px;"></div>'
-                f'<img src="{project_logo}" alt="" style="height:36px;width:auto;object-fit:contain;" />'
+                f'<img src="##PROJECT_LOGO##" alt="" style="height:36px;width:auto;object-fit:contain;" />'
             ) if project_logo else ''
             header_html = (
                 f'<div style="position:absolute;top:0;right:0;left:0;height:56px;background:#fff;border-bottom:2px solid {primary};display:flex;align-items:center;padding:0 20px;z-index:10;">'
                 '<img src="##LOGO##" style="height:40px;margin-right:12px;" />'
                 + project_logo_html +
                 f'<div style="width:3px;height:28px;background:{accent};margin:0 12px;"></div>'
-                f'<span style="font-size:16px;font-weight:600;color:{primary};">{title}</span>'
+                f'<span style="font-size:16px;font-weight:600;color:{header_title};">{title}</span>'
                 '</div>'
             )
             html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
 
         if not has_footer:
             footer_html = (
-                f'<div style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{primary};display:flex;align-items:center;padding:0 16px;z-index:10;">'
-                f'<span style="font-size:13px;color:#fff;">{title}</span>'
-                f'<span style="font-size:13px;color:rgba(255,255,255,0.7);margin-right:auto;margin-left:8px;">{company_name}</span>'
-                f'<span style="color:{accent};font-size:12px;font-weight:700;min-width:24px;text-align:left;">{slide_num}</span>'
+                f'<div style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{footer_background};display:flex;align-items:center;padding:0 16px;z-index:10;">'
+                f'<span style="font-size:13px;color:{footer_text};">{title}</span>'
+                f'<span style="font-size:13px;color:{footer_text};opacity:0.7;margin-right:auto;margin-left:8px;">{company_name}</span>'
+                f'<span style="color:{footer_accent};font-size:12px;font-weight:700;min-width:24px;text-align:left;">{slide_num}</span>'
                 '</div>'
             )
             html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
@@ -3009,6 +3168,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
                         map_placeholders=None, tenant_id=None, slide_num=None, slide_title=None,
                         total_slides=None):
     """Unified post-processing pipeline for every generated slide."""
+    html = _canonicalize_slide_root_class(html)
     html = postprocess_slide(
         html, slide_type, slide_num=slide_num, slide_title=slide_title,
         total_slides=total_slides, tenant_id=tenant_id, branding=branding,
@@ -3016,10 +3176,12 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     )
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
+    html = _apply_logo_contrast_styles(html, branding, project_data)
     html = _replace_creative_image_placeholders(html, creative_images, slide_type)
     html = _replace_data_placeholders(html, project_data, branding)
     html = resolve_logo_in_html(
-        html, tenant_id, project_logo=(project_data or {}).get('project_logo')
+        html, tenant_id, _branding_cache=branding,
+        project_logo=(project_data or {}).get('project_logo')
     )
     return _drop_unresolved_image_placeholders(html)
 

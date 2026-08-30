@@ -13035,11 +13035,14 @@
       const exitOn = val('exitEnabled') !== 'no';
       const exitMethod = val('exitMethod'); const exitInput = document.getElementById('exitInput');
       if (exitInput) { exitInput.disabled = !exitOn || exitMethod === 'none'; exitInput.closest('div')?.classList.toggle('dynamic-off', !exitOn || exitMethod === 'none'); const lbl = exitInput.closest('div')?.querySelector('label'); if (lbl) { lbl.textContent = exitMethod === 'capRate' ? 'Cap Rate %' : exitMethod === 'fixed' ? 'قيمة البيع الثابتة' : exitMethod === 'noiMultiple' ? 'مضاعف NOI' : exitMethod === 'revenueMultiple' ? 'مضاعف الإيرادات' : 'مدخل التخارج'; } }
-      // Every readonly figure on this screen is the product of inputs the user typed, but the screen
-      // showed only the result — so a number that looked wrong could not be traced without reading
-      // the code. This states each derived figure as its own arithmetic, with the actual entered
-      // values in it, and it is data rather than instruction: no step tells anyone what to press.
-      function renderClarifications(facts) {
+      updateDynamicFieldDetails(exitOn);
+    }
+
+    // Every readonly figure on this screen is the product of inputs the user typed, but the screen
+    // showed only the result — so a number that looked wrong could not be traced without reading
+    // the code. This states each derived figure as its own arithmetic, with the actual entered
+    // values in it, and it is data rather than instruction: no step tells anyone what to press.
+    function renderClarifications(facts) {
         const body = document.querySelector('#clarificationsTable tbody');
         if (!body) return;
         const rows = [];
@@ -13128,8 +13131,9 @@
         body.innerHTML = rows.map(([label, method, result]) =>
           `<tr><td>${escapeReportHtml(label)}</td><td>${escapeReportHtml(method)}</td><td class="row-result">${escapeReportHtml(result)}</td></tr>`).join('');
         setConditionalVisibility('clarificationsBlock', rows.length > 0);
-      }
+    }
 
+    function updateDynamicFieldDetails(exitOn) {
       // A sale exit is the disposal of unsold sellable area, so it exists only in a project that
       // has sellable units at all. The selector used to stay open on a rental-only project, where
       // `calculateAll()` forces saleExitMethod to 'none' — so a user could pick a method, enter an
@@ -18043,6 +18047,11 @@
     let tempMoodboardImages = {};
 
 
+    function containsSlideRoot(html) {
+      if (!html) return false;
+      return Boolean(new DOMParser().parseFromString(String(html), 'text/html').querySelector('.slide'));
+    }
+
     let isGeneratingTenantSlides = false;
     async function generateTenantSlides() {
       if (isGeneratingTenantSlides) return;
@@ -18176,7 +18185,7 @@
               if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
 
               const data = await api('POST', '/api/generate-slide-single', genPayload);
-              if (data.success && data.slide && data.slide.html && data.slide.html.includes('class="slide"')) {
+              if (data.success && data.slide && data.slide.html && containsSlideRoot(data.slide.html)) {
                 generated = data.slide;
               } else {
                 lastError = data.error || 'استجابة غير مكتملة من الخادم';
@@ -18226,7 +18235,7 @@
           }
         }
 
-        if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !s.html.includes('class="slide"'))) {
+        if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !containsSlideRoot(s.html))) {
           setLiveGenBanner(true, 'لم يكتمل التوليد', 'حدث خطأ في بعض الشرائح ولم يتم الحفظ', 90);
           toast('لم يكتمل توليد العرض، لذلك لم يتم حفظه.');
           return;
