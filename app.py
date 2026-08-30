@@ -4192,22 +4192,30 @@ def _ensure_required_location_slides(plan, project_data):
                     'content_density': 'medium',
                     'bullets': [],
                     'content_source': source,
+                    'image_tokens': [f'##{slide_type.upper()}##'],
                 })
         required.append({
             'title': 'ملخص الموقع الجغرافي',
             'type': 'content',
             'section_key': 'location',
-            'design_style': 'text',
-            'requires_image': False,
+            'design_style': 'map',
+            'requires_image': True,
             'content_density': 'medium',
             'bullets': ['طبيعة الموقع وموقعه الاستراتيجي', 'الاتصال بالطرق والمعالم المحيطة', 'المزايا المستندة إلى بيانات الموقع'],
             'content_source': 'site_analysis',
+            'image_tokens': ['##MAP_OVERVIEW##'],
         })
     if not required:
         return plan
     insert_at = 2 if len(slides) >= 2 else len(slides)
     for item in required:
         if item['type'] in existing_types:
+            existing_slides = [slide for slide in slides if isinstance(slide, dict) and slide.get('type') == item['type']]
+            for existing in existing_slides:
+                if item.get('image_tokens'):
+                    existing['image_tokens'] = list(item['image_tokens'])
+                    existing['requires_image'] = True
+                    existing['design_style'] = item.get('design_style') or existing.get('design_style')
             continue
         slides.insert(insert_at, item)
         insert_at += 1
@@ -5307,6 +5315,19 @@ def api_regenerate_presentation_maps(pres_id):
     })
 
 
+def _generation_map_marker_side(images, project_data, view='overview'):
+    images = images if isinstance(images, dict) else {}
+    project_data = project_data if isinstance(project_data, dict) else {}
+    centers = images.get('map_centers') if isinstance(images.get('map_centers'), dict) else {}
+    center = centers.get(view) if isinstance(centers.get(view), dict) else {}
+    try:
+        marker_lng = float(images.get('map_lng') or project_data.get('location_lng'))
+        center_lng = float(center.get('lng'))
+    except (TypeError, ValueError):
+        return 'right'
+    return 'left' if marker_lng < center_lng else 'right'
+
+
 @app.route('/api/generate-slide-single', methods=['POST'])
 @require_permission('create_presentation')
 def api_generate_slide_single():
@@ -5329,6 +5350,7 @@ def api_generate_slide_single():
     if not branding:
         return jsonify({'error': 'Branding not configured'}), 400
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
+    project_data['_map_marker_side'] = _generation_map_marker_side(images, project_data)
 
     # Map generation is explicit. A single-slide request may reuse supplied
     # persisted assets, but it must never trigger a hidden Google/OSM call.
@@ -5419,6 +5441,7 @@ def api_generate_slide_single():
         slide_num=slide_index + 1,
         slide_title=slide.get('title', f'شريحة {slide_index + 1}'),
         total_slides=total,
+        content_source=slide.get('content_source'),
     )
 
     return jsonify({
@@ -5454,6 +5477,8 @@ def api_generate_slides():
 
     if not slide_plan or 'slides' not in slide_plan:
         return jsonify({'error': 'slidePlan with slides array is required'}), 400
+    _prepare_generation_logo_context(project_data, branding, g.tenant_id)
+    project_data['_map_marker_side'] = _generation_map_marker_side(images, project_data)
 
     # Map generation is explicit. Reuse only placeholders already supplied by the
     # caller or persisted by a previous, user-triggered map generation.

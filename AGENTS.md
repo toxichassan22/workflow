@@ -243,7 +243,11 @@ assertion deliberately, not reflexively.
   When a real boundary exists the regenerate zoom shift is skipped, otherwise it re-framed the plot
   back to a dot. Generated slide HTML and the preview gallery render map images with `contain` and
   `center center`, never `cover`: cropping a 16:9 map into a narrow content column moved the baked
-  centre pin to the visible edge even though the source PNG itself was centred.
+  centre pin to the visible edge even though the source PNG itself was centred. Every
+  `map_landmarks` slide carries `##MAP_LANDMARKS##`; omission triggers the same required-image retry.
+  Location and executive map summaries must carry `data-map-summary-background` and
+  `data-map-summary-card`; the server pins the card to the side opposite `_map_marker_side` and
+  normalizes the full map to the content holder.
 - `catchment_rings()` collapses the catchment rows into at most three concentric drive-time bands and
   `zoom_for_radius_km()` frames the outer one. The rows are destinations, so one ring per row drew
   nine circles up to 31 km wide with unreadable labels. The landmarks view is framed the same way
@@ -304,12 +308,15 @@ Two states, and both are stated to the model explicitly — silence made it inve
   recomputing, new ratio, row or year is allowed. Slide generation attaches
   `collectFinancialStudyReport()` to the generation-only copy of `financial_study_model`, so
   `_financial_data_note()` receives the same visible headings, labels, option text, metrics and
-  complete tables as the financial PDF. The canonical plan always builds `financial_indicators`
-  from the report's exact «التكاليف والاستثمار» and «مؤشرات العائد والاسترداد» groups, then splits
-  the remaining fields six rows per slide and tables eight rows per slide. Numeric tables carry an
-  explicit `chart_type` chosen from Bar/Column, grouped comparisons, Line/Area, Pie/Donut, Treemap,
-  Scatter, Histogram, Heatmap or Candlestick according to the table meaning; the original table stays
-  beside the visualization.
+  complete tables as the financial PDF. The canonical plan renders those report parts first, six
+  field rows or eight table rows per slide, then appends two or three `financial_summary:*` slides
+  for «التكاليف والاستثمار» and «مؤشرات العائد والاسترداد» at the end of the financial section. A
+  table wider than eight columns is split into groups of five data columns plus its first context
+  column. Charts are forbidden outside the financial section; `_limit_presentation_charts()` keeps
+  only the three highest-scoring readable financial tables (2–6 rows and at most four columns), and
+  every other candidate stays a table. Auto-selection uses safe Bar/Column/Line variants instead of
+  the broken Treemap/Heatmap overlays. Every source header, label and value is required in generated
+  HTML; tables are normalized to 13px headers and 12px cells, and fitted HTML is saved for export.
 - **Approved sections have disabled controls, but their values remain data.** Report and sidebar
   collectors must exclude hidden/inactive wrappers, not `control.disabled`. Ignoring disabled table
   controls makes a select fall back to the cell's `textContent` (all options concatenated) and makes
@@ -372,7 +379,9 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   Re-generating a summary shows current vs new and waits for replace/keep. The client also
   asked for a separate SWOT block (`strengths` / `weaknesses` / `opportunities` / `threats`)
   inside دراسة السوق; it is generated with the summary but must stay independent of the
-  ten executive-summary sections from the PDF. The market summary must start with
+  ten executive-summary sections from the PDF. The deck's `swot_risks` section is rebuilt to one
+  canonical `market_study_data.swot` slide; never append `executive_content.risks`, a second SWOT
+  matrix, or a duplicate risk-treatment register. The market summary must start with
   `الملخص التنفيذي لسوق المشروع`, contain the ten sections in order, target about 500 words,
   and use `غير متوفر من مصدر موثوق` for unavailable information; the decision must always
   be one of the five allowed classifications.
@@ -409,7 +418,11 @@ resolved roles; do not return them to raw `background_color` / `text_color` pair
 classifies the visible pixels of the company and project logos independently as light or dark, sends
 the two decisions to the slide prompt, and `finalize_slide_html()` applies the matching background to
 each logo image itself. A light logo gets the dark readable brand surface; a dark logo gets white.
-Never infer both logos from one shared container. Generated text is also audited before acceptance;
+Never infer both logos from one shared container. Content headers enforce 48px logos; cover, closing
+and section dividers enforce 80px for both logos. The cover veil is derived from `primary_color`, and
+`_normalize_brand_overlay()` rewrites the historical fixed navy. Closing always uses the main image
+when available and `contact_closing` carries only fields entered in the project; an empty contact
+section yields only thanks and the project name. Generated text is also audited before acceptance;
 a foreground/background pair below 4.5:1 causes a model retry with the failed pair named.
 
 ## What the slide model receives
@@ -502,13 +515,16 @@ frames**. Three rules came out of it:
 - **State what is missing.** `_get_images_info` names every map as available or forbidden and does
   the same for the cover, external/interior images, land photos, team logos and 2D plans. Land-photo
   descriptions, plan titles/descriptions and visual captions travel in `images`; team logo file ids
-  are resolved and published server-side. The plan emits one clear image per slide (two only when
-  explicitly appropriate), never a compressed four-image moodboard before the conclusion.
-- **One physical image has one owner slide.** Plan normalization canonicalizes `PROJECT_IMAGE` to
-  `MOODBOARD_IMAGE`, `2D_PLAN` to `PLAN_IMAGE`, `LAND_IMAGE` to `LAND_PHOTO`, and the historical
-  interior aliases before checking coverage. `_deduplicate_plan_media()` removes a token already
-  owned by an earlier slide, including the grouped-then-single pattern; do not return to comparing
-  whole slide signatures as the only media deduplication.
+  are resolved and published server-side. Plans use one image per slide; land/exterior/interior use
+  `_balanced_media_chunks()` so four images become 2+2 and five become an intentional 2+3 rather
+  than 2+1+1. The assigned one-to-three tokens are all mandatory in generated HTML.
+- **One physical image has one owner slide in its dedicated section.** Plan normalization
+  canonicalizes `PROJECT_IMAGE` to `MOODBOARD_IMAGE`, `2D_PLAN` to `PLAN_IMAGE`, `LAND_IMAGE` to
+  `LAND_PHOTO`, and the historical interior aliases, then `_reserve_media_sections()` assigns them
+  only to exterior, plans, land and interior respectively. `_deduplicate_plan_media()` handles the
+  grouped-then-single pattern, and generation retries if SOL omits any token assigned to the slide.
+  Stored visual files are republished before planning; interior collection scans up to 30 images per
+  component rather than silently stopping at four.
 - **An unresolved image token never becomes an empty box.** `IMAGE_TOKEN_RE` is skipped by the
   catch-all replacer, and `_drop_unresolved_image_placeholders()` (end of `finalize_slide_html` and
   of `resolve_designer_chat_placeholders`) removes the `<img>` or the `background-image` that

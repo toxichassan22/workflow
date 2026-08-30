@@ -16736,6 +16736,7 @@
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+      await repairVisualConceptStoredImages();
       if (!(await validateFinancialStudyBeforeProceed())) return;
       tenantFinancialPresentationReport = financialStudyHasRealInput(tenantProjectData.financial_study_model)
         && typeof collectFinancialStudyReport === 'function' ? collectFinancialStudyReport() : null;
@@ -16807,7 +16808,7 @@
     const VISUAL_CONCEPT_EXTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'external');
     const VISUAL_CONCEPT_INTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'internal');
     const VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior';
-    const VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 4;
+    const VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 30;
     const VISUAL_CONCEPT_MAX_PLANS = 30;
     const VISUAL_CONCEPT_SLOT_ALIASES = {
       cover: ['cover', 'main', 'hero'],
@@ -17761,7 +17762,10 @@
     // is republished from its file id and the stored URL is healed in place.
     let visualConceptImageRepairRunning = false;
     async function repairVisualConceptStoredImages() {
-      if (visualConceptImageRepairRunning) return;
+      if (visualConceptImageRepairRunning) {
+        while (visualConceptImageRepairRunning) await new Promise(resolve => setTimeout(resolve, 50));
+        return;
+      }
       const slots = tenantVisualConceptState?.slots || {};
       const slotIds = Object.keys(slots).filter(id => {
         const slot = slots[id];
@@ -18225,6 +18229,7 @@
               const slideHtml = processSlideHtmlClient(generated.html, generated.type);
               stage.innerHTML = slideHtml || '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(slideObj.title || '') + '</div>';
               autoFitSlideContent(stage);
+              slideObj.html = stage.innerHTML;
               enableSlideInlineEditing(stage, i);
             }
           }
