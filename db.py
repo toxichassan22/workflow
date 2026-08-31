@@ -2871,6 +2871,17 @@ def add_map_image(tenant_id, image_type, file_path, placeholder, presentation_id
     return image_id
 
 
+def update_map_image(image_id, tenant_id, file_path, placeholder, metadata=None):
+    conn = get_db()
+    conn.execute(
+        '''UPDATE map_images SET file_path = ?, placeholder = ?, metadata_json = ?
+           WHERE id = ? AND tenant_id = ?''',
+        (file_path, placeholder, json.dumps(metadata, ensure_ascii=False) if metadata else None,
+         image_id, tenant_id)
+    )
+    conn.commit()
+
+
 def get_map_images(tenant_id, presentation_id=None, draft_id=None, image_type=None):
     """Get map images for a tenant, optionally filtered by presentation, draft, and type."""
     conn = get_db()

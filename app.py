@@ -5104,25 +5104,35 @@ def api_generate_single_map_image():
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None)
     if not effective_id:
         return jsonify({'success': False, 'error': 'معرّف العرض أو المسودة مطلوب'}), 400
-    image_types = [map_type, f'{map_type}_satellite', f'{map_type}_roadmap']
-    if map_type == 'overview':
-        image_types.extend(['overview_editable', 'overview_satellite_editable', 'overview_roadmap_editable'])
-    for image_type in image_types:
-        db.delete_map_images(g.tenant_id, presentation_id=effective_id, image_type=image_type)
-    project_data['enabled_maps'] = [map_type]
-    project_data['refresh_maps'] = True
-    if data.get('regenSeed') is not None:
-        project_data['regen_seed'] = data.get('regenSeed')
-    branding = db.get_branding(g.tenant_id) or {}
-    result = maps_service.generate_all_map_images(
-        project_data,
-        g.tenant_id,
-        presentation_id=presentation_id,
-        draft_id=draft_id,
-        force=False,
-        branding=branding,
-        highlight_site=data.get('highlightSite', True) is not False,
-    )
+    highlight_site = data.get('highlightSite', True) is not False
+    if map_type == 'overview' and data.get('overlayOnly') is True:
+        result = maps_service.recompose_overview_map(
+            project_data,
+            g.tenant_id,
+            presentation_id=presentation_id,
+            draft_id=draft_id,
+            highlight_site=highlight_site,
+        )
+    else:
+        image_types = [map_type, f'{map_type}_satellite', f'{map_type}_roadmap']
+        if map_type == 'overview':
+            image_types.extend(['overview_editable', 'overview_satellite_editable', 'overview_roadmap_editable'])
+        for image_type in image_types:
+            db.delete_map_images(g.tenant_id, presentation_id=effective_id, image_type=image_type)
+        project_data['enabled_maps'] = [map_type]
+        project_data['refresh_maps'] = True
+        if data.get('regenSeed') is not None:
+            project_data['regen_seed'] = data.get('regenSeed')
+        branding = db.get_branding(g.tenant_id) or {}
+        result = maps_service.generate_all_map_images(
+            project_data,
+            g.tenant_id,
+            presentation_id=presentation_id,
+            draft_id=draft_id,
+            force=False,
+            branding=branding,
+            highlight_site=highlight_site,
+        )
     if result.get('error'):
         return jsonify({'success': False, 'error': result['error']}), 400
     placeholders = {}

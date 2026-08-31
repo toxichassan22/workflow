@@ -16320,18 +16320,39 @@
       if (image) image.style.cursor = tenantMapPolygonMode || tenantMapPinMode || tenantRoadDrawingTarget || tenantLandmarkPlacementTarget ? 'crosshair' : 'default';
     }
 
-    async function ensureEditableOverviewPreview() {
-      const view = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === 'overview');
-      if (view?.editableKeys.some(key => !!tenantCreativeImages.map_placeholders?.[key])) return true;
-      const generated = await regenerateMapPreview('overview');
-      return !!generated && !!view?.editableKeys.some(key => !!tenantCreativeImages.map_placeholders?.[key]);
+    async function applyOverviewMapEdits() {
+      try {
+        const payload = slimMapProjectData(tenantProjectData);
+        payload.location_analysis_approved = tenantProjectData.location_analysis_approved === true || tenantProjectData.location_analysis_approved === 'true';
+        payload.draftId = tenantProjectData.draftId;
+        const data = await api('POST', '/api/generate-map-image', {
+          projectData: payload,
+          mapType: 'overview',
+          presentationId: tenantPresentationId,
+          highlightSite: shouldHighlightTenantSite(),
+          mapApproved: false,
+          overlayOnly: true
+        });
+        if (!data.success) return false;
+        tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
+        tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
+        tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+        tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
+        tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
+        await saveMapPreviewState();
+        renderMapPreviewGallery();
+        return true;
+      } catch (error) {
+        console.warn('[OVERVIEW MAP OVERLAY]', error);
+        triggerAutoSaveDraft();
+        return false;
+      }
     }
 
     async function toggleTenantPolygonMode() {
       if (tenantCreativeImages.map_approvals?.overview) { toast('خريطة الأرض معتمدة'); return; }
       if (tenantSelectedMapType !== 'overview') selectMapPreviewView('overview');
       if (!tenantMapPreviewState) { toast('خريطة الأرض غير مولدة'); return; }
-      if (!(await ensureEditableOverviewPreview())) return;
       tenantMapPinMode = false;
       tenantMapDraftPinHistory = [];
       tenantMapDraftPolygonPoints = [];
@@ -16363,8 +16384,8 @@
       syncTenantLocationPolygon();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
-      await regenerateMapPreview('overview');
       triggerAutoSaveDraft();
+      await applyOverviewMapEdits();
       toast('تم اعتماد حدود الموقع');
     }
 
@@ -16372,7 +16393,6 @@
       if (tenantCreativeImages.map_approvals?.overview) { toast('خريطة الأرض معتمدة'); return; }
       if (tenantSelectedMapType !== 'overview') selectMapPreviewView('overview');
       if (!tenantMapPreviewState) { toast('خريطة الأرض غير مولدة'); return; }
-      if (!(await ensureEditableOverviewPreview())) return;
       const lat = Number(tenantProjectData.location_lat);
       const lng = Number(tenantProjectData.location_lng);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) { toast('موقع المبنى غير محدد'); return; }
@@ -16420,8 +16440,8 @@
       tenantMapDraftPinHistory = [];
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
-      const generated = await regenerateMapPreview('overview');
-      if (!generated) await saveMapPreviewState();
+      triggerAutoSaveDraft();
+      await applyOverviewMapEdits();
       toast('تم اعتماد موقع المبنى');
     }
 
@@ -16439,8 +16459,8 @@
       const polygonPoints = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
       const roadPaths = Array.isArray(tenantProjectData.manual_road_paths) ? [...tenantProjectData.manual_road_paths] : [];
       if (tenantRoadDrawingTarget?.points?.length) roadPaths.push(tenantRoadDrawingTarget);
-      const showBoundary = tenantSelectedMapType === 'overview' && !!state?.usesEditableBase && polygonPoints.length > 0;
-      const showPin = tenantSelectedMapType === 'overview' && !!state?.usesEditableBase;
+      const showBoundary = tenantSelectedMapType === 'overview' && (!!state?.usesEditableBase || tenantMapPolygonMode) && polygonPoints.length > 0;
+      const showPin = tenantSelectedMapType === 'overview' && (!!state?.usesEditableBase || tenantMapPinMode);
       const showRoads = tenantSelectedMapType === 'access';
       if (!overlay || !img || !state || !img.naturalWidth || !img.naturalHeight || (!showBoundary && !showPin && (!showRoads || !roadPaths.length))) {
         if (overlay) overlay.innerHTML = '';

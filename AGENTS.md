@@ -260,8 +260,11 @@ assertion deliberately, not reflexively.
   over the clean copy, so boundary and pin modes never stack a second marker over the baked one.
   Boundary mode replaces the normal toolbar with undo, clear-selection, confirm and cancel without
   applying a client-side zoom. Pin mode keeps a draft history until confirm; confirmed coordinates
-  override the original Maps-link coordinates during later map generation. Presentation generation
-  reuses the four approved final images and never auto-generates missing maps. The retired
+  override the original Maps-link coordinates during later map generation. Confirming either edit
+  recomposes the marked PNG locally from the clean sidecar without a Google call or global loader;
+  only explicit initial generation and regeneration use the map provider and generation loader.
+  Presentation generation reuses the four approved final images and never auto-generates missing
+  maps. The retired
   `/api/generate-map-images` and saved-presentation bulk regeneration routes reject requests before
   any map-provider call.
 - Nearby and city landmark tables persist structured rows. `show_on_map` selects at most seven;

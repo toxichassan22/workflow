@@ -2871,6 +2871,97 @@ def _resolve_map_coordinates(project_data, tenant_id):
     return lat, lng
 
 
+def _overview_polygon(project_data, highlight_site):
+    if not highlight_site:
+        return None
+    value = project_data.get('location_polygon')
+    try:
+        if isinstance(value, str):
+            points = [
+                (float(lat.strip()), float(lng.strip()))
+                for item in value.split(';') if ',' in item
+                for lat, lng in [item.split(',', 1)]
+            ]
+        elif isinstance(value, list):
+            points = [(float(item[0]), float(item[1])) for item in value if len(item) >= 2]
+        else:
+            points = []
+    except (TypeError, ValueError):
+        points = []
+    return points if len(points) >= 3 else None
+
+
+def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_site):
+    from db import add_map_image, get_map_images, update_map_image
+    rows = get_map_images(tenant_id, presentation_id=effective_id)
+    by_type = {}
+    for row in rows:
+        if row.get('image_type') not in by_type and os.path.isfile(row.get('file_path') or ''):
+            by_type[row['image_type']] = row
+    lat = _extract_coordinate(
+        project_data.get('location_lat') or project_data.get('locationLat') or
+        project_data.get('latitude') or project_data.get('lat')
+    )
+    lng = _extract_coordinate(
+        project_data.get('location_lng') or project_data.get('locationLng') or
+        project_data.get('longitude') or project_data.get('lng')
+    )
+    if lat is None or lng is None:
+        return {'error': 'لم يتم العثور على إحداثيات الموقع المعتمدة'}
+    polygon = _overview_polygon(project_data, highlight_site)
+    placeholders = {}
+    centers = {}
+    zooms = {}
+    for editable_type in ('overview_editable', 'overview_satellite_editable', 'overview_roadmap_editable'):
+        editable = by_type.get(editable_type)
+        if not editable:
+            continue
+        try:
+            metadata = json.loads(editable.get('metadata_json') or '{}')
+            center_lat = float(metadata.get('center_lat'))
+            center_lng = float(metadata.get('center_lng'))
+            zoom = int(metadata.get('zoom'))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        final_type = editable_type.replace('_editable', '')
+        final_placeholder = str(editable.get('placeholder') or '').replace('_EDITABLE##', '##')
+        final_path = _unique_map_path(tenant_id, effective_id, final_type)
+        shutil.copyfile(editable['file_path'], final_path)
+        if polygon and not _draw_site_highlight(final_path, center_lat, center_lng, zoom, size=(1280, 720), polygon_coords=polygon, auto_detect_polygon=False, auto_detected=False):
+            continue
+        if not _overlay_markers(final_path, center_lat, center_lng, zoom, _build_markers(lat, lng), size=(1280, 720)):
+            continue
+        next_metadata = {**metadata, 'lat': lat, 'lng': lng, 'highlight_site': bool(highlight_site)}
+        final = by_type.get(final_type)
+        if final:
+            update_map_image(final['id'], tenant_id, final_path, final_placeholder, next_metadata)
+        else:
+            add_map_image(tenant_id, final_type, final_path, final_placeholder, effective_id, next_metadata)
+        update_map_image(editable['id'], tenant_id, editable['file_path'], editable['placeholder'], next_metadata)
+        placeholders[final_placeholder] = final_path
+        centers['overview'] = {'lat': center_lat, 'lng': center_lng}
+        zooms['overview'] = zoom
+    if not placeholders:
+        return {'error': 'نسخة الخريطة النظيفة غير متاحة'}
+    return {
+        'placeholders': placeholders,
+        'centers': centers,
+        'zooms': zooms,
+        'site_polygon': [list(point) for point in polygon] if polygon else [],
+    }
+
+
+def recompose_overview_map(project_data, tenant_id, presentation_id=None, draft_id=None, highlight_site=True):
+    effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None)
+    if not effective_id:
+        return {'error': 'معرّف العرض أو المسودة مطلوب'}
+    lock_key = (str(tenant_id), str(effective_id))
+    with _MAP_GENERATION_LOCKS_GUARD:
+        lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
+    with lock:
+        return _recompose_overview_map(project_data, tenant_id, effective_id, highlight_site)
+
+
 def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None) or (project_data or {}).get('draft_id') or (project_data or {}).get('draftId') or 'unscoped'
     lock_key = (str(tenant_id), str(effective_id))
@@ -3218,6 +3309,10 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 if active_mt == 'satellite':
                     _apply_sepia_tone(overview_path, intensity=0.35)
                     _apply_map_overlay(overview_path, dark_factor=0.12)
+                if draw_compass:
+                    _draw_compass(overview_path, position='top-right')
+                if draw_inset:
+                    _draw_inset_map(overview_path, lat, lng, inset_size=180)
                 editable_placeholder = editable_placeholders[placeholder]
                 editable_suffix = img_suffix + '_editable'
                 editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
@@ -3226,10 +3321,6 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 if highlight_site:
                     _draw_site_highlight(overview_path, map_center_lat, map_center_lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _overlay_markers(overview_path, map_center_lat, map_center_lng, overview_zoom, overview_markers, size=(1280, 720))
-                if draw_compass:
-                    _draw_compass(overview_path, position='top-right')
-                if draw_inset:
-                    _draw_inset_map(overview_path, lat, lng, inset_size=180)
                 result['placeholders'][placeholder] = overview_path
                 result['placeholders'][editable_placeholder] = editable_path
                 _record_maps_call(tenant_id)

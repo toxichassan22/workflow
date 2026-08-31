@@ -4013,6 +4013,72 @@ class MeetingRequirementsTests(unittest.TestCase):
             }, self.tenant_a)
             self.assertEqual((linked_lat, linked_lng), (25.0, 45.0))
 
+    def test_overview_edits_recompose_without_full_map_generation(self):
+        client = self.app.test_client()
+        result = {'placeholders': {}, 'zooms': {'overview': 18}, 'centers': {'overview': {'lat': 24.0, 'lng': 46.0}}, 'site_polygon': []}
+        with patch.object(self.application_module.maps_service, 'recompose_overview_map', return_value=result) as recompose, \
+                patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps, \
+                patch.object(self.application_module.db, 'delete_map_images') as delete_images:
+            response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'quick-overview',
+                                'location_analysis_approved': True, 'location_coordinates_confirmed': True},
+                'mapType': 'overview',
+                'overlayOnly': True,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        recompose.assert_called_once()
+        generate_maps.assert_not_called()
+        delete_images.assert_not_called()
+
+        from PIL import Image
+        editable_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        editable_path = editable_file.name
+        editable_file.close()
+        final_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        final_path = final_file.name
+        final_file.close()
+        self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
+        self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
+        Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 18, 'center_lat': 24.0, 'center_lng': 46.0,
+                    'map_highlight_version': self.application_module.maps_service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': self.application_module.maps_service.MAP_LABEL_RENDER_VERSION,
+                    'highlight_site': True}
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'overview_editable', editable_path, '##MAP_OVERVIEW_EDITABLE##',
+                             'draft_quick-compose', metadata)
+            with patch.object(self.application_module.maps_service, 'get_static_map') as provider, \
+                    patch.object(self.application_module.maps_service, 'geocode_address') as geocode, \
+                    patch.object(self.application_module.maps_service, '_unique_map_path', return_value=final_path):
+                composed = self.application_module.maps_service.recompose_overview_map({
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'location_coordinates_confirmed': True,
+                    'location_polygon': '23.9999,45.9999;23.9999,46.0001;24.0001,46.0001;24.0001,45.9999',
+                }, self.tenant_a, draft_id='quick-compose', highlight_site=True)
+            provider.assert_not_called()
+            geocode.assert_not_called()
+        self.assertNotIn('error', composed)
+        self.assertEqual(composed['placeholders']['##MAP_OVERVIEW##'], final_path)
+        self.assertNotEqual(Path(editable_path).read_bytes(), Path(final_path).read_bytes())
+
+        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        drawing_start = source.split('async function toggleTenantPolygonMode()', 1)[1].split('function cancelTenantPolygonMode()', 1)[0]
+        boundary_confirm = source.split('async function confirmTenantPolygon()', 1)[1].split('async function startTenantMapPinMode()', 1)[0]
+        pin_start = source.split('async function startTenantMapPinMode()', 1)[1].split('function undoTenantMapPin()', 1)[0]
+        pin_confirm = source.split('async function confirmTenantMapPin()', 1)[1].split('function syncTenantLocationPolygon()', 1)[0]
+        quick_update = source.split('async function applyOverviewMapEdits()', 1)[1].split('async function toggleTenantPolygonMode()', 1)[0]
+        self.assertNotIn('regenerateMapPreview(', drawing_start)
+        self.assertNotIn('regenerateMapPreview(', pin_start)
+        self.assertNotIn('regenerateMapPreview(', boundary_confirm)
+        self.assertNotIn('regenerateMapPreview(', pin_confirm)
+        self.assertIn('await applyOverviewMapEdits()', boundary_confirm)
+        self.assertIn('await applyOverviewMapEdits()', pin_confirm)
+        self.assertIn('overlayOnly: true', quick_update)
+        self.assertNotIn('showLoader(', quick_update)
+        self.assertNotIn('ensureEditableOverviewPreview()', drawing_start)
+        self.assertNotIn('ensureEditableOverviewPreview()', pin_start)
+
     def test_location_tables_and_controls_are_scoped_to_their_maps(self):
         source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertNotIn('lt-location-input', source)
