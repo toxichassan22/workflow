@@ -5104,7 +5104,10 @@ def api_generate_single_map_image():
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None)
     if not effective_id:
         return jsonify({'success': False, 'error': 'معرّف العرض أو المسودة مطلوب'}), 400
-    for image_type in (map_type, f'{map_type}_satellite', f'{map_type}_roadmap'):
+    image_types = [map_type, f'{map_type}_satellite', f'{map_type}_roadmap']
+    if map_type == 'overview':
+        image_types.extend(['overview_editable', 'overview_satellite_editable', 'overview_roadmap_editable'])
+    for image_type in image_types:
         db.delete_map_images(g.tenant_id, presentation_id=effective_id, image_type=image_type)
     project_data['enabled_maps'] = [map_type]
     project_data['refresh_maps'] = True
@@ -5135,6 +5138,7 @@ def api_generate_single_map_image():
         'landmarks_matrix': result.get('landmarks_matrix', []),
         'zooms': result.get('zooms', {}),
         'centers': result.get('centers', {}),
+        'sitePolygon': result.get('site_polygon', []),
     })
 
 

@@ -3950,8 +3950,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('اعتماد الخرائط الأربع مطلوب قبل توليد العرض', source)
         self.assertIn("city_landmarks: { nameLabel: 'مَعلم المدينة'", source)
         self.assertNotIn("secondary_roads: { nameLabel:", source)
-        self.assertIn('tenantProjectData.location_lat = nextLat.toFixed(6)', source)
+        self.assertIn('tenantProjectData.location_lat = latValue', source)
         pin_body = source.split('function setTenantMapPointFromClick(event)', 1)[1].split('function updateTenantPolygonControls()', 1)[0]
+        self.assertIn('tenantMapDraftPinHistory.push([nextLat, nextLng])', pin_body)
+        self.assertNotIn('tenantProjectData.location_lat = nextLat.toFixed(6)', pin_body)
         self.assertNotIn("tenantProjectData.location_polygon = ''", pin_body)
         self.assertIn("return regenerateMapPreview('overview');", source)
         self.assertNotIn("'/api/generate-map-images'", source)
@@ -3969,6 +3971,48 @@ class MeetingRequirementsTests(unittest.TestCase):
         access_body = maps_source.split('def _draw_access_roads(', 1)[1].split('def _get_cached_map_images(', 1)[0]
         self.assertNotIn("('main_roads', 'secondary_roads')", access_body)
 
+    def test_overview_map_has_dedicated_generation_and_edit_modes(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        approval_panel = index_source.split('id="locationAnalysisApprovalPanel"', 1)[1].split('</div>', 1)[0]
+        self.assertIn('id="generateOverviewMapButton"', approval_panel)
+        self.assertIn('onclick="generateOverviewMap()"', approval_panel)
+        workflow_body = index_source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
+        self.assertIn("if (view.mapType === 'overview' && tenantMapPolygonMode)", workflow_body)
+        self.assertIn('تراجع عن آخر نقطة', workflow_body)
+        self.assertIn('مسح التحديد', workflow_body)
+        self.assertIn('اعتماد الحدود', workflow_body)
+        self.assertIn("if (view.mapType === 'overview' && tenantMapPinMode)", workflow_body)
+        self.assertIn('اعتماد التعيين', workflow_body)
+        self.assertIn('function generateOverviewMap()', index_source)
+        self.assertIn('function startTenantMapPinMode()', index_source)
+        self.assertIn('function undoTenantMapPin()', index_source)
+        self.assertIn('function cancelTenantMapPin()', index_source)
+        self.assertIn('async function confirmTenantMapPin()', index_source)
+        self.assertIn("tenantSelectedMapType === 'overview' && tenantMapPinMode", index_source)
+        self.assertIn("editableKeys: ['##MAP_OVERVIEW_EDITABLE##'", index_source)
+        self.assertNotIn('function applyTenantPolygonZoom()', index_source)
+        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        self.assertIn("'##MAP_OVERVIEW_EDITABLE##'", maps_source)
+        self.assertIn('shutil.copyfile(overview_path, editable_path)', maps_source)
+
+    def test_confirmed_map_pin_overrides_the_original_google_link(self):
+        service = self.application_module.maps_service
+        with patch.object(service, 'extract_coords_from_maps_link', return_value={'lat': 25.0, 'lng': 45.0}):
+            lat, lng = service._resolve_map_coordinates({
+                'location_address': 'https://www.google.com/maps/@25,45,17z',
+                'location_lat': '24.123456',
+                'location_lng': '46.654321',
+                'location_coordinates_confirmed': True,
+            }, self.tenant_a)
+            self.assertEqual((lat, lng), (24.123456, 46.654321))
+            linked_lat, linked_lng = service._resolve_map_coordinates({
+                'location_address': 'https://www.google.com/maps/@25,45,17z',
+                'location_lat': '24.123456',
+                'location_lng': '46.654321',
+                'location_coordinates_confirmed': False,
+            }, self.tenant_a)
+            self.assertEqual((linked_lat, linked_lng), (25.0, 45.0))
+
     def test_location_tables_and_controls_are_scoped_to_their_maps(self):
         source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertNotIn('lt-location-input', source)
@@ -3985,6 +4029,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("city_landmarks: { nameLabel: 'مَعلم المدينة', nameHint: 'مثال: الواجهة البحرية', categoryLabel: 'النوع', mapSelectable: true, mapType: 'catchment' }", source)
         workflow_body = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
         self.assertIn('MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === tenantSelectedMapType)', workflow_body)
+        self.assertIn('onclick="toggleTenantPolygonMode()"', workflow_body)
+        self.assertIn('onclick="startTenantMapPinMode()"', workflow_body)
         self.assertNotIn('MAP_PREVIEW_VIEW_DEFS.map(view =>', workflow_body)
         landmark_body = source.split('function startLandmarkPlacement(key, tr)', 1)[1].split('function startManualRoadDrawing', 1)[0]
         self.assertIn('openLocationTableMap(mapType)', landmark_body)
@@ -4299,7 +4345,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         # because no boundary has been found yet.
         self.assertIn("'survey_coordinates', 'city'", index_source)
         self.assertIn("return source !== 'cleared';", index_source)
-        self.assertIn("tenantProjectData.location_polygon_source = 'cleared';", index_source)
+        clear_body = index_source.split('function clearTenantPolygonSelection()', 1)[1].split('async function confirmTenantPolygon()', 1)[0]
+        self.assertIn('tenantMapDraftPolygonPoints = [];', clear_body)
+        self.assertNotIn('location_polygon_source', clear_body)
 
     def test_map_preview_uses_the_rendered_centre_and_fits_its_content(self):
         import maps_service

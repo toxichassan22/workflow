@@ -255,11 +255,15 @@ assertion deliberately, not reflexively.
 - **Location analysis and map rendering are separate approvals.** `/api/analyze-site` fills location
   data only. `location_analysis_approved` gates individual `/api/generate-map-image` calls; overview
   must be generated and approved before access, catchment, or landmarks. Each image keeps its own
-  `map_approvals` lock. Moving the unapproved overview pin updates latitude/longitude, preserves the
-  independently editable plot polygon, and releases location-analysis approval without invalidating
-  map images already approved. Presentation generation reuses the four approved images and never
-  auto-generates missing maps. The retired `/api/generate-map-images` and saved-presentation bulk
-  regeneration routes reject requests before any map-provider call.
+  `map_approvals` lock. Overview generation persists both the final marked image and a clean
+  `##MAP_OVERVIEW_EDITABLE##` sidecar: the large preview draws the current boundary and system pin
+  over the clean copy, so boundary and pin modes never stack a second marker over the baked one.
+  Boundary mode replaces the normal toolbar with undo, clear-selection, confirm and cancel without
+  applying a client-side zoom. Pin mode keeps a draft history until confirm; confirmed coordinates
+  override the original Maps-link coordinates during later map generation. Presentation generation
+  reuses the four approved final images and never auto-generates missing maps. The retired
+  `/api/generate-map-images` and saved-presentation bulk regeneration routes reject requests before
+  any map-provider call.
 - Nearby and city landmark tables persist structured rows. `show_on_map` selects at most seven;
   when none are selected, table order supplies the first seven. The tables have no per-row URL field:
   nearby placement opens the landmarks map and city placement opens the catchment map. Access uses

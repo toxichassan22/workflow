@@ -2841,6 +2841,36 @@ def _calculate_map_zooms(polygon_coords):
     return zooms
 
 
+def _resolve_map_coordinates(project_data, tenant_id):
+    address = project_data.get('location_address') or project_data.get('location', '')
+    maps_link = (
+        (address if str(address).startswith('http') else '') or
+        project_data.get('location_maps_link') or project_data.get('maps_link')
+    )
+    confirmed = project_data.get('location_coordinates_confirmed')
+    if isinstance(confirmed, str):
+        confirmed = confirmed.strip().lower() in {'true', '1', 'yes'}
+    lat = _extract_coordinate(
+        project_data.get('location_lat') or project_data.get('locationLat') or
+        project_data.get('latitude') or project_data.get('lat')
+    )
+    lng = _extract_coordinate(
+        project_data.get('location_lng') or project_data.get('locationLng') or
+        project_data.get('longitude') or project_data.get('lng')
+    )
+    if not confirmed:
+        linked_coords = extract_coords_from_maps_link(maps_link) if maps_link else None
+        if linked_coords:
+            lat, lng = linked_coords['lat'], linked_coords['lng']
+        elif maps_link:
+            return None, None
+    if (lat is None or lng is None) and address and not str(address).startswith('http'):
+        geo = geocode_address(address, tenant_id=tenant_id)
+        if geo.get('success'):
+            lat, lng = geo['lat'], geo['lng']
+    return lat, lng
+
+
 def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None) or (project_data or {}).get('draft_id') or (project_data or {}).get('draftId') or 'unscoped'
     lock_key = (str(tenant_id), str(effective_id))
@@ -2868,29 +2898,10 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         (address if str(address).startswith('http') else '') or
         project_data.get('location_maps_link') or project_data.get('maps_link')
     )
-    linked_coords = extract_coords_from_maps_link(maps_link) if maps_link else None
-    if linked_coords:
-        lat = linked_coords['lat']
-        lng = linked_coords['lng']
-    elif maps_link:
-        return {'error': 'تعذر استخراج الإحداثيات من رابط Google Maps'}
-    else:
-        lat = _extract_coordinate(
-            project_data.get('location_lat') or project_data.get('locationLat') or
-            project_data.get('latitude') or project_data.get('lat')
-        )
-        lng = _extract_coordinate(
-            project_data.get('location_lng') or project_data.get('locationLng') or
-            project_data.get('longitude') or project_data.get('lng')
-        )
-
-    if (lat is None or lng is None) and address and not str(address).startswith('http'):
-        geo = geocode_address(address, tenant_id=tenant_id)
-        if geo.get('success'):
-            lat = geo['lat']
-            lng = geo['lng']
-
+    lat, lng = _resolve_map_coordinates(project_data, tenant_id)
     if lat is None or lng is None:
+        if maps_link:
+            return {'error': 'تعذر استخراج الإحداثيات من رابط Google Maps'}
         return {'error': 'لم يتم العثور على موقع أو إحداثيات للمشروع. يرجى إدخال عنوان المشروع أو رابط Google Maps في البيانات.'}
 
     enabled_maps = project_data.get('enabled_maps')
@@ -2999,6 +3010,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
             print('[POLYGON] Using the Google geocoding bounds rectangle')
 
     auto_detected = not user_polygon_used
+    result['site_polygon'] = [list(point) for point in polygon_coords] if polygon_coords and len(polygon_coords) >= 3 else []
 
     # Compute presentation-friendly zoom levels from the selected boundary.
     zooms = _calculate_map_zooms(polygon_coords)
@@ -3193,6 +3205,11 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                              ('roadmap', '##MAP_OVERVIEW_ROADMAP##', 'overview_roadmap')]
         else:
             styles_to_gen = [(overview_mt, '##MAP_OVERVIEW##', 'overview')]
+        editable_placeholders = {
+            '##MAP_OVERVIEW##': '##MAP_OVERVIEW_EDITABLE##',
+            '##MAP_OVERVIEW_SATELLITE##': '##MAP_OVERVIEW_SATELLITE_EDITABLE##',
+            '##MAP_OVERVIEW_ROADMAP##': '##MAP_OVERVIEW_ROADMAP_EDITABLE##',
+        }
 
         for active_mt, placeholder, img_suffix in styles_to_gen:
             overview_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
@@ -3201,6 +3218,11 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 if active_mt == 'satellite':
                     _apply_sepia_tone(overview_path, intensity=0.35)
                     _apply_map_overlay(overview_path, dark_factor=0.12)
+                editable_placeholder = editable_placeholders[placeholder]
+                editable_suffix = img_suffix + '_editable'
+                editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
+                shutil.copyfile(overview_path, editable_path)
+                metadata = {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks_matrix': result.get('landmarks_matrix') or []}
                 if highlight_site:
                     _draw_site_highlight(overview_path, map_center_lat, map_center_lng, overview_zoom, size=(1280, 720), polygon_coords=polygon_coords, auto_detect_polygon=False, auto_detected=auto_detected)
                 _overlay_markers(overview_path, map_center_lat, map_center_lng, overview_zoom, overview_markers, size=(1280, 720))
@@ -3209,9 +3231,11 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 if draw_inset:
                     _draw_inset_map(overview_path, lat, lng, inset_size=180)
                 result['placeholders'][placeholder] = overview_path
+                result['placeholders'][editable_placeholder] = editable_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': overview_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, overview_path, placeholder, effective_pres_id, metadata)
+                add_map_image(tenant_id, editable_suffix, editable_path, editable_placeholder, effective_pres_id, metadata)
 
     # Generate map_landmarks (closer zoom)
     if 'landmarks' in enabled_maps:
