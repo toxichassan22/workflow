@@ -3985,6 +3985,24 @@
       flex-wrap: wrap;
     }
 
+    .map-control-field {
+      display: flex !important;
+      align-items: center;
+      gap: 7px;
+      margin: 0 !important;
+      color: var(--p) !important;
+      font-size: 12px !important;
+    }
+
+    .map-control-field select,
+    .map-control-field input {
+      width: auto !important;
+      min-width: 170px;
+      padding: 7px 9px !important;
+      border-radius: 8px !important;
+      font-size: 13px !important;
+    }
+
     .tenant-map-preview-card {
       cursor: pointer;
       transition: border-color .15s ease, box-shadow .15s ease;
@@ -6192,7 +6210,8 @@
       'enabled_maps', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
       'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_maps_link',
       'locationLat', 'locationLng', 'location_polygon', 'location_polygon_source', 'longitude',
-      'location_analysis_approved', 'location_coordinates_confirmed', 'main_roads', 'main_roads_data', 'manual_road_paths', 'map_styles', 'map_type', 'maps_link',
+      'access_road_label_positions', 'access_roads_data', 'location_analysis_approved', 'location_coordinates_confirmed',
+      'main_roads', 'main_roads_data', 'manual_road_paths', 'map_styles', 'map_type', 'maps_link',
       'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks', 'city_landmarks_data', 'regen_seed',
       'refresh_maps',
       // The croquis coordinates are the real plot boundary, so the server needs them to
@@ -6499,6 +6518,10 @@
     let tenantMapPinMode = false;
     let tenantMapDraftPinHistory = [];
     let tenantRoadDrawingTarget = null;
+    let tenantRoadEditMode = false;
+    let tenantRoadEditDraft = null;
+    let tenantRoadEditHistory = [];
+    let tenantRoadEditSelectedIndex = -1;
     let tenantLandmarkPlacementTarget = null;
     let tenantNearbyLandmarks = [];
     let tenantSelectedMapType = 'overview';
@@ -6512,6 +6535,14 @@
       if (typeof value !== 'string') return [];
       return value.split(';').map(point => point.split(',').map(Number))
         .filter(point => point.length === 2 && point.every(Number.isFinite));
+    }
+
+    function resetTenantRoadModes() {
+      tenantRoadDrawingTarget = null;
+      tenantRoadEditMode = false;
+      tenantRoadEditDraft = null;
+      tenantRoadEditHistory = [];
+      tenantRoadEditSelectedIndex = -1;
     }
 
     function invalidateTenantMapAssets() {
@@ -6534,6 +6565,7 @@
       tenantMapPolygonMode = false;
       tenantMapPinMode = false;
       tenantMapDraftPinHistory = [];
+      resetTenantRoadModes();
       tenantProjectData.location_polygon = '';
       syncTenantLocationPolygon();
       renderTenantMapPolygonOverlay();
@@ -11441,7 +11473,7 @@
       tenantMapPolygonMode = false;
       tenantMapPinMode = false;
       tenantMapDraftPinHistory = [];
-      tenantRoadDrawingTarget = null;
+      resetTenantRoadModes();
       tenantLandmarkPlacementTarget = null;
       tenantNearbyLandmarks = [];
       tenantProjectSectionStatuses = {};
@@ -11745,6 +11777,7 @@
       });
       hidden.value = (key === 'main_roads' ? normalizeAccessRoadNames(lines) : lines).join('\n');
       if (key === 'main_roads') {
+        tenantProjectData.main_roads = hidden.value;
         tenantProjectData.main_roads_data = structuredRows;
       } else if (key === 'nearby_landmarks') {
         tenantNearbyLandmarks = structuredRows;
@@ -11835,6 +11868,7 @@
       actionGroup.className = 'lt-action-group';
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
+      delBtn.dataset.sectionLockIgnore = '1';
       delBtn.className = 'btn small danger lt-del';
       delBtn.title = 'حذف الصف';
       delBtn.textContent = 'حذف';
@@ -11846,19 +11880,22 @@
             .filter(item => String(item?.name || '').trim() !== roadName);
         }
         serializeLocationTable(key);
+        if (cfg.road) invalidateAccessMapApproval();
         invalidateLocationAnalysisApproval();
       });
       if (cfg.road) {
         const drawBtn = document.createElement('button');
         drawBtn.type = 'button';
+        drawBtn.dataset.sectionLockIgnore = '1';
         drawBtn.className = 'btn small ghost';
         drawBtn.textContent = 'تحديد المسار';
-        drawBtn.addEventListener('click', () => startManualRoadDrawing(nameInput.value));
+        drawBtn.addEventListener('click', () => startManualRoadDrawingFromTable(nameInput.value));
         actionGroup.appendChild(drawBtn);
       }
       if (cfg.mapSelectable) {
         const placeBtn = document.createElement('button');
         placeBtn.type = 'button';
+        placeBtn.dataset.sectionLockIgnore = '1';
         placeBtn.className = 'btn small ghost';
         placeBtn.textContent = 'تحديد الموقع';
         placeBtn.addEventListener('click', () => startLandmarkPlacement(key, tr));
@@ -11869,6 +11906,7 @@
 
       [nameInput, categoryInput, distInput, durInput].filter(Boolean).forEach(inp => inp.addEventListener('input', () => {
         serializeLocationTable(key);
+        if (cfg.road) invalidateAccessMapApproval();
         invalidateLocationAnalysisApproval();
       }));
 
@@ -11939,10 +11977,13 @@
 
       const addBtn = document.createElement('button');
       addBtn.type = 'button';
+      addBtn.dataset.sectionLockIgnore = '1';
       addBtn.className = 'btn ghost small location-table-add';
       addBtn.textContent = '+ إضافة صف';
       addBtn.addEventListener('click', () => {
         addLocationTableRow(key, {});
+        if (key === 'main_roads') invalidateAccessMapApproval();
+        invalidateLocationAnalysisApproval();
         const tbody = table.querySelector('tbody');
         const last = tbody.lastElementChild;
         if (last) last.querySelector('.lt-name-input').focus();
@@ -11965,7 +12006,7 @@
       }
       const hint = document.createElement('div');
       hint.className = 'location-table-hint';
-      hint.textContent = 'تُملأ تلقائيًا من تحليل الموقع — يمكنك التعديل أو الإضافة أو الحذف.';
+      hint.textContent = 'مصدر البيانات: تحليل الموقع';
       wrap.appendChild(hint);
 
       const hidden = document.createElement('input');
@@ -12015,11 +12056,27 @@
         : { valid: true, message: '' };
     }
 
+    function releaseLocationSectionApproval() {
+      if (tenantProjectSectionStatuses.location !== 'approved') return false;
+      applySectionStatuses({ location: 'draft' });
+      return true;
+    }
+
+    function invalidateAccessMapApproval() {
+      if (!tenantCreativeImages.map_approvals?.access) return;
+      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), access: false };
+      releaseLocationSectionApproval();
+      renderLocationWorkflowState();
+      triggerAutoSaveDraft();
+    }
+
     function invalidateLocationAnalysisApproval() {
-      if (!tenantProjectData.location_analysis_approved) return;
+      const changed = !!tenantProjectData.location_analysis_approved;
       tenantProjectData.location_analysis_approved = false;
+      const sectionChanged = releaseLocationSectionApproval();
       const input = document.getElementById('locationAnalysisApproved');
       if (input) input.value = '';
+      if (!changed && !sectionChanged) return;
       renderLocationWorkflowState();
       triggerAutoSaveDraft();
     }
@@ -12027,6 +12084,7 @@
     async function toggleLocationAnalysisApproval() {
       if (tenantProjectData.location_analysis_approved) {
         tenantProjectData.location_analysis_approved = false;
+        releaseLocationSectionApproval();
       } else {
         const validation = validateLocationAnalysisApproval();
         if (!validation.valid) { toast(validation.message); return; }
@@ -12056,10 +12114,13 @@
         if (input && input.type !== 'hidden') input.disabled = approved;
       });
       Object.keys(LOCATION_TABLE_FIELDS).forEach(key => {
-        document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] input, #tenantProjectForm table[data-location-table="' + key + '"] textarea, #tenantProjectForm table[data-location-table="' + key + '"] button')
-          .forEach(control => { control.disabled = approved; });
+        const roadModeLocked = key === 'main_roads' && (tenantRoadEditMode || !!tenantRoadDrawingTarget);
+        document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] input, #tenantProjectForm table[data-location-table="' + key + '"] textarea')
+          .forEach(control => { control.disabled = approved || roadModeLocked; });
+        document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] button')
+          .forEach(control => { control.disabled = roadModeLocked; });
         const add = document.querySelector('#tenantProjectForm table[data-location-table="' + key + '"]')?.closest('.location-table-field')?.querySelector('.location-table-add');
-        if (add) add.disabled = approved;
+        if (add) add.disabled = roadModeLocked;
       });
       const controls = document.getElementById('locationMapGenerationControls');
       if (controls && typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined') {
@@ -12089,19 +12150,23 @@
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'overview\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="toggleTenantPolygonMode()" ' + (mapApproved ? 'disabled' : '') + '>رسم حدود الموقع</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startTenantMapPinMode()" ' + (mapApproved ? 'disabled' : '') + '>تعيين الموقع</button>';
+        } else if (view.mapType === 'access' && tenantRoadEditMode) {
+          actions = accessRoadEditControlsHtml();
+        } else if (view.mapType === 'access' && tenantRoadDrawingTarget) {
+          actions = manualRoadDrawingControlsHtml();
+        } else if (view.mapType === 'access' && generated) {
+          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'access\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
+            approvalButton +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startAccessRoadEditMode()" ' + (mapApproved ? 'disabled' : '') + '>إضافة / تعديل الطرق</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startManualRoadDrawing(\'\')" ' + (mapApproved ? 'disabled' : '') + '>رسم مسار الطرق</button>';
         } else if (view.mapType !== 'overview') {
           actions = '<button type="button" class="btn small primary" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'' + view.mapType + '\')" ' + (generationLocked ? 'disabled' : '') + '>' + (generated ? 'إعادة توليد ' : 'توليد ') + view.title + '</button>' + approvalButton;
         }
-        const roadControls = view.mapType === 'access' && tenantRoadDrawingTarget
-          ? '<div id="manualRoadDrawingControls" class="map-active-controls-actions" style="margin-top:8px;">' +
-            '<span id="manualRoadDrawingStatus" class="tenant-hint">رسم مسار: ' + escapeHtml(tenantRoadDrawingTarget.name) + '</span>' +
-            '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="finishManualRoadDrawing()">اعتماد مسار الطريق</button>' +
-            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelManualRoadDrawing()">إلغاء رسم الطريق</button></div>'
-          : '';
         controls.innerHTML = actions
-          ? '<div class="map-active-controls"><div class="map-active-controls-title">' + escapeHtml(view.title) + '</div><div class="map-active-controls-actions">' + actions + '</div>' + roadControls + '</div>'
+          ? '<div class="map-active-controls"><div class="map-active-controls-title">' + escapeHtml(view.title) + '</div><div class="map-active-controls-actions">' + actions + '</div></div>'
           : '';
         updateTenantPolygonControls();
+        updateTenantRoadControls();
         updateTenantMapInteractionState();
       }
       renderMapPreviewGallery();
@@ -12132,29 +12197,255 @@
       toast('تم تفعيل تحديد موقع المعلم على ' + (mapType === 'landmarks' ? 'خريطة المعالم' : 'خريطة المنطقة'));
     }
 
-    function startManualRoadDrawing(name) {
-      const roadName = String(name || '').trim();
-      if (!roadName) { toast('اسم الطريق مطلوب'); return; }
+    function accessRoadNameKey(name) {
+      return String(name || '').replace(/^(طريق|شارع|جادة|ممر)\s+/, '').replace(/[\sـ]+/g, ' ').trim().toLowerCase();
+    }
+
+    function accessRoadRows() {
+      serializeLocationTable('main_roads');
+      const rows = Array.isArray(tenantProjectData.main_roads_data)
+        ? tenantProjectData.main_roads_data
+        : parseLocationFieldText('main_roads', tenantProjectData.main_roads || '');
+      return rows.filter(row => String(row?.name || '').trim()).map(row => ({
+        ...row,
+        name: String(row.name).trim(),
+        original_name: row.original_name || String(row.name).trim()
+      }));
+    }
+
+    function accessRoadGeometry() {
+      const byName = new Map();
+      const add = road => {
+        const key = accessRoadNameKey(road?.name);
+        if (!key || !Array.isArray(road?.points) || road.points.length < 2) return;
+        byName.set(key, { ...road, points: road.points.map(point => [Number(point[0]), Number(point[1])]) });
+      };
+      const storedRoads = Array.isArray(tenantProjectData.access_roads_data)
+        ? tenantProjectData.access_roads_data
+        : (Array.isArray(tenantCreativeImages.map_access_roads) ? tenantCreativeImages.map_access_roads : []);
+      storedRoads.forEach(add);
+      (Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : []).forEach(add);
+      const positions = tenantRoadEditMode
+        ? tenantRoadEditDraft?.labelPositions || {}
+        : tenantProjectData.access_road_label_positions || {};
+      const rows = tenantRoadEditMode ? tenantRoadEditDraft?.rows || [] : accessRoadRows();
+      const roads = rows.map(row => {
+        const geometry = byName.get(accessRoadNameKey(row.original_name)) || byName.get(accessRoadNameKey(row.name));
+        if (!geometry) return null;
+        return {
+          ...geometry,
+          name: row.name,
+          label_point: positions[row.name] || positions[row.original_name] || geometry.label_point || null
+        };
+      }).filter(Boolean);
+      if (tenantRoadDrawingTarget?.points?.length) {
+        const index = roads.findIndex(road => accessRoadNameKey(road.name) === accessRoadNameKey(tenantRoadDrawingTarget.name));
+        const draft = { name: tenantRoadDrawingTarget.name, points: tenantRoadDrawingTarget.points, label_point: positions[tenantRoadDrawingTarget.name] || null };
+        if (index >= 0) roads[index] = draft;
+        else roads.push(draft);
+      }
+      return roads;
+    }
+
+    function roadEditSnapshot() {
+      return JSON.stringify({ draft: tenantRoadEditDraft, selectedIndex: tenantRoadEditSelectedIndex });
+    }
+
+    function pushRoadEditHistory() {
+      const snapshot = roadEditSnapshot();
+      if (tenantRoadEditHistory[tenantRoadEditHistory.length - 1] !== snapshot) tenantRoadEditHistory.push(snapshot);
+      if (tenantRoadEditHistory.length > 60) tenantRoadEditHistory.shift();
+    }
+
+    function accessRoadEditControlsHtml() {
+      const rows = tenantRoadEditDraft?.rows || [];
+      const options = rows.map((row, index) => '<option value="' + index + '" ' + (tenantRoadEditSelectedIndex === index ? 'selected' : '') + '>' + escapeHtml(row.name) + '</option>').join('');
+      const selectedName = tenantRoadEditSelectedIndex >= 0 ? rows[tenantRoadEditSelectedIndex]?.name || '' : tenantRoadEditDraft?.newName || '';
+      return '<label class="map-control-field">اختيار الطريق<select id="accessRoadEditSelect" onchange="selectAccessRoadEdit(this.value)">' + options + '<option value="-1" ' + (tenantRoadEditSelectedIndex < 0 ? 'selected' : '') + '>طريق جديد</option></select></label>' +
+        '<label class="map-control-field">اسم الطريق<input id="accessRoadEditName" type="text" value="' + escapeHtml(selectedName) + '" oninput="updateAccessRoadDraftName(this.value)"></label>' +
+        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoAccessRoadEditsButton" onclick="undoAccessRoadEdits()">تراجع</button>' +
+        '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmAccessRoadEdits()">اعتماد</button>' +
+        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelAccessRoadEdits()">إلغاء</button>';
+    }
+
+    function manualRoadDrawingControlsHtml() {
+      const names = accessRoadRows().map(row => row.name);
+      const options = names.map(name => '<option value="' + escapeHtml(name) + '" ' + (name === tenantRoadDrawingTarget?.name ? 'selected' : '') + '>' + escapeHtml(name) + '</option>').join('');
+      return '<label class="map-control-field">اختيار الطريق<select id="manualRoadDrawingSelect" onchange="selectManualRoadDrawingRoad(this.value)">' + options + '</select></label>' +
+        '<button type="button" class="btn primary small" data-section-lock-ignore="1" id="confirmManualRoadDrawingButton" onclick="finishManualRoadDrawing()">اعتماد المسارات</button>' +
+        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoManualRoadDrawingButton" onclick="undoManualRoadDrawing()">تراجع</button>' +
+        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelManualRoadDrawing()">إلغاء</button>';
+    }
+
+    async function startAccessRoadEditMode() {
+      if (tenantCreativeImages.map_approvals?.access) { toast('خريطة الطرق معتمدة'); return; }
       if (!openLocationTableMap('access')) return;
-      tenantLandmarkPlacementTarget = null;
-      tenantRoadDrawingTarget = { name: roadName, points: [] };
-      tenantMapPolygonMode = false;
+      tenantRoadDrawingTarget = null;
+      tenantRoadEditMode = true;
+      tenantRoadEditDraft = {
+        rows: accessRoadRows(),
+        labelPositions: JSON.parse(JSON.stringify(tenantProjectData.access_road_label_positions || {})),
+        newName: ''
+      };
+      tenantRoadEditHistory = [];
+      tenantRoadEditSelectedIndex = tenantRoadEditDraft.rows.length ? 0 : -1;
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+      await ensureAccessEditablePreview();
+    }
+
+    function selectAccessRoadEdit(value) {
+      tenantRoadEditSelectedIndex = Number(value);
+      const input = document.getElementById('accessRoadEditName');
+      if (input) input.value = tenantRoadEditSelectedIndex >= 0
+        ? tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.name || ''
+        : tenantRoadEditDraft?.newName || '';
+    }
+
+    function updateAccessRoadDraftName(value) {
+      if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      pushRoadEditHistory();
+      if (tenantRoadEditSelectedIndex < 0) {
+        tenantRoadEditDraft.newName = value;
+      } else if (tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex]) {
+        tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex].name = value;
+      }
+      renderTenantMapPolygonOverlay();
+      updateTenantRoadControls();
+    }
+
+    function commitAccessRoadDraftName() {
+      if (!tenantRoadEditDraft || tenantRoadEditSelectedIndex >= 0) return tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex] || null;
+      const input = document.getElementById('accessRoadEditName');
+      const name = String(input?.value || tenantRoadEditDraft.newName || '').trim();
+      if (!name) return null;
+      const existing = tenantRoadEditDraft.rows.findIndex(row => accessRoadNameKey(row.name) === accessRoadNameKey(name));
+      if (existing >= 0) {
+        tenantRoadEditSelectedIndex = existing;
+        return tenantRoadEditDraft.rows[existing];
+      }
+      tenantRoadEditDraft.rows.push({ name, original_name: name, row_source: 'manual' });
+      tenantRoadEditSelectedIndex = tenantRoadEditDraft.rows.length - 1;
+      tenantRoadEditDraft.newName = '';
+      return tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex];
+    }
+
+    function setAccessRoadLabelFromMap(lat, lng) {
+      if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      pushRoadEditHistory();
+      const row = commitAccessRoadDraftName();
+      if (!row || !String(row.name || '').trim()) return;
+      tenantRoadEditDraft.labelPositions[row.name.trim()] = [lat, lng];
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
     }
 
-    function finishManualRoadDrawing() {
-      if (!tenantRoadDrawingTarget || tenantRoadDrawingTarget.points.length < 2) {
-        toast('مسار الطريق يحتاج نقطتين على الأقل');
-        return;
-      }
-      const paths = Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : [];
-      tenantProjectData.manual_road_paths = paths.filter(item => item?.name !== tenantRoadDrawingTarget.name)
-        .concat([{ name: tenantRoadDrawingTarget.name, points: tenantRoadDrawingTarget.points }]);
-      tenantRoadDrawingTarget = null;
+    function undoAccessRoadEdits() {
+      const snapshot = tenantRoadEditHistory.pop();
+      if (!snapshot) return;
+      const state = JSON.parse(snapshot);
+      tenantRoadEditDraft = state.draft;
+      tenantRoadEditSelectedIndex = state.selectedIndex;
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+    }
+
+    async function confirmAccessRoadEdits() {
+      if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      commitAccessRoadDraftName();
+      const unique = new Set();
+      const rows = tenantRoadEditDraft.rows.filter(row => {
+        row.name = String(row.name || '').trim();
+        const key = accessRoadNameKey(row.name);
+        if (!key || unique.has(key)) return false;
+        unique.add(key);
+        return true;
+      });
+      const renamed = new Map(rows.map(row => [accessRoadNameKey(row.original_name), row.name]));
+      const renameGeometry = road => ({ ...road, name: renamed.get(accessRoadNameKey(road?.name)) || road?.name });
+      tenantProjectData.access_roads_data = (Array.isArray(tenantProjectData.access_roads_data) ? tenantProjectData.access_roads_data : []).map(renameGeometry);
+      tenantProjectData.manual_road_paths = (Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : []).map(renameGeometry);
+      tenantProjectData.access_road_label_positions = Object.fromEntries(rows.map(row => {
+        const point = tenantRoadEditDraft.labelPositions[row.name] || tenantRoadEditDraft.labelPositions[row.original_name];
+        return point ? [row.name, point] : null;
+      }).filter(Boolean));
+      tenantProjectData.main_roads = rows.map(row => row.name).join('\n');
+      tenantProjectData.main_roads_data = rows.map(({ original_name, ...row }) => row);
+      setLocationTableValue('main_roads', tenantProjectData.main_roads_data);
+      tenantRoadEditMode = false;
+      tenantRoadEditDraft = null;
+      tenantRoadEditHistory = [];
+      tenantRoadEditSelectedIndex = -1;
+      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), access: false };
+      releaseLocationSectionApproval();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
       triggerAutoSaveDraft();
+      await applyAccessMapEdits();
+      toast('تم اعتماد تعديلات الطرق');
+    }
+
+    function cancelAccessRoadEdits() {
+      tenantRoadEditMode = false;
+      tenantRoadEditDraft = null;
+      tenantRoadEditHistory = [];
+      tenantRoadEditSelectedIndex = -1;
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+    }
+
+    function startManualRoadDrawingFromTable(name) {
+      const roadName = String(name || '').trim();
+      if (!roadName) { toast('اسم الطريق مطلوب'); return; }
+      return startManualRoadDrawing(roadName);
+    }
+
+    async function startManualRoadDrawing(name) {
+      if (tenantCreativeImages.map_approvals?.access) { toast('خريطة الطرق معتمدة'); return; }
+      if (!openLocationTableMap('access')) return;
+      const names = accessRoadRows().map(row => row.name);
+      const requestedName = String(name || '').trim();
+      const roadName = requestedName
+        ? names.find(item => accessRoadNameKey(item) === accessRoadNameKey(requestedName))
+        : names[0];
+      if (!roadName) { toast(requestedName ? 'اسم الطريق غير موجود في الجدول' : 'لا توجد طرق رئيسية'); return; }
+      tenantLandmarkPlacementTarget = null;
+      tenantRoadEditMode = false;
+      tenantRoadEditDraft = null;
+      tenantRoadDrawingTarget = { name: roadName, points: [] };
+      tenantMapPolygonMode = false;
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+      await ensureAccessEditablePreview();
+    }
+
+    function selectManualRoadDrawingRoad(name) {
+      if (!tenantRoadDrawingTarget) return;
+      tenantRoadDrawingTarget = { name: String(name || '').trim(), points: [] };
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+    }
+
+    function undoManualRoadDrawing() {
+      if (!tenantRoadDrawingTarget?.points?.length) return;
+      tenantRoadDrawingTarget.points.pop();
+      renderTenantMapPolygonOverlay();
+      updateTenantRoadControls();
+    }
+
+    async function finishManualRoadDrawing() {
+      if (!tenantRoadDrawingTarget || tenantRoadDrawingTarget.points.length < 2) return;
+      const paths = Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : [];
+      tenantProjectData.manual_road_paths = paths.filter(item => accessRoadNameKey(item?.name) !== accessRoadNameKey(tenantRoadDrawingTarget.name))
+        .concat([{ name: tenantRoadDrawingTarget.name, points: tenantRoadDrawingTarget.points }]);
+      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), access: false };
+      tenantRoadDrawingTarget = null;
+      releaseLocationSectionApproval();
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+      triggerAutoSaveDraft();
+      await applyAccessMapEdits();
+      toast('تم اعتماد مسار الطريق');
     }
 
     function cancelManualRoadDrawing() {
@@ -16007,6 +16298,7 @@
         tenantProjectData.location_coordinates_confirmed = false;
         tenantProjectData.location_coordinates_source = data.source || 'site_analysis';
         tenantProjectData.location_analysis_approved = false;
+        releaseLocationSectionApproval();
         tenantProjectData.location_analysis_approved_at = '';
         setLocationDataFetchedAt();
         Object.entries(fields).forEach(([key, value]) => {
@@ -16025,6 +16317,7 @@
           tenantMapPolygonMode = false;
           tenantMapPinMode = false;
           tenantMapDraftPinHistory = [];
+          resetTenantRoadModes();
           renderTenantMapPolygonOverlay();
         }
         tenantCreativeImages = tenantCreativeImages || {};
@@ -16055,7 +16348,7 @@
 
     const MAP_PREVIEW_VIEW_DEFS = [
       { mapType: 'overview', title: 'خريطة الأرض / المبنى', keys: ['##MAP_OVERVIEW##', '##MAP_OVERVIEW_SATELLITE##', '##MAP_OVERVIEW_ROADMAP##'], editableKeys: ['##MAP_OVERVIEW_EDITABLE##', '##MAP_OVERVIEW_SATELLITE_EDITABLE##', '##MAP_OVERVIEW_ROADMAP_EDITABLE##'] },
-      { mapType: 'access', title: 'خريطة الطرق الرئيسية', keys: ['##MAP_ACCESS##', '##MAP_ACCESS_SATELLITE##', '##MAP_ACCESS_ROADMAP##'] },
+      { mapType: 'access', title: 'خريطة الطرق الرئيسية', keys: ['##MAP_ACCESS##', '##MAP_ACCESS_SATELLITE##', '##MAP_ACCESS_ROADMAP##'], editableKeys: ['##MAP_ACCESS_EDITABLE##', '##MAP_ACCESS_SATELLITE_EDITABLE##', '##MAP_ACCESS_ROADMAP_EDITABLE##'] },
       { mapType: 'catchment', title: 'خريطة المنطقة', keys: ['##MAP_CATCHMENT##', '##MAP_CATCHMENT_SATELLITE##', '##MAP_CATCHMENT_ROADMAP##'] },
       { mapType: 'landmarks', title: 'خريطة المعالم', keys: ['##MAP_LANDMARKS##', '##MAP_LANDMARKS_SATELLITE##', '##MAP_LANDMARKS_ROADMAP##'] }
     ];
@@ -16107,6 +16400,7 @@
         tenantMapPinMode = false;
         tenantMapDraftPinHistory = [];
       }
+      if (mapType !== 'access') resetTenantRoadModes();
       tenantSelectedMapType = mapType;
       renderLocationWorkflowState();
       const placeholders = tenantCreativeImages.map_placeholders || {};
@@ -16166,6 +16460,7 @@
     async function unapproveMapPreview(mapType) {
       // Approval was one-way, so an approved map could never be regenerated or replaced.
       tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
+      releaseLocationSectionApproval();
       await saveMapPreviewState();
       renderMapPreviewGallery();
       renderLocationWorkflowState();
@@ -16219,6 +16514,15 @@
         if (mapType === 'landmarks') {
           tenantCreativeImages.map_landmarks = data.landmarks_matrix || data.landmarks || [];
           tenantProjectData.landmarks_matrix = tenantCreativeImages.map_landmarks;
+        }
+        if (mapType === 'access') {
+          tenantProjectData.access_roads_data = Array.isArray(data.accessRoads) ? data.accessRoads : [];
+          tenantCreativeImages.map_access_roads = tenantProjectData.access_roads_data;
+          const positions = { ...(tenantProjectData.access_road_label_positions || {}) };
+          tenantProjectData.access_roads_data.forEach(road => {
+            if (road?.name && Array.isArray(road.label_point) && !positions[road.name]) positions[road.name] = road.label_point;
+          });
+          tenantProjectData.access_road_label_positions = positions;
         }
         tenantCreativeImages.maps_persisted = true;
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
@@ -16280,9 +16584,14 @@
         updateTenantPolygonControls();
         return;
       }
+      if (tenantRoadEditMode && tenantSelectedMapType === 'access') {
+        setAccessRoadLabelFromMap(nextLat, nextLng);
+        return;
+      }
       if (tenantRoadDrawingTarget && tenantSelectedMapType === 'access') {
         tenantRoadDrawingTarget.points.push([nextLat, nextLng]);
         renderTenantMapPolygonOverlay();
+        updateTenantRoadControls();
         const status = document.getElementById('manualRoadDrawingStatus');
         if (status) status.textContent = 'رسم مسار: ' + tenantRoadDrawingTarget.name + ' — ' + tenantRoadDrawingTarget.points.length + ' نقاط';
         return;
@@ -16315,9 +16624,18 @@
       if (pinConfirmButton) pinConfirmButton.disabled = locked || tenantMapDraftPinHistory.length <= 1;
     }
 
+    function updateTenantRoadControls() {
+      const editUndo = document.getElementById('undoAccessRoadEditsButton');
+      const pathUndo = document.getElementById('undoManualRoadDrawingButton');
+      const pathConfirm = document.getElementById('confirmManualRoadDrawingButton');
+      if (editUndo) editUndo.disabled = !tenantRoadEditHistory.length;
+      if (pathUndo) pathUndo.disabled = !tenantRoadDrawingTarget?.points?.length;
+      if (pathConfirm) pathConfirm.disabled = (tenantRoadDrawingTarget?.points?.length || 0) < 2;
+    }
+
     function updateTenantMapInteractionState() {
       const image = document.querySelector('#mapPreviewImage img');
-      if (image) image.style.cursor = tenantMapPolygonMode || tenantMapPinMode || tenantRoadDrawingTarget || tenantLandmarkPlacementTarget ? 'crosshair' : 'default';
+      if (image) image.style.cursor = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantLandmarkPlacementTarget ? 'crosshair' : 'default';
     }
 
     async function applyOverviewMapEdits() {
@@ -16347,6 +16665,47 @@
         triggerAutoSaveDraft();
         return false;
       }
+    }
+
+    async function applyAccessMapEdits() {
+      try {
+          const payload = slimMapProjectData(tenantProjectData);
+          payload.location_analysis_approved = tenantProjectData.location_analysis_approved === true || tenantProjectData.location_analysis_approved === 'true';
+          payload.draftId = tenantProjectData.draftId;
+          const data = await api('POST', '/api/generate-map-image', {
+            projectData: payload,
+            mapType: 'access',
+            presentationId: tenantPresentationId,
+            overviewApproved: true,
+            mapApproved: false,
+            overlayOnly: true
+          });
+          if (!data.success) return false;
+          tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
+          tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
+          tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+          tenantProjectData.access_roads_data = Array.isArray(data.accessRoads) ? data.accessRoads : tenantProjectData.access_roads_data || [];
+          tenantCreativeImages.map_access_roads = tenantProjectData.access_roads_data;
+          const positions = { ...(tenantProjectData.access_road_label_positions || {}) };
+          tenantProjectData.access_roads_data.forEach(road => {
+            if (road?.name && Array.isArray(road.label_point)) positions[road.name] = road.label_point;
+          });
+          tenantProjectData.access_road_label_positions = positions;
+          tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
+          await saveMapPreviewState();
+          renderMapPreviewGallery();
+          return true;
+        } catch (error) {
+          console.warn('[ACCESS MAP OVERLAY]', error);
+          triggerAutoSaveDraft();
+          return false;
+      }
+    }
+
+    async function ensureAccessEditablePreview() {
+      if (tenantMapPreviewState?.usesEditableBase) return true;
+      if (!(await applyAccessMapEdits())) return false;
+      return selectMapPreviewView('access');
     }
 
     async function toggleTenantPolygonMode() {
@@ -16457,12 +16816,12 @@
       const img = document.querySelector('#mapPreviewImage img');
       const state = tenantMapPreviewState;
       const polygonPoints = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
-      const roadPaths = Array.isArray(tenantProjectData.manual_road_paths) ? [...tenantProjectData.manual_road_paths] : [];
-      if (tenantRoadDrawingTarget?.points?.length) roadPaths.push(tenantRoadDrawingTarget);
+      const roadPaths = tenantSelectedMapType === 'access' ? accessRoadGeometry() : [];
       const showBoundary = tenantSelectedMapType === 'overview' && (!!state?.usesEditableBase || tenantMapPolygonMode) && polygonPoints.length > 0;
       const showPin = tenantSelectedMapType === 'overview' && (!!state?.usesEditableBase || tenantMapPinMode);
-      const showRoads = tenantSelectedMapType === 'access';
-      if (!overlay || !img || !state || !img.naturalWidth || !img.naturalHeight || (!showBoundary && !showPin && (!showRoads || !roadPaths.length))) {
+      const showRoads = tenantSelectedMapType === 'access' && !!state?.usesEditableBase;
+      const showAccessPin = tenantSelectedMapType === 'access' && !!state?.usesEditableBase;
+      if (!overlay || !img || !state || !img.naturalWidth || !img.naturalHeight || (!showBoundary && !showPin && !showAccessPin && (!showRoads || !roadPaths.length))) {
         if (overlay) overlay.innerHTML = '';
         return;
       }
@@ -16489,16 +16848,28 @@
       const savedPin = [Number(tenantProjectData.location_lat), Number(tenantProjectData.location_lng)];
       const draftPin = tenantMapPinMode && tenantMapDraftPinHistory.length ? tenantMapDraftPinHistory[tenantMapDraftPinHistory.length - 1] : savedPin;
       let pinMarkup = '';
-      if (showPin && draftPin.every(Number.isFinite)) {
+      if ((showPin || showAccessPin) && draftPin.every(Number.isFinite)) {
         const [pinX, pinY] = toPoint(draftPin).split(',');
         pinMarkup = '<circle cx="' + pinX + '%" cy="' + pinY + '%" r="2.2" fill="rgba(107,28,35,.24)" stroke="#fff" stroke-width="0.7"></circle>' +
           '<circle cx="' + pinX + '%" cy="' + pinY + '%" r="1.25" fill="#6B1C23" stroke="#6B1C23" stroke-width="0.35"><title>موقع المبنى</title></circle>';
       }
       const roadMarkup = showRoads ? roadPaths.map(path => {
-        const roadPoints = (path.points || []).map(toPoint).join(' ');
-        return roadPoints ? '<polyline points="' + roadPoints + '" fill="none" stroke="#d4a359" stroke-width="0.8"><title>' + escapeHtml(path.name || 'طريق') + '</title></polyline>' : '';
+        const roadPoints = (path.points || []).map(toPoint);
+        if (roadPoints.length < 2) return '';
+        const labelPoint = Array.isArray(path.label_point) ? toPoint(path.label_point) : roadPoints[Math.floor(roadPoints.length / 2)];
+        const [labelX, labelY] = labelPoint.split(',').map(Number);
+        const label = String(path.name || '');
+        const labelWidth = Math.min(30, Math.max(12, label.length * 1.15));
+        return '<polyline points="' + roadPoints.join(' ') + '" fill="none" stroke="rgba(105,73,35,.55)" stroke-width="1.8"></polyline>' +
+          '<polyline points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="0.9"><title>' + escapeHtml(label) + '</title></polyline>' +
+          (label ? '<rect x="' + (labelX - labelWidth / 2).toFixed(3) + '" y="' + (labelY - 3.2).toFixed(3) + '" width="' + labelWidth.toFixed(3) + '" height="6.4" rx="1.1" fill="#254b66" stroke="#f0e6d2" stroke-width="0.35"></rect>' +
+            '<text x="' + labelX.toFixed(3) + '" y="' + (labelY + 1.2).toFixed(3) + '" text-anchor="middle" font-size="3.1" font-weight="700" fill="#fff">' + escapeHtml(label) + '</text>' : '');
       }).join('') : '';
-      overlay.innerHTML = boundaryMarkup + pinMarkup + roadMarkup;
+      const roadPointMarkup = tenantRoadDrawingTarget ? tenantRoadDrawingTarget.points.map(point => {
+        const [x, y] = toPoint(point).split(',');
+        return '<circle cx="' + x + '%" cy="' + y + '%" r="1.15" fill="#fff" stroke="#6B1C23" stroke-width="0.45"></circle>';
+      }).join('') : '';
+      overlay.innerHTML = boundaryMarkup + roadMarkup + roadPointMarkup + pinMarkup;
     }
 
     function removeTenantPolygonPoint(index) {
@@ -19948,7 +20319,7 @@
       tenantMapPolygonMode = false;
       tenantMapPinMode = false;
       tenantMapDraftPinHistory = [];
-      tenantRoadDrawingTarget = null;
+      resetTenantRoadModes();
       tenantLandmarkPlacementTarget = null;
       tenantNearbyLandmarks = [];
       tenantActiveProjectSection = null;
@@ -20118,6 +20489,7 @@
         tenantMapPolygonMode = false;
         tenantMapPinMode = false;
         tenantMapDraftPinHistory = [];
+        resetTenantRoadModes();
         tenantNearbyLandmarks = [];
         tenantActiveProjectSection = null;
         tempCoverImage = null;

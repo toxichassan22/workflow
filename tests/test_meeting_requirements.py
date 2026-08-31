@@ -4079,6 +4079,97 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('ensureEditableOverviewPreview()', drawing_start)
         self.assertNotIn('ensureEditableOverviewPreview()', pin_start)
 
+    def test_access_map_edits_are_scoped_persistent_and_provider_free(self):
+        client = self.app.test_client()
+        result = {'placeholders': {}, 'zooms': {'access': 16}, 'centers': {'access': {'lat': 24.0, 'lng': 46.0}}, 'access_roads': []}
+        with patch.object(self.application_module.maps_service, 'recompose_access_map', return_value=result) as recompose, \
+                patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps, \
+                patch.object(self.application_module.db, 'delete_map_images') as delete_images:
+            response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'quick-access',
+                                'location_analysis_approved': False, 'location_coordinates_confirmed': True},
+                'mapType': 'access',
+                'overlayOnly': True,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        recompose.assert_called_once()
+        generate_maps.assert_not_called()
+        delete_images.assert_not_called()
+
+        from PIL import Image
+        editable_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        editable_path = editable_file.name
+        editable_file.close()
+        final_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        final_path = final_file.name
+        final_file.close()
+        self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
+        self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
+        Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 16, 'center_lat': 24.0, 'center_lng': 46.0,
+                    'access_roads_version': self.application_module.maps_service.ACCESS_ROADS_RENDER_VERSION,
+                    'map_highlight_version': self.application_module.maps_service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': self.application_module.maps_service.MAP_LABEL_RENDER_VERSION}
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'access_editable', editable_path, '##MAP_ACCESS_EDITABLE##',
+                             'draft_quick-access-compose', metadata)
+            with patch.object(self.application_module.maps_service, 'get_static_map') as provider, \
+                    patch.object(self.application_module.maps_service, '_snap_to_roads') as roads_provider, \
+                    patch.object(self.application_module.maps_service, '_google_directions_route') as directions_provider, \
+                    patch.object(self.application_module.maps_service, '_unique_map_path', return_value=final_path):
+                composed = self.application_module.maps_service.recompose_access_map({
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'main_roads': 'شارع صحيح',
+                    'access_roads_data': [{'name': 'شارع صحيح', 'points': [[24.0, 45.9998], [24.0, 46.0002]]}],
+                    'access_road_label_positions': {'شارع صحيح': [24.0001, 46.0]},
+                }, self.tenant_a, draft_id='quick-access-compose')
+            provider.assert_not_called()
+            roads_provider.assert_not_called()
+            directions_provider.assert_not_called()
+        self.assertNotIn('error', composed)
+        self.assertEqual(composed['placeholders']['##MAP_ACCESS##'], final_path)
+        self.assertEqual(composed['access_roads'][0]['name'], 'شارع صحيح')
+        self.assertNotEqual(Path(editable_path).read_bytes(), Path(final_path).read_bytes())
+
+        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        workflow = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
+        for label in ('إعادة توليد الخريطة', 'اعتماد الخريطة', 'إضافة / تعديل الطرق', 'رسم مسار الطرق'):
+            self.assertIn(label, workflow)
+        for label in ('اختيار الطريق', 'اعتماد المسارات', 'تراجع', 'إلغاء'):
+            self.assertIn(label, source)
+        self.assertIn("view.mapType === 'access' && tenantRoadEditMode", workflow)
+        self.assertIn("view.mapType === 'access' && tenantRoadDrawingTarget", workflow)
+        for function_name in ('startAccessRoadEditMode', 'undoAccessRoadEdits', 'confirmAccessRoadEdits',
+                              'cancelAccessRoadEdits', 'selectManualRoadDrawingRoad', 'undoManualRoadDrawing',
+                              'applyAccessMapEdits'):
+            self.assertIn('function ' + function_name + '(', source)
+        path_start = source.split('function startManualRoadDrawing(name)', 1)[1].split('async function finishManualRoadDrawing()', 1)[0]
+        path_confirm = source.split('async function finishManualRoadDrawing()', 1)[1].split('function cancelManualRoadDrawing()', 1)[0]
+        edit_confirm = source.split('async function confirmAccessRoadEdits()', 1)[1].split('function cancelAccessRoadEdits()', 1)[0]
+        self.assertNotIn('regenerateMapPreview(', path_start + path_confirm + edit_confirm)
+        self.assertNotIn('showLoader(', path_start + path_confirm + edit_confirm)
+        self.assertIn('await applyAccessMapEdits()', path_confirm)
+        self.assertIn('await applyAccessMapEdits()', edit_confirm)
+        self.assertIn('tenantProjectData.manual_road_paths', path_confirm)
+        self.assertIn('tenantProjectData.access_road_label_positions', edit_confirm)
+        self.assertIn("editableKeys: ['##MAP_ACCESS_EDITABLE##'", source)
+        self.assertIn("'access_roads_data'", source)
+        self.assertIn("'access_road_label_positions'", source)
+        self.assertIn('tenantProjectData.main_roads = hidden.value;', source)
+        self.assertIn('function invalidateAccessMapApproval()', source)
+
+        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        self.assertIn('def recompose_access_map(', maps_source)
+        self.assertIn('allow_discovery=False', maps_source)
+        self.assertIn("(project_data or {}).get('access_roads_data')", maps_source)
+        self.assertIn("(project_data or {}).get('access_road_label_positions')", maps_source)
+        approved = self.application_module.maps_service._approved_manual_road_paths([
+            {'name': 'شارع صحيح', 'points': [[24.0, 46.0], [24.1, 46.1]]},
+            {'name': 'شارع غير موجود', 'points': [[24.0, 46.0], [24.1, 46.1]]},
+        ], ['شارع صحيح'])
+        self.assertEqual([name for _, name in approved], ['شارع صحيح'])
+
     def test_location_tables_and_controls_are_scoped_to_their_maps(self):
         source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertNotIn('lt-location-input', source)
@@ -4088,6 +4179,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('.location-table .lt-map-select {', source)
         self.assertIn('width: 17px;', source)
         self.assertIn("actionGroup.className = 'lt-action-group';", source)
+        self.assertIn("delBtn.dataset.sectionLockIgnore = '1';", source)
+        self.assertIn("drawBtn.dataset.sectionLockIgnore = '1';", source)
+        self.assertIn("placeBtn.dataset.sectionLockIgnore = '1';", source)
+        self.assertIn("addBtn.dataset.sectionLockIgnore = '1';", source)
+        self.assertIn(".forEach(control => { control.disabled = roadModeLocked; });", source)
+        self.assertIn('function releaseLocationSectionApproval()', source)
+        self.assertIn("applySectionStatuses({ location: 'draft' });", source)
         self.assertIn("document.createElement(cfg.road ? 'textarea' : 'input')", source)
         self.assertIn('resize: vertical;', source)
         self.assertIn("main_roads: { nameLabel: 'الطريق الرئيسي', nameHint: 'مثال: طريق الملك فهد', nameOnly: true, road: true, mapType: 'access' }", source)
@@ -4103,12 +4201,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         road_body = source.split('function startManualRoadDrawing(name)', 1)[1].split('function finishManualRoadDrawing', 1)[0]
         self.assertIn("openLocationTableMap('access')", road_body)
         overlay_body = source.split('function renderTenantMapPolygonOverlay()', 1)[1].split('function removeTenantPolygonPoint', 1)[0]
-        self.assertIn("const showRoads = tenantSelectedMapType === 'access';", overlay_body)
+        self.assertIn("const showRoads = tenantSelectedMapType === 'access' &&", overlay_body)
 
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v12-context-zoom-road-names'", source)
+        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v13-editable-road-labels'", source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
         self.assertIn("def _strip_arabic_diacritics(text):", source)
         self.assertIn("def _arabic_reshaper_without_ligatures():", source)
@@ -4119,7 +4217,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertGreater(overlay_font.stat().st_size, 10000)
         self.assertEqual(overlay_font.read_bytes()[:4], b'\x00\x01\x00\x00')
         self.assertIn("'feature:road|element:labels|visibility:off'", source)
-        self.assertIn('pending_labels.append((route_segment, label_text))', source)
+        self.assertIn('pending_labels.append((route_segment, label_text, coords))', source)
         self.assertIn('labels_overlay = Image.new', source)
         self.assertIn('distance=52', source)
         self.assertIn('candidates = preferred_candidates or visible_candidates', source)

@@ -271,7 +271,14 @@ assertion deliberately, not reflexively.
   when none are selected, table order supplies the first seven. The tables have no per-row URL field:
   nearby placement opens the landmarks map and city placement opens the catchment map. Access uses
   approved `main_roads` only, never hidden secondary roads; `manual_road_paths` supplies client-drawn
-  geometry on the access map. The map toolbar renders only the currently selected map's actions.
+  geometry and `access_road_label_positions` stores movable labels. Initial generation persists the
+  verified Google geometry in `access_roads_data` plus a clean `##MAP_ACCESS_EDITABLE##` sidecar.
+  Name/label and path modes edit those values with undo/confirm/cancel, release only the access-image
+  approval, and recompose locally without another provider call. A new name has no highlight until it
+  has verified Google geometry or a manually approved path. The map toolbar renders only the currently
+  selected map's actions. Location-table action buttons bypass the section lock; the first real data
+  change automatically releases both location-analysis approval and the location section status instead
+  of disabling clicks.
 - `catchment_rings()` collapses the catchment rows into at most three concentric drive-time bands and
   `zoom_for_radius_km()` frames the outer one. The rows are destinations, so one ring per row drew
   nine circles up to 31 km wide with unreadable labels. The landmarks view is framed the same way
