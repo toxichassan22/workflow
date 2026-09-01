@@ -4263,6 +4263,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("'catchment_label_positions'", source)
         self.assertIn("'catchment_map_landmarks'", source)
         self.assertIn('map-place-label', source)
+        self.assertIn('map-place-marker', source)
+        self.assertIn('function startCatchmentMarkerDrag(event, name)', source)
+        self.assertIn('tenantCatchmentEditDraft.landmarks', source)
+        self.assertIn('tenantProjectData.city_landmarks_data =', confirm_body)
 
         maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         self.assertIn('def _draw_catchment_markers(', maps_source)

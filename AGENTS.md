@@ -289,8 +289,10 @@ assertion deliberately, not reflexively.
   nine circles up to 31 km wide with unreadable labels. The catchment map uses every explicitly
   selected city-landmark row, even one, or the first seven when none is selected. It persists resolved
   points in `catchment_map_landmarks`, movable blocks in `catchment_label_positions`, and a clean
-  `##MAP_CATCHMENT_EDITABLE##` sidecar. Initial labels use collision-free blocks below their fixed
-  numbered markers; edit-mode drag has undo/confirm/cancel and recomposes locally without Google.
+  `##MAP_CATCHMENT_EDITABLE##` sidecar. Initial labels use collision-free blocks below their numbered
+  markers. Edit mode makes both independently draggable: moving a marker updates the selected row's
+  real lat/lng (and carries its label offset), while moving a label only updates its display position.
+  Undo/confirm/cancel persists both layers and recomposes locally without Google.
   The landmarks view is framed the same way around the landmarks it draws; it used to inherit the plot
   zoom, so every landmark fell outside the frame.
 - **Access-road discovery must be deterministic.** `access_probe_points()` is fixed; it used to be

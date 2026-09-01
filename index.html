@@ -4029,6 +4029,31 @@
       border-color: #d4a359;
     }
 
+    .map-place-marker {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      transform: translate(-50%, -100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      background: #8b2020;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, .35);
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    .map-place-marker.editable {
+      pointer-events: auto;
+      cursor: move;
+    }
+
     .map-road-label-delete {
       position: absolute;
       top: -12px;
@@ -12615,9 +12640,11 @@
       const selectedRows = cityRows.filter(item => item?.show_on_map === true || item?.selected === true);
       const desiredRows = (selectedRows.length ? selectedRows : cityRows).slice(0, 7);
       const storedByName = new Map(stored.map(item => [String(item?.name || '').trim(), item]));
-      const source = desiredRows.length
-        ? desiredRows.map(item => ({ ...(storedByName.get(String(item?.name || '').trim()) || {}), ...item }))
-        : stored.slice(0, 7);
+      const source = tenantCatchmentEditMode && Array.isArray(tenantCatchmentEditDraft?.landmarks)
+        ? tenantCatchmentEditDraft.landmarks
+        : desiredRows.length
+          ? desiredRows.map(item => ({ ...(storedByName.get(String(item?.name || '').trim()) || {}), ...item }))
+          : stored.slice(0, 7);
       const positions = tenantCatchmentEditMode
         ? tenantCatchmentEditDraft?.labelPositions || {}
         : tenantProjectData.catchment_label_positions || {};
@@ -12641,6 +12668,7 @@
       tenantProjectData.catchment_map_landmarks = catchmentMapLandmarks();
       tenantCatchmentEditMode = true;
       tenantCatchmentEditDraft = {
+        landmarks: JSON.parse(JSON.stringify(tenantProjectData.catchment_map_landmarks || [])),
         labelPositions: JSON.parse(JSON.stringify(tenantProjectData.catchment_label_positions || {}))
       };
       tenantCatchmentEditHistory = [];
@@ -12672,6 +12700,41 @@
       event.stopPropagation();
     }
 
+    function startCatchmentMarkerDrag(event, name) {
+      if (!tenantCatchmentEditMode || !tenantCatchmentEditDraft) return;
+      const item = tenantCatchmentEditDraft.landmarks.find(value => value?.name === name);
+      if (!item) return;
+      pushCatchmentEditHistory();
+      updateTenantCatchmentControls();
+      const image = document.querySelector('#mapPreviewImage img');
+      const startLat = Number(item.lat);
+      const startLng = Number(item.lng);
+      const initialLabel = tenantCatchmentEditDraft.labelPositions[name] || item.label_point;
+      const move = moveEvent => {
+        const coordinates = tenantMapCoordinatesFromClient(moveEvent.clientX, moveEvent.clientY, image);
+        if (!coordinates) return;
+        item.lat = coordinates[0];
+        item.lng = coordinates[1];
+        if (Array.isArray(initialLabel)) {
+          tenantCatchmentEditDraft.labelPositions[name] = [
+            Number(initialLabel[0]) + coordinates[0] - startLat,
+            Number(initialLabel[1]) + coordinates[1] - startLng
+          ];
+        }
+        renderTenantMapPolygonOverlay();
+      };
+      const stop = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', stop);
+        window.removeEventListener('pointercancel', stop);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', stop);
+      window.addEventListener('pointercancel', stop);
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
     function undoCatchmentEdits() {
       const snapshot = tenantCatchmentEditHistory.pop();
       if (!snapshot) return;
@@ -12684,6 +12747,11 @@
       if (!tenantCatchmentEditMode || !tenantCatchmentEditDraft) return;
       tenantProjectData.catchment_label_positions = { ...tenantCatchmentEditDraft.labelPositions };
       tenantProjectData.catchment_map_landmarks = catchmentMapLandmarks();
+      const updatedByName = new Map(tenantProjectData.catchment_map_landmarks.map(item => [item.name, item]));
+      tenantProjectData.city_landmarks_data = (Array.isArray(tenantProjectData.city_landmarks_data) ? tenantProjectData.city_landmarks_data : []).map(item => {
+        const updated = updatedByName.get(item?.name);
+        return updated ? { ...item, lat: updated.lat, lng: updated.lng } : item;
+      });
       tenantCatchmentEditMode = false;
       tenantCatchmentEditDraft = null;
       tenantCatchmentEditHistory = [];
@@ -17168,8 +17236,12 @@
         const y = customPoint?.[1] ?? markerPoint[1] + 5;
         if (!Number.isFinite(x) || !Number.isFinite(y)) return '';
         const encodedName = encodeURIComponent(String(item.name)).replace(/'/g, '%27');
-        return '<div class="map-place-label' + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;padding:3px 7px"' +
+        const index = items.indexOf(item) + 1;
+        const marker = '<div class="map-place-marker' + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-marker="' + escapeHtml(item.name) + '" style="left:' + markerPoint[0].toFixed(3) + '%;top:' + markerPoint[1].toFixed(3) + '%"' +
+          (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentMarkerDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + index + '</div>';
+        const label = '<div class="map-place-label' + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;padding:3px 7px"' +
           (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + escapeHtml(item.name) + '</div>';
+        return marker + label;
       }).join('');
     }
 
@@ -17233,12 +17305,7 @@
         const [x, y] = toPoint(point).split(',');
         return '<circle cx="' + x + '%" cy="' + y + '%" r="1.15" fill="#fff" stroke="#6B1C23" stroke-width="0.45"></circle>';
       }).join('') : '';
-      const catchmentMarkerMarkup = showCatchment ? catchmentItems.map((item, index) => {
-        const [x, y] = toPoint([item.lat, item.lng]).split(',');
-        return '<circle cx="' + x + '%" cy="' + y + '%" r="1.45" fill="#8B2020" stroke="#fff" stroke-width="0.45"><title>' + escapeHtml(item.name || '') + '</title></circle>' +
-          '<text x="' + x + '%" y="' + y + '%" dy="1" text-anchor="middle" font-size="2.2" font-weight="700" fill="#fff">' + (index + 1) + '</text>';
-      }).join('') : '';
-      overlay.innerHTML = boundaryMarkup + roadMarkup + roadPointMarkup + catchmentMarkerMarkup + pinMarkup;
+      overlay.innerHTML = boundaryMarkup + roadMarkup + roadPointMarkup + pinMarkup;
       if (showRoads) renderAccessRoadLabels(roadPaths, toPoint, true);
       else if (showCatchment) renderCatchmentLabels(catchmentItems, toPoint);
       else if (labelLayer) {
