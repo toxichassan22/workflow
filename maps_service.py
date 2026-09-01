@@ -940,7 +940,8 @@ def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, siz
         return False
 
 
-def _draw_catchment_markers(image_path, center_lat, center_lng, zoom, landmarks, label_positions=None, scale=2):
+def _draw_catchment_markers(image_path, center_lat, center_lng, zoom, landmarks, label_positions=None, scale=2,
+                            site_lat=None, site_lng=None):
     try:
         img = Image.open(image_path).convert('RGBA')
         overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
@@ -953,7 +954,11 @@ def _draw_catchment_markers(image_path, center_lat, center_lng, zoom, landmarks,
                 positions = json.loads(positions)
             except (TypeError, ValueError):
                 positions = {}
-        marker_items = _build_markers(center_lat, center_lng, landmarks)
+        marker_items = _build_markers(
+            site_lat if site_lat is not None else center_lat,
+            site_lng if site_lng is not None else center_lng,
+            landmarks,
+        )
         occupied = []
         rendered = []
         for marker in marker_items:
@@ -2968,6 +2973,7 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
     landmarks_matrix = next((m.get('landmarks_matrix') for m in metadata_by_type.values() if m.get('landmarks_matrix')), [])
     access_roads = next((m.get('access_roads') for m in metadata_by_type.values() if m.get('access_roads')), [])
     catchment_landmarks = next((m.get('catchment_landmarks') for m in metadata_by_type.values() if m.get('catchment_landmarks')), [])
+    landmark_map_items = next((m.get('landmark_map_items') for m in metadata_by_type.values() if m.get('landmark_map_items')), [])
     zooms = {
         image_type: meta['zoom'] for image_type, meta in metadata_by_type.items()
         if isinstance(meta, dict) and meta.get('zoom') is not None
@@ -2985,6 +2991,7 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
         'landmarks_matrix': landmarks_matrix,
         'access_roads': access_roads,
         'catchment_landmarks': catchment_landmarks,
+        'landmark_map_items': landmark_map_items,
         'zooms': zooms,
         'centers': centers,
         'found_types': found_types,
@@ -3396,6 +3403,129 @@ def recompose_catchment_map(project_data, tenant_id, presentation_id=None, draft
         return _recompose_catchment_map(project_data, tenant_id, effective_id)
 
 
+def _recompose_landmarks_map(project_data, tenant_id, effective_id):
+    from db import add_map_image, get_map_images, update_map_image
+    rows = get_map_images(tenant_id, presentation_id=effective_id)
+    by_type = {}
+    for row in rows:
+        if row.get('image_type') not in by_type and os.path.isfile(row.get('file_path') or ''):
+            by_type[row['image_type']] = row
+    site_lat = _extract_coordinate(project_data.get('location_lat') or project_data.get('locationLat') or project_data.get('lat'))
+    site_lng = _extract_coordinate(project_data.get('location_lng') or project_data.get('locationLng') or project_data.get('lng'))
+    if site_lat is None or site_lng is None:
+        return {'error': 'لم يتم العثور على إحداثيات الموقع المعتمدة'}
+    landmarks = project_data.get('landmark_map_items') or []
+    if isinstance(landmarks, str):
+        try:
+            landmarks = json.loads(landmarks)
+        except (TypeError, ValueError):
+            landmarks = []
+    if not isinstance(landmarks, list):
+        landmarks = []
+    map_styles = project_data.get('map_styles') or {}
+    if isinstance(map_styles, str):
+        try:
+            map_styles = json.loads(map_styles)
+        except (TypeError, ValueError):
+            map_styles = {}
+    draw_compass = project_data.get('draw_compass', True)
+    if isinstance(draw_compass, str):
+        draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
+    for final_type, editable_type in (
+        ('landmarks', 'landmarks_editable'),
+        ('landmarks_satellite', 'landmarks_satellite_editable'),
+        ('landmarks_roadmap', 'landmarks_roadmap_editable'),
+    ):
+        final = by_type.get(final_type)
+        if not final or editable_type in by_type:
+            continue
+        try:
+            metadata = json.loads(final.get('metadata_json') or '{}')
+            center_lat = float(metadata.get('center_lat'))
+            center_lng = float(metadata.get('center_lng'))
+            zoom = int(metadata.get('zoom'))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        active_maptype = 'satellite' if final_type.endswith('_satellite') else 'roadmap' if final_type.endswith('_roadmap') else str(map_styles.get('landmarks') or project_data.get('map_type') or 'satellite')
+        if active_maptype in {'auto', 'both'}:
+            active_maptype = 'satellite'
+        styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
+        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
+        if not os.path.isfile(cached_base):
+            continue
+        editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
+        shutil.copyfile(cached_base, editable_path)
+        if active_maptype == 'satellite':
+            _apply_sepia_tone(editable_path, intensity=0.35)
+            _apply_map_overlay(editable_path, dark_factor=0.20)
+        if draw_compass:
+            _draw_compass(editable_path, position='top-right')
+        editable_placeholder = str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
+        editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
+        by_type[editable_type] = {
+            'id': editable_id,
+            'image_type': editable_type,
+            'file_path': editable_path,
+            'placeholder': editable_placeholder,
+            'metadata_json': json.dumps(metadata, ensure_ascii=False),
+        }
+    placeholders = {}
+    centers = {}
+    zooms = {}
+    rendered_landmarks = []
+    for editable_type in ('landmarks_editable', 'landmarks_satellite_editable', 'landmarks_roadmap_editable'):
+        editable = by_type.get(editable_type)
+        if not editable:
+            continue
+        try:
+            metadata = json.loads(editable.get('metadata_json') or '{}')
+            center_lat = float(metadata.get('center_lat'))
+            center_lng = float(metadata.get('center_lng'))
+            zoom = int(metadata.get('zoom'))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        final_type = editable_type.replace('_editable', '')
+        final_placeholder = str(editable.get('placeholder') or '').replace('_EDITABLE##', '##')
+        final_path = _unique_map_path(tenant_id, effective_id, final_type)
+        shutil.copyfile(editable['file_path'], final_path)
+        current_landmarks = _draw_catchment_markers(
+            final_path, center_lat, center_lng, zoom, landmarks,
+            project_data.get('landmark_label_positions'), scale=2, site_lat=site_lat, site_lng=site_lng
+        )
+        next_metadata = {**metadata, 'lat': site_lat, 'lng': site_lng, 'landmark_map_items': current_landmarks}
+        final = by_type.get(final_type)
+        if final:
+            update_map_image(final['id'], tenant_id, final_path, final_placeholder, next_metadata)
+        else:
+            add_map_image(tenant_id, final_type, final_path, final_placeholder, effective_id, next_metadata)
+        update_map_image(editable['id'], tenant_id, editable['file_path'], editable['placeholder'], next_metadata)
+        placeholders[final_placeholder] = final_path
+        placeholders[editable['placeholder']] = editable['file_path']
+        centers['landmarks'] = {'lat': center_lat, 'lng': center_lng}
+        zooms['landmarks'] = zoom
+        if not rendered_landmarks:
+            rendered_landmarks = current_landmarks
+    if not placeholders:
+        return {'error': 'نسخة خريطة المعالم النظيفة غير متاحة'}
+    return {
+        'placeholders': placeholders,
+        'centers': centers,
+        'zooms': zooms,
+        'landmark_map_items': rendered_landmarks,
+    }
+
+
+def recompose_landmarks_map(project_data, tenant_id, presentation_id=None, draft_id=None):
+    effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None)
+    if not effective_id:
+        return {'error': 'معرّف العرض أو المسودة مطلوب'}
+    lock_key = (str(tenant_id), str(effective_id))
+    with _MAP_GENERATION_LOCKS_GUARD:
+        lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
+    with lock:
+        return _recompose_landmarks_map(project_data, tenant_id, effective_id)
+
+
 def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None) or (project_data or {}).get('draft_id') or (project_data or {}).get('draftId') or 'unscoped'
     lock_key = (str(tenant_id), str(effective_id))
@@ -3489,6 +3619,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         'landmarks_matrix': [],
         'access_roads': [],
         'catchment_landmarks': [],
+        'landmark_map_items': [],
     }
 
     polygon_coords = None
@@ -3776,7 +3907,6 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 landmarks_zoom = fitted_zoom
                 result['zooms']['landmarks'] = landmarks_zoom
                 print(f'[LANDMARKS] {len(shown_landmarks)} landmarks within {radius_km:.1f} km, zoom {landmarks_zoom}')
-        landmarks_markers = _build_markers(marker_lat, marker_lng, shown_landmarks or landmarks)
         landmarks_mt = map_styles['landmarks']
         if landmarks_mt == 'both':
             styles_to_gen = [('satellite', '##MAP_LANDMARKS_SATELLITE##', 'landmarks_satellite'),
@@ -3784,6 +3914,11 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         else:
             styles_to_gen = [(landmarks_mt, '##MAP_LANDMARKS##', 'landmarks')]
 
+        editable_placeholders = {
+            '##MAP_LANDMARKS##': '##MAP_LANDMARKS_EDITABLE##',
+            '##MAP_LANDMARKS_SATELLITE##': '##MAP_LANDMARKS_SATELLITE_EDITABLE##',
+            '##MAP_LANDMARKS_ROADMAP##': '##MAP_LANDMARKS_ROADMAP_EDITABLE##',
+        }
         for active_mt, placeholder, img_suffix in styles_to_gen:
             landmarks_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
             lm_res = get_static_map(map_center_lat, map_center_lng, zoom=landmarks_zoom, size=(1280, 720), output_path=landmarks_path, maptype=active_mt, styles=_styles_for(active_mt, SATELLITE_WIDE_STYLES), bypass_cache=refresh_maps)
@@ -3791,15 +3926,39 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 if active_mt == 'satellite':
                     _apply_sepia_tone(landmarks_path, intensity=0.35)
                     _apply_map_overlay(landmarks_path, dark_factor=0.20)
-                _overlay_markers(landmarks_path, map_center_lat, map_center_lng, landmarks_zoom, landmarks_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(landmarks_path, position='top-right')
                 if draw_inset:
                     _draw_inset_map(landmarks_path, lat, lng, inset_size=180)
+                editable_placeholder = editable_placeholders[placeholder]
+                editable_suffix = img_suffix + '_editable'
+                editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
+                shutil.copyfile(landmarks_path, editable_path)
+                rendered_landmarks = _draw_catchment_markers(
+                    landmarks_path, map_center_lat, map_center_lng, landmarks_zoom, shown_landmarks or landmarks,
+                    project_data.get('landmark_label_positions'), scale=2, site_lat=marker_lat, site_lng=marker_lng
+                )
+                if not result['landmark_map_items']:
+                    result['landmark_map_items'] = rendered_landmarks
+                metadata = {
+                    'lat': lat,
+                    'lng': lng,
+                    'zoom': landmarks_zoom,
+                    'center_lat': map_center_lat,
+                    'center_lng': map_center_lng,
+                    'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': MAP_LABEL_RENDER_VERSION,
+                    'highlight_site': bool(highlight_site),
+                    'landmarks': landmarks,
+                    'landmarks_matrix': result.get('landmarks_matrix') or [],
+                    'landmark_map_items': rendered_landmarks,
+                }
                 result['placeholders'][placeholder] = landmarks_path
+                result['placeholders'][editable_placeholder] = editable_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': landmarks_zoom, 'center_lat': map_center_lat, 'center_lng': map_center_lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'landmarks': landmarks, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, landmarks_path, placeholder, effective_pres_id, metadata)
+                add_map_image(tenant_id, editable_suffix, editable_path, editable_placeholder, effective_pres_id, metadata)
 
     # Generate map_access
     if 'access' in enabled_maps:

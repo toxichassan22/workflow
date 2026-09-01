@@ -292,9 +292,12 @@ assertion deliberately, not reflexively.
   `##MAP_CATCHMENT_EDITABLE##` sidecar. Initial labels use collision-free blocks below their numbered
   markers. Edit mode makes both independently draggable: moving a marker updates the selected row's
   real lat/lng (and carries its label offset), while moving a label only updates its display position.
-  Undo/confirm/cancel persists both layers and recomposes locally without Google.
-  The landmarks view is framed the same way around the landmarks it draws; it used to inherit the plot
-  zoom, so every landmark fell outside the frame.
+  Undo/confirm/cancel persists both layers and recomposes locally without Google. The nearby-landmarks
+  map keeps the same selected-or-first-seven rule and zoom logic, but mirrors this editor through
+  `landmark_map_items`, `landmark_label_positions`, and `##MAP_LANDMARKS_EDITABLE##`; moving a marker
+  updates its `nearby_landmarks_data` coordinates while moving its label remains visual-only. The
+  landmarks view is framed around the landmarks it draws; it used to inherit the plot zoom, so every
+  landmark fell outside the frame.
 - **Access-road discovery must be deterministic.** `access_probe_points()` is fixed; it used to be
   shifted and rotated by `regen_seed`, so every regeneration snapped to different roads and the same
   site came back with different street names. The label also prefers the road names the user entered

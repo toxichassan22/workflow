@@ -4274,6 +4274,81 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("project_data.get('catchment_label_positions')", maps_source)
         self.assertIn('preferred_point=', maps_source)
 
+    def test_landmarks_map_editing_preserves_existing_selection_logic(self):
+        service = self.application_module.maps_service
+        rows = [{'name': f'معلم {index}', 'show_on_map': index in (3, 7)} for index in range(1, 10)]
+        self.assertEqual([row['name'] for row in service.select_map_landmark_rows(rows)], ['معلم 3', 'معلم 7'])
+        self.assertEqual(len(service.select_map_landmark_rows([{'name': f'معلم {index}'} for index in range(1, 10)])), 7)
+
+        client = self.app.test_client()
+        result = {'placeholders': {}, 'zooms': {'landmarks': 14}, 'centers': {'landmarks': {'lat': 24.0, 'lng': 46.0}}, 'landmark_map_items': []}
+        with patch.object(service, 'recompose_landmarks_map', return_value=result) as recompose, \
+                patch.object(service, 'generate_all_map_images') as generate_maps, \
+                patch.object(self.application_module.db, 'delete_map_images') as delete_images:
+            response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'quick-landmarks'},
+                'mapType': 'landmarks',
+                'overlayOnly': True,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        recompose.assert_called_once()
+        generate_maps.assert_not_called()
+        delete_images.assert_not_called()
+
+        from PIL import Image
+        editable_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        editable_path = editable_file.name
+        editable_file.close()
+        final_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        final_path = final_file.name
+        final_file.close()
+        self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
+        self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
+        Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 14, 'center_lat': 24.0, 'center_lng': 46.0,
+                    'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': service.MAP_LABEL_RENDER_VERSION}
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'landmarks_editable', editable_path, '##MAP_LANDMARKS_EDITABLE##',
+                             'draft_quick-landmarks-compose', metadata)
+            with patch.object(service, 'get_static_map') as provider, \
+                    patch.object(service, '_unique_map_path', return_value=final_path):
+                composed = service.recompose_landmarks_map({
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'landmark_map_items': [
+                        {'name': 'معلم أول', 'lat': 24.001, 'lng': 46.001},
+                        {'name': 'معلم ثان', 'lat': 24.002, 'lng': 46.002},
+                    ],
+                    'landmark_label_positions': {'معلم أول': [24.0015, 46.0015]},
+                }, self.tenant_a, draft_id='quick-landmarks-compose')
+            provider.assert_not_called()
+        self.assertNotIn('error', composed)
+        self.assertEqual(len(composed['landmark_map_items']), 2)
+        self.assertNotEqual(Path(editable_path).read_bytes(), Path(final_path).read_bytes())
+
+        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        workflow = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
+        self.assertIn("view.mapType === 'landmarks' && tenantLandmarksEditMode", workflow)
+        self.assertIn("view.mapType === 'landmarks' && generated", workflow)
+        self.assertIn('>تعديل</button>', workflow)
+        for function_name in ('startLandmarksEditMode', 'startLandmarksLabelDrag', 'startLandmarksMarkerDrag',
+                              'undoLandmarksEdits', 'confirmLandmarksEdits', 'cancelLandmarksEdits',
+                              'applyLandmarksMapEdits'):
+            self.assertIn('function ' + function_name + '(', source)
+        confirm_body = source.split('async function confirmLandmarksEdits()', 1)[1].split('function cancelLandmarksEdits()', 1)[0]
+        self.assertNotIn('regenerateMapPreview(', confirm_body)
+        self.assertNotIn('showLoader(', confirm_body)
+        self.assertIn('await applyLandmarksMapEdits()', confirm_body)
+        self.assertIn('tenantProjectData.nearby_landmarks_data =', confirm_body)
+        self.assertIn("editableKeys: ['##MAP_LANDMARKS_EDITABLE##'", source)
+        self.assertIn("'landmark_label_positions'", source)
+        self.assertIn("'landmark_map_items'", source)
+
+        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        self.assertIn('def recompose_landmarks_map(', maps_source)
+        self.assertIn("project_data.get('landmark_label_positions')", maps_source)
+
     def test_location_tables_and_controls_are_scoped_to_their_maps(self):
         source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertNotIn('lt-location-input', source)
@@ -4287,7 +4362,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("drawBtn.dataset.sectionLockIgnore = '1';", source)
         self.assertIn("placeBtn.dataset.sectionLockIgnore = '1';", source)
         self.assertIn("addBtn.dataset.sectionLockIgnore = '1';", source)
-        self.assertIn(".forEach(control => { control.disabled = roadModeLocked || catchmentModeLocked; });", source)
+        self.assertIn(".forEach(control => { control.disabled = roadModeLocked || catchmentModeLocked || landmarksModeLocked; });", source)
         self.assertIn('function releaseLocationSectionApproval()', source)
         self.assertIn("applySectionStatuses({ location: 'draft' });", source)
         self.assertIn("document.createElement(cfg.road ? 'textarea' : 'input')", source)
