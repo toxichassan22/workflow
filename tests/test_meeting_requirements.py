@@ -3966,7 +3966,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(app_source.count('generate_all_map_images('), 1)
         maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         self.assertIn('overview_markers = _build_markers(marker_lat, marker_lng)', maps_source)
-        self.assertIn('catchment_markers = _build_markers(marker_lat, marker_lng, city_landmarks)', maps_source)
+        self.assertIn('_draw_catchment_markers(', maps_source)
         self.assertNotIn('marker_lat, marker_lng = map_center_lat, map_center_lng', maps_source)
         access_body = maps_source.split('def _draw_access_roads(', 1)[1].split('def _get_cached_map_images(', 1)[0]
         self.assertNotIn("('main_roads', 'secondary_roads')", access_body)
@@ -4187,6 +4187,89 @@ class MeetingRequirementsTests(unittest.TestCase):
         ], ['شارع صحيح'])
         self.assertEqual([name for _, name in approved], ['شارع صحيح'])
 
+    def test_catchment_map_selection_labels_and_editing_are_scoped(self):
+        service = self.application_module.maps_service
+        rows = [{'name': f'مكان {index}', 'show_on_map': index == 5} for index in range(1, 10)]
+        self.assertEqual([row['name'] for row in service.select_map_landmark_rows(rows)], ['مكان 5'])
+        self.assertEqual(len(service.select_map_landmark_rows([
+            {'name': f'مكان {index}'} for index in range(1, 10)
+        ])), 7)
+
+        client = self.app.test_client()
+        result = {'placeholders': {}, 'zooms': {'catchment': 12}, 'centers': {'catchment': {'lat': 24.0, 'lng': 46.0}}, 'catchment_landmarks': []}
+        with patch.object(service, 'recompose_catchment_map', return_value=result) as recompose, \
+                patch.object(service, 'generate_all_map_images') as generate_maps, \
+                patch.object(self.application_module.db, 'delete_map_images') as delete_images:
+            response = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+                'projectData': {'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'quick-catchment'},
+                'mapType': 'catchment',
+                'overlayOnly': True,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        recompose.assert_called_once()
+        generate_maps.assert_not_called()
+        delete_images.assert_not_called()
+
+        from PIL import Image
+        editable_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        editable_path = editable_file.name
+        editable_file.close()
+        final_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        final_path = final_file.name
+        final_file.close()
+        self.addCleanup(lambda: os.path.exists(editable_path) and os.unlink(editable_path))
+        self.addCleanup(lambda: os.path.exists(final_path) and os.unlink(final_path))
+        Image.new('RGB', (1280, 720), '#ddd8cf').save(editable_path)
+        metadata = {'lat': 24.0, 'lng': 46.0, 'zoom': 12, 'center_lat': 24.0, 'center_lng': 46.0,
+                    'map_highlight_version': service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': service.MAP_LABEL_RENDER_VERSION}
+        landmarks = [
+            {'name': 'مكان أول', 'lat': 24.001, 'lng': 46.001},
+            {'name': 'مكان ثان', 'lat': 24.0011, 'lng': 46.0011},
+            {'name': 'مكان ثالث', 'lat': 24.0012, 'lng': 46.0012},
+        ]
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'catchment_editable', editable_path, '##MAP_CATCHMENT_EDITABLE##',
+                             'draft_quick-catchment-compose', metadata)
+            with patch.object(service, 'get_static_map') as provider, \
+                    patch.object(service, '_unique_map_path', return_value=final_path):
+                composed = service.recompose_catchment_map({
+                    'location_lat': 24.0,
+                    'location_lng': 46.0,
+                    'catchment_map_landmarks': landmarks,
+                    'catchment_label_positions': {'مكان أول': [24.002, 46.002]},
+                }, self.tenant_a, draft_id='quick-catchment-compose')
+            provider.assert_not_called()
+        self.assertNotIn('error', composed)
+        self.assertEqual(len(composed['catchment_landmarks']), 3)
+        self.assertEqual(len({tuple(item['label_point']) for item in composed['catchment_landmarks']}), 3)
+        self.assertNotEqual(Path(editable_path).read_bytes(), Path(final_path).read_bytes())
+
+        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        workflow = source.split('function renderLocationWorkflowState()', 1)[1].split('function openLocationTableMap', 1)[0]
+        self.assertIn("view.mapType === 'catchment' && tenantCatchmentEditMode", workflow)
+        self.assertIn("view.mapType === 'catchment' && generated", workflow)
+        self.assertIn('إعادة توليد الخريطة', workflow)
+        self.assertIn('اعتماد الخريطة', workflow)
+        self.assertIn('>تعديل</button>', workflow)
+        for function_name in ('startCatchmentEditMode', 'startCatchmentLabelDrag', 'undoCatchmentEdits',
+                              'confirmCatchmentEdits', 'cancelCatchmentEdits', 'applyCatchmentMapEdits'):
+            self.assertIn('function ' + function_name + '(', source)
+        confirm_body = source.split('async function confirmCatchmentEdits()', 1)[1].split('function cancelCatchmentEdits()', 1)[0]
+        self.assertNotIn('regenerateMapPreview(', confirm_body)
+        self.assertNotIn('showLoader(', confirm_body)
+        self.assertIn('await applyCatchmentMapEdits()', confirm_body)
+        self.assertIn("editableKeys: ['##MAP_CATCHMENT_EDITABLE##'", source)
+        self.assertIn("'catchment_label_positions'", source)
+        self.assertIn("'catchment_map_landmarks'", source)
+        self.assertIn('map-place-label', source)
+
+        maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
+        self.assertIn('def _draw_catchment_markers(', maps_source)
+        self.assertIn('def recompose_catchment_map(', maps_source)
+        self.assertIn("project_data.get('catchment_label_positions')", maps_source)
+        self.assertIn('preferred_point=', maps_source)
+
     def test_location_tables_and_controls_are_scoped_to_their_maps(self):
         source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertNotIn('lt-location-input', source)
@@ -4200,7 +4283,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("drawBtn.dataset.sectionLockIgnore = '1';", source)
         self.assertIn("placeBtn.dataset.sectionLockIgnore = '1';", source)
         self.assertIn("addBtn.dataset.sectionLockIgnore = '1';", source)
-        self.assertIn(".forEach(control => { control.disabled = roadModeLocked; });", source)
+        self.assertIn(".forEach(control => { control.disabled = roadModeLocked || catchmentModeLocked; });", source)
         self.assertIn('function releaseLocationSectionApproval()', source)
         self.assertIn("applySectionStatuses({ location: 'draft' });", source)
         self.assertIn("document.createElement(cfg.road ? 'textarea' : 'input')", source)

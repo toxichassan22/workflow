@@ -5081,7 +5081,7 @@ def api_generate_single_map_image():
     if map_type not in {'overview', 'landmarks', 'access', 'catchment'}:
         return jsonify({'success': False, 'error': 'نوع خريطة غير صالح'}), 400
     project_data = clean_project_data(data.get('projectData', {})) or {}
-    overlay_only = data.get('overlayOnly') is True and map_type in {'overview', 'access'}
+    overlay_only = data.get('overlayOnly') is True and map_type in {'overview', 'access', 'catchment'}
     if not overlay_only and project_data.get('location_analysis_approved') is not True:
         return jsonify({
             'success': False,
@@ -5121,9 +5121,16 @@ def api_generate_single_map_image():
             presentation_id=presentation_id,
             draft_id=draft_id,
         )
+    elif data.get('overlayOnly') is True and map_type == 'catchment':
+        result = maps_service.recompose_catchment_map(
+            project_data,
+            g.tenant_id,
+            presentation_id=presentation_id,
+            draft_id=draft_id,
+        )
     else:
         image_types = [map_type, f'{map_type}_satellite', f'{map_type}_roadmap']
-        if map_type in {'overview', 'access'}:
+        if map_type in {'overview', 'access', 'catchment'}:
             image_types.extend([
                 f'{map_type}_editable', f'{map_type}_satellite_editable', f'{map_type}_roadmap_editable'
             ])
@@ -5160,6 +5167,7 @@ def api_generate_single_map_image():
         'centers': result.get('centers', {}),
         'sitePolygon': result.get('site_polygon', []),
         'accessRoads': result.get('access_roads', []),
+        'catchmentLandmarks': result.get('catchment_landmarks', []),
     })
 
 
@@ -5452,6 +5460,9 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         if metadata.get('access_roads') and not project_data.get('access_roads_data'):
             project_data['access_roads_data'] = metadata['access_roads']
             creative['map_access_roads'] = metadata['access_roads']
+        if metadata.get('catchment_landmarks') and not project_data.get('catchment_map_landmarks'):
+            project_data['catchment_map_landmarks'] = metadata['catchment_landmarks']
+            creative['map_catchment_landmarks'] = metadata['catchment_landmarks']
         if map_highlight_site is None and metadata.get('highlight_site') is not None:
             map_highlight_site = bool(metadata.get('highlight_site'))
     creative['map_placeholders'] = placeholders

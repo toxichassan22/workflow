@@ -4003,7 +4003,8 @@
       font-size: 13px !important;
     }
 
-    .map-road-label {
+    .map-road-label,
+    .map-place-label {
       position: absolute;
       transform: translate(-50%, -50%);
       padding: 4px 8px;
@@ -4021,7 +4022,8 @@
       transform-origin: center;
     }
 
-    .map-road-label.editable {
+    .map-road-label.editable,
+    .map-place-label.editable {
       pointer-events: auto;
       cursor: move;
       border-color: #d4a359;
@@ -6248,7 +6250,8 @@
     // Sending the whole project data pushed the request past ~35KB, where the shared
     // hosting proxy corrupts the body and the request fails (404/502).
     const MAP_PAYLOAD_FIELDS = [
-      'catchment_areas', 'city_landmarks', 'calculate_landmark_driving', 'draft_id', 'draftId', 'draw_compass', 'draw_inset',
+      'catchment_areas', 'catchment_label_positions', 'catchment_map_landmarks', 'city_landmarks', 'calculate_landmark_driving',
+      'draft_id', 'draftId', 'draw_compass', 'draw_inset',
       'enabled_maps', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
       'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_maps_link',
       'locationLat', 'locationLng', 'location_polygon', 'location_polygon_source', 'longitude',
@@ -6564,6 +6567,9 @@
     let tenantRoadEditDraft = null;
     let tenantRoadEditHistory = [];
     let tenantRoadEditSelectedIndex = -1;
+    let tenantCatchmentEditMode = false;
+    let tenantCatchmentEditDraft = null;
+    let tenantCatchmentEditHistory = [];
     let tenantLandmarkPlacementTarget = null;
     let tenantNearbyLandmarks = [];
     let tenantSelectedMapType = 'overview';
@@ -6587,6 +6593,12 @@
       tenantRoadEditSelectedIndex = -1;
     }
 
+    function resetTenantCatchmentMode() {
+      tenantCatchmentEditMode = false;
+      tenantCatchmentEditDraft = null;
+      tenantCatchmentEditHistory = [];
+    }
+
     function invalidateTenantMapAssets() {
       tenantCreativeImages = {
         ...(tenantCreativeImages || {}),
@@ -6608,6 +6620,7 @@
       tenantMapPinMode = false;
       tenantMapDraftPinHistory = [];
       resetTenantRoadModes();
+      resetTenantCatchmentMode();
       tenantProjectData.location_polygon = '';
       syncTenantLocationPolygon();
       renderTenantMapPolygonOverlay();
@@ -11516,6 +11529,7 @@
       tenantMapPinMode = false;
       tenantMapDraftPinHistory = [];
       resetTenantRoadModes();
+      resetTenantCatchmentMode();
       tenantLandmarkPlacementTarget = null;
       tenantNearbyLandmarks = [];
       tenantProjectSectionStatuses = {};
@@ -11899,6 +11913,7 @@
             toast('الحد الأقصى 7 معالم لكل خريطة');
           }
           serializeLocationTable(key);
+          if (key === 'city_landmarks') invalidateCatchmentMapApproval();
           invalidateLocationAnalysisApproval();
         });
         selectTd.appendChild(selectInput);
@@ -11923,6 +11938,7 @@
         }
         serializeLocationTable(key);
         if (cfg.road) invalidateAccessMapApproval();
+        if (key === 'city_landmarks') invalidateCatchmentMapApproval();
         invalidateLocationAnalysisApproval();
       });
       if (cfg.road) {
@@ -11949,6 +11965,7 @@
       [nameInput, categoryInput, distInput, durInput].filter(Boolean).forEach(inp => inp.addEventListener('input', () => {
         serializeLocationTable(key);
         if (cfg.road) invalidateAccessMapApproval();
+        if (key === 'city_landmarks') invalidateCatchmentMapApproval();
         invalidateLocationAnalysisApproval();
       }));
 
@@ -12025,6 +12042,7 @@
       addBtn.addEventListener('click', () => {
         addLocationTableRow(key, {});
         if (key === 'main_roads') invalidateAccessMapApproval();
+        if (key === 'city_landmarks') invalidateCatchmentMapApproval();
         invalidateLocationAnalysisApproval();
         const tbody = table.querySelector('tbody');
         const last = tbody.lastElementChild;
@@ -12112,6 +12130,14 @@
       triggerAutoSaveDraft();
     }
 
+    function invalidateCatchmentMapApproval() {
+      if (!tenantCreativeImages.map_approvals?.catchment) return;
+      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), catchment: false };
+      releaseLocationSectionApproval();
+      renderLocationWorkflowState();
+      triggerAutoSaveDraft();
+    }
+
     function invalidateLocationAnalysisApproval() {
       const changed = !!tenantProjectData.location_analysis_approved;
       tenantProjectData.location_analysis_approved = false;
@@ -12157,12 +12183,13 @@
       });
       Object.keys(LOCATION_TABLE_FIELDS).forEach(key => {
         const roadModeLocked = key === 'main_roads' && (tenantRoadEditMode || !!tenantRoadDrawingTarget);
+        const catchmentModeLocked = key === 'city_landmarks' && tenantCatchmentEditMode;
         document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] input, #tenantProjectForm table[data-location-table="' + key + '"] textarea')
-          .forEach(control => { control.disabled = approved || roadModeLocked; });
+          .forEach(control => { control.disabled = approved || roadModeLocked || catchmentModeLocked; });
         document.querySelectorAll('#tenantProjectForm table[data-location-table="' + key + '"] button')
-          .forEach(control => { control.disabled = roadModeLocked; });
+          .forEach(control => { control.disabled = roadModeLocked || catchmentModeLocked; });
         const add = document.querySelector('#tenantProjectForm table[data-location-table="' + key + '"]')?.closest('.location-table-field')?.querySelector('.location-table-add');
-        if (add) add.disabled = roadModeLocked;
+        if (add) add.disabled = roadModeLocked || catchmentModeLocked;
       });
       const controls = document.getElementById('locationMapGenerationControls');
       if (controls && typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined') {
@@ -12201,6 +12228,14 @@
             approvalButton +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startAccessRoadEditMode()" ' + (mapApproved ? 'disabled' : '') + '>إضافة / تعديل الطرق</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startManualRoadDrawing(\'\')" ' + (mapApproved ? 'disabled' : '') + '>رسم مسار الطرق</button>';
+        } else if (view.mapType === 'catchment' && tenantCatchmentEditMode) {
+          actions = '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmCatchmentEdits()">اعتماد</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoCatchmentEditsButton" onclick="undoCatchmentEdits()">تراجع</button>' +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelCatchmentEdits()">إلغاء</button>';
+        } else if (view.mapType === 'catchment' && generated) {
+          actions = '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'catchment\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
+            approvalButton +
+            '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startCatchmentEditMode()" ' + (mapApproved ? 'disabled' : '') + '>تعديل</button>';
         } else if (view.mapType !== 'overview') {
           actions = '<button type="button" class="btn small primary" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'' + view.mapType + '\')" ' + (generationLocked ? 'disabled' : '') + '>' + (generated ? 'إعادة توليد ' : 'توليد ') + view.title + '</button>' + approvalButton;
         }
@@ -12209,6 +12244,7 @@
           : '';
         updateTenantPolygonControls();
         updateTenantRoadControls();
+        updateTenantCatchmentControls();
         updateTenantMapInteractionState();
       }
       renderMapPreviewGallery();
@@ -12567,6 +12603,101 @@
 
     function cancelManualRoadDrawing() {
       tenantRoadDrawingTarget = null;
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+    }
+
+    function catchmentMapLandmarks() {
+      const stored = Array.isArray(tenantProjectData.catchment_map_landmarks)
+        ? tenantProjectData.catchment_map_landmarks
+        : (Array.isArray(tenantCreativeImages.map_catchment_landmarks) ? tenantCreativeImages.map_catchment_landmarks : []);
+      const cityRows = Array.isArray(tenantProjectData.city_landmarks_data) ? tenantProjectData.city_landmarks_data : [];
+      const selectedRows = cityRows.filter(item => item?.show_on_map === true || item?.selected === true);
+      const desiredRows = (selectedRows.length ? selectedRows : cityRows).slice(0, 7);
+      const storedByName = new Map(stored.map(item => [String(item?.name || '').trim(), item]));
+      const source = desiredRows.length
+        ? desiredRows.map(item => ({ ...(storedByName.get(String(item?.name || '').trim()) || {}), ...item }))
+        : stored.slice(0, 7);
+      const positions = tenantCatchmentEditMode
+        ? tenantCatchmentEditDraft?.labelPositions || {}
+        : tenantProjectData.catchment_label_positions || {};
+      return source.filter(item => Number.isFinite(Number(item?.lat)) && Number.isFinite(Number(item?.lng))).map(item => ({
+        ...item,
+        lat: Number(item.lat),
+        lng: Number(item.lng),
+        label_point: positions[item.name] || item.label_point || null
+      }));
+    }
+
+    function pushCatchmentEditHistory() {
+      const snapshot = JSON.stringify(tenantCatchmentEditDraft);
+      if (tenantCatchmentEditHistory[tenantCatchmentEditHistory.length - 1] !== snapshot) tenantCatchmentEditHistory.push(snapshot);
+      if (tenantCatchmentEditHistory.length > 60) tenantCatchmentEditHistory.shift();
+    }
+
+    async function startCatchmentEditMode() {
+      if (tenantCreativeImages.map_approvals?.catchment) { toast('خريطة المنطقة معتمدة'); return; }
+      if (!openLocationTableMap('catchment')) return;
+      tenantProjectData.catchment_map_landmarks = catchmentMapLandmarks();
+      tenantCatchmentEditMode = true;
+      tenantCatchmentEditDraft = {
+        labelPositions: JSON.parse(JSON.stringify(tenantProjectData.catchment_label_positions || {}))
+      };
+      tenantCatchmentEditHistory = [];
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+      await ensureCatchmentEditablePreview();
+    }
+
+    function startCatchmentLabelDrag(event, name) {
+      if (!tenantCatchmentEditMode || !tenantCatchmentEditDraft) return;
+      pushCatchmentEditHistory();
+      updateTenantCatchmentControls();
+      const image = document.querySelector('#mapPreviewImage img');
+      const move = moveEvent => {
+        const coordinates = tenantMapCoordinatesFromClient(moveEvent.clientX, moveEvent.clientY, image);
+        if (!coordinates) return;
+        tenantCatchmentEditDraft.labelPositions[name] = coordinates;
+        renderTenantMapPolygonOverlay();
+      };
+      const stop = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', stop);
+        window.removeEventListener('pointercancel', stop);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', stop);
+      window.addEventListener('pointercancel', stop);
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    function undoCatchmentEdits() {
+      const snapshot = tenantCatchmentEditHistory.pop();
+      if (!snapshot) return;
+      tenantCatchmentEditDraft = JSON.parse(snapshot);
+      renderTenantMapPolygonOverlay();
+      updateTenantCatchmentControls();
+    }
+
+    async function confirmCatchmentEdits() {
+      if (!tenantCatchmentEditMode || !tenantCatchmentEditDraft) return;
+      tenantProjectData.catchment_label_positions = { ...tenantCatchmentEditDraft.labelPositions };
+      tenantProjectData.catchment_map_landmarks = catchmentMapLandmarks();
+      tenantCatchmentEditMode = false;
+      tenantCatchmentEditDraft = null;
+      tenantCatchmentEditHistory = [];
+      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), catchment: false };
+      releaseLocationSectionApproval();
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+      triggerAutoSaveDraft();
+      await applyCatchmentMapEdits();
+      toast('تم اعتماد تعديلات خريطة المنطقة');
+    }
+
+    function cancelCatchmentEdits() {
+      resetTenantCatchmentMode();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
     }
@@ -16438,6 +16569,7 @@
           tenantMapPinMode = false;
           tenantMapDraftPinHistory = [];
           resetTenantRoadModes();
+          resetTenantCatchmentMode();
           renderTenantMapPolygonOverlay();
         }
         tenantCreativeImages = tenantCreativeImages || {};
@@ -16469,7 +16601,7 @@
     const MAP_PREVIEW_VIEW_DEFS = [
       { mapType: 'overview', title: 'خريطة الأرض / المبنى', keys: ['##MAP_OVERVIEW##', '##MAP_OVERVIEW_SATELLITE##', '##MAP_OVERVIEW_ROADMAP##'], editableKeys: ['##MAP_OVERVIEW_EDITABLE##', '##MAP_OVERVIEW_SATELLITE_EDITABLE##', '##MAP_OVERVIEW_ROADMAP_EDITABLE##'] },
       { mapType: 'access', title: 'خريطة الطرق الرئيسية', keys: ['##MAP_ACCESS##', '##MAP_ACCESS_SATELLITE##', '##MAP_ACCESS_ROADMAP##'], editableKeys: ['##MAP_ACCESS_EDITABLE##', '##MAP_ACCESS_SATELLITE_EDITABLE##', '##MAP_ACCESS_ROADMAP_EDITABLE##'] },
-      { mapType: 'catchment', title: 'خريطة المنطقة', keys: ['##MAP_CATCHMENT##', '##MAP_CATCHMENT_SATELLITE##', '##MAP_CATCHMENT_ROADMAP##'] },
+      { mapType: 'catchment', title: 'خريطة المنطقة', keys: ['##MAP_CATCHMENT##', '##MAP_CATCHMENT_SATELLITE##', '##MAP_CATCHMENT_ROADMAP##'], editableKeys: ['##MAP_CATCHMENT_EDITABLE##', '##MAP_CATCHMENT_SATELLITE_EDITABLE##', '##MAP_CATCHMENT_ROADMAP_EDITABLE##'] },
       { mapType: 'landmarks', title: 'خريطة المعالم', keys: ['##MAP_LANDMARKS##', '##MAP_LANDMARKS_SATELLITE##', '##MAP_LANDMARKS_ROADMAP##'] }
     ];
 
@@ -16521,6 +16653,7 @@
         tenantMapDraftPinHistory = [];
       }
       if (mapType !== 'access') resetTenantRoadModes();
+      if (mapType !== 'catchment') resetTenantCatchmentMode();
       tenantSelectedMapType = mapType;
       renderLocationWorkflowState();
       const placeholders = tenantCreativeImages.map_placeholders || {};
@@ -16647,6 +16780,15 @@
           tenantProjectData.access_road_label_positions = positions;
           tenantProjectData.access_road_label_sizes = sizes;
         }
+        if (mapType === 'catchment') {
+          tenantProjectData.catchment_map_landmarks = Array.isArray(data.catchmentLandmarks) ? data.catchmentLandmarks : [];
+          tenantCreativeImages.map_catchment_landmarks = tenantProjectData.catchment_map_landmarks;
+          const positions = { ...(tenantProjectData.catchment_label_positions || {}) };
+          tenantProjectData.catchment_map_landmarks.forEach(item => {
+            if (item?.name && Array.isArray(item.label_point) && !positions[item.name]) positions[item.name] = item.label_point;
+          });
+          tenantProjectData.catchment_label_positions = positions;
+        }
         tenantCreativeImages.maps_persisted = true;
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
         tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
@@ -16763,9 +16905,14 @@
       if (pathConfirm) pathConfirm.disabled = (tenantRoadDrawingTarget?.points?.length || 0) < 2;
     }
 
+    function updateTenantCatchmentControls() {
+      const undoButton = document.getElementById('undoCatchmentEditsButton');
+      if (undoButton) undoButton.disabled = !tenantCatchmentEditHistory.length;
+    }
+
     function updateTenantMapInteractionState() {
       const image = document.querySelector('#mapPreviewImage img');
-      if (image) image.style.cursor = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantLandmarkPlacementTarget ? 'crosshair' : 'default';
+      if (image) image.style.cursor = tenantMapPolygonMode || tenantMapPinMode || tenantRoadEditMode || tenantRoadDrawingTarget || tenantCatchmentEditMode || tenantLandmarkPlacementTarget ? 'crosshair' : 'default';
     }
 
     async function applyOverviewMapEdits() {
@@ -16839,6 +16986,47 @@
       if (tenantMapPreviewState?.usesEditableBase) return true;
       if (!(await applyAccessMapEdits())) return false;
       return selectMapPreviewView('access');
+    }
+
+    function applyCatchmentMapEdits() {
+      return (async () => {
+        try {
+          const payload = slimMapProjectData(tenantProjectData);
+          payload.draftId = tenantProjectData.draftId;
+          const data = await api('POST', '/api/generate-map-image', {
+            projectData: payload,
+            mapType: 'catchment',
+            presentationId: tenantPresentationId,
+            mapApproved: false,
+            overlayOnly: true
+          });
+          if (!data.success) return false;
+          tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
+          tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
+          tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
+          tenantProjectData.catchment_map_landmarks = Array.isArray(data.catchmentLandmarks) ? data.catchmentLandmarks : tenantProjectData.catchment_map_landmarks || [];
+          tenantCreativeImages.map_catchment_landmarks = tenantProjectData.catchment_map_landmarks;
+          const positions = { ...(tenantProjectData.catchment_label_positions || {}) };
+          tenantProjectData.catchment_map_landmarks.forEach(item => {
+            if (item?.name && Array.isArray(item.label_point)) positions[item.name] = item.label_point;
+          });
+          tenantProjectData.catchment_label_positions = positions;
+          tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
+          await saveMapPreviewState();
+          renderMapPreviewGallery();
+          return true;
+        } catch (error) {
+          console.warn('[CATCHMENT MAP OVERLAY]', error);
+          triggerAutoSaveDraft();
+          return false;
+        }
+      })();
+    }
+
+    async function ensureCatchmentEditablePreview() {
+      if (tenantMapPreviewState?.usesEditableBase) return true;
+      if (!(await applyCatchmentMapEdits())) return false;
+      return selectMapPreviewView('catchment');
     }
 
     async function toggleTenantPolygonMode() {
@@ -16947,6 +17135,7 @@
     function renderAccessRoadLabels(roadPaths, toPoint, visible) {
       const layer = document.getElementById('mapLabelOverlay');
       if (!layer) return;
+      layer.style.pointerEvents = 'none';
       if (!visible) {
         layer.innerHTML = '';
         return;
@@ -16967,6 +17156,23 @@
       }).join('');
     }
 
+    function renderCatchmentLabels(items, toPoint) {
+      const layer = document.getElementById('mapLabelOverlay');
+      if (!layer) return;
+      layer.style.pointerEvents = tenantCatchmentEditMode ? 'auto' : 'none';
+      layer.innerHTML = items.map(item => {
+        if (!item?.name) return '';
+        const markerPoint = toPoint([item.lat, item.lng]).split(',').map(Number);
+        const customPoint = Array.isArray(item.label_point) ? toPoint(item.label_point).split(',').map(Number) : null;
+        const x = customPoint?.[0] ?? markerPoint[0];
+        const y = customPoint?.[1] ?? markerPoint[1] + 5;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return '';
+        const encodedName = encodeURIComponent(String(item.name)).replace(/'/g, '%27');
+        return '<div class="map-place-label' + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;padding:3px 7px"' +
+          (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + escapeHtml(item.name) + '</div>';
+      }).join('');
+    }
+
     function renderTenantMapPolygonOverlay() {
       const overlay = document.getElementById('mapPolygonOverlay');
       const labelLayer = document.getElementById('mapLabelOverlay');
@@ -16974,13 +17180,18 @@
       const state = tenantMapPreviewState;
       const polygonPoints = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
       const roadPaths = tenantSelectedMapType === 'access' ? accessRoadGeometry() : [];
+      const catchmentItems = tenantSelectedMapType === 'catchment' ? catchmentMapLandmarks() : [];
       const showBoundary = tenantSelectedMapType === 'overview' && (!!state?.usesEditableBase || tenantMapPolygonMode) && polygonPoints.length > 0;
       const showPin = tenantSelectedMapType === 'overview' && (!!state?.usesEditableBase || tenantMapPinMode);
       const showRoads = tenantSelectedMapType === 'access' && !!state?.usesEditableBase;
       const showAccessPin = tenantSelectedMapType === 'access' && !!state?.usesEditableBase;
-      if (!overlay || !img || !state || !img.naturalWidth || !img.naturalHeight || (!showBoundary && !showPin && !showAccessPin && (!showRoads || !roadPaths.length))) {
+      const showCatchment = tenantSelectedMapType === 'catchment' && !!state?.usesEditableBase;
+      if (!overlay || !img || !state || !img.naturalWidth || !img.naturalHeight || (!showBoundary && !showPin && !showAccessPin && !showCatchment && (!showRoads || !roadPaths.length))) {
         if (overlay) overlay.innerHTML = '';
-        if (labelLayer) labelLayer.innerHTML = '';
+        if (labelLayer) {
+          labelLayer.innerHTML = '';
+          labelLayer.style.pointerEvents = 'none';
+        }
         return;
       }
       const world = 256 * Math.pow(2, state.zoom) * 2;
@@ -17006,7 +17217,7 @@
       const savedPin = [Number(tenantProjectData.location_lat), Number(tenantProjectData.location_lng)];
       const draftPin = tenantMapPinMode && tenantMapDraftPinHistory.length ? tenantMapDraftPinHistory[tenantMapDraftPinHistory.length - 1] : savedPin;
       let pinMarkup = '';
-      if ((showPin || showAccessPin) && draftPin.every(Number.isFinite)) {
+      if ((showPin || showAccessPin || showCatchment) && draftPin.every(Number.isFinite)) {
         const [pinX, pinY] = toPoint(draftPin).split(',');
         pinMarkup = '<circle cx="' + pinX + '%" cy="' + pinY + '%" r="2.2" fill="rgba(107,28,35,.24)" stroke="#fff" stroke-width="0.7"></circle>' +
           '<circle cx="' + pinX + '%" cy="' + pinY + '%" r="1.25" fill="#6B1C23" stroke="#6B1C23" stroke-width="0.35"><title>موقع المبنى</title></circle>';
@@ -17022,8 +17233,18 @@
         const [x, y] = toPoint(point).split(',');
         return '<circle cx="' + x + '%" cy="' + y + '%" r="1.15" fill="#fff" stroke="#6B1C23" stroke-width="0.45"></circle>';
       }).join('') : '';
-      overlay.innerHTML = boundaryMarkup + roadMarkup + roadPointMarkup + pinMarkup;
-      renderAccessRoadLabels(roadPaths, toPoint, showRoads);
+      const catchmentMarkerMarkup = showCatchment ? catchmentItems.map((item, index) => {
+        const [x, y] = toPoint([item.lat, item.lng]).split(',');
+        return '<circle cx="' + x + '%" cy="' + y + '%" r="1.45" fill="#8B2020" stroke="#fff" stroke-width="0.45"><title>' + escapeHtml(item.name || '') + '</title></circle>' +
+          '<text x="' + x + '%" y="' + y + '%" dy="1" text-anchor="middle" font-size="2.2" font-weight="700" fill="#fff">' + (index + 1) + '</text>';
+      }).join('') : '';
+      overlay.innerHTML = boundaryMarkup + roadMarkup + roadPointMarkup + catchmentMarkerMarkup + pinMarkup;
+      if (showRoads) renderAccessRoadLabels(roadPaths, toPoint, true);
+      else if (showCatchment) renderCatchmentLabels(catchmentItems, toPoint);
+      else if (labelLayer) {
+        labelLayer.innerHTML = '';
+        labelLayer.style.pointerEvents = 'none';
+      }
     }
 
     function removeTenantPolygonPoint(index) {
@@ -20474,6 +20695,7 @@
       tenantMapPinMode = false;
       tenantMapDraftPinHistory = [];
       resetTenantRoadModes();
+      resetTenantCatchmentMode();
       tenantLandmarkPlacementTarget = null;
       tenantNearbyLandmarks = [];
       tenantActiveProjectSection = null;
@@ -20644,6 +20866,7 @@
         tenantMapPinMode = false;
         tenantMapDraftPinHistory = [];
         resetTenantRoadModes();
+        resetTenantCatchmentMode();
         tenantNearbyLandmarks = [];
         tenantActiveProjectSection = null;
         tempCoverImage = null;

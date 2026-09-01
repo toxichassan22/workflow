@@ -799,10 +799,10 @@ def _apply_map_overlay(image_path, dark_factor=0.35, gradient=True):
         return False
 
 
-def _draw_marker_name_label(draw, px, anchor_y, text, img_w, img_h, occupied):
+def _draw_marker_name_label(draw, px, anchor_y, text, img_w, img_h, occupied, preferred_point=None):
     clean_text = _strip_arabic_diacritics(str(text or '').strip())
     if not clean_text:
-        return
+        return None
 
     max_text_width = min(360, max(180, img_w - 48))
     font = None
@@ -829,26 +829,51 @@ def _draw_marker_name_label(draw, px, anchor_y, text, img_w, img_h, occupied):
     label_width = text_width + pad_x * 2
     label_height = text_height + pad_y * 2
     candidates = [
-        (px - label_width / 2, anchor_y - label_height - 10),
-        (px - label_width / 2, anchor_y + 10),
-        (px + 46, anchor_y - label_height / 2),
-        (px - label_width - 46, anchor_y - label_height / 2),
+        (px - label_width / 2, anchor_y + 12),
+        (px - label_width / 2, anchor_y - label_height - 52),
+        (px + 52, anchor_y - label_height / 2),
+        (px - label_width - 52, anchor_y - label_height / 2),
+        (px + 52, anchor_y + 42),
+        (px - label_width - 52, anchor_y + 42),
+        (px + 52, anchor_y - label_height - 64),
+        (px - label_width - 52, anchor_y - label_height - 64),
     ]
     rect = None
-    for left, top in candidates:
-        left = max(8, min(img_w - label_width - 8, left))
-        top = max(8, min(img_h - label_height - 8, top))
-        candidate_rect = (left, top, left + label_width, top + label_height)
-        if not any(
-            not (candidate_rect[2] < other[0] or candidate_rect[0] > other[2]
-                 or candidate_rect[3] < other[1] or candidate_rect[1] > other[3])
-            for other in occupied
-        ):
-            rect = candidate_rect
-            break
+    if preferred_point:
+        left = max(8, min(img_w - label_width - 8, preferred_point[0] - label_width / 2))
+        top = max(8, min(img_h - label_height - 8, preferred_point[1] - label_height / 2))
+        rect = (left, top, left + label_width, top + label_height)
+    else:
+        for left, top in candidates:
+            left = max(8, min(img_w - label_width - 8, left))
+            top = max(8, min(img_h - label_height - 8, top))
+            candidate_rect = (left, top, left + label_width, top + label_height)
+            if not any(
+                not (candidate_rect[2] < other[0] or candidate_rect[0] > other[2]
+                     or candidate_rect[3] < other[1] or candidate_rect[1] > other[3])
+                for other in occupied
+            ):
+                rect = candidate_rect
+                break
+    if rect is None:
+        for distance in (90, 140, 200, 270):
+            for angle in range(0, 360, 45):
+                radians = math.radians(angle)
+                left = max(8, min(img_w - label_width - 8, px + math.cos(radians) * distance - label_width / 2))
+                top = max(8, min(img_h - label_height - 8, anchor_y + math.sin(radians) * distance - label_height / 2))
+                candidate_rect = (left, top, left + label_width, top + label_height)
+                if not any(
+                    not (candidate_rect[2] < other[0] or candidate_rect[0] > other[2]
+                         or candidate_rect[3] < other[1] or candidate_rect[1] > other[3])
+                    for other in occupied
+                ):
+                    rect = candidate_rect
+                    break
+            if rect is not None:
+                break
     if rect is None:
         left = max(8, min(img_w - label_width - 8, px - label_width / 2))
-        top = max(8, min(img_h - label_height - 8, anchor_y - label_height - 10))
+        top = max(8, min(img_h - label_height - 8, anchor_y + 12))
         rect = (left, top, left + label_width, top + label_height)
 
     left, top, right, bottom = [int(round(value)) for value in rect]
@@ -866,6 +891,7 @@ def _draw_marker_name_label(draw, px, anchor_y, text, img_w, img_h, occupied):
         font=font,
     )
     occupied.append((left, top, right, bottom))
+    return ((left + right) / 2, (top + bottom) / 2)
 
 
 def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, size=(1280, 720), scale=2):
@@ -912,6 +938,73 @@ def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, siz
     except Exception as e:
         print(f"[MAP MARKERS ERROR] {e}")
         return False
+
+
+def _draw_catchment_markers(image_path, center_lat, center_lng, zoom, landmarks, label_positions=None, scale=2):
+    try:
+        img = Image.open(image_path).convert('RGBA')
+        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        img_w, img_h = img.size
+        center_x, center_y = img_w // 2, img_h // 2
+        positions = label_positions or {}
+        if isinstance(positions, str):
+            try:
+                positions = json.loads(positions)
+            except (TypeError, ValueError):
+                positions = {}
+        marker_items = _build_markers(center_lat, center_lng, landmarks)
+        occupied = []
+        rendered = []
+        for marker in marker_items:
+            marker_lat = marker.get('lat')
+            marker_lng = marker.get('lng')
+            if marker_lat is None or marker_lng is None:
+                continue
+            dx, dy = _latlng_to_pixel_offset(marker_lat, marker_lng, center_lat, center_lng, zoom, scale=scale)
+            px = center_x + dx
+            py = center_y + dy
+            if not (0 <= px <= img_w and 0 <= py <= img_h):
+                continue
+            is_site = marker.get('type') == 'site'
+            pin_size = 120 if is_site else 72
+            pin = _draw_pin_marker(
+                color=marker.get('color', MARKER_COLOR_LANDMARK),
+                label=marker.get('label'),
+                size=pin_size,
+                is_site=is_site,
+            )
+            left = int(px - pin_size // 2)
+            top = int(py - pin_size)
+            overlay.paste(pin, (left, top), pin)
+            occupied.append((left, top, left + pin_size, top + pin_size))
+            if is_site or not marker.get('name'):
+                continue
+            preferred = positions.get(marker['name']) if isinstance(positions, dict) else None
+            preferred_point = None
+            if isinstance(preferred, (list, tuple)) and len(preferred) >= 2:
+                try:
+                    label_dx, label_dy = _latlng_to_pixel_offset(
+                        float(preferred[0]), float(preferred[1]), center_lat, center_lng, zoom, scale=scale
+                    )
+                    preferred_point = (center_x + label_dx, center_y + label_dy)
+                except (TypeError, ValueError):
+                    preferred_point = None
+            label_pixel = _draw_marker_name_label(
+                draw, px, py, marker['name'], img_w, img_h, occupied, preferred_point=preferred_point
+            )
+            item = next((dict(value) for value in landmarks if value.get('name') == marker['name']), {'name': marker['name']})
+            if label_pixel:
+                item['label_point'] = list(_pixel_to_latlng(
+                    label_pixel[0], label_pixel[1], img_w, img_h, center_lat, center_lng, zoom, scale=scale
+                ))
+            rendered.append(item)
+        img = Image.alpha_composite(img, overlay)
+        img.save(image_path, 'PNG')
+        return rendered
+    except Exception as error:
+        print(f'[CATCHMENT MARKERS ERROR] {error}')
+        return []
 
 
 def classify_landmark_category(types):
@@ -2874,6 +2967,7 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
     landmarks = next((m.get('landmarks') for m in metadata_by_type.values() if m.get('landmarks')), [])
     landmarks_matrix = next((m.get('landmarks_matrix') for m in metadata_by_type.values() if m.get('landmarks_matrix')), [])
     access_roads = next((m.get('access_roads') for m in metadata_by_type.values() if m.get('access_roads')), [])
+    catchment_landmarks = next((m.get('catchment_landmarks') for m in metadata_by_type.values() if m.get('catchment_landmarks')), [])
     zooms = {
         image_type: meta['zoom'] for image_type, meta in metadata_by_type.items()
         if isinstance(meta, dict) and meta.get('zoom') is not None
@@ -2890,6 +2984,7 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
         'landmarks': landmarks,
         'landmarks_matrix': landmarks_matrix,
         'access_roads': access_roads,
+        'catchment_landmarks': catchment_landmarks,
         'zooms': zooms,
         'centers': centers,
         'found_types': found_types,
@@ -3175,6 +3270,132 @@ def recompose_access_map(project_data, tenant_id, presentation_id=None, draft_id
         return _recompose_access_map(project_data, tenant_id, effective_id)
 
 
+def _recompose_catchment_map(project_data, tenant_id, effective_id):
+    from db import add_map_image, get_map_images, update_map_image
+    rows = get_map_images(tenant_id, presentation_id=effective_id)
+    by_type = {}
+    for row in rows:
+        if row.get('image_type') not in by_type and os.path.isfile(row.get('file_path') or ''):
+            by_type[row['image_type']] = row
+    lat = _extract_coordinate(project_data.get('location_lat') or project_data.get('locationLat') or project_data.get('lat'))
+    lng = _extract_coordinate(project_data.get('location_lng') or project_data.get('locationLng') or project_data.get('lng'))
+    if lat is None or lng is None:
+        return {'error': 'لم يتم العثور على إحداثيات الموقع المعتمدة'}
+    landmarks = project_data.get('catchment_map_landmarks') or []
+    if isinstance(landmarks, str):
+        try:
+            landmarks = json.loads(landmarks)
+        except (TypeError, ValueError):
+            landmarks = []
+    if not isinstance(landmarks, list):
+        landmarks = []
+    map_styles = project_data.get('map_styles') or {}
+    if isinstance(map_styles, str):
+        try:
+            map_styles = json.loads(map_styles)
+        except (TypeError, ValueError):
+            map_styles = {}
+    draw_compass = project_data.get('draw_compass', True)
+    if isinstance(draw_compass, str):
+        draw_compass = draw_compass.lower() in {'true', '1', 'yes'}
+    rings = catchment_rings(_parse_catchment_zones(project_data.get('catchment_areas', '')))
+    for final_type, editable_type in (
+        ('catchment', 'catchment_editable'),
+        ('catchment_satellite', 'catchment_satellite_editable'),
+        ('catchment_roadmap', 'catchment_roadmap_editable'),
+    ):
+        final = by_type.get(final_type)
+        if not final or editable_type in by_type:
+            continue
+        try:
+            metadata = json.loads(final.get('metadata_json') or '{}')
+            center_lat = float(metadata.get('center_lat'))
+            center_lng = float(metadata.get('center_lng'))
+            zoom = int(metadata.get('zoom'))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        active_maptype = 'satellite' if final_type.endswith('_satellite') else 'roadmap' if final_type.endswith('_roadmap') else str(map_styles.get('catchment') or project_data.get('map_type') or 'satellite')
+        if active_maptype in {'auto', 'both'}:
+            active_maptype = 'satellite'
+        styles = SATELLITE_WIDE_STYLES if active_maptype == 'satellite' else SATELLITE_WITH_LABELS_STYLES
+        cached_base = _map_cache_path(center_lat, center_lng, active_maptype, zoom, None, None, (1280, 720), styles)
+        if not os.path.isfile(cached_base):
+            continue
+        editable_path = _unique_map_path(tenant_id, effective_id, editable_type)
+        shutil.copyfile(cached_base, editable_path)
+        if active_maptype == 'satellite':
+            _apply_sepia_tone(editable_path, intensity=0.35)
+            _apply_map_overlay(editable_path, dark_factor=0.15)
+        if rings:
+            _draw_catchment_zones(editable_path, center_lat, center_lng, zoom, rings, scale=2)
+        if draw_compass:
+            _draw_compass(editable_path, position='top-right')
+        editable_placeholder = str(final.get('placeholder') or '')[:-2] + '_EDITABLE##'
+        editable_id = add_map_image(tenant_id, editable_type, editable_path, editable_placeholder, effective_id, metadata)
+        by_type[editable_type] = {
+            'id': editable_id,
+            'image_type': editable_type,
+            'file_path': editable_path,
+            'placeholder': editable_placeholder,
+            'metadata_json': json.dumps(metadata, ensure_ascii=False),
+        }
+    placeholders = {}
+    centers = {}
+    zooms = {}
+    rendered_landmarks = []
+    for editable_type in ('catchment_editable', 'catchment_satellite_editable', 'catchment_roadmap_editable'):
+        editable = by_type.get(editable_type)
+        if not editable:
+            continue
+        try:
+            metadata = json.loads(editable.get('metadata_json') or '{}')
+            center_lat = float(metadata.get('center_lat'))
+            center_lng = float(metadata.get('center_lng'))
+            zoom = int(metadata.get('zoom'))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        final_type = editable_type.replace('_editable', '')
+        final_placeholder = str(editable.get('placeholder') or '').replace('_EDITABLE##', '##')
+        final_path = _unique_map_path(tenant_id, effective_id, final_type)
+        shutil.copyfile(editable['file_path'], final_path)
+        current_landmarks = _draw_catchment_markers(
+            final_path, center_lat, center_lng, zoom, landmarks,
+            project_data.get('catchment_label_positions'), scale=2
+        )
+        next_metadata = {**metadata, 'lat': lat, 'lng': lng, 'catchment_landmarks': current_landmarks}
+        final = by_type.get(final_type)
+        if final:
+            update_map_image(final['id'], tenant_id, final_path, final_placeholder, next_metadata)
+        else:
+            add_map_image(tenant_id, final_type, final_path, final_placeholder, effective_id, next_metadata)
+        update_map_image(editable['id'], tenant_id, editable['file_path'], editable['placeholder'], next_metadata)
+        placeholders[final_placeholder] = final_path
+        placeholders[editable['placeholder']] = editable['file_path']
+        centers['catchment'] = {'lat': center_lat, 'lng': center_lng}
+        zooms['catchment'] = zoom
+        if not rendered_landmarks:
+            rendered_landmarks = current_landmarks
+    if not placeholders:
+        return {'error': 'نسخة خريطة المنطقة النظيفة غير متاحة'}
+    return {
+        'placeholders': placeholders,
+        'centers': centers,
+        'zooms': zooms,
+        'catchment_landmarks': rendered_landmarks,
+    }
+
+
+def recompose_catchment_map(project_data, tenant_id, presentation_id=None, draft_id=None):
+    effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None)
+    if not effective_id:
+        return {'error': 'معرّف العرض أو المسودة مطلوب'}
+    lock_key = (str(tenant_id), str(effective_id))
+    with _MAP_GENERATION_LOCKS_GUARD:
+        lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
+    with lock:
+        return _recompose_catchment_map(project_data, tenant_id, effective_id)
+
+
 def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None) or (project_data or {}).get('draft_id') or (project_data or {}).get('draftId') or 'unscoped'
     lock_key = (str(tenant_id), str(effective_id))
@@ -3267,6 +3488,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         'landmarks': [],
         'landmarks_matrix': [],
         'access_roads': [],
+        'catchment_landmarks': [],
     }
 
     polygon_coords = None
@@ -3652,7 +3874,6 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 catchment_zoom = fitted_zoom
                 result['zooms']['catchment'] = catchment_zoom
                 print(f"[CATCHMENT] {len(rings)} rings, outer {max(ring['km'] for ring in rings):.1f} km, zoom {catchment_zoom}")
-        catchment_markers = _build_markers(marker_lat, marker_lng, city_landmarks)
         catchment_mt = map_styles['catchment']
         if catchment_mt == 'both':
             styles_to_gen = [('satellite', '##MAP_CATCHMENT_SATELLITE##', 'catchment_satellite'),
@@ -3660,6 +3881,11 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
         else:
             styles_to_gen = [(catchment_mt, '##MAP_CATCHMENT##', 'catchment')]
 
+        editable_placeholders = {
+            '##MAP_CATCHMENT##': '##MAP_CATCHMENT_EDITABLE##',
+            '##MAP_CATCHMENT_SATELLITE##': '##MAP_CATCHMENT_SATELLITE_EDITABLE##',
+            '##MAP_CATCHMENT_ROADMAP##': '##MAP_CATCHMENT_ROADMAP_EDITABLE##',
+        }
         for active_mt, placeholder, img_suffix in styles_to_gen:
             catchment_path = _unique_map_path(tenant_id, effective_pres_id, img_suffix)
             # Fetch clean map without the API-drawn paths, as we will draw them with PIL for premium styling.
@@ -3671,15 +3897,39 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
                 # Draw the anti-aliased concentric rings with time label pills
                 if rings:
                     _draw_catchment_zones(catchment_path, lat, lng, catchment_zoom, rings, scale=2)
-                _overlay_markers(catchment_path, lat, lng, catchment_zoom, catchment_markers, size=(1280, 720))
                 if draw_compass:
                     _draw_compass(catchment_path, position='top-right')
                 if draw_inset:
                     _draw_inset_map(catchment_path, lat, lng, inset_size=180)
+                editable_placeholder = editable_placeholders[placeholder]
+                editable_suffix = img_suffix + '_editable'
+                editable_path = _unique_map_path(tenant_id, effective_pres_id, editable_suffix)
+                shutil.copyfile(catchment_path, editable_path)
+                rendered_landmarks = _draw_catchment_markers(
+                    catchment_path, lat, lng, catchment_zoom, city_landmarks,
+                    project_data.get('catchment_label_positions'), scale=2
+                )
+                if not result['catchment_landmarks']:
+                    result['catchment_landmarks'] = rendered_landmarks
+                metadata = {
+                    'lat': lat,
+                    'lng': lng,
+                    'zoom': catchment_zoom,
+                    'center_lat': lat,
+                    'center_lng': lng,
+                    'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': MAP_LABEL_RENDER_VERSION,
+                    'highlight_site': bool(highlight_site),
+                    'zones': zones,
+                    'landmarks_matrix': result.get('landmarks_matrix') or [],
+                    'catchment_landmarks': rendered_landmarks,
+                }
                 result['placeholders'][placeholder] = catchment_path
+                result['placeholders'][editable_placeholder] = editable_path
                 _record_maps_call(tenant_id)
                 from db import add_map_image
-                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, {'lat': lat, 'lng': lng, 'zoom': catchment_zoom, 'center_lat': lat, 'center_lng': lng, 'map_highlight_version': MAP_HIGHLIGHT_RENDER_VERSION, 'map_label_version': MAP_LABEL_RENDER_VERSION, 'highlight_site': bool(highlight_site), 'zones': zones, 'landmarks_matrix': result.get('landmarks_matrix') or []})
+                add_map_image(tenant_id, img_suffix, catchment_path, placeholder, effective_pres_id, metadata)
+                add_map_image(tenant_id, editable_suffix, editable_path, editable_placeholder, effective_pres_id, metadata)
 
     return result
 
