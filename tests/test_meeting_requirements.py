@@ -4157,15 +4157,22 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('tenantProjectData.access_road_label_positions', edit_confirm)
         self.assertIn("editableKeys: ['##MAP_ACCESS_EDITABLE##'", source)
         self.assertIn("'access_roads_data'", source)
+        self.assertIn('Array.isArray(data.roads)', source)
         self.assertIn("'access_road_label_positions'", source)
         self.assertIn("'access_road_label_sizes'", source)
         self.assertIn('id="mapLabelOverlay"', source)
         self.assertIn('function startAccessRoadLabelDrag(event, name)', source)
         self.assertIn('function adjustAccessRoadLabelSize(delta)', source)
+        self.assertIn('function deleteAccessRoadFromDraft(event, name)', source)
+        self.assertIn('map-road-label-delete', source)
         self.assertIn('onpointerdown="startAccessRoadLabelDrag(event,', source)
+        self.assertIn('onpointerdown="event.stopPropagation()"', source)
+        self.assertIn('>حذف</button>', source)
         self.assertIn('تصغير الاسم', source)
         self.assertIn('تكبير الاسم', source)
         self.assertIn('tenantProjectData.main_roads = hidden.value;', source)
+        self.assertIn('const allowedRoadKeys = new Set(rows.map(row => accessRoadNameKey(row.name)));', source)
+        self.assertIn('.filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name)))', source)
         self.assertIn('function invalidateAccessMapApproval()', source)
 
         maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
@@ -4436,7 +4443,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # The probes decided which roads were found; seeding them meant a new set of street
         # names on every regeneration of the same site.
         self.assertEqual(maps_service.access_probe_points(*site), maps_service.access_probe_points(*site))
-        self.assertEqual(len(maps_service.access_probe_points(*site)), 4)
+        self.assertEqual(len(maps_service.access_probe_points(*site)), 8)
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         access_at = source.index('def _draw_access_roads(')
         body = source[access_at:source.index('def _get_cached_map_images(')]
@@ -4444,6 +4451,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('seed_step', body)
         self.assertNotIn('rotate_by', body)
         self.assertNotIn("regen_seed = int(", body)
+        self.assertNotIn('discovered_count', body)
+        self.assertIn("road_data if isinstance(road_data, list) else []", body)
 
         # The names the user entered in the location section win over Google's wording.
         known = [

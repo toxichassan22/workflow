@@ -2357,17 +2357,27 @@ def _google_reverse_geocode_road(lat, lng, tenant_id=None):
     return ''
 
 
+def _fixed_road_probe_points(lat, lng, lat_step, lng_step):
+    diagonal_lat = lat_step * 0.72
+    diagonal_lng = lng_step * 0.72
+    return [
+        (lat + lat_step, lng),
+        (lat - lat_step, lng),
+        (lat, lng + lng_step),
+        (lat, lng - lng_step),
+        (lat + diagonal_lat, lng + diagonal_lng),
+        (lat + diagonal_lat, lng - diagonal_lng),
+        (lat - diagonal_lat, lng + diagonal_lng),
+        (lat - diagonal_lat, lng - diagonal_lng),
+    ]
+
+
 def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=None, origin_lng=None, max_results=6,
                           lat_step=0.0018, lng_step=0.0024):
     """Return verified nearby road names from Google Roads + Directions."""
     route_origin_lat = origin_lat if origin_lat is not None else center_lat
     route_origin_lng = origin_lng if origin_lng is not None else center_lng
-    probes = [
-        (route_origin_lat + lat_step, route_origin_lng),
-        (route_origin_lat - lat_step, route_origin_lng),
-        (route_origin_lat, route_origin_lng + lng_step),
-        (route_origin_lat, route_origin_lng - lng_step),
-    ]
+    probes = _fixed_road_probe_points(route_origin_lat, route_origin_lng, lat_step, lng_step)
 
     def fetch(probe):
         p_lat, p_lng = probe
@@ -2406,7 +2416,7 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
         }
 
     import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         candidates = list(executor.map(fetch, probes))
 
     roads = []
@@ -2422,19 +2432,12 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
 
 
 def access_probe_points(lat, lng):
-    """The four fixed points used to discover the access roads around a site.
+    """Fixed points used to discover the access roads around a site.
 
     These must never depend on a regeneration seed: moving them snapped to different roads
     and produced a different set of street names on every regeneration of the same site.
     """
-    lat_step = 0.0018  # about 200 m
-    lng_step = 0.0024
-    return [
-        (lat + lat_step, lng),
-        (lat - lat_step, lng),
-        (lat, lng + lng_step),
-        (lat, lng - lng_step),
-    ]
+    return _fixed_road_probe_points(lat, lng, 0.0018, 0.0024)
 
 
 _ROAD_NAME_PREFIXES = ('طريق', 'شارع', 'الطريق', 'الشارع', 'ش.', 'ش')
@@ -2640,8 +2643,22 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         # so every regeneration snapped to different roads and the map came back with a
         # different set of street names for the same site.
         probe_points = access_probe_points(route_origin_lat, route_origin_lng)
+        targeted_probes = []
+        for item in road_data if isinstance(road_data, list) else []:
+            if not isinstance(item, dict) or item.get('row_source') == 'manual':
+                continue
+            expected_name = match_known_road_name(item.get('name'), discoverable_road_names)
+            try:
+                road_lat = float(item.get('lat'))
+                road_lng = float(item.get('lng'))
+            except (TypeError, ValueError):
+                continue
+            if expected_name and math.isfinite(road_lat) and math.isfinite(road_lng):
+                targeted_probes.append(((road_lat, road_lng), expected_name))
+        probe_entries = targeted_probes + [(point, None) for point in probe_points]
 
-        def _fetch_probe_route(probe):
+        def _fetch_probe_route(entry):
+            probe, expected_name = entry
             p_lat, p_lng = probe
             snapped = _snap_to_roads(p_lat, p_lng, tenant_id=tenant_id)
             dest_lat = snapped['lat'] if snapped else p_lat
@@ -2659,7 +2676,8 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 )
                 if localized_name:
                     discovered_name = localized_name
-            approved_name = match_known_road_name(discovered_name, discoverable_road_names)
+            candidates = [expected_name] if expected_name else discoverable_road_names
+            approved_name = match_known_road_name(discovered_name, candidates)
             if not approved_name:
                 return None
             return route['coords'], approved_name, _road_name_key(approved_name)
@@ -2672,10 +2690,9 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         if allow_discovery and remaining_approved_names:
             print("[ACCESS ROADS] Discovering approved nearby roads through Google Maps APIs...")
             import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                probe_results = list(executor.map(_fetch_probe_route, probe_points))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(12, max(1, len(probe_entries)))) as executor:
+                probe_results = list(executor.map(_fetch_probe_route, probe_entries))
 
-        discovered_count = 0
         for result in probe_results:
             if not result:
                 continue
@@ -2683,9 +2700,6 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 continue
             seen_road_keys.add(result[1])
             road_route_mapping.append((result[0], result[1]))
-            discovered_count += 1
-            if discovered_count >= 3:
-                break
         print(f"[ACCESS ROADS] labels: {[name for _, name in road_route_mapping]}")
 
         # 3. Draw routes and labels. Highlights first, names last so the gold

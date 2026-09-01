@@ -275,8 +275,12 @@ assertion deliberately, not reflexively.
   draggable position and independent 0.6–1.8 scale. Initial generation persists the
   verified Google geometry in `access_roads_data` plus a clean `##MAP_ACCESS_EDITABLE##` sidecar.
   Name/label and path modes edit those values with undo/confirm/cancel, release only the access-image
-  approval, and recompose locally without another provider call. A new name has no highlight until it
-  has verified Google geometry or a manually approved path. The map toolbar renders only the currently
+  approval, and recompose locally without another provider call. Each editable map label carries a
+  small text «حذف» action; confirmation removes its table row, discovered/manual geometry, position and
+  size. There is no three-road rendering cap: every table row with verified Google geometry or a manually
+  approved path is eligible, and structured Google road coordinates are probed directly before the fixed
+  fallback points. A new name has no highlight until it has verified Google geometry or a manually
+  approved path. The map toolbar renders only the currently
   selected map's actions. Location-table action buttons bypass the section lock; the first real data
   change automatically releases both location-analysis approval and the location section status instead
   of disabling clicks.

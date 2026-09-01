@@ -4027,6 +4027,24 @@
       border-color: #d4a359;
     }
 
+    .map-road-label-delete {
+      position: absolute;
+      top: -12px;
+      left: -10px;
+      width: auto;
+      min-width: 0;
+      padding: 2px 5px;
+      border: 1px solid #fff;
+      border-radius: 5px;
+      background: #8b2020;
+      color: #fff;
+      font: inherit;
+      font-size: 8px;
+      line-height: 1.2;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+
     .tenant-map-preview-card {
       cursor: pointer;
       transition: border-color .15s ease, box-shadow .15s ease;
@@ -12400,6 +12418,27 @@
       event.stopPropagation();
     }
 
+    function deleteAccessRoadFromDraft(event, name) {
+      if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      const index = tenantRoadEditDraft.rows.findIndex(row => accessRoadNameKey(row.name) === accessRoadNameKey(name));
+      if (index < 0) return;
+      pushRoadEditHistory();
+      const [removed] = tenantRoadEditDraft.rows.splice(index, 1);
+      for (const key of [removed.name, removed.original_name]) {
+        delete tenantRoadEditDraft.labelPositions[key];
+        delete tenantRoadEditDraft.labelSizes[key];
+      }
+      tenantRoadEditSelectedIndex = tenantRoadEditDraft.rows.length
+        ? Math.min(index, tenantRoadEditDraft.rows.length - 1)
+        : -1;
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+    }
+
     function adjustAccessRoadLabelSize(delta) {
       if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
       pushRoadEditHistory();
@@ -12434,8 +12473,11 @@
       });
       const renamed = new Map(rows.map(row => [accessRoadNameKey(row.original_name), row.name]));
       const renameGeometry = road => ({ ...road, name: renamed.get(accessRoadNameKey(road?.name)) || road?.name });
-      tenantProjectData.access_roads_data = (Array.isArray(tenantProjectData.access_roads_data) ? tenantProjectData.access_roads_data : []).map(renameGeometry);
-      tenantProjectData.manual_road_paths = (Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : []).map(renameGeometry);
+      const allowedRoadKeys = new Set(rows.map(row => accessRoadNameKey(row.name)));
+      tenantProjectData.access_roads_data = (Array.isArray(tenantProjectData.access_roads_data) ? tenantProjectData.access_roads_data : [])
+        .map(renameGeometry).filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name)));
+      tenantProjectData.manual_road_paths = (Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : [])
+        .map(renameGeometry).filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name)));
       tenantProjectData.access_road_label_positions = Object.fromEntries(rows.map(row => {
         const point = tenantRoadEditDraft.labelPositions[row.name] || tenantRoadEditDraft.labelPositions[row.original_name];
         return point ? [row.name, point] : null;
@@ -16357,7 +16399,9 @@
         tenantNearbyLandmarks = (Array.isArray(data.landmarks) ? data.landmarks : [])
           .map(item => ({ ...item, row_source: item.row_source || 'ai' }));
         tenantProjectData.nearby_landmarks_data = tenantNearbyLandmarks;
-        tenantProjectData.main_roads_data = parseLocationFieldText('main_roads', fields.main_roads || '')
+        tenantProjectData.main_roads_data = (Array.isArray(data.roads) && data.roads.length
+          ? data.roads
+          : parseLocationFieldText('main_roads', fields.main_roads || ''))
           .map(item => ({ ...item, row_source: 'ai' }));
         tenantProjectData.city_landmarks_data = (Array.isArray(data.cityLandmarks) ? data.cityLandmarks : [])
           .map(item => ({ ...item, row_source: item.row_source || 'ai' }));
@@ -16915,8 +16959,11 @@
         if (!Number.isFinite(x) || !Number.isFinite(y)) return '';
         const scale = Math.max(0.6, Math.min(1.8, Number(path.label_scale) || 1));
         const encodedName = encodeURIComponent(String(path.name)).replace(/'/g, '%27');
+        const deleteAction = tenantRoadEditMode
+          ? '<button type="button" class="map-road-label-delete" onpointerdown="event.stopPropagation()" onclick="deleteAccessRoadFromDraft(event,decodeURIComponent(\'' + encodedName + '\'))">حذف</button>'
+          : '';
         return '<div class="map-road-label' + (tenantRoadEditMode ? ' editable' : '') + '" data-road-label="' + escapeHtml(path.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:' + (13 * scale).toFixed(1) + 'px;padding:' + (4 * scale).toFixed(1) + 'px ' + (8 * scale).toFixed(1) + 'px"' +
-          (tenantRoadEditMode ? ' onpointerdown="startAccessRoadLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + escapeHtml(path.name) + '</div>';
+          (tenantRoadEditMode ? ' onpointerdown="startAccessRoadLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + escapeHtml(path.name) + deleteAction + '</div>';
       }).join('');
     }
 
