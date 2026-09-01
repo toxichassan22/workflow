@@ -13530,7 +13530,23 @@
 
     // S4: Financial Study Model (Extracted from THE-VIEW-Financial-Model-FINAL-v2.html)
     const nf = new Intl.NumberFormat('en-US');
-    function money(n) { return new Intl.NumberFormat('en-US', { maximumFractionDigits: 10 }).format(Number(n) || 0) }
+    function roundFinancialResult(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return 0;
+      const rounded = Math.sign(number) * Math.round((Math.abs(number) + Number.EPSILON) * 10) / 10;
+      return Object.is(rounded, -0) ? 0 : rounded;
+    }
+    function formatFinancialResultNumber(value, grouped = true) {
+      const rounded = roundFinancialResult(value);
+      const hasFraction = !Number.isInteger(rounded);
+      return new Intl.NumberFormat('en-US', {
+        useGrouping: grouped,
+        minimumFractionDigits: hasFraction ? 1 : 0,
+        maximumFractionDigits: hasFraction ? 1 : 0
+      }).format(rounded);
+    }
+    function money(n) { return formatFinancialResultNumber(n, true) }
+    function financialPercent(n) { return formatFinancialResultNumber(n, false) + '%' }
     function rawNum(n) { return Number(n || 0) }
     function parseNumber(value) {
       let cleaned = String(value ?? '').trim();
@@ -13546,6 +13562,43 @@
       if (value == null || String(value).trim() === '') return fallback;
       return parseNumber(value);
     }
+    const FINANCIAL_SAVED_RATIO_KEYS = new Set(['roi', 'projectIrr', 'irr', 'equityIrr', 'occupancyReach']);
+    const FINANCIAL_SAVED_EXACT_KEYS = new Set([
+      'year', 'startYear', 'endYear', 'studyYear', 'operationYear', 'developmentYears',
+      'operationYears', 'totalYears', 'salesStartYear', 'salesYears', 'saleExitYear',
+      'operatingExitYear', 'financeDrawYears', 'financeRepaymentStartYear',
+      'financeRepaymentYears', 'floorCount', 'units'
+    ]);
+    function roundFinancialSavedResults(value, key = '') {
+      if (Array.isArray(value)) return value.map(item => roundFinancialSavedResults(item, key));
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [
+          childKey, roundFinancialSavedResults(childValue, childKey)
+        ]));
+      }
+      if (typeof value !== 'number' || !Number.isFinite(value) || FINANCIAL_SAVED_EXACT_KEYS.has(key)) return value;
+      if (FINANCIAL_SAVED_RATIO_KEYS.has(key)) return roundFinancialResult(value * 100) / 100;
+      return roundFinancialResult(value);
+    }
+    function financialControlContext(control) {
+      const cell = control?.closest('td,th');
+      const header = cell && cell.cellIndex >= 0 ? cell.closest('table')?.querySelector('thead tr')?.cells[cell.cellIndex]?.textContent : '';
+      const label = control?.closest('div')?.querySelector(':scope > label')?.textContent || '';
+      return [control?.id, control?.dataset?.field, header, label].filter(Boolean).join(' ');
+    }
+    function formatFinancialReportValue(value, context = '') {
+      const raw = String(value ?? '').trim();
+      const match = raw.match(/^(\()?\s*([-+]?(?:[0-9٠-٩]+(?:[٬،,][0-9٠-٩]{3})*|[0-9٠-٩]+)(?:[٫.][0-9٠-٩]+)?)\s*(\))?\s*(%|٪|سنة|سنوات|م²|م2|ر\.?\s?س|ريال(?:\s+سعودي)?)?$/);
+      if (!match || /تاريخ|هاتف|جوال|وثيقة|معرف|رقم|date|phone|mobile|document|identifier|\bid\b/i.test(context)) return raw;
+      const number = parseNumber(match[2]);
+      const suffix = match[4] || '';
+      const percent = suffix === '%' || suffix === '٪' || /%|نسبة|معدل|إشغال|ROI|IRR/i.test(context);
+      const year = suffix === 'سنة' || suffix === 'سنوات' || /سنة|سنوات|عام|year/i.test(context);
+      let formatted = formatFinancialResultNumber(number, !(percent || year));
+      if (match[1] && match[3]) formatted = '(' + formatted.replace(/^-/, '') + ')';
+      if (suffix) formatted += (suffix === '%' || suffix === '٪' ? '' : ' ') + suffix;
+      return formatted;
+    }
     function num(id) { return parseNumber(document.getElementById(id)?.value) }
     function val(id) { return document.getElementById(id)?.value || '' }
     function reportFieldValue(id) {
@@ -13553,7 +13606,8 @@
       if (!el) return '—';
       if (el.tagName === 'SELECT') return el.selectedOptions?.[0]?.textContent?.trim() || '—';
       const value = String(el.value ?? '').trim();
-      return value || '—';
+      if (!value) return '—';
+      return isFinancialNumericControl(el) ? formatFinancialReportValue(value, financialControlContext(el)) : value;
     }
     function escapeReportHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -13576,7 +13630,10 @@
       table.querySelectorAll('.conditional-off').forEach(node => node.remove());
       table.querySelectorAll('input').forEach(input => {
         const span = document.createElement('span');
-        span.textContent = input.value?.trim() || '—';
+        const value = input.value?.trim() || '';
+        span.textContent = value
+          ? (isFinancialNumericControl(input) ? formatFinancialReportValue(value, financialControlContext(input)) : value)
+          : '—';
         input.replaceWith(span);
       });
       table.querySelectorAll('select').forEach(select => {
@@ -14046,8 +14103,7 @@
     // the developer fee silently never entered the cashflow. The footer states both sums and the
     // note states what is still unassigned.
     function schedulePercentText(value) {
-      const number = Number(value) || 0;
-      return (Math.round(number * 100) / 100) + '%';
+      return financialPercent(Number(value) || 0);
     }
     function renderSchedulePercentTotals(rows, costValueTotal, devValueTotal) {
       const costPct = rows.reduce((sum, row) => sum + Math.max(0, Number(row.costPct) || 0), 0);
@@ -14376,7 +14432,7 @@
         const rows = [];
         const add = (label, method, result) => { if (method) rows.push([label, method, result]); };
         const m = value => money(value);
-        const pctText = value => (Math.round((Number(value) || 0) * 100) / 100) + '%';
+        const pctText = value => financialPercent(Number(value) || 0);
 
         if (facts.landValue > 0) {
           add('قيمة الأرض',
@@ -14445,16 +14501,16 @@
           add('إجمالي حقوق الملكية', `مساهمة الأرض العينية ${m(facts.landEquityContribution)} + الضخ النقدي ${m(facts.totalCashEquity)}`, m(facts.totalEquityRequired));
         }
         if (facts.roi !== null && facts.roiOutflows > 0) {
-          add('ROI', `(التدفقات الداخلة ${m(facts.roiInflows)} − التدفقات الخارجة ${m(facts.roiOutflows)}) ÷ ${m(facts.roiOutflows)} — ${facts.roiScope}`, (facts.roi * 100).toFixed(2) + '%');
+          add('ROI', `(التدفقات الداخلة ${m(facts.roiInflows)} − التدفقات الخارجة ${m(facts.roiOutflows)}) ÷ ${m(facts.roiOutflows)} — ${facts.roiScope}`, financialPercent(facts.roi * 100));
         }
         add('Project IRR', `معدل الخصم الذي يصفّر صافي تدفقات المشروع قبل التمويل وأتعاب الصندوق — ${facts.irrScope}`,
-          facts.projectIrr === null ? 'غير متاح' : (facts.projectIrr * 100).toFixed(2) + '%');
+          facts.projectIrr === null ? 'غير متاح' : financialPercent(facts.projectIrr * 100));
         if (facts.financeOn) {
           add('Equity IRR', `معدل الخصم الذي يصفّر تدفقات حقوق الملكية بعد التمويل وأتعاب الصندوق — ${facts.irrScope}`,
-            facts.equityIrr === null ? 'غير متاح' : (facts.equityIrr * 100).toFixed(2) + '%');
+            facts.equityIrr === null ? 'غير متاح' : financialPercent(facts.equityIrr * 100));
         }
         add('فترة استرداد المشروع', 'أول سنة يصبح فيها الرصيد التراكمي لتدفقات المشروع موجبًا، مع احتساب الكسر داخل السنة',
-          facts.payback === null ? 'لا يسترد خلال الفترة' : facts.payback.toFixed(2) + ' سنة');
+          facts.payback === null ? 'لا يسترد خلال الفترة' : formatFinancialResultNumber(facts.payback, false) + ' سنة');
 
         body.innerHTML = rows.map(([label, method, result]) =>
           `<tr><td>${escapeReportHtml(label)}</td><td>${escapeReportHtml(method)}</td><td class="row-result">${escapeReportHtml(result)}</td></tr>`).join('');
@@ -14909,7 +14965,7 @@
       setTxt('resSaleExit', money(saleExitValue));
       setTxt('resOperatingExitGross', money(operatingExitGross));
       setTxt('resOperatingExit', money(operatingExitValue));
-      setTxt('resSaleExitScope', saleExitMethod === 'none' ? 'غير مفعل' : `السنة ${saleExitYear} | تكلفة التخارج ${(saleExitCostRate * 100).toFixed(2)}%`);
+      setTxt('resSaleExitScope', saleExitMethod === 'none' ? 'غير مفعل' : `السنة ${saleExitYear} | تكلفة التخارج ${financialPercent(saleExitCostRate * 100)}`);
       renderSaleExitStatus({ modeFlags, exitOn, saleExitMethod, saleAreaTotal, saleExitGross, saleExitValue });
       renderClarifications({
         landMethod, landArea, landPricePerM2: num('landPricePerM2'), landValue,
@@ -14927,7 +14983,7 @@
         landEquityContribution, totalCashEquity, totalEquityRequired,
         roi, roiInflows, roiOutflows, roiScope, irrScope, projectIrr, equityIrr: irrVal, payback
       });
-      setTxt('resOperatingExitScope', exitMethod === 'none' ? 'غير مفعل' : `السنة ${operatingExitYear} | تكلفة التخارج ${(operatingExitCostRate * 100).toFixed(2)}%`);
+      setTxt('resOperatingExitScope', exitMethod === 'none' ? 'غير مفعل' : `السنة ${operatingExitYear} | تكلفة التخارج ${financialPercent(operatingExitCostRate * 100)}`);
       setTxt('resTerminal', money(terminal));
       setTxt('resYear0', '0');
       setTxt('resLandRent', money(landRent));
@@ -14936,11 +14992,11 @@
       setTxt('resFinanceCost', money(totalFinanceCost));
       setTxt('resFundFees', money(totalFundFees));
       setTxt('resTotalInvestmentCost', money(adjustedProjectCost));
-      setTxt('resROI', roi === null ? 'غير متاح' : (roi * 100).toFixed(2) + '%');
-      setTxt('resProjectIRR', projectIrr === null ? 'غير متاح' : (projectIrr * 100).toFixed(2) + '%');
-      setTxt('resIRR', irrVal === null ? 'غير متاح' : (irrVal * 100).toFixed(2) + '%');
-      setTxt('resPayback', payback === null ? 'لا يسترد خلال الفترة' : payback.toFixed(2) + ' سنة');
-      setTxt('resEquityPayback', equityPayback === 0 ? 'لا يتطلب ضخًا صافياً' : equityPayback === null ? 'لا يسترد خلال الفترة' : equityPayback.toFixed(2) + ' سنة');
+      setTxt('resROI', roi === null ? 'غير متاح' : financialPercent(roi * 100));
+      setTxt('resProjectIRR', projectIrr === null ? 'غير متاح' : financialPercent(projectIrr * 100));
+      setTxt('resIRR', irrVal === null ? 'غير متاح' : financialPercent(irrVal * 100));
+      setTxt('resPayback', payback === null ? 'لا يسترد خلال الفترة' : formatFinancialResultNumber(payback, false) + ' سنة');
+      setTxt('resEquityPayback', equityPayback === 0 ? 'لا يتطلب ضخًا صافياً' : equityPayback === null ? 'لا يسترد خلال الفترة' : formatFinancialResultNumber(equityPayback, false) + ' سنة');
       setTxt('resROIScope', roiScope + ' | يشمل التمويل وتكاليف الصندوق');
       setTxt('resProjectIRRScope', irrScope + ' | قبل التمويل وأتعاب الصندوق');
       setTxt('resEquityIRRScope', irrScope + ' | بعد التمويل وأتعاب الصندوق');
@@ -14973,7 +15029,7 @@
       const tb = document.querySelector('#cashflowTable tbody');
       if (tb) {
         tb.innerHTML = projected.map(r => `<tr>
-          <td>${r.year}</td><td>${r.phase}</td><td class="cf-rental">${r.operationYear ? Math.round(r.occupancyReach * 100) + '%' : '—'}</td><td class="cf-sales">${money(r.saleRevenue)}</td><td class="cf-rental">${money(r.operatingRevenue)}</td><td class="cf-grace">${money(r.graceDiscount)}</td>
+          <td>${r.year}</td><td>${r.phase}</td><td class="cf-rental">${r.operationYear ? financialPercent(r.occupancyReach * 100) : '—'}</td><td class="cf-sales">${money(r.saleRevenue)}</td><td class="cf-rental">${money(r.operatingRevenue)}</td><td class="cf-grace">${money(r.graceDiscount)}</td>
           <td>${money(r.developmentCost)}</td><td>${money(r.developerPayment)}</td><td class="cf-rental">${money(r.opex)}</td><td>${money(r.landRent)}</td><td class="cf-fund">${money(r.fundFeesAnnual)}</td>
           <td class="cf-finance">${money(r.financeDraw)}</td><td class="cf-finance">${money(r.financeInterest + r.financeFee)}</td><td class="cf-finance">${money(r.financeRepayment)}</td>
           <td class="row-result">${r.final < 0 ? '(' + money(Math.abs(r.final)) + ')' : money(r.final)}</td><td class="row-result">${r.cumulative < 0 ? '(' + money(Math.abs(r.cumulative)) + ')' : money(r.cumulative)}</td><td>${money(r.cashReserve)}</td>
@@ -15009,7 +15065,10 @@
       const hidden = document.getElementById('financialCalcData');
       if (hidden) {
         hidden.value = JSON.stringify({
-          projectCost, projectCostWithFinance, adjustedProjectCost, totalFundFees, roi, projectIrr, equityIrr: irrVal, payback, equityPayback, totalEquityRequired,
+          ...roundFinancialSavedResults({
+            projectCost, projectCostWithFinance, adjustedProjectCost, totalFundFees,
+            roi, projectIrr, equityIrr: irrVal, payback, equityPayback, totalEquityRequired
+          }),
           components: componentRows,
           unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), fundEnabled: val('fundEnabled'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
         });
@@ -15105,7 +15164,7 @@
       return {
         inputs,
         tables,
-        projection: window.__financialProjection || {},
+        projection: roundFinancialSavedResults(window.__financialProjection || {}),
         dynamicRows: collectFinancialDynamicRows(),
         financialCalcData: (() => {
           try { return JSON.parse(document.getElementById('financialCalcData')?.value || '{}'); } catch (e) { return {}; }
@@ -15143,7 +15202,8 @@
       if (!control) return '';
       if (control.tagName === 'SELECT') return financialReportText(control.selectedOptions?.[0]) || String(control.value ?? '').trim();
       if (control.type === 'checkbox') return control.checked ? 'نعم' : 'لا';
-      return String(control.value ?? '').trim();
+      const value = String(control.value ?? '').trim();
+      return isFinancialNumericControl(control) ? formatFinancialReportValue(value, financialControlContext(control)) : value;
     }
 
     function financialReportCellText(cell) {
@@ -15574,7 +15634,7 @@
     function updateSensitivityBaseInputs() { document.querySelectorAll('#sensitivityAssumptionsTable tbody tr').forEach(tr => { const reg = sensitivityRegistry[tr.dataset.key]; if (!reg) return; tr.classList.toggle('conditional-off', !reg.app()); const b = reg.base(); const c = tr.querySelector('.sensAutoBase'); if (c) c.textContent = `${money(b)} ${reg.unit}` }) }
     function renderSensitivity() {
       const tbody = document.querySelector('#sensitivityTable tbody'); if (!tbody || window.__sensitivityRunning) return; updateSensitivityBaseInputs(); const vars = collectSensitivityVariables().filter(v => sensitivityRegistry[v.key]?.app()), labels = ['متحفظ', 'أساسي', 'متفائل'], snapshots = []; const capture = (el, kind) => { if (el && !snapshots.some(x => x.el === el)) snapshots.push({ el, value: el.value, kind }) };
-      document.querySelectorAll('#revenueTable tbody tr').forEach(tr => { const m = tr.querySelector('[data-field="method"] select')?.value; if (m === 'areaSale') capture(tr.querySelector('[data-field="price"] input'), 'sale'); else if (m === 'fixed') capture(tr.querySelector('[data-field="qty"] input'), 'rate'); else if (m !== 'percentRevenue') capture(tr.querySelector('[data-field="price"] input'), 'rate') }); document.querySelectorAll('#occupancyRampTable [data-field="reachPct"] input').forEach(el => capture(el, 'occupancy')); document.querySelectorAll('#costTable tbody tr').forEach(tr => { if (tr.querySelector('[data-field="class"] select')?.value === 'execution') capture(tr.querySelector('[data-field="method"] select')?.value === 'fixed' ? tr.querySelector('[data-field="qty"] input') : tr.querySelector('[data-field="price"] input'), 'cost') }); document.querySelectorAll('#opexTable tbody tr [data-field="price"] input,#opexTable tbody tr [data-field="qty"] input').forEach(el => capture(el, 'opex')); capture(document.getElementById('developmentYears'), 'delay'); capture(document.getElementById('annualFinanceRate'), 'finance'); if (val('exitMethod') === 'capRate') capture(document.getElementById('exitInput'), 'cap'); if (val('exitMethod') === 'fixed') capture(document.getElementById('exitInput'), 'exit'); if (val('saleExitMethod') === 'fixed') capture(document.getElementById('saleExitFixedValue'), 'exit'); const results = []; window.__sensitivityRunning = true; try { [0, 1, 2].forEach(si => { snapshots.forEach(s => { const regVar = vars.find(v => sensitivityRegistry[v.key]?.kind === s.kind); if (!regVar) return; const target = si === 1 ? sensitivityRegistry[regVar.key].base() : (si === 0 ? regVar.low : regVar.high), base = sensitivityRegistry[regVar.key].base(), orig = parseNumber(s.value); if (['sale', 'rate', 'cost', 'opex'].includes(s.kind)) s.el.value = String(base ? Math.max(0, orig * target / base) : orig); else if (s.kind === 'occupancy') s.el.value = String(base ? Math.max(0, Math.min(100, orig * target / base)) : orig); else s.el.value = String(Math.max(s.kind === 'cap' ? .01 : 0, target)) }); calculateAll(); const f = window.__financialProjection || {}, rows = f.projected || [], totalRevenue = rows.reduce((s, r) => s + r.saleRevenue + r.operatingRevenue, 0), totalExpenses = rows.reduce((s, r) => s + r.opex + r.landRent, 0), out = (f.adjustedProjectCost || 0) + totalExpenses, profit = totalRevenue + (f.terminal || 0) - out; results.push({ label: labels[si], totalRevenue, fullNoi: f.fullOccupancyNOI || 0, totalCost: f.adjustedProjectCost || 0, netProfit: profit, exit: f.terminal || 0, roi: out > 0 ? profit / out : null, projectIrr: irr(f.projectCashflows || []), equityIrr: irr(f.cashflows || []), payback: f.payback, equity: f.equityRequired || 0 }); snapshots.forEach(s => s.el.value = s.value) }); calculateAll() } finally { window.__sensitivityRunning = false } tbody.innerHTML = results.map(r => `<tr class="${r.label === 'أساسي' ? 'sensitivity-base-row' : ''}"><td>${r.label}</td><td>${money(r.totalRevenue)}</td><td>${money(r.fullNoi)}</td><td>${money(r.totalCost)}</td><td>${money(r.netProfit)}</td><td>${money(r.exit)}</td><td>${r.roi === null ? 'غير متاح' : (r.roi * 100).toFixed(2) + '%'}</td><td>${r.projectIrr === null ? 'غير متاح' : (r.projectIrr * 100).toFixed(2) + '%'}</td><td>${r.equityIrr === null ? 'غير متاح' : (r.equityIrr * 100).toFixed(2) + '%'}</td><td>${r.payback === null ? 'لا يسترد' : r.payback.toFixed(2) + ' سنة'}</td><td>${money(r.equity)}</td></tr>`).join('')
+      document.querySelectorAll('#revenueTable tbody tr').forEach(tr => { const m = tr.querySelector('[data-field="method"] select')?.value; if (m === 'areaSale') capture(tr.querySelector('[data-field="price"] input'), 'sale'); else if (m === 'fixed') capture(tr.querySelector('[data-field="qty"] input'), 'rate'); else if (m !== 'percentRevenue') capture(tr.querySelector('[data-field="price"] input'), 'rate') }); document.querySelectorAll('#occupancyRampTable [data-field="reachPct"] input').forEach(el => capture(el, 'occupancy')); document.querySelectorAll('#costTable tbody tr').forEach(tr => { if (tr.querySelector('[data-field="class"] select')?.value === 'execution') capture(tr.querySelector('[data-field="method"] select')?.value === 'fixed' ? tr.querySelector('[data-field="qty"] input') : tr.querySelector('[data-field="price"] input'), 'cost') }); document.querySelectorAll('#opexTable tbody tr [data-field="price"] input,#opexTable tbody tr [data-field="qty"] input').forEach(el => capture(el, 'opex')); capture(document.getElementById('developmentYears'), 'delay'); capture(document.getElementById('annualFinanceRate'), 'finance'); if (val('exitMethod') === 'capRate') capture(document.getElementById('exitInput'), 'cap'); if (val('exitMethod') === 'fixed') capture(document.getElementById('exitInput'), 'exit'); if (val('saleExitMethod') === 'fixed') capture(document.getElementById('saleExitFixedValue'), 'exit'); const results = []; window.__sensitivityRunning = true; try { [0, 1, 2].forEach(si => { snapshots.forEach(s => { const regVar = vars.find(v => sensitivityRegistry[v.key]?.kind === s.kind); if (!regVar) return; const target = si === 1 ? sensitivityRegistry[regVar.key].base() : (si === 0 ? regVar.low : regVar.high), base = sensitivityRegistry[regVar.key].base(), orig = parseNumber(s.value); if (['sale', 'rate', 'cost', 'opex'].includes(s.kind)) s.el.value = String(base ? Math.max(0, orig * target / base) : orig); else if (s.kind === 'occupancy') s.el.value = String(base ? Math.max(0, Math.min(100, orig * target / base)) : orig); else s.el.value = String(Math.max(s.kind === 'cap' ? .01 : 0, target)) }); calculateAll(); const f = window.__financialProjection || {}, rows = f.projected || [], totalRevenue = rows.reduce((s, r) => s + r.saleRevenue + r.operatingRevenue, 0), totalExpenses = rows.reduce((s, r) => s + r.opex + r.landRent, 0), out = (f.adjustedProjectCost || 0) + totalExpenses, profit = totalRevenue + (f.terminal || 0) - out; results.push({ label: labels[si], totalRevenue, fullNoi: f.fullOccupancyNOI || 0, totalCost: f.adjustedProjectCost || 0, netProfit: profit, exit: f.terminal || 0, roi: out > 0 ? profit / out : null, projectIrr: irr(f.projectCashflows || []), equityIrr: irr(f.cashflows || []), payback: f.payback, equity: f.equityRequired || 0 }); snapshots.forEach(s => s.el.value = s.value) }); calculateAll() } finally { window.__sensitivityRunning = false } tbody.innerHTML = results.map(r => `<tr class="${r.label === 'أساسي' ? 'sensitivity-base-row' : ''}"><td>${r.label}</td><td>${money(r.totalRevenue)}</td><td>${money(r.fullNoi)}</td><td>${money(r.totalCost)}</td><td>${money(r.netProfit)}</td><td>${money(r.exit)}</td><td>${r.roi === null ? 'غير متاح' : (r.roi * 100).toFixed(1) + '%'}</td><td>${r.projectIrr === null ? 'غير متاح' : (r.projectIrr * 100).toFixed(1) + '%'}</td><td>${r.equityIrr === null ? 'غير متاح' : (r.equityIrr * 100).toFixed(1) + '%'}</td><td>${r.payback === null ? 'لا يسترد' : r.payback.toFixed(1) + ' سنة'}</td><td>${money(r.equity)}</td></tr>`).join('')
     }
 
 

@@ -351,10 +351,13 @@ Two states, and both are stated to the model explicitly — silence made it inve
   `financial_study_model`, `_financial_data_note()` returns `FINANCIAL_ABSENT_NOTE` which forbids any
   financial slide or figure, and `strip_financial_slides()` removes financial slides that the
   planner, the fallback plan or the minimum-count padding proposed anyway.
-- **Study entered.** Every figure is transcribed with the same value, unit, currency and decimal
-  precision; thousands separators are display-only. No rounding, million/thousand conversion,
-  recomputing, new ratio, row or year is allowed. Slide generation attaches
-  `collectFinancialStudyReport()` to the generation-only copy of `financial_study_model`, so
+- **Study entered.** Source inputs are copied without inventing or recomputing figures. Calculated
+  fractional results are rounded half-up to one decimal at the display/save boundary, while formulas
+  keep full precision until their result; money, area and quantity values use thousands separators on
+  screen and in every PDF engine. Years, dates, coordinates, phones, document numbers and identifiers
+  keep their exact digits. No million/thousand unit conversion, new ratio, row or year is allowed.
+  Slide generation attaches `collectFinancialStudyReport()` to the generation-only copy of
+  `financial_study_model`, so
   `_financial_data_note()` receives the same visible headings, labels, option text, metrics and
   complete tables as the financial PDF. The canonical plan renders those report parts first, six
   field rows or eight table rows per slide, then appends two or three `financial_summary:*` slides
@@ -884,15 +887,17 @@ derived finance total (`financeBaseAmount`, `facilityAmount`, arrangement fees, 
 as zero. `parseNumber()` / `financialInputNumber()` / `setFinancialSnapshotInput()` must strip
 commas and Arabic digits before writing a value back into an input.
 
-**The exported PDF is the screen, verbatim, laid out as tables — nothing else changes.** The owner
-asked for exactly that. `collectFinancialStudyReport()` (client, export only — never stored in the
-draft) walks `#section-financial-calc` in DOM order and sends `report.parts`: `heading` /
-`fields` / `table` entries carrying the **visible label** of each input, the **selected option
-text** of each list, and the **displayed figure**. `_financial_screen_sections()` renders those
-as-is. Do not reintroduce a server-side label map or number reformatter on that path: the report
-used to be rebuilt from `FINANCIAL_RESULT_LABELS` / `FINANCIAL_COLUMN_LABELS`, so «هل وحدات
-المشروع بيعية أم تأجيرية؟» printed as «طبيعة الإيرادات» and its value printed as the raw option
-id `mixed`. Those maps stay only for drafts saved before `report.parts` existed.
+**The exported PDF keeps the screen's labels, order and selected option text, laid out as tables.**
+`collectFinancialStudyReport()` (client, export only — never stored in the draft) walks
+`#section-financial-calc` in DOM order and sends `report.parts`: `heading` / `fields` / `table`
+entries carrying the **visible label** of each input, the **selected option text** of each list, and
+the displayed figure. Numeric controls are normalized by `formatFinancialReportValue()` before the
+request, and `_financial_report_format_display()` repeats that guarantee in both the HTML and direct
+PyMuPDF paths: fractional results use one decimal and money/area/quantity values use thousands
+separators. Do not reintroduce a server-side label map: the report used to be rebuilt from
+`FINANCIAL_RESULT_LABELS` / `FINANCIAL_COLUMN_LABELS`, so «هل وحدات المشروع بيعية أم تأجيرية؟»
+printed as «طبيعة الإيرادات» and its value printed as the raw option id `mixed`. Those maps stay only
+for drafts saved before `report.parts` existed.
 
 A field is skipped when it is off on screen: `hidden`, `.conditional-off`, `.dynamic-off`,
 `.hidden`, or `display:none`. Those are the same markers `applyConditionalVisibility()` and

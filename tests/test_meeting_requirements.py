@@ -2510,8 +2510,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('12. النتائج المالية', html)
         self.assertIn('إجمالي تكلفة المشروع', html)
         self.assertIn('500,000,000', html)
-        self.assertIn('42.00%', html)
-        self.assertIn('18.00%', html)
+        self.assertIn('42%', html)
+        self.assertIn('18%', html)
         self.assertIn('Project IRR', html)
         self.assertIn('نسبة السحب %', html)
         self.assertIn('صافي تدفق المشروع', html)
@@ -2589,6 +2589,60 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("if (control.tagName === 'SELECT') return financialReportText(control.selectedOptions?.[0])",
                       index_source)
         self.assertIn("FINANCIAL_REPORT_SKIP_COLUMNS = new Set(['ترتيب / حذف', 'ترتيب', 'حذف'])", index_source)
+
+    def test_financial_decimals_and_pdf_values_use_one_decimal_and_thousands_separators(self):
+        module = self.application_module
+        self.assertEqual(module._financial_report_format_number(1234567.26, 'projectCost'), '1,234,567.3')
+        self.assertEqual(module._financial_report_format_number(1234567, 'projectCost'), '1,234,567')
+        self.assertEqual(module._financial_report_format_number(0.18254, 'projectIrr'), '18.3%')
+        self.assertEqual(module._financial_report_format_number(6.55, 'payback'), '6.6 سنة')
+        self.assertEqual(module._financial_report_format_number(2027, 'year'), '2027')
+        self.assertEqual(module._financial_report_format_number(1234, 'units'), '1,234')
+        self.assertEqual(module._financial_report_format_display('0500000000', 'رقم الهاتف'), '0500000000')
+
+        model = {
+            'inputs': {
+                'unitRevenueMode': 'mixed', 'developmentYears': 4, 'landArea': 70000,
+                'builtUpAreaAbove': 100000, 'financeEnabled': 'no', 'fundEnabled': 'no',
+                'fundFeesEnabled': 'no', 'externalEnabled': 'no', 'exitEnabled': 'no',
+            },
+            'tables': {},
+            'projection': {},
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': 'النتائج المالية'},
+                {'type': 'fields', 'rows': [
+                    ['إجمالي تكلفة الاستثمار', '1234567.26'],
+                    ['Project IRR', '18.256%'],
+                ]},
+                {'type': 'table', 'headers': ['السنة', 'إجمالي الإيرادات', 'نسبة الإشغال %'],
+                 'rows': [['2027', '9876543.26', '87.26%']]},
+            ]},
+        }
+        with self.app.app_context():
+            html = module.build_financial_report_html('مشروع مالي', model, {}, self.tenant_a)
+        for expected in ('1,234,567.3', '18.3%', '9,876,543.3', '87.3%'):
+            self.assertIn(expected, html)
+        self.assertIn('<td dir="ltr">2027</td>', html)
+        self.assertNotIn('2,027', html)
+
+        with tempfile.TemporaryDirectory() as folder:
+            output = os.path.join(folder, 'grouped.pdf')
+            with self.app.app_context():
+                module.generate_financial_pdf_from_model('مشروع مالي', model, output)
+            import fitz
+            document = fitz.open(output)
+            try:
+                text = '\n'.join(page.get_text() for page in document)
+            finally:
+                document.close()
+            for expected in ('1,234,567.3', '9,876,543.3', '87.3%'):
+                self.assertIn(expected, text)
+            self.assertNotIn('2,027', text)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function roundFinancialResult(value)', index_source)
+        self.assertIn('maximumFractionDigits: hasFraction ? 1 : 0', index_source)
+        self.assertIn('roundFinancialSavedResults(window.__financialProjection || {})', index_source)
 
     def test_cashflow_column_tints_do_not_override_the_table_header(self):
         """The cf-* classes also sit on the <th> so whole columns can be hidden by project mode.
@@ -3254,7 +3308,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('wide-table', html)
         self.assertIn('1,000', html)
         self.assertIn('90', html)
-        self.assertIn('12.00%', html)
+        self.assertIn('12%', html)
         self.assertNotIn('ترتيب / حذف', html)
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('function persistFinancialStudyDraftState()', index_source)

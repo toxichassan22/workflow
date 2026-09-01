@@ -12,6 +12,7 @@ import subprocess
 import requests
 import uuid as _uuid
 import threading
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import db_driver
 import concurrent.futures
@@ -6103,7 +6104,10 @@ _FINANCIAL_PERCENT_KEYS = {
 }
 _FINANCIAL_YEAR_KEYS = {
     'year', 'startYear', 'endYear', 'studyYear', 'operationYear', 'developmentYears',
-    'operationYears', 'financeDrawYears', 'financeRepaymentYears', 'floorCount', 'units',
+    'operationYears', 'salesStartYear', 'salesYears', 'landContributionYear',
+    'financeDrawYears', 'financeRepaymentStartYear', 'financeRepaymentYears',
+    'fundFeeStartYear', 'fundFeeEndYear', 'performanceCrystallizationYear',
+    'saleExitYear', 'operatingExitYear',
 }
 
 
@@ -6129,6 +6133,16 @@ def _financial_report_plain_number(value):
         return None
 
 
+def _financial_rounded_text(value, grouped=True):
+    try:
+        rounded = Decimal(str(value)).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return ''
+    if rounded == rounded.to_integral_value():
+        return f'{int(rounded):,}' if grouped else str(int(rounded))
+    return f'{rounded:,.1f}' if grouped else f'{rounded:.1f}'
+
+
 def _financial_report_format_number(value, key=''):
     number = _financial_report_plain_number(value)
     if number is None:
@@ -6141,16 +6155,46 @@ def _financial_report_format_number(value, key=''):
             display = number * 100
         else:
             display = number
-        return html_lib.escape(f'{display:,.2f}%')
+        return html_lib.escape(_financial_rounded_text(display, grouped=False) + '%')
     if field in {'payback', 'equityPayback'} or (isinstance(value, str) and 'سنة' in str(value)):
-        if float(number).is_integer():
-            return html_lib.escape(f'{int(number):,} سنة')
-        return html_lib.escape(f'{number:,.2f} سنة')
+        return html_lib.escape(_financial_rounded_text(number, grouped=False) + ' سنة')
     if field in _FINANCIAL_YEAR_KEYS and float(number).is_integer() and abs(number) < 10000:
-        return html_lib.escape(f'{int(number):,}')
-    if float(number).is_integer():
-        return html_lib.escape(f'{int(number):,}')
-    return html_lib.escape(f'{number:,.2f}')
+        return html_lib.escape(str(int(number)))
+    return html_lib.escape(_financial_rounded_text(number))
+
+
+_FINANCIAL_DISPLAY_VALUE_RE = re.compile(
+    r'^\s*(?P<open>\()?\s*(?P<number>[-+]?(?:[0-9٠-٩]+(?:[٬،,][0-9٠-٩]{3})*|[0-9٠-٩]+)(?:[٫.][0-9٠-٩]+)?)'
+    r'\s*(?P<close>\))?\s*(?P<suffix>%|٪|سنة|سنوات|م²|م2|ر\.?\s?س|ريال(?:\s+سعودي)?)?\s*$'
+)
+_FINANCIAL_PERCENT_CONTEXT_RE = re.compile(r'%|نسبة|معدل|إشغال|ROI|IRR', re.IGNORECASE)
+_FINANCIAL_YEAR_CONTEXT_RE = re.compile(r'سنة|سنوات|عام|year', re.IGNORECASE)
+_FINANCIAL_LITERAL_CONTEXT_RE = re.compile(
+    r'تاريخ|هاتف|جوال|وثيقة|معرف|رقم|date|phone|mobile|document|identifier|\bid\b', re.IGNORECASE
+)
+
+
+def _financial_report_format_display(value, context=''):
+    if value is None or value == '':
+        return '—'
+    if isinstance(value, bool):
+        return _financial_report_escape(value)
+    text = str(value).strip()
+    match = _FINANCIAL_DISPLAY_VALUE_RE.fullmatch(text)
+    if not match or _FINANCIAL_LITERAL_CONTEXT_RE.search(str(context or '')):
+        return _financial_report_escape(value)
+    number = _financial_report_plain_number(text)
+    if number is None:
+        return _financial_report_escape(value)
+    suffix = match.group('suffix') or ''
+    percent = bool(suffix in {'%', '٪'} or _FINANCIAL_PERCENT_CONTEXT_RE.search(str(context or '')))
+    year = bool(suffix in {'سنة', 'سنوات'} or _FINANCIAL_YEAR_CONTEXT_RE.search(str(context or '')))
+    formatted = _financial_rounded_text(number, grouped=not (percent or year))
+    if match.group('open') and match.group('close'):
+        formatted = f'({formatted.lstrip("-")})'
+    if suffix:
+        formatted += (' ' if suffix not in {'%', '٪'} else '') + suffix
+    return html_lib.escape(formatted)
 
 
 # Section 12 is a results summary with curated metrics. English acronyms (ROI, Project IRR, Equity IRR, NOI)
@@ -6399,7 +6443,7 @@ def _financial_screen_sections(parts):
                 continue
             body.append('<table class="summary-table"><tbody>' + ''.join(
                 f'<tr><th>{_financial_report_escape(row[0])}</th>'
-                + _financial_report_cell(_financial_report_escape(row[1]), row[1]) + '</tr>'
+                + _financial_report_cell(_financial_report_format_display(row[1], row[0]), row[1]) + '</tr>'
                 for row in rows) + '</tbody></table>')
         elif kind == 'table':
             headers = [header for header in (part.get('headers') or [])]
@@ -6411,7 +6455,13 @@ def _financial_screen_sections(parts):
                 continue
             head = ''.join(f'<th>{_financial_report_escape(header)}</th>' for header in headers)
             cells = ''.join(
-                '<tr>' + ''.join(_financial_report_cell(_financial_report_escape(cell), cell) for cell in row) + '</tr>'
+                '<tr>' + ''.join(
+                    _financial_report_cell(
+                        _financial_report_format_display(cell, headers[index] if index < len(headers) else ''),
+                        cell,
+                    )
+                    for index, cell in enumerate(row)
+                ) + '</tr>'
                 for row in rows)
             wide = ' wide' if len(headers) > 8 else ''
             body.append(f'<table class="data-table{wide}"><thead><tr>{head}</tr></thead><tbody>{cells}</tbody></table>')
@@ -6650,7 +6700,11 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             label, value, key = (item + ('',))[:3] if len(item) < 3 else item
             if value in (None, '', [], {}) or isinstance(value, (dict, list)):
                 continue
-            visible.append((str(label), str(value).strip() if raw else _financial_pdf_text(value, key)))
+            visible.append((
+                str(label),
+                html_lib.unescape(_financial_report_format_display(value, label)) if raw
+                else _financial_pdf_text(value, key),
+            ))
         if not visible:
             draw_text('لا توجد قيم مطبقة في هذا القسم.', 9)
             return
@@ -6729,6 +6783,15 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
         if not rows:
             draw_text('لا توجد بنود مدخلة في هذا الجدول.', 9)
             return
+        rows = [
+            [
+                html_lib.unescape(_financial_report_format_display(
+                    value, headers[index] if index < len(headers) else ''
+                ))
+                for index, value in enumerate(row)
+            ]
+            for row in rows
+        ]
         cell = lambda row, index: str(row[index]).strip() if index < len(row) else ''
         max_columns = 9
         bands = [(headers, rows)]
