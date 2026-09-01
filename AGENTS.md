@@ -559,6 +559,15 @@ its own — the «تحديث الهيكل المقترح» sidebar button, `gene
 `directGenerateProposalFile()` and travels to the server as `slidePlan`; do not re-expose it.
 `test_the_slide_structure_is_not_client_facing` guards this.
 
+Section headers expose `توليد عرض القسم`, not the slide structure. The client sends the project-form
+`sectionKey` with `POST /api/slide-plan`; `PROJECT_SECTION_PRESENTATION_TARGETS` maps it to one or
+more canonical deck sections. Section mode ignores the full-deck minimum and locked count, then
+`filter_presentation_plan_sections()` keeps only the cover, index, selected section dividers/content,
+and closing. The result is created with `POST /api/presentations` under `<project> - <section>` and
+must not replace the existing presentation or mark the source draft dirty. The financial target still
+uses the generation-only `report.parts`, so its standalone deck is the exact same financial section
+that the full deck would receive.
+
 ## Never advertise an image that does not exist
 
 `##STREET_VIEW_1..4##` was listed in the design rules, in `SLIDE_PLAN_PROMPT` (type `site_photos`)

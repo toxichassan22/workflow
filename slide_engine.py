@@ -942,6 +942,42 @@ def refresh_index_entries(plan):
     return plan
 
 
+def filter_presentation_plan_sections(plan, section_keys):
+    if not isinstance(plan, dict) or not isinstance(plan.get('slides'), list):
+        return None
+    requested = {
+        _SECTION_KEY_ALIASES.get(str(key or '').strip().lower(), str(key or '').strip().lower())
+        for key in (section_keys or [])
+    }
+    requested.intersection_update(PRESENTATION_SECTION_ORDER)
+    if not requested:
+        return None
+
+    slides = [slide for slide in plan['slides'] if isinstance(slide, dict)]
+    cover = next((slide for slide in slides if slide.get('type') == 'cover'), None)
+    index = next((slide for slide in slides if slide.get('type') == 'index'), None)
+    closing = next((slide for slide in reversed(slides) if slide.get('type') == 'closing'), None)
+    body = [
+        slide for slide in slides
+        if slide.get('type') not in ('cover', 'index', 'closing')
+        and _slide_section_key(slide) in requested
+    ]
+    if not body and not ('closing' in requested and closing):
+        return None
+
+    selected = []
+    if cover:
+        selected.append(cover)
+    if index:
+        selected.append(index)
+    selected.extend(body)
+    if closing:
+        selected.append(closing)
+    filtered = dict(plan)
+    filtered['slides'] = selected
+    return refresh_index_entries(filtered)
+
+
 def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=None):
     if not isinstance(plan, dict):
         plan = {}

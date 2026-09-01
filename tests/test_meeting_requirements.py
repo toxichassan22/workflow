@@ -1457,6 +1457,105 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('نوع الرسم المطلوب: column', engine.build_slide_user_msg(
             chart_slide, 3, len(plan['slides']), {}, project))
 
+    def test_section_presentation_plan_keeps_only_the_requested_section_and_shell(self):
+        engine = self.application_module.slide_engine
+        project = {'project_name': 'مشروع الاختبار', 'financial_study_model': {
+            'inputs': {'projectCost': 1234567},
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': 'الإيرادات السنوية'},
+                {'type': 'table', 'headers': ['السنة', 'الإيراد'],
+                 'rows': [['2027', '100'], ['2028', '150']]},
+            ]},
+        }}
+        full_plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'نبذة', 'type': 'content', 'section_key': 'overview',
+             'bullets': ['أ', 'ب', 'ج']},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {})
+
+        filtered = engine.filter_presentation_plan_sections(full_plan, ('financial',))
+        self.assertIsNotNone(filtered)
+        self.assertEqual(
+            {slide.get('section_key') for slide in filtered['slides']},
+            {'cover', 'index', 'financial', 'closing'},
+        )
+        self.assertEqual(filtered['slides'][0]['type'], 'cover')
+        self.assertEqual(filtered['slides'][1]['type'], 'index')
+        self.assertEqual(filtered['slides'][-1]['type'], 'closing')
+        self.assertTrue(any(slide.get('content_source', '').startswith('financial_report:')
+                            for slide in filtered['slides']))
+        self.assertEqual(
+            [entry['section_key'] for entry in filtered['slides'][1]['index_entries']],
+            ['financial', 'closing'],
+        )
+        self.assertIsNone(engine.filter_presentation_plan_sections(full_plan, ('team',)))
+
+    def test_financial_section_presentation_api_ignores_full_deck_minimum_and_frontend_saves_it(self):
+        project = {'project_name': 'مشروع الاختبار', 'financial_study_model': {
+            'inputs': {'projectCost': 1234567},
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': 'الإيرادات السنوية'},
+                {'type': 'table', 'headers': ['السنة', 'الإيراد'],
+                 'rows': [['2027', '100'], ['2028', '150']]},
+            ]},
+        }}
+        planner = json.dumps({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'نبذة', 'type': 'content', 'section_key': 'overview',
+             'bullets': ['أ', 'ب', 'ج']},
+            {'title': 'الدراسة المالية', 'type': 'content', 'section_key': 'financial',
+             'content_source': 'financial_indicators'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, ensure_ascii=False)
+        client = self.app.test_client()
+        with patch.object(self.application_module, 'call_zai_chat_parallel', return_value={
+            'choices': [{'message': {'content': planner}}]
+        }):
+            response = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
+                'projectData': project,
+                'sectionKey': 'section-financial-calc',
+            })
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertTrue(payload['success'])
+        slides = payload['plan']['slides']
+        self.assertLess(len(slides), 14)
+        self.assertEqual(
+            {slide.get('section_key') for slide in slides},
+            {'cover', 'index', 'financial', 'closing'},
+        )
+        with self.app.app_context(), patch.object(
+                self.application_module, 'call_zai_chat_parallel', return_value={
+                    'choices': [{'message': {'content': planner}}]
+                }):
+            branding = dict(db.get_branding(self.tenant_a) or {})
+            branding.update({'lock_slide_count': 1, 'default_slide_count': 30, 'min_slides': 30})
+            locked_payload = self.application_module._execute_slide_plan(
+                project, self.tenant_a, branding, target_section_keys=('financial',))
+        self.assertTrue(locked_payload['success'])
+        self.assertLess(len(locked_payload['plan']['slides']), 30)
+
+        invalid = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
+            'projectData': project,
+            'sectionKey': 'unknown-section',
+        })
+        self.assertEqual(invalid.status_code, 400)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("generateButton.textContent = 'توليد عرض القسم'", index_source)
+        self.assertIn('async function generateProjectSectionPresentation(sectionKey, sectionLabel = \'\')', index_source)
+        self.assertIn('if (sectionKey) requestBody.sectionKey = sectionKey;', index_source)
+        self.assertIn('tenantPresentationId = null;', index_source)
+        self.assertIn("api('POST', '/api/presentations'", index_source)
+        self.assertIn('await saveTenantPresentation(options.presentationTitle)', index_source)
+        self.assertIn('tenantPresentationTitle = p.title || \'\';', index_source)
+        self.assertIn('if (options.markDraftDirty !== false) triggerAutoSaveDraft();', index_source)
+        self.assertIn("hasLocation && (!sectionKey || sectionKey === 'location')", index_source)
+
     def test_wide_financial_tables_split_columns_and_skip_broken_charts(self):
         engine = self.application_module.slide_engine
         headers = ['السنة'] + [f'المؤشر {index}' for index in range(1, 13)]

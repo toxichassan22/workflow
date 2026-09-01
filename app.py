@@ -4129,6 +4129,20 @@ from slide_engine import (
 )
 
 
+PROJECT_SECTION_PRESENTATION_TARGETS = {
+    'basic': (('overview', 'components'), 'بيانات المشروع'),
+    'location': (('location',), 'الموقع الجغرافي'),
+    'land_croquis': (('land',), 'تحليل الأرض'),
+    'section-timeline': (('timeline',), 'الجدول الزمني'),
+    'section-financial-calc': (('financial',), 'الدراسة المالية والمؤشرات'),
+    'section-team': (('team',), 'فريق العمل'),
+    'section-market-study': (('market', 'swot_risks'), 'دراسة السوق'),
+    'section-visual-concept': (('plans', 'exterior', 'interior'), 'التصور البصري'),
+    'section-executive-content': (('executive_summary',), 'المحتوى التنفيذي'),
+    'contact': (('closing',), 'بيانات التواصل'),
+}
+
+
 def _ensure_required_location_slides(plan, project_data):
     if not isinstance(plan, dict) or not isinstance(plan.get('slides'), list):
         return plan
@@ -4195,17 +4209,25 @@ def _ensure_required_location_slides(plan, project_data):
     return plan
 
 
-def _execute_slide_plan(project_data, tenant_id, branding, images=None):
+def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_section_keys=None):
     """Ask the planner for a slide plan, then enforce the company's slide bounds on it."""
+    target_section_keys = tuple(
+        key for key in (target_section_keys or ())
+        if key in slide_engine.PRESENTATION_SECTION_ORDER
+    )
+    section_mode = bool(target_section_keys)
     training_context = db.get_training_context(tenant_id) or ''
-    slide_count_locked = bool(branding.get('lock_slide_count'))
-    configured_min, configured_max, locked_count = resolve_slide_bounds(branding)
+    slide_count_locked = bool(branding.get('lock_slide_count')) and not section_mode
+    bounds_branding = dict(branding)
+    if section_mode:
+        bounds_branding['lock_slide_count'] = False
+    configured_min, configured_max, locked_count = resolve_slide_bounds(bounds_branding)
 
     effective_max_slides = max(1, configured_max)
-    effective_min_slides = min(configured_min, effective_max_slides)
+    effective_min_slides = 1 if section_mode else min(configured_min, effective_max_slides)
 
     # A locked slide count outranks any hint found in the training context.
-    if not slide_count_locked:
+    if not slide_count_locked and not section_mode:
         # Search training context only for explicit min slide constraints
         matches = re.findall(r'(?:أقل|لا يقل عن|بدون أن يقل عن|الحد الأدنى|من|حوالي|أقل عدد|عدد الشرائح.*?لا يقل عن|الالتزام بـ).*?(\d+)', training_context)
         if matches:
@@ -4220,20 +4242,34 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None):
     effective_branding = dict(branding)
     effective_branding['min_slides'] = effective_min_slides
     effective_branding['max_slides'] = effective_max_slides
+    if section_mode:
+        effective_branding['lock_slide_count'] = False
     if slide_count_locked:
         effective_branding['default_slide_count'] = locked_count
     elif effective_branding.get('default_slide_count', 0) > effective_max_slides:
         effective_branding['default_slide_count'] = effective_max_slides
 
     prompt = build_slide_plan_prompt(project_data, effective_branding, tenant_id=tenant_id, images=images)
+    if section_mode:
+        target_titles = '، '.join(slide_engine.PRESENTATION_SECTION_TITLES[key] for key in target_section_keys)
+        prompt = (
+            "## نطاق العرض المستقل\n"
+            f"أنشئ خطة للغلاف والفهرس والأقسام التالية فقط ثم الخاتمة: {target_titles}.\n"
+            "لا تضف أي قسم آخر، ولا تطبق الحد الأدنى لعدد شرائح العرض الكامل.\n\n"
+            + prompt
+        )
     if training_context:
         # Only a locked count is a ceiling. Otherwise the count follows the content, and this
         # header used to contradict the prompt by naming a maximum the prompt calls open.
-        count_rule = (f"عدد الشرائح لهذه الشركة مقفل على {locked_count} شريحة بالضبط."
-                      if slide_count_locked
-                      else f"لا يقل عدد الشرائح عن {effective_min_slides} شريحة، ولا يوجد حد أعلى: "
-                           "وزّع كل المحتوى المتاح على ما يحتاجه من شرائح دون اختصار أو دمج، "
-                           "وابقِ كل شريحة بفكرة واحدة غير مزدحمة.")
+        count_rule = (
+            "هذا عرض مستقل لقسم محدد، وعدد شرائحه يتبع محتوى القسم فقط."
+            if section_mode else
+            f"عدد الشرائح لهذه الشركة مقفل على {locked_count} شريحة بالضبط."
+            if slide_count_locked else
+            f"لا يقل عدد الشرائح عن {effective_min_slides} شريحة، ولا يوجد حد أعلى: "
+            "وزّع كل المحتوى المتاح على ما يحتاجه من شرائح دون اختصار أو دمج، "
+            "وابقِ كل شريحة بفكرة واحدة غير مزدحمة."
+        )
         prompt = f"## بيانات خاصة بالشركة وقاعدة عدد الشرائح\nتنبيه هام جداً: {count_rule}\n{training_context}\n\n---\n\n{prompt}"
 
     plan = None
@@ -4334,6 +4370,16 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None):
     plan['proposed_count'] = len(slides)
     plan['slides'] = slides
     plan = slide_engine.refresh_index_entries(plan)
+    if section_mode:
+        filtered_plan = slide_engine.filter_presentation_plan_sections(plan, target_section_keys)
+        if not filtered_plan:
+            target_titles = '، '.join(slide_engine.PRESENTATION_SECTION_TITLES[key] for key in target_section_keys)
+            return {
+                'success': False,
+                'error': f'لا توجد بيانات متاحة لتوليد عرض قسم {target_titles}',
+                'failureReason': 'section_empty',
+            }
+        plan = filtered_plan
     plan['source'] = plan_source
     if plan_error:
         plan['source_error'] = plan_error[:400]
@@ -4350,7 +4396,7 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None):
     }
 
 
-def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images, job_id):
+def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images, job_id, target_section_keys=None):
     with flask_app.app_context():
         _write_job('.plan_jobs', tenant_id, job_id, {
             'status': 'running',
@@ -4358,11 +4404,15 @@ def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images,
             'message': 'جاري تحليل بيانات المشروع وإعداد هيكل العرض...',
         })
         try:
-            payload = _execute_slide_plan(project_data, tenant_id, branding, images)
+            payload = _execute_slide_plan(
+                project_data, tenant_id, branding, images,
+                target_section_keys=target_section_keys,
+            )
+            succeeded = bool(payload.get('success'))
             _write_job('.plan_jobs', tenant_id, job_id, {
                 **payload,
-                'status': 'completed',
-                'message': 'تم إعداد خطة الشرائح',
+                'status': 'completed' if succeeded else 'failed',
+                'message': 'تم إعداد خطة الشرائح' if succeeded else payload.get('error', 'تعذر إعداد خطة الشرائح'),
             })
         except Exception as exc:
             print(f'[SLIDE-PLAN JOB FAILED] {exc}')
@@ -4390,13 +4440,22 @@ def api_slide_plan():
     project_data = clean_project_data(data.get('projectData', {}))
     images = _augment_generation_images(data.get('images', {}), project_data, g.tenant_id)
     branding = db.get_branding(g.tenant_id)
+    project_section_key = str(data.get('sectionKey') or '').strip()
+    section_target = PROJECT_SECTION_PRESENTATION_TARGETS.get(project_section_key) if project_section_key else None
 
+    if project_section_key and not section_target:
+        return jsonify({'success': False, 'error': 'قسم المشروع غير صالح'}), 400
     if not branding:
         return jsonify({'error': 'Branding not configured'}), 400
 
+    target_section_keys = section_target[0] if section_target else None
     use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
     if not use_background:
-        return jsonify(_execute_slide_plan(project_data, g.tenant_id, branding, images))
+        payload = _execute_slide_plan(
+            project_data, g.tenant_id, branding, images,
+            target_section_keys=target_section_keys,
+        )
+        return jsonify(payload), 200 if payload.get('success') else 400
 
     job_id = str(_uuid.uuid4())
     _write_job('.plan_jobs', g.tenant_id, job_id, {
@@ -4406,7 +4465,7 @@ def api_slide_plan():
     })
     threading.Thread(
         target=_slide_plan_job_worker,
-        args=(current_app._get_current_object(), g.tenant_id, project_data, dict(branding), images, job_id),
+        args=(current_app._get_current_object(), g.tenant_id, project_data, dict(branding), images, job_id, target_section_keys),
         daemon=True,
     ).start()
     return jsonify({

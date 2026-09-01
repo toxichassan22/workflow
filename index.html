@@ -3775,6 +3775,16 @@
       background: var(--soft);
     }
 
+    .section-presentation-btn {
+      border-color: var(--p);
+      background: var(--p);
+      color: #fff;
+    }
+
+    .section-presentation-btn:hover {
+      background: var(--pd);
+    }
+
     .tenant-form-section.section-locked input:not([type="hidden"]):not([data-section-lock-ignore]),
     .tenant-form-section.section-locked select:not([data-section-lock-ignore]),
     .tenant-form-section.section-locked textarea:not([data-section-lock-ignore]),
@@ -6189,6 +6199,7 @@
     let tenantSlidePlan = null;
     let tenantSlidesData = [];
     let tenantPresentationId = null;
+    let tenantPresentationTitle = '';
     let tenantProjectMode = 'new';
     let tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
     let tenantFinancialPresentationReport = null;
@@ -6925,14 +6936,16 @@
     }
 
     let tenantSlidePlanRequest = null;
-    function requestTenantSlidePlan(projectData, onProgress) {
+    function requestTenantSlidePlan(projectData, onProgress, sectionKey = '') {
       if (tenantSlidePlanRequest) return tenantSlidePlanRequest;
       const payload = typeof slimGenerationProjectData === 'function'
         ? slimGenerationProjectData(projectData) : projectData;
-      tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', {
+      const requestBody = {
         projectData: payload,
         images: buildPresentationPlanAssets()
-      })
+      };
+      if (sectionKey) requestBody.sectionKey = sectionKey;
+      tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', requestBody)
         .then(res => (res && res.jobId && !res.plan) ? pollTenantSlidePlanJob(res.jobId, onProgress) : res)
         .finally(() => { tenantSlidePlanRequest = null; });
       return tenantSlidePlanRequest;
@@ -11546,6 +11559,7 @@
 
     async function startTenantProject() {
       tenantPresentationId = null;
+      tenantPresentationTitle = '';
       tenantProjectMode = 'new';
       tenantProjectData = { draftId: crypto.randomUUID() };
       tenantVisualConceptState = null;
@@ -11596,6 +11610,19 @@
       });
     }
 
+    const PROJECT_SECTION_PRESENTATION_TITLES = Object.freeze({
+      basic: 'بيانات المشروع',
+      location: 'الموقع الجغرافي',
+      land_croquis: 'تحليل الأرض',
+      'section-timeline': 'الجدول الزمني',
+      'section-financial-calc': 'الدراسة المالية والمؤشرات',
+      'section-team': 'فريق العمل',
+      'section-market-study': 'دراسة السوق',
+      'section-visual-concept': 'التصور البصري',
+      'section-executive-content': 'المحتوى التنفيذي',
+      contact: 'بيانات التواصل'
+    });
+
     function createProjectSectionHeader(sectionKey, label, options = {}) {
       const title = document.createElement('h3');
       title.className = 'tenant-section-title';
@@ -11614,6 +11641,15 @@
       title.appendChild(titleText);
 
       if (!underConstruction) {
+        if (PROJECT_SECTION_PRESENTATION_TITLES[sectionKey] && hasPermission('create_presentation')) {
+          const generateButton = document.createElement('button');
+          generateButton.type = 'button';
+          generateButton.className = 'section-approve-btn section-presentation-btn';
+          generateButton.dataset.sectionLockIgnore = '1';
+          generateButton.textContent = 'توليد عرض القسم';
+          generateButton.addEventListener('click', () => generateProjectSectionPresentation(sectionKey, label));
+          title.appendChild(generateButton);
+        }
         const toggleButton = document.createElement('button');
         toggleButton.type = 'button';
         toggleButton.className = 'section-approve-btn';
@@ -18297,12 +18333,68 @@
       return result;
     }
 
+    async function generateProjectSectionPresentation(sectionKey, sectionLabel = '') {
+      const resolvedLabel = PROJECT_SECTION_PRESENTATION_TITLES[sectionKey] || sectionLabel;
+      if (!resolvedLabel) {
+        toast('قسم المشروع غير صالح');
+        return;
+      }
+      if (isGeneratingTenantSlides || tenantSlidePlanRequest) {
+        toast('يوجد عرض قيد التوليد حاليًا');
+        return;
+      }
+
+      const formData = await collectTenantFormData();
+      tenantProjectData = { ...tenantProjectData, ...formData };
+      if (!tenantProjectData.project_name && tenantProjectData.projectName) {
+        tenantProjectData.project_name = tenantProjectData.projectName;
+      }
+      await repairVisualConceptStoredImages();
+      if (sectionKey === 'section-financial-calc' && !(await validateFinancialStudyBeforeProceed())) return;
+      tenantFinancialPresentationReport = financialStudyHasRealInput(tenantProjectData.financial_study_model)
+        && typeof collectFinancialStudyReport === 'function' ? collectFinancialStudyReport() : null;
+      await saveProjectAsDraftNow(true);
+
+      const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
+      const presentationTitle = projectName + ' - ' + resolvedLabel;
+      showTenantPage('tenantSlidesPage');
+      clearTenantSlidesStage('جاري إعداد عرض ' + resolvedLabel);
+      setSlidesEditorInfo(presentationTitle, 0);
+      setLiveGenBanner(true, 'إعداد عرض ' + resolvedLabel, 'تحليل بيانات القسم وبناء الشرائح', 5);
+
+      const planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
+        setLiveGenBanner(true, 'إعداد عرض ' + resolvedLabel,
+          (job && job.message) || 'تحليل بيانات القسم وبناء الشرائح', 8);
+      }, sectionKey);
+      if (!planResponse?.success || !planResponse.plan) {
+        const errorMessage = planResponse?.error || 'تعذر إعداد عرض القسم';
+        setLiveGenBanner(true, 'تعذر إعداد عرض القسم', errorMessage, 5);
+        toast(errorMessage);
+        renderTenantSlides();
+        return;
+      }
+
+      tenantSlidePlan = planResponse.plan;
+      tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+      tenantPresentationId = null;
+      tenantPresentationTitle = presentationTitle;
+      tenantProjectMode = 'new';
+      await generateTenantSlides({
+        sectionKey,
+        sectionLabel: resolvedLabel,
+        presentationTitle,
+        financialValidated: sectionKey === 'section-financial-calc',
+        markDraftDirty: false
+      });
+    }
+
     async function directGenerateProposalFile() {
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
+      tenantPresentationTitle = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
       await repairVisualConceptStoredImages();
       if (!(await validateFinancialStudyBeforeProceed())) return;
       tenantFinancialPresentationReport = financialStudyHasRealInput(tenantProjectData.financial_study_model)
@@ -19656,11 +19748,12 @@
     }
 
     let isGeneratingTenantSlides = false;
-    async function generateTenantSlides() {
+    async function generateTenantSlides(options = {}) {
       if (isGeneratingTenantSlides) return;
       if (!tenantSlidePlan || !tenantProjectData) return;
       isGeneratingTenantSlides = true;
       try {
+        const sectionKey = String(options.sectionKey || '');
         const totalSlides = (tenantSlidePlan.slides || []).length;
         if (!totalSlides) { toast('لا توجد شرائح في الخطة'); return; }
 
@@ -19669,7 +19762,8 @@
           const freshData = await collectTenantFormData();
           tenantProjectData = { ...tenantProjectData, ...freshData };
         }
-        if (!(await validateFinancialStudyBeforeProceed())) return;
+        if ((!sectionKey || sectionKey === 'section-financial-calc') && !options.financialValidated
+          && !(await validateFinancialStudyBeforeProceed())) return;
 
         // Ensure we are on the presentation page
         showTenantPage('tenantSlidesPage');
@@ -19724,7 +19818,7 @@
           tenantProjectData.location_maps_link ||
           tenantProjectData.location
         );
-        if (hasLocation) {
+        if (hasLocation && (!sectionKey || sectionKey === 'location')) {
           if (!tenantProjectData.location_analysis_approved) {
             throw new Error('اعتماد تحليل الموقع مطلوب قبل توليد العرض');
           }
@@ -19850,10 +19944,18 @@
         setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', 'إجمالي ' + totalSlides + ' شريحة معتمدة', 100);
         renderTenantSlidesSidebar();
         renderTenantDesignerChat();
-        await saveTenantPresentation();
-        triggerAutoSaveDraft();
+        const presentationSaved = await saveTenantPresentation(options.presentationTitle);
+        if (!presentationSaved) {
+          setLiveGenBanner(true, 'اكتمل التوليد وتعذر الحفظ', 'الشرائح ما زالت مفتوحة في المعاينة', 100);
+          return;
+        }
+        if (options.markDraftDirty !== false) triggerAutoSaveDraft();
         selectTenantSlide(0);
-        toast('تم توليد جميع الشرائح (' + totalSlides + ' شريحة) بنجاح');
+        const completedTitle = options.sectionLabel
+          ? 'تم توليد عرض ' + options.sectionLabel + ' وحفظه (' + totalSlides + ' شريحة)'
+          : 'تم توليد جميع الشرائح (' + totalSlides + ' شريحة) بنجاح';
+        setSlidesEditorInfo(tenantPresentationTitle, totalSlides);
+        toast(completedTitle);
         setTimeout(() => {
           setLiveGenBanner(false);
         }, 3500);
@@ -20985,8 +21087,9 @@
       toast('تم حذف الشريحة. اضغط "حفظ التعديلات" للحفظ.');
     }
 
-    async function saveTenantPresentation() {
-      const title = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
+    async function saveTenantPresentation(titleOverride = '') {
+      const title = String(titleOverride || tenantPresentationTitle
+        || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان').trim();
       tenantProjectData = {
         ...tenantProjectData,
         tenantSlidePlan,
@@ -21000,8 +21103,13 @@
       });
       if (data.success && data.presentationId) {
         tenantPresentationId = data.presentationId;
+        tenantPresentationTitle = title;
         tenantProjectMode = 'presentation';
+        tenantArchiveCache = null;
+        return true;
       }
+      toast(data.error || 'تعذر حفظ العرض');
+      return false;
     }
 
     async function openExistingPresentation(presId) {
@@ -21009,6 +21117,7 @@
       if (!data.success || !data.presentation) { toast('فشل تحميل العرض'); return; }
       const p = data.presentation;
       tenantPresentationId = p.id;
+      tenantPresentationTitle = p.title || '';
       tenantProjectMode = 'presentation';
       tenantProjectData = { ...(p.projectData || {}) };
       tenantSlidesData = Array.isArray(p.slidesData)
@@ -21186,6 +21295,7 @@
         const pageDrafts = draftData.pageDrafts || {};
         const sectionStatuses = draft.section_statuses || {};
         tenantPresentationId = null;
+        tenantPresentationTitle = '';
         tenantProjectMode = 'draft';
         tenantProjectData = { ...draftData, draftId: draftData.draftId || draft.id || draftId };
         tenantSlidesData = Array.isArray(draftData.tenantSlidesData) ? draftData.tenantSlidesData : [];
@@ -21283,7 +21393,8 @@
 
     async function saveExistingPresentation() {
       if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return; }
-      const title = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
+      const title = tenantPresentationTitle
+        || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
       tenantProjectData = {
         ...tenantProjectData,
         tenantSlidePlan,
