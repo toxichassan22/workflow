@@ -2644,6 +2644,62 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('maximumFractionDigits: hasFraction ? 1 : 0', index_source)
         self.assertIn('roundFinancialSavedResults(window.__financialProjection || {})', index_source)
 
+    def test_financial_clarifications_are_manual_optional_and_omitted_when_empty(self):
+        module = self.application_module
+        base_inputs = {
+            'unitRevenueMode': 'mixed', 'developmentYears': 4, 'landArea': 70000,
+            'builtUpAreaAbove': 100000, 'financeEnabled': 'no', 'fundEnabled': 'no',
+            'fundFeesEnabled': 'no', 'externalEnabled': 'no', 'exitEnabled': 'no',
+        }
+        with self.app.app_context():
+            blank_html = module.build_financial_report_html(
+                'مشروع مالي', {'inputs': {**base_inputs, 'financialClarifications': ''}}, {}, self.tenant_a)
+            filled_html = module.build_financial_report_html(
+                'مشروع مالي', {'inputs': {
+                    **base_inputs, 'financialClarifications': 'CLIENT-NOTE-731\nدفعة مرتبطة باعتماد العميل'
+                }}, {}, self.tenant_a)
+            blank_screen_html = module.build_financial_report_html('مشروع مالي', {
+                'inputs': base_inputs,
+                'report': {'parts': [
+                    {'type': 'heading', 'level': 2, 'text': '15. الإيضاحات'},
+                    {'type': 'fields', 'rows': [['الإيضاحات', '']]},
+                ]},
+            }, {}, self.tenant_a)
+
+        self.assertNotIn('15. الإيضاحات', blank_html)
+        self.assertNotIn('15. الإيضاحات', blank_screen_html)
+        self.assertIn('15. الإيضاحات', filled_html)
+        self.assertIn('CLIENT-NOTE-731', filled_html)
+        self.assertIn('white-space:pre-wrap', filled_html)
+
+        screen_model = {
+            'inputs': base_inputs,
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': '15. الإيضاحات'},
+                {'type': 'fields', 'rows': [['الإيضاحات', 'CLIENT-NOTE-731']]},
+            ]},
+        }
+        fallback_model = {'inputs': {
+            **base_inputs, 'financialClarifications': 'CLIENT-NOTE-731\nدفعة مرتبطة باعتماد العميل'
+        }}
+        with tempfile.TemporaryDirectory() as folder:
+            import fitz
+            for name, pdf_model in (('screen', screen_model), ('fallback', fallback_model)):
+                output = os.path.join(folder, name + '-clarifications.pdf')
+                with self.app.app_context():
+                    module.generate_financial_pdf_from_model('مشروع مالي', pdf_model, output)
+                document = fitz.open(output)
+                try:
+                    text = '\n'.join(page.get_text() for page in document)
+                finally:
+                    document.close()
+                self.assertIn('CLIENT-NOTE-731', text)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('<textarea id="financialClarifications"', index_source)
+        self.assertNotIn('id="clarificationsTable"', index_source)
+        self.assertNotIn('function renderClarifications(facts)', index_source)
+
     def test_cashflow_column_tints_do_not_override_the_table_header(self):
         """The cf-* classes also sit on the <th> so whole columns can be hidden by project mode.
         An unscoped class rule outranks "#section-financial-calc th" on specificity, which left
@@ -3397,16 +3453,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('لا يوجد تخارج بيعي: وحدات المشروع تأجيرية بالكامل.', index_source)
         self.assertIn('التخارج البيعي مطبق بقيمة صفر:', index_source)
 
-        # 3. الإيضاحات states each derived figure as its own arithmetic, and reaches the report.
-        self.assertIn('<h3>15. الإيضاحات</h3>', index_source)
-        self.assertIn('id="clarificationsTable"', index_source)
-        self.assertIn('function renderClarifications(facts)', index_source)
-        self.assertIn("<th>طريقة الاحتساب بالأرقام المُدخلة</th>", index_source)
-        self.assertIn("reportTableSnapshot('clarificationsTable', false)", index_source)
-        self.assertIn("setConditionalVisibility('clarificationsBlock', rows.length > 0);", index_source)
-        self.assertIn('updateDynamicFieldDetails(exitOn);\n    }\n\n    // Every readonly figure', index_source)
-        self.assertLess(index_source.index('function renderClarifications(facts)'),
-                        index_source.index('function updateDynamicFieldDetails(exitOn)'))
+        # 3. الإيضاحات is client-written optional text, never an automatically calculated table.
+        self.assertIn('<textarea id="financialClarifications"', index_source)
+        self.assertIn("const clarificationText = val('financialClarifications').trim();", index_source)
+        self.assertIn('const clarificationReportSection = clarificationText', index_source)
+        self.assertNotIn('id="clarificationsTable"', index_source)
+        self.assertNotIn('function renderClarifications(facts)', index_source)
+        self.assertNotIn('renderClarifications({', index_source)
 
         # 4 and 5. Each schedule stops strictly at the end year entered for that schedule.
         self.assertIn('function financeMovementRows(projected, financeOn, repaymentStartYear, repaymentYears)',

@@ -13998,7 +13998,7 @@
 
         <div class="finance-block" id="clarificationsBlock">
           <h3>15. الإيضاحات</h3>
-          <div class="table-wrap"><table id="clarificationsTable"><thead><tr><th>البند</th><th>طريقة الاحتساب بالأرقام المُدخلة</th><th>الناتج</th></tr></thead><tbody></tbody></table></div>
+          <div><label for="financialClarifications">الإيضاحات</label><textarea id="financialClarifications" rows="6" maxlength="5000" oninput="triggerAutoSaveDraft()"></textarea></div>
         </div>
 
         <div class="finance-block" style="text-align:center;padding:20px">
@@ -14420,101 +14420,6 @@
       const exitMethod = val('exitMethod'); const exitInput = document.getElementById('exitInput');
       if (exitInput) { exitInput.disabled = !exitOn || exitMethod === 'none'; exitInput.closest('div')?.classList.toggle('dynamic-off', !exitOn || exitMethod === 'none'); const lbl = exitInput.closest('div')?.querySelector('label'); if (lbl) { lbl.textContent = exitMethod === 'capRate' ? 'Cap Rate %' : exitMethod === 'fixed' ? 'قيمة البيع الثابتة' : exitMethod === 'noiMultiple' ? 'مضاعف NOI' : exitMethod === 'revenueMultiple' ? 'مضاعف الإيرادات' : 'مدخل التخارج'; } }
       updateDynamicFieldDetails(exitOn);
-    }
-
-    // Every readonly figure on this screen is the product of inputs the user typed, but the screen
-    // showed only the result — so a number that looked wrong could not be traced without reading
-    // the code. This states each derived figure as its own arithmetic, with the actual entered
-    // values in it, and it is data rather than instruction: no step tells anyone what to press.
-    function renderClarifications(facts) {
-        const body = document.querySelector('#clarificationsTable tbody');
-        if (!body) return;
-        const rows = [];
-        const add = (label, method, result) => { if (method) rows.push([label, method, result]); };
-        const m = value => money(value);
-        const pctText = value => financialPercent(Number(value) || 0);
-
-        if (facts.landValue > 0) {
-          add('قيمة الأرض',
-            facts.landMethod === 'perM2'
-              ? `${m(facts.landArea)} م² × ${m(facts.landPricePerM2)}`
-              : 'قيمة مُدخلة مباشرة',
-            m(facts.landValue));
-        }
-        if (facts.landRent > 0) {
-          add('إيجار الأرض السنوي',
-            facts.landRentMethod === 'percentLandValue' ? `${m(facts.landValue)} × ${pctText(facts.landRentRate)}`
-              : facts.landRentMethod === 'monthlyFixed' ? `${m(facts.monthlyLandRent)} × 12`
-                : 'قيمة سنوية مُدخلة مباشرة',
-            m(facts.landRent));
-        }
-        if (facts.developerCost > 0) {
-          add('أتعاب المطور', `${m(facts.developerBaseAmount)} × ${pctText(facts.developerRate)}`, m(facts.developerCost));
-        }
-        if (facts.projectCost > 0) {
-          add('إجمالي تكلفة المشروع',
-            `بنود التكلفة ${m(facts.costTotal)} + أتعاب المطور ${m(facts.developerCost)} + بنود خارجية ${m(facts.externalCost)} + الأرض ${m(facts.landCostIncluded)}`,
-            m(facts.projectCost));
-        }
-        if (facts.financeOn && facts.facilityAmount > 0) {
-          add('قيمة التسهيل التمويلي', `${m(facts.financeBaseAmount)} × ${pctText(facts.financingRate)}`, m(facts.facilityAmount));
-          if (facts.arrangementFee > 0) add('رسوم ترتيب التمويل', `${m(facts.facilityAmount)} × ${pctText(facts.arrangementFeeRate)}`, m(facts.arrangementFee));
-          if (facts.totalFinanceInterest > 0) {
-            add('إجمالي فوائد التمويل',
-              facts.financeInterestMethod === 'fixed'
-                ? `${pctText(facts.annualFinanceRate)} سنويًا على أصل التسهيل ${m(facts.facilityAmount)} خلال سنوات التمويل`
-                : `${pctText(facts.annualFinanceRate)} سنويًا على الرصيد المتبقي في كل سنة`,
-              m(facts.totalFinanceInterest));
-          }
-        }
-        if (facts.totalFundFees > 0) {
-          add('إجمالي تكاليف الصندوق',
-            `أتعاب الإدارة ${m(facts.totalFundManagementFees)} + أتعاب إضافية ${m(facts.totalAdditionalFundFees)} + أتعاب التخارج ${m(facts.fundExitFeeTotal)} + حافز الأداء ${m(facts.performanceFeeTotal)}`,
-            m(facts.totalFundFees));
-        }
-        if (facts.adjustedProjectCost > 0) {
-          add('إجمالي تكلفة الاستثمار',
-            `تكلفة المشروع ${m(facts.projectCost)} + تكلفة التمويل ${m(facts.totalFinanceCost)} + تكاليف الصندوق ${m(facts.totalFundFees)}`,
-            m(facts.adjustedProjectCost));
-        }
-        if (facts.saleRevenueTotal > 0) {
-          add('إجمالي إيرادات البيع', `مجموع بنود الإيرادات البيعية، موزَّعة على ${facts.salesYears} سنة بدءًا من السنة ${facts.salesStartYear}`, m(facts.saleRevenueTotal));
-        }
-        if (facts.saleExitGross > 0) {
-          add('إجمالي التخارج البيعي',
-            facts.saleExitMethod === 'remainingArea'
-              ? `${m(facts.saleExitRemainingArea)} م² × ${m(facts.saleExitPricePerM2)} في السنة ${facts.saleExitYear}`
-              : `قيمة بيعية ثابتة مُدخلة في السنة ${facts.saleExitYear}`,
-            m(facts.saleExitGross));
-          add('صافي التخارج البيعي', `${m(facts.saleExitGross)} − تكاليف التخارج ${pctText(facts.saleExitCostRate * 100)}`, m(facts.saleExitValue));
-        }
-        if (facts.operatingExitGross > 0) {
-          add('إجمالي التخارج التشغيلي',
-            facts.exitMethod === 'capRate' ? `الربح التشغيلي في السنة ${facts.operatingExitYear} ÷ ${pctText(facts.exitInput)}`
-              : facts.exitMethod === 'noiMultiple' ? `الربح التشغيلي في السنة ${facts.operatingExitYear} × ${facts.exitInput}`
-                : facts.exitMethod === 'revenueMultiple' ? `إيرادات السنة ${facts.operatingExitYear} × ${facts.exitInput}`
-                  : `قيمة تشغيلية ثابتة مُدخلة في السنة ${facts.operatingExitYear}`,
-            m(facts.operatingExitGross));
-          add('صافي التخارج التشغيلي', `${m(facts.operatingExitGross)} − تكاليف التخارج ${pctText(facts.operatingExitCostRate * 100)}`, m(facts.operatingExitValue));
-        }
-        if (facts.totalEquityRequired > 0) {
-          add('إجمالي حقوق الملكية', `مساهمة الأرض العينية ${m(facts.landEquityContribution)} + الضخ النقدي ${m(facts.totalCashEquity)}`, m(facts.totalEquityRequired));
-        }
-        if (facts.roi !== null && facts.roiOutflows > 0) {
-          add('ROI', `(التدفقات الداخلة ${m(facts.roiInflows)} − التدفقات الخارجة ${m(facts.roiOutflows)}) ÷ ${m(facts.roiOutflows)} — ${facts.roiScope}`, financialPercent(facts.roi * 100));
-        }
-        add('Project IRR', `معدل الخصم الذي يصفّر صافي تدفقات المشروع قبل التمويل وأتعاب الصندوق — ${facts.irrScope}`,
-          facts.projectIrr === null ? 'غير متاح' : financialPercent(facts.projectIrr * 100));
-        if (facts.financeOn) {
-          add('Equity IRR', `معدل الخصم الذي يصفّر تدفقات حقوق الملكية بعد التمويل وأتعاب الصندوق — ${facts.irrScope}`,
-            facts.equityIrr === null ? 'غير متاح' : financialPercent(facts.equityIrr * 100));
-        }
-        add('فترة استرداد المشروع', 'أول سنة يصبح فيها الرصيد التراكمي لتدفقات المشروع موجبًا، مع احتساب الكسر داخل السنة',
-          facts.payback === null ? 'لا يسترد خلال الفترة' : formatFinancialResultNumber(facts.payback, false) + ' سنة');
-
-        body.innerHTML = rows.map(([label, method, result]) =>
-          `<tr><td>${escapeReportHtml(label)}</td><td>${escapeReportHtml(method)}</td><td class="row-result">${escapeReportHtml(result)}</td></tr>`).join('');
-        setConditionalVisibility('clarificationsBlock', rows.length > 0);
     }
 
     function updateDynamicFieldDetails(exitOn) {
@@ -14967,22 +14872,6 @@
       setTxt('resOperatingExit', money(operatingExitValue));
       setTxt('resSaleExitScope', saleExitMethod === 'none' ? 'غير مفعل' : `السنة ${saleExitYear} | تكلفة التخارج ${financialPercent(saleExitCostRate * 100)}`);
       renderSaleExitStatus({ modeFlags, exitOn, saleExitMethod, saleAreaTotal, saleExitGross, saleExitValue });
-      renderClarifications({
-        landMethod, landArea, landPricePerM2: num('landPricePerM2'), landValue,
-        landRentMethod: rentMethod, landRentRate: num('landRentRate'), monthlyLandRent: num('monthlyLandRent'), landRent,
-        developerBaseAmount, developerRate: num('developerRate'), developerCost,
-        costTotal, externalCost, landCostIncluded, projectCost,
-        financeOn, financeBaseAmount, financingRate: num('financingRate'), facilityAmount,
-        arrangementFeeRate: num('financeArrangementFeeRate'), arrangementFee,
-        financeInterestMethod, annualFinanceRate: annualFinanceRate * 100, totalFinanceInterest, totalFinanceCost,
-        totalFundManagementFees, totalAdditionalFundFees, fundExitFeeTotal, performanceFeeTotal, totalFundFees,
-        adjustedProjectCost, saleRevenueTotal, salesStartYear, salesYears,
-        saleExitMethod, saleExitYear, saleExitRemainingArea: num('saleExitRemainingArea'),
-        saleExitPricePerM2: num('saleExitPricePerM2'), saleExitCostRate, saleExitGross, saleExitValue,
-        exitMethod, exitInput, operatingExitYear, operatingExitCostRate, operatingExitGross, operatingExitValue,
-        landEquityContribution, totalCashEquity, totalEquityRequired,
-        roi, roiInflows, roiOutflows, roiScope, irrScope, projectIrr, equityIrr: irrVal, payback
-      });
       setTxt('resOperatingExitScope', exitMethod === 'none' ? 'غير مفعل' : `السنة ${operatingExitYear} | تكلفة التخارج ${financialPercent(operatingExitCostRate * 100)}`);
       setTxt('resTerminal', money(terminal));
       setTxt('resYear0', '0');
@@ -15524,7 +15413,12 @@
       const fundReportSection = val('fundEnabled') === 'yes' && val('fundFeesEnabled') === 'yes' ? `<section class="section page-break"><h3>9. أتعاب إدارة الصندوق</h3>${fundSummary}<h4>الأتعاب الإضافية الاختيارية</h4>${reportTableSnapshot('fundAdditionalFeesTable', true, true)}<h4>جدول أتعاب الصندوق السنوي</h4>${reportTableSnapshot('fundFeeScheduleTable', false)}</section>` : '';
       const bonusReportSection = reportFlags.sales && val('developerBonusEnabled') === 'yes' ? `<section class="section"><h3>10. علاوة حسن أداء المطور</h3>${bonusSummary}</section>` : '';
       const externalReportSection = val('externalEnabled') === 'yes' ? `<section class="section"><h3>11. البنود الخارجية المرنة</h3>${reportTableSnapshot('externalTable', true, true)}</section>` : '';
-      const exitReportSection = val('exitEnabled') === 'yes' ? `<section class="section"><h3>15. التخارج والافتراضات المالية</h3>${reportRows([['طريقة التخارج البيعي', reportFieldValue('saleExitMethod')], ['سنة التخارج البيعي', reportFieldValue('saleExitYear')], ['طريقة التخارج التأجيري', reportFieldValue('exitMethod')], ['سنة التخارج التأجيري', reportFieldValue('operatingExitYear')], ['مدخل التخارج التأجيري', reportFieldValue('exitInput')], ['تكاليف التخارج التأجيري', reportFieldValue('operatingExitCostRate') + '%']])}</section>` : '';
+      const clarificationText = val('financialClarifications').trim();
+      const clarificationReportSection = clarificationText
+        ? `<section class="section"><h3>15. الإيضاحات</h3><div class="financial-clarifications">${escapeReportHtml(clarificationText)}</div></section>`
+        : '';
+      const exitReportNumber = clarificationText ? 16 : 15;
+      const exitReportSection = val('exitEnabled') === 'yes' ? `<section class="section"><h3>${exitReportNumber}. التخارج والافتراضات المالية</h3>${reportRows([['طريقة التخارج البيعي', reportFieldValue('saleExitMethod')], ['سنة التخارج البيعي', reportFieldValue('saleExitYear')], ['طريقة التخارج التأجيري', reportFieldValue('exitMethod')], ['سنة التخارج التأجيري', reportFieldValue('operatingExitYear')], ['مدخل التخارج التأجيري', reportFieldValue('exitInput')], ['تكاليف التخارج التأجيري', reportFieldValue('operatingExitCostRate') + '%']])}</section>` : '';
       const ideaText = pd.project_idea || pd.project_description || pd.description || val('idea') || 'تقرير مالي مبني على المدخلات والافتراضات المسجلة في النموذج.';
 
       reportWindow.document.open();
@@ -15563,6 +15457,7 @@
       .summary-table td{font-weight:700}
       .empty{color:#777;border:1px dashed #ccc;padding:12px}
       .note{background:#F4F8FC;border-right:4px solid #123B6D;padding:10px 12px;font-size:10px;color:#555}
+      .financial-clarifications{white-space:pre-wrap;border:1px solid #d9d1cb;padding:12px;font-size:11px;line-height:1.7}
       footer{margin-top:20px;padding-top:10px;border-top:1px solid #ddd;color:#777;font-size:9px;display:flex;justify-content:space-between}
       @media print{
         .print-actions{display:none}
@@ -15594,7 +15489,7 @@
         <section class="section page-break"><h3>12. ملخص النتائج المالية</h3>${resultSummary}</section>
         <section class="section wide-table"><h3>13. التدفقات النقدية السنوية</h3>${reportTableSnapshot('cashflowTable', false)}</section>
         <section class="section wide-table"><h3>14. تحليل الحساسية العام</h3><h4>افتراضات السيناريوهات</h4>${reportTableSnapshot('sensitivityAssumptionsTable', false)}<h4>النتائج المقارنة</h4>${reportTableSnapshot('sensitivityTable', false)}</section>
-        <section class="section wide-table"><h3>15. الإيضاحات</h3>${reportTableSnapshot('clarificationsTable', false)}</section>
+        ${clarificationReportSection}
         ${exitReportSection}
         <section class="section conditional-off"><h3>16. التخارج والافتراضات المالية</h3>${reportRows([
         ['طريقة التخارج البيعي', reportFieldValue('saleExitMethod')],

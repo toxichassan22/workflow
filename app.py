@@ -6411,22 +6411,48 @@ def _financial_screen_parts(model):
     """The study as the screen sent it, or None for a draft saved before that was captured."""
     report = model.get('report') if isinstance(model, dict) else None
     parts = report.get('parts') if isinstance(report, dict) else None
-    return parts if isinstance(parts, list) and parts else None
+    if not isinstance(parts, list) or not parts:
+        return None
+    cleaned = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if part.get('type') == 'fields':
+            rows = [
+                row for row in (part.get('rows') or [])
+                if isinstance(row, (list, tuple)) and len(row) >= 2
+                and str(row[1] if row[1] is not None else '').strip()
+            ]
+            if not rows:
+                continue
+            part = {**part, 'rows': rows}
+        cleaned.append(part)
+    result = []
+    for index, part in enumerate(cleaned):
+        if part.get('type') == 'heading':
+            level = int(part.get('level') or 2)
+            has_content = False
+            for following in cleaned[index + 1:]:
+                if following.get('type') == 'heading' and int(following.get('level') or 2) <= level:
+                    break
+                if following.get('type') != 'heading':
+                    has_content = True
+                    break
+            if not has_content:
+                continue
+        result.append(part)
+    return result or None
 
 
 def _financial_screen_sections(parts):
-    """Same labels, same values, same order as the screen — only laid out as tables.
-
-    Nothing here renames a field or reformats a number: the client already sent the visible
-    label of every input, the selected option text of every list, and the displayed figure.
-    """
+    """Keep the screen's labels, values and order while normalizing numeric display."""
     sections = []
     body = []
 
     def flush():
-        if body:
+        if body and any(not item.startswith(('<h2>', '<h3>')) for item in body):
             sections.append('<section>' + ''.join(body) + '</section>')
-            body.clear()
+        body.clear()
 
     for part in parts:
         if not isinstance(part, dict):
@@ -6438,13 +6464,23 @@ def _financial_screen_sections(parts):
                 flush()
             body.append(f'<h{level}>{_financial_report_escape(part.get("text"))}</h{level}>')
         elif kind == 'fields':
-            rows = [row for row in (part.get('rows') or []) if isinstance(row, (list, tuple)) and len(row) >= 2]
+            rows = [
+                row for row in (part.get('rows') or [])
+                if isinstance(row, (list, tuple)) and len(row) >= 2
+                and str(row[1] if row[1] is not None else '').strip()
+            ]
             if not rows:
                 continue
-            body.append('<table class="summary-table"><tbody>' + ''.join(
-                f'<tr><th>{_financial_report_escape(row[0])}</th>'
-                + _financial_report_cell(_financial_report_format_display(row[1], row[0]), row[1]) + '</tr>'
-                for row in rows) + '</tbody></table>')
+            regular_rows = [row for row in rows if str(row[0] or '').strip() != 'الإيضاحات']
+            if regular_rows:
+                body.append('<table class="summary-table"><tbody>' + ''.join(
+                    f'<tr><th>{_financial_report_escape(row[0])}</th>'
+                    + _financial_report_cell(_financial_report_format_display(row[1], row[0]), row[1]) + '</tr>'
+                    for row in regular_rows) + '</tbody></table>')
+            for row in rows:
+                if str(row[0] or '').strip() == 'الإيضاحات':
+                    body.append('<div class="financial-clarifications">'
+                                + _financial_report_escape(row[1]) + '</div>')
         elif kind == 'table':
             headers = [header for header in (part.get('headers') or [])]
             if not headers:
@@ -6529,6 +6565,10 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
         + '<h3>النتائج المقارنة</h3>' + _financial_report_table(tables.get('sensitivityTable'))
         + '</section>'
     )
+    clarifications = str(inputs.get('financialClarifications') or '').strip()
+    if clarifications:
+        sections.append('<section><h2>15. الإيضاحات</h2><div class="financial-clarifications">'
+                        + _financial_report_escape(clarifications) + '</div></section>')
     return _financial_report_document(sections, font_css, font_family)
 
 
@@ -6550,6 +6590,7 @@ def _financial_report_document(sections, font_css, font_family):
 .eyebrow {{ color:#4a4a4a; font-weight:700; }} h1 {{ color:#1a1a1a; font-size:32px; margin:18px 0 6px; }} h2 {{ color:#1a1a1a; font-size:20px; border-bottom:2px solid #1a1a1a; padding-bottom:6px; }}
 h3 {{ color:#1a1a1a; font-size:14px; margin:12px 0 6px; }}
 table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px; }} th,td {{ border:1px solid #b3b3b3; padding:6px; text-align:right; vertical-align:top; color:#1a1a1a; }} thead {{ display:table-header-group; }} tr {{ break-inside:avoid; page-break-inside:avoid; }} thead th {{ background:#e6e6e6; font-weight:700; }} .summary-table th {{ width:38%; background:#f2f2f2; font-weight:400; }} .summary-table td {{ font-weight:700; }} .empty {{ color:#555; border:1px dashed #b3b3b3; padding:10px; }}
+.financial-clarifications {{ white-space:pre-wrap; border:1px solid #b3b3b3; padding:12px; line-height:1.7; }}
 </style></head><body><main class="financial-report">{''.join(sections)}</main></body></html>'''
 
 
@@ -6693,6 +6734,27 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
         place(box, text, size, color=(0.1, 0.1, 0.1))
         y += size + 8
 
+    def draw_paragraph(text, size=9):
+        nonlocal y
+        width = page_size.width - margin * 2
+        for paragraph in str(text or '').splitlines() or ['']:
+            words = paragraph.split()
+            if not words:
+                y += size + 4
+                continue
+            line = ''
+            for word in words:
+                candidate = (line + ' ' + word).strip()
+                shaped = _financial_pdf_shape(candidate)
+                measured = sum(font.text_length(part, size) for _, font, part in split_runs(shaped))
+                if line and measured > width:
+                    draw_text(line, size)
+                    line = word
+                else:
+                    line = candidate
+            if line:
+                draw_text(line, size)
+
     def draw_kv_table(rows, raw=False):
         nonlocal y
         visible = []
@@ -6710,6 +6772,10 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             return
         col_w = (page_size.width - margin * 2) / 2
         for label, value in visible:
+            if label.strip() == 'الإيضاحات':
+                draw_paragraph(value)
+                y += 4
+                continue
             ensure_space(16)
             rect = fitz.Rect(margin, y, page_size.width - margin, y + 15)
             page.draw_rect(rect, color=(0.85, 0.82, 0.8), width=0.4)
@@ -6921,6 +6987,10 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
             sensitivity_assumptions = dynamic_rows.get('sensitivity')
     draw_data_table(sensitivity_assumptions, '14. تحليل الحساسية العام - الافتراضات')
     draw_data_table(tables.get('sensitivityTable'), '14. تحليل الحساسية العام - النتائج')
+    clarifications = str(inputs.get('financialClarifications') or '').strip()
+    if clarifications:
+        draw_text('15. الإيضاحات', 12)
+        draw_paragraph(clarifications)
     document.save(output_path)
     document.close()
     return output_path

@@ -881,6 +881,12 @@ plus the JS object). That object must include `dynamicRows.sensitivity` so table
 reload. `collectFinancialStudyModel()` must keep values from fields that are currently hidden by a
 mode switch; otherwise toggling بيع / تأجير wipes the other side on the next save.
 
+`financialClarifications` is one optional textarea written only by the client. It replaces the old
+auto-calculated `clarificationsTable`; no calculation or AI flow may populate it. A non-empty value
+is saved in `inputs`, copied to `report.parts`, and rendered with preserved line breaks by every PDF
+engine. When blank, its heading and section are omitted from both the HTML report and direct PyMuPDF
+output rather than leaving an empty numbered section.
+
 Save **raw numbers**, never `money()` strings, in `inputs` and `dynamicRows`. A `type="number"`
 field silently blanks `189,750,000`, so the next `calculateAll()` treats project cost and every
 derived finance total (`financeBaseAmount`, `facilityAmount`, arrangement fees, interest, equity)
