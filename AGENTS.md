@@ -271,7 +271,8 @@ assertion deliberately, not reflexively.
   when none are selected, table order supplies the first seven. The tables have no per-row URL field:
   nearby placement opens the landmarks map and city placement opens the catchment map. Access uses
   approved `main_roads` only, never hidden secondary roads; `manual_road_paths` supplies client-drawn
-  geometry and `access_road_label_positions` stores movable labels. Initial generation persists the
+  geometry, while `access_road_label_positions` and `access_road_label_sizes` store each label's
+  draggable position and independent 0.6–1.8 scale. Initial generation persists the
   verified Google geometry in `access_roads_data` plus a clean `##MAP_ACCESS_EDITABLE##` sidecar.
   Name/label and path modes edit those values with undo/confirm/cancel, release only the access-image
   approval, and recompose locally without another provider call. A new name has no highlight until it

@@ -4003,6 +4003,30 @@
       font-size: 13px !important;
     }
 
+    .map-road-label {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      padding: 4px 8px;
+      border: 1px solid #f0e6d2;
+      border-radius: 6px;
+      background: #254b66;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.25;
+      white-space: nowrap;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+      direction: rtl;
+      pointer-events: none;
+      transform-origin: center;
+    }
+
+    .map-road-label.editable {
+      pointer-events: auto;
+      cursor: move;
+      border-color: #d4a359;
+    }
+
     .tenant-map-preview-card {
       cursor: pointer;
       transition: border-color .15s ease, box-shadow .15s ease;
@@ -6210,7 +6234,7 @@
       'enabled_maps', 'landmarks_matrix', 'lat', 'latitude', 'lng', 'location',
       'location_address', 'location_detail', 'location_lat', 'location_lng', 'location_maps_link',
       'locationLat', 'locationLng', 'location_polygon', 'location_polygon_source', 'longitude',
-      'access_road_label_positions', 'access_roads_data', 'location_analysis_approved', 'location_coordinates_confirmed',
+      'access_road_label_positions', 'access_road_label_sizes', 'access_roads_data', 'location_analysis_approved', 'location_coordinates_confirmed',
       'main_roads', 'main_roads_data', 'manual_road_paths', 'map_styles', 'map_type', 'maps_link',
       'nearby_landmarks', 'nearby_landmarks_data', 'city_landmarks', 'city_landmarks_data', 'regen_seed',
       'refresh_maps',
@@ -12228,6 +12252,9 @@
       const positions = tenantRoadEditMode
         ? tenantRoadEditDraft?.labelPositions || {}
         : tenantProjectData.access_road_label_positions || {};
+      const sizes = tenantRoadEditMode
+        ? tenantRoadEditDraft?.labelSizes || {}
+        : tenantProjectData.access_road_label_sizes || {};
       const rows = tenantRoadEditMode ? tenantRoadEditDraft?.rows || [] : accessRoadRows();
       const roads = rows.map(row => {
         const geometry = byName.get(accessRoadNameKey(row.original_name)) || byName.get(accessRoadNameKey(row.name));
@@ -12235,12 +12262,13 @@
         return {
           ...geometry,
           name: row.name,
-          label_point: positions[row.name] || positions[row.original_name] || geometry.label_point || null
+          label_point: positions[row.name] || positions[row.original_name] || geometry.label_point || null,
+          label_scale: sizes[row.name] || sizes[row.original_name] || geometry.label_scale || 1
         };
       }).filter(Boolean);
       if (tenantRoadDrawingTarget?.points?.length) {
         const index = roads.findIndex(road => accessRoadNameKey(road.name) === accessRoadNameKey(tenantRoadDrawingTarget.name));
-        const draft = { name: tenantRoadDrawingTarget.name, points: tenantRoadDrawingTarget.points, label_point: positions[tenantRoadDrawingTarget.name] || null };
+        const draft = { name: tenantRoadDrawingTarget.name, points: tenantRoadDrawingTarget.points, label_point: positions[tenantRoadDrawingTarget.name] || null, label_scale: sizes[tenantRoadDrawingTarget.name] || 1 };
         if (index >= 0) roads[index] = draft;
         else roads.push(draft);
       }
@@ -12263,6 +12291,8 @@
       const selectedName = tenantRoadEditSelectedIndex >= 0 ? rows[tenantRoadEditSelectedIndex]?.name || '' : tenantRoadEditDraft?.newName || '';
       return '<label class="map-control-field">اختيار الطريق<select id="accessRoadEditSelect" onchange="selectAccessRoadEdit(this.value)">' + options + '<option value="-1" ' + (tenantRoadEditSelectedIndex < 0 ? 'selected' : '') + '>طريق جديد</option></select></label>' +
         '<label class="map-control-field">اسم الطريق<input id="accessRoadEditName" type="text" value="' + escapeHtml(selectedName) + '" oninput="updateAccessRoadDraftName(this.value)"></label>' +
+        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadLabelSize(-0.1)">تصغير الاسم</button>' +
+        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadLabelSize(0.1)">تكبير الاسم</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoAccessRoadEditsButton" onclick="undoAccessRoadEdits()">تراجع</button>' +
         '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmAccessRoadEdits()">اعتماد</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelAccessRoadEdits()">إلغاء</button>';
@@ -12285,6 +12315,7 @@
       tenantRoadEditDraft = {
         rows: accessRoadRows(),
         labelPositions: JSON.parse(JSON.stringify(tenantProjectData.access_road_label_positions || {})),
+        labelSizes: JSON.parse(JSON.stringify(tenantProjectData.access_road_label_sizes || {})),
         newName: ''
       };
       tenantRoadEditHistory = [];
@@ -12340,6 +12371,46 @@
       renderTenantMapPolygonOverlay();
     }
 
+    function startAccessRoadLabelDrag(event, name) {
+      if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      const index = tenantRoadEditDraft.rows.findIndex(row => accessRoadNameKey(row.name) === accessRoadNameKey(name));
+      if (index < 0) return;
+      tenantRoadEditSelectedIndex = index;
+      const select = document.getElementById('accessRoadEditSelect');
+      const input = document.getElementById('accessRoadEditName');
+      if (select) select.value = String(index);
+      if (input) input.value = tenantRoadEditDraft.rows[index].name;
+      pushRoadEditHistory();
+      const image = document.querySelector('#mapPreviewImage img');
+      const move = moveEvent => {
+        const coordinates = tenantMapCoordinatesFromClient(moveEvent.clientX, moveEvent.clientY, image);
+        if (!coordinates) return;
+        tenantRoadEditDraft.labelPositions[tenantRoadEditDraft.rows[index].name] = coordinates;
+        renderTenantMapPolygonOverlay();
+      };
+      const stop = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', stop);
+        window.removeEventListener('pointercancel', stop);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', stop);
+      window.addEventListener('pointercancel', stop);
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    function adjustAccessRoadLabelSize(delta) {
+      if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      pushRoadEditHistory();
+      const row = commitAccessRoadDraftName();
+      if (!row || !String(row.name || '').trim()) return;
+      const current = Number(tenantRoadEditDraft.labelSizes[row.name] || tenantRoadEditDraft.labelSizes[row.original_name] || 1);
+      tenantRoadEditDraft.labelSizes[row.name] = Math.max(0.6, Math.min(1.8, Math.round((current + Number(delta || 0)) * 10) / 10));
+      renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+    }
+
     function undoAccessRoadEdits() {
       const snapshot = tenantRoadEditHistory.pop();
       if (!snapshot) return;
@@ -12368,6 +12439,10 @@
       tenantProjectData.access_road_label_positions = Object.fromEntries(rows.map(row => {
         const point = tenantRoadEditDraft.labelPositions[row.name] || tenantRoadEditDraft.labelPositions[row.original_name];
         return point ? [row.name, point] : null;
+      }).filter(Boolean));
+      tenantProjectData.access_road_label_sizes = Object.fromEntries(rows.map(row => {
+        const size = tenantRoadEditDraft.labelSizes[row.name] || tenantRoadEditDraft.labelSizes[row.original_name];
+        return size ? [row.name, size] : null;
       }).filter(Boolean));
       tenantProjectData.main_roads = rows.map(row => row.name).join('\n');
       tenantProjectData.main_roads_data = rows.map(({ original_name, ...row }) => row);
@@ -12912,6 +12987,7 @@
           <div id="mapPreviewImage" style="display:none;max-width:100%;border-radius:8px;overflow:hidden;border:1px solid #ddd;position:relative;">
             <img src="" alt="Map preview" style="width:100%;display:block;cursor:crosshair;" onclick="setTenantMapPointFromClick(event)" />
             <svg id="mapPolygonOverlay" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>
+            <div id="mapLabelOverlay" style="position:absolute;inset:0;pointer-events:none"></div>
           </div>
           <div id="mapPreviewGallery" class="tenant-map-preview-gallery" style="display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;"></div>
           <p id="mapPreviewHint" class="tenant-hint" style="margin:8px 0 0;display:none"></p>
@@ -16519,10 +16595,13 @@
           tenantProjectData.access_roads_data = Array.isArray(data.accessRoads) ? data.accessRoads : [];
           tenantCreativeImages.map_access_roads = tenantProjectData.access_roads_data;
           const positions = { ...(tenantProjectData.access_road_label_positions || {}) };
+          const sizes = { ...(tenantProjectData.access_road_label_sizes || {}) };
           tenantProjectData.access_roads_data.forEach(road => {
             if (road?.name && Array.isArray(road.label_point) && !positions[road.name]) positions[road.name] = road.label_point;
+            if (road?.name && Number.isFinite(Number(road.label_scale)) && !sizes[road.name]) sizes[road.name] = Number(road.label_scale);
           });
           tenantProjectData.access_road_label_positions = positions;
+          tenantProjectData.access_road_label_sizes = sizes;
         }
         tenantCreativeImages.maps_persisted = true;
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
@@ -16559,19 +16638,26 @@
       return regenerateMapPreview('overview');
     }
 
-    function setTenantMapPointFromClick(event) {
-      if (!tenantMapPreviewState) return;
-      const img = event.currentTarget;
+    function tenantMapCoordinatesFromClient(clientX, clientY, img) {
+      if (!tenantMapPreviewState || !img) return null;
       const rect = img.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const x = (event.clientX - rect.left) / rect.width - 0.5;
-      const y = (event.clientY - rect.top) / rect.height - 0.5;
+      if (!rect.width || !rect.height) return null;
+      const x = (clientX - rect.left) / rect.width - 0.5;
+      const y = (clientY - rect.top) / rect.height - 0.5;
       const world = 256 * Math.pow(2, tenantMapPreviewState.zoom) * 2;
       const centerLatRad = tenantMapPreviewState.lat * Math.PI / 180;
       const centerY = (1 - Math.log(Math.tan(centerLatRad) + 1 / Math.cos(centerLatRad)) / Math.PI) / 2;
       const nextY = centerY + (y * img.naturalHeight) / world;
       const nextLng = tenantMapPreviewState.lng + (x * img.naturalWidth) * 360 / world;
-      const nextLat = (Math.atan(Math.sinh(Math.PI * (1 - 2 * nextY))) * 180 / Math.PI);
+      const nextLat = Math.atan(Math.sinh(Math.PI * (1 - 2 * nextY))) * 180 / Math.PI;
+      return [nextLat, nextLng];
+    }
+
+    function setTenantMapPointFromClick(event) {
+      const img = event.currentTarget;
+      const coordinates = tenantMapCoordinatesFromClient(event.clientX, event.clientY, img);
+      if (!coordinates) return;
+      const [nextLat, nextLng] = coordinates;
       if (tenantMapPolygonMode && tenantSelectedMapType === 'overview') {
         tenantMapDraftPolygonPoints.push([nextLat, nextLng]);
         renderTenantMapPolygonOverlay();
@@ -16687,10 +16773,13 @@
           tenantProjectData.access_roads_data = Array.isArray(data.accessRoads) ? data.accessRoads : tenantProjectData.access_roads_data || [];
           tenantCreativeImages.map_access_roads = tenantProjectData.access_roads_data;
           const positions = { ...(tenantProjectData.access_road_label_positions || {}) };
+          const sizes = { ...(tenantProjectData.access_road_label_sizes || {}) };
           tenantProjectData.access_roads_data.forEach(road => {
             if (road?.name && Array.isArray(road.label_point)) positions[road.name] = road.label_point;
+            if (road?.name && Number.isFinite(Number(road.label_scale))) sizes[road.name] = Number(road.label_scale);
           });
           tenantProjectData.access_road_label_positions = positions;
+          tenantProjectData.access_road_label_sizes = sizes;
           tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
           await saveMapPreviewState();
           renderMapPreviewGallery();
@@ -16811,8 +16900,29 @@
       if (input) input.value = value;
     }
 
+    function renderAccessRoadLabels(roadPaths, toPoint, visible) {
+      const layer = document.getElementById('mapLabelOverlay');
+      if (!layer) return;
+      if (!visible) {
+        layer.innerHTML = '';
+        return;
+      }
+      layer.innerHTML = roadPaths.map(path => {
+        const points = Array.isArray(path.points) ? path.points : [];
+        if (points.length < 2 || !path.name) return '';
+        const labelPoint = Array.isArray(path.label_point) ? path.label_point : points[Math.floor(points.length / 2)];
+        const [x, y] = toPoint(labelPoint).split(',').map(Number);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return '';
+        const scale = Math.max(0.6, Math.min(1.8, Number(path.label_scale) || 1));
+        const encodedName = encodeURIComponent(String(path.name)).replace(/'/g, '%27');
+        return '<div class="map-road-label' + (tenantRoadEditMode ? ' editable' : '') + '" data-road-label="' + escapeHtml(path.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:' + (13 * scale).toFixed(1) + 'px;padding:' + (4 * scale).toFixed(1) + 'px ' + (8 * scale).toFixed(1) + 'px"' +
+          (tenantRoadEditMode ? ' onpointerdown="startAccessRoadLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' : '') + '>' + escapeHtml(path.name) + '</div>';
+      }).join('');
+    }
+
     function renderTenantMapPolygonOverlay() {
       const overlay = document.getElementById('mapPolygonOverlay');
+      const labelLayer = document.getElementById('mapLabelOverlay');
       const img = document.querySelector('#mapPreviewImage img');
       const state = tenantMapPreviewState;
       const polygonPoints = tenantMapPolygonMode ? tenantMapDraftPolygonPoints : tenantMapPolygonPoints;
@@ -16823,6 +16933,7 @@
       const showAccessPin = tenantSelectedMapType === 'access' && !!state?.usesEditableBase;
       if (!overlay || !img || !state || !img.naturalWidth || !img.naturalHeight || (!showBoundary && !showPin && !showAccessPin && (!showRoads || !roadPaths.length))) {
         if (overlay) overlay.innerHTML = '';
+        if (labelLayer) labelLayer.innerHTML = '';
         return;
       }
       const world = 256 * Math.pow(2, state.zoom) * 2;
@@ -16856,20 +16967,16 @@
       const roadMarkup = showRoads ? roadPaths.map(path => {
         const roadPoints = (path.points || []).map(toPoint);
         if (roadPoints.length < 2) return '';
-        const labelPoint = Array.isArray(path.label_point) ? toPoint(path.label_point) : roadPoints[Math.floor(roadPoints.length / 2)];
-        const [labelX, labelY] = labelPoint.split(',').map(Number);
         const label = String(path.name || '');
-        const labelWidth = Math.min(30, Math.max(12, label.length * 1.15));
         return '<polyline points="' + roadPoints.join(' ') + '" fill="none" stroke="rgba(105,73,35,.55)" stroke-width="1.8"></polyline>' +
-          '<polyline points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="0.9"><title>' + escapeHtml(label) + '</title></polyline>' +
-          (label ? '<rect x="' + (labelX - labelWidth / 2).toFixed(3) + '" y="' + (labelY - 3.2).toFixed(3) + '" width="' + labelWidth.toFixed(3) + '" height="6.4" rx="1.1" fill="#254b66" stroke="#f0e6d2" stroke-width="0.35"></rect>' +
-            '<text x="' + labelX.toFixed(3) + '" y="' + (labelY + 1.2).toFixed(3) + '" text-anchor="middle" font-size="3.1" font-weight="700" fill="#fff">' + escapeHtml(label) + '</text>' : '');
+          '<polyline points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="0.9"><title>' + escapeHtml(label) + '</title></polyline>';
       }).join('') : '';
       const roadPointMarkup = tenantRoadDrawingTarget ? tenantRoadDrawingTarget.points.map(point => {
         const [x, y] = toPoint(point).split(',');
         return '<circle cx="' + x + '%" cy="' + y + '%" r="1.15" fill="#fff" stroke="#6B1C23" stroke-width="0.45"></circle>';
       }).join('') : '';
       overlay.innerHTML = boundaryMarkup + roadMarkup + roadPointMarkup + pinMarkup;
+      renderAccessRoadLabels(roadPaths, toPoint, showRoads);
     }
 
     function removeTenantPolygonPoint(index) {

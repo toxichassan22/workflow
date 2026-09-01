@@ -4123,6 +4123,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                     'main_roads': 'شارع صحيح',
                     'access_roads_data': [{'name': 'شارع صحيح', 'points': [[24.0, 45.9998], [24.0, 46.0002]]}],
                     'access_road_label_positions': {'شارع صحيح': [24.0001, 46.0]},
+                    'access_road_label_sizes': {'شارع صحيح': 0.8},
                 }, self.tenant_a, draft_id='quick-access-compose')
             provider.assert_not_called()
             roads_provider.assert_not_called()
@@ -4130,6 +4131,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('error', composed)
         self.assertEqual(composed['placeholders']['##MAP_ACCESS##'], final_path)
         self.assertEqual(composed['access_roads'][0]['name'], 'شارع صحيح')
+        self.assertEqual(composed['access_roads'][0]['label_scale'], 0.8)
         self.assertNotEqual(Path(editable_path).read_bytes(), Path(final_path).read_bytes())
 
         source = (ROOT / 'index.html').read_text(encoding='utf-8')
@@ -4156,6 +4158,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("editableKeys: ['##MAP_ACCESS_EDITABLE##'", source)
         self.assertIn("'access_roads_data'", source)
         self.assertIn("'access_road_label_positions'", source)
+        self.assertIn("'access_road_label_sizes'", source)
+        self.assertIn('id="mapLabelOverlay"', source)
+        self.assertIn('function startAccessRoadLabelDrag(event, name)', source)
+        self.assertIn('function adjustAccessRoadLabelSize(delta)', source)
+        self.assertIn('onpointerdown="startAccessRoadLabelDrag(event,', source)
+        self.assertIn('تصغير الاسم', source)
+        self.assertIn('تكبير الاسم', source)
         self.assertIn('tenantProjectData.main_roads = hidden.value;', source)
         self.assertIn('function invalidateAccessMapApproval()', source)
 
@@ -4164,6 +4173,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('allow_discovery=False', maps_source)
         self.assertIn("(project_data or {}).get('access_roads_data')", maps_source)
         self.assertIn("(project_data or {}).get('access_road_label_positions')", maps_source)
+        self.assertIn("(project_data or {}).get('access_road_label_sizes')", maps_source)
         approved = self.application_module.maps_service._approved_manual_road_paths([
             {'name': 'شارع صحيح', 'points': [[24.0, 46.0], [24.1, 46.1]]},
             {'name': 'شارع غير موجود', 'points': [[24.0, 46.0], [24.1, 46.1]]},
@@ -4206,7 +4216,7 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_access_road_names_are_drawn_above_highlights(self):
         source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v13-editable-road-labels'", source)
+        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v14-draggable-road-labels'", source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
         self.assertIn("def _strip_arabic_diacritics(text):", source)
         self.assertIn("def _arabic_reshaper_without_ligatures():", source)

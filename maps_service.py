@@ -222,7 +222,7 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (160, 50, 50, 78)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 230)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
-ACCESS_ROADS_RENDER_VERSION = 'v13-editable-road-labels'
+ACCESS_ROADS_RENDER_VERSION = 'v14-draggable-road-labels'
 MAP_HIGHLIGHT_RENDER_VERSION = 'survey-polygon-v3'
 MAP_LABEL_RENDER_VERSION = 'named-labels-v3-access-context'
 ACCESS_ROADMAP_STYLES = [
@@ -2532,19 +2532,20 @@ def _approved_manual_road_paths(value, approved_names):
 def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, project_data=None, tenant_id=None,
                        origin_lat=None, origin_lng=None, allow_discovery=True):
     """Draw only approved main-road geometry and labels."""
-    def _draw_road_label(draw, px, py, text, font=None, bg_color=(37, 75, 102, 255), border_color=(240, 230, 210, 255)):
+    def _draw_road_label(draw, px, py, text, label_scale=1.0, font=None, bg_color=(37, 75, 102, 255), border_color=(240, 230, 210, 255)):
+        label_scale = max(0.6, min(1.8, float(label_scale or 1)))
         if not font:
-            font = _get_arabic_font(24)
+            font = _get_arabic_font(max(12, round(24 * label_scale)))
 
         reshaped_text = _reshape_arabic_text(text)
         bbox = draw.textbbox((0, 0), reshaped_text, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-        pad_x = 12
-        pad_y = 7
+        pad_x = max(7, round(12 * label_scale))
+        pad_y = max(4, round(7 * label_scale))
         rect = [int(px - tw // 2 - pad_x), int(py - th // 2 - pad_y), int(px + tw // 2 + pad_x), int(py + th // 2 + pad_y)]
 
-        draw.rounded_rectangle(rect, radius=8, fill=bg_color, outline=border_color, width=2)
+        draw.rounded_rectangle(rect, radius=max(5, round(8 * label_scale)), fill=bg_color, outline=border_color, width=2)
         draw.text((int(px - tw // 2), int(py - th // 2 - 2)), reshaped_text, fill='#FFFFFF', font=font)
 
     def _offset_label_point(point, route_segment, img_w, img_h, distance=52):
@@ -2618,6 +2619,19 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 try:
                     if isinstance(point, (list, tuple)) and len(point) >= 2:
                         position_by_key[_road_name_key(name)] = (float(point[0]), float(point[1]))
+                except (TypeError, ValueError):
+                    continue
+        label_sizes = (project_data or {}).get('access_road_label_sizes') or {}
+        if isinstance(label_sizes, str):
+            try:
+                label_sizes = json.loads(label_sizes)
+            except (TypeError, ValueError):
+                label_sizes = {}
+        size_by_key = {}
+        if isinstance(label_sizes, dict):
+            for name, value in label_sizes.items():
+                try:
+                    size_by_key[_road_name_key(name)] = max(0.6, min(1.8, float(value)))
                 except (TypeError, ValueError):
                     continue
 
@@ -2721,7 +2735,9 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             labels_draw = ImageDraw.Draw(labels_overlay)
             for route_segment, label_text, route_coords in pending_labels:
                 best_p = None
-                label_point = position_by_key.get(_road_name_key(label_text))
+                label_key = _road_name_key(label_text)
+                label_point = position_by_key.get(label_key)
+                label_scale = size_by_key.get(label_key, 1.0)
                 if label_point:
                     label_dx, label_dy = _latlng_to_pixel_offset(
                         label_point[0], label_point[1], center_lat, center_lng, zoom, scale=scale
@@ -2740,7 +2756,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 candidates = preferred_candidates or visible_candidates
                 candidates.sort(key=lambda candidate: -candidate[0])
 
-                label_half_width = min(240, max(90, len(label_text or '') * 7))
+                label_half_width = min(300, max(70, len(label_text or '') * 7 * label_scale))
                 if best_p is None:
                     for _, point in candidates:
                         offset_point = _offset_label_point(point, route_segment, img_w, img_h)
@@ -2758,7 +2774,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                             break
 
                 if best_p and label_text:
-                    _draw_road_label(labels_draw, best_p[0], best_p[1], label_text)
+                    _draw_road_label(labels_draw, best_p[0], best_p[1], label_text, label_scale=label_scale)
                     label_point = _pixel_to_latlng(
                         best_p[0], best_p[1], img_w, img_h, center_lat, center_lng, zoom, scale=scale
                     )
@@ -2766,6 +2782,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                     'name': label_text,
                     'points': [[point[0], point[1]] for point in route_coords],
                     'label_point': list(label_point) if label_point else None,
+                    'label_scale': label_scale,
                 })
 
             img = Image.alpha_composite(img, labels_overlay)
