@@ -295,7 +295,9 @@ assertion deliberately, not reflexively.
   Undo/confirm/cancel persists both layers and recomposes locally without Google. The nearby-landmarks
   map keeps the same selected-or-first-seven rule and zoom logic, but mirrors this editor through
   `landmark_map_items`, `landmark_label_positions`, and `##MAP_LANDMARKS_EDITABLE##`; moving a marker
-  updates its `nearby_landmarks_data` coordinates while moving its label remains visual-only. The
+  updates its `nearby_landmarks_data` coordinates while moving its label remains visual-only. Blank
+  table `lat`/`lng` values must never overwrite the resolved map item (`Number('')` is zero in JS and
+  put otherwise valid markers off-map); `mergeResolvedMapLandmark()` preserves the generated point. The
   landmarks view is framed around the landmarks it draws; it used to inherit the plot zoom, so every
   landmark fell outside the frame.
 - **Access-road discovery must be deterministic.** `access_probe_points()` is fixed; it used to be

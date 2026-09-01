@@ -4344,6 +4344,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("editableKeys: ['##MAP_LANDMARKS_EDITABLE##'", source)
         self.assertIn("'landmark_label_positions'", source)
         self.assertIn("'landmark_map_items'", source)
+        self.assertIn('function isUsableMapCoordinate(value, latitude)', source)
+        self.assertIn('function mergeResolvedMapLandmark(row, resolved)', source)
+        self.assertIn('mergeResolvedMapLandmark(item, storedByName.get', source)
 
         maps_source = (ROOT / 'maps_service.py').read_text(encoding='utf-8')
         self.assertIn('def recompose_landmarks_map(', maps_source)

@@ -12665,6 +12665,22 @@
       renderTenantMapPolygonOverlay();
     }
 
+    function isUsableMapCoordinate(value, latitude) {
+      if (value === '' || value === null || value === undefined) return false;
+      const number = Number(value);
+      return Number.isFinite(number) && (latitude ? number >= -90 && number <= 90 : number >= -180 && number <= 180);
+    }
+
+    function mergeResolvedMapLandmark(row, resolved) {
+      const source = resolved || {};
+      return {
+        ...source,
+        ...row,
+        lat: isUsableMapCoordinate(row?.lat, true) ? Number(row.lat) : source.lat,
+        lng: isUsableMapCoordinate(row?.lng, false) ? Number(row.lng) : source.lng
+      };
+    }
+
     function catchmentMapLandmarks() {
       const stored = Array.isArray(tenantProjectData.catchment_map_landmarks)
         ? tenantProjectData.catchment_map_landmarks
@@ -12676,12 +12692,12 @@
       const source = tenantCatchmentEditMode && Array.isArray(tenantCatchmentEditDraft?.landmarks)
         ? tenantCatchmentEditDraft.landmarks
         : desiredRows.length
-          ? desiredRows.map(item => ({ ...(storedByName.get(String(item?.name || '').trim()) || {}), ...item }))
+          ? desiredRows.map(item => mergeResolvedMapLandmark(item, storedByName.get(String(item?.name || '').trim())))
           : stored.slice(0, 7);
       const positions = tenantCatchmentEditMode
         ? tenantCatchmentEditDraft?.labelPositions || {}
         : tenantProjectData.catchment_label_positions || {};
-      return source.filter(item => Number.isFinite(Number(item?.lat)) && Number.isFinite(Number(item?.lng))).map(item => ({
+      return source.filter(item => isUsableMapCoordinate(item?.lat, true) && isUsableMapCoordinate(item?.lng, false)).map(item => ({
         ...item,
         lat: Number(item.lat),
         lng: Number(item.lng),
@@ -12814,12 +12830,12 @@
       const source = tenantLandmarksEditMode && Array.isArray(tenantLandmarksEditDraft?.landmarks)
         ? tenantLandmarksEditDraft.landmarks
         : desiredRows.length
-          ? desiredRows.map(item => ({ ...(storedByName.get(String(item?.name || '').trim()) || {}), ...item }))
+          ? desiredRows.map(item => mergeResolvedMapLandmark(item, storedByName.get(String(item?.name || '').trim())))
           : stored.slice(0, 7);
       const positions = tenantLandmarksEditMode
         ? tenantLandmarksEditDraft?.labelPositions || {}
         : tenantProjectData.landmark_label_positions || {};
-      return source.filter(item => Number.isFinite(Number(item?.lat)) && Number.isFinite(Number(item?.lng))).map(item => ({
+      return source.filter(item => isUsableMapCoordinate(item?.lat, true) && isUsableMapCoordinate(item?.lng, false)).map(item => ({
         ...item,
         lat: Number(item.lat),
         lng: Number(item.lng),
