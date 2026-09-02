@@ -960,7 +960,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(any(slide.get('design_style') == 'chart' and slide.get('chart_type')
                             for slide in financial_slides))
         revenue_slide = next(slide for slide in financial_slides
-                             if str(slide.get('content_source')).startswith('financial_report:5:'))
+                             if str(slide.get('content_source')).startswith('financial_report:5:')
+                             or any(str(src).startswith('financial_report:5:') for src in (slide.get('content_sources') or [])))
         source_note = engine._slide_source_data_note(revenue_slide, project)
         self.assertIn('1,500,000', source_note)
         self.assertEqual(financial_slides[-1].get('content_source'), 'financial_indicators')
@@ -3174,7 +3175,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         response.json.return_value = {'choices': [{'message': {'content': 'ok'}}]}
         with patch('app.requests.post', return_value=response) as post:
             result = module.call_openrouter_chat(
-                'system', 'instructions', model='google/gemini-3.7-flash',
+                'system', 'instructions', model='google/gemini-3.8-flash',
                 reasoning_effort='high', image_references=['data:image/png;base64,AAAA'])
         self.assertIn('choices', result)
         request_payload = post.call_args.kwargs['json']
@@ -6213,7 +6214,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()['analysis'], 'تحليل من النموذج الاحتياطي')
-        self.assertEqual(fallback.call_args.kwargs['model'], 'google/gemini-3.7-flash')
+        self.assertEqual(fallback.call_args.kwargs['model'], 'google/gemini-3.8-flash')
 
     def test_project_draft_preserves_selected_landmark_details(self):
         client = self.app.test_client()

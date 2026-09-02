@@ -403,6 +403,111 @@ def _limit_presentation_charts(groups, limit=4):
                 slide['design_style'] = 'table'
 
 
+# Vertical stacking budget for packed financial tables: data rows plus the header and
+# caption each stacked table costs, capped so 560px of slide height stays readable.
+_FINANCIAL_PACK_ROW_BUDGET = 16.0
+_FINANCIAL_PACK_MAX_TABLES = 3
+
+
+def _pack_financial_table_slices(items):
+    """Pack consecutive narrow financial table slices into slides that stack them vertically.
+
+    The client shrinks the tables, so one small table per slide wasted the deck with
+    a half-empty slide each. Wide (column-split) tables never reach this packer: the
+    caller flushes them as single slides because two six-column tables stacked
+    vertically do not fit the slide height.
+    """
+    groups = []
+    current = None
+    for item in items:
+        weight = float(item.get('row_count') or 0) + 2.5
+        if current is not None and (current['weight'] + weight <= _FINANCIAL_PACK_ROW_BUDGET
+                                    and len(current['items']) < _FINANCIAL_PACK_MAX_TABLES):
+            current['items'].append(item)
+            current['weight'] += weight
+        else:
+            current = {'items': [item], 'weight': weight}
+            groups.append(current)
+    slides = []
+    for group in groups:
+        group_items = group['items']
+        sources = [str(item['source']) for item in group_items]
+        row_count = sum(int(item.get('row_count') or 0) for item in group_items)
+        if len(group_items) == 1:
+            item = group_items[0]
+            slides.append({
+                'title': item['title'] + (f" — {item['suffix']}" if item.get('suffix') else ''),
+                'type': 'content', 'design_style': 'table',
+                'chart_type': '', 'content_density': 'high', 'requires_image': False,
+                'content_source': sources[0],
+                'source_table': item.get('source_table'),
+                'row_count': row_count, 'financial_template': 'report', 'bullets': [],
+            })
+            continue
+        titles = list(dict.fromkeys(str(item['title']) for item in group_items))
+        if len(titles) == 1:
+            title = titles[0]
+        elif len(titles) == 2:
+            title = ' + '.join(titles)
+        else:
+            title = f'{titles[0]} + جداول أخرى'
+        slides.append({
+            'title': title, 'type': 'content', 'design_style': 'table',
+            'chart_type': '', 'content_density': 'high', 'requires_image': False,
+            'content_source': sources[0], 'content_sources': sources,
+            'source_table': group_items[0].get('source_table'),
+            'row_count': row_count, 'financial_template': 'report', 'bullets': [],
+        })
+    return slides
+
+
+def _financial_report_part_title(model, part_index):
+    """Re-derive the heading a report part sat under, matching the plan builder's walk."""
+    report = model.get('report') if isinstance(model, dict) and isinstance(model.get('report'), dict) else {}
+    parts = report.get('parts') if isinstance(report.get('parts'), list) else []
+    heading = 'الدراسة المالية'
+    subheading = ''
+    for index, part in enumerate(parts):
+        if not isinstance(part, dict):
+            continue
+        if part.get('type') == 'heading':
+            text = str(part.get('text') or '').strip()
+            if part.get('level') == 3:
+                subheading = text
+            else:
+                heading = text or heading
+                subheading = ''
+            continue
+        if index == part_index:
+            return subheading or heading
+    return ''
+
+
+def _stacked_financial_report_note(sources, model):
+    """One combined note for a slide that stacks several report tables vertically."""
+    report = model.get('report') if isinstance(model, dict) and isinstance(model.get('report'), dict) else {}
+    parts = report.get('parts') if isinstance(report.get('parts'), list) else []
+    blocks = []
+    for number, source in enumerate(sources, 1):
+        match = re.fullmatch(r'financial_report:(\d+):(\d+):(\d+)(?::(\d+):(\d+))?', str(source))
+        if not match:
+            continue
+        part_index, start, end = map(int, match.groups()[:3])
+        column_start = int(match.group(4)) if match.group(4) is not None else None
+        column_end = int(match.group(5)) if match.group(5) is not None else None
+        if part_index >= len(parts) or not isinstance(parts[part_index], dict):
+            continue
+        part = _financial_report_part_slice(parts[part_index], start, end, column_start, column_end)
+        part_title = _financial_report_part_title(model, part_index) or f'جدول {number}'
+        blocks.append(f'جدول {number} — {part_title} (الصفوف {start + 1} إلى {end}):\n'
+                      + json.dumps(part, ensure_ascii=False, indent=2))
+    if not blocks:
+        return ''
+    return ('هذه الشريحة تضم الجداول التالية مرصوصة رأسياً تحت بعضها في الشريحة نفسها — '
+            'اعرض كل جدول كاملاً بترويسته ثم الجدول الذي يليه أسفله بفاصل واضح، دون دمجها في جدول واحد:\n\n'
+            + '\n\n'.join(blocks))
+
+
 def _merge_sparse_plan_slides(groups):
     for section_key, slides in groups.items():
         merged = []
@@ -412,7 +517,8 @@ def _merge_sparse_plan_slides(groups):
                                 and not source.startswith(('financial_summary:', 'financial_indicators')))
             sparse_generic = (not source and not slide.get('image_tokens')
                               and len([item for item in (slide.get('bullets') or []) if str(item or '').strip()]) <= 1)
-            if (sparse_financial or sparse_generic) and merged:
+            if ((sparse_financial or sparse_generic) and merged
+                    and not merged[-1].get('chart_type') and not slide.get('chart_type')):
                 target = merged[-1]
                 if source:
                     target['content_sources'] = list(target.get('content_sources') or [target.get('content_source')])
@@ -429,7 +535,8 @@ def _merge_sparse_plan_slides(groups):
                             and not first_source.startswith(('financial_summary:', 'financial_indicators')))
             first_generic = (not first_source and not first.get('image_tokens')
                              and len([item for item in (first.get('bullets') or []) if str(item or '').strip()]) <= 1)
-            if first_sparse or first_generic:
+            if ((first_sparse or first_generic) and merged
+                    and not merged[1].get('chart_type') and not first.get('chart_type')):
                 target = merged[1]
                 if first_source:
                     target['content_sources'] = list(first.get('content_sources') or [first_source]) + list(
@@ -850,6 +957,13 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         if report_parts:
             heading = 'الدراسة المالية'
             subheading = ''
+            pending_tables = []
+
+            def flush_pending_tables():
+                for packed_slide in _pack_financial_table_slices(pending_tables):
+                    add('financial', packed_slide)
+                pending_tables.clear()
+
             for part_index, part in enumerate(report_parts):
                 if not isinstance(part, dict):
                     continue
@@ -882,6 +996,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 if (chart_cand in FINANCIAL_CHART_TYPES and not chartable_overall
                         and target_section == 'financial'
                         and _can_chart_financial_part(chart_cand, part, model, project_data)):
+                    flush_pending_tables()
                     chart_titles = {
                         'combo': 'التدفقات النقدية السنوية والتراكمية',
                         'waterfall': 'تكوين إجمالي تكلفة المشروع',
@@ -902,11 +1017,6 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     })
                 for row_number, (start, end) in enumerate(row_ranges, 1):
                     for column_number, (column_start, column_end) in enumerate(column_ranges, 1):
-                        title_suffixes = []
-                        if len(row_ranges) > 1:
-                            title_suffixes.append(str(row_number))
-                        if len(column_ranges) > 1:
-                            title_suffixes.append(f'جزء {column_number}')
                         chart_cand = _financial_chart_type(part_title, index=part_index)
                         chartable = (len(column_ranges) == 1 and start == 0 and column_number == 1
                                      and part.get('type') == 'table'
@@ -915,15 +1025,34 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                                          part, rows[start:end], column_start, column_end))
                         source_suffix = (f':{column_start}:{column_end}'
                                          if column_start is not None and column_end is not None else '')
-                        add(target_section, {
-                            'title': part_title + (f" — {' / '.join(title_suffixes)}" if title_suffixes else ''),
-                            'type': 'content', 'design_style': 'chart' if chartable else 'table',
-                            'chart_type': chart_cand if chartable else '',
-                            'content_density': 'high', 'requires_image': False,
-                            'content_source': f'financial_report:{part_index}:{start}:{end}{source_suffix}',
-                            'source_table': f'report_part_{part_index}', 'row_count': end - start,
-                            'financial_template': 'report', 'bullets': [],
-                        })
+                        part_source = f'financial_report:{part_index}:{start}:{end}{source_suffix}'
+                        if chartable or column_start is not None or len(column_ranges) > 1:
+                            # Chart slides and wide column-split tables own their slide:
+                            # two six-column tables stacked vertically do not fit.
+                            flush_pending_tables()
+                            title_suffixes = []
+                            if len(row_ranges) > 1:
+                                title_suffixes.append(str(row_number))
+                            if len(column_ranges) > 1:
+                                title_suffixes.append(f'جزء {column_number}')
+                            add(target_section, {
+                                'title': part_title + (f" — {' / '.join(title_suffixes)}" if title_suffixes else ''),
+                                'type': 'content', 'design_style': 'chart' if chartable else 'table',
+                                'chart_type': chart_cand if chartable else '',
+                                'content_density': 'high', 'requires_image': False,
+                                'content_source': part_source,
+                                'source_table': f'report_part_{part_index}', 'row_count': end - start,
+                                'financial_template': 'report', 'bullets': [],
+                            })
+                        else:
+                            pending_tables.append({
+                                'title': part_title,
+                                'suffix': str(row_number) if len(row_ranges) > 1 else '',
+                                'source': part_source,
+                                'source_table': f'report_part_{part_index}',
+                                'row_count': end - start,
+                            })
+            flush_pending_tables()
             fin_slides = groups.get('financial', [])
             if not any(canonicalize_chart_type(s.get('chart_type')) == 'combo' for s in fin_slides) and (tables.get('cashflowTable') or tables.get('cashflow')):
                 cf_rows = tables.get('cashflowTable') or tables.get('cashflow') or []
@@ -2667,7 +2796,7 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
     tot_wrapped = _wrap_tspans(total.get('name', 'إجمالي تكلفة المشروع'), tot_cx)
     labels_svg.append(f'<g transform="translate(0, {y_zero + 18})">{tot_wrapped}</g>')
 
-    return f'''<svg viewBox="0 0 {width} {height}" style="width:100%;height:auto;max-height:360px;font-family:inherit;overflow:visible;" role="img" aria-label="المخطط الشلالي لتكوين إجمالي تكلفة المشروع">
+    return f'''<svg data-chart="waterfall" viewBox="0 0 {width} {height}" style="width:100%;height:auto;max-height:360px;font-family:inherit;overflow:visible;" role="img" aria-label="المخطط الشلالي لتكوين إجمالي تكلفة المشروع">
   <!-- Grid -->
   {''.join(grid_lines)}
   <!-- Baseline -->
@@ -3083,7 +3212,7 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
             c_offset = -9 if it['cy'] < y_zero else 15
             data_labels_svg.append(f'<text x="{cx}" y="{it["cy"] + c_offset}" fill="#0284c7" font-size="9" font-weight="700" text-anchor="middle">{cum_m:.1f}</text>')
 
-    svg_code = f'''<svg class="combo-chart" viewBox="0 0 {int(vb_w)} {int(vb_h)}" style="width: 100%; height: auto; max-height: 290px; display: block;" role="img" aria-label="مخطط التدفقات النقدية السنوية والرصيد التراكمي">
+    svg_code = f'''<svg data-chart="combo" class="combo-chart" viewBox="0 0 {int(vb_w)} {int(vb_h)}" style="width: 100%; height: auto; max-height: 290px; display: block;" role="img" aria-label="مخطط التدفقات النقدية السنوية والرصيد التراكمي">
   <defs>
     <linearGradient id="posBarGrad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#12324c"/>
@@ -3442,6 +3571,14 @@ def _extract_heatmap_chart_data(part_or_table, model=None, project_data=None):
 def _slide_source_data_note(slide, project_data):
     content_sources = (slide or {}).get('content_sources') if isinstance(slide, dict) else None
     if isinstance(content_sources, list) and content_sources:
+        fin_sources = [str(source) for source in content_sources
+                       if re.fullmatch(r'financial_report:\d+:\d+:\d+(?::\d+:\d+)?', str(source))]
+        if fin_sources and len(fin_sources) == len([s for s in content_sources if str(s or '').strip()]):
+            model = _parse_financial_dict((project_data if isinstance(project_data, dict) else {})
+                                          .get('financial_study_model'))
+            stacked_note = _stacked_financial_report_note(fin_sources, model)
+            if stacked_note:
+                return stacked_note
         notes = []
         for content_source in content_sources:
             item = dict(slide)
@@ -3978,6 +4115,8 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         notes.append('تصميم جداول تقرير PDF المالي هو التصميم الأساسي والإلزامي: انقل جميع الجداول والمؤشرات بمسمياتها الأصلية وبالقيم والترتيب نفسها، وطبّق ألوان الهوية فقط دون تغيير هيكل الجدول أو مساحاته.')
         notes.append('ممنوع منعاً باتاً: تحويل الجداول المالية إلى كروت عائمة (cards)، أو شبكة مربعات إحصائية (KPI boxes)، أو تصميم الشريحة على شكل 4 خانات عائمة أو شريحة بها خانة واحدة. يجب استخدام وسم <table> نظامي كامل بحدود واضحة 1px solid وخلفيات ترويسة هادئة.')
         notes.append('لجداول المؤشرات والملخصات (Key-Value): استخدم جدولاً بعمودين (<table class="summary-table">) بعرض 35%-40% لعمود اسم البند بخلفية هادئة بلون الهوية، وعمود القيمة بخط عريض bold وفواصل آلاف للأرقام. عند وجود جدولين مترابطين رصهما بجانب بعضهما في عمودين متجاورين (display:grid; grid-template-columns:1fr 1fr; gap:24px;) بنفس فكرة ومساحات تقرير PDF المالي.')
+        if len([s for s in (slide.get('content_sources') or []) if str(s or '').strip()]) > 1:
+            notes.append('هذه الشريحة تضم أكثر من جدول مرصوص رأسياً تحت بعضها: اعرض كل جدول بعرض المحتوى الكامل (بدون max-width 820px) وتحت الجدول الذي قبله بتباعد 18px، مع عنوان صغير 15px بلون الهوية فوق كل جدول، وبقاء كل صف وعمود كاملاً دون اختصار أو دمج الجداول في جدول واحد.')
         notes.append('نسّق الأعداد بفواصل الآلاف للعرض فقط، من دون تقريب أو تحويل إلى ألف أو مليون أو تغيير عدد الخانات العشرية.')
         if chart_type:
             notes.append(
@@ -4825,6 +4964,31 @@ def _build_structured_fallback_slide(slide, project_data, branding):
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2>'
                 f'<div style="display:grid;grid-template-columns:repeat({columns},1fr);gap:12px;height:540px;">{images}</div></div>')
+    content_sources = (slide or {}).get('content_sources')
+    if isinstance(content_sources, list) and len(content_sources) > 1:
+        model = _parse_financial_dict((source or {}).get('financial_study_model'))
+        tables_html = []
+        for src in content_sources:
+            dummy_slide = dict(slide)
+            dummy_slide['content_source'] = src
+            sub_headers, sub_rows = _fallback_table_data(dummy_slide, source)
+            if sub_rows:
+                sub_title = ''
+                match_t = re.fullmatch(r'financial_table:([^:]+):\d+:\d+', src)
+                if match_t:
+                    t_key = match_t.group(1)
+                    sub_title = next((t[1] for t in _FINANCIAL_PLAN_TABLES if t[0] == t_key), t_key)
+                elif re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src):
+                    p_idx = int(re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src).group(1))
+                    sub_title = _financial_report_part_title(model, p_idx)
+                sub_table = _render_fallback_table(sub_headers, sub_rows, primary)
+                title_block = f'<div style="font-size:13px;font-weight:700;color:{primary};margin:8px 0 4px;">{html_lib.escape(sub_title)}</div>' if sub_title else ''
+                tables_html.append(f'<div>{title_block}{sub_table}</div>')
+        if tables_html:
+            return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
+                    f'<h2 style="font-size:26px;margin:0 0 12px;color:{primary};">{title}</h2>'
+                    f'<div style="display:flex;flex-direction:column;gap:8px;max-height:540px;overflow:hidden;">{"".join(tables_html)}</div></div>')
+
     headers, rows = _fallback_table_data(slide, source)
     chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
     if chart_type and rows:
@@ -4922,6 +5086,17 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         return build_index_slide(slide, slide_num, total_slides, branding, project_data)
     if (slide or {}).get('type') == 'section_divider':
         return build_section_divider_slide(slide, slide_num, total_slides, branding, project_data)
+
+    chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
+    if chart_type in APPROVED_CHART_TYPES:
+        deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding)
+        if deterministic_slide:
+            return postprocess_slide(
+                deterministic_slide, (slide or {}).get('type', 'content'),
+                slide_num=slide_num, slide_title=(slide or {}).get('title', f'شريحة {slide_num}'),
+                total_slides=total_slides, tenant_id=(branding or {}).get('tenant_id'),
+                branding=branding, project_data=project_data
+            )
 
     user_msg = build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=project_data)
     slide_title = slide.get('title', f'شريحة {slide_num}')
