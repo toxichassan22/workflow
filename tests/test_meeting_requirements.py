@@ -7476,6 +7476,95 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('الجدول الزمني', index_titles)
         self.assertIn('الخاتمة', index_titles)
 
+    def test_heatmap_polarity_and_three_tier_colors(self):
+        engine = self.application_module.slide_engine
+        sample_rows = [
+            {
+                'السيناريو': 'متحفظ',
+                'إجمالي الإيرادات': '125,000,000',
+                'إجمالي تكلفة المشروع': '110,000,000',
+                'صافي الربح': '15,000,000',
+                'ROI كامل الدورة': '13.6%',
+                'Project IRR كامل الدورة': '11.2%',
+                'Equity IRR كامل الدورة': '14.0%',
+                'فترة الاسترداد': '7.2 سنة'
+            },
+            {
+                'السيناريو': 'أساسي',
+                'إجمالي الإيرادات': '150,000,000',
+                'إجمالي تكلفة المشروع': '105,000,000',
+                'صافي الربح': '45,000,000',
+                'ROI كامل الدورة': '42.8%',
+                'Project IRR كامل الدورة': '16.5%',
+                'Equity IRR كامل الدورة': '21.0%',
+                'فترة الاسترداد': '5.0 سنة'
+            },
+            {
+                'السيناريو': 'متفائل',
+                'إجمالي الإيرادات': '180,000,000',
+                'إجمالي تكلفة المشروع': '100,000,000',
+                'صافي الربح': '80,000,000',
+                'ROI كامل الدورة': '80.0%',
+                'Project IRR كامل الدورة': '22.0%',
+                'Equity IRR كامل الدورة': '28.5%',
+                'فترة الاسترداد': '3.8 سنة'
+            }
+        ]
+        res = engine._extract_heatmap_chart_data({'rows': sample_rows})
+        self.assertIn('matrix', res)
+        self.assertIn('columns', res)
+        self.assertIn('legend', res)
+        self.assertIn('html_matrix', res)
+        self.assertEqual(len(res['matrix']), 7)
+
+        # 1. Higher is better (Revenue, Profit, ROI, Project IRR, Equity IRR)
+        rev = next(r for r in res['matrix'] if r['key'] == 'revenue')
+        self.assertTrue(rev['higher_is_better'])
+        self.assertEqual(rev['conservative_level'], 'worst')
+        self.assertEqual(rev['base_level'], 'medium')
+        self.assertEqual(rev['optimistic_level'], 'best')
+
+        # 2. Lower is better (Cost, Payback)
+        cost = next(r for r in res['matrix'] if r['key'] == 'cost')
+        self.assertFalse(cost['higher_is_better'])
+        self.assertEqual(cost['conservative_level'], 'worst')  # 110M is highest cost -> worst
+        self.assertEqual(cost['base_level'], 'medium')        # 105M is middle -> medium
+        self.assertEqual(cost['optimistic_level'], 'best')    # 100M is lowest cost -> best
+
+        pb = next(r for r in res['matrix'] if r['key'] == 'payback')
+        self.assertFalse(pb['higher_is_better'])
+        self.assertEqual(pb['conservative_level'], 'worst')   # 7.2 years is longest -> worst
+        self.assertEqual(pb['base_level'], 'medium')          # 5.0 years is middle -> medium
+        self.assertEqual(pb['optimistic_level'], 'best')      # 3.8 years is shortest -> best
+
+        # 3. Reverse cost scenario where conservative spends less
+        reverse_rows = [
+            {'السيناريو': 'متحفظ', 'إجمالي تكلفة المشروع': '80,000,000'},
+            {'السيناريو': 'أساسي', 'إجمالي تكلفة المشروع': '100,000,000'},
+            {'السيناريو': 'متفائل', 'إجمالي تكلفة المشروع': '120,000,000'},
+        ]
+        rev_res = engine._extract_heatmap_chart_data({'rows': reverse_rows})
+        rev_cost = next(r for r in rev_res['matrix'] if r['key'] == 'cost')
+        self.assertEqual(rev_cost['conservative_level'], 'best')   # 80M is lowest -> best
+        self.assertEqual(rev_cost['base_level'], 'medium')         # 100M is middle -> medium
+        self.assertEqual(rev_cost['optimistic_level'], 'worst')    # 120M is highest -> worst
+
+        # 4. Non-numeric payback "لا يسترد"
+        non_num_rows = [
+            {'السيناريو': 'متحفظ', 'فترة الاسترداد': 'لا يسترد'},
+            {'السيناريو': 'أساسي', 'فترة الاسترداد': '5.0 سنة'},
+            {'السيناريو': 'متفائل', 'فترة الاسترداد': '3.8 سنة'},
+        ]
+        non_num_res = engine._extract_heatmap_chart_data({'rows': non_num_rows})
+        non_num_pb = next(r for r in non_num_res['matrix'] if r['key'] == 'payback')
+        self.assertEqual(non_num_pb['conservative_level'], 'worst')
+        self.assertEqual(non_num_pb['base_level'], 'medium')
+        self.assertEqual(non_num_pb['optimistic_level'], 'best')
+
+        # 5. Zero emojis, zero icons in generated html_matrix and labels
+        self.assertIsNone(re.search(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]', res['html_matrix']))
+
 
 if __name__ == '__main__':
     unittest.main()
+

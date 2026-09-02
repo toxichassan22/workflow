@@ -2467,6 +2467,21 @@ def _clean_numeric_val(val):
         return 0.0
 
 
+def _clean_numeric_val_strict(val):
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s in ('—', '-', 'غير متاح', 'N/A', 'لا يسترد', 'غير مسترد', 'none', 'null'):
+        return None
+    neg = '(' in s or '-' in s
+    cleaned = re.sub(r'[^\d.]', '', s.replace(',', ''))
+    try:
+        n = float(cleaned)
+        return -n if neg else n
+    except (ValueError, TypeError):
+        return None
+
+
 def _format_sar_display(val):
     val_m = round(val / 1e6, 2)
     if abs(val_m) >= 0.1:
@@ -3107,6 +3122,98 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
     }
 
 
+def _format_heatmap_value_display(metric_key, val_raw, num_val):
+    if val_raw in ('لا يسترد', 'غير مسترد'):
+        return 'لا يسترد'
+    if val_raw in ('غير متاح', 'N/A', '—', '-'):
+        return 'غير متاح'
+    if num_val is None:
+        return str(val_raw or '—')
+
+    if metric_key in ('revenue', 'cost', 'net_profit'):
+        val_m = abs(num_val) / 1e6
+        if val_m >= 0.1:
+            sign = '-' if num_val < 0 else ''
+            return f"{sign}{val_m:,.2f} م.ر"
+        return f"{int(num_val):,} ر.س"
+    elif metric_key in ('roi', 'project_irr', 'equity_irr'):
+        if '%' in str(val_raw):
+            return str(val_raw).strip()
+        return f"{num_val:.1f}%"
+    elif metric_key == 'payback':
+        if 'سنة' in str(val_raw) or 'عام' in str(val_raw):
+            return str(val_raw).strip()
+        return f"{num_val:.1f} سنة"
+    return str(val_raw)
+
+
+def _build_heatmap_matrix_html(chart_data, primary='#16405f', secondary='#0284c7'):
+    matrix = (chart_data or {}).get('matrix') if isinstance(chart_data, dict) else (chart_data or [])
+    if not matrix:
+        return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات كافية لمصفوفة الخريطة الحرارية</div>'
+
+    rows_html = []
+    for r in matrix:
+        metric = html_lib.escape(str(r.get('metric') or ''))
+        pol_tag = html_lib.escape(str(r.get('polarity_label') or ('الأعلى أفضل' if r.get('higher_is_better') else 'الأقل أفضل')))
+        pol_style = 'background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;' if r.get('higher_is_better') else 'background:#fdf4ff;color:#86198f;border:1px solid #f5d0fe;'
+
+        c_val = html_lib.escape(str(r.get('conservative') or '—'))
+        b_val = html_lib.escape(str(r.get('base') or '—'))
+        o_val = html_lib.escape(str(r.get('optimistic') or '—'))
+
+        c_style = r.get('conservative_style') or ''
+        b_style = r.get('base_style') or ''
+        o_style = r.get('optimistic_style') or ''
+
+        rows_html.append(f'''
+        <tr>
+          <td style="padding:4px 8px;text-align:right;vertical-align:middle;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;">
+              <span style="font-weight:700;color:#1e293b;font-size:12.5px;">{metric}</span>
+              <span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;{pol_style}">{pol_tag}</span>
+            </div>
+          </td>
+          <td style="padding:4px 8px;text-align:center;vertical-align:middle;"><div style="{c_style}">{c_val}</div></td>
+          <td style="padding:4px 8px;text-align:center;vertical-align:middle;"><div style="{b_style}">{b_val}</div></td>
+          <td style="padding:4px 8px;text-align:center;vertical-align:middle;"><div style="{o_style}">{o_val}</div></td>
+        </tr>''')
+
+    return f'''<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;display:flex;flex-direction:column;justify-content:space-between;font-family:inherit;">
+  <table style="width:100%;border-collapse:separate;border-spacing:0 5px;table-layout:fixed;">
+    <thead>
+      <tr>
+        <th style="padding:6px 12px;font-size:12.5px;font-weight:700;color:#475569;text-align:right;border-bottom:2px solid #cbd5e1;width:34%;">المؤشر المالي</th>
+        <th style="padding:6px 12px;font-size:12.5px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #cbd5e1;">السيناريو المتحفظ</th>
+        <th style="padding:6px 12px;font-size:12.5px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #cbd5e1;">السيناريو الأساسي</th>
+        <th style="padding:6px 12px;font-size:12.5px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #cbd5e1;">السيناريو المتفائل</th>
+      </tr>
+    </thead>
+    <tbody>
+      {''.join(rows_html)}
+    </tbody>
+  </table>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:11.5px;color:#64748b;">
+    <div style="display:flex;gap:18px;align-items:center;">
+      <span style="font-weight:700;color:#1e293b;">مفتاح التقييم الاتجاهي:</span>
+      <div style="display:flex;align-items:center;gap:6px;font-weight:600;">
+        <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#d1fae5;border:1px solid #a7f3d0;"></span>
+        <span>الأفضل (أخضر)</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-weight:600;">
+        <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#fef3c7;border:1px solid #fde68a;"></span>
+        <span>المتوسط (أصفر)</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-weight:600;">
+        <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#fee2e2;border:1px solid #fca5a5;"></span>
+        <span>الأقل (أحمر)</span>
+      </div>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;">الألوان تعتمد على اتجاه وطبيعة المؤشر (الأعلى أفضل للعائد والربح، والأقل أفضل للتكلفة والاسترداد)</div>
+  </div>
+</div>'''
+
+
 def _extract_heatmap_chart_data(part_or_table, model=None, project_data=None):
     model = model if isinstance(model, dict) else {}
     tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
@@ -3131,61 +3238,205 @@ def _extract_heatmap_chart_data(part_or_table, model=None, project_data=None):
                     break
 
     metric_configs = [
-        ('صافي الربح', True),
-        ('إجمالي الإيرادات', True),
-        ('ROI كامل الدورة', True),
-        ('Project IRR كامل الدورة', True),
-        ('Equity IRR كامل الدورة', True),
-        ('إجمالي تكلفة الاستثمار', False),
-        ('فترة الاسترداد', False),
+        {
+            'key': 'revenue',
+            'name': 'إجمالي الإيرادات',
+            'aliases': ['إجمالي الإيرادات', 'الإيرادات', 'إجمالي المبيعات', 'الإيراد الإجمالي', 'total revenue'],
+            'higher_is_better': True,
+        },
+        {
+            'key': 'cost',
+            'name': 'إجمالي تكلفة المشروع',
+            'aliases': ['إجمالي تكلفة المشروع', 'تكلفة المشروع', 'إجمالي تكلفة الاستثمار', 'تكلفة الاستثمار', 'التكلفة الرأسمالية', 'إجمالي التكاليف', 'project cost', 'investment cost'],
+            'higher_is_better': False,
+        },
+        {
+            'key': 'net_profit',
+            'name': 'صافي الربح',
+            'aliases': ['صافي الربح', 'الربح الصافي', 'صافي الأرباح', 'net profit'],
+            'higher_is_better': True,
+        },
+        {
+            'key': 'roi',
+            'name': 'العائد على الاستثمار (ROI)',
+            'aliases': ['العائد على الاستثمار (ROI)', 'ROI كامل الدورة', 'العائد على الاستثمار', 'معدل العائد على الاستثمار', 'ROI', 'roi'],
+            'higher_is_better': True,
+        },
+        {
+            'key': 'project_irr',
+            'name': 'العائد الداخلي للمشروع (Project IRR)',
+            'aliases': ['العائد الداخلي للمشروع (Project IRR)', 'Project IRR كامل الدورة', 'العائد الداخلي للمشروع', 'Project IRR', 'معدل العائد الداخلي للمشروع', 'project irr'],
+            'higher_is_better': True,
+        },
+        {
+            'key': 'equity_irr',
+            'name': 'العائد الداخلي لحقوق الملكية (Equity IRR)',
+            'aliases': ['العائد الداخلي لحقوق الملكية (Equity IRR)', 'Equity IRR كامل الدورة', 'العائد الداخلي لحقوق الملكية', 'Equity IRR', 'معدل العائد الداخلي للملكية', 'equity irr'],
+            'higher_is_better': True,
+        },
+        {
+            'key': 'payback',
+            'name': 'فترة الاسترداد',
+            'aliases': ['فترة الاسترداد', 'فترة استرداد رأس المال', 'الاسترداد', 'payback period', 'payback'],
+            'higher_is_better': False,
+        },
     ]
+
+    scenarios = ['متحفظ', 'أساسي', 'متفائل']
     matrix = []
-    for metric_name, higher_is_better in metric_configs:
-        row_vals = {}
-        for r in rows:
-            if isinstance(r, (list, tuple)) and headers:
-                r = dict(zip(headers, r))
-            if isinstance(r, dict):
-                sc_name = str(r.get('السيناريو') or '').strip()
-                val = r.get(metric_name)
-                if sc_name and val:
-                    row_vals[sc_name] = str(val)
-        if row_vals:
-            best_sc = 'base'
-            c_num = _clean_numeric_val(row_vals.get('متحفظ'))
-            b_num = _clean_numeric_val(row_vals.get('أساسي'))
-            o_num = _clean_numeric_val(row_vals.get('متفائل'))
 
-            if higher_is_better:
-                if o_num >= b_num and o_num >= c_num and o_num > 0:
-                    best_sc = 'optimistic'
-                elif b_num >= c_num and b_num > 0:
-                    best_sc = 'base'
+    style_best = 'background:#d1fae5;color:#065f46;font-weight:700;padding:6px 10px;border:1px solid #a7f3d0;text-align:center;border-radius:6px;'
+    style_medium = 'background:#fef3c7;color:#92400e;font-weight:600;padding:6px 10px;border:1px solid #fde68a;text-align:center;border-radius:6px;'
+    style_worst = 'background:#fee2e2;color:#991b1b;font-weight:600;padding:6px 10px;border:1px solid #fca5a5;text-align:center;border-radius:6px;'
+    style_neutral = 'background:#f1f5f9;color:#64748b;font-weight:500;padding:6px 10px;border:1px solid #e2e8f0;text-align:center;border-radius:6px;'
+
+    normalized_rows = []
+    for r in rows:
+        if isinstance(r, (list, tuple)) and headers:
+            r = dict(zip(headers, r))
+        if isinstance(r, dict):
+            normalized_rows.append(r)
+
+    is_transposed = False
+    if normalized_rows:
+        first_row = normalized_rows[0]
+        if any(sc in first_row for sc in scenarios):
+            is_transposed = True
+
+    for cfg in metric_configs:
+        m_key = cfg['key']
+        m_name = cfg['name']
+        aliases = cfg['aliases']
+        higher_is_better = cfg['higher_is_better']
+
+        vals = {}
+        nums = {}
+
+        if is_transposed:
+            target_row = None
+            for r in normalized_rows:
+                indicator_name = str(r.get('المؤشر') or r.get('البند') or r.get('المؤشر المالي') or r.get('البيان') or '').strip()
+                if any(alias.lower() in indicator_name.lower() or indicator_name.lower() in alias.lower() for alias in aliases):
+                    target_row = r
+                    break
+            for sc in scenarios:
+                raw_v = target_row.get(sc) if target_row else None
+                matched_val = str(raw_v).strip() if raw_v is not None else None
+                vals[sc] = matched_val if matched_val is not None else '—'
+                nums[sc] = _clean_numeric_val_strict(matched_val)
+        else:
+            for sc in scenarios:
+                sc_row = next((r for r in normalized_rows if str(r.get('السيناريو') or '').strip() == sc), {})
+                matched_val = None
+                for alias in aliases:
+                    if alias in sc_row and sc_row[alias] is not None and str(sc_row[alias]).strip():
+                        matched_val = str(sc_row[alias]).strip()
+                        break
+                vals[sc] = matched_val if matched_val is not None else '—'
+                nums[sc] = _clean_numeric_val_strict(matched_val)
+
+        # Harmonize Base scenario with financial model summary/inputs (Rule 5)
+        if (vals.get('أساسي') in (None, '—', '0', '0.0', '0%') or nums.get('أساسي') is None) and model:
+            inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
+            summary = model.get('summary') if isinstance(model.get('summary'), dict) else {}
+            fallback_val = None
+            if m_key == 'cost':
+                fallback_val = inputs.get('adjustedProjectCost') or inputs.get('projectCost') or summary.get('totalCost')
+            elif m_key == 'revenue':
+                fallback_val = summary.get('totalRevenue') or summary.get('revenueTotal') or inputs.get('targetTotalRevenue')
+            elif m_key == 'net_profit':
+                fallback_val = summary.get('netProfit') or summary.get('netProfitTotal')
+            elif m_key == 'roi':
+                fallback_val = summary.get('roiTotal') or summary.get('roi') or inputs.get('targetRoi')
+            elif m_key == 'project_irr':
+                fallback_val = summary.get('projectIrr') or inputs.get('projectIrr')
+            elif m_key == 'equity_irr':
+                fallback_val = summary.get('equityIrr') or inputs.get('equityIrr')
+            elif m_key == 'payback':
+                fallback_val = summary.get('paybackPeriodYears') or inputs.get('paybackPeriodYears')
+
+            if fallback_val is not None and str(fallback_val).strip() not in ('0', '0.0', ''):
+                vals['أساسي'] = str(fallback_val).strip()
+                nums['أساسي'] = _clean_numeric_val_strict(fallback_val)
+
+        levels = {}
+        for sc in scenarios:
+            val_str = str(vals[sc]).strip()
+            if val_str in ('لا يسترد', 'غير مسترد'):
+                levels[sc] = 'worst'
+
+        numeric_scs = [(sc, nums[sc]) for sc in scenarios if nums[sc] is not None and sc not in levels]
+
+        if numeric_scs:
+            sorted_scs = sorted(numeric_scs, key=lambda x: x[1], reverse=higher_is_better)
+            unique_vals = []
+            for _, val in sorted_scs:
+                if val not in unique_vals:
+                    unique_vals.append(val)
+
+            has_pre_worst = any(lvl == 'worst' for lvl in levels.values())
+
+            for sc, val in numeric_scs:
+                if len(unique_vals) == 1:
+                    levels[sc] = 'medium'
+                elif len(unique_vals) == 2:
+                    if val == unique_vals[0]:
+                        levels[sc] = 'best'
+                    else:
+                        levels[sc] = 'medium' if has_pre_worst else 'worst'
                 else:
-                    best_sc = 'conservative'
-            else:
-                valid_nums = [(sc, n) for sc, n in [('conservative', c_num), ('base', b_num), ('optimistic', o_num)] if n > 0]
-                if valid_nums:
-                    best_sc = min(valid_nums, key=lambda x: x[1])[0]
-                else:
-                    best_sc = 'base'
+                    if val == unique_vals[0]:
+                        levels[sc] = 'best'
+                    elif val == unique_vals[-1]:
+                        levels[sc] = 'worst'
+                    else:
+                        levels[sc] = 'medium'
 
-            green_style = 'background:rgba(16,185,129,0.15);color:#047857;font-weight:700;padding:6px 8px;border:1px solid #cbd5e1;text-align:center;'
-            normal_style = 'background:#ffffff;color:#334155;padding:6px 8px;border:1px solid #cbd5e1;text-align:center;'
-            base_style = 'background:#f8fafc;color:#1e293b;font-weight:600;padding:6px 8px;border:1px solid #cbd5e1;text-align:center;'
+        for sc in scenarios:
+            if sc not in levels:
+                levels[sc] = 'neutral'
 
-            matrix.append({
-                'metric': metric_name,
-                'higher_is_better': higher_is_better,
-                'best_scenario': best_sc,
-                'conservative': row_vals.get('متحفظ', '—'),
-                'base': row_vals.get('أساسي', '—'),
-                'optimistic': row_vals.get('متفائل', '—'),
-                'conservative_style': green_style if best_sc == 'conservative' else normal_style,
-                'base_style': green_style if best_sc == 'base' else base_style,
-                'optimistic_style': green_style if best_sc == 'optimistic' else normal_style,
-            })
-    return matrix
+        def get_style(lvl):
+            if lvl == 'best': return style_best
+            if lvl == 'medium': return style_medium
+            if lvl == 'worst': return style_worst
+            return style_neutral
+
+        c_disp = _format_heatmap_value_display(m_key, vals['متحفظ'], nums.get('متحفظ'))
+        b_disp = _format_heatmap_value_display(m_key, vals['أساسي'], nums.get('أساسي'))
+        o_disp = _format_heatmap_value_display(m_key, vals['متفائل'], nums.get('متفائل'))
+
+        matrix.append({
+            'metric': m_name,
+            'key': m_key,
+            'higher_is_better': higher_is_better,
+            'polarity_label': 'الأعلى أفضل' if higher_is_better else 'الأقل أفضل',
+            'conservative': c_disp,
+            'base': b_disp,
+            'optimistic': o_disp,
+            'conservative_raw': vals['متحفظ'],
+            'base_raw': vals['أساسي'],
+            'optimistic_raw': vals['متفائل'],
+            'conservative_level': levels['متحفظ'],
+            'base_level': levels['أساسي'],
+            'optimistic_level': levels['متفائل'],
+            'conservative_style': get_style(levels['متحفظ']),
+            'base_style': get_style(levels['أساسي']),
+            'optimistic_style': get_style(levels['متفائل']),
+        })
+
+    html_card = _build_heatmap_matrix_html({'matrix': matrix})
+
+    return {
+        'columns': scenarios,
+        'matrix': matrix,
+        'legend': [
+            {'label': 'الأفضل (أخضر)', 'color': '#065f46', 'bg': '#d1fae5'},
+            {'label': 'المتوسط (أصفر)', 'color': '#92400e', 'bg': '#fef3c7'},
+            {'label': 'الأقل (أحمر)', 'color': '#991b1b', 'bg': '#fee2e2'},
+        ],
+        'html_matrix': html_card,
+    }
 
 
 def _slide_source_data_note(slide, project_data):
@@ -3278,7 +3529,7 @@ def _slide_source_data_note(slide, project_data):
             extra = ''
             if c_type == 'waterfall':
                 c_data = _extract_waterfall_chart_data(part, model, project_data)
-                extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة الاستثمار (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+                extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة المشروع (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
             elif c_type == 'combo':
                 c_data = _extract_combo_chart_data(part, model, project_data)
                 extra = '\n\nبيانات مخطط التدفقات النقدية (combo_chart_data) السنوية والتراكمية (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
@@ -3295,7 +3546,7 @@ def _slide_source_data_note(slide, project_data):
         extra = ''
         if c_type == 'waterfall':
             c_data = _extract_waterfall_chart_data(part, model, project_data)
-            extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة الاستثمار (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+            extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة المشروع (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
         elif c_type == 'combo':
             c_data = _extract_combo_chart_data(part, model, project_data)
             extra = '\n\nبيانات مخطط التدفقات النقدية (combo_chart_data) السنوية والتراكمية (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
@@ -3311,7 +3562,7 @@ def _slide_source_data_note(slide, project_data):
         extra = ''
         if c_type == 'waterfall' or (not c_type and table_key == 'costTable'):
             c_data = _extract_waterfall_chart_data({'rows': rows[start:end]}, model, project_data)
-            extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة الاستثمار (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+            extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة المشروع (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
         elif c_type == 'combo' or (not c_type and table_key == 'cashflowTable'):
             c_data = _extract_combo_chart_data({'rows': rows[start:end]}, model, project_data)
             extra = '\n\nبيانات مخطط التدفقات النقدية (combo_chart_data) السنوية والتراكمية (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
@@ -3623,12 +3874,13 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         ),
         'heatmap': (
             'الخريطة الحرارية (Heatmap Matrix) لمقارنة السيناريوهات المالية: '
-            'مصفوفة جدول مقارنة للسيناريوهات الثلاثة (المتحفظ، الأساسي، المتفائل) لمؤشرات الأداء الرئيسية المرفقة. '
-            'الهيكل الإلزامي: قسّم الشريحة إلى عمودين متجاورين (50% لجدول البيانات، 50% لمصفوفة الخريطة الحرارية الملونة) '
-            'أو اعرض مصفوفة المقارنة كاملة بعرض مريح. '
-            'تلوين اتجاهي ذكي بحسب قطبية المؤشر (Directional Polarity-Aware Coloring): '
-            'الخلايا الأفضل في كل صف تحصل على تمييز أخضر هادئ (background: rgba(16, 185, 129, 0.15); color: #047857; font-weight: 700;) '
-            'والخلايا الأخرى بلون هادئ محايد، وطبّق الأنماط الجاهزة (conservative_style, base_style, optimistic_style) المرفقة لكل صف.'
+            'مصفوفة مقارنة بصرية للسيناريوهات الثلاثة (المتحفظ، الأساسي، المتفائل) لنتائج وحساسية الدراسة المالية. '
+            'الهيكل الإلزامي: اعرض مصفوفة الخريطة الحرارية كاملة بعرض مريح يبرز المؤشرات المالية السبعة (الإيرادات، تكلفة المشروع، صافي الربح، ROI، Project IRR، Equity IRR، فترة الاسترداد). '
+            'تلوين اتجاهي ذكي ثلاثي المستويات بحسب طبيعة المؤشر (Directional Polarity-Aware Coloring): '
+            '1. الأعلى أفضل لمؤشرات الإيرادات وصافي الربح ومعدلات العائد (الأعلى = أخضر، المتوسط = أصفر، الأقل = أحمر). '
+            '2. الأقل أفضل لمؤشرات التكلفة وفترة الاسترداد (الأقل = أخضر، المتوسط = أصفر، الأعلى = أحمر). '
+            '3. استخدم الأنماط الجاهزة المرفقة (conservative_style, base_style, optimistic_style) أو قم بتضمين كود html_matrix الجاهز مباشرة. '
+            '4. ضع مفتاح التقييم الاتجاهي أسفل المصفوفة (الأفضل أخضر، المتوسط أصفر، الأقل أحمر) بدون أي أيقونات أو إيموجي نهائياً.'
         ),
     }
     chart_note = chart_instructions.get(chart_type, '')
@@ -4499,42 +4751,7 @@ def _render_fallback_combo(chart_data, primary='#005f78', secondary='#0ea5e9'):
 
 
 def _render_fallback_heatmap(chart_data, primary='#005f78', secondary='#0ea5e9'):
-    matrix = (chart_data or {}).get('matrix') if isinstance(chart_data, dict) else chart_data
-    if not matrix:
-        return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات سيناريوهات كافية</div>'
-    rows_html = []
-    for r in matrix:
-        metric = html_lib.escape(str(r.get('metric') or ''))
-        c_val = html_lib.escape(str(r.get('conservative') or '—'))
-        b_val = html_lib.escape(str(r.get('base') or '—'))
-        o_val = html_lib.escape(str(r.get('optimistic') or '—'))
-        c_style = r.get('conservative_style') or 'padding:6px 8px;font-size:11px;border:1px solid #cbd5e1;text-align:center;'
-        b_style = r.get('base_style') or 'padding:6px 8px;font-size:11px;border:1px solid #cbd5e1;text-align:center;background:#f8fafc;'
-        o_style = r.get('optimistic_style') or 'padding:6px 8px;font-size:11px;border:1px solid #cbd5e1;text-align:center;'
-        rows_html.append(f'''
-        <tr>
-            <td style="padding:6px 8px;font-size:11px;font-weight:700;color:#1e293b;border:1px solid #cbd5e1;">{metric}</td>
-            <td style="{c_style}">{c_val}</td>
-            <td style="{b_style}">{b_val}</td>
-            <td style="{o_style}">{o_val}</td>
-        </tr>
-        ''')
-    return (
-        f'<div style="background:#f8fafc;padding:12px;border-radius:8px;border:1px solid #e2e8f0;">'
-        f'<div style="font-size:12px;font-weight:700;color:{primary};margin-bottom:8px;">مقارنة السيناريوهات المالية (الخريطة الحرارية)</div>'
-        f'<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
-        f'<thead>'
-        f'<tr>'
-        f'<th style="background:{primary};color:#fff;padding:6px;font-size:11px;text-align:right;">المؤشر</th>'
-        f'<th style="background:{primary};color:#fff;padding:6px;font-size:11px;text-align:center;">متحفظ</th>'
-        f'<th style="background:{primary};color:#fff;padding:6px;font-size:11px;text-align:center;">أساسي</th>'
-        f'<th style="background:{primary};color:#fff;padding:6px;font-size:11px;text-align:center;">متفائل</th>'
-        f'</tr>'
-        f'</thead>'
-        f'<tbody>{"".join(rows_html)}</tbody>'
-        f'</table>'
-        f'</div>'
-    )
+    return _build_heatmap_matrix_html(chart_data, primary, secondary)
 
 
 def _render_fallback_chart(chart_type, slide, project_data, primary='#005f78', secondary='#0ea5e9'):
