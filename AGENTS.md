@@ -885,7 +885,8 @@ mode switch; otherwise toggling بيع / تأجير wipes the other side on the 
 auto-calculated `clarificationsTable`; no calculation or AI flow may populate it. A non-empty value
 is saved in `inputs`, copied to `report.parts`, and rendered with preserved line breaks by every PDF
 engine. When blank, its heading and section are omitted from both the HTML report and direct PyMuPDF
-output rather than leaving an empty numbered section.
+output rather than leaving an empty numbered section. Its editor is 13px and its HTML/PDF block is
+10px so it matches the surrounding form and report text instead of inheriting the browser's 16px.
 
 Save **raw numbers**, never `money()` strings, in `inputs` and `dynamicRows`. A `type="number"`
 field silently blanks `189,750,000`, so the next `calculateAll()` treats project cost and every
@@ -900,7 +901,11 @@ entries carrying the **visible label** of each input, the **selected option text
 the displayed figure. Numeric controls are normalized by `formatFinancialReportValue()` before the
 request, and `_financial_report_format_display()` repeats that guarantee in both the HTML and direct
 PyMuPDF paths: fractional results use one decimal and money/area/quantity values use thousands
-separators. Do not reintroduce a server-side label map: the report used to be rebuilt from
+separators. `_financial_report_format_display()` also formats eligible numbers inside compound text
+cells, not only cells containing a bare number. `revenueTable` remains on screen and in the saved
+model for calculations and presentation generation, but the whole «بنود الإيرادات» report section
+(including its occupancy subtable) is omitted by `_financial_screen_parts()` and both legacy PDF
+loops. Do not reintroduce a server-side label map: the report used to be rebuilt from
 `FINANCIAL_RESULT_LABELS` / `FINANCIAL_COLUMN_LABELS`, so «هل وحدات المشروع بيعية أم تأجيرية؟»
 printed as «طبيعة الإيرادات» and its value printed as the raw option id `mixed`. Those maps stay only
 for drafts saved before `report.parts` existed.

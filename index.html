@@ -4610,6 +4610,11 @@
       resize: vertical !important;
     }
 
+    #section-financial-calc #financialClarifications {
+      font-size: 13px !important;
+      line-height: 1.6 !important;
+    }
+
     #section-financial-calc input:focus,
     #section-financial-calc textarea:focus,
     #section-financial-calc select:focus {
@@ -13588,16 +13593,26 @@
     }
     function formatFinancialReportValue(value, context = '') {
       const raw = String(value ?? '').trim();
+      const contextText = String(context || '');
+      if (/تاريخ|هاتف|جوال|وثيقة|معرف|رقم|date|phone|mobile|document|identifier|\bid\b/i.test(contextText)) return raw;
       const match = raw.match(/^(\()?\s*([-+]?(?:[0-9٠-٩]+(?:[٬،,][0-9٠-٩]{3})*|[0-9٠-٩]+)(?:[٫.][0-9٠-٩]+)?)\s*(\))?\s*(%|٪|سنة|سنوات|م²|م2|ر\.?\s?س|ريال(?:\s+سعودي)?)?$/);
-      if (!match || /تاريخ|هاتف|جوال|وثيقة|معرف|رقم|date|phone|mobile|document|identifier|\bid\b/i.test(context)) return raw;
-      const number = parseNumber(match[2]);
-      const suffix = match[4] || '';
-      const percent = suffix === '%' || suffix === '٪' || /%|نسبة|معدل|إشغال|ROI|IRR/i.test(context);
-      const year = suffix === 'سنة' || suffix === 'سنوات' || /سنة|سنوات|عام|year/i.test(context);
-      let formatted = formatFinancialResultNumber(number, !(percent || year));
-      if (match[1] && match[3]) formatted = '(' + formatted.replace(/^-/, '') + ')';
-      if (suffix) formatted += (suffix === '%' || suffix === '٪' ? '' : ' ') + suffix;
-      return formatted;
+      if (match) {
+        const number = parseNumber(match[2]);
+        const suffix = match[4] || '';
+        const percent = suffix === '%' || suffix === '٪' || /%|نسبة|معدل|إشغال|ROI|IRR/i.test(contextText);
+        const year = suffix === 'سنة' || suffix === 'سنوات' || /سنة|سنوات|عام|year/i.test(contextText);
+        let formatted = formatFinancialResultNumber(number, !(percent || year));
+        if (match[1] && match[3]) formatted = '(' + formatted.replace(/^-/, '') + ')';
+        if (suffix) formatted += (suffix === '%' || suffix === '٪' ? '' : ' ') + suffix;
+        return formatted;
+      }
+      if (!/إجمالي|تكلفة|قيمة|مساحة|سعر|إيراد|مصروف|تمويل|كمية|مبلغ|تدفق|رصيد|حقوق|أتعاب|أصل|دين|سيولة|استثمار|دخل|NOI|total|amount|cost|price|revenue|area|cash|balance/i.test(contextText + ' ' + raw)) return raw;
+      return raw.replace(/(?<![0-9٠-٩])[-+]?(?:[0-9٠-٩]+(?:[٬،,][0-9٠-٩]{3})*)(?:[٫.][0-9٠-٩]+)?(?![0-9٠-٩])/g, (token, offset) => {
+        const number = parseNumber(token);
+        if (number >= 1900 && number <= 2100 && /سنة|سنوات|عام|year/i.test(contextText)) return token;
+        const trailing = raw.slice(offset + token.length).trimStart();
+        return formatFinancialResultNumber(number, !trailing.startsWith('%') && !trailing.startsWith('٪'));
+      });
     }
     function num(id) { return parseNumber(document.getElementById(id)?.value) }
     function val(id) { return document.getElementById(id)?.value || '' }
@@ -13643,6 +13658,10 @@
       });
       table.querySelectorAll('button,.help,.custom-formula-row,.row-actions').forEach(node => node.remove());
       table.querySelectorAll('.off-cell').forEach(cell => { if (!cell.textContent.trim()) cell.textContent = '—' });
+      table.querySelectorAll('tbody td,tfoot td').forEach(cell => {
+        const header = cell.closest('table')?.querySelector('thead tr')?.cells[cell.cellIndex]?.textContent || '';
+        cell.textContent = formatFinancialReportValue(cell.textContent, header);
+      });
       const dropIndexes = new Set();
       table.querySelectorAll('thead th').forEach((th, idx) => {
         const text = String(th.textContent || '').replace(/\s+/g, ' ').trim();
@@ -15457,7 +15476,7 @@
       .summary-table td{font-weight:700}
       .empty{color:#777;border:1px dashed #ccc;padding:12px}
       .note{background:#F4F8FC;border-right:4px solid #123B6D;padding:10px 12px;font-size:10px;color:#555}
-      .financial-clarifications{white-space:pre-wrap;border:1px solid #d9d1cb;padding:12px;font-size:11px;line-height:1.7}
+      .financial-clarifications{white-space:pre-wrap;border:1px solid #d9d1cb;padding:10px;font-size:10px;line-height:1.6}
       footer{margin-top:20px;padding-top:10px;border-top:1px solid #ddd;color:#777;font-size:9px;display:flex;justify-content:space-between}
       @media print{
         .print-actions{display:none}
@@ -15477,7 +15496,6 @@
         <section class="section"><h3>1. بيانات المشروع</h3>${projectSummary}</section>
         <section class="section"><h3>2. مدة المشروع والأرض ومساحات البناء</h3>${areaSummary}</section>
         <section class="section page-break"><h3>3. مكونات المشروع</h3>${reportTableSnapshot('componentsTable', true)}</section>
-        <section class="section"><h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable', true, true)}<h4>نسبة الوصول السنوية إلى الإشغال المستهدف</h4>${reportTableSnapshot('occupancyRampTable', false)}</section>
         ${graceReportSection}
         <section class="section page-break"><h3>5. تكاليف المشروع وأتعاب المطور</h3>${costSummary}<h4>تفاصيل بنود التكلفة</h4>${reportTableSnapshot('costTable', true, true)}</section>
         <section class="section"><h3>6. مراحل التطوير ودفعات المطور</h3>${reportTableSnapshot('scheduleTable', false)}</section>

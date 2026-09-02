@@ -6172,6 +6172,13 @@ _FINANCIAL_YEAR_CONTEXT_RE = re.compile(r'سنة|سنوات|عام|year', re.IGN
 _FINANCIAL_LITERAL_CONTEXT_RE = re.compile(
     r'تاريخ|هاتف|جوال|وثيقة|معرف|رقم|date|phone|mobile|document|identifier|\bid\b', re.IGNORECASE
 )
+_FINANCIAL_GROUP_CONTEXT_RE = re.compile(
+    r'إجمالي|تكلفة|قيمة|مساحة|سعر|إيراد|مصروف|تمويل|كمية|مبلغ|تدفق|رصيد|حقوق|أتعاب|'
+    r'أصل|دين|سيولة|استثمار|دخل|NOI|total|amount|cost|price|revenue|area|cash|balance', re.IGNORECASE
+)
+_FINANCIAL_NUMBER_TOKEN_RE = re.compile(
+    r'(?<![0-9٠-٩])[-+]?(?:[0-9٠-٩]+(?:[٬،,][0-9٠-٩]{3})*)(?:[٫.][0-9٠-٩]+)?(?![0-9٠-٩])'
+)
 
 
 def _financial_report_format_display(value, context=''):
@@ -6180,21 +6187,38 @@ def _financial_report_format_display(value, context=''):
     if isinstance(value, bool):
         return _financial_report_escape(value)
     text = str(value).strip()
+    context_text = str(context or '')
+    if _FINANCIAL_LITERAL_CONTEXT_RE.search(context_text):
+        return _financial_report_escape(value)
     match = _FINANCIAL_DISPLAY_VALUE_RE.fullmatch(text)
-    if not match or _FINANCIAL_LITERAL_CONTEXT_RE.search(str(context or '')):
+    if match:
+        number = _financial_report_plain_number(text)
+        if number is None:
+            return _financial_report_escape(value)
+        suffix = match.group('suffix') or ''
+        percent = bool(suffix in {'%', '٪'} or _FINANCIAL_PERCENT_CONTEXT_RE.search(context_text))
+        year = bool(suffix in {'سنة', 'سنوات'} or _FINANCIAL_YEAR_CONTEXT_RE.search(context_text))
+        formatted = _financial_rounded_text(number, grouped=not (percent or year))
+        if match.group('open') and match.group('close'):
+            formatted = f'({formatted.lstrip("-")})'
+        if suffix:
+            formatted += (' ' if suffix not in {'%', '٪'} else '') + suffix
+        return html_lib.escape(formatted)
+    if not (_FINANCIAL_GROUP_CONTEXT_RE.search(context_text)
+            or re.search(r'م²|م2|ر\.?\s?س|ريال(?:\s+سعودي)?|SAR', text, re.IGNORECASE)):
         return _financial_report_escape(value)
-    number = _financial_report_plain_number(text)
-    if number is None:
-        return _financial_report_escape(value)
-    suffix = match.group('suffix') or ''
-    percent = bool(suffix in {'%', '٪'} or _FINANCIAL_PERCENT_CONTEXT_RE.search(str(context or '')))
-    year = bool(suffix in {'سنة', 'سنوات'} or _FINANCIAL_YEAR_CONTEXT_RE.search(str(context or '')))
-    formatted = _financial_rounded_text(number, grouped=not (percent or year))
-    if match.group('open') and match.group('close'):
-        formatted = f'({formatted.lstrip("-")})'
-    if suffix:
-        formatted += (' ' if suffix not in {'%', '٪'} else '') + suffix
-    return html_lib.escape(formatted)
+
+    def format_token(token_match):
+        raw = token_match.group(0)
+        number = _financial_report_plain_number(raw)
+        if number is None:
+            return raw
+        if 1900 <= abs(number) <= 2100 and _FINANCIAL_YEAR_CONTEXT_RE.search(context_text):
+            return raw
+        trailing = text[token_match.end():].lstrip()
+        return _financial_rounded_text(number, grouped=not trailing.startswith(('%', '٪')))
+
+    return html_lib.escape(_FINANCIAL_NUMBER_TOKEN_RE.sub(format_token, text))
 
 
 # Section 12 is a results summary with curated metrics. English acronyms (ROI, Project IRR, Equity IRR, NOI)
@@ -6414,8 +6438,19 @@ def _financial_screen_parts(model):
     if not isinstance(parts, list) or not parts:
         return None
     cleaned = []
+    skipped_heading_level = None
     for part in parts:
         if not isinstance(part, dict):
+            continue
+        if skipped_heading_level is not None:
+            if (part.get('type') == 'heading'
+                    and int(part.get('level') or 2) <= skipped_heading_level):
+                skipped_heading_level = None
+            else:
+                continue
+        if (part.get('type') == 'heading'
+                and re.search(r'بنود\s+الإيرادات', str(part.get('text') or ''))):
+            skipped_heading_level = int(part.get('level') or 2)
             continue
         if part.get('type') == 'fields':
             rows = [
@@ -6523,7 +6558,7 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
     sections.append('<section><h2>1. ملخص المشروع</h2>' + rows([('unitRevenueMode', 'طبيعة الإيرادات'), ('developmentYears', 'مدة التطوير'), ('operationYears', 'سنوات التشغيل'), ('landArea', 'مساحة الأرض')]) + '</section>')
     sections.append('<section><h2>2. الأرض والمساحات</h2>' + rows([('landArea', 'مساحة الأرض'), ('coverageRate', 'نسبة التغطية'), ('floorCount', 'عدد الطوابق'), ('builtUpAreaAbove', 'مسطحات البناء فوق الأرض'), ('basementArea', 'مساحة البدرومات'), ('landValueMethod', 'طريقة احتساب قيمة الأرض'), ('landStatus', 'حالة الأرض')]) + '</section>')
     for number, title, table_key in (
-        ('3', 'مكونات المشروع', 'componentsTable'), ('4', 'بنود الإيرادات', 'revenueTable'),
+        ('3', 'مكونات المشروع', 'componentsTable'),
         ('5', 'تكاليف المشروع', 'costTable'), ('6', 'مراحل التطوير', 'scheduleTable'),
         ('7', 'المصروفات التشغيلية', 'opexTable'),
     ):
@@ -6590,7 +6625,7 @@ def _financial_report_document(sections, font_css, font_family):
 .eyebrow {{ color:#4a4a4a; font-weight:700; }} h1 {{ color:#1a1a1a; font-size:32px; margin:18px 0 6px; }} h2 {{ color:#1a1a1a; font-size:20px; border-bottom:2px solid #1a1a1a; padding-bottom:6px; }}
 h3 {{ color:#1a1a1a; font-size:14px; margin:12px 0 6px; }}
 table {{ width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10px; }} th,td {{ border:1px solid #b3b3b3; padding:6px; text-align:right; vertical-align:top; color:#1a1a1a; }} thead {{ display:table-header-group; }} tr {{ break-inside:avoid; page-break-inside:avoid; }} thead th {{ background:#e6e6e6; font-weight:700; }} .summary-table th {{ width:38%; background:#f2f2f2; font-weight:400; }} .summary-table td {{ font-weight:700; }} .empty {{ color:#555; border:1px dashed #b3b3b3; padding:10px; }}
-.financial-clarifications {{ white-space:pre-wrap; border:1px solid #b3b3b3; padding:12px; line-height:1.7; }}
+.financial-clarifications {{ white-space:pre-wrap; border:1px solid #b3b3b3; padding:10px; font-size:10px; line-height:1.6; }}
 </style></head><body><main class="financial-report">{''.join(sections)}</main></body></html>'''
 
 
@@ -6929,7 +6964,6 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
     ])
     for number, title, table_key in (
         ('3', 'مكونات المشروع', 'componentsTable'),
-        ('4', 'بنود الإيرادات', 'revenueTable'),
         ('5', 'تكاليف المشروع', 'costTable'),
         ('6', 'مراحل التطوير', 'scheduleTable'),
         ('7', 'المصروفات التشغيلية', 'opexTable'),

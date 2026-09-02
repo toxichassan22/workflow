@@ -2697,8 +2697,58 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('<textarea id="financialClarifications"', index_source)
+        self.assertIn('#section-financial-calc #financialClarifications {', index_source)
+        self.assertIn('font-size: 13px !important;', index_source.split('#section-financial-calc #financialClarifications {', 1)[1].split('}', 1)[0])
+        self.assertIn('.financial-clarifications{white-space:pre-wrap', index_source)
+        self.assertIn('font-size:10px', index_source.split('.financial-clarifications{', 1)[1].split('}', 1)[0])
         self.assertNotIn('id="clarificationsTable"', index_source)
         self.assertNotIn('function renderClarifications(facts)', index_source)
+
+    def test_financial_pdf_formats_compound_numbers_and_omits_revenue_items(self):
+        module = self.application_module
+        compound = 'مساحة مبنية 1234567.26 م² وقيمة 7654321 ريال'
+        self.assertEqual(
+            module._financial_report_format_display(compound, 'تفاصيل الاستثمار'),
+            'مساحة مبنية 1,234,567.3 م² وقيمة 7,654,321 ريال',
+        )
+        report_model = {
+            'inputs': {'unitRevenueMode': 'mixed'},
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': '4. بنود الإيرادات'},
+                {'type': 'table', 'headers': ['اسم الإيراد', 'القيمة'],
+                 'rows': [['REVENUE-TOKEN-441', '1234567.26']]},
+                {'type': 'heading', 'level': 2, 'text': '12. ملخص النتائج المالية'},
+                {'type': 'fields', 'rows': [['إجمالي الاستثمار', 'TOTAL 1234567.26']]},
+            ]},
+        }
+        fallback_model = {
+            'inputs': {'unitRevenueMode': 'mixed'},
+            'tables': {'revenueTable': [{'name': 'REVENUE-TOKEN-441', 'price': 1234567.26}]},
+        }
+        with self.app.app_context():
+            report_html = module.build_financial_report_html('مشروع مالي', report_model, {}, self.tenant_a)
+            fallback_html = module.build_financial_report_html('مشروع مالي', fallback_model, {}, self.tenant_a)
+        for html in (report_html, fallback_html):
+            self.assertNotIn('4. بنود الإيرادات', html)
+            self.assertNotIn('REVENUE-TOKEN-441', html)
+        self.assertIn('TOTAL 1,234,567.3', report_html)
+
+        with tempfile.TemporaryDirectory() as folder:
+            output = os.path.join(folder, 'without-revenue.pdf')
+            with self.app.app_context():
+                module.generate_financial_pdf_from_model('مشروع مالي', report_model, output)
+            import fitz
+            document = fitz.open(output)
+            try:
+                text = '\n'.join(page.get_text() for page in document)
+            finally:
+                document.close()
+            normalized_text = text.replace('\xa0', ' ')
+            self.assertNotIn('REVENUE-TOKEN-441', normalized_text)
+            self.assertIn('TOTAL 1,234,567.3', normalized_text)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertNotIn("<h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable'", index_source)
 
     def test_cashflow_column_tints_do_not_override_the_table_header(self):
         """The cf-* classes also sit on the <th> so whole columns can be hidden by project mode.
