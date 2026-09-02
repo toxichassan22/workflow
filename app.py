@@ -6172,6 +6172,10 @@ _FINANCIAL_YEAR_CONTEXT_RE = re.compile(r'سنة|سنوات|عام|year', re.IGN
 _FINANCIAL_LITERAL_CONTEXT_RE = re.compile(
     r'تاريخ|هاتف|جوال|وثيقة|معرف|رقم|date|phone|mobile|document|identifier|\bid\b', re.IGNORECASE
 )
+_FINANCIAL_AMOUNT_CONTEXT_RE = re.compile(
+    r'إجمالي|تكلفة|قيمة|مساحة|سعر|إيراد|مصروف|كمية|مبلغ|تدفق|رصيد|حقوق|أتعاب|'
+    r'أصل|دين|سيولة|استثمار|دخل|NOI|total|amount|cost|price|revenue|area|cash|balance', re.IGNORECASE
+)
 _FINANCIAL_GROUP_CONTEXT_RE = re.compile(
     r'إجمالي|تكلفة|قيمة|مساحة|سعر|إيراد|مصروف|تمويل|كمية|مبلغ|تدفق|رصيد|حقوق|أتعاب|'
     r'أصل|دين|سيولة|استثمار|دخل|NOI|total|amount|cost|price|revenue|area|cash|balance', re.IGNORECASE
@@ -6196,8 +6200,9 @@ def _financial_report_format_display(value, context=''):
         if number is None:
             return _financial_report_escape(value)
         suffix = match.group('suffix') or ''
-        percent = bool(suffix in {'%', '٪'} or _FINANCIAL_PERCENT_CONTEXT_RE.search(context_text))
-        year = bool(suffix in {'سنة', 'سنوات'} or _FINANCIAL_YEAR_CONTEXT_RE.search(context_text))
+        amount = bool(_FINANCIAL_AMOUNT_CONTEXT_RE.search(context_text))
+        percent = bool(suffix in {'%', '٪'} or (not amount and _FINANCIAL_PERCENT_CONTEXT_RE.search(context_text)))
+        year = bool(suffix in {'سنة', 'سنوات'} or (not amount and _FINANCIAL_YEAR_CONTEXT_RE.search(context_text)))
         formatted = _financial_rounded_text(number, grouped=not (percent or year))
         if match.group('open') and match.group('close'):
             formatted = f'({formatted.lstrip("-")})'

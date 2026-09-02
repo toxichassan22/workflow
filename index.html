@@ -13599,8 +13599,9 @@
       if (match) {
         const number = parseNumber(match[2]);
         const suffix = match[4] || '';
-        const percent = suffix === '%' || suffix === '٪' || /%|نسبة|معدل|إشغال|ROI|IRR/i.test(contextText);
-        const year = suffix === 'سنة' || suffix === 'سنوات' || /سنة|سنوات|عام|year/i.test(contextText);
+        const amount = /إجمالي|تكلفة|قيمة|مساحة|سعر|إيراد|مصروف|كمية|مبلغ|تدفق|رصيد|حقوق|أتعاب|أصل|دين|سيولة|استثمار|دخل|NOI|total|amount|cost|price|revenue|area|cash|balance/i.test(contextText);
+        const percent = suffix === '%' || suffix === '٪' || (!amount && /%|نسبة|معدل|إشغال|ROI|IRR/i.test(contextText));
+        const year = suffix === 'سنة' || suffix === 'سنوات' || (!amount && /سنة|سنوات|عام|year/i.test(contextText));
         let formatted = formatFinancialResultNumber(number, !(percent || year));
         if (match[1] && match[3]) formatted = '(' + formatted.replace(/^-/, '') + ')';
         if (suffix) formatted += (suffix === '%' || suffix === '٪' ? '' : ' ') + suffix;

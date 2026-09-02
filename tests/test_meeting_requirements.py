@@ -2711,6 +2711,15 @@ class MeetingRequirementsTests(unittest.TestCase):
             module._financial_report_format_display(compound, 'تفاصيل الاستثمار'),
             'مساحة مبنية 1,234,567.3 م² وقيمة 7,654,321 ريال',
         )
+        screenshot_values = (
+            ('إيراد أول سنة تشغيل', '69192152.4', '69,192,152.4'),
+            ('NOI أول سنة تشغيل', '27676861', '27,676,861'),
+            ('إيرادات التشغيل عند 100% إشغال', '115320254', '115,320,254'),
+            ('المصروفات عند 100% إشغال', '69192152.4', '69,192,152.4'),
+            ('NOI عند 100% إشغال', '46128101.6', '46,128,101.6'),
+        )
+        for label, value, expected in screenshot_values:
+            self.assertEqual(module._financial_report_format_display(value, label), expected)
         report_model = {
             'inputs': {'unitRevenueMode': 'mixed'},
             'report': {'parts': [
@@ -2718,7 +2727,10 @@ class MeetingRequirementsTests(unittest.TestCase):
                 {'type': 'table', 'headers': ['اسم الإيراد', 'القيمة'],
                  'rows': [['REVENUE-TOKEN-441', '1234567.26']]},
                 {'type': 'heading', 'level': 2, 'text': '12. ملخص النتائج المالية'},
-                {'type': 'fields', 'rows': [['إجمالي الاستثمار', 'TOTAL 1234567.26']]},
+                {'type': 'fields', 'rows': (
+                    [['إجمالي الاستثمار', 'TOTAL 1234567.26']]
+                    + [[label, value] for label, value, _expected in screenshot_values]
+                )},
             ]},
         }
         fallback_model = {
@@ -2732,6 +2744,8 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertNotIn('4. بنود الإيرادات', html)
             self.assertNotIn('REVENUE-TOKEN-441', html)
         self.assertIn('TOTAL 1,234,567.3', report_html)
+        for _label, _value, expected in screenshot_values:
+            self.assertIn(expected, report_html)
 
         with tempfile.TemporaryDirectory() as folder:
             output = os.path.join(folder, 'without-revenue.pdf')

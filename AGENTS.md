@@ -902,7 +902,9 @@ the displayed figure. Numeric controls are normalized by `formatFinancialReportV
 request, and `_financial_report_format_display()` repeats that guarantee in both the HTML and direct
 PyMuPDF paths: fractional results use one decimal and money/area/quantity values use thousands
 separators. `_financial_report_format_display()` also formats eligible numbers inside compound text
-cells, not only cells containing a bare number. `revenueTable` remains on screen and in the saved
+cells, not only cells containing a bare number. An amount label remains an amount when its description
+contains «سنة» or «% إشغال» — those words must not suppress grouping on revenue, NOI or expense
+values. `revenueTable` remains on screen and in the saved
 model for calculations and presentation generation, but the whole «بنود الإيرادات» report section
 (including its occupancy subtable) is omitted by `_financial_screen_parts()` and both legacy PDF
 loops. Do not reintroduce a server-side label map: the report used to be rebuilt from
