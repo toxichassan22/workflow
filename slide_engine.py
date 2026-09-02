@@ -2341,10 +2341,6 @@ def validate_slide_plan(plan, branding):
     return len(issues) == 0, issues
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Single Slide Generation
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _clean_numeric_val(val):
     if val is None:
         return 0.0
@@ -2594,16 +2590,32 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
     max_cum = max(cums + [1.0])
     cum_range = (max_cum - min_cum) or 1.0
 
+    # Scale for the polyline: zero at y=100, positive above, negative below.
+    # The bars use top:50% (= y=100 in viewBox 200) as zero.
+    max_abs_cum = max(abs(min_cum), abs(max_cum), 1.0)
+    # Use 85px of headroom each side (y=15..185) for the line points.
+    px_half = 85.0
+
     svg_points = []
+    svg_circles = []
     n = len(items)
+    gap_px = 4.0
+    total_w = 500.0
+    col_w = (total_w - max(n - 1, 0) * gap_px) / max(n, 1)
+
     for idx, it in enumerate(items):
         it['bar_height_pct'] = min(max(round((abs(it['net_flow_m']) / max_flow) * 42, 1), 4.0), 42.0) if it['net_flow_m'] != 0 else 2.0
         it['bar_direction'] = 'up' if it['is_positive'] else 'down'
         it['cum_y_pct'] = round(((it['cumulative_m'] - min_cum) / cum_range) * 80 + 10, 1)
 
-        x = round(30 + idx * (440 / max(n - 1, 1)), 1)
-        y = round(160 - ((it['cumulative_m'] - min_cum) / cum_range) * 125, 1)
+        # Exact center of column in a 500px flex container with 4px gap
+        x = round(idx * (col_w + gap_px) + col_w / 2.0, 1)
+        # y=100 is zero; positive cumulative → lower y (above); negative → higher y (below)
+        y = round(100 - (it['cumulative_m'] / max_abs_cum) * px_half, 1)
+        it['cx'] = x
+        it['cy'] = y
         svg_points.append(f"{x},{y}")
+        svg_circles.append({'cx': x, 'cy': y, 'year': it.get('year', '')})
 
     return {
         'items': items,
@@ -2613,6 +2625,7 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
             'min_cumulative_m': min_cum,
             'max_cumulative_m': max_cum,
             'svg_polyline_points': ' '.join(svg_points),
+            'svg_circles': svg_circles,
         }
     }
 
@@ -3096,8 +3109,9 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             'إذا كان التدفق سالباً: شريط للأسفل (position: absolute; top: 50%; height: bar_height_pct%; width: 60%; background: #ef4444; border-radius: 2px;). '
             'وتسمية السنة بالأسفل (position: absolute; bottom: -22px; font-size: 9px; font-weight: 600; color: #64748b; white-space: nowrap;). '
             '3. طبقة مسار الرصيد التراكمي فوق الأعمدة (position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none;): '
-            f'عنصر svg كامل ومغلق يحتوي <polyline fill="none" stroke="{primary_color}" stroke-width="2.5" stroke-linejoin="round" points="svg_polyline_points" /> '
-            f'ودوائر نقاط للسنوات <circle cx="..." cy="..." r="3.5" fill="{primary_color}" stroke="#ffffff" stroke-width="1.5" />. تأكد من إغلاق وسم </svg> دائماً. '
+            f'عنصر svg كامل ومغلق بنطاق عرض viewBox="0 0 500 200" style="position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none;" يحتوي بدقة على: '
+            f'<polyline fill="none" stroke="{primary_color}" stroke-width="2.5" stroke-linejoin="round" points="انسخ قيمة summary.svg_polyline_points حرفياً" /> '
+            f'ودوائر نقاط للسنوات بالإحداثيات المحسوبة لكل سنة: <circle cx="item.cx" cy="item.cy" r="3.5" fill="{primary_color}" stroke="#ffffff" stroke-width="1.5" />. تأكد من إغلاق وسم </svg> دائماً. '
             'ملاحظة هامة: اعرض جدول التدفقات المعتمد في العمود الأول والمخطط في العمود الثاني فقط، ولا تضف أي جداول أخرى خارج العمودين.'
         ),
         'heatmap': (
