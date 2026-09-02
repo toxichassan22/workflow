@@ -1580,6 +1580,35 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertEqual(s.get('chart_type'), '')
             self.assertNotEqual(s.get('design_style'), 'chart')
 
+    def test_wide_cashflow_table_in_report_preserves_combo_chart(self):
+        engine = self.application_module.slide_engine
+        headers = ['البيان'] + [f'سنة {i}' for i in range(1, 16)] + ['الإجمالي']
+        rows = [
+            ['صافي تدفق المشروع'] + [str((i - 3) * 10000000) for i in range(1, 16)] + ['750000000'],
+            ['الرصيد التراكمي'] + [str((i - 5) * 20000000) for i in range(1, 16)] + ['1500000000'],
+        ]
+        report = {'parts': [
+            {'type': 'heading', 'level': 2, 'text': 'النتائج المالية'},
+            {'type': 'heading', 'level': 2, 'text': 'جدول التدفقات النقدية'},
+            {'type': 'table', 'headers': headers, 'rows': rows},
+        ]}
+        project = {'project_name': 'مشروع تدفقات', 'financial_study_model': {'inputs': {'projectCost': 50000000}, 'report': report}}
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {})
+        fin_slides = [s for s in plan['slides'] if s.get('section_key') == 'financial']
+        combo_slides = [s for s in fin_slides if s.get('chart_type') == 'combo']
+        self.assertEqual(len(combo_slides), 1, "Expected exactly 1 combo chart slide for cash flow")
+        combo_slide = combo_slides[0]
+        self.assertEqual(combo_slide.get('design_style'), 'chart')
+        self.assertIn('التدفقات النقدية', combo_slide.get('title', ''))
+        c_data = engine._extract_combo_chart_data(None, project['financial_study_model'], project)
+        self.assertGreaterEqual(len(c_data['items']), 5)
+        fb_headers, fb_rows = engine._fallback_table_data(combo_slide, project)
+        self.assertEqual(fb_headers, ['السنة', 'صافي التدفق السنوي', 'الرصيد التراكمي'])
+        self.assertEqual(len(fb_rows), len(c_data['items']))
+
     def test_financial_study_slides_strictly_follow_pdf_table_design(self):
         engine = self.application_module.slide_engine
         import design_templates as templates

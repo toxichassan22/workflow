@@ -304,6 +304,44 @@ def _financial_table_chartable(part, rows, column_start=None, column_end=None):
     return 2 <= len(rows) <= 12 and 2 <= column_count <= 8 and _rows_have_comparable_numbers(rows)
 
 
+def _can_chart_financial_part(chart_cand, part, model=None, project_data=None):
+    if not isinstance(part, dict):
+        return False
+    rows = part.get('rows') or []
+    if not rows:
+        return False
+    if chart_cand == 'combo':
+        for r in rows:
+            if isinstance(r, dict):
+                txt = ' '.join(str(k) + ' ' + str(v) for k, v in r.items()).lower()
+                if re.search(r'صافي.*تدفق|net.*cash|net.*flow|رصيد.*تراكمي|cumulative', txt):
+                    return True
+            elif isinstance(r, (list, tuple)) and r:
+                txt = str(r[0]).lower()
+                if re.search(r'صافي.*تدفق|net.*cash|net.*flow|رصيد.*تراكمي|cumulative', txt):
+                    return True
+        if isinstance(model, dict) and (model.get('tables', {}).get('cashflowTable') or model.get('tables', {}).get('cashflow')):
+            return True
+        return False
+    elif chart_cand == 'waterfall':
+        for r in rows:
+            txt = str(r.get('البند') if isinstance(r, dict) else (r[0] if isinstance(r, (list, tuple)) and r else '')).lower()
+            if re.search(r'تكلف|cost|استثمار|مجموع|إجمالي', txt):
+                return True
+        if isinstance(model, dict) and (model.get('tables', {}).get('costTable') or model.get('tables', {}).get('costs')):
+            return True
+        return False
+    elif chart_cand == 'heatmap':
+        for r in rows:
+            txt = str(r.get('السيناريو') if isinstance(r, dict) else (r[0] if isinstance(r, (list, tuple)) and r else '')).lower()
+            if re.search(r'متحفظ|أساسي|اساسي|متفائل|تحفظ|تفاؤل', txt):
+                return True
+        if isinstance(model, dict) and (model.get('tables', {}).get('sensitivityTable') or model.get('tables', {}).get('sensitivity')):
+            return True
+        return False
+    return False
+
+
 def _financial_chart_score(slide):
     text = ' '.join(str(slide.get(key) or '') for key in ('title', 'content_source', 'source_table', 'chart_type')).lower()
     priorities = (
@@ -836,6 +874,32 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     continue
                 column_ranges = _financial_column_ranges(part) if part.get('type') == 'table' else [(None, None)]
                 row_ranges = _balanced_row_ranges(len(rows), max_per_slide=12, min_per_slide=4)
+                chart_cand = _financial_chart_type(part_title, index=part_index) if part.get('type') == 'table' else ''
+                chartable_overall = (len(column_ranges) == 1 and len(row_ranges) == 1
+                                     and part.get('type') == 'table'
+                                     and bool(chart_cand)
+                                     and _financial_table_chartable(part, rows, None, None))
+                if (chart_cand in FINANCIAL_CHART_TYPES and not chartable_overall
+                        and target_section == 'financial'
+                        and _can_chart_financial_part(chart_cand, part, model, project_data)):
+                    chart_titles = {
+                        'combo': 'التدفقات النقدية السنوية والتراكمية',
+                        'waterfall': 'تكوين إجمالي تكلفة الاستثمار',
+                        'heatmap': 'مقارنة السيناريوهات المالية',
+                    }
+                    add(target_section, {
+                        'title': chart_titles.get(chart_cand, part_title),
+                        'type': 'content',
+                        'design_style': 'chart',
+                        'chart_type': chart_cand,
+                        'content_density': 'high',
+                        'requires_image': False,
+                        'content_source': f'financial_chart:{chart_cand}:{part_index}',
+                        'source_table': f'report_part_{part_index}',
+                        'row_count': len(rows),
+                        'financial_template': 'report',
+                        'bullets': [],
+                    })
                 for row_number, (start, end) in enumerate(row_ranges, 1):
                     for column_number, (column_start, column_end) in enumerate(column_ranges, 1):
                         title_suffixes = []
@@ -860,6 +924,52 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                             'source_table': f'report_part_{part_index}', 'row_count': end - start,
                             'financial_template': 'report', 'bullets': [],
                         })
+            fin_slides = groups.get('financial', [])
+            if not any(canonicalize_chart_type(s.get('chart_type')) == 'combo' for s in fin_slides) and (tables.get('cashflowTable') or tables.get('cashflow')):
+                cf_rows = tables.get('cashflowTable') or tables.get('cashflow') or []
+                add('financial', {
+                    'title': 'التدفقات النقدية السنوية والتراكمية',
+                    'type': 'content',
+                    'design_style': 'chart',
+                    'chart_type': 'combo',
+                    'content_density': 'high',
+                    'requires_image': False,
+                    'content_source': f'financial_table:cashflowTable:0:{len(cf_rows)}',
+                    'source_table': 'cashflowTable',
+                    'row_count': len(cf_rows),
+                    'financial_template': 'report',
+                    'bullets': [],
+                })
+            if not any(canonicalize_chart_type(s.get('chart_type')) == 'waterfall' for s in fin_slides) and (tables.get('costTable') or tables.get('costs')):
+                ct_rows = tables.get('costTable') or tables.get('costs') or []
+                add('financial', {
+                    'title': 'تكوين إجمالي تكلفة الاستثمار',
+                    'type': 'content',
+                    'design_style': 'chart',
+                    'chart_type': 'waterfall',
+                    'content_density': 'high',
+                    'requires_image': False,
+                    'content_source': f'financial_table:costTable:0:{len(ct_rows)}',
+                    'source_table': 'costTable',
+                    'row_count': len(ct_rows),
+                    'financial_template': 'report',
+                    'bullets': [],
+                })
+            if not any(canonicalize_chart_type(s.get('chart_type')) == 'heatmap' for s in fin_slides) and (tables.get('sensitivityTable') or tables.get('sensitivity')):
+                st_rows = tables.get('sensitivityTable') or tables.get('sensitivity') or []
+                add('financial', {
+                    'title': 'مقارنة السيناريوهات المالية',
+                    'type': 'content',
+                    'design_style': 'chart',
+                    'chart_type': 'heatmap',
+                    'content_density': 'high',
+                    'requires_image': False,
+                    'content_source': f'financial_table:sensitivityTable:0:{len(st_rows)}',
+                    'source_table': 'sensitivityTable',
+                    'row_count': len(st_rows),
+                    'financial_template': 'report',
+                    'bullets': [],
+                })
         else:
             for table_key, title, style in _FINANCIAL_PLAN_TABLES:
                 rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
@@ -2543,35 +2653,66 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
     model = model if isinstance(model, dict) else {}
     tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
     cf = tables.get('cashflowTable') if isinstance(tables.get('cashflowTable'), list) else []
+    if not cf and isinstance(model.get('report'), dict):
+        for p in model.get('report', {}).get('parts', []):
+            if isinstance(p, dict) and p.get('type') == 'table':
+                txt = f"{p.get('text', '')} {p.get('title', '')}".lower()
+                if re.search(r'تدفق|cashflow|cash flow', txt):
+                    part_or_table = p
+                    break
     rows = []
+    headers = []
     if isinstance(part_or_table, dict):
         rows = part_or_table.get('rows') or cf
+        headers = part_or_table.get('headers') or []
     elif isinstance(part_or_table, list) and part_or_table:
         rows = part_or_table
     else:
         rows = cf
 
+    year_idx = 0
+    net_idx = -3
+    cum_idx = -2
+    if headers:
+        for h_i, h_name in enumerate(headers):
+            h_str = str(h_name).strip().lower()
+            if re.search(r'سنة|عام|year', h_str) and not re.search(r'تشغيل|إشغال|وصول', h_str):
+                year_idx = h_i
+            elif re.search(r'صافي.*تدفق|net.*cash|net.*flow', h_str):
+                net_idx = h_i
+            elif re.search(r'تراكمي|cumulative', h_str):
+                cum_idx = h_i
+
     items = []
+    running_cum = 0.0
     for r in rows:
         year = ''
         net_val = 0.0
         cum_val = 0.0
+        has_cum = False
         if isinstance(r, dict):
             year = str(r.get('السنة') or r.get('year') or '').strip()
             net_val = _clean_numeric_val(r.get('صافي تدفق المشروع') or r.get('netCashFlow') or r.get('net_flow'))
-            cum_val = _clean_numeric_val(r.get('الرصيد التراكمي') or r.get('cumulativeCashFlow') or r.get('cumulative'))
-        elif isinstance(r, (list, tuple)) and len(r) >= 3:
-            year = str(r[0]).strip()
-            net_val = _clean_numeric_val(r[-3])
-            cum_val = _clean_numeric_val(r[-2])
+            raw_cum = r.get('الرصيد التراكمي') or r.get('cumulativeCashFlow') or r.get('cumulative')
+            if raw_cum is not None and str(raw_cum).strip() not in ('', '—', '-'):
+                cum_val = _clean_numeric_val(raw_cum)
+                has_cum = True
+        elif isinstance(r, (list, tuple)) and len(r) >= 2:
+            year = str(r[year_idx]).strip() if year_idx < len(r) else ''
+            net_val = _clean_numeric_val(r[net_idx]) if abs(net_idx) <= len(r) else 0.0
+            if abs(cum_idx) <= len(r) and str(r[cum_idx]).strip() not in ('', '—', '-'):
+                cum_val = _clean_numeric_val(r[cum_idx])
+                has_cum = True
         if year:
             year_label = f"سنة {year}" if not year.startswith('سنة') else year
+            running_cum += net_val
+            effective_cum = cum_val if has_cum else running_cum
             items.append({
                 'year': year_label,
                 'net_flow_m': round(net_val / 1e6, 1),
                 'net_flow_display': f"{round(net_val / 1e6, 1)} م.ر",
-                'cumulative_m': round(cum_val / 1e6, 1),
-                'cumulative_display': f"{round(cum_val / 1e6, 1)} م.ر",
+                'cumulative_m': round(effective_cum / 1e6, 1),
+                'cumulative_display': f"{round(effective_cum / 1e6, 1)} م.ر",
                 'is_positive': net_val >= 0,
             })
 
@@ -2584,7 +2725,7 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
             {'year': 'سنة 5', 'net_flow_m': 60.0, 'net_flow_display': '60.0 م.ر', 'cumulative_m': 45.0, 'cumulative_display': '45.0 م.ر', 'is_positive': True},
         ]
 
-    items = items[:10]
+    items = items[:15]
     max_flow = max([abs(it['net_flow_m']) for it in items] + [1.0])
     cums = [it['cumulative_m'] for it in items]
     min_cum = min(cums + [0.0])
@@ -2636,12 +2777,23 @@ def _extract_heatmap_chart_data(part_or_table, model=None, project_data=None):
     tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
     sens = tables.get('sensitivityTable') if isinstance(tables.get('sensitivityTable'), list) else []
     rows = []
+    headers = []
     if isinstance(part_or_table, dict):
         rows = part_or_table.get('rows') or sens
+        headers = part_or_table.get('headers') or []
     elif isinstance(part_or_table, list) and part_or_table:
         rows = part_or_table
     else:
         rows = sens
+
+    if not rows and isinstance(model.get('report'), dict):
+        for p in model.get('report', {}).get('parts', []):
+            if isinstance(p, dict) and p.get('type') == 'table':
+                txt = f"{p.get('text', '')} {p.get('title', '')}".lower()
+                if re.search(r'حساسي|سيناريو|sensitivity', txt):
+                    rows = p.get('rows') or []
+                    headers = p.get('headers') or []
+                    break
 
     metric_configs = [
         ('صافي الربح', True),
@@ -2656,6 +2808,8 @@ def _extract_heatmap_chart_data(part_or_table, model=None, project_data=None):
     for metric_name, higher_is_better in metric_configs:
         row_vals = {}
         for r in rows:
+            if isinstance(r, (list, tuple)) and headers:
+                r = dict(zip(headers, r))
             if isinstance(r, dict):
                 sc_name = str(r.get('السيناريو') or '').strip()
                 val = r.get(metric_name)
@@ -2797,6 +2951,23 @@ def _slide_source_data_note(slide, project_data):
                 c_data = _extract_heatmap_chart_data(part, model, project_data)
                 extra = '\n\nبيانات مصفوفة الخريطة الحرارية (heatmap_chart_data) لمقارنة السيناريوهات والقطبية:\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
             return 'المحتوى الحرفي المطلوب في هذه الشريحة فقط:\n' + json.dumps(part, ensure_ascii=False, indent=2) + extra
+    match = re.fullmatch(r'financial_chart:([^:]+):(\d+)', source)
+    if match:
+        chart_cand, part_index = match.group(1), int(match.group(2))
+        report = model.get('report') if isinstance(model.get('report'), dict) else {}
+        parts = report.get('parts') if isinstance(report.get('parts'), list) else []
+        part = parts[part_index] if part_index < len(parts) and isinstance(parts[part_index], dict) else {}
+        extra = ''
+        if c_type == 'waterfall':
+            c_data = _extract_waterfall_chart_data(part, model, project_data)
+            extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة الاستثمار (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+        elif c_type == 'combo':
+            c_data = _extract_combo_chart_data(part, model, project_data)
+            extra = '\n\nبيانات مخطط التدفقات النقدية (combo_chart_data) السنوية والتراكمية (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+        elif c_type == 'heatmap':
+            c_data = _extract_heatmap_chart_data(part, model, project_data)
+            extra = '\n\nبيانات مصفوفة الخريطة الحرارية (heatmap_chart_data) لمقارنة السيناريوهات والقطبية:\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+        return 'بيانات الرسم البياني المعتمد:\n' + extra
     match = re.fullmatch(r'financial_table:([^:]+):(\d+):(\d+)', source)
     if match:
         table_key, start, end = match.group(1), int(match.group(2)), int(match.group(3))
@@ -3113,7 +3284,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             f'عنصر svg كامل ومغلق بنطاق عرض viewBox="0 0 500 200" style="position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none;" يحتوي بدقة على: '
             f'<polyline fill="none" stroke="{primary_color}" stroke-width="2.5" stroke-linejoin="round" points="انسخ قيمة summary.svg_polyline_points حرفياً" /> '
             f'ودوائر نقاط للسنوات بالإحداثيات المحسوبة لكل سنة: <circle cx="item.cx" cy="item.cy" r="3.5" fill="{primary_color}" stroke="#ffffff" stroke-width="1.5" />. تأكد من إغلاق وسم </svg> دائماً. '
-            'ملاحظة هامة: اعرض جدول التدفقات المعتمد في العمود الأول والمخطط في العمود الثاني فقط، ولا تضف أي جداول أخرى خارج العمودين.'
+            'ملاحظة هامة: في العمود الأول اعرض جدول التدفقات المعتمد (السنة، صافي التدفق السنوي، الرصيد التراكمي) من combo_chart_data.items، وفي العمود الثاني المخطط المركب، ولا تضف أي جداول أخرى خارج العمودين.'
         ),
         'heatmap': (
             'الخريطة الحرارية (Heatmap Matrix) لمقارنة السيناريوهات المالية: '
@@ -3641,8 +3812,24 @@ def _required_slide_texts(slide, project_data):
             required.extend(_required_slide_texts(item, project_data))
         return list(dict.fromkeys(required))
     source = str((slide or {}).get('content_source') or '')
+    chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
     project_data = project_data if isinstance(project_data, dict) else {}
     model = _parse_financial_dict(project_data.get('financial_study_model'))
+    if chart_type == 'combo':
+        c_data = _extract_combo_chart_data(None, model, project_data)
+        items = c_data.get('items') or []
+        return [str(it.get('year') or '') for it in items if str(it.get('year') or '').strip()]
+    if chart_type == 'waterfall':
+        w_data = _extract_waterfall_chart_data(None, model, project_data)
+        items = w_data.get('items') or []
+        res = [str(it.get('name') or '') for it in items if str(it.get('name') or '').strip()]
+        if w_data.get('total', {}).get('name'):
+            res.append(str(w_data['total']['name']))
+        return res
+    if chart_type == 'heatmap':
+        h_data = _extract_heatmap_chart_data(None, model, project_data)
+        matrix = h_data.get('matrix') or []
+        return [str(r.get('metric') or '') for r in matrix if str(r.get('metric') or '').strip()]
     if (slide or {}).get('type') == 'map_landmarks' or source == 'nearby_landmarks':
         matrix = project_data.get('landmarks_matrix')
         if isinstance(matrix, list):
@@ -3738,8 +3925,33 @@ def _missing_required_slide_texts(html, slide, project_data):
 
 
 def _fallback_table_data(slide, project_data):
-    source = str((slide or {}).get('content_source') or '')
+    chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
     model = _parse_financial_dict((project_data or {}).get('financial_study_model'))
+    if chart_type == 'combo':
+        c_data = _extract_combo_chart_data(None, model, project_data)
+        items = c_data.get('items') or []
+        if items:
+            headers = ['السنة', 'صافي التدفق السنوي', 'الرصيد التراكمي']
+            rows = [[it.get('year', ''), it.get('net_flow_display', ''), it.get('cumulative_display', '')] for it in items]
+            return headers, rows
+    elif chart_type == 'waterfall':
+        w_data = _extract_waterfall_chart_data(None, model, project_data)
+        items = w_data.get('items') or []
+        if items:
+            headers = ['بند التكلفة', 'القيمة']
+            rows = [[it.get('name', ''), it.get('display', '')] for it in items]
+            if w_data.get('total'):
+                rows.append([w_data['total'].get('name', 'الإجمالي'), w_data['total'].get('display', '')])
+            return headers, rows
+    elif chart_type == 'heatmap':
+        h_data = _extract_heatmap_chart_data(None, model, project_data)
+        matrix = h_data.get('matrix') or []
+        if matrix:
+            headers = ['المؤشر المالي', 'متحفظ', 'أساسي', 'متفائل']
+            rows = [[r.get('metric', ''), r.get('conservative', ''), r.get('base', ''), r.get('optimistic', '')] for r in matrix]
+            return headers, rows
+
+    source = str((slide or {}).get('content_source') or '')
     match = re.fullmatch(r'financial_report:(\d+):(\d+):(\d+)(?::(\d+):(\d+))?', source)
     if match:
         part_index, start, end = map(int, match.groups()[:3])
@@ -3871,7 +4083,7 @@ def _render_fallback_combo(chart_data, primary='#005f78', secondary='#0ea5e9'):
     items = (chart_data or {}).get('items') if isinstance(chart_data, dict) else chart_data
     if not items:
         return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات تدفقات نقدية كافية</div>'
-    items = items[:10]
+    items = items[:15]
     cols_html = []
     points = []
     net_flows = [it.get('net_flow_m', 0.0) for it in items]
@@ -4962,7 +5174,7 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
             return ''
         html = re.sub(r'<img\b[^>]*>', _strip_cover_extra_images, html, flags=re.IGNORECASE)
         for _ in range(3):
-            html = re.sub(r'<(?:div|figure|picture)\b[^>]*>\s*</(?:div|figure|picture)>', '', html, flags=re.IGNORECASE)
+            html = re.sub(r'<(?:div|figure|picture)\b(?![^>]*(?:\bslide\b|data-cover-overlay))[^>]*>\s*</(?:div|figure|picture)>', '', html, flags=re.IGNORECASE)
     if is_closing:
         html = re.sub(
             r'<(p|h[1-6]|span)\b[^>]*>[^<]*(?:فرصة\s+(?:واعدة|مشروطة)|واعدة\s+بشروط|بشروط)[^<]*</\1\s*>',
