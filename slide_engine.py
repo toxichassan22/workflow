@@ -90,7 +90,7 @@ _SECTION_MATCHERS = (
 
 def _slide_section_key(slide, current=''):
     slide = slide if isinstance(slide, dict) else {}
-    explicit = str(slide.get('section_key') or slide.get('section') or '').strip().lower()
+    explicit = str(slide.get('section_key') or slide.get('sectionKey') or slide.get('section') or '').strip().lower()
     explicit = _SECTION_KEY_ALIASES.get(explicit, explicit)
     if explicit in PRESENTATION_SECTION_ORDER:
         return explicit
@@ -102,7 +102,8 @@ def _slide_section_key(slide, current=''):
     if slide_type.startswith('map_') or slide_type == 'site_specs':
         return 'location'
     text = ' '.join(str(value or '') for value in (
-        slide.get('title'), slide.get('content_source'), slide.get('source_table'),
+        slide.get('title'), slide.get('content_source') or slide.get('contentSource'),
+        slide.get('source_table') or slide.get('sourceTable'),
         ' '.join(str(item or '') for item in (slide.get('bullets') or [])),
     )).lower()
     for key, pattern in _SECTION_MATCHERS:
@@ -3438,15 +3439,16 @@ def build_index_slide(slide, slide_num, total_slides, branding=None, project_dat
         rows = []
         for entry in items:
             title = html_lib.escape(str(entry.get('title') or '').strip())
+            section_key = html_lib.escape(str(entry.get('section_key') or '').strip(), quote=True)
             try:
                 page = int(entry.get('page'))
             except (TypeError, ValueError):
                 page = 0
             rows.append(
-                '<div style="min-height:48px;display:flex;align-items:center;gap:18px;'
+                f'<div data-index-section="{section_key}" style="min-height:48px;display:flex;align-items:center;gap:18px;'
                 f'border-bottom:1px solid {separator};padding:9px 2px;box-sizing:border-box;">'
                 f'<div style="font-size:16px;font-weight:600;color:{text_color};flex:1;">{title}</div>'
-                f'<div dir="ltr" style="font-size:16px;font-weight:700;color:{accent};min-width:34px;'
+                f'<div data-index-page="{section_key}" dir="ltr" style="font-size:16px;font-weight:700;color:{accent};min-width:34px;'
                 f'text-align:left;">{page:02d}</div></div>'
             )
         return ''.join(rows)
@@ -3513,7 +3515,7 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
         f'{rule}'
         '</div>'
         # dir="ltr": inside the RTL slide "06 — 60" would be reordered into "60 — 06".
-        f'<div dir="ltr" style="position:absolute;bottom:34px;left:48px;font-size:13px;letter-spacing:1px;'
+        f'<div data-slide-counter="1" dir="ltr" style="position:absolute;bottom:34px;left:48px;font-size:13px;letter-spacing:1px;'
         f'color:rgba(255,255,255,0.55);">{footer_number}</div>'
         f'<div style="position:absolute;bottom:34px;right:48px;font-size:13px;font-weight:700;'
         f'letter-spacing:1.5px;color:{accent};">{project_name}</div>'
@@ -3863,6 +3865,72 @@ def _strip_presentation_icons(html):
     return _ICON_RE.sub('', html)
 
 
+def _slide_counter_text(slide_num, total_slides=None):
+    try:
+        number = int(slide_num)
+    except (TypeError, ValueError):
+        return ''
+    try:
+        total = int(total_slides)
+    except (TypeError, ValueError):
+        total = number
+    return f'{number:02d} — {max(number, total):02d}'
+
+
+def _with_data_attribute(open_tag, name):
+    if re.search(rf'\b{re.escape(name)}\s*=', open_tag, flags=re.IGNORECASE):
+        return open_tag
+    return open_tag[:-1] + f' {name}="1">'
+
+
+def _rewrite_slide_counter(html, slide_type, slide_num, total_slides=None):
+    if not html:
+        return html
+    counter = _slide_counter_text(slide_num, total_slides)
+    if not counter:
+        return html
+    marker = re.compile(
+        r'(<(?P<tag>span|div)\b[^>]*\bdata-slide-counter=["\'][^"\']*["\'][^>]*>)'
+        r'[\s\S]*?(</(?P=tag)\s*>)', re.IGNORECASE,
+    )
+    html, replaced = marker.subn(lambda match: match.group(1) + counter + match.group(3), html)
+    if replaced:
+        return html
+    if slide_type == 'section_divider':
+        legacy = re.compile(
+            r'(<div\b(?=[^>]*bottom:\s*34px)(?=[^>]*left:\s*48px)[^>]*)>'
+            r'\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*</div\s*>', re.IGNORECASE,
+        )
+        return legacy.sub(lambda match: _with_data_attribute(match.group(1) + '>', 'data-slide-counter')
+                          + counter + '</div>', html, count=1)
+
+    footer = re.compile(
+        r'(?P<open><div\b[^>]*height:\s*36px[^>]*>)(?P<body>[\s\S]*?)</div\s*>', re.IGNORECASE,
+    )
+
+    def replace_footer(match):
+        spans = list(re.finditer(
+            r'(?P<open><span\b[^>]*>)(?P<value>\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*)</span\s*>',
+            match.group('body'), flags=re.IGNORECASE,
+        ))
+        if not spans:
+            return match.group(0)
+        target = spans[-1]
+        span_open = _with_data_attribute(target.group('open'), 'data-slide-counter')
+        body = (match.group('body')[:target.start()] + span_open + counter + '</span>'
+                + match.group('body')[target.end():])
+        return _with_data_attribute(match.group('open'), 'data-slide-footer') + body + '</div>'
+
+    return footer.sub(replace_footer, html, count=1)
+
+
+def _remove_managed_slide_footer(html):
+    return re.sub(
+        r'<div\b[^>]*\bdata-slide-footer=["\'][^"\']*["\'][^>]*>[\s\S]*?</div\s*>',
+        '', html or '', count=1, flags=re.IGNORECASE,
+    )
+
+
 def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_slides=None,
                        tenant_id=None, branding=None, project_data=None):
     """Post-process a slide while keeping cover and closing free of header/footer.
@@ -3886,6 +3954,10 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         re.search(r'ختام|closing|شكراً|thanks', normalized_title)
     ) or (total_slides is not None and int(slide_num or 0) == int(total_slides))
     is_cover_or_closing = is_cover or is_closing
+    if is_cover_or_closing or slide_type == 'moodboard':
+        html = _remove_managed_slide_footer(html)
+    else:
+        html = _rewrite_slide_counter(html, slide_type, slide_num, total_slides)
     if is_cover_or_closing:
         html = _normalize_brand_overlay(html, branding)
     if is_cover:
@@ -3977,11 +4049,12 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
             html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
 
         if not has_footer:
+            footer_number = _slide_counter_text(slide_num, total_slides)
             footer_html = (
-                f'<div style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{footer_background};display:flex;align-items:center;padding:0 16px;z-index:10;">'
+                f'<div data-slide-footer="1" style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{footer_background};display:flex;align-items:center;padding:0 16px;z-index:10;">'
                 f'<span style="font-size:13px;color:{footer_text};">{title}</span>'
                 f'<span style="font-size:13px;color:{footer_text};opacity:0.7;margin-right:auto;margin-left:8px;">{company_name}</span>'
-                f'<span style="color:{footer_accent};font-size:12px;font-weight:700;min-width:24px;text-align:left;">{slide_num}</span>'
+                f'<span data-slide-counter="1" style="color:{footer_accent};font-size:12px;font-weight:700;min-width:52px;text-align:left;">{footer_number}</span>'
                 '</div>'
             )
             html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
@@ -4021,6 +4094,58 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     )
     return _drop_unresolved_image_placeholders(html)
 
+
+def renumber_presentation_slides(slides, branding=None, project_data=None, tenant_id=None):
+    source = slides if isinstance(slides, list) else []
+    total = len(source)
+    if not total:
+        return []
+    branding = dict(branding or (db.get_branding(tenant_id) if tenant_id else {}) or {})
+    project_data = dict(project_data or {})
+    normalized = []
+    current_section = ''
+    for index, raw in enumerate(source):
+        item = dict(raw) if isinstance(raw, dict) else {'html': str(raw or '')}
+        slide_type = str(item.get('type') or '').strip().lower()
+        title = str(item.get('title') or '').strip()
+        html = str(item.get('html') or '')
+        if not slide_type:
+            if index == 0:
+                slide_type = 'cover'
+            elif re.search(r'محتويات\s+العرض|فهرس|index', title + ' ' + html, flags=re.IGNORECASE):
+                slide_type = 'index'
+            elif index == total - 1:
+                slide_type = 'closing'
+            else:
+                slide_type = 'content'
+            item['type'] = slide_type
+        if slide_type == 'cover':
+            item['section_key'] = 'cover'
+        elif slide_type == 'index':
+            item['section_key'] = 'index'
+        else:
+            section_key = _slide_section_key(item, current_section)
+            item['section_key'] = section_key
+            if slide_type == 'section_divider' and section_key in PRESENTATION_SECTION_ORDER:
+                current_section = section_key
+        normalized.append(item)
+
+    refresh_index_entries({'slides': normalized})
+    for index, item in enumerate(normalized, 1):
+        slide_type = str(item.get('type') or 'content')
+        if slide_type == 'index':
+            index_html = build_index_slide(item, index, total, branding, project_data)
+            item['html'] = finalize_slide_html(
+                index_html, slide_type, project_data, branding, tenant_id=tenant_id,
+                slide_num=index, slide_title=item.get('title') or 'محتويات العرض',
+                total_slides=total, content_source=item.get('content_source'),
+            )
+        elif slide_type in ('cover', 'closing', 'moodboard'):
+            item['html'] = _remove_managed_slide_footer(item.get('html') or '')
+        else:
+            item['html'] = _rewrite_slide_counter(
+                item.get('html') or '', slide_type, index, total)
+    return normalized
 
 
 def generate_all_slides(slide_plan, project_data, branding, images_info, call_glm_fn, map_placeholders=None,

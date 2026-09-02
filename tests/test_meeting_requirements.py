@@ -5147,6 +5147,116 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('if (!tenantSlidePlan) {', index_source)
         self.assertNotIn('settingsMaxSlides', index_source)
 
+    def test_slide_renumbering_updates_legacy_footers_totals_and_index(self):
+        engine = self.application_module.slide_engine
+        branding = {
+            'primary_color': '#123B6D', 'secondary_color': '#0b1f33',
+            'accent_color': '#C4A35A', 'background_color': '#ffffff',
+            'text_color': '#111111', 'company_name': 'شركة الاختبار',
+        }
+        project = {'project_name': 'المشروع'}
+        content = lambda title: engine.postprocess_slide(
+            f'<div class="slide"><p>{title}</p></div>', 'content', slide_num=98,
+            slide_title=title, total_slides=99, branding=branding, project_data=project,
+        )
+        slides = [
+            {'title': 'الغلاف', 'type': 'cover', 'html': '<div class="slide">غلاف</div>'},
+            {'title': 'محتويات العرض', 'type': 'index', 'html': '<div class="slide">فهرس قديم</div>'},
+            {'title': 'نبذة عن المشروع', 'type': 'section_divider', 'section_key': 'overview',
+             'html': engine.build_section_divider_slide(
+                 {'title': 'نبذة عن المشروع'}, 88, 99, branding, project)},
+            {'title': 'ملخص المشروع', 'type': 'content', 'section_key': 'overview',
+             'html': content('ملخص المشروع')},
+            {'title': 'الدراسة المالية', 'type': 'section_divider', 'section_key': 'financial',
+             'html': engine.build_section_divider_slide(
+                 {'title': 'الدراسة المالية'}, 90, 99, branding, project)},
+            {'title': 'مؤشرات الاستثمار', 'type': 'content', 'section_key': 'financial',
+             'html': content('مؤشرات الاستثمار')},
+            {'title': 'الخاتمة', 'type': 'closing', 'html': '<div class="slide">ختام</div>'},
+        ]
+
+        renumbered = engine.renumber_presentation_slides(
+            slides, branding=branding, project_data=project)
+        self.assertEqual(len(renumbered), 7)
+        self.assertIn('data-slide-counter="1"', renumbered[2]['html'])
+        self.assertIn('03 — 07', renumbered[2]['html'])
+        self.assertIn('data-slide-counter="1"', renumbered[3]['html'])
+        self.assertIn('04 — 07', renumbered[3]['html'])
+        self.assertIn('05 — 07', renumbered[4]['html'])
+        self.assertIn('06 — 07', renumbered[5]['html'])
+        self.assertNotIn('data-slide-footer', renumbered[0]['html'])
+        self.assertNotIn('data-slide-footer', renumbered[-1]['html'])
+        self.assertRegex(renumbered[1]['html'], r'data-index-page="overview"[^>]*>03</div>')
+        self.assertRegex(renumbered[1]['html'], r'data-index-page="financial"[^>]*>05</div>')
+        self.assertRegex(renumbered[1]['html'], r'data-index-page="closing"[^>]*>07</div>')
+        self.assertEqual(renumbered, engine.renumber_presentation_slides(
+            renumbered, branding=branding, project_data=project))
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function renumberTenantSlides()', index_source)
+        self.assertIn('renumberTenantSlides();\n      renderTenantSlides();', index_source)
+        create_source = index_source.split('async function saveTenantPresentation', 1)[1].split('async function openExistingPresentation', 1)[0]
+        update_source = index_source.split('async function saveExistingPresentation', 1)[1].split('async function regeneratePresentationMaps', 1)[0]
+        export_source = index_source.split('async function exportTenantSlides', 1)[1].split('async function deleteTenantPresentation', 1)[0]
+        self.assertLess(create_source.index('renumberTenantSlides();'), create_source.index("api('POST', '/api/presentations'"))
+        self.assertLess(update_source.index('renumberTenantSlides();'), update_source.index("api('PUT', '/api/presentations/'"))
+        self.assertLess(export_source.index('renumberTenantSlides();'), export_source.index('const payload = {'))
+        self.assertIn('slidesData: tenantSlidesData', export_source)
+
+    def test_presentation_save_update_and_export_enforce_slide_numbers(self):
+        engine = self.application_module.slide_engine
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        with self.app.app_context():
+            branding = db.get_branding(self.tenant_a) or {}
+        stale_content = engine.postprocess_slide(
+            '<div class="slide"><p>محتوى</p></div>', 'content', slide_num=8,
+            slide_title='محتوى', total_slides=9, branding=branding,
+        )
+        slides = [
+            {'title': 'الغلاف', 'type': 'cover', 'html': '<div class="slide">غلاف</div>'},
+            {'title': 'محتويات العرض', 'type': 'index', 'html': '<div class="slide">فهرس</div>'},
+            {'title': 'محتوى', 'type': 'content', 'section_key': 'overview', 'html': stale_content},
+            {'title': 'الخاتمة', 'type': 'closing', 'html': '<div class="slide">ختام</div>'},
+        ]
+        created = client.post('/api/presentations', headers=headers, json={
+            'title': 'عرض الترقيم', 'projectData': {'project_name': 'عرض الترقيم'},
+            'slidesData': slides, 'slideCount': 99,
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        presentation_id = created.get_json()['presentationId']
+        with self.app.app_context():
+            stored = db.get_presentation(presentation_id, tenant_id=self.tenant_a)
+            stored_slides = json.loads(stored['slides_data'])
+        self.assertEqual(stored['slide_count'], 4)
+        self.assertIn('03 — 04', stored_slides[2]['html'])
+
+        loaded = client.get('/api/presentations/' + presentation_id, headers=headers).get_json()['presentation']
+        self.assertIn('03 — 04', loaded['slidesData'][2]['html'])
+        loaded_slides = loaded['slidesData']
+        loaded_slides.insert(3, {
+            'title': 'محتوى إضافي', 'type': 'content', 'section_key': 'overview', 'html': stale_content,
+        })
+        updated = client.put('/api/presentations/' + presentation_id, headers=headers, json={
+            'slidesData': loaded_slides, 'slideCount': 99,
+        })
+        self.assertTrue(updated.get_json()['success'], updated.get_json())
+        with self.app.app_context():
+            stored = db.get_presentation(presentation_id, tenant_id=self.tenant_a)
+            stored_slides = json.loads(stored['slides_data'])
+        self.assertEqual(stored['slide_count'], 5)
+        self.assertIn('03 — 05', stored_slides[2]['html'])
+        self.assertIn('04 — 05', stored_slides[3]['html'])
+
+        with patch('exports.pdf_export.generate_pdf') as generate_pdf:
+            exported = client.post('/api/export', headers=headers, json={
+                'format': 'pdf', 'presentationId': presentation_id, 'projectName': 'عرض الترقيم',
+            })
+        self.assertTrue(exported.get_json()['success'], exported.get_json())
+        exported_html = generate_pdf.call_args.args[0]
+        self.assertIn('03 — 05', exported_html)
+        self.assertIn('04 — 05', exported_html)
+
     def test_the_slide_structure_is_not_client_facing(self):
         """Owner rule: the client never operates the structure — no plan panel, no editable plan
         titles, and no button that builds or rebuilds it outside «توليد العرض»."""

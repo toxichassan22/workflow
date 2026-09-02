@@ -3372,6 +3372,9 @@ def api_designer_chat():
             else:
                 executed.append({'tool': tool, 'status': 'skipped', 'message': 'أداة غير معروفة'})
 
+        slides = slide_engine.renumber_presentation_slides(
+            slides, branding=branding, project_data=project_data, tenant_id=tenant_id,
+        )
         validation = _validate_workspace_data({'slidesData': slides})
         if not validation['valid']:
             return jsonify({'success': False, 'error': 'تم رفض التعديل لأن العرض يحتوي على شرائح غير صالحة', 'validation': validation}), 422
@@ -5400,6 +5403,10 @@ def api_generate_slide_single():
             'html': html,
             'title': slide.get('title', f'شريحة {slide_index + 1}'),
             'type': slide.get('type', 'content'),
+            'sectionKey': slide.get('section_key', ''),
+            'contentSource': slide.get('content_source', ''),
+            'sourceTable': slide.get('source_table', ''),
+            'indexEntries': slide.get('index_entries', []),
             'designStyle': slide.get('design_style', 'cards'),
         },
         'slideIndex': slide_index,
@@ -5464,6 +5471,10 @@ def api_generate_slides():
                 'html': html or '',
                 'title': slide_info.get('title', f'شريحة {i+1}'),
                 'type': slide_info.get('type', 'content'),
+                'sectionKey': slide_info.get('section_key', ''),
+                'contentSource': slide_info.get('content_source', ''),
+                'sourceTable': slide_info.get('source_table', ''),
+                'indexEntries': slide_info.get('index_entries', []),
                 'designStyle': slide_info.get('design_style', 'cards'),
             })
 
@@ -5581,7 +5592,11 @@ def api_save_presentation():
     title = (data.get('title') or 'عرض بدون عنوان').strip()
     project_data = normalize_presentation_assets(data.get('projectData', {}), g.tenant_id)
     slides_data = normalize_presentation_assets(data.get('slidesData', []), g.tenant_id)
-    slide_count = data.get('slideCount', len(slides_data))
+    slides_data = slide_engine.renumber_presentation_slides(
+        slides_data, branding=db.get_branding(g.tenant_id), project_data=project_data,
+        tenant_id=g.tenant_id,
+    )
+    slide_count = len(slides_data)
 
     pres_id = db.create_presentation(
         tenant_id=g.tenant_id,
@@ -5607,9 +5622,13 @@ def api_get_presentation(pres_id):
     pres['projectData'] = _merge_persisted_map_assets(pres['projectData'], g.tenant_id, presentation_id=pres_id)
     slides = json.loads(pres['slides_data']) if pres.get('slides_data') else []
     branding = db.get_branding(g.tenant_id) or {}
+    slides = slide_engine.renumber_presentation_slides(
+        slides, branding=branding, project_data=pres['projectData'], tenant_id=g.tenant_id,
+    )
     for s in slides:
         if isinstance(s, dict) and 'html' in s and isinstance(s['html'], str):
             s['html'] = resolve_logo_in_html(s['html'], g.tenant_id, _branding_cache=branding)
+    pres['slide_count'] = len(slides)
     pres['slidesData'] = slides
     return jsonify({'success': True, 'presentation': pres})
 
@@ -5628,6 +5647,19 @@ def api_update_presentation(pres_id):
         if k in data:
             db_key = {'projectData': 'project_data', 'slidesData': 'slides_data', 'slideCount': 'slide_count'}.get(k, k)
             updates[db_key] = normalize_presentation_assets(data[k], g.tenant_id) if k in {'projectData', 'slidesData'} else data[k]
+
+    if 'slides_data' in updates:
+        project_data = updates.get('project_data')
+        if not isinstance(project_data, dict):
+            try:
+                project_data = json.loads(pres.get('project_data') or '{}')
+            except (TypeError, ValueError):
+                project_data = {}
+        updates['slides_data'] = slide_engine.renumber_presentation_slides(
+            updates['slides_data'], branding=db.get_branding(g.tenant_id),
+            project_data=project_data, tenant_id=g.tenant_id,
+        )
+        updates['slide_count'] = len(updates['slides_data'])
 
     # Save version snapshot before update if slides_data is changing
     if 'slides_data' in updates:
@@ -7206,26 +7238,33 @@ def api_export():
             slides_html = data.get('slidesHtml', '')
             slides_data = data.get('slidesData', [])
             presentation_id = data.get('presentationId')
+            project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+            pres = db.get_presentation(presentation_id, g.tenant_id) if presentation_id else None
+            if pres and not project_data:
+                try:
+                    project_data = json.loads(pres.get('project_data') or '{}')
+                except (TypeError, ValueError):
+                    project_data = {}
 
             # Fallback: load latest saved slides from DB
-            if not slides_html and not slides_data and presentation_id:
-                pres = db.get_presentation(presentation_id, g.tenant_id)
-                if pres and pres.get('slides_data'):
-                    try:
-                        loaded = pres['slides_data']
-                        if isinstance(loaded, str):
-                            loaded = json.loads(loaded)
-                        slides_data = loaded if isinstance(loaded, list) else []
-                    except Exception as e:
-                        print(f"[EXPORT] failed to load slides_data: {e}")
+            if not slides_html and not slides_data and pres and pres.get('slides_data'):
+                try:
+                    loaded = pres['slides_data']
+                    if isinstance(loaded, str):
+                        loaded = json.loads(loaded)
+                    slides_data = loaded if isinstance(loaded, list) else []
+                except Exception as e:
+                    print(f"[EXPORT] failed to load slides_data: {e}")
 
+            if slides_data:
+                slides_data = slide_engine.renumber_presentation_slides(
+                    slides_data, branding=branding, project_data=project_data, tenant_id=g.tenant_id,
+                )
+                slides_html, export_notes = _export_html_from_slides(slides_data)
+                if export_notes:
+                    print('[EXPORT] ' + ' | '.join(export_notes))
             if not slides_html:
-                if slides_data:
-                    slides_html, export_notes = _export_html_from_slides(slides_data)
-                    if export_notes:
-                        print('[EXPORT] ' + ' | '.join(export_notes))
-                if not slides_html:
-                    return jsonify({'error': 'slidesHtml or slidesData is required for PDF export'}), 400
+                return jsonify({'error': 'slidesHtml or slidesData is required for PDF export'}), 400
 
             safe_name = ''.join(c for c in project_name if c.isalnum() or c in '-_ ')[:50].strip() or 'presentation'
             pdf_path = os.path.join(tenant_output_dir, f"{safe_name}_{int(time.time())}.pdf")
@@ -7246,21 +7285,29 @@ def api_export():
             from exports.pptx_export import generate_pptx
             slides_data = data.get('slidesData', [])
             presentation_id = data.get('presentationId')
+            project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+            pres = db.get_presentation(presentation_id, g.tenant_id) if presentation_id else None
+            if pres and not project_data:
+                try:
+                    project_data = json.loads(pres.get('project_data') or '{}')
+                except (TypeError, ValueError):
+                    project_data = {}
 
             # Fallback: load latest saved slides from DB
-            if not slides_data and presentation_id:
-                pres = db.get_presentation(presentation_id, g.tenant_id)
-                if pres and pres.get('slides_data'):
-                    try:
-                        loaded = pres['slides_data']
-                        if isinstance(loaded, str):
-                            loaded = json.loads(loaded)
-                        slides_data = loaded if isinstance(loaded, list) else []
-                    except Exception as e:
-                        print(f"[EXPORT] failed to load slides_data for PPTX: {e}")
+            if not slides_data and pres and pres.get('slides_data'):
+                try:
+                    loaded = pres['slides_data']
+                    if isinstance(loaded, str):
+                        loaded = json.loads(loaded)
+                    slides_data = loaded if isinstance(loaded, list) else []
+                except Exception as e:
+                    print(f"[EXPORT] failed to load slides_data for PPTX: {e}")
 
             if not slides_data:
                 return jsonify({'error': 'slidesData is required for PPTX export'}), 400
+            slides_data = slide_engine.renumber_presentation_slides(
+                slides_data, branding=branding, project_data=project_data, tenant_id=g.tenant_id,
+            )
 
             pptx_path = generate_pptx(slides_data, project_name, branding, tenant_output_dir, g.tenant_id)
             relative_url = f'/outputs/{g.tenant_id}/{os.path.basename(pptx_path)}'
@@ -10830,7 +10877,15 @@ def api_restore_version(pres_id, version_id):
 
     # Restore the old version
     old_slides = _json.loads(version['slides_data']) if version.get('slides_data') else []
-    db.update_presentation(pres_id, slides_data=old_slides)
+    try:
+        project_data = _json.loads(pres.get('project_data') or '{}')
+    except (TypeError, ValueError):
+        project_data = {}
+    old_slides = slide_engine.renumber_presentation_slides(
+        old_slides, branding=db.get_branding(g.tenant_id), project_data=project_data,
+        tenant_id=g.tenant_id,
+    )
+    db.update_presentation(pres_id, slides_data=old_slides, slide_count=len(old_slides))
     _record_change('presentation', pres_id, 'استرجاع نسخة',
                    [f'رجع العرض إلى نسخة {version["created_at"]}']
                    + change_tracking.describe_slide_changes(current_slides, old_slides))
@@ -13220,13 +13275,18 @@ HTML الحالي:
                 title = (params.get('title') or workspace.get('title') or
                          (workspace.get('projectData') or {}).get('project_name') or 'عرض بدون عنوان').strip()
                 slides = _workspace_slides(workspace)
+                project_data = workspace.get('projectData') if isinstance(workspace.get('projectData'), dict) else {}
+                slides = slide_engine.renumber_presentation_slides(
+                    slides, branding=db.get_branding(tenant_id), project_data=project_data,
+                    tenant_id=tenant_id,
+                )
                 pres_id = workspace.get('presentationId')
                 existing = db.get_presentation(pres_id, tenant_id=tenant_id) if pres_id else None
                 if existing:
                     db.save_presentation_version(pres_id, None, 'Super Agent', slides, action='agent_save')
-                    db.update_presentation(pres_id, title=title, project_data=workspace.get('projectData', {}), slides_data=slides, slide_count=len(slides), status='edited')
+                    db.update_presentation(pres_id, title=title, project_data=project_data, slides_data=slides, slide_count=len(slides), status='edited')
                 else:
-                    pres_id = db.create_presentation(tenant_id, title, workspace.get('projectData', {}), slides, len(slides))
+                    pres_id = db.create_presentation(tenant_id, title, project_data, slides, len(slides))
                 result['presentationId'] = pres_id
                 result['data'] = {
                     'presentationId': pres_id,

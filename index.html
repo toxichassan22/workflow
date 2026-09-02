@@ -11555,6 +11555,10 @@
         slides: slidesData.map(slide => ({
           title: slide.title || '',
           type: slide.type || 'content',
+          section_key: slide.section_key || slide.sectionKey || '',
+          content_source: slide.content_source || slide.contentSource || '',
+          source_table: slide.source_table || slide.sourceTable || '',
+          index_entries: slide.index_entries || slide.indexEntries || [],
           design_style: slide.designStyle || slide.design_style || 'cards',
           bullets: slide.bullets || [],
           metrics: slide.metrics || []
@@ -15937,6 +15941,7 @@
         if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
         if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
         if (typeof persistFinancialStudyDraftState === 'function') persistFinancialStudyDraftState();
+        renumberTenantSlides();
         const formData = await collectTenantFormData();
         const data = { ...tenantProjectData, ...formData };
         if (!data.project_logo && tenantProjectData.project_logo) data.project_logo = tenantProjectData.project_logo;
@@ -19882,6 +19887,10 @@
             title: generated.title || plan.title,
             type: generated.type || plan.type || 'content',
             html: generated.html,
+            section_key: generated.sectionKey || plan.section_key || '',
+            content_source: generated.contentSource || plan.content_source || '',
+            source_table: generated.sourceTable || plan.source_table || '',
+            index_entries: generated.indexEntries || plan.index_entries || [],
             designStyle: generated.designStyle || plan.design_style || 'cards',
             bullets: plan.bullets || [],
             metrics: plan.metrics || []
@@ -19957,6 +19966,140 @@
 
     let activeSlideIndex = 0;
     const slideInlineEditStates = {};
+    const TENANT_PRESENTATION_SECTION_TITLES = {
+      overview: 'نبذة عن المشروع', components: 'مكونات المشروع', land: 'تحليل الأرض',
+      location: 'تحليل الموقع الجغرافي', market: 'تحليل السوق', timeline: 'الجدول الزمني',
+      financial: 'الدراسة المالية', swot_risks: 'تحليل SWOT وتحليل المخاطر', team: 'فريق العمل',
+      plans: 'المخططات', exterior: 'التصورات الخارجية', interior: 'التصورات الداخلية',
+      executive_summary: 'الملخص التنفيذي', closing: 'الخاتمة'
+    };
+
+    function tenantSlideSectionKey(slide, current = '') {
+      const explicit = String(slide?.section_key || slide?.sectionKey || slide?.section || '').trim();
+      if (TENANT_PRESENTATION_SECTION_TITLES[explicit]) return explicit;
+      const type = String(slide?.type || '').toLowerCase();
+      if (type === 'closing') return 'closing';
+      if (type === 'moodboard') return 'exterior';
+      if (type.startsWith('map_') || type === 'site_specs') return 'location';
+      const text = [slide?.title, slide?.content_source, slide?.contentSource, slide?.source_table]
+        .filter(Boolean).join(' ').toLowerCase();
+      const matchers = [
+        ['closing', /الخاتمة|الختام|شكرا|شكراً|closing|conclusion|thanks/i],
+        ['executive_summary', /الملخص التنفيذي|executive summary/i],
+        ['interior', /التصورات? الداخلية|التصميم الداخلي|interior/i],
+        ['exterior', /التصورات? الخارجية|المود بورد|mood ?board|واجهات المشروع|exterior|التصور البصري/i],
+        ['plans', /المخططات|المساقط|مخطط معماري|2d|floor ?plans?/i],
+        ['team', /فريق العمل|فريق التطوير|المطور|الاستشاري|team/i],
+        ['swot_risks', /swot|نقاط القوة|نقاط الضعف|الفرص والتهديدات|المخاطر|إدارة المخاطر|risk/i],
+        ['financial', /الدراسة المالية|التحليل المالي|الجدوى|التدفقات النقدية|الإيرادات|التكاليف|العائد|roi|irr|financial|cash ?flow/i],
+        ['timeline', /الجدول الزمني|الخطة الزمنية|مراحل التطوير|مراحل التنفيذ|timeline|schedule/i],
+        ['market', /تحليل السوق|دراسة السوق|المنافسين|الطلب السوقي|market|competitor/i],
+        ['location', /الموقع الجغرافي|تحليل الموقع|الموقع الاستراتيجي|خريطة|الطرق|المعالم|نطاق التأثير|site|location|map|access|landmarks|catchment/i],
+        ['land', /تحليل الأرض|الأرض والاشتراطات|الأرض والكروكي|الكروكي|اشتراطات البناء|حدود الأرض|صور الأرض|land|croquis/i],
+        ['components', /مكونات المشروع|الوحدات والمساحات|المكونات|components|units/i],
+        ['overview', /نبذة عن المشروع|المشروع والفكرة|فكرة المشروع|نظرة عامة|تعريف المشروع|project overview|project brief/i]
+      ];
+      return matchers.find(([, pattern]) => pattern.test(text))?.[0] || current || 'overview';
+    }
+
+    function renumberTenantSlideHtml(slide, index, total, indexEntries) {
+      if (!slide?.html) return slide?.html || '';
+      const template = document.createElement('template');
+      template.innerHTML = String(slide.html);
+      const root = template.content.querySelector('.slide');
+      if (!root) return slide.html;
+      const type = String(slide.type || 'content').toLowerCase();
+      if (['cover', 'closing', 'moodboard'].includes(type)) {
+        root.querySelectorAll('[data-slide-footer]').forEach(node => node.remove());
+      } else {
+        const counter = String(index).padStart(2, '0') + ' — ' + String(total).padStart(2, '0');
+        let counters = Array.from(root.querySelectorAll('[data-slide-counter]'));
+        if (!counters.length && type === 'section_divider') {
+          counters = Array.from(root.querySelectorAll('div')).filter(node => /^\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*$/.test(node.textContent || ''));
+        }
+        if (!counters.length) {
+          const footer = Array.from(root.querySelectorAll('div')).find(node => /height:\s*36px/i.test(node.getAttribute('style') || ''));
+          if (footer) {
+            const candidates = Array.from(footer.querySelectorAll('span,div')).filter(node => /^\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*$/.test(node.textContent || ''));
+            const counterNode = candidates[candidates.length - 1];
+            if (counterNode) {
+              footer.dataset.slideFooter = '1';
+              counterNode.dataset.slideCounter = '1';
+              counters = [counterNode];
+            }
+          }
+        }
+        counters.forEach(node => {
+          node.dataset.slideCounter = '1';
+          node.textContent = counter;
+        });
+      }
+      if (type === 'index') {
+        const activeSections = new Set(indexEntries.map(entry => entry.section_key));
+        root.querySelectorAll('[data-index-section]').forEach(row => {
+          if (!activeSections.has(row.dataset.indexSection)) row.remove();
+        });
+        indexEntries.forEach(entry => {
+          let page = root.querySelector('[data-index-page="' + entry.section_key + '"]');
+          if (!page) {
+            const title = Array.from(root.querySelectorAll('div')).find(node =>
+              node.children.length === 0 && String(node.textContent || '').trim() === entry.title);
+            const sibling = title?.nextElementSibling;
+            if (sibling && /^\s*\d+\s*$/.test(sibling.textContent || '')) page = sibling;
+          }
+          if (page) {
+            page.dataset.indexPage = entry.section_key;
+            page.textContent = String(entry.page).padStart(2, '0');
+          }
+        });
+      }
+      return template.innerHTML;
+    }
+
+    function renumberTenantSlides() {
+      if (!Array.isArray(tenantSlidesData) || !tenantSlidesData.length) return tenantSlidesData;
+      let current = '';
+      tenantSlidesData = tenantSlidesData.map(slide => {
+        const item = { ...(slide || {}) };
+        const type = String(item.type || 'content').toLowerCase();
+        if (type === 'cover') item.section_key = 'cover';
+        else if (type === 'index') item.section_key = 'index';
+        else {
+          item.section_key = tenantSlideSectionKey(item, current);
+          if (type === 'section_divider') current = item.section_key;
+        }
+        return item;
+      });
+      const seen = new Set();
+      const indexEntries = [];
+      tenantSlidesData.forEach((slide, index) => {
+        if (slide.type !== 'section_divider' && slide.section_key !== 'closing') return;
+        if (!TENANT_PRESENTATION_SECTION_TITLES[slide.section_key] || seen.has(slide.section_key)) return;
+        seen.add(slide.section_key);
+        indexEntries.push({
+          section_key: slide.section_key,
+          title: TENANT_PRESENTATION_SECTION_TITLES[slide.section_key],
+          page: index + 1
+        });
+      });
+      tenantSlidesData = tenantSlidesData.map((slide, index) => {
+        const item = { ...slide };
+        if (item.type === 'index') item.index_entries = indexEntries;
+        item.html = renumberTenantSlideHtml(item, index + 1, tenantSlidesData.length, indexEntries);
+        return item;
+      });
+      tenantSlidePlan = {
+        ...(tenantSlidePlan || {}),
+        proposed_count: tenantSlidesData.length,
+        slides: tenantSlidesData.map(slide => ({
+          title: slide.title || '', type: slide.type || 'content', section_key: slide.section_key || '',
+          content_source: slide.content_source || '', source_table: slide.source_table || '',
+          index_entries: slide.index_entries || [], design_style: slide.designStyle || slide.design_style || 'cards',
+          bullets: slide.bullets || [], metrics: slide.metrics || []
+        }))
+      };
+      return tenantSlidesData;
+    }
 
     // Mirror of design_templates.sanitize_slide_html_for_export(): every export strips the font
     // declarations a slide carries so the company font wins, and the preview must show the same
@@ -20312,6 +20455,7 @@
     function renderTenantSlides() {
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
+      renumberTenantSlides();
       // If branding hasn't loaded yet (failed/slow earlier), retry it and re-render
       // when it arrives so the real logo replaces the sample one automatically.
       if (!tenantBranding && !renderTenantSlides._brandingRetry) {
@@ -20390,6 +20534,7 @@
       if (toIdx < 0 || toIdx >= tenantSlidesData.length) return;
       const [moved] = tenantSlidesData.splice(fromIdx, 1);
       tenantSlidesData.splice(toIdx, 0, moved);
+      renumberTenantSlides();
       renderTenantSlides();
       selectTenantSlide(toIdx);
       triggerAutoSaveDraft();
@@ -20839,7 +20984,9 @@
         const newSlide = {
           title: reply.title || 'شريحة جديدة',
           html: reply.html,
-          type: reply.type || 'content'
+          type: reply.type || 'content',
+          section_key: reply.sectionKey || reply.section_key || '',
+          content_source: reply.contentSource || reply.content_source || ''
         };
         tenantSlidesData.splice(insertIdx, 0, newSlide);
         selectTenantSlide(insertIdx);
@@ -20863,6 +21010,7 @@
         content: reply.response || 'تم تنفيذ الطلب وتحديث العرض.',
         slides: tenantChatFocusIndexes.slice()
       });
+      renumberTenantSlides();
       renderTenantSlides();
       renderTenantDesignerChat();
       triggerAutoSaveDraft();
@@ -21046,6 +21194,7 @@
       const temp = tenantSlidesData[index];
       tenantSlidesData[index] = tenantSlidesData[newIndex];
       tenantSlidesData[newIndex] = temp;
+      renumberTenantSlides();
       renderTenantSlides();
     }
 
@@ -21056,6 +21205,7 @@
       tenantSlidesData.splice(index, 1);
       activeSlideIndex = Math.min(activeSlideIndex, tenantSlidesData.length - 1);
       tenantChatSlideIndex = Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1);
+      renumberTenantSlides();
       renderTenantSlides();
       triggerAutoSaveDraft();
       toast('تم حذف الشريحة. اضغط "حفظ التعديلات" للحفظ.');
@@ -21064,6 +21214,7 @@
     async function saveTenantPresentation(titleOverride = '') {
       const title = String(titleOverride || tenantPresentationTitle
         || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان').trim();
+      renumberTenantSlides();
       tenantProjectData = {
         ...tenantProjectData,
         tenantSlidePlan,
@@ -21369,6 +21520,7 @@
       if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return; }
       const title = tenantPresentationTitle
         || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
+      renumberTenantSlides();
       tenantProjectData = {
         ...tenantProjectData,
         tenantSlidePlan,
@@ -21616,10 +21768,14 @@
       if (!tenantPresentationId) await saveTenantPresentation();
       if (!tenantPresentationId) { toast('لا يوجد عرض للتصدير'); return; }
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'presentation';
+      renumberTenantSlides();
+      tenantProjectData = { ...tenantProjectData, tenantSlidePlan };
       const payload = {
         format: format,
         presentationId: tenantPresentationId,
-        projectName: projectName
+        projectName: projectName,
+        projectData: tenantProjectData,
+        slidesData: tenantSlidesData
       };
       let data = null;
       showLoader('جاري تصدير الملف', 'الصيغة: ' + format.toUpperCase(), 8);
@@ -21914,6 +22070,7 @@
         }
       }
       if (changed) {
+        renumberTenantSlides();
         renderTenantSlides();
         renderTenantSlidesSidebar();
         updateTenantChatSlideSelect();
@@ -22687,8 +22844,10 @@
       if (data.success) {
         toast('تم استعادة النسخة');
         document.getElementById('versionsModal').remove();
-        if (typeof renderTenantSlides === 'function' && data.slidesData) {
-          renderTenantSlides(data.slidesData);
+        if (typeof renderTenantSlides === 'function' && Array.isArray(data.slidesData)) {
+          tenantSlidesData = data.slidesData;
+          renumberTenantSlides();
+          renderTenantSlides();
         }
       } else {
         toast(data.error || 'فشل الاستعادة');

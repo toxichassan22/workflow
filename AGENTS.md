@@ -571,6 +571,24 @@ must not replace the existing presentation or mark the source draft dirty. The f
 uses the generation-only `report.parts`, so its standalone deck is the exact same financial section
 that the full deck would receive.
 
+## Slide numbering survives edits
+
+`slide_engine.renumber_presentation_slides()` is the server authority after every slide mutation and
+before save, restore, PDF or PPTX export. `renumberTenantSlides()` mirrors it immediately in the
+browser after insert, delete and move, and the export request carries the current slides rather than
+silently exporting an older saved copy.
+
+- Managed content footers carry `data-slide-footer` and `data-slide-counter` and display current plus
+  total as `03 — 12`. Section dividers carry the same counter marker. Cover, closing and moodboard
+  never receive a managed footer.
+- Deterministic index rows carry `data-index-section` / `data-index-page`. Renumbering recomputes each
+  section start and the closing page, rebuilds the server index, and updates or removes browser rows.
+- Preserve `section_key`, `content_source`, `source_table` and `index_entries` from the slide plan in
+  every stored slide. Legacy slides infer their section from semantic type/title and their old
+  `height:36px` footer is upgraded in place.
+- POST/PUT presentation routes ignore a caller's stale `slideCount` and store `len(slides)` after
+  renumbering. Designer chat, super-agent workspace saves and version restore use the same function.
+
 ## Never advertise an image that does not exist
 
 `##STREET_VIEW_1..4##` was listed in the design rules, in `SLIDE_PLAN_PROMPT` (type `site_photos`)
