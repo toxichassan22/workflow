@@ -276,6 +276,26 @@ def _financial_column_ranges(part):
     return [(start, min(start + 5, len(headers))) for start in range(1, len(headers), 5)]
 
 
+def _balanced_row_ranges(total_rows, max_per_slide=12, min_per_slide=4):
+    """Chunk rows into balanced, readable ranges without leaving orphan 1-2 row slides."""
+    if total_rows <= 0:
+        return []
+    if total_rows <= max_per_slide:
+        return [(0, total_rows)]
+    num_chunks = (total_rows + 9) // 10
+    while num_chunks > 1 and (total_rows // num_chunks) < min_per_slide:
+        num_chunks -= 1
+    base_size = total_rows // num_chunks
+    remainder = total_rows % num_chunks
+    ranges = []
+    start = 0
+    for i in range(num_chunks):
+        size = base_size + (1 if i < remainder else 0)
+        ranges.append((start, start + size))
+        start += size
+    return ranges
+
+
 def _financial_table_chartable(part, rows, column_start=None, column_end=None):
     if column_start is not None:
         return False
@@ -410,26 +430,20 @@ def _financial_summary_plan_slides(model):
             'chart_type': '', 'content_density': 'high', 'requires_image': False,
             'content_source': 'financial_indicators', 'row_count': 2, 'bullets': [],
         }]
-    split_name = max(available, key=lambda item: len(item[1]))[0]
-    split_largest = sum(len(rows) for _name, rows in available) > 12 and len(dict(available)[split_name]) > 6
     slides = []
     for name, rows in available:
-        chunks = [rows]
-        if name == split_name and split_largest:
-            midpoint = (len(rows) + 1) // 2
-            chunks = [rows[:midpoint], rows[midpoint:]]
-        offset = 0
-        for chunk_index, chunk in enumerate(chunks, 1):
+        row_ranges = _balanced_row_ranges(len(rows), max_per_slide=12, min_per_slide=5)
+        for chunk_index, (start, end) in enumerate(row_ranges, 1):
+            chunk = rows[start:end]
             key = 'costs' if name == 'التكاليف والاستثمار' else 'returns'
-            suffix = f' — {chunk_index}' if len(chunks) > 1 else ''
+            suffix = f' — {chunk_index}' if len(row_ranges) > 1 else ''
             slides.append({
                 'title': f'الملخص المالي — {name}{suffix}',
                 'type': 'content', 'design_style': 'table', 'chart_type': '',
                 'content_density': 'high', 'requires_image': False,
-                'content_source': f'financial_summary:{key}:{offset}:{offset + len(chunk)}',
+                'content_source': f'financial_summary:{key}:{start}:{end}',
                 'row_count': len(chunk), 'bullets': [],
             })
-            offset += len(chunk)
     return slides[:3]
 
 
@@ -811,7 +825,6 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     continue
                 rows = part.get('rows') if isinstance(part.get('rows'), list) else []
                 rows = _filter_substantive_financial_rows(rows, part.get('type'))
-                chunk_size = 8 if part.get('type') == 'table' else 6
                 if not rows:
                     continue
                 part_title = subheading or heading
@@ -822,12 +835,11 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 if target_section == 'components':
                     continue
                 column_ranges = _financial_column_ranges(part) if part.get('type') == 'table' else [(None, None)]
-                for start in range(0, len(rows), chunk_size):
-                    end = min(start + chunk_size, len(rows))
-                    row_number = start // chunk_size + 1
+                row_ranges = _balanced_row_ranges(len(rows), max_per_slide=12, min_per_slide=4)
+                for row_number, (start, end) in enumerate(row_ranges, 1):
                     for column_number, (column_start, column_end) in enumerate(column_ranges, 1):
                         title_suffixes = []
-                        if len(rows) > chunk_size:
+                        if len(row_ranges) > 1:
                             title_suffixes.append(str(row_number))
                         if len(column_ranges) > 1:
                             title_suffixes.append(f'جزء {column_number}')
@@ -851,13 +863,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         else:
             for table_key, title, style in _FINANCIAL_PLAN_TABLES:
                 rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
-                for start in range(0, len(rows), 8):
-                    end = min(start + 8, len(rows))
-                    number = start // 8 + 1
+                row_ranges = _balanced_row_ranges(len(rows), max_per_slide=12, min_per_slide=4)
+                for number, (start, end) in enumerate(row_ranges, 1):
                     is_chart = (style == 'chart' and start == 0)
                     c_type = _financial_chart_type(title, table_key, number - 1) if is_chart else ''
                     add('financial', {
-                        'title': title + (f' — {number}' if len(rows) > 8 else ''),
+                        'title': title + (f' — {number}' if len(row_ranges) > 1 else ''),
                         'type': 'content', 'design_style': 'chart' if c_type else ('table' if style == 'chart' else style),
                         'chart_type': c_type,
                         'content_density': 'high', 'requires_image': False,
@@ -2647,10 +2658,10 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     bullets_text = '\n'.join(f'- {b}' for b in bullets) if bullets else '(لا توجد نقاط محددة — استخرج من بيانات المشروع)'
 
     style_instructions = {
-        'dashboard': 'لوحة مؤشرات مالية تتضمن جدولاً منظماً شاملاً للتكاليف والاستثمار ومؤشرات العائد والاسترداد مع إبراز الأرقام الكبرى بوزن 800',
+        'dashboard': 'لوحة مؤشرات مالية تعتمد جداول HTML نظامية كاملة بعمودين للتكاليف والاستثمار ومؤشرات العائد بجانب بعضهما بنفس تصميم ومساحات تقرير PDF مع منع الكروت العائمة والمربعات الإحصائية',
         'cards': 'بطاقتان أو ثلاث فقط لعناصر مستقلة عريضة وغنية؛ استخدم الفقرات النصية أو الجداول بدلاً من التقطيع المفرط إلى مربعات صغيرة',
         'timeline': 'مراحل زمنية واضحة ومسار تدفق زمني، واعرض الملاحظة فقط تحت المرحلة التي تحتوي ملاحظة فعلية',
-        'table': 'جدول احترافي كامل بالمسميات والقيم الأصلية وفواصل آلاف للأرقام دون تقريب مع رؤوس جداول عريضة 700',
+        'table': 'جدول احترافي كامل مطابق لتصميم تقرير PDF المالي بحدود واضحة 1px solid ورؤوس مظللة بألوان الهوية وفواصل آلاف للأرقام ومنع تحويل الجدول إلى كروت عائمة',
         'chart': 'رسم بياني احترافي حصراً من الأنواع الأربعة المعتمدة (مقارنة المنافسين: horizontal_bar في دراسة السوق، تكوين إجمالي تكلفة الاستثمار: waterfall، التدفقات النقدية السنوية والتراكمية: combo، مقارنة السيناريوهات المالية: heatmap في المالية) بـ HTML و CSS النقي مع جدول الأرقام بجانبه وبألوان الهوية ومنع أي نوع آخر',
         'text': 'عنوان وفقرة غنية ووافية أو قائمة منظمة تشرح الفكرة بالكامل بلا اختصار مخل وبلا تجزئة لمربعات فارغة',
         'image': 'استخدم جميع رموز الصور المحددة في الخطة بتوزيع متوازن واحد للمجموعة، وبحد أقصى ثلاث صور في الشريحة',
@@ -2782,6 +2793,9 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             notes.append(timeline_note.strip())
     if section_key == 'financial':
         notes.append('قالب تقرير الدراسة المالية ملزم: انقل جميع الجداول والمؤشرات المطلوبة بمسمياتها الأصلية وبالقيم والوحدات والترتيب نفسها، ولا تغيّر إلا ألوان الهوية والتنسيق المحدود.')
+        notes.append('تصميم جداول تقرير PDF المالي هو التصميم الأساسي والإلزامي: انقل جميع الجداول والمؤشرات بمسمياتها الأصلية وبالقيم والترتيب نفسها، وطبّق ألوان الهوية فقط دون تغيير هيكل الجدول أو مساحاته.')
+        notes.append('ممنوع منعاً باتاً: تحويل الجداول المالية إلى كروت عائمة (cards)، أو شبكة مربعات إحصائية (KPI boxes)، أو تصميم الشريحة على شكل 4 خانات عائمة أو شريحة بها خانة واحدة. يجب استخدام وسم <table> نظامي كامل بحدود واضحة 1px solid وخلفيات ترويسة هادئة.')
+        notes.append('لجداول المؤشرات والملخصات (Key-Value): استخدم جدولاً بعمودين (<table class="summary-table">) بعرض 35%-40% لعمود اسم البند بخلفية هادئة بلون الهوية، وعمود القيمة بخط عريض bold وفواصل آلاف للأرقام. عند وجود جدولين مترابطين رصهما بجانب بعضهما في عمودين متجاورين (display:grid; grid-template-columns:1fr 1fr; gap:24px;) بنفس فكرة ومساحات تقرير PDF المالي.')
         notes.append('نسّق الأعداد بفواصل الآلاف للعرض فقط، من دون تقريب أو تحويل إلى ألف أو مليون أو تغيير عدد الخانات العشرية.')
         if chart_type:
             notes.append(f'أنشئ الرسم المحدد فقط ({chart_type}: {chart_note}) بجانب جدول مصدره، مع بقاء الجدول كاملًا ومقروءًا ومنع position:absolute للرسم أو الجدول أو النصوص.')
@@ -3379,6 +3393,10 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                     html, flags=re.IGNORECASE):
                 print(f"[SLIDE-{slide_num}] ERROR: unplanned chart outside selected financial charts (attempt {attempt})")
                 retry_note = '\n\nإعادة المحاولة: هذه الشريحة لا تحمل chart_type؛ احذف الرسم البياني واعرض النص أو الجدول فقط.'
+                continue
+            if _slide_section_key(slide) == 'financial' and not slide.get('chart_type') and '<table' not in html.lower():
+                print(f"[SLIDE-{slide_num}] ERROR: financial slide must use table, not cards/boxes (attempt {attempt})")
+                retry_note = '\n\nإعادة المحاولة: شريحة الدراسة المالية ملزمة باستخدام جداول HTML نظامية (table) بتصميم تقرير PDF. احذف الكروت العائمة والمربعات واعرض البيانات داخل جدول كامل.'
                 continue
             missing_images = [token for token in (slide.get('image_tokens') or []) if token not in html]
             if missing_images:
