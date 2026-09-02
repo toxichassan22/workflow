@@ -2726,48 +2726,157 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
         ]
 
     items = items[:15]
-    max_flow = max([abs(it['net_flow_m']) for it in items] + [1.0])
-    cums = [it['cumulative_m'] for it in items]
-    min_cum = min(cums + [0.0])
-    max_cum = max(cums + [1.0])
-    cum_range = (max_cum - min_cum) or 1.0
+    all_vals = [it['net_flow_m'] for it in items] + [it['cumulative_m'] for it in items] + [0.0]
+    min_v = min(all_vals)
+    max_v = max(all_vals)
 
-    # Scale for the polyline: zero at y=100, positive above, negative below.
-    # The bars use top:50% (= y=100 in viewBox 200) as zero.
-    max_abs_cum = max(abs(min_cum), abs(max_cum), 1.0)
-    # Use 85px of headroom each side (y=15..185) for the line points.
-    px_half = 85.0
+    import math
+    def _bound_step(val, step=250.0, is_max=True):
+        if is_max:
+            return math.ceil(val / step) * step
+        return math.floor(val / step) * step
+
+    raw_span = max_v - min_v
+    step = 250.0 if raw_span > 600 else (100.0 if raw_span > 250 else (50.0 if raw_span > 100 else 20.0))
+    y_max = _bound_step(max_v, step=step, is_max=True)
+    y_min = _bound_step(min_v, step=step, is_max=False)
+    if y_max <= y_min:
+        y_max = y_min + step * 2
+
+    vb_w = 540.0
+    vb_h = 290.0
+    m_left = 60.0
+    m_right = 25.0
+    m_top = 35.0
+    m_bottom = 45.0
+
+    plot_w = vb_w - m_left - m_right
+    plot_h = vb_h - m_top - m_bottom
+    span = y_max - y_min
+    scale_y = plot_h / span
+
+    def val_to_y(v):
+        return round(m_top + (y_max - v) * scale_y, 1)
+
+    y_zero = val_to_y(0.0)
+    n = len(items)
+    col_step = plot_w / max(n, 1)
+    bar_w = min(max(round(col_step * 0.55, 1), 16.0), 30.0)
 
     svg_points = []
     svg_circles = []
-    n = len(items)
-    gap_px = 4.0
-    total_w = 500.0
-    col_w = (total_w - max(n - 1, 0) * gap_px) / max(n, 1)
+    ticks = []
+    curr = y_min
+    while curr <= y_max + 1e-6:
+        ticks.append({'val': curr, 'y': val_to_y(curr), 'is_zero': abs(curr) < 1e-6})
+        curr += step
 
     for idx, it in enumerate(items):
-        it['bar_height_pct'] = min(max(round((abs(it['net_flow_m']) / max_flow) * 42, 1), 4.0), 42.0) if it['net_flow_m'] != 0 else 2.0
-        it['bar_direction'] = 'up' if it['is_positive'] else 'down'
-        it['cum_y_pct'] = round(((it['cumulative_m'] - min_cum) / cum_range) * 80 + 10, 1)
+        cx = round(m_left + idx * col_step + col_step / 2.0, 1)
+        bx = round(cx - bar_w / 2.0, 1)
+        net_m = it['net_flow_m']
+        cum_m = it['cumulative_m']
 
-        # Exact center of column in a 500px flex container with 4px gap
-        x = round(idx * (col_w + gap_px) + col_w / 2.0, 1)
-        # y=100 is zero; positive cumulative means lower y (above); negative means higher y (below)
-        y = round(100 - (it['cumulative_m'] / max_abs_cum) * px_half, 1)
-        it['cx'] = x
-        it['cy'] = y
-        svg_points.append(f"{x},{y}")
-        svg_circles.append({'cx': x, 'cy': y, 'year': it.get('year', '')})
+        by_net = val_to_y(net_m)
+        cy_cum = val_to_y(cum_m)
+
+        if net_m >= 0:
+            bh = round(y_zero - by_net, 1)
+            by = by_net
+        else:
+            bh = round(by_net - y_zero, 1)
+            by = y_zero
+
+        it['cx'] = cx
+        it['cy'] = cy_cum
+        it['bar_x'] = bx
+        it['bar_y'] = by
+        it['bar_w'] = bar_w
+        it['bar_h'] = max(bh, 1.5)
+        it['bar_direction'] = 'up' if it['is_positive'] else 'down'
+        it['bar_height_pct'] = round((abs(net_m) / max(max_v, 1.0)) * 100, 1)
+        it['cum_y_pct'] = round(((cum_m - y_min) / span) * 100, 1)
+
+        svg_points.append(f"{cx},{cy_cum}")
+        svg_circles.append({'cx': cx, 'cy': cy_cum, 'year': it.get('year', ''), 'val': cum_m})
+
+    grid_lines = []
+    y_labels = []
+    for t in ticks:
+        stroke = "#94a3b8" if t['is_zero'] else "#e2e8f0"
+        stroke_w = "1.5" if t['is_zero'] else "1"
+        grid_lines.append(f'<line x1="{m_left - 8}" y1="{t["y"]}" x2="{vb_w - m_right}" y2="{t["y"]}" stroke="{stroke}" stroke-width="{stroke_w}"/>')
+        label_txt = f"{int(t['val']):,}" if t['val'] == int(t['val']) else f"{t['val']:.1f}"
+        if t['val'] < 0:
+            label_txt = f"-{abs(int(t['val'])):,}" if t['val'] == int(t['val']) else f"-{abs(t['val']):.1f}"
+        y_labels.append(f'<text x="{m_left - 12}" y="{t["y"] + 3.5}" fill="#64748b" font-size="9" text-anchor="end" direction="ltr">{label_txt}</text>')
+
+    bars_svg = []
+    circles_svg = []
+    x_labels_svg = []
+    data_labels_svg = []
+
+    for i, it in enumerate(items):
+        cx = it['cx']
+        bx = it['bar_x']
+        by = it['bar_y']
+        bh = it['bar_h']
+        net_m = it['net_flow_m']
+        cum_m = it['cumulative_m']
+        bar_color = "url(#posBarGrad)" if it['is_positive'] else "url(#negBarGrad)"
+
+        bars_svg.append(f'<rect x="{bx}" y="{by}" width="{bar_w}" height="{bh}" rx="2" fill="{bar_color}" opacity="0.9"/>')
+        circles_svg.append(f'<circle cx="{cx}" cy="{it["cy"]}" r="4.5" fill="#ffffff" stroke="#0284c7" stroke-width="2.5"/>')
+        x_labels_svg.append(f'<text x="{cx}" y="{vb_h - 18}" fill="#64748b" font-size="9.5" text-anchor="middle">{it["year"]}</text>')
+
+        # Labels: avoid overlap between bar and circle when close
+        if abs(by - it['cy']) > 22:
+            if net_m > 40:
+                data_labels_svg.append(f'<text x="{cx}" y="{by - 6}" fill="#0b1f33" font-size="9" font-weight="700" text-anchor="middle">{net_m:.1f}</text>')
+        if not it['is_positive']:
+            neg_txt = f"-{abs(net_m):.1f}"
+            data_labels_svg.append(f'<text x="{cx}" y="{by + bh + 14}" fill="#b89564" font-size="9" font-weight="700" text-anchor="middle" direction="ltr">{neg_txt}</text>')
+
+        # Key milestone cumulative points
+        if i in (0, 1, 2, 3, 4, 9) or abs(net_m - cum_m) > 50:
+            c_offset = -9 if it['cy'] < y_zero else 15
+            data_labels_svg.append(f'<text x="{cx}" y="{it["cy"] + c_offset}" fill="#0284c7" font-size="9" font-weight="700" text-anchor="middle">{cum_m:.1f}</text>')
+
+    svg_code = f'''<svg class="combo-chart" viewBox="0 0 {int(vb_w)} {int(vb_h)}" style="width: 100%; height: auto; max-height: 290px; display: block;" role="img" aria-label="مخطط التدفقات النقدية السنوية والرصيد التراكمي">
+  <defs>
+    <linearGradient id="posBarGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#12324c"/>
+      <stop offset="100%" stop-color="#0b1f33"/>
+    </linearGradient>
+    <linearGradient id="negBarGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#c5a880"/>
+      <stop offset="100%" stop-color="#b89564"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="{int(vb_w)}" height="{int(vb_h)}" fill="#ffffff" rx="6"/>
+  <text x="{int(m_left - 12)}" y="{int(m_top - 12)}" fill="#94a3b8" font-size="8.5" text-anchor="end">م.ر</text>
+  <g>{''.join(grid_lines)}</g>
+  <g font-family="Tajawal, sans-serif">{''.join(y_labels)}</g>
+  <g>{''.join(bars_svg)}</g>
+  <polyline points="{' '.join(svg_points)}" fill="none" stroke="#0284c7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g>{''.join(circles_svg)}</g>
+  <g font-family="Tajawal, sans-serif">{''.join(data_labels_svg)}</g>
+  <g font-family="IBM Plex Sans Arabic, Tajawal, sans-serif">{''.join(x_labels_svg)}</g>
+</svg>'''
 
     return {
         'items': items,
         'summary': {
             'years_count': len(items),
-            'max_abs_flow_m': max_flow,
-            'min_cumulative_m': min_cum,
-            'max_cumulative_m': max_cum,
+            'max_abs_flow_m': max([abs(it['net_flow_m']) for it in items] + [1.0]),
+            'min_cumulative_m': min([it['cumulative_m'] for it in items] + [0.0]),
+            'max_cumulative_m': max([it['cumulative_m'] for it in items] + [1.0]),
+            'y_min': y_min,
+            'y_max': y_max,
+            'y_zero': y_zero,
             'svg_polyline_points': ' '.join(svg_points),
             'svg_circles': svg_circles,
+            'svg_code': svg_code,
         }
     }
 
@@ -4080,6 +4189,22 @@ def _render_fallback_waterfall(chart_data, primary='#005f78', secondary='#0ea5e9
 
 
 def _render_fallback_combo(chart_data, primary='#005f78', secondary='#0ea5e9'):
+    summary = (chart_data or {}).get('summary') if isinstance(chart_data, dict) else {}
+    svg_code = summary.get('svg_code')
+    if svg_code:
+        return (
+            f'<div style="background:#f8fafc;padding:14px 14px 20px;border-radius:8px;border:1px solid #e2e8f0;position:relative;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+            f'<span style="font-size:12px;font-weight:700;color:{primary};">التدفقات النقدية السنوية والتراكمية (ملايين ر.س)</span>'
+            f'<div style="display:flex;gap:12px;font-size:9.5px;font-weight:600;">'
+            f'<span style="color:#0b1f33;">صافي التدفق السنوي</span>'
+            f'<span style="color:#b89564;">تدفق سالب</span>'
+            f'<span style="color:#0284c7;">الرصيد التراكمي</span>'
+            f'</div>'
+            f'</div>'
+            f'{svg_code}'
+            f'</div>'
+        )
     items = (chart_data or {}).get('items') if isinstance(chart_data, dict) else chart_data
     if not items:
         return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات تدفقات نقدية كافية</div>'
