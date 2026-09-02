@@ -6302,7 +6302,7 @@
         slim.nearby_landmarks_data = slim.nearby_landmarks_data.slice(0, 20).map(item => {
           if (!item || typeof item !== 'object') return item;
           return Object.fromEntries(
-            ['name', 'category', 'distance_km', 'distance_meters', 'duration_minutes', 'distance_text', 'lat', 'lng']
+            ['name', 'category', 'distance_km', 'distance_meters', 'duration_minutes', 'distance_text', 'lat', 'lng', 'show_on_map', 'selected', 'row_source']
               .filter(key => item[key] !== undefined && item[key] !== null && item[key] !== '')
               .map(key => [key, item[key]])
           );
@@ -6806,7 +6806,7 @@
     async function pollTenantSlidePlanJob(jobId, onProgress) {
       const started = Date.now();
       let res = null;
-      while (Date.now() - started < 10 * 60 * 1000) {
+      while (Date.now() - started < 2 * 60 * 1000) {
         await new Promise(resolve => setTimeout(resolve, 2500));
         res = await apiWithTimeout('GET', '/api/slide-plan/jobs/' + encodeURIComponent(jobId), null,
           30000);
@@ -6916,7 +6916,16 @@
       };
       if (sectionKey) requestBody.sectionKey = sectionKey;
       tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', requestBody)
-        .then(res => (res && res.jobId && !res.plan) ? pollTenantSlidePlanJob(res.jobId, onProgress) : res)
+        .then(async res => {
+          if (!(res && res.jobId && !res.plan)) return res;
+          const completed = await pollTenantSlidePlanJob(res.jobId, onProgress);
+          if (completed?.plan || !res.fallbackPlan) return completed;
+          return {
+            success: true,
+            plan: { ...res.fallbackPlan, source: 'fallback', source_error: completed?.error || 'planner_timeout' },
+            planSource: 'fallback'
+          };
+        })
         .finally(() => { tenantSlidePlanRequest = null; });
       return tenantSlidePlanRequest;
     }
@@ -8314,7 +8323,9 @@
             status: row.status || '',
             price: [row.price_type, priceRange || row.price_value].filter(Boolean).join(' '),
             operationType: row.operation_type || '',
-            area: row.area_sqm || row.area_from || row.area_to || '',
+            area: row.area_mode === 'range' || row.area_from || row.area_to
+              ? [row.area_from, row.area_to].filter(Boolean).join(' إلى ')
+              : (row.area_sqm || ''),
             source: row.source || ''
           };
         });
@@ -8957,7 +8968,9 @@
               ? [formatMarketNumber(row.price_from), formatMarketNumber(row.price_to)].filter(Boolean).join(' إلى ')
               : formatMarketNumber(row.price_value))
             : formatMarketNumber(row.price_value);
-          const area = formatMarketNumber(row.area_sqm || row.area_from || row.area_to);
+          const area = row.area_mode === 'range' || row.area_from || row.area_to
+            ? [formatMarketNumber(row.area_from), formatMarketNumber(row.area_to)].filter(Boolean).join(' إلى ')
+            : formatMarketNumber(row.area_sqm);
           const details = [
             row.project_type ? 'النوع: ' + row.project_type : '',
             area ? 'مساحة الوحدة: ' + area + ' م²' : '',
@@ -8998,10 +9011,18 @@
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return base;
       const competitors = (Array.isArray(parsed.competitors) ? parsed.competitors : []).map(item => {
         const row = { ...(item || {}) };
-        row.area_sqm = cleanMarketNumber(row.area_sqm || row.area_from || row.area_to || '');
-        delete row.area_mode;
-        delete row.area_from;
-        delete row.area_to;
+        const areaCache = row.area_cache || row.areaCache || {};
+        row.area_sqm = cleanMarketNumber(row.area_sqm || '');
+        row.area_from = cleanMarketNumber(row.area_from || row.areaFrom || '');
+        row.area_to = cleanMarketNumber(row.area_to || row.areaTo || '');
+        row.area_mode = row.area_mode === 'range' ? 'range'
+          : row.area_mode === 'fixed' ? 'fixed'
+            : row.area_from || row.area_to ? 'range' : 'fixed';
+        row.area_cache = {
+          area_sqm: cleanMarketNumber(areaCache.area_sqm || row.area_sqm),
+          area_from: cleanMarketNumber(areaCache.area_from || row.area_from),
+          area_to: cleanMarketNumber(areaCache.area_to || row.area_to)
+        };
         return row;
       });
       return {
@@ -9743,8 +9764,8 @@
         name: 'اسم المشروع', project_name: 'اسم المشروع',
         project_type: 'نوع المشروع', projectType: 'نوع المشروع',
         area_sqm: 'مساحة الوحدة', areaSqm: 'مساحة الوحدة', area: 'مساحة الوحدة',
-        area_from: 'مساحة الوحدة', areaFrom: 'مساحة الوحدة',
-        area_to: 'مساحة الوحدة', areaTo: 'مساحة الوحدة',
+        area_from: 'مساحة الوحدة من', areaFrom: 'مساحة الوحدة من',
+        area_to: 'مساحة الوحدة إلى', areaTo: 'مساحة الوحدة إلى',
         status: 'الحالة', project_status: 'الحالة',
         classification: 'التصنيف', logo_url: 'شعار المنافس', logoUrl: 'شعار المنافس',
         operation_type: 'نوع العملية', operationType: 'نوع العملية', operation: 'نوع العملية',
@@ -9940,14 +9961,48 @@
       input.value = formatMarketNumber(input.value);
     }
 
+    function cacheCompetitorAreaInputs(tr) {
+      const fixed = tr.querySelector('[data-field="area_sqm"]');
+      const from = tr.querySelector('[data-field="area_from"]');
+      const to = tr.querySelector('[data-field="area_to"]');
+      if (fixed) tr.dataset.areaFixed = cleanMarketNumber(fixed.value);
+      if (from) tr.dataset.areaFrom = cleanMarketNumber(from.value);
+      if (to) tr.dataset.areaTo = cleanMarketNumber(to.value);
+    }
+
     function renderCompetitorAreaInputs(tr, row = {}) {
       const cell = tr.querySelector('[data-field="area_cell"]');
       if (!cell) return;
-      const area = cleanMarketNumber(row.area_sqm || row.area_from || row.area_to || '');
-      cell.innerHTML = '<input data-field="area_sqm" value="' + escapeHtml(area) + '" placeholder="المساحة (م²)" inputmode="decimal">';
-      const input = cell.querySelector('input');
-      formatMarketNumericInput(input);
-      input.addEventListener('input', persistMarketStudyFromDom);
+      const from = cleanMarketNumber(row.area_from ?? row.areaFrom ?? tr.dataset.areaFrom ?? '');
+      const to = cleanMarketNumber(row.area_to ?? row.areaTo ?? tr.dataset.areaTo ?? '');
+      const fixed = cleanMarketNumber(row.area_sqm ?? row.areaSqm ?? tr.dataset.areaFixed ?? '');
+      const mode = row.area_mode === 'range' ? 'range'
+        : row.area_mode === 'fixed' ? 'fixed'
+          : from !== '' || to !== '' ? 'range' : 'fixed';
+      cell.innerHTML = '<select data-field="area_mode"><option value="fixed"' + (mode === 'fixed' ? ' selected' : '') + '>مساحة ثابتة</option><option value="range"' + (mode === 'range' ? ' selected' : '') + '>نطاق من — إلى</option></select>' +
+        (mode === 'range'
+          ? '<input data-field="area_from" value="' + escapeHtml(from) + '" placeholder="من (م²)" inputmode="decimal" style="margin-top:6px"><input data-field="area_to" value="' + escapeHtml(to) + '" placeholder="إلى (م²)" inputmode="decimal" style="margin-top:6px">'
+          : '<input data-field="area_sqm" value="' + escapeHtml(fixed) + '" placeholder="المساحة (م²)" inputmode="decimal" style="margin-top:6px">');
+      cell.querySelector('[data-field="area_mode"]').addEventListener('change', event => {
+        cacheCompetitorAreaInputs(tr);
+        const current = collectOneCompetitorRow(tr);
+        current.area_mode = event.target.value;
+        if (current.area_mode === 'range') {
+          current.area_from = current.area_cache?.area_from || current.area_sqm;
+          current.area_to = current.area_cache?.area_to || '';
+        } else {
+          current.area_sqm = current.area_cache?.area_sqm || current.area_from || current.area_to;
+        }
+        renderCompetitorAreaInputs(tr, current);
+        persistMarketStudyFromDom();
+      });
+      cell.querySelectorAll('input').forEach(input => {
+        formatMarketNumericInput(input);
+        input.addEventListener('input', () => {
+          cacheCompetitorAreaInputs(tr);
+          persistMarketStudyFromDom();
+        });
+      });
     }
 
     function competitorLogoPath(row = {}) {
@@ -9977,21 +10032,31 @@
     }
 
     async function importCompetitorLogo(tr) {
+      if (tr.dataset.logoImporting === 'true') return;
       const row = collectOneCompetitorRow(tr);
-      const response = await api('POST', '/api/market-study/competitors/logo', {
-        draftId: tenantProjectData?.draftId || '', competitor: row
-      });
-      if (!response?.success || !response.competitor) {
-        toast(response?.error || 'لم يُعثر على شعار رسمي');
-        return;
-      }
-      const imported = response.competitor;
-      tr.dataset.logoFileId = imported.logo_file_id || '';
-      tr.dataset.logoPath = imported.logo_path || '';
-      tr.dataset.logoUrl = imported.logo_url || '';
-      tr.dataset.logoSourceUrl = imported.logo_source_url || '';
+      tr.dataset.logoImporting = 'true';
       renderCompetitorLogoCell(tr);
-      persistMarketStudyFromDom();
+      try {
+        const response = await api('POST', '/api/market-study/competitors/logo', {
+          draftId: tenantProjectData?.draftId || '', competitor: row
+        });
+        if (!response?.success || !response.competitor) {
+          toast(response?.error || 'لم يُعثر على شعار رسمي');
+          return;
+        }
+        const imported = response.competitor;
+        tr.dataset.logoFileId = imported.logo_file_id || tr.dataset.logoFileId || '';
+        tr.dataset.logoPath = imported.logo_path || tr.dataset.logoPath || '';
+        tr.dataset.logoUrl = imported.logo_url || tr.dataset.logoUrl || '';
+        tr.dataset.logoSourceUrl = imported.logo_source_url || tr.dataset.logoSourceUrl || '';
+        tr.dataset.fieldSources = JSON.stringify(imported.field_sources || imported.fieldSources || {});
+        const sourceLinks = tr.querySelector('[data-source-links]');
+        if (sourceLinks) sourceLinks.innerHTML = marketSourceLinksHtml(imported);
+        persistMarketStudyFromDom();
+      } finally {
+        tr.dataset.logoImporting = '';
+        renderCompetitorLogoCell(tr);
+      }
     }
 
     function renderCompetitorLogoCell(tr) {
@@ -9999,9 +10064,10 @@
       if (!cell) return;
       const path = tr.dataset.logoPath || tr.dataset.logoUrl || '';
       const manual = Boolean(tr.dataset.logoFileId);
-      cell.innerHTML = (path ? '<img src="' + escapeHtml(path) + '" alt="شعار المنافس" style="width:72px;height:54px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:5px">' : '<div style="height:54px;display:flex;align-items:center;justify-content:center;color:var(--muted)">لا يوجد</div>') +
-        '<input type="file" accept="image/png,image/jpeg,image/webp" data-competitor-logo style="width:100%;font-size:11px">' +
-        '<button type="button" class="btn ghost small" data-import-competitor-logo style="width:100%;margin-top:4px"' + (manual ? ' disabled' : '') + '>استيراد رسمي</button>';
+      const importing = tr.dataset.logoImporting === 'true';
+      cell.innerHTML = (path ? '<img src="' + escapeHtml(path) + '" alt="شعار المنافس" style="width:72px;height:54px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:5px">' : '<div style="height:54px;display:flex;align-items:center;justify-content:center;color:var(--muted)">' + (importing ? 'جاري البحث والاستيراد' : 'لا يوجد') + '</div>') +
+        '<input type="file" accept="image/png,image/jpeg,image/webp" data-competitor-logo style="width:100%;font-size:11px"' + (importing ? ' disabled' : '') + '>' +
+        '<button type="button" class="btn ghost small" data-import-competitor-logo style="width:100%;margin-top:4px"' + (manual || importing ? ' disabled' : '') + '>' + (importing ? 'جاري الاستيراد' : 'استيراد رسمي') + '</button>';
       cell.querySelector('[data-competitor-logo]')?.addEventListener('change', event => uploadCompetitorLogo(event.target, tr));
       cell.querySelector('[data-import-competitor-logo]')?.addEventListener('click', () => importCompetitorLogo(tr));
     }
@@ -10035,6 +10101,10 @@
       tr.dataset.conflictWarnings = JSON.stringify(row.conflict_warnings || row.conflictWarnings || []);
       tr.dataset.logoImportWarning = row.logo_import_warning || row.logoImportWarning || '';
       tr.dataset.notes = row.notes || row.note || '';
+      const areaCache = row.area_cache || row.areaCache || {};
+      tr.dataset.areaFixed = cleanMarketNumber(row.area_sqm || row.areaSqm || areaCache.area_sqm || '');
+      tr.dataset.areaFrom = cleanMarketNumber(row.area_from || row.areaFrom || areaCache.area_from || '');
+      tr.dataset.areaTo = cleanMarketNumber(row.area_to || row.areaTo || areaCache.area_to || '');
       tr.dataset.priceCache = JSON.stringify(row.price_cache || row.priceCache || {});
       const operation = inferCompetitorOperation(row);
       const priceType = inferCompetitorPriceType(row);
@@ -10121,14 +10191,25 @@
         source_urls: Array.from(tr.querySelectorAll('[data-source-links] a[href]'))
           .map(anchor => anchor.getAttribute('href') || '')
       });
+      cacheCompetitorAreaInputs(tr);
       cacheCompetitorPriceInputs(tr, read('price_type'));
       let conflict_warnings = [];
       try { conflict_warnings = JSON.parse(tr.dataset.conflictWarnings || '[]') || []; } catch (error) { conflict_warnings = []; }
+      const area_mode = read('area_mode') || 'fixed';
+      const area_cache = {
+        area_sqm: cleanMarketNumber(tr.dataset.areaFixed || ''),
+        area_from: cleanMarketNumber(tr.dataset.areaFrom || ''),
+        area_to: cleanMarketNumber(tr.dataset.areaTo || '')
+      };
       return {
         id: tr.dataset.competitorId,
         name: read('name'),
         project_type: read('project_type'),
-        area_sqm: cleanMarketNumber(read('area_sqm')),
+        area_mode,
+        area_sqm: area_mode === 'fixed' ? area_cache.area_sqm : '',
+        area_from: area_mode === 'range' ? area_cache.area_from : '',
+        area_to: area_mode === 'range' ? area_cache.area_to : '',
+        area_cache,
         status: read('status'),
         classification: read('classification'),
         logo_file_id: tr.dataset.logoFileId || '',
@@ -13113,6 +13194,7 @@
         return updated ? { ...item, lat: updated.lat, lng: updated.lng } : item;
       });
       tenantNearbyLandmarks = tenantProjectData.nearby_landmarks_data;
+      refreshLocationTables();
       tenantLandmarksEditMode = false;
       tenantLandmarksEditDraft = null;
       tenantLandmarksEditHistory = [];
@@ -13805,7 +13887,7 @@
       const dropIndexes = new Set();
       table.querySelectorAll('thead th').forEach((th, idx) => {
         const text = String(th.textContent || '').replace(/\s+/g, ' ').trim();
-        if (text === 'ترتيب / حذف' || text === 'حذف' || text === 'ترتيب') dropIndexes.add(idx);
+        if (text === 'ترتيب / حذف' || text === 'حذف' || text === 'ترتيب' || text === 'مرتبط بمكون') dropIndexes.add(idx);
       });
       if (!dropIndexes.size && dropLastColumn && table.querySelector('thead tr')?.cells.length) {
         dropIndexes.add(table.querySelector('thead tr').cells.length - 1);
@@ -15224,7 +15306,7 @@
     // labels, same option wording, same numbers — only laid out as tables. The server used to
     // rebuild it from its own label map, so «هل وحدات المشروع بيعية أم تأجيرية؟» printed as
     // «طبيعة الإيرادات» and its value printed as the raw option id «mixed».
-    const FINANCIAL_REPORT_SKIP_COLUMNS = new Set(['ترتيب / حذف', 'ترتيب', 'حذف']);
+    const FINANCIAL_REPORT_SKIP_COLUMNS = new Set(['ترتيب / حذف', 'ترتيب', 'حذف', 'مرتبط بمكون']);
     const FINANCIAL_REPORT_SKIP_IDS = new Set([
       'componentAreaValidation', 'timelineStagesWarning', 'analysisWarnings',
       'componentsAllowedUsesNote', 'sensitivityVariableSelect',
@@ -15636,6 +15718,7 @@
         <section class="section"><h3>1. بيانات المشروع</h3>${projectSummary}</section>
         <section class="section"><h3>2. مدة المشروع والأرض ومساحات البناء</h3>${areaSummary}</section>
         <section class="section page-break"><h3>3. مكونات المشروع</h3>${reportTableSnapshot('componentsTable', true)}</section>
+        <section class="section page-break"><h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable', false)}<h4>نسبة الوصول السنوية إلى الإشغال المستهدف</h4>${reportTableSnapshot('occupancyRampTable', false)}</section>
         ${graceReportSection}
         <section class="section page-break"><h3>5. تكاليف المشروع وأتعاب المطور</h3>${costSummary}<h4>تفاصيل بنود التكلفة</h4>${reportTableSnapshot('costTable', true, true)}</section>
         <section class="section"><h3>6. مراحل التطوير ودفعات المطور</h3>${reportTableSnapshot('scheduleTable', false)}</section>

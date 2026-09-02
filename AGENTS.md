@@ -297,8 +297,10 @@ assertion deliberately, not reflexively.
   `landmark_map_items`, `landmark_label_positions`, and `##MAP_LANDMARKS_EDITABLE##`; moving a marker
   updates its `nearby_landmarks_data` coordinates while moving its label remains visual-only. Blank
   table `lat`/`lng` values must never overwrite the resolved map item (`Number('')` is zero in JS and
-  put otherwise valid markers off-map); `mergeResolvedMapLandmark()` preserves the generated point. The
-  landmarks view is framed around the landmarks it draws; it used to inherit the plot zoom, so every
+  put otherwise valid markers off-map); `mergeResolvedMapLandmark()` preserves the generated point.
+  Confirming an edit must call `refreshLocationTables()` before a later serialization, and
+  `slimMapProjectData()` must retain `show_on_map` / `selected`; otherwise full regeneration restores
+  stale table coordinates and loses the chosen landmark set. The landmarks view is framed around the landmarks it draws; it used to inherit the plot zoom, so every
   landmark fell outside the frame.
 - **Access-road discovery must be deterministic.** `access_probe_points()` is fixed; it used to be
   shifted and rotated by `regen_seed`, so every regeneration snapped to different roads and the same
@@ -425,9 +427,10 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
 - **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).
-  The competitor table shows project name, logo, type, classification, fixed unit area, status,
-  source, operation type, dynamic price type, and dynamic value. Price inputs default to Saudi
-  riyal (`SAR`); range types render `من` and `إلى` values. The row keeps a `price_cache` per price
+  The competitor table shows project name, logo, type, classification, unit area, status,
+  source, operation type, dynamic price type, and dynamic value. Area supports both a fixed value
+  and a real `من` / `إلى` range. Price inputs default to Saudi riyal (`SAR`); range price types also
+  render `من` and `إلى` values. The row keeps a `price_cache` per price
   type so changing operation or price type and returning to it never loses the previous fixed or
   range values. Competitor radius has no fake «تلقائي» option: the default is an explicit `10` km.
   Saved drafts that still store `auto` map back to 10 km. `city` and `custom` are real instructions
@@ -450,10 +453,12 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   `غير متوفر من مصدر موثوق`. Competitor `source_url` and summary `url` must be the exact
   page that contained the figure, not the site homepage. `prefer_specific_source_url()`
   drops a bare domain/home path when a deeper URL is also present.
-- Competitor unit area is one fixed `area_sqm` value. New UI/model output must never write
-  `area_mode`, `area_from`, or `area_to`; legacy ranges hydrate to the lower available bound.
-  Market figures are stored without separators, rounded half-up to one decimal only when fractional,
-  and displayed with separators. Prices still support a fixed value or a real `price_from` / `price_to`
+- Competitor unit area supports `area_mode=fixed` with `area_sqm` and `area_mode=range` with
+  `area_from` / `area_to`. `area_cache` preserves each mode's values while the client switches modes,
+  but only the active fixed value or active range is used in analysis and slides. AI must keep a
+  sourced range as a range and use a fixed value only when the source gives one. Market figures are
+  stored without separators, rounded half-up to one decimal only when fractional, and displayed with
+  separators. Prices still support a fixed value or a real `price_from` / `price_to`
   range according to `price_type`; never average a sourced range. An official project/developer site
   is labeled `مصدر رسمي للجهة` for that entity's own data. Deleting a source removes its URL from
   `source_urls` and every `field_sources` association but keeps the competitor values; manual values
@@ -463,7 +468,11 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   HTTPS PNG/JPEG/WEBP only from the same public host as a proven official project/developer page,
   rejects private/reserved DNS addresses, pins the verified public IP for the TLS request to prevent
   DNS rebinding, and rejects invalid/oversized images before publishing a durable
-  creative URL. Missing or unprovable logos remain empty. `_augment_generation_images()` carries the
+  creative URL. When the row has no proven official URL, the import endpoint performs one cited web
+  search for the official site before looking for its logo. Known first-party image/CDN sibling
+  subdomains are accepted only under the same registrable domain. The row button displays and disables
+  itself while that search/import is running. Missing or unprovable logos remain empty.
+  `_augment_generation_images()` carries the
   stored logos as `competitor_logos`; market-study slides resolve `##COMPETITOR_LOGO_N##` and inject
   any omitted available logos programmatically.
 - **Never send the search tool together with `response_format: json_object`.** Gemini answers that
@@ -547,11 +556,11 @@ a fixed slide count:
   is reachable only for a tenant with `lock_slide_count`, which is the one honest way to fix a count
   exactly. The «أقصى عدد شرائح» settings input is gone, and the admin agent stores a requested
   number as `default_slide_count` + `min_slides`, never as a ceiling.
-- **The plan request was capped at 6,000 tokens.** The plan is one JSON document holding every
-  slide, so a large project's plan was cut mid-object, `parse_slide_plan` raised, and
-  `build_fallback_plan()` took over. That is why a real file came out as exactly the generic 15
-  slides (`الغلاف`, `الفهرس`, `نظرة عامة على المشروع` … `شكراً لكم`) — those titles are the
-  fallback's, not the model's. It is now 40,000 tokens with a 600s timeout.
+- **The plan request must finish before Gunicorn kills the worker.** A previous 40,000-token,
+  600-second request exceeded the live worker's 300-second timeout, left the job permanently at 8%,
+  and never reached `build_fallback_plan()`. Planning now uses the fast text model with a 12,000-token,
+  75-second bound and one attempt. The queued response also carries a normalized `fallbackPlan`; if
+  polling still fails, the browser continues with that plan instead of stopping generation.
 - **A regenerated file reused its saved plan.** `directGenerateProposalFile()` asked for a plan only
   `if (!tenantSlidePlan)`, and opening a draft restores the previous plan, so pressing «توليد العرض»
   again rebuilt the same structure and count regardless of how the project had changed. It now
@@ -956,10 +965,10 @@ PyMuPDF paths: fractional results use one decimal and money/area/quantity values
 separators. `_financial_report_format_display()` also formats eligible numbers inside compound text
 cells, not only cells containing a bare number. An amount label remains an amount when its description
 contains «سنة» or «% إشغال» — those words must not suppress grouping on revenue, NOI or expense
-values. `revenueTable` remains on screen and in the saved
-model for calculations and presentation generation, but the whole «بنود الإيرادات» report section
-(including its occupancy subtable) is omitted by `_financial_screen_parts()` and both legacy PDF
-loops. Do not reintroduce a server-side label map: the report used to be rebuilt from
+values. `revenueTable` remains on screen, in the saved model, and in every PDF path together with
+its occupancy-ramp table. Only the «مرتبط بمكون» column and the existing action column are removed
+from the PDF; `_financial_screen_parts()` enforces the same exclusion for older clients, and both
+legacy HTML/PyMuPDF loops include section 4. Do not reintroduce a server-side label map: the report used to be rebuilt from
 `FINANCIAL_RESULT_LABELS` / `FINANCIAL_COLUMN_LABELS`, so «هل وحدات المشروع بيعية أم تأجيرية؟»
 printed as «طبيعة الإيرادات» and its value printed as the raw option id `mixed`. Those maps stay only
 for drafts saved before `report.parts` existed.
@@ -1055,8 +1064,10 @@ three that are: `POST /api/extract-croquis`, `POST /api/market-study/{competitor
 `POST /api/slide-plan` — the last one because the planner reads every section, so its prompt runs to
 tens of thousands of characters and the answer takes minutes; the browser reported
 `CLIENT_REQUEST_TIMEOUT` for plans the server had produced. Each answers `202 {jobId}` and the
-client polls (`GET /api/slide-plan/jobs/<id>`, 2.5 s, 10 min ceiling). `_write_job` / `_read_job`
-are the shared tenant-scoped file store; `.plan_jobs` and `.market_jobs` are the namespaces. Keep
+client polls (`GET /api/slide-plan/jobs/<id>`, 2.5 s). Slide-plan polling has a two-minute ceiling,
+which safely exceeds the 75-second provider bound; its initial response retains `fallbackPlan` so a
+stale or failed job still continues generation. `_write_job` / `_read_job` are the shared tenant-scoped
+file store; `.plan_jobs` and `.market_jobs` are the namespaces. Keep
 the unittest path synchronous (`TESTING`) unless a test passes `background: true`.
 
 The live hosting proxy fabricates a 404 if `POST /api/extract-croquis` stays open for the whole

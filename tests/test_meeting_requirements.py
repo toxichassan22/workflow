@@ -2636,7 +2636,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Selected option text, not the option id, and hidden inputs stay out.
         self.assertIn("if (control.tagName === 'SELECT') return financialReportText(control.selectedOptions?.[0])",
                       index_source)
-        self.assertIn("FINANCIAL_REPORT_SKIP_COLUMNS = new Set(['ترتيب / حذف', 'ترتيب', 'حذف'])", index_source)
+        self.assertIn("FINANCIAL_REPORT_SKIP_COLUMNS = new Set(['ترتيب / حذف', 'ترتيب', 'حذف', 'مرتبط بمكون'])", index_source)
 
     def test_financial_decimals_and_pdf_values_use_one_decimal_and_thousands_separators(self):
         module = self.application_module
@@ -2752,7 +2752,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('id="clarificationsTable"', index_source)
         self.assertNotIn('function renderClarifications(facts)', index_source)
 
-    def test_financial_pdf_formats_compound_numbers_and_omits_revenue_items(self):
+    def test_financial_pdf_keeps_revenue_items_without_linked_component_column(self):
         module = self.application_module
         compound = 'مساحة مبنية 1234567.26 م² وقيمة 7654321 ريال'
         self.assertEqual(
@@ -2772,8 +2772,8 @@ class MeetingRequirementsTests(unittest.TestCase):
             'inputs': {'unitRevenueMode': 'mixed'},
             'report': {'parts': [
                 {'type': 'heading', 'level': 2, 'text': '4. بنود الإيرادات'},
-                {'type': 'table', 'headers': ['اسم الإيراد', 'القيمة'],
-                 'rows': [['REVENUE-TOKEN-441', '1234567.26']]},
+                {'type': 'table', 'headers': ['اسم الإيراد', 'مرتبط بمكون', 'القيمة'],
+                 'rows': [['REVENUE-LABEL', 'LINKED-COMPONENT-HIDDEN', '1234567.26']]},
                 {'type': 'heading', 'level': 2, 'text': '12. ملخص النتائج المالية'},
                 {'type': 'fields', 'rows': (
                     [['إجمالي الاستثمار', 'TOTAL 1234567.26']]
@@ -2783,20 +2783,26 @@ class MeetingRequirementsTests(unittest.TestCase):
         }
         fallback_model = {
             'inputs': {'unitRevenueMode': 'mixed'},
-            'tables': {'revenueTable': [{'name': 'REVENUE-TOKEN-441', 'price': 1234567.26}]},
+            'tables': {'revenueTable': [{
+                'name': 'REVENUE-LABEL', 'component': 'LINKED-COMPONENT-HIDDEN',
+                'price': 1234567.26,
+            }]},
         }
         with self.app.app_context():
             report_html = module.build_financial_report_html('مشروع مالي', report_model, {}, self.tenant_a)
             fallback_html = module.build_financial_report_html('مشروع مالي', fallback_model, {}, self.tenant_a)
         for html in (report_html, fallback_html):
-            self.assertNotIn('4. بنود الإيرادات', html)
-            self.assertNotIn('REVENUE-TOKEN-441', html)
+            self.assertIn('4. بنود الإيرادات', html)
+            self.assertIn('REVENUE-LABEL', html)
+            self.assertNotIn('مرتبط بمكون', html)
+            self.assertNotIn('LINKED-COMPONENT-HIDDEN', html)
+            self.assertIn('1,234,567.3', html)
         self.assertIn('TOTAL 1,234,567.3', report_html)
         for _label, _value, expected in screenshot_values:
             self.assertIn(expected, report_html)
 
         with tempfile.TemporaryDirectory() as folder:
-            output = os.path.join(folder, 'without-revenue.pdf')
+            output = os.path.join(folder, 'with-revenue.pdf')
             with self.app.app_context():
                 module.generate_financial_pdf_from_model('مشروع مالي', report_model, output)
             import fitz
@@ -2806,11 +2812,13 @@ class MeetingRequirementsTests(unittest.TestCase):
             finally:
                 document.close()
             normalized_text = text.replace('\xa0', ' ')
-            self.assertNotIn('REVENUE-TOKEN-441', normalized_text)
+            self.assertIn('REVENUE-LABEL', normalized_text)
+            self.assertNotIn('LINKED-COMPONENT-HIDDEN', normalized_text)
             self.assertIn('TOTAL 1,234,567.3', normalized_text)
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        self.assertNotIn("<h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable'", index_source)
+        self.assertIn("<h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable'", index_source)
+        self.assertIn("'مرتبط بمكون'", index_source.split('FINANCIAL_REPORT_SKIP_COLUMNS', 1)[1][:180])
 
     def test_cashflow_column_tints_do_not_override_the_table_header(self):
         """The cf-* classes also sit on the <th> so whole columns can be hidden by project mode.
@@ -3169,6 +3177,10 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'https://cdn.example/logo.png', 'https://developer.example/project')
         request_get.assert_not_called()
         self.assertIn('خارج الموقع الرسمي', error)
+        self.assertTrue(module._same_official_host(
+            'https://cdn.developer.example/logo.png', 'https://project.developer.example/about'))
+        self.assertFalse(module._same_official_host(
+            'https://cdn.other.example/logo.png', 'https://project.developer.example/about'))
         pinned_pool = Mock()
         pinned_response = Mock()
         pinned_pool.urlopen.return_value = pinned_response
@@ -3213,6 +3225,54 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("formData.append('fileType', 'competitor_logo')", index_source)
         self.assertIn('data-field="logo_cell"', index_source)
         self.assertIn('استيراد رسمي', index_source)
+        self.assertIn("tr.dataset.logoImporting = 'true'", index_source)
+        self.assertIn('جاري البحث والاستيراد', index_source)
+
+    def test_competitor_logo_import_discovers_a_cited_official_site_and_preserves_manual_files(self):
+        module = self.application_module
+        client = self.app.test_client()
+        official_url = 'https://project.example.com/about'
+        logo_url = 'https://cdn.example.com/project-logo.png'
+        response = {'choices': [{'message': {
+            'content': json.dumps({
+                'official_url': official_url,
+                'logo_url': logo_url,
+                'logo_source_url': official_url,
+            }),
+            'annotations': [{'url_citation': {'url': official_url}}],
+        }}]}
+
+        def store_logo(row, draft_id=None):
+            result = dict(row)
+            result['logo_file_id'] = 'imported-logo-file'
+            result['logo_path'] = '/uploads/creative/imported-logo.png'
+            return result
+
+        with patch.object(module, '_call_market_study_model', return_value=(response, '')) as model_call, \
+                patch.object(module, '_store_imported_competitor_logo', side_effect=store_logo):
+            imported = client.post('/api/market-study/competitors/logo', headers=self._headers(self.token_a), json={
+                'draftId': 'logo-discovery-draft',
+                'competitor': {'id': 'arabic-project', 'name': 'مشروع عربي', 'source': 'منصة عقار'},
+            })
+        self.assertEqual(imported.status_code, 200, imported.get_json())
+        competitor = imported.get_json()['competitor']
+        self.assertEqual(competitor['logo_file_id'], 'imported-logo-file')
+        self.assertEqual(competitor['logo_source_url'], official_url)
+        self.assertEqual(competitor['field_sources']['logo_url'], [official_url])
+        self.assertIn(official_url, competitor['source_urls'])
+        self.assertTrue(competitor['logo_official_verified'])
+        self.assertEqual(model_call.call_count, 1)
+
+        with patch.object(module, '_call_market_study_model') as model_call:
+            preserved = client.post('/api/market-study/competitors/logo', headers=self._headers(self.token_a), json={
+                'competitor': {
+                    'id': 'manual-logo-project', 'name': 'مشروع يدوي',
+                    'logo_file_id': 'manual-file', 'logo_path': '/uploads/creative/manual.png',
+                },
+            })
+        self.assertEqual(preserved.status_code, 200, preserved.get_json())
+        self.assertEqual(preserved.get_json()['competitor']['logo_file_id'], 'manual-file')
+        model_call.assert_not_called()
 
     def test_drafts_are_saved_only_on_request(self):
         """Autosave fired on any input and from several render helpers, so merely opening a new
@@ -4684,6 +4744,32 @@ class MeetingRequirementsTests(unittest.TestCase):
         generate_maps.assert_not_called()
         delete_images.assert_not_called()
 
+        generated_result = {
+            'placeholders': {}, 'zooms': {'landmarks': 14},
+            'centers': {'landmarks': {'lat': 24.0, 'lng': 46.0}},
+            'landmark_map_items': [{'name': 'محدد', 'lat': 24.01, 'lng': 46.01, 'show_on_map': True}],
+        }
+        with patch.object(service, 'generate_all_map_images', return_value=generated_result) as generate_maps, \
+                patch.object(self.application_module.db, 'delete_map_images') as delete_images:
+            regenerated = client.post('/api/generate-map-image', headers=self._headers(self.token_a), json={
+                'projectData': {
+                    'location_lat': 24.0, 'location_lng': 46.0, 'draftId': 'quick-landmarks',
+                    'location_analysis_approved': True,
+                    'nearby_landmarks_data': [
+                        {'name': 'محدد', 'lat': 24.01, 'lng': 46.01, 'show_on_map': True},
+                        {'name': 'غير محدد', 'lat': 24.02, 'lng': 46.02, 'show_on_map': False},
+                    ],
+                },
+                'mapType': 'landmarks', 'overviewApproved': True, 'regenSeed': 123,
+            })
+        self.assertEqual(regenerated.status_code, 200, regenerated.get_json())
+        generate_maps.assert_called_once()
+        sent_project = generate_maps.call_args.args[0]
+        self.assertEqual(sent_project['enabled_maps'], ['landmarks'])
+        self.assertTrue(sent_project['refresh_maps'])
+        self.assertTrue(sent_project['nearby_landmarks_data'][0]['show_on_map'])
+        self.assertGreaterEqual(delete_images.call_count, 6)
+
         from PIL import Image
         editable_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
         editable_path = editable_file.name
@@ -4730,6 +4816,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('showLoader(', confirm_body)
         self.assertIn('await applyLandmarksMapEdits()', confirm_body)
         self.assertIn('tenantProjectData.nearby_landmarks_data =', confirm_body)
+        self.assertIn('refreshLocationTables()', confirm_body)
+        slim_body = source.split('function slimMapProjectData(data)', 1)[1].split('return slim;', 1)[0]
+        self.assertIn("'show_on_map'", slim_body)
+        self.assertIn("'selected'", slim_body)
         self.assertIn("editableKeys: ['##MAP_LANDMARKS_EDITABLE##'", source)
         self.assertIn("'landmark_label_positions'", source)
         self.assertIn("'landmark_map_items'", source)
@@ -5215,7 +5305,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_slide_plan_falls_back_when_ai_provider_is_unavailable(self):
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_zai_chat_parallel', side_effect=RuntimeError('AI unavailable')):
+        with patch.object(self.application_module, 'call_zai_chat_parallel', side_effect=RuntimeError('AI unavailable')) as planner:
             response = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
                 'projectData': {'project_name': 'مشروع تجريبي', 'project_type': 'سكني'}
             })
@@ -5227,6 +5317,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         # the model's own proposal — every such file otherwise came out with identical titles.
         self.assertEqual(response.get_json()['plan']['source'], 'fallback')
         self.assertEqual(response.get_json()['planSource'], 'fallback')
+        self.assertEqual(planner.call_count, 1)
+        self.assertEqual(planner.call_args.kwargs['max_tokens'], 12000)
+        self.assertEqual(planner.call_args.kwargs['timeout'], 75)
+        self.assertEqual(planner.call_args.kwargs['model'], self.application_module.LUNA_TEXT_MODEL)
 
     def test_slide_count_has_no_upper_limit(self):
         """The plan follows the amount of content: a stored max_slides used to trim the surplus."""
@@ -5256,7 +5350,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('Too many slides', ' '.join(result['validation']['issues']))
 
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
-        self.assertIn('max_tokens=40000', app_source)
+        self.assertIn('max_tokens=12000', app_source)
+        self.assertIn('timeout=75', app_source)
+        self.assertIn('model=LUNA_TEXT_MODEL', app_source)
+        self.assertNotIn('timeout=600', app_source)
         self.assertNotIn('شريحة كحد أقصى)', app_source)
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
@@ -5831,6 +5928,8 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'background': True,
             })
             self.assertEqual(queued.status_code, 202, queued.get_json())
+            self.assertTrue(queued.get_json()['fallbackPlan']['slides'])
+            self.assertEqual(queued.get_json()['fallbackPlan']['source'], 'fallback')
             job_id = queued.get_json()['jobId']
 
             job = {}
@@ -5849,6 +5948,10 @@ class MeetingRequirementsTests(unittest.TestCase):
                              headers=self._headers(self.token_a))
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(missing.get_json()['failureReason'], 'job_not_found')
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('started < 2 * 60 * 1000', index_source)
+        self.assertIn('if (completed?.plan || !res.fallbackPlan) return completed;', index_source)
+        self.assertIn("plan: { ...res.fallbackPlan, source: 'fallback'", index_source)
 
     def test_site_analysis_endpoint_returns_ai_text_without_large_creative_payload(self):
         client = self.app.test_client()
@@ -6706,7 +6809,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(ranged['price_from'], '900')
         self.assertEqual(ranged['price_to'], '1500')
 
-    def test_market_study_official_sources_fixed_area_and_permanent_source_deletion(self):
+    def test_market_study_supports_fixed_and_range_areas_and_permanent_source_deletion(self):
         import market_study
         row = market_study.normalize_competitor_row({
             'id': 'c1', 'name': 'مشروع النخيل', 'area_mode': 'range',
@@ -6715,10 +6818,10 @@ class MeetingRequirementsTests(unittest.TestCase):
             'source_urls': ['https://nakheel.example/project'],
             'field_sources': {'price_value': ['https://nakheel.example/project']},
         })
-        self.assertEqual(row['area_sqm'], '1200.6')
-        self.assertNotIn('area_mode', row)
-        self.assertNotIn('area_from', row)
-        self.assertNotIn('area_to', row)
+        self.assertEqual(row['area_mode'], 'range')
+        self.assertEqual(row['area_sqm'], '')
+        self.assertEqual(row['area_from'], '1200.6')
+        self.assertEqual(row['area_to'], '2500')
         self.assertEqual(row['price_value'], '1500000')
         sources = market_study.competitor_source_rows([row])
         self.assertEqual(sources[0]['reliability'], 'مصدر رسمي للجهة')
@@ -6730,9 +6833,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         area_source = index_source[index_source.index('function renderCompetitorAreaInputs'):
                                    index_source.index('function competitorLogoPath')]
-        for retired in ('data-field="area_mode"', 'data-field="area_from"', 'data-field="area_to"'):
-            self.assertNotIn(retired, area_source)
-        for expected in ('data-field="area_sqm"', 'removeMarketSourcePermanently', 'formatMarketNumericInput'):
+        for expected in ('data-field="area_mode"', 'data-field="area_sqm"', 'data-field="area_from"',
+                         'data-field="area_to"', 'نطاق من — إلى'):
+            self.assertIn(expected, area_source)
+        for expected in ('removeMarketSourcePermanently', 'formatMarketNumericInput', 'cacheCompetitorAreaInputs'):
             self.assertIn(expected, index_source)
         formatted = self.application_module.slide_engine.finalize_slide_html(
             '<div class="slide"><table><tr><td>2027</td><td>1500000</td></tr></table></div>',
@@ -6779,12 +6883,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(row['logo_path'], '/uploads/manual.png')
         self.assertFalse(row['logo_url'])
         warning_fields = {warning['field'] for warning in row['conflict_warnings']}
-        self.assertTrue({'project_type', 'area_sqm', 'classification', 'price_type'} <= warning_fields)
+        self.assertTrue({'project_type', 'area_mode', 'classification', 'price_type'} <= warning_fields)
 
         prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, existing, mode='fill')
-        self.assertNotIn('"area_mode"', prompt)
-        self.assertNotIn('"area_from"', prompt)
-        self.assertNotIn('"area_to"', prompt)
+        self.assertIn('"area_mode"', prompt)
+        self.assertIn('"area_from"', prompt)
+        self.assertIn('"area_to"', prompt)
         self.assertIn('املأ الحقول الناقصة فقط', prompt)
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('cacheCompetitorPriceInputs', index_source)

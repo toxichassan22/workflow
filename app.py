@@ -4330,22 +4330,19 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
 
     plan = None
     last_error = None
-    # The planner reads every section, so its prompt is long and the answer is slow. This runs in a
-    # background job now, not inside the request, so it can wait for a real plan instead of falling
-    # back to the generic one after 45 seconds.
-    max_attempts = 2
+    # The planner must finish before the web worker timeout so a slow provider can fall back cleanly.
+    max_attempts = 1
     for attempt in range(1, max_attempts + 1):
         try:
             response = call_zai_chat_parallel(
                 "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية الاستثمارية.",
                 prompt,
-                # The plan is one JSON document holding every slide, so its length grows with the
-                # slide count. 6,000 tokens cut a long plan mid-object, the JSON failed to parse
-                # and the generic fallback plan took over — which is what capped a big project.
-                max_tokens=40000,
+                # The outline is compact; a bounded fast-model request avoids the five-minute
+                # Gunicorn kill that previously left the background job stuck at 8 percent.
+                max_tokens=12000,
                 attempts=1,
-                timeout=600,
-                model=SLIDE_TEXT_MODEL
+                timeout=75,
+                model=LUNA_TEXT_MODEL
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
             plan = parse_slide_plan(content, effective_branding, project_data)
@@ -4452,12 +4449,30 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
     }
 
 
+def _emergency_slide_plan(project_data, branding, images, tenant_id, target_section_keys=None):
+    plan = build_fallback_plan(branding)
+    plan = _ensure_required_location_slides(plan, project_data)
+    plan = slide_engine.strip_financial_slides(plan, project_data)
+    plan = slide_engine.strip_street_view_slides(plan)
+    plan = slide_engine.normalize_presentation_plan(plan, project_data, images, tenant_id=tenant_id)
+    if target_section_keys:
+        filtered = slide_engine.filter_presentation_plan_sections(plan, target_section_keys)
+        if filtered:
+            plan = filtered
+    plan = slide_engine.refresh_index_entries(plan)
+    plan['source'] = 'fallback'
+    return plan
+
+
 def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images, job_id, target_section_keys=None):
     with flask_app.app_context():
+        fallback_plan = _emergency_slide_plan(
+            project_data, branding, images, tenant_id, target_section_keys=target_section_keys)
         _write_job('.plan_jobs', tenant_id, job_id, {
             'status': 'running',
             'success': True,
             'message': 'جاري تحليل بيانات المشروع وإعداد هيكل العرض...',
+            'fallbackPlan': fallback_plan,
         })
         try:
             payload = _execute_slide_plan(
@@ -4514,10 +4529,13 @@ def api_slide_plan():
         return jsonify(payload), 200 if payload.get('success') else 400
 
     job_id = str(_uuid.uuid4())
+    fallback_plan = _emergency_slide_plan(
+        project_data, branding, images, g.tenant_id, target_section_keys=target_section_keys)
     _write_job('.plan_jobs', g.tenant_id, job_id, {
         'status': 'queued',
         'success': True,
         'message': 'تم استلام طلب إعداد هيكل العرض',
+        'fallbackPlan': fallback_plan,
     })
     threading.Thread(
         target=_slide_plan_job_worker,
@@ -4529,6 +4547,7 @@ def api_slide_plan():
         'jobId': job_id,
         'status': 'queued',
         'message': 'بدأ إعداد هيكل العرض في الخلفية',
+        'fallbackPlan': fallback_plan,
     }), 202
 
 
@@ -6559,7 +6578,8 @@ FINANCIAL_COLUMN_LABELS = {
 }
 
 FINANCIAL_REPORT_DROP_COLUMNS = {
-    'ترتيب / حذف', 'حذف', 'ترتيب', 'idx', 'id', 'leasable', 'totalArea',
+    'ترتيب / حذف', 'حذف', 'ترتيب', 'مرتبط بمكون', 'المكون المرتبط',
+    'idx', 'id', 'component', 'componentId', 'leasable', 'totalArea',
     'projected', 'cashflows', 'projectCashflows', 'financePlan', 'financeRepaymentPlan',
     'modeFlags', 'areaState',
 }
@@ -6593,19 +6613,8 @@ def _financial_screen_parts(model):
     if not isinstance(parts, list) or not parts:
         return None
     cleaned = []
-    skipped_heading_level = None
     for part in parts:
         if not isinstance(part, dict):
-            continue
-        if skipped_heading_level is not None:
-            if (part.get('type') == 'heading'
-                    and int(part.get('level') or 2) <= skipped_heading_level):
-                skipped_heading_level = None
-            else:
-                continue
-        if (part.get('type') == 'heading'
-                and re.search(r'بنود\s+الإيرادات', str(part.get('text') or ''))):
-            skipped_heading_level = int(part.get('level') or 2)
             continue
         if part.get('type') == 'fields':
             rows = [
@@ -6616,6 +6625,17 @@ def _financial_screen_parts(model):
             if not rows:
                 continue
             part = {**part, 'rows': rows}
+        elif part.get('type') == 'table':
+            headers = [str(header or '').strip() for header in (part.get('headers') or [])]
+            kept_indexes = [index for index, header in enumerate(headers)
+                            if header not in FINANCIAL_REPORT_DROP_COLUMNS]
+            if not kept_indexes:
+                continue
+            rows = [
+                [row[index] if index < len(row) else '' for index in kept_indexes]
+                for row in (part.get('rows') or []) if isinstance(row, (list, tuple))
+            ]
+            part = {**part, 'headers': [headers[index] for index in kept_indexes], 'rows': rows}
         cleaned.append(part)
     result = []
     for index, part in enumerate(cleaned):
@@ -6714,6 +6734,7 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
     sections.append('<section><h2>2. الأرض والمساحات</h2>' + rows([('landArea', 'مساحة الأرض'), ('coverageRate', 'نسبة التغطية'), ('floorCount', 'عدد الطوابق'), ('builtUpAreaAbove', 'مسطحات البناء فوق الأرض'), ('basementArea', 'مساحة البدرومات'), ('landValueMethod', 'طريقة احتساب قيمة الأرض'), ('landStatus', 'حالة الأرض')]) + '</section>')
     for number, title, table_key in (
         ('3', 'مكونات المشروع', 'componentsTable'),
+        ('4', 'بنود الإيرادات', 'revenueTable'),
         ('5', 'تكاليف المشروع', 'costTable'), ('6', 'مراحل التطوير', 'scheduleTable'),
         ('7', 'المصروفات التشغيلية', 'opexTable'),
     ):
@@ -7119,6 +7140,7 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
     ])
     for number, title, table_key in (
         ('3', 'مكونات المشروع', 'componentsTable'),
+        ('4', 'بنود الإيرادات', 'revenueTable'),
         ('5', 'تكاليف المشروع', 'costTable'),
         ('6', 'مراحل التطوير', 'scheduleTable'),
         ('7', 'المصروفات التشغيلية', 'opexTable'),
@@ -10289,14 +10311,36 @@ def api_market_study_competitor_logo():
     if competitor.get('logo_file_id') or competitor.get('logo_path'):
         return jsonify({'success': True, 'competitor': competitor})
     official_url = competitor.get('logo_source_url') or competitor.get('source_url')
-    if not official_url or not market_study.official_source_reliability(
-            competitor.get('name'), competitor.get('source'), official_url):
-        return jsonify({'success': False, 'error': 'لا يوجد موقع رسمي موثق لهذا المنافس'}), 400
+    verified_official = bool(official_url and market_study.official_source_reliability(
+        competitor.get('name'), competitor.get('source'), official_url))
+    if not verified_official:
+        discovery_prompt = (
+            f'ابحث عن الموقع الرسمي وشعار «{competitor["name"]}». '
+            'أعد JSON فقط بالمفاتيح official_url وlogo_url وlogo_source_url. '
+            'official_url صفحة HTTPS من الموقع الرسمي للمشروع أو المطور، '
+            'logo_url رابط HTTPS مباشر لصورة PNG أو JPG أو WEBP من الموقع الرسمي أو نطاق الصور التابع له، '
+            'وlogo_source_url الصفحة الرسمية التي تثبت الشعار. إذا لم تجد دليلًا رسميًا أعد القيم فارغة.'
+        )
+        response, provider_error = _call_market_study_model(
+            market_study.build_consultant_system_prompt(), discovery_prompt, max_tokens=1600)
+        parsed, parse_error = _parse_market_model_json(response)
+        discovered_official = str(parsed.get('official_url') or parsed.get('logo_source_url') or '').strip()
+        citations = _market_citation_urls(response)
+        cited_official = bool(discovered_official and any(
+            _related_official_hosts(discovered_official, citation) for citation in citations))
+        if parse_error or not cited_official:
+            return jsonify({'success': False, 'error': provider_error or 'لم يُعثر على موقع رسمي موثق'}), 404
+        official_url = discovered_official
+        competitor['logo_url'] = str(parsed.get('logo_url') or '').strip()
+        competitor['logo_source_url'] = str(parsed.get('logo_source_url') or official_url).strip()
+        competitor['logo_official_verified'] = True
+    else:
+        competitor['logo_official_verified'] = True
     if not competitor.get('logo_url'):
         prompt = (
             f'ابحث داخل الموقع الرسمي فقط عن شعار «{competitor["name"]}»: {official_url}. '
             'أعد JSON فقط بالمفتاحين logo_url وlogo_source_url. '
-            'logo_url رابط HTTPS مباشر لصورة PNG أو JPG أو WEBP على النطاق الرسمي نفسه، '
+            'logo_url رابط HTTPS مباشر لصورة PNG أو JPG أو WEBP على النطاق الرسمي أو نطاق الصور التابع له، '
             'وlogo_source_url صفحة الموقع الرسمي. إذا لم تجده أعد القيمتين فارغتين.'
         )
         response, provider_error = _call_market_study_model(
@@ -10306,6 +10350,13 @@ def api_market_study_competitor_logo():
             return jsonify({'success': False, 'error': provider_error or 'لم يُعثر على شعار رسمي'}), 404
         competitor['logo_url'] = str(parsed.get('logo_url') or '').strip()
         competitor['logo_source_url'] = str(parsed.get('logo_source_url') or official_url).strip()
+    logo_source_url = competitor.get('logo_source_url') or official_url
+    if logo_source_url:
+        field_sources = market_study.competitor_field_sources(competitor)
+        field_sources['logo_url'] = [logo_source_url]
+        competitor['field_sources'] = field_sources
+        competitor['source_urls'] = list(dict.fromkeys(
+            market_study.competitor_source_urls(competitor) + [logo_source_url]))
     competitor = _store_imported_competitor_logo(
         competitor, draft_id=data.get('draftId') or data.get('draft_id'))
     if not competitor.get('logo_file_id'):
@@ -11175,11 +11226,40 @@ def _open_pinned_https(parsed, addresses):
     return pool, response
 
 
+_OFFICIAL_CDN_PREFIXES = {'cdn', 'images', 'image', 'img', 'static', 'assets', 'media', 'files'}
+_TWO_LEVEL_PUBLIC_SUFFIXES = {'co.uk', 'com.sa', 'net.sa', 'org.sa', 'com.ae', 'co.za', 'com.eg'}
+
+
+def _normalized_web_host(url):
+    return (urlsplit(str(url or '')).hostname or '').lower().removeprefix('www.')
+
+
+def _registrable_host(host):
+    parts = str(host or '').split('.')
+    if len(parts) < 2:
+        return str(host or '')
+    suffix = '.'.join(parts[-2:])
+    return '.'.join(parts[-3:]) if suffix in _TWO_LEVEL_PUBLIC_SUFFIXES and len(parts) >= 3 else suffix
+
+
+def _related_official_hosts(first_url, second_url):
+    first = _normalized_web_host(first_url)
+    second = _normalized_web_host(second_url)
+    return bool(first and second and (
+        first == second or first.endswith('.' + second) or second.endswith('.' + first)
+    ))
+
+
 def _same_official_host(logo_url, official_url):
-    logo_host = (urlsplit(str(logo_url or '')).hostname or '').lower().removeprefix('www.')
-    official_host = (urlsplit(str(official_url or '')).hostname or '').lower().removeprefix('www.')
-    return bool(logo_host and official_host and
-                (logo_host == official_host or logo_host.endswith('.' + official_host)))
+    logo_host = _normalized_web_host(logo_url)
+    official_host = _normalized_web_host(official_url)
+    if not logo_host or not official_host:
+        return False
+    if logo_host == official_host or logo_host.endswith('.' + official_host):
+        return True
+    logo_parts = logo_host.split('.')
+    return bool(len(logo_parts) >= 3 and logo_parts[0] in _OFFICIAL_CDN_PREFIXES
+                and _registrable_host(logo_host) == _registrable_host(official_host))
 
 
 def _safe_download_competitor_logo(logo_url, official_url):
@@ -11243,7 +11323,8 @@ def _store_imported_competitor_logo(row, draft_id=None):
     name = str((row or {}).get('name') or 'competitor').strip()
     if not logo_url or not official_url:
         return row
-    if not market_study.official_source_reliability(name, (row or {}).get('source'), official_url):
+    if not (row or {}).get('logo_official_verified') and not market_study.official_source_reliability(
+            name, (row or {}).get('source'), official_url):
         return row
     content, mime_type, extension, error = _safe_download_competitor_logo(logo_url, official_url)
     if error or not content:

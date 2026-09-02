@@ -514,12 +514,12 @@ _COMPETITOR_SOURCE_FIELD_ALIASES = {
     'area_sqm': 'area_sqm',
     'areaSqm': 'area_sqm',
     'المساحة': 'area_sqm',
-    'area_from': 'area_sqm',
-    'areaFrom': 'area_sqm',
-    'المساحة من': 'area_sqm',
-    'area_to': 'area_sqm',
-    'areaTo': 'area_sqm',
-    'المساحة إلى': 'area_sqm',
+    'area_from': 'area_from',
+    'areaFrom': 'area_from',
+    'المساحة من': 'area_from',
+    'area_to': 'area_to',
+    'areaTo': 'area_to',
+    'المساحة إلى': 'area_to',
     'status': 'status',
     'project_status': 'status',
     'حالة المشروع': 'status',
@@ -548,6 +548,8 @@ _COMPETITOR_SOURCE_FIELD_LABELS = {
     'name': 'اسم المشروع',
     'project_type': 'نوع المشروع',
     'area_sqm': 'مساحة الوحدة',
+    'area_from': 'مساحة الوحدة من',
+    'area_to': 'مساحة الوحدة إلى',
     'status': 'الحالة',
     'classification': 'التصنيف',
     'logo_url': 'شعار المنافس',
@@ -800,7 +802,10 @@ def empty_competitor(source='manual'):
         'id': str(uuid.uuid4()),
         'name': '',
         'project_type': '',
+        'area_mode': 'fixed',
         'area_sqm': '',
+        'area_from': '',
+        'area_to': '',
         'status': '',
         'classification': '',
         'logo_file_id': '',
@@ -1018,7 +1023,7 @@ def build_consultant_system_prompt():
         '6. صنّف المنافسين إلى: منافس مباشر، منافس غير مباشر، مشروع مرجعي.\n'
         '7. اذكر سبب اختيار كل منافس داخليًا في التحليل حتى لو لم يظهر عمود السبب في الجدول.\n'
         '8. لكل منافس أعد جميع روابط الصفحات التي استخدمت منها البيانات في source_urls، وليس رابطًا واحدًا فقط.\n'
-        '9. مساحة الوحدة قيمة ثابتة واحدة في area_sqm؛ لا تخرج area_mode أو area_from أو area_to، ولا تستخدم مساحة الأرض أو المبنى أو البرج أو المشروع الكلية.\n'
+        '9. مساحة الوحدة تكون area_mode=fixed مع area_sqm عندما يثبت المصدر قيمة واحدة، أو area_mode=range مع area_from وarea_to عندما يثبت المصدر نطاقًا؛ ولا تستخدم مساحة الأرض أو المبنى أو البرج أو المشروع الكلية.\n'
         '10. في الفندق استخدم مساحة الغرفة أو الجناح أو الشقة الفندقية، وإذا لم توجد مساحة وحدة موثوقة اترك area_sqm فارغة ولا تستخدم Tower GFA أو Gross Floor Area.\n'
         'إذا كان الطلب تحليلًا أو ملخصًا والسوق يعتمد على جدول المنافسين الحالي:\n'
         '1. اعتمد قائمة المنافسين الموجودة في الجدول ولا تحذف أي منافس منها.\n'
@@ -1089,9 +1094,12 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         price_type = _norm(row.get('price_type'))
         price_complete = (bool(_norm(row.get('price_from'))) and bool(_norm(row.get('price_to')))
                           if price_uses_range(price_type) else bool(_norm(row.get('price_value'))))
+        area_mode = 'range' if _norm(row.get('area_mode')) == 'range' or row.get('area_from') or row.get('area_to') else 'fixed'
+        area_complete = (bool(_norm(row.get('area_from'))) and bool(_norm(row.get('area_to')))
+                         if area_mode == 'range' else bool(_norm(row.get('area_sqm'))))
         return all(_norm(row.get(key)) for key in (
-            'project_type', 'area_sqm', 'status', 'classification', 'operation_type', 'price_type', 'source'
-        )) and price_complete
+            'project_type', 'status', 'classification', 'operation_type', 'price_type', 'source'
+        )) and area_complete and price_complete
 
     incomplete = [row for row in named if not is_complete(row)]
     today = date.today().isoformat()
@@ -1151,7 +1159,10 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "id": "أبق المعرف إن وُجد وإلا اتركه فارغًا",\n'
         '      "name": "",\n'
         '      "project_type": "سكني أو تجاري أو فندقي أو صناعي ولوجستي أو متعدد الاستخدامات أو أخرى",\n'
-        '      "area_sqm": "مساحة الوحدة الثابتة بالمتر المربع",\n'
+        '      "area_mode": "fixed أو range حسب المصدر",\n'
+        '      "area_sqm": "القيمة الثابتة أو فارغ للنطاق",\n'
+        '      "area_from": "بداية النطاق أو فارغ للقيمة الثابتة",\n'
+        '      "area_to": "نهاية النطاق أو فارغ للقيمة الثابتة",\n'
         '      "status": "قائم أو تحت الإنشاء أو على الخارطة",\n'
         '      "classification": "مباشر أو غير مباشر أو مرجعي",\n'
         '      "operation_type": "بيع أو إيجار أو تشغيل فندقي أو أخرى",\n'
@@ -1164,7 +1175,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "source_urls": [],\n'
         '      "logo_url": "رابط صورة الشعار من الموقع الرسمي فقط أو فارغ",\n'
         '      "logo_source_url": "صفحة الموقع الرسمي التي تثبت الشعار أو فارغ",\n'
-        '      "field_sources": {"name": [], "project_type": [], "area_sqm": [], "status": [], "classification": [], "operation_type": [], "price_type": [], "price_value": [], "price_from": [], "price_to": [], "logo_url": []},\n'
+        '      "field_sources": {"name": [], "project_type": [], "area_sqm": [], "area_from": [], "area_to": [], "status": [], "classification": [], "operation_type": [], "price_type": [], "price_value": [], "price_from": [], "price_to": [], "logo_url": []},\n'
         '      "notes": "",\n'
         '      "row_source": "ai"\n'
         '    }\n'
@@ -1178,7 +1189,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'إذا لم تجد سعرًا اترك حقول السعر فارغة واذكر المصدر إن وُجد.\n'
         'في source_urls ضع كل روابط الصفحات التي قرأتها واستخدمت منها أي معلومة لهذا المنافس، رابطًا لكل صفحة، '
         'ولا تكتف برابط واحد إذا استخدمت أكثر من صفحة. اجعل source_url هو الرابط الأهم للتوافق مع البيانات القديمة. '
-        'في field_sources اربط كل حقل أعدت له قيمة بروابط الصفحات التي تثبته، وبالأخص area_sqm، status، classification، operation_type، price_type، price_value، price_from، price_to، وlogo_url. '
+        'في field_sources اربط كل حقل أعدت له قيمة بروابط الصفحات التي تثبته، وبالأخص area_sqm، area_from، area_to، status، classification، operation_type، price_type، price_value، price_from، price_to، وlogo_url. '
         'logo_url مقبول فقط عندما يكون logo_source_url صفحة رسمية للمشروع أو المطور، وإلا اترك الحقلين فارغين. '
         'اجعل source_urls اتحاد جميع روابط field_sources. '
         'في source_url وsource_urls ضع روابط الصفحات المحددة من نتائج البحث، وليس رابط الصفحة الرئيسية للموقع. '
@@ -1271,11 +1282,16 @@ def normalize_competitor_row(row, fallback_source='ai'):
     price_value = _clean_numeric(price_value)
     price_from = _clean_numeric(price_from)
     price_to = _clean_numeric(price_to)
-    area_sqm = _clean_numeric(_first_nonempty(row.get('area_sqm'), row.get('areaSqm'), row.get('area'), row.get('المساحة')))
-    legacy_area_from = _clean_numeric(_first_nonempty(row.get('area_from'), row.get('areaFrom'), row.get('المساحة من')))
-    legacy_area_to = _clean_numeric(_first_nonempty(row.get('area_to'), row.get('areaTo'), row.get('المساحة إلى')))
-    if not area_sqm:
-        area_sqm = legacy_area_from or legacy_area_to
+    area_cache = row.get('area_cache') if isinstance(row.get('area_cache'), dict) else {}
+    area_sqm = _clean_numeric(_first_nonempty(
+        row.get('area_sqm'), row.get('areaSqm'), row.get('area'), row.get('المساحة'), area_cache.get('area_sqm')))
+    area_from = _clean_numeric(_first_nonempty(
+        row.get('area_from'), row.get('areaFrom'), row.get('المساحة من'), area_cache.get('area_from')))
+    area_to = _clean_numeric(_first_nonempty(
+        row.get('area_to'), row.get('areaTo'), row.get('المساحة إلى'), area_cache.get('area_to')))
+    requested_area_mode = _norm(row.get('area_mode') or row.get('areaMode'))
+    area_mode = ('range' if requested_area_mode == 'range' else 'fixed'
+                 if requested_area_mode == 'fixed' else 'range' if area_from or area_to else 'fixed')
     operation = _canonical_operation(
         row.get('operation_type') or row.get('operationType') or row.get('operation') or row.get('نوع العملية')
         or row.get('نوع التشغيل') or row.get('التشغيل'),
@@ -1307,7 +1323,11 @@ def normalize_competitor_row(row, fallback_source='ai'):
         'id': _norm(row.get('id')) or str(uuid.uuid4()),
         'name': name,
         'project_type': project_type,
-        'area_sqm': area_sqm,
+        'area_mode': area_mode,
+        'area_sqm': area_sqm if area_mode == 'fixed' else '',
+        'area_from': area_from if area_mode == 'range' else '',
+        'area_to': area_to if area_mode == 'range' else '',
+        'area_cache': {'area_sqm': area_sqm, 'area_from': area_from, 'area_to': area_to},
         'status': status,
         'classification': classification,
         'logo_file_id': _norm(row.get('logo_file_id') or row.get('logoFileId')),
@@ -1444,7 +1464,10 @@ def merge_generated_competitors(existing, generated, mode='generate'):
     by_id = {str(row.get('id')): index for index, row in enumerate(current)}
     by_name = {_norm(row.get('name')).casefold(): index for index, row in enumerate(current)}
     updated = 0
-    protected = {'id', 'name', 'row_source', 'field_sources', 'source_urls', 'conflict_warnings'}
+    protected = {
+        'id', 'name', 'row_source', 'field_sources', 'source_urls', 'conflict_warnings',
+        'area_mode', 'area_sqm', 'area_from', 'area_to', 'area_cache',
+    }
     for raw in generated or []:
         incoming = normalize_competitor_row(raw)
         if not incoming:
@@ -1459,6 +1482,32 @@ def merge_generated_competitors(existing, generated, mode='generate'):
         incoming_sources = competitor_field_sources(incoming)
         warnings = list(target.get('conflict_warnings') or [])
         has_manual_logo = bool(target.get('logo_file_id') or target.get('logo_path'))
+        target_has_area = any(_competitor_value_filled(target.get(key))
+                              for key in ('area_sqm', 'area_from', 'area_to'))
+        incoming_has_area = any(_competitor_value_filled(incoming.get(key))
+                                for key in ('area_sqm', 'area_from', 'area_to'))
+        if incoming_has_area and not target_has_area:
+            for key in ('area_mode', 'area_sqm', 'area_from', 'area_to', 'area_cache'):
+                target[key] = incoming.get(key)
+            for key in ('area_sqm', 'area_from', 'area_to'):
+                if incoming_sources.get(key):
+                    target_sources[key] = _unique_values(incoming_sources[key])
+            updated += 1
+        elif incoming_has_area and target_has_area:
+            target_area = (target.get('area_mode'), target.get('area_sqm'), target.get('area_from'), target.get('area_to'))
+            incoming_area = (incoming.get('area_mode'), incoming.get('area_sqm'), incoming.get('area_from'), incoming.get('area_to'))
+            area_urls = _unique_values(
+                (incoming_sources.get('area_sqm') or [])
+                + (incoming_sources.get('area_from') or [])
+                + (incoming_sources.get('area_to') or [])
+            )
+            official_url = next((url for url in area_urls if official_source_reliability(
+                incoming.get('name'), incoming.get('source'), url)), '')
+            if target_area != incoming_area and official_url:
+                warnings.append({
+                    'field': 'area_mode', 'existing': target_area, 'incoming': incoming_area,
+                    'source': incoming.get('source') or 'مصدر رسمي للجهة', 'source_url': official_url,
+                })
         for key, value in incoming.items():
             if key in protected or (has_manual_logo and key in {'logo_url', 'logo_source_url'}):
                 continue
