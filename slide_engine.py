@@ -2537,9 +2537,150 @@ def _extract_competitor_chart_data(competitors, project_data=None):
     return items
 
 
+def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f', secondary='#0284c7', gold='#b89564'):
+    total_val_m = total.get('value_millions', 0.0)
+    if total_val_m <= 0:
+        total_val_m = sum(it.get('value_millions', 0.0) for it in items) or 1.0
+
+    max_tick = 100.0
+    for t in [100, 200, 300, 500, 750, 1000, 1500, 2000, 5000]:
+        if total_val_m <= t:
+            max_tick = float(t)
+            break
+    else:
+        max_tick = total_val_m * 1.15
+
+    tick_step = max_tick / 4.0
+    ticks = [0.0, tick_step, tick_step * 2, tick_step * 3, max_tick]
+
+    pad_left = 60
+    pad_right = 25
+    pad_top = 45
+    pad_bottom = 65
+    chart_w = width - pad_left - pad_right
+    chart_h = height - pad_top - pad_bottom
+
+    def y_for(val):
+        return round(pad_top + chart_h - (val / max_tick) * chart_h, 1)
+
+    y_zero = y_for(0.0)
+
+    grid_lines = []
+    tick_texts = []
+    for t in ticks:
+        ty = y_for(t)
+        grid_lines.append(f'<line x1="{pad_left}" y1="{ty}" x2="{width - pad_right}" y2="{ty}" stroke="#e2e8f0" stroke-width="1" />')
+        val_str = f"{t:,.0f}" if t == int(t) else f"{t:,.1f}"
+        tick_texts.append(f'<text x="{pad_left - 8}" y="{ty + 4}" font-size="10" fill="#94a3b8" text-anchor="end">{val_str}</text>')
+
+    n_cols = len(items) + 1
+    col_slot = chart_w / max(n_cols, 1)
+    bar_w = min(round(col_slot * 0.72, 1), 75.0)
+
+    bars_svg = []
+    connectors_svg = []
+    labels_svg = []
+
+    def _wrap_tspans(text, cx, max_chars=14):
+        words = str(text).split()
+        if len(words) <= 2 and len(text) <= max_chars:
+            return f'<text x="{cx}" y="0" font-size="9.5" font-weight="600" fill="#334155" text-anchor="middle">{html_lib.escape(text)}</text>'
+        mid = len(words) // 2
+        line1 = ' '.join(words[:mid])
+        line2 = ' '.join(words[mid:])
+        return f'''<text x="{cx}" y="-4" font-size="9.5" font-weight="600" fill="#334155" text-anchor="middle">
+          <tspan x="{cx}" dy="0">{html_lib.escape(line1)}</tspan>
+          <tspan x="{cx}" dy="12">{html_lib.escape(line2)}</tspan>
+        </text>'''
+
+    running_m = 0.0
+    prev_top_x = None
+    prev_top_y = None
+
+    for idx, it in enumerate(items):
+        val_m = it.get('value_millions', 0.0)
+        bot_y = y_for(running_m)
+        top_y = y_for(running_m + val_m)
+        bar_h = max(round(bot_y - top_y, 1), 4.0)
+
+        cx = pad_left + idx * col_slot + col_slot / 2
+        bx = round(cx - bar_w / 2, 1)
+
+        name = it.get('name', '')
+        if 'مطور' in name:
+            color = gold
+        elif 'صندوق' in name:
+            color = '#8b5cf6'
+        elif 'تمويل' in name:
+            color = '#f59e0b'
+        elif idx % 2 == 0:
+            color = primary
+        else:
+            color = secondary
+
+        if prev_top_x is not None:
+            connectors_svg.append(f'<line x1="{prev_top_x}" y1="{prev_top_y}" x2="{bx}" y2="{prev_top_y}" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="3 3" />')
+
+        bars_svg.append(f'<rect x="{bx}" y="{top_y}" width="{bar_w}" height="{bar_h}" fill="{color}" rx="3" />')
+
+        pct = it.get('pct_of_total', round((val_m / total_val_m) * 100, 1))
+        disp = it.get('display', f"{val_m:.1f} م.ر")
+        labels_svg.append(f'<text x="{cx}" y="{top_y - 8}" font-size="9.5" font-weight="700" fill="#0f172a" text-anchor="middle">{disp}</text>')
+        labels_svg.append(f'<text x="{cx}" y="{top_y - 20}" font-size="8.5" font-weight="600" fill="#64748b" text-anchor="middle">{pct}%</text>')
+
+        wrapped = _wrap_tspans(name, cx)
+        labels_svg.append(f'<g transform="translate(0, {y_zero + 18})">{wrapped}</g>')
+
+        prev_top_x = bx + bar_w
+        prev_top_y = top_y
+        running_m += val_m
+
+    # Total column
+    tot_idx = len(items)
+    tot_cx = pad_left + tot_idx * col_slot + col_slot / 2
+    tot_bx = round(tot_cx - bar_w / 2, 1)
+    tot_top_y = y_for(total_val_m)
+    tot_h = round(y_zero - tot_top_y, 1)
+
+    if prev_top_x is not None:
+        connectors_svg.append(f'<line x1="{prev_top_x}" y1="{prev_top_y}" x2="{tot_bx}" y2="{prev_top_y}" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="3 3" />')
+
+    bars_svg.append(f'<rect x="{tot_bx}" y="{tot_top_y}" width="{bar_w}" height="{tot_h}" fill="{primary}" rx="3" />')
+    tot_disp = total.get('display', f"{total_val_m:.1f} م.ر")
+    labels_svg.append(f'<text x="{tot_cx}" y="{tot_top_y - 8}" font-size="10.5" font-weight="800" fill="{primary}" text-anchor="middle">{tot_disp}</text>')
+    labels_svg.append(f'<text x="{tot_cx}" y="{tot_top_y - 22}" font-size="8.5" font-weight="700" fill="{primary}" text-anchor="middle">100%</text>')
+    tot_wrapped = _wrap_tspans(total.get('name', 'إجمالي تكلفة الاستثمار'), tot_cx)
+    labels_svg.append(f'<g transform="translate(0, {y_zero + 18})">{tot_wrapped}</g>')
+
+    return f'''<svg viewBox="0 0 {width} {height}" style="width:100%;height:auto;max-height:360px;font-family:inherit;overflow:visible;" role="img" aria-label="المخطط الشلالي لتكوين إجمالي تكلفة الاستثمار">
+  <!-- Grid -->
+  {''.join(grid_lines)}
+  <!-- Baseline -->
+  <line x1="{pad_left}" y1="{y_zero}" x2="{width - pad_right}" y2="{y_zero}" stroke="#64748b" stroke-width="1.5" />
+  <!-- Ticks -->
+  {''.join(tick_texts)}
+  <!-- Connectors -->
+  {''.join(connectors_svg)}
+  <!-- Bars -->
+  {''.join(bars_svg)}
+  <!-- Labels -->
+  {''.join(labels_svg)}
+</svg>'''
+
+
 def _extract_waterfall_chart_data(part_or_table, model=None, project_data=None):
     model = model if isinstance(model, dict) else {}
     inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
+    tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+    project_data = project_data if isinstance(project_data, dict) else {}
+    fcd = project_data.get('financial_calc_data')
+    if isinstance(fcd, str):
+        try:
+            fcd = json.loads(fcd)
+        except Exception:
+            fcd = {}
+    fcd = fcd if isinstance(fcd, dict) else {}
+
     rows = []
     if isinstance(part_or_table, dict):
         rows = part_or_table.get('rows') or []
@@ -2572,6 +2713,20 @@ def _extract_waterfall_chart_data(part_or_table, model=None, project_data=None):
                 })
 
     if not items:
+        for r in tables.get('costTable', []):
+            if isinstance(r, dict):
+                c_name = str(r.get('اسم التكلفة') or '').strip()
+                c_val = _clean_numeric_val(r.get('الناتج'))
+                if c_name and c_val > 0 and c_name not in seen_names:
+                    seen_names.add(c_name)
+                    items.append({
+                        'name': c_name,
+                        'value_sar': c_val,
+                        'value_millions': round(c_val / 1e6, 2),
+                        'display': _format_sar_display(c_val),
+                    })
+
+    if not items:
         fallback_cost_keys = (
             ('landCostIncluded', 'قيمة الأرض'),
             ('landValue', 'قيمة الأرض'),
@@ -2600,22 +2755,7 @@ def _extract_waterfall_chart_data(part_or_table, model=None, project_data=None):
                 })
 
     if not items:
-        tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
-        for r in tables.get('costTable', []):
-            if isinstance(r, dict):
-                c_name = str(r.get('اسم التكلفة') or '').strip()
-                c_val = _clean_numeric_val(r.get('الناتج'))
-                if c_name and c_val > 0 and c_name not in seen_names:
-                    seen_names.add(c_name)
-                    items.append({
-                        'name': c_name,
-                        'value_sar': c_val,
-                        'value_millions': round(c_val / 1e6, 2),
-                        'display': _format_sar_display(c_val),
-                    })
-
-    if not items:
-        total_guess = _clean_numeric_val(inputs.get('adjustedProjectCost') or inputs.get('projectCost') or inputs.get('landCostIncluded') or inputs.get('equityRequired') or 100000000)
+        total_guess = _clean_numeric_val(inputs.get('adjustedProjectCost') or inputs.get('projectCost') or inputs.get('landCostIncluded') or 100000000)
         items = [
             {'name': 'قيمة الأرض', 'value_sar': total_guess * 0.45, 'value_millions': round(total_guess * 0.45 / 1e6, 2), 'display': _format_sar_display(total_guess * 0.45)},
             {'name': 'تكاليف التنفيذ', 'value_sar': total_guess * 0.38, 'value_millions': round(total_guess * 0.38 / 1e6, 2), 'display': _format_sar_display(total_guess * 0.38)},
@@ -2624,29 +2764,115 @@ def _extract_waterfall_chart_data(part_or_table, model=None, project_data=None):
             {'name': 'أتعاب الصندوق والتمويل', 'value_sar': total_guess * 0.05, 'value_millions': round(total_guess * 0.05 / 1e6, 2), 'display': _format_sar_display(total_guess * 0.05)},
         ]
 
-    total_val = sum(it['value_sar'] for it in items)
-    adj_cost = _clean_numeric_val(inputs.get('adjustedProjectCost') or inputs.get('projectCost') or inputs.get('equityRequired'))
-    if adj_cost > 0 and adj_cost >= total_val * 0.85:
-        total_val = adj_cost
+    # Mandatory inclusion of Developer Cost, Fund Cost, and Finance Cost if present (> 0) and not already in items
+    # 1. Developer Cost (تكلفة المطور)
+    has_dev = any(any(kw in str(it.get('name', '')).lower() for kw in ('مطور', 'أتعاب التطوير', 'إدارة التطوير', 'developer')) for it in items)
+    if not has_dev:
+        dev_val = _clean_numeric_val(
+            inputs.get('developerCostValue')
+            or inputs.get('developerCost')
+            or inputs.get('developerFee')
+            or inputs.get('totalDeveloperCost')
+            or inputs.get('developerFeesTotal')
+            or fcd.get('developerCost')
+            or fcd.get('developerCostValue')
+            or project_data.get('developer_cost')
+            or project_data.get('developer_fee')
+        )
+        if dev_val > 0:
+            seen_names.add('تكلفة المطور')
+            items.append({
+                'name': 'تكلفة المطور',
+                'value_sar': dev_val,
+                'value_millions': round(dev_val / 1e6, 2),
+                'display': _format_sar_display(dev_val),
+            })
 
+    # 2. Fund Cost (تكلفة الصندوق)
+    has_fund = any('صندوق' in str(it.get('name', '')) or 'fund' in str(it.get('name', '')).lower() for it in items)
+    if not has_fund:
+        fund_val = _clean_numeric_val(
+            inputs.get('fundFeesTotal')
+            or inputs.get('totalFundFees')
+            or inputs.get('fundManagementFeesTotal')
+            or inputs.get('fundTotalFees')
+            or inputs.get('fundCost')
+            or inputs.get('fundFees')
+            or fcd.get('totalFundFees')
+            or project_data.get('fund_fees')
+            or project_data.get('fund_cost')
+        )
+        if fund_val <= 0 and isinstance(tables.get('fundFeeScheduleTable'), list):
+            for fr in tables['fundFeeScheduleTable']:
+                if isinstance(fr, dict):
+                    fund_val += _clean_numeric_val(fr.get('إجمالي أتعاب الصندوق') or fr.get('أتعاب الإدارة') or fr.get('total'))
+        if fund_val > 0:
+            seen_names.add('تكلفة الصندوق')
+            items.append({
+                'name': 'تكلفة الصندوق',
+                'value_sar': fund_val,
+                'value_millions': round(fund_val / 1e6, 2),
+                'display': _format_sar_display(fund_val),
+            })
+
+    # 3. Finance Cost (تكلفة التمويل)
+    has_fin = any(any(kw in str(it.get('name', '')).lower() for kw in ('تمويل', 'فوائد التمويل', 'رسوم التمويل', 'finance')) for it in items)
+    if not has_fin:
+        fin_val = _clean_numeric_val(
+            inputs.get('totalFinanceCost')
+            or inputs.get('financeCost')
+            or fcd.get('totalFinanceCost')
+            or project_data.get('total_finance_cost')
+            or project_data.get('finance_cost')
+        )
+        if fin_val <= 0:
+            interest = _clean_numeric_val(inputs.get('financeInterestTotal') or fcd.get('financeInterestTotal'))
+            arrangement = _clean_numeric_val(inputs.get('arrangementFeeTotal') or fcd.get('arrangementFeeTotal'))
+            fin_val = interest + arrangement
+        if fin_val <= 0 and isinstance(tables.get('debtScheduleTable'), list):
+            for dr in tables['debtScheduleTable']:
+                if isinstance(dr, dict):
+                    fin_val += _clean_numeric_val(dr.get('الفائدة')) + _clean_numeric_val(dr.get('رسوم التمويل'))
+        if fin_val > 0:
+            seen_names.add('تكلفة التمويل')
+            items.append({
+                'name': 'تكلفة التمويل',
+                'value_sar': fin_val,
+                'value_millions': round(fin_val / 1e6, 2),
+                'display': _format_sar_display(fin_val),
+            })
+
+    total_val = sum(it['value_sar'] for it in items)
     max_val = max([total_val] + [it['value_sar'] for it in items]) or 1.0
     running = 0.0
     for it in items:
+        it['pct_of_total'] = round((it['value_sar'] / total_val) * 100, 1) if total_val > 0 else 0.0
         it['offset_pct'] = round((running / max_val) * 100, 1)
-        it['height_pct'] = max(round((it['value_sar'] / max_val) * 100, 1), 6.0)
+        it['height_pct'] = max(round((it['value_sar'] / max_val) * 100, 1), 5.0)
         running += it['value_sar']
+
+    total_data = {
+        'name': 'إجمالي تكلفة الاستثمار',
+        'value_sar': total_val,
+        'value_millions': round(total_val / 1e6, 2),
+        'display': _format_sar_display(total_val),
+        'pct_of_total': 100.0,
+        'height_pct': 100.0,
+        'offset_pct': 0.0,
+    }
+
+    svg_code = _build_waterfall_svg(items, total_data)
 
     return {
         'items': items,
-        'total': {
-            'name': 'إجمالي تكلفة الاستثمار',
-            'value_sar': total_val,
-            'value_millions': round(total_val / 1e6, 2),
-            'display': _format_sar_display(total_val),
-            'height_pct': 100.0,
-            'offset_pct': 0.0,
+        'total': total_data,
+        'summary': {
+            'total_millions': round(total_val / 1e6, 2),
+            'items_count': len(items),
+            'svg_code': svg_code,
         }
     }
+
 
 
 def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
@@ -3361,11 +3587,11 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         ),
         'waterfall': (
             'المخطط الشلالي (Waterfall Chart) لتكوين إجمالي تكلفة الاستثمار: '
-            'يوضح مساهمة كل بند تكلفة من القائمة المرفقة وصولاً لعمود إجمالي تكلفة الاستثمار النهائي. '
+            'يوضح مساهمة كل بند تكلفة من القائمة المرفقة (بما يشمل تكلفة المطور وتكاليف الصندوق والتمويل عند توفرها) وصولاً لعمود إجمالي تكلفة الاستثمار النهائي. '
             'الهيكل الإلزامي: قسّم الشريحة إلى عمودين متجاورين متساويين (50% لجدول التكاليف، 50% للمخطط الشلالي) '
             'داخل حاوية display: grid; grid-template-columns: 1fr 1fr; gap: 24px; height: 500px; align-items: start;. '
             'في جانب الرسم: حاوية رسم بخلفية #f8fafc وبودر 1px solid #e2e8f0 وبادينغ 16px وراديوس 8px بارتفاع كلي 380px، '
-            'تتضمن بالأعلى عنوان المخطط، ثم خط أساس سفلي (border-bottom: 2px solid #94a3b8; height: 260px; display: flex; align-items: flex-end; justify-content: space-between; position: relative; gap: 6px; padding-bottom: 4px;). '
+            'تتضمن بالأعلى عنوان المخطط، ثم يمكنك إدراج كود SVG الجاهز والمحسوب بدقة من summary.svg_code أو بنائه كأعمدة عائمة: '
             'لكل بند تكلفة من قائمة البيانات المرفقة (waterfall_chart_data.items): '
             'عمود رأسي عائم (flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative;): '
             f'1. قيمة البند بالأعلى: (<span style="position: absolute; bottom: calc(offset_pct% + height_pct% + 4px); font-size: 10px; font-weight: 700; color: {primary_color}; white-space: nowrap;">display</span>). '
@@ -4150,6 +4376,15 @@ def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9
 
 
 def _render_fallback_waterfall(chart_data, primary='#005f78', secondary='#0ea5e9'):
+    summary = (chart_data or {}).get('summary') if isinstance(chart_data, dict) else {}
+    svg_code = summary.get('svg_code')
+    if svg_code:
+        return (
+            f'<div style="background:#f8fafc;padding:14px 14px 20px;border-radius:8px;border:1px solid #e2e8f0;position:relative;">'
+            f'<div style="font-size:13px;font-weight:700;color:{primary};margin-bottom:8px;">تكوين إجمالي تكلفة الاستثمار (ملايين ر.س)</div>'
+            f'{svg_code}'
+            f'</div>'
+        )
     items = (chart_data or {}).get('items') or []
     total = (chart_data or {}).get('total') or {}
     if not items and not total:

@@ -1609,6 +1609,58 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(fb_headers, ['السنة', 'صافي التدفق السنوي', 'الرصيد التراكمي'])
         self.assertEqual(len(fb_rows), len(c_data['items']))
 
+    def test_waterfall_mandatory_developer_fund_finance_costs(self):
+        engine = self.application_module.slide_engine
+        cost_rows = [
+            {'اسم التكلفة': 'أعمال إنشائية', 'الناتج': '100,000,000'},
+            {'اسم التكلفة': 'تصاميم ودراسات', 'الناتج': '10,000,000'}
+        ]
+        model = {
+            'inputs': {
+                'developerCostValue': '8,000,000',
+                'fundFeesTotal': '4,500,000',
+                'financeInterestTotal': '12,000,000',
+                'arrangementFeeTotal': '1,000,000',
+            },
+            'tables': {
+                'costTable': cost_rows
+            }
+        }
+        res = engine._extract_waterfall_chart_data({'rows': cost_rows}, model=model)
+        names = [it['name'] for it in res['items']]
+        self.assertIn('أعمال إنشائية', names)
+        self.assertIn('تصاميم ودراسات', names)
+        self.assertIn('تكلفة المطور', names)
+        self.assertIn('تكلفة الصندوق', names)
+        self.assertIn('تكلفة التمويل', names)
+
+        dev_item = next(it for it in res['items'] if it['name'] == 'تكلفة المطور')
+        fund_item = next(it for it in res['items'] if it['name'] == 'تكلفة الصندوق')
+        fin_item = next(it for it in res['items'] if it['name'] == 'تكلفة التمويل')
+        self.assertEqual(dev_item['value_sar'], 8000000.0)
+        self.assertEqual(fund_item['value_sar'], 4500000.0)
+        self.assertEqual(fin_item['value_sar'], 13000000.0)
+
+        # Total check: 100M + 10M + 8M + 4.5M + 13M = 135.5M
+        self.assertEqual(res['total']['value_sar'], 135500000.0)
+        self.assertIn('svg_code', res.get('summary', {}))
+
+        # Test omission when 0 or not present
+        zero_model = {
+            'inputs': {
+                'developerCostValue': '0',
+                'fundFeesTotal': 0,
+                'totalFinanceCost': 0,
+            },
+            'tables': {'costTable': cost_rows}
+        }
+        res_zero = engine._extract_waterfall_chart_data({'rows': cost_rows}, model=zero_model)
+        names_zero = [it['name'] for it in res_zero['items']]
+        self.assertNotIn('تكلفة المطور', names_zero)
+        self.assertNotIn('تكلفة الصندوق', names_zero)
+        self.assertNotIn('تكلفة التمويل', names_zero)
+        self.assertEqual(res_zero['total']['value_sar'], 110000000.0)
+
     def test_financial_study_slides_strictly_follow_pdf_table_design(self):
         engine = self.application_module.slide_engine
         import design_templates as templates
