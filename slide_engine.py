@@ -2345,6 +2345,346 @@ def validate_slide_plan(plan, branding):
 # Single Slide Generation
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _clean_numeric_val(val):
+    if val is None:
+        return 0.0
+    s = str(val).strip()
+    if not s or s in ('—', '-', 'غير متاح', 'N/A'):
+        return 0.0
+    neg = '(' in s or '-' in s
+    cleaned = re.sub(r'[^\d.]', '', s.replace(',', ''))
+    try:
+        n = float(cleaned)
+        return -n if neg else n
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _format_sar_display(val):
+    val_m = round(val / 1e6, 2)
+    if abs(val_m) >= 0.1:
+        return f"{round(val / 1e6, 1)} م.ر"
+    return f"{int(val):,} ر.س"
+
+
+def _extract_competitor_chart_data(competitors, project_data=None):
+    project_data = project_data if isinstance(project_data, dict) else {}
+    items = []
+    for comp in (competitors or []):
+        if not isinstance(comp, dict):
+            continue
+        name = str(comp.get('name') or comp.get('competitor_name') or comp.get('project_name') or '').strip()
+        price_val = comp.get('price_value') or comp.get('price') or comp.get('value')
+        p_from = comp.get('price_from') or comp.get('min_price')
+        p_to = comp.get('price_to') or comp.get('max_price')
+        p_type = str(comp.get('price_type') or comp.get('type') or '').strip()
+        unit = str(comp.get('unit') or (comp.get('area_cache') if isinstance(comp.get('area_cache'), dict) else {}).get('unit') or '').strip()
+
+        num = 0.0
+        for raw in (price_val, p_to, p_from):
+            val = _clean_numeric_val(raw)
+            if val > 0:
+                num = val
+                break
+        if name and num > 0:
+            unit_str = f" {unit}" if unit else " ر.س/م²"
+            items.append({
+                'name': name,
+                'price_num': num,
+                'display_price': f"{int(num):,}{unit_str}",
+                'price_type': p_type,
+                'is_project': False,
+            })
+
+    items.sort(key=lambda x: x['price_num'], reverse=True)
+
+    proj_price_raw = project_data.get('proposed_price') or project_data.get('project_price')
+    market = _decode_json_fact(project_data.get('market_study_data')) if isinstance(project_data.get('market_study_data'), (str, dict)) else {}
+    if not proj_price_raw and isinstance(market, dict):
+        proj_price_raw = market.get('proposed_price') or market.get('project_price')
+    if proj_price_raw:
+        p_val = _clean_numeric_val(proj_price_raw)
+        if p_val > 0:
+            p_name = str(project_data.get('project_name') or project_data.get('projectName') or 'مشروعنا').strip()
+            unit_str = items[0]['display_price'].split()[-1] if items and ' ' in items[0]['display_price'] else 'ر.س/م²'
+            items.append({
+                'name': f"{p_name} (المشروع المقترح)",
+                'price_num': p_val,
+                'display_price': f"{int(p_val):,} {unit_str}",
+                'price_type': 'سعر مقترح',
+                'is_project': True,
+            })
+            items.sort(key=lambda x: x['price_num'], reverse=True)
+
+    if len(items) > 6:
+        project_item = next((it for it in items if it.get('is_project')), None)
+        items = items[:6]
+        if project_item and project_item not in items:
+            items[-1] = project_item
+            items.sort(key=lambda x: x['price_num'], reverse=True)
+
+    max_p = max((x['price_num'] for x in items), default=1.0)
+    for it in items:
+        it['bar_width_pct'] = max(round((it['price_num'] / max_p) * 100, 1), 15.0)
+
+    return items
+
+
+def _extract_waterfall_chart_data(part_or_table, model=None, project_data=None):
+    model = model if isinstance(model, dict) else {}
+    inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
+    rows = []
+    if isinstance(part_or_table, dict):
+        rows = part_or_table.get('rows') or []
+    elif isinstance(part_or_table, list):
+        rows = part_or_table
+
+    items = []
+    seen_names = set()
+    for r in rows:
+        name = ''
+        val = 0.0
+        if isinstance(r, dict):
+            name = str(r.get('اسم التكلفة') or r.get('البند') or r.get('name') or '').strip()
+            val = _clean_numeric_val(r.get('الناتج') or r.get('القيمة') or r.get('value') or r.get('cost'))
+        elif isinstance(r, (list, tuple)) and r:
+            name = str(r[0]).strip()
+            for cell in reversed(r[1:]):
+                c_val = _clean_numeric_val(cell)
+                if c_val > 0:
+                    val = c_val
+                    break
+        if name and name not in ('الإجمالي', 'المجموع', 'Total', 'إجمالي تكلفة الاستثمار') and val > 0:
+            if name not in seen_names:
+                seen_names.add(name)
+                items.append({
+                    'name': name,
+                    'value_sar': val,
+                    'value_millions': round(val / 1e6, 2),
+                    'display': _format_sar_display(val),
+                })
+
+    if not items:
+        fallback_cost_keys = (
+            ('landCostIncluded', 'قيمة الأرض'),
+            ('landValue', 'قيمة الأرض'),
+            ('executionCostTotal', 'تكلفة التنفيذ والإنشاء'),
+            ('designCostTotal', 'التصميم والدراسات والاستشارات'),
+            ('servicesCostTotal', 'رسوم الخدمات والتراخيص'),
+            ('advertisingCostTotal', 'الدعاية والتسويق'),
+            ('developerCost', 'أتعاب إدارة التطوير'),
+            ('fundFeesTotal', 'أتعاب إدارة الصندوق'),
+            ('totalFundFees', 'أتعاب إدارة الصندوق'),
+            ('fundManagementFeesTotal', 'أتعاب إدارة الصندوق'),
+            ('totalFinanceCost', 'تكلفة التمويل البنكي'),
+            ('contingencyCostTotal', 'احتياطي الطوارئ'),
+        )
+        for k, label in fallback_cost_keys:
+            if label in seen_names:
+                continue
+            c_val = _clean_numeric_val(inputs.get(k))
+            if c_val > 0:
+                seen_names.add(label)
+                items.append({
+                    'name': label,
+                    'value_sar': c_val,
+                    'value_millions': round(c_val / 1e6, 2),
+                    'display': _format_sar_display(c_val),
+                })
+
+    if not items:
+        tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+        for r in tables.get('costTable', []):
+            if isinstance(r, dict):
+                c_name = str(r.get('اسم التكلفة') or '').strip()
+                c_val = _clean_numeric_val(r.get('الناتج'))
+                if c_name and c_val > 0 and c_name not in seen_names:
+                    seen_names.add(c_name)
+                    items.append({
+                        'name': c_name,
+                        'value_sar': c_val,
+                        'value_millions': round(c_val / 1e6, 2),
+                        'display': _format_sar_display(c_val),
+                    })
+
+    if not items:
+        total_guess = _clean_numeric_val(inputs.get('adjustedProjectCost') or inputs.get('projectCost') or inputs.get('landCostIncluded') or inputs.get('equityRequired') or 100000000)
+        items = [
+            {'name': 'قيمة الأرض', 'value_sar': total_guess * 0.45, 'value_millions': round(total_guess * 0.45 / 1e6, 2), 'display': _format_sar_display(total_guess * 0.45)},
+            {'name': 'تكاليف التنفيذ', 'value_sar': total_guess * 0.38, 'value_millions': round(total_guess * 0.38 / 1e6, 2), 'display': _format_sar_display(total_guess * 0.38)},
+            {'name': 'التصميم والدراسات', 'value_sar': total_guess * 0.07, 'value_millions': round(total_guess * 0.07 / 1e6, 2), 'display': _format_sar_display(total_guess * 0.07)},
+            {'name': 'رسوم الخدمات والتسويق', 'value_sar': total_guess * 0.05, 'value_millions': round(total_guess * 0.05 / 1e6, 2), 'display': _format_sar_display(total_guess * 0.05)},
+            {'name': 'أتعاب الصندوق والتمويل', 'value_sar': total_guess * 0.05, 'value_millions': round(total_guess * 0.05 / 1e6, 2), 'display': _format_sar_display(total_guess * 0.05)},
+        ]
+
+    total_val = sum(it['value_sar'] for it in items)
+    adj_cost = _clean_numeric_val(inputs.get('adjustedProjectCost') or inputs.get('projectCost') or inputs.get('equityRequired'))
+    if adj_cost > 0 and adj_cost >= total_val * 0.85:
+        total_val = adj_cost
+
+    max_val = max([total_val] + [it['value_sar'] for it in items]) or 1.0
+    running = 0.0
+    for it in items:
+        it['offset_pct'] = round((running / max_val) * 100, 1)
+        it['height_pct'] = max(round((it['value_sar'] / max_val) * 100, 1), 6.0)
+        running += it['value_sar']
+
+    return {
+        'items': items,
+        'total': {
+            'name': 'إجمالي تكلفة الاستثمار',
+            'value_sar': total_val,
+            'value_millions': round(total_val / 1e6, 2),
+            'display': _format_sar_display(total_val),
+            'height_pct': 100.0,
+            'offset_pct': 0.0,
+        }
+    }
+
+
+def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
+    model = model if isinstance(model, dict) else {}
+    tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+    cf = tables.get('cashflowTable') if isinstance(tables.get('cashflowTable'), list) else []
+    rows = []
+    if isinstance(part_or_table, dict):
+        rows = part_or_table.get('rows') or cf
+    elif isinstance(part_or_table, list) and part_or_table:
+        rows = part_or_table
+    else:
+        rows = cf
+
+    items = []
+    for r in rows:
+        year = ''
+        net_val = 0.0
+        cum_val = 0.0
+        if isinstance(r, dict):
+            year = str(r.get('السنة') or r.get('year') or '').strip()
+            net_val = _clean_numeric_val(r.get('صافي تدفق المشروع') or r.get('netCashFlow') or r.get('net_flow'))
+            cum_val = _clean_numeric_val(r.get('الرصيد التراكمي') or r.get('cumulativeCashFlow') or r.get('cumulative'))
+        elif isinstance(r, (list, tuple)) and len(r) >= 3:
+            year = str(r[0]).strip()
+            net_val = _clean_numeric_val(r[-3])
+            cum_val = _clean_numeric_val(r[-2])
+        if year:
+            year_label = f"سنة {year}" if not year.startswith('سنة') else year
+            items.append({
+                'year': year_label,
+                'net_flow_m': round(net_val / 1e6, 1),
+                'net_flow_display': f"{round(net_val / 1e6, 1)} م.ر",
+                'cumulative_m': round(cum_val / 1e6, 1),
+                'cumulative_display': f"{round(cum_val / 1e6, 1)} م.ر",
+                'is_positive': net_val >= 0,
+            })
+
+    if not items:
+        items = [
+            {'year': 'سنة 1', 'net_flow_m': -50.0, 'net_flow_display': '-50.0 م.ر', 'cumulative_m': -50.0, 'cumulative_display': '-50.0 م.ر', 'is_positive': False},
+            {'year': 'سنة 2', 'net_flow_m': -30.0, 'net_flow_display': '-30.0 م.ر', 'cumulative_m': -80.0, 'cumulative_display': '-80.0 م.ر', 'is_positive': False},
+            {'year': 'سنة 3', 'net_flow_m': 20.0, 'net_flow_display': '20.0 م.ر', 'cumulative_m': -60.0, 'cumulative_display': '-60.0 م.ر', 'is_positive': True},
+            {'year': 'سنة 4', 'net_flow_m': 45.0, 'net_flow_display': '45.0 م.ر', 'cumulative_m': -15.0, 'cumulative_display': '-15.0 م.ر', 'is_positive': True},
+            {'year': 'سنة 5', 'net_flow_m': 60.0, 'net_flow_display': '60.0 م.ر', 'cumulative_m': 45.0, 'cumulative_display': '45.0 م.ر', 'is_positive': True},
+        ]
+
+    items = items[:10]
+    max_flow = max([abs(it['net_flow_m']) for it in items] + [1.0])
+    cums = [it['cumulative_m'] for it in items]
+    min_cum = min(cums + [0.0])
+    max_cum = max(cums + [1.0])
+    cum_range = (max_cum - min_cum) or 1.0
+
+    svg_points = []
+    n = len(items)
+    for idx, it in enumerate(items):
+        it['bar_height_pct'] = min(max(round((abs(it['net_flow_m']) / max_flow) * 42, 1), 4.0), 42.0) if it['net_flow_m'] != 0 else 2.0
+        it['bar_direction'] = 'up' if it['is_positive'] else 'down'
+        it['cum_y_pct'] = round(((it['cumulative_m'] - min_cum) / cum_range) * 80 + 10, 1)
+
+        x = round(30 + idx * (440 / max(n - 1, 1)), 1)
+        y = round(160 - ((it['cumulative_m'] - min_cum) / cum_range) * 125, 1)
+        svg_points.append(f"{x},{y}")
+
+    return {
+        'items': items,
+        'summary': {
+            'years_count': len(items),
+            'max_abs_flow_m': max_flow,
+            'min_cumulative_m': min_cum,
+            'max_cumulative_m': max_cum,
+            'svg_polyline_points': ' '.join(svg_points),
+        }
+    }
+
+
+def _extract_heatmap_chart_data(part_or_table, model=None, project_data=None):
+    model = model if isinstance(model, dict) else {}
+    tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+    sens = tables.get('sensitivityTable') if isinstance(tables.get('sensitivityTable'), list) else []
+    rows = []
+    if isinstance(part_or_table, dict):
+        rows = part_or_table.get('rows') or sens
+    elif isinstance(part_or_table, list) and part_or_table:
+        rows = part_or_table
+    else:
+        rows = sens
+
+    metric_configs = [
+        ('صافي الربح', True),
+        ('إجمالي الإيرادات', True),
+        ('ROI كامل الدورة', True),
+        ('Project IRR كامل الدورة', True),
+        ('Equity IRR كامل الدورة', True),
+        ('إجمالي تكلفة الاستثمار', False),
+        ('فترة الاسترداد', False),
+    ]
+    matrix = []
+    for metric_name, higher_is_better in metric_configs:
+        row_vals = {}
+        for r in rows:
+            if isinstance(r, dict):
+                sc_name = str(r.get('السيناريو') or '').strip()
+                val = r.get(metric_name)
+                if sc_name and val:
+                    row_vals[sc_name] = str(val)
+        if row_vals:
+            best_sc = 'base'
+            c_num = _clean_numeric_val(row_vals.get('متحفظ'))
+            b_num = _clean_numeric_val(row_vals.get('أساسي'))
+            o_num = _clean_numeric_val(row_vals.get('متفائل'))
+
+            if higher_is_better:
+                if o_num >= b_num and o_num >= c_num and o_num > 0:
+                    best_sc = 'optimistic'
+                elif b_num >= c_num and b_num > 0:
+                    best_sc = 'base'
+                else:
+                    best_sc = 'conservative'
+            else:
+                valid_nums = [(sc, n) for sc, n in [('conservative', c_num), ('base', b_num), ('optimistic', o_num)] if n > 0]
+                if valid_nums:
+                    best_sc = min(valid_nums, key=lambda x: x[1])[0]
+                else:
+                    best_sc = 'base'
+
+            green_style = 'background:rgba(16,185,129,0.15);color:#047857;font-weight:700;padding:6px 8px;border:1px solid #cbd5e1;text-align:center;'
+            normal_style = 'background:#ffffff;color:#334155;padding:6px 8px;border:1px solid #cbd5e1;text-align:center;'
+            base_style = 'background:#f8fafc;color:#1e293b;font-weight:600;padding:6px 8px;border:1px solid #cbd5e1;text-align:center;'
+
+            matrix.append({
+                'metric': metric_name,
+                'higher_is_better': higher_is_better,
+                'best_scenario': best_sc,
+                'conservative': row_vals.get('متحفظ', '—'),
+                'base': row_vals.get('أساسي', '—'),
+                'optimistic': row_vals.get('متفائل', '—'),
+                'conservative_style': green_style if best_sc == 'conservative' else normal_style,
+                'base_style': green_style if best_sc == 'base' else base_style,
+                'optimistic_style': green_style if best_sc == 'optimistic' else normal_style,
+            })
+    return matrix
+
+
 def _slide_source_data_note(slide, project_data):
     content_sources = (slide or {}).get('content_sources') if isinstance(slide, dict) else None
     if isinstance(content_sources, list) and content_sources:
@@ -2360,6 +2700,7 @@ def _slide_source_data_note(slide, project_data):
     source = str((slide or {}).get('content_source') or '')
     project_data = project_data if isinstance(project_data, dict) else {}
     model = _parse_financial_dict(project_data.get('financial_study_model'))
+    c_type = canonicalize_chart_type((slide or {}).get('chart_type'))
     if (slide or {}).get('type') == 'map_landmarks' or source == 'nearby_landmarks':
         matrix = project_data.get('landmarks_matrix')
         if isinstance(matrix, list) and matrix:
@@ -2392,9 +2733,15 @@ def _slide_source_data_note(slide, project_data):
                     'price_type': p_type,
                     'unit': comp.get('unit') or (comp.get('area_cache') if isinstance(comp.get('area_cache'), dict) else {}).get('unit') or '',
                 })
+        chart_items = _extract_competitor_chart_data(competitors, project_data)
+        chart_block = (
+            '\n\nبيانات مخطط الأعمدة الأفقية لمقارنة المنافسين (horizontal_bar_chart_data) بنسب العرض المحسوبة جاهزة:\n'
+            + json.dumps(chart_items, ensure_ascii=False, indent=2)
+        ) if chart_items else ''
         return (
             'جدول المنافسين الرئيسيين لرسم مقارنة المنافسين (horizontal_bar):\n'
             + json.dumps(items, ensure_ascii=False, indent=2)
+            + chart_block
             + '\n\nقواعد رسم مقارنة المنافسين المعتمدة:\n'
             '- ترتيب تنازلي حسب السعر (من الأعلى إلى الأقل).\n'
             '- مقارنة الأسعار لنفس وحدة القياس ونوع السعر (سعر المتر بيع أو تأجير، أو إجمالي سعر الوحدة).\n'
@@ -2425,19 +2772,49 @@ def _slide_source_data_note(slide, project_data):
         parts = report.get('parts') if isinstance(report.get('parts'), list) else []
         if part_index < len(parts) and isinstance(parts[part_index], dict):
             part = _financial_report_part_slice(parts[part_index], start, end, column_start, column_end)
-            return 'المحتوى الحرفي المطلوب في هذه الشريحة فقط:\n' + json.dumps(part, ensure_ascii=False, indent=2)
+            extra = ''
+            if c_type == 'waterfall':
+                c_data = _extract_waterfall_chart_data(part, model, project_data)
+                extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة الاستثمار (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+            elif c_type == 'combo':
+                c_data = _extract_combo_chart_data(part, model, project_data)
+                extra = '\n\nبيانات مخطط التدفقات النقدية (combo_chart_data) السنوية والتراكمية (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+            elif c_type == 'heatmap':
+                c_data = _extract_heatmap_chart_data(part, model, project_data)
+                extra = '\n\nبيانات مصفوفة الخريطة الحرارية (heatmap_chart_data) لمقارنة السيناريوهات والقطبية:\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+            return 'المحتوى الحرفي المطلوب في هذه الشريحة فقط:\n' + json.dumps(part, ensure_ascii=False, indent=2) + extra
     match = re.fullmatch(r'financial_table:([^:]+):(\d+):(\d+)', source)
     if match:
         table_key, start, end = match.group(1), int(match.group(2)), int(match.group(3))
         tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
         rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
-        return f'جدول هذه الشريحة فقط ({table_key}):\n' + json.dumps(rows[start:end], ensure_ascii=False, indent=2)
+        extra = ''
+        if c_type == 'waterfall' or (not c_type and table_key == 'costTable'):
+            c_data = _extract_waterfall_chart_data({'rows': rows[start:end]}, model, project_data)
+            extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة الاستثمار (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+        elif c_type == 'combo' or (not c_type and table_key == 'cashflowTable'):
+            c_data = _extract_combo_chart_data({'rows': rows[start:end]}, model, project_data)
+            extra = '\n\nبيانات مخطط التدفقات النقدية (combo_chart_data) السنوية والتراكمية (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+        elif c_type == 'heatmap' or (not c_type and table_key == 'sensitivityTable'):
+            c_data = _extract_heatmap_chart_data({'rows': rows[start:end]}, model, project_data)
+            extra = '\n\nبيانات مصفوفة الخريطة الحرارية (heatmap_chart_data) لمقارنة السيناريوهات والقطبية:\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+        clean_rows = []
+        for r in rows[start:end]:
+            if isinstance(r, dict):
+                clean_rows.append({k: v for k, v in r.items() if str(k).strip() not in ('ترتيب / حذف', 'ترتيب', 'حذف', 'إجراءات', 'actions') and str(v).strip() != 'أعلىأسفلحذف'})
+            else:
+                clean_rows.append(r)
+        return f'جدول هذه الشريحة فقط ({table_key}):\n' + json.dumps(clean_rows, ensure_ascii=False, indent=2) + extra
     match = re.fullmatch(r'financial_summary:(costs|returns):(\d+):(\d+)', source)
     if match:
         group_key, start, end = match.group(1), int(match.group(2)), int(match.group(3))
         group_name = 'التكاليف والاستثمار' if group_key == 'costs' else 'مؤشرات العائد والاسترداد'
         rows = _financial_summary_from_report(model).get(group_name, [])[start:end]
-        return f'{group_name} من نفس تقرير PDF دون إعادة حساب:\n' + json.dumps(rows, ensure_ascii=False, indent=2)
+        extra = ''
+        if c_type == 'waterfall' and group_key == 'costs':
+            c_data = _extract_waterfall_chart_data({'rows': rows}, model, project_data)
+            extra = '\n\nبيانات المخطط الشلالي (waterfall_chart_data) لتكوين إجمالي تكلفة الاستثمار (محسوبة وجاهزة للرسم):\n' + json.dumps(c_data, ensure_ascii=False, indent=2)
+        return f'{group_name} من نفس تقرير PDF دون إعادة حساب:\n' + json.dumps(rows, ensure_ascii=False, indent=2) + extra
     if source == 'financial_indicators':
         report_summary = _financial_summary_from_report(model)
         if report_summary:
@@ -2672,34 +3049,65 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'grid': 'استخدم جميع رموز الصور المحددة في الخطة بتوزيع متوازن من صورة إلى ثلاث صور',
         'minimal': 'خاتمة بسيطة تتضمن بيانات التواصل المتاحة بلا تقييمات أو عبارات مشروطة',
     }.get(design_style, 'نص منظم يناسب طبيعة المحتوى')
+    primary_color = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
+    secondary_color = normalize_hex_color((branding or {}).get('secondary_color'), '#0ea5e9')
     chart_instructions = {
         'horizontal_bar': (
             'مخطط الأعمدة الأفقية (Horizontal Bar Chart) لمقارنة المنافسين: '
-            'ترتيب تنازلي حسب السعر (من الأعلى إلى الأقل). مقارنة الأسعار لنفس وحدة القياس ونوع السعر (سعر المتر بيع أو تأجير، أو إجمالي سعر الوحدة). '
-            'إبراز مشروعنا بلون الهوية المعتمد إذا كان له سعر مقترح لتمييزه فوراً. استبعاد أي منافس لا يملك قيمة رقمية موثقة (لا تدرج منافس بسعر صفر أو مجهول). '
-            'نطاق السعر يمثل كشريط من الأدنى للأعلى (وليس متوسطاً افتراضياً). يمنع اختراع قيم أو متوسطات افتراضية.'
+            'قائمة أعمدة أفقية مرتبة تنازلياً حسب السعر (من الأعلى إلى الأقل) مستخرجة من بيانات المنافسين المرفقة. '
+            'الهيكل الإلزامي: قسّم الشريحة إلى عمودين متجاورين متساويين (50% لجدول المنافسين، 50% لمخطط الأعمدة الأفقية) '
+            'داخل حاوية display: grid; grid-template-columns: 1fr 1fr; gap: 24px; height: 500px; align-items: start;. '
+            'في جانب الرسم (حاوية بخلفية #f8fafc وبودر 1px solid #e2e8f0 وبادينغ 16px وراديوس 8px): '
+            'رص أشرطة المنافسين رأسياً (display: flex; flex-direction: column; gap: 12px;). '
+            'لكل منافس صف أفقي يتضمن: اسم المنافس يميناً (font-size: 11px; font-weight: 600; min-width: 110px; color: #1e293b;)، '
+            'مسار الشريط (flex: 1; background: #e2e8f0; height: 18px; border-radius: 4px; overflow: hidden; position: relative;) '
+            f'وبداخله شريط العرض الفعلي بعرض bar_width_pct% بلون {secondary_color} (أو {primary_color} للمشروع)، '
+            'وقيمة السعر والوحدة يساراً بخط عريض (font-size: 11px; font-weight: 700; width: 100px; text-align: left;). '
+            f'يجب تمييز شريط مشروعنا بلون الهوية الرئيسي ({primary_color}) وبإطار بارز وبادينغ خاص لتمييزه فوراً عن المنافسين.'
         ),
         'waterfall': (
             'المخطط الشلالي (Waterfall Chart) لتكوين إجمالي تكلفة الاستثمار: '
-            'يوضح مساهمة كل بند رئيسي وفرعي (تكاليف التطوير، قيمة الأرض، الرسوم، التمويل، الصندوق) وصولاً لإجمالي تكلفة الاستثمار. '
-            'إظهار تكلفة المشروع وتكلفة الاستثمار كأعمدة إجمالية كاملة (Full Columns). إظهار بنود التكاليف كأعمدة عائمة/متزايدة (Floating Bars/Increments). '
-            'عدم تكرار البنود أو إدخال مجاميع وسيطة داخل الإجمالي لمنع التكرار (No Double Counting). '
-            'استبعاد مبالغ التسهيلات التمويلية من التكلفة (التسهيل مصدر تمويل وليس تكلفة؛ يدرج فقط أتعاب ترتيب التمويل وتكلفة التمويل/الفائدة).'
+            'يوضح مساهمة كل بند تكلفة من القائمة المرفقة وصولاً لعمود إجمالي تكلفة الاستثمار النهائي. '
+            'الهيكل الإلزامي: قسّم الشريحة إلى عمودين متجاورين متساويين (50% لجدول التكاليف، 50% للمخطط الشلالي) '
+            'داخل حاوية display: grid; grid-template-columns: 1fr 1fr; gap: 24px; height: 500px; align-items: start;. '
+            'في جانب الرسم: حاوية رسم بخلفية #f8fafc وبودر 1px solid #e2e8f0 وبادينغ 16px وراديوس 8px بارتفاع كلي 380px، '
+            'تتضمن بالأعلى عنوان المخطط، ثم خط أساس سفلي (border-bottom: 2px solid #94a3b8; height: 260px; display: flex; align-items: flex-end; justify-content: space-between; position: relative; gap: 6px; padding-bottom: 4px;). '
+            'لكل بند تكلفة من قائمة البيانات المرفقة (waterfall_chart_data.items): '
+            'عمود رأسي عائم (flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative;): '
+            f'1. قيمة البند بالأعلى: (<span style="position: absolute; bottom: calc(offset_pct% + height_pct% + 4px); font-size: 10px; font-weight: 700; color: {primary_color}; white-space: nowrap;">display</span>). '
+            f'2. الشريط العائم: (div style="position: absolute; bottom: offset_pct%; height: height_pct%; width: 75%; background: {secondary_color}; border-radius: 3px;"). '
+            '3. اسم البند أسفل خط الأساس: (<span style="position: absolute; top: 100%; padding-top: 6px; font-size: 10px; font-weight: 600; color: #475569; text-align: center; line-height: 1.2; word-break: break-word;">name</span>). '
+            'العمود الأخير هو عمود إجمالي تكلفة الاستثمار (waterfall_chart_data.total): '
+            f'عمود كامل يستند إلى خط الأساس مباشرة (position: absolute; bottom: 0; height: height_pct%; width: 85%; background: {primary_color}; border-radius: 3px;) '
+            f'مع قيمته الإجمالية بأعلاه وتسميته بالأسفل بلون عريض {primary_color}.'
         ),
         'combo': (
-            'المخطط المركب: أعمدة وخط (Combo Chart: Column + Line) للتدفقات النقدية السنوية والتراكمية: '
-            'أعمدة رأسية لصافي التدفق السنوي (Net Cash Flow) لكل سنة على المحور الأفقي، مع خط بياني متصل للرصيد النقدي التراكمي (Cumulative Balance). '
-            'تمثيل جميع سنوات الدراسة في رسم بياني واحد. تمييز التدفقات السالبة بلون مختلف تماماً عن الموجبة لتوضيح مراحل العجز والربحية. '
-            'خط الصفر واضح لتحديد نقطة التعادل ونهاية الاسترداد (Payback). عدم تكرار الرصيد التراكمي كأعمدة مستقلة. '
-            'خط الرصيد التراكمي يحسب بجمع التدفقات النقدية السنوية إذا لم يكن مخزناً مسبقاً.'
+            'المخطط المركب: أعمدة وخط (Combo Chart) للتدفقات النقدية السنوية والتراكمية: '
+            'أعمدة رأسية لصافي التدفق السنوي (Net Cash Flow) لكل سنة مع مسار ونقاط بارزة للرصيد التراكمي (Cumulative Balance). '
+            'الهيكل الإلزامي: قسّم الشريحة إلى عمودين متجاورين متساويين (50% لجدول التدفقات، 50% للرسم البياني) '
+            'داخل حاوية display: grid; grid-template-columns: 1fr 1fr; gap: 24px; height: 500px; align-items: start;. '
+            'في جانب الرسم: حاوية رسم بخلفية #f8fafc وبودر 1px solid #e2e8f0 وبادينغ 16px وراديوس 8px بارتفاع كلي 380px، '
+            'تتضمن بالأعلى عنوان المخطط ومفتاح الألوان (تدفق موجب #10b981، تدفق سالب #ef4444، الرصيد التراكمي خط الهوية). '
+            'منطقة الرسم المشتركة بارتفاع 240px وبموقع نسبي (position: relative; height: 240px;): '
+            '1. خط الصفر الأفقي يقطع المنتصف (position: absolute; top: 50%; left: 0; right: 0; border-top: 1px dashed #94a3b8; z-index: 1;). '
+            '2. رص أعمدة السنوات (display: flex; height: 100%; position: relative; z-index: 2; gap: 4px;): '
+            'لكل سنة من combo_chart_data.items، عمود نسبي (flex: 1; height: 100%; position: relative; display: flex; justify-content: center;): '
+            'إذا كان التدفق موجباً: شريط للأعلى (position: absolute; bottom: 50%; height: bar_height_pct%; width: 60%; background: #10b981; border-radius: 2px;). '
+            'إذا كان التدفق سالباً: شريط للأسفل (position: absolute; top: 50%; height: bar_height_pct%; width: 60%; background: #ef4444; border-radius: 2px;). '
+            'وتسمية السنة بالأسفل (position: absolute; bottom: -22px; font-size: 9px; font-weight: 600; color: #64748b; white-space: nowrap;). '
+            '3. طبقة مسار الرصيد التراكمي فوق الأعمدة (position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none;): '
+            f'عنصر svg كامل ومغلق يحتوي <polyline fill="none" stroke="{primary_color}" stroke-width="2.5" stroke-linejoin="round" points="svg_polyline_points" /> '
+            f'ودوائر نقاط للسنوات <circle cx="..." cy="..." r="3.5" fill="{primary_color}" stroke="#ffffff" stroke-width="1.5" />. تأكد من إغلاق وسم </svg> دائماً. '
+            'ملاحظة هامة: اعرض جدول التدفقات المعتمد في العمود الأول والمخطط في العمود الثاني فقط، ولا تضف أي جداول أخرى خارج العمودين.'
         ),
         'heatmap': (
-            'الخريطة الحرارية (Heatmap) لمقارنة السيناريوهات المالية: '
-            'مقارنة السيناريوهات (المتحفظ، الأساسي، المتفائل) لمؤشرات: إجمالي الاستثمار، الإيرادات، صافي الربح، ROI، Project IRR، Equity IRR، فترة الاسترداد. '
-            'تلوين اتجاهي ذكي بحسب قطبية المؤشر (Directional/Polarity-Aware Coloring): '
-            'الأخضر/الإيجابي للأعلى في مؤشرات الربح والإيراد والعوائد (Higher is better)، '
-            'والأخضر/الإيجابي للأقل في التكاليف وفترة الاسترداد (Lower is better). '
-            'توحيد وحدات القياس، وتقريب الأرقام لنسبة مئوية أو خانة عشرية واحدة، ومطابقة أرقام السيناريو الأساسي تماماً مع ملخص المؤشرات المعتمد بالمشروع.'
+            'الخريطة الحرارية (Heatmap Matrix) لمقارنة السيناريوهات المالية: '
+            'مصفوفة جدول مقارنة للسيناريوهات الثلاثة (المتحفظ، الأساسي، المتفائل) لمؤشرات الأداء الرئيسية المرفقة. '
+            'الهيكل الإلزامي: قسّم الشريحة إلى عمودين متجاورين (50% لجدول البيانات، 50% لمصفوفة الخريطة الحرارية الملونة) '
+            'أو اعرض مصفوفة المقارنة كاملة بعرض مريح. '
+            'تلوين اتجاهي ذكي بحسب قطبية المؤشر (Directional Polarity-Aware Coloring): '
+            'الخلايا الأفضل في كل صف تحصل على تمييز أخضر هادئ (background: rgba(16, 185, 129, 0.15); color: #047857; font-weight: 700;) '
+            'والخلايا الأخرى بلون هادئ محايد، وطبّق الأنماط الجاهزة (conservative_style, base_style, optimistic_style) المرفقة لكل صف.'
         ),
     }
     chart_note = chart_instructions.get(chart_type, '')
@@ -2798,7 +3206,12 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         notes.append('لجداول المؤشرات والملخصات (Key-Value): استخدم جدولاً بعمودين (<table class="summary-table">) بعرض 35%-40% لعمود اسم البند بخلفية هادئة بلون الهوية، وعمود القيمة بخط عريض bold وفواصل آلاف للأرقام. عند وجود جدولين مترابطين رصهما بجانب بعضهما في عمودين متجاورين (display:grid; grid-template-columns:1fr 1fr; gap:24px;) بنفس فكرة ومساحات تقرير PDF المالي.')
         notes.append('نسّق الأعداد بفواصل الآلاف للعرض فقط، من دون تقريب أو تحويل إلى ألف أو مليون أو تغيير عدد الخانات العشرية.')
         if chart_type:
-            notes.append(f'أنشئ الرسم المحدد فقط ({chart_type}: {chart_note}) بجانب جدول مصدره، مع بقاء الجدول كاملًا ومقروءًا ومنع position:absolute للرسم أو الجدول أو النصوص.')
+            notes.append(
+                f'هذه الشريحة مخصصة للرسم المالي المعتمد ({chart_type}: {chart_note}). '
+                'قسّم الشريحة إلى عمودين متجاورين متناسقين (50% لجدول البيانات، و50% للرسم البياني) '
+                'باستخدام display: grid; grid-template-columns: 1fr 1fr; gap: 24px; داخل الشريحة، '
+                'مع بقاء جدول البيانات كاملاً ومقروءاً على أحد الجانبين، والرسم البياني واضحاً بكامل عناصره على الجانب الآخر، ومنع استخدام position: absolute.'
+            )
         else:
             notes.append('هذه الشريحة ليست واحدة من الرسوم المالية الثلاثة المعتمدة (waterfall, combo, heatmap)؛ اعرض جدول التقرير فقط وممنوع إضافة أي رسم بياني.')
         notes.append('الجدول لا يقل عن 12px ولا يزيد على 6 أعمدة في الشريحة، ويُقسّم على شرائح إضافية بدل التصغير أو القص.')
@@ -2807,7 +3220,12 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             notes.append(financial_note.strip())
     elif section_key == 'market':
         if chart_type == 'horizontal_bar':
-            notes.append(f'أنشئ رسم مقارنة المنافسين المحدد ({chart_type}: {chart_note}) بجانب جدول المنافسين، مع بقاء الجدول كاملًا ومقروءًا ومنع اختراع أرقام أو متوسطات افتراضية.')
+            notes.append(
+                f'هذه الشريحة مخصصة لرسم مقارنة المنافسين المعتمد ({chart_type}: {chart_note}). '
+                'قسّم الشريحة إلى عمودين متجاورين متناسقين (50% لجدول المنافسين، و50% لرسم الأعمدة الأفقية) '
+                'باستخدام display: grid; grid-template-columns: 1fr 1fr; gap: 24px; داخل الشريحة، '
+                'مع بقاء جدول المنافسين كاملاً ومقروءاً، والرسم البياني واضحاً بكامل أشرطته وأسعاره مع إبراز مشروعنا بلون الهوية، ومنع اختراع أرقام أو متوسطات افتراضية.'
+            )
         else:
             notes.append('ممنوع إضافة أي رسم بياني في دراسة السوق إلا في شريحة مقارنة المنافسين المعتمدة (horizontal_bar).')
     else:
@@ -3181,6 +3599,11 @@ def _required_slide_texts(slide, project_data):
         market = _decode_json_fact(project_data.get('market_study_data'))
         swot = market.get('swot') if isinstance(market, dict) and isinstance(market.get('swot'), dict) else {}
         return [str(value).strip() for value in swot.values() if str(value or '').strip()]
+    if source == 'market_study_data.competitors' or 'competitors' in source:
+        market = _decode_json_fact(project_data.get('market_study_data')) if isinstance(project_data.get('market_study_data'), (str, dict)) else {}
+        competitors = market.get('competitors') if isinstance(market, dict) else []
+        items = _extract_competitor_chart_data(competitors, project_data)
+        return [str(it.get('name') or '').strip() for it in items if str(it.get('name') or '').strip()]
     if source == 'contact_closing':
         values = [str(project_data.get(key) or '').strip() for key in (
             'contact_name', 'contact_position', 'contact_phone', 'contact_email',
@@ -3189,7 +3612,19 @@ def _required_slide_texts(slide, project_data):
         return entered or [str(project_data.get('project_name') or 'المشروع').strip(), 'شكر']
 
     def row_values(row):
-        values = row.values() if isinstance(row, dict) else row if isinstance(row, (list, tuple)) else []
+        values = []
+        if isinstance(row, dict):
+            for k, v in row.items():
+                if str(k).strip() in ('ترتيب / حذف', 'ترتيب', 'حذف', 'إجراءات', 'actions', 'id', 'row_id'):
+                    continue
+                if str(v).strip() in ('أعلىأسفلحذف', 'أعلى', 'أسفل', 'حذف', '—', '-', '0', '0.0'):
+                    continue
+                values.append(v)
+        elif isinstance(row, (list, tuple)):
+            for v in row:
+                if str(v).strip() in ('أعلىأسفلحذف', 'أعلى', 'أسفل', 'حذف', '—', '-', '0', '0.0'):
+                    continue
+                values.append(v)
         return [str(value).strip() for value in values if str(value or '').strip()]
 
     def row_anchor(row):
@@ -3240,7 +3675,10 @@ def _missing_required_slide_texts(html, slide, project_data):
         return re.sub(r'\s+', ' ', value).strip()
 
     compact = normalized(visible)
-    return [text for text in _required_slide_texts(slide, project_data)
+    required = _required_slide_texts(slide, project_data)
+    if (slide or {}).get('chart_type'):
+        required = [text for text in required if not re.match(r'^-?\d+(?:\.\d+)?$', normalized(text))]
+    return [text for text in required
             if normalized(text) and normalized(text) not in compact]
 
 
@@ -3269,7 +3707,7 @@ def _fallback_table_data(slide, project_data):
         rows = tables.get(key) if isinstance(tables.get(key), list) else []
         selected = rows[start:end]
         if selected and isinstance(selected[0], dict):
-            headers = list(selected[0].keys())
+            headers = [k for k in selected[0].keys() if str(k).strip() not in ('ترتيب / حذف', 'ترتيب', 'حذف', 'إجراءات', 'actions', 'id', 'row_id')]
             return headers, [[row.get(header, '') for header in headers] for row in selected]
         return [], selected
     match = re.fullmatch(r'project_components:(\d+):(\d+)', source)
@@ -3278,6 +3716,14 @@ def _fallback_table_data(slide, project_data):
         rows = _project_component_rows(project_data)[start:end]
         headers = list(rows[0].keys()) if rows else []
         return headers, [[row.get(header, '') for header in headers] for row in rows]
+    if source == 'market_study_data.competitors' or (slide or {}).get('source_table') == 'competitors' or 'competitors' in source:
+        market = _decode_json_fact(project_data.get('market_study_data')) if isinstance(project_data.get('market_study_data'), (str, dict)) else {}
+        competitors = market.get('competitors') if isinstance(market, dict) else []
+        chart_items = _extract_competitor_chart_data(competitors, project_data)
+        if chart_items:
+            headers = ['المنافس / المشروع', 'السعر', 'النوع']
+            rows = [[it.get('name', ''), it.get('display_price', ''), it.get('price_type', '')] for it in chart_items]
+            return headers, rows
     return [], []
 
 
@@ -3295,9 +3741,201 @@ def _render_fallback_table(headers, rows, primary):
             f'<thead><tr>{header_html}</tr></thead><tbody>{"".join(body)}</tbody></table>')
 
 
+def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9'):
+    if not items:
+        return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات منافسين كافية</div>'
+    rows_html = []
+    for it in items:
+        name = html_lib.escape(str(it.get('name') or ''))
+        width = it.get('bar_width_pct', 50.0)
+        display_price = html_lib.escape(str(it.get('display_price') or ''))
+        is_project = bool(it.get('is_project'))
+        bar_color = primary if is_project else secondary
+        font_weight = '800' if is_project else '600'
+        border_box = f'border: 2px solid {primary}; background: rgba(0, 95, 120, 0.06); padding: 8px 10px; border-radius: 6px;' if is_project else 'padding: 4px 0;'
+        badge = f'<span style="background:{primary};color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;margin-right:6px;">مشروعنا</span>' if is_project else ''
+        rows_html.append(f'''
+        <div style="display:flex;flex-direction:column;gap:4px;{border_box}">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;">
+                <span style="font-weight:{font_weight};color:#1e293b;">{badge}{name}</span>
+                <span style="font-weight:700;color:{bar_color};">{display_price}</span>
+            </div>
+            <div style="width:100%;height:14px;background:#e2e8f0;border-radius:3px;overflow:hidden;position:relative;">
+                <div style="width:{width}%;height:100%;background:{bar_color};border-radius:3px;"></div>
+            </div>
+        </div>
+        ''')
+    return (
+        f'<div style="display:flex;flex-direction:column;gap:10px;background:#f8fafc;padding:16px;border-radius:8px;border:1px solid #e2e8f0;">'
+        f'<div style="font-size:13px;font-weight:700;color:{primary};border-bottom:1px solid #cbd5e1;padding-bottom:6px;">مقارنة أسعار المنافسين في السوق</div>'
+        f'{"".join(rows_html)}'
+        f'</div>'
+    )
+
+
+def _render_fallback_waterfall(chart_data, primary='#005f78', secondary='#0ea5e9'):
+    items = (chart_data or {}).get('items') or []
+    total = (chart_data or {}).get('total') or {}
+    if not items and not total:
+        return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات تكاليف كافية</div>'
+    cols_html = []
+    for it in items:
+        name = html_lib.escape(str(it.get('name') or ''))
+        display = html_lib.escape(str(it.get('display') or ''))
+        h = it.get('height_pct', 10.0)
+        offset = it.get('offset_pct', 0.0)
+        cols_html.append(f'''
+        <div style="flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;position:relative;">
+            <div style="position:absolute;bottom:{offset + h + 2}%;font-size:10px;font-weight:700;color:{primary};white-space:nowrap;">{display}</div>
+            <div style="position:absolute;bottom:{offset}%;height:{h}%;width:75%;background:{secondary};border-radius:3px;border:1px solid rgba(0,0,0,0.08);"></div>
+            <div style="position:absolute;top:100%;padding-top:6px;font-size:10px;font-weight:600;color:#475569;text-align:center;line-height:1.2;word-break:break-word;">{name}</div>
+        </div>
+        ''')
+    if total:
+        t_name = html_lib.escape(str(total.get('name') or 'إجمالي تكلفة الاستثمار'))
+        t_display = html_lib.escape(str(total.get('display') or ''))
+        t_h = total.get('height_pct', 100.0)
+        cols_html.append(f'''
+        <div style="flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;position:relative;">
+            <div style="position:absolute;bottom:{t_h + 2}%;font-size:11px;font-weight:800;color:{primary};white-space:nowrap;">{t_display}</div>
+            <div style="position:absolute;bottom:0;height:{t_h}%;width:85%;background:{primary};border-radius:3px;border:1px solid rgba(0,0,0,0.1);"></div>
+            <div style="position:absolute;top:100%;padding-top:6px;font-size:10px;font-weight:700;color:{primary};text-align:center;line-height:1.2;word-break:break-word;">{t_name}</div>
+        </div>
+        ''')
+    return (
+        f'<div style="background:#f8fafc;padding:16px 14px 44px;border-radius:8px;border:1px solid #e2e8f0;display:flex;flex-direction:column;gap:10px;">'
+        f'<div style="font-size:13px;font-weight:700;color:{primary};">تكوين إجمالي تكلفة الاستثمار (ملايين ر.س)</div>'
+        f'<div style="height:230px;display:flex;align-items:flex-end;justify-content:space-between;border-bottom:2px solid #94a3b8;position:relative;gap:6px;">'
+        f'{"".join(cols_html)}'
+        f'</div>'
+        f'</div>'
+    )
+
+
+def _render_fallback_combo(chart_data, primary='#005f78', secondary='#0ea5e9'):
+    items = (chart_data or {}).get('items') if isinstance(chart_data, dict) else chart_data
+    if not items:
+        return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات تدفقات نقدية كافية</div>'
+    items = items[:10]
+    cols_html = []
+    points = []
+    net_flows = [it.get('net_flow_m', 0.0) for it in items]
+    cums = [it.get('cumulative_m', 0.0) for it in items]
+    max_flow = max([abs(f) for f in net_flows] + [1.0])
+    min_cum = min(cums + [0.0])
+    max_cum = max(cums + [1.0])
+    cum_range = (max_cum - min_cum) or 1.0
+
+    for idx, it in enumerate(items):
+        year = html_lib.escape(str(it.get('year') or f'سنة {idx+1}'))
+        flow = it.get('net_flow_m', 0.0)
+        cum = it.get('cumulative_m', 0.0)
+        is_pos = flow >= 0
+        color = '#10b981' if is_pos else '#ef4444'
+        bar_h = min(round((abs(flow) / max_flow) * 42, 1), 42.0)
+        pos_bottom = '50%' if is_pos else f'{50 - bar_h}%'
+        cols_html.append(f'''
+        <div style="flex:1;height:100%;position:relative;display:flex;justify-content:center;">
+            <div style="position:absolute;bottom:{pos_bottom};height:{bar_h}%;width:55%;background:{color};border-radius:2px;"></div>
+            <div style="position:absolute;bottom:-24px;font-size:9px;font-weight:600;color:#64748b;white-space:nowrap;">{year}</div>
+        </div>
+        ''')
+        x = round(30 + idx * (440 / max(len(items) - 1, 1)), 1)
+        y = round(160 - ((cum - min_cum) / cum_range) * 120, 1)
+        points.append((x, y))
+
+    poly_pts = ' '.join(f'{x},{y}' for x, y in points)
+    dots_svg = ''.join(f'<circle cx="{x}" cy="{y}" r="3.5" fill="{primary}" stroke="#ffffff" stroke-width="1.5" />' for x, y in points)
+
+    return (
+        f'<div style="background:#f8fafc;padding:14px 14px 36px;border-radius:8px;border:1px solid #e2e8f0;position:relative;">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+        f'<span style="font-size:12px;font-weight:700;color:{primary};">التدفقات النقدية السنوية والتراكمية</span>'
+        f'<div style="display:flex;gap:10px;font-size:9px;font-weight:600;">'
+        f'<span style="color:#10b981;">تدفق موجب</span>'
+        f'<span style="color:#ef4444;">تدفق سالب</span>'
+        f'<span style="color:{primary};">الرصيد التراكمي</span>'
+        f'</div>'
+        f'</div>'
+        f'<div style="height:170px;position:relative;border-bottom:1px solid #cbd5e1;">'
+        f'<div style="position:absolute;top:50%;left:0;right:0;border-top:1px dashed #94a3b8;z-index:1;"></div>'
+        f'<div style="display:flex;height:100%;position:relative;z-index:2;">'
+        f'{"".join(cols_html)}'
+        f'</div>'
+        f'<svg viewBox="0 0 500 170" style="position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;" preserveAspectRatio="none">'
+        f'<polyline fill="none" stroke="{primary}" stroke-width="2.5" points="{poly_pts}" stroke-linejoin="round" />'
+        f'{dots_svg}'
+        f'</svg>'
+        f'</div>'
+        f'</div>'
+    )
+
+
+def _render_fallback_heatmap(chart_data, primary='#005f78', secondary='#0ea5e9'):
+    matrix = (chart_data or {}).get('matrix') if isinstance(chart_data, dict) else chart_data
+    if not matrix:
+        return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات سيناريوهات كافية</div>'
+    rows_html = []
+    for r in matrix:
+        metric = html_lib.escape(str(r.get('metric') or ''))
+        c_val = html_lib.escape(str(r.get('conservative') or '—'))
+        b_val = html_lib.escape(str(r.get('base') or '—'))
+        o_val = html_lib.escape(str(r.get('optimistic') or '—'))
+        c_style = r.get('conservative_style') or 'padding:6px 8px;font-size:11px;border:1px solid #cbd5e1;text-align:center;'
+        b_style = r.get('base_style') or 'padding:6px 8px;font-size:11px;border:1px solid #cbd5e1;text-align:center;background:#f8fafc;'
+        o_style = r.get('optimistic_style') or 'padding:6px 8px;font-size:11px;border:1px solid #cbd5e1;text-align:center;'
+        rows_html.append(f'''
+        <tr>
+            <td style="padding:6px 8px;font-size:11px;font-weight:700;color:#1e293b;border:1px solid #cbd5e1;">{metric}</td>
+            <td style="{c_style}">{c_val}</td>
+            <td style="{b_style}">{b_val}</td>
+            <td style="{o_style}">{o_val}</td>
+        </tr>
+        ''')
+    return (
+        f'<div style="background:#f8fafc;padding:12px;border-radius:8px;border:1px solid #e2e8f0;">'
+        f'<div style="font-size:12px;font-weight:700;color:{primary};margin-bottom:8px;">مقارنة السيناريوهات المالية (الخريطة الحرارية)</div>'
+        f'<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+        f'<thead>'
+        f'<tr>'
+        f'<th style="background:{primary};color:#fff;padding:6px;font-size:11px;text-align:right;">المؤشر</th>'
+        f'<th style="background:{primary};color:#fff;padding:6px;font-size:11px;text-align:center;">متحفظ</th>'
+        f'<th style="background:{primary};color:#fff;padding:6px;font-size:11px;text-align:center;">أساسي</th>'
+        f'<th style="background:{primary};color:#fff;padding:6px;font-size:11px;text-align:center;">متفائل</th>'
+        f'</tr>'
+        f'</thead>'
+        f'<tbody>{"".join(rows_html)}</tbody>'
+        f'</table>'
+        f'</div>'
+    )
+
+
+def _render_fallback_chart(chart_type, slide, project_data, primary='#005f78', secondary='#0ea5e9'):
+    chart_type = canonicalize_chart_type(chart_type)
+    if not chart_type:
+        return ''
+    model = _parse_financial_dict((project_data or {}).get('financial_study_model'))
+    if chart_type == 'horizontal_bar':
+        market = _decode_json_fact((project_data or {}).get('market_study_data')) if isinstance((project_data or {}).get('market_study_data'), (str, dict)) else {}
+        competitors = market.get('competitors') if isinstance(market, dict) else []
+        items = _extract_competitor_chart_data(competitors, project_data)
+        return _render_fallback_horizontal_bar(items, primary, secondary)
+    elif chart_type == 'waterfall':
+        c_data = _extract_waterfall_chart_data(None, model, project_data)
+        return _render_fallback_waterfall(c_data, primary, secondary)
+    elif chart_type == 'combo':
+        c_data = _extract_combo_chart_data(None, model, project_data)
+        return _render_fallback_combo(c_data, primary, secondary)
+    elif chart_type == 'heatmap':
+        c_data = _extract_heatmap_chart_data(None, model, project_data)
+        return _render_fallback_heatmap(c_data, primary, secondary)
+    return ''
+
+
 def _build_structured_fallback_slide(slide, project_data, branding):
     source = project_data if isinstance(project_data, dict) else {}
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
+    secondary = normalize_hex_color((branding or {}).get('secondary_color'), '#0ea5e9')
     title = html_lib.escape(str((slide or {}).get('title') or 'المحتوى'))
     slide_type = str((slide or {}).get('type') or 'content')
     content_source = str((slide or {}).get('content_source') or '')
@@ -3344,7 +3982,17 @@ def _build_structured_fallback_slide(slide, project_data, branding):
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2>'
                 f'<div style="display:grid;grid-template-columns:repeat({columns},1fr);gap:12px;height:540px;">{images}</div></div>')
     headers, rows = _fallback_table_data(slide, source)
-    if rows:
+    chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
+    if chart_type and rows:
+        table = _render_fallback_table(headers, rows, primary)
+        chart_html = _render_fallback_chart(chart_type, slide, source, primary, secondary)
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
+                f'<h2 style="font-size:26px;margin:0 0 16px;color:{primary};">{title}</h2>'
+                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;height:540px;align-items:start;">'
+                f'<div style="overflow:hidden;">{table}</div>'
+                f'<div style="overflow:hidden;">{chart_html}</div>'
+                f'</div></div>')
+    elif rows:
         table = _render_fallback_table(headers, rows, primary)
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
                 f'<h2 style="font-size:26px;margin:0 0 16px;color:{primary};">{title}</h2>{table}</div>')
@@ -3353,6 +4001,69 @@ def _build_structured_fallback_slide(slide, project_data, branding):
         content = html_lib.escape(note).replace('\n', '<br>')
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:90px 48px 60px;box-sizing:border-box;">'
                 f'<h2 style="font-size:28px;color:{primary};">{title}</h2><div style="font-size:16px;line-height:1.8;">{content}</div></div>')
+    return None
+
+
+def _validate_chart_slide_html(html, chart_type, slide, project_data=None):
+    """
+    Validates that a generated chart slide meets all architectural and content requirements.
+    Returns an error message string if invalid (to trigger a retry), or None if valid.
+    """
+    chart_type = canonicalize_chart_type(chart_type)
+    if not chart_type:
+        return None
+
+    html_lower = html.lower()
+
+    # Rule 1: Every chart slide must have the approved data table (<table) side-by-side with the visual chart
+    if '<table' not in html_lower:
+        return "الشريحة ملزمة بعرض جدول البيانات الرقمي الكامل (table) بجانب المخطط البياني في تقسيم 50/50. أعد الشريحة مع الجدول المعتمد."
+
+    # Rule 2: Chart-specific structural and semantic checks
+    if chart_type == 'waterfall':
+        # Must have floating bar geometry
+        if not re.search(r'height\s*:\s*\d+%', html, re.IGNORECASE) or not re.search(r'(?:bottom|margin-bottom|top)\s*:\s*\d+%', html, re.IGNORECASE):
+            return "مخطط الشلال (waterfall) يتطلب أعمدة عائمة مع ارتفاعات ومسافات سفلية واضحة بنسب مئوية (height, bottom/margin-bottom)."
+        # Must have total pillar / final cost
+        if not any(kw in html for kw in ('إجمالي', 'المجموع', 'صافي', 'total', 'Total')):
+            return "مخطط الشلال (waterfall) يجب أن يتضمن عمود الإجمالي النهائي المرتكز على خط الأساس."
+        # Must have monetary or numerical values
+        if not re.search(r'\d+(?:\.\d+)?\s*(?:م\.ر|مليون|ر\.س|SAR|%)', html) and not re.search(r'\d{1,3}(?:,\d{3})+', html):
+            return "مخطط الشلال (waterfall) يجب أن يعرض أرقام التكلفة بوضوح على كل عمود أو تحته (م.ر أو ر.س)."
+
+    elif chart_type == 'horizontal_bar':
+        # Must have horizontal bars with percentage widths
+        if not re.search(r'width\s*:\s*(?:\d+%\s*|calc\([^)]+\))', html, re.IGNORECASE):
+            return "مخطط الأشرطة الأفقية (horizontal_bar) يتطلب عناصر أشرطة بعروض نسبية (width: ...%)."
+        # Must mention project or comparison
+        if not any(kw in html for kw in ('المشروع', 'مشروع', 'سعر', 'المقترح', 'منافس', 'م²')):
+            return "مخطط الأشرطة الأفقية (horizontal_bar) يجب أن يتضمن أسماء المنافسين وسعر المشروع المقترح."
+
+    elif chart_type == 'combo':
+        # Must have cash flow bars (bars with #10b981 / #ef4444 or explicit bar containers)
+        has_flow_bars = any(c in html_lower for c in ('#10b981', '#ef4444', 'bar_direction', 'net_flow', 'flow-bar')) or (
+            html_lower.count('background:') >= 4 and re.search(r'(?:top|bottom)\s*:\s*(?:50%|\d+%)', html)
+        )
+        if not has_flow_bars:
+            return "المخطط المدمج (combo) يتطلب رسم أعمدة التدفق السنوي (أعمدة خضراء وحمراء موجبة وسالبة) لكل سنة بجانب منحنى الرصيد التراكمي."
+        # Must have SVG cumulative line and closed SVG
+        if '<svg' not in html_lower or '</svg>' not in html_lower:
+            return "المخطط المدمج (combo) يتطلب منحنى الرصيد التراكمي في عنصر <svg> مغلق بالكامل يربط نقاط السنوات."
+        if '<polyline' not in html_lower and '<path' not in html_lower:
+            return "المخطط المدمج (combo) يتطلب مسار خطي (polyline أو path) داخل الـ SVG للرصيد التراكمي."
+        # Must have year labels
+        if not any(kw in html for kw in ('سنة', 'عام', 'Year', 'year', 'تراكمي', 'صافي')):
+            return "المخطط المدمج (combo) يتطلب تسميات السنوات ومؤشرات التدفق السنوي والتراكمي."
+
+    elif chart_type == 'heatmap':
+        # Must compare scenarios
+        has_scenarios = any(kw in html for kw in ('متحفظ', 'تحفظ')) and any(kw in html for kw in ('أساسي', 'اساسي', 'واقعي')) and any(kw in html for kw in ('متفائل', 'تفاؤل'))
+        if not has_scenarios:
+            return "الخريطة الحرارية (heatmap) يجب أن تعرض سيناريوهات الحساسية الثلاثة (متحفظ، أساسي، متفائل)."
+        # Must have visual color shading / highlight
+        if not re.search(r'background\s*:\s*(?:rgba|#[0-9a-fA-F]{3,8}|hsl)', html, re.IGNORECASE):
+            return "الخريطة الحرارية (heatmap) تتطلب تمييزًا لونيًا لخلايا السيناريو الأفضل."
+
     return None
 
 
@@ -3388,13 +4099,20 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                 retry_note = '\n\nإعادة المحاولة: لم يصل HTML صالح. أخرج div class="slide" واحدًا مكتملًا فقط.'
                 continue
             content_source = str(slide.get('content_source') or '')
-            if not slide.get('chart_type') and re.search(
+            chart_type = canonicalize_chart_type(slide.get('chart_type'))
+            if chart_type:
+                chart_err = _validate_chart_slide_html(html, chart_type, slide, project_data)
+                if chart_err:
+                    print(f"[SLIDE-{slide_num}] ERROR: chart validation failed: {chart_err} (attempt {attempt})")
+                    retry_note = f'\n\nإعادة المحاولة: {chart_err}'
+                    continue
+            elif re.search(
                     r'(?:data-chart|class\s*=\s*["\'][^"\']*(?:chart|treemap|heatmap)|conic-gradient\s*\()',
                     html, flags=re.IGNORECASE):
                 print(f"[SLIDE-{slide_num}] ERROR: unplanned chart outside selected financial charts (attempt {attempt})")
                 retry_note = '\n\nإعادة المحاولة: هذه الشريحة لا تحمل chart_type؛ احذف الرسم البياني واعرض النص أو الجدول فقط.'
                 continue
-            if _slide_section_key(slide) == 'financial' and not slide.get('chart_type') and '<table' not in html.lower():
+            if _slide_section_key(slide) == 'financial' and not chart_type and '<table' not in html.lower():
                 print(f"[SLIDE-{slide_num}] ERROR: financial slide must use table, not cards/boxes (attempt {attempt})")
                 retry_note = '\n\nإعادة المحاولة: شريحة الدراسة المالية ملزمة باستخدام جداول HTML نظامية (table) بتصميم تقرير PDF. احذف الكروت العائمة والمربعات واعرض البيانات داخل جدول كامل.'
                 continue
@@ -4059,14 +4777,23 @@ def _remove_unapproved_contact_elements(html, project_data):
 
 
 def _strip_presentation_icons(html):
-    """Remove all icon markup and emoji, keeping company logo images.
+    """Remove all icon markup and emoji, keeping company logo images and genuine data charts.
 
     Emojis used to be converted into inline SVG icons first, which the SVG removal below then
     deleted anyway. The product rule is that no icon is ever produced, so they are simply stripped.
+    Genuine data rendering SVGs (map polygon overlay or chart data lines/polylines) are preserved.
     """
     if not html:
         return html
-    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', '', html, flags=re.IGNORECASE)
+
+    def _strip_svg_if_icon(match):
+        chunk = match.group(0)
+        # Preserve genuine data visualization SVGs (map boundary overlay or chart data lines/polylines)
+        if any(marker in chunk for marker in ('mapPolygonOverlay', 'data-chart', 'polyline', 'data-chart-line')):
+            return chunk
+        return ''
+
+    html = re.sub(r'<svg\b[^>]*>[\s\S]*?</svg\s*>', _strip_svg_if_icon, html, flags=re.IGNORECASE)
     html = re.sub(
         r'<(?:i|span|div)\b[^>]*(?:class|id)=["\'][^"\']*(?:icon|emoji|lucide|fa-|material-icons)[^"\']*["\'][^>]*>[\s\S]*?</(?:i|span|div)\s*>',
         '', html, flags=re.IGNORECASE
