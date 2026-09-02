@@ -1080,7 +1080,8 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
         cover = source_slides[0]
     cover = dict(cover or {})
     cover.update({'title': 'الغلاف', 'type': 'cover', 'section_key': 'cover',
-                  'design_style': 'image', 'requires_image': True})
+                  'design_style': 'image', 'requires_image': True,
+                  'image_tokens': ['##IMAGE_COVER##'], 'image_layout': None})
     index = next((slide for slide in source_slides if slide.get('type') == 'index'), None)
     index = dict(index or {})
     index.update({'title': 'محتويات العرض', 'type': 'index', 'section_key': 'index',
@@ -2610,7 +2611,7 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
 
         # Exact center of column in a 500px flex container with 4px gap
         x = round(idx * (col_w + gap_px) + col_w / 2.0, 1)
-        # y=100 is zero; positive cumulative → lower y (above); negative → higher y (below)
+        # y=100 is zero; positive cumulative means lower y (above); negative means higher y (below)
         y = round(100 - (it['cumulative_m'] / max_abs_cum) * px_half, 1)
         it['cx'] = x
         it['cy'] = y
@@ -3135,12 +3136,8 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     # Explicit image/map placeholder for this slide
     placeholder_note = ''
     image_tokens = [str(token) for token in (slide.get('image_tokens') or []) if str(token or '').strip()]
-    if image_tokens:
-        placeholder_note = 'استخدم كل رموز الصور التالية مرة واحدة وبحجم واضح، ولا تستبدلها بصورة الغلاف: ' + '، '.join(image_tokens)
-        if slide.get('image_layout'):
-            placeholder_note += f". التخطيط المعتمد لهذه المجموعة هو {slide.get('image_layout')} ولا تغيّر عدد الصور"
-    elif slide_type == 'cover':
-        placeholder_note = 'يجب استخدام ##IMAGE_COVER## كخلفية كاملة على كامل الشريحة، ووضع طبقة فوقها تحمل data-cover-overlay. لون الطبقة سيُثبت من اللون الأساسي للهوية؛ ممنوع كحلي ثابت أو لون خارج الهوية.'
+    if slide_type == 'cover':
+        placeholder_note = 'يجب استخدام ##IMAGE_COVER## كخلفية كاملة على كامل الشريحة (Full Bleed Background)، ووضع طبقة فوقها تحمل data-cover-overlay. لون الطبقة سيُثبت من اللون الأساسي للهوية؛ ممنوع كحلي ثابت أو لون خارج الهوية. ممنوع منعاً باتاً وضع أي بطاقة صورة أو وسم <img> إضافي لصورة المشروع داخل الشريحة؛ الصورة كخلفية كاملة فقط.'
     elif slide_type == 'map_overview':
         placeholder_note = 'يجب استخدام ##MAP_OVERVIEW## كخلفية رئيسية لهذه الشريحة مع ضبط الصورة في المنتصف تماماً (center center) بدون أي إزاحة أو قطع.'
     elif slide_type == 'map_landmarks':
@@ -3153,6 +3150,10 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         placeholder_note = 'استخدم جدول بيانات احترافي لخصائص الموقع.'
     elif slide_type == 'moodboard':
         placeholder_note = 'استخدم كل رموز صور التصورات الخارجية المحددة للشريحة وفق التخطيط المعتمد، دون حذف أو تكرار.'
+    elif image_tokens:
+        placeholder_note = 'استخدم كل رموز الصور التالية مرة واحدة وبحجم واضح، ولا تستبدلها بصورة الغلاف: ' + '، '.join(image_tokens)
+        if slide.get('image_layout'):
+            placeholder_note += f". التخطيط المعتمد لهذه المجموعة هو {slide.get('image_layout')} ولا تغيّر عدد الصور"
     elif design_style == 'image':
         placeholder_note = 'لا تستخدم صورة ما لم يكن رمزها محددًا في خطة هذه الشريحة أو في الصور المتوفرة لموضوعها.'
 
@@ -3169,6 +3170,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
         'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
         'املأ الشريحة بالمحتوى الضروري والوافي؛ وشرائح الملخص المالي تستخدم جداول التقرير نفسها دون ضغط أو حذف',
+        'جداول الدراسة المالية يجب أن تكون متناسقة ومضغوطة بأناقة (Compact & Fitted): ممنوع تمديد الجدول رأسياً بملء الشريحة (لا تضع height: 100% أو height: 480px على الجدول لتفادي الصفوف العملاقة والفراغات المفرطة)، واجعل ارتفاع الصفوف طبيعياً ومريحاً (padding: 7px 12px;). جداول العمودين (مثل البند والقيمة) توضع في بطاقة أنيقة بعرض متناسب مريح (max-width: 820px; margin: 0 auto;) أو بجانب بعضها عند وجود جدولين، دون تشتيت المسافات.',
     ]
     company_tone = str((project_data or {}).get('_company_logo_tone') or (branding or {}).get('_logo_tone') or '').strip().lower()
     project_tone = str((project_data or {}).get('_project_logo_tone') or '').strip().lower()
@@ -3466,22 +3468,61 @@ def _format_presentation_numeric_text(html):
 
 
 def _normalize_table_readability(html):
-    def normalize_table(match):
-        return _set_tag_style(
-            match.group(0), ('width', 'border-collapse', 'table-layout'),
-            'width:100%!important;border-collapse:collapse!important;table-layout:fixed!important;')
+    # Strip height stretch from wrapper containers around tables
+    def _strip_table_wrapper_stretch(h):
+        """Remove height:100%, height:NNNpx, flex:1 from divs that wrap tables."""
+        def deflate_wrapper(m):
+            tag = m.group(0)
+            tag = re.sub(r'height\s*:\s*(?:100%|\d{3,}px)\s*;?', '', tag, flags=re.IGNORECASE)
+            tag = re.sub(r'flex\s*:\s*1\s*;?', '', tag, flags=re.IGNORECASE)
+            return tag
+        # Match opening div tags that precede a <table
+        return re.sub(r'<div\b[^>]*>(?=\s*<table\b)', deflate_wrapper, h, flags=re.IGNORECASE)
+    html = _strip_table_wrapper_stretch(html)
+
+    def _count_columns(table_html):
+        """Count the max columns in the first row of a table."""
+        row_match = re.search(r'<tr\b[^>]*>(.*?)</tr>', table_html, re.IGNORECASE | re.S)
+        if not row_match:
+            return 0
+        cells = re.findall(r'<(?:th|td)\b', row_match.group(1), re.IGNORECASE)
+        return len(cells)
+
+    # Per-table normalization: count columns and apply width constraint
+    def normalize_full_table(match):
+        table_html = match.group(0)
+        cols = _count_columns(table_html)
+        if cols <= 2:
+            max_w = '820px'
+        elif cols <= 4:
+            max_w = '1080px'
+        else:
+            max_w = '1200px'
+        # Strip width:100% and excessive height from the <table> tag
+        table_tag_match = re.match(r'<table\b[^>]*>', table_html, re.IGNORECASE)
+        if table_tag_match:
+            old_tag = table_tag_match.group(0)
+            new_tag = re.sub(r'width\s*:\s*100%\s*;?', '', old_tag, flags=re.IGNORECASE)
+            new_tag = re.sub(r'height\s*:\s*(?:100%|\d{3,}px)\s*;?', '', new_tag, flags=re.IGNORECASE)
+            new_tag = _set_tag_style(
+                new_tag, ('border-collapse', 'max-width', 'margin-left', 'margin-right'),
+                f'border-collapse:collapse!important;max-width:{max_w}!important;margin-left:auto!important;margin-right:auto!important;')
+            table_html = new_tag + table_html[table_tag_match.end():]
+        return table_html
+
+    html = re.sub(r'<table\b[^>]*>.*?</table>', normalize_full_table, html, flags=re.IGNORECASE | re.S)
 
     def normalize_header(match):
         return _set_tag_style(
             match.group(0), ('font-size', 'line-height', 'padding', 'overflow-wrap'),
-            'font-size:13px!important;line-height:1.35!important;padding:8px!important;overflow-wrap:anywhere!important;')
+            'font-size:13px!important;line-height:1.35!important;padding:8px 12px!important;overflow-wrap:anywhere!important;')
 
     def normalize_cell(match):
+        tag = re.sub(r'height\s*:\s*(?:100%|\d{2,}px)\s*;?', '', match.group(0), flags=re.IGNORECASE)
         return _set_tag_style(
-            match.group(0), ('font-size', 'line-height', 'padding', 'vertical-align', 'overflow-wrap'),
-            'font-size:12px!important;line-height:1.4!important;padding:7px!important;vertical-align:middle!important;overflow-wrap:anywhere!important;')
+            tag, ('font-size', 'line-height', 'padding', 'vertical-align', 'overflow-wrap'),
+            'font-size:12px!important;line-height:1.35!important;padding:7px 12px!important;vertical-align:middle!important;overflow-wrap:anywhere!important;')
 
-    html = re.sub(r'<table\b[^>]*>', normalize_table, html, flags=re.IGNORECASE)
     html = re.sub(r'<th\b[^>]*>', normalize_header, html, flags=re.IGNORECASE)
     return re.sub(r'<td\b[^>]*>', normalize_cell, html, flags=re.IGNORECASE)
 
@@ -4912,6 +4953,16 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         html = _normalize_brand_overlay(html, branding)
     if is_cover:
         html = _normalize_cover_overlay_element(html, branding)
+        def _strip_cover_extra_images(match):
+            tag = match.group(0)
+            src_match = re.search(r'src=["\']([^"\']*)["\']', tag, re.IGNORECASE)
+            src = (src_match.group(1) if src_match else '').strip()
+            if '##LOGO##' in src or '##PROJECT_LOGO##' in src or 'logo' in src.lower():
+                return tag
+            return ''
+        html = re.sub(r'<img\b[^>]*>', _strip_cover_extra_images, html, flags=re.IGNORECASE)
+        for _ in range(3):
+            html = re.sub(r'<(?:div|figure|picture)\b[^>]*>\s*</(?:div|figure|picture)>', '', html, flags=re.IGNORECASE)
     if is_closing:
         html = re.sub(
             r'<(p|h[1-6]|span)\b[^>]*>[^<]*(?:فرصة\s+(?:واعدة|مشروطة)|واعدة\s+بشروط|بشروط)[^<]*</\1\s*>',
