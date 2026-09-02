@@ -884,7 +884,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                         and _can_chart_financial_part(chart_cand, part, model, project_data)):
                     chart_titles = {
                         'combo': 'التدفقات النقدية السنوية والتراكمية',
-                        'waterfall': 'تكوين إجمالي تكلفة الاستثمار',
+                        'waterfall': 'تكوين إجمالي تكلفة المشروع',
                         'heatmap': 'مقارنة السيناريوهات المالية',
                     }
                     add(target_section, {
@@ -943,7 +943,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             if not any(canonicalize_chart_type(s.get('chart_type')) == 'waterfall' for s in fin_slides) and (tables.get('costTable') or tables.get('costs')):
                 ct_rows = tables.get('costTable') or tables.get('costs') or []
                 add('financial', {
-                    'title': 'تكوين إجمالي تكلفة الاستثمار',
+                    'title': 'تكوين إجمالي تكلفة المشروع',
                     'type': 'content',
                     'design_style': 'chart',
                     'chart_type': 'waterfall',
@@ -2649,10 +2649,10 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
     tot_disp = total.get('display', f"{total_val_m:.1f} م.ر")
     labels_svg.append(f'<text x="{tot_cx}" y="{tot_top_y - 8}" font-size="10.5" font-weight="800" fill="{primary}" text-anchor="middle">{tot_disp}</text>')
     labels_svg.append(f'<text x="{tot_cx}" y="{tot_top_y - 22}" font-size="8.5" font-weight="700" fill="{primary}" text-anchor="middle">100%</text>')
-    tot_wrapped = _wrap_tspans(total.get('name', 'إجمالي تكلفة الاستثمار'), tot_cx)
+    tot_wrapped = _wrap_tspans(total.get('name', 'إجمالي تكلفة المشروع'), tot_cx)
     labels_svg.append(f'<g transform="translate(0, {y_zero + 18})">{tot_wrapped}</g>')
 
-    return f'''<svg viewBox="0 0 {width} {height}" style="width:100%;height:auto;max-height:360px;font-family:inherit;overflow:visible;" role="img" aria-label="المخطط الشلالي لتكوين إجمالي تكلفة الاستثمار">
+    return f'''<svg viewBox="0 0 {width} {height}" style="width:100%;height:auto;max-height:360px;font-family:inherit;overflow:visible;" role="img" aria-label="المخطط الشلالي لتكوين إجمالي تكلفة المشروع">
   <!-- Grid -->
   {''.join(grid_lines)}
   <!-- Baseline -->
@@ -2702,7 +2702,7 @@ def _extract_waterfall_chart_data(part_or_table, model=None, project_data=None):
                 if c_val > 0:
                     val = c_val
                     break
-        if name and name not in ('الإجمالي', 'المجموع', 'Total', 'إجمالي تكلفة الاستثمار') and val > 0:
+        if name and name not in ('الإجمالي', 'المجموع', 'Total', 'إجمالي تكلفة الاستثمار', 'إجمالي تكلفة المشروع', 'تكلفة الاستثمار', 'تكلفة المشروع') and val > 0:
             if name not in seen_names:
                 seen_names.add(name)
                 items.append({
@@ -2852,7 +2852,7 @@ def _extract_waterfall_chart_data(part_or_table, model=None, project_data=None):
         running += it['value_sar']
 
     total_data = {
-        'name': 'إجمالي تكلفة الاستثمار',
+        'name': 'إجمالي تكلفة المشروع',
         'value_sar': total_val,
         'value_millions': round(total_val / 1e6, 2),
         'display': _format_sar_display(total_val),
@@ -3586,8 +3586,8 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             f'يجب تمييز شريط مشروعنا بلون الهوية الرئيسي ({primary_color}) وبإطار بارز وبادينغ خاص لتمييزه فوراً عن المنافسين.'
         ),
         'waterfall': (
-            'المخطط الشلالي (Waterfall Chart) لتكوين إجمالي تكلفة الاستثمار: '
-            'يوضح مساهمة كل بند تكلفة من القائمة المرفقة (بما يشمل تكلفة المطور وتكاليف الصندوق والتمويل عند توفرها) وصولاً لعمود إجمالي تكلفة الاستثمار النهائي. '
+            'المخطط الشلالي (Waterfall Chart) لتكوين إجمالي تكلفة المشروع: '
+            'يوضح مساهمة كل بند تكلفة من القائمة المرفقة (بما يشمل تكلفة المطور وتكاليف الصندوق والتمويل عند توفرها) وصولاً لعمود إجمالي تكلفة المشروع النهائي. '
             'الهيكل الإلزامي: قسّم الشريحة إلى عمودين متجاورين متساويين (50% لجدول التكاليف، 50% للمخطط الشلالي) '
             'داخل حاوية display: grid; grid-template-columns: 1fr 1fr; gap: 24px; height: 500px; align-items: start;. '
             'في جانب الرسم: حاوية رسم بخلفية #f8fafc وبودر 1px solid #e2e8f0 وبادينغ 16px وراديوس 8px بارتفاع كلي 380px، '
@@ -3597,7 +3597,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             f'1. قيمة البند بالأعلى: (<span style="position: absolute; bottom: calc(offset_pct% + height_pct% + 4px); font-size: 10px; font-weight: 700; color: {primary_color}; white-space: nowrap;">display</span>). '
             f'2. الشريط العائم: (div style="position: absolute; bottom: offset_pct%; height: height_pct%; width: 75%; background: {secondary_color}; border-radius: 3px;"). '
             '3. اسم البند أسفل خط الأساس: (<span style="position: absolute; top: 100%; padding-top: 6px; font-size: 10px; font-weight: 600; color: #475569; text-align: center; line-height: 1.2; word-break: break-word;">name</span>). '
-            'العمود الأخير هو عمود إجمالي تكلفة الاستثمار (waterfall_chart_data.total): '
+            'العمود الأخير هو عمود إجمالي تكلفة المشروع (waterfall_chart_data.total): '
             f'عمود كامل يستند إلى خط الأساس مباشرة (position: absolute; bottom: 0; height: height_pct%; width: 85%; background: {primary_color}; border-radius: 3px;) '
             f'مع قيمته الإجمالية بأعلاه وتسميته بالأسفل بلون عريض {primary_color}.'
         ),
@@ -4381,7 +4381,7 @@ def _render_fallback_waterfall(chart_data, primary='#005f78', secondary='#0ea5e9
     if svg_code:
         return (
             f'<div style="background:#f8fafc;padding:14px 14px 20px;border-radius:8px;border:1px solid #e2e8f0;position:relative;">'
-            f'<div style="font-size:13px;font-weight:700;color:{primary};margin-bottom:8px;">تكوين إجمالي تكلفة الاستثمار (ملايين ر.س)</div>'
+            f'<div style="font-size:13px;font-weight:700;color:{primary};margin-bottom:8px;">تكوين إجمالي تكلفة المشروع (ملايين ر.س)</div>'
             f'{svg_code}'
             f'</div>'
         )
@@ -4403,7 +4403,7 @@ def _render_fallback_waterfall(chart_data, primary='#005f78', secondary='#0ea5e9
         </div>
         ''')
     if total:
-        t_name = html_lib.escape(str(total.get('name') or 'إجمالي تكلفة الاستثمار'))
+        t_name = html_lib.escape(str(total.get('name') or 'إجمالي تكلفة المشروع'))
         t_display = html_lib.escape(str(total.get('display') or ''))
         t_h = total.get('height_pct', 100.0)
         cols_html.append(f'''
@@ -4415,7 +4415,7 @@ def _render_fallback_waterfall(chart_data, primary='#005f78', secondary='#0ea5e9
         ''')
     return (
         f'<div style="background:#f8fafc;padding:16px 14px 44px;border-radius:8px;border:1px solid #e2e8f0;display:flex;flex-direction:column;gap:10px;">'
-        f'<div style="font-size:13px;font-weight:700;color:{primary};">تكوين إجمالي تكلفة الاستثمار (ملايين ر.س)</div>'
+        f'<div style="font-size:13px;font-weight:700;color:{primary};">تكوين إجمالي تكلفة المشروع (ملايين ر.س)</div>'
         f'<div style="height:230px;display:flex;align-items:flex-end;justify-content:space-between;border-bottom:2px solid #94a3b8;position:relative;gap:6px;">'
         f'{"".join(cols_html)}'
         f'</div>'

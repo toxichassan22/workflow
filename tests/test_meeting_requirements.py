@@ -1643,6 +1643,7 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         # Total check: 100M + 10M + 8M + 4.5M + 13M = 135.5M
         self.assertEqual(res['total']['value_sar'], 135500000.0)
+        self.assertEqual(res['total']['name'], 'إجمالي تكلفة المشروع')
         self.assertIn('svg_code', res.get('summary', {}))
 
         # Test omission when 0 or not present
