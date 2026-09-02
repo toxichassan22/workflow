@@ -10,8 +10,14 @@ import hashlib
 import html as html_lib
 import subprocess
 import requests
+from urllib3 import HTTPSConnectionPool
+from urllib3.util import Timeout
 import uuid as _uuid
 import threading
+import ipaddress
+import socket
+from io import BytesIO
+from urllib.parse import urlsplit
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import db_driver
@@ -1402,6 +1408,22 @@ def _augment_generation_images(images, project_data, tenant_id):
             'logo': _generation_project_image_url(tenant_id, file_id) if file_id else '',
         })
     result['team_members'] = team_members
+    market_state = (project_data or {}).get('market_study_data')
+    if isinstance(market_state, str):
+        try:
+            market_state = json.loads(market_state)
+        except (TypeError, ValueError):
+            market_state = {}
+    competitors = market_state.get('competitors') if isinstance(market_state, dict) else []
+    competitor_logos = []
+    for row in competitors if isinstance(competitors, list) else []:
+        if not isinstance(row, dict):
+            continue
+        logo = str(row.get('logo_path') or '').strip()
+        if not logo and row.get('logo_file_id'):
+            logo = _generation_project_image_url(tenant_id, row['logo_file_id'])
+        competitor_logos.append({'name': str(row.get('name') or '').strip(), 'logo': logo})
+    result['competitor_logos'] = competitor_logos
     land_source = result.get('land_photos')
     if not isinstance(land_source, list):
         land_source = (project_data or {}).get('land_photos_file_meta')
@@ -2937,7 +2959,7 @@ def _designer_target_indexes(action, count, current_index, force_all=False):
     return [max(0, min(idx, count - 1))] if count else []
 
 
-def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None):
+def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None, slide_type='content', total_slides=None, content_source=None):
     """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
         try:
@@ -3033,9 +3055,14 @@ HTML الحالي:
                 for ph, b64_str in base64_map.items():
                     output = output.replace(ph, b64_str)
 
-                output = postprocess_slide(output, slide_index + 1, tenant_id)
                 output = resolve_designer_chat_placeholders(output, project_data, presentation_id,
                                                            tenant_id, creative_images)
+                output = slide_engine.finalize_slide_html(
+                    output, slide_type or 'content', project_data, branding,
+                    creative_images=creative_images, tenant_id=tenant_id,
+                    slide_num=slide_index + 1, slide_title=title,
+                    total_slides=total_slides or (slide_index + 1), content_source=content_source,
+                )
                 response_text = parsed.get('response') or 'تم تحديث الشريحة بنجاح.'
                 if vision_error:
                     response_text += ' التعديل جرى على الكود بدون معاينة بصرية للشريحة.'
@@ -3044,7 +3071,15 @@ HTML الحالي:
         except Exception as exc:
             print(f'[DESIGNER-EDIT] attempt {attempt} failed: {exc}')
 
-    return html, f'تم الحفاظ على تصميم الشريحة {slide_index + 1} لتعذر التعديل التلقائي عليها.'
+    fallback = resolve_designer_chat_placeholders(
+        html, project_data, presentation_id, tenant_id, creative_images)
+    fallback = slide_engine.finalize_slide_html(
+        fallback, slide_type or 'content', project_data, branding,
+        creative_images=creative_images, tenant_id=tenant_id,
+        slide_num=slide_index + 1, slide_title=title,
+        total_slides=total_slides or (slide_index + 1), content_source=content_source,
+    )
+    return fallback, f'تم الحفاظ على تصميم الشريحة {slide_index + 1} لتعذر التعديل التلقائي عليها.'
 
 
 DESIGNER_CHAT_VERBATIM_TURNS = 10
@@ -3175,6 +3210,7 @@ def api_designer_chat():
             focus_indexes.append(number)
 
     branding = db.get_branding(g.tenant_id) or {}
+    _prepare_generation_logo_context(project_data, branding, g.tenant_id)
     training_context = db.get_training_context(g.tenant_id) or ''
     summary = [{'index': i + 1, 'title': s.get('title', '') if isinstance(s, dict) else ''} for i, s in enumerate(slides)]
     all_note = "\n تنبيه هام جداً: المستخدم طلب صراحة تعديل جميع الشرائح دون استثناء! يجب أن تعيد target='all' في الأداة edit_slides." if is_all_slides_request else ""
@@ -3311,7 +3347,10 @@ def api_designer_chat():
                                 branding,
                                 tenant_id=tenant_id,
                                 creative_images=creative_images,
-                                user_image_refs=user_image_refs
+                                user_image_refs=user_image_refs,
+                                slide_type=slide_item.get('type', 'content'),
+                                total_slides=len(slides),
+                                content_source=slide_item.get('content_source') or slide_item.get('contentSource'),
                             )
                             return idx, h, r
 
@@ -3332,7 +3371,14 @@ def api_designer_chat():
                 else:
                     for idx in indexes:
                         slide = slides[idx] if isinstance(slides[idx], dict) else {}
-                        html, response_text = _designer_edit_slide(slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'), instruction, idx, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs)
+                        html, response_text = _designer_edit_slide(
+                            slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'),
+                            instruction, idx, project_data, presentation_id, branding,
+                            tenant_id=tenant_id, creative_images=creative_images,
+                            user_image_refs=user_image_refs, slide_type=slide.get('type', 'content'),
+                            total_slides=len(slides),
+                            content_source=slide.get('content_source') or slide.get('contentSource'),
+                        )
                         slide['html'] = html
                         slides[idx] = slide
                         if response_text:
@@ -3362,7 +3408,13 @@ def api_designer_chat():
                 title = params.get('title') or 'شريحة جديدة'
                 slide_type = params.get('type') or 'content'
                 plan_slide = {'title': title, 'type': slide_type, 'design_style': params.get('designStyle', 'cards'), 'bullets': []}
-                html, _ = _designer_edit_slide('<div class="slide" style="width:1280px;height:720px;"><h1>' + title + '</h1></div>', title, params.get('instruction') or message, len(slides), project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs)
+                html, _ = _designer_edit_slide(
+                    '<div class="slide" style="width:1280px;height:720px;"><h1>' + title + '</h1></div>',
+                    title, params.get('instruction') or message, len(slides), project_data,
+                    presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images,
+                    user_image_refs=user_image_refs, slide_type=slide_type,
+                    total_slides=len(slides) + 1,
+                )
                 slides.append({'html': html, 'title': title, 'type': slide_type, 'designStyle': plan_slide['design_style'], 'bullets': [], 'metrics': []})
                 executed.append({'tool': tool, 'status': 'success', 'index': len(slides) - 1})
             elif tool in ('regenerate_maps', 'update_map_style', 'change_map_type'):
@@ -5227,6 +5279,13 @@ def api_generate_single_map_image():
         if path and os.path.exists(path):
             rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
             placeholders[placeholder] = '/' + rel_path
+    map_labels = {'overview': 'الموقع العام', 'access': 'الوصول', 'catchment': 'نطاق الخدمة', 'landmarks': 'المعالم'}
+    if presentation_id:
+        _record_change('presentation', presentation_id, 'توليد خريطة',
+                       [f'وُلّدت خريطة {map_labels.get(map_type, map_type)}'])
+    elif draft_id:
+        _record_change('draft', draft_id, 'توليد خريطة',
+                       [f'وُلّدت خريطة {map_labels.get(map_type, map_type)}'])
     return jsonify({
         'success': True,
         'mapType': map_type,
@@ -5560,13 +5619,36 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
 @app.route('/api/presentations', methods=['GET'])
 @require_permission('view_presentations')
 def api_get_presentations():
-    """List all presentations for the current tenant."""
-    presentations = db.get_presentations(g.tenant_id)
+    """List tenant presentations with optional project and archive filters."""
+    try:
+        limit = int(request.args.get('limit', 200))
+        offset = int(request.args.get('offset', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'limit and offset must be integers'}), 400
+    presentations = db.get_presentations(
+        g.tenant_id,
+        draft_id=(request.args.get('draftId') or '').strip() or None,
+        search=(request.args.get('search') or '').strip(),
+        status=(request.args.get('status') or '').strip(),
+        date_from=(request.args.get('from') or '').strip(),
+        date_to=(request.args.get('to') or '').strip(),
+        limit=limit,
+        offset=offset,
+    )
     result = []
     for p in presentations:
+        draft_id = p.get('draft_id')
+        if not draft_id and p.get('project_data'):
+            try:
+                project_data = json.loads(p['project_data']) if isinstance(p['project_data'], str) else p['project_data']
+            except (TypeError, ValueError):
+                project_data = {}
+            if isinstance(project_data, dict):
+                draft_id = project_data.get('draftId') or project_data.get('draft_id')
         result.append({
             'id': p['id'],
             'title': p['title'],
+            'draftId': draft_id,
             'slideCount': p.get('slide_count', 0),
             'status': p.get('status', 'draft'),
             'createdAt': p.get('created_at'),
@@ -5579,6 +5661,11 @@ def api_get_presentations():
 @require_permission('create_presentation')
 def api_delete_presentation(pres_id):
     """Delete a presentation for the current tenant."""
+    presentation = db.get_presentation(pres_id, tenant_id=g.tenant_id)
+    if not presentation:
+        return jsonify({'error': 'Presentation not found'}), 404
+    _record_change('presentation', pres_id, 'حذف العرض',
+                   [f'حُذف العرض «{presentation.get("title") or "بدون عنوان"}»'])
     if not db.delete_presentation(pres_id, g.tenant_id):
         return jsonify({'error': 'Presentation not found'}), 404
     return jsonify({'success': True})
@@ -5604,6 +5691,7 @@ def api_save_presentation():
         project_data=project_data,
         slides_data=slides_data,
         slide_count=slide_count,
+        draft_id=project_data.get('draftId') or project_data.get('draft_id'),
     )
     _record_change('presentation', pres_id, 'إنشاء العرض',
                    [f'العنوان: «{title}»', f'عدد الشرائح: {slide_count}'])
@@ -5647,6 +5735,9 @@ def api_update_presentation(pres_id):
         if k in data:
             db_key = {'projectData': 'project_data', 'slidesData': 'slides_data', 'slideCount': 'slide_count'}.get(k, k)
             updates[db_key] = normalize_presentation_assets(data[k], g.tenant_id) if k in {'projectData', 'slidesData'} else data[k]
+    if isinstance(updates.get('project_data'), dict):
+        updates['draft_id'] = (updates['project_data'].get('draftId')
+                               or updates['project_data'].get('draft_id') or pres.get('draft_id'))
 
     if 'slides_data' in updates:
         project_data = updates.get('project_data')
@@ -5661,16 +5752,25 @@ def api_update_presentation(pres_id):
         )
         updates['slide_count'] = len(updates['slides_data'])
 
-    # Save version snapshot before update if slides_data is changing
+    details = []
+    action = 'تعديل العرض'
+    if 'title' in updates and updates['title'] != pres.get('title'):
+        details.append(f'عنوان العرض: من «{pres.get("title") or "بدون"}» إلى «{updates["title"]}»')
+    if 'project_data' in updates:
+        try:
+            old_project_data = json.loads(pres.get('project_data') or '{}')
+        except (TypeError, ValueError):
+            old_project_data = {}
+        details.extend(change_tracking.describe_draft_changes(old_project_data, updates['project_data']))
     if 'slides_data' in updates:
         current_slides = change_tracking.parse_slides(pres.get('slides_data'))
         db.save_presentation_version(pres_id, g.user_id, g.user_name or 'System', current_slides, action='edit')
-        # What actually changed, slide by slide. This used to be one line reading «تعديل المحتوى».
-        details = []
-        if 'title' in updates and updates['title'] != pres.get('title'):
-            details.append(f'عنوان العرض: من «{pres.get("title") or "بدون"}» إلى «{updates["title"]}»')
         details.extend(change_tracking.describe_slide_changes(current_slides, updates['slides_data']))
-        _record_change('presentation', pres_id, 'تعديل الشرائح', details, source='manual')
+        action = 'تعديل الشرائح'
+    if 'status' in updates and updates['status'] != pres.get('status'):
+        details.append(f'حالة العرض: من «{pres.get("status") or "مسودة"}» إلى «{updates["status"]}»')
+    if details:
+        _record_change('presentation', pres_id, action, details, source='manual')
 
     db.update_presentation(pres_id, **updates)
     return jsonify({'success': True})
@@ -5772,7 +5872,13 @@ def api_get_all_project_drafts():
         offset = int(request.args.get('offset', 0))
     except (TypeError, ValueError):
         return jsonify({'error': 'limit and offset must be integers'}), 400
-    drafts = db.get_all_project_draft_summaries(g.tenant_id, limit=limit, offset=offset)
+    drafts = db.get_all_project_draft_summaries(
+        g.tenant_id, limit=limit, offset=offset,
+        search=(request.args.get('search') or '').strip(),
+        status=(request.args.get('status') or '').strip(),
+        date_from=(request.args.get('from') or '').strip(),
+        date_to=(request.args.get('to') or '').strip(),
+    )
     return jsonify({'success': True, 'drafts': drafts, 'limit': max(1, min(limit, 200)), 'offset': max(0, offset)})
 
 
@@ -5859,6 +5965,9 @@ def api_restore_project_draft(draft_id):
     restored = db.restore_draft_from_snapshot(g.tenant_id, draft_id, snapshot)
     if restored is None:
         return jsonify({'error': 'Draft not found'}), 404
+    _record_change('draft', draft_id, 'استرجاع بيانات المشروع',
+                   [f'استُعيد الحقل «{field}» من العرض «{presentation.get("title") or "بدون عنوان"}»'
+                    for field in restored])
     return jsonify({'success': True, 'restoredFields': restored, 'restoredCount': len(restored)})
 
 
@@ -5866,6 +5975,11 @@ def api_restore_project_draft(draft_id):
 @require_auth
 def api_delete_project_draft_by_id(draft_id):
     """Delete a specific project draft by ID."""
+    draft = db.get_project_draft_by_id(g.tenant_id, draft_id)
+    if not draft:
+        return jsonify({'error': 'Draft not found'}), 404
+    _record_change('draft', draft_id, 'حذف المشروع',
+                   [f'حُذف المشروع «{draft.get("title") or "بدون عنوان"}»'])
     db.delete_project_draft_by_id(g.tenant_id, draft_id)
     return jsonify({'success': True})
 
@@ -5946,6 +6060,8 @@ def api_request_project_draft_approval():
             'error': 'All project sections must be approved before requesting approval',
             'sectionStatuses': draft.get('section_statuses', {})
         }), 400
+    _record_change('draft', draft.get('id') or data.get('draftId'), 'طلب تعميد المشروع',
+                   ['أُرسل المشروع للمراجعة'])
     return jsonify({'success': True, 'draft': draft})
 
 
@@ -5979,6 +6095,8 @@ def api_review_project_draft():
         g.tenant_id, draft_id, review_status, _project_draft_actor_id(), _project_draft_actor_name(), note
     ):
         return jsonify({'error': 'Pending draft approval not found'}), 404
+    action = 'اعتماد المشروع' if review_status == 'approved' else 'إعادة المشروع للتعديل'
+    _record_change('draft', draft_id, action, [note] if note else [action])
     return jsonify({'success': True})
 
 
@@ -9928,12 +10046,21 @@ def _execute_market_competitors(data):
     generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
     merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode=mode)
     market_study.apply_search_citations(merged, _market_citation_urls(res))
+    draft_id = payload.get('draftId') or payload.get('draft_id')
+    for row in merged:
+        if row.get('logo_file_id') or row.get('logo_path'):
+            continue
+        try:
+            _store_imported_competitor_logo(row, draft_id=draft_id)
+        except Exception as exc:
+            row['logo_import_warning'] = str(exc)
     return {
         'success': True,
         'competitors': merged,
         'sources': market_study.competitor_source_rows(merged),
         'added': added,
         'updated': updated,
+        'conflictWarnings': [warning for row in merged for warning in (row.get('conflict_warnings') or [])],
         'searchExpanded': bool(parsed.get('searchExpanded')),
         'expansionNote': parsed.get('expansionNote') or parsed.get('notes') or '',
         'notes': parsed.get('notes') or '',
@@ -10150,6 +10277,44 @@ def api_market_study_competitors():
 @require_auth
 def api_market_study_summary():
     return _start_market_job('summary', _execute_market_summary)
+
+
+@app.route('/api/market-study/competitors/logo', methods=['POST'])
+@require_permission('create_presentation')
+def api_market_study_competitor_logo():
+    data = request.json or {}
+    competitor = market_study.normalize_competitor_row(data.get('competitor') or {}, fallback_source='manual')
+    if not competitor:
+        return jsonify({'success': False, 'error': 'بيانات المنافس غير صالحة'}), 400
+    if competitor.get('logo_file_id') or competitor.get('logo_path'):
+        return jsonify({'success': True, 'competitor': competitor})
+    official_url = competitor.get('logo_source_url') or competitor.get('source_url')
+    if not official_url or not market_study.official_source_reliability(
+            competitor.get('name'), competitor.get('source'), official_url):
+        return jsonify({'success': False, 'error': 'لا يوجد موقع رسمي موثق لهذا المنافس'}), 400
+    if not competitor.get('logo_url'):
+        prompt = (
+            f'ابحث داخل الموقع الرسمي فقط عن شعار «{competitor["name"]}»: {official_url}. '
+            'أعد JSON فقط بالمفتاحين logo_url وlogo_source_url. '
+            'logo_url رابط HTTPS مباشر لصورة PNG أو JPG أو WEBP على النطاق الرسمي نفسه، '
+            'وlogo_source_url صفحة الموقع الرسمي. إذا لم تجده أعد القيمتين فارغتين.'
+        )
+        response, provider_error = _call_market_study_model(
+            market_study.build_consultant_system_prompt(), prompt, max_tokens=1200)
+        parsed, parse_error = _parse_market_model_json(response)
+        if parse_error:
+            return jsonify({'success': False, 'error': provider_error or 'لم يُعثر على شعار رسمي'}), 404
+        competitor['logo_url'] = str(parsed.get('logo_url') or '').strip()
+        competitor['logo_source_url'] = str(parsed.get('logo_source_url') or official_url).strip()
+    competitor = _store_imported_competitor_logo(
+        competitor, draft_id=data.get('draftId') or data.get('draft_id'))
+    if not competitor.get('logo_file_id'):
+        return jsonify({'success': False, 'error': competitor.get('logo_import_warning') or 'لم يُعثر على شعار رسمي'}), 404
+    draft_id = data.get('draftId') or data.get('draft_id')
+    if draft_id:
+        _record_change('draft', draft_id, 'استيراد شعار منافس',
+                       [f'استُورد شعار «{competitor.get("name")}» من الموقع الرسمي'], source='ai')
+    return jsonify({'success': True, 'competitor': competitor})
 
 
 @app.route('/api/market-study/jobs/<job_id>', methods=['GET'])
@@ -10962,10 +11127,141 @@ PROJECT_FILE_EXTENSIONS = {
     '.webp': 'image/webp', '.pdf': 'application/pdf'
 }
 PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license',
-                      'regulation_reference', 'team_logo', 'visual_reference', 'conceptual_plan', 'project_logo'}
+                      'regulation_reference', 'team_logo', 'competitor_logo', 'visual_reference',
+                      'conceptual_plan', 'project_logo'}
 # Types that must be real images: they are rendered in <img> thumbnails, where a PDF shows nothing.
-PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'visual_reference', 'project_logo'}
+PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'competitor_logo', 'visual_reference', 'project_logo'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
+COMPETITOR_LOGO_MAX_BYTES = 2 * 1024 * 1024
+COMPETITOR_LOGO_MIMES = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp'}
+
+
+def _public_host_addresses(host):
+    try:
+        addresses = {info[4][0] for info in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
+    except (OSError, socket.gaierror):
+        return ()
+    verified = []
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            return ()
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+                or ip.is_reserved or ip.is_unspecified):
+            return ()
+        verified.append(address)
+    return tuple(sorted(verified))
+
+
+def _safe_public_host(host):
+    return bool(_public_host_addresses(host))
+
+
+def _open_pinned_https(parsed, addresses):
+    host = str(parsed.hostname).encode('idna').decode('ascii')
+    path = parsed.path or '/'
+    if parsed.query:
+        path += '?' + parsed.query
+    pool = HTTPSConnectionPool(
+        addresses[0], port=443, assert_hostname=host, server_hostname=host,
+        cert_reqs='CERT_REQUIRED', ca_certs=requests.certs.where(),
+    )
+    response = pool.urlopen(
+        'GET', path, headers={'Host': host, 'User-Agent': 'Mozilla/5.0'},
+        redirect=False, preload_content=False, retries=False,
+        timeout=Timeout(connect=7, read=20),
+    )
+    return pool, response
+
+
+def _same_official_host(logo_url, official_url):
+    logo_host = (urlsplit(str(logo_url or '')).hostname or '').lower().removeprefix('www.')
+    official_host = (urlsplit(str(official_url or '')).hostname or '').lower().removeprefix('www.')
+    return bool(logo_host and official_host and
+                (logo_host == official_host or logo_host.endswith('.' + official_host)))
+
+
+def _safe_download_competitor_logo(logo_url, official_url):
+    parsed = urlsplit(str(logo_url or '').strip())
+    official = urlsplit(str(official_url or '').strip())
+    try:
+        invalid_port = parsed.port not in (None, 443) or official.port not in (None, 443)
+    except ValueError:
+        invalid_port = True
+    if (parsed.scheme.lower() != 'https' or official.scheme.lower() != 'https'
+            or not parsed.hostname or not official.hostname or parsed.username or official.username
+            or invalid_port):
+        return None, None, None, 'رابط الشعار الرسمي غير صالح'
+    if not _same_official_host(logo_url, official_url):
+        return None, None, None, 'شعار المنافس خارج الموقع الرسمي'
+    addresses = _public_host_addresses(parsed.hostname)
+    if not addresses or not _public_host_addresses(official.hostname):
+        return None, None, None, 'عنوان موقع الشعار غير مسموح'
+    try:
+        pool, response = _open_pinned_https(parsed, addresses)
+    except Exception as exc:
+        return None, None, None, str(exc)
+    try:
+        if response.status != 200:
+            return None, None, None, f'تعذر تنزيل الشعار: HTTP {response.status}'
+        mime_type = str(response.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+        extension = COMPETITOR_LOGO_MIMES.get(mime_type)
+        if not extension:
+            return None, None, None, 'نوع ملف الشعار غير مدعوم'
+        try:
+            declared = int(response.headers.get('Content-Length') or 0)
+        except (TypeError, ValueError):
+            declared = 0
+        if declared > COMPETITOR_LOGO_MAX_BYTES:
+            return None, None, None, 'حجم شعار المنافس أكبر من الحد المسموح'
+        content = bytearray()
+        for chunk in response.stream(64 * 1024):
+            if not chunk:
+                continue
+            content.extend(chunk)
+            if len(content) > COMPETITOR_LOGO_MAX_BYTES:
+                return None, None, None, 'حجم شعار المنافس أكبر من الحد المسموح'
+        try:
+            from PIL import Image, UnidentifiedImageError
+            with Image.open(BytesIO(content)) as image:
+                width, height = image.size
+                if width <= 0 or height <= 0 or width * height > 16_000_000:
+                    return None, None, None, 'أبعاد شعار المنافس غير صالحة'
+                image.verify()
+        except (UnidentifiedImageError, OSError):
+            return None, None, None, 'ملف شعار المنافس غير صالح'
+        return bytes(content), mime_type, extension, ''
+    finally:
+        response.release_conn()
+        pool.close()
+
+
+def _store_imported_competitor_logo(row, draft_id=None):
+    logo_url = str((row or {}).get('logo_url') or '').strip()
+    official_url = str((row or {}).get('logo_source_url') or (row or {}).get('source_url') or '').strip()
+    name = str((row or {}).get('name') or 'competitor').strip()
+    if not logo_url or not official_url:
+        return row
+    if not market_study.official_source_reliability(name, (row or {}).get('source'), official_url):
+        return row
+    content, mime_type, extension, error = _safe_download_competitor_logo(logo_url, official_url)
+    if error or not content:
+        row['logo_import_warning'] = error or 'تعذر استيراد شعار المنافس'
+        return row
+    from werkzeug.datastructures import FileStorage
+    upload = FileStorage(
+        stream=BytesIO(content), filename='competitor-logo' + extension, content_type=mime_type,
+    )
+    stored = _store_project_upload(
+        upload, 'competitor_logo', draft_id=draft_id, project_id=str(row.get('id') or '') or None,
+    )
+    published = _publish_project_file_as_creative_image(stored['id'])
+    row['logo_file_id'] = stored['id']
+    row['logo_path'] = published or ('/api/project-files/' + stored['id'])
+    row['logo_source_url'] = official_url
+    row.pop('logo_import_warning', None)
+    return row
 
 
 def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=None):
@@ -11053,6 +11349,9 @@ def api_upload_project_file():
         return jsonify({'success': False, 'error': str(error)}), 400
     except OSError as error:
         return jsonify({'success': False, 'error': f'Could not store project file: {error}'}), 500
+    if file_type == 'competitor_logo' and draft_id:
+        _record_change('draft', draft_id, 'رفع شعار منافس',
+                       [f'رُفع الملف «{result.get("originalName") or "شعار منافس"}»'])
     return jsonify({'success': True, 'file': result}), 201
 
 
@@ -13610,6 +13909,7 @@ def api_request_approval(pres_id):
     if existing and existing['status'] == 'pending':
         return jsonify({'error': 'Approval already requested'}), 400
     approval_id = db.create_approval(pres_id, g.tenant_id, g.user_id, g.user_name or 'Unknown')
+    _record_change('presentation', pres_id, 'طلب تعميد العرض', ['أُرسل العرض للمراجعة'])
     return jsonify({'success': True, 'approvalId': approval_id})
 
 
@@ -13630,9 +13930,15 @@ def api_review_approval(approval_id):
     if status not in ('approved', 'rejected'):
         return jsonify({'error': 'status must be approved or rejected'}), 400
     note = data.get('note')
+    approval = db.get_approval(approval_id, g.tenant_id)
+    if not approval:
+        return jsonify({'error': 'Approval not found'}), 404
     result = db.review_approval(approval_id, g.tenant_id, status, g.user_id, g.user_name or 'Admin', note)
     if not result:
         return jsonify({'error': 'Approval not found'}), 404
+    action = 'اعتماد العرض' if status == 'approved' else 'إعادة العرض للتعديل'
+    _record_change('presentation', approval['presentation_id'], action,
+                   [str(note).strip()] if str(note or '').strip() else [action])
     return jsonify({'success': True})
 
 

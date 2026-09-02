@@ -8,6 +8,7 @@ required indicator, source-priority rule, or input option from the PDF.
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from urllib.parse import urlsplit, urlunsplit
 import json
 import re
@@ -436,7 +437,13 @@ def _clean_numeric(value):
         return ''
     text = text.translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
     text = text.replace('٬', '').replace('،', '').replace(',', '').replace('٫', '.').replace(' ', '')
-    return text if re.fullmatch(r'-?\d+(?:\.\d+)?', text) else str(value or '').strip()
+    if not re.fullmatch(r'-?\d+(?:\.\d+)?', text):
+        return str(value or '').strip()
+    try:
+        rounded = Decimal(text).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return text
+    return str(int(rounded)) if rounded == rounded.to_integral_value() else f'{rounded:.1f}'
 
 
 def _first_nonempty(*values):
@@ -507,15 +514,20 @@ _COMPETITOR_SOURCE_FIELD_ALIASES = {
     'area_sqm': 'area_sqm',
     'areaSqm': 'area_sqm',
     'المساحة': 'area_sqm',
-    'area_from': 'area_from',
-    'areaFrom': 'area_from',
-    'المساحة من': 'area_from',
-    'area_to': 'area_to',
-    'areaTo': 'area_to',
-    'المساحة إلى': 'area_to',
+    'area_from': 'area_sqm',
+    'areaFrom': 'area_sqm',
+    'المساحة من': 'area_sqm',
+    'area_to': 'area_sqm',
+    'areaTo': 'area_sqm',
+    'المساحة إلى': 'area_sqm',
     'status': 'status',
     'project_status': 'status',
     'حالة المشروع': 'status',
+    'classification': 'classification',
+    'تصنيف': 'classification',
+    'logo_url': 'logo_url',
+    'logoUrl': 'logo_url',
+    'شعار المنافس': 'logo_url',
     'operation_type': 'operation_type',
     'operationType': 'operation_type',
     'operation': 'operation_type',
@@ -536,9 +548,9 @@ _COMPETITOR_SOURCE_FIELD_LABELS = {
     'name': 'اسم المشروع',
     'project_type': 'نوع المشروع',
     'area_sqm': 'مساحة الوحدة',
-    'area_from': 'مساحة الوحدة من',
-    'area_to': 'مساحة الوحدة إلى',
     'status': 'الحالة',
+    'classification': 'التصنيف',
+    'logo_url': 'شعار المنافس',
     'operation_type': 'نوع العملية',
     'price_type': 'نوع السعر',
     'price_value': 'قيمة السعر',
@@ -788,12 +800,14 @@ def empty_competitor(source='manual'):
         'id': str(uuid.uuid4()),
         'name': '',
         'project_type': '',
-        'area_mode': 'fixed',
         'area_sqm': '',
-        'area_from': '',
-        'area_to': '',
         'status': '',
         'classification': '',
+        'logo_file_id': '',
+        'logo_path': '',
+        'logo_url': '',
+        'logo_source_url': '',
+        'conflict_warnings': [],
         'operation_type': '',
         'price_type': '',
         'price_value': '',
@@ -1004,7 +1018,7 @@ def build_consultant_system_prompt():
         '6. صنّف المنافسين إلى: منافس مباشر، منافس غير مباشر، مشروع مرجعي.\n'
         '7. اذكر سبب اختيار كل منافس داخليًا في التحليل حتى لو لم يظهر عمود السبب في الجدول.\n'
         '8. لكل منافس أعد جميع روابط الصفحات التي استخدمت منها البيانات في source_urls، وليس رابطًا واحدًا فقط.\n'
-        '9. مساحة الوحدة تكون area_mode=fixed مع area_sqm، أو area_mode=range مع area_from وarea_to؛ ولا تستخدم مساحة الأرض أو المبنى أو البرج أو المشروع الكلية.\n'
+        '9. مساحة الوحدة قيمة ثابتة واحدة في area_sqm؛ لا تخرج area_mode أو area_from أو area_to، ولا تستخدم مساحة الأرض أو المبنى أو البرج أو المشروع الكلية.\n'
         '10. في الفندق استخدم مساحة الغرفة أو الجناح أو الشقة الفندقية، وإذا لم توجد مساحة وحدة موثوقة اترك area_sqm فارغة ولا تستخدم Tower GFA أو Gross Floor Area.\n'
         'إذا كان الطلب تحليلًا أو ملخصًا والسوق يعتمد على جدول المنافسين الحالي:\n'
         '1. اعتمد قائمة المنافسين الموجودة في الجدول ولا تحذف أي منافس منها.\n'
@@ -1070,12 +1084,16 @@ def _project_input_block(payload):
 def build_competitors_user_prompt(payload, existing_competitors, mode='generate'):
     existing = existing_competitors if isinstance(existing_competitors, list) else []
     named = [row for row in existing if _norm(row.get('name'))]
-    incomplete = [
-        row for row in named
-        if not (_norm(row.get('project_type')) and _norm(row.get('status')) and (
-            _norm(row.get('price_value')) or _norm(row.get('price_from'))
-        ) and _norm(row.get('source')))
-    ]
+
+    def is_complete(row):
+        price_type = _norm(row.get('price_type'))
+        price_complete = (bool(_norm(row.get('price_from'))) and bool(_norm(row.get('price_to')))
+                          if price_uses_range(price_type) else bool(_norm(row.get('price_value'))))
+        return all(_norm(row.get(key)) for key in (
+            'project_type', 'area_sqm', 'status', 'classification', 'operation_type', 'price_type', 'source'
+        )) and price_complete
+
+    incomplete = [row for row in named if not is_complete(row)]
     today = date.today().isoformat()
     if mode == 'fill':
         task = (
@@ -1133,10 +1151,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "id": "أبق المعرف إن وُجد وإلا اتركه فارغًا",\n'
         '      "name": "",\n'
         '      "project_type": "سكني أو تجاري أو فندقي أو صناعي ولوجستي أو متعدد الاستخدامات أو أخرى",\n'
-        '      "area_mode": "fixed أو range",\n'
-        '      "area_sqm": "",\n'
-        '      "area_from": "",\n'
-        '      "area_to": "",\n'
+        '      "area_sqm": "مساحة الوحدة الثابتة بالمتر المربع",\n'
         '      "status": "قائم أو تحت الإنشاء أو على الخارطة",\n'
         '      "classification": "مباشر أو غير مباشر أو مرجعي",\n'
         '      "operation_type": "بيع أو إيجار أو تشغيل فندقي أو أخرى",\n'
@@ -1147,7 +1162,9 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "source": "",\n'
         '      "source_url": "",\n'
         '      "source_urls": [],\n'
-        '      "field_sources": {"name": [], "project_type": [], "area_sqm": [], "area_from": [], "area_to": [], "status": [], "operation_type": [], "price_type": [], "price_value": [], "price_from": [], "price_to": []},\n'
+        '      "logo_url": "رابط صورة الشعار من الموقع الرسمي فقط أو فارغ",\n'
+        '      "logo_source_url": "صفحة الموقع الرسمي التي تثبت الشعار أو فارغ",\n'
+        '      "field_sources": {"name": [], "project_type": [], "area_sqm": [], "status": [], "classification": [], "operation_type": [], "price_type": [], "price_value": [], "price_from": [], "price_to": [], "logo_url": []},\n'
         '      "notes": "",\n'
         '      "row_source": "ai"\n'
         '    }\n'
@@ -1161,7 +1178,8 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'إذا لم تجد سعرًا اترك حقول السعر فارغة واذكر المصدر إن وُجد.\n'
         'في source_urls ضع كل روابط الصفحات التي قرأتها واستخدمت منها أي معلومة لهذا المنافس، رابطًا لكل صفحة، '
         'ولا تكتف برابط واحد إذا استخدمت أكثر من صفحة. اجعل source_url هو الرابط الأهم للتوافق مع البيانات القديمة. '
-        'في field_sources اربط كل حقل أعدت له قيمة بروابط الصفحات التي تثبته، وبالأخص area_sqm، status، operation_type، price_type، price_value، price_from، وprice_to. '
+        'في field_sources اربط كل حقل أعدت له قيمة بروابط الصفحات التي تثبته، وبالأخص area_sqm، status، classification، operation_type، price_type، price_value، price_from، price_to، وlogo_url. '
+        'logo_url مقبول فقط عندما يكون logo_source_url صفحة رسمية للمشروع أو المطور، وإلا اترك الحقلين فارغين. '
         'اجعل source_urls اتحاد جميع روابط field_sources. '
         'في source_url وsource_urls ضع روابط الصفحات المحددة من نتائج البحث، وليس رابط الصفحة الرئيسية للموقع. '
         'رابط النطاق وحده أو الصفحة الرئيسية غير مقبول؛ إن لم تتوفر صفحة محددة '
@@ -1254,10 +1272,10 @@ def normalize_competitor_row(row, fallback_source='ai'):
     price_from = _clean_numeric(price_from)
     price_to = _clean_numeric(price_to)
     area_sqm = _clean_numeric(_first_nonempty(row.get('area_sqm'), row.get('areaSqm'), row.get('area'), row.get('المساحة')))
-    area_from = _clean_numeric(_first_nonempty(row.get('area_from'), row.get('areaFrom'), row.get('المساحة من')))
-    area_to = _clean_numeric(_first_nonempty(row.get('area_to'), row.get('areaTo'), row.get('المساحة إلى')))
-    area_mode = _norm(row.get('area_mode') or row.get('areaMode'))
-    area_mode = 'range' if area_mode == 'range' or area_from or area_to else 'fixed' if area_mode == 'fixed' or area_sqm else ''
+    legacy_area_from = _clean_numeric(_first_nonempty(row.get('area_from'), row.get('areaFrom'), row.get('المساحة من')))
+    legacy_area_to = _clean_numeric(_first_nonempty(row.get('area_to'), row.get('areaTo'), row.get('المساحة إلى')))
+    if not area_sqm:
+        area_sqm = legacy_area_from or legacy_area_to
     operation = _canonical_operation(
         row.get('operation_type') or row.get('operationType') or row.get('operation') or row.get('نوع العملية')
         or row.get('نوع التشغيل') or row.get('التشغيل'),
@@ -1279,21 +1297,30 @@ def normalize_competitor_row(row, fallback_source='ai'):
         *price_source_urls,
         *source_urls,
     )
+    logo_url = _norm(row.get('logo_url') or row.get('logoUrl'))
+    logo_source_url = prefer_specific_source_url(
+        row.get('logo_source_url'), row.get('logoSourceUrl'),
+        *(field_sources.get('logo_url') or []),
+    )
+    conflict_warnings = row.get('conflict_warnings') if isinstance(row.get('conflict_warnings'), list) else []
     result = {
         'id': _norm(row.get('id')) or str(uuid.uuid4()),
         'name': name,
         'project_type': project_type,
-        'area_mode': area_mode,
         'area_sqm': area_sqm,
-        'area_from': area_from,
-        'area_to': area_to,
         'status': status,
         'classification': classification,
+        'logo_file_id': _norm(row.get('logo_file_id') or row.get('logoFileId')),
+        'logo_path': _norm(row.get('logo_path') or row.get('logoPath')),
+        'logo_url': logo_url,
+        'logo_source_url': logo_source_url,
+        'conflict_warnings': list(conflict_warnings),
         'operation_type': operation,
         'price_type': price_type,
         'price_value': price_value,
         'price_from': price_from,
         'price_to': price_to,
+        'price_cache': row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {},
         'source': _norm(row.get('source') or row.get('source_name') or row.get('sourceName')),
         'source_url': source_url,
         'source_urls': source_urls,
@@ -1384,13 +1411,29 @@ def competitor_source_rows(competitors):
     return rows
 
 
+def _competitor_value_filled(value):
+    if value is None:
+        return False
+    if isinstance(value, (dict, list, tuple, set)):
+        return bool(value)
+    return bool(_norm(value))
+
+
+def _competitor_values_equal(left, right):
+    if isinstance(left, (dict, list)) or isinstance(right, (dict, list)):
+        return left == right
+    return _norm(left).casefold() == _norm(right).casefold()
+
+
 def merge_generated_competitors(existing, generated, mode='generate'):
     current = []
     for row in existing or []:
-        if isinstance(row, dict) and _norm(row.get('name')):
-            item = dict(row)
-            item['id'] = item.get('id') or str(uuid.uuid4())
-            current.append(item)
+        if not isinstance(row, dict):
+            continue
+        normalized = normalize_competitor_row(
+            row, fallback_source=_norm(row.get('row_source')) or 'manual')
+        if normalized:
+            current.append(normalized)
     if mode != 'fill':
         replaced = []
         for raw in generated or []:
@@ -1401,26 +1444,59 @@ def merge_generated_competitors(existing, generated, mode='generate'):
     by_id = {str(row.get('id')): index for index, row in enumerate(current)}
     by_name = {_norm(row.get('name')).casefold(): index for index, row in enumerate(current)}
     updated = 0
+    protected = {'id', 'name', 'row_source', 'field_sources', 'source_urls', 'conflict_warnings'}
     for raw in generated or []:
         incoming = normalize_competitor_row(raw)
         if not incoming:
             continue
-        index = None
-        if incoming['id'] in by_id:
-            index = by_id[incoming['id']]
-        elif incoming['name'].casefold() in by_name:
-            index = by_name[incoming['name'].casefold()]
+        index = by_id.get(incoming['id'])
+        if index is None:
+            index = by_name.get(incoming['name'].casefold())
         if index is None:
             continue
         target = current[index]
+        target_sources = competitor_field_sources(target)
+        incoming_sources = competitor_field_sources(incoming)
+        warnings = list(target.get('conflict_warnings') or [])
+        has_manual_logo = bool(target.get('logo_file_id') or target.get('logo_path'))
         for key, value in incoming.items():
-            if key in ('id', 'name', 'row_source'):
+            if key in protected or (has_manual_logo and key in {'logo_url', 'logo_source_url'}):
                 continue
-            if value and not _norm(target.get(key)):
+            current_value = target.get(key)
+            if _competitor_value_filled(value) and not _competitor_value_filled(current_value):
                 target[key] = value
+                if incoming_sources.get(key):
+                    target_sources[key] = _unique_values(
+                        (target_sources.get(key) or []) + incoming_sources[key]
+                    )
                 updated += 1
-        if not target.get('row_source'):
-            target['row_source'] = incoming.get('row_source') or 'ai'
+                continue
+            if not (_competitor_value_filled(value) and _competitor_value_filled(current_value)):
+                continue
+            if _competitor_values_equal(current_value, value):
+                continue
+            urls = incoming_sources.get(key) or []
+            official_url = next((url for url in urls if official_source_reliability(
+                incoming.get('name'), incoming.get('source'), url)), '')
+            if official_url:
+                warning = {
+                    'field': key,
+                    'existing': current_value,
+                    'incoming': value,
+                    'source': incoming.get('source') or 'مصدر رسمي للجهة',
+                    'source_url': official_url,
+                }
+                signature = (key, str(current_value), str(value), official_url)
+                existing_signatures = {
+                    (item.get('field'), str(item.get('existing')), str(item.get('incoming')), item.get('source_url'))
+                    for item in warnings if isinstance(item, dict)
+                }
+                if signature not in existing_signatures:
+                    warnings.append(warning)
+        target['field_sources'] = target_sources
+        target['source_urls'] = _unique_values(competitor_source_urls(target) + competitor_source_urls(incoming))
+        target['source_url'] = prefer_specific_source_url(target.get('source_url'), *target['source_urls'])
+        target['conflict_warnings'] = warnings
     return current, 0, updated
 
 

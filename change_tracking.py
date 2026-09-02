@@ -88,6 +88,27 @@ def describe_slide_changes(old_slides, new_slides):
     new_list = new_slides if isinstance(new_slides, list) else []
     lines = []
 
+    def slide_identity(slide):
+        item = slide if isinstance(slide, dict) else {}
+        explicit = str(item.get('id') or item.get('slideId') or '').strip()
+        if explicit:
+            return 'id:' + explicit
+        return '|'.join((
+            str(item.get('title') or '').strip(),
+            str(item.get('type') or '').strip(),
+            str(item.get('content_source') or item.get('contentSource') or '').strip(),
+        ))
+
+    old_order = [slide_identity(slide) for slide in old_list]
+    new_order = [slide_identity(slide) for slide in new_list]
+    if (len(old_order) == len(new_order) and old_order != new_order
+            and sorted(old_order) == sorted(new_order) and all(old_order)):
+        lines.append('أُعيد ترتيب الشرائح')
+        for new_index, identity in enumerate(new_order):
+            old_index = old_order.index(identity)
+            if old_index != new_index:
+                lines.append(f'{_slide_label(new_index, new_list[new_index])}: نُقلت من الموضع {old_index + 1} إلى {new_index + 1}')
+
     if len(new_list) != len(old_list):
         lines.append(f'عدد الشرائح: من {len(old_list)} إلى {len(new_list)}')
 

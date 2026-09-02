@@ -9,6 +9,7 @@ import re
 import concurrent.futures
 import html as html_lib
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from html.parser import HTMLParser
 from design_templates import (
     build_design_rules, contrast_ratio, dark_surface_color, extract_slide_elements,
@@ -1642,12 +1643,16 @@ def _market_study_facts(project_data):
         lines.append(summary)
     competitors = state.get('competitors') if isinstance(state.get('competitors'), list) else []
     rows = []
-    for competitor in competitors:
+    for index, competitor in enumerate(competitors, 1):
         if not isinstance(competitor, dict):
             continue
         # Per-field source URLs are provenance for the study screen, not slide content.
         row = {key: value for key, value in competitor.items()
-               if key not in ('id', 'field_sources', 'source_urls', 'row_source') and value not in (None, '', [])}
+               if key not in ('id', 'field_sources', 'source_urls', 'row_source', 'logo_file_id',
+                              'logo_path', 'logo_url', 'logo_source_url', 'conflict_warnings',
+                              'logo_import_warning', 'price_cache') and value not in (None, '', [])}
+        if competitor.get('logo_file_id') or competitor.get('logo_path'):
+            row['شعار المنافس'] = f'##COMPETITOR_LOGO_{index}##'
         if row:
             rows.append(row)
     if rows:
@@ -2837,18 +2842,50 @@ def _normalize_map_summary_layout(html, marker_side='right'):
                   normalize_card, html, flags=re.IGNORECASE)
 
 
+_PRESENTATION_EXACT_NUMBER_CONTEXT = re.compile(
+    r'تاريخ|هاتف|جوال|وثيقة|صك|مخطط|قطعة|معرف|إحداث|خط العرض|خط الطول|'
+    r'phone|mobile|date|document|identifier|latitude|longitude|\blat\b|\blng\b|\bid\b',
+    re.IGNORECASE,
+)
+
+
 def _format_presentation_numeric_text(html):
     parts = re.split(r'(<[^>]+>)', html)
-    def format_number(match):
-        value = match.group(1)
-        if '.' not in value and 1900 <= abs(int(value)) <= 2100:
-            return value
-        return ((f'{int(value.split(".", 1)[0]):,}.' + value.split('.', 1)[1])
-                if '.' in value else f'{int(value):,}')
+    ignored = False
+    number_pattern = re.compile(r'(?<![\d,٬])(-?(?:\d{4,}(?:\.\d+)?|\d+\.\d{2,}))(?![\d,٬])')
 
-    for index in range(0, len(parts), 2):
-        parts[index] = re.sub(r'(?<![\d,٬])(-?\d{4,}(?:\.\d+)?)(?![\d,٬])',
-                              format_number, parts[index])
+    def format_text(text, prefix=''):
+        numeric_only = bool(re.fullmatch(r'\s*-?\d+(?:\.\d+)?%?\s*', text or ''))
+
+        def format_number(match):
+            value = match.group(1)
+            window = (prefix[-64:] if numeric_only else '') + text[max(0, match.start() - 48):match.end() + 24]
+            if _PRESENTATION_EXACT_NUMBER_CONTEXT.search(window):
+                return value
+            if '.' not in value and 1900 <= abs(int(value)) <= 2100:
+                return value
+            if '.' not in value and value.lstrip('-').startswith('0') and len(value.lstrip('-')) >= 7:
+                return value
+            try:
+                rounded = Decimal(value).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+            except (InvalidOperation, ValueError):
+                return value
+            if rounded == rounded.to_integral_value():
+                return f'{int(rounded):,}'
+            return f'{rounded:,.1f}'
+
+        return number_pattern.sub(format_number, text)
+
+    recent_text = ''
+    for index, part in enumerate(parts):
+        if part.startswith('<'):
+            if re.match(r'<\s*(?:style|script)\b', part, flags=re.IGNORECASE):
+                ignored = True
+            elif re.match(r'<\s*/\s*(?:style|script)\b', part, flags=re.IGNORECASE):
+                ignored = False
+        elif not ignored:
+            parts[index] = format_text(part, recent_text)
+            recent_text = (recent_text + ' ' + part)[-160:]
     return ''.join(parts)
 
 
@@ -3523,7 +3560,7 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
     )
 
 
-def _replace_creative_image_placeholders(html, creative_images, slide_type):
+def _replace_creative_image_placeholders(html, creative_images, slide_type, content_source=None):
     """Resolve image tokens after generation so browser previews always have real sources."""
     if not html:
         return html
@@ -3554,6 +3591,14 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
         url = str(source.get('logo') or source.get('url') or '').strip()
         if url:
             html = re.sub(rf'#*TEAM_LOGO_{index}#*', _css_url(url), html, flags=re.IGNORECASE)
+
+    competitor_logos = creative_images.get('competitor_logos') if isinstance(creative_images, dict) else []
+    for index, item in enumerate(competitor_logos if isinstance(competitor_logos, list) else [], 1):
+        source = item if isinstance(item, dict) else {'logo': item}
+        url = str(source.get('logo') or source.get('url') or '').strip()
+        if url:
+            html = re.sub(rf'#*COMPETITOR_LOGO_{index}#*', _css_url(url), html, flags=re.IGNORECASE)
+    html = re.sub(r'#*COMPETITOR_LOGO_\d+#*', '', html, flags=re.IGNORECASE)
 
     # Replace component-specific interior tokens
     interior_comps = []
@@ -3606,6 +3651,22 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type):
     if slide_type == 'moodboard' or 'moodboard' in str(slide_type).lower() or 'مودبورد' in html:
         if any(moodboard) and not re.search(r'<img|background-image', html, re.IGNORECASE):
             html = _build_moodboard_fallback(moodboard)
+    logo_items = []
+    for item in competitor_logos if isinstance(competitor_logos, list) else []:
+        source = item if isinstance(item, dict) else {'logo': item}
+        url = str(source.get('logo') or source.get('url') or '').strip()
+        if url:
+            logo_items.append((str(source.get('name') or '').strip(), url))
+    missing_logo_items = [(name, url) for name, url in logo_items if url not in html]
+    if str(content_source or '').startswith('market_study_data') and missing_logo_items:
+        logos = ''.join(
+            '<img src="' + html_lib.escape(url, quote=True) + '" alt="' + html_lib.escape(name, quote=True)
+            + '" style="width:64px;height:40px;object-fit:contain;background:#fff;border-radius:7px;padding:4px;box-sizing:border-box;">'
+            for name, url in missing_logo_items[:6]
+        )
+        strip = ('<div data-competitor-logos="1" style="position:absolute;left:50px;bottom:58px;z-index:20;'
+                 'display:flex;gap:8px;align-items:center;">' + logos + '</div>')
+        html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1' + strip, html, count=1)
     return html
 
 
@@ -4077,8 +4138,6 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     if (isinstance(slide_type, str) and (slide_type.startswith('map_') or slide_type == 'site_specs')
             or content_source in ('site_analysis', 'executive_content.summary', 'location_detail')):
         html = _inject_location_data_timestamp(html, project_data)
-    if str(content_source or '').startswith(('financial_', 'market_study_data.')):
-        html = _format_presentation_numeric_text(html)
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
     if (isinstance(slide_type, str) and slide_type.startswith('map_')) or content_source in ('site_analysis', 'executive_content.summary'):
@@ -4086,12 +4145,13 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     if content_source in ('site_analysis', 'executive_content.summary'):
         html = _normalize_map_summary_layout(html, str((project_data or {}).get('_map_marker_side') or 'right'))
     html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
-    html = _replace_creative_image_placeholders(html, creative_images, slide_type)
+    html = _replace_creative_image_placeholders(html, creative_images, slide_type, content_source)
     html = _replace_data_placeholders(html, project_data, branding)
     html = resolve_logo_in_html(
         html, tenant_id, _branding_cache=branding,
         project_logo=(project_data or {}).get('project_logo')
     )
+    html = _format_presentation_numeric_text(html)
     return _drop_unresolved_image_placeholders(html)
 
 

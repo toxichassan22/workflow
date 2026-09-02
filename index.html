@@ -1835,7 +1835,7 @@
     }
 
     #marketCompetitorsTable {
-      min-width: 2200px;
+      min-width: 2300px;
     }
 
     .market-sources-table {
@@ -1867,59 +1867,17 @@
       min-width: 300px;
     }
 
-    #marketCompetitorsTable th:nth-child(1),
-    #marketCompetitorsTable td:nth-child(1) {
-      width: 300px;
-      min-width: 300px;
-    }
-
-    #marketCompetitorsTable th:nth-child(2),
-    #marketCompetitorsTable td:nth-child(2) {
-      width: 190px;
-      min-width: 190px;
-    }
-
-    #marketCompetitorsTable th:nth-child(3),
-    #marketCompetitorsTable td:nth-child(3) {
-      width: 180px;
-      min-width: 180px;
-    }
-
-    #marketCompetitorsTable th:nth-child(4),
-    #marketCompetitorsTable td:nth-child(4) {
-      width: 180px;
-      min-width: 180px;
-    }
-
-    #marketCompetitorsTable th:nth-child(5),
-    #marketCompetitorsTable td:nth-child(5) {
-      width: 620px;
-      min-width: 620px;
-    }
-
-    #marketCompetitorsTable th:nth-child(6),
-    #marketCompetitorsTable td:nth-child(6) {
-      width: 190px;
-      min-width: 190px;
-    }
-
-    #marketCompetitorsTable th:nth-child(7),
-    #marketCompetitorsTable td:nth-child(7) {
-      width: 240px;
-      min-width: 240px;
-    }
-
-    #marketCompetitorsTable th:nth-child(8),
-    #marketCompetitorsTable td:nth-child(8) {
-      width: 220px;
-      min-width: 220px;
-    }
-
-    #marketCompetitorsTable th:nth-child(9),
-    #marketCompetitorsTable td:nth-child(9) {
-      width: 100px;
-      min-width: 100px;
-    }
+    #marketCompetitorsTable th:nth-child(1), #marketCompetitorsTable td:nth-child(1) { width:280px;min-width:280px; }
+    #marketCompetitorsTable th:nth-child(2), #marketCompetitorsTable td:nth-child(2) { width:120px;min-width:120px;text-align:center; }
+    #marketCompetitorsTable th:nth-child(3), #marketCompetitorsTable td:nth-child(3) { width:180px;min-width:180px; }
+    #marketCompetitorsTable th:nth-child(4), #marketCompetitorsTable td:nth-child(4) { width:170px;min-width:170px; }
+    #marketCompetitorsTable th:nth-child(5), #marketCompetitorsTable td:nth-child(5) { width:170px;min-width:170px; }
+    #marketCompetitorsTable th:nth-child(6), #marketCompetitorsTable td:nth-child(6) { width:170px;min-width:170px; }
+    #marketCompetitorsTable th:nth-child(7), #marketCompetitorsTable td:nth-child(7) { width:520px;min-width:520px; }
+    #marketCompetitorsTable th:nth-child(8), #marketCompetitorsTable td:nth-child(8) { width:180px;min-width:180px; }
+    #marketCompetitorsTable th:nth-child(9), #marketCompetitorsTable td:nth-child(9) { width:220px;min-width:220px; }
+    #marketCompetitorsTable th:nth-child(10), #marketCompetitorsTable td:nth-child(10) { width:220px;min-width:220px; }
+    #marketCompetitorsTable th:nth-child(11), #marketCompetitorsTable td:nth-child(11) { width:100px;min-width:100px; }
 
     #section-market-study th,
     #section-market-study td {
@@ -1936,7 +1894,7 @@
     }
 
     #marketCompetitorsTable td:nth-child(1) textarea,
-    #marketCompetitorsTable td:nth-child(5) textarea {
+    #marketCompetitorsTable td:nth-child(7) textarea {
       min-height: 84px;
     }
 
@@ -5020,7 +4978,7 @@
             <button class="btn ghost" data-permission="create_presentation"
               onclick="startTenantProject(); closeTenantDropdown()">عرض جديد</button>
             <button class="btn ghost" data-permission="view_presentations"
-              onclick="openTenantPresentations(); closeTenantDropdown()">العروض</button>
+              onclick="openTenantPresentations(); closeTenantDropdown()">المشاريع</button>
             <button class="btn ghost" data-permission="company_settings"
               onclick="openTenantSettings(); closeTenantDropdown()">إعدادات الشركة</button>
             <button class="btn ghost" data-permission="custom_fields"
@@ -5659,7 +5617,14 @@
 
     <!-- Presentations -->
     <section id="tenantPresentationsPage" class="tenant-page">
-      <h2>العروض السابقة</h2>
+      <h2>المشاريع</h2>
+      <div class="tenant-grid" style="margin-bottom:16px">
+        <div class="tenant-field full"><label>بحث</label><input type="text" id="projectArchiveSearch" placeholder="اسم المشروع"></div>
+        <div class="tenant-field"><label>الحالة</label><select id="projectArchiveStatus"><option value="">كل الحالات</option><option value="draft">مسودة</option><option value="pending_approval">بانتظار التعميد</option><option value="approved">معتمد</option></select></div>
+        <div class="tenant-field"><label>من تاريخ</label><input type="date" id="projectArchiveFrom"></div>
+        <div class="tenant-field"><label>إلى تاريخ</label><input type="date" id="projectArchiveTo"></div>
+        <div class="tenant-field"><button type="button" class="btn primary" onclick="openTenantPresentations(true)">تصفية</button></div>
+      </div>
       <div id="tenantPresentationsList"></div>
       <div class="tenant-btns">
         <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
@@ -7154,6 +7119,40 @@
       }
     }
 
+    async function loadProjectPresentationsSidebar(draftId) {
+      const host = document.getElementById('tenantProjectPreviousList');
+      if (!host || !draftId || host.dataset.draftId !== String(draftId)) return;
+      const filters = {
+        draftId: String(draftId),
+        search: document.getElementById('projectPreviousSearch')?.value?.trim() || '',
+        status: document.getElementById('projectPreviousStatus')?.value || '',
+        from: document.getElementById('projectPreviousFrom')?.value || '',
+        to: document.getElementById('projectPreviousTo')?.value || ''
+      };
+      const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
+      host.innerHTML = '<p class="tenant-hint">جاري تحميل العروض...</p>';
+      const response = await api('GET', '/api/presentations?' + query.toString()).catch(() => ({ success: false }));
+      if (host.dataset.draftId !== String(draftId)) return;
+      const presentations = response?.success && Array.isArray(response.presentations)
+        ? response.presentations.slice().sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
+        : [];
+      const groups = [
+        { key: 'draft', label: 'مسودة', items: presentations.filter(item => !['pending_approval', 'approved'].includes(item.status)) },
+        { key: 'pending_approval', label: 'بانتظار التعميد', items: presentations.filter(item => item.status === 'pending_approval') },
+        { key: 'approved', label: 'معتمد', items: presentations.filter(item => item.status === 'approved') }
+      ].filter(group => group.items.length);
+      host.innerHTML = groups.length ? groups.map(group =>
+        '<div style="margin-top:10px"><strong style="display:block;font-size:12px;color:var(--muted);margin-bottom:5px">' + group.label + '</strong>' +
+        group.items.map(item => {
+          const date = (item.updatedAt || item.createdAt || '').slice(0, 10);
+          return '<div style="border:1px solid var(--line);border-radius:9px;padding:6px;margin-bottom:6px;background:#fff">' +
+            '<button type="button" class="project-section-nav-item" style="padding:5px;width:100%;text-align:right" onclick="openExistingPresentation(\'' + item.id + '\')">' +
+            '<span>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</span><span class="project-section-nav-status">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + '</span></button>' +
+            '<button type="button" class="btn ghost small" style="width:100%;margin-top:4px" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات</button></div>';
+        }).join('') + '</div>'
+      ).join('') : '<p class="tenant-hint">لا توجد عروض سابقة.</p>';
+    }
+
     function appendWorkflowNavigation(sidebar, activePageId, includeProject) {
       if (!sidebar) return;
       if (sidebar.childElementCount) {
@@ -7174,6 +7173,28 @@
         genButton.textContent = 'توليد العرض';
         genButton.addEventListener('click', () => directGenerateProposalFile());
         sidebar.appendChild(genButton);
+      }
+
+      if (!includeProject && hasPermission('view_presentations')) {
+        const previous = document.createElement('div');
+        previous.style.cssText = 'margin-top:12px;padding-top:10px;border-top:1px solid var(--line)';
+        previous.innerHTML = '<p class="project-form-sidebar-title">العروض السابقة</p>' +
+          '<input id="projectPreviousSearch" placeholder="اسم العرض" style="width:100%;margin-bottom:5px">' +
+          '<select id="projectPreviousStatus" style="width:100%;margin-bottom:5px"><option value="">كل الحالات</option><option value="draft">مسودة</option><option value="pending_approval">بانتظار التعميد</option><option value="approved">معتمد</option></select>' +
+          '<input id="projectPreviousFrom" type="date" aria-label="من تاريخ" style="width:100%;margin-bottom:5px">' +
+          '<input id="projectPreviousTo" type="date" aria-label="إلى تاريخ" style="width:100%;margin-bottom:5px">' +
+          '<button type="button" class="btn ghost small" id="projectPreviousApply" style="width:100%">تصفية</button>' +
+          '<div id="tenantProjectPreviousList"></div>';
+        sidebar.appendChild(previous);
+        const draftId = tenantProjectData?.draftId || tenantProjectData?.draft_id || '';
+        const list = previous.querySelector('#tenantProjectPreviousList');
+        if (list) list.dataset.draftId = String(draftId);
+        previous.querySelector('#projectPreviousApply')?.addEventListener('click', () => loadProjectPresentationsSidebar(draftId));
+        previous.querySelector('#projectPreviousSearch')?.addEventListener('keydown', event => {
+          if (event.key === 'Enter') loadProjectPresentationsSidebar(draftId);
+        });
+        if (draftId) loadProjectPresentationsSidebar(draftId);
+        else if (list) list.innerHTML = '<p class="tenant-hint">لا توجد عروض سابقة.</p>';
       }
 
       const items = [...TENANT_WORKFLOW_ITEMS];
@@ -8293,9 +8314,7 @@
             status: row.status || '',
             price: [row.price_type, priceRange || row.price_value].filter(Boolean).join(' '),
             operationType: row.operation_type || '',
-            area: row.area_mode === 'range' || row.area_from || row.area_to
-              ? [row.area_from, row.area_to].filter(Boolean).join(' إلى ')
-              : (row.area_sqm || ''),
+            area: row.area_sqm || row.area_from || row.area_to || '',
             source: row.source || ''
           };
         });
@@ -8719,6 +8738,7 @@
       'أخرى': ['قيمة واحدة', 'نطاق سعري', 'أخرى']
     };
     const MARKET_RANGE_PRICE_TYPES = ['نطاق سعري', 'نطاق أسعار الغرف'];
+    const MARKET_COMPETITOR_CLASSIFICATIONS = ['مباشر', 'غير مباشر', 'مرجعي'];
     let marketSummaryPending = null;
 
     function marketAudienceKind(label) {
@@ -8937,9 +8957,7 @@
               ? [formatMarketNumber(row.price_from), formatMarketNumber(row.price_to)].filter(Boolean).join(' إلى ')
               : formatMarketNumber(row.price_value))
             : formatMarketNumber(row.price_value);
-          const area = row.area_mode === 'range' || row.area_from || row.area_to
-            ? [formatMarketNumber(row.area_from), formatMarketNumber(row.area_to)].filter(Boolean).join(' إلى ')
-            : formatMarketNumber(row.area_sqm);
+          const area = formatMarketNumber(row.area_sqm || row.area_from || row.area_to);
           const details = [
             row.project_type ? 'النوع: ' + row.project_type : '',
             area ? 'مساحة الوحدة: ' + area + ' م²' : '',
@@ -8978,7 +8996,14 @@
       const parsed = parseStoredLandTable(tenantProjectData.market_study_data);
       const base = emptyMarketStudyState();
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return base;
-      const competitors = Array.isArray(parsed.competitors) ? parsed.competitors : [];
+      const competitors = (Array.isArray(parsed.competitors) ? parsed.competitors : []).map(item => {
+        const row = { ...(item || {}) };
+        row.area_sqm = cleanMarketNumber(row.area_sqm || row.area_from || row.area_to || '');
+        delete row.area_mode;
+        delete row.area_from;
+        delete row.area_to;
+        return row;
+      });
       return {
         ...base,
         ...parsed,
@@ -9087,7 +9112,7 @@
           <div class="table-wrap">
             <table id="marketCompetitorsTable">
               <thead><tr>
-                <th>اسم المشروع</th><th>النوع</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
+                <th>اسم المشروع</th><th>الشعار</th><th>النوع</th><th>التصنيف</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
                 <th>نوع العملية</th><th>نوع السعر</th><th>القيمة (ر.س)</th><th></th>
               </tr></thead>
               <tbody></tbody>
@@ -9718,9 +9743,10 @@
         name: 'اسم المشروع', project_name: 'اسم المشروع',
         project_type: 'نوع المشروع', projectType: 'نوع المشروع',
         area_sqm: 'مساحة الوحدة', areaSqm: 'مساحة الوحدة', area: 'مساحة الوحدة',
-        area_from: 'مساحة الوحدة من', areaFrom: 'مساحة الوحدة من',
-        area_to: 'مساحة الوحدة إلى', areaTo: 'مساحة الوحدة إلى',
+        area_from: 'مساحة الوحدة', areaFrom: 'مساحة الوحدة',
+        area_to: 'مساحة الوحدة', areaTo: 'مساحة الوحدة',
         status: 'الحالة', project_status: 'الحالة',
+        classification: 'التصنيف', logo_url: 'شعار المنافس', logoUrl: 'شعار المنافس',
         operation_type: 'نوع العملية', operationType: 'نوع العملية', operation: 'نوع العملية',
         price_type: 'نوع السعر', priceType: 'نوع السعر',
         price_value: 'قيمة السعر', priceValue: 'قيمة السعر', value: 'قيمة السعر',
@@ -9880,12 +9906,19 @@
       return '';
     }
 
+    function roundSystemNumber(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return 0;
+      const rounded = Math.sign(number) * Math.round((Math.abs(number) + Number.EPSILON) * 10) / 10;
+      return Object.is(rounded, -0) ? 0 : rounded;
+    }
+
     function cleanMarketNumber(value) {
       let text = String(value ?? '').trim();
       if (!text) return '';
       text = text.replace(/[٠-٩]/g, ch => String('٠١٢٣٤٥٦٧٨٩'.indexOf(ch)))
         .replace(/[٬،,]/g, '').replace(/٫/g, '.').replace(/\s/g, '');
-      return /^-?\d+(?:\.\d+)?$/.test(text) ? text : String(value ?? '').trim();
+      return /^-?\d+(?:\.\d+)?$/.test(text) ? String(roundSystemNumber(Number(text))) : String(value ?? '').trim();
     }
 
     function formatMarketNumber(value) {
@@ -9910,25 +9943,80 @@
     function renderCompetitorAreaInputs(tr, row = {}) {
       const cell = tr.querySelector('[data-field="area_cell"]');
       if (!cell) return;
-      const from = row.area_from ?? row.areaFrom ?? '';
-      const to = row.area_to ?? row.areaTo ?? '';
-      const mode = row.area_mode === 'range' || from !== '' || to !== '' ? 'range' : 'fixed';
-      cell.innerHTML = '<select data-field="area_mode"><option value="fixed"' + (mode === 'fixed' ? ' selected' : '') + '>مساحة ثابتة</option><option value="range"' + (mode === 'range' ? ' selected' : '') + '>من — إلى</option></select>' +
-        (mode === 'range'
-          ? '<input data-field="area_from" value="' + escapeHtml(from) + '" placeholder="من (م²)" inputmode="decimal"><input data-field="area_to" value="' + escapeHtml(to) + '" placeholder="إلى (م²)" inputmode="decimal" style="margin-top:6px">'
-          : '<input data-field="area_sqm" value="' + escapeHtml(row.area_sqm || '') + '" placeholder="المساحة (م²)" inputmode="decimal" style="margin-top:6px">');
-      cell.querySelector('[data-field="area_mode"]').addEventListener('change', event => {
-        const current = collectOneCompetitorRow(tr);
-        current.area_mode = event.target.value;
-        if (current.area_mode === 'range' && !current.area_from) current.area_from = current.area_sqm;
-        if (current.area_mode === 'fixed' && !current.area_sqm) current.area_sqm = current.area_from || current.area_to;
-        renderCompetitorAreaInputs(tr, current);
-        persistMarketStudyFromDom();
+      const area = cleanMarketNumber(row.area_sqm || row.area_from || row.area_to || '');
+      cell.innerHTML = '<input data-field="area_sqm" value="' + escapeHtml(area) + '" placeholder="المساحة (م²)" inputmode="decimal">';
+      const input = cell.querySelector('input');
+      formatMarketNumericInput(input);
+      input.addEventListener('input', persistMarketStudyFromDom);
+    }
+
+    function competitorLogoPath(row = {}) {
+      return String(row.logo_path || row.logoPath || row.logo_url || row.logoUrl || '');
+    }
+
+    async function uploadCompetitorLogo(input, tr) {
+      const file = input.files?.[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      formData.append('fileType', 'competitor_logo');
+      if (tenantProjectData?.draftId) formData.append('draftId', tenantProjectData.draftId);
+      formData.append('projectId', tr.dataset.competitorId);
+      const response = await api('POST', '/api/project-files', formData, true);
+      if (!response?.success || !response.file?.id) {
+        toast(response?.error || 'تعذر حفظ شعار المنافس');
+        return;
+      }
+      const published = await publishProjectFileImageUrl(response.file.id, 'competitor-logo-' + tr.dataset.competitorId);
+      tr.dataset.logoFileId = response.file.id;
+      tr.dataset.logoPath = published || ('/api/project-files/' + response.file.id);
+      tr.dataset.logoUrl = '';
+      tr.dataset.logoSourceUrl = '';
+      renderCompetitorLogoCell(tr);
+      persistMarketStudyFromDom();
+    }
+
+    async function importCompetitorLogo(tr) {
+      const row = collectOneCompetitorRow(tr);
+      const response = await api('POST', '/api/market-study/competitors/logo', {
+        draftId: tenantProjectData?.draftId || '', competitor: row
       });
-      cell.querySelectorAll('input').forEach(input => {
-        formatMarketNumericInput(input);
-        input.addEventListener('input', persistMarketStudyFromDom);
-      });
+      if (!response?.success || !response.competitor) {
+        toast(response?.error || 'لم يُعثر على شعار رسمي');
+        return;
+      }
+      const imported = response.competitor;
+      tr.dataset.logoFileId = imported.logo_file_id || '';
+      tr.dataset.logoPath = imported.logo_path || '';
+      tr.dataset.logoUrl = imported.logo_url || '';
+      tr.dataset.logoSourceUrl = imported.logo_source_url || '';
+      renderCompetitorLogoCell(tr);
+      persistMarketStudyFromDom();
+    }
+
+    function renderCompetitorLogoCell(tr) {
+      const cell = tr.querySelector('[data-field="logo_cell"]');
+      if (!cell) return;
+      const path = tr.dataset.logoPath || tr.dataset.logoUrl || '';
+      const manual = Boolean(tr.dataset.logoFileId);
+      cell.innerHTML = (path ? '<img src="' + escapeHtml(path) + '" alt="شعار المنافس" style="width:72px;height:54px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:5px">' : '<div style="height:54px;display:flex;align-items:center;justify-content:center;color:var(--muted)">لا يوجد</div>') +
+        '<input type="file" accept="image/png,image/jpeg,image/webp" data-competitor-logo style="width:100%;font-size:11px">' +
+        '<button type="button" class="btn ghost small" data-import-competitor-logo style="width:100%;margin-top:4px"' + (manual ? ' disabled' : '') + '>استيراد رسمي</button>';
+      cell.querySelector('[data-competitor-logo]')?.addEventListener('change', event => uploadCompetitorLogo(event.target, tr));
+      cell.querySelector('[data-import-competitor-logo]')?.addEventListener('click', () => importCompetitorLogo(tr));
+    }
+
+    function competitorPriceCache(tr) {
+      try { return JSON.parse(tr.dataset.priceCache || '{}') || {}; } catch (error) { return {}; }
+    }
+
+    function cacheCompetitorPriceInputs(tr, priceType) {
+      const cache = competitorPriceCache(tr);
+      const read = field => cleanMarketNumber(tr.querySelector('[data-field="' + field + '"]')?.value || '');
+      const type = priceType || tr.dataset.previousPriceType || tr.querySelector('[data-field="price_type"]')?.value || '';
+      if (type) cache[type] = { price_value: read('price_value'), price_from: read('price_from'), price_to: read('price_to') };
+      tr.dataset.priceCache = JSON.stringify(cache);
+      return cache;
     }
 
     function addMarketCompetitorRow(row = {}) {
@@ -9940,31 +10028,57 @@
       tr.dataset.rowSource = row.row_source || 'manual';
       tr.dataset.priceCurrency = row.price_currency || row.currency || 'SAR';
       tr.dataset.fieldSources = JSON.stringify(row.field_sources || row.fieldSources || {});
+      tr.dataset.logoFileId = row.logo_file_id || row.logoFileId || '';
+      tr.dataset.logoPath = row.logo_path || row.logoPath || '';
+      tr.dataset.logoUrl = row.logo_url || row.logoUrl || '';
+      tr.dataset.logoSourceUrl = row.logo_source_url || row.logoSourceUrl || '';
+      tr.dataset.conflictWarnings = JSON.stringify(row.conflict_warnings || row.conflictWarnings || []);
+      tr.dataset.logoImportWarning = row.logo_import_warning || row.logoImportWarning || '';
+      tr.dataset.notes = row.notes || row.note || '';
+      tr.dataset.priceCache = JSON.stringify(row.price_cache || row.priceCache || {});
       const operation = inferCompetitorOperation(row);
       const priceType = inferCompetitorPriceType(row);
       const priceTypes = MARKET_PRICE_TYPES[operation] || MARKET_PRICE_TYPES['أخرى'];
+      tr.dataset.previousPriceType = priceType;
+      let warnings = [];
+      try { warnings = JSON.parse(tr.dataset.conflictWarnings || '[]') || []; } catch (error) { warnings = []; }
+      const warningsHtml = warnings.map(item => {
+        const label = marketSourceFieldLabel(item.field || '');
+        const link = safeHttpUrl(item.source_url) ? ' <a href="' + escapeHtml(safeHttpUrl(item.source_url)) + '" target="_blank" rel="noopener noreferrer">المصدر الرسمي</a>' : '';
+        return '<div style="color:#92400e;margin-top:4px">تعارض في ' + escapeHtml(label) + ': تم الإبقاء على القيمة الحالية.' + link + '</div>';
+      }).join('');
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
+        '<td data-field="logo_cell"></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(MARKET_PROJECT_TYPES, row.project_type || '') + '</select></td>' +
+        '<td><select data-field="classification">' + marketSelectHtml(MARKET_COMPETITOR_CLASSIFICATIONS, row.classification || '') + '</select></td>' +
         '<td data-field="area_cell"></td>' +
         '<td><select data-field="status">' + marketSelectHtml(['قائم', 'تحت الإنشاء', 'على الخارطة'], row.status || '') + '</select></td>' +
         '<td><textarea data-field="source" rows="2" placeholder="المصدر">' + escapeHtml(row.source || '') + '</textarea>' +
-        '<div data-source-links class="market-source-links">' + marketSourceLinksHtml(row) + '</div></td>' +
+        '<div data-source-links class="market-source-links">' + marketSourceLinksHtml(row) + '</div><div data-conflict-warnings>' + warningsHtml + '</div></td>' +
         '<td><select data-field="operation_type">' + marketSelectHtml(['بيع', 'إيجار', 'تشغيل فندقي', 'أخرى'], operation) + '</select></td>' +
         '<td><select data-field="price_type">' + marketSelectHtml(priceTypes, priceType) + '</select></td>' +
         '<td data-field="price_cell"></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-competitor>حذف</button></td>';
       tb.appendChild(tr);
+      renderCompetitorLogoCell(tr);
       renderCompetitorAreaInputs(tr, row);
       renderCompetitorPriceInputs(tr, row);
       tr.querySelector('[data-field="operation_type"]').addEventListener('change', () => {
+        cacheCompetitorPriceInputs(tr, tr.dataset.previousPriceType);
         const nextOp = tr.querySelector('[data-field="operation_type"]').value;
-        fillSelectOptions(tr.querySelector('[data-field="price_type"]'), MARKET_PRICE_TYPES[nextOp] || MARKET_PRICE_TYPES['أخرى'], '', '--');
-        renderCompetitorPriceInputs(tr, {});
+        const options = MARKET_PRICE_TYPES[nextOp] || MARKET_PRICE_TYPES['أخرى'];
+        const previousType = tr.dataset.previousPriceType || '';
+        const nextType = options.includes(previousType) ? previousType : (options[0] || '');
+        fillSelectOptions(tr.querySelector('[data-field="price_type"]'), options, nextType, '--');
+        tr.dataset.previousPriceType = nextType;
+        renderCompetitorPriceInputs(tr, { price_cache: competitorPriceCache(tr) });
         persistMarketStudyFromDom();
       });
-      tr.querySelector('[data-field="price_type"]').addEventListener('change', () => {
-        renderCompetitorPriceInputs(tr, collectOneCompetitorRow(tr));
+      tr.querySelector('[data-field="price_type"]').addEventListener('change', event => {
+        cacheCompetitorPriceInputs(tr, tr.dataset.previousPriceType);
+        tr.dataset.previousPriceType = event.target.value;
+        renderCompetitorPriceInputs(tr, { price_cache: competitorPriceCache(tr) });
         persistMarketStudyFromDom();
       });
       tr.querySelector('[data-remove-competitor]').addEventListener('click', () => {
@@ -9978,9 +10092,11 @@
       const cell = tr.querySelector('[data-field="price_cell"]');
       if (!cell) return;
       const priceType = tr.querySelector('[data-field="price_type"]')?.value || inferCompetitorPriceType(row);
-      const priceFrom = competitorPriceField(row, 'price_from');
-      const priceTo = competitorPriceField(row, 'price_to');
-      const priceValue = competitorPriceField(row, 'price_value');
+      const cache = row?.price_cache || row?.priceCache || competitorPriceCache(tr);
+      const cached = cache?.[priceType] || {};
+      const priceFrom = competitorPriceField(row, 'price_from') || cached.price_from || '';
+      const priceTo = competitorPriceField(row, 'price_to') || cached.price_to || '';
+      const priceValue = competitorPriceField(row, 'price_value') || cached.price_value || '';
       if (competitorPriceIsRange(priceType)) {
         cell.innerHTML = '<input data-field="price_from" data-currency="SAR" value="' + escapeHtml(priceFrom) + '" placeholder="من (ر.س)" inputmode="decimal">' +
           '<input data-field="price_to" data-currency="SAR" value="' + escapeHtml(priceTo) + '" placeholder="إلى (ر.س)" style="margin-top:6px" inputmode="decimal">';
@@ -10005,26 +10121,34 @@
         source_urls: Array.from(tr.querySelectorAll('[data-source-links] a[href]'))
           .map(anchor => anchor.getAttribute('href') || '')
       });
+      cacheCompetitorPriceInputs(tr, read('price_type'));
+      let conflict_warnings = [];
+      try { conflict_warnings = JSON.parse(tr.dataset.conflictWarnings || '[]') || []; } catch (error) { conflict_warnings = []; }
       return {
         id: tr.dataset.competitorId,
         name: read('name'),
         project_type: read('project_type'),
-        area_mode: read('area_mode') || 'fixed',
         area_sqm: cleanMarketNumber(read('area_sqm')),
-        area_from: cleanMarketNumber(read('area_from')),
-        area_to: cleanMarketNumber(read('area_to')),
         status: read('status'),
-        classification: tr.dataset.classification || '',
+        classification: read('classification'),
+        logo_file_id: tr.dataset.logoFileId || '',
+        logo_path: tr.dataset.logoPath || '',
+        logo_url: tr.dataset.logoUrl || '',
+        logo_source_url: tr.dataset.logoSourceUrl || '',
+        logo_import_warning: tr.dataset.logoImportWarning || '',
+        conflict_warnings,
         operation_type: read('operation_type'),
         price_type: read('price_type'),
         price_currency: tr.dataset.priceCurrency || 'SAR',
         price_value: cleanMarketNumber(read('price_value')),
         price_from: cleanMarketNumber(read('price_from')),
         price_to: cleanMarketNumber(read('price_to')),
+        price_cache: competitorPriceCache(tr),
         source: read('source'),
         source_url: source_urls[0] || '',
         source_urls,
         field_sources,
+        notes: tr.dataset.notes || '',
         row_source: tr.dataset.rowSource || 'manual'
       };
     }
@@ -10292,6 +10416,7 @@
         name: row.name, useType: row.useType, units: row.units, builtArea: row.builtArea, revenueArea: row.revenueArea
       }));
       return {
+        draftId: tenantProjectData.draftId || tenantProjectData.draft_id || '',
         projectName: tenantProjectData.project_name || '',
         projectType: selectedProjectTypeMains().join('، '),
         projectSubtype: selectedProjectSubtypes().join('، '),
@@ -10370,10 +10495,13 @@
         applyMarketStudyState(state);
         persistMarketStudyFromDom();
         const extra = res.expansionNote || res.notes || '';
+        const conflictCount = Array.isArray(res.conflictWarnings) ? res.conflictWarnings.length : 0;
         if (note) {
-          note.textContent = mode === 'fill'
-            ? ('أُكملت بيانات ' + (res.updated || 0) + ' منافس' + (extra ? ' — ' + extra : ''))
-            : ('تم استبدال الجدول بـ ' + ((res.competitors || []).length) + ' منافس' + (extra ? ' — ' + extra : ''));
+          note.textContent = (mode === 'fill'
+            ? ('أُكملت بيانات ' + (res.updated || 0) + ' منافس')
+            : ('تم استبدال الجدول بـ ' + ((res.competitors || []).length) + ' منافس')) +
+            (conflictCount ? ' — تم الإبقاء على ' + conflictCount + ' قيمة حالية متعارضة' : '') +
+            (extra ? ' — ' + extra : '');
         }
         toast(mode === 'fill' ? 'تم إكمال بيانات المنافسين دون حذف الصفوف' : 'تم استبدال جدول المنافسين بالنتيجة الجديدة');
         updateLoaderProgress(100, 'اكتمل تحديث المنافسين');
@@ -13230,6 +13358,13 @@
           if ((f.fieldKey === 'max_floors_height' || f.fieldKey === 'allowed_uses') && input.tagName === 'TEXTAREA') input.rows = 4;
           input.dataset.key = f.fieldKey;
           input.dataset.type = f.fieldType;
+          if (f.fieldType === 'number') {
+            input.addEventListener('blur', () => {
+              if (input.value !== '' && !projectNumberKeepsPrecision(f.fieldKey)) {
+                input.value = String(roundSystemNumber(Number(input.value)));
+              }
+            });
+          }
           input.placeholder = f.placeholder || '';
           if (f.fieldKey === 'approved_floor_count' && !input.placeholder) {
             input.placeholder = 'يرجى إدخال عدد الأدوار المعتمدة للمشروع وفقًا للاشتراطات التنظيمية.';
@@ -15897,7 +16032,7 @@
         if (tenantDraftDirty) {
           badge.style.background = '#fef3c7';
           badge.style.color = '#92400e';
-          badge.innerHTML = 'تغييرات غير محفوظة — اضغط «حفظ كمسودة»';
+          badge.innerHTML = 'تغييرات غير محفوظة';
         } else {
           badge.style.background = '#edf7f3';
           badge.style.color = '#126247';
@@ -18254,6 +18389,16 @@
       return uploaded[0];
     }
 
+    function projectNumberKeepsPrecision(key) {
+      return /(?:^|_)(?:lat|lng|latitude|longitude|date|year|phone|mobile|deed|plot|document|id|number)(?:_|$)/i.test(String(key || ''));
+    }
+
+    function normalizedProjectNumber(key, value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return 0;
+      return projectNumberKeepsPrecision(key) ? number : roundSystemNumber(number);
+    }
+
     async function collectTenantFormData() {
       if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
       if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
@@ -18289,7 +18434,7 @@
             }
           }
         } else if (type === 'number') {
-          result[key] = Number(input.value) || 0;
+          result[key] = normalizedProjectNumber(key, input.value);
         } else if (key === 'financial_study_model') {
           const parsed = parseFinancialStudySnapshot(input.value);
           result[key] = parsed || tenantProjectData.financial_study_model || '';
@@ -21296,95 +21441,54 @@
       toast('تم فتح العرض: ' + (p.title || ''));
     }
 
-    async function openTenantPresentations() {
+    async function openTenantPresentations(force = false) {
       showTenantPage('tenantPresentationsPage');
       const list = document.getElementById('tenantPresentationsList');
       if (!list) return;
-      const cacheKey = (tenantUser && (tenantUser.id || tenantUser.tenantId)) || 'tenant';
-      if (tenantArchiveCache && tenantArchiveCache.key === cacheKey && Date.now() - tenantArchiveCache.timestamp < 15000) {
+      const filters = {
+        search: document.getElementById('projectArchiveSearch')?.value?.trim() || '',
+        status: document.getElementById('projectArchiveStatus')?.value || '',
+        from: document.getElementById('projectArchiveFrom')?.value || '',
+        to: document.getElementById('projectArchiveTo')?.value || ''
+      };
+      const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
+      const tenantKey = (tenantUser && (tenantUser.id || tenantUser.tenantId)) || 'tenant';
+      const cacheKey = tenantKey + '|' + query.toString();
+      if (!force && tenantArchiveCache && tenantArchiveCache.key === cacheKey && Date.now() - tenantArchiveCache.timestamp < 15000) {
         list.innerHTML = tenantArchiveCache.html;
         return;
       }
-      showInlineLoader(list, 'جاري تحميل الملخص...');
-
-      const [presData, expData, draftsData, recoveryData] = await Promise.all([
-        api('GET', '/api/presentations'),
-        api('GET', '/api/exports'),
-        api('GET', '/api/project-drafts').catch(() => ({ success: false })),
+      showInlineLoader(list, 'جاري تحميل المشاريع...');
+      const [draftsData, recoveryData] = await Promise.all([
+        api('GET', '/api/project-drafts?' + query.toString()).catch(() => ({ success: false })),
         api('GET', '/api/project-drafts/recovery').catch(() => ({ success: false }))
       ]);
       const recoveryByDraft = {};
-      if (recoveryData && recoveryData.success) {
+      if (recoveryData?.success) {
         (recoveryData.drafts || []).forEach(item => { recoveryByDraft[item.draftId] = item; });
       }
-
-      const presentations = (presData.success && presData.presentations) ? presData.presentations : [];
-      const exports = (expData.success && expData.exports) ? expData.exports : [];
-      const drafts = (draftsData.success && draftsData.drafts) ? draftsData.drafts : [];
-
-      const exportsByPres = {};
-      exports.forEach(e => {
-        if (!exportsByPres[e.presentationId]) exportsByPres[e.presentationId] = [];
-        exportsByPres[e.presentationId].push(e);
-      });
-
-      let html = '';
-
-      // Section 1: Saved Project Drafts
-      if (drafts.length) {
-        html += '<h3 style="margin:16px 0 8px;color:var(--p);font-size:16px;border-bottom:2px solid var(--p);padding-bottom:6px">مسودات المشاريع المحفوظة (' + drafts.length + ')</h3>';
-        html += drafts.map(d => {
-          const title = d.title || 'مسودة مشروع بدون عنوان';
-          const statusText = d.status === 'pending_approval' ? 'في انتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
-          const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
-          // A card used to show only a title and a date, so an emptied draft looked normal.
-          const recovery = recoveryByDraft[d.id] || null;
-          const fields = recovery ? recovery.fieldCount + ' حقل ممتلئ' : '';
-          const snapshot = recovery && recovery.snapshot;
-          const restorable = snapshot && snapshot.recoverable;
-          const note = restorable
-            ? '<div class="meta" style="color:#92400e">نسخة أقدم من هذه البيانات محفوظة في العرض «' +
-            escapeHtml(snapshot.title || '') + '» وتحتوي ' + snapshot.fieldCount + ' حقلًا</div>'
-            : '';
-          return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid ' +
-            (recovery && recovery.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px;">' +
-            '<div><h3>' + escapeHtml(title) + '</h3>' +
-            '<div class="meta">' + statusText + ' | آخر تحديث: ' + date +
-            (fields ? ' | ' + fields : '') + '</div>' + note + '</div>' +
-            '<div class="tenant-actions">' +
-            '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح وإكمال المسودة</button>' +
-            '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
-            (restorable
-              ? '<button class="btn small" style="background:#b45309;color:#fff" onclick="restoreProjectDraft(\'' +
-              d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>'
-              : '') +
-            '<button class="btn small danger" onclick="deleteProjectDraftById(\'' + d.id + '\')">حذف المسودة</button>' +
-            '</div></div>';
-        }).join('');
-      }
-
-      // Section 2: Final Presentations
-      html += '<h3 style="margin:24px 0 8px;color:var(--p);font-size:16px;border-bottom:2px solid var(--p);padding-bottom:6px">العروض التقديمية النهائية (' + presentations.length + ')</h3>';
-      if (!presentations.length) {
-        html += '<p class="tenant-hint" style="margin-bottom:16px">لا توجد عروض تقديمية نهائية مُنشأة بعد.</p>';
-      } else {
-        html += presentations.map(p => {
-          const exps = exportsByPres[p.id] || [];
-          const download = exps.map(e => '<a class="btn small ghost" href="' + (e.downloadUrl || e.url) + '" target="_blank">' + e.format.toUpperCase() + '</a>').join('');
-          return '<div class="tenant-presentation-card">' +
-            '<div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
-            '<div class="meta">' + (p.slideCount || 0) + ' شريحة | ' + (p.status === 'pending_approval' ? 'في انتظار التعميد' : p.status === 'approved' ? 'معتمد' : p.status || 'draft') + ' | ' + (p.createdAt ? p.createdAt.slice(0, 16).replace('T', ' ') : '') + '</div></div>' +
-            '<div class="tenant-actions">' +
-            '<button class="btn small primary" onclick="openExistingPresentation(\'' + p.id + '\')">فتح / تعديل العرض</button>' +
-            download +
-            '<button class="btn small ghost" onclick="showPresentationVersions(\'' + p.id + '\')">النسخ</button>' +
-            '<button class="btn small ghost" onclick="showEditLog(\'' + p.id + '\')">سجل التعديلات</button>' +
-            '<button class="btn small danger" onclick="deleteTenantPresentation(\'' + p.id + '\')">حذف</button>' +
-            '</div>' +
-            '</div>';
-        }).join('');
-      }
-
+      const drafts = draftsData?.success && Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
+      const html = drafts.length ? drafts.map(d => {
+        const title = d.title || 'مشروع بدون عنوان';
+        const statusText = d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
+        const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
+        const recovery = recoveryByDraft[d.id] || null;
+        const fields = recovery ? recovery.fieldCount + ' حقل ممتلئ' : '';
+        const snapshot = recovery?.snapshot;
+        const restorable = Boolean(snapshot?.recoverable);
+        const note = restorable
+          ? '<div class="meta" style="color:#92400e">نسخة محفوظة في العرض «' + escapeHtml(snapshot.title || '') + '» تحتوي ' + snapshot.fieldCount + ' حقلًا</div>'
+          : '';
+        return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid ' +
+          (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px">' +
+          '<div><h3>' + escapeHtml(title) + '</h3><div class="meta">' + statusText + ' | ' + date +
+          (fields ? ' | ' + fields : '') + '</div>' + note + '</div><div class="tenant-actions">' +
+          '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
+          '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
+          (restorable ? '<button class="btn small" style="background:#b45309;color:#fff" onclick="restoreProjectDraft(\'' + d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>' : '') +
+          '<button class="btn small danger" onclick="deleteProjectDraftById(\'' + d.id + '\')">حذف المشروع</button>' +
+          '</div></div>';
+      }).join('') : '<p class="tenant-hint">لا توجد مشاريع مطابقة.</p>';
       list.innerHTML = html;
       tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html };
     }

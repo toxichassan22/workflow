@@ -54,6 +54,7 @@ def init_db():
         _migrate_branding_columns(conn)
         _migrate_map_images_presentation_fk(conn)
         _migrate_project_draft_columns(conn)
+        _migrate_presentation_draft_link(conn)
         _migrate_project_file_table(conn)
         _migrate_location_fields(conn)
         _migrate_font_system(conn)
@@ -165,6 +166,7 @@ def _create_tables(conn):
         id TEXT PRIMARY KEY,
         tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
+        draft_id TEXT,
         project_data TEXT,
         slides_data TEXT,
         slide_count INTEGER,
@@ -1130,6 +1132,24 @@ def _cleanup_accidental_map_fields(conn):
 def _migrate_map_images_presentation_fk(conn):
     """Remove the presentations FK from map_images so draft_* ids can be cached."""
     try:
+        if isinstance(conn, sqlite3.PostgresConnection):
+            constraints = conn.execute('''
+                SELECT tc.constraint_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                 AND tc.table_schema = kcu.table_schema
+                WHERE tc.table_schema = current_schema()
+                  AND tc.table_name = 'map_images'
+                  AND tc.constraint_type = 'FOREIGN KEY'
+                  AND kcu.column_name = 'presentation_id'
+            ''').fetchall()
+            for row in constraints:
+                name = str(row['constraint_name'] or '')
+                if re.fullmatch(r'[A-Za-z0-9_]+', name):
+                    conn.execute(f'ALTER TABLE map_images DROP CONSTRAINT "{name}"')
+            conn.commit()
+            return
         cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='map_images'")
         if not cur or not cur.fetchone():
             return
@@ -1167,7 +1187,7 @@ def _migrate_project_draft_columns(conn):
     """Add lightweight list metadata to historical project drafts."""
     try:
         cursor = conn.execute("PRAGMA table_info(project_drafts)")
-        existing_cols = {row[1] for row in cursor.fetchall()}
+        existing_cols = {row['name'] for row in cursor.fetchall()}
         migrations = {
             'title': "ALTER TABLE project_drafts ADD COLUMN title TEXT",
             'revision': "ALTER TABLE project_drafts ADD COLUMN revision INTEGER DEFAULT 1",
@@ -1190,6 +1210,33 @@ def _migrate_project_draft_columns(conn):
         conn.commit()
     except Exception as e:
         print(f"[DB DRAFT MIGRATION ERR] {e}")
+
+
+def _migrate_presentation_draft_link(conn):
+    try:
+        cursor = conn.execute("PRAGMA table_info(presentations)")
+        existing_cols = {row['name'] for row in cursor.fetchall()}
+        if 'draft_id' not in existing_cols:
+            conn.execute("ALTER TABLE presentations ADD COLUMN draft_id TEXT")
+            print("[DB MIGRATION] Added presentation draft link")
+        rows = conn.execute(
+            "SELECT id, project_data FROM presentations WHERE draft_id IS NULL OR draft_id = ''"
+        ).fetchall()
+        for row in rows:
+            try:
+                project_data = json.loads(row['project_data'] or '{}')
+            except (TypeError, ValueError):
+                project_data = {}
+            draft_id = project_data.get('draftId') or project_data.get('draft_id') if isinstance(project_data, dict) else None
+            if draft_id:
+                conn.execute('UPDATE presentations SET draft_id = ? WHERE id = ?', (str(draft_id), row['id']))
+        conn.execute(
+            'CREATE INDEX IF NOT EXISTS idx_presentations_tenant_draft '
+            'ON presentations(tenant_id, draft_id, updated_at)'
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[DB PRESENTATION MIGRATION ERR] {e}")
 
 
 def _migrate_project_file_table(conn):
@@ -1222,7 +1269,7 @@ def _migrate_branding_columns(conn):
     """Add new columns to tenant_branding if they don't exist."""
     try:
         cursor = conn.execute("PRAGMA table_info(tenant_branding)")
-        existing_cols = {row[1] for row in cursor.fetchall()}
+        existing_cols = {row['name'] for row in cursor.fetchall()}
         migrations = {
             'default_slide_count': "ALTER TABLE tenant_branding ADD COLUMN default_slide_count INTEGER DEFAULT 16",
             'lock_slide_count': "ALTER TABLE tenant_branding ADD COLUMN lock_slide_count INTEGER DEFAULT 0",
@@ -1388,21 +1435,23 @@ def add_slide_template(tenant_id, slide_type, slide_name, design_instructions=No
 # Presentations CRUD
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_presentation(tenant_id, title, project_data=None, slides_data=None, slide_count=0):
+def create_presentation(tenant_id, title, project_data=None, slides_data=None, slide_count=0, draft_id=None):
     """Create a new presentation record."""
     conn = get_db()
     pres_id = str(uuid.uuid4())
+    if not draft_id and isinstance(project_data, dict):
+        draft_id = project_data.get('draft_id') or project_data.get('draftId')
     conn.execute(
-        'INSERT INTO presentations (id, tenant_id, title, project_data, slides_data, slide_count) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO presentations (id, tenant_id, title, draft_id, project_data, slides_data, slide_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
         (
-            pres_id, tenant_id, title,
+            pres_id, tenant_id, title, draft_id,
             json.dumps(project_data, ensure_ascii=False) if project_data else None,
             json.dumps(slides_data, ensure_ascii=False) if slides_data else None,
             slide_count
         )
     )
     if project_data and isinstance(project_data, dict):
-        draft_id = project_data.get('draft_id') or project_data.get('draftId')
+        draft_id = draft_id or project_data.get('draft_id') or project_data.get('draftId')
         if draft_id:
             conn.execute(
                 'UPDATE map_images SET presentation_id = ? WHERE tenant_id = ? AND presentation_id = ?',
@@ -1422,12 +1471,35 @@ def get_presentation(pres_id, tenant_id=None):
     return dict(row) if row else None
 
 
-def get_presentations(tenant_id):
-    """Get all presentations for a tenant."""
+def get_presentations(tenant_id, draft_id=None, search='', status='', date_from='', date_to='', limit=200, offset=0):
+    """Get tenant presentations with optional project and archive filters."""
     conn = get_db()
+    clauses = ['tenant_id = ?']
+    params = [tenant_id]
+    if draft_id:
+        clauses.append('draft_id = ?')
+        params.append(str(draft_id))
+    if str(search or '').strip():
+        clauses.append('LOWER(title) LIKE ?')
+        params.append('%' + str(search).strip().lower() + '%')
+    if status == 'draft':
+        clauses.append("COALESCE(status, 'draft') IN ('draft', 'edited')")
+    elif status in {'pending_approval', 'approved'}:
+        clauses.append('status = ?')
+        params.append(status)
+    if date_from:
+        clauses.append('substr(COALESCE(updated_at, created_at), 1, 10) >= ?')
+        params.append(str(date_from)[:10])
+    if date_to:
+        clauses.append('substr(COALESCE(updated_at, created_at), 1, 10) <= ?')
+        params.append(str(date_to)[:10])
+    limit = max(1, min(int(limit or 200), 500))
+    offset = max(0, int(offset or 0))
+    params.extend([limit, offset])
     rows = conn.execute(
-        'SELECT * FROM presentations WHERE tenant_id = ? ORDER BY created_at DESC',
-        (tenant_id,)
+        'SELECT * FROM presentations WHERE ' + ' AND '.join(clauses)
+        + ' ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ? OFFSET ?',
+        params,
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1435,7 +1507,7 @@ def get_presentations(tenant_id):
 def update_presentation(pres_id, tenant_id=None, **fields):
     """Update a presentation, optionally scoped to a tenant."""
     conn = get_db()
-    allowed = {'title', 'project_data', 'slides_data', 'slide_count', 'status'}
+    allowed = {'title', 'draft_id', 'project_data', 'slides_data', 'slide_count', 'status'}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False
@@ -2305,6 +2377,15 @@ def get_pending_approvals(tenant_id):
     return [dict(r) for r in rows]
 
 
+def get_approval(approval_id, tenant_id):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM presentation_approvals WHERE id = ? AND tenant_id = ?',
+        (approval_id, tenant_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def review_approval(approval_id, tenant_id, status, reviewed_by, reviewed_by_name, note=None):
     """Approve or reject a presentation."""
     conn = get_db()
@@ -2606,21 +2687,38 @@ def get_project_draft(tenant_id, user_id):
     return _hydrate_project_draft(row)
 
 
-def get_all_project_draft_summaries(tenant_id, limit=50, offset=0):
+def get_all_project_draft_summaries(tenant_id, limit=50, offset=0, search='', status='', date_from='', date_to=''):
     """Return lightweight draft metadata without hydrating project payloads."""
     conn = get_db()
     limit = max(1, min(int(limit or 50), 200))
     offset = max(0, int(offset or 0))
+    clauses = ['tenant_id = ?']
+    params = [tenant_id]
+    if str(search or '').strip():
+        clauses.append('LOWER(title) LIKE ?')
+        params.append('%' + str(search).strip().lower() + '%')
+    if status == 'draft':
+        clauses.append("COALESCE(status, 'draft') NOT IN ('pending_approval', 'approved')")
+    elif status in {'pending_approval', 'approved'}:
+        clauses.append('status = ?')
+        params.append(status)
+    if date_from:
+        clauses.append('substr(COALESCE(updated_at, created_at), 1, 10) >= ?')
+        params.append(str(date_from)[:10])
+    if date_to:
+        clauses.append('substr(COALESCE(updated_at, created_at), 1, 10) <= ?')
+        params.append(str(date_to)[:10])
+    params.extend([limit, offset])
     rows = conn.execute(
         '''SELECT id, tenant_id, user_id, title, section_statuses, status, revision,
                   data_bytes, has_slides, has_maps, requested_by, requested_by_name,
                   requested_at, reviewed_by, reviewed_by_name, review_note, reviewed_at,
                   created_at, updated_at
            FROM project_drafts
-           WHERE tenant_id = ?
+           WHERE ''' + ' AND '.join(clauses) + '''
            ORDER BY updated_at DESC
            LIMIT ? OFFSET ?''',
-        (tenant_id, limit, offset)
+        params
     ).fetchall()
     result = []
     for row in rows:

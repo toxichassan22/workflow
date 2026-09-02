@@ -425,13 +425,15 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
 - **City / district:** visible in الموقع, filled from reverse geocode of the Maps link, editable,
   and mirrored read-only inside دراسة السوق. Persist via `data-key`.
 - **Section body** lives in `draft_data.market_study_data` (hidden `#marketStudyData` input).
-  The competitor table shows project name, type, area, status, source, operation type,
-  dynamic price type, and dynamic value. The backend-only `classification` is preserved
-  in each row but is not a visible table column. Price inputs default to Saudi riyal (`SAR`);
-  range types render `من` and `إلى` values. Competitor radius has no fake «تلقائي» option:
-  the default is an explicit `10` km. Saved drafts that still store `auto` map back to 10 km.
-  `city` and `custom` are real instructions sent to the search. Generating competitors **replaces** the table
-  with the new list. Fill-by-name completes empty cells only and never adds or deletes a row.
+  The competitor table shows project name, logo, type, classification, fixed unit area, status,
+  source, operation type, dynamic price type, and dynamic value. Price inputs default to Saudi
+  riyal (`SAR`); range types render `من` and `إلى` values. The row keeps a `price_cache` per price
+  type so changing operation or price type and returning to it never loses the previous fixed or
+  range values. Competitor radius has no fake «تلقائي» option: the default is an explicit `10` km.
+  Saved drafts that still store `auto` map back to 10 km. `city` and `custom` are real instructions
+  sent to the search. Generating competitors **replaces** the table with the new list. Fill-by-name
+  completes empty cells only and never adds or deletes a row. Existing client values and types win;
+  a differing official value is kept as `conflict_warnings` with the exact source page.
   Re-generating a summary shows current vs new and waits for replace/keep. The client also
   asked for a separate SWOT block (`strengths` / `weaknesses` / `opportunities` / `threats`)
   inside دراسة السوق; it is generated with the summary but must stay independent of the
@@ -448,12 +450,22 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   `غير متوفر من مصدر موثوق`. Competitor `source_url` and summary `url` must be the exact
   page that contained the figure, not the site homepage. `prefer_specific_source_url()`
   drops a bare domain/home path when a deeper URL is also present.
-- Competitor unit area supports `area_mode=fixed` with `area_sqm` or `area_mode=range` with
-  `area_from` / `area_to`. Market prices and areas are stored without separators and displayed with
-  separators while preserving decimals. An official project/developer site is labeled
-  `مصدر رسمي للجهة` for that entity's own data. Deleting a source removes its URL from
+- Competitor unit area is one fixed `area_sqm` value. New UI/model output must never write
+  `area_mode`, `area_from`, or `area_to`; legacy ranges hydrate to the lower available bound.
+  Market figures are stored without separators, rounded half-up to one decimal only when fractional,
+  and displayed with separators. Prices still support a fixed value or a real `price_from` / `price_to`
+  range according to `price_type`; never average a sourced range. An official project/developer site
+  is labeled `مصدر رسمي للجهة` for that entity's own data. Deleting a source removes its URL from
   `source_urls` and every `field_sources` association but keeps the competitor values; manual values
   and source rows remain supported.
+- Competitor logos are `project_files` with `file_type='competitor_logo'`, `draft_id` for the active
+  project and `project_id` for the competitor row. Manual uploads are authoritative. AI import accepts
+  HTTPS PNG/JPEG/WEBP only from the same public host as a proven official project/developer page,
+  rejects private/reserved DNS addresses, pins the verified public IP for the TLS request to prevent
+  DNS rebinding, and rejects invalid/oversized images before publishing a durable
+  creative URL. Missing or unprovable logos remain empty. `_augment_generation_images()` carries the
+  stored logos as `competitor_logos`; market-study slides resolve `##COMPETITOR_LOGO_N##` and inject
+  any omitted available logos programmatically.
 - **Never send the search tool together with `response_format: json_object`.** Gemini answers that
   pair with reasoning and empty content, the JSON parse fails, and the retry ladder then drops the
   tool — so no search ever ran and every link was a homepage recalled from memory. The first attempt
@@ -588,6 +600,28 @@ silently exporting an older saved copy.
   `height:36px` footer is upgraded in place.
 - POST/PUT presentation routes ignore a caller's stale `slideCount` and store `len(slides)` after
   renumbering. Designer chat, super-agent workspace saves and version restore use the same function.
+- AI-created slides never own branding policy. `_designer_edit_slide()` finalizes them with the current
+  company/project logos, logo tone backgrounds, final position and total; the workspace is renumbered
+  again after insertion so the model cannot omit a logo or leave a stale counter.
+- `_format_presentation_numeric_text()` runs on every finalized slide. Fractional display values round
+  half-up to one decimal and large values receive separators, while years, dates, coordinates, phone
+  numbers, document/plot numbers and identifiers keep exact digits. It skips style/script bodies so a
+  CSS width such as `1280px` is never corrupted.
+
+## Projects archive and project presentations
+
+`presentations.draft_id` is the explicit tenant-scoped link to `project_drafts.id`; migration backfills
+historical rows from `project_data.draftId`. `POST /api/presentations` writes it and
+`GET /api/presentations?draftId=...` scopes previous presentations to the active project. Keep the
+runtime JSON fallback for legacy rows.
+
+- The top-level «المشاريع» page loads only `/api/project-drafts`. It never mixes final presentations
+  into project cards. Name/status/from/to filters are server-side and results order by `updated_at DESC`.
+- The project sidebar places «العروض السابقة» below «توليد العرض». It uses the same four filters,
+  groups only non-empty results under مسودة / بانتظار التعميد / معتمد, and treats `edited` as draft.
+- Approval, restore, delete, map generation and project-data/slide updates all write `change_log` with
+  the requesting user. Pure slide moves are described as reorder/move lines. Histories stay newest-first
+  and remain accessible from the project and each previous presentation.
 
 ## Never advertise an image that does not exist
 

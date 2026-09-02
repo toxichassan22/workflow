@@ -618,6 +618,54 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('height:56px', cover)
         self.assertNotIn('height:36px', cover)
 
+    def test_ai_created_slide_is_finalized_with_both_logos_and_counter(self):
+        module = self.application_module
+        company_logo = f'/tenant-assets/{self.tenant_a}/logo'
+        project_logo = '/api/project-files/project-logo-ai'
+        with self.app.app_context():
+            db.update_branding(self.tenant_a, logo_path=company_logo)
+            branding = db.get_branding(self.tenant_a) or {}
+        response = {'choices': [{'message': {'content': json.dumps({
+            'html': '<div class="slide" style="width:1280px;height:720px"><h1>محتوى جديد</h1></div>',
+            'response': 'تمت الإضافة',
+        }, ensure_ascii=False)}}]}
+        with self.app.test_request_context(), \
+                patch.object(module, 'call_zai_chat', return_value=response), \
+                patch('generate_pdf_from_preview.render_slide_to_image_base64', return_value=None):
+            module.g.tenant_id = self.tenant_a
+            html, _message = module._designer_edit_slide(
+                '<div class="slide"><h1>جديد</h1></div>', 'محتوى جديد', 'أضف شريحة', 2,
+                {'project_name': 'المشروع', 'project_logo': project_logo}, None, branding,
+                tenant_id=self.tenant_a, slide_type='content', total_slides=5,
+            )
+        self.assertIn(company_logo, html)
+        self.assertIn(project_logo, html)
+        self.assertIn('03 — 05', html)
+        self.assertIn('data-slide-footer="1"', html)
+
+    def test_general_slide_numbers_use_one_decimal_without_changing_exact_values_or_css(self):
+        html = (
+            '<style>.metric{width:1280px;opacity:0.875}</style><div class="slide">'
+            '<p>القيمة 1234.55 والنسبة 18.25%</p><p>المعامل 1.85</p>'
+            '<p>السنة 2027</p><p>هاتف</p><p>0500000000</p>'
+            '<p>رقم الصك</p><p>12345678</p><p>خط العرض</p><p>21.687123</p>'
+            '<p>الميزانية ##budget##</p></div>'
+        )
+        formatted = self.application_module.slide_engine.finalize_slide_html(
+            html, 'content', {'budget': '9876.55'}, {'primary_color': '#123456'}, slide_num=2, total_slides=4)
+        self.assertIn('1,234.6', formatted)
+        self.assertIn('9,876.6', formatted)
+        self.assertIn('18.3%', formatted)
+        self.assertIn('1.9', formatted)
+        self.assertIn('2027', formatted)
+        self.assertNotIn('2,027', formatted)
+        self.assertIn('0500000000', formatted)
+        self.assertIn('12345678', formatted)
+        self.assertIn('21.687123', formatted)
+        self.assertIn('width:1280px', formatted)
+        self.assertIn('opacity:0.875', formatted)
+        self.assertNotIn('width:1,280px', formatted)
+
     def test_palette_contrast_and_logo_backgrounds_are_resolved_before_rendering(self):
         from PIL import Image, ImageDraw
         from design_templates import build_design_rules, contrast_ratio
@@ -3095,6 +3143,77 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('team_logo', self.application_module.PROJECT_FILE_TYPES)
         self.assertIn('team_logo', self.application_module.PROJECT_IMAGE_ONLY_TYPES)
 
+    def test_competitor_logos_are_tenant_scoped_official_only_and_rendered_in_slides(self):
+        client = self.app.test_client()
+        png_bytes = (
+            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+            b'\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82'
+        )
+        created = client.post('/api/project-files', headers=self._headers(self.token_a), data={
+            'fileType': 'competitor_logo', 'draftId': 'draft-competitor-logo',
+            'projectId': 'competitor-1', 'file': (io.BytesIO(png_bytes), 'logo.png'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(created.status_code, 201, created.get_json())
+        file_id = created.get_json()['file']['id']
+        with self.app.app_context():
+            stored = db.get_project_file(self.tenant_a, file_id)
+            self.assertEqual(stored['file_type'], 'competitor_logo')
+            self.assertEqual(stored['draft_id'], 'draft-competitor-logo')
+            self.assertEqual(stored['project_id'], 'competitor-1')
+            self.assertIsNone(db.get_project_file(self.tenant_b, file_id))
+
+        module = self.application_module
+        self.assertFalse(module._safe_public_host('127.0.0.1'))
+        with patch.object(module.requests, 'get') as request_get:
+            _content, _mime, _extension, error = module._safe_download_competitor_logo(
+                'https://cdn.example/logo.png', 'https://developer.example/project')
+        request_get.assert_not_called()
+        self.assertIn('خارج الموقع الرسمي', error)
+        pinned_pool = Mock()
+        pinned_response = Mock()
+        pinned_pool.urlopen.return_value = pinned_response
+        with patch.object(module, 'HTTPSConnectionPool', return_value=pinned_pool) as pool_factory:
+            returned_pool, returned_response = module._open_pinned_https(
+                module.urlsplit('https://developer.example/assets/logo.png?v=1'), ('203.0.113.10',))
+        self.assertIs(returned_pool, pinned_pool)
+        self.assertIs(returned_response, pinned_response)
+        self.assertEqual(pool_factory.call_args.args[0], '203.0.113.10')
+        self.assertEqual(pool_factory.call_args.kwargs['assert_hostname'], 'developer.example')
+        self.assertEqual(pool_factory.call_args.kwargs['server_hostname'], 'developer.example')
+        self.assertEqual(pinned_pool.urlopen.call_args.args[:2], ('GET', '/assets/logo.png?v=1'))
+        self.assertEqual(pinned_pool.urlopen.call_args.kwargs['headers']['Host'], 'developer.example')
+
+        valid_response = Mock(status=200)
+        valid_response.headers = {'Content-Type': 'image/png', 'Content-Length': str(len(png_bytes))}
+        valid_response.stream.return_value = [png_bytes]
+        pool = Mock()
+        with patch.object(module, '_public_host_addresses', return_value=('203.0.113.10',)), \
+                patch.object(module, '_open_pinned_https', return_value=(pool, valid_response)):
+            content, mime_type, extension, error = module._safe_download_competitor_logo(
+                'https://developer.example/logo.png', 'https://developer.example/project')
+        self.assertEqual(content, png_bytes)
+        self.assertEqual((mime_type, extension, error), ('image/png', '.png', ''))
+        valid_response.release_conn.assert_called_once()
+        pool.close.assert_called_once()
+
+        creative = {'competitor_logos': [
+            {'name': 'المنافس الأول', 'logo': '/uploads/creative/competitor-1.png'},
+            {'name': 'المنافس الثاني', 'logo': '/uploads/creative/competitor-2.png'},
+        ]}
+        finished = module.slide_engine.finalize_slide_html(
+            '<div class="slide" style="width:1280px;height:720px"><h1>المنافسون</h1></div>',
+            'content', {}, {'primary_color': '#123456'}, creative_images=creative,
+            content_source='market_study_data.competitors', slide_num=3, total_slides=6,
+        )
+        self.assertIn('data-competitor-logos="1"', finished)
+        self.assertIn('/uploads/creative/competitor-1.png', finished)
+        self.assertIn('/uploads/creative/competitor-2.png', finished)
+        self.assertNotIn('##COMPETITOR_LOGO_', finished)
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("formData.append('fileType', 'competitor_logo')", index_source)
+        self.assertIn('data-field="logo_cell"', index_source)
+        self.assertIn('استيراد رسمي', index_source)
+
     def test_drafts_are_saved_only_on_request(self):
         """Autosave fired on any input and from several render helpers, so merely opening a new
         project wrote a row to the server."""
@@ -5312,6 +5431,84 @@ class MeetingRequirementsTests(unittest.TestCase):
         # A blob is named, never dumped as a value.
         self.assertNotIn('inputs', draft_lines)
 
+    def test_project_archive_and_previous_presentations_are_filtered_and_scoped(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        draft_alpha = 'draft-alpha-archive'
+        draft_beta = 'draft-beta-archive'
+        for draft_id, name in ((draft_alpha, 'Alpha Project'), (draft_beta, 'Beta Project')):
+            response = client.post('/api/project-draft', headers=headers, json={
+                'draftId': draft_id,
+                'draftData': {'draftId': draft_id, 'project_name': name},
+                'sectionStatuses': {},
+            })
+            self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            connection = db.get_db()
+            connection.execute("UPDATE project_drafts SET status = 'approved' WHERE id = ?", (draft_beta,))
+            connection.commit()
+
+        presentation_ids = []
+        for index, status in enumerate(('draft', 'pending_approval', 'approved')):
+            response = client.post('/api/presentations', headers=headers, json={
+                'title': f'Alpha Presentation {index}',
+                'projectData': {'draftId': draft_alpha, 'project_name': 'Alpha Project'},
+                'slidesData': [{'title': 'Cover', 'type': 'cover', 'html': '<div class="slide">Cover</div>'}],
+                'slideCount': 1,
+            })
+            self.assertEqual(response.status_code, 201)
+            presentation_id = response.get_json()['presentationId']
+            presentation_ids.append(presentation_id)
+            if status != 'draft':
+                updated = client.put(
+                    f'/api/presentations/{presentation_id}', headers=headers, json={'status': status})
+                self.assertEqual(updated.status_code, 200)
+        beta_presentation = client.post('/api/presentations', headers=headers, json={
+            'title': 'Beta Presentation',
+            'projectData': {'draftId': draft_beta, 'project_name': 'Beta Project'},
+            'slidesData': [{'title': 'Cover', 'type': 'cover', 'html': '<div class="slide">Cover</div>'}],
+            'slideCount': 1,
+        }).get_json()['presentationId']
+
+        filtered = client.get(
+            '/api/presentations?draftId=' + draft_alpha + '&status=draft&search=Alpha', headers=headers)
+        self.assertEqual(filtered.status_code, 200)
+        items = filtered.get_json()['presentations']
+        self.assertEqual([item['id'] for item in items], [presentation_ids[0]])
+        self.assertTrue(all(item['draftId'] == draft_alpha for item in items))
+        all_alpha = client.get('/api/presentations?draftId=' + draft_alpha, headers=headers).get_json()['presentations']
+        self.assertEqual({item['id'] for item in all_alpha}, set(presentation_ids))
+        self.assertNotIn(beta_presentation, {item['id'] for item in all_alpha})
+
+        project_search = client.get('/api/project-drafts?search=Alpha', headers=headers).get_json()['drafts']
+        self.assertEqual([item['id'] for item in project_search], [draft_alpha])
+        approved = client.get('/api/project-drafts?status=approved', headers=headers).get_json()['drafts']
+        self.assertEqual([item['id'] for item in approved], [draft_beta])
+        with self.app.app_context():
+            stored = db.get_presentation(presentation_ids[0], tenant_id=self.tenant_a)
+            self.assertEqual(stored['draft_id'], draft_alpha)
+
+        index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        archive_source = index_html[
+            index_html.index('async function openTenantPresentations'):
+            index_html.index('async function restoreProjectDraft')
+        ]
+        self.assertIn("'/api/project-drafts?'", archive_source)
+        self.assertNotIn("'/api/presentations'", archive_source)
+        self.assertIn('loadProjectPresentationsSidebar', index_html)
+        self.assertIn('بانتظار التعميد', index_html)
+        self.assertIn(".filter(group => group.items.length)", index_html)
+
+    def test_slide_reordering_is_named_in_change_history(self):
+        old_slides = [
+            {'title': 'الأولى', 'type': 'content', 'html': '<div class="slide">أ</div>'},
+            {'title': 'الثانية', 'type': 'content', 'html': '<div class="slide">ب</div>'},
+        ]
+        details = self.application_module.change_tracking.describe_slide_changes(
+            old_slides, [old_slides[1], old_slides[0]])
+        self.assertIn('أُعيد ترتيب الشرائح', details)
+        self.assertTrue(any('نُقلت من الموضع' in item for item in details))
+
     def test_history_records_who_changed_what_for_drafts_and_ai_edits(self):
         client = self.app.test_client()
         headers = self._headers(self.token_a)
@@ -6296,11 +6493,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function inferCompetitorPriceType(row = {})', index_source)
         self.assertIn('min-width: 1450px;', index_source)
         self.assertIn('width: max-content;', index_source)
-        self.assertIn('min-width: 2200px;', index_source)
+        self.assertIn('min-width: 2300px;', index_source)
         self.assertIn('<textarea data-field="name" rows="2">', index_source)
         self.assertIn('<textarea data-field="note" rows="2">', index_source)
         self.assertIn("tr.querySelectorAll('input,select,textarea')", index_source)
-        self.assertNotIn('<select data-field="classification">', index_source)
+        self.assertIn('<select data-field="classification">', index_source)
+        self.assertIn('<td data-field="logo_cell"></td>', index_source)
         self.assertIn('data-currency="SAR"', index_source)
         self.assertIn('placeholder="من (ر.س)"', index_source)
         self.assertIn('#section-market-study th {', index_source)
@@ -6508,18 +6706,19 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(ranged['price_from'], '900')
         self.assertEqual(ranged['price_to'], '1500')
 
-    def test_market_study_official_sources_area_ranges_and_permanent_source_deletion(self):
+    def test_market_study_official_sources_fixed_area_and_permanent_source_deletion(self):
         import market_study
         row = market_study.normalize_competitor_row({
             'id': 'c1', 'name': 'مشروع النخيل', 'area_mode': 'range',
-            'area_from': '١،٢٠٠.5', 'area_to': '2,500',
+            'area_from': '١،٢٠٠.55', 'area_to': '2,500',
             'price_value': '1,500,000', 'source': 'الموقع الرسمي للمشروع',
             'source_urls': ['https://nakheel.example/project'],
             'field_sources': {'price_value': ['https://nakheel.example/project']},
         })
-        self.assertEqual(row['area_mode'], 'range')
-        self.assertEqual(row['area_from'], '1200.5')
-        self.assertEqual(row['area_to'], '2500')
+        self.assertEqual(row['area_sqm'], '1200.6')
+        self.assertNotIn('area_mode', row)
+        self.assertNotIn('area_from', row)
+        self.assertNotIn('area_to', row)
         self.assertEqual(row['price_value'], '1500000')
         sources = market_study.competitor_source_rows([row])
         self.assertEqual(sources[0]['reliability'], 'مصدر رسمي للجهة')
@@ -6529,8 +6728,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(cleaned['source_urls'], [])
         self.assertEqual(cleaned['field_sources'], {})
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
-        for expected in ('data-field="area_mode"', 'data-field="area_from"', 'data-field="area_to"',
-                         'removeMarketSourcePermanently', 'formatMarketNumericInput'):
+        area_source = index_source[index_source.index('function renderCompetitorAreaInputs'):
+                                   index_source.index('function competitorLogoPath')]
+        for retired in ('data-field="area_mode"', 'data-field="area_from"', 'data-field="area_to"'):
+            self.assertNotIn(retired, area_source)
+        for expected in ('data-field="area_sqm"', 'removeMarketSourcePermanently', 'formatMarketNumericInput'):
             self.assertIn(expected, index_source)
         formatted = self.application_module.slide_engine.finalize_slide_html(
             '<div class="slide"><table><tr><td>2027</td><td>1500000</td></tr></table></div>',
@@ -6538,6 +6740,56 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('1,500,000', formatted)
         self.assertIn('2027', formatted)
         self.assertNotIn('2,027', formatted)
+
+    def test_market_fill_preserves_client_values_sources_logos_and_records_conflicts(self):
+        import market_study
+        official = 'https://developer.example/project/prices'
+        existing = [{
+            'id': 'client-row', 'name': 'مشروع العميل', 'project_type': 'سكني',
+            'area_sqm': '120.25', 'status': '', 'classification': 'مباشر',
+            'operation_type': 'بيع', 'price_type': 'سعر الوحدة', 'price_value': '1000000',
+            'source': 'إدخال العميل', 'logo_file_id': 'manual-logo', 'logo_path': '/uploads/manual.png',
+        }]
+        generated = [{
+            'id': 'client-row', 'name': 'مشروع العميل', 'project_type': 'تجاري',
+            'area_sqm': '150', 'status': 'قائم', 'classification': 'مرجعي',
+            'operation_type': 'بيع', 'price_type': 'نطاق سعري',
+            'price_from': '900000', 'price_to': '1300000',
+            'source': 'الموقع الرسمي للمطور', 'source_url': official,
+            'source_urls': [official],
+            'logo_url': 'https://developer.example/logo.png', 'logo_source_url': official,
+            'field_sources': {
+                'project_type': [official], 'area_sqm': [official], 'status': [official],
+                'classification': [official], 'price_type': [official],
+                'price_from': [official], 'price_to': [official], 'logo_url': [official],
+            },
+        }]
+        merged, added, updated = market_study.merge_generated_competitors(existing, generated, mode='fill')
+        self.assertEqual(added, 0)
+        self.assertGreaterEqual(updated, 1)
+        row = merged[0]
+        self.assertEqual(row['project_type'], 'سكني')
+        self.assertEqual(row['area_sqm'], '120.3')
+        self.assertEqual(row['classification'], 'مباشر')
+        self.assertEqual(row['price_type'], 'سعر الوحدة')
+        self.assertEqual(row['price_value'], '1000000')
+        self.assertEqual(row['status'], 'قائم')
+        self.assertEqual(row['field_sources']['status'], [official])
+        self.assertEqual(row['logo_file_id'], 'manual-logo')
+        self.assertEqual(row['logo_path'], '/uploads/manual.png')
+        self.assertFalse(row['logo_url'])
+        warning_fields = {warning['field'] for warning in row['conflict_warnings']}
+        self.assertTrue({'project_type', 'area_sqm', 'classification', 'price_type'} <= warning_fields)
+
+        prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, existing, mode='fill')
+        self.assertNotIn('"area_mode"', prompt)
+        self.assertNotIn('"area_from"', prompt)
+        self.assertNotIn('"area_to"', prompt)
+        self.assertIn('املأ الحقول الناقصة فقط', prompt)
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('cacheCompetitorPriceInputs', index_source)
+        self.assertIn('price_cache: competitorPriceCache(tr)', index_source)
+        self.assertIn('data-field="classification"', index_source)
 
     def test_market_study_radius_auto_is_ten_km(self):
         import market_study
