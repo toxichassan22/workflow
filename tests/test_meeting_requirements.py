@@ -838,6 +838,10 @@ class MeetingRequirementsTests(unittest.TestCase):
                     {'السنة': '2027', 'الإيراد': '1,200,000'},
                     {'السنة': '2028', 'الإيراد': '1,500,000'},
                 ],
+                'costTable': [
+                    {'البند': 'تكلفة الأرض', 'القيمة': '500,000'},
+                    {'البند': 'تكلفة البناء والتطوير', 'القيمة': '700,000'},
+                ],
             },
             'report': {'parts': [
                 {'type': 'heading', 'level': 2, 'text': 'مكونات المشروع'},
@@ -847,6 +851,9 @@ class MeetingRequirementsTests(unittest.TestCase):
                 {'type': 'heading', 'level': 2, 'text': 'الإيرادات'},
                 {'type': 'table', 'headers': ['السنة', 'الإيراد'],
                  'rows': [['2027', '1,200,000'], ['2028', '1,500,000']]},
+                {'type': 'heading', 'level': 2, 'text': 'هيكل التكاليف والاستثمار'},
+                {'type': 'table', 'headers': ['البند', 'القيمة'],
+                 'rows': [['تكلفة الأرض', '500,000'], ['تكلفة البناء والتطوير', '700,000']]},
             ]},
         }
         project = {
@@ -1497,13 +1504,81 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertIn(value, summary_note)
         self.assertEqual(financial[-len(summaries):], summaries)
         chart_types = {slide.get('chart_type') for slide in financial if slide.get('chart_type')}
-        self.assertEqual(chart_types, {'column', 'bar', 'line'})
-        self.assertTrue({'bar', 'column', 'grouped_bar', 'grouped_column', 'line', 'area', 'pie',
-                         'donut', 'treemap', 'scatter', 'histogram', 'heatmap'}
-                        .issubset(set(engine.FINANCIAL_CHART_TYPES)))
-        chart_slide = next(slide for slide in financial if slide.get('chart_type') == 'column')
-        self.assertIn('نوع الرسم المطلوب: column', engine.build_slide_user_msg(
+        self.assertEqual(chart_types, {'waterfall', 'combo', 'heatmap'})
+        self.assertEqual(set(engine.FINANCIAL_CHART_TYPES), {'waterfall', 'combo', 'heatmap'})
+        self.assertEqual(set(engine.APPROVED_CHART_TYPES), {'horizontal_bar', 'waterfall', 'combo', 'heatmap'})
+        chart_slide = next(slide for slide in financial if slide.get('chart_type') == 'waterfall')
+        self.assertIn('نوع الرسم المطلوب: waterfall', engine.build_slide_user_msg(
             chart_slide, 3, len(plan['slides']), {}, project))
+
+    def test_strictly_four_approved_chart_types_in_four_locations(self):
+        engine = self.application_module.slide_engine
+        # Verify only 4 approved chart types exist
+        self.assertEqual(engine.APPROVED_CHART_TYPES, ('horizontal_bar', 'waterfall', 'combo', 'heatmap'))
+        self.assertEqual(engine.FINANCIAL_CHART_TYPES, ('waterfall', 'combo', 'heatmap'))
+
+        # 1. Market Study: Competitor comparison gets horizontal_bar
+        project_market = {
+            'project_name': 'مشروع تجريبي',
+            'market_study_data': {
+                'competitors': [
+                    {'name': 'منافس أ', 'price_value': '1500', 'price_type': 'سعر المتر بيع'},
+                    {'name': 'منافس ب', 'price_from': '1200', 'price_to': '1800', 'price_type': 'سعر المتر بيع'},
+                ]
+            }
+        }
+        plan_market = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project_market, {})
+        market_slides = [s for s in plan_market['slides'] if s.get('section_key') == 'market']
+        comp_slide = next((s for s in market_slides if s.get('content_source') == 'market_study_data.competitors'), None)
+        self.assertIsNotNone(comp_slide)
+        self.assertEqual(comp_slide.get('chart_type'), 'horizontal_bar')
+        self.assertEqual(comp_slide.get('design_style'), 'chart')
+        msg = engine.build_slide_user_msg(comp_slide, 3, 5, {'primary_color': '#123456'}, project_market)
+        self.assertIn('نوع الرسم المطلوب: horizontal_bar', msg)
+        self.assertIn('مخطط الأعمدة الأفقية', msg)
+
+        # 2. Financial Study: Cost -> waterfall, Cashflow -> combo, Sensitivity -> heatmap
+        report = {'parts': [
+            {'type': 'heading', 'level': 2, 'text': 'النتائج المالية'},
+            {'type': 'heading', 'level': 2, 'text': 'هيكل التكاليف والاستثمار'},
+            {'type': 'table', 'headers': ['البند', 'القيمة'], 'rows': [['تطوير', '100'], ['أرض', '200']]},
+            {'type': 'heading', 'level': 2, 'text': 'التدفقات النقدية السنوية'},
+            {'type': 'table', 'headers': ['السنة', 'التدفق'], 'rows': [['2027', '-50'], ['2028', '80']]},
+            {'type': 'heading', 'level': 2, 'text': 'مقارنة السيناريوهات المالية'},
+            {'type': 'table', 'headers': ['السيناريو', 'ROI'], 'rows': [['متحفظ', '12%'], ['أساسي', '18%']]},
+            {'type': 'heading', 'level': 2, 'text': 'بنود الإيرادات'},
+            {'type': 'table', 'headers': ['السنة', 'الإيراد'], 'rows': [['2027', '100'], ['2028', '150']]},
+        ]}
+        project_fin = {'project_name': 'مشروع مالي', 'financial_study_model': {'inputs': {'projectCost': 1000}, 'report': report}}
+        plan_fin = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project_fin, {})
+        fin_slides = [s for s in plan_fin['slides'] if s.get('section_key') == 'financial']
+        fin_charts = {s.get('chart_type') for s in fin_slides if s.get('chart_type')}
+        self.assertEqual(fin_charts, {'waterfall', 'combo', 'heatmap'})
+        # Revenue table should NOT have a chart
+        rev_slide = next(s for s in fin_slides if 'إيراد' in s.get('title', ''))
+        self.assertEqual(rev_slide.get('chart_type'), '')
+        self.assertEqual(rev_slide.get('design_style'), 'table')
+
+        # 3. Any chart outside the 4 locations/types is strictly stripped
+        raw_disallowed = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'مخطط كعكة للمكونات', 'type': 'content', 'section_key': 'components',
+             'design_style': 'chart', 'chart_type': 'pie', 'bullets': ['أ', 'ب', 'ج']},
+            {'title': 'مخطط تدفق الموقع', 'type': 'content', 'section_key': 'location',
+             'design_style': 'chart', 'chart_type': 'donut', 'bullets': ['أ', 'ب', 'ج']},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}
+        plan_disallowed = engine.normalize_presentation_plan(raw_disallowed, {'project_name': 'س'}, {})
+        disallowed_slides = [s for s in plan_disallowed['slides'] if s.get('section_key') in ('components', 'location')]
+        for s in disallowed_slides:
+            self.assertEqual(s.get('chart_type'), '')
+            self.assertNotEqual(s.get('design_style'), 'chart')
 
     def test_section_presentation_plan_keeps_only_the_requested_section_and_shell(self):
         engine = self.application_module.slide_engine
@@ -1790,8 +1865,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('ممنوع اختراع أي معلومة', rules)
         self.assertIn('ممنوع منعًا باتًا رسم أو تركيب أي مخطط معماري', rules)
         self.assertIn('##PLAN_IMAGE_1##', rules)
-        self.assertIn('الرسوم البيانية المالية المختارة', rules)
-        self.assertIn('الرسوم البيانية ممنوعة خارج قسم الدراسة المالية', rules)
+        self.assertIn('مواصفات الرسومات البيانية المعتمدة (4 أنواع لـ 4 مواقع محددة فقط)', rules)
+        self.assertIn('ممنوع نهائياً Pie أو Donut أو Scatter أو Histogram', rules)
         self.assertIn('بحد أقصى 10% من لون التمييز', rules)
         self.assertIn('الوزن لخدمة التسلسل البصري', rules)
         self.assertIn('عنصرين أو ثلاثة مستقلين', rules)

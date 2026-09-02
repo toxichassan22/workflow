@@ -365,10 +365,13 @@ Two states, and both are stated to the model explicitly — silence made it inve
   field rows or eight table rows per slide, then appends two or three `financial_summary:*` slides
   for «التكاليف والاستثمار» and «مؤشرات العائد والاسترداد» at the end of the financial section. A
   table wider than eight columns is split into groups of five data columns plus its first context
-  column. Charts are forbidden outside the financial section; `_limit_presentation_charts()` keeps
-  only the three highest-scoring readable financial tables (2–6 rows and at most four columns), and
-  every other candidate stays a table. Auto-selection uses safe Bar/Column/Line variants instead of
-  the broken Treemap/Heatmap overlays. Every source header, label and value is required in generated
+  column. Presentation charts are strictly limited to the 4 approved types in 4 designated locations:
+  1) Competitor Comparison (`horizontal_bar`) in the market study from `market_study_data.competitors`.
+  2) Investment Cost Waterfall (`waterfall`) in the financial study from `costTable` / `cost` report part.
+  3) Annual & Cumulative Cash Flow (`combo`) in the financial study from `cashflowTable` / `cashflow` report part.
+  4) Financial Scenarios Heatmap (`heatmap`) in the financial study from `sensitivityTable` / `sensitivity` report part.
+  All other chart types and rules are removed; `_limit_presentation_charts()` strips any chart outside
+  these 4 locations, and every other candidate stays a table or text. Every source header, label and value is required in generated
   HTML; tables are normalized to 13px headers and 12px cells, and fitted HTML is saved for export.
   In «مراحل التطوير ودفعات المطور», each percentage column is independently capped at 100%; an
   over-limit edit reverts to its last valid value and leaves an error under the table, while an

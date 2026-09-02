@@ -33,7 +33,7 @@ CONTENT_DISTRIBUTION_RULES = """
 4. صفحة بداية كل قسم تحمل اسم القسم وحده بلا وصف وبلا ترجمة وبلا نقاط.
 5. كل شريحة لها فكرة واحدة، ويُقسّم المحتوى الطويل على صفحات إضافية بدلاً من تصغيره أو حذفه.
 6. لا تكرر المعلومة أو مكونات المشروع في أكثر من موضع. الإحالة المختصرة مسموحة، أما إعادة الجدول أو القائمة نفسها فممنوعة.
-7. اختر الشكل بحسب طبيعة المحتوى: نص متصل للنبذات والملخصات، جدول للصفوف المنظمة، وصورة كبيرة للصور والمخططات. الرسم البياني ممنوع خارج الدراسة المالية، وداخلها لا يظهر إلا عند وجود chart_type في الخطة. استخدم البطاقات فقط لعناصر مستقلة قصيرة ومتوازية، وبحد أقصى ثلاث بطاقات عند الحاجة.
+7. اختر الشكل بحسب طبيعة المحتوى: نص متصل للنبذات والملخصات، جدول للصفوف المنظمة، وصورة كبيرة للصور والمخططات. الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في دراسة السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في الدراسة المالية). أي رسم خارج هذه المواقع الأربعة والأنواع الأربعة ممنوع منعاً باتاً. استخدم البطاقات فقط لعناصر مستقلة قصيرة ومتوازية، وبحد أقصى ثلاث بطاقات عند الحاجة.
 8. يوضع ملخص نهائي مستند إلى بيانات البرنامج بعد جداول كل قسم تحليلي، ولا تُضاف تحسينات إنشائية أو استرسال لا يحمل معلومة واضحة.
 9. شرائح الصور تستخدم كل الرموز المحددة لها بتخطيط المجموعة المعتمد، من صورة واحدة إلى ثلاث صور؛ وكل صورة تظهر مرة واحدة فقط ولا تعاد في شريحة أخرى.
 10. شرائح الموقع والخرائط تبقى داخل قسم تحليل الموقع الجغرافي، وشرائح الأرض وصورها وملخصها داخل قسم تحليل الأرض.
@@ -219,26 +219,37 @@ def _drop_redundant_generic_slides(groups):
             ]
 
 
-FINANCIAL_CHART_TYPES = (
-    'bar', 'column', 'grouped_bar', 'grouped_column', 'line', 'area',
-    'pie', 'donut', 'treemap', 'scatter', 'histogram', 'heatmap', 'candlestick',
-)
+APPROVED_CHART_TYPES = ('horizontal_bar', 'waterfall', 'combo', 'heatmap')
+FINANCIAL_CHART_TYPES = ('waterfall', 'combo', 'heatmap')
+
+CHART_TYPE_ALIASES = {
+    'bar': 'horizontal_bar',
+    'horizontal_bar': 'horizontal_bar',
+    'waterfall': 'waterfall',
+    'combo': 'combo',
+    'combo_chart': 'combo',
+    'column_line': 'combo',
+    'line_column': 'combo',
+    'heatmap': 'heatmap',
+}
+
+
+def canonicalize_chart_type(chart_type):
+    if not chart_type:
+        return ''
+    cleaned = str(chart_type).strip().lower().replace('-', '_').replace(' ', '_')
+    return CHART_TYPE_ALIASES.get(cleaned, '')
 
 
 def _financial_chart_type(title='', table_key='', index=0):
     text = f'{title} {table_key}'.lower()
     if re.search(r'حساسي|سيناريو|sensitivity', text):
-        return 'grouped_column'
+        return 'heatmap'
     if re.search(r'تدفق|cashflow|cash flow', text):
-        return 'line'
-    if re.search(r'تكال|تكلف|cost|مصروف|opex', text):
-        return 'bar'
-    if re.search(r'إيراد|revenue|مبيعات|sales', text):
-        return 'column'
-    if re.search(r'تمويل|سحب|سداد|finance|repayment', text):
-        return 'line'
-    cycle = ('bar', 'grouped_column', 'line', 'pie', 'donut', 'scatter', 'histogram')
-    return cycle[index % len(cycle)]
+        return 'combo'
+    if re.search(r'تكال|تكلف|cost|استثمار|capex', text) and not re.search(r'تشغيل|opex', text):
+        return 'waterfall'
+    return ''
 
 
 def _financial_report_part_slice(part, row_start, row_end, column_start=None, column_end=None):
@@ -266,41 +277,72 @@ def _financial_column_ranges(part):
 
 
 def _financial_table_chartable(part, rows, column_start=None, column_end=None):
+    if column_start is not None:
+        return False
     headers = part.get('headers') if isinstance(part, dict) and isinstance(part.get('headers'), list) else []
     column_count = len(headers) if column_start is None else min(column_end, len(headers)) - column_start + 1
-    return 2 <= len(rows) <= 6 and 2 <= column_count <= 4 and _rows_have_comparable_numbers(rows)
+    return 2 <= len(rows) <= 12 and 2 <= column_count <= 8 and _rows_have_comparable_numbers(rows)
 
 
 def _financial_chart_score(slide):
-    text = ' '.join(str(slide.get(key) or '') for key in ('title', 'content_source', 'source_table')).lower()
+    text = ' '.join(str(slide.get(key) or '') for key in ('title', 'content_source', 'source_table', 'chart_type')).lower()
     priorities = (
-        (r'إيراد|revenue|sales', 100),
-        (r'تكال|تكلف|cost|opex', 90),
-        (r'تدفق|cashflow|cash flow', 80),
-        (r'تمويل|سداد|finance|repayment', 70),
-        (r'حساسي|سيناريو|sensitivity', 60),
+        (r'تكال|تكلف|cost|waterfall', 100),
+        (r'تدفق|cashflow|cash flow|combo', 90),
+        (r'حساسي|سيناريو|sensitivity|heatmap', 80),
     )
     return next((score for pattern, score in priorities if re.search(pattern, text)), 50)
 
 
-def _limit_presentation_charts(groups, limit=3):
+def _limit_presentation_charts(groups, limit=4):
     chart_styles = {'chart', 'bar', 'column', 'grouped_bar', 'grouped_column', 'line', 'area',
-                    'pie', 'donut', 'treemap', 'scatter', 'histogram', 'heatmap', 'candlestick'}
+                    'pie', 'donut', 'treemap', 'scatter', 'histogram', 'heatmap', 'candlestick',
+                    'horizontal_bar', 'waterfall', 'combo'}
     for section_key, slides in groups.items():
-        if section_key == 'financial':
+        if section_key in ('market', 'financial'):
             continue
         for slide in slides:
             if slide.get('chart_type') or slide.get('design_style') in chart_styles:
                 slide['chart_type'] = ''
                 slide['design_style'] = 'table' if slide.get('source_table') else 'text'
+
+    market_slides = groups.get('market', [])
+    kept_market_chart = False
+    for slide in market_slides:
+        c_type = canonicalize_chart_type(slide.get('chart_type'))
+        text = ' '.join(str(slide.get(k) or '') for k in ('title', 'content_source', 'source_table')).lower()
+        is_competitor = bool(re.search(r'منافس|competitor', text))
+        if c_type == 'horizontal_bar' and is_competitor and not kept_market_chart:
+            slide['chart_type'] = 'horizontal_bar'
+            slide['design_style'] = 'chart'
+            kept_market_chart = True
+        else:
+            if slide.get('chart_type') or slide.get('design_style') in chart_styles:
+                slide['chart_type'] = ''
+                slide['design_style'] = 'table' if slide.get('source_table') else 'text'
+
     financial = groups.get('financial', [])
-    candidates = [(index, slide) for index, slide in enumerate(financial) if slide.get('chart_type')]
-    keep = {index for index, _slide in sorted(
-        candidates, key=lambda item: (-_financial_chart_score(item[1]), item[0]))[:limit]}
-    for index, slide in candidates:
-        if index not in keep:
-            slide['chart_type'] = ''
-            slide['design_style'] = 'table'
+    candidates = []
+    for index, slide in enumerate(financial):
+        c_type = canonicalize_chart_type(slide.get('chart_type'))
+        if c_type in FINANCIAL_CHART_TYPES:
+            candidates.append((index, slide, c_type))
+
+    seen_types = set()
+    keep_indices = set()
+    for index, slide, c_type in sorted(
+        candidates, key=lambda item: (-_financial_chart_score(item[1]), item[0])):
+        if c_type not in seen_types and len(keep_indices) < 3:
+            seen_types.add(c_type)
+            keep_indices.add(index)
+            slide['chart_type'] = c_type
+            slide['design_style'] = 'chart'
+
+    for index, slide in enumerate(financial):
+        if index not in keep_indices:
+            if slide.get('chart_type') or slide.get('design_style') in chart_styles:
+                slide['chart_type'] = ''
+                slide['design_style'] = 'table'
 
 
 def _merge_sparse_plan_slides(groups):
@@ -392,10 +434,10 @@ def _financial_summary_plan_slides(model):
 
 
 _FINANCIAL_PLAN_TABLES = (
-    ('revenueTable', 'بنود الإيرادات', 'chart'),
+    ('revenueTable', 'بنود الإيرادات', 'table'),
     ('costTable', 'تكاليف المشروع', 'chart'),
     ('scheduleTable', 'مراحل التطوير المالية', 'flow'),
-    ('opexTable', 'المصروفات التشغيلية', 'chart'),
+    ('opexTable', 'المصروفات التشغيلية', 'table'),
     ('graceScheduleTable', 'جدول فترة السماح', 'table'),
     ('financeDrawTable', 'جدول سحب التمويل', 'flow'),
     ('financeRepaymentTable', 'جدول سداد التمويل', 'flow'),
@@ -789,14 +831,18 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                             title_suffixes.append(str(row_number))
                         if len(column_ranges) > 1:
                             title_suffixes.append(f'جزء {column_number}')
-                        chartable = len(column_ranges) == 1 and part.get('type') == 'table' and _financial_table_chartable(
-                            part, rows[start:end], column_start, column_end)
+                        chart_cand = _financial_chart_type(part_title, index=part_index)
+                        chartable = (len(column_ranges) == 1 and start == 0 and column_number == 1
+                                     and part.get('type') == 'table'
+                                     and bool(chart_cand)
+                                     and _financial_table_chartable(
+                                         part, rows[start:end], column_start, column_end))
                         source_suffix = (f':{column_start}:{column_end}'
                                          if column_start is not None and column_end is not None else '')
                         add(target_section, {
                             'title': part_title + (f" — {' / '.join(title_suffixes)}" if title_suffixes else ''),
                             'type': 'content', 'design_style': 'chart' if chartable else 'table',
-                            'chart_type': _financial_chart_type(part_title, index=part_index) if chartable else '',
+                            'chart_type': chart_cand if chartable else '',
                             'content_density': 'high', 'requires_image': False,
                             'content_source': f'financial_report:{part_index}:{start}:{end}{source_suffix}',
                             'source_table': f'report_part_{part_index}', 'row_count': end - start,
@@ -808,10 +854,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 for start in range(0, len(rows), 8):
                     end = min(start + 8, len(rows))
                     number = start // 8 + 1
+                    is_chart = (style == 'chart' and start == 0)
+                    c_type = _financial_chart_type(title, table_key, number - 1) if is_chart else ''
                     add('financial', {
                         'title': title + (f' — {number}' if len(rows) > 8 else ''),
-                        'type': 'content', 'design_style': style,
-                        'chart_type': _financial_chart_type(title, table_key, number - 1) if style == 'chart' else '',
+                        'type': 'content', 'design_style': 'chart' if c_type else ('table' if style == 'chart' else style),
+                        'chart_type': c_type,
                         'content_density': 'high', 'requires_image': False,
                         'content_source': f'financial_table:{table_key}:{start}:{end}',
                         'source_table': table_key, 'row_count': end - start,
@@ -836,6 +884,36 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
 
     market = _decode_json_fact(source.get('market_study_data'))
     market = market if isinstance(market, dict) else {}
+    competitors = market.get('competitors') if isinstance(market.get('competitors'), list) else []
+    valid_competitors = [
+        c for c in competitors
+        if isinstance(c, dict) and (c.get('price_value') or c.get('price_from') or c.get('price_to') or c.get('price'))
+    ]
+    if valid_competitors:
+        existing_comp = next((s for s in groups.get('market', [])
+                              if s.get('content_source') == 'market_study_data.competitors'
+                              or re.search(r'منافس', str(s.get('title') or ''))), None)
+        if existing_comp:
+            existing_comp.update({
+                'title': 'مقارنة المنافسين',
+                'type': 'content',
+                'design_style': 'chart',
+                'chart_type': 'horizontal_bar',
+                'content_source': 'market_study_data.competitors',
+                'source_table': 'competitors',
+            })
+        else:
+            add('market', {
+                'title': 'مقارنة المنافسين',
+                'type': 'content',
+                'design_style': 'chart',
+                'chart_type': 'horizontal_bar',
+                'content_density': 'high',
+                'requires_image': False,
+                'content_source': 'market_study_data.competitors',
+                'source_table': 'competitors',
+                'bullets': [],
+            })
     swot = market.get('swot') if isinstance(market.get('swot'), dict) else {}
     groups['swot_risks'] = []
     if any(str(value or '').strip() for value in swot.values()):
@@ -1863,7 +1941,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - cards: بطاقتان أو ثلاث فقط لعناصر مستقلة قصيرة
 - timeline: مراحل زمنية مع الملاحظات الموجودة فقط
 - table: جدول بيانات كامل
-- chart: رسم بياني مبني على أرقام موجودة مع جدول البيانات بجانبه، ويحدد chart_type من bar أو column أو grouped_bar أو grouped_column أو line أو area أو pie أو donut أو treemap أو scatter أو histogram أو heatmap أو candlestick
+- chart: رسم بياني محصور حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة مع جدول البيانات بجانبه (مقارنة المنافسين: horizontal_bar في دراسة السوق، وتكوين إجمالي تكلفة الاستثمار: waterfall، والتدفقات النقدية السنوية والتراكمية: combo، ومقارنة السيناريوهات المالية: heatmap في الدراسة المالية). أي نوع أو موقع آخر ممنوع منعاً باتاً
 - text: فقرة أو قائمة منظمة للنبذات والملخصات
 - image: صورة كبيرة + وصفها الصحيح
 - flow: تسلسل نصي بسيط عند وجود خطوات فعلية
@@ -1886,7 +1964,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
       "section_key": "overview|components|land|location|market|timeline|financial|swot_risks|team|plans|exterior|interior|executive_summary|closing",
       "content_density": "low|medium|high",
       "design_style": "dashboard|cards|timeline|table|chart|text|image|flow|swot|map|diagram|divider",
-      "chart_type": "bar|column|grouped_bar|grouped_column|line|area|pie|donut|treemap|scatter|histogram|heatmap|candlestick أو فارغ",
+      "chart_type": "horizontal_bar|waterfall|combo|heatmap أو فارغ",
       "bullets": ["نقطة 1", "نقطة 2", "نقطة 3"],
       "requires_image": true أو false,
       "content_source": "<الحقل أو الجدول الذي يغذي هذه الشريحة>",
@@ -1903,7 +1981,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - نبذة عن المشروع نصية ولا تستخدم رموز التصورات الخارجية؛ كل صورة خارجية محفوظة لقسم التصورات الخارجية فقط حتى تظهر مرة واحدة ولا تضيع من قسمها.
 - صور الأرض تُعرض مع الوصف المحفوظ لكل صورة، ثم ملخص تحليل الأرض المعتمد. لا تستخدم صورة أرض بلا وصف إن كان الوصف متاحًا.
 - عند توفر أبعاد وحدود للأرض والشوارع المحيطة، يتم تضمين شريحة «مخطط اتجاهي لحدود الأرض» بنمط diagram لتمثيل الأرض والجهات الأربع والشوارع والإطلالات بيانياً بالـ CSS و HTML النقي دون الحاجة لرسومات خارجية.
-- الدراسة المالية تأخذ عدد الشرائح الذي تحتاجه جميع جداول تقرير المعاينة ومؤشراته، ثم يأتي الملخص المالي في نهاية القسم مقسمًا إلى شريحتين أو ثلاث. الرسوم ممنوعة خارج المالية، وداخلها ثلاثة رسوم فقط تحمل chart_type وتظهر بجانب جداولها.
+- الدراسة المالية تأخذ عدد الشرائح الذي تحتاجه جميع جداول تقرير المعاينة ومؤشراته، ثم يأتي الملخص المالي في نهاية القسم مقسمًا إلى شريحتين أو ثلاث. الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة فقط في كامل العرض: 1) مقارنة المنافسين (horizontal_bar) في قسم دراسة السوق، 2) تكوين إجمالي تكلفة الاستثمار (waterfall) في الدراسة المالية، 3) التدفقات النقدية السنوية والتراكمية (combo) في الدراسة المالية، 4) مقارنة السيناريوهات المالية (heatmap) في الدراسة المالية. يمنع منعاً باتاً إضافة أي رسم بياني خارج هذه المواقع الأربعة أو استخدام أي نوع آخر.
 - فريق العمل يحافظ على ترتيب الجهات وحقولها كما أُدخلت، ويستخدم شعار كل جهة عند الحديث عنها. لا ينشئ فئات أو مسميات جديدة.
 - كل مخطط مرفوع له صفحة مستقلة أو مساحة كبيرة مع عنوانه ووصفه؛ ممنوع جمع مخططات كثيرة في شبكة صغيرة.
 - التصورات الخارجية والداخلية تستخدم كل رموز الصور المحددة لكل شريحة، من صورة إلى ثلاث، ضمن تخطيط متوازن للمجموعة كلها ودون تكرار.
@@ -2281,6 +2359,39 @@ def _slide_source_data_note(slide, project_data):
         market = _decode_json_fact(project_data.get('market_study_data'))
         swot = market.get('swot') if isinstance(market, dict) and isinstance(market.get('swot'), dict) else {}
         return 'تحليل SWOT الأصلي الوحيد، انقل المحاور الأربعة دون إضافة أو تكرار:\n' + json.dumps(swot, ensure_ascii=False, indent=2) if swot else ''
+    if source == 'market_study_data.competitors' or (slide or {}).get('source_table') == 'competitors':
+        market = _decode_json_fact(project_data.get('market_study_data'))
+        market = market if isinstance(market, dict) else {}
+        competitors = market.get('competitors') if isinstance(market.get('competitors'), list) else []
+        items = []
+        for comp in competitors:
+            if not isinstance(comp, dict):
+                continue
+            name = str(comp.get('name') or comp.get('project_name') or '').strip()
+            price_val = comp.get('price_value') or comp.get('value') or comp.get('price')
+            p_from = comp.get('price_from') or comp.get('min_price')
+            p_to = comp.get('price_to') or comp.get('max_price')
+            p_type = comp.get('price_type') or comp.get('type') or ''
+            if name and (price_val or p_from or p_to):
+                items.append({
+                    'name': name,
+                    'price_value': price_val,
+                    'price_from': p_from,
+                    'price_to': p_to,
+                    'price_type': p_type,
+                    'unit': comp.get('unit') or (comp.get('area_cache') if isinstance(comp.get('area_cache'), dict) else {}).get('unit') or '',
+                })
+        return (
+            'جدول المنافسين الرئيسيين لرسم مقارنة المنافسين (horizontal_bar):\n'
+            + json.dumps(items, ensure_ascii=False, indent=2)
+            + '\n\nقواعد رسم مقارنة المنافسين المعتمدة:\n'
+            '- ترتيب تنازلي حسب السعر (من الأعلى إلى الأقل).\n'
+            '- مقارنة الأسعار لنفس وحدة القياس ونوع السعر (سعر المتر بيع أو تأجير، أو إجمالي سعر الوحدة).\n'
+            '- إبراز مشروعنا بلون الهوية المعتمد إذا كان له سعر مقترح، لتمييزه فوراً عن المنافسين.\n'
+            '- استبعاد أي منافس لا يملك قيمة رقمية موثقة (لا تدرج منافس بسعر صفر أو مجهول).\n'
+            '- نطاق السعر يمثل كشريط من الأدنى للأعلى (وليس متوسطاً افتراضياً).\n'
+            '- تنبيه المبرمج: يمنع منعاً باتاً اختراع قيم افتراضية أو متوسطات تقديرية.'
+        )
     if source == 'site_analysis':
         value = str(project_data.get('site_analysis') or '').strip()
         return 'ملخص الموقع المعتمد دون إضافة أو تكرار:\n' + value if value else ''
@@ -2523,6 +2634,8 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     slide_type = slide.get('type', 'content')
     design_style = slide.get('design_style', 'cards')
     chart_type = str(slide.get('chart_type') or '').strip().lower()
+    canonical_type = canonicalize_chart_type(chart_type)
+    chart_type = canonical_type or chart_type
     bullets = slide.get('bullets', [])
     density = slide.get('content_density', 'medium')
     section_key = _slide_section_key(slide)
@@ -2538,12 +2651,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'cards': 'بطاقتان أو ثلاث فقط لعناصر مستقلة عريضة وغنية؛ استخدم الفقرات النصية أو الجداول بدلاً من التقطيع المفرط إلى مربعات صغيرة',
         'timeline': 'مراحل زمنية واضحة ومسار تدفق زمني، واعرض الملاحظة فقط تحت المرحلة التي تحتوي ملاحظة فعلية',
         'table': 'جدول احترافي كامل بالمسميات والقيم الأصلية وفواصل آلاف للأرقام دون تقريب مع رؤوس جداول عريضة 700',
-        'chart': 'رسم بياني إحصائي احترافي (أعمدة، خطوط، كعكة Pie/Donut بـ conic-gradient، مخطط نطاقات Candlestick، أو مخطط تدفق Flowchart) بـ HTML و CSS النقي مع جدول الأرقام بجانبه وبألوان الهوية',
-        'pie': 'مخطط دائري / كعكة (Pie / Donut Chart) احترافي باستخدام conic-gradient في CSS مع دليل ألوان (Legend) وجدول الأرقام بجانبه',
-        'donut': 'مخطط كعكة مجوف (Donut Chart) احترافي باستخدام conic-gradient ومركز أبيض لعرض الإجمالي مع دليل ألوان وجدول الأرقام',
-        'scatter': 'مخطط نقاط انتشار (Scatter Plot) بـ HTML/CSS يوضح توزع النقاط على محورين مع تسميات واضحة ومقارنة معيارية',
-        'histogram': 'مخطط توزيع تكراري (Histogram) بأعمدة متلاصقة توضح توزيع الفئات ونسبها بدقة',
-        'candlestick': 'مخطط نطاقات وسيناريوهات (Candlestick / Range Plot) يوضح الحد الأدنى والمتوقع والأعلى لكل بند أو مرحلة',
+        'chart': 'رسم بياني احترافي حصراً من الأنواع الأربعة المعتمدة (مقارنة المنافسين: horizontal_bar في دراسة السوق، تكوين إجمالي تكلفة الاستثمار: waterfall، التدفقات النقدية السنوية والتراكمية: combo، مقارنة السيناريوهات المالية: heatmap في المالية) بـ HTML و CSS النقي مع جدول الأرقام بجانبه وبألوان الهوية ومنع أي نوع آخر',
         'text': 'عنوان وفقرة غنية ووافية أو قائمة منظمة تشرح الفكرة بالكامل بلا اختصار مخل وبلا تجزئة لمربعات فارغة',
         'image': 'استخدم جميع رموز الصور المحددة في الخطة بتوزيع متوازن واحد للمجموعة، وبحد أقصى ثلاث صور في الشريحة',
         'flow': 'مخطط تدفق بصري هندسي راقٍ (Flowchart / Visual Pipeline) يربط الكتل بمسارات تدفق واضحة وبألوان الهوية مع إبراز القيم والمراحل والمبالغ',
@@ -2554,19 +2662,34 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'minimal': 'خاتمة بسيطة تتضمن بيانات التواصل المتاحة بلا تقييمات أو عبارات مشروطة',
     }.get(design_style, 'نص منظم يناسب طبيعة المحتوى')
     chart_instructions = {
-        'bar': 'أشرطة أفقية للمقارنة بين البنود',
-        'column': 'أعمدة رأسية للمقارنة الزمنية أو بين الفئات',
-        'grouped_bar': 'أشرطة أفقية مجمعة تقارن أكثر من سلسلة لكل فئة',
-        'grouped_column': 'أعمدة رأسية مجمعة تقارن السيناريوهات أو السلاسل',
-        'line': 'خط زمني بنقاط وقيم واضحة لكل فترة',
-        'area': 'مساحة زمنية متدرجة توضح التدفق والتراكم',
-        'pie': 'دائرة نسبية للفئات التي تكوّن إجماليًا واحدًا',
-        'donut': 'دائرة مجوفة للنسب مع الإجمالي في المنتصف',
-        'treemap': 'مستطيلات مساحية متناسبة لتوزيع بنود التكلفة أو الإيراد',
-        'scatter': 'نقاط على محورين لبيان العلاقة بين متغيرين',
-        'histogram': 'أعمدة متلاصقة لتوزيع القيم على نطاقات',
-        'heatmap': 'مصفوفة خلايا لونية للمقارنة بين السيناريوهات والمتغيرات',
-        'candlestick': 'نطاق رأسي يوضح الأدنى والأساسي والأعلى',
+        'horizontal_bar': (
+            'مخطط الأعمدة الأفقية (Horizontal Bar Chart) لمقارنة المنافسين: '
+            'ترتيب تنازلي حسب السعر (من الأعلى إلى الأقل). مقارنة الأسعار لنفس وحدة القياس ونوع السعر (سعر المتر بيع أو تأجير، أو إجمالي سعر الوحدة). '
+            'إبراز مشروعنا بلون الهوية المعتمد إذا كان له سعر مقترح لتمييزه فوراً. استبعاد أي منافس لا يملك قيمة رقمية موثقة (لا تدرج منافس بسعر صفر أو مجهول). '
+            'نطاق السعر يمثل كشريط من الأدنى للأعلى (وليس متوسطاً افتراضياً). يمنع اختراع قيم أو متوسطات افتراضية.'
+        ),
+        'waterfall': (
+            'المخطط الشلالي (Waterfall Chart) لتكوين إجمالي تكلفة الاستثمار: '
+            'يوضح مساهمة كل بند رئيسي وفرعي (تكاليف التطوير، قيمة الأرض، الرسوم، التمويل، الصندوق) وصولاً لإجمالي تكلفة الاستثمار. '
+            'إظهار تكلفة المشروع وتكلفة الاستثمار كأعمدة إجمالية كاملة (Full Columns). إظهار بنود التكاليف كأعمدة عائمة/متزايدة (Floating Bars/Increments). '
+            'عدم تكرار البنود أو إدخال مجاميع وسيطة داخل الإجمالي لمنع التكرار (No Double Counting). '
+            'استبعاد مبالغ التسهيلات التمويلية من التكلفة (التسهيل مصدر تمويل وليس تكلفة؛ يدرج فقط أتعاب ترتيب التمويل وتكلفة التمويل/الفائدة).'
+        ),
+        'combo': (
+            'المخطط المركب: أعمدة وخط (Combo Chart: Column + Line) للتدفقات النقدية السنوية والتراكمية: '
+            'أعمدة رأسية لصافي التدفق السنوي (Net Cash Flow) لكل سنة على المحور الأفقي، مع خط بياني متصل للرصيد النقدي التراكمي (Cumulative Balance). '
+            'تمثيل جميع سنوات الدراسة في رسم بياني واحد. تمييز التدفقات السالبة بلون مختلف تماماً عن الموجبة لتوضيح مراحل العجز والربحية. '
+            'خط الصفر واضح لتحديد نقطة التعادل ونهاية الاسترداد (Payback). عدم تكرار الرصيد التراكمي كأعمدة مستقلة. '
+            'خط الرصيد التراكمي يحسب بجمع التدفقات النقدية السنوية إذا لم يكن مخزناً مسبقاً.'
+        ),
+        'heatmap': (
+            'الخريطة الحرارية (Heatmap) لمقارنة السيناريوهات المالية: '
+            'مقارنة السيناريوهات (المتحفظ، الأساسي، المتفائل) لمؤشرات: إجمالي الاستثمار، الإيرادات، صافي الربح، ROI، Project IRR، Equity IRR، فترة الاسترداد. '
+            'تلوين اتجاهي ذكي بحسب قطبية المؤشر (Directional/Polarity-Aware Coloring): '
+            'الأخضر/الإيجابي للأعلى في مؤشرات الربح والإيراد والعوائد (Higher is better)، '
+            'والأخضر/الإيجابي للأقل في التكاليف وفترة الاسترداد (Lower is better). '
+            'توحيد وحدات القياس، وتقريب الأرقام لنسبة مئوية أو خانة عشرية واحدة، ومطابقة أرقام السيناريو الأساسي تماماً مع ملخص المؤشرات المعتمد بالمشروع.'
+        ),
     }
     chart_note = chart_instructions.get(chart_type, '')
 
@@ -2609,7 +2732,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'لا تختصر الكلام اختصاراً مخلاً ولا تقسم الشريحة إلى 4 أو 6 مربعات صغيرة فارغة؛ اعتمد على فقرات وافية وجداول متكاملة وتدفقات بصرية منظمة',
         'لا تكرر معلومة وردت في شريحة أخرى أو قسم آخر؛ تحليل SWOT يستخدم مصدر market_study_data.swot مرة واحدة فقط، والمكونات في قسم المكونات فقط',
         'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
-        'خارج قسم الدراسة المالية استخدم النص أو الجدول أو الصورة المناسبة فقط، وممنوع إنشاء رسم بياني؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
+        'الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في المالية) وأي رسم خارجها ممنوع منعاً باتاً؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
         'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
         'املأ الشريحة بالمحتوى الضروري والوافي؛ وشرائح الملخص المالي تستخدم جداول التقرير نفسها دون ضغط أو حذف',
@@ -2663,11 +2786,18 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         if chart_type:
             notes.append(f'أنشئ الرسم المحدد فقط ({chart_type}: {chart_note}) بجانب جدول مصدره، مع بقاء الجدول كاملًا ومقروءًا ومنع position:absolute للرسم أو الجدول أو النصوص.')
         else:
-            notes.append('هذه الشريحة ليست واحدة من الرسوم المالية الثلاثة المختارة؛ اعرض جدول التقرير فقط وممنوع إضافة أي رسم بياني.')
+            notes.append('هذه الشريحة ليست واحدة من الرسوم المالية الثلاثة المعتمدة (waterfall, combo, heatmap)؛ اعرض جدول التقرير فقط وممنوع إضافة أي رسم بياني.')
         notes.append('الجدول لا يقل عن 12px ولا يزيد على 6 أعمدة في الشريحة، ويُقسّم على شرائح إضافية بدل التصغير أو القص.')
         financial_note = _financial_data_note(project_data)
         if financial_note and not source_note:
             notes.append(financial_note.strip())
+    elif section_key == 'market':
+        if chart_type == 'horizontal_bar':
+            notes.append(f'أنشئ رسم مقارنة المنافسين المحدد ({chart_type}: {chart_note}) بجانب جدول المنافسين، مع بقاء الجدول كاملًا ومقروءًا ومنع اختراع أرقام أو متوسطات افتراضية.')
+        else:
+            notes.append('ممنوع إضافة أي رسم بياني في دراسة السوق إلا في شريحة مقارنة المنافسين المعتمدة (horizontal_bar).')
+    else:
+        notes.append('الرسوم البيانية ممنوعة تماماً في هذا القسم؛ اعرض المحتوى بالجداول أو النصوص أو الصور حسب النمط المحدد.')
     notes_text = '\n'.join(f'- {n}' for n in notes)
 
     return f"""أنشئ شريحة {slide_num}/{total_slides}: {title}
