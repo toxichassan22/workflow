@@ -6170,12 +6170,6 @@
     const T_TOKEN_KEY = 'tenant_token';
     const T_TENANT_KEY = 'tenant_user';
     const T_NAVIGATION_KEY = 'tenant_navigation_state';
-    if (new URLSearchParams(window.location.search).get('detached') === '1') {
-      sessionStorage.setItem('tenant_detached_tab', '1');
-    }
-    function tenantNavigationStorage() {
-      return sessionStorage.getItem('tenant_detached_tab') === '1' ? sessionStorage : localStorage;
-    }
     let tenantToken = null;
     let tenantUser = null;
     let tenantBranding = null;
@@ -6960,7 +6954,7 @@
 
     function getTenantNavigationState() {
       try {
-        const raw = tenantNavigationStorage().getItem(T_NAVIGATION_KEY);
+        const raw = localStorage.getItem(T_NAVIGATION_KEY);
         const state = raw ? JSON.parse(raw) : null;
         return state && state.pageId ? state : null;
       } catch (e) {
@@ -6990,7 +6984,7 @@
       if (!pageId || pageId === 'tenantAuthPage') return;
       const state = buildTenantNavigationState(pageId, overrides);
       try {
-        tenantNavigationStorage().setItem(T_NAVIGATION_KEY, JSON.stringify(state));
+        localStorage.setItem(T_NAVIGATION_KEY, JSON.stringify(state));
       } catch (e) {
         console.warn('[NAVIGATION] Could not save state:', e);
       }
@@ -6998,7 +6992,7 @@
     }
 
     function clearTenantNavigationState() {
-      tenantNavigationStorage().removeItem(T_NAVIGATION_KEY);
+      localStorage.removeItem(T_NAVIGATION_KEY);
     }
 
     // Auth UI
@@ -7066,7 +7060,6 @@
       const query = new URLSearchParams();
       if (pageId === 'tenantProjectPage' && state.activeSection) query.set('section', state.activeSection);
       if (pageId === 'tenantProjectPresentationsPage' && state.draftId) query.set('draftId', state.draftId);
-      if (pageId === 'tenantProjectPresentationsPage' && sessionStorage.getItem('tenant_detached_tab') === '1') query.set('detached', '1');
       if (state.railTab === 'inputs') query.set('rail', 'inputs');
       const queryString = query.toString();
       return queryString ? route + '?' + queryString : route;
@@ -7172,13 +7165,11 @@
         toast('يجب حفظ المشروع قبل عرض عروضه السابقة');
         return;
       }
-      const query = new URLSearchParams({ draftId: String(draftId), detached: '1' });
-      window.open('/app/projects/presentations?' + query.toString(), '_blank', 'noopener');
+      loadProjectPresentationsPage(draftId);
     }
 
     function closeProjectPresentationsTab() {
-      if (window.opener || sessionStorage.getItem('tenant_detached_tab') === '1') window.close();
-      else showTenantPage('tenantDashboardPage');
+      showTenantPage('tenantProjectPage');
     }
 
     async function loadProjectPresentationsPage(draftId = currentProjectPresentationsDraftId()) {
