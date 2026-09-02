@@ -5631,6 +5631,21 @@
       </div>
     </section>
 
+    <section id="tenantProjectPresentationsPage" class="tenant-page">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+        <h2 id="projectPresentationsPageTitle" style="margin:0">العروض السابقة</h2>
+        <button type="button" class="btn ghost" onclick="closeProjectPresentationsTab()">إغلاق التبويب</button>
+      </div>
+      <div class="tenant-grid" style="margin-bottom:16px">
+        <div class="tenant-field full"><label>بحث</label><input type="text" id="projectPresentationsSearch" placeholder="اسم العرض" onkeydown="if(event.key==='Enter') loadProjectPresentationsPage()"></div>
+        <div class="tenant-field"><label>الحالة</label><select id="projectPresentationsStatus"><option value="">كل الحالات</option><option value="draft">مسودة</option><option value="pending_approval">بانتظار التعميد</option><option value="approved">معتمد</option></select></div>
+        <div class="tenant-field"><label>من تاريخ</label><input type="date" id="projectPresentationsFrom"></div>
+        <div class="tenant-field"><label>إلى تاريخ</label><input type="date" id="projectPresentationsTo"></div>
+        <div class="tenant-field"><button type="button" class="btn primary" onclick="loadProjectPresentationsPage()">تصفية</button></div>
+      </div>
+      <div id="projectPresentationsPageList"></div>
+    </section>
+
     <!-- Users Management (company admin only) -->
     <section id="tenantUsersPage" class="tenant-page">
       <div
@@ -6155,6 +6170,12 @@
     const T_TOKEN_KEY = 'tenant_token';
     const T_TENANT_KEY = 'tenant_user';
     const T_NAVIGATION_KEY = 'tenant_navigation_state';
+    if (new URLSearchParams(window.location.search).get('detached') === '1') {
+      sessionStorage.setItem('tenant_detached_tab', '1');
+    }
+    function tenantNavigationStorage() {
+      return sessionStorage.getItem('tenant_detached_tab') === '1' ? sessionStorage : localStorage;
+    }
     let tenantToken = null;
     let tenantUser = null;
     let tenantBranding = null;
@@ -6939,7 +6960,7 @@
 
     function getTenantNavigationState() {
       try {
-        const raw = localStorage.getItem(T_NAVIGATION_KEY);
+        const raw = tenantNavigationStorage().getItem(T_NAVIGATION_KEY);
         const state = raw ? JSON.parse(raw) : null;
         return state && state.pageId ? state : null;
       } catch (e) {
@@ -6954,7 +6975,10 @@
         tenantId: tenantUser && (tenantUser.id || tenantUser.tenantId) || null,
         mode: hasProjectContext ? (tenantProjectMode || (tenantPresentationId ? 'presentation' : 'draft')) : null,
         presentationId: hasProjectContext ? (tenantPresentationId || null) : null,
-        draftId: hasProjectContext && tenantProjectData ? (tenantProjectData.draftId || null) : null,
+        draftId: hasProjectContext && tenantProjectData
+          ? (tenantProjectData.draftId || null)
+          : pageId === 'tenantProjectPresentationsPage'
+            ? (overrides.draftId || currentProjectPresentationsDraftId() || null) : null,
         activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null,
         visualConceptView: pageId === 'tenantVisualConceptPage' ? (overrides.visualConceptView || document.querySelector('#tenantVisualConceptPage [data-visual-concept-view]:not([hidden])')?.dataset.visualConceptView || 'home') : null,
         railTab: localStorage.getItem('tgrTab') || 'nav',
@@ -6966,7 +6990,7 @@
       if (!pageId || pageId === 'tenantAuthPage') return;
       const state = buildTenantNavigationState(pageId, overrides);
       try {
-        localStorage.setItem(T_NAVIGATION_KEY, JSON.stringify(state));
+        tenantNavigationStorage().setItem(T_NAVIGATION_KEY, JSON.stringify(state));
       } catch (e) {
         console.warn('[NAVIGATION] Could not save state:', e);
       }
@@ -6974,7 +6998,7 @@
     }
 
     function clearTenantNavigationState() {
-      localStorage.removeItem(T_NAVIGATION_KEY);
+      tenantNavigationStorage().removeItem(T_NAVIGATION_KEY);
     }
 
     // Auth UI
@@ -7010,6 +7034,7 @@
     const TENANT_PAGE_ROUTES = {
       tenantDashboardPage: '/app/dashboard',
       tenantProjectPage: '/app/projects/new',
+      tenantProjectPresentationsPage: '/app/projects/presentations',
       tenantVisualConceptPage: '/app/projects/visual-concept',
       tenantGenerationPage: '/app/projects/generation',
       tenantSlidesPage: '/app/presentations/current',
@@ -7030,6 +7055,7 @@
       const state = history.state && typeof history.state === 'object' ? history.state : {};
       return {
         ...state,
+        draftId: state.draftId || query.get('draftId') || null,
         activeSection: state.activeSection || query.get('section') || null,
         railTab: state.railTab || query.get('rail') || localStorage.getItem('tgrTab') || 'nav'
       };
@@ -7039,6 +7065,8 @@
       const route = TENANT_PAGE_ROUTES[pageId] || window.location.pathname;
       const query = new URLSearchParams();
       if (pageId === 'tenantProjectPage' && state.activeSection) query.set('section', state.activeSection);
+      if (pageId === 'tenantProjectPresentationsPage' && state.draftId) query.set('draftId', state.draftId);
+      if (pageId === 'tenantProjectPresentationsPage' && sessionStorage.getItem('tenant_detached_tab') === '1') query.set('detached', '1');
       if (state.railTab === 'inputs') query.set('rail', 'inputs');
       const queryString = query.toString();
       return queryString ? route + '?' + queryString : route;
@@ -7098,7 +7126,12 @@
       const path = window.location.pathname;
       const pageId = TENANT_ROUTE_PAGES[path];
       if (pageId) {
-        showTenantPage(pageId, true);
+        if (pageId === 'tenantProjectPresentationsPage') {
+          const draftId = new URLSearchParams(window.location.search).get('draftId');
+          loadProjectPresentationsPage(draftId || currentProjectPresentationsDraftId());
+        } else {
+          showTenantPage(pageId, true);
+        }
         return;
       }
       // "/" and any unmapped path used to fall through here, leaving the view on the old page
@@ -7128,20 +7161,50 @@
       }
     }
 
-    async function loadProjectPresentationsSidebar(draftId) {
-      const host = document.getElementById('tenantProjectPreviousList');
-      if (!host || !draftId || host.dataset.draftId !== String(draftId)) return;
+    function currentProjectPresentationsDraftId() {
+      return new URLSearchParams(window.location.search).get('draftId')
+        || tenantProjectData?.draftId || tenantProjectData?.draft_id || '';
+    }
+
+    function openProjectPresentationsTab() {
+      const draftId = tenantProjectData?.draftId || tenantProjectData?.draft_id || '';
+      if (!draftId) {
+        toast('يجب حفظ المشروع قبل عرض عروضه السابقة');
+        return;
+      }
+      const query = new URLSearchParams({ draftId: String(draftId), detached: '1' });
+      window.open('/app/projects/presentations?' + query.toString(), '_blank', 'noopener');
+    }
+
+    function closeProjectPresentationsTab() {
+      if (window.opener || sessionStorage.getItem('tenant_detached_tab') === '1') window.close();
+      else showTenantPage('tenantDashboardPage');
+    }
+
+    async function loadProjectPresentationsPage(draftId = currentProjectPresentationsDraftId()) {
+      const host = document.getElementById('projectPresentationsPageList');
+      if (!host) return;
+      showTenantPage('tenantProjectPresentationsPage', true);
+      if (!draftId) {
+        host.innerHTML = '<p class="tenant-hint">ملف المشروع غير محدد.</p>';
+        return;
+      }
       const filters = {
         draftId: String(draftId),
-        search: document.getElementById('projectPreviousSearch')?.value?.trim() || '',
-        status: document.getElementById('projectPreviousStatus')?.value || '',
-        from: document.getElementById('projectPreviousFrom')?.value || '',
-        to: document.getElementById('projectPreviousTo')?.value || ''
+        search: document.getElementById('projectPresentationsSearch')?.value?.trim() || '',
+        status: document.getElementById('projectPresentationsStatus')?.value || '',
+        from: document.getElementById('projectPresentationsFrom')?.value || '',
+        to: document.getElementById('projectPresentationsTo')?.value || ''
       };
       const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
       host.innerHTML = '<p class="tenant-hint">جاري تحميل العروض...</p>';
-      const response = await api('GET', '/api/presentations?' + query.toString()).catch(() => ({ success: false }));
-      if (host.dataset.draftId !== String(draftId)) return;
+      const [response, draftResponse] = await Promise.all([
+        api('GET', '/api/presentations?' + query.toString()).catch(() => ({ success: false })),
+        api('GET', '/api/project-draft/' + encodeURIComponent(draftId)).catch(() => ({ success: false }))
+      ]);
+      const title = draftResponse?.success && draftResponse.draft?.title ? draftResponse.draft.title : '';
+      const titleNode = document.getElementById('projectPresentationsPageTitle');
+      if (titleNode) titleNode.textContent = title ? 'العروض السابقة — ' + title : 'العروض السابقة';
       const presentations = response?.success && Array.isArray(response.presentations)
         ? response.presentations.slice().sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
         : [];
@@ -7151,15 +7214,15 @@
         { key: 'approved', label: 'معتمد', items: presentations.filter(item => item.status === 'approved') }
       ].filter(group => group.items.length);
       host.innerHTML = groups.length ? groups.map(group =>
-        '<div style="margin-top:10px"><strong style="display:block;font-size:12px;color:var(--muted);margin-bottom:5px">' + group.label + '</strong>' +
+        '<section style="margin:0 0 22px"><h3 style="margin-bottom:10px;color:var(--p)">' + group.label + '</h3>' +
         group.items.map(item => {
-          const date = (item.updatedAt || item.createdAt || '').slice(0, 10);
-          return '<div style="border:1px solid var(--line);border-radius:9px;padding:6px;margin-bottom:6px;background:#fff">' +
-            '<button type="button" class="project-section-nav-item" style="padding:5px;width:100%;text-align:right" onclick="openExistingPresentation(\'' + item.id + '\')">' +
-            '<span>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</span><span class="project-section-nav-status">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + '</span></button>' +
-            '<button type="button" class="btn ghost small" style="width:100%;margin-top:4px" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات</button></div>';
-        }).join('') + '</div>'
-      ).join('') : '<p class="tenant-hint">لا توجد عروض سابقة.</p>';
+          const date = (item.updatedAt || item.createdAt || '').slice(0, 16).replace('T', ' ');
+          return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
+            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + '</div></div>' +
+            '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
+            '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات</button></div></div>';
+        }).join('') + '</section>'
+      ).join('') : '<p class="tenant-hint">لا توجد عروض سابقة مطابقة.</p>';
     }
 
     function appendWorkflowNavigation(sidebar, activePageId, includeProject) {
@@ -7185,25 +7248,13 @@
       }
 
       if (!includeProject && hasPermission('view_presentations')) {
-        const previous = document.createElement('div');
-        previous.style.cssText = 'margin-top:12px;padding-top:10px;border-top:1px solid var(--line)';
-        previous.innerHTML = '<p class="project-form-sidebar-title">العروض السابقة</p>' +
-          '<input id="projectPreviousSearch" placeholder="اسم العرض" style="width:100%;margin-bottom:5px">' +
-          '<select id="projectPreviousStatus" style="width:100%;margin-bottom:5px"><option value="">كل الحالات</option><option value="draft">مسودة</option><option value="pending_approval">بانتظار التعميد</option><option value="approved">معتمد</option></select>' +
-          '<input id="projectPreviousFrom" type="date" aria-label="من تاريخ" style="width:100%;margin-bottom:5px">' +
-          '<input id="projectPreviousTo" type="date" aria-label="إلى تاريخ" style="width:100%;margin-bottom:5px">' +
-          '<button type="button" class="btn ghost small" id="projectPreviousApply" style="width:100%">تصفية</button>' +
-          '<div id="tenantProjectPreviousList"></div>';
-        sidebar.appendChild(previous);
-        const draftId = tenantProjectData?.draftId || tenantProjectData?.draft_id || '';
-        const list = previous.querySelector('#tenantProjectPreviousList');
-        if (list) list.dataset.draftId = String(draftId);
-        previous.querySelector('#projectPreviousApply')?.addEventListener('click', () => loadProjectPresentationsSidebar(draftId));
-        previous.querySelector('#projectPreviousSearch')?.addEventListener('keydown', event => {
-          if (event.key === 'Enter') loadProjectPresentationsSidebar(draftId);
-        });
-        if (draftId) loadProjectPresentationsSidebar(draftId);
-        else if (list) list.innerHTML = '<p class="tenant-hint">لا توجد عروض سابقة.</p>';
+        const previousButton = document.createElement('button');
+        previousButton.type = 'button';
+        previousButton.className = 'project-section-nav-item';
+        previousButton.style.cssText = 'margin-top:6px;font-weight:700;';
+        previousButton.textContent = 'العروض السابقة';
+        previousButton.addEventListener('click', openProjectPresentationsTab);
+        sidebar.appendChild(previousButton);
       }
 
       const items = [...TENANT_WORKFLOW_ITEMS];
@@ -7241,6 +7292,7 @@
       'tenantSettingsPage',
       'tenantFieldsPage',
       'tenantPresentationsPage',
+      'tenantProjectPresentationsPage',
       'tenantUsersPage',
       'tenantTrainingPage',
       'tenantAIRulesPage',
@@ -7668,6 +7720,14 @@
           const sectionToShow = requestedSection ||
             (navigation && navigation.pageId === 'tenantProjectPage' && navigation.activeSection) || null;
           if (sectionToShow) showSection(sectionToShow, true);
+        } else if (requestedPage === 'tenantProjectPresentationsPage') {
+          const requestedDraftId = new URLSearchParams(window.location.search).get('draftId');
+          if (requestedDraftId) {
+            await openProjectDraftById(requestedDraftId);
+            await loadProjectPresentationsPage(requestedDraftId);
+          } else {
+            await loadProjectPresentationsPage();
+          }
         } else if (TENANT_NAVIGATION_CONTEXT_PAGES.has(requestedPage)) {
           // The slides route carries no identity either, and it used to be shown as-is: a refresh
           // landed on an empty workspace with no slides, no plan and no project data, while the

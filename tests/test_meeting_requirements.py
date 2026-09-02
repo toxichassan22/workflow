@@ -5592,7 +5592,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         ]
         self.assertIn("'/api/project-drafts?'", archive_source)
         self.assertNotIn("'/api/presentations'", archive_source)
-        self.assertIn('loadProjectPresentationsSidebar', index_html)
+        self.assertIn('loadProjectPresentationsPage', index_html)
+        self.assertIn('openProjectPresentationsTab', index_html)
+        self.assertIn('tenantProjectPresentationsPage', index_html)
         self.assertIn('بانتظار التعميد', index_html)
         self.assertIn(".filter(group => group.items.length)", index_html)
 
