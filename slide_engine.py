@@ -406,13 +406,11 @@ def _limit_presentation_charts(groups, limit=4):
                 slide['design_style'] = 'table'
 
 
-# Vertical stacking budget for packed financial tables: data rows plus the header and
-# caption each stacked table costs, capped so 560px of slide height stays readable.
-# A compact financial table row is roughly 25px once its header and caption are
-# included.  This leaves enough room for two related tables such as the draw and
-# repayment schedules while still keeping the result readable on a 720px slide.
-_FINANCIAL_PACK_ROW_BUDGET = 22.0
-_FINANCIAL_PACK_MAX_TABLES = 3
+# Vertical stacking budget for packed tables: data rows plus the header and caption
+# each stacked table costs.  The renderer uses compact rows, so consecutive tables
+# keep filling the current slide until this budget is reached.
+_FINANCIAL_PACK_ROW_BUDGET = 24.0
+_FINANCIAL_PACK_MAX_TABLES = 8
 
 
 def _pack_financial_table_slices(items):
@@ -566,11 +564,9 @@ def _merge_adjacent_table_slides(groups):
     facts available.
     """
     for section_key, slides in groups.items():
-        # Financial tables have their own canonical packer.  Land is the other
-        # section where the planner commonly emits several adjacent key/value
-        # tables that are really one data block.
-        if section_key != 'land':
-            continue
+        # Apply the same sequential packing rule to every section.  A table slide
+        # is only merged with the immediately preceding table slide in its section;
+        # charts, images and narrative slides naturally flush the current group.
         merged = []
         for slide in slides:
             source = str(slide.get('content_source') or '')
@@ -580,10 +576,20 @@ def _merge_adjacent_table_slides(groups):
                 and not slide.get('chart_type')
                 and not slide.get('image_tokens')
                 and not source.startswith(('financial_summary:', 'financial_indicators'))
+                and not source.startswith('project_components:')
+                and not re.fullmatch(r'financial_report:\d+:\d+:\d+:\d+:\d+', source)
             )
             previous = merged[-1] if merged else None
             previous_is_table = bool(previous and previous.get('_table_group'))
-            if is_table and previous_is_table and len(previous.get('_table_group') or []) < _FINANCIAL_PACK_MAX_TABLES:
+            previous_rows = int(previous.get('row_count') or 0) if previous_is_table else 0
+            current_rows = int(slide.get('row_count') or 0)
+            can_fit = (
+                previous_is_table
+                and len(previous.get('_table_group') or []) < _FINANCIAL_PACK_MAX_TABLES
+                and previous_rows + current_rows + 2.5 * (len(previous.get('_table_group') or []) + 1)
+                    <= _FINANCIAL_PACK_ROW_BUDGET
+            )
+            if is_table and can_fit:
                 previous['_table_group'].append(slide)
                 previous['table_group_titles'] = list(previous.get('table_group_titles') or []) + [
                     str(slide.get('title') or '').strip()
@@ -6224,18 +6230,20 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
     width, height = (1280, 960) if slide_ratio == '4:3' else (1280, 720)
 
     title = html_lib.escape(str(slide.get('title') or 'القسم').strip())
-    project_name = html_lib.escape(str(project_data.get('project_name') or project_data.get('projectName') or '').strip())
-    project_logo = str(project_data.get('project_logo') or '').strip()
-
-    logos = '<img src="##LOGO##" alt="" style="height:80px;width:auto;object-fit:contain;" />'
-    if project_logo:
-        logos += (
-            f'<div style="width:1px;height:52px;background:rgba(255,255,255,0.35);margin:0 18px;"></div>'
-            '<img src="##PROJECT_LOGO##" alt="" style="height:80px;width:auto;object-fit:contain;" />'
-        )
+    project_name = html_lib.escape(str(
+        project_data.get('project_name') or project_data.get('projectName') or 'THE VIEW'
+    ).strip())
+    project_logo = _project_logo_reference(project_data)
+    company_name = html_lib.escape(str(
+        branding.get('company_name') or 'منافع الاقتصادية للعقار'
+    ))
 
     rule = f'<div style="width:200px;height:3px;background:{accent};margin:18px 0 0 auto;"></div>'
     footer_number = f'{slide_num:02d} — {int(total_slides or slide_num):02d}' if slide_num else ''
+    header_html, footer_html = _presentation_chrome_html(
+        title, project_name, company_name, primary, accent, '#ffffff', '#ffffff', accent,
+        footer_number, project_logo=bool(project_logo), overlay=True,
+    )
 
     return (
         f'<div class="slide" dir="rtl" style="width:{width}px;height:{height}px;position:relative;'
@@ -6248,18 +6256,14 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
         f'{_hex_to_rgba(divider_background, "0.94")} 0%,{_hex_to_rgba(divider_background, "0.82")} 45%,'
         f'{_hex_to_rgba(divider_background, "0.62")} 100%);"></div>'
         f'<div style="position:absolute;top:0;bottom:0;left:0;width:10px;background:{accent};"></div>'
-        f'<div style="position:absolute;top:44px;left:48px;display:flex;align-items:center;">{logos}</div>'
+        f'{header_html}'
         # padding-bottom biases the block slightly above the optical centre, as in the reference.
         '<div style="position:absolute;top:0;bottom:0;right:64px;width:58%;display:flex;flex-direction:column;'
         'justify-content:center;text-align:right;padding-bottom:56px;box-sizing:border-box;">'
         f'<div style="font-size:58px;line-height:1.15;font-weight:700;color:#ffffff;">{title}</div>'
         f'{rule}'
         '</div>'
-        # dir="ltr": inside the RTL slide "06 — 60" would be reordered into "60 — 06".
-        f'<div data-slide-counter="1" dir="ltr" style="position:absolute;bottom:34px;left:48px;font-size:13px;letter-spacing:1px;'
-        f'color:rgba(255,255,255,0.55);">{footer_number}</div>'
-        f'<div style="position:absolute;bottom:34px;right:48px;font-size:13px;font-weight:700;'
-        f'letter-spacing:1.5px;color:{accent};">{project_name}</div>'
+        f'{footer_html}'
         '</div>'
     )
 
@@ -6422,7 +6426,7 @@ def _replace_data_placeholders(html, project_data, branding=None):
         'roi': project_data.get('roi') or project_data.get('return_on_investment') or '—',
         'alqrma_almdafa_almtwqaa__cap_rate': project_data.get('cap_rate') or project_data.get('capRate') or project_data.get('alqrma_almdafa_almtwqaa__cap_rate') or '—',
         'nsba_alashgal_almtwqaa': project_data.get('occupancy_rate') or project_data.get('occupancy') or '—',
-        'PROJECT_LOGO': project_data.get('project_logo') or project_data.get('projectLogo') or '',
+        'PROJECT_LOGO': _project_logo_reference(project_data),
     }
 
     for a_key, a_val in aliases.items():
@@ -6503,16 +6507,19 @@ def _apply_logo_contrast_styles(html, branding, project_data, slide_type='conten
 
     def style_token(source, token, tone):
         background = dark_background if tone == 'light' else '#ffffff'
-        size = ('height:48px!important;max-height:48px!important;' if content_header else
-                'height:80px!important;max-height:80px!important;' if hero_logo else '')
-        padding = '4px 10px' if content_header else '6px 12px'
-        declarations = (
-            f'{size}background:{background}!important;padding:{padding}!important;'
-            'border-radius:8px!important;box-sizing:border-box!important;object-fit:contain!important;'
-        )
 
         def apply(match):
             tag = match.group(0)
+            chrome_logo = 'presentation-chrome-logo' in tag
+            size = ('height:48px!important;max-height:48px!important;' if chrome_logo and content_header else
+                    'height:40px!important;max-height:40px!important;' if chrome_logo else
+                    'height:48px!important;max-height:48px!important;' if content_header else
+                    'height:80px!important;max-height:80px!important;' if hero_logo else '')
+            padding = '3px 7px' if chrome_logo else ('4px 10px' if content_header else '6px 12px')
+            declarations = (
+                f'{size}background:{background}!important;padding:{padding}!important;'
+                'border-radius:8px!important;box-sizing:border-box!important;object-fit:contain!important;'
+            )
             style_match = re.search(r'style\s*=\s*(["\'])(.*?)\1', tag, re.IGNORECASE)
             if style_match:
                 style = style_match.group(2).rstrip(';') + ';' + declarations
@@ -6774,33 +6781,72 @@ def _strip_existing_slide_chrome(html):
 
 
 def _presentation_chrome_html(title, project_title, company_name, primary, accent, footer_background,
-                              footer_text, footer_accent, counter, project_logo=False):
+                              footer_text, footer_accent, counter, project_logo=False, overlay=False):
+    """Return the one mandatory header/footer used by every slide type.
+
+    Cover and section-divider slides use the same information over the main image, while
+    ordinary slides use a light document header. Keeping this in one renderer prevents
+    generated/model-authored chrome from drifting between preview and PDF export.
+    """
+    if overlay:
+        header_background = _hex_to_rgba(primary, '0.84')
+        footer_surface = _hex_to_rgba(primary, '0.92')
+        header_text = '#ffffff'
+        footer_surface_text = '#ffffff'
+        header_style = (
+            f'position:absolute;top:0;right:0;left:0;height:78px;background:{header_background};'
+            'border-bottom:1px solid rgba(255,255,255,.22);'
+        )
+        footer_style = f'background:{footer_surface};border-top:1px solid rgba(255,255,255,.22);'
+    else:
+        header_text = primary
+        footer_surface_text = footer_text
+        header_style = f'position:relative;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
+        footer_style = f'background:{footer_background};border-top:1px solid #e2e8f0;'
+
+    logo_style = (
+        ('height:80px;max-height:40px;' if overlay else 'height:40px;') +
+        'width:auto;max-width:122px;object-fit:contain;display:inline-block;'
+        'background:#ffffff;border-radius:6px;padding:3px 7px;box-sizing:border-box;'
+    )
+    footer_marker = '' if overlay else ' data-slide-footer="1"'
+    footer_dimension = 'height:var(--slide-footer-height,2.25rem);min-height:2.25rem;' if overlay else 'height:36px;'
     project_logo_html = (
-        '<span style="display:inline-flex;align-items:center;margin-right:10px;">'
-        '<img src="##PROJECT_LOGO##" alt="" style="height:30px;width:auto;object-fit:contain;" />'
-        '</span>'
+        '<img class="presentation-chrome-logo" src="##PROJECT_LOGO##" alt="" '
+        f'style="{logo_style}" />'
     ) if project_logo else ''
     header = (
-        f'<header class="slide-header" data-slide-header="1" dir="rtl" style="height:56px;position:relative;display:flex;'
-        f'align-items:center;justify-content:space-between;padding:0 20px;background:#ffffff;border-bottom:2px solid {primary};'
-        f'box-sizing:border-box;z-index:10;overflow:hidden;">'
-        f'<div style="display:flex;align-items:center;min-width:0;gap:10px;">'
-        f'<img src="##LOGO##" alt="" style="height:38px;width:auto;max-width:120px;object-fit:contain;display:inline-block;" />'
+        f'<header class="slide-header" data-slide-header="1" dir="rtl" style="{header_style}'
+        'display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
+        'box-sizing:border-box;z-index:10;overflow:hidden;">'
+        '<div style="display:flex;align-items:center;gap:10px;min-width:0;direction:ltr;">'
+        f'<img class="presentation-chrome-logo" src="##LOGO##" alt="" style="{logo_style}" />'
         f'{project_logo_html}'
         f'<span style="width:3px;height:28px;background:{accent};display:inline-block;flex:0 0 auto;"></span>'
-        f'<span style="font-size:16px;font-weight:700;color:{primary};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</span>'
-        f'</div></header>'
+        f'<span style="font-size:16px;font-weight:700;color:{header_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;">{title}</span>'
+        '</div></header>'
     )
     footer = (
-        f'<footer class="slide-footer" data-slide-footer="1" dir="rtl" style="position:absolute;bottom:0;right:0;left:0;'
-        f'height:36px;background:{footer_background};border-top:1px solid rgba(255,255,255,.16);display:flex;'
-        f'align-items:center;justify-content:space-between;padding:0 20px;box-sizing:border-box;z-index:10;overflow:hidden;">'
-        f'<span style="font-size:11px;font-weight:600;color:{footer_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34%;">{project_title}</span>'
-        f'<span style="font-size:11px;font-weight:500;color:{footer_text};opacity:.86;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42%;text-align:center;">{company_name}</span>'
-        f'<span data-slide-counter="1" dir="ltr" style="display:inline-flex;align-items:center;justify-content:center;min-width:62px;'
-        f'font-size:12px;font-weight:700;color:{footer_accent};text-align:center;">{counter}</span></footer>'
+        f'<footer class="slide-footer"{footer_marker} dir="rtl" style="position:absolute;bottom:0;right:0;left:0;'
+        f'{footer_dimension}{footer_style}display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
+        'box-sizing:border-box;z-index:10;overflow:hidden;">'
+        f'<span style="font-size:12px;font-weight:700;color:{footer_surface_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62%;">{project_title}</span>'
+        f'<span data-slide-counter="1" dir="ltr" style="display:inline-flex;align-items:center;justify-content:center;min-width:72px;'
+        f'font-size:12px;font-weight:700;color:{footer_accent if not overlay else accent};text-align:center;">{counter}</span></footer>'
     )
     return header, footer
+
+
+def _project_logo_reference(project_data):
+    source = project_data if isinstance(project_data, dict) else {}
+    value = str(source.get('project_logo') or source.get('projectLogo') or '').strip()
+    if value:
+        return value
+    meta = source.get('project_logo_file_meta')
+    if isinstance(meta, dict) and str(meta.get('path') or '').strip():
+        return str(meta.get('path')).strip()
+    file_id = str(source.get('project_logo_file_id') or '').strip()
+    return f'/api/project-files/{file_id}' if file_id else ''
 
 
 def _strip_internal_financial_notes(html):
@@ -6916,41 +6962,43 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         return tag
     html = re.sub(r'<img\s[^>]*>', _strip_srcless_img, html, flags=re.IGNORECASE)
 
-    # Content/map/site slides get a header/footer; cover, dividers, moodboard and closing never do:
-    # a divider carries its own logo, section name, slide number and project name.
-    if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
-        title = html_lib.escape(str(slide_title or f'شريحة {slide_num}' or 'العنوان'))
-        primary = '#7A0C0C'
-        accent = '#C4A35A'
-        company_name = 'منافع الاقتصادية للعقار'
+    # Every slide, including the cover, section dividers, moodboards and closing, gets
+    # the same required brand pair and page counter. Cover-like slides render the chrome
+    # over the main image so the image remains the visual background.
+    title = html_lib.escape(str(slide_title or f'شريحة {slide_num}' or 'العنوان'))
+    primary = '#7A0C0C'
+    accent = '#C4A35A'
+    company_name = 'منافع الاقتصادية للعقار'
 
-        if branding is None and tenant_id:
-            branding = db.get_branding(tenant_id) or {}
-        if branding:
-            primary = branding.get('primary_color') or primary
-            accent = branding.get('accent_color') or accent
-            company_name = branding.get('company_name') or company_name
-            if not company_name:
-                tenant = db.get_tenant(tenant_id) if tenant_id else None
-                company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
+    if branding is None and tenant_id:
+        branding = db.get_branding(tenant_id) or {}
+    if branding:
+        primary = branding.get('primary_color') or primary
+        accent = branding.get('accent_color') or accent
+        company_name = branding.get('company_name') or company_name
+        if not company_name:
+            tenant = db.get_tenant(tenant_id) if tenant_id else None
+            company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
 
-        primary = normalize_hex_color(primary, '#7a0c0c')
-        accent = normalize_hex_color(accent, '#c4a35a')
-        footer_background = '#ffffff'
-        footer_text = readable_text_color(primary, footer_background, ('#0f172a',))
-        footer_accent = readable_text_color(accent, footer_background, (footer_text,))
-        project_source = project_data if isinstance(project_data, dict) else {}
-        project_title = html_lib.escape(str(
-            project_source.get('project_name') or project_source.get('projectName') or 'THE VIEW'
-        ))
-        footer_number = _slide_counter_text(slide_num, total_slides)
-        header_html, footer_html = _presentation_chrome_html(
-            title, project_title, html_lib.escape(company_name), primary, accent,
-            footer_background, footer_text, footer_accent, footer_number,
-            project_logo=bool(str((project_data or {}).get('project_logo') or '').strip())
-        )
-        html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html + '\n', html, count=1)
-        html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
+    primary = normalize_hex_color(primary, '#7a0c0c')
+    accent = normalize_hex_color(accent, '#c4a35a')
+    overlay = slide_type in ('cover', 'section_divider', 'closing') or is_cover_or_closing
+    footer_background = '#ffffff'
+    footer_text = readable_text_color(primary, footer_background, ('#0f172a',))
+    footer_accent = readable_text_color(accent, footer_background, (footer_text,))
+    project_source = project_data if isinstance(project_data, dict) else {}
+    project_title = html_lib.escape(str(
+        project_source.get('project_name') or project_source.get('projectName') or 'THE VIEW'
+    ))
+    footer_number = _slide_counter_text(slide_num, total_slides)
+    header_html, footer_html = _presentation_chrome_html(
+        title, project_title, html_lib.escape(company_name), primary, accent,
+        footer_background, footer_text, footer_accent, footer_number,
+        project_logo=bool(_project_logo_reference(project_source)),
+        overlay=overlay,
+    )
+    html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html + '\n', html, count=1)
+    html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
 
     return html
 
@@ -6981,7 +7029,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     html = _replace_data_placeholders(html, project_data, branding)
     html = resolve_logo_in_html(
         html, tenant_id, _branding_cache=branding,
-        project_logo=(project_data or {}).get('project_logo')
+        project_logo=_project_logo_reference(project_data),
     )
     html = _format_presentation_numeric_text(html)
     return _drop_unresolved_image_placeholders(html)
@@ -7042,6 +7090,14 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 item.get('html') or '', slide_type, slide_num=index, slide_title=item.get('title'),
                 total_slides=total, tenant_id=tenant_id, branding=branding, project_data=project_data,
             )
+        # Renumbering is also used when reopening/exporting an older saved deck. Resolve
+        # the two chrome logos here so a newly rebuilt header never reaches the client
+        # with a placeholder or with the project logo replaced by the company logo.
+        item['html'] = _replace_data_placeholders(item.get('html') or '', project_data, branding)
+        item['html'] = resolve_logo_in_html(
+            item['html'], tenant_id, _branding_cache=branding,
+            project_logo=_project_logo_reference(project_data),
+        )
     return normalized
 
 
