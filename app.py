@@ -5374,6 +5374,10 @@ def api_generate_slide_single():
         return jsonify({'error': 'slidePlan with slides array is required'}), 400
 
     slides = slide_plan.get('slides', [])
+    # The client may send just the single slide needed (slideIndex always 0)
+    # together with a _totalSlides field for the real deck size.
+    _total_slides_override = data.get('_totalSlides')
+    total_slides = int(_total_slides_override) if isinstance(_total_slides_override, (int, float)) and _total_slides_override > 0 else len(slides)
     if slide_index < 0 or slide_index >= len(slides):
         return jsonify({'error': 'Invalid slide index'}), 400
 
@@ -5447,7 +5451,7 @@ def api_generate_slide_single():
         return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL)
 
     slide = slides[slide_index]
-    total = len(slides)
+    total = total_slides
     html = generate_single_slide(system_prompt, slide, slide_index + 1, total, branding, call_glm_fn, max_retries=3, project_data=project_data)
 
     # Never turn a failed generation into a fake successful slide. The client

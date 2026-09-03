@@ -20132,11 +20132,14 @@
 
           for (let attempt = 1; attempt <= 3 && !generated; attempt++) {
             try {
+              // Snapshot the specific slide so a mutating plan cannot break the request.
+              const _snapSlide = tenantSlidePlan.slides[i];
               const genPayload = {
                 projectData: slimGenerationProjectData(tenantProjectData),
-                slidePlan: tenantSlidePlan,
+                slidePlan: { slides: [_snapSlide] },
                 images: generationImages,
-                slideIndex: i
+                slideIndex: 0,
+                _totalSlides: totalSlides
               };
               if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
 
