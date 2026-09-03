@@ -555,18 +555,7 @@ def _merge_sparse_plan_slides(groups):
             sparse_generic = (not source and slide.get('design_style') != 'table'
                               and not slide.get('image_tokens')
                               and len([item for item in (slide.get('bullets') or []) if str(item or '').strip()]) <= 1)
-            target = merged[-1] if merged else None
-            prev_title = str(target.get('title') or '').strip() if target else ''
-            curr_title = str(slide.get('title') or '').strip()
-            is_sensitivity_merge = any('حساسية' in t for t in (prev_title, curr_title)) and not (
-                'حساسية' in prev_title and 'حساسية' in curr_title
-            )
-            is_clarification_merge = any(term in t for t in (prev_title, curr_title) for term in ('إيضاح', 'clarification', 'ملاحظات')) and not (
-                any(term in prev_title for term in ('إيضاح', 'clarification', 'ملاحظات')) and any(term in curr_title for term in ('إيضاح', 'clarification', 'ملاحظات'))
-            )
             if ((sparse_financial or sparse_generic) and merged
-                    and not is_sensitivity_merge
-                    and not is_clarification_merge
                     and not target.get('chart_type') and not slide.get('chart_type')):
                 if source:
                     target['content_sources'] = list(target.get('content_sources') or [target.get('content_source')])
@@ -585,17 +574,7 @@ def _merge_sparse_plan_slides(groups):
                              and not first.get('image_tokens')
                              and len([item for item in (first.get('bullets') or []) if str(item or '').strip()]) <= 1)
             second = merged[1]
-            first_title = str(first.get('title') or '').strip()
-            second_title = str(second.get('title') or '').strip()
-            is_sens = any('حساسية' in t for t in (first_title, second_title)) and not (
-                'حساسية' in first_title and 'حساسية' in second_title
-            )
-            is_clarif = any(term in t for t in (first_title, second_title) for term in ('إيضاح', 'clarification', 'ملاحظات')) and not (
-                any(term in first_title for term in ('إيضاح', 'clarification', 'ملاحظات')) and any(term in second_title for term in ('إيضاح', 'clarification', 'ملاحظات'))
-            )
             if ((first_sparse or first_generic) and merged
-                    and not is_sens
-                    and not is_clarif
                     and not second.get('chart_type') and not first.get('chart_type')):
                 target = second
                 if first_source:
@@ -637,18 +616,8 @@ def _merge_adjacent_table_slides(groups):
             previous_is_table = bool(previous and previous.get('_table_group'))
             previous_rows = int(previous.get('row_count') or 0) if previous_is_table else 0
             current_rows = int(slide.get('row_count') or 0)
-            prev_title = str(previous.get('title') or '').strip() if previous else ''
-            curr_title = str(slide.get('title') or '').strip()
-            is_sensitivity_merge = any('حساسية' in t for t in (prev_title, curr_title)) and not (
-                'حساسية' in prev_title and 'حساسية' in curr_title
-            )
-            is_clarification_merge = any(term in t for t in (prev_title, curr_title) for term in ('إيضاح', 'clarification', 'ملاحظات')) and not (
-                any(term in prev_title for term in ('إيضاح', 'clarification', 'ملاحظات')) and any(term in curr_title for term in ('إيضاح', 'clarification', 'ملاحظات'))
-            )
             can_fit = (
                 previous_is_table
-                and not is_sensitivity_merge
-                and not is_clarification_merge
                 and len(previous.get('_table_group') or []) < _FINANCIAL_PACK_MAX_TABLES
                 and previous_rows + current_rows + 2.5 * (len(previous.get('_table_group') or []) + 1)
                     <= _FINANCIAL_PACK_ROW_BUDGET
@@ -1169,14 +1138,6 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     continue
                 if part.get('type') == 'heading':
                     text = str(part.get('text') or '').strip()
-                    is_sens_heading = any(term in text for term in ('حساسية', 'sensitivity', 'سيناريو'))
-                    pending_has_sens = any(
-                        any(t in str(item.get('title', '')) for t in ('حساسية', 'sensitivity', 'سيناريو'))
-                        for item in pending_tables
-                    )
-                    is_clarification = any(term in text for term in ('إيضاح', 'clarification', 'ملاحظات'))
-                    if (is_sens_heading and not pending_has_sens) or (pending_has_sens and not is_sens_heading) or is_clarification:
-                        flush_pending_tables()
                     if part.get('level') == 3:
                         subheading = text
                     else:
