@@ -411,7 +411,7 @@ def _limit_presentation_charts(groups, limit=4):
 # A compact financial table row is roughly 25px once its header and caption are
 # included.  This leaves enough room for two related tables such as the draw and
 # repayment schedules while still keeping the result readable on a 720px slide.
-_FINANCIAL_PACK_ROW_BUDGET = 20.0
+_FINANCIAL_PACK_ROW_BUDGET = 22.0
 _FINANCIAL_PACK_MAX_TABLES = 3
 
 
@@ -1174,11 +1174,17 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             assumption_rows = tables.get('sensitivityAssumptionsTable')
             if (not isinstance(assumption_rows, list) or not assumption_rows) and isinstance(tables.get('sensitivity'), list):
                 assumption_rows = tables.get('sensitivity')
-            has_assumptions = any(
-                str(s.get('source_table') or '') == 'sensitivityAssumptionsTable'
-                or 'sensitivityAssumptionsTable' in str(s.get('content_source') or '')
-                for s in groups.get('financial', [])
-            )
+            def is_assumptions_slide(s):
+                text = ' '.join(str(s.get(key) or '') for key in ('title', 'content_source', 'source_table')).lower()
+                source_match = re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', str(s.get('content_source') or ''))
+                if source_match:
+                    text += ' ' + _financial_report_part_title(model, int(source_match.group(1))).lower()
+                return (
+                    'sensitivityassumptionstable' in text
+                    or bool(re.search(r'افتراضات.*(?:حساسية|سيناريو)|(?:حساسية|سيناريو).*افتراضات', text))
+                )
+
+            has_assumptions = any(is_assumptions_slide(s) for s in groups.get('financial', []))
             if assumption_rows and not has_assumptions:
                 add('financial', {
                     'title': 'افتراضات تحليل الحساسية', 'type': 'content',
@@ -4332,8 +4338,14 @@ def _set_tag_style(tag, property_names, declarations):
     style_match = re.search(r'style\s*=\s*(["\'])(.*?)\1', tag, re.IGNORECASE)
     if style_match:
         style = style_match.group(2)
-        names = '|'.join(re.escape(name) for name in property_names)
-        style = re.sub(rf'(?:^|;)\s*(?:{names})\s*:[^;]*;?', ';', style, flags=re.IGNORECASE)
+        # Remove one property at a time.  A single alternation used to consume
+        # the separator after every other declaration, leaving duplicate inline
+        # rules after a second normalization pass.
+        for property_name in property_names:
+            style = re.sub(
+                rf'(^|;)\s*{re.escape(property_name)}\s*:[^;]*;?',
+                r'\1', style, flags=re.IGNORECASE
+            )
         style = style.strip('; ')
         style = (style + ';' if style else '') + declarations
         return tag[:style_match.start(2)] + style + tag[style_match.end(2):]
@@ -4541,7 +4553,23 @@ def _normalize_table_readability(html):
             'font-size:12px!important;line-height:1.35!important;padding:7px 12px!important;vertical-align:middle!important;overflow-wrap:anywhere!important;')
 
     html = re.sub(r'<th\b[^>]*>', normalize_header, html, flags=re.IGNORECASE)
-    return re.sub(r'<td\b[^>]*>', normalize_cell, html, flags=re.IGNORECASE)
+    html = re.sub(r'<td\b[^>]*>', normalize_cell, html, flags=re.IGNORECASE)
+
+    def normalize_numeric_cell(match):
+        opening, body = match.group(1), match.group(2)
+        plain = html_lib.unescape(re.sub(r'<[^>]*>', '', body)).strip()
+        compact = re.sub(r'[\d٠-٩\s,٬.٫%٪()\-+/:]', '', plain)
+        for word in ('ريال', 'ر.س', 'سنة', 'عام', 'مؤشر', 'مرة'):
+            compact = compact.replace(word, '')
+        if re.search(r'[\d٠-٩]', plain) and not re.search(r'[A-Za-z\u0600-\u06ff]', compact):
+            opening = _set_tag_style(
+                opening, ('text-align', 'direction'),
+                'text-align:center!important;direction:ltr!important;'
+            )
+        return opening + body + '</td>'
+
+    return re.sub(r'(<td\b[^>]*>)([\s\S]*?)</td\s*>', normalize_numeric_cell,
+                  html, flags=re.IGNORECASE)
 
 
 def _normalize_brand_overlay(html, branding):
@@ -4920,7 +4948,7 @@ def _format_table_num(val):
 
 def _render_fallback_table(headers, rows, primary):
     header_html = ''.join(
-        f'<th style="background:{primary};color:#fff;padding:9px 12px;font-size:12px;text-align:right;">{html_lib.escape(str(value))}</th>'
+        f'<th style="background:{primary};color:#fff;padding:9px 12px;font-size:12px;text-align:center;vertical-align:middle;">{html_lib.escape(str(value))}</th>'
         for value in headers)
     body = []
     for row_idx, row in enumerate(rows):
@@ -4929,11 +4957,11 @@ def _render_fallback_table(headers, rows, primary):
         tds = []
         for col_idx, val in enumerate(values):
             fmt, is_num = _format_table_num(val)
-            align = 'left' if is_num and col_idx > 0 else 'right'
-            direction = 'ltr' if is_num and col_idx > 0 else 'rtl'
+            align = 'center' if is_num else 'right'
+            direction = 'ltr' if is_num else 'rtl'
             tds.append(
                 f'<td style="border-bottom:1px solid #e2e8f0;padding:8px 12px;font-size:11.5px;'
-                f'text-align:{align};direction:{direction};font-feature-settings:\'tnum\';font-variant-numeric:tabular-nums;">{fmt}</td>'
+                f'text-align:{align};direction:{direction};vertical-align:middle;font-feature-settings:\'tnum\';font-variant-numeric:tabular-nums;">{fmt}</td>'
             )
         body.append(f'<tr style="background:{bg};">{"".join(tds)}</tr>')
     return ('<table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">'
@@ -5174,16 +5202,22 @@ SOL_SLIDES_CSS = """
     background: #0b1f33; color: #ffffff; font-weight: 700; padding: 10px 14px; font-size: 11.5px; white-space: nowrap;
   }
   .financial-table td {
-    padding: 8px 14px; border-bottom: 1px solid #f1f5f9; color: #1e293b; font-weight: 500;
+    padding: 8px 14px; border-bottom: 1px solid #f1f5f9; color: #1e293b; font-weight: 500; vertical-align: middle;
   }
   .financial-table tr:nth-child(even) td {
     background: #f8fafc;
   }
   .financial-table td.numeric {
-    text-align: left; direction: ltr; font-weight: 600; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+    text-align: center !important; direction: ltr; font-weight: 600; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
   }
   .financial-table tfoot td {
     background: #f1f5f9; font-weight: 800; border-top: 2px solid #cbd5e1; color: #0b1f33;
+  }
+  .stacked-financial-tables .financial-table th {
+    padding: 6px 10px; font-size: 11px;
+  }
+  .stacked-financial-tables .financial-table td {
+    padding: 5px 10px; font-size: 11px;
   }
 
   .waterfall-card {
@@ -5505,10 +5539,6 @@ def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_s
         </tbody>
       </table>
     </div>
-    <div class="table-note" style="display:flex;justify-content:space-between;">
-      <span>نطاق التحليل: {title}</span>
-      <span>القيم معروضة بـ (ر.س) ومقربة وفق النموذج المالي المعتمد.</span>
-    </div>
   </div>
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>
@@ -5672,7 +5702,7 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
             f'{html_lib.escape(block["title"])}</div>' if block['title'] else ''
         )
         rendered_tables.append(f'''
-        <div style="margin-bottom:10px;">
+        <div style="margin-bottom:6px;">
           {title_block}
           <div class="financial-table-wrap">
             <table class="financial-table">
@@ -5699,7 +5729,7 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
       </div>
     </div>
   </header>
-  <div style="padding:0 58px;margin-top:14px;max-height:510px;overflow:hidden;">
+  <div class="stacked-financial-tables" style="padding:0 58px;margin-top:14px;max-height:510px;overflow:hidden;">
     {"".join(rendered_tables)}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
@@ -6675,6 +6705,133 @@ def _remove_managed_slide_footer(html):
     )
 
 
+def _slide_element_end(html, opening_match):
+    """Return the end offset of one possibly nested HTML element."""
+    tag_name = opening_match.group('tag').lower()
+    depth = 0
+    void_tags = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+                 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+    tag_re = re.compile(r'<(?P<closing>/)?(?P<tag>[a-z][\w:-]*)(?:\s[^>]*)?>', re.IGNORECASE)
+    for tag_match in tag_re.finditer(html, opening_match.start()):
+        if tag_match.group('tag').lower() != tag_name:
+            continue
+        if tag_match.group('closing'):
+            depth -= 1
+            if depth == 0:
+                return tag_match.end()
+        elif tag_name not in void_tags and not tag_match.group(0).rstrip().endswith('/>'):
+            depth += 1
+    return len(html)
+
+
+def _strip_existing_slide_chrome(html):
+    """Remove model-authored headers/footers before adding the canonical chrome.
+
+    Generated HTML has historically mixed semantic header/footer tags, marked divs,
+    and unmarked absolute bars.  Removing the full balanced element prevents nested
+    footer divs from being left behind and keeps every content slide on one layout.
+    """
+    if not html:
+        return html
+    opening_re = re.compile(r'<(?P<tag>[a-z][\w:-]*)(?P<attrs>\s[^>]*)?>', re.IGNORECASE)
+    ranges = []
+    for match in opening_re.finditer(html):
+        tag = match.group('tag').lower()
+        attrs = match.group('attrs') or ''
+        classes = re.search(r'\bclass\s*=\s*["\']([^"\']*)["\']', attrs, re.IGNORECASE)
+        class_text = (classes.group(1) if classes else '').lower()
+        style_match = re.search(r'\bstyle\s*=\s*["\']([^"\']*)["\']', attrs, re.IGNORECASE)
+        style = (style_match.group(1) if style_match else '').lower().replace(' ', '')
+        is_header = (
+            tag == 'header'
+            or 'slide-header' in class_text
+            or re.search(r'\bdata-slide-header\s*=', attrs, re.IGNORECASE)
+            or (re.search(r'position:(?:absolute|fixed)', style)
+                and re.search(r'top:0(?:px)?', style)
+                and re.search(r'height:(?:36|40|48|56|60|64|72|96)px', style))
+        )
+        is_footer = (
+            tag == 'footer'
+            or 'slide-footer' in class_text
+            or re.search(r'\bdata-slide-footer\s*=', attrs, re.IGNORECASE)
+            or (re.search(r'position:(?:absolute|fixed)', style)
+                and re.search(r'bottom:0(?:px)?', style)
+                and re.search(r'height:(?:30|32|34|36|38|40|42)px', style))
+        )
+        if not (is_header or is_footer):
+            continue
+        end = _slide_element_end(html, match)
+        ranges.append((match.start(), end))
+    for start, end in reversed(ranges):
+        while start > 0 and html[start - 1] in ' \t\r\n':
+            start -= 1
+        while end < len(html) and html[end] in ' \t\r\n':
+            end += 1
+        html = html[:start] + html[end:]
+    # Removed chrome leaves indentation-only lines behind; collapse them so a
+    # second normalization pass is byte-stable as well as visually stable.
+    return re.sub(r'\n[ \t]*(?:\n[ \t]*)+', '\n', html)
+
+
+def _presentation_chrome_html(title, project_title, company_name, primary, accent, footer_background,
+                              footer_text, footer_accent, counter, project_logo=False):
+    project_logo_html = (
+        '<span style="display:inline-flex;align-items:center;margin-right:10px;">'
+        '<img src="##PROJECT_LOGO##" alt="" style="height:30px;width:auto;object-fit:contain;" />'
+        '</span>'
+    ) if project_logo else ''
+    header = (
+        f'<header class="slide-header" data-slide-header="1" dir="rtl" style="height:56px;position:relative;display:flex;'
+        f'align-items:center;justify-content:space-between;padding:0 20px;background:#ffffff;border-bottom:2px solid {primary};'
+        f'box-sizing:border-box;z-index:10;overflow:hidden;">'
+        f'<div style="display:flex;align-items:center;min-width:0;gap:10px;">'
+        f'<img src="##LOGO##" alt="" style="height:38px;width:auto;max-width:120px;object-fit:contain;display:inline-block;" />'
+        f'{project_logo_html}'
+        f'<span style="width:3px;height:28px;background:{accent};display:inline-block;flex:0 0 auto;"></span>'
+        f'<span style="font-size:16px;font-weight:700;color:{primary};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</span>'
+        f'</div></header>'
+    )
+    footer = (
+        f'<footer class="slide-footer" data-slide-footer="1" dir="rtl" style="position:absolute;bottom:0;right:0;left:0;'
+        f'height:36px;background:{footer_background};border-top:1px solid rgba(255,255,255,.16);display:flex;'
+        f'align-items:center;justify-content:space-between;padding:0 20px;box-sizing:border-box;z-index:10;overflow:hidden;">'
+        f'<span style="font-size:11px;font-weight:600;color:{footer_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34%;">{project_title}</span>'
+        f'<span style="font-size:11px;font-weight:500;color:{footer_text};opacity:.86;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42%;text-align:center;">{company_name}</span>'
+        f'<span data-slide-counter="1" dir="ltr" style="display:inline-flex;align-items:center;justify-content:center;min-width:62px;'
+        f'font-size:12px;font-weight:700;color:{footer_accent};text-align:center;">{counter}</span></footer>'
+    )
+    return header, footer
+
+
+def _strip_internal_financial_notes(html):
+    """Remove model-facing financial instructions that must not reach the client deck."""
+    if not html:
+        return html
+    note_re = re.compile(
+        r'القيم\s+معروضة[\s\S]{0,180}?دون\s+إعادة\s+حساب[\s\S]{0,60}?تقريب',
+        re.IGNORECASE,
+    )
+    opening_re = re.compile(r'<(?P<tag>div|span|p|small|section|aside)\b(?P<attrs>\s[^>]*)?>', re.IGNORECASE)
+    while True:
+        note = note_re.search(html)
+        if not note:
+            break
+        container = None
+        for candidate in reversed(list(opening_re.finditer(html, 0, note.start()))):
+            attrs = candidate.group('attrs') or ''
+            if re.search(r'\bclass\s*=\s*["\'][^"\']*\bslide\b', attrs, re.IGNORECASE):
+                continue
+            end = _slide_element_end(html, candidate)
+            if end >= note.end():
+                container = (candidate.start(), end)
+                break
+        if container:
+            html = html[:container[0]] + html[container[1]:]
+        else:
+            html = html[:note.start()] + html[note.end():]
+    return html
+
+
 def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_slides=None,
                        tenant_id=None, branding=None, project_data=None):
     """Post-process a slide while keeping cover and closing free of header/footer.
@@ -6698,9 +6855,12 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         re.search(r'ختام|closing|شكراً|thanks', normalized_title)
     ) or (total_slides is not None and int(slide_num or 0) == int(total_slides))
     is_cover_or_closing = is_cover or is_closing
-    if is_cover_or_closing or slide_type == 'moodboard':
-        html = _remove_managed_slide_footer(html)
-    else:
+    # Rebuild the presentation chrome from one source of truth.  Model-authored
+    # chrome differed from the deterministic financial templates and could carry
+    # a stale counter or malformed nested footer into the exported deck.
+    html = _strip_existing_slide_chrome(html)
+    html = _strip_internal_financial_notes(html)
+    if slide_type == 'section_divider':
         html = _rewrite_slide_counter(html, slide_type, slide_num, total_slides)
     if is_cover_or_closing:
         html = _normalize_brand_overlay(html, branding)
@@ -6759,10 +6919,7 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     # Content/map/site slides get a header/footer; cover, dividers, moodboard and closing never do:
     # a divider carries its own logo, section name, slide number and project name.
     if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
-        has_header = bool(re.search(r'height:\s*56px|slide-header|<header\b', html))
-        has_footer = bool(re.search(r'height:\s*36px|slide-footer|<footer\b', html))
-
-        title = slide_title or f'شريحة {slide_num}' or 'العنوان'
+        title = html_lib.escape(str(slide_title or f'شريحة {slide_num}' or 'العنوان'))
         primary = '#7A0C0C'
         accent = '#C4A35A'
         company_name = 'منافع الاقتصادية للعقار'
@@ -6779,39 +6936,21 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
 
         primary = normalize_hex_color(primary, '#7a0c0c')
         accent = normalize_hex_color(accent, '#c4a35a')
-        header_title = readable_text_color(primary, '#ffffff', ('#0f172a',))
-        footer_background = dark_surface_color(primary, branding.get('secondary_color') if branding else None)
-        footer_text = readable_text_color('#ffffff', footer_background, ('#0f172a',))
+        footer_background = '#ffffff'
+        footer_text = readable_text_color(primary, footer_background, ('#0f172a',))
         footer_accent = readable_text_color(accent, footer_background, (footer_text,))
-
-        if not has_header:
-            # The project logo belongs next to the company logo. This fallback used to carry the
-            # company logo alone, so a slide the model built without a header lost it entirely.
-            project_logo = str((project_data or {}).get('project_logo') or '').strip()
-            project_logo_html = (
-                f'<div style="width:1px;height:26px;background:#e2e8f0;margin:0 10px;"></div>'
-                f'<img src="##PROJECT_LOGO##" alt="" style="height:36px;width:auto;object-fit:contain;" />'
-            ) if project_logo else ''
-            header_html = (
-                f'<div style="position:absolute;top:0;right:0;left:0;height:56px;background:#fff;border-bottom:2px solid {primary};display:flex;align-items:center;padding:0 20px;z-index:10;">'
-                '<img src="##LOGO##" style="height:40px;margin-right:12px;" />'
-                + project_logo_html +
-                f'<div style="width:3px;height:28px;background:{accent};margin:0 12px;"></div>'
-                f'<span style="font-size:16px;font-weight:600;color:{header_title};">{title}</span>'
-                '</div>'
-            )
-            html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
-
-        if not has_footer:
-            footer_number = _slide_counter_text(slide_num, total_slides)
-            footer_html = (
-                f'<div data-slide-footer="1" style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{footer_background};display:flex;align-items:center;padding:0 16px;z-index:10;">'
-                f'<span style="font-size:13px;color:{footer_text};">{title}</span>'
-                f'<span style="font-size:13px;color:{footer_text};opacity:0.7;margin-right:auto;margin-left:8px;">{company_name}</span>'
-                f'<span data-slide-counter="1" style="color:{footer_accent};font-size:12px;font-weight:700;min-width:52px;text-align:left;">{footer_number}</span>'
-                '</div>'
-            )
-            html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
+        project_source = project_data if isinstance(project_data, dict) else {}
+        project_title = html_lib.escape(str(
+            project_source.get('project_name') or project_source.get('projectName') or 'THE VIEW'
+        ))
+        footer_number = _slide_counter_text(slide_num, total_slides)
+        header_html, footer_html = _presentation_chrome_html(
+            title, project_title, html_lib.escape(company_name), primary, accent,
+            footer_background, footer_text, footer_accent, footer_number,
+            project_logo=bool(str((project_data or {}).get('project_logo') or '').strip())
+        )
+        html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html + '\n', html, count=1)
+        html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
 
     return html
 
@@ -6894,10 +7033,15 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 total_slides=total, content_source=item.get('content_source'),
             )
         elif slide_type in ('cover', 'closing', 'moodboard'):
-            item['html'] = _remove_managed_slide_footer(item.get('html') or '')
+            item['html'] = postprocess_slide(
+                item.get('html') or '', slide_type, slide_num=index, slide_title=item.get('title'),
+                total_slides=total, tenant_id=tenant_id, branding=branding, project_data=project_data,
+            )
         else:
-            item['html'] = _rewrite_slide_counter(
-                item.get('html') or '', slide_type, index, total)
+            item['html'] = postprocess_slide(
+                item.get('html') or '', slide_type, slide_num=index, slide_title=item.get('title'),
+                total_slides=total, tenant_id=tenant_id, branding=branding, project_data=project_data,
+            )
     return normalized
 
 
