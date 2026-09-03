@@ -4701,6 +4701,14 @@ def _fallback_table_data(slide, project_data):
         selected = rows[start:end]
         if selected and isinstance(selected[0], dict):
             headers = [k for k in selected[0].keys() if str(k).strip() not in ('ترتيب / حذف', 'ترتيب', 'حذف', 'إجراءات', 'actions', 'id', 'row_id')]
+            active_headers = []
+            for h in headers:
+                vals = [str(row.get(h) or '').strip() for row in selected]
+                has_content = any(v and v not in ('0', '0.0', '—', '-', '0%', '0.00') for v in vals)
+                if has_content or len(active_headers) == 0:
+                    active_headers.append(h)
+            if active_headers:
+                headers = active_headers
             return headers, [[row.get(header, '') for header in headers] for row in selected]
         return [], selected
     match = re.fullmatch(r'project_components:(\d+):(\d+)', source)
@@ -4720,17 +4728,51 @@ def _fallback_table_data(slide, project_data):
     return [], []
 
 
+def _format_table_num(val):
+    s = str(val or '').strip()
+    if not s or s in ('—', '-', 'N/A', 'nan'):
+        return '—', False
+    if re.match(r'^-?\d{1,3}(,\d{3})+(\.\d+)?%?$', s):
+        return s, True
+    is_pct = s.endswith('%')
+    raw_num = s[:-1].strip() if is_pct else s
+    try:
+        clean = raw_num.replace(',', '')
+        f = float(clean)
+        if 1950 <= f <= 2050 and '.' not in raw_num and not is_pct:
+            return str(int(f)), True
+        if abs(f) >= 1000 and '.' not in raw_num:
+            res = f"{int(f):,}"
+        elif abs(f) >= 1000:
+            res = f"{f:,.2f}".rstrip('0').rstrip('.')
+        else:
+            res = raw_num
+        if is_pct:
+            res += '%'
+        return res, True
+    except (ValueError, TypeError):
+        return html_lib.escape(s), False
+
+
 def _render_fallback_table(headers, rows, primary):
     header_html = ''.join(
-        f'<th style="background:{primary};color:#fff;padding:8px;font-size:13px;">{html_lib.escape(str(value))}</th>'
+        f'<th style="background:{primary};color:#fff;padding:9px 12px;font-size:12px;text-align:right;">{html_lib.escape(str(value))}</th>'
         for value in headers)
     body = []
-    for row in rows:
+    for row_idx, row in enumerate(rows):
         values = list(row.values()) if isinstance(row, dict) else list(row) if isinstance(row, (list, tuple)) else [row]
-        body.append('<tr>' + ''.join(
-            f'<td style="border:1px solid #dbe3ea;padding:7px;font-size:12px;overflow-wrap:anywhere;">{html_lib.escape(str(value))}</td>'
-            for value in values) + '</tr>')
-    return ('<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+        bg = '#f8fafc' if row_idx % 2 == 1 else '#ffffff'
+        tds = []
+        for col_idx, val in enumerate(values):
+            fmt, is_num = _format_table_num(val)
+            align = 'left' if is_num and col_idx > 0 else 'right'
+            direction = 'ltr' if is_num and col_idx > 0 else 'rtl'
+            tds.append(
+                f'<td style="border-bottom:1px solid #e2e8f0;padding:8px 12px;font-size:11.5px;'
+                f'text-align:{align};direction:{direction};font-feature-settings:\'tnum\';font-variant-numeric:tabular-nums;">{fmt}</td>'
+            )
+        body.append(f'<tr style="background:{bg};">{"".join(tds)}</tr>')
+    return ('<table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">'
             f'<thead><tr>{header_html}</tr></thead><tbody>{"".join(body)}</tbody></table>')
 
 
@@ -4915,7 +4957,551 @@ def _render_fallback_chart(chart_type, slide, project_data, primary='#005f78', s
     return ''
 
 
-def _build_structured_fallback_slide(slide, project_data, branding):
+SOL_SLIDES_CSS = """
+  .slide {
+    width: 1280px; height: 720px; position: relative; overflow: hidden;
+    background: #ffffff; color: #0b1f33; box-sizing: border-box; font-family: inherit;
+  }
+  .slide-header {
+    height: 96px; padding: 0 58px; display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid #e2e8f0; box-sizing: border-box;
+  }
+  .header-left { text-align: left; }
+  .header-project { font-size: 13px; font-weight: 700; color: #0b1f33; letter-spacing: 0.05em; }
+  .header-cat { font-size: 11px; font-weight: 600; color: #c59a58; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
+  .header-right { display: flex; align-items: center; gap: 14px; text-align: right; }
+  .header-accent-bar { width: 4px; height: 38px; border-radius: 2px; flex-shrink: 0; }
+  .header-title { font-size: 24px; font-weight: 800; color: #0b1f33; margin: 0; line-height: 1.2; }
+  .header-subtitle { font-size: 13px; font-weight: 500; color: #64748b; margin: 3px 0 0; }
+  .slide-footer {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 38px; padding: 0 58px;
+    display: flex; justify-content: space-between; align-items: center;
+    border-top: 1px solid #f1f5f9; background: #ffffff; font-size: 11px; color: #94a3b8; box-sizing: border-box;
+  }
+  .footer-left { font-weight: 600; color: #64748b; }
+  .footer-center { font-weight: 500; }
+  .footer-right { font-weight: 700; color: #0b1f33; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+  
+  .luxury-kpi-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px;
+  }
+  .luxury-kpi-card {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .luxury-kpi-card.primary {
+    background: #0b1f33; border-color: #0b1f33; color: #ffffff;
+  }
+  .luxury-kpi-card.primary .kpi-label { color: #94a3b8; }
+  .luxury-kpi-card.primary .kpi-val { color: #ffffff; }
+  .luxury-kpi-card.accent {
+    border-right: 3px solid #c59a58;
+  }
+  .kpi-label { font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 4px; }
+  .kpi-val { font-size: 20px; font-weight: 800; color: #0b1f33; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+
+  .financial-table-wrap {
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;
+  }
+  .financial-table {
+    width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: right;
+  }
+  .financial-table th {
+    background: #0b1f33; color: #ffffff; font-weight: 700; padding: 10px 14px; font-size: 11.5px; white-space: nowrap;
+  }
+  .financial-table td {
+    padding: 8px 14px; border-bottom: 1px solid #f1f5f9; color: #1e293b; font-weight: 500;
+  }
+  .financial-table tr:nth-child(even) td {
+    background: #f8fafc;
+  }
+  .financial-table td.numeric {
+    text-align: left; direction: ltr; font-weight: 600; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+  }
+  .financial-table tfoot td {
+    background: #f1f5f9; font-weight: 800; border-top: 2px solid #cbd5e1; color: #0b1f33;
+  }
+
+  .waterfall-card {
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 24px;
+    height: 420px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .waterfall-card-header {
+    display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid #f1f5f9;
+  }
+  .waterfall-card-title { font-size: 14px; font-weight: 700; color: #0b1f33; }
+  .waterfall-card-unit { font-size: 11px; font-weight: 600; color: #64748b; }
+
+  .cashflow-layout {
+    display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; align-items: start;
+  }
+  .combo-chart-box {
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px;
+  }
+  .table-note {
+    font-size: 10.5px; color: #94a3b8; margin-top: 8px; font-weight: 500;
+  }
+"""
+
+
+def _build_sol_waterfall_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    model = _parse_financial_dict((source or {}).get('financial_study_model'))
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'تكوين إجمالي تكلفة المشروع'))
+    project_title = html_lib.escape(str((source or {}).get('project_name') or (source or {}).get('projectName') or 'THE VIEW'))
+
+    w_data = _extract_waterfall_chart_data(None, model, source)
+    items = w_data.get('items') or []
+    total = w_data.get('total') or {}
+
+    total_cost_m = total.get('value_millions', 0.0)
+    total_cost_display = total.get('display', f"{total_cost_m:,.2f} م.ر")
+    sorted_items = sorted(items, key=lambda x: x.get('value_millions', 0), reverse=True)
+    top2_pct = sum(it.get('pct_of_total', 0) for it in sorted_items[:2]) if sorted_items else 0
+    top1_name = sorted_items[0].get('name', 'المكون الرئيسي') if sorted_items else 'المكون الرئيسي'
+    top1_val = sorted_items[0].get('display', '—') if sorted_items else '—'
+
+    svg_code = _build_waterfall_svg(items, total, width=1116, height=310, primary=primary, secondary='#0284c7', gold=accent)
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
+
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">PROJECT COST WATERFALL</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">مخطط شلالي يوضح مساهمة كل مكون في بناء إجمالي التكلفة الرأسمالية للمشروع</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 58px;margin-top:16px;">
+    <div class="luxury-kpi-grid">
+      <div class="luxury-kpi-card primary" style="background:{primary};border-color:{primary};">
+        <div class="kpi-label">إجمالي تكلفة المشروع</div>
+        <div class="kpi-val">{total_cost_display}</div>
+      </div>
+      <div class="luxury-kpi-card accent">
+        <div class="kpi-label">المكونان الرئيسيان</div>
+        <div class="kpi-val">{top2_pct:.1f}%</div>
+      </div>
+      <div class="luxury-kpi-card">
+        <div class="kpi-label">{top1_name}</div>
+        <div class="kpi-val">{top1_val}</div>
+      </div>
+    </div>
+    <div class="waterfall-card">
+      <div class="waterfall-card-header">
+        <div class="waterfall-card-title">المخطط الشلالي لتراكم التكلفة</div>
+        <div class="waterfall-card-unit">القيم بمليون ريال سعودي</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;margin-top:8px;">
+        {svg_code}
+      </div>
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">هيكل تكلفة المشروع — عرض تراكمي لمكونات التطوير</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_sol_combo_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    model = _parse_financial_dict((source or {}).get('financial_study_model'))
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'التدفقات النقدية وصافي الرصيد التراكمي'))
+    project_title = html_lib.escape(str((source or {}).get('project_name') or (source or {}).get('projectName') or 'THE VIEW'))
+
+    c_data = _extract_combo_chart_data(None, model, source)
+    items = c_data.get('items') or []
+    summary = c_data.get('summary') or {}
+
+    total_inflow = summary.get('total_inflow_display', '—')
+    peak_outflow = summary.get('peak_outflow_display', '—')
+    payback_year = summary.get('payback_year_display', '—')
+
+    if total_inflow == '—' and items:
+        tot_inf = sum(it.get('net_flow_m', 0) for it in items if it.get('net_flow_m', 0) > 0)
+        total_inflow = f"{tot_inf:,.1f} م.ر"
+    if peak_outflow == '—' and items:
+        min_cum = min((it.get('cumulative_m', 0) for it in items), default=0)
+        peak_outflow = f"{abs(min_cum):,.1f} م.ر"
+    if payback_year == '—' and items:
+        for it in items:
+            if it.get('cumulative_m', 0) > 0:
+                payback_year = str(it.get('year') or '')
+                break
+
+    table_rows = []
+    for it in items[:10]:
+        y = html_lib.escape(str(it.get('year') or ''))
+        f_val = it.get('net_flow_m', 0.0)
+        c_val = it.get('cumulative_m', 0.0)
+        f_str = f"{f_val:,.2f}"
+        c_str = f"{c_val:,.2f}"
+        f_style = 'color:#dc2626;' if f_val < 0 else 'color:#059669;'
+        c_style = 'color:#dc2626;' if c_val < 0 else 'color:#0b1f33;'
+        table_rows.append(f'''<tr>
+          <td>{y}</td>
+          <td class="numeric" style="{f_style}">{f_str}</td>
+          <td class="numeric" style="{c_style}">{c_str}</td>
+        </tr>''')
+
+    svg_code = summary.get('svg_code') or _render_fallback_combo(c_data, primary, accent)
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
+
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">CASH FLOW ANALYSIS</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">تحليل التدفقات السنوية وصافي الرصيد التراكمي لسنوات المشروع</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 58px;margin-top:16px;">
+    <div class="luxury-kpi-grid">
+      <div class="luxury-kpi-card primary" style="background:{primary};border-color:{primary};">
+        <div class="kpi-label">إجمالي التدفقات الإيجابية</div>
+        <div class="kpi-val">{total_inflow}</div>
+      </div>
+      <div class="luxury-kpi-card accent">
+        <div class="kpi-label">أقصى عجز تمويلي تراكمي</div>
+        <div class="kpi-val">{peak_outflow}</div>
+      </div>
+      <div class="luxury-kpi-card">
+        <div class="kpi-label">سنة التحول للإيجابية / الاسترداد</div>
+        <div class="kpi-val">{payback_year}</div>
+      </div>
+    </div>
+    <div class="cashflow-layout">
+      <div class="financial-table-wrap">
+        <table class="financial-table">
+          <thead>
+            <tr>
+              <th>السنة</th>
+              <th style="text-align:left;">صافي التدفق (م.ر)</th>
+              <th style="text-align:left;">الرصيد التراكمي (م.ر)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {"".join(table_rows)}
+          </tbody>
+        </table>
+      </div>
+      <div class="combo-chart-box">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-size:12px;font-weight:700;color:{primary};">الرسم البياني للتدفقات</span>
+          <div style="display:flex;gap:10px;font-size:9.5px;font-weight:600;">
+            <span style="color:#059669;">تدفق موجب</span>
+            <span style="color:#dc2626;">تدفق سالب</span>
+            <span style="color:{primary};">التراكمي</span>
+          </div>
+        </div>
+        {svg_code}
+      </div>
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">التدفقات النقدية — صافي التدفق والرصيد التراكمي</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'جدول البيانات'))
+    project_title = html_lib.escape(str((source or {}).get('project_name') or (source or {}).get('projectName') or 'THE VIEW'))
+
+    headers, rows = _fallback_table_data(slide, source)
+    if not rows:
+        headers = ['البند', 'القيمة']
+        rows = [['لا تتوفر بيانات', '—']]
+
+    th_cells = ''.join(f'<th>{html_lib.escape(str(h))}</th>' for h in headers)
+    tb_rows = []
+
+    total_val = 0.0
+    has_total_calc = False
+
+    for row_idx, r in enumerate(rows):
+        vals = list(r.values()) if isinstance(r, dict) else list(r) if isinstance(r, (list, tuple)) else [r]
+        td_cells = []
+        for idx, v in enumerate(vals):
+            formatted, is_num = _format_table_num(v)
+            cls = ' class="numeric"' if is_num and idx > 0 else ''
+            td_cells.append(f'<td{cls}>{formatted}</td>')
+            if is_num and idx == len(vals) - 1:
+                try:
+                    f_val = float(str(v).replace(',', ''))
+                    total_val += f_val
+                    has_total_calc = True
+                except (ValueError, TypeError):
+                    pass
+        tb_rows.append(f'<tr>{"".join(td_cells)}</tr>')
+
+    kpi1_title = 'عدد البنود المعتمدة'
+    kpi1_val = f"بنود {len(rows)}"
+
+    kpi2_title = 'أكبر بند رئيسي'
+    first_row_vals = list(rows[0].values()) if isinstance(rows[0], dict) else list(rows[0]) if isinstance(rows[0], (list, tuple)) else [rows[0]]
+    kpi2_val = html_lib.escape(str(first_row_vals[0] if first_row_vals else '—'))
+
+    kpi3_title = 'إجمالي التكلفة / القيمة'
+    if has_total_calc and total_val > 0:
+        kpi3_val = f"{total_val:,.0f} ر.س"
+    else:
+        kpi3_val = html_lib.escape(str(first_row_vals[1] if len(first_row_vals) > 1 else '—'))
+
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
+
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">CAPITAL INVESTMENT</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">توزيع الاستثمار المستهدف على مكونات التطوير الرئيسية والتكاليف المرتبطة بها</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 58px;margin-top:16px;">
+    <div class="luxury-kpi-grid">
+      <div class="luxury-kpi-card primary" style="background:{primary};border-color:{primary};">
+        <div class="kpi-label">{kpi3_title}</div>
+        <div class="kpi-val">{kpi3_val}</div>
+      </div>
+      <div class="luxury-kpi-card accent">
+        <div class="kpi-label">{kpi2_title}</div>
+        <div class="kpi-val" style="font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{kpi2_val}</div>
+      </div>
+      <div class="luxury-kpi-card">
+        <div class="kpi-label">{kpi1_title}</div>
+        <div class="kpi-val">{kpi1_val}</div>
+      </div>
+    </div>
+    <div class="financial-table-wrap" style="max-height:420px;overflow:hidden;">
+      <table class="financial-table">
+        <thead>
+          <tr>{th_cells}</tr>
+        </thead>
+        <tbody>
+          {"".join(tb_rows)}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-note" style="display:flex;justify-content:space-between;">
+      <span>نطاق التحليل: {title}</span>
+      <span>القيم معروضة بالريال السعودي ومقربة وفق النموذج المالي المعتمد.</span>
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">{title}</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_sol_heatmap_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    model = _parse_financial_dict((source or {}).get('financial_study_model'))
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'نتائج تحليل الحساسية'))
+    project_title = html_lib.escape(str((source or {}).get('project_name') or (source or {}).get('projectName') or 'THE VIEW'))
+
+    h_data = _extract_heatmap_chart_data(None, model, source)
+    matrix_html = _build_heatmap_matrix_html(h_data, primary, accent)
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
+
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">SENSITIVITY ANALYSIS</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">مصفوفة اختبار المؤشرات المالية وفق السيناريوهات الثلاثة (المتحفظ، الأساسي، المتفائل)</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 58px;margin-top:16px;">
+    <div class="luxury-kpi-grid">
+      <div class="luxury-kpi-card primary" style="background:{primary};border-color:{primary};">
+        <div class="kpi-label">السيناريو الأساسي</div>
+        <div class="kpi-val">النموذج المعتمد</div>
+      </div>
+      <div class="luxury-kpi-card accent">
+        <div class="kpi-label">السيناريو المتحفظ</div>
+        <div class="kpi-val">اختبار الضغط</div>
+      </div>
+      <div class="luxury-kpi-card">
+        <div class="kpi-label">السيناريو المتفائل</div>
+        <div class="kpi-val">أقصى كفاءة</div>
+      </div>
+    </div>
+    <div style="max-height:430px;overflow:hidden;">
+      {matrix_html}
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">تحليل الحساسية — مقارنة السيناريوهات الثلاثة</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'مقارنة أسعار المنافسين'))
+    project_title = html_lib.escape(str((source or {}).get('project_name') or (source or {}).get('projectName') or 'THE VIEW'))
+
+    market = _decode_json_fact(source.get('market_study_data')) if isinstance(source.get('market_study_data'), (str, dict)) else {}
+    competitors = market.get('competitors') if isinstance(market, dict) else []
+    items = _extract_competitor_chart_data(competitors, source)
+
+    bar_chart_html = _render_fallback_horizontal_bar(items, primary, accent)
+    headers, rows = _fallback_table_data(slide, source)
+    table_html = _render_fallback_table(headers, rows, primary)
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
+
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">MARKET BENCHMARK</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">تحليل أسعار السوق ومقارنة الوحدات المنافسة في النطاق الجغرافي</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 58px;margin-top:16px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-height:510px;overflow:hidden;align-items:start;">
+      <div style="overflow:hidden;">
+        {table_html}
+      </div>
+      <div style="overflow:hidden;">
+        {bar_chart_html}
+      </div>
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">دراسة السوق — مقارنة أسعار المنافسين</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    source = source if isinstance(source, dict) else {}
+    model = _parse_financial_dict(source.get('financial_study_model'))
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'الدراسة المالية'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+    content_sources = (slide or {}).get('content_sources') or []
+
+    tables_html = []
+    for src in content_sources:
+        dummy_slide = dict(slide)
+        dummy_slide['content_source'] = src
+        sub_headers, sub_rows = _fallback_table_data(dummy_slide, source)
+        if sub_rows:
+            sub_title = ''
+            match_t = re.fullmatch(r'financial_table:([^:]+):\d+:\d+', src)
+            if match_t:
+                t_key = match_t.group(1)
+                sub_title = next((t[1] for t in _FINANCIAL_PLAN_TABLES if t[0] == t_key), t_key)
+            elif re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src):
+                p_idx = int(re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src).group(1))
+                sub_title = _financial_report_part_title(model, p_idx)
+
+            th_cells = ''.join(f'<th>{html_lib.escape(str(h))}</th>' for h in sub_headers)
+            tb_rows = []
+            for r in sub_rows:
+                vals = list(r.values()) if isinstance(r, dict) else list(r) if isinstance(r, (list, tuple)) else [r]
+                td_cells = []
+                for idx, v in enumerate(vals):
+                    formatted, is_num = _format_table_num(v)
+                    cls = ' class="numeric"' if is_num and idx > 0 else ''
+                    td_cells.append(f'<td{cls}>{formatted}</td>')
+                tb_rows.append(f'<tr>{"".join(td_cells)}</tr>')
+
+            title_block = f'<div style="font-size:12.5px;font-weight:700;color:{primary};margin:8px 0 4px;">{html_lib.escape(sub_title)}</div>' if sub_title else ''
+            tables_html.append(f'''
+            <div style="margin-bottom:10px;">
+              {title_block}
+              <div class="financial-table-wrap">
+                <table class="financial-table">
+                  <thead><tr>{th_cells}</tr></thead>
+                  <tbody>{"".join(tb_rows)}</tbody>
+                </table>
+              </div>
+            </div>
+            ''')
+
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">FINANCIAL TABLES</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">جداول وبيانات الدراسة المالية للمشروع</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 58px;margin-top:14px;max-height:510px;overflow:hidden;">
+    {"".join(tables_html)}
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">جداول الدراسة المالية المعتمدة</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_structured_fallback_slide(slide, project_data, branding, slide_num=None, total_slides=None):
     source = project_data if isinstance(project_data, dict) else {}
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
     secondary = normalize_hex_color((branding or {}).get('secondary_color'), '#0ea5e9')
@@ -4964,46 +5550,25 @@ def _build_structured_fallback_slide(slide, project_data, branding):
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2>'
                 f'<div style="display:grid;grid-template-columns:repeat({columns},1fr);gap:12px;height:540px;">{images}</div></div>')
+
+    chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
+    if chart_type == 'waterfall':
+        return _build_sol_waterfall_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    elif chart_type == 'combo':
+        return _build_sol_combo_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    elif chart_type == 'heatmap':
+        return _build_sol_heatmap_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    elif chart_type == 'horizontal_bar':
+        return _build_sol_horizontal_bar_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+
     content_sources = (slide or {}).get('content_sources')
     if isinstance(content_sources, list) and len(content_sources) > 1:
-        model = _parse_financial_dict((source or {}).get('financial_study_model'))
-        tables_html = []
-        for src in content_sources:
-            dummy_slide = dict(slide)
-            dummy_slide['content_source'] = src
-            sub_headers, sub_rows = _fallback_table_data(dummy_slide, source)
-            if sub_rows:
-                sub_title = ''
-                match_t = re.fullmatch(r'financial_table:([^:]+):\d+:\d+', src)
-                if match_t:
-                    t_key = match_t.group(1)
-                    sub_title = next((t[1] for t in _FINANCIAL_PLAN_TABLES if t[0] == t_key), t_key)
-                elif re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src):
-                    p_idx = int(re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src).group(1))
-                    sub_title = _financial_report_part_title(model, p_idx)
-                sub_table = _render_fallback_table(sub_headers, sub_rows, primary)
-                title_block = f'<div style="font-size:13px;font-weight:700;color:{primary};margin:8px 0 4px;">{html_lib.escape(sub_title)}</div>' if sub_title else ''
-                tables_html.append(f'<div>{title_block}{sub_table}</div>')
-        if tables_html:
-            return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
-                    f'<h2 style="font-size:26px;margin:0 0 12px;color:{primary};">{title}</h2>'
-                    f'<div style="display:flex;flex-direction:column;gap:8px;max-height:540px;overflow:hidden;">{"".join(tables_html)}</div></div>')
+        return _build_sol_stacked_tables_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
 
     headers, rows = _fallback_table_data(slide, source)
-    chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
-    if chart_type and rows:
-        table = _render_fallback_table(headers, rows, primary)
-        chart_html = _render_fallback_chart(chart_type, slide, source, primary, secondary)
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
-                f'<h2 style="font-size:26px;margin:0 0 16px;color:{primary};">{title}</h2>'
-                f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;height:540px;align-items:start;">'
-                f'<div style="overflow:hidden;">{table}</div>'
-                f'<div style="overflow:hidden;">{chart_html}</div>'
-                f'</div></div>')
-    elif rows:
-        table = _render_fallback_table(headers, rows, primary)
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
-                f'<h2 style="font-size:26px;margin:0 0 16px;color:{primary};">{title}</h2>{table}</div>')
+    if rows:
+        return _build_sol_table_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+
     note = _slide_source_data_note(slide, source) or '\n'.join(str(item) for item in ((slide or {}).get('bullets') or []))
     if note:
         content = html_lib.escape(note).replace('\n', '<br>')
@@ -5089,7 +5654,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
 
     chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
     if chart_type in APPROVED_CHART_TYPES:
-        deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding)
+        deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
             return postprocess_slide(
                 deterministic_slide, (slide or {}).get('type', 'content'),
@@ -5176,7 +5741,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         except Exception as e:
             print(f"[SLIDE-{slide_num}] Exception: {e}")
 
-    fallback = _build_structured_fallback_slide(slide, project_data, branding)
+    fallback = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
     if fallback:
         fallback = postprocess_slide(
             fallback, slide_type, slide_num=slide_num, slide_title=slide_title,
@@ -5970,8 +6535,8 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     # Content/map/site slides get a header/footer; cover, dividers, moodboard and closing never do:
     # a divider carries its own logo, section name, slide number and project name.
     if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
-        has_header = bool(re.search(r'height:\s*56px', html))
-        has_footer = bool(re.search(r'height:\s*36px', html))
+        has_header = bool(re.search(r'height:\s*56px|slide-header|<header\b', html))
+        has_footer = bool(re.search(r'height:\s*36px|slide-footer|<footer\b', html))
 
         title = slide_title or f'شريحة {slide_num}' or 'العنوان'
         primary = '#7A0C0C'
