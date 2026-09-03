@@ -623,6 +623,63 @@ def _merge_adjacent_table_slides(groups):
         groups[section_key] = merged
 
 
+def _is_sensitivity_assumptions_slide(slide, model=None):
+    """Identify the assumptions table that belongs with the sensitivity results."""
+    source = str((slide or {}).get('content_source') or '').strip().lower()
+    source_table = str((slide or {}).get('source_table') or '').strip().lower()
+    text = ' '.join(str((slide or {}).get(key) or '') for key in ('title', 'content_source', 'source_table')).lower()
+    if 'sensitivityassumptionstable' in source or 'sensitivityassumptionstable' in source_table:
+        return True
+    if model and source.startswith('financial_report:'):
+        match = re.fullmatch(r'financial_report:(\d+):\d+:\d+(?::\d+:\d+)?', source)
+        report_title = _financial_report_part_title(model, int(match.group(1))).lower() if match else ''
+        if match and re.search(r'sensitivity|حساسية|سيناريو', report_title):
+            return bool(re.search(r'assumption|افتراض', text + ' ' + report_title))
+    return bool(re.search(r'assumption|افتراضات.*(?:حساسية|سيناريو)|(?:حساسية|سيناريو).*افتراضات', text))
+
+
+def _attach_sensitivity_assumptions(groups, project_data):
+    """Place the sensitivity assumptions table beside its result matrix when it fits."""
+    financial = groups.get('financial', [])
+    if not financial:
+        return
+    model = _parse_financial_dict((project_data or {}).get('financial_study_model'))
+    heatmap = next((slide for slide in financial if canonicalize_chart_type(slide.get('chart_type')) == 'heatmap'), None)
+    if not heatmap:
+        return
+
+    assumption_slides = []
+    for slide in financial:
+        if slide is heatmap or not _is_sensitivity_assumptions_slide(slide, model):
+            continue
+        sources = [str(value).strip() for value in (slide.get('content_sources') or [slide.get('content_source')])
+                   if str(value or '').strip()]
+        # Never remove a packed slide containing another table.  It remains a
+        # normal table slide instead of losing unrelated source data.
+        if sources and all('sensitivityassumptionstable' in value.lower() or
+                           _is_sensitivity_assumptions_slide({'content_source': value}, model)
+                           for value in sources):
+            assumption_slides.append((slide, sources))
+    if not assumption_slides:
+        return
+
+    assumption_sources = [source for _slide, sources in assumption_slides for source in sources]
+    assumption_rows = sum(int(slide.get('row_count') or 0) for slide, _sources in assumption_slides)
+    # The result matrix and the assumptions table share the chart slide only
+    # while the assumptions can stay readable in the side column.
+    if assumption_rows <= 10:
+        result_source = str(heatmap.get('content_source') or '').strip()
+        heatmap['content_sources'] = list(dict.fromkeys(assumption_sources + ([result_source] if result_source else [])))
+        heatmap['sensitivity_assumptions_sources'] = assumption_sources
+        heatmap['table_group_titles'] = list(dict.fromkeys(
+            [str(slide.get('title') or '').strip() for slide, _sources in assumption_slides] +
+            [str(heatmap.get('title') or '').strip()]
+        ))
+        heatmap['row_count'] = int(heatmap.get('row_count') or 0) + assumption_rows
+        removed = {id(slide) for slide, _sources in assumption_slides}
+        groups['financial'] = [slide for slide in financial if id(slide) not in removed]
+
+
 def _financial_summary_from_report(model):
     report = model.get('report') if isinstance(model, dict) and isinstance(model.get('report'), dict) else {}
     parts = report.get('parts') if isinstance(report.get('parts'), list) else []
@@ -1235,6 +1292,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     else:
                         pending_tables.append(item)
             flush_pending_tables()
+        _attach_sensitivity_assumptions(groups, source)
         for summary_slide in _financial_summary_plan_slides(model):
             add('financial', summary_slide)
 
@@ -5565,6 +5623,33 @@ def _build_sol_heatmap_slide(slide, source, branding=None, slide_num=None, total
     matrix_html = _build_heatmap_matrix_html(h_data, primary, accent)
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
 
+    assumption_blocks = []
+    assumption_sources = [str(value).strip() for value in (slide or {}).get('sensitivity_assumptions_sources', [])
+                          if str(value or '').strip()]
+    for assumption_source in assumption_sources:
+        assumption_slide = dict(slide or {})
+        assumption_slide['content_source'] = assumption_source
+        assumption_slide['chart_type'] = ''
+        headers, rows = _fallback_table_data(assumption_slide, source)
+        if not rows:
+            continue
+        title_text = 'افتراضات تحليل الحساسية'
+        table = _render_fallback_table(headers, rows, primary)
+        assumption_blocks.append(
+            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;overflow:hidden;">'
+            f'<div style="font-size:14px;font-weight:800;color:{primary};margin-bottom:10px;text-align:right;">{title_text}</div>'
+            f'<div style="max-height:390px;overflow:hidden;">{table}</div></div>'
+        )
+    sensitivity_side_content = matrix_html
+    if assumption_blocks:
+        sensitivity_side_content = (
+            '<div style="display:grid;grid-template-columns:minmax(300px,0.78fr) minmax(0,1.22fr);'
+            'gap:16px;align-items:start;max-height:430px;overflow:hidden;">'
+            f'<div style="min-width:0;">{"".join(assumption_blocks)}</div>'
+            f'<div style="min-width:0;overflow:hidden;">{matrix_html}</div>'
+            '</div>'
+        )
+
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
   <style>{SOL_SLIDES_CSS}</style>
   <header class="slide-header">
@@ -5596,7 +5681,7 @@ def _build_sol_heatmap_slide(slide, source, branding=None, slide_num=None, total
       </div>
     </div>
     <div style="max-height:430px;overflow:hidden;">
-      {matrix_html}
+      {sensitivity_side_content}
     </div>
   </div>
   <footer class="slide-footer" data-slide-footer="1">
@@ -6230,20 +6315,18 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
     width, height = (1280, 960) if slide_ratio == '4:3' else (1280, 720)
 
     title = html_lib.escape(str(slide.get('title') or 'القسم').strip())
-    project_name = html_lib.escape(str(
-        project_data.get('project_name') or project_data.get('projectName') or 'THE VIEW'
-    ).strip())
-    project_logo = _project_logo_reference(project_data)
-    company_name = html_lib.escape(str(
-        branding.get('company_name') or 'منافع الاقتصادية للعقار'
-    ))
+    project_name = html_lib.escape(str(project_data.get('project_name') or project_data.get('projectName') or '').strip())
+    project_logo = str(project_data.get('project_logo') or '').strip()
+
+    logos = '<img src="##LOGO##" alt="" style="height:80px;width:auto;object-fit:contain;" />'
+    if project_logo:
+        logos += (
+            '<div style="width:1px;height:52px;background:rgba(255,255,255,0.35);margin:0 18px;"></div>'
+            '<img src="##PROJECT_LOGO##" alt="" style="height:80px;width:auto;object-fit:contain;" />'
+        )
 
     rule = f'<div style="width:200px;height:3px;background:{accent};margin:18px 0 0 auto;"></div>'
     footer_number = f'{slide_num:02d} — {int(total_slides or slide_num):02d}' if slide_num else ''
-    header_html, footer_html = _presentation_chrome_html(
-        title, project_name, company_name, primary, accent, '#ffffff', '#ffffff', accent,
-        footer_number, project_logo=bool(project_logo), overlay=True,
-    )
 
     return (
         f'<div class="slide" dir="rtl" style="width:{width}px;height:{height}px;position:relative;'
@@ -6256,14 +6339,17 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
         f'{_hex_to_rgba(divider_background, "0.94")} 0%,{_hex_to_rgba(divider_background, "0.82")} 45%,'
         f'{_hex_to_rgba(divider_background, "0.62")} 100%);"></div>'
         f'<div style="position:absolute;top:0;bottom:0;left:0;width:10px;background:{accent};"></div>'
-        f'{header_html}'
+        f'<div style="position:absolute;top:44px;left:48px;display:flex;align-items:center;">{logos}</div>'
         # padding-bottom biases the block slightly above the optical centre, as in the reference.
         '<div style="position:absolute;top:0;bottom:0;right:64px;width:58%;display:flex;flex-direction:column;'
         'justify-content:center;text-align:right;padding-bottom:56px;box-sizing:border-box;">'
         f'<div style="font-size:58px;line-height:1.15;font-weight:700;color:#ffffff;">{title}</div>'
         f'{rule}'
         '</div>'
-        f'{footer_html}'
+        f'<div data-slide-counter="1" dir="ltr" style="position:absolute;bottom:34px;left:48px;font-size:13px;letter-spacing:1px;'
+        f'color:rgba(255,255,255,0.55);">{footer_number}</div>'
+        f'<div style="position:absolute;bottom:34px;right:48px;font-size:13px;font-weight:700;'
+        f'letter-spacing:1.5px;color:{accent};">{project_name}</div>'
         '</div>'
     )
 
@@ -6731,112 +6817,6 @@ def _slide_element_end(html, opening_match):
     return len(html)
 
 
-def _strip_existing_slide_chrome(html):
-    """Remove model-authored headers/footers before adding the canonical chrome.
-
-    Generated HTML has historically mixed semantic header/footer tags, marked divs,
-    and unmarked absolute bars.  Removing the full balanced element prevents nested
-    footer divs from being left behind and keeps every content slide on one layout.
-    """
-    if not html:
-        return html
-    opening_re = re.compile(r'<(?P<tag>[a-z][\w:-]*)(?P<attrs>\s[^>]*)?>', re.IGNORECASE)
-    ranges = []
-    for match in opening_re.finditer(html):
-        tag = match.group('tag').lower()
-        attrs = match.group('attrs') or ''
-        classes = re.search(r'\bclass\s*=\s*["\']([^"\']*)["\']', attrs, re.IGNORECASE)
-        class_text = (classes.group(1) if classes else '').lower()
-        style_match = re.search(r'\bstyle\s*=\s*["\']([^"\']*)["\']', attrs, re.IGNORECASE)
-        style = (style_match.group(1) if style_match else '').lower().replace(' ', '')
-        is_header = (
-            tag == 'header'
-            or 'slide-header' in class_text
-            or re.search(r'\bdata-slide-header\s*=', attrs, re.IGNORECASE)
-            or (re.search(r'position:(?:absolute|fixed)', style)
-                and re.search(r'top:0(?:px)?', style)
-                and re.search(r'height:(?:36|40|48|56|60|64|72|96)px', style))
-        )
-        is_footer = (
-            tag == 'footer'
-            or 'slide-footer' in class_text
-            or re.search(r'\bdata-slide-footer\s*=', attrs, re.IGNORECASE)
-            or (re.search(r'position:(?:absolute|fixed)', style)
-                and re.search(r'bottom:0(?:px)?', style)
-                and re.search(r'height:(?:30|32|34|36|38|40|42)px', style))
-        )
-        if not (is_header or is_footer):
-            continue
-        end = _slide_element_end(html, match)
-        ranges.append((match.start(), end))
-    for start, end in reversed(ranges):
-        while start > 0 and html[start - 1] in ' \t\r\n':
-            start -= 1
-        while end < len(html) and html[end] in ' \t\r\n':
-            end += 1
-        html = html[:start] + html[end:]
-    # Removed chrome leaves indentation-only lines behind; collapse them so a
-    # second normalization pass is byte-stable as well as visually stable.
-    return re.sub(r'\n[ \t]*(?:\n[ \t]*)+', '\n', html)
-
-
-def _presentation_chrome_html(title, project_title, company_name, primary, accent, footer_background,
-                              footer_text, footer_accent, counter, project_logo=False, overlay=False):
-    """Return the one mandatory header/footer used by every slide type.
-
-    Cover and section-divider slides use the same information over the main image, while
-    ordinary slides use a light document header. Keeping this in one renderer prevents
-    generated/model-authored chrome from drifting between preview and PDF export.
-    """
-    if overlay:
-        header_background = _hex_to_rgba(primary, '0.84')
-        footer_surface = _hex_to_rgba(primary, '0.92')
-        header_text = '#ffffff'
-        footer_surface_text = '#ffffff'
-        header_style = (
-            f'position:absolute;top:0;right:0;left:0;height:78px;background:{header_background};'
-            'border-bottom:1px solid rgba(255,255,255,.22);'
-        )
-        footer_style = f'background:{footer_surface};border-top:1px solid rgba(255,255,255,.22);'
-    else:
-        header_text = primary
-        footer_surface_text = footer_text
-        header_style = f'position:relative;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
-        footer_style = f'background:{footer_background};border-top:1px solid #e2e8f0;'
-
-    logo_style = (
-        ('height:80px;max-height:40px;' if overlay else 'height:40px;') +
-        'width:auto;max-width:122px;object-fit:contain;display:inline-block;'
-        'background:#ffffff;border-radius:6px;padding:3px 7px;box-sizing:border-box;'
-    )
-    footer_marker = '' if overlay else ' data-slide-footer="1"'
-    footer_dimension = 'height:var(--slide-footer-height,2.25rem);min-height:2.25rem;' if overlay else 'height:36px;'
-    project_logo_html = (
-        '<img class="presentation-chrome-logo" src="##PROJECT_LOGO##" alt="" '
-        f'style="{logo_style}" />'
-    ) if project_logo else ''
-    header = (
-        f'<header class="slide-header" data-slide-header="1" dir="rtl" style="{header_style}'
-        'display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
-        'box-sizing:border-box;z-index:10;overflow:hidden;">'
-        '<div style="display:flex;align-items:center;gap:10px;min-width:0;direction:ltr;">'
-        f'<img class="presentation-chrome-logo" src="##LOGO##" alt="" style="{logo_style}" />'
-        f'{project_logo_html}'
-        f'<span style="width:3px;height:28px;background:{accent};display:inline-block;flex:0 0 auto;"></span>'
-        f'<span style="font-size:16px;font-weight:700;color:{header_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;">{title}</span>'
-        '</div></header>'
-    )
-    footer = (
-        f'<footer class="slide-footer"{footer_marker} dir="rtl" style="position:absolute;bottom:0;right:0;left:0;'
-        f'{footer_dimension}{footer_style}display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
-        'box-sizing:border-box;z-index:10;overflow:hidden;">'
-        f'<span style="font-size:12px;font-weight:700;color:{footer_surface_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62%;">{project_title}</span>'
-        f'<span data-slide-counter="1" dir="ltr" style="display:inline-flex;align-items:center;justify-content:center;min-width:72px;'
-        f'font-size:12px;font-weight:700;color:{footer_accent if not overlay else accent};text-align:center;">{counter}</span></footer>'
-    )
-    return header, footer
-
-
 def _project_logo_reference(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     value = str(source.get('project_logo') or source.get('projectLogo') or '').strip()
@@ -6892,7 +6872,9 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     html = _block_external_images(html)
     html = _ensure_map_placeholder(html, slide_type)
 
-    # Cover and closing must never receive the universal header/footer.
+    # Keep the header and footer authored by Sol.  The engine must not remove them
+    # and rebuild a second chrome layer because that reserves space over the
+    # generated content and changes the layout Sol designed.
     normalized_title = str(slide_title or '').strip().lower()
     is_cover = slide_type == 'cover' or int(slide_num or 0) == 1 or bool(
         re.search(r'غلاف|cover|front', normalized_title)
@@ -6901,13 +6883,10 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         re.search(r'ختام|closing|شكراً|thanks', normalized_title)
     ) or (total_slides is not None and int(slide_num or 0) == int(total_slides))
     is_cover_or_closing = is_cover or is_closing
-    # Rebuild the presentation chrome from one source of truth.  Model-authored
-    # chrome differed from the deterministic financial templates and could carry
-    # a stale counter or malformed nested footer into the exported deck.
-    html = _strip_existing_slide_chrome(html)
     html = _strip_internal_financial_notes(html)
-    if slide_type == 'section_divider':
-        html = _rewrite_slide_counter(html, slide_type, slide_num, total_slides)
+    # Renumber a counter that Sol already rendered, but never create or remove
+    # the surrounding header/footer markup.
+    html = _rewrite_slide_counter(html, slide_type, slide_num, total_slides)
     if is_cover_or_closing:
         html = _normalize_brand_overlay(html, branding)
     if is_cover:
@@ -6961,44 +6940,6 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
             return ''
         return tag
     html = re.sub(r'<img\s[^>]*>', _strip_srcless_img, html, flags=re.IGNORECASE)
-
-    # Every slide, including the cover, section dividers, moodboards and closing, gets
-    # the same required brand pair and page counter. Cover-like slides render the chrome
-    # over the main image so the image remains the visual background.
-    title = html_lib.escape(str(slide_title or f'شريحة {slide_num}' or 'العنوان'))
-    primary = '#7A0C0C'
-    accent = '#C4A35A'
-    company_name = 'منافع الاقتصادية للعقار'
-
-    if branding is None and tenant_id:
-        branding = db.get_branding(tenant_id) or {}
-    if branding:
-        primary = branding.get('primary_color') or primary
-        accent = branding.get('accent_color') or accent
-        company_name = branding.get('company_name') or company_name
-        if not company_name:
-            tenant = db.get_tenant(tenant_id) if tenant_id else None
-            company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
-
-    primary = normalize_hex_color(primary, '#7a0c0c')
-    accent = normalize_hex_color(accent, '#c4a35a')
-    overlay = slide_type in ('cover', 'section_divider', 'closing') or is_cover_or_closing
-    footer_background = '#ffffff'
-    footer_text = readable_text_color(primary, footer_background, ('#0f172a',))
-    footer_accent = readable_text_color(accent, footer_background, (footer_text,))
-    project_source = project_data if isinstance(project_data, dict) else {}
-    project_title = html_lib.escape(str(
-        project_source.get('project_name') or project_source.get('projectName') or 'THE VIEW'
-    ))
-    footer_number = _slide_counter_text(slide_num, total_slides)
-    header_html, footer_html = _presentation_chrome_html(
-        title, project_title, html_lib.escape(company_name), primary, accent,
-        footer_background, footer_text, footer_accent, footer_number,
-        project_logo=bool(_project_logo_reference(project_source)),
-        overlay=overlay,
-    )
-    html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html + '\n', html, count=1)
-    html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
 
     return html
 
@@ -7081,23 +7022,11 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 total_slides=total, content_source=item.get('content_source'),
             )
         elif slide_type in ('cover', 'closing', 'moodboard'):
-            item['html'] = postprocess_slide(
-                item.get('html') or '', slide_type, slide_num=index, slide_title=item.get('title'),
-                total_slides=total, tenant_id=tenant_id, branding=branding, project_data=project_data,
-            )
+            item['html'] = _rewrite_slide_counter(
+                item.get('html') or '', slide_type, index, total)
         else:
-            item['html'] = postprocess_slide(
-                item.get('html') or '', slide_type, slide_num=index, slide_title=item.get('title'),
-                total_slides=total, tenant_id=tenant_id, branding=branding, project_data=project_data,
-            )
-        # Renumbering is also used when reopening/exporting an older saved deck. Resolve
-        # the two chrome logos here so a newly rebuilt header never reaches the client
-        # with a placeholder or with the project logo replaced by the company logo.
-        item['html'] = _replace_data_placeholders(item.get('html') or '', project_data, branding)
-        item['html'] = resolve_logo_in_html(
-            item['html'], tenant_id, _branding_cache=branding,
-            project_logo=_project_logo_reference(project_data),
-        )
+            item['html'] = _rewrite_slide_counter(
+                item.get('html') or '', slide_type, index, total)
     return normalized
 
 
