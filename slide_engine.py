@@ -6941,6 +6941,63 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         return tag
     html = re.sub(r'<img\s[^>]*>', _strip_srcless_img, html, flags=re.IGNORECASE)
 
+    # Content/map/site slides get a header/footer; cover, dividers, moodboard and closing never do:
+    # a divider carries its own logo, section name, slide number and project name.
+    if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
+        has_header = bool(re.search(r'height:\s*56px', html))
+        has_footer = bool(re.search(r'height:\s*36px', html))
+
+        title = slide_title or f'شريحة {slide_num}' or 'العنوان'
+        primary = '#7A0C0C'
+        accent = '#C4A35A'
+        company_name = 'منافع الاقتصادية للعقار'
+
+        if branding is None and tenant_id:
+            branding = db.get_branding(tenant_id) or {}
+        if branding:
+            primary = branding.get('primary_color') or primary
+            accent = branding.get('accent_color') or accent
+            company_name = branding.get('company_name') or company_name
+            if not company_name:
+                tenant = db.get_tenant(tenant_id) if tenant_id else None
+                company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
+
+        primary = normalize_hex_color(primary, '#7a0c0c')
+        accent = normalize_hex_color(accent, '#c4a35a')
+        header_title = readable_text_color(primary, '#ffffff', ('#0f172a',))
+        footer_background = dark_surface_color(primary, branding.get('secondary_color') if branding else None)
+        footer_text = readable_text_color('#ffffff', footer_background, ('#0f172a',))
+        footer_accent = readable_text_color(accent, footer_background, (footer_text,))
+
+        if not has_header:
+            # The project logo belongs next to the company logo. This fallback used to carry the
+            # company logo alone, so a slide the model built without a header lost it entirely.
+            project_logo = str((project_data or {}).get('project_logo') or '').strip()
+            project_logo_html = (
+                f'<div style="width:1px;height:26px;background:#e2e8f0;margin:0 10px;"></div>'
+                f'<img src="##PROJECT_LOGO##" alt="" style="height:36px;width:auto;object-fit:contain;" />'
+            ) if project_logo else ''
+            header_html = (
+                f'<div style="position:absolute;top:0;right:0;left:0;height:56px;background:#fff;border-bottom:2px solid {primary};display:flex;align-items:center;padding:0 20px;z-index:10;">'
+                '<img src="##LOGO##" style="height:40px;margin-right:12px;" />'
+                + project_logo_html +
+                f'<div style="width:3px;height:28px;background:{accent};margin:0 12px;"></div>'
+                f'<span style="font-size:16px;font-weight:600;color:{header_title};">{title}</span>'
+                '</div>'
+            )
+            html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
+
+        if not has_footer:
+            footer_number = _slide_counter_text(slide_num, total_slides)
+            footer_html = (
+                f'<div data-slide-footer="1" style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{footer_background};display:flex;align-items:center;padding:0 16px;z-index:10;">'
+                f'<span style="font-size:13px;color:{footer_text};">{title}</span>'
+                f'<span style="font-size:13px;color:{footer_text};opacity:0.7;margin-right:auto;margin-left:8px;">{company_name}</span>'
+                f'<span data-slide-counter="1" style="color:{footer_accent};font-size:12px;font-weight:700;min-width:52px;text-align:left;">{footer_number}</span>'
+                '</div>'
+            )
+            html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
+
     return html
 
 
