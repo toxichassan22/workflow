@@ -5375,11 +5375,21 @@ def api_generate_slide_single():
 
     slides = slide_plan.get('slides', [])
     # The client may send just the single slide needed (slideIndex always 0)
-    # together with a _totalSlides field for the real deck size.
+    # together with a _totalSlides field for the real deck size and a _slideNum
+    # field for this slide's real one-based position in that deck. Numbering,
+    # cover/closing detection and header/footer all follow _slideNum: using the
+    # snapshot index (always 1) mistook every slide for the cover and stripped
+    # its chrome without re-adding it.
     _total_slides_override = data.get('_totalSlides')
     total_slides = int(_total_slides_override) if isinstance(_total_slides_override, (int, float)) and _total_slides_override > 0 else len(slides)
     if slide_index < 0 or slide_index >= len(slides):
         return jsonify({'error': 'Invalid slide index'}), 400
+    try:
+        slide_num = int(data.get('_slideNum') or 0)
+    except (TypeError, ValueError):
+        slide_num = 0
+    if slide_num < 1 or slide_num > total_slides:
+        slide_num = slide_index + 1
 
     branding = db.get_branding(g.tenant_id)
     if not branding:
@@ -5452,15 +5462,15 @@ def api_generate_slide_single():
 
     slide = slides[slide_index]
     total = total_slides
-    html = generate_single_slide(system_prompt, slide, slide_index + 1, total, branding, call_glm_fn, max_retries=3, project_data=project_data)
+    html = generate_single_slide(system_prompt, slide, slide_num, total, branding, call_glm_fn, max_retries=3, project_data=project_data)
 
     # Never turn a failed generation into a fake successful slide. The client
     # can retry the request, but it must not save an incomplete presentation.
     if len(extract_slide_elements(html or '')) != 1:
-        title = slide.get('title', f'شريحة {slide_index + 1}')
+        title = slide.get('title', f'شريحة {slide_num}')
         return jsonify({
             'success': False,
-            'error': f'تعذر توليد الشريحة {slide_index + 1}: {title}',
+            'error': f'تعذر توليد الشريحة {slide_num}: {title}',
             'slideIndex': slide_index,
             'totalSlides': total,
         }), 503
@@ -5473,8 +5483,8 @@ def api_generate_slide_single():
         creative_images=images,
         map_placeholders=map_placeholders,
         tenant_id=g.tenant_id,
-        slide_num=slide_index + 1,
-        slide_title=slide.get('title', f'شريحة {slide_index + 1}'),
+        slide_num=slide_num,
+        slide_title=slide.get('title', f'شريحة {slide_num}'),
         total_slides=total,
         content_source=slide.get('content_source'),
     )
@@ -5483,7 +5493,7 @@ def api_generate_slide_single():
         'success': True,
         'slide': {
             'html': html,
-            'title': slide.get('title', f'شريحة {slide_index + 1}'),
+            'title': slide.get('title', f'شريحة {slide_num}'),
             'type': slide.get('type', 'content'),
             'sectionKey': slide.get('section_key', ''),
             'contentSource': slide.get('content_source', ''),

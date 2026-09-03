@@ -272,7 +272,7 @@ def _financial_report_part_slice(part, row_start, row_end, column_start=None, co
     return result
 
 
-def _financial_column_ranges(part):
+def _financial_column_ranges(part, title=''):
     """Split a wide table into balanced column groups, each keeping the context column.
 
     Groups hold at most five data columns plus the first context column, and
@@ -280,7 +280,17 @@ def _financial_column_ranges(part):
     2-3 column remainder slide on its own.
     """
     headers = part.get('headers') if isinstance(part, dict) and isinstance(part.get('headers'), list) else []
-    if len(headers) <= 8:
+    rows = part.get('rows') if isinstance(part, dict) and isinstance(part.get('rows'), list) else []
+    title_text = f"{str((part or {}).get('title') or (part or {}).get('text') or '')} {title}".lower()
+    is_sensitivity = (
+        any(term in title_text for term in ('حساسية', 'sensitivity', 'سيناريو'))
+        or any('سيناريو' in str(h) or 'حساسية' in str(h) for h in headers)
+        or any(
+            any(term in str(cell) for term in ('متحفظ', 'متفائل', 'أساسي'))
+            for r in rows if isinstance(r, list) for cell in r
+        )
+    )
+    if len(headers) <= 8 or is_sensitivity:
         return [(None, None)]
     data_count = len(headers) - 1
     num_groups = max(1, (data_count + 4) // 5)
@@ -472,6 +482,8 @@ def _pack_financial_table_slices(items):
         titles = list(dict.fromkeys(str(item['title']) for item in group_items))
         if len(titles) == 1:
             title = titles[0]
+        elif any('حساسية' in t for t in titles):
+            title = next((t for t in titles if 'حساسية' in t), titles[0])
         elif len(titles) == 2:
             title = ' + '.join(titles)
         else:
@@ -543,9 +555,21 @@ def _merge_sparse_plan_slides(groups):
             sparse_generic = (not source and slide.get('design_style') != 'table'
                               and not slide.get('image_tokens')
                               and len([item for item in (slide.get('bullets') or []) if str(item or '').strip()]) <= 1)
+            target = merged[-1] if merged else None
+            prev_title = str(target.get('title') or '').strip() if target else ''
+            curr_title = str(slide.get('title') or '').strip()
+            prev_num_match = re.match(r'^(\d+)[\.\-\s]', prev_title)
+            curr_num_match = re.match(r'^(\d+)[\.\-\s]', curr_title)
+            different_numbered_sections = (
+                bool(prev_num_match and curr_num_match and prev_num_match.group(1) != curr_num_match.group(1))
+            )
+            is_sensitivity_merge = any('حساسية' in t for t in (prev_title, curr_title)) and not (
+                'حساسية' in prev_title and 'حساسية' in curr_title
+            )
             if ((sparse_financial or sparse_generic) and merged
-                    and not merged[-1].get('chart_type') and not slide.get('chart_type')):
-                target = merged[-1]
+                    and not different_numbered_sections
+                    and not is_sensitivity_merge
+                    and not target.get('chart_type') and not slide.get('chart_type')):
                 if source:
                     target['content_sources'] = list(target.get('content_sources') or [target.get('content_source')])
                     target['content_sources'].append(source)
@@ -562,9 +586,20 @@ def _merge_sparse_plan_slides(groups):
             first_generic = (not first_source and first.get('design_style') != 'table'
                              and not first.get('image_tokens')
                              and len([item for item in (first.get('bullets') or []) if str(item or '').strip()]) <= 1)
+            second = merged[1]
+            first_title = str(first.get('title') or '').strip()
+            second_title = str(second.get('title') or '').strip()
+            first_num = re.match(r'^(\d+)[\.\-\s]', first_title)
+            second_num = re.match(r'^(\d+)[\.\-\s]', second_title)
+            different_numbered = bool(first_num and second_num and first_num.group(1) != second_num.group(1))
+            is_sens = any('حساسية' in t for t in (first_title, second_title)) and not (
+                'حساسية' in first_title and 'حساسية' in second_title
+            )
             if ((first_sparse or first_generic) and merged
-                    and not merged[1].get('chart_type') and not first.get('chart_type')):
-                target = merged[1]
+                    and not different_numbered
+                    and not is_sens
+                    and not second.get('chart_type') and not first.get('chart_type')):
+                target = second
                 if first_source:
                     target['content_sources'] = list(first.get('content_sources') or [first_source]) + list(
                         target.get('content_sources') or [target.get('content_source')])
@@ -604,8 +639,20 @@ def _merge_adjacent_table_slides(groups):
             previous_is_table = bool(previous and previous.get('_table_group'))
             previous_rows = int(previous.get('row_count') or 0) if previous_is_table else 0
             current_rows = int(slide.get('row_count') or 0)
+            prev_title = str(previous.get('title') or '').strip() if previous else ''
+            curr_title = str(slide.get('title') or '').strip()
+            prev_num_match = re.match(r'^(\d+)[\.\-\s]', prev_title)
+            curr_num_match = re.match(r'^(\d+)[\.\-\s]', curr_title)
+            different_numbered_sections = (
+                bool(prev_num_match and curr_num_match and prev_num_match.group(1) != curr_num_match.group(1))
+            )
+            is_sensitivity_merge = any('حساسية' in t for t in (prev_title, curr_title)) and not (
+                'حساسية' in prev_title and 'حساسية' in curr_title
+            )
             can_fit = (
                 previous_is_table
+                and not different_numbered_sections
+                and not is_sensitivity_merge
                 and len(previous.get('_table_group') or []) < _FINANCIAL_PACK_MAX_TABLES
                 and previous_rows + current_rows + 2.5 * (len(previous.get('_table_group') or []) + 1)
                     <= _FINANCIAL_PACK_ROW_BUDGET
@@ -655,8 +702,8 @@ def _is_sensitivity_assumptions_slide(slide, model=None):
         match = re.fullmatch(r'financial_report:(\d+):\d+:\d+(?::\d+:\d+)?', source)
         report_title = _financial_report_part_title(model, int(match.group(1))).lower() if match else ''
         if match and re.search(r'sensitivity|حساسية|سيناريو', report_title):
-            return bool(re.search(r'assumption|افتراض', text + ' ' + report_title))
-    return bool(re.search(r'assumption|افتراضات.*(?:حساسية|سيناريو)|(?:حساسية|سيناريو).*افتراضات', text))
+            return bool(re.search(r'assumption|افتراض|متغير', text + ' ' + report_title))
+    return bool(re.search(r'assumption|افتراض|متغير|متغيرات.*(?:حساسية|سيناريو)|(?:حساسية|سيناريو).*متغيرات', text))
 
 
 def _attach_sensitivity_assumptions(groups, project_data):
@@ -692,10 +739,14 @@ def _attach_sensitivity_assumptions(groups, project_data):
         result_source = str(heatmap.get('content_source') or '').strip()
         heatmap['content_sources'] = list(dict.fromkeys(assumption_sources + ([result_source] if result_source else [])))
         heatmap['sensitivity_assumptions_sources'] = assumption_sources
-        heatmap['table_group_titles'] = list(dict.fromkeys(
+        raw_titles = (
             [str(slide.get('title') or '').strip() for slide, _sources in assumption_slides] +
             [str(heatmap.get('title') or '').strip()]
-        ))
+        )
+        sens_title = next((t for t in raw_titles if 'حساسية' in t), raw_titles[0] if raw_titles else '')
+        if sens_title:
+            heatmap['title'] = sens_title
+        heatmap['table_group_titles'] = list(dict.fromkeys(raw_titles))
         heatmap['row_count'] = int(heatmap.get('row_count') or 0) + assumption_rows
         removed = {id(slide) for slide, _sources in assumption_slides}
         groups['financial'] = [slide for slide in financial if id(slide) not in removed]
@@ -1125,6 +1176,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     if part.get('level') == 3:
                         subheading = text
                     else:
+                        flush_pending_tables()
                         heading = text or heading
                         subheading = ''
                     continue
@@ -1139,20 +1191,26 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 target_section = 'components' if 'مكونات المشروع' in heading else 'financial'
                 if target_section == 'components':
                     continue
-                column_ranges = _financial_column_ranges(part) if part.get('type') == 'table' else [(None, None)]
+                column_ranges = _financial_column_ranges(part, title=part_title) if part.get('type') == 'table' else [(None, None)]
                 # Narrow key/value tables stay readable with more rows per slide, so a
                 # 14-row section does not burn two slides; wide tables keep the
                 # tighter budget because each row costs more horizontal space.
                 column_count = len(part.get('headers') or []) if part.get('type') == 'table' else 2
                 row_ranges = _balanced_row_ranges(
                     len(rows), max_per_slide=16 if column_count <= 3 else 12, min_per_slide=4)
-                chart_cand = _financial_chart_type(part_title, index=part_index) if part.get('type') == 'table' else ''
+                is_assumption_part = (
+                    bool(re.search(r'افتراض|assumption|متغير', part_title, re.IGNORECASE))
+                    or any('متغير' in str(h) for h in (part.get('headers') or []))
+                )
+                chart_cand = '' if is_assumption_part else (
+                    _financial_chart_type(part_title, index=part_index) if part.get('type') == 'table' else '')
                 chartable_overall = (len(column_ranges) == 1 and len(row_ranges) == 1
                                      and part.get('type') == 'table'
                                      and bool(chart_cand)
                                      and _financial_table_chartable(part, rows, None, None))
                 if (chart_cand in FINANCIAL_CHART_TYPES and not chartable_overall
                         and target_section == 'financial'
+                        and chart_cand != 'heatmap'
                         and _can_chart_financial_part(chart_cand, part, model, project_data)):
                     flush_pending_tables()
                     chart_titles = {
@@ -1175,7 +1233,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     })
                 for row_number, (start, end) in enumerate(row_ranges, 1):
                     for column_number, (column_start, column_end) in enumerate(column_ranges, 1):
-                        chart_cand = _financial_chart_type(part_title, index=part_index)
+                        chart_cand = '' if is_assumption_part else _financial_chart_type(part_title, index=part_index)
                         chartable = (len(column_ranges) == 1 and start == 0 and column_number == 1
                                      and part.get('type') == 'table'
                                      and bool(chart_cand)
@@ -6052,32 +6110,6 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                 total_slides=total_slides, tenant_id=(branding or {}).get('tenant_id'),
                 branding=branding, project_data=project_data
             )
-
-    # Every ordinary financial table slide is backed by exact stored rows. Keep
-    # Sol's visual language through the deterministic renderer, but do not ask
-    # the model to recompose the tables: it can omit a source or leave a large
-    # blank area while trying to fit the page. Approved chart slides are handled
-    # by the deterministic chart branch above and retain table + chart layout.
-    financial_sources = [str(source).strip() for source in (
-        (slide or {}).get('content_sources') or [(slide or {}).get('content_source')]
-    ) if str(source or '').strip()]
-    is_financial_table_slide = (
-        _slide_section_key(slide) == 'financial'
-        and not chart_type
-        and any(source.startswith(('financial_table:', 'financial_report:', 'financial_summary:', 'financial_indicators'))
-                for source in financial_sources)
-    )
-    if is_financial_table_slide:
-        deterministic_slide = _build_structured_fallback_slide(
-            slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
-        if deterministic_slide:
-            return postprocess_slide(
-                deterministic_slide, (slide or {}).get('type', 'content'),
-                slide_num=slide_num, slide_title=(slide or {}).get('title', f'شريحة {slide_num}'),
-                total_slides=total_slides, tenant_id=(branding or {}).get('tenant_id'),
-                branding=branding, project_data=project_data
-            )
-
     user_msg = build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=project_data)
     slide_title = slide.get('title', f'شريحة {slide_num}')
     slide_type = slide.get('type', 'content')
@@ -7063,16 +7095,25 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     html = _ensure_map_placeholder(html, slide_type)
 
     normalized_title = str(slide_title or '').strip().lower()
-    is_cover = slide_type == 'cover' or int(slide_num or 0) == 1 or bool(
-        re.search(r'غلاف|cover|front', normalized_title)
+    is_cover = slide_type == 'cover' or (
+        slide_type not in ('section_divider', 'closing', 'index', 'content', 'overview', 'site_specs')
+        and int(slide_num or 0) == 1
+    ) or (
+        slide_type not in ('section_divider', 'closing', 'index')
+        and bool(re.search(r'غلاف|cover|front', normalized_title))
     )
-    is_closing = slide_type == 'closing' or bool(
-        re.search(r'ختام|closing|شكراً|thanks', normalized_title)
-    ) or (total_slides is not None and int(slide_num or 0) == int(total_slides))
+    is_closing = slide_type == 'closing' or (
+        slide_type not in ('cover', 'section_divider', 'index')
+        and (
+            bool(re.search(r'ختام|closing|شكراً|thanks', normalized_title))
+            or (total_slides is not None and int(slide_num or 0) == int(total_slides) and int(slide_num or 0) > 1)
+        )
+    )
     is_cover_or_closing = is_cover or is_closing
     # Sol and the deterministic financial renderer use different chrome. Remove
     # both forms first so preview and export always receive the same one.
-    html = _strip_existing_slide_chrome(html)
+    if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
+        html = _strip_existing_slide_chrome(html)
     html = _strip_internal_financial_notes(html)
     if is_cover_or_closing:
         html = _normalize_brand_overlay(html, branding)
@@ -7087,7 +7128,7 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
             return ''
         html = re.sub(r'<img\b[^>]*>', _strip_cover_extra_images, html, flags=re.IGNORECASE)
         for _ in range(3):
-            html = re.sub(r'<(?:div|figure|picture)\b(?![^>]*(?:\bslide\b|data-cover-overlay))[^>]*>\s*</(?:div|figure|picture)>', '', html, flags=re.IGNORECASE)
+            html = re.sub(r'<(?:div|figure|picture)\b(?![^>]*(?:\bslide\b|data-cover-overlay|background|##IMAGE_COVER##|cover-bg))[^>]*>\s*</(?:div|figure|picture)>', '', html, flags=re.IGNORECASE)
     if is_closing:
         html = re.sub(
             r'<(p|h[1-6]|span)\b[^>]*>[^<]*(?:فرصة\s+(?:واعدة|مشروطة)|واعدة\s+بشروط|بشروط)[^<]*</\1\s*>',

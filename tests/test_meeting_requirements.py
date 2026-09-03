@@ -447,6 +447,60 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn(logo_path + '?t=1', html)
         self.assertNotIn('/assets/logo.png', html)
 
+    def test_single_slide_snapshot_uses_real_deck_position_for_chrome(self):
+        """A single-slide snapshot must use _slideNum, not the snapshot index.
+
+        The client sends one slide at a time with slideIndex always 0. Numbering
+        the slide from that index mistook every slide for the cover, stripped
+        its header/footer and never re-added them, so         whole decks came out
+        without chrome.
+        """
+        project_data = {
+            'project_name': 'المشروع',
+            'financial_study_model': {
+                'inputs': {'projectCost': 1000},
+                'report': {'parts': [
+                    {'type': 'heading', 'level': 2, 'text': 'الدراسة المالية'},
+                    {'type': 'heading', 'level': 3, 'text': '1. طبيعة وحدات المشروع'},
+                    {'type': 'fields', 'rows': [[f'البند {i}', f'القيمة {i}'] for i in range(1, 7)]},
+                ]},
+            },
+        }
+        plan_slide = {'title': '1. طبيعة وحدات المشروع', 'type': 'content',
+                      'design_style': 'table', 'content_source': 'financial_report:2:0:6',
+                      'row_count': 6}
+        client = self.app.test_client()
+        response = client.post('/api/generate-slide-single', headers=self._headers(self.token_a), json={
+            'projectData': project_data,
+            'slidePlan': {'slides': [plan_slide]},
+            'images': {},
+            'slideIndex': 0,
+            '_slideNum': 5,
+            '_totalSlides': 24,
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        html = response.get_json()['slide']['html']
+        self.assertIn('data-slide-header="1"', html)
+        self.assertIn('data-slide-footer="1"', html)
+        self.assertIn('05 — 24', html)
+        self.assertIn('<table', html)
+
+        # Backward compatibility: without _slideNum the snapshot index still numbers the slide.
+        legacy = client.post('/api/generate-slide-single', headers=self._headers(self.token_a), json={
+            'projectData': project_data,
+            'slidePlan': {'slides': [
+                {'title': 'الغلاف', 'type': 'cover'},
+                dict(plan_slide, title='1. طبيعة وحدات المشروع'),
+                {'title': 'الخاتمة', 'type': 'closing'},
+            ]},
+            'images': {},
+            'slideIndex': 1,
+        })
+        self.assertEqual(legacy.status_code, 200, legacy.get_json())
+        legacy_html = legacy.get_json()['slide']['html']
+        self.assertIn('data-slide-header="1"', legacy_html)
+        self.assertIn('02 — 03', legacy_html)
+
     FULL_PROJECT = {
         'project_name': 'THE VIEW',
         'project_type': ['سكني', 'فندقي'],
