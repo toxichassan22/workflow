@@ -409,7 +409,7 @@ def _limit_presentation_charts(groups, limit=4):
 # Vertical stacking budget for packed tables: data rows plus the header and caption
 # each stacked table costs.  The renderer uses compact rows, so consecutive tables
 # keep filling the current slide until this budget is reached.
-_FINANCIAL_PACK_ROW_BUDGET = 24.0
+_FINANCIAL_PACK_ROW_BUDGET = 21.5
 _FINANCIAL_PACK_MAX_TABLES = 8
 
 
@@ -508,7 +508,7 @@ def _stacked_financial_report_note(sources, model):
     if not blocks:
         return ''
     return ('هذه الشريحة المالية العادية تضم الجداول التالية في الشريحة نفسها — '
-            'ادمج الجداول المتتالية ذات الترويسة والأعمدة المتطابقة في جدول واحد، ورص جميع الجداول المتبقية رأسياً تحت بعضها بترتيب المصادر، مع إبقاء كل صف وعمود كاملاً. لا تضع جدولين بجانب بعضهما، وإذا لم تتسع المساحة الحالية فانقل بقية الجداول إلى الشريحة المالية التالية دون قص أو حذف. هذا الترتيب لا يلغي تخطيط الجدول بجانب الرسم في شرائح الرسوم المعتمدة:\n\n'
+            'اعرض كل جدول مستقلاً، ورص جميع الجداول رأسياً تحت بعضها بترتيب المصادر، مع إبقاء كل صف وعمود كاملاً. لا تضع جدولين بجانب بعضهما، وإذا لم تتسع المساحة الحالية فانقل بقية الجداول إلى الشريحة المالية التالية دون قص أو حذف. هذا الترتيب لا يلغي تخطيط الجدول بجانب الرسم في شرائح الرسوم المعتمدة:\n\n'
             + '\n\n'.join(blocks))
 
 
@@ -4304,7 +4304,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         stacked_sources = [s for s in (slide.get('content_sources') or []) if str(s or '').strip()]
         stacked_titles = [t for t in (slide.get('table_group_titles') or []) if str(t or '').strip()]
         if (len(stacked_sources) > 1 or len(stacked_titles) > 1) and not chart_type:
-            notes.append('هذه الشريحة المالية العادية تضم عدة جداول: ادمج الجداول المتتالية ذات الترويسة والأعمدة المتطابقة في جدول واحد، ورص جميع الجداول رأسياً تحت بعضها بتباعد 18px، مع عنوان صغير فوق كل جدول وبقاء كل صف وعمود كاملاً دون اختصار. لا تضع أي جدول بجانب جدول آخر، وإذا لم تتسع المساحة فانقل بقية الجداول إلى الشريحة التالية دون قص أو حذف.')
+            notes.append('هذه الشريحة المالية العادية تضم عدة جداول: اعرض كل جدول مستقلاً، ورص جميع الجداول رأسياً تحت بعضها بتباعد 18px، مع عنوان صغير فوق كل جدول وبقاء كل صف وعمود كاملاً دون اختصار. لا تضع أي جدول بجانب جدول آخر، وإذا لم تتسع المساحة فانقل بقية الجداول إلى الشريحة التالية دون قص أو حذف.')
             if stacked_titles:
                 notes.append('عناوين جداول هذه المجموعة كما وردت في الخطة: ' + ' — '.join(stacked_titles))
         notes.append('نسّق الأعداد بفواصل الآلاف للعرض فقط، من دون تقريب أو تحويل إلى ألف أو مليون أو تغيير عدد الخانات العشرية.')
@@ -5777,14 +5777,11 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
 
             table_blocks.append((sub_title, tuple(str(h) for h in sub_headers), tb_rows, th_cells))
 
-    # Adjacent key/value blocks with the same columns are one logical table.
-    # This is common in the land and project-summary sections, where splitting
-    # the same «البند / القيمة» table by heading only creates empty space.
+    # Keep every source as a separate visual table.  Combining equal-column
+    # blocks made the lower source look missing when the shared wrapper clipped
+    # the combined table at the bottom of the slide.
     tables_html = []
     for sub_title, headers_key, tb_rows, th_cells in table_blocks:
-        if tables_html and tables_html[-1].get('headers') == headers_key:
-            tables_html[-1]['rows'].extend(tb_rows)
-            continue
         tables_html.append({'title': sub_title, 'headers': headers_key, 'header_html': th_cells, 'rows': list(tb_rows)})
     rendered_tables = []
     for block in tables_html:
@@ -6817,6 +6814,82 @@ def _slide_element_end(html, opening_match):
     return len(html)
 
 
+def _strip_existing_slide_chrome(html):
+    """Remove model-authored or stale header/footer elements before rebuilding them."""
+    if not html:
+        return html
+    opening_re = re.compile(r'<(?P<tag>[a-z][\w:-]*)(?P<attrs>\s[^>]*)?>', re.IGNORECASE)
+    ranges = []
+    for match in opening_re.finditer(html):
+        tag = match.group('tag').lower()
+        attrs = match.group('attrs') or ''
+        classes = re.search(r'\bclass\s*=\s*["\']([^"\']*)["\']', attrs, re.IGNORECASE)
+        class_text = (classes.group(1) if classes else '').lower()
+        style_match = re.search(r'\bstyle\s*=\s*["\']([^"\']*)["\']', attrs, re.IGNORECASE)
+        style = (style_match.group(1) if style_match else '').lower().replace(' ', '')
+        is_header = (
+            tag == 'header'
+            or 'slide-header' in class_text
+            or re.search(r'\bdata-slide-header\s*=', attrs, re.IGNORECASE)
+            or (re.search(r'position:(?:absolute|fixed)', style)
+                and re.search(r'top:0(?:px)?', style)
+                and re.search(r'height:(?:36|40|48|56|60|64|72|96)px', style))
+        )
+        is_footer = (
+            tag == 'footer'
+            or 'slide-footer' in class_text
+            or re.search(r'\bdata-slide-footer\s*=', attrs, re.IGNORECASE)
+            or (re.search(r'position:(?:absolute|fixed)', style)
+                and re.search(r'bottom:0(?:px)?', style)
+                and re.search(r'height:(?:30|32|34|36|38|40|42)px', style))
+        )
+        if is_header or is_footer:
+            ranges.append((match.start(), _slide_element_end(html, match)))
+    for start, end in reversed(ranges):
+        while start > 0 and html[start - 1] in ' \t\r\n':
+            start -= 1
+        while end < len(html) and html[end] in ' \t\r\n':
+            end += 1
+        html = html[:start] + html[end:]
+    return re.sub(r'\n[ \t]*(?:\n[ \t]*)+', '\n', html)
+
+
+def _presentation_chrome_html(title, project_title, company_name, primary, accent,
+                              footer_background, footer_text, footer_accent, counter,
+                              project_logo=False):
+    """Return the single canonical light header and footer for content slides."""
+    logo_style = (
+        'height:40px;width:auto;max-width:122px;object-fit:contain;display:inline-block;'
+        'background:#ffffff;border-radius:6px;padding:3px 7px;box-sizing:border-box;'
+    )
+    project_logo_html = (
+        '<img class="presentation-chrome-logo" src="##PROJECT_LOGO##" alt="" '
+        f'style="{logo_style}" />'
+    ) if project_logo else ''
+    header = (
+        f'<header class="slide-header" data-slide-header="1" dir="rtl" '
+        f'style="position:relative;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
+        'display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
+        'box-sizing:border-box;z-index:10;overflow:hidden;">'
+        '<div style="display:flex;align-items:center;gap:10px;min-width:0;direction:ltr;">'
+        f'<img class="presentation-chrome-logo" src="##LOGO##" alt="" style="{logo_style}" />'
+        f'{project_logo_html}'
+        f'<span style="width:3px;height:28px;background:{accent};display:inline-block;flex:0 0 auto;"></span>'
+        f'<span style="font-size:16px;font-weight:700;color:{primary};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;">{title}</span>'
+        '</div></header>'
+    )
+    footer = (
+        f'<footer class="slide-footer" data-slide-footer="1" dir="rtl" '
+        f'style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{footer_background};'
+        f'border-top:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
+        'box-sizing:border-box;z-index:10;overflow:hidden;">'
+        f'<span style="font-size:12px;font-weight:700;color:{footer_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62%;">{project_title}</span>'
+        f'<span data-slide-counter="1" dir="ltr" style="display:inline-flex;align-items:center;justify-content:center;min-width:72px;font-size:12px;font-weight:700;color:{footer_accent};text-align:center;">{counter}</span>'
+        '</footer>'
+    )
+    return header, footer
+
+
 def _project_logo_reference(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     value = str(source.get('project_logo') or source.get('projectLogo') or '').strip()
@@ -6872,9 +6945,6 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     html = _block_external_images(html)
     html = _ensure_map_placeholder(html, slide_type)
 
-    # Keep the header and footer authored by Sol.  The engine must not remove them
-    # and rebuild a second chrome layer because that reserves space over the
-    # generated content and changes the layout Sol designed.
     normalized_title = str(slide_title or '').strip().lower()
     is_cover = slide_type == 'cover' or int(slide_num or 0) == 1 or bool(
         re.search(r'غلاف|cover|front', normalized_title)
@@ -6883,10 +6953,10 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         re.search(r'ختام|closing|شكراً|thanks', normalized_title)
     ) or (total_slides is not None and int(slide_num or 0) == int(total_slides))
     is_cover_or_closing = is_cover or is_closing
+    # Sol and the deterministic financial renderer use different chrome. Remove
+    # both forms first so preview and export always receive the same one.
+    html = _strip_existing_slide_chrome(html)
     html = _strip_internal_financial_notes(html)
-    # Renumber a counter that Sol already rendered, but never create or remove
-    # the surrounding header/footer markup.
-    html = _rewrite_slide_counter(html, slide_type, slide_num, total_slides)
     if is_cover_or_closing:
         html = _normalize_brand_overlay(html, branding)
     if is_cover:
@@ -6941,13 +7011,10 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         return tag
     html = re.sub(r'<img\s[^>]*>', _strip_srcless_img, html, flags=re.IGNORECASE)
 
-    # Content/map/site slides get a header/footer; cover, dividers, moodboard and closing never do:
-    # a divider carries its own logo, section name, slide number and project name.
+    # Content/map/site slides get one canonical header/footer; cover, dividers,
+    # moodboards and closing keep their own image-led layouts.
     if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
-        has_header = bool(re.search(r'height:\s*56px', html))
-        has_footer = bool(re.search(r'height:\s*36px', html))
-
-        title = slide_title or f'شريحة {slide_num}' or 'العنوان'
+        title = html_lib.escape(str(slide_title or f'شريحة {slide_num}' or 'العنوان'))
         primary = '#7A0C0C'
         accent = '#C4A35A'
         company_name = 'منافع الاقتصادية للعقار'
@@ -6964,39 +7031,21 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
 
         primary = normalize_hex_color(primary, '#7a0c0c')
         accent = normalize_hex_color(accent, '#c4a35a')
-        header_title = readable_text_color(primary, '#ffffff', ('#0f172a',))
         footer_background = dark_surface_color(primary, branding.get('secondary_color') if branding else None)
         footer_text = readable_text_color('#ffffff', footer_background, ('#0f172a',))
         footer_accent = readable_text_color(accent, footer_background, (footer_text,))
-
-        if not has_header:
-            # The project logo belongs next to the company logo. This fallback used to carry the
-            # company logo alone, so a slide the model built without a header lost it entirely.
-            project_logo = str((project_data or {}).get('project_logo') or '').strip()
-            project_logo_html = (
-                f'<div style="width:1px;height:26px;background:#e2e8f0;margin:0 10px;"></div>'
-                f'<img src="##PROJECT_LOGO##" alt="" style="height:36px;width:auto;object-fit:contain;" />'
-            ) if project_logo else ''
-            header_html = (
-                f'<div style="position:absolute;top:0;right:0;left:0;height:56px;background:#fff;border-bottom:2px solid {primary};display:flex;align-items:center;padding:0 20px;z-index:10;">'
-                '<img src="##LOGO##" style="height:40px;margin-right:12px;" />'
-                + project_logo_html +
-                f'<div style="width:3px;height:28px;background:{accent};margin:0 12px;"></div>'
-                f'<span style="font-size:16px;font-weight:600;color:{header_title};">{title}</span>'
-                '</div>'
-            )
-            html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
-
-        if not has_footer:
-            footer_number = _slide_counter_text(slide_num, total_slides)
-            footer_html = (
-                f'<div data-slide-footer="1" style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{footer_background};display:flex;align-items:center;padding:0 16px;z-index:10;">'
-                f'<span style="font-size:13px;color:{footer_text};">{title}</span>'
-                f'<span style="font-size:13px;color:{footer_text};opacity:0.7;margin-right:auto;margin-left:8px;">{company_name}</span>'
-                f'<span data-slide-counter="1" style="color:{footer_accent};font-size:12px;font-weight:700;min-width:52px;text-align:left;">{footer_number}</span>'
-                '</div>'
-            )
-            html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
+        footer_number = _slide_counter_text(slide_num, total_slides)
+        project_source = project_data if isinstance(project_data, dict) else {}
+        project_title = html_lib.escape(str(
+            project_source.get('project_name') or project_source.get('projectName') or 'THE VIEW'
+        ))
+        header_html, footer_html = _presentation_chrome_html(
+            title, project_title, html_lib.escape(str(company_name)), primary, accent,
+            footer_background, footer_text, footer_accent, footer_number,
+            project_logo=bool(_project_logo_reference(project_source)),
+        )
+        html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
+        html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
 
     return html
 
