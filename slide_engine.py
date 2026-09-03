@@ -273,19 +273,40 @@ def _financial_report_part_slice(part, row_start, row_end, column_start=None, co
 
 
 def _financial_column_ranges(part):
+    """Split a wide table into balanced column groups, each keeping the context column.
+
+    Groups hold at most five data columns plus the first context column, and
+    the data columns are distributed evenly so no group is left as a tiny
+    2-3 column remainder slide on its own.
+    """
     headers = part.get('headers') if isinstance(part, dict) and isinstance(part.get('headers'), list) else []
     if len(headers) <= 8:
         return [(None, None)]
-    return [(start, min(start + 5, len(headers))) for start in range(1, len(headers), 5)]
+    data_count = len(headers) - 1
+    num_groups = max(1, (data_count + 4) // 5)
+    base_size = data_count // num_groups
+    remainder = data_count % num_groups
+    ranges = []
+    start = 1
+    for group in range(num_groups):
+        size = base_size + (1 if group < remainder else 0)
+        ranges.append((start, start + size))
+        start += size
+    return ranges
 
 
 def _balanced_row_ranges(total_rows, max_per_slide=12, min_per_slide=4):
-    """Chunk rows into balanced, readable ranges without leaving orphan 1-2 row slides."""
+    """Chunk rows into balanced, readable ranges without leaving orphan 1-2 row slides.
+
+    The chunk count follows ``max_per_slide`` (a 14-row narrow table stays on
+    one slide when the caller allows 16), while the ``min_per_slide`` guard
+    still folds a tiny remainder back instead of emitting a near-empty slide.
+    """
     if total_rows <= 0:
         return []
     if total_rows <= max_per_slide:
         return [(0, total_rows)]
-    num_chunks = (total_rows + 9) // 10
+    num_chunks = (total_rows + max_per_slide - 1) // max_per_slide
     while num_chunks > 1 and (total_rows // num_chunks) < min_per_slide:
         num_chunks -= 1
     base_size = total_rows // num_chunks
@@ -1119,7 +1140,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 if target_section == 'components':
                     continue
                 column_ranges = _financial_column_ranges(part) if part.get('type') == 'table' else [(None, None)]
-                row_ranges = _balanced_row_ranges(len(rows), max_per_slide=12, min_per_slide=4)
+                # Narrow key/value tables stay readable with more rows per slide, so a
+                # 14-row section does not burn two slides; wide tables keep the
+                # tighter budget because each row costs more horizontal space.
+                column_count = len(part.get('headers') or []) if part.get('type') == 'table' else 2
+                row_ranges = _balanced_row_ranges(
+                    len(rows), max_per_slide=16 if column_count <= 3 else 12, min_per_slide=4)
                 chart_cand = _financial_chart_type(part_title, index=part_index) if part.get('type') == 'table' else ''
                 chartable_overall = (len(column_ranges) == 1 and len(row_ranges) == 1
                                      and part.get('type') == 'table'
@@ -1269,7 +1295,10 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
                 if not rows:
                     continue
-                row_ranges = _balanced_row_ranges(len(rows), max_per_slide=12, min_per_slide=4)
+                first_keys = list(rows[0].keys()) if isinstance(rows[0], dict) else []
+                row_ranges = _balanced_row_ranges(
+                    len(rows), max_per_slide=16 if first_keys and len(first_keys) <= 3 else 12,
+                    min_per_slide=4)
                 for number, (start, end) in enumerate(row_ranges, 1):
                     is_chart = (style == 'chart' and start == 0)
                     c_type = _financial_chart_type(title, table_key, number - 1) if is_chart else ''
@@ -4941,6 +4970,26 @@ def _fallback_table_data(slide, project_data):
         key, start, end = match.group(1), int(match.group(2)), int(match.group(3))
         name = 'التكاليف والاستثمار' if key == 'costs' else 'مؤشرات العائد والاسترداد'
         return ['البند', 'القيمة'], _financial_summary_from_report(model).get(name, [])[start:end]
+    if source == 'financial_indicators':
+        # The closing financial summary when the report carries no dedicated
+        # cost/return groups. Render the study's own key figures (same labels
+        # as the PDF note) instead of an empty table.
+        projection = model.get('projection') if isinstance(model.get('projection'), dict) else {}
+        inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
+        calc = _parse_financial_dict(project_data.get('financial_calc_data'))
+        indicator_rows = []
+        for key, label in _FINANCIAL_INDICATOR_LABELS:
+            value = projection.get(key)
+            if value in (None, '', [], {}) and inputs.get(key) not in (None, '', [], {}):
+                value = inputs.get(key)
+            if value in (None, '', [], {}) and calc.get(key) not in (None, '', [], {}):
+                value = calc.get(key)
+            if value in (None, '', [], {}, -1):
+                continue
+            indicator_rows.append([label, value])
+            if len(indicator_rows) >= 12:
+                break
+        return ['البند', 'القيمة'], indicator_rows
     match = re.fullmatch(r'financial_table:([^:]+):(\d+):(\d+)', source)
     if match:
         key, start, end = match.group(1), int(match.group(2)), int(match.group(3))
@@ -5218,26 +5267,11 @@ SOL_SLIDES_CSS = """
     width: 1280px; height: 720px; position: relative; overflow: hidden;
     background: #ffffff; color: #0b1f33; box-sizing: border-box; font-family: inherit;
   }
-  .slide-header {
-    height: 96px; padding: 0 58px; display: flex; justify-content: space-between; align-items: center;
-    border-bottom: 1px solid #e2e8f0; box-sizing: border-box;
-  }
-  .header-left { text-align: left; }
-  .header-project { font-size: 13px; font-weight: 700; color: #0b1f33; letter-spacing: 0.05em; }
-  .header-cat { font-size: 11px; font-weight: 600; color: #c59a58; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
-  .header-right { display: flex; align-items: center; gap: 14px; text-align: right; }
-  .header-accent-bar { width: 4px; height: 38px; border-radius: 2px; flex-shrink: 0; }
-  .header-title { font-size: 24px; font-weight: 800; color: #0b1f33; margin: 0; line-height: 1.2; }
-  .header-subtitle { font-size: 13px; font-weight: 500; color: #64748b; margin: 3px 0 0; }
-  .slide-footer {
-    position: absolute; bottom: 0; left: 0; right: 0; height: 38px; padding: 0 58px;
-    display: flex; justify-content: space-between; align-items: center;
-    border-top: 1px solid #f1f5f9; background: #ffffff; font-size: 11px; color: #94a3b8; box-sizing: border-box;
-  }
-  .footer-left { font-weight: 600; color: #64748b; }
-  .footer-center { font-weight: 500; }
-  .footer-right { font-weight: 700; color: #0b1f33; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
-  
+  /* NOTE: no .slide-header/.slide-footer rules live here on purpose. The SOL
+     builders below emit their own header/footer markup, but postprocess_slide()
+     always replaces it with the single canonical chrome, so class-based header
+     rules would only restyle that chrome in renderers that drop inline styles.
+     Body components (tables, KPIs, charts) are styled below. */
   .luxury-kpi-grid {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px;
   }
@@ -5563,8 +5597,18 @@ def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_s
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
 
+    # Long narrow tables share one slide instead of burning two: beyond eleven
+    # rows the table switches to the compact density the stacked renderer uses,
+    # so sixteen rows still end above the footer instead of clipping under it.
+    compact = len(rows) > 11
+    compact_css = (
+        '<style>.financial-table th{padding:7px 10px;font-size:11px;}'
+        '.financial-table td{padding:5px 10px;font-size:11px;}</style>'
+    ) if compact else ''
+    wrap_max_height = 480 if compact else 420
+
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
-  <style>{SOL_SLIDES_CSS}</style>
+  <style>{SOL_SLIDES_CSS}</style>{compact_css}
   <header class="slide-header">
     <div class="header-left">
       <div class="header-project">{project_title}</div>
@@ -5593,7 +5637,7 @@ def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_s
         <div class="kpi-val">{kpi1_val}</div>
       </div>
     </div>
-    <div class="financial-table-wrap" style="max-height:420px;overflow:hidden;">
+    <div class="financial-table-wrap" style="max-height:{wrap_max_height}px;overflow:hidden;">
       <table class="financial-table">
         <thead>
           <tr>{th_cells}</tr>
@@ -5777,11 +5821,16 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
 
             table_blocks.append((sub_title, tuple(str(h) for h in sub_headers), tb_rows, th_cells))
 
-    # Keep every source as a separate visual table.  Combining equal-column
-    # blocks made the lower source look missing when the shared wrapper clipped
-    # the combined table at the bottom of the slide.
+    # Consecutive slices of one table (same title and columns) are rendered as a
+    # single visual table instead of two stacked tables repeating the same
+    # header. Unrelated tables keep their own header and sub-title so none of
+    # them looks missing when the slide fills up.
     tables_html = []
     for sub_title, headers_key, tb_rows, th_cells in table_blocks:
+        if (tables_html and tables_html[-1]['title'] == sub_title
+                and tables_html[-1]['headers'] == headers_key):
+            tables_html[-1]['rows'].extend(tb_rows)
+            continue
         tables_html.append({'title': sub_title, 'headers': headers_key, 'header_html': th_cells, 'rows': list(tb_rows)})
     rendered_tables = []
     for block in tables_html:
@@ -5802,6 +5851,20 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
         ''')
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
+    if not tables_html:
+        # Every source resolved to zero rows (for example a plan built from a
+        # report that the generation payload no longer carries). An empty body
+        # under a header reads as a broken slide, so state the section instead.
+        return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <div style="padding:90px 58px 60px;box-sizing:border-box;">
+    <h1 style="font-size:26px;font-weight:800;color:{primary};margin:0 0 14px;">{title}</h1>
+    <p style="font-size:15px;line-height:2;color:#475569;margin:0;">لا توجد بيانات معتمدة لعرضها في هذا القسم.</p>
+  </div>
+  <div data-slide-footer="1" style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{primary};display:flex;align-items:center;justify-content:space-between;padding:0 24px;box-sizing:border-box;">
+    <span style="font-size:12px;font-weight:700;color:#ffffff;">{project_title}</span>
+    <span data-slide-counter="1" dir="ltr" style="font-size:12px;font-weight:700;color:#ffffff;">{slide_num_str}</span>
+  </div>
+</div>'''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
   <style>{SOL_SLIDES_CSS}</style>
   <header class="slide-header">
@@ -6900,6 +6963,50 @@ def _presentation_chrome_html(title, project_title, company_name, primary, accen
     return header, footer
 
 
+def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=None,
+                           branding=None, project_data=None, tenant_id=None):
+    """Inject the single canonical header/footer for a content slide.
+
+    The one chrome authority: postprocess_slide() calls this for every new
+    slide, and renumber_presentation_slides() calls it for stored slides that
+    predate it, so old and new decks converge on one header and footer.
+    Callers must strip any stale chrome first via _strip_existing_slide_chrome.
+    """
+    title = html_lib.escape(str(slide_title or (f'شريحة {slide_num}' if slide_num else 'العنوان')))
+    primary = '#7A0C0C'
+    accent = '#C4A35A'
+    company_name = 'منافع الاقتصادية للعقار'
+
+    if branding is None and tenant_id:
+        branding = db.get_branding(tenant_id) or {}
+    if branding:
+        primary = branding.get('primary_color') or primary
+        accent = branding.get('accent_color') or accent
+        company_name = branding.get('company_name') or company_name
+        if not company_name:
+            tenant = db.get_tenant(tenant_id) if tenant_id else None
+            company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
+
+    primary = normalize_hex_color(primary, '#7a0c0c')
+    accent = normalize_hex_color(accent, '#c4a35a')
+    footer_background = dark_surface_color(primary, branding.get('secondary_color') if branding else None)
+    footer_text = readable_text_color('#ffffff', footer_background, ('#0f172a',))
+    footer_accent = readable_text_color(accent, footer_background, (footer_text,))
+    footer_number = _slide_counter_text(slide_num, total_slides)
+    project_source = project_data if isinstance(project_data, dict) else {}
+    project_title = html_lib.escape(str(
+        project_source.get('project_name') or project_source.get('projectName') or 'THE VIEW'
+    ))
+    header_html, footer_html = _presentation_chrome_html(
+        title, project_title, html_lib.escape(str(company_name)), primary, accent,
+        footer_background, footer_text, footer_accent, footer_number,
+        project_logo=bool(_project_logo_reference(project_source)),
+    )
+    html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
+    html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
+    return html
+
+
 def _project_logo_reference(project_data):
     source = project_data if isinstance(project_data, dict) else {}
     value = str(source.get('project_logo') or source.get('projectLogo') or '').strip()
@@ -7024,38 +7131,10 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     # Content/map/site slides get one canonical header/footer; cover, dividers,
     # moodboards and closing keep their own image-led layouts.
     if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
-        title = html_lib.escape(str(slide_title or f'شريحة {slide_num}' or 'العنوان'))
-        primary = '#7A0C0C'
-        accent = '#C4A35A'
-        company_name = 'منافع الاقتصادية للعقار'
-
-        if branding is None and tenant_id:
-            branding = db.get_branding(tenant_id) or {}
-        if branding:
-            primary = branding.get('primary_color') or primary
-            accent = branding.get('accent_color') or accent
-            company_name = branding.get('company_name') or company_name
-            if not company_name:
-                tenant = db.get_tenant(tenant_id) if tenant_id else None
-                company_name = tenant.get('company_name') if tenant else 'منافع الاقتصادية للعقار'
-
-        primary = normalize_hex_color(primary, '#7a0c0c')
-        accent = normalize_hex_color(accent, '#c4a35a')
-        footer_background = dark_surface_color(primary, branding.get('secondary_color') if branding else None)
-        footer_text = readable_text_color('#ffffff', footer_background, ('#0f172a',))
-        footer_accent = readable_text_color(accent, footer_background, (footer_text,))
-        footer_number = _slide_counter_text(slide_num, total_slides)
-        project_source = project_data if isinstance(project_data, dict) else {}
-        project_title = html_lib.escape(str(
-            project_source.get('project_name') or project_source.get('projectName') or 'THE VIEW'
-        ))
-        header_html, footer_html = _presentation_chrome_html(
-            title, project_title, html_lib.escape(str(company_name)), primary, accent,
-            footer_background, footer_text, footer_accent, footer_number,
-            project_logo=bool(_project_logo_reference(project_source)),
+        html = _ensure_managed_chrome(
+            html, slide_title=slide_title, slide_num=slide_num, total_slides=total_slides,
+            branding=branding, project_data=project_data, tenant_id=tenant_id,
         )
-        html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
-        html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
 
     return html
 
@@ -7137,12 +7216,29 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 slide_num=index, slide_title=item.get('title') or 'محتويات العرض',
                 total_slides=total, content_source=item.get('content_source'),
             )
-        elif slide_type in ('cover', 'closing', 'moodboard'):
+        elif slide_type in ('cover', 'closing', 'moodboard', 'section_divider'):
             item['html'] = _rewrite_slide_counter(
                 item.get('html') or '', slide_type, index, total)
         else:
-            item['html'] = _rewrite_slide_counter(
-                item.get('html') or '', slide_type, index, total)
+            html = item.get('html') or ''
+            if 'data-slide-header' not in html:
+                # A stored slide that predates the canonical chrome (or lost it
+                # to an edit) converges here: the stale header/footer is
+                # replaced with the managed one instead of keeping a second
+                # visual language beside the fresh slides.
+                html = _strip_existing_slide_chrome(html)
+                html = _ensure_managed_chrome(
+                    html, slide_title=item.get('title'), slide_num=index,
+                    total_slides=total, branding=branding,
+                    project_data=project_data, tenant_id=tenant_id,
+                )
+                html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
+                html = _replace_data_placeholders(html, project_data, branding)
+                html = resolve_logo_in_html(
+                    html, tenant_id, _branding_cache=branding,
+                    project_logo=_project_logo_reference(project_data),
+                )
+            item['html'] = _rewrite_slide_counter(html, slide_type, index, total)
     return normalized
 
 

@@ -1677,7 +1677,8 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertGreaterEqual(end - start, 4)  # No 1-2 row chunks
         self.assertEqual(ranges_13, [(0, 7), (7, 13)])
 
-        # 2. Test plan normalization with 13 rows splits evenly without 1-row slides
+        # 2. Test plan normalization packs a narrow 13-row table on one slide
+        # instead of burning two slides, while wide tables still split evenly.
         report = {'parts': [
             {'type': 'heading', 'level': 2, 'text': 'جدول تكاليف الاستثمار المفصل'},
             {'type': 'table', 'headers': ['البند', 'القيمة'], 'rows': [[f'بند {i}', f'{i * 1000}'] for i in range(1, 14)]},
@@ -1687,8 +1688,33 @@ class MeetingRequirementsTests(unittest.TestCase):
             {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الخاتمة', 'type': 'closing'},
         ]}, project, {})
         fin_slides = [s for s in plan['slides'] if s.get('section_key') == 'financial' and 'تكاليف الاستثمار المفصل' in s.get('title', '')]
-        self.assertEqual(len(fin_slides), 2)
-        self.assertEqual([s.get('row_count') for s in fin_slides], [7, 6])
+        self.assertEqual(len(fin_slides), 1)
+        self.assertEqual([s.get('row_count') for s in fin_slides], [13])
+
+        # Genuinely long narrow tables still split into balanced slides.
+        long_report = {'parts': [
+            {'type': 'heading', 'level': 2, 'text': 'جدول تكاليف الاستثمار المفصل'},
+            {'type': 'table', 'headers': ['البند', 'القيمة'], 'rows': [[f'بند {i}', f'{i * 1000}'] for i in range(1, 21)]},
+        ]}
+        long_project = {'project_name': 'مشروع متوازن', 'financial_study_model': {'inputs': {'projectCost': 1000}, 'report': long_report}}
+        long_plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, long_project, {})
+        long_slides = [s for s in long_plan['slides'] if s.get('section_key') == 'financial' and 'تكاليف الاستثمار المفصل' in s.get('title', '')]
+        self.assertEqual([s.get('row_count') for s in long_slides], [10, 10])
+
+        # Wide tables keep the tighter budget and split evenly without orphans.
+        wide_report = {'parts': [
+            {'type': 'heading', 'level': 2, 'text': 'جدول تكاليف الاستثمار المفصل'},
+            {'type': 'table', 'headers': ['البند', 'سنة 1', 'سنة 2', 'سنة 3', 'سنة 4', 'الإجمالي'],
+             'rows': [[f'بند {i}', '1', '2', '3', '4', '10'] for i in range(1, 14)]},
+        ]}
+        wide_project = {'project_name': 'مشروع متوازن', 'financial_study_model': {'inputs': {'projectCost': 1000}, 'report': wide_report}}
+        wide_plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, wide_project, {})
+        wide_slides = [s for s in wide_plan['slides'] if s.get('section_key') == 'financial' and 'تكاليف الاستثمار المفصل' in s.get('title', '')]
+        self.assertEqual([s.get('row_count') for s in wide_slides], [7, 6])
 
         # 3. Test prompt user message carries strict PDF table instructions and bans card/box grids
         fin_table_slide = fin_slides[0]

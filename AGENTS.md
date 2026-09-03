@@ -361,8 +361,11 @@ Two states, and both are stated to the model explicitly — silence made it inve
   Slide generation attaches `collectFinancialStudyReport()` to the generation-only copy of
   `financial_study_model`, so
   `_financial_data_note()` receives the same visible headings, labels, option text, metrics and
-  complete tables as the financial PDF. The canonical plan renders those report parts first, six
-  field rows or eight table rows per slide, then appends two or three `financial_summary:*` slides
+  complete tables as the financial PDF. The canonical plan renders those report parts first, packing
+  consecutive narrow tables into vertically stacked slides (narrow key/value tables keep up to 16
+  rows per slide with a compact density past 11 rows, wide tables up to 12, wide column sets split
+  into balanced groups so no tiny remainder slice owns a slide, and consecutive slices of one table
+  render as a single visual table), then appends two or three `financial_summary:*` slides
   for «التكاليف والاستثمار» and «مؤشرات العائد والاسترداد» at the end of the financial section. A
   table wider than eight columns is split into groups of five data columns plus its first context
   column. Presentation charts are strictly limited to the 4 approved types in 4 designated locations:
