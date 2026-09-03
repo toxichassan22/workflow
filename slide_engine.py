@@ -5990,11 +5990,21 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                 branding=branding, project_data=project_data
             )
 
-    # A packed table slide is already backed by exact stored rows.  Render it
-    # deterministically so the model cannot flatten the stack, omit a table, or
-    # replace it with cards while trying to fit the page.
-    if (_slide_section_key(slide) == 'financial'
-            and len([s for s in (slide or {}).get('content_sources') or [] if str(s or '').strip()]) > 1):
+    # Every ordinary financial table slide is backed by exact stored rows. Keep
+    # Sol's visual language through the deterministic renderer, but do not ask
+    # the model to recompose the tables: it can omit a source or leave a large
+    # blank area while trying to fit the page. Approved chart slides are handled
+    # by the deterministic chart branch above and retain table + chart layout.
+    financial_sources = [str(source).strip() for source in (
+        (slide or {}).get('content_sources') or [(slide or {}).get('content_source')]
+    ) if str(source or '').strip()]
+    is_financial_table_slide = (
+        _slide_section_key(slide) == 'financial'
+        and not chart_type
+        and any(source.startswith(('financial_table:', 'financial_report:', 'financial_summary:', 'financial_indicators'))
+                for source in financial_sources)
+    )
+    if is_financial_table_slide:
         deterministic_slide = _build_structured_fallback_slide(
             slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
