@@ -639,7 +639,22 @@ function addRevenue(d={}){const tb=document.querySelector('#revenueTable tbody')
 tb.appendChild(tr);
 tr.dataset.revenueKey=d.id||uid();
 tr.dataset.componentId=d.componentId||'';
-tr.querySelectorAll('input,select').forEach(x=>x.addEventListener('input',calculateAll));
+tr.querySelectorAll('input,select').forEach(x=>{
+  x.addEventListener('input',calculateAll);
+  x.addEventListener('change',calculateAll);
+});
+const compSelect=tr.querySelector('[data-field="component"] select');
+if(compSelect){
+  const onCompChange=()=>{
+    tr.dataset.componentId=compSelect.value||'';
+    if(!window.__batchLoading){
+      updateAutoQtyPreview(tr);
+      calculateAll();
+    }
+  };
+  compSelect.addEventListener('change',onCompChange);
+  compSelect.addEventListener('input',onCompChange);
+}
 enhanceNumericInputs(tr);
 updateRevenueComponentOptions();
 updateDynamicFields();
@@ -1126,30 +1141,38 @@ function getComponentRowsData(){
 }
 function updateRevenueComponentOptions(){
   const components=getComponentRowsData();
+  const optionsHtml='<option value="">غير مرتبط بمكون</option>' + components.map(c=>`<option value="${c.id}">${c.name} — مبني ${money(c.builtArea)} م² | بيعي/تأجيري ${money(c.revenueArea)} م² | ${money(c.units)} وحدة</option>`).join('');
   document.querySelectorAll('#revenueTable tbody tr').forEach(tr=>{
     const sel=tr.querySelector('[data-field="component"] select');
     if(!sel)return;
-    const previous=sel.value || tr.dataset.componentId || '';
-    sel.innerHTML='<option value="">غير مرتبط بمكون</option>' + components.map(c=>`<option value="${c.id}">${c.name} — مبني ${money(c.builtArea)} م² | بيعي/تأجيري ${money(c.revenueArea)} م² | ${money(c.units)} وحدة</option>`).join('');
-    if(previous!==''&&!components.some(c=>String(c.id)===String(previous))&&/^\d+$/.test(previous)&&components[Number(previous)]){
-      tr.dataset.componentId=components[Number(previous)].id;
+    let currentId=(sel.options&&sel.options.length>0)?(sel.value||''):(tr.dataset.componentId||'');
+    if(currentId!==''&&!components.some(c=>String(c.id)===String(currentId))&&/^\d+$/.test(currentId)&&components[Number(currentId)]){
+      currentId=components[Number(currentId)].id;
     }
-    const resolved=tr.dataset.componentId||previous;
-    if([...sel.options].some(o=>o.value===resolved)) sel.value=resolved;
+    if(sel.dataset.lastOptionsHtml!==optionsHtml){
+      sel.innerHTML=optionsHtml;
+      sel.dataset.lastOptionsHtml=optionsHtml;
+    }
+    if(currentId&&[...sel.options].some(o=>o.value===currentId)){
+      sel.value=currentId;
+    }else{
+      sel.value='';
+    }
     tr.dataset.componentId=sel.value || '';
   });
 }
 function getLinkedComponentForRevenueRow(tr){
-  const idx=tr.querySelector('[data-field="component"] select')?.value || '';
+  const sel=tr.querySelector('[data-field="component"] select');
+  const idx=sel?(sel.value||''):(tr?.dataset?.componentId||'');
   if(idx==='')return null;
   return getComponentRowsData().find(c=>String(c.id)===String(idx)) || null;
 }
 function getRevenueQuantity(tr){
   const source=tr.querySelector('[data-field="qtySource"] select')?.value || 'manual';
   const comp=getLinkedComponentForRevenueRow(tr);
-  if((source==='componentRevenueArea'||source==='componentArea') && comp) return comp.revenueArea;
-  if(source==='componentBuiltArea' && comp) return comp.builtArea;
-  if(source==='componentUnits' && comp) return comp.units;
+  if(source==='componentRevenueArea'||source==='componentArea') return comp ? comp.revenueArea : 0;
+  if(source==='componentBuiltArea') return comp ? comp.builtArea : 0;
+  if(source==='componentUnits') return comp ? comp.units : 0;
   return parseNumber(tr.querySelector('[data-field="qty"] input')?.value);
 }
 function updateAutoQtyPreview(tr){
@@ -1157,9 +1180,9 @@ function updateAutoQtyPreview(tr){
   const comp=getLinkedComponentForRevenueRow(tr);
   const qtyInput=tr.querySelector('[data-field="qty"] input');
   if(!qtyInput)return;
-  if((source==='componentRevenueArea'||source==='componentArea') && comp) qtyInput.value=money(comp.revenueArea);
-  if(source==='componentBuiltArea' && comp) qtyInput.value=money(comp.builtArea);
-  if(source==='componentUnits' && comp) qtyInput.value=money(comp.units);
+  if(source==='componentRevenueArea'||source==='componentArea') qtyInput.value=money(comp ? comp.revenueArea : 0);
+  else if(source==='componentBuiltArea') qtyInput.value=money(comp ? comp.builtArea : 0);
+  else if(source==='componentUnits') qtyInput.value=money(comp ? comp.units : 0);
 }
 
 function setWrapVisible(id, visible){

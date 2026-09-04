@@ -7643,6 +7643,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         # 5. Zero emojis, zero icons in generated html_matrix and labels
         self.assertIsNone(re.search(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]', res['html_matrix']))
 
+    def test_revenue_table_linked_component_can_be_changed_and_cleared(self):
+        """Selecting a linked component in table 4 (بنود الإيرادات) must remain editable:
+        changing to another component or choosing 'غير مرتبط بمكون' must not revert to
+        the previously saved componentId."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('const compSelect = tr.querySelector(\'[data-field="component"] select\');', index_source)
+        self.assertIn('compSelect.addEventListener(\'change\', onCompChange);', index_source)
+        self.assertIn('tr.dataset.componentId = compSelect.value || \'\';', index_source)
+        self.assertIn('let currentId = (sel.options && sel.options.length > 0) ? (sel.value || \'\') : (tr.dataset.componentId || \'\');', index_source)
+        self.assertIn('const idx = sel ? (sel.value || \'\') : (tr?.dataset?.componentId || \'\');', index_source)
+
 
 if __name__ == '__main__':
     unittest.main()
