@@ -20519,6 +20519,10 @@
       }
 
       // 2. Data Placeholders
+      const projectLogoMetaPath = projectData.project_logo_file_meta?.path
+        ? ('/' + String(projectData.project_logo_file_meta.path).replace(/^\/+/, '')) : '';
+      const projectLogoUrl = projectData.project_logo || projectLogoMetaPath
+        || (projectData.project_logo_file_id ? '/api/project-files/' + encodeURIComponent(projectData.project_logo_file_id) : '');
       const replacements = {
         'PROJECT_NAME': projectData.project_name || projectData.projectName || projectData.name || '',
         'PROJECT_TYPE': projectData.project_type || projectData.projectType || '',
@@ -20537,7 +20541,7 @@
         'roi': projectData.roi || '',
         'alqrma_almdafa_almtwqaa__cap_rate': projectData.cap_rate || projectData.capRate || '',
         'nsba_alashgal_almtwqaa': projectData.occupancy_rate || '',
-        'PROJECT_LOGO': projectData.project_logo || ''
+        'PROJECT_LOGO': projectLogoUrl
       };
 
       Object.entries(replacements).forEach(([key, val]) => {
@@ -22033,6 +22037,8 @@
     async function exportTenantSlides(format) {
       if (!tenantPresentationId) await saveTenantPresentation();
       if (!tenantPresentationId) { toast('لا يوجد عرض للتصدير'); return; }
+      await repairVisualConceptStoredImages();
+      persistVisualConceptDraftState();
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'presentation';
       renumberTenantSlides();
       tenantProjectData = { ...tenantProjectData, tenantSlidePlan };

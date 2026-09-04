@@ -174,6 +174,58 @@ def _resolve_asset_urls(html):
     return html
 
 
+_PROJECT_FILE_URL_RE = re.compile(
+    r'(?P<url>(?:https?://[^"\'\s)<>]+)?/api/project-files/'
+    r'(?P<file_id>[^"\'\s)<>/?#]+)(?:\?[^"\'\s)<>]*)?(?:#[^"\'\s)<>]*)?)',
+    re.IGNORECASE,
+)
+
+
+def _local_project_file_path(tenant_id, file_id):
+    """Return a tenant-scoped local image path for an authenticated project-file URL."""
+    if not tenant_id or not file_id:
+        return None
+    try:
+        import db
+        stored = db.get_project_file(str(tenant_id), str(file_id))
+    except Exception as exc:
+        print(f'[EXPORT] Could not resolve project file {file_id}: {exc}')
+        return None
+    if not stored or not str(stored.get('mime_type') or '').lower().startswith('image/'):
+        return None
+
+    storage_path = Path(os.path.realpath(str(stored.get('storage_path') or '')))
+    tenant_root = Path(os.path.realpath(BASE_DIR / 'uploads' / str(tenant_id)))
+    try:
+        if os.path.commonpath([str(tenant_root), str(storage_path)]) != str(tenant_root):
+            return None
+    except ValueError:
+        return None
+    return storage_path if storage_path.is_file() else None
+
+
+def _resolve_project_file_urls(html, tenant_id):
+    """Replace authenticated project-file image URLs with local file URIs for offline export.
+
+    The editor can load ``/api/project-files/<id>`` with the user's auth header. Exported HTML
+    is rendered from a ``file:`` URL, where that route is neither relative to the application nor
+    authenticated. Resolving the record here also keeps legacy presentations exportable after the
+    client has migrated to durable ``/uploads/`` image URLs.
+    """
+    if not html or not tenant_id:
+        return html
+    resolved = {}
+
+    def replace(match):
+        file_id = match.group('file_id')
+        if file_id not in resolved:
+            path = _local_project_file_path(tenant_id, file_id)
+            resolved[file_id] = path.as_uri() if path else ''
+        return resolved[file_id] or match.group('url')
+
+    return _PROJECT_FILE_URL_RE.sub(replace, html)
+
+
 def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     if not out_path:
         raise ValueError("out_path is required")
@@ -191,6 +243,7 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     # Resolve tenant logo placeholders and broken paths
     tenant_id = tenant_id or (branding or {}).get('tenant_id')
     html = resolve_logo_in_html(html, tenant_id)
+    html = _resolve_project_file_urls(html, tenant_id)
 
     # Convert the logo reference to an actual file URI so Playwright can render it
     def _local_logo_uri(tid):
@@ -474,6 +527,7 @@ def render_slide_to_image_base64(slide_html, branding=None, tenant_id=None, widt
         if logo_uri and tenant_id:
             html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/logo(?:\?[^\s"\'\\)]+)?', logo_uri, html)
 
+        html = _resolve_project_file_urls(html, tenant_id)
         html = _resolve_asset_urls(html)
         html = sanitize_slide_html_for_export(html)
         slides = extract_slide_elements(html)
@@ -533,4 +587,3 @@ img {{ max-width:100%; max-height:100%; object-fit:cover; }}
 
 if __name__ == "__main__":
     generate_pdf(["<div class='slide'>test</div>"], {}, "outputs/test.pdf")
-

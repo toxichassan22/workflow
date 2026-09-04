@@ -14,6 +14,7 @@ from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from design_templates import build_font_css, sanitize_slide_html_for_export
+from generate_pdf_from_preview import _resolve_asset_urls, _resolve_project_file_urls
 from slide_engine import resolve_logo_in_html
 
 
@@ -109,6 +110,12 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
                         # Remove the cache-busting query when replacing the tenant logo path
                         html = re.sub(re.escape(branding['logo_path'].split('?')[0]) + r"(?:\?[^\"'\\)\s]*)?", logo_data_uri, html)
                     html = html.replace('/assets/logo.png', logo_data_uri)
+
+                # PPTX screenshots are rendered from about:blank, so application-relative
+                # uploads and authenticated project-file URLs need the same local resolution as
+                # PDF export. This also makes legacy cover images and project logos exportable.
+                html = _resolve_project_file_urls(html, tenant_id)
+                html = _resolve_asset_urls(html)
 
                 # Strip any previously-baked font-family declarations so the tenant font wins
                 html = sanitize_slide_html_for_export(html)

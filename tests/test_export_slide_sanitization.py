@@ -84,6 +84,46 @@ class ExportSlideSanitizationTests(unittest.TestCase):
                      'page-break-after:always !important'):
             self.assertIn(rule, print_block, rule)
 
+    def test_authenticated_project_file_images_are_localized_for_export(self):
+        """Legacy cover images and project logos use an authenticated route in the editor."""
+        import tempfile
+        from unittest.mock import patch
+
+        import generate_pdf_from_preview as engine
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            image_path = root / 'uploads' / 'tenant-a' / 'project-documents' / 'cover.png'
+            image_path.parent.mkdir(parents=True)
+            image_path.write_bytes(b'not-rendered-by-this-unit-test')
+            stored = {
+                'storage_path': str(image_path),
+                'mime_type': 'image/png',
+            }
+            html = (
+                '<div class="slide" style="background-image:url(\'/api/project-files/file-1?cache=2\');">'
+                '<img src="https://sagdemos.store/api/project-files/file-1" />'
+                '</div>'
+            )
+            with patch.object(engine, 'BASE_DIR', root), \
+                    patch('db.get_project_file', return_value=stored):
+                resolved = engine._resolve_project_file_urls(html, 'tenant-a')
+
+            local_uri = image_path.as_uri()
+            self.assertIn(local_uri, resolved)
+            self.assertNotIn('/api/project-files/file-1', resolved)
+
+    def test_unresolvable_project_file_url_is_left_untouched(self):
+        import tempfile
+        from unittest.mock import patch
+
+        import generate_pdf_from_preview as engine
+
+        with tempfile.TemporaryDirectory():
+            html = '<div class="slide"><img src="/api/project-files/missing"></div>'
+            with patch('db.get_project_file', return_value=None):
+                self.assertEqual(engine._resolve_project_file_urls(html, 'tenant-a'), html)
+
     def test_body_grid_cannot_combine_two_slides_on_one_page(self):
         import tempfile
         from pathlib import Path
