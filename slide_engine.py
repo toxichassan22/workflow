@@ -3554,48 +3554,48 @@ def _build_heatmap_matrix_html(chart_data, primary='#16405f', secondary='#0284c7
 
         rows_html.append(f'''
         <tr>
-          <td style="padding:4px 8px;text-align:right;vertical-align:middle;">
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;">
-              <span style="font-weight:700;color:#1e293b;font-size:12.5px;">{metric}</span>
-              <span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;{pol_style}">{pol_tag}</span>
+          <td style="padding:2px 6px;text-align:right;vertical-align:middle;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;padding:4px 8px;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;">
+              <span style="font-weight:700;color:#1e293b;font-size:12px;line-height:1.25;">{metric}</span>
+              <span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;white-space:nowrap;line-height:1.25;{pol_style}">{pol_tag}</span>
             </div>
           </td>
-          <td style="padding:4px 8px;text-align:center;vertical-align:middle;"><div style="{c_style}">{c_val}</div></td>
-          <td style="padding:4px 8px;text-align:center;vertical-align:middle;"><div style="{b_style}">{b_val}</div></td>
-          <td style="padding:4px 8px;text-align:center;vertical-align:middle;"><div style="{o_style}">{o_val}</div></td>
+          <td style="padding:2px 6px;text-align:center;vertical-align:middle;"><div style="{c_style}">{c_val}</div></td>
+          <td style="padding:2px 6px;text-align:center;vertical-align:middle;"><div style="{b_style}">{b_val}</div></td>
+          <td style="padding:2px 6px;text-align:center;vertical-align:middle;"><div style="{o_style}">{o_val}</div></td>
         </tr>''')
 
-    return f'''<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;display:flex;flex-direction:column;justify-content:space-between;font-family:inherit;">
-  <table data-preserve-density="1" style="width:100%;border-collapse:separate;border-spacing:0 5px;table-layout:fixed;">
+    return f'''<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px 16px;display:flex;flex-direction:column;justify-content:space-between;font-family:inherit;">
+  <table data-preserve-density="1" style="width:100%;border-collapse:separate;border-spacing:0 3px;table-layout:fixed;">
     <thead>
       <tr>
-        <th style="padding:6px 12px;font-size:12.5px;font-weight:700;color:#475569;text-align:right;border-bottom:2px solid #cbd5e1;width:34%;">المؤشر المالي</th>
-        <th style="padding:6px 12px;font-size:12.5px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #cbd5e1;">السيناريو المتحفظ</th>
-        <th style="padding:6px 12px;font-size:12.5px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #cbd5e1;">السيناريو الأساسي</th>
-        <th style="padding:6px 12px;font-size:12.5px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #cbd5e1;">السيناريو المتفائل</th>
+        <th style="padding:4px 8px;font-size:11.5px;font-weight:700;color:#475569;text-align:right;border-bottom:2px solid #cbd5e1;width:40%;">المؤشر المالي</th>
+        <th style="padding:4px 8px;font-size:11.5px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #cbd5e1;">السيناريو المتحفظ</th>
+        <th style="padding:4px 8px;font-size:11.5px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #cbd5e1;">السيناريو الأساسي</th>
+        <th style="padding:4px 8px;font-size:11.5px;font-weight:700;color:#475569;text-align:center;border-bottom:2px solid #cbd5e1;">السيناريو المتفائل</th>
       </tr>
     </thead>
     <tbody>
       {''.join(rows_html)}
     </tbody>
   </table>
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:11.5px;color:#64748b;">
-    <div style="display:flex;gap:18px;align-items:center;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;font-size:10.5px;color:#64748b;">
+    <div style="display:flex;gap:12px;align-items:center;">
       <span style="font-weight:700;color:#1e293b;">مفتاح التقييم الاتجاهي:</span>
-      <div style="display:flex;align-items:center;gap:6px;font-weight:600;">
+      <div style="display:flex;align-items:center;gap:4px;font-weight:600;">
         <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#d1fae5;border:1px solid #a7f3d0;"></span>
         <span>الأفضل (أخضر)</span>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;font-weight:600;">
+      <div style="display:flex;align-items:center;gap:4px;font-weight:600;">
         <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#fef3c7;border:1px solid #fde68a;"></span>
         <span>المتوسط (أصفر)</span>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;font-weight:600;">
+      <div style="display:flex;align-items:center;gap:4px;font-weight:600;">
         <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#fee2e2;border:1px solid #fca5a5;"></span>
         <span>الأقل (أحمر)</span>
       </div>
     </div>
-    <div style="font-size:11px;color:#94a3b8;">الألوان تعتمد على اتجاه وطبيعة المؤشر (الأعلى أفضل للعائد والربح، والأقل أفضل للتكلفة والاسترداد)</div>
+    <div style="font-size:10px;color:#94a3b8;">الألوان تعتمد على اتجاه وطبيعة المؤشر (الأعلى أفضل للعائد والربح، والأقل أفضل للتكلفة والاسترداد)</div>
   </div>
 </div>'''
 
@@ -3671,10 +3671,10 @@ def _extract_heatmap_chart_data(part_or_table, model=None, project_data=None):
     scenarios = ['متحفظ', 'أساسي', 'متفائل']
     matrix = []
 
-    style_best = 'background:#d1fae5;color:#065f46;font-weight:700;padding:6px 10px;border:1px solid #a7f3d0;text-align:center;border-radius:6px;'
-    style_medium = 'background:#fef3c7;color:#92400e;font-weight:600;padding:6px 10px;border:1px solid #fde68a;text-align:center;border-radius:6px;'
-    style_worst = 'background:#fee2e2;color:#991b1b;font-weight:600;padding:6px 10px;border:1px solid #fca5a5;text-align:center;border-radius:6px;'
-    style_neutral = 'background:#f1f5f9;color:#64748b;font-weight:500;padding:6px 10px;border:1px solid #e2e8f0;text-align:center;border-radius:6px;'
+    style_best = 'background:#d1fae5;color:#065f46;font-weight:700;padding:4px 8px;border:1px solid #a7f3d0;text-align:center;border-radius:6px;'
+    style_medium = 'background:#fef3c7;color:#92400e;font-weight:600;padding:4px 8px;border:1px solid #fde68a;text-align:center;border-radius:6px;'
+    style_worst = 'background:#fee2e2;color:#991b1b;font-weight:600;padding:4px 8px;border:1px solid #fca5a5;text-align:center;border-radius:6px;'
+    style_neutral = 'background:#f1f5f9;color:#64748b;font-weight:500;padding:4px 8px;border:1px solid #e2e8f0;text-align:center;border-radius:6px;'
 
     normalized_rows = []
     for r in rows:
@@ -5777,7 +5777,7 @@ def _build_sol_heatmap_slide(slide, source, branding=None, slide_num=None, total
         <div class="kpi-val">أقصى كفاءة</div>
       </div>
     </div>
-    <div style="max-height:440px;overflow:hidden;">
+    <div style="max-height:510px;overflow:visible;">
       {sensitivity_side_content}
     </div>
   </div>

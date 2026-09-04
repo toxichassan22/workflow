@@ -7643,6 +7643,31 @@ class MeetingRequirementsTests(unittest.TestCase):
         # 5. Zero emojis, zero icons in generated html_matrix and labels
         self.assertIsNone(re.search(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]', res['html_matrix']))
 
+    def test_heatmap_slide_keeps_all_financial_metrics_inside_card(self):
+        engine = self.application_module.slide_engine
+        rows = [
+            {'السيناريو': 'متحفظ', 'إجمالي الإيرادات': '125,000,000', 'إجمالي تكلفة المشروع': '110,000,000',
+             'صافي الربح': '15,000,000', 'ROI كامل الدورة': '13.6%', 'Project IRR كامل الدورة': '11.2%',
+             'Equity IRR كامل الدورة': '14.0%', 'فترة الاسترداد': '7.2 سنة'},
+            {'السيناريو': 'أساسي', 'إجمالي الإيرادات': '150,000,000', 'إجمالي تكلفة المشروع': '105,000,000',
+             'صافي الربح': '45,000,000', 'ROI كامل الدورة': '42.8%', 'Project IRR كامل الدورة': '16.5%',
+             'Equity IRR كامل الدورة': '21.0%', 'فترة الاسترداد': '5.0 سنة'},
+            {'السيناريو': 'متفائل', 'إجمالي الإيرادات': '180,000,000', 'إجمالي تكلفة المشروع': '100,000,000',
+             'صافي الربح': '80,000,000', 'ROI كامل الدورة': '80.0%', 'Project IRR كامل الدورة': '22.0%',
+             'Equity IRR كامل الدورة': '28.5%', 'فترة الاسترداد': '3.8 سنة'},
+        ]
+        slide_html = engine._build_sol_heatmap_slide(
+            {'title': 'مقارنة السيناريوهات المالية', 'chart_type': 'heatmap'},
+            {'project_name': 'مشروع الاختبار', 'financial_study_model': {'tables': {'sensitivityTable': rows}}},
+            {},
+        )
+
+        self.assertEqual(slide_html.count('<tr>'), 8)  # header plus all seven metric rows
+        for metric in ('إجمالي الإيرادات', 'إجمالي تكلفة المشروع', 'صافي الربح', 'ROI', 'Project IRR', 'Equity IRR', 'فترة الاسترداد'):
+            self.assertIn(metric, slide_html)
+        self.assertNotIn('max-height:440px;overflow:hidden;', slide_html)
+        self.assertIn('max-height:510px;overflow:visible;', slide_html)
+
     def test_revenue_table_linked_component_can_be_changed_and_cleared(self):
         """Selecting a linked component in table 4 (بنود الإيرادات) must remain editable:
         changing to another component or choosing 'غير مرتبط بمكون' must not revert to
