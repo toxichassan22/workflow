@@ -1232,8 +1232,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertLessEqual(sum(bool(slide.get('chart_type')) for slide in financial), 3)
         summaries = [slide for slide in financial
                      if str(slide.get('content_source') or '').startswith('financial_summary:')]
-        self.assertGreaterEqual(len(summaries), 2)
-        self.assertLessEqual(len(summaries), 3)
+        self.assertEqual(len(summaries), 1)
         self.assertEqual(financial[-len(summaries):], summaries)
         self.assertFalse(any(slide.get('row_count') == 1 for slide in financial[:-len(summaries)]))
 
@@ -1899,11 +1898,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         ]}, project, {})
         slides = [slide for slide in plan['slides']
                   if str(slide.get('content_source') or '').startswith('financial_report:1:')]
-        self.assertEqual(len(slides), 3, slides)
+        self.assertEqual(len(slides), 1, slides)
         self.assertTrue(all(slide.get('design_style') == 'table' for slide in slides))
         for slide in slides:
             payload = json.loads(engine._slide_source_data_note(slide, project).split('\n', 1)[1])
-            self.assertLessEqual(len(payload['headers']), 6)
             self.assertEqual(payload['headers'][0], 'السنة')
             self.assertTrue(all(len(row) == len(payload['headers']) for row in payload['rows']))
 

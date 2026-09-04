@@ -290,7 +290,11 @@ def _financial_column_ranges(part, title=''):
             for r in rows if isinstance(r, list) for cell in r
         )
     )
-    if len(headers) <= 8 or is_sensitivity:
+    is_cashflow = (
+        any(term in title_text for term in ('تدفق', 'cashflow', 'cash_flow', 'نقدية', 'cash flow'))
+        or any('تدفق' in str(h) for h in headers)
+    )
+    if len(headers) <= 8 or is_sensitivity or is_cashflow:
         return [(None, None)]
     data_count = len(headers) - 1
     num_groups = max(1, (data_count + 4) // 5)
@@ -744,24 +748,24 @@ def _financial_summary_plan_slides(model):
             'chart_type': '', 'content_density': 'high', 'requires_image': False,
             'content_source': 'financial_indicators', 'row_count': 2, 'bullets': [],
         }]
-    slides = []
+    content_sources = []
+    total_rows = 0
     for name, rows in available:
-        row_ranges = _balanced_row_ranges(len(rows), max_per_slide=12, min_per_slide=5)
-        for chunk_index, (start, end) in enumerate(row_ranges, 1):
-            chunk = rows[start:end]
-            key = 'costs' if name == 'التكاليف والاستثمار' else 'returns'
-            suffix = f' — {chunk_index}' if len(row_ranges) > 1 else ''
-            slides.append({
-                'title': f'الملخص المالي — {name}{suffix}',
-                'type': 'content', 'design_style': 'table', 'chart_type': '',
-                'content_density': 'high', 'requires_image': False,
-                'content_source': f'financial_summary:{key}:{start}:{end}',
-                'row_count': len(chunk), 'bullets': [],
-            })
-    return slides[:3]
+        key = 'costs' if name == 'التكاليف والاستثمار' else 'returns'
+        content_sources.append(f'financial_summary:{key}:0:{len(rows)}')
+        total_rows += len(rows)
+    return [{
+        'title': 'الملخص المالي',
+        'type': 'content', 'design_style': 'table', 'chart_type': '',
+        'content_density': 'high', 'requires_image': False,
+        'content_source': content_sources[0] if len(content_sources) == 1 else f'financial_summary:combined:0:{total_rows}',
+        'content_sources': content_sources,
+        'row_count': total_rows, 'bullets': [],
+    }]
 
 
 _FINANCIAL_PLAN_TABLES = (
+    ('componentsTable', 'مكونات المشروع', 'table'),
     ('revenueTable', 'بنود الإيرادات', 'table'),
     ('costTable', 'تكاليف المشروع', 'chart'),
     ('scheduleTable', 'مراحل التطوير المالية', 'flow'),
@@ -1152,16 +1156,18 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 if part.get('type') == 'fields' and any(name in part_title for name in (
                         'التكاليف والاستثمار', 'مؤشرات العائد والاسترداد')):
                     continue
-                target_section = 'components' if 'مكونات المشروع' in heading else 'financial'
-                if target_section == 'components':
-                    continue
+                target_section = 'financial'
+                is_cashflow_part = any(t in part_title.lower() for t in ('تدفق', 'cashflow', 'cash_flow', 'نقدية', 'cash flow'))
+                is_components_part = any(t in part_title for t in ('مكونات', 'components')) or 'مكونات' in heading
                 column_ranges = _financial_column_ranges(part, title=part_title) if part.get('type') == 'table' else [(None, None)]
                 # Narrow key/value tables stay readable with more rows per slide, so a
                 # 14-row section does not burn two slides; wide tables keep the
                 # tighter budget because each row costs more horizontal space.
+                # Cash flow table is kept on a single slide with full rows.
                 column_count = len(part.get('headers') or []) if part.get('type') == 'table' else 2
+                max_rows_budget = 25 if is_cashflow_part else (16 if column_count <= 3 else 12)
                 row_ranges = _balanced_row_ranges(
-                    len(rows), max_per_slide=16 if column_count <= 3 else 12, min_per_slide=4)
+                    len(rows), max_per_slide=max_rows_budget, min_per_slide=4)
                 is_assumption_part = (
                     bool(re.search(r'افتراض|assumption|متغير', part_title, re.IGNORECASE))
                     or any('متغير' in str(h) for h in (part.get('headers') or []))
@@ -1206,7 +1212,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                         source_suffix = (f':{column_start}:{column_end}'
                                          if column_start is not None and column_end is not None else '')
                         part_source = f'financial_report:{part_index}:{start}:{end}{source_suffix}'
-                        if chartable or column_start is not None or len(column_ranges) > 1:
+                        if chartable or column_start is not None or len(column_ranges) > 1 or is_cashflow_part or is_components_part:
                             # Chart slides and wide column-split tables own their slide:
                             # two six-column tables stacked vertically do not fit.
                             flush_pending_tables()
@@ -1315,11 +1321,15 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
 
             for table_key, title, style in _FINANCIAL_PLAN_TABLES:
                 rows = tables.get(table_key) if isinstance(tables.get(table_key), list) else []
+                if not rows and table_key == 'componentsTable':
+                    rows = _project_component_rows(source)
                 if not rows:
                     continue
                 first_keys = list(rows[0].keys()) if isinstance(rows[0], dict) else []
+                is_cf = (table_key == 'cashflowTable')
                 row_ranges = _balanced_row_ranges(
-                    len(rows), max_per_slide=16 if first_keys and len(first_keys) <= 3 else 12,
+                    len(rows),
+                    max_per_slide=25 if is_cf else (16 if first_keys and len(first_keys) <= 3 else 12),
                     min_per_slide=4)
                 for number, (start, end) in enumerate(row_ranges, 1):
                     is_chart = (style == 'chart' and start == 0)
@@ -1331,11 +1341,11 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                         'source_table': table_key,
                         'row_count': end - start,
                     }
-                    if c_type:
+                    if c_type or table_key == 'componentsTable' or is_cf:
                         flush_pending_tables()
                         add('financial', {
                             'title': title + (f' — {number}' if len(row_ranges) > 1 else ''),
-                            'type': 'content', 'design_style': 'chart', 'chart_type': c_type,
+                            'type': 'content', 'design_style': 'chart' if c_type else 'table', 'chart_type': c_type,
                             'content_density': 'high', 'requires_image': False,
                             'content_source': item['source'], 'source_table': table_key,
                             'row_count': end - start, 'financial_template': 'report', 'bullets': [],
@@ -2927,10 +2937,12 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
     tick_step = max_tick / 4.0
     ticks = [0.0, tick_step, tick_step * 2, tick_step * 3, max_tick]
 
+    n_cols = len(items) + 1
+    use_stagger = n_cols >= 7
     pad_left = 60
     pad_right = 25
     pad_top = 45
-    pad_bottom = 65
+    pad_bottom = 80 if use_stagger else 65
     chart_w = width - pad_left - pad_right
     chart_h = height - pad_top - pad_bottom
 
@@ -2947,7 +2959,6 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
         val_str = f"{t:,.0f}" if t == int(t) else f"{t:,.1f}"
         tick_texts.append(f'<text x="{pad_left - 8}" y="{ty + 4}" font-size="10" fill="#94a3b8" text-anchor="end">{val_str}</text>')
 
-    n_cols = len(items) + 1
     col_slot = chart_w / max(n_cols, 1)
     bar_w = min(round(col_slot * 0.72, 1), 75.0)
 
@@ -2955,16 +2966,16 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
     connectors_svg = []
     labels_svg = []
 
-    def _wrap_tspans(text, cx, max_chars=14):
+    def _wrap_tspans(text, cx, max_chars=12, font_size="9"):
         words = str(text).split()
         if len(words) <= 2 and len(text) <= max_chars:
-            return f'<text x="{cx}" y="0" font-size="9.5" font-weight="600" fill="#334155" text-anchor="middle">{html_lib.escape(text)}</text>'
+            return f'<text x="{cx}" y="0" font-size="{font_size}" font-weight="600" fill="#334155" text-anchor="middle">{html_lib.escape(text)}</text>'
         mid = len(words) // 2
         line1 = ' '.join(words[:mid])
         line2 = ' '.join(words[mid:])
-        return f'''<text x="{cx}" y="-4" font-size="9.5" font-weight="600" fill="#334155" text-anchor="middle">
+        return f'''<text x="{cx}" y="-4" font-size="{font_size}" font-weight="600" fill="#334155" text-anchor="middle">
           <tspan x="{cx}" dy="0">{html_lib.escape(line1)}</tspan>
-          <tspan x="{cx}" dy="12">{html_lib.escape(line2)}</tspan>
+          <tspan x="{cx}" dy="11">{html_lib.escape(line2)}</tspan>
         </text>'''
 
     running_m = 0.0
@@ -3002,8 +3013,13 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
         labels_svg.append(f'<text x="{cx}" y="{top_y - 8}" font-size="9.5" font-weight="700" fill="#0f172a" text-anchor="middle">{disp}</text>')
         labels_svg.append(f'<text x="{cx}" y="{top_y - 20}" font-size="8.5" font-weight="600" fill="#64748b" text-anchor="middle">{pct}%</text>')
 
-        wrapped = _wrap_tspans(name, cx)
-        labels_svg.append(f'<g transform="translate(0, {y_zero + 18})">{wrapped}</g>')
+        if use_stagger and idx % 2 == 1:
+            lbl_y = y_zero + 38
+            labels_svg.append(f'<line x1="{cx}" y1="{y_zero}" x2="{cx}" y2="{y_zero + 26}" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2" />')
+        else:
+            lbl_y = y_zero + 14
+        wrapped = _wrap_tspans(name, cx, font_size="8.5" if use_stagger else "9.5")
+        labels_svg.append(f'<g transform="translate(0, {lbl_y})">{wrapped}</g>')
 
         prev_top_x = bx + bar_w
         prev_top_y = top_y
@@ -3023,8 +3039,14 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
     tot_disp = total.get('display', f"{total_val_m:.1f} ر.س")
     labels_svg.append(f'<text x="{tot_cx}" y="{tot_top_y - 8}" font-size="10.5" font-weight="800" fill="{primary}" text-anchor="middle">{tot_disp}</text>')
     labels_svg.append(f'<text x="{tot_cx}" y="{tot_top_y - 22}" font-size="8.5" font-weight="700" fill="{primary}" text-anchor="middle">100%</text>')
-    tot_wrapped = _wrap_tspans(total.get('name', 'إجمالي تكلفة المشروع'), tot_cx)
-    labels_svg.append(f'<g transform="translate(0, {y_zero + 18})">{tot_wrapped}</g>')
+
+    if use_stagger and tot_idx % 2 == 1:
+        tot_lbl_y = y_zero + 38
+        labels_svg.append(f'<line x1="{tot_cx}" y1="{y_zero}" x2="{tot_cx}" y2="{y_zero + 26}" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2" />')
+    else:
+        tot_lbl_y = y_zero + 14
+    tot_wrapped = _wrap_tspans(total.get('name', 'إجمالي تكلفة المشروع'), tot_cx, font_size="8.5" if use_stagger else "9.5")
+    labels_svg.append(f'<g transform="translate(0, {tot_lbl_y})">{tot_wrapped}</g>')
 
     return f'''<svg data-chart="waterfall" viewBox="0 0 {width} {height}" style="width:100%;height:auto;max-height:360px;font-family:inherit;overflow:visible;" role="img" aria-label="المخطط الشلالي لتكوين إجمالي تكلفة المشروع">
   <!-- Grid -->
@@ -3311,18 +3333,22 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
                 'year': year_label,
                 'net_flow_m': round(net_val / 1e6, 1),
                 'net_flow_display': f"{round(net_val / 1e6, 1)} ر.س",
+                'net_flow_full': f"({abs(net_val):,.0f})" if net_val < 0 else f"{net_val:,.0f}",
+                'net_val': net_val,
                 'cumulative_m': round(effective_cum / 1e6, 1),
                 'cumulative_display': f"{round(effective_cum / 1e6, 1)} ر.س",
+                'cumulative_full': f"({abs(effective_cum):,.0f})" if effective_cum < 0 else f"{effective_cum:,.0f}",
+                'cum_val': effective_cum,
                 'is_positive': net_val >= 0,
             })
 
     if not items:
         items = [
-            {'year': 'سنة 1', 'net_flow_m': -50.0, 'net_flow_display': '-50.0 ر.س', 'cumulative_m': -50.0, 'cumulative_display': '-50.0 ر.س', 'is_positive': False},
-            {'year': 'سنة 2', 'net_flow_m': -30.0, 'net_flow_display': '-30.0 ر.س', 'cumulative_m': -80.0, 'cumulative_display': '-80.0 ر.س', 'is_positive': False},
-            {'year': 'سنة 3', 'net_flow_m': 20.0, 'net_flow_display': '20.0 ر.س', 'cumulative_m': -60.0, 'cumulative_display': '-60.0 ر.س', 'is_positive': True},
-            {'year': 'سنة 4', 'net_flow_m': 45.0, 'net_flow_display': '45.0 ر.س', 'cumulative_m': -15.0, 'cumulative_display': '-15.0 ر.س', 'is_positive': True},
-            {'year': 'سنة 5', 'net_flow_m': 60.0, 'net_flow_display': '60.0 ر.س', 'cumulative_m': 45.0, 'cumulative_display': '45.0 ر.س', 'is_positive': True},
+            {'year': 'سنة 1', 'net_flow_m': -50.0, 'net_flow_display': '-50.0 ر.س', 'net_flow_full': '(50,000,000)', 'net_val': -50000000.0, 'cumulative_m': -50.0, 'cumulative_display': '-50.0 ر.س', 'cumulative_full': '(50,000,000)', 'cum_val': -50000000.0, 'is_positive': False},
+            {'year': 'سنة 2', 'net_flow_m': -30.0, 'net_flow_display': '-30.0 ر.س', 'net_flow_full': '(30,000,000)', 'net_val': -30000000.0, 'cumulative_m': -80.0, 'cumulative_display': '-80.0 ر.س', 'cumulative_full': '(80,000,000)', 'cum_val': -80000000.0, 'is_positive': False},
+            {'year': 'سنة 3', 'net_flow_m': 20.0, 'net_flow_display': '20.0 ر.س', 'net_flow_full': '20,000,000', 'net_val': 20000000.0, 'cumulative_m': -60.0, 'cumulative_display': '-60.0 ر.س', 'cumulative_full': '(60,000,000)', 'cum_val': -60000000.0, 'is_positive': True},
+            {'year': 'سنة 4', 'net_flow_m': 45.0, 'net_flow_display': '45.0 ر.س', 'net_flow_full': '45,000,000', 'net_val': 45000000.0, 'cumulative_m': -15.0, 'cumulative_display': '-15.0 ر.س', 'cumulative_full': '(15,000,000)', 'cum_val': -15000000.0, 'is_positive': True},
+            {'year': 'سنة 5', 'net_flow_m': 60.0, 'net_flow_display': '60.0 ر.س', 'net_flow_full': '60,000,000', 'net_val': 60000000.0, 'cumulative_m': 45.0, 'cumulative_display': '45.0 ر.س', 'cumulative_full': '45,000,000', 'cum_val': 45000000.0, 'is_positive': True},
         ]
 
     items = items[:15]
@@ -4964,16 +4990,16 @@ def _fallback_table_data(slide, project_data):
         items = c_data.get('items') or []
         if items:
             headers = ['السنة', 'صافي التدفق السنوي', 'الرصيد التراكمي']
-            rows = [[it.get('year', ''), it.get('net_flow_display', ''), it.get('cumulative_display', '')] for it in items]
+            rows = [[it.get('year', ''), it.get('net_flow_full', it.get('net_flow_display', '')), it.get('cumulative_full', it.get('cumulative_display', ''))] for it in items]
             return headers, rows
     elif chart_type == 'waterfall':
         w_data = _extract_waterfall_chart_data(chart_source, model, project_data)
         items = w_data.get('items') or []
         if items:
-            headers = ['بند التكلفة', 'القيمة']
-            rows = [[it.get('name', ''), it.get('display', '')] for it in items]
+            headers = ['بند التكلفة', 'القيمة (ر.س)']
+            rows = [[it.get('name', ''), f"{it.get('value_sar', 0):,.0f} ر.س" if it.get('value_sar') else it.get('display', '')] for it in items]
             if w_data.get('total'):
-                rows.append([w_data['total'].get('name', 'الإجمالي'), w_data['total'].get('display', '')])
+                rows.append([w_data['total'].get('name', 'الإجمالي'), f"{w_data['total'].get('value_sar', 0):,.0f} ر.س" if w_data['total'].get('value_sar') else w_data['total'].get('display', '')])
             return headers, rows
     elif chart_type == 'heatmap':
         h_data = _extract_heatmap_chart_data(chart_source, model, project_data)
@@ -5031,9 +5057,11 @@ def _fallback_table_data(slide, project_data):
             }
             rows = next((tables.get(alias) for alias in aliases.get(key, ())
                          if isinstance(tables.get(alias), list)), [])
+        if not rows and key == 'componentsTable':
+            rows = _project_component_rows(project_data)
         selected = rows[start:end]
         if selected and isinstance(selected[0], dict):
-            headers = [k for k in selected[0].keys() if str(k).strip() not in ('ترتيب / حذف', 'ترتيب', 'حذف', 'إجراءات', 'actions', 'id', 'row_id')]
+            headers = [k for k in selected[0].keys() if str(k).strip() not in ('ترتيب / حذف', 'ترتيب', 'حذف', 'إجراءات', 'actions', 'id', 'row_id', 'الناتج')]
             active_headers = []
             for h in headers:
                 vals = [str(row.get(h) or '').strip() for row in selected]
@@ -5098,11 +5126,10 @@ def _render_fallback_table(headers, rows, primary):
         tds = []
         for col_idx, val in enumerate(values):
             fmt, is_num = _format_table_num(val)
-            align = 'center' if is_num else 'right'
             direction = 'ltr' if is_num else 'rtl'
             tds.append(
                 f'<td style="border-bottom:1px solid #e2e8f0;padding:8px 12px;font-size:11.5px;'
-                f'text-align:{align};direction:{direction};vertical-align:middle;font-feature-settings:\'tnum\';font-variant-numeric:tabular-nums;">{fmt}</td>'
+                f'text-align:center;direction:{direction};vertical-align:middle;font-feature-settings:\'tnum\';font-variant-numeric:tabular-nums;">{fmt}</td>'
             )
         body.append(f'<tr style="background:{bg};">{"".join(tds)}</tr>')
     return ('<table data-preserve-density="1" style="width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">'
@@ -5322,19 +5349,19 @@ SOL_SLIDES_CSS = """
     background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;
   }
   .financial-table {
-    width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: right;
+    width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: center;
   }
   .financial-table th {
-    background: #0b1f33; color: #ffffff; font-weight: 700; padding: 10px 14px; font-size: 11.5px; white-space: nowrap;
+    background: #0b1f33; color: #ffffff; font-weight: 700; padding: 10px 14px; font-size: 11.5px; white-space: nowrap; text-align: center; vertical-align: middle;
   }
   .financial-table td {
-    padding: 8px 14px; border-bottom: 1px solid #f1f5f9; color: #1e293b; font-weight: 500; vertical-align: middle;
+    padding: 8px 14px; border-bottom: 1px solid #f1f5f9; color: #1e293b; font-weight: 500; text-align: center; vertical-align: middle;
   }
   .financial-table tr:nth-child(even) td {
     background: #f8fafc;
   }
   .financial-table td.numeric {
-    text-align: center !important; direction: ltr; font-weight: 600; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+    text-align: center !important; vertical-align: middle; direction: ltr; font-weight: 600; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
   }
   .financial-table tfoot td {
     background: #f1f5f9; font-weight: 800; border-top: 2px solid #cbd5e1; color: #0b1f33;
@@ -5387,20 +5414,22 @@ def _build_sol_waterfall_slide(slide, source, branding=None, slide_num=None, tot
     top1_val = sorted_items[0].get('display', '—') if sorted_items else '—'
 
     waterfall_rows = [
-        [it.get('name', ''), it.get('display', ''), f"{it.get('pct_of_total', 0):.1f}%"]
+        [it.get('name', ''), f"{it.get('value_sar', 0):,.0f} ر.س" if it.get('value_sar') else it.get('display', ''), f"{it.get('pct_of_total', 0):.1f}%"]
         for it in items
     ]
     if total:
+        tot_val_sar = total.get('value_sar', 0)
+        tot_val_display = f"{tot_val_sar:,.0f} ر.س" if tot_val_sar else total.get('display', '')
         waterfall_rows.append([
             total.get('name', 'إجمالي تكلفة المشروع'),
-            total.get('display', ''),
+            tot_val_display,
             '100%',
         ])
     waterfall_table = _render_fallback_table(
-        ['بند التكلفة', 'القيمة', 'النسبة'], waterfall_rows, primary)
+        ['بند التكلفة', 'القيمة (ر.س)', 'النسبة'], waterfall_rows, primary)
 
-    # Use width=580, height=330 to fit the 0.95fr / 1.05fr grid layout cleanly
-    svg_code = _build_waterfall_svg(items, total, width=580, height=330, primary=primary, secondary='#0ea5e9', gold=accent)
+    # Use width=580, height=350 to fit the 0.95fr / 1.05fr grid layout cleanly
+    svg_code = _build_waterfall_svg(items, total, width=580, height=350, primary=primary, secondary='#0ea5e9', gold=accent)
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
 
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -5487,16 +5516,16 @@ def _build_sol_combo_slide(slide, source, branding=None, slide_num=None, total_s
     table_rows = []
     for it in items:
         y = html_lib.escape(str(it.get('year') or ''))
-        f_val = it.get('net_flow_m', 0.0)
-        c_val = it.get('cumulative_m', 0.0)
-        f_str = f"{abs(f_val):,.1f}-" if f_val < 0 else f"{f_val:,.1f}"
-        c_str = f"{abs(c_val):,.1f}-" if c_val < 0 else f"{c_val:,.1f}"
+        f_val = it.get('net_val') if 'net_val' in it else (it.get('net_flow_m', 0.0) * 1e6)
+        c_val = it.get('cum_val') if 'cum_val' in it else (it.get('cumulative_m', 0.0) * 1e6)
+        f_str = f"({abs(f_val):,.0f})" if f_val < 0 else f"{f_val:,.0f}"
+        c_str = f"({abs(c_val):,.0f})" if c_val < 0 else f"{c_val:,.0f}"
         f_style = 'color:#dc2626;' if f_val < 0 else 'color:#059669;'
         c_style = 'color:#dc2626;' if c_val < 0 else f'color:{primary};'
         table_rows.append(f'''<tr>
-          <td style="font-weight:600;">{y}</td>
-          <td class="numeric" style="{f_style}font-weight:700;">{f_str}</td>
-          <td class="numeric" style="{c_style}font-weight:700;">{c_str}</td>
+          <td style="font-weight:600;text-align:center;vertical-align:middle;">{y}</td>
+          <td class="numeric" style="{f_style}font-weight:700;text-align:center;vertical-align:middle;">{f_str}</td>
+          <td class="numeric" style="{c_style}font-weight:700;text-align:center;vertical-align:middle;">{c_str}</td>
         </tr>''')
 
     svg_code = summary.get('svg_code') or _render_fallback_combo(c_data, primary, accent)
@@ -5537,9 +5566,9 @@ def _build_sol_combo_slide(slide, source, branding=None, slide_num=None, total_s
         <table class="financial-table" data-preserve-density="1">
           <thead>
             <tr>
-              <th style="background:{primary};">السنة</th>
-              <th style="background:{primary};text-align:center;">صافي التدفق (مليون ر.س)</th>
-              <th style="background:{primary};text-align:center;">الرصيد التراكمي (مليون ر.س)</th>
+              <th style="background:{primary};text-align:center;vertical-align:middle;">السنة</th>
+              <th style="background:{primary};text-align:center;vertical-align:middle;">صافي التدفق (ر.س)</th>
+              <th style="background:{primary};text-align:center;vertical-align:middle;">الرصيد التراكمي (ر.س)</th>
             </tr>
           </thead>
           <tbody>
@@ -5584,6 +5613,7 @@ def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_s
 
     n_rows = len(rows)
     is_wide = len(headers) >= 8
+    is_super_wide = len(headers) >= 12
 
     if n_rows <= 8:
         th_pad = '10px 14px'
@@ -5607,7 +5637,13 @@ def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_s
         th_font = '9.5px'
         td_font = '9px'
 
-    th_cells = ''.join(f'<th style="background:{primary};color:#fff;font-weight:700;padding:{th_pad};font-size:{th_font};white-space:nowrap;text-align:center;border-left:1px solid rgba(255,255,255,0.1);">{html_lib.escape(str(h))}</th>' for h in headers)
+    if is_super_wide:
+        th_pad = '5px 3px'
+        td_pad = '4px 3px'
+        th_font = '8.5px'
+        td_font = '8px'
+
+    th_cells = ''.join(f'<th style="background:{primary};color:#fff;font-weight:700;padding:{th_pad};font-size:{th_font};white-space:nowrap;text-align:center;vertical-align:middle;border-left:1px solid rgba(255,255,255,0.1);">{html_lib.escape(str(h))}</th>' for h in headers)
     
     tb_rows = []
     for r_idx, r in enumerate(rows):
@@ -5627,9 +5663,8 @@ def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_s
                         num_color = 'color:#059669;'
                 except (ValueError, TypeError):
                     pass
-            align = 'center' if (is_num or idx > 0) else 'right'
             direction = 'ltr' if is_num else 'rtl'
-            td_cells.append(f'<td style="padding:{td_pad};font-size:{td_font};text-align:{align};direction:{direction};border-bottom:1px solid #f1f5f9;{num_color}font-weight:500;">{formatted}</td>')
+            td_cells.append(f'<td style="padding:{td_pad};font-size:{td_font};text-align:center;vertical-align:middle;direction:{direction};border-bottom:1px solid #f1f5f9;{num_color}font-weight:500;">{formatted}</td>')
         tb_rows.append(f'<tr style="background:{bg};">{"".join(td_cells)}</tr>')
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
@@ -5819,9 +5854,11 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
         if sub_rows:
             total_rows += len(sub_rows)
             sub_title = ''
-            match_t = re.fullmatch(r'financial_table:([^:]+):\d+:\d+', src)
-            if match_t:
-                t_key = match_t.group(1)
+            match_sum = re.fullmatch(r'financial_summary:(costs|returns):\d+:\d+', src)
+            if match_sum:
+                sub_title = 'التكاليف والاستثمار' if match_sum.group(1) == 'costs' else 'مؤشرات العائد والاسترداد'
+            elif re.fullmatch(r'financial_table:([^:]+):\d+:\d+', src):
+                t_key = re.fullmatch(r'financial_table:([^:]+):\d+:\d+', src).group(1)
                 sub_title = next((t[1] for t in _FINANCIAL_PLAN_TABLES if t[0] == t_key), t_key)
             elif re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src):
                 p_idx = int(re.fullmatch(r'financial_report:(\d+):\d+:\d+.*', src).group(1))
@@ -5849,7 +5886,7 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
 
     rendered_tables = []
     for sub_title, headers_key, sub_rows, sub_headers in merged_blocks:
-        th_cells = ''.join(f'<th style="background:{primary};color:#fff;padding:{th_pad};font-size:{th_font};">{html_lib.escape(str(h))}</th>' for h in sub_headers)
+        th_cells = ''.join(f'<th style="background:{primary};color:#fff;padding:{th_pad};font-size:{th_font};text-align:center;vertical-align:middle;">{html_lib.escape(str(h))}</th>' for h in sub_headers)
         tb_rows = []
         for r_idx, r in enumerate(sub_rows):
             vals = list(r.values()) if isinstance(r, dict) else list(r) if isinstance(r, (list, tuple)) else [r]
@@ -5858,7 +5895,8 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
             for idx, v in enumerate(vals):
                 formatted, is_num = _format_table_num(v)
                 cls = ' class="numeric"' if is_num and idx > 0 else ''
-                td_cells.append(f'<td{cls} style="padding:{td_pad};font-size:{td_font};">{formatted}</td>')
+                direction = 'ltr' if is_num else 'rtl'
+                td_cells.append(f'<td{cls} style="padding:{td_pad};font-size:{td_font};text-align:center;vertical-align:middle;direction:{direction};">{formatted}</td>')
             tb_rows.append(f'<tr style="background:{bg};">{"".join(td_cells)}</tr>')
 
         title_block = f'<div style="font-size:11.5px;font-weight:700;color:{primary};margin:{title_margin};">{html_lib.escape(sub_title)}</div>' if sub_title else ''
