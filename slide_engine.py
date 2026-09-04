@@ -559,7 +559,8 @@ def _merge_sparse_plan_slides(groups):
             sparse_generic = (not source and slide.get('design_style') != 'table'
                               and not slide.get('image_tokens')
                               and len([item for item in (slide.get('bullets') or []) if str(item or '').strip()]) <= 1)
-            if ((sparse_financial or sparse_generic) and merged
+            target = merged[-1] if merged else None
+            if ((sparse_financial or sparse_generic) and target
                     and not target.get('chart_type') and not slide.get('chart_type')):
                 if source:
                     target['content_sources'] = list(target.get('content_sources') or [target.get('content_source')])
