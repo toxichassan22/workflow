@@ -1375,11 +1375,8 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     market = _decode_json_fact(source.get('market_study_data'))
     market = market if isinstance(market, dict) else {}
     competitors = market.get('competitors') if isinstance(market.get('competitors'), list) else []
-    valid_competitors = [
-        c for c in competitors
-        if isinstance(c, dict) and (c.get('price_value') or c.get('price_from') or c.get('price_to') or c.get('price'))
-    ]
-    if valid_competitors:
+    named_competitors = [c for c in competitors if _competitor_name(c)]
+    if named_competitors:
         existing_comp = next((s for s in groups.get('market', [])
                               if s.get('content_source') == 'market_study_data.competitors'
                               or re.search(r'منافس', str(s.get('title') or ''))), None)
@@ -2211,6 +2208,15 @@ def _market_study_facts(project_data):
     summary = str(state.get('one_block_summary') or '').strip()
     if summary:
         lines.append(summary)
+    scope = {}
+    for key in ('competitor_radius', 'competitor_radius_custom_km', 'data_period',
+                'data_period_from', 'data_period_to'):
+        value = state.get(key)
+        if value not in (None, '', []):
+            scope[key] = value
+    if scope:
+        lines.append('### نطاق وفترة بيانات دراسة السوق')
+        lines.append(json.dumps(scope, ensure_ascii=False, indent=2))
     competitors = state.get('competitors') if isinstance(state.get('competitors'), list) else []
     rows = []
     for index, competitor in enumerate(competitors, 1):
@@ -2221,13 +2227,17 @@ def _market_study_facts(project_data):
                if key not in ('id', 'field_sources', 'source_urls', 'row_source', 'logo_file_id',
                               'logo_path', 'logo_url', 'logo_source_url', 'conflict_warnings',
                               'logo_import_warning', 'price_cache', 'area_cache') and value not in (None, '', [])}
-        if competitor.get('logo_file_id') or competitor.get('logo_path'):
+        if competitor.get('logo_file_id') or competitor.get('logo_path') or competitor.get('logo_url'):
             row['شعار المنافس'] = f'##COMPETITOR_LOGO_{index}##'
         if row:
             rows.append(row)
     if rows:
         lines.append('### المنافسون (أرقامهم كما هي، ممنوع تعديلها)')
         lines.append(json.dumps(rows, ensure_ascii=False, indent=2))
+    sources = state.get('sources') if isinstance(state.get('sources'), list) else []
+    if sources:
+        lines.append('### مصادر دراسة السوق')
+        lines.append(json.dumps(sources, ensure_ascii=False, indent=2))
     for key, title in (('summary', 'محاور دراسة السوق'), ('swot', 'تحليل SWOT')):
         block = state.get(key)
         if isinstance(block, dict):
@@ -2859,18 +2869,91 @@ def _format_sar_display(val):
     return f"{int(val):,} ر.س"
 
 
+def _competitor_candidates(comp):
+    if not isinstance(comp, dict):
+        return []
+    candidates = [comp]
+    for key in ('pricing', 'price_data', 'price_details', 'area_data', 'details'):
+        nested = comp.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested)
+    return candidates
+
+
+def _competitor_value(comp, *keys):
+    for candidate in _competitor_candidates(comp):
+        for key in keys:
+            value = candidate.get(key)
+            if value not in (None, '', [], {}):
+                return value
+    return ''
+
+
+def _competitor_name(comp):
+    value = _competitor_value(comp, 'name', 'competitor_name', 'project_name', 'اسم المشروع')
+    return str(value or '').strip() if not isinstance(value, (dict, list)) else ''
+
+
+def _competitor_price_fields(comp):
+    price_value = _competitor_value(comp, 'price_value', 'value', 'القيمة', 'price')
+    price_from = _competitor_value(comp, 'price_from', 'min_price', 'from', 'من')
+    price_to = _competitor_value(comp, 'price_to', 'max_price', 'to', 'إلى')
+    if isinstance(price_value, dict):
+        price_value = _competitor_value(price_value, 'price_value', 'value', 'القيمة', 'amount')
+    if isinstance(price_from, dict):
+        price_from = _competitor_value(price_from, 'price_from', 'min_price', 'from', 'من', 'value')
+    if isinstance(price_to, dict):
+        price_to = _competitor_value(price_to, 'price_to', 'max_price', 'to', 'إلى', 'value')
+    return price_value, price_from, price_to
+
+
+def _competitor_logo_token(comp, index):
+    if isinstance(comp, dict) and any(comp.get(key) for key in ('logo_file_id', 'logo_path', 'logo_url')):
+        return f'##COMPETITOR_LOGO_{index}##'
+    return ''
+
+
+def _competitor_display_text(value, fallback='—'):
+    if isinstance(value, list):
+        value = '، '.join(str(item).strip() for item in value if str(item).strip())
+    elif isinstance(value, dict):
+        value = '، '.join(f'{key}: {val}' for key, val in value.items()
+                          if val not in (None, '', [], {}))
+    text = str(value or '').strip()
+    return text or fallback
+
+
+def _competitor_price_display(comp):
+    price_value, price_from, price_to = _competitor_price_fields(comp)
+    currency = _competitor_value(comp, 'price_currency', 'currency', 'العملة')
+    values = []
+    value_text, _ = _format_table_num(price_value)
+    from_text, _ = _format_table_num(price_from)
+    to_text, _ = _format_table_num(price_to)
+    if price_value not in (None, '', []) and value_text != '—':
+        values.append(value_text)
+    elif (price_from not in (None, '', []) or price_to not in (None, '', [])):
+        range_text = f'من {from_text} إلى {to_text}'
+        values.append(range_text)
+    if currency and values:
+        values[-1] = f'{values[-1]} {str(currency).strip()}'
+    price_type = _competitor_value(comp, 'price_type', 'pricing_type', 'نوع السعر', 'type')
+    if price_type:
+        values.insert(0, _competitor_display_text(price_type))
+    return ' | '.join(values) if values else '—'
+
+
 def _extract_competitor_chart_data(competitors, project_data=None):
     project_data = project_data if isinstance(project_data, dict) else {}
     items = []
     for comp in (competitors or []):
         if not isinstance(comp, dict):
             continue
-        name = str(comp.get('name') or comp.get('competitor_name') or comp.get('project_name') or '').strip()
-        price_val = comp.get('price_value') or comp.get('price') or comp.get('value')
-        p_from = comp.get('price_from') or comp.get('min_price')
-        p_to = comp.get('price_to') or comp.get('max_price')
-        p_type = str(comp.get('price_type') or comp.get('type') or '').strip()
-        unit = str(comp.get('unit') or (comp.get('area_cache') if isinstance(comp.get('area_cache'), dict) else {}).get('unit') or '').strip()
+        name = _competitor_name(comp)
+        price_val, p_from, p_to = _competitor_price_fields(comp)
+        p_type = str(_competitor_value(comp, 'price_type', 'pricing_type', 'نوع السعر', 'type') or '').strip()
+        unit = str(_competitor_value(comp, 'unit') or
+                   (comp.get('area_cache') if isinstance(comp.get('area_cache'), dict) else {}).get('unit') or '').strip()
 
         num = 0.0
         for raw in (price_val, p_to, p_from):
@@ -3864,32 +3947,45 @@ def _slide_source_data_note(slide, project_data):
         market = market if isinstance(market, dict) else {}
         competitors = market.get('competitors') if isinstance(market.get('competitors'), list) else []
         items = []
-        for comp in competitors:
+        for index, comp in enumerate(competitors, 1):
             if not isinstance(comp, dict):
                 continue
-            name = str(comp.get('name') or comp.get('project_name') or '').strip()
-            price_val = comp.get('price_value') or comp.get('value') or comp.get('price')
-            p_from = comp.get('price_from') or comp.get('min_price')
-            p_to = comp.get('price_to') or comp.get('max_price')
-            p_type = comp.get('price_type') or comp.get('type') or ''
-            if name and (price_val or p_from or p_to):
-                items.append({
-                    'name': name,
-                    'price_value': price_val,
-                    'price_from': p_from,
-                    'price_to': p_to,
-                    'price_type': p_type,
-                    'unit': comp.get('unit') or (comp.get('area_cache') if isinstance(comp.get('area_cache'), dict) else {}).get('unit') or '',
-                })
+            name = _competitor_name(comp)
+            if not name:
+                continue
+            row = {key: value for key, value in comp.items()
+                   if key not in ('id', 'field_sources', 'row_source', 'logo_file_id', 'logo_path',
+                                  'logo_url', 'logo_source_url', 'conflict_warnings',
+                                  'logo_import_warning', 'price_cache', 'area_cache')
+                   and value not in (None, '', [])}
+            logo_token = _competitor_logo_token(comp, index)
+            if logo_token:
+                row['شعار المنافس'] = logo_token
+            if row:
+                items.append(row)
         chart_items = _extract_competitor_chart_data(competitors, project_data)
         chart_block = (
             '\n\nبيانات مخطط الأعمدة الأفقية لمقارنة المنافسين (horizontal_bar_chart_data) بنسب العرض المحسوبة جاهزة:\n'
             + json.dumps(chart_items, ensure_ascii=False, indent=2)
         ) if chart_items else ''
+        scope = {key: market.get(key) for key in (
+            'competitor_radius', 'competitor_radius_custom_km', 'data_period',
+            'data_period_from', 'data_period_to') if market.get(key) not in (None, '', [])}
+        scope_block = (
+            '\nنطاق وفترة البيانات كما أُدخلتا في القسم:\n' +
+            json.dumps(scope, ensure_ascii=False, indent=2)
+        ) if scope else ''
+        source_rows = market.get('sources') if isinstance(market.get('sources'), list) else []
+        sources_block = (
+            '\nمصادر المنافسين ودراسة السوق كما هي:\n' +
+            json.dumps(source_rows, ensure_ascii=False, indent=2)
+        ) if source_rows else ''
         return (
-            'جدول المنافسين الرئيسيين لرسم مقارنة المنافسين (horizontal_bar):\n'
+            'جدول المنافسين الكامل كما هو في قسم دراسة السوق (horizontal_bar):\n'
             + json.dumps(items, ensure_ascii=False, indent=2)
             + chart_block
+            + scope_block
+            + sources_block
             + '\n\nقواعد رسم مقارنة المنافسين المعتمدة:\n'
             '- ترتيب تنازلي حسب السعر (من الأعلى إلى الأقل).\n'
             '- مقارنة الأسعار لنفس وحدة القياس ونوع السعر (سعر المتر بيع أو تأجير، أو إجمالي سعر الوحدة).\n'
@@ -5137,6 +5233,108 @@ def _render_fallback_table(headers, rows, primary):
             f'<thead><tr>{header_html}</tr></thead><tbody>{"".join(body)}</tbody></table>')
 
 
+def _competitor_table_cell(value, fallback='—'):
+    text = _competitor_display_text(value, fallback=fallback)
+    formatted, is_num = _format_table_num(text)
+    return formatted if is_num else html_lib.escape(text)
+
+
+def _competitor_area_display(comp):
+    area_cache = comp.get('area_cache') if isinstance(comp, dict) and isinstance(comp.get('area_cache'), dict) else {}
+    area_fixed = _competitor_value(comp, 'area_sqm', 'area', 'المساحة') or area_cache.get('area_sqm')
+    area_from = _competitor_value(comp, 'area_from', 'min_area', 'من') or area_cache.get('area_from')
+    area_to = _competitor_value(comp, 'area_to', 'max_area', 'إلى') or area_cache.get('area_to')
+    area_mode = str(_competitor_value(comp, 'area_mode', 'mode') or '').strip().lower()
+    if area_mode == 'range' or area_from not in (None, '', []) or area_to not in (None, '', []):
+        return f'من {_competitor_table_cell(area_from)} إلى {_competitor_table_cell(area_to)}'
+    return _competitor_table_cell(area_fixed)
+
+
+def _competitor_source_display(comp):
+    source = _competitor_value(comp, 'source', 'المصدر')
+    source_html = f'<div>{html_lib.escape(_competitor_display_text(source))}</div>'
+    urls = comp.get('source_urls') if isinstance(comp, dict) and isinstance(comp.get('source_urls'), list) else []
+    if not urls:
+        single_url = _competitor_value(comp, 'source_url')
+        urls = [single_url] if single_url else []
+    links = []
+    for index, url in enumerate(urls, 1):
+        url_text = str(url or '').strip()
+        if re.match(r'^https?://', url_text, re.IGNORECASE):
+            links.append(
+                f'<a href="{html_lib.escape(url_text, quote=True)}" target="_blank" rel="noopener noreferrer" '
+                f'style="color:#2563eb;font-size:8px;word-break:break-all;">المصدر {index}</a>'
+            )
+    if links:
+        source_html += '<div style="margin-top:3px;display:flex;flex-direction:column;gap:2px;">' + ''.join(links) + '</div>'
+    notes = _competitor_value(comp, 'notes', 'note', 'ملاحظات')
+    if notes:
+        source_html += f'<div style="margin-top:3px;color:#64748b;font-size:8px;white-space:pre-line;">{html_lib.escape(_competitor_display_text(notes))}</div>'
+    return source_html
+
+
+def _render_competitor_table(competitors, primary):
+    """Render every stored competitor field in one deterministic table."""
+    rows_html = []
+    has_logo = False
+    for index, comp in enumerate(competitors or [], 1):
+        if not isinstance(comp, dict) or not _competitor_name(comp):
+            continue
+        name = _competitor_name(comp)
+        logo_token = _competitor_logo_token(comp, index)
+        has_logo = has_logo or bool(logo_token)
+        if logo_token:
+            logo_html = (
+                f'<div style="height:42px;display:flex;align-items:center;justify-content:center;">'
+                f'<img src="{logo_token}" alt="{html_lib.escape(name, quote=True)}" '
+                'style="width:76px;height:40px;object-fit:contain;background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:3px;box-sizing:border-box;">'
+                '</div>'
+            )
+        else:
+            logo_html = '<div style="height:42px;display:flex;align-items:center;justify-content:center;color:#64748b;">لا يوجد</div>'
+        project_type = _competitor_value(comp, 'project_type', 'projectType', 'النوع')
+        classification = _competitor_value(comp, 'classification', 'التصنيف')
+        type_html = f'<div>{html_lib.escape(_competitor_display_text(project_type))}</div>'
+        if classification:
+            type_html += f'<div style="margin-top:2px;color:#64748b;font-size:8px;">{html_lib.escape(_competitor_display_text(classification))}</div>'
+        operation = _competitor_value(comp, 'operation_type', 'operation', 'نوع العملية')
+        status = _competitor_value(comp, 'status', 'الحالة')
+        price = html_lib.escape(_competitor_price_display(comp))
+        cells = (
+            logo_html,
+            html_lib.escape(name),
+            type_html,
+            _competitor_area_display(comp),
+            _competitor_table_cell(status),
+            _competitor_table_cell(operation),
+            price,
+            _competitor_source_display(comp),
+        )
+        bg = '#f8fafc' if len(rows_html) % 2 else '#ffffff'
+        rows_html.append(
+            f'<tr style="background:{bg};">' + ''.join(
+                f'<td style="border-bottom:1px solid #e2e8f0;padding:5px 4px;font-size:{"8.5px" if col_idx in (0, 7) else "9px"};'
+                f'text-align:center;direction:rtl;vertical-align:middle;line-height:1.25;word-break:break-word;">{value}</td>'
+                for col_idx, value in enumerate(cells)
+            ) + '</tr>'
+        )
+    if not rows_html:
+        return '<div data-competitor-table="1" style="padding:20px;text-align:center;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;">لا توجد بيانات منافسين</div>'
+    headers = ('الشعار', 'اسم المشروع', 'النوع والتصنيف', 'المساحة م²', 'الحالة', 'نوع العملية', 'بيانات السعر', 'المصدر والملاحظات')
+    header_html = ''.join(
+        f'<th style="background:{primary};color:#fff;padding:6px 4px;font-size:9px;text-align:center;vertical-align:middle;line-height:1.2;">{header}</th>'
+        for header in headers
+    )
+    logo_attr = ' data-competitor-logos="1"' if has_logo else ''
+    return (
+        f'<table data-competitor-table="1"{logo_attr} data-preserve-density="1" '
+        'style="width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">'
+        f'<colgroup><col style="width:12%"><col style="width:14%"><col style="width:14%"><col style="width:11%">'
+        '<col style="width:9%"><col style="width:11%"><col style="width:15%"><col style="width:14%"></colgroup>'
+        f'<thead><tr>{header_html}</tr></thead><tbody>{"".join(rows_html)}</tbody></table>'
+    )
+
+
 def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9'):
     if not items:
         return '<div style="padding:20px;text-align:center;color:#64748b;">لا تتوفر بيانات منافسين كافية</div>'
@@ -5167,6 +5365,33 @@ def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9
         f'{"".join(rows_html)}'
         f'</div>'
     )
+
+
+def _market_scope_display(market):
+    if not isinstance(market, dict):
+        return ''
+    radius = market.get('competitor_radius')
+    if radius == 'city':
+        radius_text = 'كامل المدينة'
+    elif radius == 'custom':
+        radius_text = _competitor_display_text(market.get('competitor_radius_custom_km')) + ' كم'
+    elif radius not in (None, ''):
+        radius_text = _competitor_display_text(radius) + ' كم'
+    else:
+        radius_text = ''
+    period_map = {
+        '12m': 'آخر 12 شهرًا', '24m': 'آخر 24 شهرًا', '3y': 'آخر 3 سنوات', '5y': 'آخر 5 سنوات',
+    }
+    period = market.get('data_period')
+    period_text = period_map.get(str(period), '') if period not in (None, '') else ''
+    if period == 'custom':
+        period_text = f'من {_competitor_display_text(market.get("data_period_from"))} إلى {_competitor_display_text(market.get("data_period_to"))}'
+    parts = []
+    if radius_text:
+        parts.append(f'نطاق المنافسين: {radius_text}')
+    if period_text:
+        parts.append(f'فترة البيانات: {period_text}')
+    return ' | '.join(parts)
 
 
 def _render_fallback_waterfall(chart_data, primary='#005f78', secondary='#0ea5e9'):
@@ -5800,8 +6025,12 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
     items = _extract_competitor_chart_data(competitors, source)
 
     bar_chart_html = _render_fallback_horizontal_bar(items, primary, accent)
-    headers, rows = _fallback_table_data(slide, source)
-    table_html = _render_fallback_table(headers, rows, primary)
+    table_html = _render_competitor_table(competitors, primary)
+    scope_text = _market_scope_display(market)
+    scope_html = (
+        f'<div style="margin-bottom:10px;color:#64748b;font-size:10px;text-align:right;">'
+        f'{html_lib.escape(scope_text)}</div>'
+    ) if scope_text else ''
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
 
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -5819,12 +6048,13 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
       </div>
     </div>
   </header>
-  <div style="padding:0 58px;margin-top:16px;">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-height:510px;overflow:hidden;align-items:start;">
-      <div style="overflow:hidden;">
+  <div style="padding:0 58px;margin-top:12px;">
+    {scope_html}
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;max-height:520px;overflow:visible;align-items:start;">
+      <div style="overflow:visible;">
         {table_html}
       </div>
-      <div style="overflow:hidden;">
+      <div style="overflow:visible;">
         {bar_chart_html}
       </div>
     </div>

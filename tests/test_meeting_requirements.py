@@ -3503,6 +3503,82 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("tr.dataset.logoImporting = 'true'", index_source)
         self.assertIn('جاري البحث والاستيراد', index_source)
 
+    def test_competitor_slide_renders_full_rows_logos_scope_and_horizontal_chart(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع تجريبي',
+            'market_study_data': {
+                'competitor_radius': '10',
+                'data_period': '12m',
+                'sources': [{'title': 'الموقع الرسمي', 'url': 'https://example.com/market'}],
+                'competitors': [
+                    {
+                        'name': 'رافلز', 'project_type': 'فندقي', 'classification': 'مباشر',
+                        'area_sqm': '1,200', 'status': 'قائم', 'operation_type': 'تشغيل فندقي',
+                        'price_type': 'سعر الليلة', 'price_currency': 'SAR', 'price_value': '1548',
+                        'source': 'الموقع الرسمي', 'source_urls': ['https://example.com/raffles'],
+                        'notes': 'بيانات موثقة', 'logo_file_id': 'raffles-file',
+                        'logo_path': '/uploads/raffles.png',
+                    },
+                    {
+                        'name': 'سومو', 'project_type': 'سكني', 'classification': 'مرجعي',
+                        'area_mode': 'range', 'area_from': '900', 'area_to': '1500',
+                        'status': 'تحت الإنشاء', 'operation_type': 'بيع',
+                        'price_type': 'نطاق سعري', 'price_from': '900000', 'price_to': '1200000',
+                        'source': 'منصة موثقة', 'source_url': 'https://example.com/sumou',
+                        'logo_file_id': 'sumou-file',
+                    },
+                ],
+            },
+        }
+        slide = {
+            'title': 'مقارنة المنافسين', 'type': 'content', 'section_key': 'market',
+            'chart_type': 'horizontal_bar', 'content_source': 'market_study_data.competitors',
+            'source_table': 'competitors',
+        }
+        raw = engine._build_sol_horizontal_bar_slide(
+            slide, project, {'primary_color': '#123456', 'accent_color': '#c59a58'},
+            slide_num=4, total_slides=8,
+        )
+        for value in ('data-competitor-table="1"', 'رافلز', 'سومو', 'فندقي', 'مباشر',
+                      '1,200', 'تحت الإنشاء', 'تشغيل فندقي', '1,548', '900,000',
+                      'https://example.com/raffles', 'بيانات موثقة', 'نطاق المنافسين',
+                      '##COMPETITOR_LOGO_1##', '##COMPETITOR_LOGO_2##', 'width:100%'):
+            self.assertIn(value, raw)
+        self.assertGreaterEqual(raw.count('<tr'), 3)
+
+        finished = engine.finalize_slide_html(
+            raw, 'content', project, {'primary_color': '#123456'},
+            creative_images={'competitor_logos': [
+                {'name': 'رافلز', 'logo': '/uploads/raffles.png'},
+                {'name': 'سومو', 'logo': '/uploads/sumou.png'},
+            ]},
+            content_source='market_study_data.competitors', slide_num=4, total_slides=8,
+        )
+        self.assertIn('/uploads/raffles.png', finished)
+        self.assertIn('/uploads/sumou.png', finished)
+        self.assertNotIn('##COMPETITOR_LOGO_', finished)
+        self.assertNotIn('src=""', finished)
+
+        note = engine._slide_source_data_note(slide, project)
+        for value in ('classification', 'area_sqm', 'operation_type', 'price_value', 'الموقع الرسمي', 'رافلز', 'نطاق وفترة البيانات'):
+            self.assertIn(value, note)
+
+    def test_competitor_slide_is_planned_when_named_rows_have_no_canonical_price_key(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع بلا سعر',
+            'market_study_data': {'competitors': [{'name': 'منافس محفوظ', 'price': {'value': '1750'}}]},
+        }
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {})
+        comp_slide = next((slide for slide in plan['slides']
+                           if slide.get('content_source') == 'market_study_data.competitors'), None)
+        self.assertIsNotNone(comp_slide)
+        self.assertEqual(comp_slide.get('chart_type'), 'horizontal_bar')
+
     def test_competitor_logo_import_discovers_a_cited_official_site_and_preserves_manual_files(self):
         module = self.application_module
         client = self.app.test_client()
