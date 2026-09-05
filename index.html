@@ -1913,6 +1913,79 @@
       margin-top: 4px;
     }
 
+    #section-market-study .market-source-url-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    #section-market-study .market-source-url-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      direction: ltr;
+    }
+
+    #section-market-study .market-source-url-row input {
+      flex: 1;
+      min-width: 0;
+    }
+
+    #section-market-study .market-source-url-row button {
+      flex: none;
+      width: auto;
+      white-space: nowrap;
+    }
+
+    #section-market-study .market-source-url-add {
+      align-self: flex-start;
+      width: auto;
+    }
+
+    #section-market-study .market-logo-actions {
+      display: flex;
+      justify-content: center;
+      gap: 5px;
+      flex-wrap: wrap;
+      margin-top: 5px;
+    }
+
+    #section-market-study .market-logo-actions button {
+      width: auto;
+      min-width: 0;
+      padding: 3px 7px;
+      font-size: 11px;
+    }
+
+    #section-market-study .market-logo-progress {
+      margin-top: 6px;
+      direction: rtl;
+    }
+
+    #section-market-study .market-logo-progress-track {
+      height: 7px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e5e7eb;
+    }
+
+    #section-market-study .market-logo-progress-bar {
+      height: 100%;
+      width: 8%;
+      border-radius: inherit;
+      background: var(--p);
+      transition: width .35s ease;
+    }
+
+    #section-market-study .market-logo-progress-label {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      text-align: center;
+    }
+
     #section-market-study th {
       background: #f7fafc;
       color: var(--ink);
@@ -10079,6 +10152,108 @@
       return String(row.logo_path || row.logoPath || row.logo_url || row.logoUrl || '');
     }
 
+    function closeCompetitorLogoPreview() {
+      document.getElementById('competitorLogoPreviewModal')?.remove();
+    }
+
+    async function openCompetitorLogoPreview(tr) {
+      if (!tr) return;
+      let source = tr.dataset.logoPath || tr.dataset.logoUrl || '';
+      if (/^\/api\/project-files\//i.test(source)) source = '';
+      if (!source && tr.dataset.logoFileId) {
+        try {
+          source = await getProjectFileObjectUrl(tr.dataset.logoFileId);
+        } catch (error) {
+          toast(error.message || 'تعذر تحميل صورة الشعار');
+          return;
+        }
+      }
+      if (!source) {
+        toast('لا توجد صورة شعار للمعاينة');
+        return;
+      }
+      closeCompetitorLogoPreview();
+      const modal = document.createElement('div');
+      modal.id = 'competitorLogoPreviewModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:16px;max-width:1100px;width:100%;max-height:92vh;display:flex;flex-direction:column;gap:12px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><h3 style="margin:0;font-size:1rem">معاينة شعار المنافس</h3>' +
+        '<button type="button" class="btn ghost" data-close-competitor-logo-preview>إغلاق</button></div>' +
+        '<div style="min-height:320px;max-height:78vh;overflow:auto;background:#f6f7f9;border-radius:12px;display:flex;align-items:center;justify-content:center;padding:12px">' +
+        '<img src="' + escapeHtml(source) + '" alt="شعار المنافس" style="max-width:100%;max-height:76vh;width:auto;height:auto;object-fit:contain;display:block"></div></div>';
+      modal.addEventListener('click', event => { if (event.target === modal) closeCompetitorLogoPreview(); });
+      document.body.appendChild(modal);
+      modal.querySelector('[data-close-competitor-logo-preview]')?.addEventListener('click', closeCompetitorLogoPreview);
+      modal.querySelector('img')?.addEventListener('error', () => {
+        const image = modal.querySelector('img');
+        if (image) image.replaceWith(Object.assign(document.createElement('span'), {
+          className: 'tenant-hint', textContent: 'تعذر عرض صورة الشعار'
+        }));
+      });
+    }
+
+    function startCompetitorLogoProgress(tr, initialLabel) {
+      const progress = tr?.querySelector('[data-logo-progress]');
+      const bar = progress?.querySelector('[data-logo-progress-bar]');
+      const label = progress?.querySelector('[data-logo-progress-label]');
+      if (!progress || !bar || !label) return;
+      progress.hidden = false;
+      let value = 8;
+      let phase = 0;
+      const phases = ['جاري التحقق من الموقع الرسمي', 'جاري البحث عن صورة الشعار', 'جاري حفظ الشعار'];
+      bar.style.width = value + '%';
+      bar.setAttribute('aria-valuenow', String(value));
+      label.textContent = initialLabel || phases[phase];
+      clearInterval(tr._competitorLogoProgressTimer);
+      tr._competitorLogoProgressTimer = window.setInterval(() => {
+        value = value < 65 ? value + 7 : value < 90 ? value + 2 : value;
+        if (value >= 35) phase = 1;
+        if (value >= 70) phase = 2;
+        bar.style.width = value + '%';
+        bar.setAttribute('aria-valuenow', String(value));
+        label.textContent = phases[phase];
+      }, 700);
+    }
+
+    function finishCompetitorLogoProgress(tr, success, successLabel = 'اكتمل استيراد الشعار', failureLabel = 'تعذر استيراد الشعار') {
+      if (!tr) return;
+      clearInterval(tr._competitorLogoProgressTimer);
+      const progress = tr.querySelector('[data-logo-progress]');
+      const bar = progress?.querySelector('[data-logo-progress-bar]');
+      const label = progress?.querySelector('[data-logo-progress-label]');
+      if (bar) {
+        bar.style.width = '100%';
+        bar.setAttribute('aria-valuenow', '100');
+      }
+      if (label) label.textContent = success ? successLabel : failureLabel;
+      window.setTimeout(() => {
+        tr.dataset.logoImporting = '';
+        tr.dataset.logoUploading = '';
+        renderCompetitorLogoCell(tr);
+      }, success ? 450 : 900);
+    }
+
+    async function removeCompetitorLogo(tr) {
+      if (!tr || tr.dataset.logoImporting === 'true' || tr.dataset.logoUploading === 'true') return;
+      if (!confirm('حذف شعار المنافس؟')) return;
+      const fileId = tr.dataset.logoFileId || '';
+      if (fileId) {
+        try {
+          const response = await api('DELETE', '/api/project-files/' + encodeURIComponent(fileId));
+          if (!response?.success) throw new Error(response?.error || 'تعذر حذف ملف الشعار');
+        } catch (error) {
+          toast(error.message || 'تعذر حذف ملف الشعار');
+          return;
+        }
+      }
+      tr.dataset.logoFileId = '';
+      tr.dataset.logoPath = '';
+      tr.dataset.logoUrl = '';
+      tr.dataset.logoImportWarning = '';
+      renderCompetitorLogoCell(tr);
+      persistMarketStudyFromDom();
+    }
+
     async function uploadCompetitorLogo(input, tr) {
       const file = input.files?.[0];
       if (!file) return;
@@ -10087,32 +10262,41 @@
       formData.append('fileType', 'competitor_logo');
       if (tenantProjectData?.draftId) formData.append('draftId', tenantProjectData.draftId);
       formData.append('projectId', tr.dataset.competitorId);
-      const response = await api('POST', '/api/project-files', formData, true);
-      if (!response?.success || !response.file?.id) {
-        toast(response?.error || 'تعذر حفظ شعار المنافس');
-        return;
-      }
-      const published = await publishProjectFileImageUrl(response.file.id, 'competitor-logo-' + tr.dataset.competitorId);
-      tr.dataset.logoFileId = response.file.id;
-      tr.dataset.logoPath = published || ('/api/project-files/' + response.file.id);
-      tr.dataset.logoUrl = '';
-      tr.dataset.logoSourceUrl = '';
+      tr.dataset.logoUploading = 'true';
       renderCompetitorLogoCell(tr);
-      persistMarketStudyFromDom();
+      startCompetitorLogoProgress(tr, 'جاري حفظ الشعار');
+      let success = false;
+      try {
+        const response = await api('POST', '/api/project-files', formData, true);
+        if (!response?.success || !response.file?.id) throw new Error(response?.error || 'تعذر حفظ شعار المنافس');
+        const published = await publishProjectFileImageUrl(response.file.id, 'competitor-logo-' + tr.dataset.competitorId);
+        tr.dataset.logoFileId = response.file.id;
+        tr.dataset.logoPath = published || ('/api/project-files/' + response.file.id);
+        tr.dataset.logoUrl = '';
+        tr.dataset.logoSourceUrl = '';
+        renderCompetitorLogoCell(tr);
+        persistMarketStudyFromDom();
+        success = true;
+      } catch (error) {
+        toast(error.message || 'تعذر حفظ شعار المنافس');
+      } finally {
+        finishCompetitorLogoProgress(tr, success, 'اكتمل حفظ الشعار', 'تعذر حفظ الشعار');
+      }
     }
 
     async function importCompetitorLogo(tr) {
-      if (tr.dataset.logoImporting === 'true') return;
+      if (tr.dataset.logoImporting === 'true' || tr.dataset.logoUploading === 'true') return;
       const row = collectOneCompetitorRow(tr);
       tr.dataset.logoImporting = 'true';
       renderCompetitorLogoCell(tr);
+      startCompetitorLogoProgress(tr);
+      let success = false;
       try {
         const response = await api('POST', '/api/market-study/competitors/logo', {
           draftId: tenantProjectData?.draftId || '', competitor: row
         });
         if (!response?.success || !response.competitor) {
-          toast(response?.error || 'لم يُعثر على شعار رسمي');
-          return;
+          throw new Error(response?.error || 'لم يُعثر على شعار رسمي');
         }
         const imported = response.competitor;
         tr.dataset.logoFileId = imported.logo_file_id || tr.dataset.logoFileId || '';
@@ -10120,12 +10304,14 @@
         tr.dataset.logoUrl = imported.logo_url || tr.dataset.logoUrl || '';
         tr.dataset.logoSourceUrl = imported.logo_source_url || tr.dataset.logoSourceUrl || '';
         tr.dataset.fieldSources = JSON.stringify(imported.field_sources || imported.fieldSources || {});
-        const sourceLinks = tr.querySelector('[data-source-links]');
-        if (sourceLinks) sourceLinks.innerHTML = marketSourceLinksHtml(imported);
+        renderCompetitorSourceUrlEditor(tr, imported);
+        renderCompetitorSourceLinks(tr);
         persistMarketStudyFromDom();
+        success = true;
+      } catch (error) {
+        toast(error.message || 'لم يُعثر على شعار رسمي');
       } finally {
-        tr.dataset.logoImporting = '';
-        renderCompetitorLogoCell(tr);
+        finishCompetitorLogoProgress(tr, success);
       }
     }
 
@@ -10133,13 +10319,26 @@
       const cell = tr.querySelector('[data-field="logo_cell"]');
       if (!cell) return;
       const path = tr.dataset.logoPath || tr.dataset.logoUrl || '';
+      const hasLogo = Boolean(path || tr.dataset.logoFileId);
       const manual = Boolean(tr.dataset.logoFileId);
       const importing = tr.dataset.logoImporting === 'true';
-      cell.innerHTML = (path ? '<img src="' + escapeHtml(path) + '" alt="شعار المنافس" style="width:72px;height:54px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:5px">' : '<div style="height:54px;display:flex;align-items:center;justify-content:center;color:var(--muted)">' + (importing ? 'جاري البحث والاستيراد' : 'لا يوجد') + '</div>') +
-        '<input type="file" accept="image/png,image/jpeg,image/webp" data-competitor-logo style="width:100%;font-size:11px"' + (importing ? ' disabled' : '') + '>' +
-        '<button type="button" class="btn ghost small" data-import-competitor-logo style="width:100%;margin-top:4px"' + (manual || importing ? ' disabled' : '') + '>' + (importing ? 'جاري الاستيراد' : 'استيراد رسمي') + '</button>';
+      const uploading = tr.dataset.logoUploading === 'true';
+      const busy = importing || uploading;
+      const busyLabel = uploading ? 'جاري حفظ الشعار' : 'جاري البحث والاستيراد';
+      const progress = busy
+        ? '<div data-logo-progress class="market-logo-progress"><div class="market-logo-progress-track"><div data-logo-progress-bar class="market-logo-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"></div></div><span data-logo-progress-label class="market-logo-progress-label">' + busyLabel + '</span></div>'
+        : '';
+      const actions = hasLogo
+        ? '<div class="market-logo-actions"><button type="button" class="btn ghost small" data-preview-competitor-logo>تكبير</button><button type="button" class="btn ghost small" data-remove-competitor-logo>حذف</button></div>'
+        : '';
+      cell.innerHTML = (path ? '<img src="' + escapeHtml(path) + '" alt="شعار المنافس" style="width:72px;height:54px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:5px">' : '<div style="height:54px;display:flex;align-items:center;justify-content:center;color:var(--muted)">' + (busy ? busyLabel : 'لا يوجد') + '</div>') +
+        progress + actions +
+        '<input type="file" accept="image/png,image/jpeg,image/webp" data-competitor-logo style="width:100%;font-size:11px"' + (busy ? ' disabled' : '') + '>' +
+        '<button type="button" class="btn ghost small" data-import-competitor-logo style="width:100%;margin-top:4px"' + (manual || busy ? ' disabled' : '') + '>' + (busy ? busyLabel : 'استيراد رسمي') + '</button>';
       cell.querySelector('[data-competitor-logo]')?.addEventListener('change', event => uploadCompetitorLogo(event.target, tr));
       cell.querySelector('[data-import-competitor-logo]')?.addEventListener('click', () => importCompetitorLogo(tr));
+      cell.querySelector('[data-preview-competitor-logo]')?.addEventListener('click', () => openCompetitorLogoPreview(tr));
+      cell.querySelector('[data-remove-competitor-logo]')?.addEventListener('click', () => removeCompetitorLogo(tr));
     }
 
     function competitorPriceCache(tr) {
@@ -10195,13 +10394,16 @@
         '<td data-field="area_cell"></td>' +
         '<td><select data-field="status">' + marketSelectHtml(['قائم', 'تحت الإنشاء', 'على الخارطة'], row.status || '') + '</select></td>' +
         '<td><textarea data-field="source" rows="2" placeholder="المصدر">' + escapeHtml(row.source || '') + '</textarea>' +
-        '<div data-source-links class="market-source-links">' + marketSourceLinksHtml(row) + '</div><div data-conflict-warnings>' + warningsHtml + '</div></td>' +
+        '<div data-source-url-editor class="market-source-url-editor"></div>' +
+        '<div data-source-links class="market-source-links"></div><div data-conflict-warnings>' + warningsHtml + '</div></td>' +
         '<td><select data-field="operation_type">' + marketSelectHtml(['بيع', 'إيجار', 'تشغيل فندقي', 'أخرى'], operation) + '</select></td>' +
         '<td><select data-field="price_type">' + marketSelectHtml(priceTypes, priceType) + '</select></td>' +
         '<td data-field="price_cell"></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-competitor>حذف</button></td>';
       tb.appendChild(tr);
       renderCompetitorLogoCell(tr);
+      renderCompetitorSourceUrlEditor(tr, row);
+      renderCompetitorSourceLinks(tr);
       renderCompetitorAreaInputs(tr, row);
       renderCompetitorPriceInputs(tr, row);
       tr.querySelector('[data-field="operation_type"]').addEventListener('change', () => {
@@ -10257,8 +10459,9 @@
       } catch (error) {
         field_sources = {};
       }
+      const directSourceUrls = competitorSourceUrlValues(tr);
       const source_urls = marketSourceUrls({
-        source_urls: Array.from(tr.querySelectorAll('[data-source-links] a[href]'))
+        source_urls: directSourceUrls.length ? directSourceUrls : Array.from(tr.querySelectorAll('[data-source-links] a[href]'))
           .map(anchor => anchor.getAttribute('href') || '')
       });
       cacheCompetitorAreaInputs(tr);
@@ -10356,6 +10559,17 @@
       const next = safeMarketUrl(nextUrl) ? String(nextUrl).trim() : '';
       const nextKey = next.toLowerCase();
       if (previous && previous !== nextKey) {
+        let replacedInput = false;
+        competitor.querySelectorAll('[data-source-url]').forEach(input => {
+          if (String(input.value || '').trim().toLowerCase() !== previous) return;
+          if (next && !replacedInput) {
+            input.value = next;
+            input.dataset.previousUrl = next;
+            replacedInput = true;
+          } else {
+            input.closest('[data-source-url-row]')?.remove();
+          }
+        });
         const host = competitor.querySelector('[data-source-links]');
         let replaced = false;
         host?.querySelectorAll('a[href]').forEach(anchor => {
@@ -10390,6 +10604,60 @@
           competitor.dataset.logoSourceUrl = next;
         }
       }
+    }
+
+    function competitorSourceUrlValues(tr) {
+      return Array.from(tr?.querySelectorAll('[data-source-url]') || [])
+        .map(input => String(input.value || '').trim())
+        .filter(value => /^https?:\/\//i.test(value) && safeMarketUrl(value));
+    }
+
+    function renderCompetitorSourceLinks(tr) {
+      const host = tr?.querySelector('[data-source-links]');
+      if (host) host.innerHTML = marketSourceLinksHtml({ source_urls: competitorSourceUrlValues(tr) });
+    }
+
+    function addCompetitorSourceUrlInput(tr, value = '') {
+      const editor = tr?.querySelector('[data-source-url-editor]');
+      if (!editor) return;
+      const row = document.createElement('div');
+      row.className = 'market-source-url-row';
+      row.dataset.sourceUrlRow = '1';
+      row.innerHTML = '<input data-source-url value="' + escapeHtml(value || '') + '" placeholder="https://..." inputmode="url">' +
+        '<button type="button" class="btn ghost small" data-remove-source-url>حذف</button>';
+      editor.insertBefore(row, editor.querySelector('[data-add-source-url]'));
+      const input = row.querySelector('[data-source-url]');
+      input.dataset.previousUrl = String(value || '').trim();
+      input.addEventListener('input', () => {
+        const previous = input.dataset.previousUrl || '';
+        const next = String(input.value || '').trim();
+        if (previous && previous.toLowerCase() !== next.toLowerCase()) {
+          rewriteMarketCompetitorSourceUrl(tr, previous, next);
+        }
+        input.dataset.previousUrl = next;
+        renderCompetitorSourceLinks(tr);
+        persistMarketStudyFromDom();
+      });
+      row.querySelector('[data-remove-source-url]').addEventListener('click', () => {
+        const current = String(input.value || '').trim();
+        rewriteMarketCompetitorSourceUrl(tr, current, '');
+        row.remove();
+        renderCompetitorSourceLinks(tr);
+        persistMarketStudyFromDom();
+      });
+      return input;
+    }
+
+    function renderCompetitorSourceUrlEditor(tr, row = {}) {
+      const editor = tr?.querySelector('[data-source-url-editor]');
+      if (!editor) return;
+      editor.innerHTML = '<div class="tenant-hint">الروابط المرجعية</div>' +
+        '<button type="button" class="btn ghost small market-source-url-add" data-add-source-url>إضافة رابط مرجعي</button>';
+      marketSourceUrls(row).forEach(url => addCompetitorSourceUrlInput(tr, url));
+      editor.querySelector('[data-add-source-url]').addEventListener('click', () => {
+        const input = addCompetitorSourceUrlInput(tr);
+        input?.focus();
+      });
     }
 
     function attachMarketSourceToCompetitor(sourceRow) {

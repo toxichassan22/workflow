@@ -11653,6 +11653,33 @@ def api_get_project_file(file_id):
     return response
 
 
+@app.route('/api/project-files/<file_id>', methods=['DELETE'])
+@require_permission('create_presentation')
+def api_delete_project_file(file_id):
+    stored = db.get_project_file(g.tenant_id, str(file_id))
+    if not stored:
+        return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
+    if stored.get('file_type') != 'competitor_logo':
+        return jsonify({'success': False, 'error': 'لا يمكن حذف هذا النوع من الملفات من هنا'}), 400
+
+    tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(g.tenant_id)))
+    storage_path = os.path.realpath(stored.get('storage_path') or '')
+    try:
+        inside_tenant = os.path.commonpath([tenant_root, storage_path]) == tenant_root
+    except ValueError:
+        inside_tenant = False
+    if not inside_tenant:
+        print(f"[PROJECT FILE] rejected delete outside tenant path for {file_id}")
+        return jsonify({'success': False, 'error': 'مسار الملف غير مسموح'}), 403
+    try:
+        if os.path.isfile(storage_path):
+            os.unlink(storage_path)
+    except OSError as error:
+        print(f"[PROJECT FILE] could not remove logo file {file_id}: {error}")
+    deleted = db.delete_project_file(g.tenant_id, str(file_id))
+    return jsonify({'success': bool(deleted), 'fileId': str(file_id)})
+
+
 @app.route('/api/project-files/<file_id>/publish-image', methods=['POST'])
 @require_permission('create_presentation')
 def api_publish_project_file_image(file_id):

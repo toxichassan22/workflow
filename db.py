@@ -2935,6 +2935,22 @@ def get_project_file(tenant_id, file_id):
     return dict(row) if row else None
 
 
+def delete_project_file(tenant_id, file_id):
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM project_files WHERE id = ? AND tenant_id = ?',
+        (file_id, tenant_id)
+    ).fetchone()
+    if not row:
+        return None
+    conn.execute(
+        'DELETE FROM project_files WHERE id = ? AND tenant_id = ?',
+        (file_id, tenant_id)
+    )
+    conn.commit()
+    return dict(row)
+
+
 def get_project_files(tenant_id, draft_id=None, project_id=None, file_type=None):
     conn = get_db()
     query = 'SELECT * FROM project_files WHERE tenant_id = ?'
