@@ -3671,6 +3671,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('##COMPETITOR_LOGO_', finished)
         self.assertNotIn('src=""', finished)
 
+        renumbered = engine.renumber_presentation_slides([
+            {**slide, 'html': finished},
+        ], branding={'primary_color': '#123456'}, project_data=project)
+        self.assertIn('/uploads/raffles.png', renumbered[0]['html'])
+        self.assertIn('/uploads/sumou.png', renumbered[0]['html'])
+
         note = engine._slide_source_data_note(slide, project)
         for value in ('classification', 'area_sqm', 'operation_type', 'price_value', 'الموقع الرسمي', 'رافلز', 'نطاق وفترة البيانات'):
             self.assertIn(value, note)

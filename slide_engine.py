@@ -8111,7 +8111,28 @@ def _is_market_slide(slide_type='', slide_title='', content_source=''):
 
 
 def _strip_market_slide_media(html):
-    """Keep only competitor-logo images in market slides."""
+    """Keep competitor logos while removing maps and unrelated images from market slides."""
+    protected_images = []
+
+    def protect_competitor_region(match):
+        region = match.group(0)
+
+        def stash_image(image_match):
+            marker = f'__MARKET_COMPETITOR_IMAGE_{len(protected_images)}__'
+            protected_images.append((marker, image_match.group(0)))
+            return marker
+
+        return re.sub(r'<img\b[^>]*>', stash_image, region, flags=re.IGNORECASE)
+
+    # Resolved logos no longer contain the token name (for example they may be
+    # /uploads/creative/.../logo.png), so protect the semantic competitor
+    # containers before the generic market-image cleanup runs. This also keeps
+    # already-saved presentations exportable when they are re-numbered.
+    html = re.sub(
+        r'<(?P<tag>table|div)\b[^>]*\bdata-competitor-(?:table|logos)\b[^>]*>.*?</(?P=tag)>',
+        protect_competitor_region, html, flags=re.IGNORECASE | re.DOTALL,
+    )
+
     def keep_image(match):
         tag = match.group(0)
         src_match = re.search(r'\bsrc\s*=\s*["\']([^"\']*)["\']', tag, flags=re.IGNORECASE)
@@ -8126,6 +8147,8 @@ def _strip_market_slide_media(html):
     )
     html = re.sub(r'<img\b[^>]*>', keep_image, html, flags=re.IGNORECASE)
     html = re.sub(r'#*MAP_(?:OVERVIEW|LANDMARKS|ACCESS|CATCHMENT)#*', '', html, flags=re.IGNORECASE)
+    for marker, image in protected_images:
+        html = html.replace(marker, image)
     return html
 
 
