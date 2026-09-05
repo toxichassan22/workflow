@@ -12564,7 +12564,7 @@
         const mapApproved = !!approvals[view.mapType];
         const generationLocked = !approved || (view.mapType !== 'overview' && !approvals.overview) || mapApproved;
         const approvalLocked = !approved || (view.mapType !== 'overview' && !approvals.overview);
-        const approvalButton = generated
+        const approvalButton = generated || mapApproved
           ? '<button type="button" class="btn small ' + (mapApproved ? 'ghost' : 'primary') + '" data-section-lock-ignore="1" onclick="' + (mapApproved ? 'unapproveMapPreview' : 'approveMapPreview') + '(\'' + view.mapType + '\')" ' + (!mapApproved && approvalLocked ? 'disabled' : '') + '>' + (mapApproved ? 'إلغاء اعتماد الخريطة' : 'اعتماد الخريطة') + '</button>'
           : '';
         let actions = '';
@@ -12582,6 +12582,10 @@
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="regenerateMapPreview(\'overview\')" ' + (generationLocked ? 'disabled' : '') + '>إعادة توليد الخريطة</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="toggleTenantPolygonMode()" ' + (mapApproved ? 'disabled' : '') + '>رسم حدود الموقع</button>' +
             '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="startTenantMapPinMode()" ' + (mapApproved ? 'disabled' : '') + '>تعيين الموقع</button>';
+        } else if (mapApproved) {
+          // Keep an inconsistent legacy state recoverable: approval can survive while its image
+          // reference is missing, and the user must be able to release it before regenerating.
+          actions = approvalButton;
         } else if (view.mapType === 'access' && tenantRoadEditMode) {
           actions = accessRoadEditControlsHtml();
         } else if (view.mapType === 'access' && tenantRoadDrawingTarget) {
@@ -17186,11 +17190,12 @@
       const cards = views.map(view => {
         const url = mapPreviewStoredUrl(view);
         const visible = mapPreviewIsVisible(view, approvals);
+        const approvedWithoutFile = !!approvals[view.mapType] && !url;
         const status = !visible
           ? (tenantProjectData?.location_analysis_approved
             ? 'بانتظار اعتماد خريطة الأرض / المبنى'
             : 'بانتظار اعتماد تحليل الموقع')
-          : (approvals[view.mapType] ? 'معتمدة' : (url ? 'بانتظار الاعتماد' : 'غير مولدة'));
+          : (approvals[view.mapType] ? (approvedWithoutFile ? 'معتمدة بدون ملف' : 'معتمدة') : (url ? 'بانتظار الاعتماد' : 'غير مولدة'));
         const preview = visible && url
           ? '<img src="' + escapeHtml(withCacheBust(url)) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:contain;object-position:center center;background:#f4f6f8;border-radius:8px;">'
           : '<div class="tenant-map-preview-placeholder" style="display:flex;align-items:center;justify-content:center;aspect-ratio:16/9;background:#f4f6f8;border-radius:8px;color:var(--muted);text-align:center;padding:12px;">' + escapeHtml(status === 'غير مولدة' ? 'لم تُولد الخريطة' : status) + '</div>';

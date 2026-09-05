@@ -4895,6 +4895,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function mapPreviewIsVisible(view, approvals = tenantCreativeImages?.map_approvals || {})', source)
         self.assertIn("'بانتظار اعتماد خريطة الأرض / المبنى'", source)
         self.assertIn("'بانتظار اعتماد تحليل الموقع'", source)
+        self.assertIn("'معتمدة بدون ملف'", source)
+        self.assertIn('const approvalButton = generated || mapApproved', source)
+        self.assertIn('} else if (mapApproved) {', source)
         gallery_body = source.split('function renderMapPreviewGallery()', 1)[1].split('function withCacheBust', 1)[0]
         self.assertIn('const visible = mapPreviewIsVisible(view, approvals);', gallery_body)
         self.assertIn('visible && url', gallery_body)
