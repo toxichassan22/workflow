@@ -5112,6 +5112,14 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             notes.append(financial_note.strip())
     elif section_key == 'market':
         notes.append('الهيدر والفوتر ثابتان وتتم إضافتهما آلياً؛ اجعل مساحة الإبداع داخل منطقة المحتوى فقط.')
+        market_design_reference = (
+            'المرجع البصري لقسم دراسة السوق هو تقرير استثماري تحليلي راقٍ: خلفية بيضاء ومساحات هادئة، '
+            'ألوان الهوية الأساسية مع لمسات ذهبية، عناوين كبيرة، فواصل رفيعة، حاويات ذات حواف مستديرة، '
+            'وتباين واضح بين العنوان والمعلومة والخلاصة. لا تضع المحتوى في صندوق نص واحد أو جدول خام ممتد؛ '
+            'ابنِ هرمية بصرية من منطقتين أو أكثر، واستعمل شرائط إبراز أو لوحة قرار أو مؤشرات قصيرة عندما تكون البيانات متاحة. '
+            'لا تستخدم أيقونات أو رموزاً زخرفية أو ظلالاً ثقيلة.'
+        )
+        notes.append(market_design_reference)
         if chart_type == 'horizontal_bar':
             notes.append(
                 f'هذه الشريحة مخصصة لرسم مقارنة المنافسين المعتمد ({chart_type}: {chart_note}). '
@@ -5120,7 +5128,16 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
                 'مع بقاء جدول المنافسين كاملاً ومقروءاً، والرسم البياني واضحاً بكامل أشرطته وأسعاره مع إبراز مشروعنا بلون الهوية، ومنع اختراع أرقام أو متوسطات افتراضية.'
             )
         else:
-            notes.append('هذه شريحة سوق عادية: صمّم التكوين البصري والهرمية والمساحات بحرية بما يخدم البيانات المعتمدة، مع منع الخرائط والصور الفوتوغرافية وخلفيات الصور وأي رسم بياني إضافي.')
+            if content_source == 'market_study_data.scope':
+                notes.append('لنطاق الدراسة: استخدم عمودين تحليليين متوازنين، ثم شريطاً سفلياً من مؤشرين أو ثلاثة مستخرجين من البيانات فقط.')
+            elif content_source.startswith('market_study_data.summary'):
+                notes.append('لتحليل السوق: اجعل أول محور منطقة إبراز رئيسية، ثم وزّع بقية المحاور في بطاقات تحليلية متوازنة مع خلاصة واضحة، دون عرض JSON أو جدول خام.')
+            elif content_source.startswith('market_study_data.one_block_summary'):
+                notes.append('للملخص التنفيذي: قسّم الفقرة المعتمدة بصرياً إلى مقاطع قصيرة متتابعة، مع لوحة جانبية لتصنيف الدراسة أو إخلاء المسؤولية عند توفرهما؛ ممنوع وضع الفقرة كلها داخل بطاقة واحدة.')
+            elif content_source.startswith('market_study_data.sources'):
+                notes.append('للمصادر: استخدم عمودين متوازنين من جداول مدمجة بترويسة كحلية أو تركوازية، وصفوف متناوبة، وروابط مقروءة دون تمديدها خارج الخلية.')
+            else:
+                notes.append('هذه شريحة سوق عادية: صمّم التكوين البصري والهرمية والمساحات بحرية بما يخدم البيانات المعتمدة، مع منع الخرائط والصور الفوتوغرافية وخلفيات الصور وأي رسم بياني إضافي.')
     else:
         notes.append('الرسوم البيانية ممنوعة تماماً في هذا القسم؛ اعرض المحتوى بالجداول أو النصوص أو الصور حسب النمط المحدد.')
     notes_text = '\n'.join(f'- {n}' for n in notes)
@@ -6748,15 +6765,17 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
       </div>
     </div>
   </header>
-  <div style="padding:0 58px;margin-top:12px;">
-    {scope_html}
-    <div style="display:grid;direction:rtl;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'table chart';gap:20px;max-height:520px;overflow:visible;align-items:start;">
-      <div style="grid-area:table;overflow:visible;">
+  <div style="padding:0 42px;margin-top:12px;">
+    <div style="background:#f3f6f8;border:1px solid #dbe4ee;border-radius:12px;padding:14px 16px 16px;box-sizing:border-box;">
+      {scope_html}
+      <div style="display:grid;direction:rtl;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'table chart';gap:20px;max-height:520px;overflow:visible;align-items:start;">
+      <div style="grid-area:table;background:#ffffff;border:1px solid #dbe4ee;border-radius:10px;padding:8px;overflow:visible;">
         {table_html}
       </div>
-      <div style="grid-area:chart;overflow:visible;">
+      <div style="grid-area:chart;background:#ffffff;border:1px solid #dbe4ee;border-radius:10px;padding:8px;overflow:visible;">
         {bar_chart_html}
         {provenance_html}
+      </div>
       </div>
     </div>
   </div>
@@ -6887,6 +6906,88 @@ def _market_value_html(value):
     return html_lib.escape(str(value or 'غير متوفر')).replace('\n', '<br>')
 
 
+def _market_paragraph_blocks(value, count=3):
+    """Split approved prose into visual blocks without changing its wording."""
+    text = re.sub(r'\s+', ' ', str(value or '').strip())
+    if not text:
+        return []
+    sentences = [item.strip() for item in re.split(r'(?<=[.!؟])\s+', text) if item.strip()]
+    if len(sentences) <= 1:
+        words = text.split()
+        size = max(1, (len(words) + count - 1) // count)
+        return [' '.join(words[index:index + size]) for index in range(0, len(words), size)]
+    block_size = max(1, (len(sentences) + count - 1) // count)
+    return [" ".join(sentences[index:index + block_size]) for index in range(0, len(sentences), block_size)]
+
+
+def _build_market_scope_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render the market scope as an editorial overview instead of a raw key/value table."""
+    source = source if isinstance(source, dict) else {}
+    market = _market_state(source)
+    rows = _market_scope_rows(market)
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'نطاق الدراسة'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+    midpoint = (len(rows) + 1) // 2
+    columns = (rows[:midpoint], rows[midpoint:])
+
+    def render_row(label, value):
+        return (
+            f'<div style="padding:13px 15px;border-bottom:1px solid #dbe4ee;min-height:76px;box-sizing:border-box;">'
+            f'<div style="font-size:12px;font-weight:800;color:{primary};margin-bottom:5px;">{html_lib.escape(str(label))}</div>'
+            f'<div style="font-size:13px;line-height:1.65;color:#334155;text-align:justify;">{_market_value_html(value)}</div></div>'
+        )
+
+    column_html = ''.join(
+        f'<div style="background:#ffffff;border:1px solid #dbe4ee;border-top:5px solid {primary};border-radius:9px;overflow:hidden;">'
+        + ''.join(render_row(label, value) for label, value in column)
+        + '</div>'
+        for column in columns if column
+    )
+    city = str(source.get('city') or '').strip()
+    district = str(source.get('district') or '').strip()
+    location_line = ' — '.join(item for item in (district, city) if item)
+    location_html = (
+        f'<div style="background:#e8dcc0;border-radius:9px;padding:13px 16px;min-width:190px;">'
+        f'<div style="font-size:11px;font-weight:800;color:#334155;margin-bottom:5px;">الموقع الجغرافي</div>'
+        f'<div style="font-size:16px;font-weight:800;color:#1f2937;">{html_lib.escape(location_line)}</div></div>'
+    ) if location_line else ''
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">MARKET SCOPE</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">الإطار الجغرافي والزمني المعتمد لقراءة السوق</p>
+      </div>
+    </div>
+  </header>
+  <div data-market-scope="1" style="padding:0 36px;margin-top:14px;">
+    <div style="background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;padding:20px 22px 18px;box-sizing:border-box;">
+      <div style="display:flex;align-items:end;justify-content:space-between;gap:20px;border-bottom:1px solid #dbe4ee;padding-bottom:14px;margin-bottom:16px;direction:rtl;">
+        <div><div style="font-size:22px;font-weight:800;color:{primary};">تعريف السوق ونطاق الدراسة</div><div style="font-size:12px;color:#64748b;margin-top:5px;">البيانات التي تحدد مجال المقارنة والتحليل</div></div>
+        {location_html}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">
+        {column_html}
+      </div>
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">تحليل السوق — نطاق الدراسة</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
 def _build_market_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
     """Render one readable page of the detailed market analysis."""
     source = source if isinstance(source, dict) else {}
@@ -6899,41 +7000,65 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
     title = html_lib.escape(str((slide or {}).get('title') or 'تحليل السوق'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
     is_prose = isinstance(market.get('summary'), str) and bool(str(market.get('summary') or '').strip())
-    subtitle = 'محاور تحليل السوق التفصيلي'
+    subtitle = 'قراءة تحليلية للعرض والطلب والمنافسة والفرصة الاستثمارية'
+    panel_style = (
+        'background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;'
+        'box-shadow:0 3px 10px rgba(15,23,42,.05);box-sizing:border-box;'
+    )
     if is_prose:
+        prose_blocks = _market_paragraph_blocks(rows[0][1] if rows else '', 3)
         body_content = (
-            f'<div style="border-top:4px solid {primary};background:#f8fafc;padding:28px 34px;">'
-            f'<div style="font-size:15.5px;line-height:1.95;color:#1f2937;font-weight:500;text-align:justify;">'
-            f'{_market_value_html(rows[0][1] if rows else "")}'
-            f'</div></div>'
+            f'<div data-market-analysis="1" style="{panel_style}padding:22px 28px;display:grid;'
+            f'grid-template-columns:0.72fr 1.8fr;grid-template-areas:"side main";gap:26px;direction:ltr;">'
+            f'<div style="grid-area:side;direction:rtl;border-right:5px solid {accent};padding:8px 18px 8px 8px;">'
+            f'<div style="font-size:15px;font-weight:800;color:{primary};margin-bottom:12px;">ماذا تعني القراءة؟</div>'
+            f'<div style="font-size:12px;line-height:1.85;color:#475569;text-align:justify;">تحليل منظم للبيانات المعتمدة يوضح اتجاه السوق والفجوة والفرصة.</div>'
+            f'</div>'
+            f'<div style="grid-area:main;direction:rtl;display:flex;flex-direction:column;gap:14px;">'
+            + ''.join(
+                f'<div data-market-analysis-block="{index + 1}" style="padding:0 0 13px;border-bottom:1px solid #e2e8f0;'
+                f'font-size:14px;line-height:1.9;color:#1f2937;text-align:justify;">{_market_value_html(block)}</div>'
+                for index, block in enumerate(prose_blocks)
+            )
+            + '</div></div>'
         )
     else:
-        midpoint = (len(rows) + 1) // 2
-        columns = (rows[:midpoint], rows[midpoint:])
-        subtitle = 'قراءة تحليلية للعرض والطلب والمنافسة والفرصة الاستثمارية'
+        featured = rows[:1]
+        details = rows[1:]
 
-        def render_column(column_rows):
-            blocks = []
-            for label, value in column_rows:
-                blocks.append(
-                    f'<div data-market-analysis-card="1" style="background:#ffffff;border:1px solid #e2e8f0;'
-                    f'border-right:4px solid {accent};border-radius:8px;padding:13px 16px 14px;'
-                    f'min-height:98px;box-sizing:border-box;box-shadow:0 2px 7px rgba(15,23,42,.04);">'
-                    f'<div style="font-size:13px;font-weight:800;color:{primary};line-height:1.3;margin-bottom:8px;">'
-                    f'{html_lib.escape(str(label))}</div>'
-                    f'<div style="font-size:12.5px;line-height:1.62;color:#334155;font-weight:500;text-align:justify;">'
-                    f'{_market_value_html(value)}</div>'
-                    '</div>'
-                )
-            return '<div style="display:flex;flex-direction:column;gap:12px;">' + ''.join(blocks) + '</div>'
-
-        body_content = (
-            f'<div data-market-analysis="1" style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">'
-            + ''.join(
-                f'<div style="min-width:0;background:#f8fafc;border-top:5px solid {primary};border-radius:8px;padding:12px;">'
-                f'{render_column(column)}</div>' for column in columns if column
+        def render_detail(label, value):
+            return (
+                f'<div data-market-analysis-card="1" style="background:#ffffff;border:1px solid #dbe4ee;'
+                f'border-right:4px solid {accent};border-radius:9px;padding:12px 15px;min-height:102px;'
+                f'box-sizing:border-box;">'
+                f'<div style="font-size:13px;font-weight:800;color:{primary};line-height:1.35;margin-bottom:7px;">{html_lib.escape(str(label))}</div>'
+                f'<div style="font-size:11.8px;line-height:1.62;color:#334155;font-weight:500;text-align:justify;">{_market_value_html(value)}</div>'
+                '</div>'
             )
-            + '</div>'
+
+        featured_html = ''.join(
+            f'<div style="background:{primary};color:#ffffff;border-radius:10px;padding:17px 20px;min-height:140px;box-sizing:border-box;">'
+            f'<div style="font-size:16px;font-weight:800;margin-bottom:8px;">{html_lib.escape(str(label))}</div>'
+            f'<div style="font-size:13px;line-height:1.8;text-align:justify;">{_market_value_html(value)}</div></div>'
+            for label, value in featured
+        )
+        detail_cards = ''.join(render_detail(label, value) for label, value in details)
+        decision = str(market.get('decision') or '').strip()
+        decision_html = (
+            f'<div style="background:#e8dcc0;border-radius:9px;padding:13px 16px;margin-top:14px;">'
+            f'<div style="font-size:11px;font-weight:800;color:#334155;margin-bottom:5px;">تصنيف الدراسة</div>'
+            f'<div style="font-size:16px;font-weight:800;color:#1f2937;">{html_lib.escape(decision)}</div></div>'
+        ) if decision else ''
+        body_content = (
+            f'<div data-market-analysis="1" style="{panel_style}padding:18px 22px;display:grid;'
+            f'grid-template-columns:0.9fr 1.8fr;grid-template-areas:"side main";gap:20px;direction:ltr;">'
+            f'<div style="grid-area:side;direction:rtl;background:#f3f6f8;border-top:5px solid {primary};border-radius:9px;padding:13px;">'
+            f'<div style="font-size:15px;font-weight:800;color:{primary};margin-bottom:12px;">قراءة مركزة</div>'
+            f'<div style="font-size:11.5px;line-height:1.75;color:#475569;text-align:justify;">المحاور التالية تلخص البيانات الواردة في نطاق الدراسة دون تغيير قيمها.</div>'
+            f'{decision_html}</div>'
+            f'<div style="grid-area:main;direction:rtl;display:flex;flex-direction:column;gap:12px;">'
+            f'{featured_html}<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">{detail_cards}</div>'
+            '</div></div>'
         )
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
@@ -7006,12 +7131,42 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
     title = html_lib.escape(str((slide or {}).get('title') or 'ملخص دراسة سوق العمل'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+    market = _market_state(source)
+    blocks = _market_paragraph_blocks(value, 3)
+    decision = str(market.get('decision') or '').strip()
+    disclaimer = str(market.get('disclaimer') or '').strip()
+    block_html = ''.join(
+        f'<p style="padding:0 0 17px;margin:0 0 17px;'
+        f'border-bottom:1px solid #dbe4ee;font-size:13.4px;line-height:1.9;color:#1f2937;text-align:justify;" data-market-work-block="{index + 1}">'
+        f'{_market_value_html(block)}</p>'
+        for index, block in enumerate(blocks)
+    )
+    aside_parts = []
+    if decision:
+        aside_parts.append(
+            f'<div style="background:{primary};color:#ffffff;border-radius:10px;padding:18px 16px;margin-bottom:16px;">'
+            f'<div style="font-size:12px;font-weight:800;margin-bottom:8px;">تصنيف الدراسة</div>'
+            f'<div style="font-size:18px;font-weight:800;line-height:1.45;">{html_lib.escape(decision)}</div></div>'
+        )
+    aside_parts.append(
+        f'<div style="border-right:5px solid {accent};padding:7px 16px 7px 6px;">'
+        f'<div style="font-size:15px;font-weight:800;color:{primary};margin-bottom:9px;">خلاصة القرار</div>'
+        f'<div style="font-size:12px;line-height:1.85;color:#475569;text-align:justify;">قراءة السوق تجمع المؤشرات المعتمدة في مسار واحد لاتخاذ القرار.</div></div>'
+    )
+    if disclaimer:
+        aside_parts.append(
+            f'<div style="background:#e8dcc0;border-radius:10px;padding:14px 16px;margin-top:20px;color:#1f2937;">'
+            f'<div style="font-size:12px;font-weight:800;margin-bottom:7px;">إخلاء المسؤولية</div>'
+            f'<div style="font-size:11.5px;line-height:1.7;text-align:justify;">{_market_value_html(disclaimer)}</div></div>'
+        )
     body_html = (
-        f'<div data-market-work-summary="1" style="border:1px solid #e2e8f0;border-right:6px solid {accent};'
-        f'border-radius:10px;background:#f8fafc;padding:32px 42px;height:504px;overflow:hidden;box-sizing:border-box;'
-        f'box-shadow:0 3px 10px rgba(15,23,42,.05);">'
-        f'<p style="margin:0;font-size:18.5px;line-height:2.08;color:#1f2937;font-weight:500;text-align:justify;">'
-        f'{_market_value_html(value)}</p></div>'
+        f'<div data-market-work-summary="1" style="background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;'
+        f'padding:22px 28px;height:510px;overflow:hidden;box-sizing:border-box;box-shadow:0 3px 10px rgba(15,23,42,.05);'
+        f'display:grid;grid-template-columns:0.72fr 1.85fr;grid-template-areas:"aside main";gap:28px;direction:ltr;">'
+        f'<aside style="grid-area:aside;direction:rtl;padding-top:2px;">{"".join(aside_parts)}</aside>'
+        f'<div style="grid-area:main;direction:rtl;">'
+        f'<div style="font-size:22px;font-weight:800;color:{primary};margin:0 0 14px;text-align:right;">القراءة النهائية للسوق</div>'
+        f'{block_html}</div></div>'
     )
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
@@ -7110,8 +7265,14 @@ def _build_market_sources_slide(slide, source, branding=None, slide_num=None, to
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">
-    {''.join(render_column(column, index) for index, column in enumerate(columns))}
+  <div data-market-sources="1" style="margin:12px 36px 0;padding:14px 16px 18px;background:#f3f6f8;border:1px solid #dbe4ee;border-top:5px solid {primary};border-radius:12px;box-sizing:border-box;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:12px;direction:rtl;">
+      <div style="font-size:16px;font-weight:800;color:{primary};">سجل المراجع المستخدمة في الدراسة</div>
+      <div style="font-size:10.5px;color:#64748b;">روابط وبيانات المصادر كما وردت</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">
+      {''.join(render_column(column, index) for index, column in enumerate(columns))}
+    </div>
   </div>
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>
@@ -7282,6 +7443,8 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
                 '<div data-map-summary-background style="background-image:url(##MAP_OVERVIEW##);"></div>'
                 f'<div data-map-summary-card style="background:{primary};color:#fff;padding:24px;overflow:hidden;">'
                 f'<h2 style="font-size:28px;margin:0 0 18px;">{title}</h2><div style="font-size:14px;line-height:1.7;">{note}</div></div></div>')
+    if re.fullmatch(r'market_study_data\.scope', content_source):
+        return _build_market_scope_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if re.fullmatch(r'market_study_data\.summary(?::\d+:\d+)?', content_source):
         return _build_market_summary_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if re.fullmatch(r'market_study_data\.one_block_summary(?::\d+:\d+)?', content_source):
@@ -7403,6 +7566,34 @@ def _validate_chart_slide_html(html, chart_type, slide, project_data=None):
     return None
 
 
+def _validate_market_visual_design(html, slide):
+    """Reject flat market markup so the model retries with the approved visual language."""
+    if _slide_section_key(slide) != 'market':
+        return None
+    if canonicalize_chart_type((slide or {}).get('chart_type')) == 'horizontal_bar':
+        return None
+    source = str((slide or {}).get('content_source') or '').strip()
+    if not source or not html:
+        return None
+    has_layout = bool(re.search(
+        r'(?:display\s*:\s*(?:grid|flex)|grid-template-columns\s*:|grid-template-areas\s*:)',
+        html, flags=re.IGNORECASE,
+    ))
+    if not has_layout:
+        return 'تصميم شريحة السوق مسطح؛ أعد بناء منطقة المحتوى بتقسيم بصري واضح باستخدام grid أو flex، وليس صندوق نص واحد.'
+    if source.startswith('market_study_data.one_block_summary'):
+        blocks = len(re.findall(r'data-market-work-block|border-bottom\s*:', html, flags=re.IGNORECASE))
+        if blocks < 2:
+            return 'الملخص التنفيذي يجب أن يتوزع على مقاطع بصرية متتابعة مع لوحة جانبية، وليس فقرة واحدة داخل بطاقة.'
+    elif source.startswith('market_study_data.sources'):
+        if '<table' not in html.lower() and html.lower().count('grid-template-columns') < 2:
+            return 'شريحة المصادر يجب أن تعرض سجل المراجع في عمودين منظمين بجداول أو شبكات متوازنة.'
+    elif source == 'market_study_data.scope' or source.startswith('market_study_data.summary'):
+        if not re.search(r'border-radius\s*:', html, flags=re.IGNORECASE) or html.lower().count('background:') < 2:
+            return 'شريحة السوق يجب أن تحتوي على منطقة إبراز ومناطق تحليلية متعددة بألوان الهوية، لا جدولاً خاماً أو صندوقاً واحداً.'
+    return None
+
+
 def generate_single_slide(system_prompt, slide, slide_num, total_slides, branding, call_glm_fn, max_retries=2, project_data=None):
     """
     Generate a single slide's HTML.
@@ -7502,6 +7693,11 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                     html, flags=re.IGNORECASE):
                 print(f"[SLIDE-{slide_num}] ERROR: unplanned chart outside selected financial charts (attempt {attempt})")
                 retry_note = '\n\nإعادة المحاولة: هذه الشريحة لا تحمل chart_type؛ احذف الرسم البياني واعرض النص أو الجدول فقط.'
+                continue
+            market_design_err = _validate_market_visual_design(html, slide)
+            if market_design_err:
+                print(f"[SLIDE-{slide_num}] ERROR: market visual design failed: {market_design_err} (attempt {attempt})")
+                retry_note = f'\n\nإعادة المحاولة: {market_design_err} طبّق المرجع البصري للتقرير الاستثماري، مع الحفاظ على النصوص والأرقام.'
                 continue
             if _slide_section_key(slide) == 'financial' and not chart_type and '<table' not in html.lower():
                 print(f"[SLIDE-{slide_num}] ERROR: financial slide must use table, not cards/boxes (attempt {attempt})")
