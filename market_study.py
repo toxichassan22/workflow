@@ -164,9 +164,7 @@ RANGE_PRICE_TYPES = {'نطاق سعري', 'نطاق أسعار الغرف'}
 COMPETITOR_MIN_DIRECT = 5
 
 SUMMARY_LABEL = 'تحليل السوق'
-# Drafts saved before the one-paragraph summary stored ten separate sections.
-# The list stays only to join those legacy drafts into one prose paragraph.
-LEGACY_SUMMARY_SECTIONS = [
+SUMMARY_SECTIONS = [
     {'key': 'market_definition', 'label': 'تعريف السوق'},
     {'key': 'city_position', 'label': 'وضع المدينة'},
     {'key': 'sector_performance', 'label': 'أداء القطاع'},
@@ -176,6 +174,12 @@ LEGACY_SUMMARY_SECTIONS = [
     {'key': 'market_gap', 'label': 'الفجوة السوقية'},
     {'key': 'recommendation', 'label': 'التوصية'},
     {'key': 'risks', 'label': 'المخاطر'},
+]
+
+# Older drafts included the decision inside summary. Keep the complete order
+# available only for compatibility when converting those drafts.
+LEGACY_SUMMARY_SECTIONS = [
+    *SUMMARY_SECTIONS,
     {'key': 'decision', 'label': 'القرار'},
 ]
 
@@ -198,6 +202,19 @@ MISSING_VALUE_PHRASE = 'غير متوفر من مصدر موثوق'
 CURRENCY_LABEL = 'ريال سعودي'
 SUMMARY_TITLE = 'الملخص التنفيذي لسوق المشروع'
 SUMMARY_WORD_TARGET = 200
+
+SUMMARY_SECTION_HINTS = {
+    'market_definition': 'المدينة، نوع المشروع، نطاق الدراسة، فترة البيانات.',
+    'city_position': 'عدد السكان والنمو والكثافة إذا كانت مؤثرة، الأهمية الاقتصادية للمدينة، أهم محركات الطلب المرتبطة بالمشروع.',
+    'sector_performance': 'أهم مؤشرات أداء النشاط العقاري المحدد، اتجاه الأسعار أو الإيجارات أو الإشغال، حجم الصفقات أو الطلب، والمقارنة بالفترة السابقة.',
+    'supply': 'حجم المعروض القائم، المعروض تحت الإنشاء، المشروعات المستقبلية، ووجود فائض أو نقص.',
+    'demand': 'مستوى الطلب، العملاء المستهدفون، المنتج والمساحات الأكثر طلبًا، ومعدل الامتصاص أو الإشغال عند توفره.',
+    'competition': 'عدد المنافسين، عدد المنافسين المباشرين، نطاق الأسعار، وأهم نقاط القوة والضعف لديهم.',
+    'market_gap': 'المنتج غير المتوفر بشكل كاف، المساحات أو الخدمات الناقصة، والفرصة التي يستطيع المشروع استهدافها.',
+    'recommendation': 'الاستخدام الأنسب، المكونات المقترحة، المساحات أو مزيج الوحدات، والسعر أو الإيجار أو ADR المقترح.',
+    'risks': 'أهم المخاطر السوقية وشروط نجاح المشروع.',
+    'decision': 'صنّف الفرصة إلى إحدى قيم القرار المسموحة مع تفسير مختصر.',
+}
 
 SOURCE_PRIORITY = {
     1: [
@@ -816,6 +833,10 @@ def empty_competitor(source='manual'):
     }
 
 
+def empty_summary():
+    return {item['key']: '' for item in SUMMARY_SECTIONS}
+
+
 def empty_swot():
     return {item['key']: '' for item in SWOT_SECTIONS}
 
@@ -823,23 +844,46 @@ def empty_swot():
 def summary_prose(value):
     """The market summary as one prose paragraph.
 
-    New drafts store a single paragraph string. Drafts saved while the summary
-    was ten separate sections store a dict; those are joined in the original
-    section order, skipping empty placeholders and the decision (which lives
-    in its own field), so an old draft still reads as one market analysis.
+    This helper creates the executive paragraph from either the new structured
+    analysis or an older paragraph/string value. It skips empty placeholders
+    and the decision, which remains in its own field.
     """
     if isinstance(value, str):
-        return re.sub(r'\r\n', '\n', str(value)).strip()
+        return re.sub(r'\s+', ' ', str(value)).strip()
     if isinstance(value, dict):
         parts = []
-        for item in LEGACY_SUMMARY_SECTIONS:
-            if item['key'] == 'decision':
-                continue
+        for item in SUMMARY_SECTIONS:
             text = _norm(value.get(item['key']))
             if text and text != MISSING_VALUE_PHRASE:
-                parts.append(text)
-        return ' '.join(parts)
+                parts.append(re.sub(r'\s+', ' ', text))
+        return ' '.join(parts).strip()
     return ''
+
+
+def summary_has_content(value):
+    """Return whether the detailed market analysis has a real value."""
+    if isinstance(value, dict):
+        return any(
+            _norm(value.get(item['key'])) and _norm(value.get(item['key'])) != MISSING_VALUE_PHRASE
+            for item in SUMMARY_SECTIONS
+        )
+    text = _norm(value)
+    return bool(text and text != MISSING_VALUE_PHRASE)
+
+
+def is_market_summary_paragraph(value):
+    """Identify the prose executive summary versus the old headed block."""
+    text = str(value or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
+    if not text:
+        return False
+    if re.search(r'(?m)^\s*\d+[.)]\s+', text):
+        return False
+    headings = {
+        'نطاق دراسة السوق', 'نطاق الدراسة', 'المنافسون', 'تحليل السوق',
+        'تحليل SWOT', 'المصادر', 'مصادر دراسة السوق', 'القرار',
+        'إخلاء المسؤولية', 'ملخص دراسة سوق العمل', SUMMARY_TITLE,
+    }
+    return not any(line.strip().rstrip(':：') in headings for line in text.splitlines() if line.strip())
 
 
 _GENERIC_SOURCE_PATHS = {
@@ -950,6 +994,8 @@ def catalog_payload():
         'summaryTitle': SUMMARY_TITLE,
         'summaryWordTarget': SUMMARY_WORD_TARGET,
         'summaryLabel': SUMMARY_LABEL,
+        'summarySections': SUMMARY_SECTIONS,
+        'summarySectionHints': SUMMARY_SECTION_HINTS,
         'mandatoryRules': MANDATORY_RULES,
         'swotSections': SWOT_SECTIONS,
         'decisionOptions': DECISION_OPTIONS,
@@ -1009,13 +1055,9 @@ def build_consultant_system_prompt():
         '8. قدم توصية بتوزيع المساحات حسب الطلب المتوقع'
     )
 
-    summary_spec = (
-        'الملخص التنفيذي لسوق المشروع هو فقرة واحدة متماسة تتحدث عن سوق هذا المشروع تحديدًا، '
-        'بلا عناوين فرعية ولا ترقيم ولا نقاط، وتغطي في سياقها المتصل: '
-        'تعريف السوق ونطاق الدراسة، وضع المدينة وأهم محركات الطلب، أداء القطاع وأهم مؤشراته الرقمية، '
-        'العرض القائم والمستقبلي، الطلب والعملاء المستهدفون والمنتجات والمساحات الأكثر طلبًا، '
-        'المنافسة وأبرز المنافسين وأسعارهم، الفجوة السوقية، ثم التوصية بالاستخدام الأنسب '
-        'والمكونات والتسعير الإرشادي.'
+    summary_spec = '\n'.join(
+        f'- {item["label"]}: {SUMMARY_SECTION_HINTS[item["key"]]}'
+        for item in SUMMARY_SECTIONS
     )
 
     return (
@@ -1046,12 +1088,14 @@ def build_consultant_system_prompt():
         + '\n\nثالثًا التحليل حسب نوع المشروع:\n'
         + '\n\n'.join(type_blocks)
         + '\n\n' + mixed
-        + '\n\nرابعًا ملخص السوق — أهم مخرج:\n'
+        + '\n\nرابعًا مخرجات ملخص السوق — حقلا التحليل والملخص مختلفان:\n'
         f'ابدأ مخرجات الدراسة بعنوان: {SUMMARY_TITLE}.\n'
         'يجب أن يكون التحليل مخصصًا لنوع المشروع وليس وصفًا عامًا للمدينة.\n'
+        'حقل summary هو تحليل السوق التفصيلي المنظم، وأعد فيه كل محور في قيمة مستقلة حسب الترتيب التالي:\n'
         + summary_spec
-        + f'\nاكتب التحليل في حدود {SUMMARY_WORD_TARGET} كلمة داخل فقرة واحدة.\n\n'
-        'بعد الملخص أعد تحليل SWOT مستقلًا للمشروع في السوق المحدد، من أربع خانات:\n'
+        + '\nاكتب كل محور بصياغة تحليلية واضحة، ويمكن تنظيم التفاصيل داخله في نقاط قصيرة عند الحاجة. لا تختصر المحاور في فقرة واحدة ولا تدمجها في حقل واحد.\n'
+        f'حقل one_block_summary هو {SUMMARY_TITLE} نفسه: فقرة عربية واحدة متماسكة ومحترمة عن سوق هذا المشروع، في حدود {SUMMARY_WORD_TARGET} كلمة، بلا عناوين فرعية ولا ترقيم ولا نقاط. اجعلها ملخصًا كاملًا يربط أهم نتائج السوق والعرض والطلب والمنافسة والفجوة والتوصية والقرار في سياق واحد، ولا تضع فيها قائمة SWOT أو قائمة مصادر.\n\n'
+        'بعد التحليل أعد تحليل SWOT مستقلًا للمشروع في السوق المحدد، من أربع خانات:\n'
         + '\n'.join(f'- {item["label"]}: {SWOT_SECTION_HINTS[item["key"]]}' for item in SWOT_SECTIONS)
         + '\nلا تخلط SWOT مع تحليل السوق. كل خانة نقاط قصيرة خاصة بهذا المشروع وهذا النوع.\n'
         'لا تستخدم وصفًا عامًا للمدينة بدل تحليل المشروع.\n\n'
@@ -1211,32 +1255,28 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
 
 def build_summary_user_prompt(payload, competitors, current_summary=None, current_sources=None, current_swot=None):
     today = date.today().isoformat()
+    section_keys = ', '.join(item['key'] for item in SUMMARY_SECTIONS)
     swot_keys = ', '.join(item['key'] for item in SWOT_SECTIONS)
     return (
         f'تاريخ اليوم / تاريخ الوصول للمصادر: {today}\n'
         f'ابدأ المخرجات بعنوان: {SUMMARY_TITLE}.\n'
-        'اكتب تحليل السوق كفقرة واحدة متماسة عن سوق هذا المشروع، بلا عناوين فرعية ولا ترقيم ولا نقاط.\n'
-        'الفكرة تربط في نص متصل: تعريف السوق ونطاق الدراسة، وضع المدينة، أداء القطاع، العرض، الطلب، '
-        'المنافسة، الفجوة السوقية، ثم التوصية.\n'
-        'التحليل مخصص لنوع هذا المشروع وليس وصفًا عامًا للمدينة.\n'
-        f'اجعل الفقرة في حدود {SUMMARY_WORD_TARGET} كلمة.\n'
+        'اكتب تحليل السوق التفصيلي داخل summary على شكل محاور منظمة، قيمة مستقلة لكل محور، مع تحليل خاص بهذا المشروع وليس وصفًا عامًا للمدينة.\n'
+        f'المفاتيح الإلزامية لمحاور summary بالترتيب: {section_keys}.\n'
+        'غطِّ في كل محور عناصر brief النظام، واستخدم نقاطًا قصيرة داخل قيمة المحور عند الحاجة. لا تضع تحليل السوق التفصيلي في فقرة واحدة ولا تخلط محاوره.\n'
         'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
-        f'إذا لم تتوفر معلومة فاذكر ذلك داخل الفقرة بعبارة: {MISSING_VALUE_PHRASE}.\n'
+        f'إذا لم تتوفر معلومة فاكتب داخل المحور: {MISSING_VALUE_PHRASE}.\n'
         'حقل القرار يجب أن يكون قيمة واحدة فقط من: '
         + '، '.join(DECISION_OPTIONS)
         + '.\n'
-        'بعد التحليل اكتب تحليل SWOT مستقلًا من أربع خانات: نقاط القوة، نقاط الضعف، الفرص، التهديدات.\n'
+        'بعد محاور تحليل السوق اكتب تحليل SWOT مستقلًا من أربع خانات: نقاط القوة، نقاط الضعف، الفرص، التهديدات.\n'
         'اجعل كل خانة نقاطًا قصيرة خاصة بهذا المشروع وهذا النوع، ولا تكرر التحليل حرفيًا.\n'
-        'بعد ذلك اكتب one_block_summary كنص عربي متماسك يلخص دراسة السوق كاملة داخل حقل واحد، '
-        'ويجمع المنافسين والبيانات السعرية وتحليل السوق وتحليل SWOT والقرار. استخدم الحقائق والأرقام والمصادر الموجودة فقط، '
-        'ولا تضف أي معلومة غير موجودة. حافظ داخل الحقل الواحد على عناوين واضحة وفقرات وأسطر فارغة وتنسيق مناسب للقراءة، '
-        'ولا تضغط النص في سطر واحد ولا تكتب رموز فصل الأسطر حرفيًا.\n\n'
+        f'اكتب one_block_summary باعتباره {SUMMARY_TITLE}: فقرة عربية واحدة محترمة ومتماسكة تلخص سوق المشروع كاملًا، في حدود {SUMMARY_WORD_TARGET} كلمة، بلا عناوين فرعية ولا ترقيم ولا نقاط. اربط داخلها أهم نتائج السوق والعرض والطلب والمنافسة والفجوة والتوصية والقرار. استخدم الحقائق والأرقام والمصادر الموجودة فقط، ولا تضع فيها SWOT أو قائمة مصادر.\n\n'
         'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
         'المنافسون المعتمدون في الجدول:\n'
         f'{json.dumps(competitors or [], ensure_ascii=False, indent=2)}\n\n'
-        'تحليل السوق الحالي إن وُجد (للسياق فقط، أعد كتابة تحليل جديد كامل):\n'
-        f'{current_summary if isinstance(current_summary, str) else json.dumps(current_summary or {}, ensure_ascii=False)}\n\n'
+        'تحليل السوق الحالي إن وُجد (للسياق فقط، أعد كتابة المحاور كاملة):\n'
+        f'{json.dumps(current_summary, ensure_ascii=False) if isinstance(current_summary, (dict, list)) else str(current_summary or "")}\n\n'
         'مصادر حالية إن وُجدت (للسياق فقط، أعد بناء جدول المصادر كاملًا مع كل رقم):\n'
         f'{json.dumps(current_sources or [], ensure_ascii=False)}\n\n'
         'تحليل SWOT حالي إن وُجد (للسياق فقط، أعد كتابته كاملًا):\n'
@@ -1244,14 +1284,24 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         'أرجع JSON فقط بهذا الشكل:\n'
         '{\n'
         f'  "title": "{SUMMARY_TITLE}",\n'
-        f'  "summary": "فقرة واحدة متماسة تحلل السوق، بلا عناوين ولا ترقيم ولا نقاط",\n'
+        '  "summary": {\n'
+        '    "market_definition": "تحليل محور تعريف السوق",\n'
+        '    "city_position": "تحليل محور وضع المدينة",\n'
+        '    "sector_performance": "تحليل محور أداء القطاع",\n'
+        '    "supply": "تحليل محور العرض",\n'
+        '    "demand": "تحليل محور الطلب",\n'
+        '    "competition": "تحليل محور المنافسة",\n'
+        '    "market_gap": "تحليل محور الفجوة السوقية",\n'
+        '    "recommendation": "تحليل محور التوصية",\n'
+        '    "risks": "تحليل محور المخاطر"\n'
+        '  },\n'
         f'  "swot": {{ مفاتيح إلزامية: {swot_keys} }},\n'
         '  "decision": "قيمة من قائمة القرار",\n'
         '  "sources": [\n'
         '    {"name": "", "url": "", "data_date": "", "accessed_at": "' + today + '", "reliability": "", "note": ""}\n'
         '  ],\n'
         '  "disclaimer": "هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا",\n'
-        '  "one_block_summary": "نص عربي متماسك يلخص الدراسة كاملة"\n'
+        '  "one_block_summary": "فقرة عربية واحدة متماسكة تلخص سوق المشروع كاملًا بلا عناوين ولا ترقيم ولا نقاط"\n'
         '}\n'
         'في url ضع رابط الصفحة المحددة التي ظهر فيها الرقم أو المعلومة، وليس رابط الصفحة الرئيسية للموقع.\n'
     )
@@ -1561,13 +1611,21 @@ def merge_generated_competitors(existing, generated, mode='generate'):
 
 def normalize_summary(raw):
     data = raw if isinstance(raw, dict) else {}
-    summary = summary_prose(data.get('summary'))
-    if not summary:
-        # A model that ignored the JSON shape may still have returned the
-        # legacy section keys at the top level; join them before failing.
-        top_level = {item['key']: data.get(item['key']) for item in LEGACY_SUMMARY_SECTIONS}
+    raw_summary = data.get('summary')
+    summary_source = raw_summary if isinstance(raw_summary, dict) else None
+    if summary_source is None:
+        top_level = {item['key']: data.get(item['key']) for item in SUMMARY_SECTIONS}
         if any(_norm(value) for value in top_level.values()):
-            summary = summary_prose(top_level)
+            summary_source = top_level
+    if isinstance(summary_source, dict):
+        summary = {
+            item['key']: _norm(summary_source.get(item['key'])) or MISSING_VALUE_PHRASE
+            for item in SUMMARY_SECTIONS
+        }
+    else:
+        # Keep a paragraph returned by an older model readable until the next
+        # generation. New responses always use the structured object above.
+        summary = _norm(raw_summary) if isinstance(raw_summary, str) else {}
     decision = _norm(data.get('decision'))
     if decision not in DECISION_OPTIONS:
         matched = next((option for option in DECISION_OPTIONS if option in decision), '')
@@ -1619,6 +1677,14 @@ def normalize_summary(raw):
     one_block_summary = one_block_summary.replace('\\r\\n', '\n').replace('\\n', '\n')
     one_block_summary = re.sub(r'[ \t]+', ' ', one_block_summary)
     one_block_summary = re.sub(r'\n{3,}', '\n\n', one_block_summary)
+    if one_block_summary and not is_market_summary_paragraph(one_block_summary):
+        fallback_paragraph = summary_prose(summary)
+        if isinstance(raw_summary, str) and raw_summary.strip():
+            fallback_paragraph = raw_summary.strip()
+        one_block_summary = fallback_paragraph
+    if not one_block_summary:
+        one_block_summary = summary_prose(summary)
+    one_block_summary = re.sub(r'\s+', ' ', one_block_summary).strip()
     return {
         'title': SUMMARY_TITLE,
         'summary': summary,

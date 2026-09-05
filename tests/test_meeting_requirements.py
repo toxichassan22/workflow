@@ -1765,9 +1765,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
         self.assertIn('النهاية الكاملة لملخص سوق العمل', long_work_html)
         self.assertIn('data-market-work-summary', long_work_html)
-        self.assertIn('<article', long_work_html)
+        self.assertIn('<p style=', long_work_html)
+        self.assertNotIn('<article', long_work_html)
 
-    def test_market_summary_paragraph_renders_as_single_prose_slide(self):
+    def test_market_analysis_points_and_work_summary_paragraph_are_separate(self):
         engine = self.application_module.slide_engine
         project = {
             'project_name': 'مشروع السوق',
@@ -1778,14 +1779,19 @@ class MeetingRequirementsTests(unittest.TestCase):
                     'name': 'منافس موثق', 'price_value': '15000',
                     'price_type': 'سعر المتر المربع', 'operation_type': 'بيع',
                 }],
-                'summary': 'تحليل السوق: قطاع الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية.',
+                'summary': {
+                    'market_definition': 'قطاع الضيافة الفاخرة في جدة',
+                    'city_position': 'تستفيد جدة من الطلب السياحي والأعمال',
+                    'competition': 'المنافسة مباشرة مع مشاريع الواجهة البحرية',
+                    'recommendation': 'التطوير مناسب مع مشغل عالمي',
+                },
                 'swot': {
                     'strengths': 'موقع قوي',
                     'weaknesses': 'تكلفة مرتفعة',
                     'opportunities': 'نمو الطلب',
                     'threats': 'منافسة جديدة',
                 },
-                'one_block_summary': 'ملخص دراسة السوق كامل',
+                'one_block_summary': 'يظهر السوق في جدة فرصة لتطوير مشروع ضيافة فاخر متكامل، مدعومة بموقع الواجهة البحرية وتنوع الطلب السياحي والأعمال، مع ضرورة التميز أمام المنافسين واستقطاب مشغل عالمي وإدارة التكلفة والتسويق على مراحل.',
                 'sources': [{'name': 'مصدر رسمي', 'url': 'https://example.test/source'}],
             }, ensure_ascii=False),
         }
@@ -1806,11 +1812,25 @@ class MeetingRequirementsTests(unittest.TestCase):
             lambda *_args, **_kwargs: self.fail('market summary must be deterministic'),
             project_data=project,
         )
-        self.assertIn('قطاع الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية', html)
-        self.assertNotIn('المحاور العشرة', html)
+        self.assertIn('قطاع الضيافة الفاخرة في جدة', html)
+        self.assertIn('تعريف السوق', html)
+        self.assertIn('المنافسة مباشرة مع مشاريع الواجهة البحرية', html)
+        self.assertIn('تحليل السوق', html)
+        self.assertNotIn('الملخص التنفيذي لسوق المشروع', html)
+        work_slide = next(slide for slide in content
+                          if slide.get('content_source') == 'market_study_data.one_block_summary')
+        work_html = engine.generate_single_slide(
+            'system', work_slide, 4, 10, {'primary_color': '#123456'},
+            lambda *_args, **_kwargs: self.fail('market work summary must be deterministic'),
+            project_data=project,
+        )
+        self.assertIn('يظهر السوق في جدة فرصة لتطوير مشروع ضيافة فاخر متكامل', work_html)
+        self.assertIn('<p style=', work_html)
+        self.assertNotIn('<article', work_html)
         facts = engine._market_study_facts(project)
-        self.assertIn('### تحليل السوق المعتمد', facts)
-        self.assertIn('قطاع الضيافة الفاخرة في جدة', facts)
+        self.assertIn('### الملخص التنفيذي لسوق المشروع', facts)
+        self.assertIn('### تحليل السوق', facts)
+        self.assertIn('يظهر السوق في جدة فرصة لتطوير مشروع ضيافة فاخر متكامل', facts)
 
     def test_wide_cashflow_table_in_report_preserves_combo_chart(self):
         engine = self.application_module.slide_engine
@@ -7269,7 +7289,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             'one_block_summary': 'عنوان الملخص\\n\\nفقرة الملخص.',
             'summary': {},
         })
-        self.assertEqual(normalized['one_block_summary'], 'عنوان الملخص\n\nفقرة الملخص.')
+        self.assertEqual(normalized['one_block_summary'], 'عنوان الملخص فقرة الملخص.')
         summary_prompt = market_study.build_summary_user_prompt({}, [])
         self.assertIn('one_block_summary', summary_prompt)
         prompt = market_study.build_consultant_system_prompt()
@@ -7725,21 +7745,26 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(parsed['title'], 'الملخص التنفيذي لسوق المشروع')
         self.assertEqual(parsed['swot']['strengths'], 'موقع على طريق رئيسي')
         self.assertEqual(parsed['swot']['threats'], 'مشروعات جديدة قريبة')
-        # A legacy ten-section summary dict is joined into one prose paragraph;
-        # the decision stays in its own field and placeholders are dropped.
-        self.assertEqual(parsed['summary'], 'سوق سكني في الرياض')
+        self.assertEqual(parsed['summary']['market_definition'], 'سوق سكني في الرياض')
+        self.assertEqual(parsed['summary']['city_position'], market_study.MISSING_VALUE_PHRASE)
         self.assertEqual(parsed['decision'], 'فرصة واعدة بشروط')
         prose = market_study.normalize_summary({
-            'summary': 'سوق الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية.',
+            'summary': {
+                'market_definition': 'سوق الضيافة الفاخرة في جدة',
+                'demand': 'ينمو الطلب على الواجهة البحرية',
+            },
+            'one_block_summary': 'سوق الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية.',
             'decision': 'فرصة قوية',
         })
-        self.assertEqual(prose['summary'], 'سوق الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية.')
+        self.assertEqual(prose['summary']['demand'], 'ينمو الطلب على الواجهة البحرية')
+        self.assertEqual(prose['one_block_summary'], 'سوق الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية.')
         self.assertIn('ابدأ المخرجات بعنوان: الملخص التنفيذي لسوق المشروع.', market_study.build_summary_user_prompt({}, []))
         self.assertIn('في حدود 200 كلمة', market_study.build_summary_user_prompt({}, []))
         self.assertIn('مصادر حالية إن وُجدت', market_study.build_summary_user_prompt({}, []))
         summary_prompt = market_study.build_summary_user_prompt({}, [])
-        self.assertIn('بلا عناوين فرعية ولا ترقيم ولا نقاط', summary_prompt)
-        self.assertIn('"summary": "فقرة واحدة متماسة تحلل السوق', summary_prompt)
+        self.assertIn('تحليل السوق التفصيلي داخل summary على شكل محاور منظمة', summary_prompt)
+        self.assertIn('one_block_summary باعتباره الملخص التنفيذي لسوق المشروع', summary_prompt)
+        self.assertIn('"market_definition": "تحليل محور تعريف السوق"', summary_prompt)
 
     def test_contact_section_and_fields_registered_and_piped(self):
         """Contact information section and its 7 fields are registered in schema and piped to slide engine."""

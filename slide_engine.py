@@ -936,15 +936,14 @@ def _market_summary_rows(market):
         return []
     summary = market.get('summary')
     if isinstance(summary, str):
-        # The approved market analysis is one prose paragraph; it renders as
-        # a single editorial row instead of the legacy ten label/value rows.
+        # Keep paragraphs from the previous schema readable until regeneration.
         text = summary.strip()
         return [['تحليل السوق', text]] if text else []
     if not isinstance(summary, dict):
         return []
     try:
         import market_study
-        definitions = market_study.LEGACY_SUMMARY_SECTIONS
+        definitions = market_study.SUMMARY_SECTIONS
     except Exception:
         definitions = [
             {'key': 'market_definition', 'label': 'تعريف السوق'},
@@ -956,7 +955,6 @@ def _market_summary_rows(market):
             {'key': 'market_gap', 'label': 'الفجوة السوقية'},
             {'key': 'recommendation', 'label': 'التوصية'},
             {'key': 'risks', 'label': 'المخاطر'},
-            {'key': 'decision', 'label': 'القرار'},
         ]
     return [
         [item['label'], str(summary.get(item['key']) or '').strip()]
@@ -1223,14 +1221,10 @@ def _normalize_market_group_slides(existing, market):
 
     summary_rows = _market_summary_rows(market)
     if summary_rows:
-        # One slide uses two balanced columns of five rows, keeping all ten
-        # fields while removing the old five-slide repetition.
-        result.append(take('market_study_data.summary', 'الملخص التنفيذي لسوق المشروع', 'table', 'market_summary'))
+        # Keep the detailed market analysis as organized labelled points.
+        result.append(take('market_study_data.summary', 'تحليل السوق', 'table', 'market_summary'))
 
-    one_block = (str(market.get('one_block_summary') or '')
-                 .replace('\\r\\n', '\n')
-                 .replace('\\n', '\n')
-                 .strip())
+    one_block = _market_one_block_paragraph(market)
     if one_block:
         block_chunks = _market_one_block_chunks(one_block)
         chunk_cursor = 0
@@ -1856,7 +1850,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     summaries = (
         ('land', 'ملخص تحليل الأرض', 'land_and_building_summary', str(source.get('land_and_building_summary') or '').strip()),
         ('location', 'ملخص الموقع الجغرافي', 'site_analysis', str(source.get('site_analysis') or '').strip()),
-        ('market', 'ملخص تحليل السوق', 'market_study_data.one_block_summary', str(market.get('one_block_summary') or '').strip()),
+        ('market', 'الملخص التنفيذي لسوق المشروع', 'market_study_data.one_block_summary', _market_one_block_paragraph(market)),
     )
     for section_key, title, content_source, value in summaries:
         if not value:
@@ -2642,6 +2636,7 @@ def _market_study_facts(project_data):
     lines = []
     summary = str(state.get('one_block_summary') or '').strip()
     if summary:
+        lines.append('### الملخص التنفيذي لسوق المشروع')
         lines.append(summary)
     scope = {}
     for key in ('competitor_radius', 'competitor_radius_custom_km', 'data_period',
@@ -2673,14 +2668,13 @@ def _market_study_facts(project_data):
     if sources:
         lines.append('### مصادر دراسة السوق')
         lines.append(json.dumps(sources, ensure_ascii=False, indent=2))
-    # Keep the structured summary even when one_block_summary is present. The
-    # one-block text is useful as prose, but it must not replace the market
-    # analysis in the model context.
+    # Keep the detailed analysis even when one_block_summary is present. The
+    # executive paragraph must not replace the market analysis in the model context.
     summary_text = str(state.get('summary') or '').strip() if isinstance(state.get('summary'), str) else ''
     if summary_text:
-        lines.append('### تحليل السوق المعتمد')
+        lines.append('### تحليل السوق')
         lines.append(summary_text)
-    for key, title in (('summary', 'محاور دراسة السوق'), ('swot', 'تحليل SWOT')):
+    for key, title in (('summary', 'تحليل السوق'), ('swot', 'تحليل SWOT')):
         block = state.get(key)
         if isinstance(block, dict):
             filled = {k: v for k, v in block.items() if str(v or '').strip()}
@@ -4479,7 +4473,7 @@ def _slide_source_data_note(slide, project_data):
     one_block_match = re.fullmatch(r'market_study_data\.one_block_summary(?::(\d+):(\d+))?', source)
     if one_block_match:
         market = _market_state(project_data)
-        value = str(market.get('one_block_summary') or '').strip()
+        value = _market_one_block_paragraph(market)
         if one_block_match.group(1) is not None:
             value = value[int(one_block_match.group(1)):int(one_block_match.group(2))]
         return 'ملخص دراسة السوق المعتمد كما أُدخل:\n' + value if value else ''
@@ -5540,7 +5534,7 @@ def _required_slide_texts(slide, project_data):
     one_block_match = re.fullmatch(r'market_study_data\.one_block_summary(?::(\d+):(\d+))?', source)
     if one_block_match:
         market = _market_state(project_data)
-        value = str(market.get('one_block_summary') or '').strip()
+        value = _market_one_block_paragraph(market)
         if one_block_match.group(1) is not None:
             value = value[int(one_block_match.group(1)):int(one_block_match.group(2))]
         return [value] if value else []
@@ -6827,16 +6821,16 @@ def _market_value_html(value):
 
 
 def _build_market_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Render the approved market analysis: one prose paragraph, or the legacy ten fields."""
+    """Render the detailed market analysis as organized labelled points."""
     source = source if isinstance(source, dict) else {}
     market = _market_state(source)
     rows = _market_summary_rows(market)
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
-    title = html_lib.escape(str((slide or {}).get('title') or 'الملخص التنفيذي لسوق المشروع'))
+    title = html_lib.escape(str((slide or {}).get('title') or 'تحليل السوق'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
     is_prose = isinstance(market.get('summary'), str) and bool(str(market.get('summary') or '').strip())
-    subtitle = 'التحليل المعتمد لسوق المشروع'
+    subtitle = 'محاور تحليل السوق التفصيلي'
     if is_prose:
         body_content = (
             f'<div style="border-top:4px solid {primary};background:#f8fafc;padding:28px 34px;">'
@@ -6847,7 +6841,7 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
     else:
         midpoint = (len(rows) + 1) // 2
         columns = (rows[:midpoint], rows[midpoint:])
-        subtitle = 'المحاور العشرة المعتمدة في ملخص دراسة السوق'
+        subtitle = 'محاور تحليل السوق التفصيلي'
 
         def render_column(column_rows):
             blocks = []
@@ -6888,15 +6882,40 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
   </div>
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>
-    <div class="footer-center">الملخص التنفيذي لسوق المشروع</div>
+    <div class="footer-center">تحليل السوق</div>
     <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
   </footer>
 </div>'''
 
 
+def _market_one_block_paragraph(market):
+    """Return the executive market summary as one prose paragraph."""
+    value = str((market or {}).get('one_block_summary') or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
+    try:
+        import market_study
+        is_paragraph = market_study.is_market_summary_paragraph(value)
+    except Exception:
+        is_paragraph = bool(value and not re.search(r'(?m)^\s*\d+[.)]\s+', value))
+    if is_paragraph:
+        return re.sub(r'\s+', ' ', value).strip()
+    summary = (market or {}).get('summary')
+    if isinstance(summary, dict):
+        try:
+            import market_study
+            fallback = market_study.summary_prose(summary)
+        except Exception:
+            fallback = ' '.join(str(summary.get(key) or '').strip() for key in (
+                'market_definition', 'city_position', 'sector_performance', 'supply',
+                'demand', 'competition', 'market_gap', 'recommendation', 'risks'
+            ) if str(summary.get(key) or '').strip())
+        if fallback:
+            return re.sub(r'\s+', ' ', fallback).strip()
+    return re.sub(r'\s+', ' ', str(summary or '').strip()).strip() if isinstance(summary, str) else re.sub(r'\s+', ' ', value).strip()
+
+
 def _market_one_block_text(slide, market):
     source = str((slide or {}).get('content_source') or '')
-    value = str((market or {}).get('one_block_summary') or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
+    value = _market_one_block_paragraph(market)
     match = re.fullmatch(r'market_study_data\.one_block_summary:(\d+):(\d+)', source)
     if match:
         value = value[int(match.group(1)):int(match.group(2))]
@@ -6904,7 +6923,7 @@ def _market_one_block_text(slide, market):
 
 
 def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Render the complete work-market summary as a two-column editorial layout."""
+    """Render the complete work-market summary as one full-width paragraph."""
     source = source if isinstance(source, dict) else {}
     market = _market_state(source)
     value = _market_one_block_text(slide, market)
@@ -6912,31 +6931,12 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
     title = html_lib.escape(str((slide or {}).get('title') or 'ملخص دراسة سوق العمل'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
-    blocks = _market_work_blocks(value)
-    columns = _market_work_block_columns(blocks)
-
-    def render_column(column_blocks, column_index):
-        rendered = []
-        offset = sum(len(column) for column in columns[:column_index])
-        for block_index, (heading, body) in enumerate(column_blocks, offset + 1):
-            heading_html = ''
-            if heading:
-                heading_html = (
-                    f'<div style="display:flex;align-items:baseline;gap:9px;margin-bottom:6px;">'
-                    f'<span dir="ltr" style="font-size:10px;font-weight:800;color:{accent};">{block_index:02d}</span>'
-                    f'<span style="font-size:14px;font-weight:800;color:{primary};line-height:1.3;">{_market_value_html(heading)}</span>'
-                    '</div>'
-                )
-            body_html = (
-                f'<div style="font-size:12.4px;line-height:1.58;color:#334155;font-weight:500;">'
-                f'{_market_value_html(body)}</div>'
-                if body else ''
-            )
-            rendered.append(
-                f'<article style="break-inside:avoid;border-top:2px solid {accent};padding:10px 4px 12px;">'
-                f'{heading_html}{body_html}</article>'
-            )
-        return ''.join(rendered)
+    body_html = (
+        f'<div data-market-work-summary="1" style="border-top:4px solid {primary};background:#f8fafc;'
+        f'padding:28px 36px;height:492px;overflow:hidden;box-sizing:border-box;">'
+        f'<p style="margin:0;font-size:17px;line-height:2.05;color:#1f2937;font-weight:500;text-align:justify;">'
+        f'{_market_value_html(value)}</p></div>'
+    )
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -6954,10 +6954,8 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
       </div>
     </div>
   </header>
-  <div data-market-work-summary="1" style="padding:0 42px;margin-top:12px;height:536px;overflow:hidden;">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start;">
-      {''.join(f'<section style="min-width:0;">{render_column(column, index)}</section>' for index, column in enumerate(columns))}
-    </div>
+  <div style="padding:0 42px;margin-top:12px;overflow:hidden;">
+    {body_html}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>

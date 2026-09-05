@@ -10131,7 +10131,7 @@ def _execute_market_summary(data):
             'providerError': provider_error,
         }
     normalized = market_study.normalize_summary(parsed)
-    if not str(normalized.get('summary') or '').strip():
+    if not market_study.summary_has_content(normalized.get('summary')):
         return {
             'success': False,
             'error': 'عاد النموذج ملخصًا فارغًا. لم يُستبدل النص الحالي.',
