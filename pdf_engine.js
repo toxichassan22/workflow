@@ -54,9 +54,11 @@ function fontFaceCss() {
       const mime = f.format === 'opentype' ? 'font/otf' : 'font/ttf';
       srcUrl = 'data:' + mime + ';base64,' + embedded.data;
     } else {
-      // 2) Fall back to reading the file from disk
+      // 2) Fall back to reading the file from disk (keep the read inside FONT_DIR)
       const fp = path.join(FONT_DIR, f.file);
-      if (fs.existsSync(fp)) {
+      if (path.resolve(fp).indexOf(path.resolve(FONT_DIR) + path.sep) !== 0) {
+        console.warn('[PDF] Font path escapes the fonts directory, skipping:', f.file);
+      } else if (fs.existsSync(fp)) {
         const buf = fs.readFileSync(fp);
         // Reject Git-LFS pointer stubs (tiny files starting with "version https://git-lfs")
         const isPointer = buf.length < 500 || buf.toString('utf8', 0, Math.min(100, buf.length)).indexOf('git-lfs') !== -1;

@@ -446,12 +446,18 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   Re-generating a summary shows current vs new and waits for replace/keep. The client also
   asked for a separate SWOT block (`strengths` / `weaknesses` / `opportunities` / `threats`)
   inside دراسة السوق; it is generated with the summary but must stay independent of the
-  ten executive-summary sections from the PDF. The deck's `swot_risks` section is rebuilt to one
+  market analysis. The deck's `swot_risks` section is rebuilt to one
   canonical `market_study_data.swot` slide; never append `executive_content.risks`, a second SWOT
-  matrix, or a duplicate risk-treatment register. The market summary must start with
-  `الملخص التنفيذي لسوق المشروع`, contain the ten sections in order, target about 500 words,
-  and use `غير متوفر من مصدر موثوق` for unavailable information; the decision must always
-  be one of the five allowed classifications.
+  matrix, or a duplicate risk-treatment register. The market summary (owner's rule, 2026-09) is
+  **one cohesive Arabic paragraph** about this project's market — no headings, no numbered
+  sections, no bullet lists — starting with `الملخص التنفيذي لسوق المشروع` as its title field,
+  targeting about 200 words (`SUMMARY_WORD_TARGET`), using `غير متوفر من مصدر موثوق` for
+  unavailable figures, with the decision as its own field holding one of the five allowed
+  classifications. `market_study_data.summary` is a **string**; drafts saved while it was a dict
+  of ten sections are joined into prose on read by `summary_prose()` (Python) /
+  `marketSummaryText()` (JS), which skip placeholders and the decision key. The deterministic
+  market-summary slide renders prose full-width and keeps the legacy two-column grid only for
+  old dict drafts.
 - Production jobs are queued (`POST /api/market-study/competitors` or `/summary`, poll
   `GET /api/market-study/jobs/<id>`) for the same hosting-proxy reason as croquis. Tests stay
   synchronous unless they pass `background: true`. Web search goes through the OpenRouter

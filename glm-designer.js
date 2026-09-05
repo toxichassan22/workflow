@@ -642,7 +642,8 @@ ${code}
     fs.writeFileSync(scriptPath, fullCode);
 
     console.log('\n[3/3] Running final presentation...');
-    execSync('node ' + scriptPath, { stdio: 'inherit', cwd: __dirname });
+    var { execFileSync } = require('child_process');
+    execFileSync('node', [scriptPath], { stdio: 'inherit', cwd: __dirname });
 
     console.log('\n═══════════════════════════════════════');
     console.log('  DONE!');

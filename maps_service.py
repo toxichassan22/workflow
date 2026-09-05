@@ -14,7 +14,7 @@ import re
 import hashlib
 import shutil
 import threading
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urljoin, urlencode
 
 # Force UTF-8 stdout so Arabic/unicode OSM tag names don't crash on Windows cp1252
 try:
@@ -30,6 +30,40 @@ from PIL import Image, ImageDraw, ImageFont
 
 GOOGLE_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 MAPS_DIR = os.path.join(os.path.dirname(__file__), 'uploads', 'maps')
+
+# Every provider fetch in this module talks to exactly these hosts. The guard
+# below keeps a malformed link or a future edit from turning any request sink
+# into an SSRF entry point toward the intranet or cloud metadata.
+_ALLOWED_REMOTE_HOSTS = (
+    'maps.googleapis.com',
+    'places.googleapis.com',
+    'roads.googleapis.com',
+    'overpass-api.de',
+    'lz4.overpass-api.de',
+    'overpass.kumi.systems',
+    'google.com',
+    'goo.gl',
+)
+
+
+def _assert_allowed_remote_url(url):
+    """Validate scheme and host before any server-side request (SSRF guard)."""
+    parsed = urlsplit(str(url or '').strip())
+    host = (parsed.netloc or '').lower().removeprefix('www.')
+    if parsed.scheme != 'https' or not host:
+        raise ValueError(f'Blocked non-https remote URL: {url}')
+    if not any(host == item or host.endswith('.' + item) for item in _ALLOWED_REMOTE_HOSTS):
+        raise ValueError(f'Blocked remote host: {host}')
+    return url
+
+
+def _ensure_path_inside(path, base_dir):
+    """Refuse any write target that escapes base_dir (path traversal guard)."""
+    target = os.path.abspath(str(path))
+    base = os.path.abspath(str(base_dir))
+    if os.path.commonpath([base, target]) != base:
+        raise ValueError(f'Blocked write target outside maps directory: {path}')
+    return target
 
 # Ensure maps directory exists
 os.makedirs(MAPS_DIR, exist_ok=True)
@@ -314,11 +348,22 @@ def extract_coords_from_maps_link(url):
     if not url.startswith('http'):
         return None
     
-    # Step 1: Follow shortened links (maps.app.goo.gl)
+    # Step 1: Follow shortened links (maps.app.goo.gl). Each hop is validated
+    # against the provider allow-list; redirects are followed manually so a
+    # link can never bounce the server toward an arbitrary host.
     try:
-        if 'maps.app.goo.gl' in url or 'goo.gl/maps' in url or 'maps.google.com' in url:
-            resp = requests.get(url, timeout=10, allow_redirects=True, headers={'User-Agent': 'Mozilla/5.0'})
-            url = resp.url
+        host = (urlsplit(url).netloc or '').lower()
+        if host.endswith(('maps.app.goo.gl', 'goo.gl', 'maps.google.com')):
+            current = url
+            for _hop in range(5):
+                resp = requests.get(
+                    _assert_allowed_remote_url(current), timeout=10,
+                    allow_redirects=False, headers={'User-Agent': 'Mozilla/5.0'})
+                location = resp.headers.get('Location') if resp.is_redirect or resp.is_permanent_redirect else None
+                if not location:
+                    break
+                current = urljoin(current, location)
+            url = current
             print(f"[MAPS LINK] Resolved shortened URL to: {url}")
     except Exception as e:
         print(f"[MAPS LINK] Failed to resolve shortened URL: {e}")
@@ -381,7 +426,7 @@ def geocode_address(address, tenant_id=None):
     url = 'https://maps.googleapis.com/maps/api/geocode/json'
     params = {'address': address, 'key': _get_api_key()}
     try:
-        response = requests.get(url, params=params, timeout=15)
+        response = requests.get(_assert_allowed_remote_url(url), params=params, timeout=15)
         data = response.json()
         if data.get('status') != 'OK':
             return {'error': f"Geocoding API error: {data.get('status')}", 'details': data}
@@ -584,12 +629,14 @@ def get_curated_city_landmarks(city, lat, lng, tenant_id=None):
 def _download_image(url, params, output_path):
     """Download image from Google Maps Static API and save to disk."""
     try:
+        _assert_allowed_remote_url(url)
+        target = _ensure_path_inside(output_path, MAPS_DIR)
         response = requests.get(url, params=params, timeout=30)
         if response.status_code != 200:
             return {'error': f"Image request failed: HTTP {response.status_code}", 'content': response.text[:200]}
-        with open(output_path, 'wb') as f:
+        with open(target, 'wb') as f:
             f.write(response.content)
-        return {'success': True, 'path': output_path, 'size': len(response.content)}
+        return {'success': True, 'path': target, 'size': len(response.content)}
     except Exception as e:
         return {'error': f"Image download failed: {str(e)}"}
 
@@ -1140,7 +1187,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
         body['includedTypes'] = list(included_types)
 
     try:
-        response = requests.post(url, headers=headers, json=body, timeout=15)
+        response = requests.post(_assert_allowed_remote_url(url), headers=headers, json=body, timeout=15)
         try:
             data = response.json()
         except ValueError:
@@ -1318,7 +1365,7 @@ def _get_drive_matrix_chunk(origin, destinations):
     }
 
     try:
-        response = requests.get(url, params=params, timeout=15)
+        response = requests.get(_assert_allowed_remote_url(url), params=params, timeout=15)
         data = response.json()
         if data.get('status') != 'OK':
             print(f"[DRIVE MATRIX] API error: {data.get('status')}")
@@ -1734,7 +1781,7 @@ def _fetch_osm_polygon(lat, lng, radius_m=400):
     data = None
     for server_url in overpass_servers:
         try:
-            resp = requests.post(server_url, data={'data': query}, headers=headers, timeout=8)
+            resp = requests.post(_assert_allowed_remote_url(server_url), data={'data': query}, headers=headers, timeout=8)
             if resp.status_code == 200:
                 data = resp.json()
                 break
@@ -1838,7 +1885,7 @@ def _fetch_osm_neighborhood(lat, lng, radius_m=2000):
     data = None
     for server_url in overpass_servers:
         try:
-            resp = requests.post(server_url, data={'data': query}, headers=headers, timeout=15)
+            resp = requests.post(_assert_allowed_remote_url(server_url), data={'data': query}, headers=headers, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
                 break
@@ -2370,7 +2417,7 @@ def _snap_to_roads(lat, lng, tenant_id=None):
         'key': _get_api_key(),
     }
     try:
-        resp = requests.get(url, params=params, timeout=10)
+        resp = requests.get(_assert_allowed_remote_url(url), params=params, timeout=10)
         data = resp.json()
         if 'snappedPoints' in data and data['snappedPoints']:
             sp = data['snappedPoints'][0]

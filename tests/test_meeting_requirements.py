@@ -1767,6 +1767,51 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-market-work-summary', long_work_html)
         self.assertIn('<article', long_work_html)
 
+    def test_market_summary_paragraph_renders_as_single_prose_slide(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع السوق',
+            'market_study_data': json.dumps({
+                'competitor_radius': '10',
+                'data_period': '12m',
+                'competitors': [{
+                    'name': 'منافس موثق', 'price_value': '15000',
+                    'price_type': 'سعر المتر المربع', 'operation_type': 'بيع',
+                }],
+                'summary': 'تحليل السوق: قطاع الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية.',
+                'swot': {
+                    'strengths': 'موقع قوي',
+                    'weaknesses': 'تكلفة مرتفعة',
+                    'opportunities': 'نمو الطلب',
+                    'threats': 'منافسة جديدة',
+                },
+                'one_block_summary': 'ملخص دراسة السوق كامل',
+                'sources': [{'name': 'مصدر رسمي', 'url': 'https://example.test/source'}],
+            }, ensure_ascii=False),
+        }
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'مقارنة المنافسين', 'type': 'map_catchment'},
+            {'title': 'الفجوة السوقية', 'type': 'map_overview'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {})
+        content = [slide for slide in plan['slides']
+                   if slide.get('section_key') == 'market' and slide.get('type') == 'content']
+        summary_slides = [slide for slide in content
+                          if slide.get('content_source') == 'market_study_data.summary']
+        self.assertEqual(len(summary_slides), 1)
+        html = engine.generate_single_slide(
+            'system', summary_slides[0], 3, 10, {'primary_color': '#123456'},
+            lambda *_args, **_kwargs: self.fail('market summary must be deterministic'),
+            project_data=project,
+        )
+        self.assertIn('قطاع الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية', html)
+        self.assertNotIn('المحاور العشرة', html)
+        facts = engine._market_study_facts(project)
+        self.assertIn('### تحليل السوق المعتمد', facts)
+        self.assertIn('قطاع الضيافة الفاخرة في جدة', facts)
+
     def test_wide_cashflow_table_in_report_preserves_combo_chart(self):
         engine = self.application_module.slide_engine
         headers = ['البيان'] + [f'سنة {i}' for i in range(1, 16)] + ['الإجمالي']
@@ -7680,12 +7725,21 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(parsed['title'], 'الملخص التنفيذي لسوق المشروع')
         self.assertEqual(parsed['swot']['strengths'], 'موقع على طريق رئيسي')
         self.assertEqual(parsed['swot']['threats'], 'مشروعات جديدة قريبة')
-        self.assertEqual(parsed['summary']['market_definition'], 'سوق سكني في الرياض')
-        self.assertEqual(parsed['summary']['city_position'], market_study.MISSING_VALUE_PHRASE)
+        # A legacy ten-section summary dict is joined into one prose paragraph;
+        # the decision stays in its own field and placeholders are dropped.
+        self.assertEqual(parsed['summary'], 'سوق سكني في الرياض')
         self.assertEqual(parsed['decision'], 'فرصة واعدة بشروط')
+        prose = market_study.normalize_summary({
+            'summary': 'سوق الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية.',
+            'decision': 'فرصة قوية',
+        })
+        self.assertEqual(prose['summary'], 'سوق الضيافة الفاخرة في جدة ينمو مع الطلب على الواجهة البحرية.')
         self.assertIn('ابدأ المخرجات بعنوان: الملخص التنفيذي لسوق المشروع.', market_study.build_summary_user_prompt({}, []))
-        self.assertIn('في حدود 500 كلمة', market_study.build_summary_user_prompt({}, []))
+        self.assertIn('في حدود 200 كلمة', market_study.build_summary_user_prompt({}, []))
         self.assertIn('مصادر حالية إن وُجدت', market_study.build_summary_user_prompt({}, []))
+        summary_prompt = market_study.build_summary_user_prompt({}, [])
+        self.assertIn('بلا عناوين فرعية ولا ترقيم ولا نقاط', summary_prompt)
+        self.assertIn('"summary": "فقرة واحدة متماسة تحلل السوق', summary_prompt)
 
     def test_contact_section_and_fields_registered_and_piped(self):
         """Contact information section and its 7 fields are registered in schema and piped to slide engine."""

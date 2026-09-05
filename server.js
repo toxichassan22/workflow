@@ -1,7 +1,7 @@
 var express = require('express');
 var path = require('path');
 var fs = require('fs');
-var { execSync, exec } = require('child_process');
+var { execSync, exec, execFileSync } = require('child_process');
 
 // ═══ Load .env file (same logic as Python's dotenv) ═══
 (function loadEnv() {
@@ -274,6 +274,10 @@ function syncToGitHub() {
   if (!token) {
     return; // Silently skip if no GitHub token is provided
   }
+  if (!/^[A-Za-z0-9_-]+$/.test(token)) {
+    console.error('[Git Auto-Save] GITHUB_TOKEN has unexpected characters; refusing to run git.');
+    return;
+  }
 
   var gitUrl = 'https://toxichassan22:' + token + '@github.com/toxichassan22/manafe-presentation-generator.git';
 
@@ -542,8 +546,8 @@ app.post('/api/generate', function (req, res) {
 
   try {
     var dataFile = path.join(__dirname, 'project-data.json');
-    var cmd = 'node glm-designer.js "' + topic.replace(/"/g, '\\"') + '" ' + dataFile;
-    var output = execSync(cmd, {
+    // Argument-array form keeps the topic out of any shell parsing.
+    var output = execFileSync('node', ['glm-designer.js', String(topic), dataFile], {
       cwd: __dirname,
       encoding: 'utf8',
       timeout: 300000,
@@ -2238,11 +2242,17 @@ app.post('/api/save-file', function (req, res) {
   if (!filename || !base64Data) {
     return res.status(400).json({ error: 'filename and data are required' });
   }
-  // Sanitize filename
+  // Sanitize filename and keep the write inside OUTPUT_DIR
   filename = filename.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+  if (filename.indexOf('..') !== -1 || path.basename(filename) !== filename) {
+    return res.status(400).json({ error: 'invalid filename' });
+  }
   try {
     var buffer = Buffer.from(base64Data, 'base64');
     var filePath = path.join(OUTPUT_DIR, filename);
+    if (path.resolve(filePath).indexOf(path.resolve(OUTPUT_DIR) + path.sep) !== 0) {
+      return res.status(400).json({ error: 'invalid filename' });
+    }
     fs.writeFileSync(filePath, buffer);
     console.log('  ✓ Saved file to ' + filePath);
     res.json({ success: true, url: '/outputs/' + filename });

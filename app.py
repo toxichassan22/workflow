@@ -170,10 +170,12 @@ def api_body_chunk():
     except Exception:
         return jsonify({'error': 'Invalid chunk data'}), 400
     import shutil as _shutil
-    chunk_root = os.path.join(UPLOADS_DIR, '.body_chunks')
-    chunk_dir = os.path.join(chunk_root, upload_id)
+    chunk_root = os.path.abspath(os.path.join(UPLOADS_DIR, '.body_chunks'))
+    chunk_dir = os.path.abspath(os.path.join(chunk_root, upload_id))
+    if os.path.commonpath([chunk_root, chunk_dir]) != chunk_root:
+        return jsonify({'error': 'Invalid upload id'}), 400
     os.makedirs(chunk_dir, exist_ok=True)
-    with open(os.path.join(chunk_dir, f'{idx}.part'), 'wb') as fh:
+    with open(os.path.join(chunk_dir, f'{int(idx)}.part'), 'wb') as fh:
         fh.write(raw)
     # Best-effort sweep of stale chunk dirs (>15 min)
     try:
@@ -582,7 +584,7 @@ def persist_generated_image(image, tenant_id):
         'image/jpg': '.jpg',
         'image/webp': '.webp',
     }.get(mime)
-    if not extension:
+    if not extension or not re.fullmatch(r'\.(png|jpg|webp)', extension):
         return image
     try:
         raw = base64.b64decode(encoded, validate=True)
@@ -9891,7 +9893,10 @@ def _job_dir(namespace, tenant_id):
 
 
 def _job_path(namespace, tenant_id, job_id):
-    return os.path.join(_job_dir(namespace, tenant_id), f'{job_id}.json')
+    safe_job_id = str(job_id or '')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{6,80}', safe_job_id):
+        raise ValueError('Invalid job id')
+    return os.path.join(_job_dir(namespace, tenant_id), f'{safe_job_id}.json')
 
 
 def _write_job(namespace, tenant_id, job_id, payload):
@@ -10107,7 +10112,8 @@ def _execute_market_competitors(data):
 def _execute_market_summary(data):
     payload = _prepare_market_payload(data)
     competitors = data.get('competitors') if isinstance(data.get('competitors'), list) else []
-    current_summary = data.get('currentSummary') if isinstance(data.get('currentSummary'), dict) else None
+    raw_current = data.get('currentSummary')
+    current_summary = raw_current if isinstance(raw_current, (dict, str)) else None
     current_sources = data.get('currentSources') if isinstance(data.get('currentSources'), list) else None
     current_swot = data.get('currentSwot') if isinstance(data.get('currentSwot'), dict) else None
     system_prompt = market_study.build_consultant_system_prompt()
@@ -10124,15 +10130,14 @@ def _execute_market_summary(data):
             'failureReason': reason,
             'providerError': provider_error,
         }
-    raw_summary = parsed.get('summary') if isinstance(parsed.get('summary'), dict) else {}
-    if not any(str(raw_summary.get(item['key']) or '').strip() for item in market_study.SUMMARY_SECTIONS):
+    normalized = market_study.normalize_summary(parsed)
+    if not str(normalized.get('summary') or '').strip():
         return {
             'success': False,
             'error': 'عاد النموذج ملخصًا فارغًا. لم يُستبدل النص الحالي.',
             'failureReason': 'empty_response',
             'providerError': provider_error,
         }
-    normalized = market_study.normalize_summary(parsed)
     market_study.apply_search_citations(normalized.get('sources'), _market_citation_urls(res), url_key='url')
     return {
         'success': True,
@@ -11371,7 +11376,7 @@ def _store_project_upload(uploaded_file, file_type, draft_id=None, project_id=No
     if file_type in PROJECT_IMAGE_ONLY_TYPES and not mime_type.startswith('image/'):
         raise ValueError('هذا الحقل يقبل الصور فقط (PNG أو JPG أو WEBP)')
 
-    document_dir = os.path.join(UPLOADS_DIR, str(g.tenant_id), 'project-documents')
+    document_dir = os.path.join(UPLOADS_DIR, re.sub(r'[^A-Za-z0-9_-]', '', str(g.tenant_id)) or 'public', 'project-documents')
     os.makedirs(document_dir, exist_ok=True)
     temp_path = os.path.join(document_dir, f'.upload-{_uuid.uuid4().hex}.tmp')
     digest = hashlib.sha256()
@@ -11778,11 +11783,16 @@ def api_upload_branding_font_variant():
     if error:
         return jsonify({'error': error}), 400
     ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in {'.ttf', '.otf', '.woff', '.woff2'}:
+        return jsonify({'error': 'Invalid font file extension'}), 400
     safe_name = re.sub(r'[^A-Za-z0-9_-]', '_', os.path.splitext(file.filename)[0])
-    font_dir = os.path.join(UPLOADS_DIR, g.tenant_id, 'fonts')
+    safe_tenant = re.sub(r'[^A-Za-z0-9_-]', '', str(g.tenant_id)) or 'public'
+    font_dir = os.path.join(UPLOADS_DIR, safe_tenant, 'fonts')
     os.makedirs(font_dir, exist_ok=True)
     filename = f'{safe_name}_{script}_{weight}{ext}'
-    filepath = os.path.join(font_dir, filename)
+    filepath = os.path.abspath(os.path.join(font_dir, filename))
+    if os.path.commonpath([os.path.abspath(font_dir), filepath]) != os.path.abspath(font_dir):
+        return jsonify({'error': 'Invalid font filename'}), 400
     with open(filepath, 'wb') as font_file:
         font_file.write(base64.b64decode(json.loads(file_data)['data']))
     stored_path = os.path.relpath(filepath, os.path.dirname(__file__)).replace('\\', '/')
@@ -11803,11 +11813,16 @@ def api_auto_upload_branding_font():
     raw = base64.b64decode(parsed['data'])
     detected = _detect_font_metadata(raw, file.filename)
     ext = parsed['ext']
+    if ext not in {'.ttf', '.otf', '.woff', '.woff2'}:
+        return jsonify({'error': 'Invalid font file extension'}), 400
     safe_name = re.sub(r'[^A-Za-z0-9_-]', '_', os.path.splitext(file.filename)[0])
-    font_dir = os.path.join(UPLOADS_DIR, g.tenant_id, 'fonts')
+    safe_tenant = re.sub(r'[^A-Za-z0-9_-]', '', str(g.tenant_id)) or 'public'
+    font_dir = os.path.join(UPLOADS_DIR, safe_tenant, 'fonts')
     os.makedirs(font_dir, exist_ok=True)
     filename = f'{safe_name}_{detected["weight"]}{ext}'
-    filepath = os.path.join(font_dir, filename)
+    filepath = os.path.abspath(os.path.join(font_dir, filename))
+    if os.path.commonpath([os.path.abspath(font_dir), filepath]) != os.path.abspath(font_dir):
+        return jsonify({'error': 'Invalid font filename'}), 400
     with open(filepath, 'wb') as font_file:
         font_file.write(raw)
     stored_path = os.path.relpath(filepath, os.path.dirname(__file__)).replace('\\', '/')

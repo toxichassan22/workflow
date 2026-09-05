@@ -40,7 +40,7 @@ CONTENT_DISTRIBUTION_RULES = """
 11. قسم تحليل السوق لا يحتوي على خرائط أو صور أو خلفيات صور. الاستثناء الوحيد هو شعار المنافس إذا كان محفوظاً ضمن بيانات ذلك المنافس، ويظهر داخل صفه في جدول المنافسين.
 12. قسم تحليل السوق يحتوي على رسم بياني واحد فقط: horizontal_bar في شريحة مقارنة المنافسين. بقية محتوى السوق نصوص وجداول ثابتة، ولا يجوز للنموذج إنشاء رسم بديل أو شريحة صور.
 13. يجب نقل نطاق الدراسة، وكل صف من جدول المنافسين، والملخص التنفيذي لسوق المشروع، وملخص دراسة السوق، وكل مصدر كما هو من بيانات السوق. تقسيم البيانات على شرائح إضافية مسموح، حذفها أو اختصارها غير مسموح.
-14. التوزيع المضغوط لقسم السوق إلزامي: شريحة واحدة لنطاق الدراسة، شريحة واحدة لمقارنة المنافسين، شريحة واحدة تجمع المحاور العشرة للملخص التنفيذي، شريحة واحدة للمصادر، وملخص دراسة سوق العمل في شريحة أو شريحتين كحد أقصى.
+14. التوزيع المضغوط لقسم السوق إلزامي: شريحة واحدة لنطاق الدراسة، شريحة واحدة لمقارنة المنافسين، شريحة واحدة لتحليل السوق المعتمد (الفقرة الواحدة)، شريحة واحدة للمصادر، وملخص دراسة سوق العمل في شريحة أو شريحتين كحد أقصى.
 15. قسم تحليل SWOT للمشروع يظهر في شريحة واحدة بعد فاصل القسم، داخل مصفوفة واضحة من أربعة محاور: نقاط القوة، نقاط الضعف، الفرص، والتهديدات. لا تعرض JSON أو أقواساً أو أسماء مفاتيح برمجية.
 16. إذا وجدت بيانات مخاطر معتمدة، أضف بعدها شريحة واحدة لسجل المخاطر وطرق المعالجة. اعرض كل خطر مقابل طريقة معالجته في صف واضح، ولا تكرر مصفوفة SWOT داخلها ولا تخترع مستوى خطورة أو إجراءً غير موجود في البيانات.
 """
@@ -932,12 +932,19 @@ def _market_scope_rows(market):
 
 
 def _market_summary_rows(market):
-    if not isinstance(market, dict) or not isinstance(market.get('summary'), dict):
+    if not isinstance(market, dict):
         return []
-    summary = market.get('summary') or {}
+    summary = market.get('summary')
+    if isinstance(summary, str):
+        # The approved market analysis is one prose paragraph; it renders as
+        # a single editorial row instead of the legacy ten label/value rows.
+        text = summary.strip()
+        return [['تحليل السوق', text]] if text else []
+    if not isinstance(summary, dict):
+        return []
     try:
         import market_study
-        definitions = market_study.SUMMARY_SECTIONS
+        definitions = market_study.LEGACY_SUMMARY_SECTIONS
     except Exception:
         definitions = [
             {'key': 'market_definition', 'label': 'تعريف السوق'},
@@ -2667,8 +2674,12 @@ def _market_study_facts(project_data):
         lines.append('### مصادر دراسة السوق')
         lines.append(json.dumps(sources, ensure_ascii=False, indent=2))
     # Keep the structured summary even when one_block_summary is present. The
-    # one-block text is useful as prose, but it must not replace the ten
-    # separately entered market-summary fields in the model context.
+    # one-block text is useful as prose, but it must not replace the market
+    # analysis in the model context.
+    summary_text = str(state.get('summary') or '').strip() if isinstance(state.get('summary'), str) else ''
+    if summary_text:
+        lines.append('### تحليل السوق المعتمد')
+        lines.append(summary_text)
     for key, title in (('summary', 'محاور دراسة السوق'), ('swot', 'تحليل SWOT')):
         block = state.get(key)
         if isinstance(block, dict):
@@ -6816,7 +6827,7 @@ def _market_value_html(value):
 
 
 def _build_market_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Render all ten executive market fields as two editorial data columns."""
+    """Render the approved market analysis: one prose paragraph, or the legacy ten fields."""
     source = source if isinstance(source, dict) else {}
     market = _market_state(source)
     rows = _market_summary_rows(market)
@@ -6824,20 +6835,37 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
     title = html_lib.escape(str((slide or {}).get('title') or 'الملخص التنفيذي لسوق المشروع'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
-    midpoint = (len(rows) + 1) // 2
-    columns = (rows[:midpoint], rows[midpoint:])
+    is_prose = isinstance(market.get('summary'), str) and bool(str(market.get('summary') or '').strip())
+    subtitle = 'التحليل المعتمد لسوق المشروع'
+    if is_prose:
+        body_content = (
+            f'<div style="border-top:4px solid {primary};background:#f8fafc;padding:28px 34px;">'
+            f'<div style="font-size:15.5px;line-height:1.95;color:#1f2937;font-weight:500;text-align:justify;">'
+            f'{_market_value_html(rows[0][1] if rows else "")}'
+            f'</div></div>'
+        )
+    else:
+        midpoint = (len(rows) + 1) // 2
+        columns = (rows[:midpoint], rows[midpoint:])
+        subtitle = 'المحاور العشرة المعتمدة في ملخص دراسة السوق'
 
-    def render_column(column_rows):
-        blocks = []
-        for label, value in column_rows:
-            blocks.append(
-                f'<div style="display:grid;grid-template-columns:0.72fr 1.75fr;gap:12px;align-items:start;'
-                f'padding:12px 14px;border-bottom:1px solid #dbe4ee;background:#ffffff;min-height:80px;box-sizing:border-box;">'
-                f'<div style="border-right:3px solid {accent};padding-right:9px;font-size:11.2px;font-weight:800;color:{primary};line-height:1.35;">{html_lib.escape(str(label))}</div>'
-                f'<div style="font-size:10.8px;line-height:1.48;color:#334155;font-weight:500;">{_market_value_html(value)}</div>'
-                '</div>'
-            )
-        return ''.join(blocks)
+        def render_column(column_rows):
+            blocks = []
+            for label, value in column_rows:
+                blocks.append(
+                    f'<div style="display:grid;grid-template-columns:0.72fr 1.75fr;gap:12px;align-items:start;'
+                    f'padding:12px 14px;border-bottom:1px solid #dbe4ee;background:#ffffff;min-height:80px;box-sizing:border-box;">'
+                    f'<div style="border-right:3px solid {accent};padding-right:9px;font-size:11.2px;font-weight:800;color:{primary};line-height:1.35;">{html_lib.escape(str(label))}</div>'
+                    f'<div style="font-size:10.8px;line-height:1.48;color:#334155;font-weight:500;">{_market_value_html(value)}</div>'
+                    '</div>'
+                )
+            return ''.join(blocks)
+
+        body_content = (
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">'
+            + ''.join(f'<div style="min-width:0;border-top:4px solid {primary};background:#f8fafc;">{render_column(column)}</div>' for column in columns)
+            + '</div>'
+        )
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -6851,14 +6879,12 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
       <div class="header-accent-bar" style="background:{accent};"></div>
       <div class="header-text-group">
         <h1 class="header-title">{title}</h1>
-        <p class="header-subtitle">المحاور العشرة المعتمدة في ملخص دراسة السوق</p>
+        <p class="header-subtitle">{subtitle}</p>
       </div>
     </div>
   </header>
   <div style="padding:0 36px;margin-top:14px;">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
-      {''.join(f'<div style="min-width:0;border-top:4px solid {primary};background:#f8fafc;">{render_column(column)}</div>' for column in columns)}
-    </div>
+    {body_content}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>

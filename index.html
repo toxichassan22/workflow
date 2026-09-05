@@ -8739,7 +8739,9 @@
       else form.appendChild(div);
     }
 
-    const MARKET_STUDY_SUMMARY_SECTIONS = [
+    // Drafts saved before the one-paragraph summary stored ten sections.
+    // The list stays only to join those legacy drafts into one paragraph.
+    const MARKET_LEGACY_SUMMARY_SECTIONS = [
       { key: 'market_definition', label: 'تعريف السوق' },
       { key: 'city_position', label: 'وضع المدينة' },
       { key: 'sector_performance', label: 'أداء القطاع' },
@@ -8981,9 +8983,7 @@
     }
 
     function emptyMarketStudyState() {
-      const summary = {};
       const swot = {};
-      MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => { summary[item.key] = ''; });
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => { swot[item.key] = ''; });
       return {
         competitor_radius: '10',
@@ -8992,13 +8992,25 @@
         data_period_from: '',
         data_period_to: '',
         competitors: [],
-        summary,
+        summary: '',
         swot,
         sources: [],
         one_block_summary: '',
         decision: '',
         disclaimer: ''
       };
+    }
+
+    function marketSummaryText(value) {
+      if (typeof value === 'string') return value.trim();
+      if (value && typeof value === 'object') {
+        return MARKET_LEGACY_SUMMARY_SECTIONS
+          .filter(item => item.key !== 'decision')
+          .map(item => String(value[item.key] || '').trim())
+          .filter(text => text && text !== 'غير متوفر من مصدر موثوق')
+          .join(' ');
+      }
+      return '';
     }
 
     function buildMarketStudyOneBlockSummary(state = {}) {
@@ -9046,12 +9058,10 @@
         });
       }
 
-      const summarySections = (MARKET_STUDY_SUMMARY_SECTIONS || [])
-        .map(item => ({ label: item.label, value: text(state.summary && state.summary[item.key]) }))
-        .filter(item => item.value);
-      if (summarySections.length) {
-        lines.push('ملخص السوق');
-        summarySections.forEach(item => lines.push(item.label + ': ' + item.value));
+      const summaryText = marketSummaryText(state.summary);
+      if (summaryText) {
+        lines.push('تحليل السوق');
+        lines.push(summaryText);
       }
 
       const swotSections = (MARKET_STUDY_SWOT_SECTIONS || [])
@@ -9094,7 +9104,7 @@
           Array.isArray(parsed.sources) ? parsed.sources : [],
           buildMarketCompetitorSourceRows(competitors)
         ),
-        summary: { ...base.summary, ...(parsed.summary || {}) },
+        summary: marketSummaryText(parsed.summary),
         swot: { ...base.swot, ...(parsed.swot || {}) }
       };
     }
@@ -9118,11 +9128,7 @@
       state.data_period_from = document.getElementById('marketDataPeriodFrom')?.value || '';
       state.data_period_to = document.getElementById('marketDataPeriodTo')?.value || '';
       state.competitors = collectMarketCompetitorRows();
-      const summary = {};
-      MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
-        summary[item.key] = document.getElementById('marketSummary_' + item.key)?.value || '';
-      });
-      state.summary = summary;
+      state.summary = document.getElementById('marketSummaryText')?.value || '';
       const swot = {};
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
         swot[item.key] = document.getElementById('marketSwot_' + item.key)?.value || '';
@@ -9208,7 +9214,9 @@
           </div>
           <div id="marketSummaryFailure"></div>
           <div id="marketSummaryCompare" hidden></div>
-          <div id="marketSummaryFields"></div>
+          <div style="margin-top:12px"><label>تحليل السوق</label>
+            <textarea id="marketSummaryText" rows="10"></textarea>
+          </div>
           <h4 style="margin-top:18px">تحليل SWOT</h4>
           <div id="marketSwotFields"></div>
           <div style="margin-top:12px"><label>تصنيف القرار</label>
@@ -9242,13 +9250,6 @@
       div.appendChild(body);
       if (before) form.insertBefore(div, before);
       else form.appendChild(div);
-      const summaryHost = document.getElementById('marketSummaryFields');
-      if (summaryHost) {
-        summaryHost.innerHTML = MARKET_STUDY_SUMMARY_SECTIONS.map(item =>
-          '<div style="margin-top:12px"><label>' + item.label + '</label>' +
-          '<textarea id="marketSummary_' + item.key + '" rows="4"></textarea></div>'
-        ).join('');
-      }
       const swotHost = document.getElementById('marketSwotFields');
       if (swotHost) {
         swotHost.innerHTML = MARKET_STUDY_SWOT_SECTIONS.map(item =>
@@ -9262,11 +9263,8 @@
           persistMarketStudyFromDom();
         });
       });
-      ['marketCompetitorRadiusCustom', 'marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer']
+      ['marketCompetitorRadiusCustom', 'marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer', 'marketSummaryText']
         .forEach(id => document.getElementById(id)?.addEventListener('input', persistMarketStudyFromDom));
-      MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
-        document.getElementById('marketSummary_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
-      });
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
         document.getElementById('marketSwot_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
       });
@@ -10528,10 +10526,8 @@
       if (from) from.value = next.data_period_from || '';
       if (to) to.value = next.data_period_to || '';
       renderMarketCompetitors(next.competitors || []);
-      MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
-        const field = document.getElementById('marketSummary_' + item.key);
-        if (field) field.value = (next.summary && next.summary[item.key]) || '';
-      });
+      const summaryField = document.getElementById('marketSummaryText');
+      if (summaryField) summaryField.value = marketSummaryText(next.summary);
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
         const field = document.getElementById('marketSwot_' + item.key);
         if (field) field.value = (next.swot && next.swot[item.key]) || '';
@@ -10660,19 +10656,19 @@
       const host = document.getElementById('marketSummaryCompare');
       if (!host) return;
       host.hidden = false;
-      const formatBlocks = (sections, values) => sections.map(item =>
+      const swotBlocks = values => MARKET_STUDY_SWOT_SECTIONS.map(item =>
         (item.label + '\n' + ((values && values[item.key]) || '')).trim()
       ).join('\n\n');
       const currentText = [
-        formatBlocks(MARKET_STUDY_SUMMARY_SECTIONS, current),
+        marketSummaryText(current),
         'تحليل SWOT',
-        formatBlocks(MARKET_STUDY_SWOT_SECTIONS, currentSwot)
-      ].join('\n\n');
+        swotBlocks(currentSwot)
+      ].filter(part => String(part || '').trim()).join('\n\n');
       const incomingText = [
-        formatBlocks(MARKET_STUDY_SUMMARY_SECTIONS, incoming),
+        marketSummaryText(incoming),
         'تحليل SWOT',
-        formatBlocks(MARKET_STUDY_SWOT_SECTIONS, incomingSwot)
-      ].join('\n\n');
+        swotBlocks(incomingSwot)
+      ].filter(part => String(part || '').trim()).join('\n\n');
       host.innerHTML =
         '<div class="summary-compare">' +
         '<div><label>النسخة الحالية</label><textarea rows="12" readonly>' + currentText.replace(/</g, '&lt;') + '</textarea></div>' +
@@ -10718,7 +10714,7 @@
       try {
         const payload = collectMarketStudyRequestPayload();
         const currentState = getMarketStudyState();
-        const currentSummary = { ...(currentState.summary || {}) };
+        const currentSummary = String(currentState.summary || '');
         const currentSwot = { ...(currentState.swot || {}) };
         let res = await api('POST', '/api/market-study/summary', payload);
         if (res && res.jobId && !res.summary) {
@@ -10733,7 +10729,7 @@
           toast(message);
           return;
         }
-        const hasCurrent = Object.values(currentSummary).some(value => String(value || '').trim())
+        const hasCurrent = String(currentSummary || '').trim()
           || Object.values(currentSwot).some(value => String(value || '').trim());
         marketSummaryPending = {
           summary: res.summary,

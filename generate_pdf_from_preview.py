@@ -313,7 +313,10 @@ img { max-width:100%; max-height:100%; object-fit:cover; }
 
     # Use a temporary directory for the preview HTML so it is cleaned up automatically
     tmp_dir = tempfile.mkdtemp(prefix='pdf_preview_')
-    resolved_html_path = Path(tmp_dir) / 'preview.html'
+    tmp_root = Path(tmp_dir).resolve()
+    resolved_html_path = tmp_root / 'preview.html'
+    if resolved_html_path.parent != tmp_root:
+        raise RuntimeError('Invalid preview html path')
     print(f"[PDF] Writing resolved HTML to {resolved_html_path}...")
     with open(resolved_html_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -554,7 +557,10 @@ img {{ max-width:100%; max-height:100%; object-fit:cover; }}
 </body>
 </html>"""
 
-        resolved_html_path = Path(tmp_dir) / 'slide_preview.html'
+        slide_root = Path(tmp_dir).resolve()
+        resolved_html_path = slide_root / 'slide_preview.html'
+        if resolved_html_path.parent != slide_root:
+            raise RuntimeError('Invalid slide preview path')
         with open(resolved_html_path, "w", encoding="utf-8") as f:
             f.write(full_html)
 

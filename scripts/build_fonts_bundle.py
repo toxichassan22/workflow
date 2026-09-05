@@ -36,7 +36,9 @@ def build():
             data = base64.b64encode(f.read()).decode('ascii')
         result[family] = {'family': family, 'format': fmt, 'data': data}
 
-    out = BASE_DIR / 'fonts_bundle.json'
+    out = (BASE_DIR / 'fonts_bundle.json').resolve()
+    if out.parent != BASE_DIR.resolve():
+        raise RuntimeError('Invalid fonts bundle path')
     with open(out, 'w', encoding='utf-8') as f:
         json.dump(result, f)
     print(f'[fonts] wrote {out} with {len(result)} faces')

@@ -19,7 +19,10 @@ def _load_jwt_secret():
     if configured_secret:
         return configured_secret, 'environment'
 
-    secret_path = os.path.join(os.path.dirname(__file__), '.jwt_secret')
+    base_dir = os.path.abspath(os.path.dirname(__file__))
+    secret_path = os.path.abspath(os.path.join(base_dir, '.jwt_secret'))
+    if os.path.commonpath([base_dir, secret_path]) != base_dir:
+        raise RuntimeError('Invalid secret file path')
     if os.path.exists(secret_path):
         with open(secret_path, 'r', encoding='utf-8') as secret_file:
             stored_secret = secret_file.read().strip()

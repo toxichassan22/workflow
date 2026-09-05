@@ -481,6 +481,8 @@ def _create_tables(conn):
             ('reviewed_at', 'TEXT'),
         ):
             if column not in draft_cols:
+                if not re.fullmatch(r'[A-Za-z0-9_]+', column) or not re.fullmatch(r'[A-Za-z0-9() ,]+', definition):
+                    raise ValueError('Invalid migration column definition')
                 conn.execute(f'ALTER TABLE project_drafts ADD COLUMN {column} {definition}')
                 print(f'[DB] Migration: added {column} column to project_drafts')
 
@@ -1145,9 +1147,9 @@ def _migrate_map_images_presentation_fk(conn):
                   AND kcu.column_name = 'presentation_id'
             ''').fetchall()
             for row in constraints:
-                name = str(row['constraint_name'] or '')
-                if re.fullmatch(r'[A-Za-z0-9_]+', name):
-                    conn.execute(f'ALTER TABLE map_images DROP CONSTRAINT "{name}"')
+                validated = re.fullmatch(r'[A-Za-z0-9_]+', str(row['constraint_name'] or ''))
+                if validated:
+                    conn.execute(f'ALTER TABLE map_images DROP CONSTRAINT "{validated.group(0)}"')
             conn.commit()
             return
         cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='map_images'")

@@ -21,7 +21,10 @@ for file_index, name in enumerate(sorted(os.listdir(root)), 1):
         img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
         page_images.append(img)
     text_name = f'pdf_{file_index:02d}_text.txt'
-    with open(os.path.join(out, text_name), 'w', encoding='utf-8') as handle:
+    text_target = os.path.abspath(os.path.join(out, text_name))
+    if os.path.commonpath([os.path.abspath(out), text_target]) != os.path.abspath(out):
+        raise RuntimeError('Invalid review output path')
+    with open(text_target, 'w', encoding='utf-8') as handle:
         handle.write(''.join(text_parts))
     item['text'] = text_name
     cols = 4
@@ -48,6 +51,9 @@ for file_index, name in enumerate(sorted(os.listdir(root)), 1):
         item['sheets'].append(sheet_name)
     manifest.append(item)
 
-with open(os.path.join(out, 'manifest.json'), 'w', encoding='utf-8') as handle:
+manifest_target = os.path.abspath(os.path.join(out, 'manifest.json'))
+if os.path.commonpath([os.path.abspath(out), manifest_target]) != os.path.abspath(out):
+    raise RuntimeError('Invalid review output path')
+with open(manifest_target, 'w', encoding='utf-8') as handle:
     json.dump(manifest, handle, ensure_ascii=False, indent=2)
 print(json.dumps(manifest, ensure_ascii=False, indent=2))
