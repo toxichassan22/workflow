@@ -963,6 +963,32 @@ def _market_summary_rows(market):
     ]
 
 
+def _market_rows_for_slide(slide, prefix, rows):
+    """Return the row slice requested by a paginated market slide source."""
+    rows = list(rows or [])
+    explicit_start = (slide or {}).get('market_row_start')
+    explicit_end = (slide or {}).get('market_row_end')
+    if explicit_start is not None and explicit_end is not None:
+        start = max(int(explicit_start), 0)
+        end = max(int(explicit_end), start)
+        return rows[start:end], start
+    content_source = str((slide or {}).get('content_source') or '').strip()
+    match = re.fullmatch(rf'{re.escape(prefix)}(?::(\d+):(\d+))?', content_source)
+    if not match or match.group(1) is None:
+        return rows, 0
+    start = max(int(match.group(1)), 0)
+    end = max(int(match.group(2)), start)
+    return rows[start:end], start
+
+
+def _market_row_pages(rows, page_size):
+    rows = list(rows or [])
+    return [
+        (start, rows[start:start + page_size])
+        for start in range(0, len(rows), page_size)
+    ]
+
+
 def _market_source_rows(market):
     if not isinstance(market, dict) or not isinstance(market.get('sources'), list):
         return []
@@ -1146,11 +1172,21 @@ def _risk_analysis_source(project_data):
     return '', []
 
 
-def _market_source_chunks(market):
-    """Keep every source, but split the register into two columns on one slide."""
-    rows = _market_source_rows(market)
+def _market_source_chunks(market, rows=None):
+    """Split one source-register page into two balanced columns."""
+    rows = _market_source_rows(market) if rows is None else list(rows or [])
     midpoint = (len(rows) + 1) // 2
     return [rows[:midpoint], rows[midpoint:]] if rows else []
+
+
+def _market_summary_pages(market):
+    """Keep detailed analysis readable by limiting each page to five topics."""
+    return _market_row_pages(_market_summary_rows(market), 5)
+
+
+def _market_source_pages(market):
+    """Keep source rows readable by limiting each page to ten references."""
+    return _market_row_pages(_market_source_rows(market), 10)
 
 
 def _market_plan_slide(title, content_source, design_style='table', source_table=''):
@@ -1219,10 +1255,20 @@ def _normalize_market_group_slides(existing, market):
         })
         result.append(competitor_slide)
 
-    summary_rows = _market_summary_rows(market)
-    if summary_rows:
-        # Keep the detailed market analysis as organized labelled points.
-        result.append(take('market_study_data.summary', 'تحليل السوق', 'table', 'market_summary'))
+    summary_pages = _market_summary_pages(market)
+    for page_index, (start, page_rows) in enumerate(summary_pages, 1):
+        if not page_rows:
+            continue
+        content_source = 'market_study_data.summary'
+        title = 'تحليل السوق'
+        if len(summary_pages) > 1:
+            if start:
+                content_source = f'market_study_data.summary:{start}:{start + len(page_rows)}'
+            title += f' ({page_index}/{len(summary_pages)})'
+        page_slide = take(content_source, title, 'table', 'market_summary')
+        page_slide['market_row_start'] = start
+        page_slide['market_row_end'] = start + len(page_rows)
+        result.append(page_slide)
 
     one_block = _market_one_block_paragraph(market)
     if one_block:
@@ -1242,12 +1288,20 @@ def _normalize_market_group_slides(existing, market):
                 title += f' - {chunk_index}'
             result.append(take(content_source, title, 'text'))
 
-    source_rows = _market_source_rows(market)
-    if source_rows:
-        # The renderer lays all rows into two columns on one source-register
-        # slide, so the source content is never dropped or cropped by a fourth
-        # continuation slide.
-        result.append(take('market_study_data.sources', 'مصادر دراسة السوق', 'table', 'market_sources'))
+    source_pages = _market_source_pages(market)
+    for page_index, (start, page_rows) in enumerate(source_pages, 1):
+        if not page_rows:
+            continue
+        content_source = 'market_study_data.sources'
+        title = 'مصادر دراسة السوق'
+        if len(source_pages) > 1:
+            if start:
+                content_source = f'market_study_data.sources:{start}:{start + len(page_rows)}'
+            title += f' ({page_index}/{len(source_pages)})'
+        page_slide = take(content_source, title, 'table', 'market_sources')
+        page_slide['market_row_start'] = start
+        page_slide['market_row_end'] = start + len(page_rows)
+        result.append(page_slide)
 
     # A market section can only own one chart, and it is always the competitor
     # comparison. This also protects plans produced before the deterministic
@@ -4466,9 +4520,9 @@ def _slide_source_data_note(slide, project_data):
     summary_match = re.fullmatch(r'market_study_data\.summary(?::(\d+):(\d+))?', source)
     if summary_match:
         market = _market_state(project_data)
-        rows = _market_summary_rows(market)
-        if summary_match.group(1) is not None:
-            rows = rows[int(summary_match.group(1)):int(summary_match.group(2))]
+        rows, _row_offset = _market_rows_for_slide(
+            slide, 'market_study_data.summary', _market_summary_rows(market)
+        )
         return 'الملخص التنفيذي لسوق المشروع، بكل محاوره وقيمه كما أُدخلت:\n' + json.dumps(rows, ensure_ascii=False, indent=2) if rows else ''
     one_block_match = re.fullmatch(r'market_study_data\.one_block_summary(?::(\d+):(\d+))?', source)
     if one_block_match:
@@ -5527,9 +5581,9 @@ def _required_slide_texts(slide, project_data):
     summary_match = re.fullmatch(r'market_study_data\.summary(?::(\d+):(\d+))?', source)
     if summary_match:
         market = _market_state(project_data)
-        rows = _market_summary_rows(market)
-        if summary_match.group(1) is not None:
-            rows = rows[int(summary_match.group(1)):int(summary_match.group(2))]
+        rows, _row_offset = _market_rows_for_slide(
+            slide, 'market_study_data.summary', _market_summary_rows(market)
+        )
         return [str(value).strip() for row in rows for value in row if str(value or '').strip()]
     one_block_match = re.fullmatch(r'market_study_data\.one_block_summary(?::(\d+):(\d+))?', source)
     if one_block_match:
@@ -5767,16 +5821,16 @@ def _fallback_table_data(slide, project_data):
     summary_match = re.fullmatch(r'market_study_data\.summary(?::(\d+):(\d+))?', source)
     if summary_match or (slide or {}).get('source_table') == 'market_summary':
         market = _market_state(project_data)
-        rows = _market_summary_rows(market)
-        if summary_match and summary_match.group(1) is not None:
-            rows = rows[int(summary_match.group(1)):int(summary_match.group(2))]
+        rows, _row_offset = _market_rows_for_slide(
+            slide, 'market_study_data.summary', _market_summary_rows(market)
+        )
         return ['محور التحليل', 'الملخص المعتمد'], rows
     sources_match = re.fullmatch(r'market_study_data\.sources(?::(\d+):(\d+))?', source)
     if sources_match or (slide or {}).get('source_table') == 'market_sources':
         market = _market_state(project_data)
-        rows = _market_source_rows(market)
-        if sources_match and sources_match.group(1) is not None:
-            rows = rows[int(sources_match.group(1)):int(sources_match.group(2))]
+        rows, _row_offset = _market_rows_for_slide(
+            slide, 'market_study_data.sources', _market_source_rows(market)
+        )
         return ['المصدر', 'الرابط', 'تاريخ البيانات', 'تاريخ الوصول', 'الموثوقية', 'الملاحظات'], rows
     if source == 'market_study_data.competitors' or (slide or {}).get('source_table') == 'competitors' or 'competitors' in source:
         market = _decode_json_fact(project_data.get('market_study_data')) if isinstance(project_data.get('market_study_data'), (str, dict)) else {}
@@ -6821,10 +6875,12 @@ def _market_value_html(value):
 
 
 def _build_market_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Render the detailed market analysis as organized labelled points."""
+    """Render one readable page of the detailed market analysis."""
     source = source if isinstance(source, dict) else {}
     market = _market_state(source)
-    rows = _market_summary_rows(market)
+    rows, _row_offset = _market_rows_for_slide(
+        slide, 'market_study_data.summary', _market_summary_rows(market)
+    )
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
     title = html_lib.escape(str((slide or {}).get('title') or 'تحليل السوق'))
@@ -6841,23 +6897,29 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
     else:
         midpoint = (len(rows) + 1) // 2
         columns = (rows[:midpoint], rows[midpoint:])
-        subtitle = 'محاور تحليل السوق التفصيلي'
+        subtitle = 'قراءة تحليلية للعرض والطلب والمنافسة والفرصة الاستثمارية'
 
         def render_column(column_rows):
             blocks = []
             for label, value in column_rows:
                 blocks.append(
-                    f'<div style="display:grid;grid-template-columns:0.72fr 1.75fr;gap:12px;align-items:start;'
-                    f'padding:12px 14px;border-bottom:1px solid #dbe4ee;background:#ffffff;min-height:80px;box-sizing:border-box;">'
-                    f'<div style="border-right:3px solid {accent};padding-right:9px;font-size:11.2px;font-weight:800;color:{primary};line-height:1.35;">{html_lib.escape(str(label))}</div>'
-                    f'<div style="font-size:10.8px;line-height:1.48;color:#334155;font-weight:500;">{_market_value_html(value)}</div>'
+                    f'<div data-market-analysis-card="1" style="background:#ffffff;border:1px solid #e2e8f0;'
+                    f'border-right:4px solid {accent};border-radius:8px;padding:13px 16px 14px;'
+                    f'min-height:98px;box-sizing:border-box;box-shadow:0 2px 7px rgba(15,23,42,.04);">'
+                    f'<div style="font-size:13px;font-weight:800;color:{primary};line-height:1.3;margin-bottom:8px;">'
+                    f'{html_lib.escape(str(label))}</div>'
+                    f'<div style="font-size:12.5px;line-height:1.62;color:#334155;font-weight:500;text-align:justify;">'
+                    f'{_market_value_html(value)}</div>'
                     '</div>'
                 )
-            return ''.join(blocks)
+            return '<div style="display:flex;flex-direction:column;gap:12px;">' + ''.join(blocks) + '</div>'
 
         body_content = (
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">'
-            + ''.join(f'<div style="min-width:0;border-top:4px solid {primary};background:#f8fafc;">{render_column(column)}</div>' for column in columns)
+            f'<div data-market-analysis="1" style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">'
+            + ''.join(
+                f'<div style="min-width:0;background:#f8fafc;border-top:5px solid {primary};border-radius:8px;padding:12px;">'
+                f'{render_column(column)}</div>' for column in columns if column
+            )
             + '</div>'
         )
 
@@ -6877,7 +6939,7 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:14px;">
+  <div style="padding:0 36px;margin-top:12px;">
     {body_content}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
@@ -6932,9 +6994,10 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
     title = html_lib.escape(str((slide or {}).get('title') or 'ملخص دراسة سوق العمل'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
     body_html = (
-        f'<div data-market-work-summary="1" style="border-top:4px solid {primary};background:#f8fafc;'
-        f'padding:28px 36px;height:492px;overflow:hidden;box-sizing:border-box;">'
-        f'<p style="margin:0;font-size:17px;line-height:2.05;color:#1f2937;font-weight:500;text-align:justify;">'
+        f'<div data-market-work-summary="1" style="border:1px solid #e2e8f0;border-right:6px solid {accent};'
+        f'border-radius:10px;background:#f8fafc;padding:32px 42px;height:504px;overflow:hidden;box-sizing:border-box;'
+        f'box-shadow:0 3px 10px rgba(15,23,42,.05);">'
+        f'<p style="margin:0;font-size:18.5px;line-height:2.08;color:#1f2937;font-weight:500;text-align:justify;">'
         f'{_market_value_html(value)}</p></div>'
     )
 
@@ -6966,26 +7029,29 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
 
 
 def _build_market_sources_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Fit the complete source register on one slide as two compact table columns."""
+    """Render one readable page of the source register as two table columns."""
     source = source if isinstance(source, dict) else {}
     market = _market_state(source)
-    columns = _market_source_chunks(market)
+    page_rows, row_offset = _market_rows_for_slide(
+        slide, 'market_study_data.sources', _market_source_rows(market)
+    )
+    columns = _market_source_chunks(market, page_rows)
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
     title = html_lib.escape(str((slide or {}).get('title') or 'مصادر دراسة السوق'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
 
-    def field(value, direction='rtl', size='7.5px'):
+    def field(value, direction='rtl', size='9px'):
         return f'<div dir="{direction}" style="font-size:{size};line-height:1.2;word-break:break-word;overflow-wrap:anywhere;">{_market_value_html(value)}</div>'
 
     def render_column(column_rows, column_index):
         header = (
-            '<div style="display:grid;grid-template-columns:1.05fr 1.75fr 1.15fr 1.35fr;'
-            f'gap:0;background:{primary};color:#fff;font-size:7.5px;font-weight:800;text-align:center;line-height:1.15;">'
-            '<div style="padding:5px 4px;">المصدر</div><div style="padding:5px 4px;">الرابط</div>'
-            '<div style="padding:5px 4px;">التواريخ والموثوقية</div><div style="padding:5px 4px;">الملاحظات</div></div>'
+            '<div style="display:grid;grid-template-columns:1.12fr 1.55fr 1.18fr 1.25fr;'
+            f'gap:0;background:{primary};color:#fff;font-size:9px;font-weight:800;text-align:center;line-height:1.2;">'
+            '<div style="padding:7px 5px;">المصدر</div><div style="padding:7px 5px;">الرابط</div>'
+            '<div style="padding:7px 5px;">التواريخ والموثوقية</div><div style="padding:7px 5px;">الملاحظات</div></div>'
         )
-        start_number = 1 + sum(len(item) for item in columns[:column_index])
+        start_number = row_offset + 1 + sum(len(item) for item in columns[:column_index])
         end_number = start_number + len(column_rows) - 1
         range_title = f'مصادر {start_number} - {end_number}' if column_rows else 'مصادر'
         rows_html = []
@@ -7001,17 +7067,17 @@ def _build_market_sources_slide(slide, source, branding=None, slide_num=None, to
             meta = '<br>'.join(html_lib.escape(part) for part in meta_parts) or 'غير متوفر'
             bg = '#f8fafc' if row_index % 2 else '#ffffff'
             rows_html.append(
-                f'<div style="display:grid;grid-template-columns:1.05fr 1.75fr 1.15fr 1.35fr;gap:0;'
+                f'<div style="display:grid;grid-template-columns:1.12fr 1.55fr 1.18fr 1.25fr;gap:0;'
                 f'background:{bg};border-bottom:1px solid #e2e8f0;align-items:center;">'
-                f'<div style="padding:5px 4px;text-align:center;font-size:7.7px;line-height:1.2;word-break:break-word;">{_market_value_html(name)}</div>'
-                f'<div style="padding:5px 4px;text-align:center;">{field(url, "ltr", "6.5px")}</div>'
-                f'<div style="padding:5px 4px;text-align:center;font-size:7px;line-height:1.2;word-break:break-word;">{meta}</div>'
-                f'<div style="padding:5px 4px;text-align:center;">{field(note, "rtl", "7.2px")}</div>'
+                f'<div style="padding:8px 6px;text-align:center;font-size:9.3px;line-height:1.35;word-break:break-word;">{_market_value_html(name)}</div>'
+                f'<div style="padding:8px 6px;text-align:center;">{field(url, "ltr", "8px")}</div>'
+                f'<div style="padding:8px 6px;text-align:center;font-size:8.4px;line-height:1.35;word-break:break-word;">{meta}</div>'
+                f'<div style="padding:8px 6px;text-align:center;">{field(note, "rtl", "8.7px")}</div>'
                 '</div>'
             )
         return (
-            f'<div style="border:1px solid #e2e8f0;border-radius:7px;overflow:hidden;min-width:0;">'
-            f'<div style="padding:6px 8px;background:#f8fafc;color:{primary};font-size:9px;font-weight:800;">{range_title}</div>'
+            f'<div style="border:1px solid #dbe4ee;border-radius:8px;overflow:hidden;min-width:0;box-shadow:0 2px 7px rgba(15,23,42,.04);">'
+            f'<div style="padding:8px 10px;background:#f8fafc;color:{primary};font-size:10.5px;font-weight:800;">{range_title}</div>'
             f'{header}{"".join(rows_html)}</div>'
         )
 
@@ -7031,7 +7097,7 @@ def _build_market_sources_slide(slide, source, branding=None, slide_num=None, to
       </div>
     </div>
   </header>
-  <div style="padding:0 24px;margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;">
+  <div style="padding:0 36px;margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">
     {''.join(render_column(column, index) for index, column in enumerate(columns))}
   </div>
   <footer class="slide-footer" data-slide-footer="1">

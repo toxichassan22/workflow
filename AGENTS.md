@@ -456,8 +456,9 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   300 words (`SUMMARY_WORD_TARGET` / `SUMMARY_MIN_WORDS`), with no headings, numbered sections, bullet lists, SWOT list, or
   source register. `summary_prose()` (Python) and `buildMarketStudyOneBlockSummary()` (JS)
   provide a readable paragraph fallback for old drafts, while old ten-field summaries remain
-  readable through `LEGACY_SUMMARY_SECTIONS`. The deterministic market-analysis slide renders
-  the points, and the executive-summary slide renders the one-block paragraph full-width.
+  readable through `LEGACY_SUMMARY_SECTIONS`. Deterministic market-analysis pages render at most
+  five topics per page as readable cards, source-register pages render at most ten references,
+  and the executive-summary slide renders the one-block paragraph full-width.
 - Production jobs are queued (`POST /api/market-study/competitors` or `/summary`, poll
   `GET /api/market-study/jobs/<id>`) for the same hosting-proxy reason as croquis. Tests stay
   synchronous unless they pass `background: true`. Web search goes through the OpenRouter

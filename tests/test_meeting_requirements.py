@@ -1694,6 +1694,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.one_block_summary') for slide in content))
         self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.sources') for slide in content))
         self.assertEqual(sum(1 for slide in content if slide.get('content_source') == 'market_study_data.summary'), 1)
+        self.assertIn('market_study_data.summary:5:9', [slide.get('content_source') for slide in content])
         self.assertLessEqual(sum(1 for slide in content if str(slide.get('content_source') or '').startswith('market_study_data.one_block_summary')), 2)
         self.assertEqual(sum(1 for slide in content if slide.get('content_source') == 'market_study_data.sources'), 1)
         self.assertTrue(all(not slide.get('image_tokens') and not slide.get('requires_image') for slide in market))
