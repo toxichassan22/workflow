@@ -1654,6 +1654,12 @@ class MeetingRequirementsTests(unittest.TestCase):
                     'market_gap': 'الفجوة السوقية', 'recommendation': 'التوصية',
                     'risks': 'المخاطر', 'decision': 'القرار',
                 },
+                'swot': {
+                    'strengths': 'موقع قوي - مكونات متكاملة',
+                    'weaknesses': 'تكلفة مرتفعة',
+                    'opportunities': 'نمو الطلب',
+                    'threats': 'منافسة جديدة',
+                },
                 'one_block_summary': 'ملخص دراسة السوق كامل',
                 'sources': [{
                     'name': 'مصدر رسمي', 'url': 'https://example.test/source',
@@ -1676,7 +1682,22 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.summary') for slide in content))
         self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.one_block_summary') for slide in content))
         self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.sources') for slide in content))
+        self.assertEqual(sum(1 for slide in content if slide.get('content_source') == 'market_study_data.summary'), 1)
+        self.assertLessEqual(sum(1 for slide in content if str(slide.get('content_source') or '').startswith('market_study_data.one_block_summary')), 2)
+        self.assertEqual(sum(1 for slide in content if slide.get('content_source') == 'market_study_data.sources'), 1)
         self.assertTrue(all(not slide.get('image_tokens') and not slide.get('requires_image') for slide in market))
+
+        swot = [slide for slide in plan['slides']
+                if slide.get('section_key') == 'swot_risks' and slide.get('type') == 'content']
+        self.assertEqual(len(swot), 1)
+        swot_html = engine.generate_single_slide(
+            'system', swot[0], 3, 10, {'primary_color': '#123456'},
+            lambda *_args, **_kwargs: self.fail('SWOT must be deterministic'),
+            project_data=project,
+        )
+        for value in ('نقاط القوة', 'نقاط الضعف', 'الفرص', 'التهديدات', 'موقع قوي', 'منافسة جديدة'):
+            self.assertIn(value, swot_html)
+        self.assertNotIn('"strengths"', swot_html)
 
         rendered = []
         for slide in content:
@@ -1693,6 +1714,36 @@ class MeetingRequirementsTests(unittest.TestCase):
                                if slide.get('content_source') == 'market_study_data.competitors')
         self.assertIn('data-competitor-table', competitor_html)
         self.assertIn('##COMPETITOR_LOGO_1##', competitor_html)
+
+        long_market = {
+            'market_study_data': {
+                'one_block_summary': (
+                    'نطاق دراسة السوق\\n\\n'
+                    + ('بيانات سوق العمل كاملة ومعتمدة كما وردت في الدراسة. ' * 150)
+                    + '\\n\\nالنهاية الكاملة لملخص سوق العمل.'
+                ),
+            },
+        }
+        long_plan = engine.normalize_presentation_plan(
+            {'slides': [
+                {'title': 'الغلاف', 'type': 'cover'},
+                {'title': 'الخاتمة', 'type': 'closing'},
+            ]},
+            long_market,
+            {},
+        )
+        long_work_slides = [slide for slide in long_plan['slides']
+                            if slide.get('content_source', '').startswith('market_study_data.one_block_summary:')]
+        self.assertEqual(len(long_work_slides), 2)
+        long_work_html = ''.join(
+            engine.generate_single_slide(
+                'system', slide, index + 1, 2, {'primary_color': '#123456'},
+                lambda *_args, **_kwargs: self.fail('long market summary must be deterministic'),
+                project_data=long_market,
+            )
+            for index, slide in enumerate(long_work_slides)
+        )
+        self.assertIn('النهاية الكاملة لملخص سوق العمل', long_work_html)
 
     def test_wide_cashflow_table_in_report_preserves_combo_chart(self):
         engine = self.application_module.slide_engine

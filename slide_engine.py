@@ -31,7 +31,7 @@ CONTENT_DISTRIBUTION_RULES = """
 2. ترتيب الأقسام لا يتغير: نبذة عن المشروع، مكونات المشروع، تحليل الأرض، تحليل الموقع الجغرافي، تحليل السوق، الجدول الزمني، الدراسة المالية، تحليل SWOT وتحليل المخاطر، فريق العمل، المخططات، التصورات الخارجية، التصورات الداخلية، الملخص التنفيذي، الخاتمة.
 3. الفهرس يعرض أسماء الأقسام فقط مع أرقام الصفحات؛ لا يعرض عناوين الشرائح الفرعية ولا يستخدم مخطط محاور أو تدفق أو بطاقات صغيرة.
 4. صفحة بداية كل قسم تحمل اسم القسم وحده بلا وصف وبلا ترجمة وبلا نقاط.
-5. كل شريحة لها فكرة واحدة، ويُقسّم المحتوى الطويل على صفحات إضافية بدلاً من تصغيره أو حذفه.
+5. كل شريحة لها فكرة واحدة، ويُضغط المحتوى المتكرر في جدول منظم أو عمودين قبل إضافة صفحة جديدة؛ لا يُصغّر النص لدرجة يصعب قراءتها ولا تُحذف البيانات.
 6. لا تكرر المعلومة أو مكونات المشروع في أكثر من موضع. الإحالة المختصرة مسموحة، أما إعادة الجدول أو القائمة نفسها فممنوعة.
 7. اختر الشكل بحسب طبيعة المحتوى: نص متصل للنبذات والملخصات، جدول للصفوف المنظمة، وصورة كبيرة للصور والمخططات. الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في دراسة السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في الدراسة المالية). أي رسم خارج هذه المواقع الأربعة والأنواع الأربعة ممنوع منعاً باتاً. استخدم البطاقات فقط لعناصر مستقلة قصيرة ومتوازية، وبحد أقصى ثلاث بطاقات عند الحاجة.
 8. يوضع ملخص نهائي مستند إلى بيانات البرنامج بعد جداول كل قسم تحليلي، ولا تُضاف تحسينات إنشائية أو استرسال لا يحمل معلومة واضحة.
@@ -40,6 +40,8 @@ CONTENT_DISTRIBUTION_RULES = """
 11. قسم تحليل السوق لا يحتوي على خرائط أو صور أو خلفيات صور. الاستثناء الوحيد هو شعار المنافس إذا كان محفوظاً ضمن بيانات ذلك المنافس، ويظهر داخل صفه في جدول المنافسين.
 12. قسم تحليل السوق يحتوي على رسم بياني واحد فقط: horizontal_bar في شريحة مقارنة المنافسين. بقية محتوى السوق نصوص وجداول ثابتة، ولا يجوز للنموذج إنشاء رسم بديل أو شريحة صور.
 13. يجب نقل نطاق الدراسة، وكل صف من جدول المنافسين، والملخص التنفيذي لسوق المشروع، وملخص دراسة السوق، وكل مصدر كما هو من بيانات السوق. تقسيم البيانات على شرائح إضافية مسموح، حذفها أو اختصارها غير مسموح.
+14. التوزيع المضغوط لقسم السوق إلزامي: شريحة واحدة لنطاق الدراسة، شريحة واحدة لمقارنة المنافسين، شريحة واحدة تجمع المحاور العشرة للملخص التنفيذي، شريحة واحدة للمصادر، وملخص دراسة سوق العمل في شريحة أو شريحتين كحد أقصى.
+15. قسم تحليل SWOT للمشروع يظهر في شريحة واحدة فقط بعد فاصل القسم، داخل مصفوفة واضحة من أربعة محاور: نقاط القوة، نقاط الضعف، الفرص، والتهديدات. لا تعرض JSON أو أقواساً أو أسماء مفاتيح برمجية.
 """
 
 PRESENTATION_SECTION_ORDER = (
@@ -986,6 +988,32 @@ def _market_has_required_data(market):
     )
 
 
+def _market_one_block_chunks(value, max_chars=2200):
+    """Split the complete market-work summary into at most two readable chunks."""
+    text = str(value or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [text]
+    midpoint = max_chars
+    split_at = text.rfind('\n\n', 0, midpoint + 260)
+    if split_at < int(len(text) * 0.35):
+        split_at = text.rfind(' ', 0, midpoint + 260)
+    if split_at < int(len(text) * 0.35):
+        split_at = min(midpoint, len(text) - 1)
+    first = text[:split_at].strip()
+    second = text[split_at:].strip()
+    return [chunk for chunk in (first, second) if chunk]
+
+
+def _market_source_chunks(market):
+    """Keep every source, but split the register into two columns on one slide."""
+    rows = _market_source_rows(market)
+    midpoint = (len(rows) + 1) // 2
+    return [rows[:midpoint], rows[midpoint:]] if rows else []
+
+
 def _market_plan_slide(title, content_source, design_style='table', source_table=''):
     return {
         'title': title,
@@ -1003,119 +1031,88 @@ def _market_plan_slide(title, content_source, design_style='table', source_table
 
 
 def _normalize_market_group_slides(existing, market):
-    """Make the market section deterministic and remove leaked map/image slides."""
+    """Make the market section compact, deterministic, and media-free."""
     if not _market_has_required_data(market):
         return list(existing or [])
 
     existing = [dict(slide) for slide in (existing or []) if isinstance(slide, dict)]
     competitors = market.get('competitors') if isinstance(market.get('competitors'), list) else []
     named_competitors = [row for row in competitors if _competitor_name(row)]
-    canonical_by_source = {}
-    preserved = []
-    competitor_slide = None
-    required_titles = {'نطاق الدراسة', 'الملخص التنفيذي لسوق المشروع', 'ملخص دراسة السوق', 'مصادر دراسة السوق'}
+    # The structured market fields are the source of truth. Older plans often
+    # contain duplicate pages for the same two-row table, plus narrative/map
+    # pages that repeat the ten summary fields. Reusing those pages defeats the
+    # compact layout and can bring stale media back, so retain only their
+    # semantic identity and rebuild the section below from current data.
+    existing_by_source = {
+        str(slide.get('content_source') or '').strip(): slide
+        for slide in existing
+        if str(slide.get('content_source') or '').strip()
+    }
 
-    for slide in existing:
-        source = str(slide.get('content_source') or '').strip()
-        title = str(slide.get('title') or '').strip()
-        title_lower = title.lower()
-        is_competitor = (
-            source == 'market_study_data.competitors'
-            or str(slide.get('source_table') or '').strip() == 'competitors'
-            or bool(re.search(r'(?:منافس|competitor)', title_lower, flags=re.IGNORECASE))
-        )
-        if is_competitor:
-            if competitor_slide is None:
-                competitor_slide = slide
-            continue
-        if source in {
-            'market_study_data.scope', 'market_study_data.summary',
-            'market_study_data.one_block_summary', 'market_study_data.sources',
-        } or re.fullmatch(r'market_study_data\.(?:summary|one_block_summary|sources):\d+:\d+', source):
-            canonical_by_source[source] = slide
-            continue
-        if title in required_titles or 'الملخص التنفيذي لسوق المشروع' in title:
-            continue
-
-        stale_map = (
-            str(slide.get('type') or '').lower().startswith('map_')
-            or source.startswith('map_')
-            or str(slide.get('design_style') or '').lower() == 'map'
-        )
-        if stale_map and not slide.get('bullets') and not source.startswith('market_study_data.'):
-            continue
-
-        # A stale market plan could ask for a map, moodboard, or arbitrary image.
-        # Keep its written content, but make the renderer text/table-only.
-        slide['section_key'] = 'market'
-        slide['type'] = 'content'
-        slide['requires_image'] = False
-        slide['image_tokens'] = []
-        slide['chart_type'] = ''
-        if str(slide.get('design_style') or '').lower() in {
-            'map', 'image', 'diagram', 'chart', 'bar', 'column', 'pie', 'donut',
-            'scatter', 'histogram', 'heatmap', 'candlestick', 'flow',
-        }:
-            slide['design_style'] = 'table' if slide.get('source_table') else 'text'
-        preserved.append(slide)
+    def take(source, title, design_style='table', source_table=''):
+        slide = dict(existing_by_source.get(source) or
+                     _market_plan_slide(title, source, design_style, source_table))
+        slide.update({
+            'title': title,
+            'type': 'content',
+            'section_key': 'market',
+            'design_style': design_style,
+            'chart_type': '',
+            'content_density': 'high',
+            'requires_image': False,
+            'content_source': source,
+            'source_table': source_table,
+            'image_tokens': [],
+            'bullets': [],
+        })
+        return slide
 
     result = []
     scope_rows = _market_scope_rows(market)
     if scope_rows:
-        result.append(canonical_by_source.get('market_study_data.scope') or
-                      _market_plan_slide('نطاق الدراسة', 'market_study_data.scope', 'table', 'market_scope'))
-    result.extend(preserved)
+        result.append(take('market_study_data.scope', 'نطاق الدراسة', 'table', 'market_scope'))
 
     if named_competitors:
-        competitor_slide = competitor_slide or _market_plan_slide(
-            'مقارنة المنافسين', 'market_study_data.competitors', 'chart', 'competitors')
+        competitor_slide = take('market_study_data.competitors', 'مقارنة المنافسين', 'chart', 'competitors')
         competitor_slide.update({
-            'title': 'مقارنة المنافسين', 'type': 'content', 'section_key': 'market',
-            'design_style': 'chart', 'chart_type': 'horizontal_bar',
-            'content_density': 'high', 'requires_image': False,
-            'content_source': 'market_study_data.competitors', 'source_table': 'competitors',
-            'image_tokens': [], 'bullets': [],
+            'design_style': 'chart',
+            'chart_type': 'horizontal_bar',
         })
         result.append(competitor_slide)
 
     summary_rows = _market_summary_rows(market)
     if summary_rows:
-        summary_chunks = [summary_rows[index:index + 2] for index in range(0, len(summary_rows), 2)]
-        for chunk_index, _chunk in enumerate(summary_chunks, 1):
-            content_source = 'market_study_data.summary'
-            title = 'الملخص التنفيذي لسوق المشروع'
-            if len(summary_chunks) > 1:
-                start = (chunk_index - 1) * 2
-                content_source = f'market_study_data.summary:{start}:{start + len(_chunk)}'
-                title += f' — {chunk_index}'
-            result.append(canonical_by_source.get(content_source) or
-                          _market_plan_slide(title, content_source, 'table', 'market_summary'))
+        # One slide uses two balanced columns of five rows, keeping all ten
+        # fields while removing the old five-slide repetition.
+        result.append(take('market_study_data.summary', 'الملخص التنفيذي لسوق المشروع', 'table', 'market_summary'))
 
-    one_block = str(market.get('one_block_summary') or '').strip()
+    one_block = (str(market.get('one_block_summary') or '')
+                 .replace('\\r\\n', '\n')
+                 .replace('\\n', '\n')
+                 .strip())
     if one_block:
-        block_chunks = [one_block[index:index + 1200] for index in range(0, len(one_block), 1200)]
+        block_chunks = _market_one_block_chunks(one_block)
+        chunk_cursor = 0
         for chunk_index, _chunk in enumerate(block_chunks, 1):
             content_source = 'market_study_data.one_block_summary'
-            title = 'ملخص دراسة السوق'
+            title = 'ملخص دراسة سوق العمل'
             if len(block_chunks) > 1:
-                start = (chunk_index - 1) * 1200
-                content_source = f'market_study_data.one_block_summary:{start}:{start + len(_chunk)}'
-                title += f' — {chunk_index}'
-            result.append(canonical_by_source.get(content_source) or
-                          _market_plan_slide(title, content_source, 'text'))
+                # Keep a stable source name for the single-slide case and a
+                # bounded slice only when two slides are actually required.
+                start = one_block.find(_chunk, chunk_cursor)
+                if start < 0:
+                    start = chunk_cursor
+                content_source = f'market_study_data.one_block_summary:{max(start, 0)}:{max(start, 0) + len(_chunk)}'
+                chunk_cursor = start + len(_chunk)
+                title += f' - {chunk_index}'
+            result.append(take(content_source, title, 'text'))
 
     source_rows = _market_source_rows(market)
     if source_rows:
-        source_chunks = [source_rows[index:index + 4] for index in range(0, len(source_rows), 4)]
-        for chunk_index, _chunk in enumerate(source_chunks, 1):
-            content_source = 'market_study_data.sources'
-            title = 'مصادر دراسة السوق'
-            if len(source_chunks) > 1:
-                start = (chunk_index - 1) * 4
-                content_source = f'market_study_data.sources:{start}:{start + len(_chunk)}'
-                title += f' — {chunk_index}'
-            result.append(canonical_by_source.get(content_source) or
-                          _market_plan_slide(title, content_source, 'table', 'market_sources'))
+        # The renderer lays all rows into two columns on one source-register
+        # slide, so the source content is never dropped or cropped by a fourth
+        # continuation slide.
+        result.append(take('market_study_data.sources', 'مصادر دراسة السوق', 'table', 'market_sources'))
 
     # A market section can only own one chart, and it is always the competitor
     # comparison. This also protects plans produced before the deterministic
@@ -6651,6 +6648,269 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
 </div>'''
 
 
+def _market_value_html(value):
+    return html_lib.escape(str(value or 'غير متوفر')).replace('\n', '<br>')
+
+
+def _build_market_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render all ten executive market fields in one balanced two-column slide."""
+    source = source if isinstance(source, dict) else {}
+    market = _market_state(source)
+    rows = _market_summary_rows(market)
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'الملخص التنفيذي لسوق المشروع'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+    midpoint = (len(rows) + 1) // 2
+    columns = (rows[:midpoint], rows[midpoint:])
+
+    def render_column(column_rows):
+        blocks = []
+        for label, value in column_rows:
+            blocks.append(
+                f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-right:4px solid {accent};'
+                'border-radius:6px;padding:8px 11px;box-sizing:border-box;min-height:86px;overflow:visible;">'
+                f'<div style="font-size:11px;font-weight:800;color:{primary};margin-bottom:4px;">{html_lib.escape(str(label))}</div>'
+                f'<div style="font-size:10.4px;line-height:1.38;color:#334155;font-weight:500;">{_market_value_html(value)}</div>'
+                '</div>'
+            )
+        return ''.join(blocks)
+
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">MARKET SUMMARY</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">المحاور العشرة المعتمدة في ملخص دراسة السوق</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 36px;margin-top:10px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;">
+      {''.join(f'<div style="display:flex;flex-direction:column;gap:8px;min-width:0;">{render_column(column)}</div>' for column in columns)}
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">الملخص التنفيذي لسوق المشروع</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _market_one_block_text(slide, market):
+    source = str((slide or {}).get('content_source') or '')
+    value = str((market or {}).get('one_block_summary') or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
+    match = re.fullmatch(r'market_study_data\.one_block_summary:(\d+):(\d+)', source)
+    if match:
+        value = value[int(match.group(1)):int(match.group(2))]
+    return value.strip()
+
+
+def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render the complete work-market summary in one or two readable slides."""
+    source = source if isinstance(source, dict) else {}
+    market = _market_state(source)
+    value = _market_one_block_text(slide, market)
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'ملخص دراسة سوق العمل'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+    paragraphs = [part.strip() for part in re.split(r'\n\s*\n+', value) if part.strip()]
+    rendered = []
+    for paragraph in paragraphs:
+        lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
+        joined = ' '.join(lines)
+        is_heading = len(joined) <= 70 and ':' not in joined and not re.search(r'[.!؟،]', joined)
+        if is_heading:
+            rendered.append(
+                f'<div style="break-inside:avoid;font-size:12px;font-weight:800;color:{primary};'
+                f'border-right:4px solid {accent};padding:3px 9px;margin:2px 0 5px;">{_market_value_html(joined)}</div>'
+            )
+        else:
+            rendered.append(
+                f'<div style="break-inside:avoid;font-size:12.7px;line-height:1.48;color:#334155;'
+                f'margin:0 0 8px;padding:0 5px;">{_market_value_html(paragraph)}</div>'
+            )
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">MARKET WORK SUMMARY</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">النص الكامل المعتمد لدراسة سوق العمل</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 42px;margin-top:12px;height:536px;overflow:hidden;">
+    {''.join(rendered)}
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">ملخص دراسة سوق العمل</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _build_market_sources_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Fit the complete source register on one slide as two compact table columns."""
+    source = source if isinstance(source, dict) else {}
+    market = _market_state(source)
+    columns = _market_source_chunks(market)
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'مصادر دراسة السوق'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+
+    def field(value, direction='rtl', size='7.5px'):
+        return f'<div dir="{direction}" style="font-size:{size};line-height:1.2;word-break:break-word;overflow-wrap:anywhere;">{_market_value_html(value)}</div>'
+
+    def render_column(column_rows, column_index):
+        header = (
+            '<div style="display:grid;grid-template-columns:1.05fr 1.75fr 1.15fr 1.35fr;'
+            f'gap:0;background:{primary};color:#fff;font-size:7.5px;font-weight:800;text-align:center;line-height:1.15;">'
+            '<div style="padding:5px 4px;">المصدر</div><div style="padding:5px 4px;">الرابط</div>'
+            '<div style="padding:5px 4px;">التواريخ والموثوقية</div><div style="padding:5px 4px;">الملاحظات</div></div>'
+        )
+        start_number = 1 + sum(len(item) for item in columns[:column_index])
+        end_number = start_number + len(column_rows) - 1
+        range_title = f'مصادر {start_number} - {end_number}' if column_rows else 'مصادر'
+        rows_html = []
+        for row_index, row in enumerate(column_rows):
+            name, url, data_date, accessed, reliability, note = list(row) + [''] * max(0, 6 - len(row))
+            meta_parts = []
+            if str(data_date or '').strip():
+                meta_parts.append('تاريخ البيانات: ' + str(data_date).strip())
+            if str(accessed or '').strip():
+                meta_parts.append('تاريخ الوصول: ' + str(accessed).strip())
+            if str(reliability or '').strip():
+                meta_parts.append('الموثوقية: ' + str(reliability).strip())
+            meta = '<br>'.join(html_lib.escape(part) for part in meta_parts) or 'غير متوفر'
+            bg = '#f8fafc' if row_index % 2 else '#ffffff'
+            rows_html.append(
+                f'<div style="display:grid;grid-template-columns:1.05fr 1.75fr 1.15fr 1.35fr;gap:0;'
+                f'background:{bg};border-bottom:1px solid #e2e8f0;align-items:center;">'
+                f'<div style="padding:5px 4px;text-align:center;font-size:7.7px;line-height:1.2;word-break:break-word;">{_market_value_html(name)}</div>'
+                f'<div style="padding:5px 4px;text-align:center;">{field(url, "ltr", "6.5px")}</div>'
+                f'<div style="padding:5px 4px;text-align:center;font-size:7px;line-height:1.2;word-break:break-word;">{meta}</div>'
+                f'<div style="padding:5px 4px;text-align:center;">{field(note, "rtl", "7.2px")}</div>'
+                '</div>'
+            )
+        return (
+            f'<div style="border:1px solid #e2e8f0;border-radius:7px;overflow:hidden;min-width:0;">'
+            f'<div style="padding:6px 8px;background:#f8fafc;color:{primary};font-size:9px;font-weight:800;">{range_title}</div>'
+            f'{header}{"".join(rows_html)}</div>'
+        )
+
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">MARKET SOURCES</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">السجل الكامل للمراجع والروابط الرسمية المستخدمة في الدراسة</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 24px;margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;">
+    {''.join(render_column(column, index) for index, column in enumerate(columns))}
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">المراجع والمصادر الرسمية لدراسة السوق</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
+def _market_swot_items(value):
+    if isinstance(value, list):
+        values = value
+    elif isinstance(value, dict):
+        values = list(value.values())
+    else:
+        text = str(value or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
+        values = re.split(r'\n\s*-\s+|\s+-\s+', text) if text else []
+    return [str(item or '').strip(' -') for item in values if str(item or '').strip(' -')]
+
+
+def _build_market_swot_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render SWOT as a readable four-quadrant matrix instead of raw JSON."""
+    source = source if isinstance(source, dict) else {}
+    market = _market_state(source)
+    swot = market.get('swot') if isinstance(market.get('swot'), dict) else {}
+    definitions = (
+        ('strengths', 'نقاط القوة', '#0f766e', '#ecfdf5'),
+        ('weaknesses', 'نقاط الضعف', '#b45309', '#fffbeb'),
+        ('opportunities', 'الفرص', '#1d4ed8', '#eff6ff'),
+        ('threats', 'التهديدات', '#b91c1c', '#fef2f2'),
+    )
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'تحليل SWOT'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+    quadrants = []
+    for key, label, color, background in definitions:
+        items = _market_swot_items(swot.get(key))
+        item_html = ''.join(
+            f'<div style="padding:6px 0;border-bottom:1px solid rgba(15,23,42,0.08);font-size:12.2px;line-height:1.42;color:#334155;">{_market_value_html(item)}</div>'
+            for item in items
+        ) or '<div style="font-size:12px;color:#64748b;">غير متوفر</div>'
+        quadrants.append(
+            f'<div style="background:{background};border:1px solid rgba(15,23,42,0.10);border-top:5px solid {color};'
+            'border-radius:8px;padding:12px 16px;box-sizing:border-box;min-width:0;overflow:visible;">'
+            f'<div style="font-size:16px;font-weight:800;color:{color};margin-bottom:5px;">{label}</div>'
+            f'{item_html}</div>'
+        )
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">SWOT ANALYSIS</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">مصفوفة نقاط القوة والضعف والفرص والتهديدات للمشروع في السوق المحدد</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 36px;margin-top:14px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;height:526px;align-items:stretch;">
+      {''.join(quadrants)}
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">تحليل SWOT للمشروع</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
 def _build_structured_fallback_slide(slide, project_data, branding, slide_num=None, total_slides=None):
     source = project_data if isinstance(project_data, dict) else {}
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
@@ -6683,6 +6943,14 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
                 '<div data-map-summary-background style="background-image:url(##MAP_OVERVIEW##);"></div>'
                 f'<div data-map-summary-card style="background:{primary};color:#fff;padding:24px;overflow:hidden;">'
                 f'<h2 style="font-size:28px;margin:0 0 18px;">{title}</h2><div style="font-size:14px;line-height:1.7;">{note}</div></div></div>')
+    if re.fullmatch(r'market_study_data\.summary(?::\d+:\d+)?', content_source):
+        return _build_market_summary_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    if re.fullmatch(r'market_study_data\.one_block_summary(?::\d+:\d+)?', content_source):
+        return _build_market_one_block_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    if re.fullmatch(r'market_study_data\.sources(?::\d+:\d+)?', content_source):
+        return _build_market_sources_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    if content_source == 'market_study_data.swot':
+        return _build_market_swot_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if slide_type == 'map_landmarks':
         matrix = source.get('landmarks_matrix') if isinstance(source.get('landmarks_matrix'), list) else []
         headers = list(matrix[0].keys()) if matrix and isinstance(matrix[0], dict) else []
@@ -6852,7 +7120,8 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             or market_source in {'market_study_data.summary', 'market_study_data.one_block_summary', 'market_study_data.sources'}
         )
     )
-    if chart_type in APPROVED_CHART_TYPES or _slide_section_key(slide) == 'financial' or deterministic_market:
+    deterministic_market_swot = market_source == 'market_study_data.swot'
+    if chart_type in APPROVED_CHART_TYPES or _slide_section_key(slide) == 'financial' or deterministic_market or deterministic_market_swot:
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
             return postprocess_slide(
