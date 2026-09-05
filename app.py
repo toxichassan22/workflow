@@ -6752,10 +6752,12 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
     for number, title, table_key in (
         ('3', 'مكونات المشروع', 'componentsTable'),
         ('4', 'بنود الإيرادات', 'revenueTable'),
-        ('5', 'تكاليف المشروع', 'costTable'), ('6', 'مراحل التطوير', 'scheduleTable'),
+        ('5', 'تكاليف المشروع', 'costTable'),
         ('7', 'المصروفات التشغيلية', 'opexTable'),
     ):
         sections.append(f'<section><h2>{number}. {title}</h2>{_financial_report_table(tables.get(table_key))}</section>')
+    if inputs.get('developerPaymentsEnabled', 'yes') == 'yes':
+        sections.insert(-1, f'<section><h2>6. مراحل التطوير ودفعات المطور</h2>{_financial_report_table(tables.get("scheduleTable"))}</section>')
     if rental_on and inputs.get('graceEnabled') == 'yes':
         grace_rows = [
             ('طريقة احتساب السماح', inputs.get('graceMethod'), 'graceMethod'),
@@ -7159,10 +7161,11 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
         ('3', 'مكونات المشروع', 'componentsTable'),
         ('4', 'بنود الإيرادات', 'revenueTable'),
         ('5', 'تكاليف المشروع', 'costTable'),
-        ('6', 'مراحل التطوير', 'scheduleTable'),
-        ('7', 'المصروفات التشغيلية', 'opexTable'),
     ):
         draw_data_table(tables.get(table_key), f'{number}. {title}')
+    if inputs.get('developerPaymentsEnabled', 'yes') == 'yes':
+        draw_data_table(tables.get('scheduleTable'), '6. مراحل التطوير ودفعات المطور')
+    draw_data_table(tables.get('opexTable'), '7. المصروفات التشغيلية')
     if rental_on and inputs.get('graceEnabled') == 'yes':
         draw_text('فترة السماح للمستأجرين', 12)
         draw_kv_table([

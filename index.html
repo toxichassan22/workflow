@@ -11690,6 +11690,10 @@
       Object.entries(snapshot.inputs || {}).forEach(([id, value]) => setFinancialSnapshotInput(id, value));
       const rows = { ...(snapshot.dynamicRows || {}) };
       if (!Array.isArray(rows.components) && Array.isArray(fallbackComponents) && fallbackComponents.length) rows.components = fallbackComponents;
+      const developerPaymentsInput = document.getElementById('developerPaymentsEnabled');
+      if (developerPaymentsInput && !Object.prototype.hasOwnProperty.call(snapshot.inputs || {}, 'developerPaymentsEnabled')) {
+        developerPaymentsInput.value = Array.isArray(rows.schedule) && rows.schedule.length ? 'yes' : 'no';
+      }
       window.__batchLoading = true;
       try {
         hydrateFinancialTableRows('componentsTable', rows.components, addComponent);
@@ -14143,15 +14147,18 @@
 
         <div class="finance-block">
           <h3>7. مراحل التطوير ودفعات المطور</h3>
-          <p class="hint">المراحل وسنواتها تُعدّل من قسم الجدول الزمني. النسبتان فقط تُدخلان هنا، وتُوزَّع دفعة المطور على كل سنوات المرحلة في التدفقات.</p>
-          <div id="timelineStagesWarning" class="validation-panel error" hidden>لا توجد مراحل في الجدول الزمني بعد، فلن تُوزَّع تكاليف التطوير على السنوات.</div>
-          <div id="scheduleTotalsNote" class="calculation-note" hidden></div>
-          <div class="table-wrap">
-            <table id="scheduleTable">
-              <thead><tr><th>المرحلة</th><th>نسبة تكلفة التطوير %</th><th>نسبة دفعة المطور %</th><th>قيمة تكلفة المرحلة</th><th>قيمة دفعة المطور</th></tr></thead>
-              <tbody></tbody>
-              <tfoot><tr><th>الإجمالي</th><th id="scheduleCostPctTotal">0%</th><th id="scheduleDevPctTotal">0%</th><th id="scheduleCostTotalValue">0</th><th id="scheduleDevTotalValue">0</th></tr></tfoot>
-            </table>
+          <div class="section-switch"><label>هل توجد مراحل تطوير ودفعات للمطور؟</label><select id="developerPaymentsEnabled" onchange="calculateAll()"><option value="no" selected>لا</option><option value="yes">نعم</option></select></div>
+          <div id="developerPaymentsDetails">
+            <p class="hint">المراحل وسنواتها تُعدّل من قسم الجدول الزمني. النسبتان فقط تُدخلان هنا، وتُوزَّع دفعة المطور على كل سنوات المرحلة في التدفقات.</p>
+            <div id="timelineStagesWarning" class="validation-panel error" hidden>لا توجد مراحل في الجدول الزمني بعد، فلن تُوزَّع تكاليف التطوير على السنوات.</div>
+            <div id="scheduleTotalsNote" class="calculation-note" hidden></div>
+            <div class="table-wrap">
+              <table id="scheduleTable">
+                <thead><tr><th>المرحلة</th><th>نسبة تكلفة التطوير %</th><th>نسبة دفعة المطور %</th><th>قيمة تكلفة المرحلة</th><th>قيمة دفعة المطور</th></tr></thead>
+                <tbody></tbody>
+                <tfoot><tr><th>الإجمالي</th><th id="scheduleCostPctTotal">0%</th><th id="scheduleDevPctTotal">0%</th><th id="scheduleCostTotalValue">0</th><th id="scheduleDevTotalValue">0</th></tr></tfoot>
+              </table>
+            </div>
           </div>
         </div>
 
@@ -14901,6 +14908,7 @@
       setConditionalVisibility('developerBonusBlock', flags.sales);
       setConditionalVisibility('developerBonusDetails', flags.sales && val('developerBonusEnabled') === 'yes');
       setConditionalVisibility('externalDetails', val('externalEnabled') === 'yes');
+      setConditionalVisibility('developerPaymentsDetails', val('developerPaymentsEnabled') === 'yes');
 
       setConditionalSelector('#financeBlock .grid.four>div:not(:first-child),#financeBlock h4,#financeBlock .table-wrap,#financeBlock p.help', financeOn);
       setConditionalSelector('#fundBlock .grid.four>div:not(:first-child),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', fundOn);
@@ -15065,7 +15073,7 @@
       const financeRepaymentPctTotal = financeRepaymentPlan.reduce((sum, row) => sum + row.repaymentPct, 0);
       financeRepaymentPlan.forEach(row => { const amount = financeRepaymentPctTotal ? facilityAmount * (row.repaymentPct / financeRepaymentPctTotal) : 0; const c = row.tr.querySelector('.financeRepaymentAmount'); if (c) c.textContent = money(amount); });
 
-      const scheduleRows = [...document.querySelectorAll('#scheduleTable tbody tr')].map(tr => {
+      const scheduleRows = val('developerPaymentsEnabled') === 'yes' ? [...document.querySelectorAll('#scheduleTable tbody tr')].map(tr => {
         const startYear = Math.max(1, Math.min(developmentYears, Math.round(parseNumber(tr.dataset.stageYear) || 1)));
         const endYear = Math.max(startYear, Math.min(developmentYears, Math.round(parseNumber(tr.dataset.stageEndYear) || startYear)));
         return {
@@ -15077,7 +15085,7 @@
           costPct: Math.max(0, parseNumber(tr.querySelector('[data-field="costPct"] input')?.value)),
           devPct: Math.max(0, parseNumber(tr.querySelector('[data-field="devPct"] input')?.value))
         };
-      });
+      }) : [];
       const costPctTotal = Math.min(100, scheduleRows.reduce((s, r) => s + r.costPct, 0)), devPctTotal = Math.min(100, scheduleRows.reduce((s, r) => s + r.devPct, 0)), developmentCostBase = costTotal + externalCost;
       let scheduleCostValueTotal = 0, scheduleDevValueTotal = 0;
       scheduleRows.forEach(r => { const stageCost = costPctTotal ? developmentCostBase * (r.costPct / costPctTotal) : 0, stageDev = devPctTotal ? developerCost * (r.devPct / devPctTotal) : 0; scheduleCostValueTotal += stageCost; scheduleDevValueTotal += stageDev; const c1 = r.tr.querySelector('.stageCost'), c2 = r.tr.querySelector('.stageDevPayment'); if (c1) c1.textContent = money(stageCost); if (c2) c2.textContent = money(stageDev); });
@@ -15753,6 +15761,7 @@
 
       const resultSummary = reportRows(resultsList);
       const graceReportSection = reportFlags.rental && val('graceEnabled') === 'yes' ? `<section class="section"><h3>5. فترة السماح</h3>${reportRows([['طريقة الاحتساب', reportFieldValue('graceMethod')], ['نطاق السماح', reportFieldValue('graceScope')], ['بداية السماح', reportFieldValue('graceStartYear')], ['مدة السماح بالأشهر', reportFieldValue('graceDurationMonths')], ['إجمالي الخصم', reportFieldValue('graceTotalDiscount')]])}${val('graceMethod') === 'schedule' ? reportTableSnapshot('graceScheduleTable', true, true) : ''}</section>` : '';
+      const developerPaymentsReportSection = val('developerPaymentsEnabled') === 'yes' ? `<section class="section"><h3>6. مراحل التطوير ودفعات المطور</h3>${reportTableSnapshot('scheduleTable', false)}</section>` : '';
       const financeReportSection = val('financeEnabled') === 'yes' ? `<section class="section"><h3>8. هيكل تمويل</h3>${financeSummary}<h4>خطة سحب التمويل</h4>${reportTableSnapshot('financeDrawTable', false)}<h4>خطة سداد أصل التمويل</h4>${reportTableSnapshot('financeRepaymentTable', false)}<h4>حركة رصيد التمويل السنوية</h4>${reportTableSnapshot('debtScheduleTable', false)}</section>` : '';
       const fundReportSection = val('fundEnabled') === 'yes' && val('fundFeesEnabled') === 'yes' ? `<section class="section page-break"><h3>9. أتعاب إدارة الصندوق</h3>${fundSummary}<h4>الأتعاب الإضافية الاختيارية</h4>${reportTableSnapshot('fundAdditionalFeesTable', true, true)}<h4>جدول أتعاب الصندوق السنوي</h4>${reportTableSnapshot('fundFeeScheduleTable', false)}</section>` : '';
       const bonusReportSection = reportFlags.sales && val('developerBonusEnabled') === 'yes' ? `<section class="section"><h3>10. علاوة حسن أداء المطور</h3>${bonusSummary}</section>` : '';
@@ -15824,7 +15833,7 @@
         <section class="section page-break"><h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable', false)}<h4>نسبة الوصول السنوية إلى الإشغال المستهدف</h4>${reportTableSnapshot('occupancyRampTable', false)}</section>
         ${graceReportSection}
         <section class="section page-break"><h3>5. تكاليف المشروع وأتعاب المطور</h3>${costSummary}<h4>تفاصيل بنود التكلفة</h4>${reportTableSnapshot('costTable', true, true)}</section>
-        <section class="section"><h3>6. مراحل التطوير ودفعات المطور</h3>${reportTableSnapshot('scheduleTable', false)}</section>
+        ${developerPaymentsReportSection}
         <section class="section page-break"><h3>7. المصروفات التشغيلية</h3>${reportTableSnapshot('opexTable', true, true)}</section>
         ${financeReportSection}
         ${fundReportSection}
