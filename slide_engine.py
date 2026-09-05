@@ -37,6 +37,9 @@ CONTENT_DISTRIBUTION_RULES = """
 8. يوضع ملخص نهائي مستند إلى بيانات البرنامج بعد جداول كل قسم تحليلي، ولا تُضاف تحسينات إنشائية أو استرسال لا يحمل معلومة واضحة.
 9. شرائح الصور تستخدم كل الرموز المحددة لها بتخطيط المجموعة المعتمد، من صورة واحدة إلى ثلاث صور؛ وكل صورة تظهر مرة واحدة فقط ولا تعاد في شريحة أخرى.
 10. شرائح الموقع والخرائط تبقى داخل قسم تحليل الموقع الجغرافي، وشرائح الأرض وصورها وملخصها داخل قسم تحليل الأرض.
+11. قسم تحليل السوق لا يحتوي على خرائط أو صور أو خلفيات صور. الاستثناء الوحيد هو شعار المنافس إذا كان محفوظاً ضمن بيانات ذلك المنافس، ويظهر داخل صفه في جدول المنافسين.
+12. قسم تحليل السوق يحتوي على رسم بياني واحد فقط: horizontal_bar في شريحة مقارنة المنافسين. بقية محتوى السوق نصوص وجداول ثابتة، ولا يجوز للنموذج إنشاء رسم بديل أو شريحة صور.
+13. يجب نقل نطاق الدراسة، وكل صف من جدول المنافسين، والملخص التنفيذي لسوق المشروع، وملخص دراسة السوق، وكل مصدر كما هو من بيانات السوق. تقسيم البيانات على شرائح إضافية مسموح، حذفها أو اختصارها غير مسموح.
 """
 
 PRESENTATION_SECTION_ORDER = (
@@ -100,6 +103,16 @@ def _slide_section_key(slide, current=''):
         return 'closing'
     if slide_type == 'moodboard':
         return 'exterior'
+    # Older plans sometimes labelled market slides as map_* because the model
+    # saw words such as "نطاق" or "منافسة" and chose a location map. Keep
+    # those slides in the market section so the market-only media policy can
+    # repair them instead of letting a map leak into the location section.
+    market_text = ' '.join(str(value or '') for value in (
+        slide.get('title'), slide.get('content_source') or slide.get('contentSource'),
+        slide.get('source_table') or slide.get('sourceTable'),
+    )).lower()
+    if re.search(r'(?:تحليل السوق|دراسة السوق|المنافسين|مقارنة المنافسين|الفجوة السوقية|السوقية|market|competitor)', market_text, flags=re.IGNORECASE):
+        return 'market'
     if slide_type.startswith('map_') or slide_type == 'site_specs':
         return 'location'
     text = ' '.join(str(value or '') for value in (
@@ -613,6 +626,7 @@ def _merge_adjacent_table_slides(groups):
                 and slide.get('design_style') == 'table'
                 and not slide.get('chart_type')
                 and not slide.get('image_tokens')
+                and section_key != 'market'
                 and not source.startswith(('financial_summary:', 'financial_indicators'))
                 and not source.startswith('project_components:')
                 and not re.fullmatch(r'financial_report:\d+:\d+:\d+:\d+:\d+', source)
@@ -890,6 +904,278 @@ def _balanced_media_chunks(items, single=False):
         chunks.append(items[start:start + size])
         start += size
     return chunks
+
+
+def _market_state(project_data):
+    value = (project_data or {}).get('market_study_data') if isinstance(project_data, dict) else None
+    decoded = _decode_json_fact(value)
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _market_scope_rows(market):
+    if not isinstance(market, dict):
+        return []
+    rows = []
+    scope_text = _market_scope_display(market)
+    if scope_text:
+        parts = [part.strip() for part in scope_text.split('|') if part.strip()]
+        for part in parts:
+            if ':' in part:
+                label, value = part.split(':', 1)
+                rows.append([label.strip(), value.strip()])
+            else:
+                rows.append(['نطاق الدراسة', part])
+    return rows
+
+
+def _market_summary_rows(market):
+    if not isinstance(market, dict) or not isinstance(market.get('summary'), dict):
+        return []
+    summary = market.get('summary') or {}
+    try:
+        import market_study
+        definitions = market_study.SUMMARY_SECTIONS
+    except Exception:
+        definitions = [
+            {'key': 'market_definition', 'label': 'تعريف السوق'},
+            {'key': 'city_position', 'label': 'وضع المدينة'},
+            {'key': 'sector_performance', 'label': 'أداء القطاع'},
+            {'key': 'supply', 'label': 'العرض'},
+            {'key': 'demand', 'label': 'الطلب'},
+            {'key': 'competition', 'label': 'المنافسة'},
+            {'key': 'market_gap', 'label': 'الفجوة السوقية'},
+            {'key': 'recommendation', 'label': 'التوصية'},
+            {'key': 'risks', 'label': 'المخاطر'},
+            {'key': 'decision', 'label': 'القرار'},
+        ]
+    return [
+        [item['label'], str(summary.get(item['key']) or '').strip()]
+        for item in definitions
+        if str(summary.get(item['key']) or '').strip()
+    ]
+
+
+def _market_source_rows(market):
+    if not isinstance(market, dict) or not isinstance(market.get('sources'), list):
+        return []
+    rows = []
+    for item in market.get('sources') or []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get('name') or item.get('title') or item.get('source') or ''
+        url = item.get('url') or item.get('source_url') or item.get('sourceUrl') or ''
+        data_date = item.get('data_date') or item.get('dataDate') or item.get('source_date') or item.get('date') or ''
+        accessed = item.get('accessed_at') or item.get('accessedAt') or item.get('date_accessed') or ''
+        reliability = item.get('reliability') or item.get('priority') or ''
+        note = item.get('note') or item.get('notes') or ''
+        values = [name, url, data_date, accessed, reliability, note]
+        if any(str(value or '').strip() for value in values):
+            rows.append(values)
+    return rows
+
+
+def _market_has_required_data(market):
+    if not isinstance(market, dict):
+        return False
+    return bool(
+        _market_scope_rows(market)
+        or isinstance(market.get('competitors'), list) and any(_competitor_name(row) for row in market.get('competitors') or [])
+        or _market_summary_rows(market)
+        or str(market.get('one_block_summary') or '').strip()
+        or _market_source_rows(market)
+    )
+
+
+def _market_plan_slide(title, content_source, design_style='table', source_table=''):
+    return {
+        'title': title,
+        'type': 'content',
+        'section_key': 'market',
+        'design_style': design_style,
+        'chart_type': '',
+        'content_density': 'high',
+        'requires_image': False,
+        'content_source': content_source,
+        'source_table': source_table,
+        'image_tokens': [],
+        'bullets': [],
+    }
+
+
+def _normalize_market_group_slides(existing, market):
+    """Make the market section deterministic and remove leaked map/image slides."""
+    if not _market_has_required_data(market):
+        return list(existing or [])
+
+    existing = [dict(slide) for slide in (existing or []) if isinstance(slide, dict)]
+    competitors = market.get('competitors') if isinstance(market.get('competitors'), list) else []
+    named_competitors = [row for row in competitors if _competitor_name(row)]
+    canonical_by_source = {}
+    preserved = []
+    competitor_slide = None
+    required_titles = {'نطاق الدراسة', 'الملخص التنفيذي لسوق المشروع', 'ملخص دراسة السوق', 'مصادر دراسة السوق'}
+
+    for slide in existing:
+        source = str(slide.get('content_source') or '').strip()
+        title = str(slide.get('title') or '').strip()
+        title_lower = title.lower()
+        is_competitor = (
+            source == 'market_study_data.competitors'
+            or str(slide.get('source_table') or '').strip() == 'competitors'
+            or bool(re.search(r'(?:منافس|competitor)', title_lower, flags=re.IGNORECASE))
+        )
+        if is_competitor:
+            if competitor_slide is None:
+                competitor_slide = slide
+            continue
+        if source in {
+            'market_study_data.scope', 'market_study_data.summary',
+            'market_study_data.one_block_summary', 'market_study_data.sources',
+        } or re.fullmatch(r'market_study_data\.(?:summary|one_block_summary|sources):\d+:\d+', source):
+            canonical_by_source[source] = slide
+            continue
+        if title in required_titles or 'الملخص التنفيذي لسوق المشروع' in title:
+            continue
+
+        stale_map = (
+            str(slide.get('type') or '').lower().startswith('map_')
+            or source.startswith('map_')
+            or str(slide.get('design_style') or '').lower() == 'map'
+        )
+        if stale_map and not slide.get('bullets') and not source.startswith('market_study_data.'):
+            continue
+
+        # A stale market plan could ask for a map, moodboard, or arbitrary image.
+        # Keep its written content, but make the renderer text/table-only.
+        slide['section_key'] = 'market'
+        slide['type'] = 'content'
+        slide['requires_image'] = False
+        slide['image_tokens'] = []
+        slide['chart_type'] = ''
+        if str(slide.get('design_style') or '').lower() in {
+            'map', 'image', 'diagram', 'chart', 'bar', 'column', 'pie', 'donut',
+            'scatter', 'histogram', 'heatmap', 'candlestick', 'flow',
+        }:
+            slide['design_style'] = 'table' if slide.get('source_table') else 'text'
+        preserved.append(slide)
+
+    result = []
+    scope_rows = _market_scope_rows(market)
+    if scope_rows:
+        result.append(canonical_by_source.get('market_study_data.scope') or
+                      _market_plan_slide('نطاق الدراسة', 'market_study_data.scope', 'table', 'market_scope'))
+    result.extend(preserved)
+
+    if named_competitors:
+        competitor_slide = competitor_slide or _market_plan_slide(
+            'مقارنة المنافسين', 'market_study_data.competitors', 'chart', 'competitors')
+        competitor_slide.update({
+            'title': 'مقارنة المنافسين', 'type': 'content', 'section_key': 'market',
+            'design_style': 'chart', 'chart_type': 'horizontal_bar',
+            'content_density': 'high', 'requires_image': False,
+            'content_source': 'market_study_data.competitors', 'source_table': 'competitors',
+            'image_tokens': [], 'bullets': [],
+        })
+        result.append(competitor_slide)
+
+    summary_rows = _market_summary_rows(market)
+    if summary_rows:
+        summary_chunks = [summary_rows[index:index + 2] for index in range(0, len(summary_rows), 2)]
+        for chunk_index, _chunk in enumerate(summary_chunks, 1):
+            content_source = 'market_study_data.summary'
+            title = 'الملخص التنفيذي لسوق المشروع'
+            if len(summary_chunks) > 1:
+                start = (chunk_index - 1) * 2
+                content_source = f'market_study_data.summary:{start}:{start + len(_chunk)}'
+                title += f' — {chunk_index}'
+            result.append(canonical_by_source.get(content_source) or
+                          _market_plan_slide(title, content_source, 'table', 'market_summary'))
+
+    one_block = str(market.get('one_block_summary') or '').strip()
+    if one_block:
+        block_chunks = [one_block[index:index + 1200] for index in range(0, len(one_block), 1200)]
+        for chunk_index, _chunk in enumerate(block_chunks, 1):
+            content_source = 'market_study_data.one_block_summary'
+            title = 'ملخص دراسة السوق'
+            if len(block_chunks) > 1:
+                start = (chunk_index - 1) * 1200
+                content_source = f'market_study_data.one_block_summary:{start}:{start + len(_chunk)}'
+                title += f' — {chunk_index}'
+            result.append(canonical_by_source.get(content_source) or
+                          _market_plan_slide(title, content_source, 'text'))
+
+    source_rows = _market_source_rows(market)
+    if source_rows:
+        source_chunks = [source_rows[index:index + 4] for index in range(0, len(source_rows), 4)]
+        for chunk_index, _chunk in enumerate(source_chunks, 1):
+            content_source = 'market_study_data.sources'
+            title = 'مصادر دراسة السوق'
+            if len(source_chunks) > 1:
+                start = (chunk_index - 1) * 4
+                content_source = f'market_study_data.sources:{start}:{start + len(_chunk)}'
+                title += f' — {chunk_index}'
+            result.append(canonical_by_source.get(content_source) or
+                          _market_plan_slide(title, content_source, 'table', 'market_sources'))
+
+    # A market section can only own one chart, and it is always the competitor
+    # comparison. This also protects plans produced before the deterministic
+    # market renderer was introduced.
+    _limit_presentation_charts({'market': result})
+    return result
+
+
+def normalize_market_section_plan(plan, project_data=None):
+    """Repair a client/stored plan without rebuilding unrelated sections."""
+    if not isinstance(plan, dict) or not isinstance(plan.get('slides'), list):
+        return plan
+    market = _market_state(project_data)
+    if not _market_has_required_data(market):
+        return plan
+
+    source_slides = [dict(slide) for slide in plan.get('slides') if isinstance(slide, dict)]
+    current = ''
+    market_indexes = []
+    market_divider_indexes = []
+    for index, slide in enumerate(source_slides):
+        section_key = _slide_section_key(slide, current)
+        if slide.get('type') == 'section_divider':
+            current = section_key
+            if section_key == 'market':
+                market_divider_indexes.append(index)
+            continue
+        current = section_key
+        if section_key == 'market' and slide.get('type') not in ('cover', 'index', 'closing'):
+            market_indexes.append(index)
+
+    existing = [source_slides[index] for index in market_indexes]
+    normalized_market = _normalize_market_group_slides(existing, market)
+    if not normalized_market and not market_indexes:
+        return plan
+
+    if market_indexes:
+        insertion_index = min(market_indexes)
+    elif market_divider_indexes:
+        insertion_index = min(market_divider_indexes) + 1
+    else:
+        insertion_index = next((index for index, slide in enumerate(source_slides)
+                                if slide.get('type') == 'closing'), len(source_slides))
+
+    market_index_set = set(market_indexes)
+    output = []
+    inserted = False
+    for index, slide in enumerate(source_slides):
+        if index == insertion_index and not inserted:
+            output.extend(normalized_market)
+            inserted = True
+        if index in market_index_set:
+            continue
+        output.append(slide)
+    if not inserted:
+        output.extend(normalized_market)
+
+    normalized = dict(plan)
+    normalized['slides'] = output
+    return refresh_index_entries(normalized)
 
 
 def _rows_have_comparable_numbers(rows):
@@ -1447,6 +1733,10 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 'content_source': content_source, 'image_tokens': summary_tokens, 'bullets': [],
             })
 
+    # The market section has a stricter contract than the other sections:
+    # canonical tables and the single approved chart are rendered from the
+    # stored market data, while stale map/image requests are repaired here.
+    groups['market'] = _normalize_market_group_slides(groups.get('market', []), market)
     _merge_sparse_plan_slides(groups)
     _merge_adjacent_table_slides(groups)
     _limit_presentation_charts(groups)
@@ -1619,7 +1909,7 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
         slides.append({
             'title': PRESENTATION_SECTION_TITLES[section_key], 'type': 'section_divider',
             'section_key': section_key, 'design_style': 'divider', 'content_density': 'low',
-            'requires_image': True, 'bullets': [],
+            'requires_image': section_key != 'market', 'bullets': [],
         })
         slides.extend(groups[section_key])
     slides.append(closing)
@@ -2238,11 +2528,14 @@ def _market_study_facts(project_data):
     if sources:
         lines.append('### مصادر دراسة السوق')
         lines.append(json.dumps(sources, ensure_ascii=False, indent=2))
+    # Keep the structured summary even when one_block_summary is present. The
+    # one-block text is useful as prose, but it must not replace the ten
+    # separately entered market-summary fields in the model context.
     for key, title in (('summary', 'محاور دراسة السوق'), ('swot', 'تحليل SWOT')):
         block = state.get(key)
         if isinstance(block, dict):
             filled = {k: v for k, v in block.items() if str(v or '').strip()}
-            if filled and not (key == 'summary' and summary):
+            if filled:
                 lines.append(f'### {title}')
                 lines.append(json.dumps(filled, ensure_ascii=False, indent=2))
     for key, title in (('decision', 'تصنيف القرار'), ('disclaimer', 'إخلاء المسؤولية')):
@@ -2943,9 +3236,45 @@ def _competitor_price_display(comp):
     return ' | '.join(values) if values else '—'
 
 
+def _competitor_chart_group(comp):
+    """Return comparable unit/type keys required by the approved chart spec."""
+    operation = str(_competitor_value(comp, 'operation_type', 'operation', 'نوع العملية') or '').strip().lower()
+    operation = re.sub(r'\s+', ' ', operation)
+    if any(token in operation for token in ('بيع', 'sale')):
+        operation = 'sale'
+    elif any(token in operation for token in ('إيجار', 'ايجار', 'rent')):
+        operation = 'rent'
+    elif any(token in operation for token in ('فندقي', 'تشغيل', 'hotel')):
+        operation = 'hotel'
+
+    price_type = str(_competitor_value(comp, 'price_type', 'pricing_type', 'نوع السعر') or '').strip().lower()
+    unit = str(_competitor_value(comp, 'unit') or
+               (comp.get('area_cache') if isinstance(comp.get('area_cache'), dict) else {}).get('unit') or '').strip().lower()
+    if any(token in (price_type + ' ' + unit) for token in ('متر', 'م²', 'm²', 'sqm', 'sq m')):
+        unit_key = 'sqm'
+    elif any(token in (price_type + ' ' + unit) for token in ('وحدة', 'unit')):
+        unit_key = 'unit'
+    elif any(token in (price_type + ' ' + unit) for token in ('ليلة', 'غرفة', 'adr', 'revpar', 'night', 'room')):
+        unit_key = 'room_night'
+    else:
+        unit_key = unit or 'unspecified'
+
+    if any(token in price_type for token in ('نطاق', 'range', 'من', 'إلى')):
+        type_key = 'range'
+    elif unit_key == 'sqm':
+        type_key = 'per_sqm'
+    elif unit_key == 'unit':
+        type_key = 'per_unit'
+    elif unit_key == 'room_night':
+        type_key = 'room_night'
+    else:
+        type_key = re.sub(r'[^a-z0-9ء-ي]+', '', price_type) or 'unspecified'
+    return operation, unit_key, type_key
+
+
 def _extract_competitor_chart_data(competitors, project_data=None):
     project_data = project_data if isinstance(project_data, dict) else {}
-    items = []
+    candidates = []
     for comp in (competitors or []):
         if not isinstance(comp, dict):
             continue
@@ -2955,22 +3284,45 @@ def _extract_competitor_chart_data(competitors, project_data=None):
         unit = str(_competitor_value(comp, 'unit') or
                    (comp.get('area_cache') if isinstance(comp.get('area_cache'), dict) else {}).get('unit') or '').strip()
 
-        num = 0.0
-        for raw in (price_val, p_to, p_from):
-            val = _clean_numeric_val(raw)
-            if val > 0:
-                num = val
-                break
-        if name and num > 0:
+        value_num = _clean_numeric_val(price_val)
+        from_num = _clean_numeric_val(p_from)
+        to_num = _clean_numeric_val(p_to)
+        if value_num <= 0 and from_num <= 0 and to_num <= 0:
+            continue
+        if value_num > 0:
+            low_num = high_num = value_num
+        else:
+            valid_range = [value for value in (from_num, to_num) if value > 0]
+            if not valid_range:
+                continue
+            low_num = min(valid_range)
+            high_num = max(valid_range)
+        if name:
             unit_str = f" {unit}" if unit else " ر.س/م²"
-            items.append({
+            candidates.append({
                 'name': name,
-                'price_num': num,
-                'display_price': f"{int(num):,}{unit_str}",
+                'price_num': high_num,
+                'price_min_num': low_num,
+                'price_max_num': high_num,
+                'is_range': high_num != low_num,
+                'display_price': (
+                    f"من {int(low_num):,} إلى {int(high_num):,}{unit_str}"
+                    if high_num != low_num else f"{int(high_num):,}{unit_str}"
+                ),
                 'price_type': p_type,
+                'unit': unit,
+                'chart_group': _competitor_chart_group(comp),
                 'is_project': False,
             })
 
+    # Never mix sale/rent, per-unit/per-square-metre, or range/point price
+    # types in one comparison. Choose the populated comparable group rather
+    # than silently combining incompatible rows.
+    grouped = {}
+    for item in candidates:
+        grouped.setdefault(item.get('chart_group'), []).append(item)
+    items = max(grouped.values(), key=lambda group: (len(group), max(item['price_num'] for item in group))) if grouped else []
+    items = list(items)
     items.sort(key=lambda x: x['price_num'], reverse=True)
 
     proj_price_raw = project_data.get('proposed_price') or project_data.get('project_price')
@@ -2985,6 +3337,9 @@ def _extract_competitor_chart_data(competitors, project_data=None):
             items.append({
                 'name': f"{p_name} (المشروع المقترح)",
                 'price_num': p_val,
+                'price_min_num': p_val,
+                'price_max_num': p_val,
+                'is_range': False,
                 'display_price': f"{int(p_val):,} {unit_str}",
                 'price_type': 'سعر مقترح',
                 'is_project': True,
@@ -2998,9 +3353,19 @@ def _extract_competitor_chart_data(competitors, project_data=None):
             items[-1] = project_item
             items.sort(key=lambda x: x['price_num'], reverse=True)
 
-    max_p = max((x['price_num'] for x in items), default=1.0)
-    for it in items:
-        it['bar_width_pct'] = max(round((it['price_num'] / max_p) * 100, 1), 15.0)
+    has_range = any(item.get('is_range') for item in items)
+    max_p = max((x['price_max_num'] for x in items), default=1.0)
+    if has_range:
+        axis_min = min((x['price_min_num'] for x in items), default=0.0)
+        axis_max = max_p
+        span = max(axis_max - axis_min, 1.0)
+        for it in items:
+            it['bar_start_pct'] = max(round(((it['price_min_num'] - axis_min) / span) * 100, 1), 0.0)
+            it['bar_width_pct'] = max(round(((it['price_max_num'] - it['price_min_num']) / span) * 100, 1), 2.0)
+    else:
+        for it in items:
+            it['bar_start_pct'] = 0.0
+            it['bar_width_pct'] = max(round((it['price_max_num'] / max_p) * 100, 1), 15.0)
 
     return items
 
@@ -3942,6 +4307,31 @@ def _slide_source_data_note(slide, project_data):
         market = _decode_json_fact(project_data.get('market_study_data'))
         swot = market.get('swot') if isinstance(market, dict) and isinstance(market.get('swot'), dict) else {}
         return 'تحليل SWOT الأصلي الوحيد، انقل المحاور الأربعة دون إضافة أو تكرار:\n' + json.dumps(swot, ensure_ascii=False, indent=2) if swot else ''
+    if source == 'market_study_data.scope':
+        market = _market_state(project_data)
+        rows = _market_scope_rows(market)
+        return 'نطاق الدراسة وفترة البيانات كما أُدخلتا في القسم:\n' + json.dumps(rows, ensure_ascii=False, indent=2) if rows else ''
+    summary_match = re.fullmatch(r'market_study_data\.summary(?::(\d+):(\d+))?', source)
+    if summary_match:
+        market = _market_state(project_data)
+        rows = _market_summary_rows(market)
+        if summary_match.group(1) is not None:
+            rows = rows[int(summary_match.group(1)):int(summary_match.group(2))]
+        return 'الملخص التنفيذي لسوق المشروع، بكل محاوره وقيمه كما أُدخلت:\n' + json.dumps(rows, ensure_ascii=False, indent=2) if rows else ''
+    one_block_match = re.fullmatch(r'market_study_data\.one_block_summary(?::(\d+):(\d+))?', source)
+    if one_block_match:
+        market = _market_state(project_data)
+        value = str(market.get('one_block_summary') or '').strip()
+        if one_block_match.group(1) is not None:
+            value = value[int(one_block_match.group(1)):int(one_block_match.group(2))]
+        return 'ملخص دراسة السوق المعتمد كما أُدخل:\n' + value if value else ''
+    sources_match = re.fullmatch(r'market_study_data\.sources(?::(\d+):(\d+))?', source)
+    if sources_match:
+        market = _market_state(project_data)
+        rows = _market_source_rows(market)
+        if sources_match.group(1) is not None:
+            rows = rows[int(sources_match.group(1)):int(sources_match.group(2))]
+        return 'مصادر دراسة السوق كاملة كما أُدخلت:\n' + json.dumps(rows, ensure_ascii=False, indent=2) if rows else ''
     if source == 'market_study_data.competitors' or (slide or {}).get('source_table') == 'competitors':
         market = _decode_json_fact(project_data.get('market_study_data'))
         market = market if isinstance(market, dict) else {}
@@ -4404,6 +4794,11 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             placeholder_note += f". التخطيط المعتمد لهذه المجموعة هو {slide.get('image_layout')} ولا تغيّر عدد الصور"
     elif design_style == 'image':
         placeholder_note = 'لا تستخدم صورة ما لم يكن رمزها محددًا في خطة هذه الشريحة أو في الصور المتوفرة لموضوعها.'
+    if section_key == 'market' and slide_type not in ('cover', 'index', 'closing', 'section_divider'):
+        placeholder_note = (
+            'هذه شريحة من قسم دراسة السوق: ممنوع استخدام الخرائط أو الصور أو خلفيات الصور. '
+            'في شريحة مقارنة المنافسين فقط، ضع شعار كل منافس داخل صفه في جدول المنافسين إذا كان الشعار متوفراً.'
+        )
 
     notes = [
         f'أنشئ فقط الشريحة {slide_num} لا غير',
@@ -4415,6 +4810,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'لا تكرر معلومة وردت في شريحة أخرى أو قسم آخر؛ تحليل SWOT يستخدم مصدر market_study_data.swot مرة واحدة فقط، والمكونات في قسم المكونات فقط',
         'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
         'الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في المالية) وأي رسم خارجها ممنوع منعاً باتاً؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
+        'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين، واجعل بقية الشرائح نصوصاً أو جداول HTML ثابتة بلا خرائط أو صور. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
         'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
         'املأ الشريحة بالمحتوى الضروري والوافي؛ وشرائح الملخص المالي تستخدم جداول التقرير نفسها دون ضغط أو حذف',
@@ -4960,6 +5356,30 @@ def _required_slide_texts(slide, project_data):
         market = _decode_json_fact(project_data.get('market_study_data'))
         swot = market.get('swot') if isinstance(market, dict) and isinstance(market.get('swot'), dict) else {}
         return [str(value).strip() for value in swot.values() if str(value or '').strip()]
+    if source == 'market_study_data.scope':
+        market = _market_state(project_data)
+        return [str(value).strip() for row in _market_scope_rows(market) for value in row if str(value or '').strip()]
+    summary_match = re.fullmatch(r'market_study_data\.summary(?::(\d+):(\d+))?', source)
+    if summary_match:
+        market = _market_state(project_data)
+        rows = _market_summary_rows(market)
+        if summary_match.group(1) is not None:
+            rows = rows[int(summary_match.group(1)):int(summary_match.group(2))]
+        return [str(value).strip() for row in rows for value in row if str(value or '').strip()]
+    one_block_match = re.fullmatch(r'market_study_data\.one_block_summary(?::(\d+):(\d+))?', source)
+    if one_block_match:
+        market = _market_state(project_data)
+        value = str(market.get('one_block_summary') or '').strip()
+        if one_block_match.group(1) is not None:
+            value = value[int(one_block_match.group(1)):int(one_block_match.group(2))]
+        return [value] if value else []
+    sources_match = re.fullmatch(r'market_study_data\.sources(?::(\d+):(\d+))?', source)
+    if sources_match:
+        market = _market_state(project_data)
+        rows = _market_source_rows(market)
+        if sources_match.group(1) is not None:
+            rows = rows[int(sources_match.group(1)):int(sources_match.group(2))]
+        return [str(value).strip() for row in rows for value in row if str(value or '').strip()]
     if source == 'market_study_data.competitors' or 'competitors' in source:
         market = _decode_json_fact(project_data.get('market_study_data')) if isinstance(project_data.get('market_study_data'), (str, dict)) else {}
         competitors = market.get('competitors') if isinstance(market, dict) else []
@@ -5175,6 +5595,24 @@ def _fallback_table_data(slide, project_data):
         rows = _project_component_rows(project_data)[start:end]
         headers = list(rows[0].keys()) if rows else []
         return headers, [[row.get(header, '') for header in headers] for row in rows]
+    if source == 'market_study_data.scope' or (slide or {}).get('source_table') == 'market_scope':
+        market = _market_state(project_data)
+        rows = _market_scope_rows(market)
+        return ['البند', 'القيمة'], rows
+    summary_match = re.fullmatch(r'market_study_data\.summary(?::(\d+):(\d+))?', source)
+    if summary_match or (slide or {}).get('source_table') == 'market_summary':
+        market = _market_state(project_data)
+        rows = _market_summary_rows(market)
+        if summary_match and summary_match.group(1) is not None:
+            rows = rows[int(summary_match.group(1)):int(summary_match.group(2))]
+        return ['محور التحليل', 'الملخص المعتمد'], rows
+    sources_match = re.fullmatch(r'market_study_data\.sources(?::(\d+):(\d+))?', source)
+    if sources_match or (slide or {}).get('source_table') == 'market_sources':
+        market = _market_state(project_data)
+        rows = _market_source_rows(market)
+        if sources_match and sources_match.group(1) is not None:
+            rows = rows[int(sources_match.group(1)):int(sources_match.group(2))]
+        return ['المصدر', 'الرابط', 'تاريخ البيانات', 'تاريخ الوصول', 'الموثوقية', 'الملاحظات'], rows
     if source == 'market_study_data.competitors' or (slide or {}).get('source_table') == 'competitors' or 'competitors' in source:
         market = _decode_json_fact(project_data.get('market_study_data')) if isinstance(project_data.get('market_study_data'), (str, dict)) else {}
         competitors = market.get('competitors') if isinstance(market, dict) else []
@@ -5253,6 +5691,12 @@ def _competitor_area_display(comp):
 def _competitor_source_display(comp):
     source = _competitor_value(comp, 'source', 'المصدر')
     source_html = f'<div>{html_lib.escape(_competitor_display_text(source))}</div>'
+    data_date = _competitor_value(comp, 'data_date', 'dataDate', 'source_date', 'date', 'تاريخ البيانات')
+    reliability = _competitor_value(comp, 'reliability', 'source_reliability', 'موثوقية المصدر')
+    if data_date:
+        source_html += f'<div style="margin-top:2px;color:#475569;font-size:8px;">تاريخ البيانات: {html_lib.escape(_competitor_display_text(data_date))}</div>'
+    if reliability:
+        source_html += f'<div style="margin-top:2px;color:#475569;font-size:8px;">الموثوقية: {html_lib.escape(_competitor_display_text(reliability))}</div>'
     urls = comp.get('source_urls') if isinstance(comp, dict) and isinstance(comp.get('source_urls'), list) else []
     if not urls:
         single_url = _competitor_value(comp, 'source_url')
@@ -5342,6 +5786,7 @@ def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9
     for it in items:
         name = html_lib.escape(str(it.get('name') or ''))
         width = it.get('bar_width_pct', 50.0)
+        start = it.get('bar_start_pct', 0.0)
         display_price = html_lib.escape(str(it.get('display_price') or ''))
         is_project = bool(it.get('is_project'))
         bar_color = primary if is_project else secondary
@@ -5355,7 +5800,7 @@ def _render_fallback_horizontal_bar(items, primary='#005f78', secondary='#0ea5e9
                 <span style="font-weight:700;color:{bar_color};">{display_price}</span>
             </div>
             <div style="width:100%;height:14px;background:#e2e8f0;border-radius:3px;overflow:hidden;position:relative;">
-                <div style="width:{width}%;height:100%;background:{bar_color};border-radius:3px;"></div>
+                <div style="position:absolute;left:{start}%;width:{width}%;height:100%;background:{bar_color};border-radius:3px;"></div>
             </div>
         </div>
         ''')
@@ -5392,6 +5837,24 @@ def _market_scope_display(market):
     if period_text:
         parts.append(f'فترة البيانات: {period_text}')
     return ' | '.join(parts)
+
+
+def _market_chart_provenance(competitors):
+    items = []
+    for comp in competitors or []:
+        if not isinstance(comp, dict):
+            continue
+        source = _competitor_display_text(_competitor_value(comp, 'source', 'المصدر'), '')
+        data_date = _competitor_display_text(_competitor_value(comp, 'data_date', 'dataDate', 'source_date', 'date', 'تاريخ البيانات'), '')
+        if source or data_date:
+            text = source or 'مصدر موثق'
+            if data_date:
+                text += f'، تاريخ البيانات: {data_date}'
+            if text not in items:
+                items.append(text)
+    if not items:
+        return ''
+    return 'مصدر ووقت بيانات المقارنة: ' + '؛ '.join(items)
 
 
 def _render_fallback_waterfall(chart_data, primary='#005f78', secondary='#0ea5e9'):
@@ -5890,7 +6353,7 @@ def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_s
                 except (ValueError, TypeError):
                     pass
             direction = 'ltr' if is_num else 'rtl'
-            td_cells.append(f'<td style="padding:{td_pad};font-size:{td_font};text-align:center;vertical-align:middle;direction:{direction};border-bottom:1px solid #f1f5f9;{num_color}font-weight:500;">{formatted}</td>')
+            td_cells.append(f'<td style="padding:{td_pad};font-size:{td_font};text-align:center;vertical-align:middle;direction:{direction};border-bottom:1px solid #f1f5f9;word-break:break-word;overflow-wrap:anywhere;line-height:1.35;{num_color}font-weight:500;">{formatted}</td>')
         tb_rows.append(f'<tr style="background:{bg};">{"".join(td_cells)}</tr>')
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
@@ -6031,6 +6494,11 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
         f'<div style="margin-bottom:10px;color:#64748b;font-size:10px;text-align:right;">'
         f'{html_lib.escape(scope_text)}</div>'
     ) if scope_text else ''
+    provenance_text = _market_chart_provenance(competitors)
+    provenance_html = (
+        f'<div style="margin-top:8px;color:#64748b;font-size:9px;text-align:right;line-height:1.35;">'
+        f'{html_lib.escape(provenance_text)}</div>'
+    ) if provenance_text else ''
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
 
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -6056,6 +6524,7 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
       </div>
       <div style="overflow:visible;">
         {bar_chart_html}
+        {provenance_html}
       </div>
     </div>
   </div>
@@ -6333,15 +6802,64 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     if (slide or {}).get('type') == 'section_divider':
         return build_section_divider_slide(slide, slide_num, total_slides, branding, project_data)
 
+    # Single-slide requests may come from an older client and bypass the full
+    # plan normalizer. Apply the same market contract to that one item.
+    if _slide_section_key(slide) == 'market':
+        slide = dict(slide or {})
+        market = _market_state(project_data)
+        title_text = str(slide.get('title') or '').strip()
+        content_source = str(slide.get('content_source') or '').strip()
+        if (
+            content_source == 'market_study_data.competitors'
+            or slide.get('source_table') == 'competitors'
+            or re.search(r'(?:منافس|competitor)', title_text, flags=re.IGNORECASE)
+        ):
+            slide.update({
+                'title': 'مقارنة المنافسين', 'type': 'content', 'section_key': 'market',
+                'design_style': 'chart', 'chart_type': 'horizontal_bar',
+                'requires_image': False, 'image_tokens': [],
+                'content_source': 'market_study_data.competitors', 'source_table': 'competitors',
+            })
+        elif re.fullmatch(r'market_study_data\.(?:scope|summary|one_block_summary|sources)(?::\d+:\d+)?', content_source):
+            slide.update({'type': 'content', 'section_key': 'market', 'requires_image': False, 'image_tokens': []})
+        else:
+            if re.search(r'نطاق', title_text, flags=re.IGNORECASE) and _market_scope_rows(market):
+                slide['content_source'] = 'market_study_data.scope'
+                slide['source_table'] = 'market_scope'
+                slide['design_style'] = 'table'
+            elif re.search(r'مصادر', title_text, flags=re.IGNORECASE) and _market_source_rows(market):
+                slide['content_source'] = 'market_study_data.sources'
+                slide['source_table'] = 'market_sources'
+                slide['design_style'] = 'table'
+            elif re.search(r'ملخص', title_text, flags=re.IGNORECASE):
+                slide['content_source'] = (
+                    'market_study_data.one_block_summary'
+                    if str(market.get('one_block_summary') or '').strip()
+                    else 'market_study_data.summary'
+                )
+                slide['source_table'] = 'market_summary' if slide['content_source'] == 'market_study_data.summary' else ''
+                slide['design_style'] = 'text' if slide['content_source'] == 'market_study_data.one_block_summary' else 'table'
+            slide.update({'type': 'content', 'section_key': 'market', 'requires_image': False, 'image_tokens': [], 'chart_type': ''})
+
     chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
-    if chart_type in APPROVED_CHART_TYPES or _slide_section_key(slide) == 'financial':
+    market_source = str((slide or {}).get('content_source') or '')
+    deterministic_market = (
+        _slide_section_key(slide) == 'market'
+        and (
+            market_source == 'market_study_data.scope'
+            or market_source == 'market_study_data.competitors'
+            or market_source.startswith(('market_study_data.summary:', 'market_study_data.one_block_summary:', 'market_study_data.sources:'))
+            or market_source in {'market_study_data.summary', 'market_study_data.one_block_summary', 'market_study_data.sources'}
+        )
+    )
+    if chart_type in APPROVED_CHART_TYPES or _slide_section_key(slide) == 'financial' or deterministic_market:
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
             return postprocess_slide(
                 deterministic_slide, (slide or {}).get('type', 'content'),
                 slide_num=slide_num, slide_title=(slide or {}).get('title', f'شريحة {slide_num}'),
                 total_slides=total_slides, tenant_id=(branding or {}).get('tenant_id'),
-                branding=branding, project_data=project_data
+                branding=branding, project_data=project_data, content_source=market_source
             )
     user_msg = build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=project_data)
     slide_title = slide.get('title', f'شريحة {slide_num}')
@@ -6411,7 +6929,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             html = postprocess_slide(
                 html, slide_type, slide_num=slide_num, slide_title=slide_title,
                 total_slides=total_slides, tenant_id=branding.get('tenant_id'),
-                branding=branding, project_data=project_data)
+                branding=branding, project_data=project_data, content_source=content_source)
             roots = extract_slide_elements(html)
             if len(roots) == 1:
                 print(f"[SLIDE-{slide_num}] OK: {len(html)} chars")
@@ -6426,7 +6944,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         fallback = postprocess_slide(
             fallback, slide_type, slide_num=slide_num, slide_title=slide_title,
             total_slides=total_slides, tenant_id=branding.get('tenant_id'),
-            branding=branding, project_data=project_data)
+            branding=branding, project_data=project_data, content_source=str(slide.get('content_source') or ''))
         roots = extract_slide_elements(fallback)
         if len(roots) == 1:
             print(f"[SLIDE-{slide_num}] Using deterministic fallback after {max_retries + 1} attempts")
@@ -6787,7 +7305,9 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type, cont
         if url:
             logo_items.append((str(source.get('name') or '').strip(), url))
     missing_logo_items = [(name, url) for name, url in logo_items if url not in html]
-    if str(content_source or '').startswith('market_study_data') and missing_logo_items:
+    # Competitor logos belong in the fixed competitor table. Do not append a
+    # decorative logo strip to summary, scope, or source slides.
+    if str(content_source or '') == 'market_study_data.competitors' and missing_logo_items:
         logos = ''.join(
             '<img src="' + html_lib.escape(url, quote=True) + '" alt="' + html_lib.escape(name, quote=True)
             + '" style="width:64px;height:40px;object-fit:contain;background:#fff;border-radius:7px;padding:4px;box-sizing:border-box;">'
@@ -7313,8 +7833,35 @@ def _strip_internal_financial_notes(html):
     return html
 
 
+def _is_market_slide(slide_type='', slide_title='', content_source=''):
+    text = ' '.join(str(value or '') for value in (slide_type, slide_title, content_source)).lower()
+    return bool(re.search(
+        r'(?:تحليل السوق|دراسة السوق|مقارنة المنافسين|المنافسين|الفجوة السوقية|السوقية|market|competitor)',
+        text, flags=re.IGNORECASE,
+    ))
+
+
+def _strip_market_slide_media(html):
+    """Keep only competitor-logo images in market slides."""
+    def keep_image(match):
+        tag = match.group(0)
+        src_match = re.search(r'\bsrc\s*=\s*["\']([^"\']*)["\']', tag, flags=re.IGNORECASE)
+        src = str(src_match.group(1) if src_match else '').lower()
+        if 'competitor_logo' in src:
+            return tag
+        return ''
+
+    html = re.sub(
+        r'background-image\s*:\s*url\s*\([^)]*(?:map_|/uploads/maps|image_cover|moodboard|land_photo|plan_image|interior)[^)]*\)',
+        'background-image:none', html, flags=re.IGNORECASE,
+    )
+    html = re.sub(r'<img\b[^>]*>', keep_image, html, flags=re.IGNORECASE)
+    html = re.sub(r'#*MAP_(?:OVERVIEW|LANDMARKS|ACCESS|CATCHMENT)#*', '', html, flags=re.IGNORECASE)
+    return html
+
+
 def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_slides=None,
-                       tenant_id=None, branding=None, project_data=None):
+                       tenant_id=None, branding=None, project_data=None, content_source=None):
     """Post-process a slide while keeping cover and closing free of header/footer.
 
     slide_type is the semantic type (cover, index, content, closing, ...).
@@ -7323,9 +7870,16 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     # No icons are ever produced: strip any SVG, icon markup and emoji the model emitted.
     html = _strip_presentation_icons(html)
 
-    # Enforce image/placeholder rules.
+    is_market = _is_market_slide(slide_type, slide_title, content_source)
+
+    # Enforce image/placeholder rules. Market slides are text/table-only and
+    # must not receive a map placeholder merely because an old slide type was
+    # map_*.
     html = _block_external_images(html)
-    html = _ensure_map_placeholder(html, slide_type)
+    if not is_market:
+        html = _ensure_map_placeholder(html, slide_type)
+    else:
+        html = _strip_market_slide_media(html)
 
     normalized_title = str(slide_title or '').strip().lower()
     is_cover = slide_type == 'cover' or (
@@ -7410,6 +7964,9 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
             branding=branding, project_data=project_data, tenant_id=tenant_id,
         )
 
+    if is_market:
+        html = _strip_market_slide_media(html)
+
     return html
 
 
@@ -7423,14 +7980,16 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     html = postprocess_slide(
         html, slide_type, slide_num=slide_num, slide_title=slide_title,
         total_slides=total_slides, tenant_id=tenant_id, branding=branding,
-        project_data=project_data
+        project_data=project_data, content_source=content_source
     )
-    if (isinstance(slide_type, str) and (slide_type.startswith('map_') or slide_type == 'site_specs')
+    if (not _is_market_slide(slide_type, slide_title, content_source)
+            and isinstance(slide_type, str) and (slide_type.startswith('map_') or slide_type == 'site_specs')
             or content_source in ('site_analysis', 'executive_content.summary', 'location_detail')):
         html = _inject_location_data_timestamp(html, project_data)
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
-    if (isinstance(slide_type, str) and slide_type.startswith('map_')) or content_source in ('site_analysis', 'executive_content.summary'):
+    if (not _is_market_slide(slide_type, slide_title, content_source)
+            and isinstance(slide_type, str) and slide_type.startswith('map_')) or content_source in ('site_analysis', 'executive_content.summary'):
         html = _map_media_contain(html)
     if content_source in ('site_analysis', 'executive_content.summary'):
         html = _normalize_map_summary_layout(html, str((project_data or {}).get('_map_marker_side') or 'right'))
@@ -7493,6 +8052,8 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
         elif slide_type in ('cover', 'closing', 'moodboard', 'section_divider'):
             item['html'] = _rewrite_slide_counter(
                 item.get('html') or '', slide_type, index, total)
+            if item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source')):
+                item['html'] = _strip_market_slide_media(item['html'])
         else:
             html = item.get('html') or ''
             if 'data-slide-header' not in html:
@@ -7513,6 +8074,8 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                     project_logo=_project_logo_reference(project_data),
                 )
             item['html'] = _rewrite_slide_counter(html, slide_type, index, total)
+            if item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source')):
+                item['html'] = _strip_market_slide_media(item['html'])
     return normalized
 
 
@@ -7522,6 +8085,10 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
     Generate all slides in parallel.
     Returns list of HTML strings.
     """
+    # Requests can carry a plan saved before the market-section rules existed.
+    # Repair that plan at the last boundary before rendering as well, so old
+    # clients and the workspace agent receive the same deterministic output.
+    slide_plan = normalize_market_section_plan(slide_plan, project_data) or slide_plan
     slides = slide_plan.get('slides', [])
     total = len(slides)
 

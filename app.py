@@ -1419,7 +1419,7 @@ def _augment_generation_images(images, project_data, tenant_id):
     for row in competitors if isinstance(competitors, list) else []:
         if not isinstance(row, dict):
             continue
-        logo = str(row.get('logo_path') or '').strip()
+        logo = str(row.get('logo_path') or row.get('logo_url') or '').strip()
         if not logo and row.get('logo_file_id'):
             logo = _generation_project_image_url(tenant_id, row['logo_file_id'])
         competitor_logos.append({'name': str(row.get('name') or '').strip(), 'logo': logo})
@@ -5526,6 +5526,7 @@ def api_generate_slides():
 
     if not slide_plan or 'slides' not in slide_plan:
         return jsonify({'error': 'slidePlan with slides array is required'}), 400
+    slide_plan = slide_engine.normalize_market_section_plan(slide_plan, project_data) or slide_plan
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
     project_data['_map_marker_side'] = _generation_map_marker_side(images, project_data)
 
@@ -13585,6 +13586,7 @@ HTML الحالي:
         elif tool == 'generate_workspace':
             project_data = clean_project_data(workspace.get('projectData') or {})
             slide_plan = workspace.get('slidePlan') or {}
+            slide_plan = slide_engine.normalize_market_section_plan(slide_plan, project_data) or slide_plan
             images = workspace.get('creativeImages') or workspace.get('images') or {}
             plan_slides = slide_plan.get('slides') if isinstance(slide_plan, dict) else None
             if not project_data or not isinstance(plan_slides, list) or not plan_slides:

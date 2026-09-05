@@ -1634,6 +1634,66 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertEqual(s.get('chart_type'), '')
             self.assertNotEqual(s.get('design_style'), 'chart')
 
+    def test_market_section_is_complete_fixed_table_one_chart_and_media_free(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع السوق',
+            'market_study_data': json.dumps({
+                'competitor_radius': '10',
+                'data_period': '12m',
+                'competitors': [{
+                    'name': 'منافس موثق', 'price_value': '15000',
+                    'price_type': 'سعر المتر المربع', 'operation_type': 'بيع',
+                    'logo_url': '/uploads/competitor.png', 'source': 'مصدر رسمي',
+                    'data_date': '2026-01',
+                }],
+                'summary': {
+                    'market_definition': 'تعريف السوق', 'city_position': 'وضع المدينة',
+                    'sector_performance': 'أداء القطاع', 'supply': 'العرض',
+                    'demand': 'الطلب', 'competition': 'المنافسة',
+                    'market_gap': 'الفجوة السوقية', 'recommendation': 'التوصية',
+                    'risks': 'المخاطر', 'decision': 'القرار',
+                },
+                'one_block_summary': 'ملخص دراسة السوق كامل',
+                'sources': [{
+                    'name': 'مصدر رسمي', 'url': 'https://example.test/source',
+                    'data_date': '2026-01', 'accessed_at': '2026-02',
+                    'reliability': '1', 'note': 'ملاحظة المصدر',
+                }],
+            }, ensure_ascii=False),
+        }
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'مقارنة المنافسين', 'type': 'map_catchment'},
+            {'title': 'الفجوة السوقية', 'type': 'map_overview'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {})
+        market = [slide for slide in plan['slides'] if slide.get('section_key') == 'market']
+        content = [slide for slide in market if slide.get('type') == 'content']
+        self.assertEqual(sum(1 for slide in content if slide.get('chart_type')), 1)
+        self.assertTrue(any(slide.get('content_source') == 'market_study_data.scope' for slide in content))
+        self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.summary') for slide in content))
+        self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.one_block_summary') for slide in content))
+        self.assertTrue(any(str(slide.get('content_source') or '').startswith('market_study_data.sources') for slide in content))
+        self.assertTrue(all(not slide.get('image_tokens') and not slide.get('requires_image') for slide in market))
+
+        rendered = []
+        for slide in content:
+            html = engine.generate_single_slide(
+                'system', slide, 3, 10, {'primary_color': '#123456'},
+                lambda *_args, **_kwargs: self.fail('market data slides must be deterministic'),
+                project_data=project,
+            )
+            rendered.append((slide, html))
+        self.assertTrue(all('MAP_' not in html for _slide, html in rendered))
+        self.assertTrue(all('<img' not in html for slide, html in rendered
+                            if slide.get('content_source') != 'market_study_data.competitors'))
+        competitor_html = next(html for slide, html in rendered
+                               if slide.get('content_source') == 'market_study_data.competitors')
+        self.assertIn('data-competitor-table', competitor_html)
+        self.assertIn('##COMPETITOR_LOGO_1##', competitor_html)
+
     def test_wide_cashflow_table_in_report_preserves_combo_chart(self):
         engine = self.application_module.slide_engine
         headers = ['البيان'] + [f'سنة {i}' for i in range(1, 16)] + ['الإجمالي']
