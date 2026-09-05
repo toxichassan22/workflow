@@ -8,6 +8,7 @@ import re
 import base64
 import hashlib
 import html as html_lib
+from html.parser import HTMLParser
 import subprocess
 import requests
 from urllib3 import HTTPSConnectionPool
@@ -17,7 +18,7 @@ import threading
 import ipaddress
 import socket
 from io import BytesIO
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import db_driver
@@ -11208,6 +11209,7 @@ PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'competitor_logo', 'visua
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
 COMPETITOR_LOGO_MAX_BYTES = 2 * 1024 * 1024
 COMPETITOR_LOGO_MIMES = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp'}
+OFFICIAL_LOGO_PAGE_MAX_BYTES = 2 * 1024 * 1024
 
 
 def _public_host_addresses(host):
@@ -11285,6 +11287,136 @@ def _same_official_host(logo_url, official_url):
                 and _registrable_host(logo_host) == _registrable_host(official_host))
 
 
+class _OfficialLogoHTMLParser(HTMLParser):
+    """Collect logo hints exposed by a company's own page."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.candidates = []
+        self._json_ld_depth = 0
+        self._json_ld_parts = []
+
+    def _add(self, value, priority):
+        value = html_lib.unescape(str(value or '')).strip()
+        if value:
+            self.candidates.append((priority, value))
+
+    def handle_starttag(self, tag, attrs):
+        attributes = {str(key).lower(): str(value or '').strip() for key, value in attrs}
+        tag_name = str(tag or '').lower()
+        if tag_name == 'meta':
+            identity = (attributes.get('property') or attributes.get('name')
+                        or attributes.get('itemprop') or '').lower()
+            if identity in {'og:image', 'og:image:url', 'twitter:image', 'twitter:image:src'}:
+                self._add(attributes.get('content'), 3)
+            elif identity == 'logo':
+                self._add(attributes.get('content'), 1)
+        elif tag_name == 'link':
+            rel = set(re.findall(r'[a-z0-9_-]+', attributes.get('rel', '').lower()))
+            if rel.intersection({'icon', 'shortcut', 'apple-touch-icon', 'logo'}):
+                self._add(attributes.get('href'), 1)
+        elif tag_name == 'img':
+            hint = ' '.join(attributes.get(key, '') for key in ('alt', 'class', 'id', 'src')).lower()
+            if any(token in hint for token in ('logo', 'brand', 'شعار')):
+                image_src = attributes.get('src') or attributes.get('data-src') or attributes.get('data-lazy-src')
+                if image_src.lower().startswith('data:'):
+                    image_src = attributes.get('data-src') or attributes.get('data-lazy-src')
+                self._add(image_src, 1)
+        elif tag_name == 'script' and attributes.get('type', '').lower() == 'application/ld+json':
+            self._json_ld_depth = 1
+            self._json_ld_parts = []
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_data(self, data):
+        if self._json_ld_depth:
+            self._json_ld_parts.append(data)
+
+    def handle_endtag(self, tag):
+        if str(tag or '').lower() != 'script' or not self._json_ld_depth:
+            return
+        try:
+            payload = json.loads(''.join(self._json_ld_parts))
+        except (TypeError, ValueError):
+            payload = None
+
+        def collect(value):
+            if isinstance(value, dict):
+                logo = value.get('logo')
+                if isinstance(logo, str):
+                    self._add(logo, 0)
+                elif isinstance(logo, dict):
+                    self._add(logo.get('url') or logo.get('contentUrl'), 0)
+                for key, item in value.items():
+                    if key != 'logo' and isinstance(item, (dict, list)):
+                        collect(item)
+            elif isinstance(value, list):
+                for item in value:
+                    collect(item)
+
+        collect(payload)
+        self._json_ld_depth = 0
+        self._json_ld_parts = []
+
+
+def _safe_read_official_logo_page(official_url):
+    parsed = urlsplit(str(official_url or '').strip())
+    try:
+        invalid_port = parsed.port not in (None, 443)
+    except ValueError:
+        invalid_port = True
+    if (parsed.scheme.lower() != 'https' or not parsed.hostname or parsed.username or invalid_port):
+        return '', 'صفحة الموقع الرسمي غير صالحة'
+    addresses = _public_host_addresses(parsed.hostname)
+    if not addresses:
+        return '', 'عنوان الموقع الرسمي غير مسموح'
+    try:
+        pool, response = _open_pinned_https(parsed, addresses)
+    except Exception as exc:
+        return '', str(exc)
+    try:
+        if response.status != 200:
+            return '', f'تعذر قراءة صفحة الموقع الرسمي: HTTP {response.status}'
+        content = bytearray()
+        for chunk in response.stream(64 * 1024):
+            if not chunk:
+                continue
+            content.extend(chunk)
+            if len(content) > OFFICIAL_LOGO_PAGE_MAX_BYTES:
+                return '', 'صفحة الموقع الرسمي أكبر من الحد المسموح'
+        return bytes(content).decode('utf-8', errors='replace'), ''
+    finally:
+        response.release_conn()
+        pool.close()
+
+
+def _official_logo_candidates(official_url):
+    page, _error = _safe_read_official_logo_page(official_url)
+    if not page:
+        return []
+    parser = _OfficialLogoHTMLParser()
+    try:
+        parser.feed(page)
+        parser.close()
+    except Exception:
+        return []
+    candidates = []
+    seen = set()
+    for _priority, raw_url in sorted(parser.candidates, key=lambda item: item[0]):
+        candidate = urljoin(official_url, raw_url)
+        parsed = urlsplit(candidate)
+        if (parsed.scheme.lower() != 'https' or not parsed.hostname or parsed.username
+                or not _same_official_host(candidate, official_url)):
+            continue
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(candidate)
+    return candidates
+
+
 def _safe_download_competitor_logo(logo_url, official_url):
     parsed = urlsplit(str(logo_url or '').strip())
     official = urlsplit(str(official_url or '').strip())
@@ -11310,8 +11442,6 @@ def _safe_download_competitor_logo(logo_url, official_url):
             return None, None, None, f'تعذر تنزيل الشعار: HTTP {response.status}'
         mime_type = str(response.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
         extension = COMPETITOR_LOGO_MIMES.get(mime_type)
-        if not extension:
-            return None, None, None, 'نوع ملف الشعار غير مدعوم'
         try:
             declared = int(response.headers.get('Content-Length') or 0)
         except (TypeError, ValueError):
@@ -11331,6 +11461,10 @@ def _safe_download_competitor_logo(logo_url, official_url):
                 width, height = image.size
                 if width <= 0 or height <= 0 or width * height > 16_000_000:
                     return None, None, None, 'أبعاد شعار المنافس غير صالحة'
+                detected = {'PNG': ('image/png', '.png'), 'JPEG': ('image/jpeg', '.jpg'), 'WEBP': ('image/webp', '.webp')}.get((image.format or '').upper())
+                if not detected:
+                    return None, None, None, 'نوع ملف الشعار غير مدعوم'
+                mime_type, extension = detected
                 image.verify()
         except (UnidentifiedImageError, OSError):
             return None, None, None, 'ملف شعار المنافس غير صالح'
@@ -11344,12 +11478,36 @@ def _store_imported_competitor_logo(row, draft_id=None):
     logo_url = str((row or {}).get('logo_url') or '').strip()
     official_url = str((row or {}).get('logo_source_url') or (row or {}).get('source_url') or '').strip()
     name = str((row or {}).get('name') or 'competitor').strip()
-    if not logo_url or not official_url:
+    if not official_url:
         return row
     if not (row or {}).get('logo_official_verified') and not market_study.official_source_reliability(
             name, (row or {}).get('source'), official_url):
         return row
-    content, mime_type, extension, error = _safe_download_competitor_logo(logo_url, official_url)
+    content = mime_type = extension = None
+    error = ''
+    candidates = [logo_url] if logo_url else []
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate or '').strip().casefold()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        content, mime_type, extension, error = _safe_download_competitor_logo(candidate, official_url)
+        if content:
+            logo_url = candidate
+            row['logo_url'] = candidate
+            break
+    if not content:
+        for candidate in _official_logo_candidates(official_url):
+            key = str(candidate or '').strip().casefold()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            content, mime_type, extension, error = _safe_download_competitor_logo(candidate, official_url)
+            if content:
+                logo_url = candidate
+                row['logo_url'] = candidate
+                break
     if error or not content:
         row['logo_import_warning'] = error or 'تعذر استيراد شعار المنافس'
         return row

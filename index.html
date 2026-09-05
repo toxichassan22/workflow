@@ -10350,40 +10350,61 @@
         .find(row => row.dataset.competitorId === String(competitorId || ''));
     }
 
+    function rewriteMarketCompetitorSourceUrl(competitor, previousUrl, nextUrl) {
+      if (!competitor) return;
+      const previous = String(previousUrl || '').trim().toLowerCase();
+      const next = safeMarketUrl(nextUrl) ? String(nextUrl).trim() : '';
+      const nextKey = next.toLowerCase();
+      if (previous && previous !== nextKey) {
+        const host = competitor.querySelector('[data-source-links]');
+        let replaced = false;
+        host?.querySelectorAll('a[href]').forEach(anchor => {
+          const href = String(anchor.getAttribute('href') || '').trim();
+          if (href.toLowerCase() !== previous) return;
+          if (next && !replaced) {
+            anchor.setAttribute('href', next);
+            anchor.textContent = next;
+            replaced = true;
+          } else {
+            anchor.remove();
+          }
+        });
+        if (next && !replaced && host) {
+          host.insertAdjacentHTML('beforeend', '<a href="' + escapeHtml(next) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(next) + '</a>');
+        }
+        let fieldSources = {};
+        try { fieldSources = JSON.parse(competitor.dataset.fieldSources || '{}') || {}; } catch (error) { fieldSources = {}; }
+        Object.keys(fieldSources).forEach(field => {
+          const values = marketValueList(fieldSources[field])
+            .map(item => String(item || '').trim().toLowerCase() === previous ? next : item)
+            .filter(Boolean);
+          if (values.length) fieldSources[field] = Array.from(new Set(values));
+          else delete fieldSources[field];
+        });
+        competitor.dataset.fieldSources = JSON.stringify(fieldSources);
+        const sourceInput = competitor.querySelector('[data-field="source"]');
+        if (sourceInput && String(sourceInput.value || '').toLowerCase().includes(previous)) {
+          sourceInput.value = String(sourceInput.value || '').replace(new RegExp(previousUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), next).trim();
+        }
+        if (String(competitor.dataset.logoSourceUrl || '').trim().toLowerCase() === previous) {
+          competitor.dataset.logoSourceUrl = next;
+        }
+      }
+    }
+
     function attachMarketSourceToCompetitor(sourceRow) {
       const competitor = marketCompetitorDomRow(sourceRow?.dataset?.competitorId);
       const url = String(sourceRow?.querySelector('[data-field="url"]')?.value || '').trim();
-      if (!competitor || !safeMarketUrl(url)) return;
-      const host = competitor.querySelector('[data-source-links]');
-      const urls = marketSourceUrls({
-        source_urls: Array.from(host?.querySelectorAll('a[href]') || []).map(anchor => anchor.getAttribute('href'))
-      });
-      if (!urls.some(item => item.toLowerCase() === url.toLowerCase())) urls.push(url);
-      if (host) host.innerHTML = urls.map(item => '<a href="' + escapeHtml(item) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item) + '</a>').join('<br>');
+      const previousUrl = sourceRow?.dataset?.previousUrl || '';
+      rewriteMarketCompetitorSourceUrl(competitor, previousUrl, url);
+      sourceRow.dataset.previousUrl = safeMarketUrl(url) ? url : '';
     }
 
     function removeMarketSourcePermanently(sourceRow) {
       if (!sourceRow) return;
       const url = String(sourceRow.querySelector('[data-field="url"]')?.value || '').trim();
       const competitor = marketCompetitorDomRow(sourceRow.dataset.competitorId);
-      if (competitor && url) {
-        const host = competitor.querySelector('[data-source-links]');
-        host?.querySelectorAll('a[href]').forEach(anchor => {
-          if (String(anchor.getAttribute('href') || '').trim().toLowerCase() === url.toLowerCase()) anchor.remove();
-        });
-        let fieldSources = {};
-        try { fieldSources = JSON.parse(competitor.dataset.fieldSources || '{}') || {}; } catch (error) { fieldSources = {}; }
-        Object.keys(fieldSources).forEach(field => {
-          const remaining = marketValueList(fieldSources[field]).filter(item => String(item).toLowerCase() !== url.toLowerCase());
-          if (remaining.length) fieldSources[field] = remaining;
-          else delete fieldSources[field];
-        });
-        competitor.dataset.fieldSources = JSON.stringify(fieldSources);
-        const sourceInput = competitor.querySelector('[data-field="source"]');
-        if (sourceInput && String(sourceInput.value || '').toLowerCase().includes(url.toLowerCase())) {
-          sourceInput.value = String(sourceInput.value || '').replace(new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), '').trim();
-        }
-      }
+      rewriteMarketCompetitorSourceUrl(competitor, url, '');
       sourceRow.remove();
       persistMarketStudyFromDom();
     }
@@ -10408,6 +10429,7 @@
       const tr = document.createElement('tr');
       tr.dataset.sourceKind = sourceRow.source_kind || '';
       tr.dataset.competitorId = sourceRow.competitor_id || '';
+      tr.dataset.previousUrl = sourceRow.url || '';
       tr.dataset.sourceFields = JSON.stringify(sourceRow.source_fields || {});
       const safeUrl = safeMarketUrl(sourceRow.url || '');
       sourceRow.reliability = sourceRow.reliability || marketOfficialSourceReliability(
