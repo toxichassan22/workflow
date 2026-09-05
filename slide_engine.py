@@ -37,8 +37,8 @@ CONTENT_DISTRIBUTION_RULES = """
 8. يوضع ملخص نهائي مستند إلى بيانات البرنامج بعد جداول كل قسم تحليلي، ولا تُضاف تحسينات إنشائية أو استرسال لا يحمل معلومة واضحة.
 9. شرائح الصور تستخدم كل الرموز المحددة لها بتخطيط المجموعة المعتمد، من صورة واحدة إلى ثلاث صور؛ وكل صورة تظهر مرة واحدة فقط ولا تعاد في شريحة أخرى.
 10. شرائح الموقع والخرائط تبقى داخل قسم تحليل الموقع الجغرافي، وشرائح الأرض وصورها وملخصها داخل قسم تحليل الأرض.
-11. قسم تحليل السوق لا يحتوي على خرائط أو صور أو خلفيات صور. الاستثناء الوحيد هو شعار المنافس إذا كان محفوظاً ضمن بيانات ذلك المنافس، ويظهر داخل صفه في جدول المنافسين.
-12. قسم تحليل السوق يحتوي على رسم بياني واحد فقط: horizontal_bar في شريحة مقارنة المنافسين. بقية محتوى السوق نصوص وجداول ثابتة، ولا يجوز للنموذج إنشاء رسم بديل أو شريحة صور.
+11. قسم تحليل السوق لا يحتوي على خرائط أو صور فوتوغرافية أو خلفيات صور. الاستثناء الوحيد هو شعار المنافس إذا كان محفوظاً ضمن بيانات ذلك المنافس، ويظهر داخل صفه في جدول المنافسين. يملك النموذج حرية اختيار التكوين البصري لبقية شرائح السوق باستخدام HTML وCSS والبيانات المعتمدة.
+12. قسم تحليل السوق يحتوي على رسم بياني واحد فقط: horizontal_bar في شريحة مقارنة المنافسين. هذه الشريحة وحدها لها تخطيط ثابت: جدول المنافسين في اليمين والرسم البياني في اليسار. بقية محتوى السوق يترك للنموذج ليصممه بصرياً بما يناسب المحتوى، من دون إنشاء رسم بياني إضافي أو صور.
 13. يجب نقل نطاق الدراسة، وكل صف من جدول المنافسين، والملخص التنفيذي لسوق المشروع، وملخص دراسة السوق، وكل مصدر كما هو من بيانات السوق. تقسيم البيانات على شرائح إضافية مسموح، حذفها أو اختصارها غير مسموح.
 14. التوزيع المضغوط لقسم السوق إلزامي: شريحة واحدة لنطاق الدراسة، شريحة واحدة لمقارنة المنافسين، شريحة واحدة لتحليل السوق المعتمد (الفقرة الواحدة)، شريحة واحدة للمصادر، وملخص دراسة سوق العمل في شريحة أو شريحتين كحد أقصى.
 15. قسم تحليل SWOT للمشروع يظهر في شريحة واحدة بعد فاصل القسم، داخل مصفوفة واضحة من أربعة محاور: نقاط القوة، نقاط الضعف، الفرص، والتهديدات. لا تعرض JSON أو أقواساً أو أسماء مفاتيح برمجية.
@@ -4907,14 +4907,20 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'grid': 'استخدم جميع رموز الصور المحددة في الخطة بتوزيع متوازن من صورة إلى ثلاث صور',
         'minimal': 'خاتمة بسيطة تتضمن بيانات التواصل المتاحة بلا تقييمات أو عبارات مشروطة',
     }.get(design_style, 'نص منظم يناسب طبيعة المحتوى')
+    if section_key == 'market' and chart_type != 'horizontal_bar':
+        style_instructions = (
+            'هذا النمط يصف نوع المحتوى فقط وليس قالباً بصرياً ملزماً. ابتكر التكوين والهرمية والمساحات والتفاصيل البصرية الأنسب لهذه الشريحة '
+            'بـ HTML وCSS راقٍ، مع الحفاظ على البيانات المعتمدة ومنع الخرائط والصور الفوتوغرافية والرسوم البيانية الإضافية.'
+        )
     primary_color = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
     secondary_color = normalize_hex_color((branding or {}).get('secondary_color'), '#0ea5e9')
     chart_instructions = {
         'horizontal_bar': (
             'مخطط الأعمدة الأفقية (Horizontal Bar Chart) لمقارنة المنافسين: '
             'قائمة أعمدة أفقية مرتبة تنازلياً حسب السعر (من الأعلى إلى الأقل) مستخرجة من بيانات المنافسين المرفقة. '
-            'الهيكل الإلزامي: قسّم الشريحة إلى عمودين متجاورين متساويين (50% لجدول المنافسين، 50% لمخطط الأعمدة الأفقية) '
-            'داخل حاوية display: grid; grid-template-columns: 1fr 1fr; gap: 24px; height: 500px; align-items: start;. '
+            'الهيكل الإلزامي الوحيد لهذه الشريحة: قسّمها إلى عمودين متجاورين متساويين، جدول المنافسين في العمود الأيمن والرسم البياني في العمود الأيسر (50% لكل منهما). '
+            'استخدم direction: rtl مع grid-template-areas: "table chart" وgrid-template-columns: 1fr 1fr وgap: 24px داخل حاوية display: grid; height: 500px; align-items: start. '
+            'لا تعكس ترتيب العمودين ولا تنقل الجدول إلى اليسار. '
             'في جانب الرسم (حاوية بخلفية #f8fafc وبودر 1px solid #e2e8f0 وبادينغ 16px وراديوس 8px): '
             'رص أشرطة المنافسين رأسياً (display: flex; flex-direction: column; gap: 12px;). '
             'لكل منافس صف أفقي يتضمن: اسم المنافس يميناً (font-size: 11px; font-weight: 600; min-width: 110px; color: #1e293b;)، '
@@ -5002,10 +5008,16 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     elif design_style == 'image':
         placeholder_note = 'لا تستخدم صورة ما لم يكن رمزها محددًا في خطة هذه الشريحة أو في الصور المتوفرة لموضوعها.'
     if section_key == 'market' and slide_type not in ('cover', 'index', 'closing', 'section_divider'):
-        placeholder_note = (
-            'هذه شريحة من قسم دراسة السوق: ممنوع استخدام الخرائط أو الصور أو خلفيات الصور. '
-            'في شريحة مقارنة المنافسين فقط، ضع شعار كل منافس داخل صفه في جدول المنافسين إذا كان الشعار متوفراً.'
-        )
+        if canonicalize_chart_type((slide or {}).get('chart_type')) == 'horizontal_bar':
+            placeholder_note = (
+                'هذه شريحة مقارنة المنافسين ذات التخطيط الثابت: جدول المنافسين في اليمين والرسم البياني في اليسار. '
+                'ممنوع استخدام الخرائط أو الصور أو خلفيات الصور؛ ضع شعار كل منافس داخل صفه في جدول المنافسين إذا كان الشعار متوفراً.'
+            )
+        else:
+            placeholder_note = (
+                'هذه شريحة من قسم دراسة السوق: ممنوع استخدام الخرائط أو الصور الفوتوغرافية أو خلفيات الصور. '
+                'للنموذج حرية ابتكار التكوين البصري والهرمية والمساحات باستخدام HTML وCSS، مع الحفاظ على كل البيانات المعتمدة.'
+            )
 
     notes = [
         f'أنشئ فقط الشريحة {slide_num} لا غير',
@@ -5017,7 +5029,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'لا تكرر معلومة وردت في شريحة أخرى أو قسم آخر؛ تحليل SWOT يستخدم مصدر market_study_data.swot مرة واحدة فقط، والمكونات في قسم المكونات فقط',
         'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
         'الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في المالية) وأي رسم خارجها ممنوع منعاً باتاً؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
-        'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين، واجعل بقية الشرائح نصوصاً أو جداول HTML ثابتة بلا خرائط أو صور. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
+        'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون خرائط أو صور فوتوغرافية أو رسوم إضافية. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
         'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
         'املأ الشريحة بالمحتوى الضروري والوافي؛ وشرائح الملخص المالي تستخدم جداول التقرير نفسها دون ضغط أو حذف',
@@ -5099,15 +5111,16 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         if financial_note and not source_note:
             notes.append(financial_note.strip())
     elif section_key == 'market':
+        notes.append('الهيدر والفوتر ثابتان وتتم إضافتهما آلياً؛ اجعل مساحة الإبداع داخل منطقة المحتوى فقط.')
         if chart_type == 'horizontal_bar':
             notes.append(
                 f'هذه الشريحة مخصصة لرسم مقارنة المنافسين المعتمد ({chart_type}: {chart_note}). '
-                'قسّم الشريحة إلى عمودين متجاورين متناسقين (50% لجدول المنافسين، و50% لرسم الأعمدة الأفقية) '
-                'باستخدام display: grid; grid-template-columns: 1fr 1fr; gap: 24px; داخل الشريحة، '
+                'التخطيط ثابت: جدول المنافسين في اليمين ورسم الأعمدة الأفقية في اليسار. '
+                'استخدم direction: rtl; grid-template-areas: "table chart"; grid-template-columns: 1fr 1fr; gap: 24px; داخل حاوية display: grid، '
                 'مع بقاء جدول المنافسين كاملاً ومقروءاً، والرسم البياني واضحاً بكامل أشرطته وأسعاره مع إبراز مشروعنا بلون الهوية، ومنع اختراع أرقام أو متوسطات افتراضية.'
             )
         else:
-            notes.append('ممنوع إضافة أي رسم بياني في دراسة السوق إلا في شريحة مقارنة المنافسين المعتمدة (horizontal_bar).')
+            notes.append('هذه شريحة سوق عادية: صمّم التكوين البصري والهرمية والمساحات بحرية بما يخدم البيانات المعتمدة، مع منع الخرائط والصور الفوتوغرافية وخلفيات الصور وأي رسم بياني إضافي.')
     else:
         notes.append('الرسوم البيانية ممنوعة تماماً في هذا القسم؛ اعرض المحتوى بالجداول أو النصوص أو الصور حسب النمط المحدد.')
     notes_text = '\n'.join(f'- {n}' for n in notes)
@@ -6737,11 +6750,11 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
   </header>
   <div style="padding:0 58px;margin-top:12px;">
     {scope_html}
-    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;max-height:520px;overflow:visible;align-items:start;">
-      <div style="overflow:visible;">
+    <div style="display:grid;direction:rtl;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:'table chart';gap:20px;max-height:520px;overflow:visible;align-items:start;">
+      <div style="grid-area:table;overflow:visible;">
         {table_html}
       </div>
-      <div style="overflow:visible;">
+      <div style="grid-area:chart;overflow:visible;">
         {bar_chart_html}
         {provenance_html}
       </div>
@@ -7443,22 +7456,12 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
 
     chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
     market_source = str((slide or {}).get('content_source') or '')
-    deterministic_market = (
+    fixed_market_comparison = (
         _slide_section_key(slide) == 'market'
-        and (
-            market_source == 'market_study_data.scope'
-            or market_source == 'market_study_data.competitors'
-            or market_source.startswith(('market_study_data.summary:', 'market_study_data.one_block_summary:', 'market_study_data.sources:'))
-            or market_source in {'market_study_data.summary', 'market_study_data.one_block_summary', 'market_study_data.sources'}
-        )
+        and market_source == 'market_study_data.competitors'
+        and chart_type == 'horizontal_bar'
     )
-    deterministic_market_swot = market_source == 'market_study_data.swot'
-    deterministic_market_risk = market_source in {
-        'executive_content.risks', 'market_study_data.risk_analysis',
-        'market_study_data.risk_register', 'market_study_data.risks',
-        'market_study_data.summary.risks',
-    }
-    if chart_type in APPROVED_CHART_TYPES or _slide_section_key(slide) == 'financial' or deterministic_market or deterministic_market_swot or deterministic_market_risk:
+    if chart_type in APPROVED_CHART_TYPES or _slide_section_key(slide) == 'financial' or fixed_market_comparison:
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
             return postprocess_slide(
