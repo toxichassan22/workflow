@@ -452,8 +452,8 @@ level has no usable data. Do not drop a required item from the PDF to shorten a 
   the nine detailed market-analysis fields, rendered as organized labelled points in the screen
   and deck; the decision remains its own field with one of the five allowed classifications.
   `market_study_data.one_block_summary` is the actual `الملخص التنفيذي لسوق المشروع`: one
-  cohesive Arabic paragraph about this project, targeting about 200 words
-  (`SUMMARY_WORD_TARGET`), with no headings, numbered sections, bullet lists, SWOT list, or
+  cohesive Arabic paragraph about this project, targeting about 350 words and never fewer than
+  300 words (`SUMMARY_WORD_TARGET` / `SUMMARY_MIN_WORDS`), with no headings, numbered sections, bullet lists, SWOT list, or
   source register. `summary_prose()` (Python) and `buildMarketStudyOneBlockSummary()` (JS)
   provide a readable paragraph fallback for old drafts, while old ten-field summaries remain
   readable through `LEGACY_SUMMARY_SECTIONS`. The deterministic market-analysis slide renders
