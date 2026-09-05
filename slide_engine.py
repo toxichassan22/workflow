@@ -41,7 +41,8 @@ CONTENT_DISTRIBUTION_RULES = """
 12. قسم تحليل السوق يحتوي على رسم بياني واحد فقط: horizontal_bar في شريحة مقارنة المنافسين. بقية محتوى السوق نصوص وجداول ثابتة، ولا يجوز للنموذج إنشاء رسم بديل أو شريحة صور.
 13. يجب نقل نطاق الدراسة، وكل صف من جدول المنافسين، والملخص التنفيذي لسوق المشروع، وملخص دراسة السوق، وكل مصدر كما هو من بيانات السوق. تقسيم البيانات على شرائح إضافية مسموح، حذفها أو اختصارها غير مسموح.
 14. التوزيع المضغوط لقسم السوق إلزامي: شريحة واحدة لنطاق الدراسة، شريحة واحدة لمقارنة المنافسين، شريحة واحدة تجمع المحاور العشرة للملخص التنفيذي، شريحة واحدة للمصادر، وملخص دراسة سوق العمل في شريحة أو شريحتين كحد أقصى.
-15. قسم تحليل SWOT للمشروع يظهر في شريحة واحدة فقط بعد فاصل القسم، داخل مصفوفة واضحة من أربعة محاور: نقاط القوة، نقاط الضعف، الفرص، والتهديدات. لا تعرض JSON أو أقواساً أو أسماء مفاتيح برمجية.
+15. قسم تحليل SWOT للمشروع يظهر في شريحة واحدة بعد فاصل القسم، داخل مصفوفة واضحة من أربعة محاور: نقاط القوة، نقاط الضعف، الفرص، والتهديدات. لا تعرض JSON أو أقواساً أو أسماء مفاتيح برمجية.
+16. إذا وجدت بيانات مخاطر معتمدة، أضف بعدها شريحة واحدة لسجل المخاطر وطرق المعالجة. اعرض كل خطر مقابل طريقة معالجته في صف واضح، ولا تكرر مصفوفة SWOT داخلها ولا تخترع مستوى خطورة أو إجراءً غير موجود في البيانات.
 """
 
 PRESENTATION_SECTION_ORDER = (
@@ -1007,6 +1008,139 @@ def _market_one_block_chunks(value, max_chars=2200):
     return [chunk for chunk in (first, second) if chunk]
 
 
+def _market_work_heading(value):
+    """Return whether a short line can act as a visual section heading."""
+    text = str(value or '').strip()
+    return bool(text and len(text) <= 70 and not re.search(r'[:：.!؟،؛]', text))
+
+
+def _market_work_blocks(value):
+    """Turn the work-market narrative into headed editorial blocks."""
+    text = str(value or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
+    if not text:
+        return []
+    parts = [part.strip() for part in re.split(r'\n\s*\n+', text) if part.strip()]
+    blocks = []
+    pending_heading = ''
+    for part in parts:
+        lines = [line.strip() for line in part.splitlines() if line.strip()]
+        if not lines:
+            continue
+        if len(lines) == 1 and _market_work_heading(lines[0]):
+            if pending_heading:
+                blocks.append((pending_heading, ''))
+            pending_heading = lines[0]
+            continue
+        heading = pending_heading
+        pending_heading = ''
+        if not heading and len(lines) > 1 and _market_work_heading(lines[0]):
+            heading = lines.pop(0)
+        body = '\n'.join(lines).strip()
+        if body or heading:
+            blocks.append((heading, body))
+    if pending_heading:
+        blocks.append((pending_heading, ''))
+    return blocks or [('', text)]
+
+
+def _market_work_block_columns(blocks):
+    """Balance two contiguous editorial columns while preserving reading order."""
+    if len(blocks) < 2:
+        return [list(blocks), []]
+    weights = [max(len(str(heading or '')) + len(str(body or '')), 1)
+               for heading, body in blocks]
+    total = sum(weights)
+    prefix = 0
+    split_at = 1
+    best_distance = total
+    for index, weight in enumerate(weights[:-1], 1):
+        prefix += weight
+        distance = abs(total - 2 * prefix)
+        if distance < best_distance:
+            best_distance = distance
+            split_at = index
+    return [list(blocks[:split_at]), list(blocks[split_at:])]
+
+
+def _risk_pair_for_slide(raw):
+    """Normalize one stored risk into a display pair without inventing content."""
+    if isinstance(raw, dict):
+        risk = raw.get('risk') or raw.get('name') or raw.get('title') or raw.get('الخطر') or raw.get('المخاطر') or ''
+        mitigation = (
+            raw.get('mitigation') or raw.get('treatment') or raw.get('solution')
+            or raw.get('المعالجة') or raw.get('طريقة المعالجة') or raw.get('التخفيف') or ''
+        )
+        return str(risk or '').strip(), str(mitigation or '').strip()
+
+    text = str(raw or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
+    if not text:
+        return '', ''
+    risk_match = re.search(
+        r'(?:^|\n)\s*(?:الخطر|المخاطر?)\s*[:：-]\s*(.*?)(?=\n\s*(?:المعالجة|طريقة المعالجة|التخفيف)\s*[:：-]|$)',
+        text, flags=re.IGNORECASE | re.DOTALL)
+    mitigation_match = re.search(
+        r'(?:^|\n)\s*(?:المعالجة|طريقة المعالجة|التخفيف)\s*[:：-]\s*(.*)$',
+        text, flags=re.IGNORECASE | re.DOTALL)
+    if risk_match:
+        risk = risk_match.group(1).strip()
+        mitigation = mitigation_match.group(1).strip() if mitigation_match else ''
+        return risk, mitigation
+    if 'المعالجة' in text:
+        risk, mitigation = text.split('المعالجة', 1)
+        return risk.strip(' :-—'), mitigation.lstrip(' :-—').strip()
+    return text, ''
+
+
+def _risk_items_from_value(value):
+    """Read list, object, or normalized text risk data into display rows."""
+    if isinstance(value, dict):
+        nested = value.get('items') or value.get('risks') or value.get('rows')
+        raw_items = nested if isinstance(nested, list) else [value]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        text = str(value or '').replace('\\r\\n', '\n').replace('\\n', '\n').strip()
+        if not text:
+            return []
+        blocks = [item.strip() for item in re.split(r'\n\s*\n+', text) if item.strip()]
+        if len(blocks) == 1 and re.search(r'(?:^|\n)\s*(?:الخطر|المخاطر?)\s*[:：-]', text):
+            blocks = [item.strip() for item in re.split(r'(?=\n\s*(?:الخطر|المخاطر?)\s*[:：-])', text) if item.strip()]
+        raw_items = blocks
+    result = []
+    seen = set()
+    for raw in raw_items:
+        risk, mitigation = _risk_pair_for_slide(raw)
+        if not risk:
+            continue
+        key = (risk, mitigation)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({'risk': risk, 'mitigation': mitigation})
+    return result
+
+
+def _risk_analysis_source(project_data):
+    """Choose the most complete approved risk source for the risk register."""
+    source = project_data if isinstance(project_data, dict) else {}
+    market = _market_state(source)
+    executive = _decode_json_fact(source.get('executive_content'))
+    executive = executive if isinstance(executive, dict) else {}
+    candidates = (
+        ('executive_content.risks', executive.get('risks')),
+        ('market_study_data.risk_analysis', market.get('risk_analysis')),
+        ('market_study_data.risk_register', market.get('risk_register')),
+        ('market_study_data.risks', market.get('risks')),
+        ('market_study_data.summary.risks', (market.get('summary') or {}).get('risks')
+         if isinstance(market.get('summary'), dict) else ''),
+    )
+    for content_source, value in candidates:
+        items = _risk_items_from_value(value)
+        if items:
+            return content_source, items
+    return '', []
+
+
 def _market_source_chunks(market):
     """Keep every source, but split the register into two columns on one slide."""
     rows = _market_source_rows(market)
@@ -1684,7 +1818,10 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 'source_table': 'competitors',
                 'bullets': [],
             })
+    executive = _decode_json_fact(source.get('executive_content'))
+    executive = executive if isinstance(executive, dict) else {}
     swot = market.get('swot') if isinstance(market.get('swot'), dict) else {}
+    risk_source, risk_items = _risk_analysis_source(source)
     groups['swot_risks'] = []
     if any(str(value or '').strip() for value in swot.values()):
         add('swot_risks', {
@@ -1692,8 +1829,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'content_density': 'high', 'requires_image': False,
             'content_source': 'market_study_data.swot', 'bullets': [],
         })
-    executive = _decode_json_fact(source.get('executive_content'))
-    executive = executive if isinstance(executive, dict) else {}
+    if risk_items:
+        add('swot_risks', {
+            'title': 'تحليل المخاطر وطرق المعالجة', 'type': 'content', 'design_style': 'risk',
+            'content_density': 'high', 'requires_image': False,
+            'content_source': risk_source, 'bullets': [],
+        })
     if str(executive.get('summary') or '').strip():
         existing_summary = groups.get('executive_summary', [])[:1]
         groups['executive_summary'] = []
@@ -1759,7 +1900,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         'market': bool(_readable_fact(market)),
         'timeline': bool(phases),
         'financial': financial_study_has_real_input(model, _parse_financial_dict(source.get('financial_calc_data'))),
-        'swot_risks': bool(any(str(value or '').strip() for value in swot.values())),
+        'swot_risks': bool(any(str(value or '').strip() for value in swot.values()) or risk_items),
         'team': bool(team_entries),
         'plans': bool(plans),
         'exterior': bool(moodboard_items),
@@ -4300,6 +4441,15 @@ def _slide_source_data_note(slide, project_data):
             return 'جدول المعالم والمسافات وأوقات القيادة كما هو دون حذف:\n' + json.dumps(matrix, ensure_ascii=False, indent=2)
         value = str(project_data.get('nearby_landmarks') or '').strip()
         return 'المعالم والمسافات وأوقات القيادة كما هي دون حذف:\n' + value if value else ''
+    if source in {
+        'executive_content.risks', 'market_study_data.risk_analysis',
+        'market_study_data.risk_register', 'market_study_data.risks',
+        'market_study_data.summary.risks',
+    }:
+        risk_source, risk_items = _risk_analysis_source(project_data)
+        if source == risk_source and risk_items:
+            return 'سجل المخاطر وطرق المعالجة المعتمد كما أُدخل، دون إضافة أو تكرار:\n' + json.dumps(risk_items, ensure_ascii=False, indent=2)
+        return ''
     if source == 'market_study_data.swot':
         market = _decode_json_fact(project_data.get('market_study_data'))
         swot = market.get('swot') if isinstance(market, dict) and isinstance(market.get('swot'), dict) else {}
@@ -4692,7 +4842,8 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'image': 'استخدم جميع رموز الصور المحددة في الخطة بتوزيع متوازن واحد للمجموعة، وبحد أقصى ثلاث صور في الشريحة',
         'flow': 'مخطط تدفق بصري هندسي راقٍ (Flowchart / Visual Pipeline) يربط الكتل بمسارات تدفق واضحة وبألوان الهوية مع إبراز القيم والمراحل والمبالغ',
         'diagram': 'مخطط اتجاهي هندسي راقٍ (Directional Diagram) لأرض المشروع وحدودها الأربعة والواجهات والشوارع المحيطة والإطلالة وفق الهيكل المعتمد',
-        'swot': 'تحليل SWOT وتحليل المخاطر بتقسيم واضح وبألوان الهوية وحدها',
+        'swot': 'مصفوفة SWOT واضحة من أربعة محاور بألوان الهوية وحدها',
+        'risk': 'سجل مخاطر منظم يضع كل خطر مقابل طريقة معالجته في صف واضح دون تكرار SWOT أو اختراع تقييمات',
         'map': 'خريطة كاملة بلا قص باستخدام contain ومضبوطة في المنتصف تماماً (center center) مع جدول أو ملخص واحد دون إعادة الأرقام في أكثر من شكل',
         'grid': 'استخدم جميع رموز الصور المحددة في الخطة بتوزيع متوازن من صورة إلى ثلاث صور',
         'minimal': 'خاتمة بسيطة تتضمن بيانات التواصل المتاحة بلا تقييمات أو عبارات مشروطة',
@@ -5349,6 +5500,18 @@ def _required_slide_texts(slide, project_data):
                                       for value in row.values() if str(value or '').strip()))
         value = str(project_data.get('nearby_landmarks') or '').strip()
         return [item.strip() for item in re.split(r'[\n|]', value) if item.strip()]
+    if source in {
+        'executive_content.risks', 'market_study_data.risk_analysis',
+        'market_study_data.risk_register', 'market_study_data.risks',
+        'market_study_data.summary.risks',
+    }:
+        risk_source, risk_items = _risk_analysis_source(project_data)
+        return [
+            str(value).strip()
+            for item in risk_items
+            for value in (item.get('risk'), item.get('mitigation'))
+            if str(value or '').strip()
+        ] if source == risk_source else []
     if source == 'market_study_data.swot':
         market = _decode_json_fact(project_data.get('market_study_data'))
         swot = market.get('swot') if isinstance(market, dict) and isinstance(market.get('swot'), dict) else {}
@@ -6653,7 +6816,7 @@ def _market_value_html(value):
 
 
 def _build_market_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Render all ten executive market fields in one balanced two-column slide."""
+    """Render all ten executive market fields as two editorial data columns."""
     source = source if isinstance(source, dict) else {}
     market = _market_state(source)
     rows = _market_summary_rows(market)
@@ -6668,10 +6831,10 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
         blocks = []
         for label, value in column_rows:
             blocks.append(
-                f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-right:4px solid {accent};'
-                'border-radius:6px;padding:8px 11px;box-sizing:border-box;min-height:86px;overflow:visible;">'
-                f'<div style="font-size:11px;font-weight:800;color:{primary};margin-bottom:4px;">{html_lib.escape(str(label))}</div>'
-                f'<div style="font-size:10.4px;line-height:1.38;color:#334155;font-weight:500;">{_market_value_html(value)}</div>'
+                f'<div style="display:grid;grid-template-columns:0.72fr 1.75fr;gap:12px;align-items:start;'
+                f'padding:12px 14px;border-bottom:1px solid #dbe4ee;background:#ffffff;min-height:80px;box-sizing:border-box;">'
+                f'<div style="border-right:3px solid {accent};padding-right:9px;font-size:11.2px;font-weight:800;color:{primary};line-height:1.35;">{html_lib.escape(str(label))}</div>'
+                f'<div style="font-size:10.8px;line-height:1.48;color:#334155;font-weight:500;">{_market_value_html(value)}</div>'
                 '</div>'
             )
         return ''.join(blocks)
@@ -6692,9 +6855,9 @@ def _build_market_summary_slide(slide, source, branding=None, slide_num=None, to
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:10px;">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;">
-      {''.join(f'<div style="display:flex;flex-direction:column;gap:8px;min-width:0;">{render_column(column)}</div>' for column in columns)}
+  <div style="padding:0 36px;margin-top:14px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
+      {''.join(f'<div style="min-width:0;border-top:4px solid {primary};background:#f8fafc;">{render_column(column)}</div>' for column in columns)}
     </div>
   </div>
   <footer class="slide-footer" data-slide-footer="1">
@@ -6715,7 +6878,7 @@ def _market_one_block_text(slide, market):
 
 
 def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, total_slides=None):
-    """Render the complete work-market summary in one or two readable slides."""
+    """Render the complete work-market summary as a two-column editorial layout."""
     source = source if isinstance(source, dict) else {}
     market = _market_state(source)
     value = _market_one_block_text(slide, market)
@@ -6723,22 +6886,32 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
     title = html_lib.escape(str((slide or {}).get('title') or 'ملخص دراسة سوق العمل'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
-    paragraphs = [part.strip() for part in re.split(r'\n\s*\n+', value) if part.strip()]
-    rendered = []
-    for paragraph in paragraphs:
-        lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
-        joined = ' '.join(lines)
-        is_heading = len(joined) <= 70 and ':' not in joined and not re.search(r'[.!؟،]', joined)
-        if is_heading:
-            rendered.append(
-                f'<div style="break-inside:avoid;font-size:12px;font-weight:800;color:{primary};'
-                f'border-right:4px solid {accent};padding:3px 9px;margin:2px 0 5px;">{_market_value_html(joined)}</div>'
+    blocks = _market_work_blocks(value)
+    columns = _market_work_block_columns(blocks)
+
+    def render_column(column_blocks, column_index):
+        rendered = []
+        offset = sum(len(column) for column in columns[:column_index])
+        for block_index, (heading, body) in enumerate(column_blocks, offset + 1):
+            heading_html = ''
+            if heading:
+                heading_html = (
+                    f'<div style="display:flex;align-items:baseline;gap:9px;margin-bottom:6px;">'
+                    f'<span dir="ltr" style="font-size:10px;font-weight:800;color:{accent};">{block_index:02d}</span>'
+                    f'<span style="font-size:14px;font-weight:800;color:{primary};line-height:1.3;">{_market_value_html(heading)}</span>'
+                    '</div>'
+                )
+            body_html = (
+                f'<div style="font-size:12.4px;line-height:1.58;color:#334155;font-weight:500;">'
+                f'{_market_value_html(body)}</div>'
+                if body else ''
             )
-        else:
             rendered.append(
-                f'<div style="break-inside:avoid;font-size:12.7px;line-height:1.48;color:#334155;'
-                f'margin:0 0 8px;padding:0 5px;">{_market_value_html(paragraph)}</div>'
+                f'<article style="break-inside:avoid;border-top:2px solid {accent};padding:10px 4px 12px;">'
+                f'{heading_html}{body_html}</article>'
             )
+        return ''.join(rendered)
+
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
   <style>{SOL_SLIDES_CSS}</style>
@@ -6755,8 +6928,10 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
       </div>
     </div>
   </header>
-  <div style="padding:0 42px;margin-top:12px;height:536px;overflow:hidden;">
-    {''.join(rendered)}
+  <div data-market-work-summary="1" style="padding:0 42px;margin-top:12px;height:536px;overflow:hidden;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start;">
+      {''.join(f'<section style="min-width:0;">{render_column(column, index)}</section>' for index, column in enumerate(columns))}
+    </div>
   </div>
   <footer class="slide-footer" data-slide-footer="1">
     <div class="footer-left">{project_title}</div>
@@ -6911,6 +7086,67 @@ def _build_market_swot_slide(slide, source, branding=None, slide_num=None, total
 </div>'''
 
 
+def _build_market_risk_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    """Render approved risks as a clear risk-to-mitigation register."""
+    source = source if isinstance(source, dict) else {}
+    _risk_source, items = _risk_analysis_source(source)
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'تحليل المخاطر وطرق المعالجة'))
+    project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
+    dense = len(items) >= 7
+    cell_padding = '8px 12px' if dense else '12px 14px'
+    body_size = '10.8px' if dense else '12px'
+    row_html = []
+    for index, item in enumerate(items, 1):
+        risk = _market_value_html(item.get('risk'))
+        mitigation = _market_value_html(item.get('mitigation')) if item.get('mitigation') else 'غير محددة في البيانات المعتمدة'
+        background = '#ffffff' if index % 2 else '#f8fafc'
+        row_html.append(
+            f'<div data-risk-row="{index}" style="display:grid;grid-template-columns:1fr 1.35fr;gap:0;'
+            f'background:{background};border-bottom:1px solid #dbe4ee;align-items:stretch;">'
+            f'<div style="padding:{cell_padding};border-right:3px solid #d7a4a4;color:#27364a;font-size:{body_size};line-height:1.5;">'
+            f'<div style="font-size:10px;font-weight:800;color:#b45309;margin-bottom:4px;" dir="ltr">{index:02d}</div>{risk}</div>'
+            f'<div style="padding:{cell_padding};border-right:1px solid #e2e8f0;color:#334155;font-size:{body_size};line-height:1.5;">{mitigation}</div>'
+            '</div>'
+        )
+    if not row_html:
+        row_html.append(
+            '<div style="padding:18px;font-size:12px;color:#64748b;">لا توجد بيانات مخاطر معتمدة لعرضها.</div>'
+        )
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">RISK ANALYSIS</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">سجل المخاطر المرتبطة بالمشروع وطرق معالجتها من البيانات المعتمدة</p>
+      </div>
+    </div>
+  </header>
+  <div data-risk-register="1" style="padding:0 42px;margin-top:16px;">
+    <div style="border-top:4px solid {primary};border-bottom:1px solid #dbe4ee;overflow:hidden;">
+      <div style="display:grid;grid-template-columns:1fr 1.35fr;background:{primary};color:#ffffff;font-size:12px;font-weight:800;line-height:1.25;">
+        <div style="padding:10px 14px;border-right:1px solid rgba(255,255,255,.35);">المخاطر</div>
+        <div style="padding:10px 14px;">طريقة المعالجة</div>
+      </div>
+      {''.join(row_html)}
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">تحليل المخاطر وطرق المعالجة</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
 def _build_structured_fallback_slide(slide, project_data, branding, slide_num=None, total_slides=None):
     source = project_data if isinstance(project_data, dict) else {}
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
@@ -6951,6 +7187,12 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         return _build_market_sources_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if content_source == 'market_study_data.swot':
         return _build_market_swot_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    if content_source in {
+        'executive_content.risks', 'market_study_data.risk_analysis',
+        'market_study_data.risk_register', 'market_study_data.risks',
+        'market_study_data.summary.risks',
+    }:
+        return _build_market_risk_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if slide_type == 'map_landmarks':
         matrix = source.get('landmarks_matrix') if isinstance(source.get('landmarks_matrix'), list) else []
         headers = list(matrix[0].keys()) if matrix and isinstance(matrix[0], dict) else []
@@ -7121,7 +7363,12 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         )
     )
     deterministic_market_swot = market_source == 'market_study_data.swot'
-    if chart_type in APPROVED_CHART_TYPES or _slide_section_key(slide) == 'financial' or deterministic_market or deterministic_market_swot:
+    deterministic_market_risk = market_source in {
+        'executive_content.risks', 'market_study_data.risk_analysis',
+        'market_study_data.risk_register', 'market_study_data.risks',
+        'market_study_data.summary.risks',
+    }
+    if chart_type in APPROVED_CHART_TYPES or _slide_section_key(slide) == 'financial' or deterministic_market or deterministic_market_swot or deterministic_market_risk:
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
             return postprocess_slide(

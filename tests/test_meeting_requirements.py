@@ -1308,7 +1308,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-map-summary-background', repaired)
         self.assertEqual(len(prompts), 1)
 
-    def test_swot_section_keeps_one_canonical_slide_without_risk_register(self):
+    def test_swot_section_keeps_one_canonical_slide_and_adds_risk_register(self):
         engine = self.application_module.slide_engine
         project = {
             'market_study_data': json.dumps({'swot': {
@@ -1330,11 +1330,22 @@ class MeetingRequirementsTests(unittest.TestCase):
         plan = engine.normalize_presentation_plan(raw, project, {})
         slides = [slide for slide in plan['slides']
                   if slide.get('section_key') == 'swot_risks' and slide.get('type') == 'content']
-        self.assertEqual(len(slides), 1, slides)
-        self.assertEqual(slides[0].get('content_source'), 'market_study_data.swot')
+        self.assertEqual(len(slides), 2, slides)
+        self.assertEqual(
+            [slide.get('content_source') for slide in slides],
+            ['market_study_data.swot', 'executive_content.risks'],
+        )
         note = engine._slide_source_data_note(slides[0], project)
         for value in ('موقع قوي', 'تكلفة مرتفعة', 'نمو الطلب', 'المنافسة'):
             self.assertIn(value, note)
+        risk_slide = slides[1]
+        risk_html = engine.generate_single_slide(
+            'system', risk_slide, 4, 10, {'primary_color': '#123456'},
+            lambda *_args, **_kwargs: self.fail('risk analysis must be deterministic'),
+            project_data=project,
+        )
+        self.assertIn('data-risk-register', risk_html)
+        self.assertIn('مخاطر مكررة وطرق معالجتها', risk_html)
 
     def test_closing_uses_main_image_contacts_and_brand_overlay(self):
         engine = self.application_module.slide_engine
@@ -1689,9 +1700,11 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         swot = [slide for slide in plan['slides']
                 if slide.get('section_key') == 'swot_risks' and slide.get('type') == 'content']
-        self.assertEqual(len(swot), 1)
+        self.assertEqual(len(swot), 2)
+        swot_slide = next(slide for slide in swot if slide.get('content_source') == 'market_study_data.swot')
+        risk_slide = next(slide for slide in swot if slide.get('content_source') == 'market_study_data.summary.risks')
         swot_html = engine.generate_single_slide(
-            'system', swot[0], 3, 10, {'primary_color': '#123456'},
+            'system', swot_slide, 3, 10, {'primary_color': '#123456'},
             lambda *_args, **_kwargs: self.fail('SWOT must be deterministic'),
             project_data=project,
         )
@@ -1714,6 +1727,13 @@ class MeetingRequirementsTests(unittest.TestCase):
                                if slide.get('content_source') == 'market_study_data.competitors')
         self.assertIn('data-competitor-table', competitor_html)
         self.assertIn('##COMPETITOR_LOGO_1##', competitor_html)
+        risk_html = engine.generate_single_slide(
+            'system', risk_slide, 4, 10, {'primary_color': '#123456'},
+            lambda *_args, **_kwargs: self.fail('risk analysis must be deterministic'),
+            project_data=project,
+        )
+        self.assertIn('data-risk-register', risk_html)
+        self.assertIn('المخاطر', risk_html)
 
         long_market = {
             'market_study_data': {
@@ -1744,6 +1764,8 @@ class MeetingRequirementsTests(unittest.TestCase):
             for index, slide in enumerate(long_work_slides)
         )
         self.assertIn('النهاية الكاملة لملخص سوق العمل', long_work_html)
+        self.assertIn('data-market-work-summary', long_work_html)
+        self.assertIn('<article', long_work_html)
 
     def test_wide_cashflow_table_in_report_preserves_combo_chart(self):
         engine = self.application_module.slide_engine
