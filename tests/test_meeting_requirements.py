@@ -4888,6 +4888,19 @@ class MeetingRequirementsTests(unittest.TestCase):
         access_body = maps_source.split('def _draw_access_roads(', 1)[1].split('def _get_cached_map_images(', 1)[0]
         self.assertNotIn("('main_roads', 'secondary_roads')", access_body)
 
+    def test_map_gallery_respects_approval_stages_and_editable_saved_maps(self):
+        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function mapPreviewStoredUrl(view)', source)
+        self.assertIn("...(view.editableKeys || [])", source)
+        self.assertIn('function mapPreviewIsVisible(view, approvals = tenantCreativeImages?.map_approvals || {})', source)
+        self.assertIn("'بانتظار اعتماد خريطة الأرض / المبنى'", source)
+        self.assertIn("'بانتظار اعتماد تحليل الموقع'", source)
+        gallery_body = source.split('function renderMapPreviewGallery()', 1)[1].split('function withCacheBust', 1)[0]
+        self.assertIn('const visible = mapPreviewIsVisible(view, approvals);', gallery_body)
+        self.assertIn('visible && url', gallery_body)
+        self.assertIn('const overviewGenerated = mapPreviewIsGenerated(overview);', source)
+        self.assertIn('const generated = mapPreviewIsGenerated(view);', source)
+
     def test_overview_map_has_dedicated_generation_and_edit_modes(self):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         approval_panel = index_source.split('id="locationAnalysisApprovalPanel"', 1)[1].split('</div>', 1)[0]

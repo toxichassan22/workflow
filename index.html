@@ -6236,15 +6236,25 @@
       return source !== 'cleared';
     }
 
+    function mapPreviewStoredUrl(view) {
+      const placeholders = tenantCreativeImages?.map_placeholders || {};
+      const keys = [...(view?.keys || []), ...(view?.editableKeys || [])];
+      return keys.map(key => placeholders[key]).find(Boolean) || '';
+    }
+
+    function mapPreviewIsGenerated(view) {
+      return !!mapPreviewStoredUrl(view);
+    }
+
+    function mapPreviewIsVisible(view, approvals = tenantCreativeImages?.map_approvals || {}) {
+      if (!tenantProjectData?.location_analysis_approved) return false;
+      return view?.mapType === 'overview' || !!approvals.overview;
+    }
+
     function hasStoredMaps(highlightSite) {
       const expectedHighlight = highlightSite === undefined ? shouldHighlightTenantSite() : highlightSite !== false;
       const c = tenantCreativeImages || {};
-      const mp = c.map_placeholders || {};
-      const hasView = keys => keys.some(key => Boolean(mp[key]));
-      const complete = hasView(['##MAP_OVERVIEW##', '##MAP_OVERVIEW_SATELLITE##', '##MAP_OVERVIEW_ROADMAP##']) &&
-        hasView(['##MAP_LANDMARKS##', '##MAP_LANDMARKS_SATELLITE##', '##MAP_LANDMARKS_ROADMAP##']) &&
-        hasView(['##MAP_ACCESS##', '##MAP_ACCESS_SATELLITE##', '##MAP_ACCESS_ROADMAP##']) &&
-        hasView(['##MAP_CATCHMENT##', '##MAP_CATCHMENT_SATELLITE##', '##MAP_CATCHMENT_ROADMAP##']);
+      const complete = typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined' && MAP_PREVIEW_VIEW_DEFS.every(mapPreviewIsGenerated);
       if (!complete) return false;
       return c.map_highlight_site === expectedHighlight &&
         (c.maps_persisted || c.maps_signature === mapsSignature(tenantProjectData, expectedHighlight));
@@ -12527,7 +12537,7 @@
       const status = document.getElementById('locationAnalysisApprovalStatus');
       if (status) status.textContent = approved ? 'تحليل الموقع معتمد' : 'تحليل الموقع يحتاج اعتمادًا قبل توليد الخرائط';
       const overview = typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined' ? MAP_PREVIEW_VIEW_DEFS[0] : null;
-      const overviewGenerated = !!overview?.keys.some(key => !!tenantCreativeImages.map_placeholders?.[key]);
+      const overviewGenerated = mapPreviewIsGenerated(overview);
       const generateOverviewButton = document.getElementById('generateOverviewMapButton');
       if (generateOverviewButton) generateOverviewButton.disabled = !approved || overviewGenerated;
       LOCATION_ANALYSIS_KEYS.forEach(key => {
@@ -12548,10 +12558,9 @@
       const controls = document.getElementById('locationMapGenerationControls');
       if (controls && typeof MAP_PREVIEW_VIEW_DEFS !== 'undefined') {
         const approvals = tenantCreativeImages.map_approvals || {};
-        const placeholders = tenantCreativeImages.map_placeholders || {};
         const view = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === tenantSelectedMapType) || MAP_PREVIEW_VIEW_DEFS[0];
         tenantSelectedMapType = view.mapType;
-        const generated = view.keys.some(key => !!placeholders[key]);
+        const generated = mapPreviewIsGenerated(view);
         const mapApproved = !!approvals[view.mapType];
         const generationLocked = !approved || (view.mapType !== 'overview' && !approvals.overview) || mapApproved;
         const approvalLocked = !approved || (view.mapType !== 'overview' && !approvals.overview);
@@ -12618,8 +12627,7 @@
       if (!view) return false;
       tenantSelectedMapType = mapType;
       renderLocationWorkflowState();
-      const placeholders = tenantCreativeImages.map_placeholders || {};
-      if (!view.keys.some(key => !!placeholders[key])) {
+      if (!mapPreviewIsGenerated(view)) {
         document.getElementById('tenantMapPreview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         toast(view.title + ' غير مولدة');
         return false;
@@ -17173,16 +17181,19 @@
     function renderMapPreviewGallery() {
       const gallery = document.getElementById('mapPreviewGallery');
       if (!gallery) return;
-      const placeholders = tenantCreativeImages.map_placeholders || {};
       const approvals = tenantCreativeImages.map_approvals || {};
       const views = MAP_PREVIEW_VIEW_DEFS;
       const cards = views.map(view => {
-        const url = view.keys.map(key => placeholders[key]).find(Boolean);
-        const approved = !!approvals[view.mapType];
-        const status = approved ? 'معتمدة' : (url ? 'بانتظار الاعتماد' : 'غير مولدة');
-        const preview = url
+        const url = mapPreviewStoredUrl(view);
+        const visible = mapPreviewIsVisible(view, approvals);
+        const status = !visible
+          ? (tenantProjectData?.location_analysis_approved
+            ? 'بانتظار اعتماد خريطة الأرض / المبنى'
+            : 'بانتظار اعتماد تحليل الموقع')
+          : (approvals[view.mapType] ? 'معتمدة' : (url ? 'بانتظار الاعتماد' : 'غير مولدة'));
+        const preview = visible && url
           ? '<img src="' + escapeHtml(withCacheBust(url)) + '" alt="' + escapeHtml(view.title) + '" style="display:block;width:100%;aspect-ratio:16/9;object-fit:contain;object-position:center center;background:#f4f6f8;border-radius:8px;">'
-          : '<div style="display:flex;align-items:center;justify-content:center;aspect-ratio:16/9;background:#f4f6f8;border-radius:8px;color:var(--muted);">لم تُولد الخريطة</div>';
+          : '<div class="tenant-map-preview-placeholder" style="display:flex;align-items:center;justify-content:center;aspect-ratio:16/9;background:#f4f6f8;border-radius:8px;color:var(--muted);text-align:center;padding:12px;">' + escapeHtml(status === 'غير مولدة' ? 'لم تُولد الخريطة' : status) + '</div>';
         return '<figure class="tenant-map-preview-card' + (tenantSelectedMapType === view.mapType ? ' active' : '') + '" data-map-select="' + escapeHtml(view.mapType) + '" style="margin:0;border:1px solid var(--line);border-radius:12px;padding:8px;background:#fff;">' +
           '<figcaption style="display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:12px;color:var(--p);margin-bottom:6px;"><span>' + escapeHtml(view.title) + '</span><span style="color:var(--muted);font-weight:600;">' + status + '</span></figcaption>' + preview + '</figure>';
       }).join('');
@@ -17225,7 +17236,7 @@
       const placeholders = tenantCreativeImages.map_placeholders || {};
       const markedUrl = view.keys.map(key => placeholders[key]).find(Boolean);
       const editableUrl = view.editableKeys?.map(key => placeholders[key]).find(Boolean);
-      const url = editableUrl || markedUrl;
+      const url = mapPreviewIsVisible(view) ? (editableUrl || markedUrl) : '';
       const previewBox = document.getElementById('mapPreviewImage');
       const image = previewBox?.querySelector('img');
       if (!url || !previewBox || !image) {
@@ -17460,7 +17471,7 @@
       const pinUndoButton = document.getElementById('undoTenantMapPinButton');
       const pinConfirmButton = document.getElementById('confirmTenantMapPinButton');
       const overview = MAP_PREVIEW_VIEW_DEFS.find(view => view.mapType === 'overview');
-      const overviewGenerated = overview?.keys.some(key => !!tenantCreativeImages.map_placeholders?.[key]);
+      const overviewGenerated = mapPreviewIsGenerated(overview);
       const locked = !overviewGenerated || !!tenantCreativeImages.map_approvals?.overview;
       if (undoButton) undoButton.disabled = locked || !tenantMapDraftPolygonPoints.length;
       if (confirmButton) confirmButton.disabled = locked || tenantMapDraftPolygonPoints.length < 3;
