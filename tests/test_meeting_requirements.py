@@ -2265,6 +2265,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("generateButton.textContent = 'توليد عرض القسم'", index_source)
         self.assertIn('async function generateProjectSectionPresentation(sectionKey, sectionLabel = \'\')', index_source)
         self.assertIn('if (sectionKey) requestBody.sectionKey = sectionKey;', index_source)
+        self.assertIn('requestBody.presentationId = tenantPresentationId;', index_source)
+        self.assertIn('requestBody.projectData = payload;', index_source)
         self.assertIn('tenantPresentationId = null;', index_source)
         self.assertIn("api('POST', '/api/presentations'", index_source)
         self.assertIn('await saveTenantPresentation(options.presentationTitle)', index_source)

@@ -4522,6 +4522,17 @@ def api_slide_plan():
     """
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
+    presentation_id = str(data.get('presentationId') or '').strip()
+    if presentation_id and not project_data:
+        presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
+        if not presentation:
+            return jsonify({'success': False, 'error': 'العرض غير موجود أو لا يتبع هذه الشركة'}), 404
+        try:
+            project_data = clean_project_data(json.loads(presentation.get('project_data') or '{}'))
+        except (TypeError, ValueError):
+            project_data = {}
+        project_data = _merge_persisted_map_assets(
+            project_data, g.tenant_id, presentation_id=presentation_id)
     images = _augment_generation_images(data.get('images', {}), project_data, g.tenant_id)
     branding = db.get_branding(g.tenant_id)
     project_section_key = str(data.get('sectionKey') or '').strip()

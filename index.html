@@ -7366,9 +7366,15 @@
       const payload = typeof slimGenerationProjectData === 'function'
         ? slimGenerationProjectData(projectData) : projectData;
       const requestBody = {
-        projectData: payload,
         images: buildPresentationPlanAssets()
       };
+      if (tenantPresentationId) {
+        // The server already has the saved project and presentation. Sending projectData here
+        // would upload the whole visual/financial state again and can exceed the hosting edge limit.
+        requestBody.presentationId = tenantPresentationId;
+      } else {
+        requestBody.projectData = payload;
+      }
       if (sectionKey) requestBody.sectionKey = sectionKey;
       tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', requestBody)
         .then(async res => {
