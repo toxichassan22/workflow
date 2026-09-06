@@ -1141,6 +1141,11 @@ class MeetingRequirementsTests(unittest.TestCase):
                           if slide.get('section_key') == 'plans' and slide.get('type') == 'content'], [1, 1, 1])
         self.assertEqual([len(slide.get('image_tokens') or []) for slide in plan['slides']
                           if slide.get('section_key') == 'interior' and slide.get('type') == 'content'], [2] * 7)
+        content_slides = [slide for slide in plan['slides'] if slide.get('type') == 'content']
+        self.assertTrue(any(slide.get('image_tokens') for slide in content_slides))
+        self.assertTrue(any(not slide.get('image_tokens') for slide in content_slides))
+        self.assertIn('لا تضف صورة إلى شرائح النص أو الجداول بلا حاجة',
+                      engine.build_slide_plan_prompt({'project_name': 'المشروع'}, {}, images))
 
     def test_image_slide_retries_when_a_planned_image_is_missing(self):
         engine = self.application_module.slide_engine
@@ -1162,6 +1167,23 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len(prompts), 2)
         self.assertIn('##PLAN_IMAGE_2##', prompts[1])
 
+    def test_unplanned_creative_image_tokens_are_removed_from_text_slides(self):
+        engine = self.application_module.slide_engine
+        html = engine.generate_single_slide(
+            'system', {'title': 'نبذة عن المشروع', 'type': 'content',
+                       'section_key': 'overview', 'image_tokens': []},
+            3, 8, {'primary_color': '#123456'},
+            lambda *_args, **_kwargs: {
+                'choices': [{'message': {'content': (
+                    '<div class="slide" style="background:#fff;color:#111">'
+                    '<img src="##MOODBOARD_IMAGE_1##"><p>محتوى</p></div>'
+                )}}]
+            },
+            project_data={},
+        )
+        self.assertNotIn('MOODBOARD_IMAGE_1', html)
+        self.assertIn('محتوى', html)
+
     def test_directional_diagram_is_canonicalized_once(self):
         engine = self.application_module.slide_engine
         project = {'project_name': 'المشروع', 'boundary_lengths': 'شمال 20م',
@@ -1178,6 +1200,75 @@ class MeetingRequirementsTests(unittest.TestCase):
                     if slide.get('content_source') == 'land_boundary_diagram']
         self.assertEqual(len(diagrams), 1, diagrams)
         self.assertEqual(sum(slide.get('design_style') == 'diagram' for slide in plan['slides']), 1)
+
+    def test_hidden_land_analysis_data_keeps_boundary_diagram_in_full_plan(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'المشروع',
+            'land_documents_analysis_data': json.dumps({
+                'parcels': [{
+                    'directions': {
+                        'north': {'boundary_length_m': 109, 'street_name': 'شارع شمالي', 'street_width_m': 20},
+                        'south': {'boundary_length_m': 98, 'uses': 'جار'},
+                    }
+                }]
+            }, ensure_ascii=False),
+        }
+        plan = engine.normalize_presentation_plan(
+            {'slides': [{'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+                        {'title': 'الخاتمة', 'type': 'closing'}]}, project, {})
+        diagram = next(slide for slide in plan['slides']
+                       if slide.get('content_source') == 'land_boundary_diagram')
+        self.assertEqual(diagram.get('section_key'), 'land')
+        self.assertEqual(diagram.get('design_style'), 'diagram')
+
+    def test_location_only_generation_keeps_shared_boundary_diagram(self):
+        engine = self.application_module.slide_engine
+        plan = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover', 'section_key': 'cover'},
+            {'title': 'الفهرس', 'type': 'index', 'section_key': 'index'},
+            {'title': 'تحليل الأرض', 'type': 'section_divider', 'section_key': 'land'},
+            {'title': 'مخطط اتجاهي لحدود الأرض', 'type': 'content', 'section_key': 'land',
+             'content_source': 'land_boundary_diagram', 'design_style': 'diagram'},
+            {'title': 'تحليل الموقع الجغرافي', 'type': 'section_divider', 'section_key': 'location'},
+            {'title': 'موقع المشروع', 'type': 'content', 'section_key': 'location'},
+            {'title': 'الخاتمة', 'type': 'closing', 'section_key': 'closing'},
+        ]}
+        filtered = engine.filter_presentation_plan_sections(plan, ['location'])
+        self.assertIsNotNone(filtered)
+        diagrams = [slide for slide in filtered['slides']
+                    if slide.get('content_source') == 'land_boundary_diagram']
+        self.assertEqual(len(diagrams), 1)
+        self.assertEqual(diagrams[0].get('section_key'), 'location')
+        location_divider = next(index for index, slide in enumerate(filtered['slides'])
+                                if slide.get('type') == 'section_divider'
+                                and slide.get('section_key') == 'location')
+        self.assertGreater(filtered['slides'].index(diagrams[0]), location_divider)
+
+    def test_boundary_diagram_is_deterministic_and_does_not_call_model(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع الواجهة',
+            'land_documents_analysis_data': json.dumps({
+                'parcels': [{'directions': {
+                    'north': {'boundary_length_m': 109, 'street_name': 'شارع شمالي', 'street_width_m': 20},
+                    'south': {'boundary_length_m': 98, 'uses': 'جار'},
+                    'east': {'boundary_length_m': 80, 'street_name': 'شارع شرقي'},
+                    'west': {'boundary_length_m': 59.5, 'uses': 'طريق الكورنيش'},
+                }}]
+            }, ensure_ascii=False),
+        }
+        html = engine.generate_single_slide(
+            'system', {'title': 'مخطط اتجاهي لحدود الأرض', 'type': 'content',
+                       'section_key': 'location', 'design_style': 'diagram',
+                       'content_source': 'land_boundary_diagram'},
+            4, 12, {'primary_color': '#005f78', 'accent_color': '#c59a58'},
+            lambda *_args, **_kwargs: self.fail('boundary diagram must be deterministic'),
+            project_data=project)
+        self.assertIn('data-boundary-diagram="1"', html)
+        self.assertEqual(len(re.findall(r'data-boundary-direction=', html)), 4)
+        for value in ('109', '98', '80', '59.5', 'شارع شمالي', 'طريق الكورنيش'):
+            self.assertIn(value, html)
 
     def test_content_logos_tables_and_fitted_html_keep_readable_sizes(self):
         engine = self.application_module.slide_engine
@@ -1416,7 +1507,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         financial = engine.generate_single_slide(
             'system', {'title': 'الإيرادات', 'type': 'content', 'section_key': 'financial',
                        'content_source': 'financial_report:1:0:1', 'design_style': 'table'},
-            4, 5, {'primary_color': '#123456'}, incomplete, max_retries=0, project_data=project)
+            4, 5, {'primary_color': '#123456'},
+            lambda *_args, **_kwargs: self.fail('financial report slides must be deterministic'),
+            max_retries=0, project_data=project)
         self.assertIn('2027', financial)
         self.assertIn('1,500,000', financial)
 

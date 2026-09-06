@@ -43,6 +43,10 @@ CONTENT_DISTRIBUTION_RULES = """
 14. التوزيع المضغوط لقسم السوق إلزامي: شريحة واحدة لنطاق الدراسة، شريحة واحدة لمقارنة المنافسين، شريحة واحدة لتحليل السوق المعتمد (الفقرة الواحدة)، شريحة واحدة للمصادر، وملخص دراسة سوق العمل في شريحة أو شريحتين كحد أقصى.
 15. قسم تحليل SWOT للمشروع يظهر في شريحة واحدة بعد فاصل القسم، داخل مصفوفة واضحة من أربعة محاور: نقاط القوة، نقاط الضعف، الفرص، والتهديدات. لا تعرض JSON أو أقواساً أو أسماء مفاتيح برمجية.
 16. إذا وجدت بيانات مخاطر معتمدة، أضف بعدها شريحة واحدة لسجل المخاطر وطرق المعالجة. اعرض كل خطر مقابل طريقة معالجته في صف واضح، ولا تكرر مصفوفة SWOT داخلها ولا تخترع مستوى خطورة أو إجراءً غير موجود في البيانات.
+17. الوسائط ليست خلفية افتراضية لكل شريحة: استخدم صورة الغلاف والخاتمة عند توفرهما، والخرائط في شرائح الموقع، والصور المرفوعة في شرائح التصورات أو الأرض أو المخططات أو الجهات التي تخصها فقط. لا تضع صورة في شريحة نص أو جدول لمجرد ملء الفراغ، ولا تختزل عرضاً كاملاً إلى صورتين إذا كانت أصول مرئية متعددة متاحة. كل أصل مرئي يظهر مرة واحدة فقط وبالرمز المخصص له.
+18. مخطط «مخطط اتجاهي لحدود الأرض» عنصر أساسي عند توفر أي بيانات حدود أو اتجاهات أو واجهات في الحقول الظاهرة أو الجداول المخفية لتحليل مستندات الأرض. يُدرج في العرض الكامل، ويُدرج أيضاً عند توليد قسم تحليل الموقع وحده، وتبقى بياناته وأطواله ومجاوراته كما هي دون اختراع أو محاكاة نسب مساحية.
+19. الأساسيات غير قابلة للتجاوز: اتجاه RTL للنص العربي، هيدر وفوتر وهوية الشركة تضاف من النظام، لا أيقونات أو إيموجي أو صور خارجية أو بيانات وهمية، جذر HTML واحد لكل شريحة، تباين مقروء، وتدفق طبيعي يمنع تداخل النص أو قصه. لا تجعل التصميم الحر سبباً لتغيير المحتوى أو الأرقام أو الوحدات.
+20. الرسوم البيانية اختيارية وليست مطلوبة في كل عرض. لا تُستخدم إلا إذا كانت بياناتها المعتمدة موجودة وفي المواقع الأربعة المسموحة فقط، مع إبقاء الجدول المالي أو جدول المنافسين الكامل ملازماً للرسم.
 """
 
 PRESENTATION_SECTION_ORDER = (
@@ -1506,9 +1510,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 'bullets': [description] if description else [],
             })
 
-    has_boundary_data = any(str(source.get(k) or '').strip() for k in (
-        'boundary_lengths', 'surrounding_streets', 'facades_count', 'facades_directions'
-    ))
+    has_boundary_data = _has_land_boundary_data(source)
     if has_boundary_data:
         directional = [slide for slide in groups.get('land', [])
                        if slide.get('content_source') == 'land_boundary_diagram'
@@ -1942,6 +1944,8 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
 
     land_keys = ('croquis_land_area', 'approved_financial_area', 'boundary_lengths',
                  'surrounding_streets', 'facades_count', 'facades_directions',
+                 'directions_table', 'land_documents_analysis_data',
+                 'landDocumentsAnalysisData', 'land_documents_analysis',
                  'building_ratio_coverage', 'setbacks', 'max_floors_height',
                  'allowed_uses', 'regulatory_constraints', 'land_and_building_summary')
     location_keys = ('location_address', 'location_lat', 'location_lng', 'city', 'district',
@@ -2018,6 +2022,22 @@ def filter_presentation_plan_sections(plan, section_keys):
         if slide.get('type') not in ('cover', 'index', 'closing')
         and _slide_section_key(slide) in requested
     ]
+    # The boundary diagram is a shared site fact rather than land-only artwork.
+    # A location-only generation must keep it, while a full/combined selection
+    # keeps the canonical land copy exactly once.
+    if 'location' in requested and 'land' not in requested:
+        boundary = next((slide for slide in slides
+                         if slide.get('content_source') == 'land_boundary_diagram'), None)
+        if boundary and not any(slide.get('content_source') == 'land_boundary_diagram' for slide in body):
+            location_copy = dict(boundary)
+            location_copy['section_key'] = 'location'
+            location_copy['sectionKey'] = 'location'
+            insert_at = next(
+                (index + 1 for index, slide in enumerate(body)
+                 if slide.get('type') == 'section_divider' and _slide_section_key(slide) == 'location'),
+                len(body),
+            )
+            body.insert(insert_at, location_copy)
     if not body and not ('closing' in requested and closing):
         return None
 
@@ -2916,7 +2936,7 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
    - كل شريحة لها فكرة واحدة واضحة ومصدر بيانات محدد
    - الجداول تبقى جداول كاملة، والأرقام القابلة للمقارنة تجمع بين جدول ورسم بياني
    - النبذات والملخصات نصوص واضحة وليست شبكات مربعات
-   - الصور والمخططات كبيرة وواضحة، وتستخدم كل رموز الخطة بتوزيع متوازن من صورة إلى ثلاث صور
+   - الصور والمخططات كبيرة وواضحة، وتستخدم كل رموز الخطة بتوزيع متوازن من صورة إلى ثلاث صور. لا تضف صورة إلى شرائح النص أو الجداول بلا حاجة، ولا تجعل كل شريحة صورة، وفي المقابل لا تحصر العرض كله في صورتين إذا كانت أصول متعددة متاحة؛ وزّع الأصول على الشرائح التي تخدمها فقط دون تكرار
 
 {distribution_rules}
 
@@ -2978,7 +2998,9 @@ SLIDE_PLAN_PROMPT = """أنت خبير في تحليل المحتوى وتوزي
 - نبذة عن المشروع نصية ولا تستخدم رموز التصورات الخارجية؛ كل صورة خارجية محفوظة لقسم التصورات الخارجية فقط حتى تظهر مرة واحدة ولا تضيع من قسمها.
 - صور الأرض تُعرض مع الوصف المحفوظ لكل صورة، ثم ملخص تحليل الأرض المعتمد. لا تستخدم صورة أرض بلا وصف إن كان الوصف متاحًا.
 - عند توفر أبعاد وحدود للأرض والشوارع المحيطة، يتم تضمين شريحة «مخطط اتجاهي لحدود الأرض» بنمط diagram لتمثيل الأرض والجهات الأربع والشوارع والإطلالات بيانياً بالـ CSS و HTML النقي دون الحاجة لرسومات خارجية.
+- بيانات مخطط حدود الأرض قد تكون في الحقول الظاهرة أو في `directions_table` أو نتيجة تحليل مستندات الأرض المخفية؛ اعتبرها بيانات كافية لإضافة المخطط ولا تنتظر حقلاً ظاهراً واحداً بعينه. هذا المخطط عنصر أساسي في العرض الكامل، ويُحافظ عليه أيضاً عند توليد تحليل الموقع وحده.
 - الدراسة المالية تأخذ عدد الشرائح الذي تحتاجه جميع جداول تقرير المعاينة ومؤشراته، ثم يأتي الملخص المالي في نهاية القسم مقسمًا إلى شريحتين أو ثلاث. الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة فقط في كامل العرض: 1) مقارنة المنافسين (horizontal_bar) في قسم دراسة السوق، 2) تكوين إجمالي تكلفة الاستثمار (waterfall) في الدراسة المالية، 3) التدفقات النقدية السنوية والتراكمية (combo) في الدراسة المالية، 4) مقارنة السيناريوهات المالية (heatmap) في الدراسة المالية. يمنع منعاً باتاً إضافة أي رسم بياني خارج هذه المواقع الأربعة أو استخدام أي نوع آخر.
+- الدراسة المالية تُسحب كما أُدخلت وحُسبت في التقرير: لا إعادة حساب أو تقريب أو تحويل وحدات أو حذف صفوف أو أعمدة أو سنوات، ولا إعادة تفسير تصميمية للمحتوى. التصميم يغيّر الهوية البصرية فقط، والرسم المالي لا يظهر إلا عند توفر بياناته المعتمدة وبجوار الجدول الكامل.
 - فريق العمل يحافظ على ترتيب الجهات وحقولها كما أُدخلت، ويستخدم شعار كل جهة عند الحديث عنها. لا ينشئ فئات أو مسميات جديدة.
 - كل مخطط مرفوع له صفحة مستقلة أو مساحة كبيرة مع عنوانه ووصفه؛ ممنوع جمع مخططات كثيرة في شبكة صغيرة.
 - التصورات الخارجية والداخلية تستخدم كل رموز الصور المحددة لكل شريحة، من صورة إلى ثلاث، ضمن تخطيط متوازن للمجموعة كلها ودون تكرار.
@@ -4789,6 +4811,10 @@ def _extract_land_boundary_diagram_data(project_data):
 
     raw_dt = source.get('directions_table')
     dt_rows = _decode_json_fact(raw_dt) if isinstance(raw_dt, str) else raw_dt
+    if isinstance(dt_rows, dict):
+        dt_rows = [dict(value, direction=key) if isinstance(value, dict) else {
+            'direction': key, 'description': value
+        } for key, value in dt_rows.items()]
     if isinstance(dt_rows, list):
         for row in dt_rows:
             if not isinstance(row, dict):
@@ -4876,6 +4902,96 @@ def _extract_land_boundary_diagram_data(project_data):
         'boundary_lengths_summary': raw_lengths,
         'surrounding_streets_summary': raw_streets,
     }
+
+
+def _has_land_boundary_data(project_data):
+    """Return whether the project has enough boundary evidence for the fixed diagram.
+
+    Boundary facts can arrive through visible croquis fields or through the hidden
+    structured result persisted from the land documents.  Looking only at the four
+    visible scalar fields made the diagram disappear after a document-only analysis
+    and, consequently, from location-only presentation generation.
+    """
+    source = project_data if isinstance(project_data, dict) else {}
+    if any(str(source.get(key) or '').strip() for key in (
+        'boundary_lengths', 'surrounding_streets', 'facades_count', 'facades_directions',
+    )):
+        return True
+    data = _extract_land_boundary_diagram_data(source)
+    if str(data.get('key_view') or '').strip():
+        return True
+    for key in ('north', 'south', 'east', 'west'):
+        item = data.get(key) if isinstance(data.get(key), dict) else {}
+        if any(str(item.get(field) or '').strip() for field in (
+            'length', 'description', 'street_name', 'street_width'
+        )):
+            return True
+    return False
+
+
+def _build_land_boundary_diagram_slide(slide, project_data, branding, slide_num=None, total_slides=None):
+    """Render the boundary diagram deterministically from approved land facts."""
+    source = project_data if isinstance(project_data, dict) else {}
+    data = _extract_land_boundary_diagram_data(source)
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'مخطط اتجاهي لحدود الأرض'))
+    project_name = html_lib.escape(str(data.get('plot_name') or source.get('project_name') or 'أرض المشروع'))
+
+    def safe(value, fallback='غير متاح'):
+        value = str(value or '').strip()
+        return html_lib.escape(value or fallback)
+
+    def card(direction_key):
+        item = data.get(direction_key) if isinstance(data.get(direction_key), dict) else {}
+        facade = bool(item.get('is_facade'))
+        border = accent if facade else '#d9e3ec'
+        label = safe(item.get('label'))
+        length = safe(item.get('length'))
+        street = str(item.get('street_name') or '').strip()
+        description = str(item.get('description') or '').strip()
+        neighbour = street or description
+        width = safe(item.get('street_width')) if item.get('street_width') else ''
+        extra = f'<div style="margin-top:7px;color:{primary};font-size:11px;font-weight:700;">{safe(neighbour)}</div>' if neighbour else ''
+        width_html = f'<div style="margin-top:5px;color:#475569;font-size:10px;">عرض الشارع: {width}</div>' if width else ''
+        return (
+            f'<div data-boundary-direction="{direction_key}" style="min-height:122px;border:2px solid {border};'
+            f'border-radius:14px;background:#ffffff;padding:14px 16px;box-sizing:border-box;direction:rtl;'
+            f'display:flex;flex-direction:column;justify-content:center;overflow:hidden;">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
+            f'<span style="font-size:18px;font-weight:800;color:{primary};">{label}</span>'
+            f'<span dir="ltr" style="font-size:22px;font-weight:800;color:{accent};white-space:nowrap;">{length}</span></div>'
+            f'<div style="height:1px;background:#e2e8f0;margin:8px 0 0;"></div>{extra}{width_html}'
+            '</div>'
+        )
+
+    key_view = str(data.get('key_view') or '').strip()
+    view_html = (
+        f'<div style="margin-top:10px;border-radius:9px;background:{accent};color:#172033;padding:8px 12px;'
+        f'font-size:11px;font-weight:800;line-height:1.35;">{html_lib.escape(key_view)}</div>'
+        if key_view else ''
+    )
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;color:#172033;box-sizing:border-box;padding:76px 42px 48px;">
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:12px;">
+    <div><h2 style="margin:0;color:{primary};font-size:28px;line-height:1.15;font-weight:800;">{title}</h2>
+    <div style="margin-top:5px;color:#64748b;font-size:11px;">الأبعاد بالمتر</div></div>
+    <div style="height:4px;width:82px;background:{accent};border-radius:4px;"></div>
+  </div>
+  <div data-boundary-diagram="1" style="height:492px;border:1px solid #dbe5ed;border-radius:16px;background:#f8fafc;padding:14px;box-sizing:border-box;display:grid;grid-template-columns:1fr 1.75fr 1fr;grid-template-rows:122px 208px 122px;gap:12px;direction:ltr;">
+    <div style="grid-column:2;grid-row:1;">{card('north')}</div>
+    <div style="grid-column:1;grid-row:2;">{card('west')}</div>
+    <div style="grid-column:2;grid-row:2;border-radius:18px;background:{primary};color:#ffffff;border:3px solid {accent};padding:22px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;direction:rtl;overflow:hidden;">
+      <div style="font-size:27px;font-weight:800;line-height:1.2;">{project_name}</div>
+      <div style="width:68px;height:3px;background:{accent};margin:13px 0;"></div>
+      <div style="font-size:14px;line-height:1.55;color:#ffffff;">{safe(data.get('facades_summary'))}</div>{view_html}
+    </div>
+    <div style="grid-column:3;grid-row:2;">{card('east')}</div>
+    <div style="grid-column:2;grid-row:3;">{card('south')}</div>
+  </div>
+  <div style="margin-top:9px;text-align:center;color:#64748b;font-size:10px;line-height:1.35;">تمثل القراءة اتجاهات الحدود وعلاقتها بالشوارع دون محاكاة مساحية للنسب.</div>
+  <div data-slide-counter="1" style="display:none;">{slide_num_str}</div>
+</div>'''
 
 
 def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=None):
@@ -5046,6 +5162,8 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'لا تكرر معلومة وردت في شريحة أخرى أو قسم آخر؛ تحليل SWOT يستخدم مصدر market_study_data.swot مرة واحدة فقط، والمكونات في قسم المكونات فقط',
         'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
         'الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في المالية) وأي رسم خارجها ممنوع منعاً باتاً؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
+        'الصور ليست عنصراً افتراضياً في كل شريحة: استخدم فقط الصور والخرائط والرموز التي تنص عليها الخطة لهذه الشريحة. لا تضف صورة إلى شريحة نص أو جدول بلا حاجة، ولا تكرر أصلاً مرئياً في موضع آخر، مع الحفاظ على توزيع معقول للصور المتاحة عبر العرض الكامل',
+        'التزم بأساسيات التوليد دون استثناء: RTL، هوية الشركة، الهيدر والفوتر النظاميان، جذر slide واحد، تباين واضح، تدفق طبيعي بلا تداخل أو قص، وعدم اختراع أرقام أو نصوص أو صور أو أيقونات',
         'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون فرض جداول أو بطاقات أو شبكة محددة، ومن دون خرائط أو صور فوتوغرافية أو رسوم إضافية. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
         'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
@@ -7461,6 +7579,9 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
                 '<div data-cover-overlay></div><div style="position:absolute;z-index:2;inset:70px;display:flex;flex-direction:column;justify-content:center;">'
                 f'<div style="display:flex;gap:18px;align-items:center;"><img src="##LOGO##" style="height:80px;width:auto;object-fit:contain;">{project_logo}</div>'
                 f'<h2 style="font-size:42px;margin:28px 0 16px;">{name}</h2><div style="font-size:18px;line-height:1.8;">{contact}</div></div></div>')
+    if content_source == 'land_boundary_diagram':
+        return _build_land_boundary_diagram_slide(
+            slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if content_source in ('site_analysis', 'executive_content.summary'):
         note = html_lib.escape(_slide_source_data_note(slide, source)).replace('\n', '<br>')
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;">'
@@ -7659,6 +7780,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         and market_source == 'market_study_data.competitors'
         and chart_type == 'horizontal_bar'
     )
+    fixed_land_boundary_diagram = market_source == 'land_boundary_diagram'
     free_market_slide = _slide_section_key(slide) == 'market' and not fixed_market_comparison
     # A stale plan must not turn an arbitrary market page into a chart or a
     # fixed market template.  The sole fixed market page is the competitor
@@ -7668,6 +7790,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         chart_type = ''
         slide['chart_type'] = ''
     if (fixed_market_comparison
+            or fixed_land_boundary_diagram
             or (_slide_section_key(slide) != 'market'
                 and (chart_type in APPROVED_CHART_TYPES
                      or _slide_section_key(slide) == 'financial'))):
@@ -7699,6 +7822,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                 print(f"[SLIDE-{slide_num}] ERROR: no HTML extracted (attempt {attempt})")
                 retry_note = '\n\nإعادة المحاولة: لم يصل HTML صالح. أخرج div class="slide" واحدًا مكتملًا فقط.'
                 continue
+            html = _strip_unplanned_creative_tokens(html, slide)
             content_source = str(slide.get('content_source') or '')
             chart_type = canonicalize_chart_type(slide.get('chart_type'))
             if chart_type:
@@ -8359,6 +8483,32 @@ def _apply_logo_contrast_styles(html, branding, project_data, slide_type='conten
     html = re.sub(r'<img\b[^>]*\bclass\s*=\s*["\'][^"\']*presentation-chrome-logo[^"\']*["\'][^>]*>',
                   style_resolved_chrome, html, flags=re.IGNORECASE)
     return html
+
+
+def _strip_unplanned_creative_tokens(html, slide):
+    """Prevent a model from spreading uploaded images into unrelated slides."""
+    if not html or not isinstance(slide, dict):
+        return html
+    allowed = {
+        _canonical_image_token(token)
+        for token in (slide.get('image_tokens') or [])
+        if _canonical_image_token(token)
+    }
+    token_re = re.compile(
+        r'#*(?:PROJECT_IMAGE|MOODBOARD_IMAGE|LAND_IMAGE|LAND_PHOTO|2D_PLAN|PLAN_IMAGE)_\d+#*|'
+        r'#*INTERIOR(?:_COMP)?_\d+_(?:IMG|IMAGE)_\d+#*|'
+        r'#*INTERIOR_C\d+_(?:IMG|IMAGE)_\d+#*|'
+        r'#*INTERIOR_\d+_\d+#*|'
+        r'#*TEAM_LOGO_\d+#*',
+        re.IGNORECASE,
+    )
+
+    def replace(match):
+        raw = match.group(0)
+        canonical = _canonical_image_token(raw)
+        return raw if canonical in allowed else ''
+
+    return token_re.sub(replace, html)
 
 
 def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None, project_logo=None):
