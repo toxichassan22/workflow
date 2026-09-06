@@ -8722,8 +8722,9 @@ def _normalize_market_content_layout(html, slide_type='', slide_title='', conten
         root_open = root_open[:-1] + ' data-market-auto-fit="1">'
     root_open = _set_tag_style(
         root_open,
-        ('display', 'flex-direction', 'align-items'),
-        'display:flex!important;flex-direction:column!important;align-items:stretch!important;',
+        ('display', 'flex-direction', 'align-items', 'padding', 'margin', 'box-sizing'),
+        'display:flex!important;flex-direction:column!important;align-items:stretch!important;'
+        'padding:0!important;margin:0!important;box-sizing:border-box!important;',
     )
     body_html = ''.join(body)
     absolute_body = bool(re.search(r'position\s*:\s*(?:absolute|fixed)', body_html, flags=re.IGNORECASE))
@@ -8777,8 +8778,18 @@ def _strip_market_slide_media(html):
 
     def keep_image(match):
         tag = match.group(0)
+        lowered_tag = tag.lower()
         src_match = re.search(r'\bsrc\s*=\s*["\']([^"\']*)["\']', tag, flags=re.IGNORECASE)
         src = str(src_match.group(1) if src_match else '').lower()
+        # The managed company/project logos are part of the fixed chrome, not
+        # market content. They must survive the market media scrub, including
+        # the second pass after the chrome has been injected.
+        if (
+            'presentation-chrome-logo' in lowered_tag
+            or '##logo##' in src
+            or '##project_logo##' in src
+        ):
+            return tag
         if 'competitor_logo' in src:
             return tag
         return ''

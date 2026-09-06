@@ -1722,8 +1722,14 @@ class MeetingRequirementsTests(unittest.TestCase):
             )
             rendered.append((slide, html))
         self.assertTrue(all('MAP_' not in html for _slide, html in rendered))
-        self.assertTrue(all('<img' not in html for slide, html in rendered
-                            if slide.get('content_source') != 'market_study_data.competitors'))
+        for slide, html in rendered:
+            if slide.get('content_source') == 'market_study_data.competitors':
+                continue
+            image_tags = re.findall(r'<img\b[^>]*>', html, flags=re.IGNORECASE)
+            self.assertTrue(
+                all('presentation-chrome-logo' in tag for tag in image_tags),
+                f'Only the fixed presentation chrome may contain images: {image_tags}',
+            )
         competitor_html = next(html for slide, html in rendered
                                if slide.get('content_source') == 'market_study_data.competitors')
         self.assertIn('data-competitor-table', competitor_html)
@@ -3842,6 +3848,15 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-market-auto-fit-content="1"', normalized)
         self.assertIn('justify-content:center', normalized)
         self.assertEqual(engine._validate_market_visual_design('<div>نص</div>', slide), None)
+        finished = engine.finalize_slide_html(
+            raw, 'content', project,
+            {'primary_color': '#123456', 'logo_path': '/tenant-assets/demo/logo'},
+            tenant_id='tenant-a', slide_num=4, slide_title=slide['title'],
+            total_slides=9, content_source=slide['content_source'],
+        )
+        self.assertIn('class="presentation-chrome-logo"', finished)
+        self.assertIn('/tenant-assets/demo/logo?t=1', finished)
+        self.assertIn('padding:0!important', finished)
 
     def test_competitor_logo_import_discovers_a_cited_official_site_and_preserves_manual_files(self):
         module = self.application_module
