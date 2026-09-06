@@ -6985,11 +6985,23 @@
       { key: 'executive_summary', label: 'الملخص التنفيذي', pattern: /الملخص التنفيذي/i }
     ];
 
+    function normalizeTenantSectionCommandText(value) {
+      return String(value || '').trim()
+        .replace(/[إأآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/ى/g, 'ي')
+        .replace(/\s+/g, ' ');
+    }
+
     function detectTenantSectionRegenerationRequest(message) {
       const text = String(message || '').trim();
-      if (!text || !/(?:إعادة|اعادة|أعد|اعد)\s*(?:توليد|إنشاء|انشاء|بناء)/i.test(text)) return null;
+      const normalized = normalizeTenantSectionCommandText(text);
+      if (!text || !/(?:إعادة|اعادة|إعاده|أعد|اعد)\s*(?:توليد|إنشاء|انشاء|بناء)/i.test(text)) return null;
       if (!/(?:قسم|القسم|كامل|بالكامل)/i.test(text)) return null;
-      return TENANT_SECTION_REGENERATION_TARGETS.find(item => item.pattern.test(text)) || null;
+      return TENANT_SECTION_REGENERATION_TARGETS.find(item => {
+        const normalizedPattern = new RegExp(item.pattern.source.replace(/ة/g, 'ه'), item.pattern.flags);
+        return item.pattern.test(text) || normalizedPattern.test(normalized);
+      }) || null;
     }
 
     function tenantSlideMatchesSection(slide, index, sectionKey) {
@@ -22049,7 +22061,7 @@
       // The turn is sent with the conversation behind it: recent turns verbatim, the older ones as
       // the memory the server compressed, and the slides under discussion.
       if (target1BasedIndexes.length) tenantChatFocusIndexes = target1BasedIndexes.slice();
-      const data = await api('POST', '/api/designer-chat', {
+      const data = await apiWithTimeout('POST', '/api/designer-chat', {
         message,
         target: targetScope,
         scope: targetScope,
@@ -22070,7 +22082,7 @@
         projectData: tenantProjectData,
         presentationId: tenantPresentationId,
         attachedImage: attachedImage ? attachedImage.dataUri : ''
-      });
+      }, 180000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.');
 
       if (indicator) indicator.remove();
 
