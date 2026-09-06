@@ -360,7 +360,8 @@
     }
 
     .ge-thumb-move,
-    .ge-thumb-delete {
+    .ge-thumb-delete,
+    .ge-thumb-regenerate {
       border: 0;
       border-radius: 5px;
       padding: 2px 5px;
@@ -372,14 +373,25 @@
       color: #777;
     }
 
+    .ge-thumb-regenerate {
+      color: var(--p);
+      background: #eef4f8;
+    }
+
     .ge-thumb-delete {
       color: #a32828;
       background: #fff1f1;
     }
 
     .ge-thumb-move:hover,
-    .ge-thumb-delete:hover {
+    .ge-thumb-delete:hover,
+    .ge-thumb-regenerate:hover {
       background: var(--soft);
+    }
+
+    .ge-thumb-regenerate:disabled {
+      cursor: wait;
+      opacity: .55;
     }
 
     .ge-slide-card {
@@ -6955,6 +6967,99 @@
         error: 'انتهت مهلة توليد الشريحة. يمكن استكمال العرض من آخر شريحة محفوظة.',
         error_code: 'SLIDE_JOB_TIMEOUT'
       };
+    }
+
+    async function regenerateTenantSlide(index) {
+      if (!hasPermission('create_presentation')) return;
+      if (isGeneratingTenantSlides || isRegeneratingTenantSlide) {
+        toast('يوجد توليد جارٍ حاليًا');
+        return;
+      }
+      if (hasResumableTenantSlideGeneration()) {
+        toast('استكمل التوليد المتوقف قبل إعادة توليد شريحة');
+        return;
+      }
+
+      const slideIndex = Number(index);
+      const current = Array.isArray(tenantSlidesData) ? tenantSlidesData[slideIndex] : null;
+      if (!current || slideIndex < 0 || slideIndex >= tenantSlidesData.length) {
+        toast('الشريحة غير موجودة');
+        return;
+      }
+
+      const planned = tenantSlidePlan?.slides?.[slideIndex] || {};
+      const snapshot = { ...planned };
+      ['title', 'type', 'section_key', 'content_source', 'source_table', 'design_style',
+        'chart_type', 'image_tokens', 'bullets', 'metrics'].forEach(key => {
+        const missing = snapshot[key] === undefined || snapshot[key] === null ||
+          (Array.isArray(snapshot[key]) && !snapshot[key].length && Array.isArray(current[key]) && current[key].length);
+        if (missing && current[key] !== undefined) snapshot[key] = current[key];
+      });
+      snapshot.title = snapshot.title || current.title || ('شريحة ' + (slideIndex + 1));
+      snapshot.type = snapshot.type || current.type || 'content';
+
+      if (!confirm('سيتم إعادة توليد الشريحة «' + snapshot.title + '» فقط، مع إبقاء باقي الشرائح كما هي. هل تريد المتابعة؟')) {
+        return;
+      }
+
+      isRegeneratingTenantSlide = true;
+      renderTenantSlidesSidebar();
+      setLiveGenBanner(true, 'إعادة توليد الشريحة ' + (slideIndex + 1) + ' من ' + tenantSlidesData.length,
+        'لن تتأثر بقية الشرائح', 35);
+
+      try {
+        const generationImages = buildPresentationGenerationImages();
+        const payload = {
+          projectData: slimGenerationProjectData(tenantProjectData),
+          slidePlan: { slides: [snapshot] },
+          images: generationImages,
+          slideIndex: 0,
+          _slideNum: slideIndex + 1,
+          _totalSlides: tenantSlidesData.length
+        };
+        if (tenantPresentationId) payload.presentationId = tenantPresentationId;
+
+        const data = await requestTenantSlideGeneration(payload);
+        if (!data?.success || !data.slide?.html || !containsSlideRoot(data.slide.html)) {
+          throw new Error(data?.error || 'تعذر إعادة توليد الشريحة');
+        }
+
+        const generatedType = data.slide.type || snapshot.type || current.type || 'content';
+        const renderedHtml = processSlideHtmlClient(data.slide.html, generatedType);
+        if (!renderedHtml || !containsSlideRoot(renderedHtml)) {
+          throw new Error('استجابة الشريحة الجديدة غير مكتملة');
+        }
+
+        tenantSlidesData[slideIndex] = {
+          ...current,
+          title: data.slide.title || snapshot.title,
+          type: generatedType,
+          html: renderedHtml,
+          section_key: data.slide.sectionKey || snapshot.section_key || current.section_key || '',
+          content_source: data.slide.contentSource || snapshot.content_source || current.content_source || '',
+          source_table: data.slide.sourceTable || snapshot.source_table || current.source_table || '',
+          index_entries: data.slide.indexEntries || snapshot.index_entries || current.index_entries || [],
+          designStyle: data.slide.designStyle || snapshot.design_style || current.designStyle || 'cards',
+          bullets: snapshot.bullets || current.bullets || [],
+          metrics: snapshot.metrics || current.metrics || []
+        };
+        tenantProjectData.tenantSlidesData = tenantSlidesData;
+        renumberTenantSlides();
+        renderTenantSlides();
+        selectTenantSlide(slideIndex);
+
+        const saved = await saveTenantPresentation();
+        if (!saved) throw new Error('تعذر حفظ الشريحة الجديدة');
+        triggerAutoSaveDraft();
+        toast('تم إعادة توليد الشريحة ' + (slideIndex + 1) + ' فقط');
+      } catch (error) {
+        console.error('[SLIDE REGENERATE]', error);
+        toast(error?.message || 'تعذر إعادة توليد الشريحة');
+      } finally {
+        isRegeneratingTenantSlide = false;
+        renderTenantSlidesSidebar();
+        setLiveGenBanner(false);
+      }
     }
 
     function buildPresentationGenerationImages() {
@@ -20400,6 +20505,7 @@
     }
 
     let isGeneratingTenantSlides = false;
+    let isRegeneratingTenantSlide = false;
 
     function tenantSlidePlanFingerprint(plan) {
       return JSON.stringify((plan?.slides || []).map(slide => ({
@@ -21361,13 +21467,18 @@
 
         const moveUpBtn = i > 0 ? '<button type="button" class="ge-thumb-move" title="تحريك لأعلى" aria-label="تحريك لأعلى" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i - 1) + ')">أعلى</button>' : '';
         const moveDownBtn = i < tenantSlidesData.length - 1 ? '<button type="button" class="ge-thumb-move" title="تحريك لأسفل" aria-label="تحريك لأسفل" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i + 1) + ')">أسفل</button>' : '';
+        const regenerateBtn = hasPermission('create_presentation')
+          ? '<button type="button" class="ge-thumb-regenerate" title="إعادة توليد هذه الشريحة فقط" aria-label="إعادة توليد هذه الشريحة فقط"' +
+            ((isGeneratingTenantSlides || isRegeneratingTenantSlide) ? ' disabled' : '') +
+            ' onclick="event.stopPropagation(); regenerateTenantSlide(' + i + ')">إعادة توليد</button>'
+          : '';
         const deleteBtn = hasPermission('create_presentation') && tenantSlidesData.length > 1
           ? '<button type="button" class="ge-thumb-delete" title="حذف الشريحة" aria-label="حذف الشريحة" onclick="event.stopPropagation(); deleteSlide(' + i + ')">حذف</button>'
           : '';
 
         thumb.innerHTML = '<span class="ge-thumb-num">' + (i + 1) + '</span>' +
           '<span class="ge-thumb-title" title="' + escapeHtml(s.title || '') + '">' + escapeHtml(s.title || 'شريحة بدون عنوان') + '</span>' +
-          '<div class="ge-thumb-actions">' + moveUpBtn + moveDownBtn + deleteBtn + '</div>';
+          '<div class="ge-thumb-actions">' + moveUpBtn + moveDownBtn + regenerateBtn + deleteBtn + '</div>';
         sidebar.appendChild(thumb);
       });
     }

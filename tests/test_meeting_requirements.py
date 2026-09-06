@@ -2385,6 +2385,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('startTenantProject', nav)
         self.assertNotIn('loadTenantProjectForm', nav)
 
+    def test_slides_page_can_regenerate_one_slide_without_rebuilding_the_deck(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('إعادة توليد هذه الشريحة فقط', index_source)
+        self.assertIn('async function regenerateTenantSlide(index)', index_source)
+        regenerate_body = index_source.split('async function regenerateTenantSlide(index) {', 1)[1]
+        regenerate_body = regenerate_body.split('\n    function buildPresentationGenerationImages()', 1)[0]
+        self.assertIn('slidePlan: { slides: [snapshot] }', regenerate_body)
+        self.assertIn('tenantSlidesData[slideIndex] =', regenerate_body)
+        self.assertIn('await saveTenantPresentation()', regenerate_body)
+        self.assertIn('لن تتأثر بقية الشرائح', regenerate_body)
+
     def test_an_emptied_draft_can_be_refilled_from_a_presentation_snapshot(self):
         """Every generated presentation stored the whole project data of its moment, so a draft
         that was emptied by a bad save is recoverable from it."""
