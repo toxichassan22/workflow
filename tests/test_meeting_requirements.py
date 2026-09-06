@@ -3784,6 +3784,65 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIsNotNone(comp_slide)
         self.assertEqual(comp_slide.get('chart_type'), 'horizontal_bar')
 
+    def test_competitor_finalization_restores_the_fixed_table_when_ai_returns_chart_only(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع مقارنة',
+            'market_study_data': {
+                'competitors': [{
+                    'name': 'منافس محفوظ', 'price_value': '1750',
+                    'price_type': 'سعر الليلة', 'operation_type': 'بيع',
+                }],
+            },
+        }
+        chart_only = '<div class="slide" style="width:1280px;height:720px"><div>الرسم فقط</div></div>'
+        finished = engine.finalize_slide_html(
+            chart_only, 'content', project, {'primary_color': '#123456'},
+            creative_images=[], slide_num=3, slide_title='مقارنة المنافسين',
+            total_slides=8, content_source='market_study_data.competitors',
+        )
+        self.assertIn('data-competitor-table="1"', finished)
+        self.assertIn('منافس محفوظ', finished)
+        self.assertIn('مقارنة أسعار المنافسين في السوق', finished)
+        self.assertIn('1,750', finished)
+        self.assertNotIn('data-market-auto-fit="1"', finished)
+
+    def test_market_sol_design_is_free_and_postprocess_centers_its_content(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع سوق',
+            'market_study_data': {
+                'one_block_summary': 'ملخص سوقي موثق ومتكامل.'
+            },
+        }
+        slide = {
+            'title': 'ملخص دراسة سوق العمل', 'type': 'content',
+            'section_key': 'market', 'design_style': 'text',
+            'content_source': 'market_study_data.one_block_summary',
+        }
+        prompt = engine.build_slide_user_msg(
+            slide, 4, 9, {'primary_color': '#123456'}, project_data=project,
+        )
+        self.assertIn('لا تفرض جدولاً أو بطاقات أو شبكة بعينها', prompt)
+        self.assertIn('لا تكرر قالباً واحداً بين الشرائح', prompt)
+        self.assertNotIn('للملخص التنفيذي: قسّم الفقرة المعتمدة بصرياً', prompt)
+        raw = (
+            '<div class="slide" style="width:1280px;height:720px;position:relative;">'
+            '<style>.slide{color:#111}</style>'
+            '<header data-slide-header="1">العنوان</header>'
+            '<div style="height:320px">المحتوى</div>'
+            '<footer data-slide-footer="1">التذييل</footer>'
+            '</div>'
+        )
+        normalized = engine._normalize_market_content_layout(
+            raw, slide_type='content', slide_title=slide['title'],
+            content_source=slide['content_source'],
+        )
+        self.assertIn('data-market-auto-fit="1"', normalized)
+        self.assertIn('data-market-auto-fit-content="1"', normalized)
+        self.assertIn('justify-content:center', normalized)
+        self.assertEqual(engine._validate_market_visual_design('<div>نص</div>', slide), None)
+
     def test_competitor_logo_import_discovers_a_cited_official_site_and_preserves_manual_files(self):
         module = self.application_module
         client = self.app.test_client()

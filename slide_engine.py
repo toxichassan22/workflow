@@ -5016,7 +5016,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         else:
             placeholder_note = (
                 'هذه شريحة من قسم دراسة السوق: ممنوع استخدام الخرائط أو الصور الفوتوغرافية أو خلفيات الصور. '
-                'للنموذج حرية ابتكار التكوين البصري والهرمية والمساحات باستخدام HTML وCSS، مع الحفاظ على كل البيانات المعتمدة.'
+                'لـ SOL حرية كاملة في ابتكار التكوين البصري والهرمية والمساحات باستخدام HTML وCSS؛ لا تفرض جدولاً أو بطاقات أو شبكة بعينها، واختر الشكل الذي يخدم طبيعة المحتوى مع الحفاظ على كل البيانات المعتمدة.'
             )
 
     notes = [
@@ -5029,7 +5029,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'لا تكرر معلومة وردت في شريحة أخرى أو قسم آخر؛ تحليل SWOT يستخدم مصدر market_study_data.swot مرة واحدة فقط، والمكونات في قسم المكونات فقط',
         'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
         'الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في المالية) وأي رسم خارجها ممنوع منعاً باتاً؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
-        'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون خرائط أو صور فوتوغرافية أو رسوم إضافية. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
+        'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون فرض جداول أو بطاقات أو شبكة محددة، ومن دون خرائط أو صور فوتوغرافية أو رسوم إضافية. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
         'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
         'املأ الشريحة بالمحتوى الضروري والوافي؛ وشرائح الملخص المالي تستخدم جداول التقرير نفسها دون ضغط أو حذف',
@@ -5115,8 +5115,8 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         market_design_reference = (
             'المرجع البصري لقسم دراسة السوق هو تقرير استثماري تحليلي راقٍ: خلفية بيضاء ومساحات هادئة، '
             'ألوان الهوية الأساسية مع لمسات ذهبية، عناوين كبيرة، فواصل رفيعة، حاويات ذات حواف مستديرة، '
-            'وتباين واضح بين العنوان والمعلومة والخلاصة. لا تضع المحتوى في صندوق نص واحد أو جدول خام ممتد؛ '
-            'ابنِ هرمية بصرية من منطقتين أو أكثر، واستعمل شرائط إبراز أو لوحة قرار أو مؤشرات قصيرة عندما تكون البيانات متاحة. '
+            'وتباين واضح بين العنوان والمعلومة والخلاصة. هذه مراجع نبرة وهوية فقط وليست قالباً إلزامياً؛ '
+            'دع SOL يختار بين فقرة تحريرية، تسلسل بصري، مخطط مفاهيمي أو أي تكوين مناسب للبيانات، ولا تفرض جدولاً أو بطاقات أو عدد أعمدة معيناً. '
             'لا تستخدم أيقونات أو رموزاً زخرفية أو ظلالاً ثقيلة.'
         )
         notes.append(market_design_reference)
@@ -5128,16 +5128,11 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
                 'مع بقاء جدول المنافسين كاملاً ومقروءاً، والرسم البياني واضحاً بكامل أشرطته وأسعاره مع إبراز مشروعنا بلون الهوية، ومنع اختراع أرقام أو متوسطات افتراضية.'
             )
         else:
-            if content_source == 'market_study_data.scope':
-                notes.append('لنطاق الدراسة: استخدم عمودين تحليليين متوازنين، ثم شريطاً سفلياً من مؤشرين أو ثلاثة مستخرجين من البيانات فقط.')
-            elif content_source.startswith('market_study_data.summary'):
-                notes.append('لتحليل السوق: اجعل أول محور منطقة إبراز رئيسية، ثم وزّع بقية المحاور في بطاقات تحليلية متوازنة مع خلاصة واضحة، دون عرض JSON أو جدول خام.')
-            elif content_source.startswith('market_study_data.one_block_summary'):
-                notes.append('للملخص التنفيذي: قسّم الفقرة المعتمدة بصرياً إلى مقاطع قصيرة متتابعة، مع لوحة جانبية لتصنيف الدراسة أو إخلاء المسؤولية عند توفرهما؛ ممنوع وضع الفقرة كلها داخل بطاقة واحدة.')
-            elif content_source.startswith('market_study_data.sources'):
-                notes.append('للمصادر: استخدم عمودين متوازنين من جداول مدمجة بترويسة كحلية أو تركوازية، وصفوف متناوبة، وروابط مقروءة دون تمديدها خارج الخلية.')
-            else:
-                notes.append('هذه شريحة سوق عادية: صمّم التكوين البصري والهرمية والمساحات بحرية بما يخدم البيانات المعتمدة، مع منع الخرائط والصور الفوتوغرافية وخلفيات الصور وأي رسم بياني إضافي.')
+            notes.append(
+                'هذه شريحة سوق غير ثابتة: صمّم التكوين البصري والهرمية والمساحات بحرية كاملة بما يخدم البيانات المعتمدة. '
+                'لا تكرر قالباً واحداً بين الشرائح ولا تحول المحتوى تلقائياً إلى جدول أو بطاقات. استخدم تدفق HTML طبيعي بلا '
+                'position:absolute أو ارتفاعات ثابتة لمنطقة النص، ووازن المساحة داخل منطقة المحتوى بحيث لا يتداخل أي نص أو يخرج من الشريحة.'
+            )
     else:
         notes.append('الرسوم البيانية ممنوعة تماماً في هذا القسم؛ اعرض المحتوى بالجداول أو النصوص أو الصور حسب النمط المحدد.')
     notes_text = '\n'.join(f'- {n}' for n in notes)
@@ -7161,7 +7156,7 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
         )
     body_html = (
         f'<div data-market-work-summary="1" style="background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;'
-        f'padding:22px 28px;height:510px;overflow:hidden;box-sizing:border-box;box-shadow:0 3px 10px rgba(15,23,42,.05);'
+        f'padding:22px 28px;min-height:420px;max-height:590px;overflow:visible;box-sizing:border-box;box-shadow:0 3px 10px rgba(15,23,42,.05);'
         f'display:grid;grid-template-columns:0.72fr 1.85fr;grid-template-areas:"aside main";gap:28px;direction:ltr;">'
         f'<aside style="grid-area:aside;direction:rtl;padding-top:2px;">{"".join(aside_parts)}</aside>'
         f'<div style="grid-area:main;direction:rtl;">'
@@ -7567,30 +7562,13 @@ def _validate_chart_slide_html(html, chart_type, slide, project_data=None):
 
 
 def _validate_market_visual_design(html, slide):
-    """Reject flat market markup so the model retries with the approved visual language."""
-    if _slide_section_key(slide) != 'market':
+    """Keep the market designer open; layout safety is handled after generation."""
+    if _slide_section_key(slide) != 'market' or not html:
         return None
-    if canonicalize_chart_type((slide or {}).get('chart_type')) == 'horizontal_bar':
-        return None
-    source = str((slide or {}).get('content_source') or '').strip()
-    if not source or not html:
-        return None
-    has_layout = bool(re.search(
-        r'(?:display\s*:\s*(?:grid|flex)|grid-template-columns\s*:|grid-template-areas\s*:)',
-        html, flags=re.IGNORECASE,
-    ))
-    if not has_layout:
-        return 'تصميم شريحة السوق مسطح؛ أعد بناء منطقة المحتوى بتقسيم بصري واضح باستخدام grid أو flex، وليس صندوق نص واحد.'
-    if source.startswith('market_study_data.one_block_summary'):
-        blocks = len(re.findall(r'data-market-work-block|border-bottom\s*:', html, flags=re.IGNORECASE))
-        if blocks < 2:
-            return 'الملخص التنفيذي يجب أن يتوزع على مقاطع بصرية متتابعة مع لوحة جانبية، وليس فقرة واحدة داخل بطاقة.'
-    elif source.startswith('market_study_data.sources'):
-        if '<table' not in html.lower() and html.lower().count('grid-template-columns') < 2:
-            return 'شريحة المصادر يجب أن تعرض سجل المراجع في عمودين منظمين بجداول أو شبكات متوازنة.'
-    elif source == 'market_study_data.scope' or source.startswith('market_study_data.summary'):
-        if not re.search(r'border-radius\s*:', html, flags=re.IGNORECASE) or html.lower().count('background:') < 2:
-            return 'شريحة السوق يجب أن تحتوي على منطقة إبراز ومناطق تحليلية متعددة بألوان الهوية، لا جدولاً خاماً أو صندوقاً واحداً.'
+    # The competitor comparison is deterministic and checked separately. Every
+    # other market slide belongs to SOL, so visual taste must never trigger a
+    # paid retry merely because it chose prose, a diagram, a table, or a new
+    # composition. The post-processing frame handles centering and flow safety.
     return None
 
 
@@ -8646,6 +8624,134 @@ def _is_market_slide(slide_type='', slide_title='', content_source=''):
     ))
 
 
+def _is_fixed_competitor_comparison(content_source='', slide_title=''):
+    """Identify the one market slide whose visual contract is fixed."""
+    text = ' '.join(str(value or '') for value in (content_source, slide_title)).lower()
+    return bool(
+        str(content_source or '').strip() == 'market_study_data.competitors'
+        or re.search(r'(?:مقارنة\s+المنافسين|المنافسين|competitor)', text, flags=re.IGNORECASE)
+    )
+
+
+def _split_top_level_html(html):
+    """Split an HTML fragment into direct-child elements without reformatting it."""
+    if not html:
+        return []
+    tag_re = re.compile(r'<(?P<closing>/)?(?P<tag>[a-z][\w:-]*)(?:\s[^>]*)?>', re.IGNORECASE)
+    void_tags = {
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+        'meta', 'param', 'source', 'track', 'wbr',
+    }
+    parts = []
+    depth = 0
+    start = None
+    for match in tag_re.finditer(html):
+        tag = match.group('tag').lower()
+        is_closing = bool(match.group('closing'))
+        if is_closing:
+            if depth:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    parts.append(html[start:match.end()])
+                    start = None
+            continue
+        if depth == 0:
+            start = match.start()
+            if tag in void_tags or match.group(0).rstrip().endswith('/>'):
+                parts.append(html[start:match.end()])
+                start = None
+                continue
+        if tag not in void_tags and not match.group(0).rstrip().endswith('/>'):
+            depth += 1
+    if start is not None:
+        parts.append(html[start:])
+    return parts
+
+
+def _normalize_market_content_layout(html, slide_type='', slide_title='', content_source=''):
+    """Center market content while leaving SOL's internal visual composition intact.
+
+    The model owns the design inside the content frame. This wrapper only gives
+    that design a stable vertical lane between the managed header and footer,
+    and converts the occasional absolute-positioned text block into normal flow
+    when it would otherwise overlap the rest of the market narrative.
+    """
+    if (
+        not html
+        or not _is_market_slide(slide_type, slide_title, content_source)
+        or _is_fixed_competitor_comparison(content_source, slide_title)
+        or 'data-market-auto-fit="1"' in html
+    ):
+        return html
+
+    root_match = re.search(
+        r'<(?P<tag>div)\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\2[^>]*>',
+        html, flags=re.IGNORECASE,
+    )
+    if not root_match:
+        return html
+    root_end = _slide_element_end(html, root_match)
+    root_close_start = html.rfind('</div>', root_match.end(), root_end)
+    if root_close_start <= root_match.end():
+        return html
+
+    root_open = root_match.group(0)
+    inner = html[root_match.end():root_close_start]
+    parts = _split_top_level_html(inner)
+    if not parts:
+        return html
+
+    preserved = []
+    body = []
+    for part in parts:
+        lowered = part.lower()
+        if (
+            re.match(r'\s*<style\b', lowered)
+            or 'data-slide-header' in lowered
+            or 'data-slide-footer' in lowered
+            or re.search(r'class\s*=\s*["\'][^"\']*slide-(?:header|footer)', lowered)
+        ):
+            preserved.append(part)
+        else:
+            body.append(part)
+    body = [part for part in body if part.strip()]
+    if not body:
+        return html
+
+    if 'data-market-auto-fit=' not in root_open:
+        root_open = root_open[:-1] + ' data-market-auto-fit="1">'
+    root_open = _set_tag_style(
+        root_open,
+        ('display', 'flex-direction', 'align-items'),
+        'display:flex!important;flex-direction:column!important;align-items:stretch!important;',
+    )
+    body_html = ''.join(body)
+    absolute_body = bool(re.search(r'position\s*:\s*(?:absolute|fixed)', body_html, flags=re.IGNORECASE))
+    repair_css = ''
+    if absolute_body:
+        selector_scope = '[data-market-auto-fit="1"] [data-market-auto-fit-content="1"]'
+        if str(content_source or '').startswith('market_study_data.one_block_summary'):
+            selector_scope += ' '
+        else:
+            selector_scope += ' > '
+        repair_css = (
+            '<style data-market-auto-flow="1">'
+            f'{selector_scope}[style*="position:absolute"],'
+            f'{selector_scope}[style*="position: absolute"],'
+            f'{selector_scope}[style*="position:fixed"],'
+            f'{selector_scope}[style*="position: fixed"]{{position:relative!important;inset:auto!important;transform:none!important;}}'
+            '</style>'
+        )
+    frame = (
+        '<div data-market-auto-fit-content="1" style="flex:1 1 auto;min-height:0;'
+        'width:calc(100% - 72px);margin:0 auto;padding:12px 0 52px;box-sizing:border-box;'
+        'display:flex;flex-direction:column;justify-content:center;overflow:visible;">'
+        + body_html + '</div>'
+    )
+    replacement = root_open + ''.join(preserved) + repair_css + frame + html[root_close_start:root_end]
+    return html[:root_match.start()] + replacement + html[root_end:]
+
+
 def _strip_market_slide_media(html):
     """Keep competitor logos while removing maps and unrelated images from market slides."""
     protected_images = []
@@ -8793,6 +8899,12 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         )
 
     if is_market:
+        html = _normalize_market_content_layout(
+            html, slide_type=slide_type, slide_title=slide_title,
+            content_source=content_source,
+        )
+
+    if is_market:
         html = _strip_market_slide_media(html)
 
     return html
@@ -8802,6 +8914,30 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
                         map_placeholders=None, tenant_id=None, slide_num=None, slide_title=None,
                         total_slides=None, content_source=None):
     """Unified post-processing pipeline for every generated slide."""
+    if _is_fixed_competitor_comparison(content_source, slide_title):
+        market = _market_state(project_data)
+        competitors = market.get('competitors') if isinstance(market, dict) else []
+        competitors = competitors if isinstance(competitors, list) else []
+        has_named_competitors = any(_competitor_name(item) for item in competitors if isinstance(item, dict))
+        # A stale/AI-authored competitor slide must never ship without the
+        # agreed table. Keep the original HTML only for legacy logo-only calls
+        # that carry no market rows to rebuild from.
+        if 'data-competitor-table' not in str(html or '').lower() and (has_named_competitors or not creative_images):
+            html = _build_sol_horizontal_bar_slide(
+                {
+                    'title': slide_title or 'مقارنة المنافسين',
+                    'type': 'content',
+                    'section_key': 'market',
+                    'design_style': 'chart',
+                    'chart_type': 'horizontal_bar',
+                    'content_source': 'market_study_data.competitors',
+                    'source_table': 'competitors',
+                },
+                project_data if isinstance(project_data, dict) else {},
+                branding,
+                slide_num=slide_num,
+                total_slides=total_slides,
+            )
     html = _canonicalize_slide_root_class(html)
     if content_source in ('site_analysis', 'executive_content.summary'):
         html = _ensure_map_summary_structure(html)
