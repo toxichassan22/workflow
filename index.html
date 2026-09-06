@@ -6998,7 +6998,10 @@
     function detectTenantSectionRegenerationRequest(message) {
       const text = String(message || '').trim();
       const normalized = normalizeTenantSectionCommandText(text);
-      if (!text || !/(?:إعادة|اعادة|إعاده|أعد|اعد)\s*(?:توليد|إنشاء|انشاء|بناء)/i.test(text)) return null;
+      const isSectionRebuildCommand =
+        /(?:اعاده|اعد)\s*(?:توليد|انشاء|بناء|تصميم|تنسيق)/i.test(normalized) ||
+        /صمم\s*(?:قسم|القسم)/i.test(normalized);
+      if (!text || !isSectionRebuildCommand) return null;
       if (!/(?:قسم|القسم|كامل|بالكامل)/i.test(text)) return null;
       return TENANT_SECTION_REGENERATION_TARGETS.find(item => {
         const normalizedPattern = new RegExp(item.pattern.source.replace(/ة/g, 'ه'), item.pattern.flags);
@@ -22048,6 +22051,7 @@
       if (input) { input.value = ''; growTenantChatInput(input); }
       clearTenantChatAttachment();
       renderTenantDesignerChat();
+      if (target1BasedIndexes.length) tenantChatFocusIndexes = target1BasedIndexes.slice();
 
       const messagesDiv = document.getElementById('tenantChatMessages');
       let indicator = null;
@@ -22061,10 +22065,11 @@
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
       }
 
-      // The turn is sent with the conversation behind it: recent turns verbatim, the older ones as
-      // the memory the server compressed, and the slides under discussion.
-      if (target1BasedIndexes.length) tenantChatFocusIndexes = target1BasedIndexes.slice();
-      const data = await apiWithTimeout('POST', '/api/designer-chat', {
+      // The turn is sent with the conversation behind it: recent turns verbatim and the older ones
+      // as the memory the server compressed. A saved presentation is already available to the
+      // server, so do not upload every rendered slide again. Apart from avoiding the hosting edge's
+      // body limit, this keeps the chat operating on the same saved deck that will be updated.
+      const chatPayload = {
         message,
         target: targetScope,
         scope: targetScope,
@@ -22076,16 +22081,23 @@
         })),
         memory: tenantDesignerChatMemory,
         focusIndexes: tenantChatFocusIndexes,
-        slideHtml: tenantSlidesData[tenantChatSlideIndex]?.html || '',
-        slideTitle: tenantSlidesData[tenantChatSlideIndex]?.title || '',
         slideIndex: tenantChatSlideIndex,
-        slidesData: tenantSlidesData,
-        slidePlan: tenantSlidePlan,
-        creativeImages: tenantCreativeImages,
-        projectData: tenantProjectData,
         presentationId: tenantPresentationId,
+        creativeImages: tenantCreativeImages,
         attachedImage: attachedImage ? attachedImage.dataUri : ''
-      }, 90000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.', {
+      };
+      if (tenantPresentationId) {
+        // api_designer_chat loads projectData and slidesData by presentationId.
+        // Keep the request small even when the deck contains many rendered images.
+      } else {
+        chatPayload.slideHtml = tenantSlidesData[tenantChatSlideIndex]?.html || '';
+        chatPayload.slideTitle = tenantSlidesData[tenantChatSlideIndex]?.title || '';
+        chatPayload.slidesData = tenantSlidesData;
+        chatPayload.slidePlan = tenantSlidePlan;
+        chatPayload.projectData = tenantProjectData;
+      }
+      const data = await apiWithTimeout('POST', '/api/designer-chat', chatPayload,
+        90000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.', {
         onProgress: (sent, total) => {
           if (!indicator || !total) return;
           const pct = 10 + Math.round((Number(sent) / Number(total)) * 30);
