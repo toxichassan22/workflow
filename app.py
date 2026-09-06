@@ -1647,6 +1647,16 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
         img_tag = match.group(0)
         if 'project_logo' in img_tag.lower() or '##project_logo##' in img_tag.lower() or 'project-logo' in img_tag.lower():
             return img_tag
+        # The managed chrome contains a company logo and, when available, a
+        # project logo.  A resolved project-file URL does not contain the
+        # semantic marker above, so the legacy compatibility pass used to
+        # rewrite it back to the company logo.  Preserve resolved chrome URLs;
+        # only placeholders and known company-logo fallbacks need replacement.
+        if 'presentation-chrome-logo' in img_tag.lower():
+            src_match = re.search(r'\bsrc\s*=\s*["\']([^"\']*)["\']', img_tag, flags=re.IGNORECASE)
+            src = str(src_match.group(1) if src_match else '').strip().lower()
+            if src and not src.startswith('##') and not src.startswith('/assets/logo.png'):
+                return img_tag
         if 'logo' in img_tag.lower() or '##LOGO##' in img_tag or 'tenant-assets' in img_tag:
             if 'src=' in img_tag.lower():
                 img_tag = re.sub(r'src=["\'][^"\']*["\']', f'src="{logo_url}"', img_tag, flags=re.IGNORECASE)
@@ -5793,8 +5803,11 @@ def api_save_presentation():
     title = (data.get('title') or 'عرض بدون عنوان').strip()
     project_data = normalize_presentation_assets(data.get('projectData', {}), g.tenant_id)
     slides_data = normalize_presentation_assets(data.get('slidesData', []), g.tenant_id)
+    branding = db.get_branding(g.tenant_id) or {}
+    render_project_data = copy.deepcopy(project_data)
+    _prepare_generation_logo_context(render_project_data, branding, g.tenant_id)
     slides_data = slide_engine.renumber_presentation_slides(
-        slides_data, branding=db.get_branding(g.tenant_id), project_data=project_data,
+        slides_data, branding=branding, project_data=render_project_data,
         tenant_id=g.tenant_id,
     )
     slide_count = len(slides_data)
@@ -5824,8 +5837,10 @@ def api_get_presentation(pres_id):
     pres['projectData'] = _merge_persisted_map_assets(pres['projectData'], g.tenant_id, presentation_id=pres_id)
     slides = json.loads(pres['slides_data']) if pres.get('slides_data') else []
     branding = db.get_branding(g.tenant_id) or {}
+    render_project_data = copy.deepcopy(pres['projectData'])
+    _prepare_generation_logo_context(render_project_data, branding, g.tenant_id)
     slides = slide_engine.renumber_presentation_slides(
-        slides, branding=branding, project_data=pres['projectData'], tenant_id=g.tenant_id,
+        slides, branding=branding, project_data=render_project_data, tenant_id=g.tenant_id,
     )
     for s in slides:
         if isinstance(s, dict) and 'html' in s and isinstance(s['html'], str):
@@ -5860,9 +5875,12 @@ def api_update_presentation(pres_id):
                 project_data = json.loads(pres.get('project_data') or '{}')
             except (TypeError, ValueError):
                 project_data = {}
+        update_branding = db.get_branding(g.tenant_id) or {}
+        render_project_data = copy.deepcopy(project_data)
+        _prepare_generation_logo_context(render_project_data, update_branding, g.tenant_id)
         updates['slides_data'] = slide_engine.renumber_presentation_slides(
-            updates['slides_data'], branding=db.get_branding(g.tenant_id),
-            project_data=project_data, tenant_id=g.tenant_id,
+            updates['slides_data'], branding=update_branding,
+            project_data=render_project_data, tenant_id=g.tenant_id,
         )
         updates['slide_count'] = len(updates['slides_data'])
 
@@ -7483,6 +7501,8 @@ def api_export():
                     project_data = json.loads(pres.get('project_data') or '{}')
                 except (TypeError, ValueError):
                     project_data = {}
+            render_project_data = copy.deepcopy(project_data)
+            _prepare_generation_logo_context(render_project_data, branding, g.tenant_id)
 
             # Fallback: load latest saved slides from DB
             if not slides_html and not slides_data and pres and pres.get('slides_data'):
@@ -7496,7 +7516,7 @@ def api_export():
 
             if slides_data:
                 slides_data = slide_engine.renumber_presentation_slides(
-                    slides_data, branding=branding, project_data=project_data, tenant_id=g.tenant_id,
+                    slides_data, branding=branding, project_data=render_project_data, tenant_id=g.tenant_id,
                 )
                 slides_html, export_notes = _export_html_from_slides(slides_data)
                 if export_notes:
@@ -13883,6 +13903,7 @@ HTML الحالي:
                 )
             else:
                 branding = db.get_branding(tenant_id) or {}
+                _prepare_generation_logo_context(project_data, branding, tenant_id)
                 training_context = db.get_training_context(tenant_id) or ''
                 def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
                     if training_context:

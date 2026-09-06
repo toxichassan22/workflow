@@ -3836,7 +3836,10 @@ class MeetingRequirementsTests(unittest.TestCase):
             '<div class="slide" style="width:1280px;height:720px;position:relative;">'
             '<style>.slide{color:#111}</style>'
             '<header data-slide-header="1">العنوان</header>'
-            '<div style="height:320px">المحتوى</div>'
+            '<div style="height:320px">'
+            '<div style="position:absolute!important;top:120px;left:20px;height:180px;">المحتوى</div>'
+            '<div style="position: fixed; right:20px; bottom:80px; height:90px;">نص إضافي</div>'
+            '</div>'
             '<footer data-slide-footer="1">التذييل</footer>'
             '</div>'
         )
@@ -3847,6 +3850,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-market-auto-fit="1"', normalized)
         self.assertIn('data-market-auto-fit-content="1"', normalized)
         self.assertIn('justify-content:center', normalized)
+        self.assertIsNone(re.search(
+            r'<[^>]+\bstyle\s*=\s*["\'][^"\']*position\s*:\s*(?:absolute|fixed)',
+            normalized, flags=re.IGNORECASE,
+        ))
+        self.assertIn('position:relative!important', normalized)
         self.assertEqual(engine._validate_market_visual_design('<div>نص</div>', slide), None)
         finished = engine.finalize_slide_html(
             raw, 'content', project,
@@ -3857,6 +3865,39 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('class="presentation-chrome-logo"', finished)
         self.assertIn('/tenant-assets/demo/logo?t=1', finished)
         self.assertIn('padding:0!important', finished)
+
+    def test_only_competitor_market_page_uses_fixed_renderer(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع سوق حر',
+            'market_study_data': {
+                'one_block_summary': 'ملخص سوقي حر يختاره SOL بصريًا دون قالب مسبق.'
+            },
+        }
+        slide = {
+            'title': 'ملخص دراسة سوق العمل', 'type': 'content',
+            'section_key': 'market', 'design_style': 'text',
+            'chart_type': 'horizontal_bar',
+            'content_source': 'market_study_data.one_block_summary',
+        }
+        calls = []
+
+        def call_glm(*args, **kwargs):
+            calls.append((args, kwargs))
+            return {'choices': [{'message': {'content': (
+                '<div class="slide" style="width:1280px;height:720px;">'
+                '<div data-sol-owned="1">ملخص سوقي حر يختاره SOL بصريًا دون قالب مسبق.</div>'
+                '</div>'
+            )}}]}
+
+        result = engine.generate_single_slide(
+            'system', slide, 6, 10, {'primary_color': '#123456'},
+            call_glm, max_retries=0, project_data=project,
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertIn('data-sol-owned="1"', result)
+        self.assertNotIn('data-competitor-table', result)
+        self.assertIn('data-slide-header="1"', result)
 
     def test_competitor_logo_import_discovers_a_cited_official_site_and_preserves_manual_files(self):
         module = self.application_module

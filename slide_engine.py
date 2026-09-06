@@ -1206,7 +1206,12 @@ def _market_plan_slide(title, content_source, design_style='table', source_table
 
 
 def _normalize_market_group_slides(existing, market):
-    """Make the market section compact, deterministic, and media-free."""
+    """Normalize market data sources while leaving SOL's visual design open.
+
+    The competitor comparison is the only market page with a fixed visual
+    renderer.  The remaining entries are only normalized for source coverage;
+    their HTML is still designed by SOL.
+    """
     if not _market_has_required_data(market):
         return list(existing or [])
 
@@ -7630,7 +7635,17 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         and market_source == 'market_study_data.competitors'
         and chart_type == 'horizontal_bar'
     )
-    if chart_type in APPROVED_CHART_TYPES or _slide_section_key(slide) == 'financial' or fixed_market_comparison:
+    # A stale plan must not turn an arbitrary market page into a chart or a
+    # fixed market template.  The sole fixed market page is the competitor
+    # comparison; approved financial charts remain fixed in the financial
+    # section, as required by the financial report contract.
+    if _slide_section_key(slide) == 'market' and not fixed_market_comparison:
+        chart_type = ''
+        slide['chart_type'] = ''
+    if (fixed_market_comparison
+            or (_slide_section_key(slide) != 'market'
+                and (chart_type in APPROVED_CHART_TYPES
+                     or _slide_section_key(slide) == 'financial'))):
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
             return postprocess_slide(
@@ -8255,6 +8270,51 @@ def _apply_logo_contrast_styles(html, branding, project_data, slide_type='conten
 
     for token, tone in profiles.items():
         html = style_token(html, token, tone)
+
+    # Stored presentations may already contain resolved logo URLs instead of
+    # placeholders.  In that case the token pass above cannot apply the tone,
+    # so restyle the managed chrome by position/source as well.  The project
+    # URL is the only reliable discriminator for the optional second logo.
+    project_logo = _project_logo_reference(project_data)
+
+    def style_resolved_chrome(match):
+        tag = match.group(0)
+        src_match = re.search(r'\bsrc\s*=\s*["\']([^"\']*)["\']', tag, re.IGNORECASE)
+        src = str(src_match.group(1) if src_match else '')
+        if '##LOGO##' in src or '##PROJECT_LOGO##' in src:
+            return tag
+        if project_logo and project_logo in src:
+            tone = profiles['##PROJECT_LOGO##']
+        else:
+            tone = profiles['##LOGO##']
+        return _apply_logo_tag_style(tag, tone, dark_background, content_header, hero_logo)
+
+    def _apply_logo_tag_style(tag, tone, background, is_content_header, is_hero_logo):
+        chrome_logo = 'presentation-chrome-logo' in tag
+        if chrome_logo:
+            size = ('height:48px!important;max-height:48px!important;' if is_content_header else
+                    'height:80px!important;max-height:80px!important;' if is_hero_logo else
+                    'height:40px!important;max-height:40px!important;')
+            padding = '3px 7px'
+        else:
+            size = ('height:48px!important;max-height:48px!important;' if is_content_header else
+                    'height:80px!important;max-height:80px!important;' if is_hero_logo else '')
+            padding = '4px 10px' if is_content_header else '6px 12px'
+        declarations = (
+            f'{size}background:{background if tone == "light" else "#ffffff"}!important;'
+            f'padding:{padding}!important;border-radius:8px!important;box-sizing:border-box!important;'
+            'object-fit:contain!important;'
+        )
+        style_match = re.search(r'style\s*=\s*(["\'])(.*?)\1', tag, re.IGNORECASE)
+        if style_match:
+            style = style_match.group(2).rstrip(';') + ';' + declarations
+            return tag[:style_match.start(2)] + style + tag[style_match.end(2):]
+        return tag.replace('<img', f'<img style="{declarations}"', 1)
+
+    # Only resolve tags that are part of the managed chrome.  Content images
+    # must never inherit the logo background rule.
+    html = re.sub(r'<img\b[^>]*\bclass\s*=\s*["\'][^"\']*presentation-chrome-logo[^"\']*["\'][^>]*>',
+                  style_resolved_chrome, html, flags=re.IGNORECASE)
     return html
 
 
@@ -8731,17 +8791,43 @@ def _normalize_market_content_layout(html, slide_type='', slide_title='', conten
     repair_css = ''
     if absolute_body:
         selector_scope = '[data-market-auto-fit="1"] [data-market-auto-fit-content="1"]'
-        if str(content_source or '').startswith('market_study_data.one_block_summary'):
-            selector_scope += ' '
-        else:
-            selector_scope += ' > '
         repair_css = (
             '<style data-market-auto-flow="1">'
             f'{selector_scope}[style*="position:absolute"],'
             f'{selector_scope}[style*="position: absolute"],'
             f'{selector_scope}[style*="position:fixed"],'
-            f'{selector_scope}[style*="position: fixed"]{{position:relative!important;inset:auto!important;transform:none!important;}}'
+            f'{selector_scope}[style*="position: fixed"]{{'
+            'position:relative!important;inset:auto!important;'
+            'top:auto!important;right:auto!important;bottom:auto!important;left:auto!important;'
+            'transform:none!important;height:auto!important;min-height:0!important;max-height:none!important;'
+            '}'
             '</style>'
+        )
+
+        # An inline `!important` declaration wins over any injected stylesheet,
+        # so repair absolute/fixed blocks in the HTML itself as well.  This is
+        # intentionally limited to elements that SOL positioned absolutely;
+        # normal-flow composition, widths, colors, and spacing remain SOL's.
+        def repair_inline_absolute(match):
+            tag = match.group(0)
+            style_match = re.search(r'style\s*=\s*(["\'])(.*?)\1', tag, flags=re.IGNORECASE)
+            if not style_match or not re.search(
+                    r'position\s*:\s*(?:absolute|fixed)', style_match.group(2), flags=re.IGNORECASE):
+                return tag
+            return _set_tag_style(
+                tag,
+                ('position', 'inset', 'top', 'right', 'bottom', 'left', 'transform',
+                 'height', 'min-height', 'max-height'),
+                'position:relative!important;inset:auto!important;'
+                'top:auto!important;right:auto!important;bottom:auto!important;left:auto!important;'
+                'transform:none!important;height:auto!important;min-height:0!important;max-height:none!important;',
+            )
+
+        body_html = re.sub(
+            r'<(?!/|!|\?)[a-z][^>]*>',
+            repair_inline_absolute,
+            body_html,
+            flags=re.IGNORECASE,
         )
     frame = (
         '<div data-market-auto-fit-content="1" style="flex:1 1 auto;min-height:0;'
