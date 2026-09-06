@@ -157,7 +157,7 @@ _SECTION_MATCHERS = (
     ('executive_summary', r'(?:الملخص التنفيذي|executive summary)'),
     ('interior', r'(?:التصورات? الداخلية|التصميم الداخلي|interior)'),
     ('exterior', r'(?:التصورات? الخارجية|المود بورد|mood ?board|واجهات المشروع|exterior|التصور البصري)'),
-    ('plans', r'(?:المخططات|المساقط|مخطط معماري|2d|floor ?plans?)'),
+    ('plans', r'(?:المخططات|المخطط|المساقط|مخطط معماري|2d|floor ?plans?)'),
     ('team', r'(?:فريق العمل|فريق التطوير|المطور|الاستشاري|team)'),
     ('swot_risks', r'(?:swot|نقاط القوة|نقاط الضعف|الفرص والتهديدات|المخاطر|إدارة المخاطر|risk)'),
     ('financial', r'(?:الدراسة المالية|التحليل المالي|الجدوى|التدفقات النقدية|الإيرادات|التكاليف|العائد|roi|irr|financial|cash ?flow)'),
@@ -1515,6 +1515,15 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         groups.setdefault(section_key, []).append(slide)
 
     _reserve_media_sections(groups)
+    # The visual-concept sections are a strict media-only area.  A planner may
+    # still return an older summary/table slide (for example, a generic
+    # "المخطط العام" slide) alongside the uploaded assets.  Keeping it here
+    # makes it survive normalization and appear before the real plan images.
+    # Start these sections from zero so every full or section regeneration is
+    # rebuilt from the persisted media, not from stale model-authored content.
+    groups['exterior'] = []
+    groups['plans'] = []
+    groups['interior'] = []
     used_media_tokens = _deduplicate_plan_media(groups)
     moodboard_tokens = [f'##MOODBOARD_IMAGE_{index}##' for index, _item in _available_asset_items(images.get('moodboard'))]
     if not groups.get('overview') and source:

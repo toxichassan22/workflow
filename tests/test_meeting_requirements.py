@@ -1174,6 +1174,45 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(len(prompts), 2)
         self.assertIn('##LAND_PHOTO_2##', prompts[1])
 
+    def test_visual_concept_drops_stale_text_and_table_slides(self):
+        engine = self.application_module.slide_engine
+        images = {
+            'moodboard': ['/uploads/exterior-1.jpg', '/uploads/exterior-2.jpg'],
+            'plans': ['/uploads/plan-1.jpg'],
+            'interior_components': [{'name': 'الفندق', 'images': [
+                {'url': '/uploads/interior-1.jpg'},
+            ]}],
+        }
+        raw = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'المخطط العام والمسطح الأفقي للمشروع', 'type': 'content',
+             'bullets': ['ملخص قديم', 'بيانات جدولية قديمة']},
+            {'title': 'ملخص التصور الخارجي', 'type': 'content',
+             'section_key': 'exterior', 'bullets': ['نص قديم']},
+            {'title': 'ملخص التصور الداخلي', 'type': 'content',
+             'section_key': 'interior', 'bullets': ['نص قديم']},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}
+
+        plan = engine.normalize_presentation_plan(raw, {'project_name': 'المشروع'}, images)
+        visual = [slide for slide in plan['slides']
+                  if slide.get('section_key') in {'plans', 'exterior', 'interior'}
+                  and slide.get('type') == 'content']
+
+        self.assertEqual(len([slide for slide in visual if slide.get('section_key') == 'plans']), 1)
+        self.assertTrue(visual)
+        self.assertTrue(all(slide.get('media_only') is True
+                            and slide.get('image_tokens')
+                            and slide.get('bullets') == []
+                            for slide in visual))
+        self.assertNotIn('المخطط العام والمسطح الأفقي للمشروع',
+                         [slide.get('title') for slide in plan['slides']])
+        self.assertNotIn('ملخص التصور الخارجي',
+                         [slide.get('title') for slide in plan['slides']])
+        self.assertNotIn('ملخص التصور الداخلي',
+                         [slide.get('title') for slide in plan['slides']])
+
     def test_visual_concept_media_slides_are_deterministic_and_text_free(self):
         engine = self.application_module.slide_engine
         for section_key, source, tokens in (
