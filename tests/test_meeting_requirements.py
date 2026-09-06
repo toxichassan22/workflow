@@ -2389,8 +2389,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('إعادة توليد هذه الشريحة فقط', index_source)
         self.assertIn('async function regenerateTenantSlide(index)', index_source)
-        replacement_body = index_source.split('async function generateTenantSlideReplacement(index, generationImages) {', 1)[1]
-        replacement_body = replacement_body.split('\n    async function regenerateTenantSlide(index)', 1)[0]
+        replacement_body = index_source.split('async function generateTenantSlideFromSnapshot(snapshot, slideIndex, totalSlides, generationImages, current = {}) {', 1)[1]
+        replacement_body = replacement_body.split('\n    async function generateTenantSlideReplacement(index, generationImages)', 1)[0]
         self.assertIn('slidePlan: { slides: [snapshot] }', replacement_body)
         regenerate_body = index_source.split('async function regenerateTenantSlide(index) {', 1)[1]
         regenerate_body = regenerate_body.split('\n    function buildPresentationGenerationImages()', 1)[0]
@@ -2405,9 +2405,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("await regenerateTenantSection(sectionRequest.key, sectionRequest.label)", index_source)
         section_body = index_source.split('async function regenerateTenantSection(sectionKey, sectionLabel) {', 1)[1]
         section_body = section_body.split('\n    function buildPresentationGenerationImages()', 1)[0]
-        self.assertIn('generateTenantSlideReplacement', section_body)
+        self.assertIn('requestTenantSectionSlidePlans', section_body)
+        self.assertIn('const plannedSlides = sectionPlan.slides;', section_body)
+        self.assertIn('const projectedTotal = tenantSlidesData.length - targetIndexes.length + plannedSlides.length;', section_body)
+        self.assertIn('nextSlides.splice(firstIndex, 0, ...replacements.map(item => item.slide));', section_body)
+        self.assertIn('generateTenantSlideFromSnapshot', section_body)
         self.assertIn('مع إبقاء باقي العرض كما هو', section_body)
-        self.assertIn('لم يتم استبدال أي شريحة', section_body)
+        self.assertIn('لم يتم استبدال الشرائح القديمة', section_body)
         self.assertIn('await saveTenantPresentation()', section_body)
 
         chat_body = index_source.split('async function sendTenantDesignerChat() {', 1)[1]

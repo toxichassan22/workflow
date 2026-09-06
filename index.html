@@ -7011,6 +7011,43 @@
       });
     }
 
+    const TENANT_SECTION_PLANNER_KEYS = {
+      overview: 'basic',
+      components: 'basic',
+      land: 'land_croquis',
+      location: 'location',
+      market: 'section-market-study',
+      swot_risks: 'section-market-study',
+      timeline: 'section-timeline',
+      financial: 'section-financial-calc',
+      team: 'section-team',
+      plans: 'section-visual-concept',
+      exterior: 'section-visual-concept',
+      interior: 'section-visual-concept',
+      executive_summary: 'section-executive-content'
+    };
+
+    function tenantSectionPlanMatchesSection(slide, sectionKey) {
+      if (!slide || ['cover', 'index', 'closing', 'section_divider'].includes(String(slide.type || '').toLowerCase())) return false;
+      const explicit = String(slide.section_key || slide.sectionKey || slide.section || '').trim();
+      return explicit === sectionKey || tenantSlideSectionKey(slide, '') === sectionKey;
+    }
+
+    async function requestTenantSectionSlidePlans(sectionKey) {
+      const plannerKey = TENANT_SECTION_PLANNER_KEYS[sectionKey];
+      if (!plannerKey) throw new Error('القسم غير مدعوم لإعادة التخطيط');
+      const response = await requestTenantSlidePlan(tenantProjectData, job => {
+        setLiveGenBanner(true, 'إعادة تخطيط قسم ' + (TENANT_PRESENTATION_SECTION_TITLES[sectionKey] || sectionKey),
+          (job && job.message) || 'تحليل الصور والبيانات وتحديد عدد الشرائح المناسب', 12);
+      }, plannerKey);
+      if (!response?.success || !response.plan) {
+        throw new Error(response?.error || 'تعذر إعداد خطة القسم الجديدة');
+      }
+      const slides = (response.plan.slides || []).filter(slide => tenantSectionPlanMatchesSection(slide, sectionKey));
+      if (!slides.length) throw new Error('لم تنتج خطة القسم شرائح قابلة للتوليد؛ لم يتم تغيير العرض.');
+      return { plan: response.plan, slides };
+    }
+
     function buildTenantSlideRegenerationSnapshot(index) {
       const slideIndex = Number(index);
       const current = Array.isArray(tenantSlidesData) ? tenantSlidesData[slideIndex] : null;
@@ -7029,17 +7066,15 @@
       return { slideIndex, current, snapshot };
     }
 
-    async function generateTenantSlideReplacement(index, generationImages) {
-      const context = buildTenantSlideRegenerationSnapshot(index);
-      if (!context) throw new Error('الشريحة غير موجودة');
-      const { slideIndex, current, snapshot } = context;
+    async function generateTenantSlideFromSnapshot(snapshot, slideIndex, totalSlides, generationImages, current = {}) {
+      if (!snapshot) throw new Error('خطة الشريحة غير موجودة');
       const payload = {
         projectData: slimGenerationProjectData(tenantProjectData),
         slidePlan: { slides: [snapshot] },
         images: generationImages,
         slideIndex: 0,
-        _slideNum: slideIndex + 1,
-        _totalSlides: tenantSlidesData.length
+        _slideNum: Number(slideIndex) + 1,
+        _totalSlides: Number(totalSlides) || 1
       };
       if (tenantPresentationId) payload.presentationId = tenantPresentationId;
 
@@ -7055,17 +7090,24 @@
       }
       return {
         ...current,
-        title: data.slide.title || snapshot.title,
+        title: data.slide.title || snapshot.title || current.title,
         type: generatedType,
         html: renderedHtml,
-        section_key: data.slide.sectionKey || snapshot.section_key || current.section_key || '',
-        content_source: data.slide.contentSource || snapshot.content_source || current.content_source || '',
-        source_table: data.slide.sourceTable || snapshot.source_table || current.source_table || '',
-        index_entries: data.slide.indexEntries || snapshot.index_entries || current.index_entries || [],
-        designStyle: data.slide.designStyle || snapshot.design_style || current.designStyle || 'cards',
+        section_key: data.slide.sectionKey || snapshot.section_key || snapshot.sectionKey || current.section_key || '',
+        content_source: data.slide.contentSource || snapshot.content_source || snapshot.contentSource || current.content_source || '',
+        source_table: data.slide.sourceTable || snapshot.source_table || snapshot.sourceTable || current.source_table || '',
+        index_entries: data.slide.indexEntries || snapshot.index_entries || snapshot.indexEntries || current.index_entries || [],
+        designStyle: data.slide.designStyle || snapshot.design_style || snapshot.designStyle || current.designStyle || 'cards',
         bullets: snapshot.bullets || current.bullets || [],
         metrics: snapshot.metrics || current.metrics || []
       };
+    }
+
+    async function generateTenantSlideReplacement(index, generationImages) {
+      const context = buildTenantSlideRegenerationSnapshot(index);
+      if (!context) throw new Error('الشريحة غير موجودة');
+      const { slideIndex, current, snapshot } = context;
+      return generateTenantSlideFromSnapshot(snapshot, slideIndex, tenantSlidesData.length, generationImages, current);
     }
 
     async function regenerateTenantSlide(index) {
@@ -7120,6 +7162,10 @@
         toast('يوجد توليد جارٍ حاليًا');
         return false;
       }
+      if (tenantSlidePlanRequest) {
+        toast('يوجد إعداد خطة جارٍ حاليًا');
+        return false;
+      }
       if (hasResumableTenantSlideGeneration()) {
         toast('استكمل التوليد المتوقف قبل إعادة توليد قسم');
         return false;
@@ -7136,39 +7182,47 @@
         return false;
       }
       const targetNumbers = targetIndexes.map(index => index + 1).join('، ');
-      if (!confirm('سيتم إعادة توليد قسم «' + sectionLabel + '» وعدد شرائحه ' + targetIndexes.length + ' فقط (' + targetNumbers + ')، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟')) return false;
+      if (sectionKey === 'financial' && typeof validateFinancialStudyBeforeProceed === 'function'
+        && !(await validateFinancialStudyBeforeProceed())) return false;
+      if (!confirm('سيتم إعادة تخطيط وتوليد قسم «' + sectionLabel + '» من صوره وبياناته الحالية. قد يزيد أو يقل عدد شرائحه، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟')) return false;
 
       const previousSlides = tenantSlidesData.slice();
       const previousPlan = tenantSlidePlan;
-      const generationImages = buildPresentationGenerationImages();
-      const replacements = [];
-      const failed = [];
+      const previousProjectData = { ...tenantProjectData };
       isRegeneratingTenantSlide = true;
       renderTenantSlidesSidebar();
       try {
-        for (let position = 0; position < targetIndexes.length; position += 1) {
-          const index = targetIndexes[position];
+        await repairVisualConceptStoredImages();
+        persistVisualConceptDraftState();
+        const generationImages = buildPresentationGenerationImages();
+        const sectionPlan = await requestTenantSectionSlidePlans(sectionKey);
+        const plannedSlides = sectionPlan.slides;
+        const firstIndex = targetIndexes[0];
+        const projectedTotal = tenantSlidesData.length - targetIndexes.length + plannedSlides.length;
+        const replacements = [];
+        for (let position = 0; position < plannedSlides.length; position += 1) {
+          const planSlide = { ...plannedSlides[position] };
           setLiveGenBanner(true, 'إعادة توليد قسم ' + sectionLabel,
-            'الشريحة ' + (position + 1) + ' من ' + targetIndexes.length, 20 + Math.round((position / targetIndexes.length) * 65));
-          try {
-            replacements.push({ index, slide: await generateTenantSlideReplacement(index, generationImages) });
-          } catch (error) {
-            failed.push({ index, message: error?.message || 'تعذر التوليد' });
-          }
-        }
-        if (failed.length) {
-          throw new Error('تعذر توليد ' + failed.length + ' من شرائح القسم؛ لم يتم استبدال أي شريحة.');
+            'الشريحة ' + (position + 1) + ' من ' + plannedSlides.length, 20 + Math.round((position / plannedSlides.length) * 65));
+          replacements.push({
+            slide: await generateTenantSlideFromSnapshot(
+              planSlide, firstIndex + position, projectedTotal, generationImages, {})
+          });
         }
 
-        replacements.forEach(item => { tenantSlidesData[item.index] = item.slide; });
+        const targetSet = new Set(targetIndexes);
+        const nextSlides = tenantSlidesData.filter((slide, index) => !targetSet.has(index));
+        nextSlides.splice(firstIndex, 0, ...replacements.map(item => item.slide));
+        tenantSlidesData = nextSlides;
         tenantProjectData.tenantSlidesData = tenantSlidesData;
         renumberTenantSlides();
         renderTenantSlides();
-        selectTenantSlide(targetIndexes[0]);
+        selectTenantSlide(Math.min(firstIndex, tenantSlidesData.length - 1));
         const saved = await saveTenantPresentation();
         if (!saved) {
           tenantSlidesData = previousSlides;
           tenantSlidePlan = previousPlan;
+          tenantProjectData = previousProjectData;
           tenantProjectData.tenantSlidesData = tenantSlidesData;
           renderTenantSlides();
           throw new Error('تعذر حفظ القسم الجديد؛ تم الاحتفاظ بالشرائح القديمة.');
@@ -7179,13 +7233,18 @@
         }).catch(() => { });
         tenantDesignerMessages.push({
           role: 'assistant',
-          content: 'تم إعادة توليد قسم ' + sectionLabel + ' فقط (' + targetIndexes.length + ' شرائح)، مع إبقاء باقي العرض كما هو.',
-          slides: targetNumbers.split('، ').map(Number)
+          content: 'تم إعادة تخطيط وتوليد قسم ' + sectionLabel + ' فقط (' + plannedSlides.length + ' شرائح بدلًا من ' + targetIndexes.length + ')، مع إبقاء باقي العرض كما هو.',
+          slides: Array.from({ length: plannedSlides.length }, (_, offset) => firstIndex + offset + 1)
         });
         renderTenantDesignerChat();
         return true;
       } catch (error) {
         console.error('[SECTION REGENERATE]', error);
+        tenantSlidesData = previousSlides;
+        tenantSlidePlan = previousPlan;
+        tenantProjectData = previousProjectData;
+        tenantProjectData.tenantSlidesData = tenantSlidesData;
+        renderTenantSlides();
         tenantDesignerMessages.push({
           role: 'assistant',
           content: error?.message || 'تعذر إعادة توليد القسم؛ لم يتم استبدال الشرائح القديمة.',
