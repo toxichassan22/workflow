@@ -5545,6 +5545,8 @@
             </div>
             <span id="liveGenProgressPct" class="tenant-live-gen-pct">0%</span>
           </div>
+          <button id="liveGenResumeButton" type="button" class="btn ghost" style="display:none;white-space:nowrap;"
+            onclick="resumeTenantSlideGeneration()">استكمال التوليد</button>
         </div>
       </div>
 
@@ -6229,8 +6231,14 @@
       const detailsEl = document.getElementById('liveGenSlideDetails');
       const barEl = document.getElementById('liveGenProgressBar');
       const pctEl = document.getElementById('liveGenProgressPct');
+      const resumeButton = document.getElementById('liveGenResumeButton');
       if (titleEl && title) titleEl.textContent = title;
       if (detailsEl) detailsEl.textContent = details || '';
+      if (resumeButton) {
+        const checkpoint = tenantSlideGenerationCheckpoint || tenantProjectData?.slide_generation_checkpoint;
+        const resumable = checkpoint?.status === 'paused' && checkpoint?.active !== false;
+        resumeButton.style.display = resumable ? 'inline-flex' : 'none';
+      }
       if (typeof pct === 'number') {
         const clampedPct = Math.max(0, Math.min(100, Math.round(pct)));
         if (barEl) barEl.style.width = clampedPct + '%';
@@ -6256,6 +6264,7 @@
     let tenantActiveProjectSection = null;
     let tenantSlidePlan = null;
     let tenantSlidesData = [];
+    let tenantSlideGenerationCheckpoint = null;
     let tenantPresentationId = null;
     let tenantPresentationTitle = '';
     let tenantProjectMode = 'new';
@@ -6917,6 +6926,35 @@
         res = { success: false, error: 'تعذر إعداد خطة الشرائح في الوقت المتاح', error_code: 'PLAN_JOB_TIMEOUT' };
       }
       return res;
+    }
+
+    // A slide can take longer than the shared hosting proxy allows. Queueing the request keeps the
+    // browser connected only to short status calls and guarantees that a timeout cannot start the
+    // same paid AI generation three more times.
+    async function requestTenantSlideGeneration(payload) {
+      const queued = await apiWithTimeout(
+        'POST', '/api/generate-slide-single-job', payload, 30000,
+        'تعذر تسجيل مهمة توليد الشريحة؛ لم يبدأ استهلاك جديد.'
+      );
+      if (!queued?.jobId) return queued;
+
+      const started = Date.now();
+      const maxWaitMs = 10 * 60 * 1000;
+      while (Date.now() - started < maxWaitMs) {
+        await new Promise(resolve => setTimeout(resolve, 2500));
+        const result = await apiWithTimeout(
+          'GET', '/api/generate-slide-single/jobs/' + encodeURIComponent(queued.jobId), null,
+          30000, 'انتهت مهلة متابعة مهمة توليد الشريحة.'
+        );
+        if (result?.status === 'completed' || (result?.success && result?.slide)) return result;
+        if (result?.status === 'failed' || result?.status === 'not_found' || result?.error_code) return result;
+        if (result?.error && !['queued', 'running'].includes(result?.status)) return result;
+      }
+      return {
+        success: false,
+        error: 'انتهت مهلة توليد الشريحة. يمكن استكمال العرض من آخر شريحة محفوظة.',
+        error_code: 'SLIDE_JOB_TIMEOUT'
+      };
     }
 
     function buildPresentationGenerationImages() {
@@ -12154,6 +12192,7 @@
       tenantVisualConceptState = null;
       tenantSlidesData = [];
       tenantSlidePlan = null;
+      tenantSlideGenerationCheckpoint = null;
       tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
       tenantFinancialPresentationReport = null;
       tempCoverImage = null;
@@ -20361,6 +20400,72 @@
     }
 
     let isGeneratingTenantSlides = false;
+
+    function tenantSlidePlanFingerprint(plan) {
+      return JSON.stringify((plan?.slides || []).map(slide => ({
+        title: slide?.title || '',
+        type: slide?.type || 'content',
+        section_key: slide?.section_key || '',
+        content_source: slide?.content_source || '',
+        source_table: slide?.source_table || '',
+        chart_type: slide?.chart_type || '',
+      })));
+    }
+
+    function tenantSlideGenerationOptions(options = {}) {
+      return {
+        sectionKey: options.sectionKey || '',
+        sectionLabel: options.sectionLabel || '',
+        presentationTitle: options.presentationTitle || tenantPresentationTitle || '',
+        financialValidated: !!options.financialValidated,
+        markDraftDirty: options.markDraftDirty !== false,
+      };
+    }
+
+    async function saveTenantSlideGenerationCheckpoint(nextIndex, status, lastError = '') {
+      const planSignature = tenantSlidePlanFingerprint(tenantSlidePlan);
+      tenantSlideGenerationCheckpoint = {
+        ...(tenantSlideGenerationCheckpoint || {}),
+        planSignature,
+        nextIndex: Math.max(0, Number(nextIndex) || 0),
+        completedCount: Array.isArray(tenantSlidesData) ? tenantSlidesData.length : 0,
+        status: status || 'paused',
+        active: status !== 'complete',
+        lastError: String(lastError || '').slice(0, 500),
+        options: tenantSlideGenerationOptions(tenantSlideGenerationCheckpoint?.options || {}),
+      };
+      tenantProjectData.slide_generation_checkpoint = tenantSlideGenerationCheckpoint;
+      tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+      try {
+        await saveProjectAsDraftNow(true);
+      } catch (error) {
+        console.error('[SLIDE CHECKPOINT]', error);
+      }
+    }
+
+    function hasResumableTenantSlideGeneration() {
+      const checkpoint = tenantSlideGenerationCheckpoint || tenantProjectData?.slide_generation_checkpoint;
+      return !!(
+        checkpoint?.status === 'paused' && checkpoint?.active !== false &&
+        tenantSlidePlan?.slides?.length && Array.isArray(tenantSlidesData) &&
+        tenantSlidesData.length < tenantSlidePlan.slides.length &&
+        checkpoint.planSignature === tenantSlidePlanFingerprint(tenantSlidePlan)
+      );
+    }
+
+    async function resumeTenantSlideGeneration() {
+      if (isGeneratingTenantSlides) return;
+      if (!hasResumableTenantSlideGeneration()) {
+        toast('لا توجد مهمة توليد قابلة للاستكمال');
+        return;
+      }
+      const checkpoint = tenantSlideGenerationCheckpoint || tenantProjectData.slide_generation_checkpoint;
+      await generateTenantSlides({
+        ...(checkpoint.options || {}),
+        resume: true,
+      });
+    }
+
     async function generateTenantSlides(options = {}) {
       if (isGeneratingTenantSlides) return;
       if (!tenantSlidePlan || !tenantProjectData) return;
@@ -20369,6 +20474,36 @@
         const sectionKey = String(options.sectionKey || '');
         const totalSlides = (tenantSlidePlan.slides || []).length;
         if (!totalSlides) { toast('لا توجد شرائح في الخطة'); return; }
+
+        const planSignature = tenantSlidePlanFingerprint(tenantSlidePlan);
+        const savedCheckpoint = tenantSlideGenerationCheckpoint || tenantProjectData.slide_generation_checkpoint;
+        const resumeRequested = options.resume === true;
+        const canResume = resumeRequested && savedCheckpoint?.status === 'paused'
+          && savedCheckpoint?.active !== false
+          && savedCheckpoint.planSignature === planSignature
+          && Array.isArray(tenantSlidesData)
+          && tenantSlidesData.length < totalSlides;
+        if (resumeRequested && !canResume) {
+          toast('لا توجد نقطة توقف متوافقة مع خطة العرض الحالية');
+          return;
+        }
+        if (!canResume) tenantSlidesData = [];
+        const startIndex = canResume
+          ? Math.min(totalSlides, Math.min(
+            Math.max(0, Number(savedCheckpoint.nextIndex) || 0), tenantSlidesData.length))
+          : 0;
+        tenantSlideGenerationCheckpoint = {
+          ...(canResume ? savedCheckpoint : {}),
+          planSignature,
+          nextIndex: startIndex,
+          completedCount: tenantSlidesData.length,
+          status: 'running',
+          active: true,
+          lastError: '',
+          options: tenantSlideGenerationOptions(options),
+        };
+        tenantProjectData.slide_generation_checkpoint = tenantSlideGenerationCheckpoint;
+        tenantProjectData.tenantSlidePlan = tenantSlidePlan;
 
         // Re-collect latest form data to ensure all location fields are fresh
         if (typeof collectTenantFormData === 'function') {
@@ -20399,11 +20534,14 @@
             stage.style.setProperty('--stage-w', '960px');
             stage.style.setProperty('--stage-h', '540px');
             stage.style.setProperty('--slide-scale', '0.75');
-            stage.innerHTML = '<div class="slide live-gen-skeleton-stage" id="slide-stage-inner-' + i + '">' +
+            const savedSlide = canResume && tenantSlidesData[i] && tenantSlidesData[i].html
+              ? processSlideHtmlClient(tenantSlidesData[i].html, tenantSlidesData[i].type)
+              : '';
+            stage.innerHTML = savedSlide || ('<div class="slide live-gen-skeleton-stage" id="slide-stage-inner-' + i + '">' +
               '<div style="font-size:12px;font-weight:700;color:#94a3b8;letter-spacing:1px">الشريحة ' + (i + 1) + ' من ' + totalSlides + '</div>' +
               '<div style="font-size:22px;font-weight:700;color:#1e293b;margin:6px 0">' + escapeHtml(plan.title || ('شريحة ' + (i + 1))) + '</div>' +
               '<div style="font-size:13px;color:#64748b;background:#f1f5f9;padding:6px 16px;border-radius:20px">قيد الانتظار للتوليد</div>' +
-              '</div>';
+              '</div>');
             container.appendChild(stage);
             wrap.appendChild(container);
           });
@@ -20449,10 +20587,10 @@
         const generationImages = buildPresentationGenerationImages();
         const hasUnapprovedImages = !!tempCoverImage || Object.keys(tempMoodboardImages || {}).length > 0;
         if (hasUnapprovedImages) toast('سيتم استخدام الصور المولدة غير المعتمدة مع استمرار إمكانية اعتمادها لاحقًا.');
-        tenantSlidesData = [];
-        activeSlideIndex = 0;
+        if (!canResume) tenantSlidesData = [];
+        activeSlideIndex = Math.min(startIndex, Math.max(0, tenantSlidesData.length - 1));
 
-        for (let i = 0; i < totalSlides; i++) {
+        for (let i = startIndex; i < totalSlides; i++) {
           const plan = tenantSlidePlan.slides[i] || {};
           const slidePct = Math.round(20 + (i / totalSlides) * 75);
           setLiveGenBanner(true, 'الشريحة ' + (i + 1) + ' من ' + totalSlides + ': ' + (plan.title || ''), 'جاري الصياغة والتصميم بالذكاء الاصطناعي...', slidePct);
@@ -20486,7 +20624,10 @@
           let generated = null;
           let lastError = '';
 
-          for (let attempt = 1; attempt <= 3 && !generated; attempt++) {
+          // The request is already a background job. Retrying here could enqueue a second paid
+          // generation after a browser or proxy timeout, so a failed slide is checkpointed for an
+          // explicit resume instead.
+          for (let attempt = 1; attempt <= 1 && !generated; attempt++) {
             try {
               // Snapshot the specific slide so a mutating plan cannot break the request.
               const _snapSlide = tenantSlidePlan.slides[i];
@@ -20500,7 +20641,7 @@
               };
               if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
 
-              const data = await api('POST', '/api/generate-slide-single', genPayload);
+              const data = await requestTenantSlideGeneration(genPayload);
               if (data.success && data.slide && data.slide.html && containsSlideRoot(data.slide.html)) {
                 generated = data.slide;
               } else {
@@ -20516,8 +20657,11 @@
           }
 
           if (!generated) {
-            setLiveGenBanner(true, 'توقف التوليد عند الشريحة ' + (i + 1), lastError, slidePct);
-            toast('توقف التوليد عند الشريحة ' + (i + 1) + ': ' + lastError);
+            await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError);
+            setLiveGenBanner(true, 'توقف التوليد مؤقتًا عند الشريحة ' + (i + 1),
+              'تم حفظ ' + tenantSlidesData.length + ' شريحة ويمكن استكمال العرض لاحقًا.', slidePct);
+            renderTenantSlidesSidebar();
+            toast('تم حفظ نقطة التوقف عند الشريحة ' + (i + 1));
             return;
           }
 
@@ -20534,6 +20678,8 @@
             metrics: plan.metrics || []
           };
           tenantSlidesData.push(slideObj);
+          tenantProjectData.tenantSlidesData = tenantSlidesData;
+          await saveTenantSlideGenerationCheckpoint(i + 1, 'running');
 
           // Live populate the slide card right in front of the user!
           if (cardEl) {
@@ -20562,6 +20708,7 @@
           return;
         }
 
+        await saveTenantSlideGenerationCheckpoint(totalSlides, 'complete');
         setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', 'إجمالي ' + totalSlides + ' شريحة معتمدة', 100);
         renderTenantSlidesSidebar();
         renderTenantDesignerChat();
@@ -20726,16 +20873,20 @@
         item.html = renumberTenantSlideHtml(item, index + 1, tenantSlidesData.length, indexEntries);
         return item;
       });
-      tenantSlidePlan = {
-        ...(tenantSlidePlan || {}),
-        proposed_count: tenantSlidesData.length,
-        slides: tenantSlidesData.map(slide => ({
-          title: slide.title || '', type: slide.type || 'content', section_key: slide.section_key || '',
-          content_source: slide.content_source || '', source_table: slide.source_table || '',
-          index_entries: slide.index_entries || [], design_style: slide.designStyle || slide.design_style || 'cards',
-          bullets: slide.bullets || [], metrics: slide.metrics || []
-        }))
-      };
+      // During a paused generation the full plan must remain intact. Rebuilding it from the
+      // completed prefix would make the resume button believe there are no remaining slides.
+      if (!tenantSlideGenerationCheckpoint?.active) {
+        tenantSlidePlan = {
+          ...(tenantSlidePlan || {}),
+          proposed_count: tenantSlidesData.length,
+          slides: tenantSlidesData.map(slide => ({
+            title: slide.title || '', type: slide.type || 'content', section_key: slide.section_key || '',
+            content_source: slide.content_source || '', source_table: slide.source_table || '',
+            index_entries: slide.index_entries || [], design_style: slide.designStyle || slide.design_style || 'cards',
+            bullets: slide.bullets || [], metrics: slide.metrics || []
+          }))
+        };
+      }
       return tenantSlidesData;
     }
 
@@ -21094,6 +21245,18 @@
         '</div>';
     }
 
+    function renderTenantSlideResumeNotice(wrap) {
+      if (!wrap || !hasResumableTenantSlideGeneration()) return;
+      const remaining = Math.max(0, (tenantSlidePlan?.slides?.length || 0) - (tenantSlidesData?.length || 0));
+      const notice = document.createElement('div');
+      notice.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;margin:0 auto 20px;max-width:960px;background:#fff8ed;border:1px solid #e7c98a;border-radius:12px;color:#6b4d16;';
+      notice.innerHTML = '<div><div style="font-weight:800">التوليد متوقف مؤقتًا</div>' +
+        '<div style="font-size:13px;margin-top:4px">تم حفظ ' + escapeHtml(String(tenantSlidesData.length)) +
+        ' شريحة ويتبقى ' + escapeHtml(String(remaining)) + ' شرائح.</div></div>' +
+        '<button type="button" class="btn primary" style="background:#1a4d6f;color:#fff;white-space:nowrap" onclick="resumeTenantSlideGeneration()">استكمال التوليد</button>';
+      wrap.appendChild(notice);
+    }
+
     function renderTenantSlides() {
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
@@ -21119,10 +21282,13 @@
           '<div style="font-size:18px;font-weight:700;color:var(--txt)">لم يتم توليد شرائح هذا العرض بعد</div>' +
           '<button type="button" class="btn primary" style="background:#1a4d6f;color:#fff;padding:10px 32px;font-size:15px;font-weight:700;margin-top:8px" onclick="directGenerateProposalFile()">توليد العرض الآن</button>' +
           '</div>';
+        renderTenantSlideResumeNotice(wrap);
         renderTenantSlidesSidebar();
         renderTenantSlidesDesignerChat();
         return;
       }
+
+      renderTenantSlideResumeNotice(wrap);
 
       // Phase 1: create lightweight skeletons instantly (no heavy processing)
       const containers = [];
@@ -21890,6 +22056,7 @@
       tenantSlidesData = Array.isArray(p.slidesData)
         ? p.slidesData
         : (Array.isArray(tenantProjectData.tenantSlidesData) ? tenantProjectData.tenantSlidesData : []);
+      tenantSlideGenerationCheckpoint = tenantProjectData.slide_generation_checkpoint || null;
       tenantSlidePlan = recoverTenantSlidePlan(tenantProjectData, tenantSlidesData);
       if (tenantSlidePlan) tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       restoreDesignerChat(tenantProjectData);
@@ -22025,6 +22192,7 @@
         tenantProjectMode = 'draft';
         tenantProjectData = { ...draftData, draftId: draftData.draftId || draft.id || draftId };
         tenantSlidesData = Array.isArray(draftData.tenantSlidesData) ? draftData.tenantSlidesData : [];
+        tenantSlideGenerationCheckpoint = draftData.slide_generation_checkpoint || null;
         tenantSlidePlan = recoverTenantSlidePlan(tenantProjectData, tenantSlidesData);
         if (tenantSlidePlan) tenantProjectData.tenantSlidePlan = tenantSlidePlan;
         restoreDesignerChat(draftData);

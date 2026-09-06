@@ -5509,6 +5509,83 @@ def api_generate_slide_single():
     })
 
 
+def _run_slide_generation_job(flask_app, tenant_id, payload, job_id, authorization):
+    """Run one slide request outside the hosting proxy's request lifetime."""
+    with flask_app.test_request_context(
+            '/api/generate-slide-single', method='POST', json=payload,
+            headers={'Authorization': authorization}):
+        try:
+            result = api_generate_slide_single()
+            response = result[0] if isinstance(result, tuple) else result
+            status_code = result[1] if isinstance(result, tuple) and len(result) > 1 else response.status_code
+            body = response.get_json(silent=True) or {}
+            if 200 <= int(status_code) < 300 and body.get('success'):
+                _write_job('.slide_jobs', tenant_id, job_id, {
+                    **body, 'status': 'completed', 'success': True,
+                })
+            else:
+                _write_job('.slide_jobs', tenant_id, job_id, {
+                    **body,
+                    'status': 'failed',
+                    'success': False,
+                    'error': body.get('error') or f'فشل توليد الشريحة (HTTP {status_code})',
+                })
+        except Exception as exc:
+            print(f'[SLIDE GENERATION JOB FAILED] {exc}')
+            _write_job('.slide_jobs', tenant_id, job_id, {
+                'status': 'failed',
+                'success': False,
+                'error': f'تعذر توليد الشريحة: {exc}',
+                'failureReason': 'job_failed',
+            })
+
+
+@app.route('/api/generate-slide-single-job', methods=['POST'])
+@require_permission('create_presentation')
+def api_generate_slide_single_job():
+    """Queue one slide so a slow AI response cannot become a proxy 404."""
+    data = request.json or {}
+    slide_plan = data.get('slidePlan') or {}
+    slides = slide_plan.get('slides') if isinstance(slide_plan, dict) else None
+    if not isinstance(slides, list) or not slides:
+        return jsonify({'success': False, 'error': 'slidePlan with slides array is required'}), 400
+    job_id = str(_uuid.uuid4())
+    tenant_id = g.tenant_id
+    authorization = request.headers.get('Authorization', '')
+    _write_job('.slide_jobs', tenant_id, job_id, {
+        'status': 'queued',
+        'success': True,
+        'message': 'تم استلام طلب توليد الشريحة',
+    })
+    threading.Thread(
+        target=_run_slide_generation_job,
+        args=(current_app._get_current_object(), tenant_id, data, job_id, authorization),
+        daemon=True,
+    ).start()
+    return jsonify({
+        'success': True,
+        'jobId': job_id,
+        'status': 'queued',
+        'message': 'بدأ توليد الشريحة في الخلفية',
+    }), 202
+
+
+@app.route('/api/generate-slide-single/jobs/<job_id>', methods=['GET'])
+@require_permission('create_presentation')
+def api_generate_slide_single_job_status(job_id):
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', str(job_id or '')):
+        return jsonify({'success': False, 'error': 'معرف مهمة غير صالح'}), 400
+    job = _read_job('.slide_jobs', g.tenant_id, job_id)
+    if not job:
+        return jsonify({
+            'success': False,
+            'status': 'not_found',
+            'error': 'المهمة غير موجودة أو انتهت صلاحيتها',
+            'failureReason': 'job_not_found',
+        }), 404
+    return jsonify(job)
+
+
 @app.route('/api/generate-slides', methods=['POST'])
 @require_permission('create_presentation')
 def api_generate_slides():
