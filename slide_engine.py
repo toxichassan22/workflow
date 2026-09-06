@@ -81,6 +81,77 @@ _SECTION_KEY_ALIASES = {
     'executive': 'executive_summary', 'summary': 'executive_summary', 'conclusion': 'closing',
 }
 
+_LOCATION_MAP_SOURCE_TYPES = {
+    'location_polygon': ('map_overview', '##MAP_OVERVIEW##'),
+    'main_roads': ('map_access', '##MAP_ACCESS##'),
+    'catchment_areas': ('map_catchment', '##MAP_CATCHMENT##'),
+    'nearby_landmarks': ('map_landmarks', '##MAP_LANDMARKS##'),
+}
+
+
+def _normalize_location_map_slide(slide):
+    """Keep every intentional map in the location section and give it one token."""
+    if not isinstance(slide, dict):
+        return slide
+    item = dict(slide)
+    slide_type = str(item.get('type') or 'content').strip().lower()
+    source = str(item.get('content_source') or item.get('contentSource') or '').strip()
+    if slide_type in ('map_overview', 'map_landmarks', 'map_access', 'map_catchment', 'site_specs'):
+        item['section_key'] = 'location'
+        item['sectionKey'] = 'location'
+    elif source in _LOCATION_MAP_SOURCE_TYPES:
+        canonical_type, token = _LOCATION_MAP_SOURCE_TYPES[source]
+        item.update({
+            'type': canonical_type,
+            'section_key': 'location',
+            'sectionKey': 'location',
+            'design_style': 'map',
+            'requires_image': True,
+            'image_tokens': [token],
+        })
+    elif source == 'site_analysis':
+        item.update({
+            'section_key': 'location',
+            'sectionKey': 'location',
+            'design_style': 'map',
+            'requires_image': True,
+            'image_tokens': ['##MAP_OVERVIEW##'],
+        })
+    elif source == 'location_detail':
+        item['section_key'] = 'location'
+        item['sectionKey'] = 'location'
+    return item
+
+
+def _is_financial_slide(slide):
+    """Recognize financial slides even when an old/model plan assigned another section."""
+    if not isinstance(slide, dict):
+        return False
+    section = str(slide.get('section_key') or slide.get('sectionKey') or '').strip().lower()
+    source = str(slide.get('content_source') or slide.get('contentSource') or '').strip().lower()
+    source_table = str(slide.get('source_table') or slide.get('sourceTable') or '').strip().lower()
+    title = str(slide.get('title') or '').strip()
+    if section == 'financial':
+        return True
+    if source.startswith(('financial_', 'financial:', 'financial_report:', 'financial_summary:')):
+        return True
+    if source_table in {'costtable', 'cashflowtable', 'sensitivitytable', 'financial_report'}:
+        return True
+    return bool(re.search(
+        r'(?:الدراسة المالية|التحليل المالي|الجدوى المالية|التدفقات النقدية|مؤشرات العائد|التكاليف والاستثمار|financial|cash ?flow|roi|irr)',
+        title, flags=re.IGNORECASE,
+    ))
+
+
+def _normalize_financial_slide(slide):
+    if not _is_financial_slide(slide):
+        return slide
+    item = dict(slide)
+    item['section_key'] = 'financial'
+    item['sectionKey'] = 'financial'
+    item['requires_image'] = False
+    return item
+
 _SECTION_MATCHERS = (
     ('closing', r'(?:الخاتمة|الختام|شكرا|شكراً|closing|conclusion|thanks)'),
     ('executive_summary', r'(?:الملخص التنفيذي|executive summary)'),
@@ -2085,6 +2156,8 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
     signatures = set()
     current = ''
     for slide in source_slides:
+        slide = _normalize_location_map_slide(slide)
+        slide = _normalize_financial_slide(slide)
         slide_type = str(slide.get('type') or 'content')
         if slide is cover or slide is index or slide is closing or slide_type in ('cover', 'index', 'closing'):
             continue
@@ -5163,6 +5236,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
         'الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في المالية) وأي رسم خارجها ممنوع منعاً باتاً؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
         'الصور ليست عنصراً افتراضياً في كل شريحة: استخدم فقط الصور والخرائط والرموز التي تنص عليها الخطة لهذه الشريحة. لا تضف صورة إلى شريحة نص أو جدول بلا حاجة، ولا تكرر أصلاً مرئياً في موضع آخر، مع الحفاظ على توزيع معقول للصور المتاحة عبر العرض الكامل',
+        'الخرائط مسموحة فقط في شرائح تحليل الموقع الجغرافي المحددة أو ملخص الموقع/الخريطة التنفيذي المحدد صراحة. في الجدول الزمني والدراسة المالية والمخططات والتصورات الخارجية والداخلية وفريق العمل وبقية الأقسام: ممنوع استخدام ##MAP_OVERVIEW## أو ##MAP_LANDMARKS## أو ##MAP_ACCESS## أو ##MAP_CATCHMENT## أو أي صورة من /uploads/maps/',
         'التزم بأساسيات التوليد دون استثناء: RTL، هوية الشركة، الهيدر والفوتر النظاميان، جذر slide واحد، تباين واضح، تدفق طبيعي بلا تداخل أو قص، وعدم اختراع أرقام أو نصوص أو صور أو أيقونات',
         'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون فرض جداول أو بطاقات أو شبكة محددة، ومن دون خرائط أو صور فوتوغرافية أو رسوم إضافية. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
@@ -5336,6 +5410,45 @@ def _ensure_map_placeholder(html, slide_type):
     html = re.sub(r'<div\b(?=[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b)[^>]*>',
                   apply, html, count=1, flags=re.IGNORECASE)
     print(f"[POST] Injected fallback placeholder {marker} into slide background")
+    return html
+
+
+def _map_media_allowed(slide_type, content_source, slide_title=''):
+    """Return whether a slide is explicitly allowed to carry a generated map."""
+    slide_type = str(slide_type or '').strip().lower()
+    content_source = str(content_source or '').strip().lower()
+    if slide_type in ('map_overview', 'map_landmarks', 'map_access', 'map_catchment'):
+        return True
+    return content_source in {
+        'location_polygon', 'main_roads', 'catchment_areas', 'nearby_landmarks',
+        'site_analysis', 'location_detail', 'executive_content.summary',
+    }
+
+
+def _strip_unplanned_map_media(html, slide_type, content_source=None, slide_title=None):
+    """Remove map tokens and resolved map assets from non-location slides.
+
+    The model receives the available map tokens as context.  Without this final
+    boundary it could place a valid map token in a timeline, plans, exterior or
+    interior slide and the resolver would turn that token into a real map image.
+    """
+    if not html or _map_media_allowed(slide_type, content_source, slide_title):
+        return html
+
+    # Map variants include forms such as _SATELLITE, _ROADMAP and
+    # _SATELLITE_EDITABLE. Keep the suffix open-ended so no variant can leak
+    # into a non-location slide and later resolve into a real map image.
+    map_ref = r'(?:##MAP_(?:OVERVIEW|LANDMARKS|ACCESS|CATCHMENT)(?:_[A-Z0-9]+)*##|/uploads/maps/|/api/map-images/)'
+    html = re.sub(
+        rf'<img\b[^>]*(?:src\s*=\s*["\'][^"\']*{map_ref}[^"\']*["\']|{map_ref})[^>]*>',
+        '', html, flags=re.IGNORECASE,
+    )
+    html = re.sub(
+        rf'(?:background(?:-image)?\s*:\s*)[^;}}]*(?:{map_ref})[^;}}]*;?',
+        '', html, flags=re.IGNORECASE,
+    )
+    html = re.sub(r'\sdata-map-summary-(?:background|card)(?:\s*=\s*["\'][^"\']*["\'])?', '', html, flags=re.IGNORECASE)
+    html = re.sub(r'##MAP_(?:OVERVIEW|LANDMARKS|ACCESS|CATCHMENT)(?:_[A-Z0-9]+)*##', '', html, flags=re.IGNORECASE)
     return html
 
 
@@ -7734,6 +7847,8 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     if (slide or {}).get('type') == 'section_divider':
         return build_section_divider_slide(slide, slide_num, total_slides, branding, project_data)
 
+    slide = _normalize_financial_slide(_normalize_location_map_slide(dict(slide or {})))
+
     # Single-slide requests may come from an older client and bypass the full
     # plan normalizer. Apply the same market contract to that one item.
     if _slide_section_key(slide) == 'market':
@@ -9267,6 +9382,8 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
             and isinstance(slide_type, str) and (slide_type.startswith('map_') or slide_type == 'site_specs')
             or content_source in ('site_analysis', 'executive_content.summary', 'location_detail')):
         html = _inject_location_data_timestamp(html, project_data)
+    html = _strip_unplanned_map_media(
+        html, slide_type, content_source=content_source, slide_title=slide_title)
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
     if (not _is_market_slide(slide_type, slide_title, content_source)
@@ -9355,6 +9472,9 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                     project_logo=_project_logo_reference(project_data),
                 )
             item['html'] = _rewrite_slide_counter(html, slide_type, index, total)
+            item['html'] = _strip_unplanned_map_media(
+                item['html'], slide_type, content_source=item.get('content_source'),
+                slide_title=title)
             if item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source')):
                 item['html'] = _strip_market_slide_media(item['html'])
     return normalized
@@ -9370,7 +9490,15 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
     # Repair that plan at the last boundary before rendering as well, so old
     # clients and the workspace agent receive the same deterministic output.
     slide_plan = normalize_market_section_plan(slide_plan, project_data) or slide_plan
-    slides = slide_plan.get('slides', [])
+    # This route is still used by workspace/legacy callers that can submit an
+    # older plan without passing through the tenant plan endpoint. Apply the
+    # same per-slide ownership repair here so those callers cannot reintroduce
+    # maps into visual, timeline or financial sections.
+    slides = [
+        _normalize_financial_slide(_normalize_location_map_slide(dict(slide)))
+        for slide in (slide_plan.get('slides', []) if isinstance(slide_plan, dict) else [])
+        if isinstance(slide, dict)
+    ]
     total = len(slides)
 
     # Build system prompt with tenant's design rules
@@ -9407,7 +9535,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
 - CSS inline فقط
 - ممنوع box-shadow/filter/backdrop-filter
 - استخدم ##LOGO## للشعار، ##IMAGE_COVER## لصورة الغلاف، ##MOODBOARD_IMAGE_N## لصور المود بورد
-- للخرائط: ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT##
+- للخرائط: ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT## — استخدمها فقط في شرائح تحليل الموقع الجغرافي أو ملخص الموقع المحدد صراحة، وممنوع استخدامها في الجدول الزمني أو الدراسة المالية أو المخططات أو التصورات الخارجية أو الداخلية أو أي قسم آخر
 - ممنوع base64 أو روابط صور خارجية
 - """ + NO_STREET_VIEW_RULE + """
 """

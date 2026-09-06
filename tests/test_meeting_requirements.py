@@ -1184,6 +1184,65 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('MOODBOARD_IMAGE_1', html)
         self.assertIn('محتوى', html)
 
+    def test_maps_are_removed_from_every_non_location_slide(self):
+        engine = self.application_module.slide_engine
+        rogue = (
+            '<div class="slide" style="background:#fff;color:#111">'
+            '<img src="##MAP_OVERVIEW##">'
+            '<img src="##MAP_OVERVIEW_SATELLITE_EDITABLE##">'
+            '<div style="background-image:url(/uploads/maps/overview.png);height:300px"></div>'
+            '<p>بيانات الجدول الزمني</p></div>'
+        )
+        cleaned = engine.finalize_slide_html(
+            rogue, 'content', {'project_name': 'المشروع'},
+            {'primary_color': '#123456'},
+            map_placeholders={'##MAP_OVERVIEW##': '/uploads/maps/overview.png'},
+            slide_num=7, slide_title='الجدول الزمني للمشروع', total_slides=20,
+            content_source='timeline',
+        )
+        self.assertNotIn('MAP_', cleaned)
+        self.assertNotIn('/uploads/maps/', cleaned)
+        self.assertIn('بيانات الجدول الزمني', cleaned)
+
+    def test_legacy_full_renderer_cannot_restore_map_in_visual_slide(self):
+        engine = self.application_module.slide_engine
+
+        def generated(_system, _user_message, **_kwargs):
+            return {'choices': [{'message': {'content': (
+                '<div class="slide" style="background:#fff;color:#111">'
+                '<img src="##MAP_OVERVIEW_SATELLITE_EDITABLE##">'
+                '<p>التصور الداخلي</p></div>'
+            )}}]}
+
+        html = engine.generate_all_slides(
+            {'slides': [{'title': 'التصور الداخلي', 'type': 'content',
+                         'section_key': 'interior', 'content_source': 'interior_image:1:1'}]},
+            {'project_name': 'المشروع'}, {'primary_color': '#123456'}, {}, generated,
+            map_placeholders={'##MAP_OVERVIEW_SATELLITE_EDITABLE##': '/uploads/maps/overview.png'},
+        )[0]
+        self.assertNotIn('MAP_', html)
+        self.assertNotIn('/uploads/maps/', html)
+        self.assertIn('التصور الداخلي', html)
+
+    def test_location_map_slides_are_rehomed_from_visual_sections(self):
+        engine = self.application_module.slide_engine
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'مرجع الموقع العام', 'type': 'map_overview', 'section_key': 'interior'},
+            {'title': 'خريطة الطرق', 'type': 'content', 'section_key': 'exterior',
+             'content_source': 'main_roads'},
+            {'title': 'الخريطة', 'type': 'content', 'section_key': 'plans',
+             'content_source': 'location_polygon'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, {'project_name': 'المشروع', 'location_address': 'جدة'}, {})
+        map_slides = [slide for slide in plan['slides']
+                      if slide.get('type', '').startswith('map_')]
+        self.assertEqual({slide.get('section_key') for slide in map_slides}, {'location'})
+        self.assertTrue(any(slide.get('content_source') == 'main_roads' for slide in map_slides))
+        self.assertTrue(any(slide.get('content_source') == 'location_polygon' for slide in map_slides))
+        self.assertTrue(all(slide.get('section_key') != 'interior' for slide in plan['slides']
+                            if slide.get('type') == 'map_overview'))
+
     def test_directional_diagram_is_canonicalized_once(self):
         engine = self.application_module.slide_engine
         project = {'project_name': 'المشروع', 'boundary_lengths': 'شمال 20م',
@@ -1512,6 +1571,39 @@ class MeetingRequirementsTests(unittest.TestCase):
             max_retries=0, project_data=project)
         self.assertIn('2027', financial)
         self.assertIn('1,500,000', financial)
+
+    def test_misclassified_financial_slide_is_rehomed_and_never_calls_model(self):
+        engine = self.application_module.slide_engine
+        project = {'project_name': 'مشروع مالي', 'financial_study_model': {
+            'inputs': {'projectCost': 1000},
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': 'الإيرادات'},
+                {'type': 'table', 'headers': ['السنة', 'الإيراد'],
+                 'rows': [['2027', '1,500,000']]},
+            ]},
+        }}
+        raw = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'الإيرادات', 'type': 'content', 'section_key': 'timeline',
+             'content_source': 'financial_report:1:0:1', 'design_style': 'table'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}
+        plan = engine.normalize_presentation_plan(raw, project, {})
+        # The canonical plan may replace a hand-authored financial report slide
+        # with its deterministic financial section. Test the important contract
+        # directly as well as confirming that the normalized plan contains that
+        # section.
+        self.assertTrue(any(slide.get('section_key') == 'financial'
+                            for slide in plan['slides']))
+        financial_plan = engine._normalize_financial_slide(raw['slides'][2])
+        self.assertEqual(financial_plan.get('section_key'), 'financial')
+        html = engine.generate_single_slide(
+            'system', financial_plan, 4, 8, {'primary_color': '#123456'},
+            lambda *_args, **_kwargs: self.fail('financial slides must bypass SOL'),
+            project_data=project,
+        )
+        self.assertIn('<table', html.lower())
+        self.assertIn('1,500,000', html)
 
     def test_unplanned_chart_retries_as_table(self):
         engine = self.application_module.slide_engine
