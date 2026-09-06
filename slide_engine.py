@@ -1238,7 +1238,7 @@ def _normalize_market_group_slides(existing, market):
             'section_key': 'market',
             'design_style': design_style,
             'chart_type': '',
-            'content_density': 'high',
+            'content_density': 'high' if design_style == 'chart' else 'medium',
             'requires_image': False,
             'content_source': source,
             'source_table': source_table,
@@ -1250,7 +1250,7 @@ def _normalize_market_group_slides(existing, market):
     result = []
     scope_rows = _market_scope_rows(market)
     if scope_rows:
-        result.append(take('market_study_data.scope', 'نطاق الدراسة', 'table', 'market_scope'))
+        result.append(take('market_study_data.scope', 'نطاق الدراسة', 'editorial', 'market_scope'))
 
     if named_competitors:
         competitor_slide = take('market_study_data.competitors', 'مقارنة المنافسين', 'chart', 'competitors')
@@ -1270,7 +1270,7 @@ def _normalize_market_group_slides(existing, market):
             if start:
                 content_source = f'market_study_data.summary:{start}:{start + len(page_rows)}'
             title += f' ({page_index}/{len(summary_pages)})'
-        page_slide = take(content_source, title, 'table', 'market_summary')
+        page_slide = take(content_source, title, 'editorial', 'market_summary')
         page_slide['market_row_start'] = start
         page_slide['market_row_end'] = start + len(page_rows)
         result.append(page_slide)
@@ -1303,7 +1303,7 @@ def _normalize_market_group_slides(existing, market):
             if start:
                 content_source = f'market_study_data.sources:{start}:{start + len(page_rows)}'
             title += f' ({page_index}/{len(source_pages)})'
-        page_slide = take(content_source, title, 'table', 'market_sources')
+        page_slide = take(content_source, title, 'editorial', 'market_sources')
         page_slide['market_row_start'] = start
         page_slide['market_row_end'] = start + len(page_rows)
         result.append(page_slide)
@@ -4889,6 +4889,12 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     bullets = slide.get('bullets', [])
     density = slide.get('content_density', 'medium')
     section_key = _slide_section_key(slide)
+    free_market_slide = section_key == 'market' and canonical_type != 'horizontal_bar'
+    if free_market_slide:
+        # The source may be structured data, but that does not make a table the
+        # requested visual treatment. Keep the plan's data contract while
+        # telling SOL that this is an editorial composition brief.
+        design_style = 'editorial'
     background = normalize_hex_color((branding or {}).get('background_color'), '#f8fafc')
     preferred_text = normalize_hex_color((branding or {}).get('text_color'), '#1e293b')
     readable_body = readable_text_color(preferred_text, background)
@@ -4903,6 +4909,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'table': 'جدول احترافي كامل مطابق لتصميم تقرير PDF المالي بحدود واضحة 1px solid ورؤوس مظللة بألوان الهوية وفواصل آلاف للأرقام ومنع تحويل الجدول إلى كروت عائمة',
         'chart': 'رسم بياني احترافي حصراً من الأنواع الأربعة المعتمدة (مقارنة المنافسين: horizontal_bar في دراسة السوق، تكوين إجمالي تكلفة الاستثمار: waterfall، التدفقات النقدية السنوية والتراكمية: combo، مقارنة السيناريوهات المالية: heatmap في المالية) بـ HTML و CSS النقي مع جدول الأرقام بجانبه وبألوان الهوية ومنع أي نوع آخر',
         'text': 'عنوان وفقرة غنية ووافية أو قائمة منظمة تشرح الفكرة بالكامل بلا اختصار مخل وبلا تجزئة لمربعات فارغة',
+        'editorial': 'تكوين تحليلي تحريري راقٍ يبرز فكرة محورية ثم يوزع الأدلة حولها بهرمية بصرية متنوعة؛ لا تبدأ بجدول HTML خام',
         'image': 'استخدم جميع رموز الصور المحددة في الخطة بتوزيع متوازن واحد للمجموعة، وبحد أقصى ثلاث صور في الشريحة',
         'flow': 'مخطط تدفق بصري هندسي راقٍ (Flowchart / Visual Pipeline) يربط الكتل بمسارات تدفق واضحة وبألوان الهوية مع إبراز القيم والمراحل والمبالغ',
         'diagram': 'مخطط اتجاهي هندسي راقٍ (Directional Diagram) لأرض المشروع وحدودها الأربعة والواجهات والشوارع المحيطة والإطلالة وفق الهيكل المعتمد',
@@ -4988,6 +4995,11 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'medium': 'محتوى متوسط — نص غني أو جدول كامل ممتلئ بصرياً',
         'high': 'محتوى كثيف — جدول بيانات متكامل أو مخطط تدفق شامل بدون ازدحام',
     }.get(density, 'محتوى متوسط')
+    if free_market_slide:
+        density_instructions = (
+            'محتوى تحليلي كثيف — وزّع جميع الحقائق داخل تكوين تحريري واضح من طبقتين أو ثلاث، '
+            'مع نقطة ارتكاز بصرية ومساحات بيضاء وفواصل هادئة؛ لا تعرضه كسجل صفوف تقليدي.'
+        )
 
     # Explicit image/map placeholder for this slide
     placeholder_note = ''
@@ -5122,7 +5134,8 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
             'ألوان الهوية الأساسية مع لمسات ذهبية، عناوين كبيرة، فواصل رفيعة، حاويات ذات حواف مستديرة، '
             'وتباين واضح بين العنوان والمعلومة والخلاصة. هذه مراجع نبرة وهوية فقط وليست قالباً إلزامياً؛ '
             'دع SOL يختار بين فقرة تحريرية، تسلسل بصري، مخطط مفاهيمي أو أي تكوين مناسب للبيانات، ولا تفرض جدولاً أو بطاقات أو عدد أعمدة معيناً. '
-            'لا تستخدم أيقونات أو رموزاً زخرفية أو ظلالاً ثقيلة.'
+            'لا تستخدم أيقونات أو رموزاً زخرفية أو ظلالاً ثقيلة. الحركة البصرية هنا تعني تدفق العين بين كتل المحتوى، '
+            'وليس CSS animation قد لا يظهر في PDF.'
         )
         notes.append(market_design_reference)
         if chart_type == 'horizontal_bar':
@@ -5135,7 +5148,10 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         else:
             notes.append(
                 'هذه شريحة سوق غير ثابتة: صمّم التكوين البصري والهرمية والمساحات بحرية كاملة بما يخدم البيانات المعتمدة. '
-                'لا تكرر قالباً واحداً بين الشرائح ولا تحول المحتوى تلقائياً إلى جدول أو بطاقات. استخدم تدفق HTML طبيعي بلا '
+                'لا تكرر قالباً واحداً بين الشرائح ولا تحول المحتوى تلقائياً إلى جدول أو بطاقات. لا تستخدم وسم <table> '
+                'إلا إذا كانت المقارنة الصفية هي الطريقة الوحيدة الواضحة للمعلومة؛ وفي غير ذلك استخدم تكويناً تحريرياً مثل '
+                'عنوان محوري كبير، رقم أو خلاصة بارزة، فواصل بينية، كتل غير متناظرة، مسار بصري رأسي، أو شرائط CSS بسيطة مبنية بـ flex. '
+                'أنشئ طبقتين بصريتين مختلفتين على الأقل، واجعل لكل شريحة شخصية مستقلة. استخدم تدفق HTML طبيعي بلا '
                 'position:absolute أو ارتفاعات ثابتة لمنطقة النص، ووازن المساحة داخل منطقة المحتوى بحيث لا يتداخل أي نص أو يخرج من الشريحة.'
             )
     else:
@@ -7159,14 +7175,22 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
             f'<div style="font-size:12px;font-weight:800;margin-bottom:7px;">إخلاء المسؤولية</div>'
             f'<div style="font-size:11.5px;line-height:1.7;text-align:justify;">{_market_value_html(disclaimer)}</div></div>'
         )
+    # This is only the emergency renderer used when SOL is unavailable. Keep
+    # it in ordinary block flow so browser and PDF engines cannot overlap the
+    # decision card with the narrative when CSS grid support differs.
     body_html = (
         f'<div data-market-work-summary="1" style="background:#ffffff;border:1px solid #dbe4ee;border-radius:12px;'
-        f'padding:22px 28px;min-height:420px;max-height:590px;overflow:visible;box-sizing:border-box;box-shadow:0 3px 10px rgba(15,23,42,.05);'
-        f'display:grid;grid-template-columns:0.72fr 1.85fr;grid-template-areas:"aside main";gap:28px;direction:ltr;">'
-        f'<aside style="grid-area:aside;direction:rtl;padding-top:2px;">{"".join(aside_parts)}</aside>'
-        f'<div style="grid-area:main;direction:rtl;">'
+        f'padding:20px 26px;min-height:0;max-height:none;overflow:visible;box-sizing:border-box;box-shadow:0 3px 10px rgba(15,23,42,.05);'
+        f'display:block;direction:rtl;">'
+        f'<div style="border-right:5px solid {accent};padding:0 16px 12px 6px;margin-bottom:16px;">'
+        f'<div style="font-size:15px;font-weight:800;color:{primary};margin-bottom:9px;">ملخص القرار</div>'
+        f'<div style="font-size:12px;line-height:1.85;color:#475569;text-align:justify;">قراءة السوق تجمع المؤشرات المعتمدة في مسار واحد لاتخاذ القرار.</div></div>'
+        f'<div style="display:block;">'
         f'<div style="font-size:22px;font-weight:800;color:{primary};margin:0 0 14px;text-align:right;">القراءة النهائية للسوق</div>'
-        f'{block_html}</div></div>'
+        f'{block_html}</div>'
+        f'{("".join(aside_parts[:1])) if decision else ""}'
+        f'{("".join(aside_parts[-1:])) if disclaimer else ""}'
+        f'</div>'
     )
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
@@ -7185,7 +7209,7 @@ def _build_market_one_block_slide(slide, source, branding=None, slide_num=None, 
       </div>
     </div>
   </header>
-  <div style="padding:0 42px;margin-top:12px;overflow:hidden;">
+  <div style="padding:0 42px;margin-top:12px;overflow:visible;">
     {body_html}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
@@ -7635,6 +7659,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         and market_source == 'market_study_data.competitors'
         and chart_type == 'horizontal_bar'
     )
+    free_market_slide = _slide_section_key(slide) == 'market' and not fixed_market_comparison
     # A stale plan must not turn an arbitrary market page into a chart or a
     # fixed market template.  The sole fixed market page is the competitor
     # comparison; approved financial charts remain fixed in the financial
@@ -7658,6 +7683,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     slide_title = slide.get('title', f'شريحة {slide_num}')
     slide_type = slide.get('type', 'content')
     retry_note = ''
+    free_market_model_html = None
 
     for attempt in range(1, max_retries + 2):
         try:
@@ -7692,6 +7718,11 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                 print(f"[SLIDE-{slide_num}] ERROR: market visual design failed: {market_design_err} (attempt {attempt})")
                 retry_note = f'\n\nإعادة المحاولة: {market_design_err} طبّق المرجع البصري للتقرير الاستثماري، مع الحفاظ على النصوص والأرقام.'
                 continue
+            if free_market_slide and len(extract_slide_elements(html)) == 1:
+                # If the model's composition is structurally sound but the
+                # completeness audit keeps retrying, preserve SOL's design
+                # instead of replacing it with a deterministic market page.
+                free_market_model_html = html
             if _slide_section_key(slide) == 'financial' and not chart_type and '<table' not in html.lower():
                 print(f"[SLIDE-{slide_num}] ERROR: financial slide must use table, not cards/boxes (attempt {attempt})")
                 retry_note = '\n\nإعادة المحاولة: شريحة الدراسة المالية ملزمة باستخدام جداول HTML نظامية (table) بتصميم تقرير PDF. احذف الكروت العائمة والمربعات واعرض البيانات داخل جدول كامل.'
@@ -7736,6 +7767,18 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             retry_note = f'\n\nإعادة المحاولة: أخرج جذر شريحة واحدًا فقط؛ الاستجابة السابقة احتوت {len(roots)} جذور.'
         except Exception as e:
             print(f"[SLIDE-{slide_num}] Exception: {e}")
+
+    if free_market_model_html:
+        preserved = postprocess_slide(
+            free_market_model_html, slide_type, slide_num=slide_num,
+            slide_title=slide_title, total_slides=total_slides,
+            tenant_id=branding.get('tenant_id'), branding=branding,
+            project_data=project_data, content_source=str(slide.get('content_source') or ''),
+        )
+        roots = extract_slide_elements(preserved)
+        if len(roots) == 1:
+            print(f"[SLIDE-{slide_num}] Preserving SOL market composition after content retries")
+            return roots[0]
 
     fallback = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
     if fallback:
@@ -8787,6 +8830,33 @@ def _normalize_market_content_layout(html, slide_type='', slide_title='', conten
         'padding:0!important;margin:0!important;box-sizing:border-box!important;',
     )
     body_html = ''.join(body)
+    if 'data-market-work-summary' in body_html:
+        # Older saved fallback slides used a grid with fixed height. Some PDF
+        # engines interpret that grid differently from the browser and let the
+        # decision card sit over the narrative. Convert only that emergency
+        # marker to ordinary flow; SOL-authored market compositions remain
+        # untouched.
+        def repair_work_summary(match):
+            return _set_tag_style(
+                match.group(0),
+                ('display', 'grid-template-columns', 'grid-template-areas', 'gap',
+                 'min-height', 'max-height', 'overflow'),
+                'display:block!important;min-height:0!important;max-height:none!important;overflow:visible!important;',
+            )
+
+        body_html = re.sub(
+            r'<div\b[^>]*\bdata-market-work-summary\s*=\s*["\']1["\'][^>]*>',
+            repair_work_summary,
+            body_html,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        body_html = re.sub(
+            r'grid-area\s*:\s*(?:aside|main)\s*;?',
+            '',
+            body_html,
+            flags=re.IGNORECASE,
+        )
     absolute_body = bool(re.search(r'position\s*:\s*(?:absolute|fixed)', body_html, flags=re.IGNORECASE))
     repair_css = ''
     if absolute_body:

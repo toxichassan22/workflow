@@ -1834,6 +1834,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('يظهر السوق في جدة فرصة لتطوير مشروع ضيافة فاخر متكامل', work_html)
         self.assertIn('<p style=', work_html)
         self.assertNotIn('<article', work_html)
+        self.assertNotIn('grid-template-areas', work_html)
+        self.assertNotIn('grid-area:aside', work_html)
         facts = engine._market_study_facts(project)
         self.assertIn('### الملخص التنفيذي لسوق المشروع', facts)
         self.assertIn('### تحليل السوق', facts)
@@ -3831,6 +3833,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
         self.assertIn('لا تفرض جدولاً أو بطاقات أو شبكة بعينها', prompt)
         self.assertIn('لا تكرر قالباً واحداً بين الشرائح', prompt)
+        self.assertIn('لا تستخدم وسم <table>', prompt)
         self.assertNotIn('للملخص التنفيذي: قسّم الفقرة المعتمدة بصرياً', prompt)
         raw = (
             '<div class="slide" style="width:1280px;height:720px;position:relative;">'
@@ -3898,6 +3901,33 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-sol-owned="1"', result)
         self.assertNotIn('data-competitor-table', result)
         self.assertIn('data-slide-header="1"', result)
+
+    def test_free_market_retries_preserve_sol_composition_instead_of_template(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع سوق حر',
+            'market_study_data': {
+                'one_block_summary': 'النص المعتمد الكامل الذي يجب عرضه داخل الشريحة.'
+            },
+        }
+        slide = {
+            'title': 'ملخص دراسة سوق العمل', 'type': 'content',
+            'section_key': 'market', 'content_source': 'market_study_data.one_block_summary',
+        }
+
+        def call_glm(*args, **kwargs):
+            return {'choices': [{'message': {'content': (
+                '<div class="slide" style="width:1280px;height:720px;">'
+                '<section data-sol-editorial="1">تكوين حر من SOL لم ينسخ النص المعتمد حرفياً.</section>'
+                '</div>'
+            )}}]}
+
+        result = engine.generate_single_slide(
+            'system', slide, 6, 10, {'primary_color': '#123456'},
+            call_glm, max_retries=0, project_data=project,
+        )
+        self.assertIn('data-sol-editorial="1"', result)
+        self.assertNotIn('data-market-work-summary', result)
 
     def test_competitor_logo_import_discovers_a_cited_official_site_and_preserves_manual_files(self):
         module = self.application_module
