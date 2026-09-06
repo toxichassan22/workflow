@@ -958,6 +958,10 @@ def _available_asset_items(values):
         source = value if isinstance(value, dict) else {'url': value}
         url = str(source.get('url') or source.get('imageUrl') or '').strip()
         identity = str(source.get('id') or url).split('?', 1)[0]
+        # The client sends one compact ``available`` marker per uploaded image while planning.
+        # Those markers deliberately have no URL, but they still represent distinct assets.
+        if url.lower() == 'available' or url.lower().startswith('available:'):
+            identity = f'available:{index}'
         if url and identity not in seen:
             seen.add(identity)
             items.append((index, source))
@@ -982,6 +986,12 @@ def _balanced_media_chunks(items, single=False):
         chunks.append(items[start:start + size])
         start += size
     return chunks
+
+
+def _pair_media_chunks(items):
+    """Pack visual-concept images two per slide, leaving one image alone when odd."""
+    items = list(items or [])
+    return [items[start:start + 2] for start in range(0, len(items), 2)]
 
 
 def _market_state(project_data):
@@ -1523,7 +1533,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                           if not any(token.startswith('##MOODBOARD_IMAGE_') for token in (slide.get('image_tokens') or []))]
     uncovered_ext = moodboard_items
     if len(moodboard_items) > 1:
-        for group_number, chunk in enumerate(_balanced_media_chunks(moodboard_items), 1):
+        for group_number, chunk in enumerate(_pair_media_chunks(moodboard_items), 1):
             tokens = [f'##MOODBOARD_IMAGE_{idx}##' for idx, _ in chunk]
             titles = [str(moodboard_meta[idx - 1].get('label') if idx <= len(moodboard_meta) and isinstance(moodboard_meta[idx - 1], dict) else it.get('label') or f'التصور الخارجي {idx}').strip() for idx, it in chunk]
             combined_title = ' — '.join(titles) if len(titles) > 1 else titles[0]
@@ -1535,7 +1545,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 'content_density': 'medium' if len(chunk) > 1 else 'low', 'requires_image': True,
                 'content_source': f'exterior_images_group:{chunk[0][0]}:{chunk[-1][0]}',
                 'image_tokens': tokens, 'image_layout': f'balanced_{len(chunk)}',
-                'bullets': [b for b in bullets if b],
+                'bullets': [], 'media_only': True,
             })
     else:
         for index, item in uncovered_ext:
@@ -1547,7 +1557,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 'content_density': 'low', 'requires_image': True,
                 'content_source': f'exterior_image:{index}',
                 'image_tokens': [f'##MOODBOARD_IMAGE_{index}##'],
-                'bullets': [caption] if caption else [],
+                'bullets': [], 'media_only': True,
             })
 
     land_items = _available_asset_items(images.get('land_photos'))
@@ -1613,7 +1623,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'content_density': 'low', 'requires_image': True,
             'content_source': f'plan_image:{index}', 'source_table': 'conceptual_plans',
             'image_tokens': [f'##PLAN_IMAGE_{index}##'], 'image_layout': 'single',
-            'bullets': [description] if description else [],
+            'bullets': [], 'media_only': True,
         })
 
     interior_components = images.get('interior_components') if isinstance(images.get('interior_components'), list) else []
@@ -1626,7 +1636,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         comp_items = _available_asset_items(component.get('images'))
         uncovered_comp_items = comp_items
         if len(comp_items) > 1:
-            for chunk in _balanced_media_chunks(comp_items):
+            for chunk in _pair_media_chunks(comp_items):
                 tokens = [f'##INTERIOR_COMP_{component_index}_IMG_{j}##' for j, _ in chunk]
                 labels = [str(it.get('label') or component_name).strip() for _, it in chunk]
                 combined_title = f'{component_name} — ' + ' / '.join(labels) if len(labels) > 1 else f'{component_name} — {labels[0]}'
@@ -1636,7 +1646,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     'content_density': 'medium' if len(chunk) > 1 else 'low', 'requires_image': True,
                     'content_source': f'interior_images_group:{component_index}:{chunk[0][0]}:{chunk[-1][0]}',
                     'image_tokens': tokens, 'image_layout': f'balanced_{len(chunk)}',
-                    'bullets': [b for b in bullets if b],
+                    'bullets': [], 'media_only': True,
                 })
         else:
             for image_index, item in uncovered_comp_items:
@@ -1648,7 +1658,7 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                     'requires_image': True,
                     'content_source': f'interior_image:{component_index}:{image_index}',
                     'image_tokens': [f'##INTERIOR_COMP_{component_index}_IMG_{image_index}##'],
-                    'bullets': [caption] if caption else [],
+                    'bullets': [], 'media_only': True,
                 })
 
     components = _project_component_rows(source)
@@ -5259,6 +5269,8 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     if placeholder_note:
         notes.insert(0, placeholder_note)
     source_note = _slide_source_data_note(slide, project_data)
+    if _is_visual_concept_media_slide(slide):
+        notes.insert(0, 'هذه شريحة وسائط فقط: اعرض رموز الصور المحددة كما هي، بلا عنوان أو وصف أو نقاط أو جدول أو خريطة أو صورة إضافية. تُحافظ المنظومة على الهيدر والفوتر والهوية آليًا.')
     if source_note:
         notes.append(source_note)
     content_source = str(slide.get('content_source') or '')
@@ -7666,6 +7678,43 @@ def _build_market_risk_slide(slide, source, branding=None, slide_num=None, total
 </div>'''
 
 
+def _is_visual_concept_media_slide(slide):
+    source = str((slide or {}).get('content_source') or '').strip().lower()
+    section = _slide_section_key(slide or {})
+    tokens = [str(token or '').strip().upper() for token in ((slide or {}).get('image_tokens') or [])]
+    has_visual_token = any(token.startswith((
+        '##PLAN_IMAGE_', '##2D_PLAN_', '##MOODBOARD_IMAGE_', '##INTERIOR_COMP_',
+    )) for token in tokens)
+    return section in {'plans', 'exterior', 'interior'} and (has_visual_token or source.startswith((
+        'plan_image:', 'exterior_image:', 'exterior_images_group:',
+        'interior_image:', 'interior_images_group:',
+    )))
+
+
+def _build_visual_concept_media_slide(slide):
+    """Build a media-only visual-concept slide; SOL must not add captions or prose here."""
+    tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
+    if not tokens:
+        return None
+    columns = 1 if len(tokens) == 1 else 2
+    images = ''.join(
+        '<div style="min-width:0;min-height:0;overflow:hidden;border:1px solid #d9e1ea;'
+        'border-radius:14px;background:#fff;display:flex;align-items:center;justify-content:center;">'
+        f'<img src="{html_lib.escape(token, quote=True)}" alt="" '
+        'style="display:block;width:100%;height:100%;object-fit:contain;object-position:center;">'
+        '</div>'
+        for token in tokens
+    )
+    return (
+        '<div class="slide" dir="rtl" data-visual-media-only="1" '
+        'style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;'
+        'padding:78px 34px 50px;box-sizing:border-box;">'
+        f'<div data-visual-media-grid="1" style="display:grid;grid-template-columns:repeat({columns},minmax(0,1fr));'
+        'gap:16px;width:100%;height:100%;align-items:stretch;">'
+        f'{images}</div></div>'
+    )
+
+
 def _build_structured_fallback_slide(slide, project_data, branding, slide_num=None, total_slides=None):
     source = project_data if isinstance(project_data, dict) else {}
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
@@ -7695,6 +7744,8 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
     if content_source == 'land_boundary_diagram':
         return _build_land_boundary_diagram_slide(
             slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    if _is_visual_concept_media_slide(slide):
+        return _build_visual_concept_media_slide(slide)
     if content_source in ('site_analysis', 'executive_content.summary'):
         note = html_lib.escape(_slide_source_data_note(slide, source)).replace('\n', '<br>')
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;">'
@@ -7904,6 +7955,16 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     if _slide_section_key(slide) == 'market' and not fixed_market_comparison:
         chart_type = ''
         slide['chart_type'] = ''
+    if _is_visual_concept_media_slide(slide):
+        deterministic_slide = _build_visual_concept_media_slide(slide)
+        if deterministic_slide:
+            return postprocess_slide(
+                deterministic_slide, (slide or {}).get('type', 'content'),
+                slide_num=slide_num, slide_title=(slide or {}).get('title', f'شريحة {slide_num}'),
+                total_slides=total_slides, tenant_id=(branding or {}).get('tenant_id'),
+                branding=branding, project_data=project_data,
+                content_source=str((slide or {}).get('content_source') or ''),
+            )
     if (fixed_market_comparison
             or fixed_land_boundary_diagram
             or (_slide_section_key(slide) != 'market'
@@ -8361,6 +8422,8 @@ def _replace_creative_image_placeholders(html, creative_images, slide_type, cont
             plans = [plans]
     for idx, url in enumerate(plans):
         num = idx + 1
+        if isinstance(url, dict):
+            url = url.get('url') or url.get('imageUrl') or url.get('image_url') or url.get('path') or ''
         if url:
             html = re.sub(rf'#*PLAN_IMAGE_{num}#*', _css_url(str(url)), html, flags=re.IGNORECASE)
             html = re.sub(rf'#*2D_PLAN_{num}#*', _css_url(str(url)), html, flags=re.IGNORECASE)

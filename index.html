@@ -6981,6 +6981,7 @@
       { key: 'financial', label: 'الدراسة المالية', pattern: /الدراسة المالية|التحليل المالي|الجدوى المالية/i },
       { key: 'swot_risks', label: 'تحليل SWOT وتحليل المخاطر', pattern: /تحليل\s*swot|تحليل المخاطر|المخاطر/i },
       { key: 'team', label: 'فريق العمل', pattern: /فريق العمل|فريق التطوير/i },
+      { key: 'visual_concept', label: 'التصور البصري', pattern: /قسم\s+التصورات(?:\s+(?:كامل|بالكامل))?|التصورات البصرية|التصور البصري/i },
       { key: 'plans', label: 'المخططات', pattern: /المخططات|المساقط|المخطط المعماري/i },
       { key: 'exterior', label: 'التصورات الخارجية', pattern: /التصورات الخارجية|التصور الخارجي|الواجهات/i },
       { key: 'interior', label: 'التصورات الداخلية', pattern: /التصورات الداخلية|التصور الداخلي|التصميم الداخلي/i },
@@ -7015,6 +7016,11 @@
         const source = String(candidate.content_source || candidate.contentSource || '').toLowerCase();
         const title = String(candidate.title || '').toLowerCase();
         const type = String(candidate.type || '').toLowerCase();
+        if (sectionKey === 'visual_concept') {
+          const explicit = String(candidate.section_key || candidate.sectionKey || candidate.section || '').trim();
+          return ['plans', 'exterior', 'interior'].includes(explicit) ||
+            ['plans', 'exterior', 'interior'].includes(tenantSlideSectionKey(candidate, ''));
+        }
         if (sectionKey === 'financial' && (
           source.startsWith('financial_') || source.startsWith('financial:') ||
           source.startsWith('financial_report:') || source.startsWith('financial_summary:') ||
@@ -7038,6 +7044,7 @@
       timeline: 'section-timeline',
       financial: 'section-financial-calc',
       team: 'section-team',
+      visual_concept: 'section-visual-concept',
       plans: 'section-visual-concept',
       exterior: 'section-visual-concept',
       interior: 'section-visual-concept',
@@ -7045,8 +7052,13 @@
     };
 
     function tenantSectionPlanMatchesSection(slide, sectionKey) {
-      if (!slide || ['cover', 'index', 'closing', 'section_divider'].includes(String(slide.type || '').toLowerCase())) return false;
+      if (!slide || ['cover', 'index', 'closing'].includes(String(slide.type || '').toLowerCase())) return false;
       const explicit = String(slide.section_key || slide.sectionKey || slide.section || '').trim();
+      if (sectionKey === 'visual_concept') {
+        return ['plans', 'exterior', 'interior'].includes(explicit) ||
+          ['plans', 'exterior', 'interior'].includes(tenantSlideSectionKey(slide, ''));
+      }
+      if (String(slide.type || '').toLowerCase() === 'section_divider') return false;
       return explicit === sectionKey || tenantSlideSectionKey(slide, '') === sectionKey;
     }
 
@@ -7072,7 +7084,7 @@
       const planned = tenantSlidePlan?.slides?.[slideIndex] || {};
       const snapshot = { ...planned };
       ['title', 'type', 'section_key', 'content_source', 'source_table', 'design_style', 'designStyle',
-        'chart_type', 'image_tokens', 'bullets', 'metrics'].forEach(key => {
+        'chart_type', 'image_tokens', 'bullets', 'metrics', 'media_only'].forEach(key => {
         const missing = snapshot[key] === undefined || snapshot[key] === null ||
           (Array.isArray(snapshot[key]) && !snapshot[key].length && Array.isArray(current[key]) && current[key].length);
         if (missing && current[key] !== undefined) snapshot[key] = current[key];
@@ -7191,7 +7203,8 @@
       renumberTenantSlides();
       const targetIndexes = tenantSlidesData
         .map((slide, index) => ({ slide, index }))
-        .filter(item => !['cover', 'index', 'closing', 'section_divider'].includes(String(item.slide?.type || '').toLowerCase()))
+        .filter(item => sectionKey === 'visual_concept'
+          || !['cover', 'index', 'closing', 'section_divider'].includes(String(item.slide?.type || '').toLowerCase()))
         .filter(item => tenantSlideMatchesSection(item.slide, item.index, sectionKey))
         .map(item => item.index);
       if (!targetIndexes.length) {
@@ -21081,6 +21094,7 @@
       overview: 'نبذة عن المشروع', components: 'مكونات المشروع', land: 'تحليل الأرض',
       location: 'تحليل الموقع الجغرافي', market: 'تحليل السوق', timeline: 'الجدول الزمني',
       financial: 'الدراسة المالية', swot_risks: 'تحليل SWOT وتحليل المخاطر', team: 'فريق العمل',
+      visual_concept: 'التصور البصري',
       plans: 'المخططات', exterior: 'التصورات الخارجية', interior: 'التصورات الداخلية',
       executive_summary: 'الملخص التنفيذي', closing: 'الخاتمة'
     };

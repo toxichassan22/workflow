@@ -1400,8 +1400,185 @@ def _generation_project_image_url(tenant_id, file_id):
     return url
 
 
+def _generation_asset_url(value, tenant_id=None):
+    """Return a durable image URL from a visual-concept asset record."""
+    source = value if isinstance(value, dict) else {'url': value}
+    url = str(
+        source.get('approvedImageUrl') or source.get('approved_image_url')
+        or source.get('imageUrl') or source.get('image_url')
+        or source.get('url') or source.get('path') or ''
+    ).strip()
+    # ``available`` is used by the compact planner payload and is not an image.
+    if not url or url.lower() in {'available', 'blob:', 'undefined', 'null', 'none'} or url.lower().startswith('blob:'):
+        url = ''
+    if not url:
+        file_id = source.get('fileId') or source.get('file_id') or source.get('sourceFileId') or source.get('source_file_id') or source.get('id')
+        if file_id and str(file_id).strip() and not str(file_id).startswith('plan_'):
+            url = _generation_project_image_url(tenant_id, file_id)
+    if url and not url.startswith('/') and not url.startswith('http') and not url.startswith('data:'):
+        url = '/' + url.lstrip('/')
+    return url
+
+
+def _visual_concept_generation_images(project_data, tenant_id):
+    """Read every visual-concept image, including uploaded images still awaiting approval."""
+    source = project_data if isinstance(project_data, dict) else {}
+    visual = source.get('visual_concept')
+    if isinstance(visual, str):
+        visual = _visual_concept_parse_json(visual, {})
+    visual = visual if isinstance(visual, dict) else {}
+    slots = visual.get('slots') if isinstance(visual.get('slots'), dict) else {}
+    creative = source.get('tenantCreativeImages') if isinstance(source.get('tenantCreativeImages'), dict) else {}
+
+    def slot_value(slot_id):
+        aliases = {
+            'right': ('right', 'east', 'east_facade'),
+            'left': ('left', 'west', 'west_facade'),
+            'top': ('top', 'aerial', 'above'),
+            'back': ('back', 'rear', 'behind'),
+        }
+        for alias in aliases.get(slot_id, (slot_id,)):
+            if isinstance(slots.get(alias), dict):
+                return slots[alias]
+        return {}
+
+    moodboard = []
+    moodboard_meta = []
+    for slot_id in ('right', 'left', 'top', 'back'):
+        item = slot_value(slot_id)
+        url = _generation_asset_url(item, tenant_id)
+        if not url:
+            continue
+        moodboard.append({
+            'url': url,
+            'label': str(item.get('label') or slot_id).strip(),
+            'caption': str(item.get('caption') or '').strip(),
+        })
+        moodboard_meta.append({
+            'label': str(item.get('label') or slot_id).strip(),
+            'caption': str(item.get('caption') or '').strip(),
+            'url': url,
+        })
+    if not moodboard:
+        saved_moodboard = creative.get('moodboard')
+        if isinstance(saved_moodboard, list):
+            for index, item in enumerate(saved_moodboard, 1):
+                url = _generation_asset_url(item, tenant_id)
+                if not url:
+                    continue
+                source_item = item if isinstance(item, dict) else {}
+                moodboard.append({
+                    'url': url,
+                    'label': str(source_item.get('label') or f'التصور الخارجي {index}').strip(),
+                    'caption': str(source_item.get('caption') or '').strip(),
+                })
+                moodboard_meta.append({
+                    'label': str(source_item.get('label') or f'التصور الخارجي {index}').strip(),
+                    'caption': str(source_item.get('caption') or '').strip(),
+                    'url': url,
+                })
+
+    component_rows = _visual_concept_components(source)
+    component_by_id = {str(row.get('id')): row for row in component_rows}
+    interior_groups = {}
+    interior_order = []
+    for slot_id, item in slots.items():
+        slot_name = str(slot_id or '')
+        if slot_name == 'interior':
+            component_id, view_index = 'interior', 1
+        elif slot_name.startswith('interior_'):
+            remainder = slot_name[len('interior_'):]
+            if '::' in remainder:
+                component_id, raw_index = remainder.rsplit('::', 1)
+                try:
+                    view_index = int(raw_index)
+                except (TypeError, ValueError):
+                    view_index = 1
+            else:
+                component_id, view_index = remainder, 1
+        else:
+            continue
+        url = _generation_asset_url(item, tenant_id)
+        if not url:
+            continue
+        if component_id not in interior_groups:
+            interior_groups[component_id] = []
+            interior_order.append(component_id)
+        interior_groups[component_id].append({
+            'url': url,
+            'label': str(item.get('label') or '').strip(),
+            'caption': str(item.get('caption') or '').strip(),
+            '_view_index': view_index,
+        })
+
+    interior_components = []
+    ordered_component_ids = [str(row.get('id')) for row in component_rows if str(row.get('id')) in interior_groups]
+    ordered_component_ids += [component_id for component_id in interior_order if component_id not in ordered_component_ids]
+    for component_id in ordered_component_ids:
+        items = sorted(interior_groups.get(component_id, []), key=lambda item: int(item.get('_view_index') or 1))
+        row = component_by_id.get(component_id) or {}
+        component_name = str(row.get('name') or ('التصميم الداخلي' if component_id == 'interior' else component_id)).strip()
+        for item in items:
+            item.pop('_view_index', None)
+            if not item.get('label'):
+                item['label'] = component_name
+        if items:
+            interior_components.append({'id': component_id, 'name': component_name, 'images': items})
+
+    plans = []
+    raw_plans = visual.get('plans2d') if isinstance(visual.get('plans2d'), list) else []
+    for index, item in enumerate(raw_plans, 1):
+        if not isinstance(item, dict):
+            continue
+        url = _generation_asset_url(item, tenant_id)
+        if not url:
+            continue
+        plans.append({
+            'url': url,
+            'title': str(item.get('title') or item.get('fileName') or f'المخطط {index}').strip(),
+            'description': str(item.get('description') or '').strip(),
+            'name': str(item.get('fileName') or '').strip(),
+        })
+
+    return {
+        'moodboard': moodboard,
+        'moodboard_meta': moodboard_meta,
+        'interior_components': interior_components,
+        'interior': [item['url'] for component in interior_components for item in component.get('images', []) if item.get('url')],
+        'plans': plans,
+        'plan_meta': [
+            {'title': item.get('title') or '', 'description': item.get('description') or '', 'url': item.get('url') or ''}
+            for item in plans
+        ],
+    }
+
+
 def _augment_generation_images(images, project_data, tenant_id):
     result = dict(images) if isinstance(images, dict) else {}
+    persisted_visual = _visual_concept_generation_images(project_data, tenant_id)
+
+    def real_asset_count(values):
+        if isinstance(values, list):
+            return sum(bool(_generation_asset_url(item)) for item in values)
+        return 0
+
+    def real_component_asset_count(values):
+        if not isinstance(values, list):
+            return 0
+        return sum(real_asset_count(component.get('images')) for component in values if isinstance(component, dict))
+
+    # A compact plan request carries the word ``available`` instead of URLs. If the client state
+    # was stale, prefer the persisted visual-concept state when it contains more media so no
+    # uploaded view disappears from the generated section.
+    if real_asset_count(result.get('moodboard')) < real_asset_count(persisted_visual.get('moodboard')):
+        result['moodboard'] = persisted_visual['moodboard']
+        result['moodboard_meta'] = persisted_visual['moodboard_meta']
+    if real_component_asset_count(result.get('interior_components')) < real_component_asset_count(persisted_visual.get('interior_components')):
+        result['interior_components'] = persisted_visual['interior_components']
+        result['interior'] = persisted_visual['interior']
+    if real_asset_count(result.get('plans')) < real_asset_count(persisted_visual.get('plans')):
+        result['plans'] = persisted_visual['plans']
+        result['plan_meta'] = persisted_visual['plan_meta']
     team_members = []
     for entry in slide_engine._selected_team_entries(project_data or {}, tenant_id):
         file_id = entry.get('_logo_file_id') or ''

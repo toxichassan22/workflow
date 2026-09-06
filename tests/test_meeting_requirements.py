@@ -1136,11 +1136,17 @@ class MeetingRequirementsTests(unittest.TestCase):
             '##INTERIOR_COMP_': 14,
         })
         self.assertEqual([len(slide.get('image_tokens') or []) for slide in plan['slides']
-                          if slide.get('section_key') == 'exterior' and slide.get('type') == 'content'], [2, 3])
+                          if slide.get('section_key') == 'exterior' and slide.get('type') == 'content'], [2, 2, 1])
         self.assertEqual([len(slide.get('image_tokens') or []) for slide in plan['slides']
                           if slide.get('section_key') == 'plans' and slide.get('type') == 'content'], [1, 1, 1])
         self.assertEqual([len(slide.get('image_tokens') or []) for slide in plan['slides']
                           if slide.get('section_key') == 'interior' and slide.get('type') == 'content'], [2] * 7)
+        visual_media_slides = [slide for slide in plan['slides']
+                               if slide.get('section_key') in {'plans', 'exterior', 'interior'}
+                               and slide.get('type') == 'content']
+        self.assertTrue(visual_media_slides)
+        self.assertTrue(all(slide.get('media_only') is True and slide.get('bullets') == []
+                            for slide in visual_media_slides))
         content_slides = [slide for slide in plan['slides'] if slide.get('type') == 'content']
         self.assertTrue(any(slide.get('image_tokens') for slide in content_slides))
         self.assertTrue(any(not slide.get('image_tokens') for slide in content_slides))
@@ -1150,8 +1156,8 @@ class MeetingRequirementsTests(unittest.TestCase):
     def test_image_slide_retries_when_a_planned_image_is_missing(self):
         engine = self.application_module.slide_engine
         responses = iter([
-            '<div class="slide" style="background:#fff;color:#111"><img src="##PLAN_IMAGE_1##"></div>',
-            '<div class="slide" style="background:#fff;color:#111"><img src="##PLAN_IMAGE_1##"><img src="##PLAN_IMAGE_2##"></div>',
+            '<div class="slide" style="background:#fff;color:#111"><img src="##LAND_PHOTO_1##"></div>',
+            '<div class="slide" style="background:#fff;color:#111"><img src="##LAND_PHOTO_1##"><img src="##LAND_PHOTO_2##"></div>',
         ])
         prompts = []
 
@@ -1160,12 +1166,84 @@ class MeetingRequirementsTests(unittest.TestCase):
             return {'choices': [{'message': {'content': next(responses)}}]}
 
         html = engine.generate_single_slide(
-            'system', {'title': 'المخططات', 'type': 'content', 'design_style': 'image',
-                       'image_tokens': ['##PLAN_IMAGE_1##', '##PLAN_IMAGE_2##']},
+            'system', {'title': 'صور الأرض', 'type': 'content', 'section_key': 'land',
+                       'design_style': 'image',
+                       'image_tokens': ['##LAND_PHOTO_1##', '##LAND_PHOTO_2##']},
             3, 5, {'primary_color': '#123456'}, generated, project_data={})
-        self.assertIn('##PLAN_IMAGE_2##', html)
+        self.assertIn('##LAND_PHOTO_2##', html)
         self.assertEqual(len(prompts), 2)
-        self.assertIn('##PLAN_IMAGE_2##', prompts[1])
+        self.assertIn('##LAND_PHOTO_2##', prompts[1])
+
+    def test_visual_concept_media_slides_are_deterministic_and_text_free(self):
+        engine = self.application_module.slide_engine
+        for section_key, source, tokens in (
+            ('plans', 'plan_image:1', ['##PLAN_IMAGE_1##']),
+            ('exterior', 'exterior_images_group:1:2', ['##MOODBOARD_IMAGE_1##', '##MOODBOARD_IMAGE_2##']),
+            ('interior', 'interior_images_group:1:1:2', ['##INTERIOR_COMP_1_IMG_1##', '##INTERIOR_COMP_1_IMG_2##']),
+        ):
+            calls = []
+
+            def must_not_call(*_args, **_kwargs):
+                calls.append(True)
+                raise AssertionError('visual concept media must not call the text model')
+
+            html = engine.generate_single_slide(
+                'system', {'title': 'وسائط', 'type': 'content', 'section_key': section_key,
+                           'content_source': source, 'design_style': 'image',
+                           'image_tokens': tokens},
+                3, 8, {'primary_color': '#123456'}, must_not_call, project_data={})
+            self.assertIn('data-visual-media-only="1"', html)
+            for token in tokens:
+                self.assertIn(token, html)
+            self.assertNotIn('<h2', html.lower())
+            self.assertFalse(calls)
+
+    def test_visual_concept_saved_state_restores_all_unapproved_media(self):
+        project = {
+            'financial_study_model': {'dynamicRows': {'components': [
+                {'id': 'hotel', 'name': 'الفندق'},
+            ]}},
+            'visual_concept': {
+                'slots': {
+                    'right': {'imageUrl': '/uploads/exterior-right.jpg'},
+                    'left': {'imageUrl': '/uploads/exterior-left.jpg'},
+                    'top': {'imageUrl': '/uploads/exterior-top.jpg'},
+                    'back': {'imageUrl': '/uploads/exterior-back.jpg'},
+                    'interior_hotel::1': {'imageUrl': '/uploads/interior-1.jpg', 'status': 'review'},
+                    'interior_hotel::2': {'imageUrl': '/uploads/interior-2.jpg', 'status': 'review'},
+                    'interior_hotel::3': {'imageUrl': '/uploads/interior-3.jpg', 'status': 'review'},
+                },
+                'plans2d': [{'fileId': 'plan-file-1', 'fileName': 'plan-one.pdf'}],
+            },
+        }
+        with patch.object(self.application_module, '_generation_project_image_url', return_value='/uploads/plan-one.png'):
+            restored = self.application_module._augment_generation_images({
+                'moodboard': ['available'],
+                'interior_components': [{'name': 'الفندق', 'images': [{'url': 'available'}]}],
+                'plans': ['available'],
+            }, project, self.tenant_a)
+        self.assertEqual(len(restored['moodboard']), 4)
+        self.assertEqual(sum(len(item['images']) for item in restored['interior_components']), 3)
+        self.assertEqual(len(restored['plans']), 1)
+        self.assertEqual(restored['plans'][0]['url'], '/uploads/plan-one.png')
+
+    def test_compact_media_markers_keep_each_uploaded_image_distinct(self):
+        engine = self.application_module.slide_engine
+        plan = engine.normalize_presentation_plan({
+            'slides': [
+                {'title': 'الغلاف', 'type': 'cover'},
+                {'title': 'الفهرس', 'type': 'index'},
+                {'title': 'التصور البصري', 'type': 'content', 'section_key': 'plans'},
+                {'title': 'الخاتمة', 'type': 'closing'},
+            ]
+        }, {'project_name': 'المشروع'}, {
+            'plans': ['available', 'available', 'available'],
+        })
+        plan_slides = [slide for slide in plan['slides']
+                       if slide.get('section_key') == 'plans' and slide.get('type') == 'content']
+        self.assertEqual([slide.get('image_tokens') for slide in plan_slides], [
+            ['##PLAN_IMAGE_1##'], ['##PLAN_IMAGE_2##'], ['##PLAN_IMAGE_3##']
+        ])
 
     def test_unplanned_creative_image_tokens_are_removed_from_text_slides(self):
         engine = self.application_module.slide_engine
