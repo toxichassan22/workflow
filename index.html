@@ -6139,20 +6139,22 @@
         '<div class="inline-loading-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="5">' +
         '<div class="inline-loading-fill" data-inline-loader-bar style="width:5%"></div>' +
         '</div></div>';
+      inlineLoaderTimers.delete(container);
+    }
+
+    function setInlineLoaderProgress(container, pct, text) {
+      if (!container) return;
       const bar = container.querySelector('[data-inline-loader-bar]');
       const pctEl = container.querySelector('[data-inline-loader-pct]');
-      let pct = 5;
-      const timer = setInterval(() => {
-        if (!bar || !bar.isConnected || !container.contains(bar)) {
-          clearInterval(timer);
-          return;
-        }
-        pct = Math.max(pct, Math.min(92, pct + (pct < 60 ? 7 : 3)));
-        bar.style.width = pct + '%';
-        bar.parentElement.setAttribute('aria-valuenow', String(pct));
-        if (pctEl) pctEl.textContent = pct + '%';
-      }, 450);
-      inlineLoaderTimers.set(container, timer);
+      const track = bar?.parentElement;
+      const value = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+      if (bar) bar.style.width = value + '%';
+      if (pctEl) pctEl.textContent = value + '%';
+      if (track) track.setAttribute('aria-valuenow', String(value));
+      if (text) {
+        const labelEl = container.querySelector('.inline-loading-header span:first-child');
+        if (labelEl) labelEl.textContent = text;
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -6896,7 +6898,7 @@
       return fetch(path, opts).then(handleApiResponse).catch(e => ({ error: 'Network error: ' + e.message }));
     }
 
-    async function apiWithTimeout(method, path, body, timeoutMs = 75000, timeoutMessage = 'انتهت مهلة الطلب؛ أعد المحاولة لاحقًا.') {
+    async function apiWithTimeout(method, path, body, timeoutMs = 75000, timeoutMessage = 'انتهت مهلة الطلب؛ أعد المحاولة لاحقًا.', requestOptions = {}) {
       const controller = new AbortController();
       let timer;
       const timeoutResponse = new Promise(resolve => {
@@ -6911,7 +6913,7 @@
       });
       try {
         return await Promise.race([
-          api(method, path, body, false, { signal: controller.signal }),
+          api(method, path, body, false, { ...requestOptions, signal: controller.signal }),
           timeoutResponse
         ]);
       } finally {
@@ -22054,6 +22056,7 @@
         indicator.id = 'tenantChatTypingIndicator';
         indicator.className = 'tenant-chat-message assistant typing';
         showInlineLoader(indicator, 'جاري تنفيذ التعديل...');
+        setInlineLoaderProgress(indicator, 10, 'جاري تجهيز الطلب...');
         messagesDiv.appendChild(indicator);
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
       }
@@ -22082,7 +22085,15 @@
         projectData: tenantProjectData,
         presentationId: tenantPresentationId,
         attachedImage: attachedImage ? attachedImage.dataUri : ''
-      }, 180000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.');
+      }, 90000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.', {
+        onProgress: (sent, total) => {
+          if (!indicator || !total) return;
+          const pct = 10 + Math.round((Number(sent) / Number(total)) * 30);
+          setInlineLoaderProgress(indicator, pct, 'جاري رفع الطلب (' + sent + ' من ' + total + ')...');
+        }
+      });
+
+      if (indicator && data?.success) setInlineLoaderProgress(indicator, 100, 'اكتمل الطلب');
 
       if (indicator) indicator.remove();
 

@@ -2402,6 +2402,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('detectTenantSectionRegenerationRequest', index_source)
         self.assertIn(".replace(/ة/g, 'ه')", index_source)
+        self.assertIn('setInlineLoaderProgress', index_source)
+        self.assertNotIn('Math.min(92, pct +', index_source)
         self.assertIn('async function regenerateTenantSection(sectionKey, sectionLabel)', index_source)
         self.assertIn("await regenerateTenantSection(sectionRequest.key, sectionRequest.label)", index_source)
         section_body = index_source.split('async function regenerateTenantSection(sectionKey, sectionLabel) {', 1)[1]
@@ -2420,6 +2422,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const sectionRequest = detectTenantSectionRegenerationRequest(message);', chat_body)
         self.assertLess(chat_body.index('await regenerateTenantSection'), chat_body.index('const moveCmd'))
         self.assertIn("apiWithTimeout('POST', '/api/designer-chat'", chat_body)
+        self.assertIn('}, 90000,', chat_body)
 
     def test_an_emptied_draft_can_be_refilled_from_a_presentation_snapshot(self):
         """Every generated presentation stored the whole project data of its moment, so a draft
