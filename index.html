@@ -6969,6 +6969,105 @@
       };
     }
 
+    const TENANT_SECTION_REGENERATION_TARGETS = [
+      { key: 'overview', label: 'نبذة عن المشروع', pattern: /نبذة عن المشروع|نظرة عامة|فكرة المشروع/i },
+      { key: 'components', label: 'مكونات المشروع', pattern: /مكونات المشروع|المكونات|الوحدات والمساحات/i },
+      { key: 'land', label: 'تحليل الأرض', pattern: /تحليل الأرض|الأرض والكروكي|الكروكي|حدود الأرض/i },
+      { key: 'location', label: 'تحليل الموقع الجغرافي', pattern: /تحليل الموقع الجغرافي|تحليل الموقع|الموقع الجغرافي/i },
+      { key: 'market', label: 'تحليل السوق', pattern: /تحليل السوق|دراسة السوق|السوق/i },
+      { key: 'timeline', label: 'الجدول الزمني', pattern: /الجدول الزمني|الخطة الزمنية|مراحل التطوير/i },
+      { key: 'financial', label: 'الدراسة المالية', pattern: /الدراسة المالية|التحليل المالي|الجدوى المالية/i },
+      { key: 'swot_risks', label: 'تحليل SWOT وتحليل المخاطر', pattern: /تحليل\s*swot|تحليل المخاطر|المخاطر/i },
+      { key: 'team', label: 'فريق العمل', pattern: /فريق العمل|فريق التطوير/i },
+      { key: 'plans', label: 'المخططات', pattern: /المخططات|المساقط|المخطط المعماري/i },
+      { key: 'exterior', label: 'التصورات الخارجية', pattern: /التصورات الخارجية|التصور الخارجي|الواجهات/i },
+      { key: 'interior', label: 'التصورات الداخلية', pattern: /التصورات الداخلية|التصور الداخلي|التصميم الداخلي/i },
+      { key: 'executive_summary', label: 'الملخص التنفيذي', pattern: /الملخص التنفيذي/i }
+    ];
+
+    function detectTenantSectionRegenerationRequest(message) {
+      const text = String(message || '').trim();
+      if (!text || !/(?:إعادة|اعادة|أعد|اعد)\s*(?:توليد|إنشاء|انشاء|بناء)/i.test(text)) return null;
+      if (!/(?:قسم|القسم|كامل|بالكامل)/i.test(text)) return null;
+      return TENANT_SECTION_REGENERATION_TARGETS.find(item => item.pattern.test(text)) || null;
+    }
+
+    function tenantSlideMatchesSection(slide, index, sectionKey) {
+      const candidates = [slide, tenantSlidePlan?.slides?.[index]].filter(Boolean);
+      return candidates.some(candidate => {
+        const source = String(candidate.content_source || candidate.contentSource || '').toLowerCase();
+        const title = String(candidate.title || '').toLowerCase();
+        const type = String(candidate.type || '').toLowerCase();
+        if (sectionKey === 'financial' && (
+          source.startsWith('financial_') || source.startsWith('financial:') ||
+          source.startsWith('financial_report:') || source.startsWith('financial_summary:') ||
+          /الدراسة المالية|التحليل المالي|الجدوى المالية|التدفقات النقدية|مؤشرات العائد|التكاليف والاستثمار|financial|cash ?flow|roi|irr/i.test(title)
+        )) return true;
+        if (sectionKey === 'location' && (
+          type.startsWith('map_') || type === 'site_specs' ||
+          ['location_polygon', 'main_roads', 'catchment_areas', 'nearby_landmarks', 'site_analysis', 'location_detail'].includes(source)
+        )) return true;
+        return tenantSlideSectionKey(candidate, '') === sectionKey;
+      });
+    }
+
+    function buildTenantSlideRegenerationSnapshot(index) {
+      const slideIndex = Number(index);
+      const current = Array.isArray(tenantSlidesData) ? tenantSlidesData[slideIndex] : null;
+      if (!current || slideIndex < 0 || slideIndex >= tenantSlidesData.length) return null;
+      const planned = tenantSlidePlan?.slides?.[slideIndex] || {};
+      const snapshot = { ...planned };
+      ['title', 'type', 'section_key', 'content_source', 'source_table', 'design_style', 'designStyle',
+        'chart_type', 'image_tokens', 'bullets', 'metrics'].forEach(key => {
+        const missing = snapshot[key] === undefined || snapshot[key] === null ||
+          (Array.isArray(snapshot[key]) && !snapshot[key].length && Array.isArray(current[key]) && current[key].length);
+        if (missing && current[key] !== undefined) snapshot[key] = current[key];
+      });
+      snapshot.title = snapshot.title || current.title || ('شريحة ' + (slideIndex + 1));
+      snapshot.type = snapshot.type || current.type || 'content';
+      snapshot.design_style = snapshot.design_style || snapshot.designStyle || current.designStyle || 'cards';
+      return { slideIndex, current, snapshot };
+    }
+
+    async function generateTenantSlideReplacement(index, generationImages) {
+      const context = buildTenantSlideRegenerationSnapshot(index);
+      if (!context) throw new Error('الشريحة غير موجودة');
+      const { slideIndex, current, snapshot } = context;
+      const payload = {
+        projectData: slimGenerationProjectData(tenantProjectData),
+        slidePlan: { slides: [snapshot] },
+        images: generationImages,
+        slideIndex: 0,
+        _slideNum: slideIndex + 1,
+        _totalSlides: tenantSlidesData.length
+      };
+      if (tenantPresentationId) payload.presentationId = tenantPresentationId;
+
+      const data = await requestTenantSlideGeneration(payload);
+      if (!data?.success || !data.slide?.html || !containsSlideRoot(data.slide.html)) {
+        throw new Error(data?.error || 'تعذر إعادة توليد الشريحة');
+      }
+
+      const generatedType = data.slide.type || snapshot.type || current.type || 'content';
+      const renderedHtml = processSlideHtmlClient(data.slide.html, generatedType);
+      if (!renderedHtml || !containsSlideRoot(renderedHtml)) {
+        throw new Error('استجابة الشريحة الجديدة غير مكتملة');
+      }
+      return {
+        ...current,
+        title: data.slide.title || snapshot.title,
+        type: generatedType,
+        html: renderedHtml,
+        section_key: data.slide.sectionKey || snapshot.section_key || current.section_key || '',
+        content_source: data.slide.contentSource || snapshot.content_source || current.content_source || '',
+        source_table: data.slide.sourceTable || snapshot.source_table || current.source_table || '',
+        index_entries: data.slide.indexEntries || snapshot.index_entries || current.index_entries || [],
+        designStyle: data.slide.designStyle || snapshot.design_style || current.designStyle || 'cards',
+        bullets: snapshot.bullets || current.bullets || [],
+        metrics: snapshot.metrics || current.metrics || []
+      };
+    }
+
     async function regenerateTenantSlide(index) {
       if (!hasPermission('create_presentation')) return;
       if (isGeneratingTenantSlides || isRegeneratingTenantSlide) {
@@ -6980,81 +7079,120 @@
         return;
       }
 
-      const slideIndex = Number(index);
-      const current = Array.isArray(tenantSlidesData) ? tenantSlidesData[slideIndex] : null;
-      if (!current || slideIndex < 0 || slideIndex >= tenantSlidesData.length) {
+      const context = buildTenantSlideRegenerationSnapshot(index);
+      if (!context) {
         toast('الشريحة غير موجودة');
         return;
       }
-
-      const planned = tenantSlidePlan?.slides?.[slideIndex] || {};
-      const snapshot = { ...planned };
-      ['title', 'type', 'section_key', 'content_source', 'source_table', 'design_style',
-        'chart_type', 'image_tokens', 'bullets', 'metrics'].forEach(key => {
-        const missing = snapshot[key] === undefined || snapshot[key] === null ||
-          (Array.isArray(snapshot[key]) && !snapshot[key].length && Array.isArray(current[key]) && current[key].length);
-        if (missing && current[key] !== undefined) snapshot[key] = current[key];
-      });
-      snapshot.title = snapshot.title || current.title || ('شريحة ' + (slideIndex + 1));
-      snapshot.type = snapshot.type || current.type || 'content';
-
-      if (!confirm('سيتم إعادة توليد الشريحة «' + snapshot.title + '» فقط، مع إبقاء باقي الشرائح كما هي. هل تريد المتابعة؟')) {
-        return;
-      }
+      if (!confirm('سيتم إعادة توليد الشريحة «' + context.snapshot.title + '» فقط، مع إبقاء باقي الشرائح كما هي. هل تريد المتابعة؟')) return;
 
       isRegeneratingTenantSlide = true;
       renderTenantSlidesSidebar();
-      setLiveGenBanner(true, 'إعادة توليد الشريحة ' + (slideIndex + 1) + ' من ' + tenantSlidesData.length,
+      setLiveGenBanner(true, 'إعادة توليد الشريحة ' + (context.slideIndex + 1) + ' من ' + tenantSlidesData.length,
         'لن تتأثر بقية الشرائح', 35);
-
       try {
-        const generationImages = buildPresentationGenerationImages();
-        const payload = {
-          projectData: slimGenerationProjectData(tenantProjectData),
-          slidePlan: { slides: [snapshot] },
-          images: generationImages,
-          slideIndex: 0,
-          _slideNum: slideIndex + 1,
-          _totalSlides: tenantSlidesData.length
-        };
-        if (tenantPresentationId) payload.presentationId = tenantPresentationId;
-
-        const data = await requestTenantSlideGeneration(payload);
-        if (!data?.success || !data.slide?.html || !containsSlideRoot(data.slide.html)) {
-          throw new Error(data?.error || 'تعذر إعادة توليد الشريحة');
-        }
-
-        const generatedType = data.slide.type || snapshot.type || current.type || 'content';
-        const renderedHtml = processSlideHtmlClient(data.slide.html, generatedType);
-        if (!renderedHtml || !containsSlideRoot(renderedHtml)) {
-          throw new Error('استجابة الشريحة الجديدة غير مكتملة');
-        }
-
-        tenantSlidesData[slideIndex] = {
-          ...current,
-          title: data.slide.title || snapshot.title,
-          type: generatedType,
-          html: renderedHtml,
-          section_key: data.slide.sectionKey || snapshot.section_key || current.section_key || '',
-          content_source: data.slide.contentSource || snapshot.content_source || current.content_source || '',
-          source_table: data.slide.sourceTable || snapshot.source_table || current.source_table || '',
-          index_entries: data.slide.indexEntries || snapshot.index_entries || current.index_entries || [],
-          designStyle: data.slide.designStyle || snapshot.design_style || current.designStyle || 'cards',
-          bullets: snapshot.bullets || current.bullets || [],
-          metrics: snapshot.metrics || current.metrics || []
-        };
+        tenantSlidesData[context.slideIndex] = await generateTenantSlideReplacement(
+          context.slideIndex, buildPresentationGenerationImages());
         tenantProjectData.tenantSlidesData = tenantSlidesData;
         renumberTenantSlides();
         renderTenantSlides();
-        selectTenantSlide(slideIndex);
-
+        selectTenantSlide(context.slideIndex);
         const saved = await saveTenantPresentation();
         if (!saved) throw new Error('تعذر حفظ الشريحة الجديدة');
         triggerAutoSaveDraft();
-        toast('تم إعادة توليد الشريحة ' + (slideIndex + 1) + ' فقط');
+        if (tenantPresentationId) api('POST', '/api/presentations/' + tenantPresentationId + '/log', {
+          action: 'إعادة توليد شريحة', details: ['الشريحة ' + (context.slideIndex + 1)], source: 'ai'
+        }).catch(() => { });
+        toast('تم إعادة توليد الشريحة ' + (context.slideIndex + 1) + ' فقط');
       } catch (error) {
         console.error('[SLIDE REGENERATE]', error);
         toast(error?.message || 'تعذر إعادة توليد الشريحة');
+      } finally {
+        isRegeneratingTenantSlide = false;
+        renderTenantSlidesSidebar();
+        setLiveGenBanner(false);
+      }
+    }
+
+    async function regenerateTenantSection(sectionKey, sectionLabel) {
+      if (!hasPermission('create_presentation')) return false;
+      if (isGeneratingTenantSlides || isRegeneratingTenantSlide) {
+        toast('يوجد توليد جارٍ حاليًا');
+        return false;
+      }
+      if (hasResumableTenantSlideGeneration()) {
+        toast('استكمل التوليد المتوقف قبل إعادة توليد قسم');
+        return false;
+      }
+
+      renumberTenantSlides();
+      const targetIndexes = tenantSlidesData
+        .map((slide, index) => ({ slide, index }))
+        .filter(item => !['cover', 'index', 'closing', 'section_divider'].includes(String(item.slide?.type || '').toLowerCase()))
+        .filter(item => tenantSlideMatchesSection(item.slide, item.index, sectionKey))
+        .map(item => item.index);
+      if (!targetIndexes.length) {
+        toast('لا توجد شرائح لهذا القسم داخل العرض');
+        return false;
+      }
+      const targetNumbers = targetIndexes.map(index => index + 1).join('، ');
+      if (!confirm('سيتم إعادة توليد قسم «' + sectionLabel + '» وعدد شرائحه ' + targetIndexes.length + ' فقط (' + targetNumbers + ')، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟')) return false;
+
+      const previousSlides = tenantSlidesData.slice();
+      const previousPlan = tenantSlidePlan;
+      const generationImages = buildPresentationGenerationImages();
+      const replacements = [];
+      const failed = [];
+      isRegeneratingTenantSlide = true;
+      renderTenantSlidesSidebar();
+      try {
+        for (let position = 0; position < targetIndexes.length; position += 1) {
+          const index = targetIndexes[position];
+          setLiveGenBanner(true, 'إعادة توليد قسم ' + sectionLabel,
+            'الشريحة ' + (position + 1) + ' من ' + targetIndexes.length, 20 + Math.round((position / targetIndexes.length) * 65));
+          try {
+            replacements.push({ index, slide: await generateTenantSlideReplacement(index, generationImages) });
+          } catch (error) {
+            failed.push({ index, message: error?.message || 'تعذر التوليد' });
+          }
+        }
+        if (failed.length) {
+          throw new Error('تعذر توليد ' + failed.length + ' من شرائح القسم؛ لم يتم استبدال أي شريحة.');
+        }
+
+        replacements.forEach(item => { tenantSlidesData[item.index] = item.slide; });
+        tenantProjectData.tenantSlidesData = tenantSlidesData;
+        renumberTenantSlides();
+        renderTenantSlides();
+        selectTenantSlide(targetIndexes[0]);
+        const saved = await saveTenantPresentation();
+        if (!saved) {
+          tenantSlidesData = previousSlides;
+          tenantSlidePlan = previousPlan;
+          tenantProjectData.tenantSlidesData = tenantSlidesData;
+          renderTenantSlides();
+          throw new Error('تعذر حفظ القسم الجديد؛ تم الاحتفاظ بالشرائح القديمة.');
+        }
+        triggerAutoSaveDraft();
+        if (tenantPresentationId) api('POST', '/api/presentations/' + tenantPresentationId + '/log', {
+          action: 'إعادة توليد قسم', details: ['القسم: ' + sectionLabel, 'الشرائح: ' + targetNumbers], source: 'ai'
+        }).catch(() => { });
+        tenantDesignerMessages.push({
+          role: 'assistant',
+          content: 'تم إعادة توليد قسم ' + sectionLabel + ' فقط (' + targetIndexes.length + ' شرائح)، مع إبقاء باقي العرض كما هو.',
+          slides: targetNumbers.split('، ').map(Number)
+        });
+        renderTenantDesignerChat();
+        return true;
+      } catch (error) {
+        console.error('[SECTION REGENERATE]', error);
+        tenantDesignerMessages.push({
+          role: 'assistant',
+          content: error?.message || 'تعذر إعادة توليد القسم؛ لم يتم استبدال الشرائح القديمة.',
+          slides: targetIndexes.map(index => index + 1)
+        });
+        renderTenantDesignerChat();
+        return false;
       } finally {
         isRegeneratingTenantSlide = false;
         renderTenantSlidesSidebar();
@@ -21788,6 +21926,16 @@
       if (!message) { toast('اكتب التعديل المطلوب أولاً'); return; }
       if (!tenantSlidesData.length && !tenantPresentationId) {
         toast('افتح عرضاً أو ولّد الشرائح أولاً');
+        return;
+      }
+
+      const sectionRequest = detectTenantSectionRegenerationRequest(message);
+      if (sectionRequest) {
+        tenantDesignerMessages.push({ role: 'user', content: message, slides: [] });
+        if (input) { input.value = ''; growTenantChatInput(input); }
+        clearTenantChatAttachment();
+        renderTenantDesignerChat();
+        await regenerateTenantSection(sectionRequest.key, sectionRequest.label);
         return;
       }
 

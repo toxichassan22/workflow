@@ -2389,12 +2389,31 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('إعادة توليد هذه الشريحة فقط', index_source)
         self.assertIn('async function regenerateTenantSlide(index)', index_source)
+        replacement_body = index_source.split('async function generateTenantSlideReplacement(index, generationImages) {', 1)[1]
+        replacement_body = replacement_body.split('\n    async function regenerateTenantSlide(index)', 1)[0]
+        self.assertIn('slidePlan: { slides: [snapshot] }', replacement_body)
         regenerate_body = index_source.split('async function regenerateTenantSlide(index) {', 1)[1]
         regenerate_body = regenerate_body.split('\n    function buildPresentationGenerationImages()', 1)[0]
-        self.assertIn('slidePlan: { slides: [snapshot] }', regenerate_body)
-        self.assertIn('tenantSlidesData[slideIndex] =', regenerate_body)
+        self.assertIn('tenantSlidesData[context.slideIndex] =', regenerate_body)
         self.assertIn('await saveTenantPresentation()', regenerate_body)
         self.assertIn('لن تتأثر بقية الشرائح', regenerate_body)
+
+    def test_designer_chat_can_regenerate_only_the_requested_section(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('detectTenantSectionRegenerationRequest', index_source)
+        self.assertIn('async function regenerateTenantSection(sectionKey, sectionLabel)', index_source)
+        self.assertIn("await regenerateTenantSection(sectionRequest.key, sectionRequest.label)", index_source)
+        section_body = index_source.split('async function regenerateTenantSection(sectionKey, sectionLabel) {', 1)[1]
+        section_body = section_body.split('\n    function buildPresentationGenerationImages()', 1)[0]
+        self.assertIn('generateTenantSlideReplacement', section_body)
+        self.assertIn('مع إبقاء باقي العرض كما هو', section_body)
+        self.assertIn('لم يتم استبدال أي شريحة', section_body)
+        self.assertIn('await saveTenantPresentation()', section_body)
+
+        chat_body = index_source.split('async function sendTenantDesignerChat() {', 1)[1]
+        chat_body = chat_body.split('\n    async function ', 1)[0]
+        self.assertIn('const sectionRequest = detectTenantSectionRegenerationRequest(message);', chat_body)
+        self.assertLess(chat_body.index('await regenerateTenantSection'), chat_body.index('const moveCmd'))
 
     def test_an_emptied_draft_can_be_refilled_from_a_presentation_snapshot(self):
         """Every generated presentation stored the whole project data of its moment, so a draft
