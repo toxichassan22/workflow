@@ -3363,6 +3363,11 @@ def api_designer_chat():
             except Exception:
                 slides = []
 
+    project_data, creative_images = _hydrate_map_assets_for_request(
+        project_data, data.get('creativeImages', {}), g.tenant_id,
+        presentation_id=presentation_id,
+    )
+
     # Backward-compatible one-slide clients still work.
     if not slides and data.get('slideHtml'):
         slides = [{'html': data.get('slideHtml'), 'title': data.get('slideTitle', ''), 'type': 'content', 'designStyle': 'cards'}]
@@ -3513,7 +3518,6 @@ def api_designer_chat():
 
         executed = []
         assistant_messages = []
-        creative_images = data.get('creativeImages') if isinstance(data.get('creativeImages'), dict) else {}
         tenant_id = g.tenant_id
         for action in actions:
             tool = action.get('tool') if isinstance(action, dict) else ''
@@ -5567,8 +5571,12 @@ def api_generate_slide_single():
     from slide_engine import generate_single_slide, build_design_rules, finalize_slide_html
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
+    presentation_id = str(data.get('presentationId') or '').strip() or None
+    project_data, request_images = _hydrate_map_assets_for_request(
+        project_data, data.get('images', {}), g.tenant_id, presentation_id=presentation_id
+    )
     slide_plan = data.get('slidePlan', {})
-    images = _augment_generation_images(data.get('images', {}), project_data, g.tenant_id)
+    images = _augment_generation_images(request_images, project_data, g.tenant_id)
     slide_index = int(data.get('slideIndex', 0))
 
     if not slide_plan or 'slides' not in slide_plan:
@@ -5801,8 +5809,11 @@ def api_generate_slides():
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
     slide_plan = data.get('slidePlan', {})
-    images = _augment_generation_images(data.get('images', {}), project_data, g.tenant_id)
-    presentation_id = data.get('presentationId')
+    presentation_id = str(data.get('presentationId') or '').strip() or None
+    project_data, request_images = _hydrate_map_assets_for_request(
+        project_data, data.get('images', {}), g.tenant_id, presentation_id=presentation_id
+    )
+    images = _augment_generation_images(request_images, project_data, g.tenant_id)
 
     branding = db.get_branding(g.tenant_id)
     if not branding:
@@ -5889,10 +5900,6 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
             metadata = json.loads(record.get('metadata_json') or '{}')
         except (TypeError, ValueError):
             metadata = {}
-        if metadata.get('map_highlight_version') != maps_service.MAP_HIGHLIGHT_RENDER_VERSION:
-            continue
-        if metadata.get('map_label_version') != maps_service.MAP_LABEL_RENDER_VERSION:
-            continue
         if image_type in seen_types or placeholder in seen_placeholders:
             continue
         seen_types.add(image_type)
@@ -5902,6 +5909,18 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         except ValueError:
             rel_path = 'uploads/maps/' + os.path.basename(path)
         placeholders[placeholder] = '/' + rel_path
+
+        # The file itself remains a valid persisted map even when a later
+        # renderer version changed its overlays or labels.  Keep importing that
+        # image so slide generation never produces an empty map frame.  Only
+        # trust the attached metadata for marker-aware layout when both versions
+        # match the renderer that produced the current map implementation.
+        current_map_metadata = (
+            metadata.get('map_highlight_version') == maps_service.MAP_HIGHLIGHT_RENDER_VERSION
+            and metadata.get('map_label_version') == maps_service.MAP_LABEL_RENDER_VERSION
+        )
+        if not current_map_metadata:
+            continue
         if creative.get('map_lat') is None and metadata.get('lat') is not None:
             creative['map_lat'] = metadata['lat']
         if creative.get('map_lng') is None and metadata.get('lng') is not None:
@@ -5924,14 +5943,57 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
             creative['map_landmark_items'] = metadata['landmark_map_items']
         if map_highlight_site is None and metadata.get('highlight_site') is not None:
             map_highlight_site = bool(metadata.get('highlight_site'))
-    creative['map_placeholders'] = placeholders
-    creative['maps_persisted'] = bool(placeholders)
+    existing_placeholders = creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {}
+    merged_placeholders = {key: value for key, value in existing_placeholders.items() if key and value}
+    merged_placeholders.update(placeholders)
+    creative['map_placeholders'] = merged_placeholders
+    creative['maps_persisted'] = bool(merged_placeholders)
     if map_highlight_site is not None:
         creative['map_highlight_site'] = map_highlight_site
     if map_zooms:
         creative['map_zooms'] = map_zooms
     project_data['tenantCreativeImages'] = creative
     return project_data
+
+
+def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentation_id=None):
+    """Restore saved map URLs before a slide, plan, or designer request runs.
+
+    Map files are persisted separately from the presentation JSON.  A request may
+    therefore have a perfectly valid presentation id but an incomplete client
+    ``creativeImages`` object, especially after reopening an older draft.  Merge
+    the DB-backed assets first, then let explicitly supplied request values win.
+    """
+    source = project_data if isinstance(project_data, dict) else {}
+    request_images = dict(images) if isinstance(images, dict) else {}
+    draft_id = source.get('draftId') or source.get('draft_id')
+    if presentation_id or draft_id:
+        source = _merge_persisted_map_assets(
+            source, tenant_id, presentation_id=presentation_id, draft_id=draft_id
+        )
+
+    creative = source.get('tenantCreativeImages') if isinstance(source.get('tenantCreativeImages'), dict) else {}
+    placeholder_sources = (
+        creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {},
+        source.get('map_placeholders') if isinstance(source.get('map_placeholders'), dict) else {},
+        request_images.get('map_placeholders') if isinstance(request_images.get('map_placeholders'), dict) else {},
+    )
+    placeholders = {}
+    for values in placeholder_sources:
+        placeholders.update({key: value for key, value in values.items() if key and value})
+    if placeholders:
+        request_images['map_placeholders'] = placeholders
+
+    # These values keep marker-aware layout and location summaries consistent with
+    # the exact map image that was persisted for the open presentation.
+    for key in (
+        'map_zooms', 'map_centers', 'map_landmarks', 'map_access_roads',
+        'map_catchment_landmarks', 'map_landmark_items', 'map_highlight_site',
+        'map_lat', 'map_lng', 'maps_persisted', 'map_approvals',
+    ):
+        if key not in request_images and key in creative:
+            request_images[key] = creative[key]
+    return source, request_images
 
 
 @app.route('/api/presentations', methods=['GET'])

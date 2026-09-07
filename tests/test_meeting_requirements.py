@@ -5362,6 +5362,58 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(hydrated['tenantCreativeImages']['map_lat'], 24.1)
         self.assertEqual(hydrated['tenantCreativeImages']['map_lng'], 46.2)
 
+    def test_slide_requests_merge_persisted_maps_into_generation_images(self):
+        map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='.png', delete=False)
+        map_path = map_file.name
+        self.addCleanup(lambda: os.path.exists(map_path) and os.unlink(map_path))
+        map_file.write(b'png')
+        map_file.close()
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a,
+                'overview',
+                map_path,
+                '##MAP_OVERVIEW##',
+                presentation_id='pres-map-hydration',
+                metadata={
+                    'map_highlight_version': self.application_module.maps_service.MAP_HIGHLIGHT_RENDER_VERSION,
+                    'map_label_version': self.application_module.maps_service.MAP_LABEL_RENDER_VERSION,
+                }
+            )
+            project, images = self.application_module._hydrate_map_assets_for_request(
+                {'project_name': 'Saved'}, {}, self.tenant_a,
+                presentation_id='pres-map-hydration'
+            )
+
+        self.assertEqual(
+            images['map_placeholders']['##MAP_OVERVIEW##'],
+            project['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##'],
+        )
+        self.assertTrue(images['map_placeholders']['##MAP_OVERVIEW##'].endswith(os.path.basename(map_path)))
+
+    def test_saved_legacy_map_file_is_not_wiped_by_renderer_version_change(self):
+        map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='.png', delete=False)
+        map_path = map_file.name
+        self.addCleanup(lambda: os.path.exists(map_path) and os.unlink(map_path))
+        map_file.write(b'png')
+        map_file.close()
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a,
+                'overview',
+                map_path,
+                '##MAP_OVERVIEW##',
+                presentation_id='pres-legacy-map',
+                metadata={'map_highlight_version': 'old', 'map_label_version': 'old'},
+            )
+            hydrated = self.application_module._merge_persisted_map_assets(
+                {'tenantCreativeImages': {'map_placeholders': {'##MAP_OVERVIEW##': '/old-saved-map.png'}}},
+                self.tenant_a,
+                presentation_id='pres-legacy-map',
+            )
+
+        self.assertTrue(hydrated['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##'].endswith(os.path.basename(map_path)))
+
     def test_bulk_map_generation_is_rejected_before_provider_calls(self):
         client = self.app.test_client()
         with patch.object(self.application_module.maps_service, 'generate_all_map_images') as generate_maps:

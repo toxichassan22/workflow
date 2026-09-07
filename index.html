@@ -7369,7 +7369,13 @@
         plan_meta: (assets.plan_meta || []).map(item => ({
           title: item.title || '', description: item.description || ''
         })),
-        land_photos: assets.land_photos || []
+        land_photos: assets.land_photos || [],
+        // The planner must know that approved maps are real assets.  Omitting
+        // this field made it instruct the model that every map was unavailable,
+        // even though the later slide request had the map images in memory.
+        map_placeholders: assets.map_placeholders || {},
+        map_zooms: assets.map_zooms || {},
+        map_centers: assets.map_centers || {}
       };
     }
 
