@@ -3050,6 +3050,23 @@ def normalize_arabic_digits_py(text):
     return text.translate(str.maketrans(eastern, western))
 
 
+def _slide_range_indexes(text, count):
+    """Return zero-based indexes for numeric ranges such as «من 2 إلى 6»."""
+    if not text or count <= 0:
+        return []
+    normalized = normalize_arabic_digits_py(text.lower())
+    indexes = []
+    for match in re.finditer(r'(?<!\d)(\d+)\s*(?:إلى|الى|حتى|لحد|[-–—])\s*(\d+)(?!\d)', normalized):
+        start, end = int(match.group(1)), int(match.group(2))
+        if start > end:
+            start, end = end, start
+        for number in range(start, end + 1):
+            index = number - 1
+            if 0 <= index < count and index not in indexes:
+                indexes.append(index)
+    return indexes
+
+
 def detect_slide_indexes_from_message_py(text, slides):
     """Detect single or multiple slide indexes from prompt text using dynamic digits, words, or titles."""
     if not text or not slides:
@@ -3090,7 +3107,13 @@ def detect_slide_indexes_from_message_py(text, slides):
             if 0 <= idx < count and idx not in found_indexes:
                 found_indexes.append(idx)
 
-    # 2. Extract digits after trigger words (شريحة, شرايح, سلايد, رقم) or lists like "7 و 9 و 20"
+    # 2. Expand numeric ranges before extracting individual numbers. The old parser stopped at
+    # the first number in «من 2 إلى 6», so a request for a bounded group silently edited one slide.
+    for idx in _slide_range_indexes(norm_text, count):
+        if idx not in found_indexes:
+            found_indexes.append(idx)
+
+    # 3. Extract digits after trigger words (شريحة, شرايح, سلايد, رقم) or lists like "7 و 9 و 20"
     trigger_match = re.search(r'(?:الشريحة|شريحة|شريحه|شرايح|سلايد|سلايدات|رقم|الأرقام|ارقام)\s*([\d\s\,\،و]+)', norm_text)
     if trigger_match:
         digit_str = trigger_match.group(1)
@@ -3116,7 +3139,7 @@ def detect_slide_indexes_from_message_py(text, slides):
             except ValueError:
                 continue
 
-    # 3. Check slide title matches
+    # 4. Check slide title matches
     if not found_indexes:
         for idx, s in enumerate(slides):
             title = (s.get('title') or '').strip().lower() if isinstance(s, dict) else ''
@@ -3163,6 +3186,59 @@ def _designer_target_indexes(action, count, current_index, force_all=False):
     else:
         idx = current_index
     return [max(0, min(idx, count - 1))] if count else []
+
+
+def _designer_actionable_edit_request(message):
+    """Identify a concrete edit that should not be stalled by a needless clarification."""
+    normalized = normalize_arabic_digits_py(str(message or '').lower())
+    return bool(re.search(
+        r'(?:لون|ألوان|الوان|خلفي|خط|عنوان|نص|هيدر|فوتر|بطاق|كارت|مساف|تباعد|حجم|عرض|ارتفاع|محاذاة|تنسيق|ترقيم|رقم|إزاحة|ازاحة|يمين|يسار|أعلى|اعلى|أسفل|اسفل|تصميم)',
+        normalized,
+    ))
+
+
+def _designer_deterministic_plan(message, slides, current_index, target_indexes):
+    """Handle unambiguous structural commands without spending a planner turn first."""
+    if not message or not slides:
+        return None
+    normalized = normalize_arabic_digits_py(str(message).strip().lower())
+    numbers = [idx + 1 for idx in (target_indexes or [])]
+
+    if re.search(r'(?:احذف|حذف|امسح|إزالة|ازالة)\s*(?:الشريحة|شريحة|السلايد|سلايد)', normalized):
+        targets = sorted(set(numbers or [current_index + 1]), reverse=True)
+        return {
+            'response': 'سأنفذ حذف الشرائح المحددة مع الحفاظ على ترتيب بقية العرض.',
+            'actions': [{'tool': 'delete_slide', 'params': {'slide_number': number}} for number in targets],
+        }
+
+    if re.search(r'(?:كرر|تكرار|انسخ|استنسخ|استنساخ|دبلر)\s*(?:الشريحة|شريحة|السلايد|سلايد)', normalized):
+        number = numbers[0] if numbers else current_index + 1
+        return {
+            'response': f'سأنشئ نسخة من الشريحة رقم {number} مع إبقاء النسخة الأصلية.',
+            'actions': [{'tool': 'duplicate_slide', 'params': {'slide_number': number}}],
+        }
+
+    move_match = re.search(
+        r'(?:انقل|حرك|غيّر\s*ترتيب|غير\s*ترتيب)\s*(?:الشريحة|شريحة|السلايد|سلايد)?\s*(\d+)\s*'
+        r'(?:إلى|الى|لمكان|مكان|لتصبح|لتكون)\s*(?:الشريحة|شريحة|السلايد|سلايد)?\s*(\d+)',
+        normalized,
+    )
+    if move_match:
+        from_number, to_number = int(move_match.group(1)), int(move_match.group(2))
+        return {
+            'response': f'سأنقل الشريحة رقم {from_number} إلى الموضع رقم {to_number}.',
+            'actions': [{'tool': 'reorder_slides', 'params': {
+                'from_index': from_number, 'to_index': to_number,
+            }}],
+        }
+
+    if re.search(r'(?:قسّم|قسم|تقسيم)\s*(?:الشريحة|شريحة|السلايد|سلايد)', normalized):
+        number = numbers[0] if numbers else current_index + 1
+        return {
+            'response': f'سأقسم الشريحة رقم {number} إلى جزأين متوازنين.',
+            'actions': [{'tool': 'split_slide', 'params': {'slide_number': number}}],
+        }
+    return None
 
 
 def _find_component_reference_image(component_query, project_data, creative_images=None):
@@ -3476,6 +3552,7 @@ HTML الحالي:
 DESIGNER_CHAT_VERBATIM_TURNS = 10
 DESIGNER_CHAT_MEMORY_CHARS = 6000
 DESIGNER_CHAT_MEMORY_MAX = 1800
+DESIGNER_CHAT_STORED_TURNS = 40
 
 
 def _designer_chat_history_lines(history):
@@ -3605,6 +3682,12 @@ def api_designer_chat():
         if 1 <= number <= len(slides) and number not in focus_indexes:
             focus_indexes.append(number)
 
+    explicit_indexes = [idx + 1 for idx in detect_slide_indexes_from_message_py(message, slides)]
+    preferred_indexes = explicit_indexes or focus_indexes
+    deterministic_plan = _designer_deterministic_plan(
+        message, slides, current_index, [number - 1 for number in preferred_indexes]
+    )
+
     branding = db.get_branding(g.tenant_id) or {}
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
     training_context = db.get_training_context(g.tenant_id) or ''
@@ -3617,6 +3700,10 @@ def api_designer_chat():
         "إذا لم تذكر الرسالة الحالية رقم شريحة فهي تكمل الحديث عن هذه الشرائح نفسها — استخدمها في "
         "indexes ولا تسأل عن رقم الشريحة من جديد، ولا تعتبرها الشريحة الحالية بالمصادفة."
     ) if focus_indexes else ""
+    explicit_scope_note = (
+        f"\n\n## نطاق صريح من رسالة المستخدم: الشرائح {'، '.join(str(n) for n in explicit_indexes)}\n"
+        "هذا النطاق مُلزم. لا توسّع التعديل إلى شرائح أخرى ولا تستبدله بالشريحة الحالية."
+    ) if explicit_indexes else ""
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
     audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index)
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
@@ -3671,7 +3758,7 @@ def api_designer_chat():
 
 قائمة الشرائح الحالية في العرض ({len(slides)} شريحة):
 {json.dumps(summary, ensure_ascii=False)}
-{memory_note}{history_note}{focus_note}"""
+{memory_note}{history_note}{focus_note}{explicit_scope_note}"""
     # An image the user attached in the chat: a design reference, something to insert, or the
     # problem they are pointing at. The attach button used to open the training page's file input,
     # so it never reached this endpoint at all.
@@ -3681,11 +3768,15 @@ def api_designer_chat():
         planner_prompt += ("\n\nأرفق المستخدم صورة مع رسالته. انظر إليها قبل التخطيط، وإن لم يكن دورها"
                           " واضحًا فاسأل عنه بأداة ask.")
     try:
-        planner_raw = extract_chat_content(
-            call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300),
-            'DESIGNER-PLANNER')
-        plan = _designer_json_response(planner_raw)
-        actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
+        if deterministic_plan:
+            plan = deterministic_plan
+            actions = plan['actions']
+        else:
+            planner_raw = extract_chat_content(
+                call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300),
+                'DESIGNER-PLANNER')
+            plan = _designer_json_response(planner_raw)
+            actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
 
         # A question is an answer on its own: nothing is edited until the user replies.
         question = ''
@@ -3695,7 +3786,9 @@ def api_designer_chat():
                 question = str(params.get('question') or '').strip()
                 if question:
                     break
-        if question:
+        if question and not deterministic_plan and not (
+            explicit_indexes or _designer_actionable_edit_request(message)
+        ):
             return jsonify({'success': True, 'data': {
                 'action': 'ask',
                 'response': question,
@@ -3706,12 +3799,21 @@ def api_designer_chat():
                 'focusIndexes': focus_indexes,
             }})
 
+        if question and (explicit_indexes or _designer_actionable_edit_request(message)):
+            fallback_target = 'indexes' if preferred_indexes else 'current'
+            actions = [{'tool': 'edit_slides', 'params': {
+                'target': fallback_target,
+                'indexes': preferred_indexes,
+                'slideIndex': current_index + 1,
+                'instruction': message,
+            }}]
+
         if not actions:
             if is_all_slides_request:
                 target = 'all'
                 target_indexes = []
             else:
-                req_indexes = data.get('indexes') if isinstance(data.get('indexes'), list) else []
+                req_indexes = explicit_indexes or (data.get('indexes') if isinstance(data.get('indexes'), list) else [])
                 if not req_indexes:
                     req_indexes = [idx + 1 for idx in detect_slide_indexes_from_message_py(message, slides)]
                 if not req_indexes:
@@ -3760,6 +3862,27 @@ def api_designer_chat():
         executed = []
         assistant_messages = []
         tenant_id = g.tenant_id
+        scoped_actions = []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            tool_name = action.get('tool') or ''
+            params = dict(action.get('params') or {}) if isinstance(action.get('params'), dict) else {}
+            if tool_name in {
+                'edit_slides', 'edit_design_slide', 'edit_design_slides',
+                'generate_image', 'generate_design_image', 'insert_image_into_slide',
+                'insert_canonical_map', 'insert_map', 'insert_financial_chart', 'update_financial_chart',
+            }:
+                if is_all_slides_request:
+                    params['target'] = 'all'
+                elif explicit_indexes:
+                    params['target'] = 'indexes'
+                    params['indexes'] = explicit_indexes
+                elif focus_indexes and not params.get('indexes') and params.get('target', 'current') in {'current', 'auto'}:
+                    params['target'] = 'indexes'
+                    params['indexes'] = focus_indexes
+            scoped_actions.append({**action, 'params': params})
+        actions = scoped_actions
         for action in actions:
             tool = action.get('tool') if isinstance(action, dict) else ''
             params = action.get('params') if isinstance(action.get('params'), dict) else {}
@@ -4041,11 +4164,55 @@ def api_designer_chat():
         if not validation['valid']:
             return jsonify({'success': False, 'error': 'تم رفض التعديل لأن العرض يحتوي على شرائح غير صالحة', 'validation': validation}), 422
         slide_changes = change_tracking.describe_slide_changes(slides_before, slides)
+        touched = [item.get('index') + 1 for item in executed
+                   if isinstance(item, dict) and isinstance(item.get('index'), int)]
+        touched += [n + 1 for item in executed if isinstance(item, dict)
+                    for n in (item.get('indexes') or []) if isinstance(n, int)]
+        turn_focus = sorted(dict.fromkeys(touched)) or focus_indexes
+        response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
+        if assistant_messages:
+            response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
+        # Persist the conversation beside the edited workspace. Relying only on the browser draft
+        # save meant a refresh between two turns restored old history and lost the new turn.
+        stored_chat = project_data.get('designerChat') if isinstance(project_data.get('designerChat'), dict) else {}
+        incoming_history = data.get('history') if isinstance(data.get('history'), list) else []
+        chat_seed = incoming_history or (stored_chat.get('messages') if isinstance(stored_chat.get('messages'), list) else [])
+        persisted_messages = []
+        for entry in chat_seed[-DESIGNER_CHAT_STORED_TURNS * 2:]:
+            if not isinstance(entry, dict) or not str(entry.get('content') or '').strip():
+                continue
+            persisted_messages.append({
+                'role': 'user' if entry.get('role') == 'user' else 'assistant',
+                'content': str(entry.get('content') or '')[:2000],
+                'slides': entry.get('slides') if isinstance(entry.get('slides'), list) else [],
+            })
+        if not persisted_messages or persisted_messages[-1].get('content') != message or persisted_messages[-1].get('role') != 'user':
+            persisted_messages.append({'role': 'user', 'content': message[:2000], 'slides': preferred_indexes[:]})
+        persisted_messages.append({'role': 'assistant', 'content': response_text[:2000], 'slides': preferred_indexes[:]})
+        persisted_project_data = dict(project_data)
+        persisted_project_data['tenantSlidesData'] = slides
+        persisted_project_data['designerChat'] = {
+            'messages': persisted_messages[-DESIGNER_CHAT_STORED_TURNS * 2:],
+            'memory': chat_memory,
+            'focusIndexes': turn_focus or preferred_indexes,
+        }
         if presentation_id:
             if slide_changes:
                 db.save_presentation_version(presentation_id, g.user_id, g.user_name or 'System',
                                              slides_before, action='pre-ai-edit')
-            db.update_presentation(presentation_id, slides_data=slides, slide_count=len(slides), status='edited')
+            db.update_presentation(
+                presentation_id, project_data=persisted_project_data,
+                slides_data=slides, slide_count=len(slides), status='edited'
+            )
+        draft_id = persisted_project_data.get('draftId') or persisted_project_data.get('draft_id')
+        if draft_id:
+            try:
+                db.save_project_draft(
+                    g.tenant_id, _project_draft_actor_id(), persisted_project_data,
+                    persisted_project_data.get('sectionStatuses'), 'draft', draft_id=draft_id
+                )
+            except Exception as draft_error:
+                print(f'[DESIGNER CHAT DRAFT SAVE] {draft_error}')
         if slide_changes:
             tools_used = ', '.join(sorted({str(item.get('tool')) for item in executed
                                            if isinstance(item, dict) and item.get('tool')}))
@@ -4056,21 +4223,15 @@ def api_designer_chat():
                 [f'الطلب: «{message[:300]}»'] + ([f'الأدوات: {tools_used}'] if tools_used else []) + slide_changes,
                 source='ai',
             )
-        response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
-        if assistant_messages:
-            response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
         # The slides this turn actually touched become the conversation's focus, so the next
         # message («وطلعها أوضح») lands on them without asking again.
         # Both keys carry 0-based indexes; the chat speaks in 1-based slide numbers.
-        touched = [item.get('index') + 1 for item in executed
-                   if isinstance(item, dict) and isinstance(item.get('index'), int)]
-        touched += [n + 1 for item in executed if isinstance(item, dict)
-                    for n in (item.get('indexes') or []) if isinstance(n, int)]
-        turn_focus = sorted(dict.fromkeys(touched)) or focus_indexes
+        persisted_project_data['designerChat']['focusIndexes'] = turn_focus
         return jsonify({'success': True, 'data': {'action': 'workspace_update', 'response': response_text,
                                                   'slidesData': slides, 'creativeImages': creative_images,
                                                   'actions': executed, 'validation': validation,
-                                                  'memory': chat_memory, 'focusIndexes': turn_focus}})
+                                                  'memory': chat_memory, 'focusIndexes': turn_focus,
+                                                  'saved': bool(presentation_id or draft_id)}})
     except Exception as exc:
         print(f'[DESIGNER-CHAT ERROR] {exc}')
         return jsonify({'success': False, 'error': str(exc)}), 500

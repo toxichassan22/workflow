@@ -315,6 +315,7 @@
       padding: 6px 8px;
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 6px;
     }
 
@@ -343,6 +344,8 @@
     }
 
     .ge-thumb-title {
+      flex: 1 1 70px;
+      min-width: 0;
       font-size: 11px;
       font-weight: 700;
       color: #555;
@@ -352,11 +355,19 @@
     }
 
     .ge-thumb-actions {
-      display: inline-flex;
+      display: flex;
+      flex: 0 0 100%;
+      width: 100%;
       gap: 3px;
-      margin-right: auto;
+      margin-right: 0;
       align-items: center;
-      flex-shrink: 0;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .ge-thumb-actions > button {
+      flex: 1 1 auto;
+      min-width: 42px;
     }
 
     .ge-thumb-move,
@@ -5586,6 +5597,10 @@
               style="display:flex; align-items:center; gap:6px; color:#3B6E91; margin:0; font-size:16px; font-weight:700;">
               <span>شات مصمم الـ AI الذكي</span>
             </h3>
+            <label for="tenantChatSlide" style="display:block;margin:10px 0 5px;font-size:12px;color:#64748b;font-weight:700;">نطاق التعديل</label>
+            <select id="tenantChatSlide" onchange="selectTenantChatSlide(this.value)" style="width:100%;padding:7px 9px;border-radius:8px;font-size:12px;background:#fff;">
+              <option value="auto">ذكي تلقائي</option>
+            </select>
           </div>
 
           <div id="tenantChatMessages" class="tenant-chat-messages"
@@ -6675,6 +6690,18 @@
     let tenantDesignerChatMemory = '';
     let tenantChatFocusIndexes = [];
     const DESIGNER_CHAT_HISTORY_KEPT = 40;
+
+    function designerChatPersistence() {
+      return {
+        messages: tenantDesignerMessages.slice(-DESIGNER_CHAT_HISTORY_KEPT * 2).map(item => ({
+          role: item.role === 'user' ? 'user' : 'assistant',
+          content: String(item.content || '').slice(0, 2000),
+          slides: Array.isArray(item.slides) ? item.slides : []
+        })),
+        memory: tenantDesignerChatMemory || '',
+        focusIndexes: tenantChatFocusIndexes || []
+      };
+    }
 
     function restoreDesignerChat(source) {
       const stored = source && typeof source === 'object' ? (source.designerChat || {}) : {};
@@ -16898,8 +16925,8 @@
 
     function setupSidebarObserver() { }
 
-    // Drafts are saved only when the user asks for it. Autosave used to fire on any input and on
-    // several render helpers, so merely opening a new project wrote a row to the server.
+    // Drafts are saved after a short quiet period following a real change. The debounce keeps rapid
+    // inline edits and chat turns to one request while ensuring a refresh cannot discard them.
     let tenantDraftDirty = false;
 
     function setDraftDirty(dirty) {
@@ -16920,9 +16947,16 @@
       if (ib && !ib.classList.contains('tgr-hidden')) renderGlobalRailInputs();
     }
 
-    // Kept under the old name because ~40 call sites use it; it now only flags unsaved work.
+    let draftAutoSaveTimer = null;
+
     function triggerAutoSaveDraft() {
       setDraftDirty(true);
+      if (draftAutoSaveTimer) clearTimeout(draftAutoSaveTimer);
+      draftAutoSaveTimer = setTimeout(() => {
+        draftAutoSaveTimer = null;
+        if (!tenantDraftDirty) return;
+        saveProjectAsDraft(true).catch(error => console.error('[DRAFT AUTOSAVE]', error));
+      }, 900);
     }
 
     // Nothing is saved silently any more, so warn before the tab is closed with pending edits.
@@ -16980,15 +17014,7 @@
         data.tenantSlidesData = tenantSlidesData;
         // The designer conversation belongs to the file, not to the tab: reopening it used to wipe
         // the chat and the agent lost track of the slide it had just been told about.
-        data.designerChat = {
-          messages: tenantDesignerMessages.slice(-DESIGNER_CHAT_HISTORY_KEPT * 2).map(item => ({
-            role: item.role === 'user' ? 'user' : 'assistant',
-            content: String(item.content || '').slice(0, 2000),
-            slides: Array.isArray(item.slides) ? item.slides : []
-          })),
-          memory: tenantDesignerChatMemory || '',
-          focusIndexes: tenantChatFocusIndexes || []
-        };
+        data.designerChat = designerChatPersistence();
         data.site_analysis_approved = !!tenantProjectData.site_analysis_approved;
         collectMapStylePanel();
         data.map_styles = tenantProjectData.map_styles || {};
@@ -21808,6 +21834,18 @@
         }
       }
 
+      // Expand bounded requests such as «الشرائح من 2 إلى 6» before parsing individual numbers.
+      const rangeMatches = normalized.matchAll(/(?<!\d)(\d+)\s*(?:إلى|الى|حتى|لحد|[-–—])\s*(\d+)(?!\d)/g);
+      for (const match of rangeMatches) {
+        let start = Number(match[1]);
+        let end = Number(match[2]);
+        if (start > end) [start, end] = [end, start];
+        for (let number = start; number <= end; number++) {
+          const idx = number - 1;
+          if (idx >= 0 && idx < count && !foundIndexes.includes(idx)) foundIndexes.push(idx);
+        }
+      }
+
       // Extract numbers following slide triggers or digit sequences (e.g., "7 و 9 و 20" or "1 و 4 و 20 و 30")
       const triggerMatch = normalized.match(/(?:الشريحة|شريحة|شريحه|شرايح|سلايد|سلايدات|رقم|الأرقام|ارقام)\s*([\d\s\,\،و]+)/);
       if (triggerMatch && triggerMatch[1]) {
@@ -22076,6 +22114,7 @@
         if (input) { input.value = ''; growTenantChatInput(input); }
         clearTenantChatAttachment();
         renderTenantDesignerChat();
+        triggerAutoSaveDraft();
         await regenerateTenantSection(sectionRequest.key, sectionRequest.label);
         return;
       }
@@ -22091,6 +22130,8 @@
           content: 'تم نقل الشريحة رقم ' + (moveCmd.fromIdx + 1) + ' لتصبح الشريحة رقم ' + (moveCmd.toIdx + 1) + ' فوراً وبدون الحاجة لإعادة التوليد!'
         });
         renderTenantDesignerChat();
+        triggerAutoSaveDraft();
+        if (tenantPresentationId) await saveExistingPresentation();
         return;
       }
 
@@ -22116,6 +22157,7 @@
       if (input) { input.value = ''; growTenantChatInput(input); }
       clearTenantChatAttachment();
       renderTenantDesignerChat();
+      triggerAutoSaveDraft();
       if (target1BasedIndexes.length) tenantChatFocusIndexes = target1BasedIndexes.slice();
 
       const messagesDiv = document.getElementById('tenantChatMessages');
@@ -22181,6 +22223,7 @@
           content: (data && data.error) || 'تعذر تنفيذ الطلب. لم يتم تغيير العرض.'
         });
         renderTenantDesignerChat();
+        triggerAutoSaveDraft();
         return;
       }
 
@@ -22196,6 +22239,7 @@
         });
         renderTenantDesignerChat();
         triggerAutoSaveDraft();
+        await saveProjectAsDraft(true);
         if (input) input.focus();
         return;
       }
@@ -22244,6 +22288,7 @@
       renderTenantDesignerChat();
       triggerAutoSaveDraft();
       if (tenantPresentationId && !reply.saved) await saveExistingPresentation();
+      await saveProjectAsDraft(true);
     }
 
     async function renderPresentationFontStatus() {
@@ -22452,7 +22497,9 @@
       tenantProjectData = {
         ...tenantProjectData,
         tenantSlidePlan,
-        tenantCreativeImages
+        tenantCreativeImages,
+        designerChat: designerChatPersistence(),
+        tenantSlidesData
       };
       const data = await api('POST', '/api/presentations', {
         title: title,
@@ -22719,7 +22766,9 @@
       tenantProjectData = {
         ...tenantProjectData,
         tenantSlidePlan,
-        tenantCreativeImages
+        tenantCreativeImages,
+        designerChat: designerChatPersistence(),
+        tenantSlidesData
       };
       const data = await api('PUT', '/api/presentations/' + tenantPresentationId, {
         title: title,

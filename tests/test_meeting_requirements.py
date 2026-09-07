@@ -4372,17 +4372,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(preserved.get_json()['competitor']['logo_file_id'], 'manual-file')
         model_call.assert_not_called()
 
-    def test_drafts_are_saved_only_on_request(self):
-        """Autosave fired on any input and from several render helpers, so merely opening a new
-        project wrote a row to the server."""
+    def test_drafts_are_saved_after_a_debounced_edit(self):
+        """Edits autosave after a short quiet period without issuing a request per keystroke."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
 
-        # The debounced background save is gone; the old name only flags unsaved work now.
-        # (Explicit checkpoint saves before slide/presentation generation stay: the backend needs
-        # the draft to exist, and they only run on a deliberate user action.)
-        self.assertNotIn('autoSaveDraftTimer', index_source)
-        self.assertNotIn('جاري الحفظ تلقائياً', index_source)
-        self.assertIn('function triggerAutoSaveDraft() {\n      setDraftDirty(true);\n    }', index_source)
+        self.assertIn('let draftAutoSaveTimer = null;', index_source)
+        self.assertIn('clearTimeout(draftAutoSaveTimer);', index_source)
+        self.assertIn('saveProjectAsDraft(true).catch(error => console.error(\'[DRAFT AUTOSAVE]\'', index_source)
+        self.assertIn('}, 900);', index_source)
         self.assertIn('function setDraftDirty(dirty)', index_source)
         self.assertIn('تغييرات غير محفوظة', index_source)
 
@@ -6830,6 +6827,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(ai_entries[0]['action'], 'تعديل بالذكاء الاصطناعي')
         self.assertIn('إنشاء العرض', [entry['action'] for entry in log])
 
+        saved_presentation = client.get('/api/presentations/' + pres_id, headers=headers).get_json()['presentation']
+        saved_chat = saved_presentation['projectData'].get('designerChat', {})
+        saved_contents = [item.get('content') for item in saved_chat.get('messages', [])]
+        self.assertIn('أضف سطر الواجهة البحرية', saved_contents)
+        self.assertTrue(any('تم تحديث الشريحة' in content for content in saved_contents))
+
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('function renderChangeLogEntry(entry)', index_source)
         self.assertIn('async function showDraftEditLog(draftId)', index_source)
@@ -7029,10 +7032,29 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('focusIndexes: tenantChatFocusIndexes,', index_source)
         self.assertIn('function applyDesignerChatMemory(reply)', index_source)
         self.assertIn('function restoreDesignerChat(source)', index_source)
-        self.assertIn('data.designerChat = {', index_source)
+        self.assertIn('data.designerChat = designerChatPersistence();', index_source)
+        self.assertIn('function designerChatPersistence()', index_source)
+        self.assertIn('let draftAutoSaveTimer = null;', index_source)
+        self.assertIn('id="tenantChatSlide"', index_source)
+        self.assertIn('.ge-thumb-actions > button', index_source)
         # The conversation is restored with the file instead of being wiped on open.
         self.assertNotIn('tenantDesignerMessages = [];\n      tenantChatSlideIndex', index_source)
         self.assertIn("'designerChat'", (ROOT / 'db.py').read_text(encoding='utf-8'))
+
+    def test_designer_chat_supports_ranges_and_fast_structural_tasks(self):
+        module = self.application_module
+        slides = [{'title': f'شريحة {index}', 'html': '<div class="slide"></div>'}
+                  for index in range(1, 9)]
+        self.assertEqual(
+            module.detect_slide_indexes_from_message_py('غيّر ألوان الشرائح من 2 إلى 5', slides),
+            [1, 2, 3, 4],
+        )
+        plan = module._designer_deterministic_plan('احذف الشريحة 3', slides, 0, [2])
+        self.assertEqual(plan['actions'][0]['tool'], 'delete_slide')
+        self.assertEqual(plan['actions'][0]['params']['slide_number'], 3)
+        plan = module._designer_deterministic_plan('انقل الشريحة 8 إلى 4', slides, 0, [7])
+        self.assertEqual(plan['actions'][0]['tool'], 'reorder_slides')
+        self.assertEqual(plan['actions'][0]['params'], {'from_index': 8, 'to_index': 4})
 
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""
