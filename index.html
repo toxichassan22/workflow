@@ -6790,16 +6790,16 @@
       return tenantCreativeImages;
     }
 
-    // The designer chat keeps its conversation: the turns, the compressed memory of the older ones,
-    // and the slides the conversation is currently about. It used to send the current message alone,
-    // so it asked «أي شريحة؟», the answer arrived at a model that had never asked, and it asked again.
+    // The designer chat keeps its conversation for the open presentation: the turns, the compressed
+    // memory of older ones, and the slides the conversation is currently about.
     let tenantDesignerMessages = [];
     let tenantDesignerChatMemory = '';
     let tenantChatFocusIndexes = [];
     const DESIGNER_CHAT_HISTORY_KEPT = 40;
 
-    function designerChatPersistence() {
+    function designerChatPersistence(presentationId = tenantPresentationId) {
       return {
+        presentationId: presentationId || null,
         messages: tenantDesignerMessages.slice(-DESIGNER_CHAT_HISTORY_KEPT * 2).map(item => ({
           role: item.role === 'user' ? 'user' : 'assistant',
           content: String(item.content || '').slice(0, 2000),
@@ -6810,19 +6810,33 @@
       };
     }
 
-    function restoreDesignerChat(source) {
+    function restoreDesignerChat(source, expectedPresentationId = null) {
       const stored = source && typeof source === 'object' ? (source.designerChat || {}) : {};
+      const storedPresentationId = stored && stored.presentationId ? String(stored.presentationId) : '';
+      const presentationMatches = !expectedPresentationId || !storedPresentationId
+        || storedPresentationId === String(expectedPresentationId);
       tenantDesignerMessages = Array.isArray(stored.messages)
+        && presentationMatches
         ? stored.messages.filter(item => item && typeof item.content === 'string').map(item => ({
           role: item.role === 'user' ? 'user' : 'assistant',
           content: String(item.content).slice(0, 2000),
           slides: Array.isArray(item.slides) ? item.slides : []
         })).slice(-DESIGNER_CHAT_HISTORY_KEPT * 2)
         : [];
-      tenantDesignerChatMemory = typeof stored.memory === 'string' ? stored.memory.slice(0, 4000) : '';
-      tenantChatFocusIndexes = Array.isArray(stored.focusIndexes)
+      tenantDesignerChatMemory = presentationMatches && typeof stored.memory === 'string'
+        ? stored.memory.slice(0, 4000) : '';
+      tenantChatFocusIndexes = presentationMatches && Array.isArray(stored.focusIndexes)
         ? stored.focusIndexes.map(Number).filter(value => Number.isInteger(value) && value >= 1).slice(0, 30)
         : [];
+    }
+
+    function resetDesignerChatForNewPresentation() {
+      tenantDesignerMessages = [];
+      tenantDesignerChatMemory = '';
+      tenantChatFocusIndexes = [];
+      tenantChatSlideScope = 'auto';
+      tenantProjectData.designerChat = designerChatPersistence(null);
+      renderTenantDesignerChat();
     }
     let tenantChatSlideIndex = 0;
     let tenantChatSlideScope = 'auto';
@@ -17082,7 +17096,7 @@
       return draftSaveChain;
     }
 
-    async function saveProjectAsDraftNow(silent = false) {
+    async function saveProjectAsDraftNow(silent = false, syncPresentation = true) {
       try {
         Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
         if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) {
@@ -17119,9 +17133,9 @@
         }
         data.tenantCreativeImages = tenantCreativeImages;
         data.tenantSlidesData = tenantSlidesData;
-        // The designer conversation belongs to the file, not to the tab: reopening it used to wipe
-        // the chat and the agent lost track of the slide it had just been told about.
-        data.designerChat = designerChatPersistence();
+        // Keep the conversation with this presentation so reopening it does not lose the agent's
+        // context, while a newly generated presentation starts with a clean history.
+        data.designerChat = designerChatPersistence(syncPresentation ? tenantPresentationId : null);
         data.site_analysis_approved = !!tenantProjectData.site_analysis_approved;
         collectMapStylePanel();
         data.map_styles = tenantProjectData.map_styles || {};
@@ -17177,7 +17191,7 @@
         if (resp.draftId) tenantProjectData.draftId = resp.draftId;
         if (resp.success) {
           tenantDraftDirty = false;
-          if (tenantPresentationId && tenantSlidesData && tenantSlidesData.length) {
+          if (syncPresentation && tenantPresentationId && tenantSlidesData && tenantSlidesData.length) {
             try {
               const presTitle = tenantPresentationTitle
                 || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
@@ -19506,7 +19520,8 @@
       if (sectionKey === 'section-financial-calc' && !(await validateFinancialStudyBeforeProceed())) return;
       tenantFinancialPresentationReport = financialStudyHasRealInput(tenantProjectData.financial_study_model)
         && typeof collectFinancialStudyReport === 'function' ? collectFinancialStudyReport() : null;
-      await saveProjectAsDraftNow(true);
+      resetDesignerChatForNewPresentation();
+      await saveProjectAsDraftNow(true, false);
 
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
       const presentationTitle = projectName + ' - ' + resolvedLabel;
@@ -19557,12 +19572,15 @@
       if (factCount < GENERATION_MIN_FACTS && !confirm('بيانات المشروع المحفوظة ' + factCount +
         ' حقل. الذكاء الاصطناعي سيكتب محتوى الشرائح من عنده لأن الحقائق غير موجودة. متابعة؟')) return;
 
-      // Auto-save draft
+      // Auto-save draft without carrying the conversation from the previous presentation.
+      resetDesignerChatForNewPresentation();
       await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
 
       // Navigate to the presentation page with the stage empty. Rendering the file's saved slides
       // here showed the previous deck for the whole planning wait, so the reader watched an old
       // presentation while a new one was being built.
+      tenantPresentationId = null;
+      tenantProjectMode = 'new';
       showTenantPage('tenantSlidesPage');
       clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
       setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
@@ -22605,6 +22623,7 @@
         tenantPresentationId = data.presentationId;
         tenantPresentationTitle = title;
         tenantProjectMode = 'presentation';
+        tenantProjectData.designerChat = designerChatPersistence(data.presentationId);
         tenantArchiveCache = null;
         return true;
       }
@@ -22626,7 +22645,7 @@
       tenantSlideGenerationCheckpoint = tenantProjectData.slide_generation_checkpoint || null;
       tenantSlidePlan = recoverTenantSlidePlan(tenantProjectData, tenantSlidesData);
       if (tenantSlidePlan) tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-      restoreDesignerChat(tenantProjectData);
+      restoreDesignerChat(tenantProjectData, tenantPresentationId);
       tenantChatSlideIndex = 0;
       activeSlideIndex = 0;
       tempCoverImage = null;
