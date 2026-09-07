@@ -22186,6 +22186,9 @@
           const [newSlide] = tenantSlidesData.splice(lastIdx, 1);
           tenantSlidesData.splice(targetIdx, 0, newSlide);
           selectTenantSlide(targetIdx);
+        } else if (tenantSlidesData.length < oldLength) {
+          activeSlideIndex = Math.max(0, Math.min(activeSlideIndex, tenantSlidesData.length - 1));
+          tenantChatSlideIndex = Math.max(0, Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1));
         }
       }
 
