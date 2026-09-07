@@ -3726,6 +3726,12 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('\n    main {', index_source)
         self.assertIn('.tenant-app > main {\n      width: 100%', index_source)
 
+    def test_slide_preview_tables_do_not_inherit_the_app_table_minimum(self):
+        """Generated slide tables can sit in a narrow column. The app-wide 850px minimum made
+        those tables overflow the preview and clip content, while exports remained correct."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('.tenant-slide-stage .slide table {\n      min-width: 0;', index_source)
+
     def test_ui_contains_no_emojis_or_icon_glyphs(self):
         """Product rule: the app ships no emojis and no icon glyphs, including arrows used as
         button labels. Generated slides are covered separately by the icon stripper."""

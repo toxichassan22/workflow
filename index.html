@@ -2949,6 +2949,13 @@
       height: 720px;
     }
 
+    /* The application table rule is intentionally wide for data-entry tables, but generated
+       slides contain tables inside narrower content columns. Keep those tables inside the slide;
+       exported slides do not load the application-wide table minimum. */
+    .tenant-slide-stage .slide table {
+      min-width: 0;
+    }
+
     .tenant-workflow-tabs {
       display: flex;
       gap: 8px;
