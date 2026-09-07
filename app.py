@@ -3248,6 +3248,57 @@ def _build_designer_section_and_asset_context(slides, project_data, current_inde
     return "\n".join(audit_lines)
 
 
+def _sanitize_designer_output(html):
+    """Sanitize designer output strictly according to platform quality and compliance rules (Pillar 7).
+    
+    1. Zero emojis (stripped).
+    2. Zero icon fonts, icon glyphs, or decorative SVGs.
+    3. Replaces direction arrows with explicit Arabic words.
+    4. Strips any how-to instructional hints.
+    5. Ensures standard slide container bounds (1280x720, overflow:hidden).
+    """
+    if not html:
+        return html
+
+    # Replace arrow glyphs with explicit Arabic words
+    arrow_replacements = {
+        '\u2191': 'أعلى',
+        '\u2193': 'أسفل',
+        '\u2192': 'يمين',
+        '\u2190': 'يسار',
+        '\u25B2': 'أعلى',
+        '\u25BC': 'أسفل',
+        '\u25BA': 'يمين',
+        '\u25C4': 'يسار',
+        '\u27A4': 'يمين',
+        '\u279C': 'يمين',
+        '\u2B06': 'أعلى',
+        '\u2B07': 'أسفل',
+        '\u27A1': 'يمين',
+        '\u2B05': 'يسار',
+    }
+    for arrow_char, ar_word in arrow_replacements.items():
+        if arrow_char in html:
+            html = html.replace(arrow_char, ar_word)
+
+    # Strip emojis and decorative icon markup
+    html = slide_engine._strip_presentation_icons(html)
+
+    # Strip instructional how-to phrasing if any was generated
+    how_to_patterns = [
+        r'اضغط\s+على\s+[^<]+',
+        r'اضغط\s+هنا\s+[^<]*',
+        r'اختر\s+من\s+القائمة\s+[^<]*',
+        r'راجع\s+أولاً\s+[^<]*',
+        r'يرجى\s+مراجعة\s+[^<]*',
+        r'قم\s+بالضغط\s+[^<]*',
+    ]
+    for pat in how_to_patterns:
+        html = re.sub(pat, '', html, flags=re.IGNORECASE)
+
+    return html
+
+
 def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None, slide_type='content', total_slides=None, content_source=None):
     """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
@@ -3323,11 +3374,26 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
 
     prompt = f"""{rules}{training_note}{vision_note}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
-- تحكّم كامل في الـ CSS والتخطيط: رفع أو إنزال الهيدر، ضبط هوامش البطاقات، تغيير حجم النصوص والخطوط، إزاحة العناصر يميناً أو يساراً.
-- التعديل الجراحي الموضعي: إضافة أو حذف أو تعديل بطاقة أو نص أو مكون محدد دون مساس بباقي محتويات الشريحة، ودون إعادة بناء من الصفر، ودون تدمير التنسيق.
-- إدراج وتعديل الصور والخرائط: يمكنك إدراج أو استبدال أي صورة أو خريطة مطلوبة مثل (##MAP_OVERVIEW##, ##MAP_ACCESS##, ##MAP_CATCHMENT##, ##MAP_LANDMARKS##, ##PROJECT_HERO##, ##SITE_PHOTO##) مع ضبط موضعها وأبعادها بدقة متناهية.
-- ممنوع منعاً باتاً وضع أي أيقونات أو إيموجي أو رموز تعبيرية (No icons, no emojis).
-- حافظ على كل المحتوى المفيد والهوية البصرية ومقاسات الشريحة 1280x720. لا تستخدم روابط صور خارجية عشوائية أو base64.
+1. قواعد الإزاحات والتخطيط الجراحي (Spatial & Layout Precision):
+   - تحكّم دقيق بكسلي ونسبية في CSS: رفع أو تنزيل الهيدر، ضبط هوامش البطاقات الداخلية (padding) والخارجية (margins)، وتغيير حجم البطاقات والمسافات البينية (gap).
+   - تحويل التخطيط بسلاسة بين عمودين أو ثلاثة أعمدة أو شبكة غير متماثلة (Asymmetric Grid) مع الحفاظ التام على انسيابية العناصر.
+   - ضبط المحاذاة العمودية والأفقية والتوزيع المتوازن (align-items / justify-content).
+2. النظم الجمالية والهوية المعتمدة (Design System & Tokens):
+   - الخط الرسمي المعتمد هو The Sans Arabic حصراً لجميع العناصر (العناوين 700 والنصوص 400).
+   - لوحة الألوان المعتمدة: الكحلي الملكي (#0c2340), الذهبي الاستثماري (#c5a059), الرمادي الداكن (#1a202c), والأبيض النقي (#ffffff).
+   - تحقيق تباين لوني عالي (Contrast Ratio >= 4.5:1) لضمان سهولة القراءة الفائقة.
+3. التعديل الجراحي الموضعي (Surgical Modifications):
+   - إضافة أو حذف أو تعديل بطاقة أو نص أو مكون محدد دون مساس بباقي محتويات الشريحة، ودون إعادة بناء من الصفر، ودون تدمير التنسيق.
+4. إدراج الخرائط والمكونات المعمارية:
+   - يمكنك إدراج أو استبدال أي خريطة من الخرائط الأربع المعتمدة (##MAP_OVERVIEW##, ##MAP_ACCESS##, ##MAP_CATCHMENT##, ##MAP_LANDMARKS##) أو صور المكونات مع ضبط موضعها وأبعادها بدقة.
+5. الصياغة العقارية والاستثمارية الرفيعة (Saudi Real Estate Phrasing):
+   - نبرة رسمية استثمارية رفيعة المستوى تخاطب المستثمرين واللجان التمويلية.
+   - استخدام المصطلحات العقارية السعودية الدقيقة (معامل البناء، الارتدادات، الصك الإلكتروني، كود البناء السعودي).
+6. الامتثال الصارم (Strict Compliance):
+   - ممنوع منعاً باتاً وضع أي أيقونات أو إيموجي أو رموز تعبيرية (No icons, no emojis).
+   - ممنوع وضع أي رموز أسهم (استخدم كلمات: أعلى، أسفل، يمين، يسار).
+   - خلو الشريحة تماماً من أي نص تعليمي (No How-To text).
+   - الحفاظ على مقاس الشريحة القياسي 1280x720 و overflow:hidden دون أشرطة تمرير.
 أعد JSON فقط بالشكل:
 {{"html":"<div class=\\"slide\\">...</div>","response":"شرح عربي موجز ودقيق لما قمت به جراحياً"}}
 عنوان الشريحة: {title}
@@ -3358,6 +3424,7 @@ HTML الحالي:
                     total_slides=total_slides or (slide_index + 1), content_source=content_source,
                     allow_all_maps=True,
                 )
+                output = _sanitize_designer_output(output)
                 response_text = parsed.get('response') or 'تم تحديث الشريحة بنجاح.'
                 if vision_error:
                     response_text += ' التعديل جرى على الكود بدون معاينة بصرية للشريحة.'
@@ -3375,6 +3442,7 @@ HTML الحالي:
         total_slides=total_slides or (slide_index + 1), content_source=content_source,
         allow_all_maps=True,
     )
+    fallback = _sanitize_designer_output(fallback)
     return fallback, f'تم الحفاظ على تصميم الشريحة {slide_index + 1} لتعذر التعديل التلقائي عليها.'
 
 
@@ -3526,24 +3594,31 @@ def api_designer_chat():
     audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index)
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master).
-أنت تمتلك كامل الصلاحية والقدرة الفائقة على تعديل أي جزء من العرض:
+أنت تمتلك كامل الصلاحية والقدرة الفائقة على تعديل أي جزء من العرض بدقة جراحية متناهية:
 - تعديل CSS والتخطيط (رفع/تنزيل الهيدر، تغيير الأحجام، إزاحة العناصر يميناً/يساراً، تعديل الألوان والخطوط).
 - تعديل جراحي فوري لمحتوى أي شريحة (إضافة بطاقات، حذف عناصر، تعديل نصوص) دون مساس ببقية الشريحة.
-- توليد صور حصرية للمكونات المعمارية والداخلية والخارجية ودمجها جراحياً داخل الشرائح.
-- إدراج أو استخدام أي خريطة من الخرائط الأربع (##MAP_OVERVIEW##, ##MAP_ACCESS##, ##MAP_CATCHMENT##, ##MAP_LANDMARKS##) في أي شريحة من شرائح العرض بحرية تامة دون أي قيود.
-- كن حاسماً ومبادراً، ولا تستخدم أداة ask إلا في الحالات المستحيلة الفهم تماماً. عندما يطلب المستخدم تعديلاً أو إزاحة أو تكبيراً/تصغيراً، نفّذه فوراً بدقة جراحية متناهية.
+- إدارة دورة حياة الشرائح كاملة: حذف شريحة (delete_slide)، تكرار شريحة (duplicate_slide)، إعادة ترتيب الشرائح (reorder_slides)، أو تقسيم شريحة كثيفة إلى شريحتين (split_slide).
+- إدراج الخرائط الأربع المعتمدة بدقة (insert_canonical_map): خريطة الموقع العام، خريطة شبكة الطرق والوصول، خريطة النطاق الجغرافي، وخريطة المعالم الحيوية.
+- إدراج وتعديل المخططات والرسوم المالية المعتمدة (insert_financial_chart): شلال التدفقات، تحليل الحساسية، التدفقات المركبة، وهيكل التمويل.
+- توليد صور حصرية للمكونات المعمارية والداخلية والخارجية ودمجها جراحياً داخل الشرائح مع بطاقة شرح توضيحي.
+- كن حاسماً ومبادراً، ولا تستخدم أداة ask إلا في الحالات المستحيلة الفهم تماماً. عندما يطلب المستخدم تعديلاً، نفّذه فوراً بدقة جراحية متناهية.
 {all_note} أعد JSON فقط:
-{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|generate_image|create_slide|ask|chat_only", "params":{{}}}}]}}
+{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|generate_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|create_slide|ask|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
 - generate_image: params={{"prompt":"وصف دقيق للصورة المراد توليدها", "component_name":"اسم المكون إن وجد", "slideIndex":1, "position":"surgical|background|right|left|inline"}}
+- insert_canonical_map: params={{"map_type":"overview|access|catchment|landmarks", "target":"current|indexes", "slideIndex":1}}
+- insert_financial_chart: params={{"chart_type":"waterfall|sensitivity|compound_flows|financing_structure", "target":"current|indexes", "slideIndex":1}}
+- delete_slide: params={{"slide_number":1-based}}
+- duplicate_slide: params={{"slide_number":1-based}}
+- reorder_slides: params={{"from_index":1-based, "to_index":1-based}}
+- split_slide: params={{"slide_number":1-based}}
 - create_slide: params={{"title":"العنوان", "type":"content", "instruction":"محتوى الشريحة وتصميمها"}}
 - regenerate_maps: params={{"maptype":"roadmap|satellite|hybrid|terrain"}}
 - ask: params={{"question":"سؤال عربي واحد قصير"}} — لا تستخدمه إلا إذا كان الطلب مبهمًا تمامًا ويستحيل تخمينه.
 
 قواعد إضافة واستخدام الخرائط:
-يمكنك إدراج أي خريطة في أي شريحة عبر edit_slides بتضمين الرمز المناسب:
 1. ##MAP_ACCESS## : لخريطة شبكة الطرق والمحاور والوصول.
 2. ##MAP_OVERVIEW## : لخريطة النظرة العامة والموقع العام.
 3. ##MAP_LANDMARKS## : لخريطة المعالم والخدمات والمواقع الحيوية القريبة.
@@ -3552,9 +3627,15 @@ def api_designer_chat():
 قواعد الفهم الذكي:
 1. إذا كان الطلب يتضمن تعديل كل الشرائح -> اختر target="all".
 2. إذا حدد المستخدم شرائح بأرقامها أو بأسماءها (مثل: "30", "تلاتين", "7 و 9", "شريحة الموقع") -> ضع أرقام تلك الشرائح في indexes كأرقام (1-based).
-3. إذا كان التعديل عاماً أو يخص الشريحة الحالية فقط -> اختر target="current".
-4. إذا طلب المستخدم تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
-5. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
+3. إذا طلب حذف شريحة (مثل: "احذف الشريحة 5") -> اختر tool="delete_slide" مع slide_number.
+4. إذا طلب تكرار شريحة (مثل: "كرر الشريحة 2") -> اختر tool="duplicate_slide" مع slide_number.
+5. إذا طلب تغيير ترتيب (مثل: "انقل الشريحة 8 إلى 4") -> اختر tool="reorder_slides" مع from_index و to_index.
+6. إذا كانت شريحة مكتظة وطلب تقسيمها -> اختر tool="split_slide" مع slide_number.
+7. إذا طلب خريطة الموقع أو الوصول أو المعالم -> اختر tool="insert_canonical_map".
+8. إذا طلب رسم أو مخطط مالي (شلال/حساسية/عوائد) -> اختر tool="insert_financial_chart".
+9. إذا طلب تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
+10. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
+11. في سائر طلبات التعديل والتنسيق -> اختر tool="edit_slides".
 
 {audit_note}
 
@@ -3619,6 +3700,22 @@ def api_designer_chat():
                 actions = [{'tool': 'regenerate_maps', 'params': {'maptype': 'roadmap'}}]
             elif any(word in msg_lower for word in ('قمر صناعي', 'satellite', 'فضائي')):
                 actions = [{'tool': 'regenerate_maps', 'params': {'maptype': 'satellite'}}]
+            elif any(word in msg_lower for word in ('احذف الشريحة', 'حذف الشريحة', 'امسح الشريحة', 'إزالة الشريحة', 'احذف شريحة')):
+                actions = [{'tool': 'delete_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
+            elif any(word in msg_lower for word in ('كرر الشريحة', 'تكرار الشريحة', 'انسخ الشريحة', 'استنساخ الشريحة', 'دبلر الشريحة')):
+                actions = [{'tool': 'duplicate_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
+            elif any(word in msg_lower for word in ('قسّم الشريحة', 'تقسيم الشريحة', 'قسم الشريحة', 'شريحتين')):
+                actions = [{'tool': 'split_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
+            elif any(word in msg_lower for word in ('خريطة وصول', 'خريطة الطرق', 'طرق الوصول')):
+                actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'access', 'slideIndex': current_index + 1}}]
+            elif any(word in msg_lower for word in ('خريطة المعالم', 'المعالم القريبة', 'معالم حيوية')):
+                actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'landmarks', 'slideIndex': current_index + 1}}]
+            elif any(word in msg_lower for word in ('نطاق التأثير', 'النطاق الجغرافي', 'خريطة النطاق')):
+                actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'catchment', 'slideIndex': current_index + 1}}]
+            elif any(word in msg_lower for word in ('خريطة الموقع', 'موقع عام', 'خريطة الارض')):
+                actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'overview', 'slideIndex': current_index + 1}}]
+            elif any(word in msg_lower for word in ('مخطط مالي', 'رسم بياني مالي', 'شلال التدفقات', 'تحليل الحساسية')):
+                actions = [{'tool': 'insert_financial_chart', 'params': {'chart_type': 'waterfall', 'slideIndex': current_index + 1}}]
             elif any(word in msg_lower for word in ('صورة', 'صوره', 'image', 'توليد صورة')):
                 actions = [{'tool': 'generate_image', 'params': {'prompt': message, 'target': target, 'indexes': target_indexes, 'slideIndex': current_index + 1}}]
             else:
@@ -3712,10 +3809,12 @@ def api_designer_chat():
                 for idx in targets:
                     slide = slides[idx] if isinstance(slides[idx], dict) else {}
                     orig_html = slide.get('html', '')
+                    caption_text = comp_name or prompt[:60]
+                    caption_markup = f'<div data-visual-media-caption="1" style="font-size:12px;color:#c5a059;margin-top:6px;font-weight:600;text-align:center;">{caption_text}</div>'
                     if position in ('surgical', 'inline') or not position:
                         instruction_img = (
-                            f"أدرج الصورة الجديدة ({image}) في تصميم الشريحة كعنصر مرئي رئيسي متناسق وجميل. "
-                            f"حافظ على جميع النصوص والبطاقات واضبط مكان الصورة باحترافية وتوازن بدون أي إيموجي."
+                            f"أدرج الصورة الجديدة ({image}) في تصميم الشريحة كعنصر مرئي رئيسي متناسق وجميل مع بطاقة شرح توضيحي ({caption_markup}). "
+                            f"حافظ على جميع النصوص والبطاقات واضبط مكان الصورة باحترافية وتوازن بدون أي إيموجي أو أيقونات."
                         )
                         updated_html, r_msg = _designer_edit_slide(
                             orig_html, slide.get('title', f'شريحة {idx + 1}'),
@@ -3733,11 +3832,151 @@ def api_designer_chat():
                         slide['html'] = re.sub(r'(</div>\s*)$', tag + r'\1', orig_html or '', count=1)
                     else:
                         side = 'right:40px' if position != 'left' else 'left:40px'
-                        tag = f'<img src="{image}" alt="" style="position:absolute;{side};top:120px;width:38%;max-height:480px;object-fit:cover;z-index:2;">'
+                        tag = f'<div style="position:absolute;{side};top:120px;width:38%;z-index:2;"><img src="{image}" alt="" style="width:100%;max-height:460px;object-fit:cover;border-radius:8px;">{caption_markup}</div>'
                         slide['html'] = re.sub(r'(</div>\s*)$', tag + r'\1', orig_html or '', count=1)
                     slides[idx] = slide
                 creative_images.setdefault('generated', []).append(image)
                 executed.append({'tool': tool, 'status': 'success', 'indexes': targets, 'image': image})
+            elif tool in ('insert_canonical_map', 'insert_map'):
+                map_type = str(params.get('map_type') or 'overview').lower()
+                token_map = {
+                    'overview': ('##MAP_OVERVIEW##', 'خريطة الموقع العام ونظرة جوية للأرض'),
+                    'access': ('##MAP_ACCESS##', 'خريطة شبكة الطرق والمحاور الرئيسية للوصول'),
+                    'catchment': ('##MAP_CATCHMENT##', 'خريطة النطاق الجغرافي واستيعاب المنطقة'),
+                    'landmarks': ('##MAP_LANDMARKS##', 'خريطة المعالم الحيوية والخدمات وأوقات القيادة'),
+                }
+                token, label = token_map.get(map_type, ('##MAP_OVERVIEW##', 'خريطة الموقع العام'))
+                targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
+                instruction_map = (
+                    f"أدرج الخريطة المعتمدة {token} بعنوان «{label}» في تصميم الشريحة بشكل متناسق ومتقن كعنصر محوري أو في بطاقة مكانية. "
+                    f"حافظ على كافة نصوص وبيانات الشريحة وخلوها التام من أي إيموجي أو أيقونات."
+                )
+                for idx in targets:
+                    slide = slides[idx] if isinstance(slides[idx], dict) else {}
+                    orig_html = slide.get('html', '')
+                    updated_html, r_msg = _designer_edit_slide(
+                        orig_html, slide.get('title', f'شريحة {idx + 1}'),
+                        instruction_map, idx, project_data, presentation_id, branding,
+                        tenant_id=tenant_id, creative_images=creative_images,
+                        user_image_refs=user_image_refs, slide_type=slide.get('type', 'content'),
+                        total_slides=len(slides),
+                        content_source=slide.get('content_source') or slide.get('contentSource'),
+                    )
+                    slide['html'] = updated_html
+                    slides[idx] = slide
+                    if r_msg:
+                        assistant_messages.append(r_msg)
+                executed.append({'tool': tool, 'status': 'success', 'indexes': targets, 'map_type': map_type})
+            elif tool in ('insert_financial_chart', 'update_financial_chart'):
+                chart_type = str(params.get('chart_type') or 'waterfall').lower()
+                targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
+                chart_desc = {
+                    'waterfall': 'مخطط شلال التدفقات النقدية والأرباح الصافية',
+                    'sensitivity': 'مخطط تحليل الحساسية للإيرادات ونسب الإشغال',
+                    'compound_flows': 'مخطط التدفقات التراكمية وصافي القيمة الحالية (NPV)',
+                    'financing_structure': 'مخطط توزيع هيكل التمويل والنفقات الرأسمالية والتشغيلية',
+                }.get(chart_type, 'مخطط التحليل المالي والاستثماري')
+                instruction_chart = (
+                    f"أدرج رسم بياني مالي احترافي متناسق يوضح «{chart_desc}» معتمد على الأرقام والمؤشرات المالية للمشروع. "
+                    f"حافظ على ألوان الهوية الرسمية (الكحلي الملكي والذهبي الاستثماري) والتباين العالي وخلو الشريحة من أي إيموجي أو أيقونات."
+                )
+                for idx in targets:
+                    slide = slides[idx] if isinstance(slides[idx], dict) else {}
+                    orig_html = slide.get('html', '')
+                    updated_html, r_msg = _designer_edit_slide(
+                        orig_html, slide.get('title', f'شريحة {idx + 1}'),
+                        instruction_chart, idx, project_data, presentation_id, branding,
+                        tenant_id=tenant_id, creative_images=creative_images,
+                        user_image_refs=user_image_refs, slide_type=slide.get('type', 'content'),
+                        total_slides=len(slides),
+                        content_source=slide.get('content_source') or slide.get('contentSource'),
+                    )
+                    slide['html'] = updated_html
+                    slides[idx] = slide
+                    if r_msg:
+                        assistant_messages.append(r_msg)
+                executed.append({'tool': tool, 'status': 'success', 'indexes': targets, 'chart_type': chart_type})
+            elif tool in ('delete_slide', 'remove_slide'):
+                raw_num = params.get('slide_number') or params.get('slide_index') or params.get('index')
+                try:
+                    target_num = int(raw_num)
+                except (TypeError, ValueError):
+                    target_num = current_index + 1
+                del_idx = target_num - 1
+                if 0 <= del_idx < len(slides):
+                    if len(slides) > 1:
+                        removed = slides.pop(del_idx)
+                        assistant_messages.append(f'تم حذف الشريحة رقم {target_num} («{removed.get("title", "")}») بنجاح.')
+                        executed.append({'tool': tool, 'status': 'success', 'deleted_index': del_idx})
+                    else:
+                        assistant_messages.append('لا يمكن حذف الشريحة الوحيدة المتبقية في العرض.')
+                        executed.append({'tool': tool, 'status': 'rejected', 'reason': 'single_slide'})
+                else:
+                    assistant_messages.append(f'رقم الشريحة {target_num} غير موجود في العرض.')
+                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'out_of_bounds'})
+            elif tool in ('duplicate_slide', 'clone_slide'):
+                raw_num = params.get('slide_number') or params.get('slide_index') or params.get('index')
+                try:
+                    target_num = int(raw_num)
+                except (TypeError, ValueError):
+                    target_num = current_index + 1
+                dup_idx = target_num - 1
+                if 0 <= dup_idx < len(slides):
+                    cloned = copy.deepcopy(slides[dup_idx])
+                    cur_title = cloned.get('title', '')
+                    cloned['title'] = cur_title + ' (نسخة)' if not cur_title.endswith('(نسخة)') else cur_title
+                    slides.insert(dup_idx + 1, cloned)
+                    assistant_messages.append(f'تم تكرار الشريحة رقم {target_num} بنجاح.')
+                    executed.append({'tool': tool, 'status': 'success', 'duplicated_index': dup_idx + 1})
+                else:
+                    assistant_messages.append(f'رقم الشريحة {target_num} غير موجود.')
+                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'out_of_bounds'})
+            elif tool in ('reorder_slides', 'move_slide'):
+                from_num = params.get('from_index') or params.get('from')
+                to_num = params.get('to_index') or params.get('to')
+                try:
+                    f_idx = int(from_num) - 1
+                    t_idx = int(to_num) - 1
+                except (TypeError, ValueError):
+                    f_idx, t_idx = -1, -1
+                if 0 <= f_idx < len(slides) and 0 <= t_idx < len(slides) and f_idx != t_idx:
+                    moved = slides.pop(f_idx)
+                    slides.insert(t_idx, moved)
+                    assistant_messages.append(f'تم نقل الشريحة من الترتيب {f_idx + 1} إلى الترتيب {t_idx + 1} بنجاح.')
+                    executed.append({'tool': tool, 'status': 'success', 'from_index': f_idx, 'to_index': t_idx})
+                else:
+                    assistant_messages.append('تعذر تغيير ترتيب الشريحة؛ تحقق من أرقام الشرائح المحددة.')
+                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'invalid_indexes'})
+            elif tool in ('split_slide', 'split_dense_slide'):
+                raw_num = params.get('slide_number') or params.get('slide_index') or params.get('index')
+                try:
+                    target_num = int(raw_num)
+                except (TypeError, ValueError):
+                    target_num = current_index + 1
+                sp_idx = target_num - 1
+                if 0 <= sp_idx < len(slides):
+                    base_slide = slides[sp_idx]
+                    part2 = copy.deepcopy(base_slide)
+                    part1_title = base_slide.get('title', '') + ' - الجزء الأول'
+                    part2_title = base_slide.get('title', '') + ' - الجزء الثاني'
+                    base_slide['title'] = part1_title
+                    part2['title'] = part2_title
+                    
+                    instr_p1 = "قسّم محتوى هذه الشريحة واحتفظ فقط بالنصف الأول من البيانات والعناصر بشكل مريح وفسيح بدون أي حشو."
+                    instr_p2 = "قسّم محتوى هذه الشريحة واحتفظ فقط بالنصف الثاني من البيانات والعناصر المتبقية بشكل أنيق ومتناسق."
+                    
+                    h1, _ = _designer_edit_slide(base_slide.get('html', ''), part1_title, instr_p1, sp_idx, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs, slide_type=base_slide.get('type', 'content'), total_slides=len(slides) + 1)
+                    h2, _ = _designer_edit_slide(part2.get('html', ''), part2_title, instr_p2, sp_idx + 1, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs, slide_type=part2.get('type', 'content'), total_slides=len(slides) + 1)
+                    
+                    base_slide['html'] = h1
+                    part2['html'] = h2
+                    slides[sp_idx] = base_slide
+                    slides.insert(sp_idx + 1, part2)
+                    assistant_messages.append(f'تم تقسيم الشريحة رقم {target_num} بنجاح إلى شريحتين متناسقتين.')
+                    executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx})
+                else:
+                    assistant_messages.append(f'رقم الشريحة {target_num} غير صحيح.')
+                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'out_of_bounds'})
             elif tool in ('create_slide', 'create_design_slide'):
                 title = params.get('title') or 'شريحة جديدة'
                 slide_type = params.get('type') or 'content'
