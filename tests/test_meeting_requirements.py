@@ -1321,6 +1321,24 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('/uploads/maps/', cleaned)
         self.assertIn('بيانات الجدول الزمني', cleaned)
 
+    def test_renumbering_does_not_delete_a_saved_map_url(self):
+        engine = self.application_module.slide_engine
+        html = (
+            '<div class="slide">'
+            '<img src="/uploads/maps/overview.png" alt="خريطة محفوظة">'
+            '<img src="##MAP_ACCESS##" alt="خريطة غير محلولة">'
+            '<p>نبذة عن المشروع</p></div>'
+        )
+        renumbered = engine.renumber_presentation_slides([
+            {'title': 'نبذة عن المشروع', 'type': 'content', 'section_key': 'overview', 'html': html},
+        ], branding={'primary_color': '#123456'}, project_data={'project_name': 'المشروع'})
+
+        # Opening/re-numbering a saved presentation must not silently erase a map
+        # that was already resolved and persisted. An unresolved token is still
+        # removed because it has no image to render.
+        self.assertIn('/uploads/maps/overview.png', renumbered[0]['html'])
+        self.assertNotIn('##MAP_ACCESS##', renumbered[0]['html'])
+
     def test_legacy_full_renderer_cannot_restore_map_in_visual_slide(self):
         engine = self.application_module.slide_engine
 

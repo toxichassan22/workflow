@@ -5446,7 +5446,8 @@ def _map_media_allowed(slide_type, content_source, slide_title=''):
     }
 
 
-def _strip_unplanned_map_media(html, slide_type, content_source=None, slide_title=None):
+def _strip_unplanned_map_media(html, slide_type, content_source=None, slide_title=None,
+                               strip_resolved=True):
     """Remove map tokens and resolved map assets from non-location slides.
 
     The model receives the available map tokens as context.  Without this final
@@ -5459,7 +5460,12 @@ def _strip_unplanned_map_media(html, slide_type, content_source=None, slide_titl
     # Map variants include forms such as _SATELLITE, _ROADMAP and
     # _SATELLITE_EDITABLE. Keep the suffix open-ended so no variant can leak
     # into a non-location slide and later resolve into a real map image.
-    map_ref = r'(?:##MAP_(?:OVERVIEW|LANDMARKS|ACCESS|CATCHMENT)(?:_[A-Z0-9]+)*##|/uploads/maps/|/api/map-images/)'
+    map_token_ref = r'##MAP_(?:OVERVIEW|LANDMARKS|ACCESS|CATCHMENT)(?:_[A-Z0-9]+)*##'
+    resolved_map_ref = r'/uploads/maps/|/api/map-images/'
+    map_ref = (
+        rf'(?:{map_token_ref}|{resolved_map_ref})'
+        if strip_resolved else map_token_ref
+    )
     html = re.sub(
         rf'<img\b[^>]*(?:src\s*=\s*["\'][^"\']*{map_ref}[^"\']*["\']|{map_ref})[^>]*>',
         '', html, flags=re.IGNORECASE,
@@ -5469,7 +5475,7 @@ def _strip_unplanned_map_media(html, slide_type, content_source=None, slide_titl
         '', html, flags=re.IGNORECASE,
     )
     html = re.sub(r'\sdata-map-summary-(?:background|card)(?:\s*=\s*["\'][^"\']*["\'])?', '', html, flags=re.IGNORECASE)
-    html = re.sub(r'##MAP_(?:OVERVIEW|LANDMARKS|ACCESS|CATCHMENT)(?:_[A-Z0-9]+)*##', '', html, flags=re.IGNORECASE)
+    html = re.sub(map_token_ref, '', html, flags=re.IGNORECASE)
     return html
 
 
@@ -9544,9 +9550,15 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                     project_logo=_project_logo_reference(project_data),
                 )
             item['html'] = _rewrite_slide_counter(html, slide_type, index, total)
+            # Generation already applies the strict media ownership boundary in
+            # finalize_slide_html().  Re-numbering is also used when an existing
+            # presentation is opened, so it must not delete a map URL that was
+            # deliberately saved in a slide (for example after a designer-chat
+            # insertion).  Unresolved map tokens are still removed here because
+            # they cannot render an image on their own.
             item['html'] = _strip_unplanned_map_media(
                 item['html'], slide_type, content_source=item.get('content_source'),
-                slide_title=title)
+                slide_title=title, strip_resolved=False)
             if item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source')):
                 item['html'] = _strip_market_slide_media(item['html'])
     return normalized
