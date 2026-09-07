@@ -6464,6 +6464,7 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         creative = {}
     placeholders = {}
     map_zooms = {}
+    map_centers = {}
     map_highlight_site = None
     seen_types = set()
     seen_placeholders = set()
@@ -6498,27 +6499,41 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         )
         if not current_map_metadata:
             continue
-        if creative.get('map_lat') is None and metadata.get('lat') is not None:
+        # The map row is the source of truth for the image that was actually
+        # approved.  Project JSON can lag behind it when a user edits a map and
+        # immediately starts presentation generation, so do not let stale JSON
+        # metadata survive a hydration pass.
+        if metadata.get('lat') is not None:
             creative['map_lat'] = metadata['lat']
-        if creative.get('map_lng') is None and metadata.get('lng') is not None:
+        if metadata.get('lng') is not None:
             creative['map_lng'] = metadata['lng']
         if metadata.get('zoom') is not None:
             base_type = image_type
-            if base_type.endswith('_satellite') or base_type.endswith('_roadmap'):
-                base_type = base_type.rsplit('_', 1)[0]
+            for suffix in ('_editable', '_satellite', '_roadmap'):
+                if base_type.endswith(suffix):
+                    base_type = base_type[:-len(suffix)]
             map_zooms.setdefault(base_type, metadata['zoom'])
-        if metadata.get('landmarks_matrix') and not creative.get('map_landmarks'):
+        if metadata.get('center_lat') is not None and metadata.get('center_lng') is not None:
+            base_type = image_type
+            for suffix in ('_editable', '_satellite', '_roadmap'):
+                if base_type.endswith(suffix):
+                    base_type = base_type[:-len(suffix)]
+            if base_type in {'overview', 'access', 'catchment', 'landmarks'}:
+                map_centers.setdefault(base_type, {
+                    'lat': metadata['center_lat'], 'lng': metadata['center_lng']
+                })
+        if 'landmarks_matrix' in metadata:
             creative['map_landmarks'] = metadata['landmarks_matrix']
-        if metadata.get('access_roads') and not project_data.get('access_roads_data'):
+        if 'access_roads' in metadata:
             project_data['access_roads_data'] = metadata['access_roads']
             creative['map_access_roads'] = metadata['access_roads']
-        if metadata.get('catchment_landmarks') and not project_data.get('catchment_map_landmarks'):
+        if 'catchment_landmarks' in metadata:
             project_data['catchment_map_landmarks'] = metadata['catchment_landmarks']
             creative['map_catchment_landmarks'] = metadata['catchment_landmarks']
-        if metadata.get('landmark_map_items') and not project_data.get('landmark_map_items'):
+        if 'landmark_map_items' in metadata:
             project_data['landmark_map_items'] = metadata['landmark_map_items']
             creative['map_landmark_items'] = metadata['landmark_map_items']
-        if map_highlight_site is None and metadata.get('highlight_site') is not None:
+        if metadata.get('highlight_site') is not None:
             map_highlight_site = bool(metadata.get('highlight_site'))
     existing_placeholders = creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {}
     merged_placeholders = {key: value for key, value in existing_placeholders.items() if key and value}
@@ -6529,6 +6544,8 @@ def _merge_persisted_map_assets(project_data, tenant_id, presentation_id=None, d
         creative['map_highlight_site'] = map_highlight_site
     if map_zooms:
         creative['map_zooms'] = map_zooms
+    if map_centers:
+        creative['map_centers'] = map_centers
     project_data['tenantCreativeImages'] = creative
     return project_data
 
@@ -6539,14 +6556,19 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
     Map files are persisted separately from the presentation JSON.  A request may
     therefore have a perfectly valid presentation id but an incomplete client
     ``creativeImages`` object, especially after reopening an older draft.  Merge
-    the DB-backed assets first, then let explicitly supplied request values win.
+    the DB-backed assets first, then use request values only as a fallback when
+    no persisted map file exists for that placeholder.
     """
     source = project_data if isinstance(project_data, dict) else {}
     request_images = dict(images) if isinstance(images, dict) else {}
     draft_id = source.get('draftId') or source.get('draft_id')
+    persisted_records = []
     if presentation_id or draft_id:
         source = _merge_persisted_map_assets(
             source, tenant_id, presentation_id=presentation_id, draft_id=draft_id
+        )
+        persisted_records = db.get_map_images(
+            tenant_id, presentation_id=presentation_id, draft_id=draft_id
         )
 
     creative = source.get('tenantCreativeImages') if isinstance(source.get('tenantCreativeImages'), dict) else {}
@@ -6555,9 +6577,32 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
         source.get('map_placeholders') if isinstance(source.get('map_placeholders'), dict) else {},
         request_images.get('map_placeholders') if isinstance(request_images.get('map_placeholders'), dict) else {},
     )
+    # A browser may still hold the map URL from before the last local edit was
+    # recomposed.  The persisted image rows are written in the same request that
+    # confirms the edit, so they must win over every client-side copy here.
     placeholders = {}
     for values in placeholder_sources:
         placeholders.update({key: value for key, value in values.items() if key and value})
+    persisted_file_records = []
+    for record in persisted_records:
+        placeholder = record.get('placeholder')
+        path = record.get('file_path')
+        if placeholder and path and os.path.exists(path):
+            try:
+                rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
+            except ValueError:
+                rel_path = 'uploads/maps/' + os.path.basename(path)
+            persisted_file_records.append(record)
+            placeholders[placeholder] = '/' + rel_path
+    # Older plans or an over-helpful model may ask for the editable sidecar token.
+    # A generated presentation must always receive the approved, marked image;
+    # the sidecar is only for the interactive map editor.
+    for placeholder, path in list(placeholders.items()):
+        if not placeholder.endswith('_EDITABLE##'):
+            continue
+        canonical = placeholder.replace('_EDITABLE##', '##')
+        if placeholders.get(canonical):
+            placeholders[placeholder] = placeholders[canonical]
     if placeholders:
         request_images['map_placeholders'] = placeholders
 
@@ -6568,7 +6613,9 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
         'map_catchment_landmarks', 'map_landmark_items', 'map_highlight_site',
         'map_lat', 'map_lng', 'maps_persisted', 'map_approvals',
     ):
-        if key not in request_images and key in creative:
+        if persisted_file_records and key in creative:
+            request_images[key] = creative[key]
+        elif key not in request_images and key in creative:
             request_images[key] = creative[key]
     return source, request_images
 

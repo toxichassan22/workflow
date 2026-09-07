@@ -5438,6 +5438,66 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
         self.assertTrue(images['map_placeholders']['##MAP_OVERVIEW##'].endswith(os.path.basename(map_path)))
 
+    def test_slide_requests_prefer_latest_edited_map_over_stale_browser_assets(self):
+        old_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_old.png', delete=False)
+        old_path = old_file.name
+        old_file.write(b'old-browser-map')
+        old_file.close()
+        edited_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_edited.png', delete=False)
+        edited_path = edited_file.name
+        edited_file.write(b'latest-edited-map')
+        edited_file.close()
+        editable_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_editable.png', delete=False)
+        editable_path = editable_file.name
+        editable_file.write(b'clean-sidecar')
+        editable_file.close()
+        for path in (old_path, edited_path, editable_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+
+        metadata = {
+            'lat': 24.0,
+            'lng': 46.0,
+            'zoom': 18,
+            'center_lat': 24.01,
+            'center_lng': 46.01,
+            'map_highlight_version': self.application_module.maps_service.MAP_HIGHLIGHT_RENDER_VERSION,
+            'map_label_version': self.application_module.maps_service.MAP_LABEL_RENDER_VERSION,
+        }
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'overview', edited_path, '##MAP_OVERVIEW##',
+                             presentation_id='pres-edited-map', metadata=metadata)
+            db.add_map_image(self.tenant_a, 'overview_editable', editable_path, '##MAP_OVERVIEW_EDITABLE##',
+                             presentation_id='pres-edited-map', metadata=metadata)
+            project, images = self.application_module._hydrate_map_assets_for_request(
+                {
+                    'tenantCreativeImages': {
+                        'map_placeholders': {
+                            '##MAP_OVERVIEW##': '/old-saved-map.png',
+                            '##MAP_OVERVIEW_EDITABLE##': '/old-sidecar.png',
+                        },
+                        'map_zooms': {'overview': 12},
+                        'map_centers': {'overview': {'lat': 25.0, 'lng': 47.0}},
+                    }
+                },
+                {
+                    'map_placeholders': {
+                        '##MAP_OVERVIEW##': '/old-browser-map.png',
+                        '##MAP_OVERVIEW_EDITABLE##': '/old-browser-sidecar.png',
+                    },
+                    'map_zooms': {'overview': 11},
+                    'map_centers': {'overview': {'lat': 26.0, 'lng': 48.0}},
+                },
+                self.tenant_a,
+                presentation_id='pres-edited-map',
+            )
+
+        self.assertTrue(images['map_placeholders']['##MAP_OVERVIEW##'].endswith(os.path.basename(edited_path)))
+        self.assertTrue(images['map_placeholders']['##MAP_OVERVIEW_EDITABLE##'].endswith(os.path.basename(edited_path)))
+        self.assertEqual(images['map_zooms']['overview'], 18)
+        self.assertEqual(images['map_centers']['overview'], {'lat': 24.01, 'lng': 46.01})
+        self.assertEqual(project['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##'],
+                         images['map_placeholders']['##MAP_OVERVIEW##'])
+
     def test_saved_legacy_map_file_is_not_wiped_by_renderer_version_change(self):
         map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='.png', delete=False)
         map_path = map_file.name
