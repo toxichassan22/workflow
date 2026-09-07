@@ -3149,6 +3149,105 @@ def _designer_target_indexes(action, count, current_index, force_all=False):
     return [max(0, min(idx, count - 1))] if count else []
 
 
+def _find_component_reference_image(component_query, project_data, creative_images=None):
+    """Search project and creative data for reference images belonging to a component or query."""
+    if not component_query:
+        return []
+    query_str = str(component_query).strip().lower()
+    creative = _designer_creative_images(project_data, creative_images) if isinstance(project_data, dict) else (creative_images or {})
+    references = []
+
+    # 1. Search interior components in creative_images and project_data
+    int_comps = creative.get('interior_components') or (project_data.get('interior_components') if isinstance(project_data, dict) else []) or (project_data.get('interiorComponents') if isinstance(project_data, dict) else [])
+    if isinstance(int_comps, list):
+        for comp in int_comps:
+            if not isinstance(comp, dict):
+                continue
+            name = str(comp.get('name') or '').strip().lower()
+            if name and (name in query_str or query_str in name):
+                for img in comp.get('images') or []:
+                    uri = img.get('data_uri') or img.get('url') or img.get('file_path') or (img if isinstance(img, str) else '')
+                    if uri and uri not in references:
+                        references.append(uri)
+
+    # 2. Search project components list
+    proj_comps = (project_data.get('project_components') or project_data.get('components') or project_data.get('components_data')) if isinstance(project_data, dict) else []
+    if isinstance(proj_comps, list):
+        for comp in proj_comps:
+            if not isinstance(comp, dict):
+                continue
+            name = str(comp.get('name') or comp.get('title') or '').strip().lower()
+            if name and (name in query_str or query_str in name):
+                for key in ('image', 'image_url', 'reference_image', 'data_uri'):
+                    val = comp.get(key)
+                    if val and val not in references:
+                        references.append(val)
+
+    # 3. Search moodboard / exterior
+    moodboard = creative.get('moodboard') or (project_data.get('moodboard') if isinstance(project_data, dict) else [])
+    moodboard_meta = creative.get('moodboard_meta') or (project_data.get('moodboard_meta') if isinstance(project_data, dict) else [])
+    if isinstance(moodboard, list) and isinstance(moodboard_meta, list):
+        for idx, img in enumerate(moodboard):
+            meta = moodboard_meta[idx] if idx < len(moodboard_meta) and isinstance(moodboard_meta[idx], dict) else {}
+            lbl = str(meta.get('label') or meta.get('caption') or '').strip().lower()
+            if lbl and (lbl in query_str or query_str in lbl):
+                if img and img not in references:
+                    references.append(img)
+
+    # 4. Search plans
+    plans = creative.get('plans') or (project_data.get('plans') if isinstance(project_data, dict) else [])
+    plan_meta = creative.get('plan_meta') or (project_data.get('plan_meta') if isinstance(project_data, dict) else [])
+    if isinstance(plans, list) and isinstance(plan_meta, list):
+        for idx, img in enumerate(plans):
+            meta = plan_meta[idx] if idx < len(plan_meta) and isinstance(plan_meta[idx], dict) else {}
+            lbl = str(meta.get('title') or meta.get('name') or meta.get('description') or '').strip().lower()
+            if lbl and (lbl in query_str or query_str in lbl):
+                if img and img not in references:
+                    references.append(img)
+
+    return references[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
+
+
+def _build_designer_section_and_asset_context(slides, project_data, current_index):
+    """Build full situational and section asset audit context for Sol the designer."""
+    slides_count = len(slides)
+    cur_slide = slides[current_index] if 0 <= current_index < slides_count and isinstance(slides[current_index], dict) else {}
+    cur_title = cur_slide.get('title', f'شريحة {current_index + 1}')
+
+    # Audit map usage across slides
+    map_usage = {
+        '##MAP_OVERVIEW##': 0,
+        '##MAP_ACCESS##': 0,
+        '##MAP_CATCHMENT##': 0,
+        '##MAP_LANDMARKS##': 0,
+    }
+    for s in slides:
+        html = s.get('html', '') if isinstance(s, dict) else ''
+        for k in map_usage:
+            if k in html:
+                map_usage[k] += 1
+
+    audit_lines = [
+        f"## الموقف التنفيذي وتدقيق الأصول المتاحة للعرض ({slides_count} شريحة):",
+        f"- الشريحة الحالية المعروضة أمام المستخدم: [{current_index + 1}] '{cur_title}'",
+        "- حالة الخرائط الأربع الرئيسية في العرض:",
+        f"  1. خريطة النظرة العامة (##MAP_OVERVIEW##): مستخدمة {map_usage['##MAP_OVERVIEW##']} مرة",
+        f"  2. خريطة شبكة الطرق والوصول (##MAP_ACCESS##): مستخدمة {map_usage['##MAP_ACCESS##']} مرة",
+        f"  3. خريطة النطاق الجغرافي واستيعاب المنطقة (##MAP_CATCHMENT##): مستخدمة {map_usage['##MAP_CATCHMENT##']} مرة",
+        f"  4. خريطة المعالم الحيوية القريبة (##MAP_LANDMARKS##): مستخدمة {map_usage['##MAP_LANDMARKS##']} مرة",
+        "- تنبيه الخرائط: يمكنك استخدام أي من هذه الخرائط الأربع في أي شريحة من العرض بحرية تامة بتضمين الرمز المقابل.",
+    ]
+
+    # Components list
+    comps = (project_data.get('interior_components') or project_data.get('components') or []) if isinstance(project_data, dict) else []
+    if isinstance(comps, list) and comps:
+        comp_names = [str(c.get('name') or c.get('title') or '').strip() for c in comps if isinstance(c, dict) and (c.get('name') or c.get('title'))]
+        if comp_names:
+            audit_lines.append(f"- مكونات المشروع المسجلة: {', '.join(comp_names[:12])}")
+
+    return "\n".join(audit_lines)
+
+
 def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None, slide_type='content', total_slides=None, content_source=None):
     """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
@@ -3219,13 +3318,18 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
         return ph
 
     clean_html = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', _preserve_base64, html or '')
-    if len(clean_html) > 30000:
-        clean_html = clean_html[:30000]
+    if len(clean_html) > 150000:
+        clean_html = clean_html[:150000]
 
     prompt = f"""{rules}{training_note}{vision_note}
-أنت Sol، مصمم ومحرر شرائح فائق الذوق والدقة. عدّل الشريحة التالية حسب الطلب، وأعد JSON فقط بالشكل:
-{{"html":"<div class=\\"slide\\">...</div>","response":"رسالة عربية قصيرة"}}
-حافظ على كل المحتوى المفيد والهوية البصرية. لا تستخدم روابط صور خارجية أو base64.
+أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
+- تحكّم كامل في الـ CSS والتخطيط: رفع أو إنزال الهيدر، ضبط هوامش البطاقات، تغيير حجم النصوص والخطوط، إزاحة العناصر يميناً أو يساراً.
+- التعديل الجراحي الموضعي: إضافة أو حذف أو تعديل بطاقة أو نص أو مكون محدد دون مساس بباقي محتويات الشريحة، ودون إعادة بناء من الصفر، ودون تدمير التنسيق.
+- إدراج وتعديل الصور والخرائط: يمكنك إدراج أو استبدال أي صورة أو خريطة مطلوبة مثل (##MAP_OVERVIEW##, ##MAP_ACCESS##, ##MAP_CATCHMENT##, ##MAP_LANDMARKS##, ##PROJECT_HERO##, ##SITE_PHOTO##) مع ضبط موضعها وأبعادها بدقة متناهية.
+- ممنوع منعاً باتاً وضع أي أيقونات أو إيموجي أو رموز تعبيرية (No icons, no emojis).
+- حافظ على كل المحتوى المفيد والهوية البصرية ومقاسات الشريحة 1280x720. لا تستخدم روابط صور خارجية عشوائية أو base64.
+أعد JSON فقط بالشكل:
+{{"html":"<div class=\\"slide\\">...</div>","response":"شرح عربي موجز ودقيق لما قمت به جراحياً"}}
 عنوان الشريحة: {title}
 HTML الحالي:
 {clean_html}
@@ -3234,7 +3338,7 @@ HTML الحالي:
 
     for attempt in range(1, 4):
         try:
-            raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=7000, model=SLIDE_TEXT_MODEL, image_references=image_refs), 'DESIGNER-EDIT')
+            raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=16000, model=SLIDE_TEXT_MODEL, image_references=image_refs, timeout=300), 'DESIGNER-EDIT')
             parsed = _designer_json_response(raw)
             output = parsed.get('html') or parsed.get('content') or parsed.get('slide_html')
             if output and ('slide' in output and '<div' in output):
@@ -3252,6 +3356,7 @@ HTML الحالي:
                     creative_images=creative_images, tenant_id=tenant_id,
                     slide_num=slide_index + 1, slide_title=title,
                     total_slides=total_slides or (slide_index + 1), content_source=content_source,
+                    allow_all_maps=True,
                 )
                 response_text = parsed.get('response') or 'تم تحديث الشريحة بنجاح.'
                 if vision_error:
@@ -3268,6 +3373,7 @@ HTML الحالي:
         creative_images=creative_images, tenant_id=tenant_id,
         slide_num=slide_index + 1, slide_title=title,
         total_slides=total_slides or (slide_index + 1), content_source=content_source,
+        allow_all_maps=True,
     )
     return fallback, f'تم الحفاظ على تصميم الشريحة {slide_index + 1} لتعذر التعديل التلقائي عليها.'
 
@@ -3417,29 +3523,29 @@ def api_designer_chat():
         "indexes ولا تسأل عن رقم الشريحة من جديد، ولا تعتبرها الشريحة الحالية بالمصادفة."
     ) if focus_indexes else ""
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
+    audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index)
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
-أنت وكيل تصميم عروض متميز ذكي يفهم كافة اللهجات العربية، المترادفات، الأرقام، وأوامر إضافة وتحديث الخرائط والتنسيقات.
-حلل طلب المستخدم وخطط لتنفيذه على العرض.{all_note} أعد JSON فقط:
-{{"response":"رسالة عربية تشرح ما ستفعله", "actions":[{{"tool":"edit_slides|generate_image|create_slide|ask|chat_only", "params":{{}}}}]}}
+أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master).
+أنت تمتلك كامل الصلاحية والقدرة الفائقة على تعديل أي جزء من العرض:
+- تعديل CSS والتخطيط (رفع/تنزيل الهيدر، تغيير الأحجام، إزاحة العناصر يميناً/يساراً، تعديل الألوان والخطوط).
+- تعديل جراحي فوري لمحتوى أي شريحة (إضافة بطاقات، حذف عناصر، تعديل نصوص) دون مساس ببقية الشريحة.
+- توليد صور حصرية للمكونات المعمارية والداخلية والخارجية ودمجها جراحياً داخل الشرائح.
+- إدراج أو استخدام أي خريطة من الخرائط الأربع (##MAP_OVERVIEW##, ##MAP_ACCESS##, ##MAP_CATCHMENT##, ##MAP_LANDMARKS##) في أي شريحة من شرائح العرض بحرية تامة دون أي قيود.
+- كن حاسماً ومبادراً، ولا تستخدم أداة ask إلا في الحالات المستحيلة الفهم تماماً. عندما يطلب المستخدم تعديلاً أو إزاحة أو تكبيراً/تصغيراً، نفّذه فوراً بدقة جراحية متناهية.
+{all_note} أعد JSON فقط:
+{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|generate_image|create_slide|ask|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
-- edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل المطلوبة"}}
-- generate_image: params={{"prompt":"وصف الصورة", "slideIndex":1, "position":"background|right|left|inline"}}
-- create_slide: params={{"title":"العنوان", "type":"content", "instruction":"محتوى الشريحة"}}
-- regenerate_maps: params={{"maptype":"roadmap|satellite|hybrid|terrain"}} (استخدمها عند طلب التبديل إلى شوارع/مرور/قمر صناعي)
-- ask: params={{"question":"سؤال عربي واحد قصير"}} — استخدمها عندما لا يكون الطلب واضحًا.
+- edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
+- generate_image: params={{"prompt":"وصف دقيق للصورة المراد توليدها", "component_name":"اسم المكون إن وجد", "slideIndex":1, "position":"surgical|background|right|left|inline"}}
+- create_slide: params={{"title":"العنوان", "type":"content", "instruction":"محتوى الشريحة وتصميمها"}}
+- regenerate_maps: params={{"maptype":"roadmap|satellite|hybrid|terrain"}}
+- ask: params={{"question":"سؤال عربي واحد قصير"}} — لا تستخدمه إلا إذا كان الطلب مبهمًا تمامًا ويستحيل تخمينه.
 
-متى تسأل بدل أن تنفّذ (مهم):
-- الطلب غامض أو يقبل أكثر من تنفيذ مختلف النتيجة (مثل «حسّن الشريحة» أو «غيّر التصميم» بلا تحديد).
-- لا تعرف أي شريحة يقصد ولم تحدده الرسالة ولا سياق العرض.
-- التنفيذ سيحذف أو يستبدل محتوى قائمًا ولست متأكدًا أنه مقصود.
-- أرفق المستخدم صورة ولم يوضح المطلوب منها (مرجع تصميم؟ صورة تُدرَج؟ خلل يشير إليه؟).
-في هذه الحالات أعد action واحدًا فقط: ask مع سؤال واحد محدد يمكن الإجابة عليه بكلمة أو سطر، وممنوع تنفيذ أي تعديل في نفس الرد. التخمين ثم تعديل خاطئ أسوأ من سؤال واحد.
-
-قواعد إضافة الخرائط عند طلب المستخدم (خريطة شوارع، خريطة منطقة، معالم، نطاق):
-إذا طلب المستخدم إضافة خريطة أو تعديل خريطة الشريحة، يرجى توجيه edit_slides بتضمين أحد الرموز التالية داخل كود HTML للشريحة:
-1. ##MAP_ACCESS## : لخريطة الشوارع المحيطة وشبكة الطرق والوصول.
-2. ##MAP_OVERVIEW## : لخريطة نظرة عامة شاملة للمنطقة بالكامل.
+قواعد إضافة واستخدام الخرائط:
+يمكنك إدراج أي خريطة في أي شريحة عبر edit_slides بتضمين الرمز المناسب:
+1. ##MAP_ACCESS## : لخريطة شبكة الطرق والمحاور والوصول.
+2. ##MAP_OVERVIEW## : لخريطة النظرة العامة والموقع العام.
 3. ##MAP_LANDMARKS## : لخريطة المعالم والخدمات والمواقع الحيوية القريبة.
 4. ##MAP_CATCHMENT## : لخريطة النطاق الجغرافي واستيعاب المنطقة.
 
@@ -3449,6 +3555,8 @@ def api_designer_chat():
 3. إذا كان التعديل عاماً أو يخص الشريحة الحالية فقط -> اختر target="current".
 4. إذا طلب المستخدم تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
 5. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
+
+{audit_note}
 
 قائمة الشرائح الحالية في العرض ({len(slides)} شريحة):
 {json.dumps(summary, ensure_ascii=False)}
@@ -3463,7 +3571,7 @@ def api_designer_chat():
                           " واضحًا فاسأل عنه بأداة ask.")
     try:
         planner_raw = extract_chat_content(
-            call_zai_chat(planner_prompt, message, max_tokens=2500, image_references=user_image_refs),
+            call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300),
             'DESIGNER-PLANNER')
         plan = _designer_json_response(planner_raw)
         actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
@@ -3580,21 +3688,53 @@ def api_designer_chat():
                 executed.append({'tool': tool, 'status': 'success', 'indexes': indexes})
             elif tool in ('generate_image', 'generate_design_image', 'insert_image_into_slide'):
                 prompt = params.get('prompt') or message
-                image = persist_generated_image(call_image_api(prompt), tenant_id)
+                comp_name = params.get('component_name') or params.get('component') or ''
+                if not comp_name and current_index < len(slides):
+                    cur_title = slides[current_index].get('title', '')
+                    comps = (project_data.get('interior_components') or project_data.get('components') or []) if isinstance(project_data, dict) else []
+                    for c in comps:
+                        c_title = (c.get('name') or c.get('title') or '') if isinstance(c, dict) else ''
+                        if c_title and c_title in cur_title:
+                            comp_name = c_title
+                            break
+
+                ref_images = _find_component_reference_image(comp_name or prompt or message, project_data, creative_images)
+                if ref_images:
+                    image_raw = call_image_api_with_references(prompt, references=ref_images)
+                else:
+                    image_raw = call_image_api(prompt)
+
+                image = persist_generated_image(image_raw, tenant_id)
                 if not image:
                     raise RuntimeError('تعذر توليد الصورة. تحقق من إعداد OpenRouter ورصيده.')
                 targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
-                position = params.get('position', 'right')
+                position = params.get('position', 'surgical')
                 for idx in targets:
                     slide = slides[idx] if isinstance(slides[idx], dict) else {}
-                    html = slide.get('html', '')
-                    if position == 'background':
+                    orig_html = slide.get('html', '')
+                    if position in ('surgical', 'inline') or not position:
+                        instruction_img = (
+                            f"أدرج الصورة الجديدة ({image}) في تصميم الشريحة كعنصر مرئي رئيسي متناسق وجميل. "
+                            f"حافظ على جميع النصوص والبطاقات واضبط مكان الصورة باحترافية وتوازن بدون أي إيموجي."
+                        )
+                        updated_html, r_msg = _designer_edit_slide(
+                            orig_html, slide.get('title', f'شريحة {idx + 1}'),
+                            instruction_img, idx, project_data, presentation_id, branding,
+                            tenant_id=tenant_id, creative_images=creative_images,
+                            user_image_refs=user_image_refs, slide_type=slide.get('type', 'content'),
+                            total_slides=len(slides),
+                            content_source=slide.get('content_source') or slide.get('contentSource'),
+                        )
+                        slide['html'] = updated_html
+                        if r_msg:
+                            assistant_messages.append(r_msg)
+                    elif position == 'background':
                         tag = f'<div aria-hidden="true" style="position:absolute;inset:0;background-image:url(\'{image}\');background-size:cover;background-position:center;z-index:0;"></div>'
+                        slide['html'] = re.sub(r'(</div>\s*)$', tag + r'\1', orig_html or '', count=1)
                     else:
                         side = 'right:40px' if position != 'left' else 'left:40px'
                         tag = f'<img src="{image}" alt="" style="position:absolute;{side};top:120px;width:38%;max-height:480px;object-fit:cover;z-index:2;">'
-                    html = re.sub(r'(</div>\s*)$', tag + r'\1', html or '', count=1)
-                    slide['html'] = html
+                        slide['html'] = re.sub(r'(</div>\s*)$', tag + r'\1', orig_html or '', count=1)
                     slides[idx] = slide
                 creative_images.setdefault('generated', []).append(image)
                 executed.append({'tool': tool, 'status': 'success', 'indexes': targets, 'image': image})
@@ -3620,6 +3760,7 @@ def api_designer_chat():
 
         slides = slide_engine.renumber_presentation_slides(
             slides, branding=branding, project_data=project_data, tenant_id=tenant_id,
+            allow_all_maps=True,
         )
         validation = _validate_workspace_data({'slidesData': slides})
         if not validation['valid']:

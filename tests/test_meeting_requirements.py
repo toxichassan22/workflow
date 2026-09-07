@@ -2581,7 +2581,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const sectionRequest = detectTenantSectionRegenerationRequest(message);', chat_body)
         self.assertLess(chat_body.index('await regenerateTenantSection'), chat_body.index('const moveCmd'))
         self.assertIn("apiWithTimeout('POST', '/api/designer-chat'", chat_body)
-        self.assertIn("90000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.'", chat_body)
+        self.assertIn("300000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.'", chat_body)
 
     def test_an_emptied_draft_can_be_refilled_from_a_presentation_snapshot(self):
         """Every generated presentation stored the whole project data of its moment, so a draft

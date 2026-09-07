@@ -22123,7 +22123,7 @@
         chatPayload.projectData = tenantProjectData;
       }
       const data = await apiWithTimeout('POST', '/api/designer-chat', chatPayload,
-        90000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.', {
+        300000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.', {
         onProgress: (sent, total) => {
           if (!indicator || !total) return;
           const pct = 10 + Math.round((Number(sent) / Number(total)) * 30);

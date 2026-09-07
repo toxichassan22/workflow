@@ -1536,6 +1536,88 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         groups['overview'][0]['title'] = 'نبذة عن المشروع'
         groups['overview'][0]['content_source'] = groups['overview'][0].get('content_source') or 'project_overview'
 
+    # Ensure all 4 canonical location maps (Overview, Access, Catchment, Landmarks) are mandatorily present
+    existing_loc = list(groups.get('location', []))
+    loc_by_token = {}
+    for s in existing_loc:
+        t = str(s.get('type') or '')
+        c_src = str(s.get('content_source') or '')
+        imgs = [str(x) for x in (s.get('image_tokens') or [])]
+        if '##MAP_OVERVIEW##' in imgs or t == 'map_overview' or c_src == 'location_polygon':
+            loc_by_token.setdefault('overview', s)
+        elif '##MAP_ACCESS##' in imgs or t == 'map_access' or c_src == 'main_roads':
+            loc_by_token.setdefault('access', s)
+        elif '##MAP_CATCHMENT##' in imgs or t == 'map_catchment' or c_src == 'catchment_areas':
+            loc_by_token.setdefault('catchment', s)
+        elif '##MAP_LANDMARKS##' in imgs or t == 'map_landmarks' or c_src == 'nearby_landmarks':
+            loc_by_token.setdefault('landmarks', s)
+
+    required_map_specs = [
+        ('overview', {
+            'title': 'الموقع العام وحدود الأرض',
+            'type': 'map_overview',
+            'section_key': 'location',
+            'design_style': 'map',
+            'content_density': 'medium',
+            'requires_image': True,
+            'content_source': 'location_polygon',
+            'image_tokens': ['##MAP_OVERVIEW##'],
+            'bullets': ['موقع المشروع الاستراتيجي وحدود الأرض', 'الربط المباشر مع النسيج الحضري المحيط'],
+        }),
+        ('access', {
+            'title': 'شبكة الطرق وسهولة الوصول',
+            'type': 'map_access',
+            'section_key': 'location',
+            'design_style': 'map',
+            'content_density': 'medium',
+            'requires_image': True,
+            'content_source': 'main_roads',
+            'image_tokens': ['##MAP_ACCESS##'],
+            'bullets': ['المحاور الرئيسية والشوارع المؤدية للموقع', 'سهولة وانسيابية الحركة المرورية'],
+        }),
+        ('catchment', {
+            'title': 'نطاق الخدمة والتأثير الجغرافي',
+            'type': 'map_catchment',
+            'section_key': 'location',
+            'design_style': 'map',
+            'content_density': 'medium',
+            'requires_image': True,
+            'content_source': 'catchment_areas',
+            'image_tokens': ['##MAP_CATCHMENT##'],
+            'bullets': ['نطاقات الوصول الزمني والسكاني حول المشروع', 'الكتلة السكانية والطلب في النطاق المستهدف'],
+        }),
+        ('landmarks', {
+            'title': 'المعالم الحيوية والمرافق المجاورة',
+            'type': 'map_landmarks',
+            'section_key': 'location',
+            'design_style': 'map',
+            'content_density': 'medium',
+            'requires_image': True,
+            'content_source': 'nearby_landmarks',
+            'image_tokens': ['##MAP_LANDMARKS##'],
+            'bullets': ['أهم المرافق والخدمات والوجهات المحيطة', 'المسافات وأزمنة الوصول التقديرية بالسيارة'],
+        }),
+    ]
+
+    mandatory_location_slides = []
+    for key, spec in required_map_specs:
+        existing = loc_by_token.get(key)
+        if existing:
+            existing['section_key'] = 'location'
+            existing['type'] = spec['type']
+            existing['requires_image'] = True
+            token = spec['image_tokens'][0]
+            existing_tokens = list(existing.get('image_tokens') or [])
+            if token not in existing_tokens:
+                existing_tokens.insert(0, token)
+            existing['image_tokens'] = existing_tokens
+            mandatory_location_slides.append(existing)
+        else:
+            mandatory_location_slides.append(spec)
+
+    other_location_slides = [s for s in existing_loc if s not in loc_by_token.values()]
+    groups['location'] = mandatory_location_slides + other_location_slides
+
     moodboard_items = _available_asset_items(images.get('moodboard'))
     moodboard_meta = images.get('moodboard_meta') if isinstance(images.get('moodboard_meta'), list) else []
     groups['exterior'] = [slide for slide in groups.get('exterior', [])
@@ -1554,7 +1636,8 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 'content_density': 'medium' if len(chunk) > 1 else 'low', 'requires_image': True,
                 'content_source': f'exterior_images_group:{chunk[0][0]}:{chunk[-1][0]}',
                 'image_tokens': tokens, 'image_layout': f'balanced_{len(chunk)}',
-                'bullets': [], 'media_only': True,
+                'bullets': [], 'captions': bullets,
+                'description': ' — '.join(b for b in bullets if b), 'media_only': True,
             })
     else:
         for index, item in uncovered_ext:
@@ -1566,7 +1649,8 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                 'content_density': 'low', 'requires_image': True,
                 'content_source': f'exterior_image:{index}',
                 'image_tokens': [f'##MOODBOARD_IMAGE_{index}##'],
-                'bullets': [], 'media_only': True,
+                'bullets': [], 'description': caption,
+                'captions': [caption] if caption else [], 'media_only': True,
             })
 
     land_items = _available_asset_items(images.get('land_photos'))
@@ -1632,7 +1716,8 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'content_density': 'low', 'requires_image': True,
             'content_source': f'plan_image:{index}', 'source_table': 'conceptual_plans',
             'image_tokens': [f'##PLAN_IMAGE_{index}##'], 'image_layout': 'single',
-            'bullets': [], 'media_only': True,
+            'bullets': [], 'description': description,
+            'captions': [description] if description else [], 'media_only': True,
         })
 
     interior_components = images.get('interior_components') if isinstance(images.get('interior_components'), list) else []
@@ -1647,27 +1732,33 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         if len(comp_items) > 1:
             for chunk in _pair_media_chunks(comp_items):
                 tokens = [f'##INTERIOR_COMP_{component_index}_IMG_{j}##' for j, _ in chunk]
-                labels = [str(it.get('label') or component_name).strip() for _, it in chunk]
-                combined_title = f'{component_name} — ' + ' / '.join(labels) if len(labels) > 1 else f'{component_name} — {labels[0]}'
+                labels = [str(it.get('label') or '').strip() for _, it in chunk]
+                label_parts = [l for l in labels if l and l != component_name]
+                combined_title = f'{component_name} — ' + ' / '.join(label_parts) if label_parts else component_name
                 bullets = [str(it.get('caption') or '').strip() for _, it in chunk]
                 add('interior', {
                     'title': combined_title, 'type': 'content', 'design_style': 'image',
                     'content_density': 'medium' if len(chunk) > 1 else 'low', 'requires_image': True,
                     'content_source': f'interior_images_group:{component_index}:{chunk[0][0]}:{chunk[-1][0]}',
                     'image_tokens': tokens, 'image_layout': f'balanced_{len(chunk)}',
-                    'bullets': [], 'media_only': True,
+                    'bullets': [], 'captions': bullets,
+                    'description': ' — '.join(b for b in bullets if b),
+                    'component_name': component_name, 'media_only': True,
                 })
         else:
             for image_index, item in uncovered_comp_items:
-                label = str(item.get('label') or component_name).strip()
+                label = str(item.get('label') or '').strip()
                 caption = str(item.get('caption') or '').strip()
+                title = f'{component_name} — {label}' if (label and label != component_name) else component_name
                 add('interior', {
-                    'title': f'{component_name} — {label}' if label != component_name else component_name,
+                    'title': title,
                     'type': 'content', 'design_style': 'image', 'content_density': 'low',
                     'requires_image': True,
                     'content_source': f'interior_image:{component_index}:{image_index}',
                     'image_tokens': [f'##INTERIOR_COMP_{component_index}_IMG_{image_index}##'],
-                    'bullets': [], 'media_only': True,
+                    'bullets': [], 'description': caption,
+                    'captions': [caption] if caption else [],
+                    'component_name': component_name, 'media_only': True,
                 })
 
     components = _project_component_rows(source)
@@ -5434,8 +5525,10 @@ def _ensure_map_placeholder(html, slide_type):
     return html
 
 
-def _map_media_allowed(slide_type, content_source, slide_title=''):
+def _map_media_allowed(slide_type, content_source, slide_title='', allow_all_maps=False):
     """Return whether a slide is explicitly allowed to carry a generated map."""
+    if allow_all_maps:
+        return True
     slide_type = str(slide_type or '').strip().lower()
     content_source = str(content_source or '').strip().lower()
     slide_title = str(slide_title or '').strip().lower()
@@ -5452,21 +5545,21 @@ def _map_media_allowed(slide_type, content_source, slide_title=''):
     if content_source.startswith('land_') or content_source in {'land', 'croquis'}:
         return True
     return bool(re.search(
-        r'(?:تحليل\s*الأرض|الأرض\s*والاشتراطات|الأرض\s*والكروكي|حدود\s*الأرض|الكروكي|land analysis|land/croquis|croquis)',
+        r'(?:تحليل\s*الأرض|الأرض\s*والاشتراطات|الأرض\s*والكروكي|حدود\s*الأرض|الكروكي|land analysis|land/croquis|croquis|خريطة|خرائط|موقع|الموقع|طرق|وصول|معالم|نطاق)',
         slide_title, flags=re.IGNORECASE,
     ))
 
 
 def _strip_unplanned_map_media(html, slide_type, content_source=None, slide_title=None,
-                               strip_resolved=True):
+                               strip_resolved=True, allow_all_maps=False):
     """Remove map tokens and resolved map assets from slides that do not own maps.
 
-    The model receives the available map tokens as context.  Without this final
+    The model receives the available map tokens as context. Without this final
     boundary it could place a valid map token in a timeline, finance, plans,
     exterior or interior slide and the resolver would turn that token into a
     real map image.
     """
-    if not html or _map_media_allowed(slide_type, content_source, slide_title):
+    if not html or allow_all_maps or _map_media_allowed(slide_type, content_source, slide_title, allow_all_maps=allow_all_maps):
         return html
 
     # Map variants include forms such as _SATELLITE, _ROADMAP and
@@ -7718,27 +7811,76 @@ def _is_visual_concept_media_slide(slide):
     )))
 
 
-def _build_visual_concept_media_slide(slide):
-    """Build a media-only visual-concept slide; SOL must not add captions or prose here."""
+def _build_visual_concept_media_slide(slide, branding=None):
+    """Build a media visual-concept slide with prominent component/title header and captions."""
     tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
     if not tokens:
         return None
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
+    secondary = normalize_hex_color((branding or {}).get('secondary_color'), '#0ea5e9')
+    title = html_lib.escape(str((slide or {}).get('title') or '').strip())
+    component_name = html_lib.escape(str((slide or {}).get('component_name') or '').strip())
+
+    captions = (slide or {}).get('captions')
+    if not isinstance(captions, list):
+        captions = (slide or {}).get('bullets')
+    if not isinstance(captions, list):
+        captions = []
+    description = str((slide or {}).get('description') or '').strip()
+
     columns = 1 if len(tokens) == 1 else 2
-    images = ''.join(
-        '<div style="min-width:0;min-height:0;overflow:hidden;border:1px solid #d9e1ea;'
-        'border-radius:14px;background:#fff;display:flex;align-items:center;justify-content:center;">'
-        f'<img src="{html_lib.escape(token, quote=True)}" alt="" '
-        'style="display:block;width:100%;height:100%;object-fit:contain;object-position:center;">'
-        '</div>'
-        for token in tokens
-    )
+
+    header_html = ''
+    if title or component_name:
+        badge = f'<span style="font-size:14px;font-weight:700;color:{secondary};background:#f0f9ff;padding:4px 12px;border-radius:6px;border:1px solid #bae6fd;">{component_name}</span>' if (component_name and component_name not in title) else ''
+        header_html = (
+            f'<div data-visual-media-title="1" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #eef2f6;">'
+            f'<div style="font-size:24px;font-weight:800;color:{primary};letter-spacing:-0.3px;">{title}</div>'
+            f'{badge}'
+            f'</div>'
+        )
+
+    cards = []
+    for i, token in enumerate(tokens):
+        cap = ''
+        if i < len(captions) and str(captions[i] or '').strip():
+            cap = str(captions[i]).strip()
+        elif description:
+            cap = description
+
+        cap_html = ''
+        if cap:
+            escaped_cap = html_lib.escape(cap)
+            cap_html = (
+                f'<div data-visual-media-caption="1" style="margin-top:10px;padding:10px 14px;background:#f8fafc;'
+                f'border:1px solid #e2e8f0;border-radius:8px;font-size:14px;font-weight:600;color:#334155;'
+                f'line-height:1.5;text-align:center;box-sizing:border-box;width:100%;">'
+                f'{escaped_cap}</div>'
+            )
+
+        card = (
+            '<div style="min-width:0;min-height:0;display:flex;flex-direction:column;'
+            'overflow:hidden;height:100%;box-sizing:border-box;">'
+            '<div style="flex:1;min-height:0;overflow:hidden;border:1px solid #d9e1ea;'
+            'border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;">'
+            f'<img src="{html_lib.escape(token, quote=True)}" alt="" '
+            'style="display:block;width:100%;height:100%;object-fit:contain;object-position:center;">'
+            '</div>'
+            f'{cap_html}'
+            '</div>'
+        )
+        cards.append(card)
+
+    images_grid = ''.join(cards)
+
     return (
         '<div class="slide" dir="rtl" data-visual-media-only="1" '
         'style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;'
-        'padding:78px 34px 50px;box-sizing:border-box;">'
+        'padding:40px 34px 34px;box-sizing:border-box;display:flex;flex-direction:column;">'
+        f'{header_html}'
         f'<div data-visual-media-grid="1" style="display:grid;grid-template-columns:repeat({columns},minmax(0,1fr));'
-        'gap:16px;width:100%;height:100%;align-items:stretch;">'
-        f'{images}</div></div>'
+        'gap:16px;width:100%;flex:1;min-height:0;align-items:stretch;">'
+        f'{images_grid}</div></div>'
     )
 
 
@@ -7772,7 +7914,7 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         return _build_land_boundary_diagram_slide(
             slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if _is_visual_concept_media_slide(slide):
-        return _build_visual_concept_media_slide(slide)
+        return _build_visual_concept_media_slide(slide, branding=branding)
     if content_source in ('site_analysis', 'executive_content.summary'):
         note = html_lib.escape(_slide_source_data_note(slide, source)).replace('\n', '<br>')
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;">'
@@ -7799,7 +7941,24 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         matrix = source.get('landmarks_matrix') if isinstance(source.get('landmarks_matrix'), list) else []
         headers = list(matrix[0].keys()) if matrix and isinstance(matrix[0], dict) else []
         rows = [[row.get(header, '') for header in headers] for row in matrix if isinstance(row, dict)]
-        table = _render_fallback_table(headers, rows, primary)
+        HEADER_LABELS = {
+            'name': 'المعلم',
+            'title': 'المعلم',
+            'landmark': 'المعلم',
+            'distance_km': 'المسافة (كم)',
+            'distance_text': 'المسافة',
+            'distance': 'المسافة',
+            'duration_min': 'مدة الوصول (دقيقة)',
+            'duration_text': 'مدة الوصول',
+            'duration': 'مدة الوصول',
+            'in_traffic': 'في أوقات الذروة',
+            'traffic_duration': 'في أوقات الذروة',
+            'type': 'التصنيف',
+            'category': 'النوع',
+            'notes': 'ملاحظات',
+        }
+        display_headers = [HEADER_LABELS.get(h, h) for h in headers]
+        table = _render_fallback_table(display_headers, rows, primary)
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
                 f'<img src="##MAP_LANDMARKS##" style="width:100%;height:100%;object-fit:contain;">'
@@ -7983,7 +8142,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         chart_type = ''
         slide['chart_type'] = ''
     if _is_visual_concept_media_slide(slide):
-        deterministic_slide = _build_visual_concept_media_slide(slide)
+        deterministic_slide = _build_visual_concept_media_slide(slide, branding=branding)
         if deterministic_slide:
             return postprocess_slide(
                 deterministic_slide, (slide or {}).get('type', 'content'),
@@ -9434,7 +9593,7 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
 
 def finalize_slide_html(html, slide_type, project_data, branding, creative_images=None,
                         map_placeholders=None, tenant_id=None, slide_num=None, slide_title=None,
-                        total_slides=None, content_source=None):
+                        total_slides=None, content_source=None, allow_all_maps=False):
     """Unified post-processing pipeline for every generated slide."""
     if _is_fixed_competitor_comparison(content_source, slide_title):
         market = _market_state(project_data)
@@ -9473,7 +9632,8 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
             or content_source in ('site_analysis', 'executive_content.summary', 'location_detail')):
         html = _inject_location_data_timestamp(html, project_data)
     html = _strip_unplanned_map_media(
-        html, slide_type, content_source=content_source, slide_title=slide_title)
+        html, slide_type, content_source=content_source, slide_title=slide_title,
+        allow_all_maps=allow_all_maps)
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
     if (not _is_market_slide(slide_type, slide_title, content_source)
@@ -9492,7 +9652,7 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     return _drop_unresolved_image_placeholders(html)
 
 
-def renumber_presentation_slides(slides, branding=None, project_data=None, tenant_id=None):
+def renumber_presentation_slides(slides, branding=None, project_data=None, tenant_id=None, allow_all_maps=False):
     source = slides if isinstance(slides, list) else []
     total = len(source)
     if not total:
@@ -9536,6 +9696,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 index_html, slide_type, project_data, branding, tenant_id=tenant_id,
                 slide_num=index, slide_title=item.get('title') or 'محتويات العرض',
                 total_slides=total, content_source=item.get('content_source'),
+                allow_all_maps=allow_all_maps,
             )
         elif slide_type in ('cover', 'closing', 'moodboard', 'section_divider'):
             item['html'] = _rewrite_slide_counter(
@@ -9570,7 +9731,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             # they cannot render an image on their own.
             item['html'] = _strip_unplanned_map_media(
                 item['html'], slide_type, content_source=item.get('content_source'),
-                slide_title=title, strip_resolved=False)
+                slide_title=title, strip_resolved=False, allow_all_maps=allow_all_maps)
             if item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source')):
                 item['html'] = _strip_market_slide_media(item['html'])
     return normalized
