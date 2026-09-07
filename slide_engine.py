@@ -9691,7 +9691,20 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     for index, item in enumerate(normalized, 1):
         slide_type = str(item.get('type') or 'content')
         if slide_type == 'index':
-            index_html = build_index_slide(item, index, total, branding, project_data)
+            existing_html = item.get('html') or ''
+            if existing_html and 'data-index-page' in existing_html:
+                index_html = existing_html
+                for entry in (item.get('index_entries') or []):
+                    sec_k = str(entry.get('section_key') or '')
+                    pg_val = entry.get('page')
+                    if sec_k and pg_val is not None:
+                        index_html = re.sub(
+                            rf'(data-index-page=["\']{re.escape(sec_k)}["\'][^>]*>)\s*\d+\s*(</div>|</span>)',
+                            rf'\g<1>{int(pg_val):02d}\g<2>',
+                            index_html
+                        )
+            else:
+                index_html = build_index_slide(item, index, total, branding, project_data)
             item['html'] = finalize_slide_html(
                 index_html, slide_type, project_data, branding, tenant_id=tenant_id,
                 slide_num=index, slide_title=item.get('title') or 'محتويات العرض',
