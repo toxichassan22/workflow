@@ -1321,6 +1321,24 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('/uploads/maps/', cleaned)
         self.assertIn('بيانات الجدول الزمني', cleaned)
 
+    def test_land_analysis_slide_can_show_requested_overview_map(self):
+        engine = self.application_module.slide_engine
+        html = (
+            '<div class="slide" style="background:#fff;color:#111">'
+            '<div style="background-image:url(##MAP_OVERVIEW##);height:300px"></div>'
+            '<p>بيانات تحليل الأرض</p></div>'
+        )
+        cleaned = engine.finalize_slide_html(
+            html, 'content', {'project_name': 'المشروع'},
+            {'primary_color': '#123456'},
+            map_placeholders={'##MAP_OVERVIEW##': '/uploads/maps/overview.png'},
+            slide_num=8, slide_title='تحليل الأرض', total_slides=20,
+            content_source='land_and_building_summary',
+        )
+        self.assertIn('/uploads/maps/overview.png', cleaned)
+        self.assertNotIn('##MAP_OVERVIEW##', cleaned)
+        self.assertIn('بيانات تحليل الأرض', cleaned)
+
     def test_renumbering_does_not_delete_a_saved_map_url(self):
         engine = self.application_module.slide_engine
         html = (

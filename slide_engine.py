@@ -43,7 +43,7 @@ CONTENT_DISTRIBUTION_RULES = """
 14. التوزيع المضغوط لقسم السوق إلزامي: شريحة واحدة لنطاق الدراسة، شريحة واحدة لمقارنة المنافسين، شريحة واحدة لتحليل السوق المعتمد (الفقرة الواحدة)، شريحة واحدة للمصادر، وملخص دراسة سوق العمل في شريحة أو شريحتين كحد أقصى.
 15. قسم تحليل SWOT للمشروع يظهر في شريحة واحدة بعد فاصل القسم، داخل مصفوفة واضحة من أربعة محاور: نقاط القوة، نقاط الضعف، الفرص، والتهديدات. لا تعرض JSON أو أقواساً أو أسماء مفاتيح برمجية.
 16. إذا وجدت بيانات مخاطر معتمدة، أضف بعدها شريحة واحدة لسجل المخاطر وطرق المعالجة. اعرض كل خطر مقابل طريقة معالجته في صف واضح، ولا تكرر مصفوفة SWOT داخلها ولا تخترع مستوى خطورة أو إجراءً غير موجود في البيانات.
-17. الوسائط ليست خلفية افتراضية لكل شريحة: استخدم صورة الغلاف والخاتمة عند توفرهما، والخرائط في شرائح الموقع، والصور المرفوعة في شرائح التصورات أو الأرض أو المخططات أو الجهات التي تخصها فقط. لا تضع صورة في شريحة نص أو جدول لمجرد ملء الفراغ، ولا تختزل عرضاً كاملاً إلى صورتين إذا كانت أصول مرئية متعددة متاحة. كل أصل مرئي يظهر مرة واحدة فقط وبالرمز المخصص له.
+17. الوسائط ليست خلفية افتراضية لكل شريحة: استخدم صورة الغلاف والخاتمة عند توفرهما، والخرائط في شرائح الموقع أو تحليل الأرض عند طلبها صراحة، والصور المرفوعة في شرائح التصورات أو الأرض أو المخططات أو الجهات التي تخصها فقط. لا تضع صورة في شريحة نص أو جدول لمجرد ملء الفراغ، ولا تختزل عرضاً كاملاً إلى صورتين إذا كانت أصول مرئية متعددة متاحة. كل أصل مرئي يظهر مرة واحدة فقط وبالرمز المخصص له.
 18. مخطط «مخطط اتجاهي لحدود الأرض» عنصر أساسي عند توفر أي بيانات حدود أو اتجاهات أو واجهات في الحقول الظاهرة أو الجداول المخفية لتحليل مستندات الأرض. يُدرج في العرض الكامل، ويُدرج أيضاً عند توليد قسم تحليل الموقع وحده، وتبقى بياناته وأطواله ومجاوراته كما هي دون اختراع أو محاكاة نسب مساحية.
 19. الأساسيات غير قابلة للتجاوز: اتجاه RTL للنص العربي، هيدر وفوتر وهوية الشركة تضاف من النظام، لا أيقونات أو إيموجي أو صور خارجية أو بيانات وهمية، جذر HTML واحد لكل شريحة، تباين مقروء، وتدفق طبيعي يمنع تداخل النص أو قصه. لا تجعل التصميم الحر سبباً لتغيير المحتوى أو الأرقام أو الوحدات.
 20. الرسوم البيانية اختيارية وليست مطلوبة في كل عرض. لا تُستخدم إلا إذا كانت بياناتها المعتمدة موجودة وفي المواقع الأربعة المسموحة فقط، مع إبقاء الجدول المالي أو جدول المنافسين الكامل ملازماً للرسم.
@@ -5255,7 +5255,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'ممنوع وضع شارات أو بطاقات مكررة مثل «* مشروع متعدد الاستخدامات *» أو شارات تصنيف عامة أعلى شرائح المحتوى العادية',
         'الرسوم البيانية محصورة حصراً في 4 أنواع معتمدة لـ 4 مواقع محددة (مقارنة المنافسين: horizontal_bar في السوق، وتكلفة الاستثمار: waterfall، والتدفقات النقدية: combo، ومقارنة السيناريوهات: heatmap في المالية) وأي رسم خارجها ممنوع منعاً باتاً؛ ولا تستخدم البطاقات إلا لعناصر مستقلة عريضة وبحد أقصى ثلاث',
         'الصور ليست عنصراً افتراضياً في كل شريحة: استخدم فقط الصور والخرائط والرموز التي تنص عليها الخطة لهذه الشريحة. لا تضف صورة إلى شريحة نص أو جدول بلا حاجة، ولا تكرر أصلاً مرئياً في موضع آخر، مع الحفاظ على توزيع معقول للصور المتاحة عبر العرض الكامل',
-        'الخرائط مسموحة فقط في شرائح تحليل الموقع الجغرافي المحددة أو ملخص الموقع/الخريطة التنفيذي المحدد صراحة. في الجدول الزمني والدراسة المالية والمخططات والتصورات الخارجية والداخلية وفريق العمل وبقية الأقسام: ممنوع استخدام ##MAP_OVERVIEW## أو ##MAP_LANDMARKS## أو ##MAP_ACCESS## أو ##MAP_CATCHMENT## أو أي صورة من /uploads/maps/',
+        'الخرائط مسموحة في شرائح تحليل الموقع الجغرافي أو تحليل الأرض عند طلبها صراحة، أو في ملخص الموقع/الخريطة التنفيذي المحدد صراحة. في الجدول الزمني والدراسة المالية والمخططات والتصورات الخارجية والداخلية وفريق العمل وبقية الأقسام: ممنوع استخدام ##MAP_OVERVIEW## أو ##MAP_LANDMARKS## أو ##MAP_ACCESS## أو ##MAP_CATCHMENT## أو أي صورة من /uploads/maps/',
         'التزم بأساسيات التوليد دون استثناء: RTL، هوية الشركة، الهيدر والفوتر النظاميان، جذر slide واحد، تباين واضح، تدفق طبيعي بلا تداخل أو قص، وعدم اختراع أرقام أو نصوص أو صور أو أيقونات',
         'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون فرض جداول أو بطاقات أو شبكة محددة، ومن دون خرائط أو صور فوتوغرافية أو رسوم إضافية. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
@@ -5438,21 +5438,33 @@ def _map_media_allowed(slide_type, content_source, slide_title=''):
     """Return whether a slide is explicitly allowed to carry a generated map."""
     slide_type = str(slide_type or '').strip().lower()
     content_source = str(content_source or '').strip().lower()
+    slide_title = str(slide_title or '').strip().lower()
     if slide_type in ('map_overview', 'map_landmarks', 'map_access', 'map_catchment'):
         return True
-    return content_source in {
+    if content_source in {
         'location_polygon', 'main_roads', 'catchment_areas', 'nearby_landmarks',
         'site_analysis', 'location_detail', 'executive_content.summary',
-    }
+    }:
+        return True
+    # Land analysis may deliberately show the approved overview map beside the
+    # parcel facts. Keep this narrow so timeline, finance and visual-concept
+    # slides remain blocked.
+    if content_source.startswith('land_') or content_source in {'land', 'croquis'}:
+        return True
+    return bool(re.search(
+        r'(?:تحليل\s*الأرض|الأرض\s*والاشتراطات|الأرض\s*والكروكي|حدود\s*الأرض|الكروكي|land analysis|land/croquis|croquis)',
+        slide_title, flags=re.IGNORECASE,
+    ))
 
 
 def _strip_unplanned_map_media(html, slide_type, content_source=None, slide_title=None,
                                strip_resolved=True):
-    """Remove map tokens and resolved map assets from non-location slides.
+    """Remove map tokens and resolved map assets from slides that do not own maps.
 
     The model receives the available map tokens as context.  Without this final
-    boundary it could place a valid map token in a timeline, plans, exterior or
-    interior slide and the resolver would turn that token into a real map image.
+    boundary it could place a valid map token in a timeline, finance, plans,
+    exterior or interior slide and the resolver would turn that token into a
+    real map image.
     """
     if not html or _map_media_allowed(slide_type, content_source, slide_title):
         return html
@@ -9619,7 +9631,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
 - CSS inline فقط
 - ممنوع box-shadow/filter/backdrop-filter
 - استخدم ##LOGO## للشعار، ##IMAGE_COVER## لصورة الغلاف، ##MOODBOARD_IMAGE_N## لصور المود بورد
-- للخرائط: ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT## — استخدمها فقط في شرائح تحليل الموقع الجغرافي أو ملخص الموقع المحدد صراحة، وممنوع استخدامها في الجدول الزمني أو الدراسة المالية أو المخططات أو التصورات الخارجية أو الداخلية أو أي قسم آخر
+- للخرائط: ##MAP_OVERVIEW##، ##MAP_LANDMARKS##، ##MAP_ACCESS##، ##MAP_CATCHMENT## — استخدمها في شرائح تحليل الموقع الجغرافي أو تحليل الأرض عند طلبها صراحة أو ملخص الموقع المحدد صراحة، وممنوع استخدامها في الجدول الزمني أو الدراسة المالية أو المخططات أو التصورات الخارجية أو الداخلية أو أي قسم آخر
 - ممنوع base64 أو روابط صور خارجية
 - """ + NO_STREET_VIEW_RULE + """
 """
