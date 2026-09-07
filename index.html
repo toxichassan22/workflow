@@ -53,8 +53,8 @@
        sentence. */
     .tenant-chat-input-row {
       display: flex;
-      gap: 5px;
-      align-items: flex-end;
+      flex-direction: column;
+      gap: 4px;
       border: 1px solid #ddd;
       border-radius: 12px;
       padding: 4px;
@@ -65,7 +65,14 @@
       border-color: var(--p);
     }
 
-    .tenant-chat-input-row textarea {
+    .tenant-chat-entry-row {
+      display: flex;
+      width: 100%;
+      gap: 5px;
+      align-items: flex-end;
+    }
+
+    .tenant-chat-entry-row textarea {
       flex: 1;
       min-width: 0;
       resize: none;
@@ -80,12 +87,12 @@
       background: transparent;
     }
 
-    .tenant-chat-input-row button {
+    .tenant-chat-entry-row button {
       flex-shrink: 0;
     }
 
-    .tenant-chat-input-row .tenant-chat-attach,
-    .tenant-chat-input-row .tenant-chat-send {
+    .tenant-chat-entry-row .tenant-chat-attach,
+    .tenant-chat-entry-row .tenant-chat-send {
       min-height: 34px;
       border-radius: 9px;
       padding: 5px 9px;
@@ -96,14 +103,16 @@
     .tenant-chat-attachment {
       display: flex;
       align-items: center;
-      gap: 6px;
+      align-self: flex-start;
+      width: min(100%, 250px);
+      gap: 7px;
       font-size: 12px;
       color: var(--p);
-      background: var(--soft);
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      padding: 4px 6px;
-      min-height: 38px;
+      background: #f5f7fa;
+      border: 1px solid #dbe2ea;
+      border-radius: 8px;
+      padding: 4px;
+      min-height: 40px;
     }
 
     .tenant-chat-attachment-preview {
@@ -117,8 +126,8 @@
     }
 
     .tenant-chat-attachment-preview img {
-      width: 42px;
-      height: 30px;
+      width: 48px;
+      height: 34px;
       object-fit: cover;
       border-radius: 6px;
       border: 1px solid rgba(59, 110, 145, .25);
@@ -5720,25 +5729,27 @@
           </div>
 
           <div id="tenantChatComposer" class="tenant-chat-composer">
-            <div id="tenantChatAttachment" class="tenant-chat-attachment" hidden>
-              <button type="button" id="tenantChatAttachmentPreviewButton" class="tenant-chat-attachment-preview"
-                onclick="openTenantChatImagePreview(this.dataset.chatImageSrc)" aria-label="فتح الصورة المرفقة">
-                <img id="tenantChatAttachmentPreview" alt="صورة مرفقة">
-              </button>
-              <span id="tenantChatAttachmentName" class="tenant-chat-attachment-name"></span>
-              <button type="button" class="tenant-chat-attachment-remove"
-                onclick="clearTenantChatAttachment()">حذف</button>
-            </div>
             <div class="tenant-chat-input-row">
-              <input type="file" id="tenantChatImageFile" accept="image/png,image/jpeg,image/jpg,image/webp" hidden
-                onchange="attachTenantChatImage(this)">
-              <button type="button" class="btn ghost tenant-chat-attach" aria-label="إرفاق صورة"
-                onclick="document.getElementById('tenantChatImageFile').click()">إرفاق</button>
-              <textarea id="tenantChatInput" placeholder="اكتب التعديل المطلوب..." rows="1"
-                oninput="growTenantChatInput(this)"
-                onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendTenantDesignerChat();}"></textarea>
-              <button type="button" class="btn primary tenant-chat-send" aria-label="إرسال"
-                onclick="sendTenantDesignerChat()">إرسال</button>
+              <div id="tenantChatAttachment" class="tenant-chat-attachment" hidden>
+                <button type="button" id="tenantChatAttachmentPreviewButton" class="tenant-chat-attachment-preview"
+                  onclick="openTenantChatImagePreview(this.dataset.chatImageSrc)" aria-label="فتح الصورة المرفقة">
+                  <img id="tenantChatAttachmentPreview" alt="صورة مرفقة">
+                </button>
+                <span id="tenantChatAttachmentName" class="tenant-chat-attachment-name"></span>
+                <button type="button" class="tenant-chat-attachment-remove"
+                  onclick="clearTenantChatAttachment()">حذف</button>
+              </div>
+              <div class="tenant-chat-entry-row">
+                <input type="file" id="tenantChatImageFile" accept="image/png,image/jpeg,image/jpg,image/webp" hidden
+                  onchange="attachTenantChatImage(this)">
+                <button type="button" class="btn ghost tenant-chat-attach" aria-label="إرفاق صورة"
+                  onclick="document.getElementById('tenantChatImageFile').click()">إرفاق</button>
+                <textarea id="tenantChatInput" placeholder="اكتب التعديل المطلوب..." rows="1"
+                  oninput="growTenantChatInput(this)"
+                  onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendTenantDesignerChat();}"></textarea>
+                <button type="button" class="btn primary tenant-chat-send" aria-label="إرسال"
+                  onclick="sendTenantDesignerChat()">إرسال</button>
+              </div>
             </div>
           </div>
         </div>

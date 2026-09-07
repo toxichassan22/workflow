@@ -7042,6 +7042,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('id="tenantChatAttachmentPreviewButton"', index_source)
         self.assertIn('class="tenant-chat-attachment-preview"', index_source)
         self.assertIn('class="tenant-chat-attachment-remove"', index_source)
+        self.assertIn('class="tenant-chat-entry-row"', index_source)
         self.assertIn('aria-label="إرفاق صورة"', index_source)
         self.assertIn('.ge-thumb-actions > button', index_source)
         # The conversation is restored with the file instead of being wiped on open.
