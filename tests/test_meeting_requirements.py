@@ -3718,6 +3718,14 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('.project-multi-select {\n      position: relative;\n      width: 100%;',
                       index_source)
 
+    def test_slide_preview_does_not_resize_generated_main_frames(self):
+        """Generated slides use semantic main elements for absolute content frames. A global
+        `main { width:100% }` rule makes frames with right/left insets overflow in the preview,
+        even though the export has no application stylesheet and remains correct."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertNotIn('\n    main {', index_source)
+        self.assertIn('.tenant-app > main {\n      width: 100%', index_source)
+
     def test_ui_contains_no_emojis_or_icon_glyphs(self):
         """Product rule: the app ships no emojis and no icon glyphs, including arrows used as
         button labels. Generated slides are covered separately by the icon stripper."""

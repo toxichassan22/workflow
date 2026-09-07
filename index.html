@@ -952,7 +952,9 @@
       }
     }
 
-    main {
+    /* Generated slides use semantic <main> elements for positioned content frames.
+       Keep the application-wide sizing rule from changing those preview layouts. */
+    .tenant-app > main {
       width: 100%
     }
 
