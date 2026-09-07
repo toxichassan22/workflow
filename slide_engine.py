@@ -84,7 +84,9 @@ _SECTION_KEY_ALIASES = {
 _LOCATION_MAP_SOURCE_TYPES = {
     'location_polygon': ('map_overview', '##MAP_OVERVIEW##'),
     'main_roads': ('map_access', '##MAP_ACCESS##'),
+    'access_roads': ('map_access', '##MAP_ACCESS##'),
     'catchment_areas': ('map_catchment', '##MAP_CATCHMENT##'),
+    'city_landmarks': ('map_catchment', '##MAP_CATCHMENT##'),
     'nearby_landmarks': ('map_landmarks', '##MAP_LANDMARKS##'),
 }
 
@@ -2082,10 +2084,13 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         existing_summary = groups.get('executive_summary', [])[:1]
         groups['executive_summary'] = []
         summary_slide = dict(existing_summary[0]) if existing_summary else {}
+        summary_ext_token = '##MOODBOARD_1##' if moodboard_items else (overview_map_tokens[0] if overview_map_tokens else '')
+        summary_tokens = [summary_ext_token] if summary_ext_token else []
+        summary_style = 'image' if moodboard_items else ('map' if overview_map_tokens else 'text')
         summary_slide.update({
-            'title': 'الملخص التنفيذي', 'type': 'content', 'design_style': 'map' if overview_map_tokens else 'text',
-            'content_density': 'high', 'requires_image': bool(overview_map_tokens),
-            'content_source': 'executive_content.summary', 'image_tokens': overview_map_tokens, 'bullets': [],
+            'title': 'الملخص التنفيذي', 'type': 'content', 'design_style': summary_style,
+            'content_density': 'high', 'requires_image': bool(summary_tokens),
+            'content_source': 'executive_content.summary', 'image_tokens': summary_tokens, 'bullets': [],
         })
         add('executive_summary', summary_slide)
 
@@ -4704,10 +4709,22 @@ def _slide_source_data_note(slide, project_data):
     project_data = project_data if isinstance(project_data, dict) else {}
     model = _parse_financial_dict(project_data.get('financial_study_model'))
     c_type = canonicalize_chart_type((slide or {}).get('chart_type'))
-    if (slide or {}).get('type') == 'map_landmarks' or source == 'nearby_landmarks':
-        matrix = project_data.get('landmarks_matrix')
-        if isinstance(matrix, list) and matrix:
-            return 'جدول المعالم والمسافات وأوقات القيادة كما هو دون حذف:\n' + json.dumps(matrix, ensure_ascii=False, indent=2)
+    if (slide or {}).get('type') == 'map_access' or source in ('main_roads', 'access_roads'):
+        roads_data = project_data.get('access_roads_data')
+        if isinstance(roads_data, list) and roads_data:
+            return 'جدول شبكة الطرق والمحاور الرئيسية ومداخل المشروع كما هو دون حذف أو اختلاق للقيم:\n' + json.dumps(roads_data, ensure_ascii=False, indent=2)
+        roads_text = str(project_data.get('main_roads') or '').strip()
+        return 'شبكة الطرق ومداخل المشروع كما هي دون حذف:\n' + roads_text if roads_text else ''
+    if (slide or {}).get('type') == 'map_catchment' or source in ('catchment_areas', 'city_landmarks'):
+        city_data = project_data.get('city_landmarks_data')
+        if isinstance(city_data, list) and city_data:
+            return 'جدول نطاق التأثير الجغرافي ومعالم المدينة وأوقات القيادة كما هو دون حذف أو اختلاق:\n' + json.dumps(city_data, ensure_ascii=False, indent=2)
+        catchment_text = str(project_data.get('catchment_areas') or project_data.get('city_landmarks') or '').strip()
+        return 'نطاق التأثير ومعالم المدينة كما هي دون حذف:\n' + catchment_text if catchment_text else ''
+    if (slide or {}).get('type') == 'map_landmarks' or source in ('nearby_landmarks', 'landmarks_matrix'):
+        nearby_data = project_data.get('nearby_landmarks_data') or project_data.get('landmarks_matrix')
+        if isinstance(nearby_data, list) and nearby_data:
+            return 'جدول المعالم والمسافات وأوقات القيادة كما هو دون حذف:\n' + json.dumps(nearby_data, ensure_ascii=False, indent=2)
         value = str(project_data.get('nearby_landmarks') or '').strip()
         return 'المعالم والمسافات وأوقات القيادة كما هي دون حذف:\n' + value if value else ''
     if source in {
@@ -5321,6 +5338,11 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         placeholder_note = 'استخدم كل رموز الصور التالية مرة واحدة وبحجم واضح، ولا تستبدلها بصورة الغلاف: ' + '، '.join(image_tokens)
         if slide.get('image_layout'):
             placeholder_note += f". التخطيط المعتمد لهذه المجموعة هو {slide.get('image_layout')} ولا تغيّر عدد الصور"
+        caps = slide.get('captions') or ([slide.get('description')] if slide.get('description') else [])
+        if caps:
+            caps_list = [str(c).strip() for c in caps if str(c).strip()]
+            if caps_list:
+                placeholder_note += f". ضع بطاقة شرح وتسمية توضيحية أسفل كل صورة نصها المعتمد: {' — '.join(caps_list)}"
     elif design_style == 'image':
         placeholder_note = 'لا تستخدم صورة ما لم يكن رمزها محددًا في خطة هذه الشريحة أو في الصور المتوفرة لموضوعها.'
     if section_key == 'market' and slide_type not in ('cover', 'index', 'closing', 'section_divider'):
@@ -7915,12 +7937,23 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
             slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if _is_visual_concept_media_slide(slide):
         return _build_visual_concept_media_slide(slide, branding=branding)
-    if content_source in ('site_analysis', 'executive_content.summary'):
+    if content_source == 'site_analysis':
         note = html_lib.escape(_slide_source_data_note(slide, source)).replace('\n', '<br>')
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;">'
                 '<div data-map-summary-background style="background-image:url(##MAP_OVERVIEW##);"></div>'
                 f'<div data-map-summary-card style="background:{primary};color:#fff;padding:24px;overflow:hidden;">'
                 f'<h2 style="font-size:28px;margin:0 0 18px;">{title}</h2><div style="font-size:14px;line-height:1.7;">{note}</div></div></div>')
+    if content_source == 'executive_content.summary':
+        note = html_lib.escape(_slide_source_data_note(slide, source)).replace('\n', '<br>')
+        ext_token = tokens[0] if tokens else '##MOODBOARD_1##'
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;box-sizing:border-box;padding:68px 36px 44px;">'
+                f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">'
+                f'<h2 style="font-size:28px;font-weight:800;color:{primary};margin:0;">{title}</h2></div>'
+                f'<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:24px;height:520px;align-items:stretch;">'
+                f'<div style="border-radius:12px;border:1px solid #e2e8f0;background:#f8fafc;padding:24px;overflow:hidden;font-size:15px;line-height:1.8;color:#1e293b;">{note}</div>'
+                f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;display:flex;align-items:center;justify-content:center;">'
+                f'<img src="{ext_token}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"></div>'
+                f'</div></div>')
     if re.fullmatch(r'market_study_data\.scope', content_source):
         return _build_market_scope_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if re.fullmatch(r'market_study_data\.summary(?::\d+:\d+)?', content_source):
@@ -7937,8 +7970,28 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         'market_study_data.summary.risks',
     }:
         return _build_market_risk_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+    if slide_type == 'map_access':
+        roads = source.get('access_roads_data') if isinstance(source.get('access_roads_data'), list) else []
+        headers = ['الطريق / المحور', 'العرض (م)', 'النوع', 'المسافة']
+        rows = [[r.get('name', ''), r.get('width_m', ''), r.get('type', ''), r.get('distance', '')] for r in roads if isinstance(r, dict)]
+        table = _render_fallback_table(headers, rows, primary) if rows else ''
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
+                f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
+                f'<img src="##MAP_ACCESS##" style="width:100%;height:100%;object-fit:contain;">'
+                f'<div style="overflow:hidden;">{table}</div></div></div>')
+    if slide_type == 'map_catchment':
+        city_marks = source.get('city_landmarks_data') if isinstance(source.get('city_landmarks_data'), list) else []
+        headers = ['المعلم / الوجهة', 'المسافة (كم)', 'مدة الوصول (دقيقة)', 'التصنيف']
+        rows = [[r.get('name', ''), r.get('distance_km', ''), r.get('duration_min', ''), r.get('type', '')] for r in city_marks if isinstance(r, dict)]
+        table = _render_fallback_table(headers, rows, primary) if rows else ''
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
+                f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
+                f'<img src="##MAP_CATCHMENT##" style="width:100%;height:100%;object-fit:contain;">'
+                f'<div style="overflow:hidden;">{table}</div></div></div>')
     if slide_type == 'map_landmarks':
         matrix = source.get('landmarks_matrix') if isinstance(source.get('landmarks_matrix'), list) else []
+        if not matrix and isinstance(source.get('nearby_landmarks_data'), list):
+            matrix = source.get('nearby_landmarks_data')
         headers = list(matrix[0].keys()) if matrix and isinstance(matrix[0], dict) else []
         rows = [[row.get(header, '') for header in headers] for row in matrix if isinstance(row, dict)]
         HEADER_LABELS = {
@@ -7959,18 +8012,22 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         }
         display_headers = [HEADER_LABELS.get(h, h) for h in headers]
         table = _render_fallback_table(display_headers, rows, primary)
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
                 f'<img src="##MAP_LANDMARKS##" style="width:100%;height:100%;object-fit:contain;">'
                 f'<div style="overflow:hidden;">{table}</div></div></div>')
     if tokens:
         columns = 1 if len(tokens) == 1 else len(tokens)
-        images = ''.join(
-            f'<img src="{html_lib.escape(token)}" style="width:100%;height:100%;object-fit:contain;min-width:0;min-height:0;">'
-            for token in tokens)
-        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:76px 28px 52px;box-sizing:border-box;">'
+        captions = (slide or {}).get('captions') or (slide or {}).get('bullets') or []
+        description = str((slide or {}).get('description') or '').strip()
+        cards = []
+        for i, token in enumerate(tokens):
+            cap = str(captions[i]).strip() if i < len(captions) and str(captions[i] or '').strip() else description
+            cap_html = f'<div style="margin-top:8px;padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;font-weight:600;color:#334155;text-align:center;">{html_lib.escape(cap)}</div>' if cap else ''
+            cards.append(f'<div style="display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;"><div style="flex:1;min-height:0;border:1px solid #d9e1ea;border-radius:10px;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;"><img src="{html_lib.escape(token)}" style="width:100%;height:100%;object-fit:contain;"></div>{cap_html}</div>')
+        return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 34px 44px;box-sizing:border-box;display:flex;flex-direction:column;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2>'
-                f'<div style="display:grid;grid-template-columns:repeat({columns},1fr);gap:12px;height:540px;">{images}</div></div>')
+                f'<div style="display:grid;grid-template-columns:repeat({columns},1fr);gap:16px;flex:1;min-height:0;">{"".join(cards)}</div></div>')
 
     chart_type = canonicalize_chart_type((slide or {}).get('chart_type'))
     if chart_type == 'waterfall':
@@ -9027,7 +9084,7 @@ def _rewrite_slide_counter(html, slide_type, slide_num, total_slides=None):
                           + counter + '</div>', html, count=1)
 
     footer = re.compile(
-        r'(?P<open><div\b[^>]*height:\s*36px[^>]*>)(?P<body>[\s\S]*?)</div\s*>', re.IGNORECASE,
+        r'(?P<open><(?P<ftag>div|footer)\b[^>]*height:\s*36px[^>]*>)(?P<body>[\s\S]*?)</(?P=ftag)\s*>', re.IGNORECASE,
     )
 
     def replace_footer(match):
@@ -9041,14 +9098,14 @@ def _rewrite_slide_counter(html, slide_type, slide_num, total_slides=None):
         span_open = _with_data_attribute(target.group('open'), 'data-slide-counter')
         body = (match.group('body')[:target.start()] + span_open + counter + '</span>'
                 + match.group('body')[target.end():])
-        return _with_data_attribute(match.group('open'), 'data-slide-footer') + body + '</div>'
+        return _with_data_attribute(match.group('open'), 'data-slide-footer') + body + f"</{match.group('ftag')}>"
 
     return footer.sub(replace_footer, html, count=1)
 
 
 def _remove_managed_slide_footer(html):
     return re.sub(
-        r'<div\b[^>]*\bdata-slide-footer=["\'][^"\']*["\'][^>]*>[\s\S]*?</div\s*>',
+        r'<(?:div|footer)\b[^>]*\bdata-slide-footer=["\'][^"\']*["\'][^>]*>[\s\S]*?</(?:div|footer)\s*>',
         '', html or '', count=1, flags=re.IGNORECASE,
     )
 
@@ -9126,7 +9183,7 @@ def _presentation_chrome_html(title, project_title, company_name, primary, accen
     ) if project_logo else ''
     header = (
         f'<header class="slide-header" data-slide-header="1" dir="rtl" '
-        f'style="position:relative;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
+        f'style="position:absolute;top:0;right:0;left:0;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
         'display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
         'box-sizing:border-box;z-index:10;overflow:hidden;">'
         '<div style="display:flex;align-items:center;gap:10px;min-width:0;direction:ltr;">'
@@ -9620,7 +9677,8 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
                 total_slides=total_slides,
             )
     html = _canonicalize_slide_root_class(html)
-    if content_source in ('site_analysis', 'executive_content.summary'):
+    is_map_summary = content_source == 'site_analysis' or (content_source == 'executive_content.summary' and '##MAP_' in str(html or ''))
+    if is_map_summary:
         html = _ensure_map_summary_structure(html)
     html = postprocess_slide(
         html, slide_type, slide_num=slide_num, slide_title=slide_title,
@@ -9629,7 +9687,8 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     )
     if (not _is_market_slide(slide_type, slide_title, content_source)
             and isinstance(slide_type, str) and (slide_type.startswith('map_') or slide_type == 'site_specs')
-            or content_source in ('site_analysis', 'executive_content.summary', 'location_detail')):
+            or content_source in ('site_analysis', 'location_detail')
+            or (content_source == 'executive_content.summary' and is_map_summary)):
         html = _inject_location_data_timestamp(html, project_data)
     html = _strip_unplanned_map_media(
         html, slide_type, content_source=content_source, slide_title=slide_title,
@@ -9637,9 +9696,9 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     if map_placeholders:
         html = _replace_map_placeholders(html, map_placeholders)
     if (not _is_market_slide(slide_type, slide_title, content_source)
-            and isinstance(slide_type, str) and slide_type.startswith('map_')) or content_source in ('site_analysis', 'executive_content.summary'):
+            and isinstance(slide_type, str) and slide_type.startswith('map_')) or is_map_summary:
         html = _map_media_contain(html)
-    if content_source in ('site_analysis', 'executive_content.summary'):
+    if is_map_summary:
         html = _normalize_map_summary_layout(html, str((project_data or {}).get('_map_marker_side') or 'right'))
     html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
     html = _replace_creative_image_placeholders(html, creative_images, slide_type, content_source)

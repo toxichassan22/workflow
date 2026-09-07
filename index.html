@@ -5508,7 +5508,7 @@
             id="btnGenerateSlidesToolbar">توليد العرض</button>
           <button type="button" class="btn slide-toolbar-btn slide-toolbar-approve"
             onclick="requestPresentationApproval(tenantPresentationId)" id="btnRequestApproval">تعميد</button>
-          <button type="button" class="btn slide-toolbar-btn slide-toolbar-primary" onclick="saveProjectAsDraft()">حفظ
+          <button type="button" class="btn slide-toolbar-btn slide-toolbar-primary" onclick="saveProjectAsDraft(); if(tenantPresentationId) saveExistingPresentation();">حفظ
             كمسودة</button>
 
           <div class="tenant-dropdown slide-toolbar-dropdown" data-permission="create_presentation">
@@ -7815,9 +7815,9 @@
       // Resize slide preview stages so they fit inside the remaining width when the rail is open.
       document.querySelectorAll('.tenant-slide-stage').forEach(st => {
         const main = st.closest('.ge-main') || st.closest('#tenantSlidesMain');
-        const maxW = main ? main.clientWidth - 32 : 960;
+        const maxW = main ? main.clientWidth - 32 : 1280;
         const minStageW = window.innerWidth <= 900 ? 280 : 480;
-        const stageW = Math.min(960, Math.max(minStageW, maxW));
+        const stageW = Math.min(1280, Math.max(minStageW, maxW));
         st.style.setProperty('--stage-w', stageW + 'px');
         st.style.setProperty('--stage-h', (stageW * 720 / 1280).toFixed(2) + 'px');
         st.style.setProperty('--slide-scale', (stageW / 1280).toFixed(4));
@@ -12848,7 +12848,7 @@
       const input = document.getElementById('locationDataFetchedAt');
       if (input) input.value = value;
       const display = document.getElementById('locationDataFetchedAtDisplay');
-      if (display) display.textContent = value ? 'آخر تحديث لبيانات الموقع: ' + formatLocationDataFetchedAt(value) : '';
+      if (display) display.textContent = value ? 'آخر تحديث للبيانات: ' + formatLocationDataFetchedAt(value) : '';
     }
 
     function serializeLocationTable(key) {
@@ -13102,7 +13102,7 @@
         const display = document.createElement('div');
         display.id = 'locationDataFetchedAtDisplay';
         display.className = 'location-table-hint';
-        display.textContent = fetchedAt ? 'آخر تحديث لبيانات الموقع: ' + formatLocationDataFetchedAt(fetchedAt) : '';
+        display.textContent = fetchedAt ? 'آخر تحديث للبيانات: ' + formatLocationDataFetchedAt(fetchedAt) : '';
         wrap.appendChild(display);
         const fetchedInput = document.createElement('input');
         fetchedInput.type = 'hidden';
@@ -17035,6 +17035,21 @@
         if (resp.draftId) tenantProjectData.draftId = resp.draftId;
         if (resp.success) {
           tenantDraftDirty = false;
+          if (tenantPresentationId && tenantSlidesData && tenantSlidesData.length) {
+            try {
+              const presTitle = tenantPresentationTitle
+                || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
+              await api('PUT', '/api/presentations/' + tenantPresentationId, {
+                title: presTitle,
+                projectData: tenantProjectData,
+                slidesData: tenantSlidesData,
+                slideCount: tenantSlidesData.length,
+                status: 'edited'
+              });
+            } catch (presErr) {
+              console.warn('Silent presentation sync error:', presErr);
+            }
+          }
           if (badge) {
             const timeStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
             badge.style.background = '#dcfce7';
@@ -21141,20 +21156,21 @@
       if (!root) return slide.html;
       const type = String(slide.type || 'content').toLowerCase();
       if (['cover', 'closing', 'moodboard'].includes(type)) {
-        root.querySelectorAll('[data-slide-footer]').forEach(node => node.remove());
+        root.querySelectorAll('[data-slide-footer], footer, .slide-footer').forEach(node => node.remove());
       } else {
         const counter = String(index).padStart(2, '0') + ' — ' + String(total).padStart(2, '0');
         let counters = Array.from(root.querySelectorAll('[data-slide-counter]'));
         if (!counters.length && type === 'section_divider') {
-          counters = Array.from(root.querySelectorAll('div')).filter(node => /^\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*$/.test(node.textContent || ''));
+          counters = Array.from(root.querySelectorAll('div, span')).filter(node => /^\s*\d{1,3}\s*[—–-]\s*\d{1,3}\s*$/.test(node.textContent || ''));
         }
         if (!counters.length) {
-          const footer = Array.from(root.querySelectorAll('div')).find(node => /height:\s*36px/i.test(node.getAttribute('style') || ''));
+          const footer = root.querySelector('footer, .slide-footer, [data-slide-footer]')
+            || Array.from(root.querySelectorAll('footer, div')).find(node => /height:\s*36px/i.test(node.getAttribute('style') || ''));
           if (footer) {
-            const candidates = Array.from(footer.querySelectorAll('span,div')).filter(node => /^\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*$/.test(node.textContent || ''));
+            footer.dataset.slideFooter = '1';
+            const candidates = Array.from(footer.querySelectorAll('span, div')).filter(node => /^\s*\d{1,3}(?:\s*[—–/-]\s*\d{1,3})?\s*$/.test(node.textContent || ''));
             const counterNode = candidates[candidates.length - 1];
             if (counterNode) {
-              footer.dataset.slideFooter = '1';
               counterNode.dataset.slideCounter = '1';
               counters = [counterNode];
             }
@@ -21166,17 +21182,31 @@
         });
       }
       if (type === 'index') {
-        const activeSections = new Set(indexEntries.map(entry => entry.section_key));
+        const activeSections = new Set((indexEntries || []).map(entry => entry.section_key));
         root.querySelectorAll('[data-index-section]').forEach(row => {
           if (!activeSections.has(row.dataset.indexSection)) row.remove();
         });
-        indexEntries.forEach(entry => {
+        (indexEntries || []).forEach(entry => {
           let page = root.querySelector('[data-index-page="' + entry.section_key + '"]');
           if (!page) {
-            const title = Array.from(root.querySelectorAll('div')).find(node =>
+            const titleNodes = Array.from(root.querySelectorAll('div, span, p, td, h3, h4')).filter(node =>
               node.children.length === 0 && String(node.textContent || '').trim() === entry.title);
-            const sibling = title?.nextElementSibling;
-            if (sibling && /^\s*\d+\s*$/.test(sibling.textContent || '')) page = sibling;
+            for (const title of titleNodes) {
+              const row = title.closest('[data-index-section]') || title.parentElement;
+              if (row) {
+                const candidates = Array.from(row.querySelectorAll('*')).filter(n =>
+                  n !== title && n.children.length === 0 && /^\s*\d{1,3}\s*$/.test(n.textContent || ''));
+                if (candidates.length) {
+                  page = candidates[candidates.length - 1];
+                  break;
+                }
+              }
+              const sibling = title.nextElementSibling;
+              if (sibling && /^\s*\d+\s*$/.test(sibling.textContent || '')) {
+                page = sibling;
+                break;
+              }
+            }
           }
           if (page) {
             page.dataset.indexPage = entry.section_key;
@@ -22375,7 +22405,9 @@
       tenantSlidesData[index].html = html;
       document.getElementById('slideEditModal').remove();
       renderTenantSlides();
-      toast('تم تعديل الشريحة. اضغط "حفظ التعديلات" للحفظ.');
+      triggerAutoSaveDraft();
+      if (tenantPresentationId) saveExistingPresentation();
+      toast('تم تعديل الشريحة');
     }
 
     function moveSlide(index, direction) {
@@ -22386,6 +22418,8 @@
       tenantSlidesData[newIndex] = temp;
       renumberTenantSlides();
       renderTenantSlides();
+      triggerAutoSaveDraft();
+      if (tenantPresentationId) saveExistingPresentation();
     }
 
     function deleteSlide(index) {
@@ -22398,7 +22432,8 @@
       renumberTenantSlides();
       renderTenantSlides();
       triggerAutoSaveDraft();
-      toast('تم حذف الشريحة. اضغط "حفظ التعديلات" للحفظ.');
+      if (tenantPresentationId) saveExistingPresentation();
+      toast('تم حذف الشريحة');
     }
 
     async function saveTenantPresentation(titleOverride = '') {

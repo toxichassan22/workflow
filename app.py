@@ -105,7 +105,7 @@ def reassemble_chunked_request_body():
     # client therefore uploads large bodies in small chunk envelopes
     # (POST /api/body-chunk) and finally sends a tiny {"__chunked_body": {...}}
     # reference; restore the original body here before routing.
-    if request.method != 'POST' or request.path == '/api/body-chunk':
+    if request.method not in ('POST', 'PUT', 'PATCH') or request.path == '/api/body-chunk':
         return
     if 'application/json' not in (request.content_type or ''):
         return
@@ -3008,22 +3008,38 @@ def resolve_designer_chat_placeholders(html_out, project_data, presentation_id, 
 
 
 def _designer_json_response(text):
-    """Parse the first JSON object returned by the designer model."""
+    """Parse the first JSON object returned by the designer model, with fallback extraction."""
     if not text:
         return {}
     cleaned = re.sub(r'^```(?:json)?\s*|\s*```$', '', text.strip(), flags=re.IGNORECASE)
     try:
         value = json.loads(cleaned)
-        return value if isinstance(value, dict) else {}
+        if isinstance(value, dict):
+            return value
     except Exception:
-        match = re.search(r'\{[\s\S]*\}', cleaned)
-        if not match:
-            return {}
+        pass
+    match = re.search(r'\{[\s\S]*\}', cleaned)
+    if match:
         try:
             value = json.loads(match.group(0))
-            return value if isinstance(value, dict) else {}
+            if isinstance(value, dict):
+                return value
         except Exception:
-            return {}
+            pass
+    # Resilient fallback: extract "html" and "response" fields manually if JSON broken by quotes/newlines
+    html_match = re.search(r'"(?:html|slide_html|content)"\s*:\s*"([\s\S]*?)(?<!\\)"\s*,\s*"(?:response|reply)"', cleaned)
+    if not html_match:
+        html_match = re.search(r'"(?:html|slide_html|content)"\s*:\s*"([\s\S]*?)(?<!\\)"\s*\}', cleaned)
+    if html_match:
+        extracted_html = html_match.group(1).replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t').replace('\\\\', '\\')
+        resp_match = re.search(r'"(?:response|reply)"\s*:\s*"([\s\S]*?)(?<!\\)"', cleaned)
+        resp_text = resp_match.group(1).replace('\\"', '"').replace('\\n', '\n') if resp_match else 'تم تحديث الشريحة بنجاح.'
+        return {'html': extracted_html, 'response': resp_text}
+    # Direct HTML slide block fallback
+    div_match = re.search(r'<div\b[^>]*class=["\']slide["\'][\s\S]*?</div>\s*$', cleaned, flags=re.IGNORECASE)
+    if div_match:
+        return {'html': div_match.group(0), 'response': 'تم تحديث الشريحة بنجاح.'}
+    return {}
 
 
 def normalize_arabic_digits_py(text):
@@ -3414,6 +3430,10 @@ HTML الحالي:
             raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=16000, model=SLIDE_TEXT_MODEL, image_references=image_refs, timeout=300), 'DESIGNER-EDIT')
             parsed = _designer_json_response(raw)
             output = parsed.get('html') or parsed.get('content') or parsed.get('slide_html')
+            if not output and raw and '<div' in raw and 'slide' in raw:
+                div_m = re.search(r'<div\b[^>]*class=["\']slide["\'][\s\S]*?</div>', raw, flags=re.IGNORECASE)
+                if div_m:
+                    output = div_m.group(0)
             if output and ('slide' in output and '<div' in output):
                 if 'class="slide"' not in output and "class='slide'" not in output:
                     output = f'<div class="slide" style="width:1280px;height:720px;position:relative;box-sizing:border-box;overflow:hidden;">{output}</div>'
@@ -3706,9 +3726,15 @@ def api_designer_chat():
                     target_indexes = [current_index + 1]
 
             msg_lower = message.lower()
-            if any(word in msg_lower for word in ('شوارع', 'مرور', 'roadmap', 'ملاحة', 'شوارع محيطة')):
+            is_slide_edit_intent = any(word in msg_lower for word in (
+                'عدل', 'تعديل', 'غير', 'تغيير', 'حرك', 'تحريك', 'صغر', 'تصغير', 'كبر', 'تكبير',
+                'احذف', 'حذف', 'امسح', 'انقل', 'نقل', 'مكان', 'إزاحة', 'ازاحة', 'يمين', 'يسار',
+                'فوق', 'تحت', 'أعلى', 'اسفل', 'هيدر', 'فوتر', 'خط', 'لون', 'خلفية', 'كارت', 'بطاقة',
+                'نص', 'عنوان', 'تنسيق', 'أبعاد', 'ابعاد', 'مسافة', 'تباعد', 'ارتفاع', 'عرض', 'حجم'
+            ))
+            if any(word in msg_lower for word in ('شوارع', 'مرور', 'roadmap', 'ملاحة', 'شوارع محيطة')) and not is_slide_edit_intent:
                 actions = [{'tool': 'regenerate_maps', 'params': {'maptype': 'roadmap'}}]
-            elif any(word in msg_lower for word in ('قمر صناعي', 'satellite', 'فضائي')):
+            elif any(word in msg_lower for word in ('قمر صناعي', 'satellite', 'فضائي')) and not is_slide_edit_intent:
                 actions = [{'tool': 'regenerate_maps', 'params': {'maptype': 'satellite'}}]
             elif any(word in msg_lower for word in ('احذف الشريحة', 'حذف الشريحة', 'امسح الشريحة', 'إزالة الشريحة', 'احذف شريحة')):
                 actions = [{'tool': 'delete_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
@@ -3716,17 +3742,17 @@ def api_designer_chat():
                 actions = [{'tool': 'duplicate_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
             elif any(word in msg_lower for word in ('قسّم الشريحة', 'تقسيم الشريحة', 'قسم الشريحة', 'شريحتين')):
                 actions = [{'tool': 'split_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
-            elif any(word in msg_lower for word in ('خريطة وصول', 'خريطة الطرق', 'طرق الوصول')):
+            elif any(word in msg_lower for word in ('خريطة وصول', 'خريطة الطرق', 'طرق الوصول')) and not is_slide_edit_intent:
                 actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'access', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('خريطة المعالم', 'المعالم القريبة', 'معالم حيوية')):
+            elif any(word in msg_lower for word in ('خريطة المعالم', 'المعالم القريبة', 'معالم حيوية')) and not is_slide_edit_intent:
                 actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'landmarks', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('نطاق التأثير', 'النطاق الجغرافي', 'خريطة النطاق')):
+            elif any(word in msg_lower for word in ('نطاق التأثير', 'النطاق الجغرافي', 'خريطة النطاق')) and not is_slide_edit_intent:
                 actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'catchment', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('خريطة الموقع', 'موقع عام', 'خريطة الارض')):
+            elif any(word in msg_lower for word in ('خريطة الموقع', 'موقع عام', 'خريطة الارض')) and not is_slide_edit_intent:
                 actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'overview', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('مخطط مالي', 'رسم بياني مالي', 'شلال التدفقات', 'تحليل الحساسية')):
+            elif any(word in msg_lower for word in ('مخطط مالي', 'رسم بياني مالي', 'شلال التدفقات', 'تحليل الحساسية')) and not is_slide_edit_intent:
                 actions = [{'tool': 'insert_financial_chart', 'params': {'chart_type': 'waterfall', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('صورة', 'صوره', 'image', 'توليد صورة')):
+            elif any(word in msg_lower for word in ('توليد صورة', 'أنشئ صورة', 'انشئ صورة', 'صورة جديدة', 'صوره جديده', 'ولد صورة')) and not is_slide_edit_intent:
                 actions = [{'tool': 'generate_image', 'params': {'prompt': message, 'target': target, 'indexes': target_indexes, 'slideIndex': current_index + 1}}]
             else:
                 actions = [{'tool': 'edit_slides', 'params': {'target': target, 'indexes': target_indexes, 'slideIndex': current_index + 1, 'instruction': message}}]
