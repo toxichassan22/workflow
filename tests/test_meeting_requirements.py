@@ -3830,14 +3830,18 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('.tenant-slide-stage .slide table {\n      min-width: 0;', index_source)
 
     def test_slide_preview_uses_one_canvas_scale_only(self):
-        """The preview stage scales the complete 1280x720 canvas. A second content transform
+        """The preview stage scales the complete slide canvas. A second content transform
         made some slides visibly shorter than their exported versions and clipped headings."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         start = index_source.index('function autoFitSlideContent(stage)')
         end = index_source.index('function collectSlideTextNodes(root)', start)
         fit_source = index_source[start:end]
-        self.assertIn("slide.style.width = '1280px';", fit_source)
-        self.assertIn("slide.style.height = '720px';", fit_source)
+        canvas_start = index_source.index('function tenantSlideCanvasDimensions(slide)')
+        canvas_source = index_source[canvas_start:start]
+        self.assertIn("slide.style.width = canvas.width + 'px';", fit_source)
+        self.assertIn("slide.style.height = canvas.height + 'px';", fit_source)
+        self.assertIn("const defaultHeight = ratio === '4:3' ? 960 : 720;", canvas_source)
+        self.assertIn("stage.style.setProperty('--stage-h'", fit_source)
         self.assertIn('const isLegacyAutoFit =', fit_source)
         self.assertNotIn("contentBox.style.transform = 'scale('", fit_source)
         self.assertNotIn('const targetH = 720;', fit_source)

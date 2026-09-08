@@ -7971,14 +7971,14 @@
       if (typeof autoFitSlideContent !== 'function') return;
       // Resize slide preview stages so they fit inside the remaining width when the rail is open.
       document.querySelectorAll('.tenant-slide-stage').forEach(st => {
+        const canvas = autoFitSlideContent(st) || { width: 1280, height: 720 };
         const main = st.closest('.ge-main') || st.closest('#tenantSlidesMain');
         const maxW = main ? main.clientWidth - 32 : 1280;
         const minStageW = window.innerWidth <= 900 ? 280 : 480;
         const stageW = Math.min(1280, Math.max(minStageW, maxW));
         st.style.setProperty('--stage-w', stageW + 'px');
-        st.style.setProperty('--stage-h', (stageW * 720 / 1280).toFixed(2) + 'px');
-        st.style.setProperty('--slide-scale', (stageW / 1280).toFixed(4));
-        autoFitSlideContent(st);
+        st.style.setProperty('--stage-h', (stageW * canvas.height / canvas.width).toFixed(2) + 'px');
+        st.style.setProperty('--slide-scale', (stageW / canvas.width).toFixed(4));
       });
       document.querySelectorAll('.ge-slide-stage').forEach(st => autoFitSlideContent(st));
     }
@@ -21601,16 +21601,41 @@
       return cleanHtml;
     }
 
+    function tenantSlideCanvasDimensions(slide) {
+      const ratio = String((tenantBranding && tenantBranding.slide_ratio) || '16:9').trim();
+      const defaultHeight = ratio === '4:3' ? 960 : 720;
+      const parsePx = value => {
+        const match = String(value || '').trim().match(/^([0-9]+(?:\.[0-9]+)?)px$/i);
+        return match ? Number(match[1]) : 0;
+      };
+      const width = parsePx(slide && slide.style && slide.style.width) || 1280;
+      const height = parsePx(slide && slide.style && slide.style.height) || defaultHeight;
+      return {
+        width: width > 0 ? width : 1280,
+        height: height > 0 ? height : defaultHeight
+      };
+    }
+
     function autoFitSlideContent(stage) {
-      if (!stage) return;
+      if (!stage) return null;
       const slide = stage.querySelector('.slide');
-      if (!slide) return;
+      if (!slide) return null;
+
+      const canvas = tenantSlideCanvasDimensions(slide);
 
       slide.style.boxSizing = 'border-box';
-      slide.style.width = '1280px';
-      slide.style.height = '720px';
+      slide.style.width = canvas.width + 'px';
+      slide.style.height = canvas.height + 'px';
 
-      // The stage already scales the complete 1280x720 canvas. A second scale on an
+      // Keep the stage in sync when a slide is inserted after the initial refit. Generated
+      // slides can use a taller canvas, while the old stage kept the skeleton's 16:9 height.
+      const stageWidth = parseFloat(stage.style.getPropertyValue('--stage-w')) || 0;
+      if (stageWidth > 0) {
+        stage.style.setProperty('--stage-h', (stageWidth * canvas.height / canvas.width).toFixed(2) + 'px');
+        stage.style.setProperty('--slide-scale', (stageWidth / canvas.width).toFixed(4));
+      }
+
+      // The stage already scales the complete slide canvas. A second scale on an
       // arbitrary content wrapper made some previews shorter than the exported slide,
       // which left a large blank area and could move the heading outside the viewport.
       // Keep the generated layout intact and only remove the legacy mutations that this
@@ -21631,6 +21656,7 @@
           if (/%$/.test(maxWidth)) el.style.removeProperty('max-width');
         }
       });
+      return canvas;
     }
 
     function collectSlideTextNodes(root) {
