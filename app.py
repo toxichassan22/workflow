@@ -6250,10 +6250,8 @@ def api_generate_slide_single():
     # rendering and before returning slide metadata. A single-slide retry can
     # arrive from an older saved plan that misclassified a map or financial
     # slide, so finalization must see the repaired type/source too.
-    slide = slide_engine._normalize_financial_slide(
-        slide_engine._normalize_location_map_slide(
-            slide_engine._normalize_land_boundary_slide(dict(slides[slide_index] or {}))
-        )
+    slide = slide_engine._normalize_legacy_single_slide(
+        dict(slides[slide_index] or {}), project_data
     )
     total = total_slides
     html = generate_single_slide(system_prompt, slide, slide_num, total, branding, call_glm_fn, max_retries=3, project_data=project_data)
@@ -6579,23 +6577,46 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
         source.get('map_placeholders') if isinstance(source.get('map_placeholders'), dict) else {},
         request_images.get('map_placeholders') if isinstance(request_images.get('map_placeholders'), dict) else {},
     )
-    # A browser may still hold the map URL from before the last local edit was
-    # recomposed.  The persisted image rows are written in the same request that
-    # confirms the edit, so they must win over every client-side copy here.
+    # The persisted rows are the fallback for reopened presentations.  Keep only
+    # the newest valid row for each image type/placeholder; without this guard an
+    # older duplicate row could be visited later and overwrite the current map.
     placeholders = {}
     for values in placeholder_sources:
         placeholders.update({key: value for key, value in values.items() if key and value})
     persisted_file_records = []
+    seen_persisted_types = set()
+    seen_persisted_placeholders = set()
     for record in persisted_records:
         placeholder = record.get('placeholder')
         path = record.get('file_path')
         if placeholder and path and os.path.exists(path):
+            image_type = record.get('image_type') or ''
+            if image_type in seen_persisted_types or placeholder in seen_persisted_placeholders:
+                continue
             try:
                 rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
             except ValueError:
                 rel_path = 'uploads/maps/' + os.path.basename(path)
+            seen_persisted_types.add(image_type)
+            seen_persisted_placeholders.add(placeholder)
             persisted_file_records.append(record)
             placeholders[placeholder] = '/' + rel_path
+
+    # During the same browser session, a map can be edited and approved after an
+    # older Google row was stored.  The request carries that approved state and
+    # its current URL, so it is authoritative for that map.  On a reopened
+    # presentation maps_persisted/approvals come from the persisted project state
+    # and agree with the DB row, preserving DB hydration as the fallback.
+    requested_placeholders = request_images.get('map_placeholders')
+    if isinstance(requested_placeholders, dict):
+        for placeholder, path in requested_placeholders.items():
+            if path and _request_map_is_approved(request_images, placeholder):
+                placeholders[placeholder] = path
+
+    if placeholders and isinstance(source, dict):
+        creative = source.get('tenantCreativeImages') if isinstance(source.get('tenantCreativeImages'), dict) else {}
+        creative['map_placeholders'] = dict(placeholders)
+        source['tenantCreativeImages'] = creative
     # Older plans or an over-helpful model may ask for the editable sidecar token.
     # A generated presentation must always receive the approved, marked image;
     # the sidecar is only for the interactive map editor.
@@ -6620,6 +6641,27 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
         elif key not in request_images and key in creative:
             request_images[key] = creative[key]
     return source, request_images
+
+
+def _map_approval_key(value):
+    """Return the logical map name for a canonical or editable placeholder."""
+    key = str(value or '').strip()
+    key = key.replace('##MAP_', '').replace('_EDITABLE##', '').replace('##', '')
+    for suffix in ('_SATELLITE', '_ROADMAP'):
+        if key.endswith(suffix):
+            key = key[:-len(suffix)]
+    return key.lower()
+
+
+def _request_map_is_approved(request_images, placeholder):
+    """Whether the caller is sending its current, user-approved map version."""
+    if not isinstance(request_images, dict) or request_images.get('maps_persisted') is not True:
+        return False
+    approvals = request_images.get('map_approvals')
+    if not isinstance(approvals, dict):
+        return False
+    value = approvals.get(_map_approval_key(placeholder))
+    return value is True or (isinstance(value, str) and value.strip().lower() in {'true', '1', 'yes'})
 
 
 @app.route('/api/presentations', methods=['GET'])

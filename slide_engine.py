@@ -135,7 +135,21 @@ def _normalize_location_map_slide(slide):
     item = dict(slide)
     slide_type = str(item.get('type') or 'content').strip().lower()
     source = str(item.get('content_source') or item.get('contentSource') or '').strip()
-    if slide_type in ('map_overview', 'map_landmarks', 'map_access', 'map_catchment', 'site_specs'):
+    type_sources = {
+        'map_overview': ('location_polygon', '##MAP_OVERVIEW##'),
+        'map_access': ('main_roads', '##MAP_ACCESS##'),
+        'map_catchment': ('catchment_areas', '##MAP_CATCHMENT##'),
+        'map_landmarks': ('nearby_landmarks', '##MAP_LANDMARKS##'),
+        'site_specs': ('location_detail', ''),
+    }
+    if slide_type in type_sources:
+        canonical_source, token = type_sources[slide_type]
+        item.update({
+            'content_source': source or canonical_source,
+            'design_style': 'map' if slide_type.startswith('map_') else (item.get('design_style') or 'table'),
+            'requires_image': slide_type.startswith('map_'),
+            'image_tokens': [token] if token else list(item.get('image_tokens') or []),
+        })
         item['section_key'] = 'location'
         item['sectionKey'] = 'location'
     elif source in _LOCATION_MAP_SOURCE_TYPES:
@@ -189,6 +203,88 @@ def _normalize_financial_slide(slide):
     item['section_key'] = 'financial'
     item['sectionKey'] = 'financial'
     item['requires_image'] = False
+    return item
+
+
+def _normalize_legacy_single_slide(slide, project_data=None):
+    """Recover structured sources from a slide snapshot saved by an older client."""
+    item = _normalize_land_boundary_slide(slide)
+    item = _normalize_location_map_slide(item)
+    item = _normalize_financial_slide(item)
+    if not isinstance(item, dict):
+        return item
+    source = str(item.get('content_source') or item.get('contentSource') or '').strip()
+    if source:
+        return item
+
+    project = project_data if isinstance(project_data, dict) else {}
+    title = str(item.get('title') or '').strip()
+    section = _slide_section_key(item)
+    lower_title = title.lower()
+
+    if section == 'market':
+        market = _market_state(project)
+        if re.search(r'(?:مقارنة\s+المنافسين|منافس|competitor)', title, flags=re.IGNORECASE):
+            if isinstance(market.get('competitors'), list) and any(_competitor_name(row) for row in market.get('competitors') or []):
+                item.update({
+                    'title': 'مقارنة المنافسين', 'design_style': 'chart',
+                    'chart_type': 'horizontal_bar', 'requires_image': False,
+                    'content_source': 'market_study_data.competitors',
+                    'source_table': 'competitors', 'image_tokens': [],
+                })
+        elif re.search(r'نطاق', title, flags=re.IGNORECASE) and _market_scope_rows(market):
+            item.update({'content_source': 'market_study_data.scope', 'source_table': 'market_scope',
+                         'design_style': 'editorial', 'requires_image': False, 'image_tokens': []})
+        elif re.search(r'مصادر|مراجع', title, flags=re.IGNORECASE) and _market_source_rows(market):
+            item.update({'content_source': 'market_study_data.sources', 'source_table': 'market_sources',
+                         'design_style': 'editorial', 'requires_image': False, 'image_tokens': []})
+        elif re.search(r'(?:swot|نقاط\s+القوة|نقاط\s+الضعف|الفرص|التهديدات)', lower_title, flags=re.IGNORECASE):
+            if isinstance(market.get('swot'), dict) and any(str(value or '').strip() for value in market.get('swot', {}).values()):
+                item.update({'content_source': 'market_study_data.swot', 'design_style': 'swot',
+                             'requires_image': False, 'image_tokens': []})
+        elif re.search(r'تحليل\s+السوق|دراسة\s+السوق', title, flags=re.IGNORECASE) and _market_summary_rows(market):
+            item.update({'content_source': 'market_study_data.summary', 'source_table': 'market_summary',
+                         'design_style': 'editorial', 'requires_image': False, 'image_tokens': []})
+        elif re.search(r'ملخص\s+دراسة\s+سوق\s+العمل', title, flags=re.IGNORECASE) and _market_one_block_paragraph(market):
+            item.update({'content_source': 'market_study_data.one_block_summary', 'design_style': 'text',
+                         'requires_image': False, 'image_tokens': []})
+        if str(item.get('content_source') or '').strip():
+            item['type'] = 'content'
+
+    if not str(item.get('content_source') or '').strip() and section == 'swot_risks':
+        if re.search(r'(?:swot|نقاط\s+القوة|نقاط\s+الضعف|الفرص|التهديدات)', lower_title, flags=re.IGNORECASE):
+            market = _market_state(project)
+            if isinstance(market.get('swot'), dict) and any(str(value or '').strip() for value in market.get('swot', {}).values()):
+                item.update({'content_source': 'market_study_data.swot', 'design_style': 'swot',
+                             'requires_image': False, 'image_tokens': []})
+        elif re.search(r'مخاطر|معالجة|risk', lower_title, flags=re.IGNORECASE):
+            risk_source, _items = _risk_analysis_source(project)
+            if risk_source:
+                item.update({'content_source': risk_source, 'design_style': 'table',
+                             'requires_image': False, 'image_tokens': []})
+
+    if not str(item.get('content_source') or '').strip() and section == 'location':
+        if re.search(r'(?:ملخص\s+الموقع|تحليل\s+الموقع)', title, flags=re.IGNORECASE) and str(project.get('site_analysis') or '').strip():
+            item.update({'content_source': 'site_analysis', 'design_style': 'map',
+                         'requires_image': True, 'image_tokens': ['##MAP_OVERVIEW##']})
+        elif re.search(r'(?:بيانات\s+الموقع|الإحداثيات|مواصفات\s+الموقع)', title, flags=re.IGNORECASE):
+            item.update({'type': 'site_specs', 'content_source': 'location_detail',
+                         'design_style': 'table', 'requires_image': False, 'image_tokens': []})
+
+    if not str(item.get('content_source') or '').strip() and section == 'land':
+        if re.search(r'(?:ملخص\s+تحليل\s+الأرض|تحليل\s+الأرض)', title, flags=re.IGNORECASE) and str(project.get('land_and_building_summary') or '').strip():
+            item.update({'content_source': 'land_and_building_summary', 'design_style': 'text',
+                         'requires_image': False, 'image_tokens': []})
+
+    if not str(item.get('content_source') or '').strip() and (
+        section == 'executive_summary' or re.search(r'الملخص\s+التنفيذي|executive\s+summary', title, flags=re.IGNORECASE)
+    ):
+        executive = _decode_json_fact(project.get('executive_content'))
+        if isinstance(executive, dict) and str(executive.get('summary') or '').strip():
+            item.update({'section_key': 'executive_summary', 'sectionKey': 'executive_summary',
+                         'content_source': 'executive_content.summary', 'design_style': 'text',
+                         'requires_image': False, 'image_tokens': []})
+
     return item
 
 _SECTION_MATCHERS = (
@@ -8241,11 +8337,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     if (slide or {}).get('type') == 'section_divider':
         return build_section_divider_slide(slide, slide_num, total_slides, branding, project_data)
 
-    slide = _normalize_financial_slide(
-        _normalize_location_map_slide(
-            _normalize_land_boundary_slide(dict(slide or {}))
-        )
-    )
+    slide = _normalize_legacy_single_slide(dict(slide or {}), project_data)
 
     # Single-slide requests may come from an older client and bypass the full
     # plan normalizer. Apply the same market contract to that one item.
@@ -8294,7 +8386,18 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         and chart_type == 'horizontal_bar'
     )
     fixed_land_boundary_diagram = market_source == 'land_boundary_diagram'
-    fixed_landmarks_map = slide.get('type') == 'map_landmarks'
+    fixed_map_slide = slide.get('type') in {
+        'map_overview', 'map_landmarks', 'map_access', 'map_catchment'
+    }
+    deterministic_market_source = bool(
+        re.fullmatch(r'market_study_data\.(?:scope|summary|sources)(?::\d+:\d+)?', market_source)
+        or market_source in {
+            'market_study_data.competitors', 'market_study_data.swot',
+            'executive_content.risks', 'market_study_data.risk_analysis',
+            'market_study_data.risk_register', 'market_study_data.risks',
+            'market_study_data.summary.risks',
+        }
+    )
     free_market_slide = _slide_section_key(slide) == 'market' and not fixed_market_comparison
     # A stale plan must not turn an arbitrary market page into a chart or a
     # fixed market template.  The sole fixed market page is the competitor
@@ -8315,9 +8418,12 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             )
     if (fixed_market_comparison
             or fixed_land_boundary_diagram
-            or fixed_landmarks_map
+            or fixed_map_slide
+            or deterministic_market_source
             or (_slide_section_key(slide) != 'market'
                 and (chart_type in APPROVED_CHART_TYPES
+                     or market_source in {'site_analysis', 'executive_content.summary',
+                                           'land_and_building_summary'}
                      or _slide_section_key(slide) == 'financial'))):
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
@@ -9934,7 +10040,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
     # same per-slide ownership repair here so those callers cannot reintroduce
     # maps into visual, timeline or financial sections.
     slides = [
-        _normalize_financial_slide(_normalize_location_map_slide(dict(slide)))
+        _normalize_legacy_single_slide(dict(slide), project_data)
         for slide in (slide_plan.get('slides', []) if isinstance(slide_plan, dict) else [])
         if isinstance(slide, dict)
     ]

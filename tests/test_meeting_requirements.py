@@ -1627,7 +1627,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             content_source='site_analysis')
         self.assertIn('data-map-summary-card', repaired)
         self.assertIn('data-map-summary-background', repaired)
-        self.assertEqual(len(prompts), 1)
+        self.assertEqual(len(prompts), 0)
 
     def test_swot_section_keeps_one_canonical_slide_and_adds_risk_register(self):
         engine = self.application_module.slide_engine
@@ -5522,6 +5522,62 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(images['map_centers']['overview'], {'lat': 24.01, 'lng': 46.01})
         self.assertEqual(project['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##'],
                          images['map_placeholders']['##MAP_OVERVIEW##'])
+
+    def test_approved_request_map_beats_older_google_row(self):
+        google_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_google.png', delete=False)
+        google_path = google_file.name
+        google_file.write(b'google-map')
+        google_file.close()
+        edited_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_approved.png', delete=False)
+        edited_path = edited_file.name
+        edited_file.write(b'approved-edited-map')
+        edited_file.close()
+        for path in (google_path, edited_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a, 'overview', google_path, '##MAP_OVERVIEW##',
+                presentation_id='pres-approved-map', metadata={}
+            )
+            project, images = self.application_module._hydrate_map_assets_for_request(
+                {'project_name': 'Saved'},
+                {
+                    'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/approved.png'},
+                    'maps_persisted': True,
+                    'map_approvals': {'overview': True},
+                },
+                self.tenant_a,
+                presentation_id='pres-approved-map',
+            )
+
+        self.assertEqual(images['map_placeholders']['##MAP_OVERVIEW##'], '/uploads/maps/approved.png')
+        self.assertEqual(project['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##'],
+                         '/uploads/maps/approved.png')
+
+    def test_duplicate_map_rows_keep_the_newest_valid_row(self):
+        old_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_old_google.png', delete=False)
+        old_path = old_file.name
+        old_file.write(b'old-google-map')
+        old_file.close()
+        new_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_new_edited.png', delete=False)
+        new_path = new_file.name
+        new_file.write(b'new-edited-map')
+        new_file.close()
+        for path in (old_path, new_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'overview', old_path, '##MAP_OVERVIEW##',
+                             presentation_id='pres-duplicate-map', metadata={})
+            db.add_map_image(self.tenant_a, 'overview', new_path, '##MAP_OVERVIEW##',
+                             presentation_id='pres-duplicate-map', metadata={})
+            _project, images = self.application_module._hydrate_map_assets_for_request(
+                {'project_name': 'Saved'}, {}, self.tenant_a,
+                presentation_id='pres-duplicate-map'
+            )
+
+        self.assertTrue(images['map_placeholders']['##MAP_OVERVIEW##'].endswith(os.path.basename(new_path)))
 
     def test_saved_legacy_map_file_is_not_wiped_by_renderer_version_change(self):
         map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='.png', delete=False)
