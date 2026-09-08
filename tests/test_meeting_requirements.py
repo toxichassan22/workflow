@@ -1584,7 +1584,7 @@ class MeetingRequirementsTests(unittest.TestCase):
             map_placeholders={'##MAP_OVERVIEW##': '/uploads/maps/overview.png'},
             content_source='site_analysis')
         self.assertIn('left:24px!important', finished)
-        self.assertIn('width:40%!important', finished)
+        self.assertIn('width:auto!important', finished)
         self.assertIn('object-fit:contain!important', finished)
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertEqual(app_source.count("project_data['_map_marker_side'] = _generation_map_marker_side(images, project_data)"), 2)

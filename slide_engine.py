@@ -5706,7 +5706,7 @@ def _inject_location_data_timestamp(html, project_data):
     return re.sub(r'(</div>\s*)$', marker + r'\1', html, count=1)
 
 
-def _normalize_map_summary_layout(html, marker_side='right'):
+def _normalize_map_summary_layout(html, marker_side='right', full_width=False):
     def normalize_background(match):
         return _set_tag_style(
             match.group(0),
@@ -5721,8 +5721,10 @@ def _normalize_map_summary_layout(html, marker_side='right'):
                  else 'left:24px!important;right:auto!important;')
 
     def normalize_card(match):
-        full_width = bool(re.search(r'\bdata-site-analysis-full\b', match.group(0), flags=re.IGNORECASE))
-        if full_width:
+        card_is_full_width = full_width or bool(
+            re.search(r'\bdata-site-analysis-full\b', match.group(0), flags=re.IGNORECASE)
+        )
+        if card_is_full_width:
             return _set_tag_style(
                 match.group(0), ('position', 'top', 'right', 'bottom', 'left', 'width', 'max-height', 'z-index'),
                 'position:absolute!important;top:76px!important;right:24px!important;bottom:56px!important;'
@@ -9762,7 +9764,11 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
             and isinstance(slide_type, str) and slide_type.startswith('map_')) or is_map_summary:
         html = _map_media_contain(html)
     if is_map_summary:
-        html = _normalize_map_summary_layout(html, str((project_data or {}).get('_map_marker_side') or 'right'))
+        html = _normalize_map_summary_layout(
+            html,
+            str((project_data or {}).get('_map_marker_side') or 'right'),
+            full_width=content_source == 'site_analysis',
+        )
     html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
     html = _replace_creative_image_placeholders(html, creative_images, slide_type, content_source)
     html = _replace_data_placeholders(html, project_data, branding)
