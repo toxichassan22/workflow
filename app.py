@@ -3309,10 +3309,13 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
         # ``C:\\...`` or ``D:\\...``) as an image source.  It is not a URL and
         # silently renders as a missing image, while the persisted map row below
         # already has the public upload path we need.  Canonical maps are either
-        # served from our map route, inline image data, or an explicit URL.
+        # served from our map route or inline image data.  External map URLs are
+        # deliberately excluded: an explicit refresh must copy the saved marked
+        # raster, never a stale Google/CDN URL that can disappear or render a
+        # different map after the response reaches the browser.
         if value.startswith('data:image/'):
             return True
-        return parsed.scheme in {'http', 'https'} and bool(parsed.netloc)
+        return False
 
     def public_map_url(file_path):
         """Convert a persisted map file to the only public route that serves it."""
