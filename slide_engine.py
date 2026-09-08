@@ -10474,6 +10474,12 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     refresh_index_entries({'slides': normalized})
     for index, item in enumerate(normalized, 1):
         slide_type = str(item.get('type') or 'content')
+        # A designer-chat edit in this same turn already produced this HTML via the model
+        # (for example description bars added to visual slides). Rebuilding from the
+        # canonical template below would silently discard that edit while the chat reply
+        # still claims it was applied. Keep the edited HTML and only refresh chrome and
+        # counters. The flag is popped so it never persists into saved presentations.
+        keep_edited_html = bool(item.pop('_designer_keep_html', False))
         if slide_type == 'index':
             existing_html = item.get('html') or ''
             if existing_html and 'data-index-page' in existing_html:
@@ -10496,7 +10502,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 allow_all_maps=allow_all_maps,
             )
         elif slide_type in ('cover', 'closing', 'moodboard', 'section_divider'):
-            if _is_fixed_section_divider(item, item.get('section_key')):
+            if _is_fixed_section_divider(item, item.get('section_key')) and not keep_edited_html:
                 divider_images = dict(creative_images)
                 if not divider_images.get('cover'):
                     fallback_cover = project_data.get('cover') or project_data.get('mainImageData')
@@ -10522,7 +10528,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             canonical_tokens = []
             if _is_visual_concept_media_slide(item):
                 media_sources, canonical_tokens = _visual_media_rebuild_sources(item, creative_images)
-            if media_sources:
+            if media_sources and not keep_edited_html:
                 # Stored presentations can predate both image_tokens and the bounded visual-media
                 # template. Prefer current assets inferred from content_source, then recover the
                 # resolved media URL already present in the old slide HTML.

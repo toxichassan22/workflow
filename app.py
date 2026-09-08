@@ -4534,6 +4534,10 @@ def api_designer_chat():
                     results.sort(key=lambda x: x[0])
                     for idx, updated_html, response_text in results:
                         slides[idx]['html'] = updated_html
+                        # Keep this model-produced HTML through the renumber below: the
+                        # canonical visual-media rebuild would otherwise discard edits
+                        # such as added description bars while the reply claims success.
+                        slides[idx]['_designer_keep_html'] = True
                         if response_text:
                             assistant_messages.append(response_text)
                 else:
@@ -4548,6 +4552,7 @@ def api_designer_chat():
                             content_source=slide.get('content_source') or slide.get('contentSource'),
                         )
                         slide['html'] = html
+                        slide['_designer_keep_html'] = True
                         slides[idx] = slide
                         if response_text:
                             assistant_messages.append(response_text)
@@ -4596,6 +4601,7 @@ def api_designer_chat():
                         updated_html, str(team_member.get('logo') or ''), team_index
                     )
                     slide['html'] = updated_html
+                    slide['_designer_keep_html'] = True
                     slides[idx] = slide
                     successful_indexes.append(idx)
                     if response_text:
@@ -4626,6 +4632,7 @@ def api_designer_chat():
                     )
                     updated_html = _inject_company_logo_panel_fallback(updated_html, company_logo_url)
                     slide['html'] = updated_html
+                    slide['_designer_keep_html'] = True
                     slides[idx] = slide
                     successful_indexes.append(idx)
                     if response_text:
@@ -4674,15 +4681,18 @@ def api_designer_chat():
                             content_source=slide.get('content_source') or slide.get('contentSource'),
                         )
                         slide['html'] = updated_html
+                        slide['_designer_keep_html'] = True
                         if r_msg:
                             assistant_messages.append(r_msg)
                     elif position == 'background':
                         tag = f'<div aria-hidden="true" style="position:absolute;inset:0;background-image:url(\'{image}\');background-size:cover;background-position:center;z-index:0;"></div>'
                         slide['html'] = re.sub(r'(</div>\s*)$', tag + r'\1', orig_html or '', count=1)
+                        slide['_designer_keep_html'] = True
                     else:
                         side = 'right:40px' if position != 'left' else 'left:40px'
                         tag = f'<div style="position:absolute;{side};top:120px;width:38%;z-index:2;"><img src="{image}" alt="" style="width:100%;max-height:460px;object-fit:cover;border-radius:8px;">{caption_markup}</div>'
                         slide['html'] = re.sub(r'(</div>\s*)$', tag + r'\1', orig_html or '', count=1)
+                        slide['_designer_keep_html'] = True
                     slides[idx] = slide
                 creative_images.setdefault('generated', []).append(image)
                 executed.append({'tool': tool, 'status': 'success', 'indexes': targets, 'image': image})
@@ -4764,6 +4774,7 @@ def api_designer_chat():
                         content_source=slide.get('content_source') or slide.get('contentSource'),
                     )
                     slide['html'] = updated_html
+                    slide['_designer_keep_html'] = True
                     slides[idx] = slide
                     if r_msg:
                         assistant_messages.append(r_msg)
@@ -4841,7 +4852,9 @@ def api_designer_chat():
                     h2, _ = _designer_edit_slide(part2.get('html', ''), part2_title, instr_p2, sp_idx + 1, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs, slide_type=part2.get('type', 'content'), total_slides=len(slides) + 1)
                     
                     base_slide['html'] = h1
+                    base_slide['_designer_keep_html'] = True
                     part2['html'] = h2
+                    part2['_designer_keep_html'] = True
                     slides[sp_idx] = base_slide
                     slides.insert(sp_idx + 1, part2)
                     assistant_messages.append(f'تم تقسيم الشريحة رقم {target_num} بنجاح إلى شريحتين متناسقتين.')
@@ -4860,7 +4873,7 @@ def api_designer_chat():
                     user_image_refs=user_image_refs, slide_type=slide_type,
                     total_slides=len(slides) + 1,
                 )
-                slides.append({'html': html, 'title': title, 'type': slide_type, 'designStyle': plan_slide['design_style'], 'bullets': [], 'metrics': []})
+                slides.append({'html': html, 'title': title, 'type': slide_type, 'designStyle': plan_slide['design_style'], 'bullets': [], 'metrics': [], '_designer_keep_html': True})
                 executed.append({'tool': tool, 'status': 'success', 'index': len(slides) - 1})
             elif tool in ('regenerate_maps', 'update_map_style', 'change_map_type'):
                 maptype = params.get('maptype') or params.get('style') or 'roadmap'
