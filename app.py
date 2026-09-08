@@ -3305,7 +3305,27 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
         # an old client URL win over the real persisted file and rendered a blank frame.
         if parsed.path.startswith('/api/map-images/'):
             return False
-        return True
+        # The browser must never receive a server filesystem path (for example
+        # ``C:\\...`` or ``D:\\...``) as an image source.  It is not a URL and
+        # silently renders as a missing image, while the persisted map row below
+        # already has the public upload path we need.  Canonical maps are either
+        # served from our map route, inline image data, or an explicit URL.
+        if value.startswith('data:image/'):
+            return True
+        return parsed.scheme in {'http', 'https'} and bool(parsed.netloc)
+
+    def public_map_url(file_path):
+        """Convert a persisted map file to the only public route that serves it."""
+        if not file_path or not os.path.isfile(file_path):
+            return ''
+        maps_root = os.path.realpath(os.path.join(UPLOADS_DIR, 'maps'))
+        service_maps_root = os.path.realpath(getattr(maps_service, 'MAPS_DIR', maps_root))
+        candidate = os.path.realpath(file_path)
+        in_upload_maps = candidate == maps_root or candidate.startswith(maps_root + os.sep)
+        in_service_maps = candidate == service_maps_root or candidate.startswith(service_maps_root + os.sep)
+        if not (in_upload_maps or in_service_maps):
+            return ''
+        return '/uploads/maps/' + os.path.basename(candidate)
 
     # The location section is the source of truth for the image the user has just
     # approved or edited.  It is sent separately from project_data by the browser,
@@ -3337,13 +3357,9 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
             if row.get('image_type') not in canonical_types:
                 continue
             path = row.get('file_path')
-            if not path or not os.path.exists(path):
-                continue
-            try:
-                rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
-            except ValueError:
-                rel_path = 'uploads/maps/' + os.path.basename(path)
-            return '/' + rel_path
+            public_url = public_map_url(path)
+            if public_url:
+                return public_url
 
     # Compatibility fallback for an unsaved draft or a request carrying a map
     # that has not yet been written to map_images.

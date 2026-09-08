@@ -7698,7 +7698,37 @@ class MeetingRequirementsTests(unittest.TestCase):
                 }],
             )
 
-        self.assertEqual(latest, '/' + os.path.relpath(stale_path, ROOT).replace('\\', '/'))
+        self.assertEqual(latest, '/uploads/maps/' + os.path.basename(stale_path))
+
+    def test_explicit_map_refresh_ignores_filesystem_client_url(self):
+        module = self.application_module
+        persisted_maps_dir = Path(module.UPLOADS_DIR) / 'maps'
+        persisted_maps_dir.mkdir(parents=True, exist_ok=True)
+        latest_file = tempfile.NamedTemporaryFile(
+            dir=persisted_maps_dir, suffix='_filesystem_fallback.png', delete=False
+        )
+        latest_path = latest_file.name
+        latest_file.write(b'persisted-latest-map')
+        latest_file.close()
+        self.addCleanup(lambda: os.path.exists(latest_path) and os.unlink(latest_path))
+
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a, 'catchment', latest_path, '##MAP_CATCHMENT##',
+                presentation_id='pres-filesystem-client-map', metadata={}
+            )
+            latest = module._latest_canonical_map_url(
+                'catchment',
+                {},
+                {'map_placeholders': {'##MAP_CATCHMENT##': r'C:\\workflow\\uploads\\maps\\stale.png'}},
+                tenant_id=self.tenant_a,
+                presentation_id='pres-filesystem-client-map',
+                preferred_images=[{
+                    'map_placeholders': {'##MAP_CATCHMENT##': r'C:\\workflow\\uploads\\maps\\stale.png'}
+                }],
+            )
+
+        self.assertEqual(latest, '/uploads/maps/' + os.path.basename(latest_path))
 
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""
