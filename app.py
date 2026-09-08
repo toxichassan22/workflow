@@ -3289,6 +3289,24 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
 
     canonical_types = {map_type, f'{map_type}_satellite', f'{map_type}_roadmap'}
 
+    def usable_map_url(value):
+        value = str(value or '').strip()
+        if not value or value.startswith('##'):
+            return False
+        parsed = urlsplit(value)
+        if parsed.path.startswith('/uploads/maps/'):
+            relative = parsed.path.removeprefix('/uploads/maps/').replace('/', os.sep)
+            maps_root = os.path.abspath(os.path.join(UPLOADS_DIR, 'maps'))
+            candidate = os.path.abspath(os.path.join(maps_root, relative))
+            if candidate != maps_root and not candidate.startswith(maps_root + os.sep):
+                return False
+            return os.path.isfile(candidate)
+        # There is no live /api/map-images route.  Treating one as usable made
+        # an old client URL win over the real persisted file and rendered a blank frame.
+        if parsed.path.startswith('/api/map-images/'):
+            return False
+        return True
+
     # The location section is the source of truth for the image the user has just
     # approved or edited.  It is sent separately from project_data by the browser,
     # so prefer it before consulting map_images, whose rows can belong to an older
@@ -3302,7 +3320,7 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
         base = token[:-2]
         for candidate in (token, f'{base}_SATELLITE##', f'{base}_ROADMAP##'):
             value = placeholders.get(candidate)
-            if value and not str(value).startswith('##'):
+            if usable_map_url(value):
                 return str(value)
 
     draft_id = (project_data or {}).get('draftId') or (project_data or {}).get('draft_id')
@@ -3341,7 +3359,7 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
         placeholders = creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {}
         for candidate in candidates:
             value = placeholders.get(candidate)
-            if value and not str(value).startswith('##'):
+            if usable_map_url(value):
                 return str(value)
     return ''
 

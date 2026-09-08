@@ -7609,7 +7609,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         module = self.application_module
         client = self.app.test_client()
         old_path = '/uploads/maps/catchment_old.png'
-        project_map = '/uploads/maps/catchment_project_section.png'
+        project_maps_dir = Path(module.UPLOADS_DIR) / 'maps'
+        project_maps_dir.mkdir(parents=True, exist_ok=True)
+        project_file = tempfile.NamedTemporaryFile(
+            dir=project_maps_dir, suffix='_project_section.png', delete=False
+        )
+        project_path = project_file.name
+        project_file.write(b'project-section-map')
+        project_file.close()
+        self.addCleanup(lambda: os.path.exists(project_path) and os.unlink(project_path))
+        project_map = '/uploads/maps/' + os.path.basename(project_path)
         slides = [{
             'type': 'map_catchment',
             'content_source': 'catchment_areas',
@@ -7660,6 +7669,36 @@ class MeetingRequirementsTests(unittest.TestCase):
             reply['creativeImages']['map_placeholders']['##MAP_CATCHMENT##'],
             project_map,
         )
+
+    def test_explicit_map_refresh_ignores_missing_client_url(self):
+        module = self.application_module
+        persisted_maps_dir = Path(module.UPLOADS_DIR) / 'maps'
+        persisted_maps_dir.mkdir(parents=True, exist_ok=True)
+        stale_file = tempfile.NamedTemporaryFile(
+            dir=persisted_maps_dir, suffix='_persisted_latest.png', delete=False
+        )
+        stale_path = stale_file.name
+        stale_file.write(b'persisted-latest-map')
+        stale_file.close()
+        self.addCleanup(lambda: os.path.exists(stale_path) and os.unlink(stale_path))
+
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a, 'catchment', stale_path, '##MAP_CATCHMENT##',
+                presentation_id='pres-missing-client-map', metadata={}
+            )
+            latest = module._latest_canonical_map_url(
+                'catchment',
+                {},
+                {'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/deleted.png'}},
+                tenant_id=self.tenant_a,
+                presentation_id='pres-missing-client-map',
+                preferred_images=[{
+                    'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/deleted.png'}
+                }],
+            )
+
+        self.assertEqual(latest, '/' + os.path.relpath(stale_path, ROOT).replace('\\', '/'))
 
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""
