@@ -7299,6 +7299,37 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(plan['actions'][0]['tool'], 'reorder_slides')
         self.assertEqual(plan['actions'][0]['params'], {'from_index': 8, 'to_index': 4})
 
+    def test_map_reload_reuses_one_approved_asset_without_model_or_google(self):
+        module = self.application_module
+        slides = [{
+            'type': 'map_catchment',
+            'content_source': 'catchment_areas',
+            'title': 'خريطة النطاق الجغرافي واستيعاب المنطقة',
+            'html': '<div class="slide"><img src="/uploads/maps/old.png">'
+                    '<img src="/uploads/maps/duplicate.png"></div>',
+        }]
+
+        plan = module._designer_deterministic_plan('أعد تحميل الخريطة للشريحة رقم 1', slides, 0, [0])
+        self.assertEqual(plan['actions'][0]['tool'], 'insert_canonical_map')
+        self.assertEqual(plan['actions'][0]['params']['map_type'], 'catchment')
+
+        creative = {
+            'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/approved.png'},
+            'map_approvals': {'catchment': True},
+        }
+        approved = module._approved_canonical_map_url('catchment', {}, creative)
+        self.assertEqual(approved, '/uploads/maps/approved.png')
+        replaced, changed = module._replace_slide_with_approved_map(
+            slides[0]['html'], 'catchment', approved)
+        self.assertTrue(changed)
+        self.assertEqual(replaced.count('/uploads/maps/approved.png'), 1)
+        self.assertNotIn('/uploads/maps/old.png', replaced)
+        self.assertNotIn('/uploads/maps/duplicate.png', replaced)
+        self.assertIn('data-canonical-map="catchment"', replaced)
+
+        creative['map_approvals']['catchment'] = False
+        self.assertEqual(module._approved_canonical_map_url('catchment', {}, creative), '')
+
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""
         import slide_engine as engine

@@ -3197,12 +3197,144 @@ def _designer_actionable_edit_request(message):
     ))
 
 
+_CANONICAL_MAP_TOKENS = {
+    'overview': '##MAP_OVERVIEW##',
+    'access': '##MAP_ACCESS##',
+    'catchment': '##MAP_CATCHMENT##',
+    'landmarks': '##MAP_LANDMARKS##',
+}
+
+
+def _canonical_map_type_for_slide(slide):
+    """Infer the canonical map owned by a slide without asking the model."""
+    item = slide if isinstance(slide, dict) else {}
+    slide_type = str(item.get('type') or '').strip().lower()
+    source = str(item.get('content_source') or item.get('contentSource') or '').strip().lower()
+    title = normalize_arabic_digits_py(str(item.get('title') or '').strip().lower())
+    html = str(item.get('html') or '').upper()
+
+    for map_type in ('overview', 'access', 'catchment', 'landmarks'):
+        if slide_type == f'map_{map_type}' or source in {
+            map_type,
+            f'{map_type}_areas',
+            f'{map_type}_landmarks',
+            f'{map_type}_roads',
+        }:
+            return map_type
+        if _CANONICAL_MAP_TOKENS[map_type] in html:
+            return map_type
+
+    if any(term in title for term in ('النطاق الجغرافي', 'نطاق التأثير', 'استيعاب المنطقة', 'منطقة الخدمة')):
+        return 'catchment'
+    if any(term in title for term in ('الوصول', 'شبكة الطرق', 'الطرق الرئيسية', 'المحاور')):
+        return 'access'
+    if any(term in title for term in ('المعالم', 'الخدمات القريبة', 'أوقات القيادة')):
+        return 'landmarks'
+    if any(term in title for term in ('الموقع العام', 'خريطة الموقع', 'خريطة الأرض', 'النظرة العامة')):
+        return 'overview'
+    return ''
+
+
+def _approved_canonical_map_url(map_type, project_data, creative_images=None):
+    """Return only the already-persisted map; this helper never calls a map provider."""
+    map_type = str(map_type or '').strip().lower()
+    token = _CANONICAL_MAP_TOKENS.get(map_type)
+    if not token:
+        return ''
+    creative = _designer_creative_images(project_data, creative_images)
+    placeholders = creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {}
+    approvals = creative.get('map_approvals') if isinstance(creative.get('map_approvals'), dict) else {}
+    if map_type in approvals:
+        approved = approvals.get(map_type)
+        if not (approved is True or (isinstance(approved, str) and approved.strip().lower() in {'true', '1', 'yes'})):
+            return ''
+    base = token[:-2]
+    for candidate in (token, f'{base}_SATELLITE##', f'{base}_ROADMAP##'):
+        value = placeholders.get(candidate)
+        if value and not str(value).startswith('##'):
+            return str(value)
+    return ''
+
+
+def _replace_slide_with_approved_map(html, map_type, map_url):
+    """Replace a slide's map media with one approved image and remove duplicate map tags."""
+    if not html or not map_url:
+        return html, False
+    token = _CANONICAL_MAP_TOKENS.get(str(map_type or '').strip().lower())
+    if not token:
+        return html, False
+
+    base = token[:-2]
+    map_tokens = (token, f'{base}_SATELLITE##', f'{base}_ROADMAP##')
+    output = str(html)
+    for candidate in map_tokens:
+        output = output.replace(candidate, map_url)
+
+    img_pattern = re.compile(r'<img\b[^>]*>', re.IGNORECASE)
+    map_tags = []
+    for match in img_pattern.finditer(output):
+        tag = match.group(0)
+        lowered = tag.lower()
+        if 'uploads/maps/' in lowered or 'maps/' in lowered or '##map_' in lowered:
+            map_tags.append(match)
+
+    changed = False
+    if map_tags:
+        first = map_tags[0]
+        first_tag = first.group(0)
+        src_pattern = re.compile(r'(\bsrc\s*=\s*)(["\'])(.*?)(\2)', re.IGNORECASE | re.DOTALL)
+        if src_pattern.search(first_tag):
+            first_tag = src_pattern.sub(lambda m: f'{m.group(1)}{m.group(2)}{map_url}{m.group(4)}', first_tag, count=1)
+        else:
+            first_tag = re.sub(r'\s*/>$', '>', first_tag)
+            first_tag = first_tag[:-1] + f' src="{map_url}">'
+        if 'data-canonical-map=' not in first_tag.lower():
+            first_tag = re.sub(r'\s*/>$', '>', first_tag)
+            first_tag = first_tag[:-1] + f' data-canonical-map="{map_type}">'
+        replacements = [(first.start(), first.end(), first_tag)]
+        replacements.extend((match.start(), match.end(), '') for match in map_tags[1:])
+        for start, end, value in reversed(replacements):
+            output = output[:start] + value + output[end:]
+        changed = True
+    elif token in output or map_url in output:
+        changed = map_url in output
+    else:
+        closing = re.search(r'</div>\s*$', output, re.IGNORECASE)
+        if closing:
+            map_markup = (
+                f'<div data-canonical-map="{map_type}" style="position:absolute;left:40px;right:40px;'
+                f'top:120px;bottom:70px;z-index:1;display:flex;align-items:center;justify-content:center;overflow:hidden;">'
+                f'<img src="{map_url}" alt="" style="width:100%;height:100%;object-fit:contain;object-position:center center;"></div>'
+            )
+            output = output[:closing.start()] + map_markup + output[closing.start():]
+            changed = True
+
+    return output, changed
+
+
 def _designer_deterministic_plan(message, slides, current_index, target_indexes):
     """Handle unambiguous structural commands without spending a planner turn first."""
     if not message or not slides:
         return None
     normalized = normalize_arabic_digits_py(str(message).strip().lower())
     numbers = [idx + 1 for idx in (target_indexes or [])]
+
+    is_map_reload = bool(
+        re.search(r'(?:إعادة|اعادة|اعاده|أعد|اعد|عيد|رجع|رجّع)', normalized)
+        and re.search(r'(?:خريطة|الخريطة|الخريطه|map)', normalized)
+        and re.search(r'(?:تحميل|إضافة|اضافة|إدراج|ادراج|استيراد|إعادتها|اعادتها)', normalized)
+    )
+    if is_map_reload:
+        number = numbers[0] if numbers else current_index + 1
+        index = number - 1
+        map_type = _canonical_map_type_for_slide(slides[index]) if 0 <= index < len(slides) else ''
+        if map_type:
+            return {
+                'response': f'سأعيد إدراج الخريطة المعتمدة في الشريحة رقم {number} من النسخة المحفوظة، دون طلب خريطة جديدة من جوجل.',
+                'actions': [{'tool': 'insert_canonical_map', 'params': {
+                    'target': 'indexes', 'indexes': [number], 'map_type': map_type,
+                }}],
+            }
 
     if re.search(r'(?:احذف|حذف|امسح|إزالة|ازالة)\s*(?:الشريحة|شريحة|السلايد|سلايد)', normalized):
         targets = sorted(set(numbers or [current_index + 1]), reverse=True)
@@ -4006,26 +4138,39 @@ def api_designer_chat():
                 }
                 token, label = token_map.get(map_type, ('##MAP_OVERVIEW##', 'خريطة الموقع العام'))
                 targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
-                instruction_map = (
-                    f"أدرج الخريطة المعتمدة {token} بعنوان «{label}» في تصميم الشريحة بشكل متناسق ومتقن كعنصر محوري أو في بطاقة مكانية. "
-                    f"حافظ على كافة نصوص وبيانات الشريحة وخلوها التام من أي إيموجي أو أيقونات."
-                )
+                approved_url = _approved_canonical_map_url(map_type, project_data, creative_images)
+                if not approved_url:
+                    assistant_messages.append(f'لا توجد نسخة معتمدة محفوظة من خريطة {label} لإعادة إدراجها؛ لم يتم طلب خريطة جديدة من جوجل.')
+                    executed.append({'tool': tool, 'status': 'failed', 'indexes': targets,
+                                     'map_type': map_type, 'reason': 'approved_map_missing'})
+                    continue
+                successful_targets = []
                 for idx in targets:
                     slide = slides[idx] if isinstance(slides[idx], dict) else {}
-                    orig_html = slide.get('html', '')
-                    updated_html, r_msg = _designer_edit_slide(
-                        orig_html, slide.get('title', f'شريحة {idx + 1}'),
-                        instruction_map, idx, project_data, presentation_id, branding,
-                        tenant_id=tenant_id, creative_images=creative_images,
-                        user_image_refs=user_image_refs, slide_type=slide.get('type', 'content'),
+                    updated_html, replaced = _replace_slide_with_approved_map(
+                        slide.get('html', ''), map_type, approved_url
+                    )
+                    if not replaced:
+                        assistant_messages.append(f'تعذر العثور على موضع خريطة {label} في الشريحة رقم {idx + 1}؛ لم يتم تغيير الشريحة.')
+                        continue
+                    updated_html = resolve_designer_chat_placeholders(
+                        updated_html, project_data, presentation_id, tenant_id, creative_images
+                    )
+                    slide['html'] = slide_engine.finalize_slide_html(
+                        updated_html, slide.get('type', 'content'), project_data, branding,
+                        creative_images=creative_images, tenant_id=tenant_id,
+                        slide_num=idx + 1, slide_title=slide.get('title', f'شريحة {idx + 1}'),
                         total_slides=len(slides),
                         content_source=slide.get('content_source') or slide.get('contentSource'),
+                        allow_all_maps=True,
                     )
-                    slide['html'] = updated_html
                     slides[idx] = slide
-                    if r_msg:
-                        assistant_messages.append(r_msg)
-                executed.append({'tool': tool, 'status': 'success', 'indexes': targets, 'map_type': map_type})
+                    successful_targets.append(idx)
+                if successful_targets:
+                    assistant_messages.append(f'تمت إعادة إدراج خريطة {label} المعتمدة في الشرائح المحددة دون توليد نسخة من جوجل.')
+                executed.append({'tool': tool, 'status': 'success' if successful_targets else 'failed',
+                                 'indexes': successful_targets, 'map_type': map_type,
+                                 'source': 'approved_persisted_map'})
             elif tool in ('insert_financial_chart', 'update_financial_chart'):
                 chart_type = str(params.get('chart_type') or 'waterfall').lower()
                 targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
