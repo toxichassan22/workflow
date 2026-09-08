@@ -241,6 +241,100 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             ),
         )
 
+    def test_renumbering_recovers_legacy_plan_image_without_image_tokens(self):
+        legacy_html = (
+            '<div class="slide" style="width:1280px;height:720px;overflow:hidden">'
+            '<div><img class="project-logo" src="/uploads/creative/tenant/project-logo.png"></div>'
+            '<div><img src="/api/map-images/overview" style="width:100%;height:auto"></div>'
+            '<div data-legacy-media-frame><img src="/uploads/creative/tenant/plan-floor-1.png" '
+            'style="display:block;width:100%;height:auto"></div></div>'
+        )
+        slides = [{
+            'title': 'مخطط الدور الأرضي',
+            'type': 'content',
+            'section_key': 'plans',
+            'content_source': 'plan_image:1',
+            'html': legacy_html,
+        }]
+
+        migrated = slide_engine.renumber_presentation_slides(
+            slides,
+            branding={'primary_color': '#123456'},
+            project_data={'project_name': 'المشروع'},
+            creative_images={},
+        )
+
+        self.assertEqual(len(migrated), 1)
+        html = migrated[0]['html']
+        self.assertIn('data-visual-media-only="1"', html)
+        self.assertIn('data-visual-media-grid="1"', html)
+        self.assertIn('/uploads/creative/tenant/plan-floor-1.png', html)
+        self.assertNotIn('/uploads/creative/tenant/project-logo.png', html)
+        self.assertNotIn('/api/map-images/overview', html)
+        self.assertNotIn('data-legacy-media-frame', html)
+        self.assertNotIn('height:auto', html)
+        self.assertIn('position:absolute!important;inset:0!important', html)
+        self.assertIn('object-fit:contain!important', html)
+
+    def test_renumbering_prefers_plan_token_inferred_from_content_source(self):
+        slides = [{
+            'title': 'مخطط الدور الأرضي',
+            'type': 'content',
+            'section_key': 'plans',
+            'content_source': 'plan_image:2',
+            'image_tokens': ['##PLAN_IMAGE_1##'],
+            'html': (
+                '<div class="slide"><img src="/uploads/creative/tenant/stale-plan.png" '
+                'style="width:100%;height:auto"></div>'
+            ),
+        }]
+
+        migrated = slide_engine.renumber_presentation_slides(
+            slides,
+            branding={'primary_color': '#123456'},
+            project_data={'project_name': 'المشروع'},
+            creative_images={'plans': [
+                {'url': '/uploads/creative/tenant/plan-1.png'},
+                {'url': '/uploads/creative/tenant/current-plan-2.png'},
+            ]},
+        )
+
+        self.assertEqual(migrated[0]['image_tokens'], ['##PLAN_IMAGE_2##'])
+        self.assertIn('/uploads/creative/tenant/current-plan-2.png', migrated[0]['html'])
+        self.assertNotIn('/uploads/creative/tenant/stale-plan.png', migrated[0]['html'])
+        self.assertIn('object-fit:contain!important', migrated[0]['html'])
+
+    def test_renumbering_keeps_non_media_plan_slide_content(self):
+        original_html = (
+            '<div class="slide"><p>تحليل توزيع المساحات</p>'
+            '<img src="/uploads/creative/tenant/supporting-plan.png" style="width:45%;height:auto"></div>'
+        )
+        migrated = slide_engine.renumber_presentation_slides([{
+            'title': 'تحليل المخططات',
+            'type': 'content',
+            'section_key': 'plans',
+            'content_source': 'plan_notes',
+            'html': original_html,
+        }], branding={'primary_color': '#123456'}, project_data={'project_name': 'المشروع'})
+
+        self.assertIn('تحليل توزيع المساحات', migrated[0]['html'])
+        self.assertIn('/uploads/creative/tenant/supporting-plan.png', migrated[0]['html'])
+        self.assertNotIn('data-visual-media-only="1"', migrated[0]['html'])
+
+    def test_legacy_visual_media_token_alias_is_rebuilt(self):
+        migrated = slide_engine.renumber_presentation_slides([{
+            'title': 'التصور الخارجي',
+            'type': 'content',
+            'section_key': 'exterior',
+            'image_tokens': ['##PROJECT_IMAGE_1##'],
+            'html': '<div class="slide"></div>',
+        }], branding={}, project_data={}, creative_images={
+            'moodboard': [{'url': '/uploads/creative/tenant/exterior-1.png'}],
+        })
+
+        self.assertIn('/uploads/creative/tenant/exterior-1.png', migrated[0]['html'])
+        self.assertIn('data-visual-media-only="1"', migrated[0]['html'])
+
     def test_slide_preview_matches_export_margin_reset(self):
         source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('display: block !important;', source)

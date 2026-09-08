@@ -6957,6 +6957,38 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('03 — 05', exported_html)
         self.assertIn('04 — 05', exported_html)
 
+    def test_export_rebuilds_legacy_plan_without_image_tokens(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        legacy_plan = {
+            'title': 'مخطط الدور الأرضي',
+            'type': 'content',
+            'section_key': 'plans',
+            'content_source': 'plan_image:1',
+            'html': (
+                '<div class="slide" style="width:1280px;height:720px;overflow:hidden">'
+                '<img class="project-logo" src="/uploads/creative/tenant/project-logo.png">'
+                '<img src="/uploads/creative/tenant/plan-floor-1.png" '
+                'style="display:block;width:100%;height:auto"></div>'
+            ),
+        }
+
+        with patch('exports.pdf_export.generate_pdf') as generate_pdf:
+            exported = client.post('/api/export', headers=headers, json={
+                'format': 'pdf',
+                'projectName': 'عرض المخطط',
+                'projectData': {'project_name': 'عرض المخطط'},
+                'slidesData': [legacy_plan],
+            })
+
+        self.assertTrue(exported.get_json()['success'], exported.get_json())
+        exported_html = generate_pdf.call_args.args[0]
+        self.assertIn('data-visual-media-only="1"', exported_html)
+        self.assertIn('/uploads/creative/tenant/plan-floor-1.png', exported_html)
+        self.assertNotIn('/uploads/creative/tenant/project-logo.png', exported_html)
+        self.assertNotIn('height:auto', exported_html)
+        self.assertIn('object-fit:contain!important', exported_html)
+
     def test_the_slide_structure_is_not_client_facing(self):
         """Owner rule: the client never operates the structure — no plan panel, no editable plan
         titles, and no button that builds or rebuilds it outside «توليد العرض»."""

@@ -8038,17 +8038,137 @@ def _build_market_risk_slide(slide, source, branding=None, slide_num=None, total
 </div>'''
 
 
+def _visual_media_content_source(slide):
+    item = slide if isinstance(slide, dict) else {}
+    return str(item.get('content_source') or item.get('contentSource') or '').strip().lower()
+
+
+def _visual_media_image_tokens(slide):
+    item = slide if isinstance(slide, dict) else {}
+    values = item.get('image_tokens')
+    if not isinstance(values, list):
+        values = item.get('imageTokens')
+    return [str(token or '').strip() for token in (values or []) if str(token or '').strip()]
+
+
+def _visual_media_tokens_from_source(slide):
+    source = _visual_media_content_source(slide)
+    match = re.fullmatch(r'plan_image:(\d+)', source)
+    if match and int(match.group(1)) > 0:
+        return [f'##PLAN_IMAGE_{int(match.group(1))}##']
+    match = re.fullmatch(r'exterior_image:(\d+)', source)
+    if match and int(match.group(1)) > 0:
+        return [f'##MOODBOARD_IMAGE_{int(match.group(1))}##']
+    match = re.fullmatch(r'exterior_images_group:(\d+):(\d+)', source)
+    if match:
+        start, end = sorted((int(match.group(1)), int(match.group(2))))
+        if start > 0:
+            return [f'##MOODBOARD_IMAGE_{index}##' for index in range(start, min(end, start + 29) + 1)]
+    match = re.fullmatch(r'interior_image:(\d+):(\d+)', source)
+    if match and int(match.group(1)) > 0 and int(match.group(2)) > 0:
+        return [f'##INTERIOR_COMP_{int(match.group(1))}_IMG_{int(match.group(2))}##']
+    match = re.fullmatch(r'interior_images_group:(\d+):(\d+):(\d+)', source)
+    if match:
+        component = int(match.group(1))
+        start, end = sorted((int(match.group(2)), int(match.group(3))))
+        if component > 0 and start > 0:
+            return [
+                f'##INTERIOR_COMP_{component}_IMG_{index}##'
+                for index in range(start, min(end, start + 29) + 1)
+            ]
+    return []
+
+
+def _usable_legacy_visual_media_url(value, attrs_text=''):
+    url = html_lib.unescape(str(value or '').strip()).strip('"\' ')
+    if not url or '##' in url or url.lower().startswith(('blob:', 'javascript:', 'about:')):
+        return ''
+    if re.search(r'(?:logo|شعار|data-cover|cover-overlay)', attrs_text, flags=re.IGNORECASE):
+        return ''
+    if re.search(
+        r'(?:tenant-assets|/api/branding/|(?:^|[/_.-])(?:project[-_])?logo(?:[/_.?&-]|$))',
+        url, flags=re.IGNORECASE,
+    ):
+        return ''
+    if re.search(
+        r'(?:^|/)uploads/maps(?:/|$)|(?:^|/)api/map-images(?:/|$)|(?:^|/)map_[^/]*(?:\?|$)',
+        url, flags=re.IGNORECASE,
+    ):
+        return ''
+    if not (
+        url.startswith(('/', 'http://', 'https://', 'data:image/'))
+        or re.search(r'\.(?:avif|bmp|gif|jpe?g|png|webp)(?:\?.*)?$', url, flags=re.IGNORECASE)
+    ):
+        return ''
+    return url
+
+
+class _LegacyVisualMediaParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.urls = []
+
+    def _append(self, value, attrs_text):
+        url = _usable_legacy_visual_media_url(value, attrs_text)
+        if url and url not in self.urls:
+            self.urls.append(url)
+
+    def handle_starttag(self, tag, attrs):
+        values = {str(key or '').lower(): str(value or '') for key, value in attrs}
+        attrs_text = ' '.join(
+            f'{key}={value}' for key, value in values.items() if key not in {'src', 'style'}
+        )
+        if str(tag or '').lower() == 'img':
+            self._append(values.get('src'), attrs_text)
+        style = values.get('style') or ''
+        for match in re.finditer(r'url\(\s*(["\']?)(.*?)\1\s*\)', style, flags=re.IGNORECASE):
+            self._append(match.group(2), attrs_text)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+
+def _legacy_visual_media_urls(slide):
+    html = _strip_existing_slide_chrome(str((slide or {}).get('html') or ''))
+    if not html:
+        return []
+    parser = _LegacyVisualMediaParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except (ValueError, TypeError):
+        return []
+    return parser.urls[:30]
+
+
+def _legacy_visual_media_layout_marked(slide):
+    item = slide if isinstance(slide, dict) else {}
+    html = str(item.get('html') or '')
+    if not _legacy_visual_media_urls(item):
+        return False
+    if item.get('media_only') or str(item.get('design_style') or item.get('designStyle') or '').strip().lower() == 'image':
+        return True
+    return bool(re.search(
+        r'data-(?:visual-media-only|visual-media-grid|legacy-media-frame)',
+        html, flags=re.IGNORECASE,
+    ))
+
+
 def _is_visual_concept_media_slide(slide):
-    source = str((slide or {}).get('content_source') or '').strip().lower()
+    source = _visual_media_content_source(slide)
     section = _slide_section_key(slide or {})
-    tokens = [str(token or '').strip().upper() for token in ((slide or {}).get('image_tokens') or [])]
+    token_names = [token.strip('#').upper() for token in _visual_media_image_tokens(slide)]
     has_visual_token = any(token.startswith((
-        '##PLAN_IMAGE_', '##2D_PLAN_', '##MOODBOARD_IMAGE_', '##INTERIOR_COMP_',
-    )) for token in tokens)
-    return section in {'plans', 'exterior', 'interior'} and (has_visual_token or source.startswith((
+        'PLAN_IMAGE_', '2D_PLAN_', 'MOODBOARD_IMAGE_', 'PROJECT_IMAGE_',
+        'INTERIOR_COMP_', 'INTERIOR_C', 'INTERIOR_IMAGE_', 'INTERIOR_',
+    )) for token in token_names)
+    has_visual_source = source.startswith((
         'plan_image:', 'exterior_image:', 'exterior_images_group:',
         'interior_image:', 'interior_images_group:',
-    )))
+    ))
+    return section in {'plans', 'exterior', 'interior'} and (
+        has_visual_token or has_visual_source or _legacy_visual_media_layout_marked(slide)
+    )
 
 
 def _creative_asset_url(value):
@@ -8071,13 +8191,13 @@ def _visual_media_token_url(token, creative_images):
     if match:
         values = images.get('moodboard') or images.get('moodboardImages') or []
         index = int(match.group(1)) - 1
-        return _creative_asset_url(values[index]) if isinstance(values, list) and index < len(values) else ''
+        return _creative_asset_url(values[index]) if isinstance(values, list) and 0 <= index < len(values) else ''
 
     match = re.fullmatch(r'(?:PLAN_IMAGE|2D_PLAN)_(\d+)', name)
     if match:
         values = images.get('plans') or images.get('plans2d') or []
         index = int(match.group(1)) - 1
-        return _creative_asset_url(values[index]) if isinstance(values, list) and index < len(values) else ''
+        return _creative_asset_url(values[index]) if isinstance(values, list) and 0 <= index < len(values) else ''
 
     match = re.fullmatch(r'INTERIOR_(?:COMP_)?(\d+)_(?:IMG|IMAGE)_(\d+)', name)
     if not match:
@@ -8088,10 +8208,10 @@ def _visual_media_token_url(token, creative_images):
         components = images.get('interior_components') or []
         component_index = int(match.group(1)) - 1
         image_index = int(match.group(2)) - 1
-        if isinstance(components, list) and component_index < len(components):
+        if isinstance(components, list) and 0 <= component_index < len(components):
             component = components[component_index]
             values = component.get('images') if isinstance(component, dict) else []
-            if isinstance(values, list) and image_index < len(values):
+            if isinstance(values, list) and 0 <= image_index < len(values):
                 return _creative_asset_url(values[image_index])
         return ''
 
@@ -8099,13 +8219,27 @@ def _visual_media_token_url(token, creative_images):
     if match:
         values = images.get('interior') or images.get('interior_images') or []
         index = int(match.group(1)) - 1
-        return _creative_asset_url(values[index]) if isinstance(values, list) and index < len(values) else ''
+        return _creative_asset_url(values[index]) if isinstance(values, list) and 0 <= index < len(values) else ''
     return ''
 
 
-def _visual_media_assets_available(slide, creative_images):
-    tokens = [str(token or '').strip() for token in ((slide or {}).get('image_tokens') or []) if str(token or '').strip()]
-    return bool(tokens) and all(_visual_media_token_url(token, creative_images) for token in tokens)
+def _visual_media_rebuild_sources(slide, creative_images):
+    inferred_tokens = _visual_media_tokens_from_source(slide)
+    if inferred_tokens and all(_visual_media_token_url(token, creative_images) for token in inferred_tokens):
+        return inferred_tokens, inferred_tokens
+
+    tokens = _visual_media_image_tokens(slide)
+    if tokens and all(_visual_media_token_url(token, creative_images) for token in tokens):
+        return tokens, tokens
+
+    direct_sources = [
+        _usable_legacy_visual_media_url(token)
+        for token in tokens
+    ]
+    if tokens and all(direct_sources):
+        return direct_sources, []
+
+    return _legacy_visual_media_urls(slide), []
 
 
 def _build_visual_concept_media_slide(slide, branding=None):
@@ -10383,47 +10517,56 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                     item.get('html') or '', slide_type, index, total)
             if slide_type != 'section_divider' and (item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source'))):
                 item['html'] = _strip_market_slide_media(item['html'])
-        elif _is_visual_concept_media_slide(item) and _visual_media_assets_available(item, creative_images):
-            # Stored presentations can predate the bounded visual-media template. Rebuild them
-            # from their preserved tokens so preview and export cannot reuse an unconstrained
-            # width:100% / height:auto image that extends below the 720px slide canvas.
-            rebuilt = _build_visual_concept_media_slide(item, branding=branding)
-            item['html'] = finalize_slide_html(
-                rebuilt, slide_type, project_data, branding,
-                creative_images=creative_images, tenant_id=tenant_id,
-                slide_num=index, slide_title=item.get('title'), total_slides=total,
-                content_source=item.get('content_source'), allow_all_maps=allow_all_maps,
-            )
         else:
-            html = item.get('html') or ''
-            # Rebuild the managed chrome on every content slide. Older saved slides
-            # may already have the previous white header, so checking only for the
-            # marker would preserve the color conflict after the new adaptive rule.
-            html = _strip_existing_slide_chrome(html)
-            html = _normalize_light_content_surface(html, slide_type=slide_type)
-            html = _ensure_managed_chrome(
-                html, slide_title=item.get('title'), slide_num=index,
-                total_slides=total, branding=branding,
-                project_data=project_data, tenant_id=tenant_id,
-            )
-            html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
-            html = _replace_data_placeholders(html, project_data, branding)
-            html = resolve_logo_in_html(
-                html, tenant_id, _branding_cache=branding,
-                project_logo=_project_logo_reference(project_data),
-            )
-            item['html'] = _rewrite_slide_counter(html, slide_type, index, total)
-            # Generation already applies the strict media ownership boundary in
-            # finalize_slide_html().  Re-numbering is also used when an existing
-            # presentation is opened, so it must not delete a map URL that was
-            # deliberately saved in a slide (for example after a designer-chat
-            # insertion).  Unresolved map tokens are still removed here because
-            # they cannot render an image on their own.
-            item['html'] = _strip_unplanned_map_media(
-                item['html'], slide_type, content_source=item.get('content_source'),
-                slide_title=title, strip_resolved=False, allow_all_maps=allow_all_maps)
-            if item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source')):
-                item['html'] = _strip_market_slide_media(item['html'])
+            media_sources = []
+            canonical_tokens = []
+            if _is_visual_concept_media_slide(item):
+                media_sources, canonical_tokens = _visual_media_rebuild_sources(item, creative_images)
+            if media_sources:
+                # Stored presentations can predate both image_tokens and the bounded visual-media
+                # template. Prefer current assets inferred from content_source, then recover the
+                # resolved media URL already present in the old slide HTML.
+                rebuild_item = dict(item)
+                rebuild_item['image_tokens'] = media_sources
+                if canonical_tokens:
+                    item['image_tokens'] = canonical_tokens
+                rebuilt = _build_visual_concept_media_slide(rebuild_item, branding=branding)
+                item['html'] = finalize_slide_html(
+                    rebuilt, slide_type, project_data, branding,
+                    creative_images=creative_images, tenant_id=tenant_id,
+                    slide_num=index, slide_title=item.get('title'), total_slides=total,
+                    content_source=_visual_media_content_source(item), allow_all_maps=allow_all_maps,
+                )
+            else:
+                html = item.get('html') or ''
+                # Rebuild the managed chrome on every content slide. Older saved slides
+                # may already have the previous white header, so checking only for the
+                # marker would preserve the color conflict after the new adaptive rule.
+                html = _strip_existing_slide_chrome(html)
+                html = _normalize_light_content_surface(html, slide_type=slide_type)
+                html = _ensure_managed_chrome(
+                    html, slide_title=item.get('title'), slide_num=index,
+                    total_slides=total, branding=branding,
+                    project_data=project_data, tenant_id=tenant_id,
+                )
+                html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
+                html = _replace_data_placeholders(html, project_data, branding)
+                html = resolve_logo_in_html(
+                    html, tenant_id, _branding_cache=branding,
+                    project_logo=_project_logo_reference(project_data),
+                )
+                item['html'] = _rewrite_slide_counter(html, slide_type, index, total)
+                # Generation already applies the strict media ownership boundary in
+                # finalize_slide_html().  Re-numbering is also used when an existing
+                # presentation is opened, so it must not delete a map URL that was
+                # deliberately saved in a slide (for example after a designer-chat
+                # insertion).  Unresolved map tokens are still removed here because
+                # they cannot render an image on their own.
+                item['html'] = _strip_unplanned_map_media(
+                    item['html'], slide_type, content_source=item.get('content_source'),
+                    slide_title=title, strip_resolved=False, allow_all_maps=allow_all_maps)
+                if item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source')):
+                    item['html'] = _strip_market_slide_media(item['html'])
     return normalized
 
 
