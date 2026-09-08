@@ -593,6 +593,73 @@
       display: block;
     }
 
+    .ge-slide-edit-controls {
+      flex-wrap: wrap;
+      row-gap: 6px;
+    }
+
+    .ge-slide-edit-controls button:disabled {
+      opacity: .45;
+      cursor: default;
+    }
+
+    .slide-element-selected {
+      outline: 2px solid #c5a059 !important;
+      outline-offset: 3px;
+    }
+
+    .slide-resize-handle {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      background: #fff;
+      border: 2px solid var(--pd);
+      border-radius: 5px;
+      cursor: nwse-resize;
+      z-index: 300;
+      box-sizing: border-box;
+    }
+
+    .slide-move-handle {
+      position: absolute;
+      height: 20px;
+      min-width: 48px;
+      padding: 0 8px;
+      background: var(--pd);
+      color: #fff;
+      border-radius: 5px;
+      font-size: 11px;
+      line-height: 20px;
+      text-align: center;
+      cursor: move;
+      z-index: 300;
+      white-space: nowrap;
+      box-sizing: border-box;
+    }
+
+    .slide-edit-color {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--pd);
+    }
+
+    .slide-edit-color input[type=color] {
+      width: 30px;
+      height: 24px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .slide-edit-color input[type=color]:disabled {
+      opacity: .45;
+      cursor: default;
+    }
+
     :root {
       --p: #3B6E91;
       --pd: #254B66;
@@ -21745,6 +21812,7 @@
           if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
           const parent = node.parentElement;
           if (!parent) return NodeFilter.FILTER_REJECT;
+          if (parent.closest('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return NodeFilter.FILTER_REJECT;
           const tag = parent.tagName;
           if (tag === 'SCRIPT' || tag === 'STYLE') return NodeFilter.FILTER_REJECT;
           return NodeFilter.FILTER_ACCEPT;
@@ -21774,6 +21842,7 @@
           el.addEventListener('click', stopEditEvent);
           el.addEventListener('keydown', onInlineEditKey);
           el.addEventListener('paste', onInlineEditPaste);
+          el.addEventListener('focus', onSlideEditableFocus);
           el.addEventListener('blur', () => commitSlideInlineEdit(stage, index, el));
         } else {
           el.removeAttribute('contenteditable');
@@ -21784,6 +21853,7 @@
           el.removeEventListener('click', stopEditEvent);
           el.removeEventListener('keydown', onInlineEditKey);
           el.removeEventListener('paste', onInlineEditPaste);
+          el.removeEventListener('focus', onSlideEditableFocus);
         }
       });
       // Re-fit the slide when toggling edit mode.
@@ -21813,6 +21883,7 @@
 
     function slideDragTarget(slide, source) {
       if (!slide || !source || source === slide) return null;
+      if (source.closest && source.closest('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return null;
       if (source.closest('[contenteditable], .presentation-chrome-logo, [data-canonical-map]')) return null;
       let node = source.nodeType === 1 ? source : source.parentElement;
       while (node && node !== slide) {
@@ -21824,24 +21895,30 @@
       return null;
     }
 
+    function findSlideRawTarget(rawRoot, target, path) {
+      if (!rawRoot) return null;
+      const placement = target ? (target.getAttribute('data-company-logo-placement')
+        || target.getAttribute('data-team-logo-placement')) : null;
+      if (placement) {
+        const attr = target.hasAttribute('data-company-logo-placement')
+          ? 'data-company-logo-placement' : 'data-team-logo-placement';
+        const safePlacement = String(placement).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const byPlacement = rawRoot.querySelector('[' + attr + '="' + safePlacement + '"]');
+        if (byPlacement) return byPlacement;
+      }
+      return elementAtSlidePath(rawRoot, path);
+    }
+
     function commitSlideElementMove(stage, index, target, path, dx, dy) {
       const slideData = tenantSlidesData[index];
       if (!slideData || !slideData.html || (!dx && !dy)) return;
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
       const rawRoot = rawDoc.querySelector('.slide');
       if (!rawRoot) return;
-      let rawTarget = null;
-      const placement = target.getAttribute('data-company-logo-placement')
-        || target.getAttribute('data-team-logo-placement');
-      if (placement) {
-        const attr = target.hasAttribute('data-company-logo-placement')
-          ? 'data-company-logo-placement' : 'data-team-logo-placement';
-        const safePlacement = String(placement).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        rawTarget = rawRoot.querySelector('[' + attr + '="' + safePlacement + '"]');
-      }
-      rawTarget = rawTarget || elementAtSlidePath(rawRoot, path);
+      const rawTarget = findSlideRawTarget(rawRoot, target, path);
       if (!rawTarget) return;
 
+      pushSlideEditHistory(index);
       const nextX = (Number(target.dataset.manualTranslateX) || 0) + dx;
       const nextY = (Number(target.dataset.manualTranslateY) || 0) + dy;
       const transform = 'translate(' + Math.round(nextX) + 'px, ' + Math.round(nextY) + 'px)';
@@ -21853,6 +21930,7 @@
       rawTarget.style.transform = transform;
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
       triggerAutoSaveDraft();
       toast('تم تحريك العنصر وحفظ موضعه في الشريحة');
     }
@@ -21863,20 +21941,15 @@
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
       const rawRoot = rawDoc.querySelector('.slide');
       if (!rawRoot) return;
-      let rawTarget = null;
-      const placement = target.getAttribute('data-company-logo-placement')
-        || target.getAttribute('data-team-logo-placement');
-      if (placement) {
-        const attr = target.hasAttribute('data-company-logo-placement')
-          ? 'data-company-logo-placement' : 'data-team-logo-placement';
-        const safePlacement = String(placement).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        rawTarget = rawRoot.querySelector('[' + attr + '="' + safePlacement + '"]');
-      }
-      rawTarget = rawTarget || elementAtSlidePath(rawRoot, path);
+      const rawTarget = findSlideRawTarget(rawRoot, target, path);
       if (!rawTarget || !rawTarget.parentElement) return;
+      pushSlideEditHistory(index);
       rawTarget.parentElement.removeChild(rawTarget);
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      const session = slideEditSessions[index];
+      if (session) session.sel = null;
       triggerAutoSaveDraft();
       renderTenantSlides();
       toast('تم حذف العنصر من الشريحة');
@@ -21955,11 +22028,256 @@
           target.removeEventListener('pointercancel', finish);
           target.classList.remove('slide-element-editable');
           if (moved) commitSlideElementMove(stage, index, target, path, dx, dy);
+          selectSlideElement(stage, index, target, path);
         };
         target.addEventListener('pointermove', handlePointerMove);
         target.addEventListener('pointerup', finish);
         target.addEventListener('pointercancel', finish);
       });
+      stage.addEventListener('click', function handleSlideEditClick(event) {
+        if (!getSlideEditSession(index)) return;
+        if (event.target.closest('.slide-element-selected, .slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return;
+        if (slideDragTarget(slide, event.target)) return;
+        clearSlideElementSelection(stage);
+        const session = slideEditSessions[index];
+        if (session) session.sel = null;
+        syncSlideElementToolbar(index);
+      });
+      stage.addEventListener('keydown', function handleSlideEditKey(event) {
+        if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+        const ae = document.activeElement;
+        if (ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|BUTTON|SELECT)$/.test(ae.tagName))) return;
+        if (!getSlideEditSession(index)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        deleteSelectedSlideElement(index);
+      });
+    }
+
+    /* Unified manual slide editing: one smart edit mode per slide with its own
+       undo session (اعتماد / تراجع / تقدم / الغاء). Text editing and element
+       dragging stay active together; a click decides by target (text edits,
+       images and positioned blocks drag). */
+    const slideEditSessions = {};
+    const SLIDE_EDIT_HISTORY_LIMIT = 30;
+
+    function slideEditFingerprint(slide) {
+      const html = String((slide && slide.html) || '');
+      return String((slide && slide.title) || '') + '|' + html.length + '|' + html.slice(0, 64);
+    }
+
+    function getSlideEditSession(index) {
+      const session = slideEditSessions[index];
+      if (!session) return null;
+      const slide = tenantSlidesData[index];
+      if (!slide || slideEditFingerprint(slide) !== session.fp) {
+        delete slideEditSessions[index];
+        return null;
+      }
+      return session;
+    }
+
+    function touchSlideEditSession(index) {
+      const session = slideEditSessions[index];
+      const slide = tenantSlidesData[index];
+      if (!session || !slide) return;
+      session.fp = slideEditFingerprint(slide);
+    }
+
+    function pushSlideEditHistory(index) {
+      const session = getSlideEditSession(index);
+      if (!session || !tenantSlidesData[index]) return false;
+      session.undo.push(tenantSlidesData[index].html);
+      if (session.undo.length > SLIDE_EDIT_HISTORY_LIMIT) session.undo.shift();
+      session.redo = [];
+      return true;
+    }
+
+    function startSlideEditSession(index) {
+      if (!hasPermission('create_presentation')) return;
+      const slide = tenantSlidesData[index];
+      if (!slide || !slide.html) return;
+      slideEditSessions[index] = {
+        originalHtml: slide.html, undo: [], redo: [], sel: null,
+        fp: slideEditFingerprint(slide)
+      };
+      slideInlineEditStates[index] = true;
+      slideElementEditStates[index] = true;
+      renderTenantSlides();
+      toast('وضع التحرير مفعّل لهذه الشريحة');
+    }
+
+    function commitSlideEditSession(index) {
+      if (!slideEditSessions[index]) return;
+      const ae = document.activeElement;
+      if (ae && ae.blur && ae.closest && ae.closest('.tenant-slide-stage')) ae.blur();
+      endSlideEditSession(index, true);
+    }
+
+    function endSlideEditSession(index, keep) {
+      const session = slideEditSessions[index];
+      if (keep !== true && session && tenantSlidesData[index]) {
+        tenantSlidesData[index].html = session.originalHtml;
+        tenantProjectData.tenantSlidesData = tenantSlidesData;
+      }
+      delete slideEditSessions[index];
+      slideInlineEditStates[index] = false;
+      slideElementEditStates[index] = false;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      triggerAutoSaveDraft();
+      renderTenantSlides();
+      toast(keep === true ? 'تم اعتماد تعديلات الشريحة' : 'تم إلغاء تعديلات الشريحة');
+    }
+
+    function undoSlideEdit(index) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.undo.length) { toast('لا توجد خطوات للتراجع'); return; }
+      const slide = tenantSlidesData[index];
+      session.redo.push(slide.html);
+      slide.html = session.undo.pop();
+      session.sel = null;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      renderTenantSlides();
+    }
+
+    function redoSlideEdit(index) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.redo.length) { toast('لا توجد خطوات للتقدم'); return; }
+      const slide = tenantSlidesData[index];
+      session.undo.push(slide.html);
+      slide.html = session.redo.pop();
+      session.sel = null;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      renderTenantSlides();
+    }
+
+    function slideStageForIndex(index) {
+      const card = document.getElementById('slide-card-' + index);
+      return card ? card.querySelector('.tenant-slide-stage') : null;
+    }
+
+    function slideEditToolbarHTML(index) {
+      const session = getSlideEditSession(index);
+      if (!session) {
+        return '<button type="button" data-slide-edit-act="edit"'
+          + ' aria-label="تعديل الشريحة: تعديل النص وتحريك العناصر">تعديل</button>';
+      }
+      const canUndo = session.undo.length > 0;
+      const canRedo = session.redo.length > 0;
+      const hasSel = !!session.sel;
+      return '<button type="button" class="active" data-slide-edit-act="commit">اعتماد</button>'
+        + '<button type="button" data-slide-edit-act="undo"' + (canUndo ? '' : ' disabled') + '>تراجع</button>'
+        + '<button type="button" data-slide-edit-act="redo"' + (canRedo ? '' : ' disabled') + '>تقدم</button>'
+        + '<button type="button" data-slide-edit-act="cancel">الغاء</button>'
+        + '<button type="button" data-slide-edit-act="addtext">إضافة نص</button>'
+        + '<button type="button" data-slide-edit-act="addimage">إضافة صورة</button>'
+        + '<label class="slide-edit-color">لون النص<input type="color" data-slide-edit-color="color" value="#1e293b"'
+        + (hasSel ? '' : ' disabled') + '></label>'
+        + '<label class="slide-edit-color">لون الخلفية<input type="color" data-slide-edit-color="background" value="#ffffff"'
+        + (hasSel ? '' : ' disabled') + '></label>'
+        + '<button type="button" data-slide-edit-act="del"' + (hasSel ? '' : ' disabled') + '>حذف العنصر</button>';
+    }
+
+    function wireSlideEditControls(editControls, index) {
+      editControls.querySelectorAll('[data-slide-edit-act]').forEach(btn => {
+        btn.addEventListener('click', event => {
+          event.stopPropagation();
+          const act = btn.getAttribute('data-slide-edit-act');
+          if (act === 'edit') startSlideEditSession(index);
+          else if (act === 'commit') commitSlideEditSession(index);
+          else if (act === 'cancel') endSlideEditSession(index, false);
+          else if (act === 'undo') undoSlideEdit(index);
+          else if (act === 'redo') redoSlideEdit(index);
+          else if (act === 'addtext') addSlideTextBox(index);
+          else if (act === 'addimage') openSlideImagePicker(index);
+          else if (act === 'del') deleteSelectedSlideElement(index);
+        });
+      });
+      editControls.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
+        inp.addEventListener('click', e => e.stopPropagation());
+        inp.addEventListener('pointerdown', e => e.stopPropagation());
+        inp.addEventListener('input', e => {
+          e.stopPropagation();
+          previewSlideElementColor(index, inp.getAttribute('data-slide-edit-color'), inp.value);
+        });
+        inp.addEventListener('change', e => {
+          e.stopPropagation();
+          commitSlideElementColor(index, inp.getAttribute('data-slide-edit-color'));
+        });
+      });
+    }
+
+    function refreshSlideEditToolbar(index) {
+      const card = document.getElementById('slide-card-' + index);
+      const controls = card ? card.querySelector('.ge-slide-edit-controls') : null;
+      if (!controls) return;
+      controls.innerHTML = slideEditToolbarHTML(index);
+      wireSlideEditControls(controls, index);
+    }
+
+    function cssColorToHex(value) {
+      const text = String(value || '').trim().toLowerCase();
+      const hex = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+      if (hex) {
+        let digits = hex[1];
+        if (digits.length === 3) digits = digits.split('').map(ch => ch + ch).join('');
+        return '#' + digits.toLowerCase();
+      }
+      const rgb = text.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([\d.]+))?\s*\)$/);
+      if (rgb) {
+        if (rgb[4] !== undefined && Number(rgb[4]) === 0) return '';
+        const toHex = n => Math.max(0, Math.min(255, Number(n))).toString(16).padStart(2, '0');
+        return '#' + toHex(rgb[1]) + toHex(rgb[2]) + toHex(rgb[3]);
+      }
+      return '';
+    }
+
+    function syncSlideElementToolbar(index) {
+      const card = document.getElementById('slide-card-' + index);
+      if (!card) return;
+      const session = getSlideEditSession(index);
+      const hasSel = !!(session && session.sel);
+      let textColor = '#1e293b';
+      let bgColor = '#ffffff';
+      if (hasSel) {
+        const stage = card.querySelector('.tenant-slide-stage');
+        const slide = stage ? stage.querySelector('.slide') : null;
+        const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+        if (target) {
+          const cs = window.getComputedStyle(target);
+          textColor = cssColorToHex(cs.color) || textColor;
+          bgColor = cssColorToHex(cs.backgroundColor) || bgColor;
+        }
+      }
+      card.querySelectorAll('[data-slide-edit-act="del"]').forEach(btn => { btn.disabled = !hasSel; });
+      card.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
+        inp.disabled = !hasSel;
+        if (hasSel) inp.value = inp.getAttribute('data-slide-edit-color') === 'color' ? textColor : bgColor;
+      });
+    }
+
+    let slideImageFileInput = null;
+    function openSlideImagePicker(index) {
+      if (!getSlideEditSession(index)) return;
+      if (!slideImageFileInput) {
+        slideImageFileInput = document.createElement('input');
+        slideImageFileInput.type = 'file';
+        slideImageFileInput.accept = 'image/*';
+        slideImageFileInput.style.display = 'none';
+        slideImageFileInput.addEventListener('change', () => {
+          const file = slideImageFileInput.files && slideImageFileInput.files[0];
+          const targetIndex = Number(slideImageFileInput.dataset.index || 0);
+          slideImageFileInput.value = '';
+          if (file) addSlideImageFromDevice(targetIndex, file);
+        });
+        document.body.appendChild(slideImageFileInput);
+      }
+      slideImageFileInput.dataset.index = String(index);
+      slideImageFileInput.click();
     }
 
     function toggleSlideElementEditing(index) {
@@ -21978,6 +22296,294 @@
       e.stopPropagation();
       const text = (e.clipboardData || window.clipboardData).getData('text/plain');
       document.execCommand('insertText', false, text);
+    }
+
+    function clearSlideElementSelection(stage) {
+      if (!stage) return;
+      stage.querySelectorAll('.slide-element-selected').forEach(el => el.classList.remove('slide-element-selected'));
+      stage.querySelectorAll('.slide-resize-handle, .slide-move-handle').forEach(el => el.remove());
+    }
+
+    function selectSlideElement(stage, index, target, path) {
+      const session = getSlideEditSession(index);
+      if (!session || !stage || !target) return;
+      clearSlideElementSelection(stage);
+      session.sel = {
+        path: (path || []).slice(),
+        placement: target.getAttribute
+          ? (target.getAttribute('data-company-logo-placement')
+            || target.getAttribute('data-team-logo-placement') || '') : ''
+      };
+      target.classList.add('slide-element-selected');
+      positionSlideEditHandles(stage, target);
+      syncSlideElementToolbar(index);
+    }
+
+    function restoreSlideEditSelection(stage, index) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.sel || !stage) return;
+      const slide = stage.querySelector('.slide');
+      let target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+      if (target && session.sel.placement) {
+        const attr = (target.hasAttribute && target.hasAttribute('data-company-logo-placement'))
+          ? 'data-company-logo-placement' : 'data-team-logo-placement';
+        const safePlacement = String(session.sel.placement).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const found = slide.querySelector('[' + attr + '="' + safePlacement + '"]');
+        if (found) target = found;
+      }
+      if (!target || !slide.contains(target)) {
+        session.sel = null;
+        refreshSlideEditToolbar(index);
+        return;
+      }
+      target.classList.add('slide-element-selected');
+      positionSlideEditHandles(stage, target);
+      syncSlideElementToolbar(index);
+    }
+
+    function positionSlideEditHandles(stage, target) {
+      if (!stage || !target) return;
+      stage.querySelectorAll('.slide-resize-handle, .slide-move-handle').forEach(el => el.remove());
+      const slide = stage.querySelector('.slide');
+      if (!slide || !slide.contains(target)) return;
+      if (window.getComputedStyle(slide).position === 'static') slide.style.position = 'relative';
+      const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+      const slideRect = slide.getBoundingClientRect();
+      const rect = target.getBoundingClientRect();
+      const x = (rect.left - slideRect.left) / scale;
+      const y = (rect.top - slideRect.top) / scale;
+      const w = rect.width / scale;
+      const h = rect.height / scale;
+      const card = stage.closest('.ge-slide-card');
+      const index = card ? Number(String(card.id || '').replace('slide-card-', '')) : NaN;
+      if (!Number.isInteger(index)) return;
+
+      const moveHandle = document.createElement('div');
+      moveHandle.className = 'slide-move-handle';
+      moveHandle.textContent = 'تحريك';
+      moveHandle.style.left = Math.max(0, Math.min(x, 1280 - 60)) + 'px';
+      moveHandle.style.top = Math.max(0, y - 26) + 'px';
+      slide.appendChild(moveHandle);
+      moveHandle.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const path = slideElementPath(slide, target);
+        if (!path) return;
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const baseX = Number(target.dataset.manualTranslateX) || 0;
+        const baseY = Number(target.dataset.manualTranslateY) || 0;
+        let moved = false;
+        const onMove = moveEvent => {
+          const dx = (moveEvent.clientX - startX) / scale;
+          const dy = (moveEvent.clientY - startY) / scale;
+          if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+          target.style.transform = 'translate(' + Math.round(baseX + dx) + 'px, ' + Math.round(baseY + dy) + 'px)';
+        };
+        const onUp = upEvent => {
+          const dx = (upEvent.clientX - startX) / scale;
+          const dy = (upEvent.clientY - startY) / scale;
+          moveHandle.removeEventListener('pointermove', onMove);
+          moveHandle.removeEventListener('pointerup', onUp);
+          moveHandle.removeEventListener('pointercancel', onUp);
+          if (moved) commitSlideElementMove(stage, index, target, path, dx, dy);
+          selectSlideElement(stage, index, target, path);
+        };
+        moveHandle.addEventListener('pointermove', onMove);
+        moveHandle.addEventListener('pointerup', onUp);
+        moveHandle.addEventListener('pointercancel', onUp);
+        try { moveHandle.setPointerCapture(event.pointerId); } catch (err) {}
+      });
+
+      const resizeHandle = document.createElement('div');
+      resizeHandle.className = 'slide-resize-handle';
+      resizeHandle.style.left = Math.max(0, x + w - 18) + 'px';
+      resizeHandle.style.top = Math.max(0, y + h - 18) + 'px';
+      slide.appendChild(resizeHandle);
+      resizeHandle.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const path = slideElementPath(slide, target);
+        if (!path) return;
+        const liveRect = target.getBoundingClientRect();
+        const startW = liveRect.width / scale;
+        const startH = liveRect.height / scale;
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const isImage = target.tagName === 'IMG';
+        let moved = false;
+        const onMove = moveEvent => {
+          const dw = (moveEvent.clientX - startX) / scale;
+          const dh = (moveEvent.clientY - startY) / scale;
+          if (Math.abs(dw) + Math.abs(dh) > 2) moved = true;
+          target.style.width = Math.max(24, Math.min(1280, Math.round(startW + dw))) + 'px';
+          if (isImage) target.style.height = Math.max(24, Math.min(720, Math.round(startH + dh))) + 'px';
+        };
+        const onUp = () => {
+          resizeHandle.removeEventListener('pointermove', onMove);
+          resizeHandle.removeEventListener('pointerup', onUp);
+          resizeHandle.removeEventListener('pointercancel', onUp);
+          if (!moved) return;
+          const finalW = parseFloat(target.style.width) || startW;
+          const finalH = isImage ? (parseFloat(target.style.height) || startH) : null;
+          commitSlideElementResize(stage, index, target, path, finalW, finalH);
+          selectSlideElement(stage, index, target, path);
+        };
+        resizeHandle.addEventListener('pointermove', onMove);
+        resizeHandle.addEventListener('pointerup', onUp);
+        resizeHandle.addEventListener('pointercancel', onUp);
+        try { resizeHandle.setPointerCapture(event.pointerId); } catch (err) {}
+      });
+    }
+
+    function commitSlideElementResize(stage, index, target, path, widthPx, heightPx) {
+      const slideData = tenantSlidesData[index];
+      if (!slideData || !slideData.html || !target) return;
+      if (!getSlideEditSession(index)) return;
+      const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
+      const rawRoot = rawDoc.querySelector('.slide');
+      const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, path);
+      if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
+      pushSlideEditHistory(index);
+      const widthValue = Math.max(24, Math.min(1280, Math.round(widthPx))) + 'px';
+      target.style.width = widthValue;
+      rawTarget.style.width = widthValue;
+      if (heightPx !== null && heightPx !== undefined) {
+        const heightValue = Math.max(24, Math.min(720, Math.round(heightPx))) + 'px';
+        target.style.height = heightValue;
+        rawTarget.style.height = heightValue;
+      }
+      slideData.html = rawRoot.outerHTML;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      toast('تم تغيير حجم العنصر');
+    }
+
+    function previewSlideElementColor(index, kind, value) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.sel) return;
+      const stage = slideStageForIndex(index);
+      const slide = stage ? stage.querySelector('.slide') : null;
+      const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+      if (!target) return;
+      if (kind === 'color') target.style.color = value;
+      else target.style.backgroundColor = value;
+    }
+
+    function commitSlideElementColor(index, kind) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.sel) return;
+      const stage = slideStageForIndex(index);
+      const slide = stage ? stage.querySelector('.slide') : null;
+      const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+      const card = document.getElementById('slide-card-' + index);
+      const input = card ? card.querySelector('[data-slide-edit-color="' + kind + '"]') : null;
+      if (!target || !input) return;
+      const slideData = tenantSlidesData[index];
+      if (!slideData || !slideData.html) return;
+      const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
+      const rawRoot = rawDoc.querySelector('.slide');
+      const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, session.sel.path);
+      if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
+      pushSlideEditHistory(index);
+      if (kind === 'color') {
+        target.style.color = input.value;
+        rawTarget.style.color = input.value;
+      } else {
+        target.style.backgroundColor = input.value;
+        rawTarget.style.backgroundColor = input.value;
+      }
+      slideData.html = rawRoot.outerHTML;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      toast('تم تغيير لون العنصر');
+    }
+
+    function deleteSelectedSlideElement(index) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.sel) { toast('لا يوجد عنصر محدد'); return; }
+      const stage = slideStageForIndex(index);
+      const slide = stage ? stage.querySelector('.slide') : null;
+      const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+      if (!stage || !target) { session.sel = null; refreshSlideEditToolbar(index); return; }
+      commitSlideElementDelete(stage, index, target, session.sel.path);
+    }
+
+    function addSlideTextBox(index) {
+      const slideData = tenantSlidesData[index];
+      if (!slideData || !slideData.html) return;
+      if (!getSlideEditSession(index)) return;
+      const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
+      const rawRoot = rawDoc.querySelector('.slide');
+      if (!rawRoot) return;
+      pushSlideEditHistory(index);
+      const box = rawDoc.createElement('div');
+      box.setAttribute('data-slide-textbox', '1');
+      box.setAttribute('style', 'position:absolute;top:300px;right:440px;width:400px;min-height:60px;'
+        + 'padding:12px 16px;box-sizing:border-box;background:#ffffff;border:1px dashed #94a3b8;'
+        + 'border-radius:10px;color:#1e293b;font-size:18px;font-weight:600;text-align:center;z-index:5;');
+      box.textContent = 'نص جديد';
+      rawRoot.appendChild(box);
+      slideData.html = rawRoot.outerHTML;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      renderTenantSlides();
+      toast('تمت إضافة مربع نص جديد');
+    }
+
+    function addSlideImageFromDevice(index, file) {
+      const slideData = tenantSlidesData[index];
+      if (!slideData || !slideData.html || !file) return;
+      if (!getSlideEditSession(index)) return;
+      if (!String(file.type || '').startsWith('image/')) { toast('الملف المختار ليس صورة'); return; }
+      if (file.size > 4 * 1024 * 1024) { toast('حجم الصورة كبير (الحد 4 ميجا)'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = String(reader.result || '');
+        if (!url.startsWith('data:image/')) { toast('تعذر قراءة الصورة'); return; }
+        const current = tenantSlidesData[index];
+        if (!current || !current.html || !getSlideEditSession(index)) return;
+        const rawDoc = new DOMParser().parseFromString(current.html, 'text/html');
+        const rawRoot = rawDoc.querySelector('.slide');
+        if (!rawRoot) return;
+        pushSlideEditHistory(index);
+        const wrap = rawDoc.createElement('div');
+        wrap.setAttribute('data-slide-imagebox', '1');
+        wrap.setAttribute('style', 'position:absolute;top:180px;right:390px;width:500px;'
+          + 'box-sizing:border-box;z-index:5;');
+        const img = rawDoc.createElement('img');
+        img.setAttribute('src', url);
+        img.setAttribute('alt', '');
+        img.setAttribute('style', 'display:block;width:100%;height:auto;border-radius:10px;');
+        wrap.appendChild(img);
+        rawRoot.appendChild(wrap);
+        current.html = rawRoot.outerHTML;
+        tenantProjectData.tenantSlidesData = tenantSlidesData;
+        touchSlideEditSession(index);
+        triggerAutoSaveDraft();
+        renderTenantSlides();
+        toast('تمت إضافة الصورة');
+      };
+      reader.onerror = () => toast('تعذر قراءة الصورة');
+      reader.readAsDataURL(file);
+    }
+
+    function onSlideEditableFocus(event) {
+      const el = event.target;
+      const stage = el && el.closest ? el.closest('.tenant-slide-stage') : null;
+      const card = el && el.closest ? el.closest('.ge-slide-card') : null;
+      if (!stage || !card) return;
+      const index = Number(String(card.id || '').replace('slide-card-', ''));
+      if (!Number.isInteger(index)) return;
+      if (!getSlideEditSession(index)) return;
+      const root = stage.querySelector('.slide');
+      const path = root ? slideElementPath(root, el) : null;
+      if (path) selectSlideElement(stage, index, el, path);
     }
 
     function toggleSlideInlineEditing(index) {
@@ -22010,7 +22616,10 @@
       });
       if (!changed) return;
 
+      pushSlideEditHistory(index);
       slideData.html = rawRoot.outerHTML;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
       renderTenantSlidesSidebar();
       triggerAutoSaveDraft();
       toast('تم تعديل النص. اضغط "حفظ التعديلات" للحفظ النهائي.');
@@ -22105,21 +22714,11 @@
         if (hasPermission('create_presentation')) {
           const editControls = document.createElement('div');
           editControls.className = 'ge-slide-edit-controls';
-          editControls.innerHTML =
-            '<button type="button" class="' + (slideInlineEditStates[i] ? 'active' : '') + '" aria-label="تعديل نص الشريحة">'
-            + (slideInlineEditStates[i] ? 'إيقاف تعديل النص' : 'تعديل النص') + '</button>'
-            + '<button type="button" class="' + (slideElementEditStates[i] ? 'active' : '') + '" aria-label="تحريك عناصر الشريحة">'
-            + (slideElementEditStates[i] ? 'إيقاف تحريك العناصر' : 'تحريك العناصر') + '</button>';
-          const editTextButton = editControls.querySelector('button:first-child');
-          const moveElementButton = editControls.querySelector('button:last-child');
-          editTextButton.onclick = event => {
-            event.stopPropagation();
-            toggleSlideInlineEditing(i);
-          };
-          moveElementButton.onclick = event => {
-            event.stopPropagation();
-            toggleSlideElementEditing(i);
-          };
+          const editSession = getSlideEditSession(i);
+          slideInlineEditStates[i] = !!editSession;
+          slideElementEditStates[i] = !!editSession;
+          editControls.innerHTML = slideEditToolbarHTML(i);
+          wireSlideEditControls(editControls, i);
           container.appendChild(editControls);
         }
         const stage = document.createElement('div');
@@ -22152,6 +22751,7 @@
           autoFitSlideContent(stage);
           enableSlideInlineEditing(stage, i);
           enableSlideElementDragging(stage, i);
+          restoreSlideEditSelection(stage, i);
         }
         cursor = end;
         if (cursor < containers.length) {
