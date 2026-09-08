@@ -3416,7 +3416,14 @@ def _replace_slide_with_approved_map(html, map_type, map_url):
 
     changed = False
     if media_tags:
-        first_kind, first = media_tags[0]
+        # A map slide can contain both a legacy background placeholder on the
+        # root element and the real image slot inside its content grid.  The
+        # root background is covered by the slide's white content surface, so
+        # prefer an image element whenever one exists.  Selecting the first
+        # tag blindly made the refresh appear successful while leaving the
+        # visible image slot empty.
+        image_media = [(kind, match) for kind, match in media_tags if kind == 'image']
+        first_kind, first = image_media[0] if image_media else media_tags[0]
         first_tag = first.group(0)
         if first_kind == 'image':
             src_pattern = re.compile(r'(\bsrc\s*=\s*)(["\'])(.*?)(\2)', re.IGNORECASE | re.DOTALL)
@@ -3437,8 +3444,30 @@ def _replace_slide_with_approved_map(html, map_type, map_url):
             first_tag = re.sub(r'\s*/>$', '>', first_tag)
             first_tag = first_tag[:-1] + f' data-canonical-map="{map_type}">'
         replacements = [(first.start(), first.end(), first_tag)]
-        replacements.extend((match.start(), match.end(), '') for _, match in media_tags[1:])
-        for start, end, value in reversed(replacements):
+        for kind, match in media_tags:
+            if match is first:
+                continue
+            if kind == 'image':
+                # There must be one visible canonical image, not a stack of
+                # old and new rasters in the same slide.
+                replacements.append((match.start(), match.end(), ''))
+            else:
+                # Keep the element itself intact.  Removing only its opening
+                # tag can unbalance the HTML, and a duplicate background is
+                # unnecessary once the visible image slot is authoritative.
+                background_tag = match.group(0)
+                background_tag = re.sub(
+                    r'(background(?:-image)?\s*):\s*url\([^)]*\)',
+                    lambda m: f'{m.group(1)}:none',
+                    background_tag,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                replacements.append((match.start(), match.end(), background_tag))
+        # Sort by source position because the visible image is often after
+        # the root background in the tag list.  Applying an earlier, shorter
+        # replacement first would invalidate the later match offsets.
+        for start, end, value in sorted(replacements, key=lambda item: item[0], reverse=True):
             output = output[:start] + value + output[end:]
         changed = True
     elif token in output or map_url in output:
