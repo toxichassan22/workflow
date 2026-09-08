@@ -3456,6 +3456,81 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
     return None
 
 
+def _designer_team_logo_search_text(value):
+    """Normalize a team name or chat text for explicit logo matching."""
+    normalized = normalize_arabic_digits_py(str(value or '').casefold())
+    normalized = re.sub(r'[^\w\u0600-\u06ff]+', ' ', normalized, flags=re.UNICODE)
+    return re.sub(r'\s+', ' ', normalized).strip()
+
+
+def _designer_team_logo_context(creative_images):
+    """Describe the selected team logos to the designer without conflating them with branding."""
+    members = creative_images.get('team_members') if isinstance(creative_images, dict) else []
+    lines = []
+    for index, member in enumerate(members or [], 1):
+        if not isinstance(member, dict):
+            continue
+        name = str(member.get('name') or f'الجهة {index}').strip()
+        role = str(member.get('role') or '').strip()
+        token = f'##TEAM_LOGO_{index}##'
+        suffix = f' — {role}' if role else ''
+        if member.get('logo'):
+            lines.append(f'- {name}{suffix}: الشعار متوفر؛ استخدم {token} عند طلب شعار هذه الجهة.')
+        else:
+            lines.append(f'- {name}{suffix}: لا يوجد شعار مرفوع؛ لا تنشئ بديلاً.')
+    if not lines:
+        return 'لا توجد شعارات جهات فريق عمل متاحة في هذا المشروع.'
+    return '\n'.join(lines)
+
+
+def _find_designer_team_logo_request(message, history, creative_images):
+    """Resolve a named team entity in a logo request to its exact TEAM_LOGO token."""
+    members = creative_images.get('team_members') if isinstance(creative_images, dict) else []
+    if not isinstance(members, list) or not members:
+        return None
+    user_turns = [
+        str(item.get('content') or '')
+        for item in history if isinstance(item, dict) and item.get('role') == 'user'
+    ]
+    user_turns.append(str(message or ''))
+    search_text = _designer_team_logo_search_text(' '.join(user_turns))
+    if not re.search(r'(?:logo|لوجو|شعار|علامة\s*تجارية)', search_text, flags=re.IGNORECASE):
+        return None
+    for index, member in enumerate(members, 1):
+        if not isinstance(member, dict) or not member.get('logo'):
+            continue
+        name = str(member.get('name') or '').strip()
+        name_key = _designer_team_logo_search_text(name)
+        if name_key and len(name_key) >= 3 and name_key in search_text:
+            return {
+                'index': index,
+                'name': name,
+                'role': str(member.get('role') or '').strip(),
+                'logo': str(member.get('logo') or '').strip(),
+                'token': f'##TEAM_LOGO_{index}##',
+            }
+    return None
+
+
+def _inject_team_logo_fallback(html, team_logo, team_index):
+    """Keep a named team logo visible if the model returned valid HTML without inserting it."""
+    if not html or not team_logo or team_logo in html:
+        return html
+    safe_url = html_lib.escape(str(team_logo), quote=True)
+    markup = (
+        f'<div data-team-logo-placement="{int(team_index)}" '
+        'style="position:absolute;left:44px;top:94px;width:170px;height:64px;'
+        'display:flex;align-items:center;justify-content:flex-start;z-index:4;overflow:hidden;">'
+        f'<img class="team-logo" src="{safe_url}" alt="" '
+        'style="max-width:100%;max-height:100%;object-fit:contain;object-position:left center;">'
+        '</div>'
+    )
+    closing = re.search(r'</div>\s*$', html, flags=re.IGNORECASE)
+    if not closing:
+        return html
+    return html[:closing.start()] + markup + html[closing.start():]
+
+
 def _find_component_reference_image(component_query, project_data, creative_images=None):
     """Search project and creative data for reference images belonging to a component or query."""
     if not component_query:
@@ -3515,7 +3590,7 @@ def _find_component_reference_image(component_query, project_data, creative_imag
     return references[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
 
 
-def _build_designer_section_and_asset_context(slides, project_data, current_index):
+def _build_designer_section_and_asset_context(slides, project_data, current_index, creative_images=None):
     """Build full situational and section asset audit context for Sol the designer."""
     slides_count = len(slides)
     cur_slide = slides[current_index] if 0 <= current_index < slides_count and isinstance(slides[current_index], dict) else {}
@@ -3544,6 +3619,12 @@ def _build_designer_section_and_asset_context(slides, project_data, current_inde
         f"  4. خريطة المعالم الحيوية القريبة (##MAP_LANDMARKS##): مستخدمة {map_usage['##MAP_LANDMARKS##']} مرة",
         "- تنبيه الخرائط: يمكنك استخدام أي من هذه الخرائط الأربع في أي شريحة من العرض بحرية تامة بتضمين الرمز المقابل.",
     ]
+
+    audit_lines.extend([
+        "- تمييز الشعارات: ##LOGO## للشركة فقط، ##PROJECT_LOGO## لشعار المشروع فقط، وشعارات جهات فريق العمل تستخدم ##TEAM_LOGO_N## حسب ترتيب القائمة التالية.",
+        "## شعارات جهات فريق العمل المتاحة:",
+        _designer_team_logo_context(creative_images),
+    ])
 
     # Components list
     comps = (project_data.get('interior_components') or project_data.get('components') or []) if isinstance(project_data, dict) else []
@@ -3625,6 +3706,12 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
         f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في التصميم)\n{training_context}"
         if training_context else ''
     )
+    team_logo_note = (
+        "\n\n## شعارات فريق العمل في هذا المشروع\n"
+        + _designer_team_logo_context(creative_images)
+        + "\nلا تضع شعار جهة فريق العمل في هيدر الشركة، ولا تستبدله بـ ##LOGO## أو ##PROJECT_LOGO##. "
+          "عند طلب شعار جهة محددة، أدرج الرمز المطابق داخل موضع محتوى مناسب في الشريحة."
+    )
 
     # Capture Playwright vision screenshot of the current slide if available
     vision_image_uri = None
@@ -3686,7 +3773,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
         "خلفية شعار الشركة وشعار المشروع مستقلة لكل شعار حسب لونه وتباينه؛ لا تغيّرها عند تغيير خلفية الشريحة."
     )
 
-    prompt = f"""{rules}{training_note}{vision_note}{surface_note}
+    prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
 1. قواعد الإزاحات والتخطيط الجراحي (Spatial & Layout Precision):
    - تحكّم دقيق بكسلي ونسبية في CSS: رفع أو تنزيل الهيدر، ضبط هوامش البطاقات الداخلية (padding) والخارجية (margins)، وتغيير حجم البطاقات والمسافات البينية (gap).
@@ -3905,6 +3992,10 @@ def api_designer_chat():
         project_data, data.get('creativeImages', {}), g.tenant_id,
         presentation_id=presentation_id,
     )
+    # Designer-chat requests must have the same selected team-logo manifest as full
+    # presentation generation. Without this merge, the model can see a team name but
+    # has no real image behind ##TEAM_LOGO_N## and falls back to the company logo.
+    creative_images = _augment_generation_images(creative_images, project_data, g.tenant_id)
 
     # Backward-compatible one-slide clients still work.
     if not slides and data.get('slideHtml'):
@@ -3951,6 +4042,31 @@ def api_designer_chat():
     deterministic_plan = _designer_deterministic_plan(
         message, slides, current_index, [number - 1 for number in preferred_indexes]
     )
+    requested_team_logo = _find_designer_team_logo_request(message, history_for_turn, creative_images)
+    if requested_team_logo:
+        if is_all_slides_request:
+            logo_target = 'all'
+            logo_indexes = []
+        elif preferred_indexes:
+            logo_target = 'indexes'
+            logo_indexes = preferred_indexes[:]
+        else:
+            logo_target = 'current'
+            logo_indexes = []
+        deterministic_plan = {
+            'response': (
+                f"سأضيف شعار جهة فريق العمل «{requested_team_logo['name']}» باستخدام الشعار المرفوع لها "
+                "داخل موضع محتوى مناسب، مع إبقاء شعار الشركة منفصلاً."
+            ),
+            'actions': [{
+                'tool': 'insert_team_logo',
+                'params': {
+                    'target': logo_target,
+                    'indexes': logo_indexes,
+                    'team_index': requested_team_logo['index'],
+                },
+            }],
+        }
 
     branding = db.get_branding(g.tenant_id) or {}
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
@@ -3969,7 +4085,7 @@ def api_designer_chat():
         "هذا النطاق مُلزم. لا توسّع التعديل إلى شرائح أخرى ولا تستبدله بالشريحة الحالية."
     ) if explicit_indexes else ""
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
-    audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index)
+    audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index, creative_images)
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master).
 أنت تمتلك كامل الصلاحية والحرية الإبداعية المطلقة لتعديل أو إعادة تصميم أي شريحة في العرض دون استثناء:
@@ -3988,6 +4104,7 @@ def api_designer_chat():
 
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
+- insert_team_logo: params={{"target":"current|all|indexes", "indexes":[1-based], "team_index":1-based}} لإضافة شعار جهة فريق العمل المرفوع فعلياً
 - generate_image: params={{"prompt":"وصف دقيق للصورة المراد توليدها", "component_name":"اسم المكون إن وجد", "slideIndex":1, "position":"surgical|background|right|left|inline"}}
 - insert_canonical_map: params={{"map_type":"overview|access|catchment|landmarks", "target":"current|indexes", "slideIndex":1, "refresh":true عند طلب تحديث خريطة موجودة}}
 - insert_financial_chart: params={{"chart_type":"waterfall|sensitivity|compound_flows|financing_structure", "target":"current|indexes", "slideIndex":1}}
@@ -4017,7 +4134,8 @@ def api_designer_chat():
 8. إذا طلب رسم أو مخطط مالي (شلال/حساسية/عوائد) -> اختر tool="insert_financial_chart".
 9. إذا طلب تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
 10. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
-11. في سائر طلبات التعديل والتنسيق -> اختر tool="edit_slides".
+11. إذا طلب المستخدم شعار جهة محددة من فريق العمل، ميّزها عن شعار الشركة واستخدم tool="insert_team_logo" مع team_index الصحيح.
+12. في سائر طلبات التعديل والتنسيق -> اختر tool="edit_slides".
 
 {audit_note}
 
@@ -4151,6 +4269,7 @@ def api_designer_chat():
                 'edit_slides', 'edit_design_slide', 'edit_design_slides',
                 'generate_image', 'generate_design_image', 'insert_image_into_slide',
                 'insert_canonical_map', 'insert_map', 'insert_financial_chart', 'update_financial_chart',
+                'insert_team_logo',
             }:
                 if is_all_slides_request:
                     params['target'] = 'all'
@@ -4221,6 +4340,57 @@ def api_designer_chat():
                         if response_text:
                             assistant_messages.append(response_text)
                 executed.append({'tool': tool, 'status': 'success', 'indexes': indexes})
+            elif tool == 'insert_team_logo':
+                raw_team_index = params.get('team_index') or params.get('teamIndex') or 0
+                try:
+                    team_index = int(raw_team_index)
+                except (TypeError, ValueError):
+                    team_index = 0
+                team_members = creative_images.get('team_members') if isinstance(creative_images, dict) else []
+                team_member = (
+                    team_members[team_index - 1]
+                    if isinstance(team_members, list) and 0 < team_index <= len(team_members)
+                    and isinstance(team_members[team_index - 1], dict)
+                    else None
+                )
+                if not team_member or not team_member.get('logo'):
+                    assistant_messages.append('لا يوجد شعار مرفوع للجهة المحددة في فريق العمل؛ لم يتم إنشاء شعار بديل.')
+                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'team_logo_missing'})
+                    continue
+                indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
+                team_name = str(team_member.get('name') or f'الجهة {team_index}').strip()
+                team_token = f'##TEAM_LOGO_{team_index}##'
+                team_instruction = (
+                    f"أدرج شعار جهة فريق العمل «{team_name}» داخل موضع محتوى مناسب ومرئي في هذه الشريحة، "
+                    f"باستخدام الرمز {team_token} فقط؛ يجب أن يتحول الرمز إلى الشعار المرفوع فعلياً. "
+                    "لا تستخدم ##LOGO## ولا ##PROJECT_LOGO## لهذا الطلب، ولا تضع شعار الجهة في هيدر شعار الشركة، "
+                    "وحافظ على شعار الشركة الموجود وبقية محتوى الشريحة وتوازنها البصري."
+                )
+                successful_indexes = []
+                for idx in indexes:
+                    slide = slides[idx] if isinstance(slides[idx], dict) else {}
+                    updated_html, response_text = _designer_edit_slide(
+                        slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'),
+                        team_instruction, idx, project_data, presentation_id, branding,
+                        tenant_id=tenant_id, creative_images=creative_images,
+                        user_image_refs=user_image_refs, slide_type=slide.get('type', 'content'),
+                        total_slides=len(slides),
+                        content_source=slide.get('content_source') or slide.get('contentSource'),
+                    )
+                    # The model normally inserts the token and the finalizer resolves it. Keep a
+                    # deterministic visible fallback for malformed-but-valid HTML that ignored the
+                    # explicit token, so a successful chat response can never silently omit the logo.
+                    updated_html = _inject_team_logo_fallback(
+                        updated_html, str(team_member.get('logo') or ''), team_index
+                    )
+                    slide['html'] = updated_html
+                    slides[idx] = slide
+                    successful_indexes.append(idx)
+                    if response_text:
+                        assistant_messages.append(response_text)
+                executed.append({'tool': tool, 'status': 'success' if successful_indexes else 'failed',
+                                 'indexes': successful_indexes, 'team_index': team_index,
+                                 'token': team_token})
             elif tool in ('generate_image', 'generate_design_image', 'insert_image_into_slide'):
                 prompt = params.get('prompt') or message
                 comp_name = params.get('component_name') or params.get('component') or ''

@@ -311,6 +311,53 @@ class AdminAgentTests(unittest.TestCase):
         self.assertIn('Vision Gate', mocked.call_args.args[0])
         self.assertIn('##TEAM_LOGO_1##', mocked.call_args.args[0])
 
+    def test_designer_chat_distinguishes_named_team_logo_from_company_logo(self):
+        module = self.application_module
+        images = {'team_members': [{
+            'name': 'Vision Gate', 'role': 'التطوير',
+            'logo': '/uploads/creative/team-logo-1.png',
+        }]}
+        match = module._find_designer_team_logo_request(
+            'لم يتم إضافة اللوجو في الشريحة 52 حل المشكلة',
+            [{'role': 'user', 'content': 'أضف لوجو Vision Gate في الشريحة 52'}],
+            images,
+        )
+        self.assertEqual(match['index'], 1)
+        self.assertEqual(match['token'], '##TEAM_LOGO_1##')
+        self.assertIn('TEAM_LOGO_1', module._designer_team_logo_context(images))
+        fallback = module._inject_team_logo_fallback(
+            '<div class="slide"><div>محتوى</div></div>', match['logo'], match['index'])
+        self.assertIn(match['logo'], fallback)
+        self.assertNotIn('##LOGO##', fallback)
+
+    def test_designer_chat_inserts_the_selected_team_logo_on_named_slide(self):
+        client = self.app.test_client()
+        project_data = {
+            'team_selection': json.dumps({'excluded': [], 'roles': {}, 'local': [{
+                'localId': 'vision-gate', 'name': 'Vision Gate',
+                'role': 'التطوير', 'logoFileId': 'team-logo-1',
+            }]}, ensure_ascii=False),
+        }
+        slides = [{
+            'title': 'فريق العمل', 'type': 'content',
+            'html': '<div class="slide"><div>محتوى</div></div>',
+        }]
+        with patch.object(self.application_module, '_generation_project_image_url',
+                          return_value='/uploads/creative/team-logo-1.png'), \
+                patch.object(self.application_module, '_designer_edit_slide',
+                             return_value=(slides[0]['html'], 'تمت إضافة الشعار')):
+            response = client.post('/api/designer-chat', headers=self._headers(), json={
+                'message': 'أضف لوجو Vision Gate في الشريحة رقم 1',
+                'projectData': project_data,
+                'slidesData': slides,
+                'slideIndex': 0,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()['data']
+        self.assertEqual(payload['actions'][0]['tool'], 'insert_team_logo')
+        self.assertIn('/uploads/creative/team-logo-1.png', payload['slidesData'][0]['html'])
+        self.assertNotIn('##LOGO##', payload['slidesData'][0]['html'])
+
 
 if __name__ == '__main__':
     unittest.main()
