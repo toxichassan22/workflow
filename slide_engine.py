@@ -339,6 +339,21 @@ def _slide_section_key(slide, current=''):
     return current if current in PRESENTATION_SECTION_ORDER else 'overview'
 
 
+_FIXED_DIVIDER_SECTION_KEYS = {'market', 'swot_risks'}
+
+
+def _is_fixed_section_divider(slide, section_key=None):
+    """Identify the two legacy dividers whose stored HTML needs rebuilding."""
+    item = slide if isinstance(slide, dict) else {}
+    section = section_key or _slide_section_key(item)
+    if section not in _FIXED_DIVIDER_SECTION_KEYS:
+        return False
+    if str(item.get('type') or '').strip().lower() == 'section_divider':
+        return True
+    title = re.sub(r'\s+', ' ', str(item.get('title') or '').strip())
+    return title == PRESENTATION_SECTION_TITLES.get(section, '')
+
+
 def _plan_slide_signature(slide):
     # ``[\W_]`` was stripping Arabic letters in the runtime used by the app,
     # turning every source-less Arabic title into the same empty signature and
@@ -2411,6 +2426,9 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
         if slide is cover or slide is index or slide is closing or slide_type in ('cover', 'index', 'closing'):
             continue
         section_key = _slide_section_key(slide, current)
+        if _is_fixed_section_divider(slide, section_key):
+            current = section_key
+            continue
         if slide_type == 'section_divider':
             current = section_key
             continue
@@ -9755,12 +9773,13 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     html = _strip_presentation_icons(html)
 
     is_market = _is_market_slide(slide_type, slide_title, content_source)
+    is_market_content = is_market and slide_type != 'section_divider'
 
     # Enforce image/placeholder rules. Market slides are text/table-only and
     # must not receive a map placeholder merely because an old slide type was
     # map_*.
     html = _block_external_images(html)
-    if not is_market:
+    if not is_market_content:
         html = _ensure_map_placeholder(html, slide_type)
     else:
         html = _strip_market_slide_media(html)
@@ -9848,13 +9867,17 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
             branding=branding, project_data=project_data, tenant_id=tenant_id,
         )
 
-    if is_market:
+    if is_market_content:
         html = _normalize_market_content_layout(
             html, slide_type=slide_type, slide_title=slide_title,
             content_source=content_source,
         )
 
-    if is_market:
+    # The market and SWOT section dividers use the same approved full-bleed
+    # cover treatment as the other dividers.  The market-media scrub applies to
+    # content slides only; applying it to a divider removes ##IMAGE_COVER## and
+    # leaves the divider as a blank solid panel.
+    if is_market_content:
         html = _strip_market_slide_media(html)
 
     return html
@@ -9957,6 +9980,15 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['section_key'] = 'index'
         else:
             section_key = _slide_section_key(item, current_section)
+            if _is_fixed_section_divider(item, section_key):
+                slide_type = 'section_divider'
+                item.update({
+                    'type': slide_type,
+                    'title': PRESENTATION_SECTION_TITLES[section_key],
+                    'design_style': 'divider',
+                    'section_key': section_key,
+                    'bullets': [],
+                })
             item['section_key'] = section_key
             if slide_type == 'section_divider' and section_key in PRESENTATION_SECTION_ORDER:
                 current_section = section_key
@@ -9987,9 +10019,28 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 allow_all_maps=allow_all_maps,
             )
         elif slide_type in ('cover', 'closing', 'moodboard', 'section_divider'):
-            item['html'] = _rewrite_slide_counter(
-                item.get('html') or '', slide_type, index, total)
-            if item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source')):
+            if _is_fixed_section_divider(item, item.get('section_key')):
+                creative_images = project_data.get('tenantCreativeImages')
+                if not isinstance(creative_images, dict):
+                    creative_images = {}
+                if not creative_images.get('cover'):
+                    fallback_cover = project_data.get('cover') or project_data.get('mainImageData')
+                    if fallback_cover:
+                        creative_images = {**creative_images, 'cover': fallback_cover}
+                rebuilt = build_section_divider_slide(
+                    item, index, total, branding, project_data
+                )
+                item['html'] = finalize_slide_html(
+                    rebuilt, 'section_divider', project_data, branding,
+                    creative_images=creative_images, tenant_id=tenant_id,
+                    slide_num=index, slide_title=item.get('title'),
+                    total_slides=total, content_source=None,
+                    allow_all_maps=allow_all_maps,
+                )
+            else:
+                item['html'] = _rewrite_slide_counter(
+                    item.get('html') or '', slide_type, index, total)
+            if slide_type != 'section_divider' and (item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source'))):
                 item['html'] = _strip_market_slide_media(item['html'])
         else:
             html = item.get('html') or ''

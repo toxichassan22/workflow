@@ -881,6 +881,50 @@ class MeetingRequirementsTests(unittest.TestCase):
         _valid, issues = engine.validate_slide_plan(plan, {'min_slides': 1, 'max_slides': 60})
         self.assertFalse([issue for issue in issues if 'section_divider' in issue], issues)
 
+    def test_market_and_swot_dividers_keep_cover_and_footer_layout(self):
+        engine = self.application_module.slide_engine
+        branding = {
+            'primary_color': '#0b1f33', 'accent_color': '#22b6e8',
+            'company_name': 'منافع',
+        }
+        project = {
+            'project_name': 'THE VIEW',
+            'tenantCreativeImages': {'cover': '/uploads/creative/approved-cover.jpg'},
+        }
+
+        for section_key, title, source in (
+            ('market', 'تحليل السوق', None),
+            ('swot_risks', 'تحليل SWOT وتحليل المخاطر', 'market_study_data.swot'),
+        ):
+            html = engine.finalize_slide_html(
+                engine.build_section_divider_slide(
+                    {'title': title, 'type': 'section_divider'}, 19, 72,
+                    branding, project,
+                ),
+                'section_divider', project, branding,
+                creative_images=project['tenantCreativeImages'],
+                slide_num=19, slide_title=title, total_slides=72,
+                content_source=source,
+            )
+            self.assertIn('/uploads/creative/approved-cover.jpg', html)
+            self.assertIn('bottom:34px;left:48px', html)
+            self.assertIn('data-slide-counter="1"', html)
+            self.assertIn('19 — 72', html)
+
+            # A legacy content-only snapshot with the divider title is repaired
+            # to the same fixed divider before it reaches the preview/export.
+            repaired = engine.renumber_presentation_slides([
+                {
+                    'title': title, 'type': 'content', 'section_key': section_key,
+                    'html': '<div class="slide"><div style="position:absolute;top:220px;left:48px">19 — 72</div></div>',
+                }
+            ], branding=branding, project_data=project)
+            self.assertEqual(repaired[0]['type'], 'section_divider')
+            self.assertIn('/uploads/creative/approved-cover.jpg', repaired[0]['html'])
+            self.assertIn('bottom:34px;left:48px', repaired[0]['html'])
+            self.assertNotIn('top:220px', repaired[0]['html'])
+            self.assertIn('01 — 01', repaired[0]['html'])
+
     def test_final_deck_plan_has_canonical_sections_page_index_and_exact_media(self):
         engine = self.application_module.slide_engine
         financial = {
@@ -3749,6 +3793,19 @@ class MeetingRequirementsTests(unittest.TestCase):
         those tables overflow the preview and clip content, while exports remained correct."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('.tenant-slide-stage .slide table {\n      min-width: 0;', index_source)
+
+    def test_slide_preview_uses_one_canvas_scale_only(self):
+        """The preview stage scales the complete 1280x720 canvas. A second content transform
+        made some slides visibly shorter than their exported versions and clipped headings."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        start = index_source.index('function autoFitSlideContent(stage)')
+        end = index_source.index('function collectSlideTextNodes(root)', start)
+        fit_source = index_source[start:end]
+        self.assertIn("slide.style.width = '1280px';", fit_source)
+        self.assertIn("slide.style.height = '720px';", fit_source)
+        self.assertIn('const isLegacyAutoFit =', fit_source)
+        self.assertNotIn("contentBox.style.transform = 'scale('", fit_source)
+        self.assertNotIn('const targetH = 720;', fit_source)
 
     def test_ui_contains_no_emojis_or_icon_glyphs(self):
         """Product rule: the app ships no emojis and no icon glyphs, including arrows used as
