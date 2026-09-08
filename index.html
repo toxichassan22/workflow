@@ -7330,12 +7330,7 @@
         renumberTenantSlides();
         renderTenantSlides();
         selectTenantSlide(context.slideIndex);
-        const saved = await saveTenantPresentation();
-        if (!saved) throw new Error('تعذر حفظ الشريحة الجديدة');
         triggerAutoSaveDraft();
-        if (tenantPresentationId) api('POST', '/api/presentations/' + tenantPresentationId + '/log', {
-          action: 'إعادة توليد شريحة', details: ['الشريحة ' + (context.slideIndex + 1)], source: 'ai'
-        }).catch(() => { });
         toast('تم إعادة توليد الشريحة ' + (context.slideIndex + 1) + ' فقط');
       } catch (error) {
         console.error('[SLIDE REGENERATE]', error);
@@ -7410,19 +7405,7 @@
         renumberTenantSlides();
         renderTenantSlides();
         selectTenantSlide(Math.min(firstIndex, tenantSlidesData.length - 1));
-        const saved = await saveTenantPresentation();
-        if (!saved) {
-          tenantSlidesData = previousSlides;
-          tenantSlidePlan = previousPlan;
-          tenantProjectData = previousProjectData;
-          tenantProjectData.tenantSlidesData = tenantSlidesData;
-          renderTenantSlides();
-          throw new Error('تعذر حفظ القسم الجديد؛ تم الاحتفاظ بالشرائح القديمة.');
-        }
         triggerAutoSaveDraft();
-        if (tenantPresentationId) api('POST', '/api/presentations/' + tenantPresentationId + '/log', {
-          action: 'إعادة توليد قسم', details: ['القسم: ' + sectionLabel, 'الشرائح: ' + targetNumbers], source: 'ai'
-        }).catch(() => { });
         tenantDesignerMessages.push({
           role: 'assistant',
           content: 'تم إعادة تخطيط وتوليد قسم ' + sectionLabel + ' فقط (' + plannedSlides.length + ' شرائح بدلًا من ' + targetIndexes.length + ')، مع إبقاء باقي العرض كما هو.',
@@ -7549,11 +7532,10 @@
       const requestBody = {
         images: buildPresentationPlanAssets()
       };
-      if (tenantPresentationId) {
-        // The server already has the saved project and presentation. Sending projectData here
-        // would upload the whole visual/financial state again and can exceed the hosting edge limit.
-        requestBody.presentationId = tenantPresentationId;
-      } else {
+      if (tenantPresentationId) requestBody.presentationId = tenantPresentationId;
+      if (tenantDraftDirty || !tenantPresentationId) {
+        // A dirty workspace is authoritative for this turn. The saved presentation is only a
+        // fallback before the first local change, so refresh can still discard unsaved work.
         requestBody.projectData = payload;
       }
       if (sectionKey) requestBody.sectionKey = sectionKey;
@@ -12691,6 +12673,7 @@
     }
 
     async function startTenantProject() {
+      setDraftDirty(false);
       tenantPresentationId = null;
       tenantPresentationTitle = '';
       tenantProjectMode = 'new';
@@ -17051,8 +17034,8 @@
 
     function setupSidebarObserver() { }
 
-    // Drafts are saved after a short quiet period following a real change. The debounce keeps rapid
-    // inline edits and chat turns to one request while ensuring a refresh cannot discard them.
+    // Drafts are saved only when the user explicitly asks for it. Changes stay in the current
+    // workspace until the save button is used, so a refresh restores the last saved version.
     let tenantDraftDirty = false;
 
     function setDraftDirty(dirty) {
@@ -17073,16 +17056,8 @@
       if (ib && !ib.classList.contains('tgr-hidden')) renderGlobalRailInputs();
     }
 
-    let draftAutoSaveTimer = null;
-
     function triggerAutoSaveDraft() {
       setDraftDirty(true);
-      if (draftAutoSaveTimer) clearTimeout(draftAutoSaveTimer);
-      draftAutoSaveTimer = setTimeout(() => {
-        draftAutoSaveTimer = null;
-        if (!tenantDraftDirty) return;
-        saveProjectAsDraft(true).catch(error => console.error('[DRAFT AUTOSAVE]', error));
-      }, 900);
     }
 
     // Nothing is saved silently any more, so warn before the tab is closed with pending edits.
@@ -19577,7 +19552,8 @@
       if (factCount < GENERATION_MIN_FACTS && !confirm('بيانات المشروع المحفوظة ' + factCount +
         ' حقل. الذكاء الاصطناعي سيكتب محتوى الشرائح من عنده لأن الحقائق غير موجودة. متابعة؟')) return;
 
-      // Auto-save draft without carrying the conversation from the previous presentation.
+      // Persist the project snapshot used to create this presentation without carrying the
+      // conversation from the previous presentation.
       resetDesignerChatForNewPresentation();
       await api('POST', '/api/project-draft', { draftData: tenantProjectData, sectionStatuses: tenantProjectSectionStatuses, status: 'submitted' });
 
@@ -21750,13 +21726,9 @@
       if (liveNodes.length !== rawNodes.length) return;
 
       let changed = false;
-      const textChanges = [];
       liveNodes.forEach((node, i) => {
         if (editedEl && !editedEl.contains(node)) return;
         if (rawNodes[i].nodeValue !== node.nodeValue) {
-          // Recorded before the overwrite, so the history can quote both sides of the edit.
-          textChanges.push('من «' + String(rawNodes[i].nodeValue || '').trim().slice(0, 120) +
-            '» إلى «' + String(node.nodeValue || '').trim().slice(0, 120) + '»');
           rawNodes[i].nodeValue = node.nodeValue;
           changed = true;
         }
@@ -21766,13 +21738,6 @@
       slideData.html = rawRoot.outerHTML;
       renderTenantSlidesSidebar();
       triggerAutoSaveDraft();
-      // Record an edit log entry when a saved presentation is open.
-      if (tenantPresentationId) {
-        api('POST', '/api/presentations/' + tenantPresentationId + '/log', {
-          action: 'تعديل نص مباشر',
-          details: textChanges.map(line => 'الشريحة ' + (index + 1) + ': ' + line)
-        }).catch(() => { });
-      }
       toast('تم تعديل النص. اضغط "حفظ التعديلات" للحفظ النهائي.');
       autoFitSlideContent(stage);
     }
@@ -22297,7 +22262,6 @@
         tenantProjectData.designerChat = designerChatPersistence();
         renderTenantDesignerChat();
         triggerAutoSaveDraft();
-        if (tenantPresentationId) await saveExistingPresentation();
         return;
       }
 
@@ -22339,10 +22303,9 @@
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
       }
 
-      // The turn is sent with the conversation behind it: recent turns verbatim and the older ones
-      // as the memory the server compressed. A saved presentation is already available to the
-      // server, so do not upload every rendered slide again. Apart from avoiding the hosting edge's
-      // body limit, this keeps the chat operating on the same saved deck that will be updated.
+      // The turn carries the conversation behind it: recent turns verbatim and the older ones as
+      // the memory the server compressed. A dirty workspace also carries its current slides so
+      // multiple unsaved chat edits build on one another instead of reverting to the saved deck.
       const chatPayload = {
         message,
         target: targetScope,
@@ -22360,15 +22323,15 @@
         creativeImages: tenantCreativeImages,
         attachedImage: attachedImage ? attachedImage.dataUri : ''
       };
-      if (tenantPresentationId) {
-        // api_designer_chat loads projectData and slidesData by presentationId.
-        // Keep the request small even when the deck contains many rendered images.
-      } else {
+      // Once the workspace is dirty, send the in-memory copy as the source for the next turn.
+      // The server must not reload the last saved presentation and discard an earlier unsaved
+      // change made in this same chat session.
+      if (tenantDraftDirty || !tenantPresentationId) {
         chatPayload.slideHtml = tenantSlidesData[tenantChatSlideIndex]?.html || '';
         chatPayload.slideTitle = tenantSlidesData[tenantChatSlideIndex]?.title || '';
         chatPayload.slidesData = tenantSlidesData;
         chatPayload.slidePlan = tenantSlidePlan;
-        chatPayload.projectData = tenantProjectData;
+        chatPayload.projectData = { ...tenantProjectData, tenantSlidesData };
       }
       const data = await apiWithTimeout('POST', '/api/designer-chat', chatPayload,
         300000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.', {
@@ -22411,7 +22374,6 @@
         tenantProjectData.designerChat = designerChatPersistence();
         renderTenantDesignerChat();
         triggerAutoSaveDraft();
-        await saveProjectAsDraft(true);
         if (input) input.focus();
         return;
       }
@@ -22462,8 +22424,6 @@
       renderTenantSlides();
       renderTenantDesignerChat();
       triggerAutoSaveDraft();
-      if (tenantPresentationId && !reply.saved) await saveExistingPresentation();
-      await saveProjectAsDraft(true);
     }
 
     async function renderPresentationFontStatus() {
@@ -22635,7 +22595,6 @@
       document.getElementById('slideEditModal').remove();
       renderTenantSlides();
       triggerAutoSaveDraft();
-      if (tenantPresentationId) saveExistingPresentation();
       toast('تم تعديل الشريحة');
     }
 
@@ -22648,7 +22607,6 @@
       renumberTenantSlides();
       renderTenantSlides();
       triggerAutoSaveDraft();
-      if (tenantPresentationId) saveExistingPresentation();
     }
 
     function deleteSlide(index) {
@@ -22661,7 +22619,6 @@
       renumberTenantSlides();
       renderTenantSlides();
       triggerAutoSaveDraft();
-      if (tenantPresentationId) saveExistingPresentation();
       toast('تم حذف الشريحة');
     }
 
@@ -22698,6 +22655,7 @@
       const data = await api('GET', '/api/presentations/' + presId);
       if (!data.success || !data.presentation) { toast('فشل تحميل العرض'); return; }
       const p = data.presentation;
+      setDraftDirty(false);
       tenantPresentationId = p.id;
       tenantPresentationTitle = p.title || '';
       tenantProjectMode = 'presentation';
@@ -22833,6 +22791,7 @@
         }
 
         const draft = resp.draft;
+        setDraftDirty(false);
         const draftData = draft.draft_data || draft.draftData || {};
         const pageDrafts = draftData.pageDrafts || {};
         const sectionStatuses = draft.section_statuses || {};
@@ -23185,8 +23144,10 @@
     }
 
     async function exportTenantSlides(format) {
-      if (!tenantPresentationId) await saveTenantPresentation();
-      if (!tenantPresentationId) { toast('لا يوجد عرض للتصدير'); return; }
+      if (!Array.isArray(tenantSlidesData) || !tenantSlidesData.length) {
+        toast('لا توجد شرائح للتصدير');
+        return;
+      }
       await repairVisualConceptStoredImages();
       persistVisualConceptDraftState();
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'presentation';

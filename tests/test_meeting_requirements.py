@@ -2678,7 +2678,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         regenerate_body = index_source.split('async function regenerateTenantSlide(index) {', 1)[1]
         regenerate_body = regenerate_body.split('\n    function buildPresentationGenerationImages()', 1)[0]
         self.assertIn('tenantSlidesData[context.slideIndex] =', regenerate_body)
-        self.assertIn('await saveTenantPresentation()', regenerate_body)
+        self.assertIn('triggerAutoSaveDraft();', regenerate_body)
+        self.assertNotIn('await saveTenantPresentation()', regenerate_body)
         self.assertIn('لن تتأثر بقية الشرائح', regenerate_body)
 
     def test_designer_chat_can_regenerate_only_the_requested_section(self):
@@ -2689,7 +2690,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('const isSectionRebuildCommand', index_source)
         self.assertIn('setInlineLoaderProgress', index_source)
         self.assertNotIn('Math.min(92, pct +', index_source)
-        self.assertIn('api_designer_chat loads projectData and slidesData by presentationId.', index_source)
+        self.assertIn('send the in-memory copy as the source for the next turn.', index_source)
         self.assertIn('if (tenantPresentationId) {', index_source)
         self.assertIn('async function regenerateTenantSection(sectionKey, sectionLabel)', index_source)
         self.assertIn("await regenerateTenantSection(sectionRequest.key, sectionRequest.label)", index_source)
@@ -2702,7 +2703,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('generateTenantSlideFromSnapshot', section_body)
         self.assertIn('مع إبقاء باقي العرض كما هو', section_body)
         self.assertIn('لم يتم استبدال الشرائح القديمة', section_body)
-        self.assertIn('await saveTenantPresentation()', section_body)
+        self.assertIn('triggerAutoSaveDraft();', section_body)
+        self.assertNotIn('await saveTenantPresentation()', section_body)
 
         chat_body = index_source.split('async function sendTenantDesignerChat() {', 1)[1]
         chat_body = chat_body.split('\n    async function ', 1)[0]
@@ -4517,14 +4519,13 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(preserved.get_json()['competitor']['logo_file_id'], 'manual-file')
         model_call.assert_not_called()
 
-    def test_drafts_are_saved_after_a_debounced_edit(self):
-        """Edits autosave after a short quiet period without issuing a request per keystroke."""
+    def test_drafts_are_saved_only_on_request(self):
+        """Edits stay local until the explicit save action is requested."""
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
 
-        self.assertIn('let draftAutoSaveTimer = null;', index_source)
-        self.assertIn('clearTimeout(draftAutoSaveTimer);', index_source)
-        self.assertIn('saveProjectAsDraft(true).catch(error => console.error(\'[DRAFT AUTOSAVE]\'', index_source)
-        self.assertIn('}, 900);', index_source)
+        self.assertNotIn('draftAutoSaveTimer', index_source)
+        self.assertNotIn('[DRAFT AUTOSAVE]', index_source)
+        self.assertIn('function triggerAutoSaveDraft() {\n      setDraftDirty(true);\n    }', index_source)
         self.assertIn('function setDraftDirty(dirty)', index_source)
         self.assertIn('تغييرات غير محفوظة', index_source)
 
@@ -7134,21 +7135,33 @@ class MeetingRequirementsTests(unittest.TestCase):
                 'slidesData': [{'title': 'الغلاف', 'html': '<div class="slide"><h1>THE VIEW</h1></div>'}],
             })
         self.assertTrue(chat.get_json()['success'], chat.get_json())
+        chat_data = chat.get_json()['data']
+        self.assertFalse(chat_data['saved'])
 
         log = client.get('/api/presentations/' + pres_id + '/edit-log', headers=headers).get_json()['log']
         ai_entries = [entry for entry in log if entry['source'] == 'ai']
-        self.assertTrue(ai_entries, log)
-        ai_details = '\n'.join(ai_entries[0]['details'])
-        self.assertIn('الطلب: «أضف سطر الواجهة البحرية»', ai_details)
-        self.assertIn('واجهة بحرية', ai_details)
-        self.assertEqual(ai_entries[0]['action'], 'تعديل بالذكاء الاصطناعي')
+        self.assertFalse(ai_entries, log)
         self.assertIn('إنشاء العرض', [entry['action'] for entry in log])
 
         saved_presentation = client.get('/api/presentations/' + pres_id, headers=headers).get_json()['presentation']
         saved_chat = saved_presentation['projectData'].get('designerChat', {})
         saved_contents = [item.get('content') for item in saved_chat.get('messages', [])]
+        self.assertNotIn('أضف سطر الواجهة البحرية', saved_contents)
+        self.assertNotIn('واجهة بحرية', saved_presentation['slidesData'][0]['html'])
+
+        saved = client.put('/api/presentations/' + pres_id, headers=headers, json={
+            'projectData': {
+                'project_name': 'THE VIEW',
+                'designerChat': {'messages': chat_data['chatHistory']},
+            },
+            'slidesData': chat_data['slidesData'],
+        })
+        self.assertTrue(saved.get_json()['success'], saved.get_json())
+        saved_presentation = client.get('/api/presentations/' + pres_id, headers=headers).get_json()['presentation']
+        saved_chat = saved_presentation['projectData'].get('designerChat', {})
+        saved_contents = [item.get('content') for item in saved_chat.get('messages', [])]
         self.assertIn('أضف سطر الواجهة البحرية', saved_contents)
-        self.assertTrue(any('تم تحديث الشريحة' in content for content in saved_contents))
+        self.assertIn('واجهة بحرية', saved_presentation['slidesData'][0]['html'])
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('function renderChangeLogEntry(entry)', index_source)
@@ -7354,7 +7367,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function resetDesignerChatForNewPresentation()', index_source)
         self.assertIn('presentationId: presentationId || null', index_source)
         self.assertIn('restoreDesignerChat(tenantProjectData, tenantPresentationId)', index_source)
-        self.assertIn('let draftAutoSaveTimer = null;', index_source)
+        self.assertNotIn('let draftAutoSaveTimer = null;', index_source)
+        self.assertIn('chatPayload.projectData = { ...tenantProjectData, tenantSlidesData };', index_source)
+        self.assertIn("'saved': False", app_source)
         self.assertIn('class="slide-toolbar-chat-context"', index_source)
         self.assertIn('class="ge-chat-panel-status"', index_source)
         self.assertNotIn('id="tenantChatSlide"', index_source)
@@ -7367,6 +7382,50 @@ class MeetingRequirementsTests(unittest.TestCase):
         # The conversation is restored with the file instead of being wiped on open.
         self.assertNotIn('tenantDesignerMessages = [];\n      tenantChatSlideIndex', index_source)
         self.assertIn("'designerChat'", (ROOT / 'db.py').read_text(encoding='utf-8'))
+
+    def test_designer_chat_does_not_save_draft_until_explicit_save(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        draft_id = 'designer-unsaved-draft'
+        old_html = '<div class="slide"><h1>قديم</h1></div>'
+        new_html = '<div class="slide"><h1>جديد</h1></div>'
+        initial_slide = {'title': 'الغلاف', 'type': 'cover', 'html': old_html}
+
+        created = client.post('/api/project-draft', headers=headers, json={'draftData': {
+            'draftId': draft_id,
+            'project_name': 'مشروع التصميم',
+            'tenantSlidesData': [initial_slide],
+        }})
+        self.assertTrue(created.get_json()['success'], created.get_json())
+        plan = json.dumps({'response': 'تم', 'actions': [
+            {'tool': 'edit_slides', 'params': {'target': 'current', 'instruction': 'غيّر العنوان'}},
+        ]}, ensure_ascii=False)
+        with patch.object(self.application_module, 'call_zai_chat',
+                          return_value={'choices': [{'message': {'content': plan}}]}), \
+                patch.object(self.application_module, '_designer_edit_slide',
+                             return_value=(new_html, 'تم تحديث الشريحة')):
+            response = client.post('/api/designer-chat', headers=headers, json={
+                'message': 'غيّر عنوان الشريحة',
+                'projectData': {'draftId': draft_id, 'project_name': 'مشروع التصميم'},
+                'slidesData': [initial_slide],
+                'slideIndex': 0,
+            })
+        self.assertTrue(response.get_json()['success'], response.get_json())
+        reply = response.get_json()['data']
+        self.assertFalse(reply['saved'])
+
+        stored = client.get('/api/project-draft/' + draft_id, headers=headers).get_json()['draft']['draft_data']
+        self.assertEqual(stored['tenantSlidesData'][0]['html'], old_html)
+
+        saved = client.post('/api/project-draft', headers=headers, json={'draftData': {
+            'draftId': draft_id,
+            'project_name': 'مشروع التصميم',
+            'tenantSlidesData': reply['slidesData'],
+            'designerChat': {'messages': reply['chatHistory']},
+        }})
+        self.assertTrue(saved.get_json()['success'], saved.get_json())
+        stored = client.get('/api/project-draft/' + draft_id, headers=headers).get_json()['draft']['draft_data']
+        self.assertEqual(stored['tenantSlidesData'][0]['html'], new_html)
 
     def test_designer_chat_merges_saved_history_with_short_browser_snapshots(self):
         module = self.application_module

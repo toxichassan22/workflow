@@ -4048,18 +4048,6 @@ def api_designer_chat():
             }
             ask_project_data = dict(project_data)
             ask_project_data['designerChat'] = ask_chat
-            if presentation_id:
-                db.update_presentation(presentation_id, tenant_id=g.tenant_id,
-                                       project_data=ask_project_data)
-            draft_id = ask_project_data.get('draftId') or ask_project_data.get('draft_id')
-            if draft_id:
-                try:
-                    db.save_project_draft(
-                        g.tenant_id, _project_draft_actor_id(), ask_project_data,
-                        ask_project_data.get('sectionStatuses'), 'draft', draft_id=draft_id
-                    )
-                except Exception as draft_error:
-                    print(f'[DESIGNER CHAT ASK SAVE] {draft_error}')
             return jsonify({'success': True, 'data': {
                 'action': 'ask',
                 'response': question,
@@ -4069,7 +4057,7 @@ def api_designer_chat():
                 'memory': chat_memory,
                 'focusIndexes': focus_indexes,
                 'chatHistory': ask_chat['messages'],
-                'saved': bool(presentation_id or draft_id),
+                'saved': False,
             }})
 
         if question and (explicit_indexes or _designer_actionable_edit_request(message)):
@@ -4471,8 +4459,9 @@ def api_designer_chat():
         response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
         if assistant_messages:
             response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
-        # Persist the conversation beside the edited workspace. Relying only on the browser draft
-        # save meant a refresh between two turns restored old history and lost the new turn.
+        # Return the updated conversation beside the edited workspace. The browser keeps both in
+        # memory until the user explicitly presses save; writing here would make a failed edit
+        # impossible to discard with a refresh.
         persisted_messages = _normalize_designer_chat_messages(history_for_turn)[-DESIGNER_CHAT_STORED_TURNS * 2:]
         if not persisted_messages or persisted_messages[-1].get('content') != message or persisted_messages[-1].get('role') != 'user':
             persisted_messages.append({'role': 'user', 'content': message[:2000], 'slides': preferred_indexes[:]})
@@ -4484,33 +4473,6 @@ def api_designer_chat():
             'memory': chat_memory,
             'focusIndexes': turn_focus or preferred_indexes,
         }
-        if presentation_id:
-            if slide_changes:
-                db.save_presentation_version(presentation_id, g.user_id, g.user_name or 'System',
-                                             slides_before, action='pre-ai-edit')
-            db.update_presentation(
-                presentation_id, project_data=persisted_project_data,
-                slides_data=slides, slide_count=len(slides), status='edited'
-            )
-        draft_id = persisted_project_data.get('draftId') or persisted_project_data.get('draft_id')
-        if draft_id:
-            try:
-                db.save_project_draft(
-                    g.tenant_id, _project_draft_actor_id(), persisted_project_data,
-                    persisted_project_data.get('sectionStatuses'), 'draft', draft_id=draft_id
-                )
-            except Exception as draft_error:
-                print(f'[DESIGNER CHAT DRAFT SAVE] {draft_error}')
-        if slide_changes:
-            tools_used = ', '.join(sorted({str(item.get('tool')) for item in executed
-                                           if isinstance(item, dict) and item.get('tool')}))
-            _record_change(
-                'presentation' if presentation_id else 'draft',
-                presentation_id or (project_data.get('draftId') or project_data.get('draft_id')),
-                'تعديل بالذكاء الاصطناعي',
-                [f'الطلب: «{message[:300]}»'] + ([f'الأدوات: {tools_used}'] if tools_used else []) + slide_changes,
-                source='ai',
-            )
         # The slides this turn actually touched become the conversation's focus, so the next
         # message («وطلعها أوضح») lands on them without asking again.
         # Both keys carry 0-based indexes; the chat speaks in 1-based slide numbers.
@@ -4528,7 +4490,7 @@ def api_designer_chat():
                                                    'actions': executed, 'validation': validation,
                                                    'memory': chat_memory, 'focusIndexes': turn_focus,
                                                    'chatHistory': persisted_project_data['designerChat']['messages'],
-                                                   'saved': bool(presentation_id or draft_id)}})
+                                                   'saved': False}})
     except Exception as exc:
         print(f'[DESIGNER-CHAT ERROR] {exc}')
         return jsonify({'success': False, 'error': str(exc)}), 500
