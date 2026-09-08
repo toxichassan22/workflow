@@ -92,6 +92,42 @@ _LOCATION_MAP_SOURCE_TYPES = {
 }
 
 
+def _normalize_land_boundary_slide(slide):
+    """Repair old boundary-diagram entries before they can reach the model.
+
+    Older saved plans often kept the visible title and diagram style but lost
+    ``content_source``.  The single-slide endpoint receives those snapshots
+    directly, so without this repair it treated the deterministic boundary
+    diagram as a normal AI-authored content slide.
+    """
+    if not isinstance(slide, dict):
+        return slide
+    item = dict(slide)
+    title = str(item.get('title') or '').strip()
+    source = str(item.get('content_source') or item.get('contentSource') or '').strip()
+    section = str(item.get('section_key') or item.get('sectionKey') or item.get('section') or '').strip().lower()
+    is_boundary_diagram = (
+        source == 'land_boundary_diagram'
+        or bool(re.search(r'(?:مخطط\s*(?:اتجاهي|حدود)|مخطط\s+اتجاهي|حدود\s+الأرض\s+والواجهات|directional\s+boundary)', title, flags=re.IGNORECASE))
+        or (str(item.get('design_style') or '').strip().lower() == 'diagram'
+            and section in ('', 'land', 'location'))
+    )
+    if not is_boundary_diagram:
+        return item
+    item.update({
+        'title': 'مخطط اتجاهي لحدود الأرض',
+        'type': 'content',
+        'section_key': section if section in ('land', 'location') else 'land',
+        'sectionKey': section if section in ('land', 'location') else 'land',
+        'design_style': 'diagram',
+        'requires_image': False,
+        'content_source': 'land_boundary_diagram',
+        'image_tokens': [],
+        'bullets': [],
+    })
+    return item
+
+
 def _normalize_location_map_slide(slide):
     """Keep every intentional map in the location section and give it one token."""
     if not isinstance(slide, dict):
@@ -2272,6 +2308,7 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
     signatures = set()
     current = ''
     for slide in source_slides:
+        slide = _normalize_land_boundary_slide(slide)
         slide = _normalize_location_map_slide(slide)
         slide = _normalize_financial_slide(slide)
         slide_type = str(slide.get('type') or 'content')
@@ -8204,7 +8241,11 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
     if (slide or {}).get('type') == 'section_divider':
         return build_section_divider_slide(slide, slide_num, total_slides, branding, project_data)
 
-    slide = _normalize_financial_slide(_normalize_location_map_slide(dict(slide or {})))
+    slide = _normalize_financial_slide(
+        _normalize_location_map_slide(
+            _normalize_land_boundary_slide(dict(slide or {}))
+        )
+    )
 
     # Single-slide requests may come from an older client and bypass the full
     # plan normalizer. Apply the same market contract to that one item.

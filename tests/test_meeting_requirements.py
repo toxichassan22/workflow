@@ -1484,6 +1484,22 @@ class MeetingRequirementsTests(unittest.TestCase):
         for value in ('109', '98', '80', '59.5', 'شارع شمالي', 'طريق الكورنيش'):
             self.assertIn(value, html)
 
+    def test_legacy_boundary_title_is_repaired_before_model_generation(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع الواجهة',
+            'boundary_lengths': 'شمال 20م، جنوب 18م',
+            'surrounding_streets': 'شارع شمالي، جار جنوباً',
+        }
+        html = engine.generate_single_slide(
+            'system', {'title': 'مخطط اتجاهي لحدود الأرض', 'type': 'content',
+                       'section_key': 'land', 'design_style': 'diagram'},
+            9, 72, {'primary_color': '#005f78', 'accent_color': '#c59a58'},
+            lambda *_args, **_kwargs: self.fail('legacy boundary title must be deterministic'),
+            project_data=project)
+        self.assertIn('data-boundary-diagram="1"', html)
+        self.assertEqual(len(re.findall(r'data-boundary-direction=', html)), 4)
+
     def test_content_logos_tables_and_fitted_html_keep_readable_sizes(self):
         engine = self.application_module.slide_engine
         html = engine.finalize_slide_html(

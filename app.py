@@ -6251,7 +6251,9 @@ def api_generate_slide_single():
     # arrive from an older saved plan that misclassified a map or financial
     # slide, so finalization must see the repaired type/source too.
     slide = slide_engine._normalize_financial_slide(
-        slide_engine._normalize_location_map_slide(dict(slides[slide_index] or {}))
+        slide_engine._normalize_location_map_slide(
+            slide_engine._normalize_land_boundary_slide(dict(slides[slide_index] or {}))
+        )
     )
     total = total_slides
     html = generate_single_slide(system_prompt, slide, slide_num, total, branding, call_glm_fn, max_retries=3, project_data=project_data)
