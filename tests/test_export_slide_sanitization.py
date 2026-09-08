@@ -84,6 +84,11 @@ class ExportSlideSanitizationTests(unittest.TestCase):
                      'page-break-after:always !important'):
             self.assertIn(rule, print_block, rule)
 
+    def test_export_keeps_media_contained_and_charts_within_the_page(self):
+        source = (ROOT / 'generate_pdf_from_preview.py').read_text(encoding='utf-8')
+        self.assertGreaterEqual(source.count('object-fit:contain'), 2)
+        self.assertGreaterEqual(source.count('svg[data-chart], svg.combo-chart'), 2)
+
     def test_authenticated_project_file_images_are_localized_for_export(self):
         """Legacy cover images and project logos use an authenticated route in the editor."""
         import tempfile

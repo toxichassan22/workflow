@@ -284,7 +284,8 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     layout_css = """
 * { margin:0; padding:0; box-sizing:border-box; }
 .pdf-export-page, .slide { width:1280px; height:720px; direction:rtl; position:relative; overflow:hidden; }
-img { max-width:100%; max-height:100%; object-fit:cover; }
+img { max-width:100%; max-height:100%; object-fit:contain; }
+svg[data-chart], svg.combo-chart { max-width:100% !important; max-height:320px !important; height:auto !important; display:block; }
 @media print {
     body#pdf-export-root { background:white !important; margin:0 !important; padding:0 !important; width:1280px !important; height:auto !important; display:block !important; columns:auto !important; column-count:auto !important; column-width:auto !important; grid-template-columns:none !important; grid-template-rows:none !important; gap:0 !important; overflow:visible !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
     body#pdf-export-root > .pdf-export-page { margin:0 !important; border:none !important; page-break-after:always !important; break-after:page !important; page-break-inside:avoid !important; break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; overflow:hidden !important; }
@@ -542,7 +543,8 @@ def render_slide_to_image_base64(slide_html, branding=None, tenant_id=None, widt
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 html, body {{ margin:0; padding:0; background:#fff; direction:rtl; width:{width}px; height:{height}px; overflow:hidden; }}
 .slide {{ width:{width}px !important; height:{height}px !important; direction:rtl; position:relative; overflow:hidden; }}
-img {{ max-width:100%; max-height:100%; object-fit:cover; }}
+img {{ max-width:100%; max-height:100%; object-fit:contain; }}
+svg[data-chart], svg.combo-chart {{ max-width:100% !important; max-height:320px !important; height:auto !important; display:block; }}
 """
 
         full_html = f"""<!DOCTYPE html>

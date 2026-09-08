@@ -5522,6 +5522,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'الصور ليست عنصراً افتراضياً في كل شريحة: استخدم فقط الصور والخرائط والرموز التي تنص عليها الخطة لهذه الشريحة. لا تضف صورة إلى شريحة نص أو جدول بلا حاجة، ولا تكرر أصلاً مرئياً في موضع آخر، مع الحفاظ على توزيع معقول للصور المتاحة عبر العرض الكامل',
         'الخرائط مسموحة في شرائح تحليل الموقع الجغرافي أو تحليل الأرض عند طلبها صراحة، أو في ملخص الموقع/الخريطة التنفيذي المحدد صراحة. في الجدول الزمني والدراسة المالية والمخططات والتصورات الخارجية والداخلية وفريق العمل وبقية الأقسام: ممنوع استخدام ##MAP_OVERVIEW## أو ##MAP_LANDMARKS## أو ##MAP_ACCESS## أو ##MAP_CATCHMENT## أو أي صورة من /uploads/maps/',
         'التزم بأساسيات التوليد دون استثناء: RTL، هوية الشركة، الهيدر والفوتر النظاميان، جذر slide واحد، تباين واضح، تدفق طبيعي بلا تداخل أو قص، وعدم اختراع أرقام أو نصوص أو صور أو أيقونات',
+        'استمرارية الخلفية إلزامية: إذا اخترت أو وجدت في الشريحة سطحاً داكناً، اجعل الـ canvas كله داكناً ومتصلاً. ممنوع وضع لوحة بيضاء كبيرة أو إطار أبيض يحمل كل المحتوى فوق الخلفية الداكنة؛ استخدم أسطحاً داكنة شفافة أو قريبة من لون الجذر، ونصاً فاتحاً وحدوداً خفيفة. عند التعديل حافظ على خلفية الجذر وهندسته ولا تعِد بناء الشريحة بلغة بصرية متعارضة',
         'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون فرض جداول أو بطاقات أو شبكة محددة، ومن دون خرائط أو صور فوتوغرافية أو رسوم إضافية. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
         'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
@@ -7003,7 +7004,7 @@ def _build_sol_waterfall_slide(slide, source, branding=None, slide_num=None, tot
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:14px;">
+  <div style="padding:0 36px;margin-top:70px;">
     <div class="luxury-kpi-grid" style="margin-bottom:12px;">
       <div class="luxury-kpi-card primary" style="background:{primary};border-color:{primary};">
         <div class="kpi-label">إجمالي تكلفة المشروع</div>
@@ -7102,7 +7103,7 @@ def _build_sol_combo_slide(slide, source, branding=None, slide_num=None, total_s
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:14px;">
+  <div style="padding:0 36px;margin-top:70px;">
     <div class="luxury-kpi-grid" style="margin-bottom:12px;">
       <div class="luxury-kpi-card primary" style="background:{primary};border-color:{primary};">
         <div class="kpi-label">إجمالي التدفقات الإيجابية</div>
@@ -7240,7 +7241,7 @@ def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_s
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:14px;">
+  <div style="padding:0 36px;margin-top:70px;">
     <div class="financial-table-wrap" style="max-height:575px;overflow:hidden;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
       <div style="padding:10px 18px;display:flex;justify-content:space-between;align-items:center;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
         <span style="font-size:13px;font-weight:700;color:{primary};">{title}</span>
@@ -7317,7 +7318,7 @@ def _build_sol_heatmap_slide(slide, source, branding=None, slide_num=None, total
       </div>
     </div>
   </header>
-  <div style="padding:0 36px;margin-top:14px;">
+  <div style="padding:0 36px;margin-top:70px;">
     <div class="luxury-kpi-grid" style="margin-bottom:12px;">
       <div class="luxury-kpi-card primary" style="background:{primary};border-color:{primary};">
         <div class="kpi-label">السيناريو الأساسي</div>
@@ -7509,7 +7510,7 @@ def _build_sol_stacked_tables_slide(slide, source, branding=None, slide_num=None
       </div>
     </div>
   </header>
-  <div class="stacked-financial-tables" style="padding:0 36px;margin-top:12px;display:flex;flex-direction:column;max-height:580px;overflow:hidden;">
+  <div class="stacked-financial-tables" style="padding:0 36px;margin-top:68px;display:flex;flex-direction:column;max-height:580px;overflow:hidden;">
     {"".join(rendered_tables)}
   </div>
   <footer class="slide-footer" data-slide-footer="1">
@@ -8178,15 +8179,31 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
                 f'<div data-site-analysis-text style="display:grid;grid-template-columns:1fr 1fr;gap:24px;height:calc(100% - 52px);overflow:hidden;text-align:right;">'
                 f'<div>{left_column}</div><div>{right_column}</div></div></div></div>')
     if content_source == 'executive_content.summary':
-        note = html_lib.escape(_slide_source_data_note(slide, source)).replace('\n', '<br>')
-        ext_token = tokens[0] if tokens else '##MOODBOARD_1##'
+        summary_text = _slide_source_data_note(slide, source)
+        note = html_lib.escape(summary_text).replace('\n', '<br>')
+        ext_token = next((token for token in tokens if not token.startswith('##')), '')
+        summary_length = len(re.sub(r'\s+', ' ', summary_text).strip())
+        if summary_length > 950:
+            summary_font = '11.5px'
+            summary_line_height = '1.38'
+        elif summary_length > 650:
+            summary_font = '12.5px'
+            summary_line_height = '1.5'
+        else:
+            summary_font = '15px'
+            summary_line_height = '1.75'
+        summary_columns = '1.2fr 1fr' if ext_token else '1fr'
+        image_panel = (
+            f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;display:flex;align-items:center;justify-content:center;">'
+            f'<img src="{html_lib.escape(ext_token, quote=True)}" alt="" style="width:100%;height:100%;object-fit:contain;display:block;"></div>'
+            if ext_token else ''
+        )
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;box-sizing:border-box;padding:68px 36px 44px;">'
                 f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">'
                 f'<h2 style="font-size:28px;font-weight:800;color:{primary};margin:0;">{title}</h2></div>'
-                f'<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:24px;height:520px;align-items:stretch;">'
-                f'<div style="border-radius:12px;border:1px solid #e2e8f0;background:#f8fafc;padding:24px;overflow:hidden;font-size:15px;line-height:1.8;color:#1e293b;">{note}</div>'
-                f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e1ea;background:#fff;display:flex;align-items:center;justify-content:center;">'
-                f'<img src="{ext_token}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"></div>'
+                f'<div style="display:grid;grid-template-columns:{summary_columns};gap:24px;height:520px;align-items:stretch;">'
+                f'<div style="border-radius:12px;border:1px solid #e2e8f0;background:#f8fafc;padding:24px;overflow:hidden;font-size:{summary_font};line-height:{summary_line_height};color:#1e293b;">{note}</div>'
+                f'{image_panel}'
                 f'</div></div>')
     if re.fullmatch(r'market_study_data\.scope', content_source):
         return _build_market_scope_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
@@ -9414,6 +9431,159 @@ def _slide_root_surface(html):
     return _css_solid_color(styles.get('background-color') or styles.get('background'))
 
 
+_LIGHT_SLIDE_SURFACE_COLORS = {
+    '#ffffff', '#fff', '#fafafa', '#f8fafc', '#f4f9fc', '#f5f5f5',
+    '#f0f4f8', '#eef2f7', '#f1f5f9', '#e2e8f0', '#dbe5ed', '#e5e7eb',
+}
+
+
+def _is_dark_slide_surface(surface):
+    """Return whether a solid slide surface can carry light content."""
+    color = normalize_hex_color(surface, '')
+    return bool(color and contrast_ratio('#ffffff', color) >= 4.5)
+
+
+def _is_light_slide_surface_color(value):
+    """Recognize the pale fills that become a broken white panel on a dark slide."""
+    color = _css_solid_color(value)
+    if not color:
+        return False
+    normalized = normalize_hex_color(color, '')
+    if normalized in _LIGHT_SLIDE_SURFACE_COLORS:
+        return True
+    # Catch common near-white custom values without treating gold/accent fills as panels.
+    channels = [int(normalized[index:index + 2], 16) for index in (1, 3, 5)]
+    return min(channels) >= 232
+
+
+def _dark_slide_style(style, surface, depth=1, exempt=False):
+    """Reconcile inline colors with a dark SOL-owned canvas.
+
+    SOL is allowed to choose the composition, but a later edit must not turn a dark
+    canvas into a dark frame around a white report page.  Keep small intentional
+    surfaces as a translucent tone and flatten direct, page-sized carriers.
+    """
+    if exempt:
+        return style
+    dark_tone = 'transparent' if depth <= 1 else 'rgba(255,255,255,0.08)'
+
+    def replace_background(match):
+        declaration = match.group(0)
+        value_match = re.search(r':\s*([^;]+)', declaration)
+        raw_value = value_match.group(1).strip() if value_match else ''
+        if not _is_light_slide_surface_color(raw_value):
+            return declaration
+        important = ' !important' if re.search(r'!important\s*$', raw_value, flags=re.IGNORECASE) else ''
+        return re.sub(r':\s*[^;]+', ':' + dark_tone + important, declaration, count=1)
+
+    style = re.sub(
+        r'\bbackground(?:-color)?\s*:\s*[^;]+',
+        replace_background,
+        style,
+        flags=re.IGNORECASE,
+    )
+
+    def replace_border(match):
+        declaration = match.group(0)
+        value_match = re.search(r'(#(?:[0-9a-f]{3}|[0-9a-f]{6})|white|rgba?\([^)]*\))', declaration, flags=re.IGNORECASE)
+        if not value_match or not _is_light_slide_surface_color(value_match.group(1)):
+            return declaration
+        return declaration[:value_match.start(1)] + 'rgba(255,255,255,0.22)' + declaration[value_match.end(1):]
+
+    style = re.sub(
+        r'\bborder(?:-(?:top|right|bottom|left))?\s*:\s*[^;]+',
+        replace_border,
+        style,
+        flags=re.IGNORECASE,
+    )
+
+    def replace_dark_text(match):
+        declaration = match.group(0)
+        value_match = re.search(r':\s*([^;]+)', declaration)
+        raw_value = value_match.group(1).strip() if value_match else ''
+        color = _css_solid_color(raw_value)
+        if not color or contrast_ratio('#ffffff', color) < 4.5:
+            return declaration
+        important = ' !important' if re.search(r'!important\s*$', raw_value, flags=re.IGNORECASE) else ''
+        return re.sub(r':\s*[^;]+', ':#f8fafc' + important, declaration, count=1)
+
+    return re.sub(r'(?<![-\w])color\s*:\s*[^;]+', replace_dark_text, style, flags=re.IGNORECASE)
+
+
+def _normalize_dark_slide_surface(html, slide_type='content'):
+    """Keep edited/generated dark slides dark instead of wrapping them in white pages.
+
+    This is deliberately limited to content-like slides. Covers, closing slides, section
+    dividers, and moodboards have their own image-led contracts and may legitimately use
+    white logo backing or other contrast surfaces.
+    """
+    if not html or slide_type in ('cover', 'closing', 'moodboard', 'section_divider'):
+        return html
+    surface = _slide_root_surface(html)
+    if not _is_dark_slide_surface(surface):
+        return html
+
+    root_match = re.search(
+        r'<(?P<tag>div)\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\2[^>]*>',
+        html, flags=re.IGNORECASE,
+    )
+    if not root_match:
+        return html
+    root_tag = root_match.group(0)
+    if 'data-slide-surface="dark"' not in root_tag and "data-slide-surface='dark'" not in root_tag:
+        root_tag = root_tag[:-1] + ' data-slide-surface="dark">'
+        html = html[:root_match.start()] + root_tag + html[root_match.end():]
+        root_match = re.search(
+            r'<(?P<tag>div)\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\2[^>]*>',
+            html, flags=re.IGNORECASE,
+        )
+    if not root_match:
+        return html
+
+    root_end = _slide_element_end(html, root_match)
+    inner_start = root_match.end()
+    inner_end = max(inner_start, root_end - len('</div>'))
+    inner = html[inner_start:inner_end]
+    tag_re = re.compile(r'<(?P<closing>/)?(?P<tag>[a-z][\w:-]*)(?P<attrs>\s[^>]*)?>', re.IGNORECASE)
+    void_tags = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+    pieces = []
+    cursor = 0
+    depth = 0
+    for match in tag_re.finditer(inner):
+        pieces.append(inner[cursor:match.start()])
+        tag = match.group('tag').lower()
+        closing = bool(match.group('closing'))
+        if closing:
+            depth = max(0, depth - 1)
+            pieces.append(match.group(0))
+            cursor = match.end()
+            continue
+        attrs = match.group('attrs') or ''
+        class_match = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', attrs, flags=re.IGNORECASE | re.DOTALL)
+        class_text = (class_match.group(2) if class_match else '').lower()
+        exempt = (
+            tag in ('header', 'footer')
+            or 'presentation-chrome-logo' in class_text
+            or 'logo' in class_text
+            or re.search(r'\bdata-slide-(?:header|footer)\s*=', attrs, flags=re.IGNORECASE)
+            or re.search(r'\bdata-cover-overlay\s*=', attrs, flags=re.IGNORECASE)
+        )
+        style_match = re.search(r'\bstyle\s*=\s*(["\'])(.*?)\1', attrs, flags=re.IGNORECASE | re.DOTALL)
+        rewritten = match.group(0)
+        if style_match and not exempt:
+            new_style = _dark_slide_style(style_match.group(2), surface, depth=depth + 1)
+            new_attrs = attrs[:style_match.start(2)] + new_style + attrs[style_match.end(2):]
+            attrs_start = match.start('attrs') - match.start()
+            attrs_end = match.end('attrs') - match.start()
+            rewritten = match.group(0)[:attrs_start] + new_attrs + match.group(0)[attrs_end:]
+        pieces.append(rewritten)
+        if tag not in void_tags and not match.group(0).rstrip().endswith('/>'):
+            depth += 1
+        cursor = match.end()
+    pieces.append(inner[cursor:])
+    return html[:inner_start] + ''.join(pieces) + html[inner_end:]
+
+
 def _presentation_chrome_html(title, project_title, company_name, primary, accent,
                               footer_background, footer_text, footer_accent, counter,
                               project_logo=False, slide_surface=None):
@@ -9844,6 +10014,11 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         )
     )
     is_cover_or_closing = is_cover or is_closing
+    # Keep a dark SOL canvas coherent after generation or an AI edit.  The model may
+    # return a large white report panel even when the original slide was intentionally
+    # dark; flatten/re-tone that carrier before the managed chrome is added.
+    if not is_cover_or_closing:
+        html = _normalize_dark_slide_surface(html, slide_type=slide_type)
     # Sol and the deterministic financial renderer use different chrome. Remove
     # both forms first so preview and export always receive the same one.
     if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
@@ -10092,6 +10267,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             # may already have the previous white header, so checking only for the
             # marker would preserve the color conflict after the new adaptive rule.
             html = _strip_existing_slide_chrome(html)
+            html = _normalize_dark_slide_surface(html, slide_type=slide_type)
             html = _ensure_managed_chrome(
                 html, slide_title=item.get('title'), slide_num=index,
                 total_slides=total, branding=branding,

@@ -2722,6 +2722,13 @@ def api_ai_edit_slide():
     from auth import get_optional_tenant_id
     tenant_id = get_optional_tenant_id() or 'default'
     branding = db.get_branding(tenant_id) or {}
+    current_surface = slide_engine._slide_root_surface(slide_html)
+    surface_note = ''
+    if slide_engine._is_dark_slide_surface(current_surface):
+        surface_note = (
+            f"\nسطح الشريحة الحالي داكن ({current_surface}) ويجب الحفاظ عليه كما هو. "
+            "لا تضف لوحة بيضاء أو إطاراً أبيض كبيراً داخل الشريحة؛ أبق المحتوى على السطح الداكن أو على درجات داكنة شفافة."
+        )
 
     vision_image_uri = None
     try:
@@ -2736,7 +2743,7 @@ def api_ai_edit_slide():
         if vision_image_uri else ""
     )
 
-    prompt = f"""عدّل الشريحة التالية حسب التعليمات:{vision_note}
+    prompt = f"""عدّل الشريحة التالية حسب التعليمات:{vision_note}{surface_note}
 التعليمات: {instruction}
 
 الشريحة الحالية:
@@ -2759,12 +2766,14 @@ def api_ai_edit_slide():
         if slide_number is None:
             raw_index = data.get('slideIndex')
             slide_number = (int(raw_index) + 1) if raw_index is not None else 2
+        requested_slide_type = data.get('slideType') or data.get('slide_type') or 'content'
         html = postprocess_slide(
             html,
             int(slide_number),
             tenant_id,
             slide_title=data.get('slideTitle') or data.get('currentSlideTitle') or '',
             total_slides=data.get('totalSlides') or data.get('total_slides'),
+            slide_type=requested_slide_type,
         )
         html = resolve_designer_chat_placeholders(html, project_data, presentation_id, tenant_id,
                                                  data.get('creativeImages'))
@@ -3596,7 +3605,17 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
     if len(clean_html) > 150000:
         clean_html = clean_html[:150000]
 
-    prompt = f"""{rules}{training_note}{vision_note}
+    current_surface = slide_engine._slide_root_surface(html)
+    surface_note = ''
+    if slide_engine._is_dark_slide_surface(current_surface):
+        surface_note = (
+            f"\n\n## عقد سطح الشريحة الحالي\n"
+            f"الجذر الحالي يستخدم الخلفية الداكنة {current_surface}. هذه الخلفية جزء من هوية التكوين ويجب أن تبقى كما هي. "
+            "عدّل العناصر الداخلية فقط، ولا تضف لوحة بيضاء أو إطاراً أبيض كبيراً يحمل المحتوى. "
+            "اجعل أي أسطح داخلية داكنة أو شفافة، والنصوص فاتحة، وحافظ على النسب والهوامش والتسلسل البصري الموجود."
+        )
+
+    prompt = f"""{rules}{training_note}{vision_note}{surface_note}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
 1. قواعد الإزاحات والتخطيط الجراحي (Spatial & Layout Precision):
    - تحكّم دقيق بكسلي ونسبية في CSS: رفع أو تنزيل الهيدر، ضبط هوامش البطاقات الداخلية (padding) والخارجية (margins)، وتغيير حجم البطاقات والمسافات البينية (gap).
@@ -3618,6 +3637,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
    - ممنوع وضع أي رموز أسهم (استخدم كلمات: أعلى، أسفل، يمين، يسار).
    - خلو الشريحة تماماً من أي نص تعليمي (No How-To text).
    - الحفاظ على مقاس الشريحة القياسي 1280x720 و overflow:hidden دون أشرطة تمرير.
+   - استمرارية السطح: إذا كانت الشريحة الحالية داكنة، لا تستبدلها بإطار داكن حول صفحة بيضاء، ولا تضف background أبيض أو فاتحاً لحاوية كبيرة؛ يجب أن يظل المحتوى جزءاً من الـ canvas الداكن.
 7. حرية إبداعية وتصميمية مطلقة لجميع أنواع الشرائح (Full Creative Freedom):
    - تمتلك كامل الصلاحية والحرية المطلقة لتعديل أو إعادة ابتكار وتصميم أي شريحة يطلبها المستخدم بلا أي استثناء أو قيود نوعية:
      * شرائح الفصول والأقسام الرئيسية (Section Dividers / الفصول): لك مطلق الحرية في إعادة تصميمها بتخطيطات إبداعية كاملة (مثل: إضافة كروت ملخصة لمحاور القسم، خطوط زمنية، إبراز مؤشرات أو أرقام قياسية، تقسيم الشريحة أفقياً أو عمودياً Split View، دمج صورة معمارية مع بطاقة داكنة ملكية، تدرجات لونية، خطوط عريضة، إلخ).

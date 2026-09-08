@@ -833,6 +833,39 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('background:#122a67', re.search(r'<header\b[^>]*>', renumbered, flags=re.IGNORECASE).group(0))
         self.assertNotIn('قديم', renumbered)
 
+    def test_dark_slide_surface_flattens_white_content_page_after_generation_or_edit(self):
+        engine = self.application_module.slide_engine
+        branding = {
+            'primary_color': '#122a67',
+            'secondary_color': '#0f1f4d',
+            'accent_color': '#d8b36a',
+        }
+        source = (
+            '<div class="slide" style="width:1280px;height:720px;background:#122a67;color:#ffffff;">'
+            '<div style="background:#ffffff;border:1px solid #e2e8f0;color:#122a67;padding:24px;">'
+            '<h1 style="color:#0f172a;">العنوان</h1>'
+            '<table><tr style="background:#f8fafc;"><td style="color:#334155;">القيمة</td></tr></table>'
+            '</div></div>'
+        )
+        finished = engine.finalize_slide_html(
+            source, 'content', {'project_name': 'المشروع'}, branding,
+            slide_num=4, slide_title='ملخص الموقع', total_slides=9,
+        )
+        content_region = re.search(r'</header>([\s\S]*?)<footer\b', finished, flags=re.IGNORECASE).group(1)
+        self.assertIn('data-slide-surface="dark"', finished)
+        self.assertNotIn('background:#ffffff', content_region)
+        self.assertNotIn('background:#f8fafc', content_region)
+        self.assertIn('background:transparent', content_region)
+        self.assertIn('color:#f8fafc', content_region)
+
+        renumbered = engine.renumber_presentation_slides(
+            [{'type': 'content', 'title': 'ملخص الموقع', 'html': source}],
+            branding=branding, project_data={'project_name': 'المشروع'},
+        )[0]['html']
+        content_region = re.search(r'</header>([\s\S]*?)<footer\b', renumbered, flags=re.IGNORECASE).group(1)
+        self.assertNotIn('background:#ffffff', content_region)
+        self.assertIn('data-slide-surface="dark"', renumbered)
+
     def test_single_slide_retries_severely_unreadable_text(self):
         engine = self.application_module.slide_engine
         responses = iter([
@@ -8946,6 +8979,37 @@ class MeetingRequirementsTests(unittest.TestCase):
             self.assertIn(metric, slide_html)
         self.assertNotIn('max-height:440px;overflow:hidden;', slide_html)
         self.assertIn('max-height:510px;overflow:visible;', slide_html)
+
+    def test_financial_sol_templates_reserve_managed_header_space(self):
+        engine = self.application_module.slide_engine
+        source = {
+            'project_name': 'مشروع الاختبار',
+            'financial_study_model': {
+                'tables': {
+                    'sensitivityTable': [
+                        {'السيناريو': 'أساسي', 'إجمالي الإيرادات': '100,000', 'إجمالي تكلفة المشروع': '50,000'},
+                    ],
+                },
+            },
+        }
+        slide = {'title': 'جدول الدراسة المالية', 'content_source': 'financial_table:components:1:1'}
+        table_html = engine._build_sol_table_slide(slide, source, {})
+        heatmap_html = engine._build_sol_heatmap_slide(
+            {'title': 'تحليل الحساسية', 'chart_type': 'heatmap'}, source, {})
+        self.assertIn('padding:0 36px;margin-top:70px;', table_html)
+        self.assertIn('padding:0 36px;margin-top:70px;', heatmap_html)
+
+    def test_executive_summary_does_not_leave_an_empty_image_panel_or_clip_long_text(self):
+        engine = self.application_module.slide_engine
+        summary = ('البيانات الأساسية\n' + ('نص معتمد للمشروع يشرح البيانات والموقع دون إضافة حقائق جديدة. ' * 24))
+        html = engine._build_structured_fallback_slide(
+            {'title': 'الملخص التنفيذي', 'content_source': 'executive_content.summary'},
+            {'project_name': 'مشروع الاختبار', 'executive_content': {'summary': summary}},
+            {},
+        )
+        self.assertIn('grid-template-columns:1fr;', html)
+        self.assertIn('font-size:11.5px;line-height:1.38;', html)
+        self.assertNotIn('##MOODBOARD_1##', html)
 
     def test_revenue_table_linked_component_can_be_changed_and_cleared(self):
         """Selecting a linked component in table 4 (بنود الإيرادات) must remain editable:
