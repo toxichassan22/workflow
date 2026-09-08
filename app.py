@@ -6206,7 +6206,7 @@ def api_generate_slide_single():
     # characters, which silently dropped the market study, the executive content and the team.
     project_json = slide_engine.build_project_facts(project_data, g.tenant_id)
 
-    landmarks_matrix = project_data.get('landmarks_matrix')
+    landmarks_matrix = project_data.get('nearby_landmarks_data') or project_data.get('landmarks_matrix')
     landmarks_note = ''
     if landmarks_matrix:
         landmarks_note = (

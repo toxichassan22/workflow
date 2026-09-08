@@ -4,6 +4,7 @@ AI analyzes project data and proposes a balanced slide plan.
 """
 
 import json
+import math
 import os
 import re
 import concurrent.futures
@@ -2512,7 +2513,7 @@ def _location_data_note(project_data):
         parts.append('إحداثيات الموقع متاحة.')
     if project_data.get('location_address'):
         parts.append(f"عنوان الموقع: {project_data.get('location_address')}")
-    if project_data.get('landmarks_matrix'):
+    if project_data.get('nearby_landmarks_data') or project_data.get('landmarks_matrix'):
         parts.append('بيانات المعالم المحيطة متاحة.')
     if project_data.get('main_roads'):
         parts.append('بيانات الطرق الرئيسية متاحة.')
@@ -5396,6 +5397,11 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
     if source_note:
         notes.append(source_note)
     content_source = str(slide.get('content_source') or '')
+    if content_source == 'site_analysis' and str((project_data or {}).get('site_analysis') or '').strip():
+        notes.append(
+            'هذه شريحة تحليل AI للموقع: انقل نص حقل تحليل AI للموقع المعتمد كاملاً كما هو، '
+            'دون تلخيص أو إعادة صياغة أو استبدال فقراته بنص جديد. يجب أن يظهر النص نفسه مرئياً داخل الشريحة.'
+        )
     if content_source in ('site_analysis', 'executive_content.summary') and '##MAP_OVERVIEW##' in (slide.get('image_tokens') or []):
         marker_side = str((project_data or {}).get('_map_marker_side') or 'right')
         if marker_side == 'left':
@@ -5715,6 +5721,12 @@ def _normalize_map_summary_layout(html, marker_side='right'):
                  else 'left:24px!important;right:auto!important;')
 
     def normalize_card(match):
+        full_width = bool(re.search(r'\bdata-site-analysis-full\b', match.group(0), flags=re.IGNORECASE))
+        if full_width:
+            return _set_tag_style(
+                match.group(0), ('position', 'top', 'right', 'bottom', 'left', 'width', 'max-height', 'z-index'),
+                'position:absolute!important;top:76px!important;right:24px!important;bottom:56px!important;'
+                'left:24px!important;width:auto!important;max-height:588px!important;z-index:2!important;')
         return _set_tag_style(
             match.group(0), ('position', 'top', 'right', 'bottom', 'left', 'width', 'max-height', 'z-index'),
             'position:absolute!important;top:76px!important;bottom:56px!important;width:40%!important;'
@@ -5958,6 +5970,46 @@ def slide_contrast_issues(html):
     return parser.issues
 
 
+def _nearby_landmark_table_rows(project_data, limit=7):
+    """Return the same four visible columns used by the nearby-landmarks table."""
+    source = project_data if isinstance(project_data, dict) else {}
+    canonical = source.get('nearby_landmarks_data')
+    legacy = source.get('landmarks_matrix')
+    rows = canonical if isinstance(canonical, list) and canonical else legacy
+    if not isinstance(rows, list):
+        return []
+    rows = [row for row in rows if isinstance(row, dict)]
+
+    def is_selected(row):
+        value = row.get('show_on_map', row.get('selected'))
+        return value is True or str(value or '').strip().lower() in {'true', '1', 'yes'}
+
+    selected = [row for row in rows if is_selected(row)]
+    rows = selected if selected else rows
+
+    def first_value(row, *keys):
+        for key in keys:
+            value = row.get(key)
+            if value not in (None, '', []):
+                return value
+        return ''
+
+    result = []
+    for row in rows:
+        name = first_value(row, 'name', 'title', 'landmark', 'displayName')
+        if name in (None, ''):
+            continue
+        result.append([
+            name,
+            first_value(row, 'category', 'type'),
+            first_value(row, 'distance_km', 'distance', 'distance_text'),
+            first_value(row, 'duration_minutes', 'duration_min', 'duration', 'minutes', 'duration_text'),
+        ])
+        if limit is not None and len(result) >= limit:
+            break
+    return result
+
+
 def _required_slide_texts(slide, project_data):
     content_sources = (slide or {}).get('content_sources') if isinstance(slide, dict) else None
     if isinstance(content_sources, list) and content_sources:
@@ -5989,12 +6041,19 @@ def _required_slide_texts(slide, project_data):
         matrix = h_data.get('matrix') or []
         return [str(r.get('metric') or '') for r in matrix if str(r.get('metric') or '').strip()]
     if (slide or {}).get('type') == 'map_landmarks' or source == 'nearby_landmarks':
-        matrix = project_data.get('landmarks_matrix')
-        if isinstance(matrix, list):
-            return list(dict.fromkeys(str(value).strip() for row in matrix if isinstance(row, dict)
-                                      for value in row.values() if str(value or '').strip()))
+        rows = _nearby_landmark_table_rows(project_data)
+        if rows:
+            return list(dict.fromkeys(
+                str(value).strip()
+                for row in rows
+                for value in row
+                if str(value or '').strip()
+            ))
         value = str(project_data.get('nearby_landmarks') or '').strip()
         return [item.strip() for item in re.split(r'[\n|]', value) if item.strip()]
+    if source == 'site_analysis':
+        value = str(project_data.get('site_analysis') or '').strip()
+        return [value] if value else []
     if source in {
         'executive_content.risks', 'market_study_data.risk_analysis',
         'market_study_data.risk_register', 'market_study_data.risks',
@@ -7945,11 +8004,26 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
     if _is_visual_concept_media_slide(slide):
         return _build_visual_concept_media_slide(slide, branding=branding)
     if content_source == 'site_analysis':
-        note = html_lib.escape(_slide_source_data_note(slide, source)).replace('\n', '<br>')
+        analysis = str(source.get('site_analysis') or '').strip()
+        paragraphs = [part.strip() for part in re.split(r'\r?\n\s*\r?\n', analysis) if part.strip()]
+        if not paragraphs and analysis:
+            paragraphs = [analysis]
+        split_at = max(1, math.ceil(len(paragraphs) / 2)) if paragraphs else 1
+
+        def paragraph_column(items):
+            return ''.join(
+                f'<p style="margin:0 0 12px;font-size:12px;line-height:1.65;">{html_lib.escape(item)}</p>'
+                for item in items
+            )
+
+        left_column = paragraph_column(paragraphs[:split_at])
+        right_column = paragraph_column(paragraphs[split_at:])
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;">'
                 '<div data-map-summary-background style="background-image:url(##MAP_OVERVIEW##);"></div>'
-                f'<div data-map-summary-card style="background:{primary};color:#fff;padding:24px;overflow:hidden;">'
-                f'<h2 style="font-size:28px;margin:0 0 18px;">{title}</h2><div style="font-size:14px;line-height:1.7;">{note}</div></div></div>')
+                f'<div data-map-summary-card data-site-analysis-full style="background:#ffffff;color:#172033;padding:24px;overflow:hidden;border:1px solid #d9e1ea;border-radius:10px;box-sizing:border-box;">'
+                f'<h2 style="font-size:28px;color:{primary};margin:0 0 14px;">{title}</h2>'
+                f'<div data-site-analysis-text style="display:grid;grid-template-columns:1fr 1fr;gap:24px;height:calc(100% - 52px);overflow:hidden;text-align:right;">'
+                f'<div>{left_column}</div><div>{right_column}</div></div></div></div>')
     if content_source == 'executive_content.summary':
         note = html_lib.escape(_slide_source_data_note(slide, source)).replace('\n', '<br>')
         ext_token = tokens[0] if tokens else '##MOODBOARD_1##'
@@ -7996,29 +8070,9 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
                 f'<img src="##MAP_CATCHMENT##" style="width:100%;height:100%;object-fit:contain;">'
                 f'<div style="overflow:hidden;">{table}</div></div></div>')
     if slide_type == 'map_landmarks':
-        matrix = source.get('landmarks_matrix') if isinstance(source.get('landmarks_matrix'), list) else []
-        if not matrix and isinstance(source.get('nearby_landmarks_data'), list):
-            matrix = source.get('nearby_landmarks_data')
-        headers = list(matrix[0].keys()) if matrix and isinstance(matrix[0], dict) else []
-        rows = [[row.get(header, '') for header in headers] for row in matrix if isinstance(row, dict)]
-        HEADER_LABELS = {
-            'name': 'المعلم',
-            'title': 'المعلم',
-            'landmark': 'المعلم',
-            'distance_km': 'المسافة (كم)',
-            'distance_text': 'المسافة',
-            'distance': 'المسافة',
-            'duration_min': 'مدة الوصول (دقيقة)',
-            'duration_text': 'مدة الوصول',
-            'duration': 'مدة الوصول',
-            'in_traffic': 'في أوقات الذروة',
-            'traffic_duration': 'في أوقات الذروة',
-            'type': 'التصنيف',
-            'category': 'النوع',
-            'notes': 'ملاحظات',
-        }
-        display_headers = [HEADER_LABELS.get(h, h) for h in headers]
-        table = _render_fallback_table(display_headers, rows, primary)
+        headers = ['المعلم', 'النوع', 'المسافة (كم)', 'المدة (دقائق)']
+        rows = _nearby_landmark_table_rows(source)
+        table = _render_fallback_table(headers, rows, primary) if rows else ''
         return (f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
                 f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
                 f'<img src="##MAP_LANDMARKS##" style="width:100%;height:100%;object-fit:contain;">'
@@ -8197,6 +8251,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         and chart_type == 'horizontal_bar'
     )
     fixed_land_boundary_diagram = market_source == 'land_boundary_diagram'
+    fixed_landmarks_map = slide.get('type') == 'map_landmarks'
     free_market_slide = _slide_section_key(slide) == 'market' and not fixed_market_comparison
     # A stale plan must not turn an arbitrary market page into a chart or a
     # fixed market template.  The sole fixed market page is the competitor
@@ -8217,6 +8272,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
             )
     if (fixed_market_comparison
             or fixed_land_boundary_diagram
+            or fixed_landmarks_map
             or (_slide_section_key(slide) != 'market'
                 and (chart_type in APPROVED_CHART_TYPES
                      or _slide_section_key(slide) == 'financial'))):
@@ -9841,7 +9897,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_gl
     design_rules = build_design_rules(branding)
     project_json = build_project_facts(project_data, branding.get('tenant_id'))
 
-    landmarks_matrix = project_data.get('landmarks_matrix')
+    landmarks_matrix = project_data.get('nearby_landmarks_data') or project_data.get('landmarks_matrix')
     landmarks_note = ''
     if landmarks_matrix:
         landmarks_note = (
