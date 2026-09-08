@@ -21607,33 +21607,30 @@
       if (!slide) return;
 
       slide.style.boxSizing = 'border-box';
-      slide.style.overflow = 'hidden';
+      slide.style.width = '1280px';
+      slide.style.height = '720px';
+
+      // The stage already scales the complete 1280x720 canvas. A second scale on an
+      // arbitrary content wrapper made some previews shorter than the exported slide,
+      // which left a large blank area and could move the heading outside the viewport.
+      // Keep the generated layout intact and only remove the legacy mutations that this
+      // function used to write into saved slide HTML.
       slide.querySelectorAll('*').forEach(el => {
         el.style.boxSizing = 'border-box';
-      });
-
-      // Calculate actual height vs 720px max slide height
-      const targetH = 720;
-      const actualH = slide.scrollHeight;
-
-      if (actualH > targetH + 5) {
-        const ratio = Math.max(0.65, Math.min(0.98, (targetH - 10) / actualH));
-        const contentBox = slide.querySelector('[class*="content"], [style*="top:56"], [style*="top: 56"], [style*="top:60"], [style*="top: 60"]') || slide;
-        if (contentBox && contentBox !== slide) {
-          contentBox.style.transformOrigin = 'top right';
-          contentBox.style.transform = 'scale(' + ratio + ')';
-          contentBox.style.width = (100 / ratio) + '%';
-        } else {
-          Array.from(slide.children).forEach(child => {
-            const pos = window.getComputedStyle(child).position;
-            if (pos !== 'absolute') {
-              child.style.transformOrigin = 'top right';
-              child.style.transform = 'scale(' + ratio + ')';
-              child.style.maxWidth = (100 / ratio) + '%';
-            }
-          });
+        const transform = String(el.style.transform || '').trim();
+        const transformOrigin = String(el.style.transformOrigin || '').trim();
+        const width = String(el.style.width || '').trim();
+        const maxWidth = String(el.style.maxWidth || '').trim();
+        const isLegacyAutoFit = /^scale\(0?\.\d+\)$/.test(transform)
+          && transformOrigin === 'top right'
+          && (/%$/.test(width) || /%$/.test(maxWidth));
+        if (isLegacyAutoFit) {
+          el.style.removeProperty('transform');
+          el.style.removeProperty('transform-origin');
+          if (/%$/.test(width)) el.style.removeProperty('width');
+          if (/%$/.test(maxWidth)) el.style.removeProperty('max-width');
         }
-      }
+      });
     }
 
     function collectSlideTextNodes(root) {
