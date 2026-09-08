@@ -1,3 +1,4 @@
+import base64
 import unittest
 from pathlib import Path
 
@@ -101,9 +102,71 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             branding={},
         )
         self.assertIn(
-            'height:100%;flex:1 1 0;min-height:0;overflow:hidden;align-items:stretch;',
+            'position:absolute;top:126px;right:34px;bottom:48px;left:34px;',
             html,
         )
+        self.assertIn('data-visual-media-frame="1" style="position:relative;', html)
+        self.assertIn('position:absolute!important;inset:0!important;', html)
+        self.assertIn('width:100%!important;height:100%!important;', html)
+        self.assertIn('object-fit:contain!important;', html)
+
+    def test_visual_media_image_stays_inside_frame_when_height_auto_is_forced(self):
+        from playwright.sync_api import sync_playwright
+
+        image_data = base64.b64encode(
+            b'<svg xmlns="http://www.w3.org/2000/svg" width="847" height="597"></svg>'
+        ).decode('ascii')
+        html = slide_engine._build_visual_concept_media_slide(
+            {
+                'title': 'مخطط الدور الأرضي',
+                'section_key': 'plans',
+                'content_source': 'plan_image:1',
+                'image_tokens': ['##PLAN_IMAGE_1##'],
+            },
+            branding={},
+        ).replace('##PLAN_IMAGE_1##', f'data:image/svg+xml;base64,{image_data}')
+        document = (
+            '<!doctype html><style>'
+            '*{margin:0;padding:0;box-sizing:border-box}'
+            '.slide{display:block!important}'
+            'img{height:auto!important}'
+            '</style>' + html
+        )
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            try:
+                page = browser.new_page(viewport={'width': 1280, 'height': 720})
+                page.set_content(document, wait_until='load')
+                metrics = page.evaluate(
+                    """() => {
+                        const image = document.querySelector('[data-visual-media-image]');
+                        const frame = document.querySelector('[data-visual-media-frame]');
+                        const slide = document.querySelector('.slide');
+                        const imageBox = image.getBoundingClientRect();
+                        const frameBox = frame.getBoundingClientRect();
+                        const slideBox = slide.getBoundingClientRect();
+                        const style = getComputedStyle(image);
+                        return {
+                            image: [imageBox.left, imageBox.top, imageBox.right, imageBox.bottom],
+                            frame: [frameBox.left, frameBox.top, frameBox.right, frameBox.bottom],
+                            slide: [slideBox.left, slideBox.top, slideBox.right, slideBox.bottom],
+                            position: style.position,
+                            objectFit: style.objectFit,
+                        };
+                    }"""
+                )
+            finally:
+                browser.close()
+
+        for image_edge, frame_edge in zip(metrics['image'], metrics['frame']):
+            self.assertAlmostEqual(image_edge, frame_edge, delta=1.1)
+        self.assertGreaterEqual(metrics['frame'][0], metrics['slide'][0])
+        self.assertGreaterEqual(metrics['frame'][1], metrics['slide'][1])
+        self.assertLessEqual(metrics['frame'][2], metrics['slide'][2])
+        self.assertLessEqual(metrics['frame'][3], metrics['slide'][3])
+        self.assertEqual(metrics['position'], 'absolute')
+        self.assertEqual(metrics['objectFit'], 'contain')
 
     def test_renumbering_migrates_legacy_visual_media_to_bounded_layout(self):
         legacy_html = (
@@ -159,8 +222,9 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         for slide in migrated:
             self.assertIn('data-visual-media-only="1"', slide['html'])
             self.assertIn('data-visual-media-grid="1"', slide['html'])
-            self.assertIn('height:100%;flex:1 1 0;min-height:0;overflow:hidden', slide['html'])
-            self.assertIn('object-fit:contain', slide['html'])
+            self.assertIn('position:absolute;top:126px;right:34px;bottom:48px;left:34px', slide['html'])
+            self.assertIn('object-fit:contain!important', slide['html'])
+            self.assertIn('position:absolute!important;inset:0!important', slide['html'])
             self.assertNotIn('data-legacy-media-frame', slide['html'])
             self.assertNotIn('height:auto', slide['html'])
         self.assertIn('/uploads/plan.png', migrated[0]['html'])

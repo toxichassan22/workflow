@@ -8131,7 +8131,9 @@ def _build_visual_concept_media_slide(slide, branding=None):
     if title or component_name:
         badge = f'<span style="font-size:14px;font-weight:700;color:{secondary};background:#f0f9ff;padding:4px 12px;border-radius:6px;border:1px solid #bae6fd;">{component_name}</span>' if (component_name and component_name not in title) else ''
         header_html = (
-            f'<div data-visual-media-title="1" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #eef2f6;">'
+            f'<div data-visual-media-title="1" style="position:absolute;top:72px;right:34px;left:34px;height:40px;'
+            f'display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;'
+            f'border-bottom:2px solid #eef2f6;box-sizing:border-box;">'
             f'<div style="font-size:24px;font-weight:800;color:{primary};letter-spacing:-0.3px;">{title}</div>'
             f'{badge}'
             f'</div>'
@@ -8158,12 +8160,12 @@ def _build_visual_concept_media_slide(slide, branding=None):
         card = (
             '<div style="min-width:0;min-height:0;display:flex;flex-direction:column;'
             'overflow:hidden;height:100%;box-sizing:border-box;">'
-            '<div style="flex:1;min-height:0;overflow:hidden;border:1px solid #d9e1ea;'
-            'border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;'
-            'box-sizing:border-box;">'
-            f'<img src="{html_lib.escape(token, quote=True)}" alt="" '
-            'style="display:block;width:100%;height:100%;max-width:100%;max-height:100%;'
-            'object-fit:contain;object-position:center;">'
+            '<div data-visual-media-frame="1" style="position:relative;flex:1;min-height:0;overflow:hidden;'
+            'border:1px solid #d9e1ea;border-radius:12px;background:#fff;box-sizing:border-box;">'
+            f'<img data-visual-media-image="1" src="{html_lib.escape(token, quote=True)}" alt="" '
+            'style="position:absolute!important;inset:0!important;display:block!important;'
+            'width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;'
+            'object-fit:contain!important;object-position:center center!important;">'
             '</div>'
             f'{cap_html}'
             '</div>'
@@ -8171,14 +8173,16 @@ def _build_visual_concept_media_slide(slide, branding=None):
         cards.append(card)
 
     images_grid = ''.join(cards)
+    grid_top = 126 if header_html else 72
 
     return (
         '<div class="slide" dir="rtl" data-visual-media-only="1" '
         'style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;'
-        'padding:72px 34px 48px;box-sizing:border-box;display:flex;flex-direction:column;">'
+        'padding:72px 34px 48px;box-sizing:border-box;">'
         f'{header_html}'
-        f'<div data-visual-media-grid="1" style="display:grid;grid-template-columns:repeat({columns},minmax(0,1fr));'
-        'gap:16px;width:100%;height:100%;flex:1 1 0;min-height:0;overflow:hidden;align-items:stretch;">'
+        f'<div data-visual-media-grid="1" style="position:absolute;top:{grid_top}px;right:34px;bottom:48px;left:34px;'
+        f'display:grid;grid-template-columns:repeat({columns},minmax(0,1fr));'
+        'gap:16px;min-width:0;min-height:0;overflow:hidden;align-items:stretch;">'
         f'{images_grid}</div></div>'
     )
 

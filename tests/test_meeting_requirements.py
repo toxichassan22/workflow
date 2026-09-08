@@ -1346,7 +1346,10 @@ class MeetingRequirementsTests(unittest.TestCase):
                 self.assertIn(token, html)
             self.assertNotIn('<h2', html.lower())
             self.assertIn('padding:72px 34px 48px', html)
-            self.assertIn('max-width:100%;max-height:100%;object-fit:contain', html)
+            self.assertIn(
+                'max-width:100%!important;max-height:100%!important;object-fit:contain!important',
+                html,
+            )
             self.assertFalse(calls)
 
     def test_visual_concept_saved_state_restores_all_unapproved_media(self):
