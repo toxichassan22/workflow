@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from design_templates import extract_slide_elements
+import slide_engine
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -88,6 +89,21 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         source = (ROOT / 'generate_pdf_from_preview.py').read_text(encoding='utf-8')
         self.assertGreaterEqual(source.count('object-fit:contain'), 2)
         self.assertGreaterEqual(source.count('svg[data-chart], svg.combo-chart'), 2)
+
+    def test_visual_media_grid_is_height_constrained_for_export(self):
+        html = slide_engine._build_visual_concept_media_slide(
+            {
+                'title': 'مخطط الدور الأرضي',
+                'section_key': 'plans',
+                'content_source': 'plan_image:1',
+                'image_tokens': ['##PLAN_IMAGE_1##'],
+            },
+            branding={},
+        )
+        self.assertIn(
+            'height:100%;flex:1 1 0;min-height:0;overflow:hidden;align-items:stretch;',
+            html,
+        )
 
     def test_authenticated_project_file_images_are_localized_for_export(self):
         """Legacy cover images and project logos use an authenticated route in the editor."""

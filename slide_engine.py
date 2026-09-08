@@ -8121,7 +8121,7 @@ def _build_visual_concept_media_slide(slide, branding=None):
         'padding:72px 34px 48px;box-sizing:border-box;display:flex;flex-direction:column;">'
         f'{header_html}'
         f'<div data-visual-media-grid="1" style="display:grid;grid-template-columns:repeat({columns},minmax(0,1fr));'
-        'gap:16px;width:100%;flex:1;min-height:0;align-items:stretch;">'
+        'gap:16px;width:100%;height:100%;flex:1 1 0;min-height:0;overflow:hidden;align-items:stretch;">'
         f'{images_grid}</div></div>'
     )
 
