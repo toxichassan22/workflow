@@ -3569,6 +3569,17 @@ def _designer_team_logo_search_text(value):
     return re.sub(r'\s+', ' ', normalized).strip()
 
 
+def _designer_company_logo_requested(message):
+    """Recognize an explicit company-brand request before consulting older team-logo context."""
+    text = _designer_team_logo_search_text(message)
+    has_logo_word = bool(re.search(r'(?:logo|لوجو|شعار|علامة\s*تجارية)', text, flags=re.IGNORECASE))
+    has_company_word = bool(re.search(
+        r'(?:الشركة|شركة|company|branding|بوابة\s*الرؤية|الرؤية\s*للتطوير)',
+        text, flags=re.IGNORECASE,
+    ))
+    return has_logo_word and has_company_word
+
+
 def _designer_team_logo_context(creative_images):
     """Describe the selected team logos to the designer without conflating them with branding."""
     members = creative_images.get('team_members') if isinstance(creative_images, dict) else []
@@ -3591,6 +3602,8 @@ def _designer_team_logo_context(creative_images):
 
 def _find_designer_team_logo_request(message, history, creative_images):
     """Resolve a named team entity in a logo request to its exact TEAM_LOGO token."""
+    if _designer_company_logo_requested(message):
+        return None
     members = creative_images.get('team_members') if isinstance(creative_images, dict) else []
     if not isinstance(members, list) or not members:
         return None
@@ -3629,6 +3642,32 @@ def _inject_team_logo_fallback(html, team_logo, team_index):
         'display:flex;align-items:center;justify-content:center;z-index:4;overflow:hidden;'
         'padding:8px 12px;box-sizing:border-box;background:#0c2340;border-radius:8px;">'
         f'<img class="team-logo" src="{safe_url}" alt="" '
+        'style="width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;object-position:center center;">'
+        '</div>'
+    )
+    closing = re.search(r'</div>\s*$', html, flags=re.IGNORECASE)
+    if not closing:
+        return html
+    return html[:closing.start()] + markup + html[closing.start():]
+
+
+def _inject_company_logo_panel_fallback(html, logo_url):
+    """Put the company logo in the right content panel when the model omitted the requested move."""
+    if not html:
+        return html
+    existing_logo_tags = [
+        tag for tag in re.findall(r'<img\b[^>]*>', html, flags=re.IGNORECASE)
+        if logo_url and logo_url in tag and 'presentation-chrome-logo' not in tag.lower()
+    ]
+    if existing_logo_tags or 'data-company-logo-placement="right-panel"' in html:
+        return html
+    source = html_lib.escape(str(logo_url or '##LOGO##'), quote=True)
+    markup = (
+        '<div data-company-logo-placement="right-panel" '
+        'style="position:absolute;right:54px;top:92px;width:180px;height:62px;'
+        'display:flex;align-items:center;justify-content:center;z-index:6;overflow:hidden;'
+        'padding:6px 10px;box-sizing:border-box;background:#0c2340;border-radius:8px;">'
+        f'<img class="company-content-logo" src="{source}" alt="" '
         'style="width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;object-position:center center;">'
         '</div>'
     )
@@ -4151,6 +4190,24 @@ def api_designer_chat():
     deterministic_plan = _designer_deterministic_plan(
         message, slides, current_index, [number - 1 for number in preferred_indexes]
     )
+    requested_company_logo = _designer_company_logo_requested(message)
+    if requested_company_logo and deterministic_plan is None:
+        if is_all_slides_request:
+            company_target = 'all'
+            company_indexes = []
+        elif preferred_indexes:
+            company_target = 'indexes'
+            company_indexes = preferred_indexes[:]
+        else:
+            company_target = 'current'
+            company_indexes = []
+        deterministic_plan = {
+            'response': 'سأنقل شعار الشركة المعتمد إلى داخل المربع الكحلي في يمين الشريحة فوق رقم سنوات الخبرة، مع الحفاظ على محتوى الشريحة.',
+            'actions': [{
+                'tool': 'insert_company_logo_panel',
+                'params': {'target': company_target, 'indexes': company_indexes},
+            }],
+        }
     requested_team_logo = _find_designer_team_logo_request(message, history_for_turn, creative_images)
     if requested_team_logo and deterministic_plan is None:
         if is_all_slides_request:
@@ -4214,6 +4271,7 @@ def api_designer_chat():
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
 - insert_team_logo: params={{"target":"current|all|indexes", "indexes":[1-based], "team_index":1-based}} لإضافة شعار جهة فريق العمل المرفوع فعلياً
+- insert_company_logo_panel: params={{"target":"current|all|indexes", "indexes":[1-based]}} لوضع شعار الشركة داخل المربع الكحلي فوق رقم سنوات الخبرة
 - generate_image: params={{"prompt":"وصف دقيق للصورة المراد توليدها", "component_name":"اسم المكون إن وجد", "slideIndex":1, "position":"surgical|background|right|left|inline"}}
 - insert_canonical_map: params={{"map_type":"overview|access|catchment|landmarks", "target":"current|indexes", "slideIndex":1, "refresh":true عند طلب تحديث خريطة موجودة}}
 - insert_financial_chart: params={{"chart_type":"waterfall|sensitivity|compound_flows|financing_structure", "target":"current|indexes", "slideIndex":1}}
@@ -4244,7 +4302,8 @@ def api_designer_chat():
 9. إذا طلب تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
 10. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
 11. إذا طلب المستخدم شعار جهة محددة من فريق العمل، ميّزها عن شعار الشركة واستخدم tool="insert_team_logo" مع team_index الصحيح.
-12. في سائر طلبات التعديل والتنسيق -> اختر tool="edit_slides".
+12. إذا طلب المستخدم نقل أو وضع شعار الشركة داخل المربع الكحلي في يمين الشريحة، استخدم tool="insert_company_logo_panel" ولا تستخدم شعار فريق العمل.
+13. في سائر طلبات التعديل والتنسيق -> اختر tool="edit_slides".
 
 {audit_note}
 
@@ -4378,7 +4437,7 @@ def api_designer_chat():
                 'edit_slides', 'edit_design_slide', 'edit_design_slides',
                 'generate_image', 'generate_design_image', 'insert_image_into_slide',
                 'insert_canonical_map', 'insert_map', 'insert_financial_chart', 'update_financial_chart',
-                'insert_team_logo',
+                'insert_team_logo', 'insert_company_logo_panel',
             }:
                 if is_all_slides_request:
                     params['target'] = 'all'
@@ -4500,6 +4559,35 @@ def api_designer_chat():
                 executed.append({'tool': tool, 'status': 'success' if successful_indexes else 'failed',
                                  'indexes': successful_indexes, 'team_index': team_index,
                                  'token': team_token})
+            elif tool == 'insert_company_logo_panel':
+                indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
+                company_logo_url = str(
+                    branding.get('logo_path') or branding.get('logo') or branding.get('logo_url') or '/assets/logo.png'
+                ).strip()
+                company_instruction = (
+                    'انقل شعار الشركة المعتمد باستخدام الرمز ##LOGO## إلى داخل المربع الكحلي الموجود في يمين الشريحة، '
+                    'واجعله فوق رقم سنوات الخبرة مباشرة داخل نفس المربع. لا تستخدم ##TEAM_LOGO_N## ولا شعار جهة من فريق العمل، '
+                    'ولا تضع الشعار في أعلى يسار الشريحة. حافظ على الرقم 55 وبقية النصوص والتنسيق.'
+                )
+                successful_indexes = []
+                for idx in indexes:
+                    slide = slides[idx] if isinstance(slides[idx], dict) else {}
+                    updated_html, response_text = _designer_edit_slide(
+                        slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'),
+                        company_instruction, idx, project_data, presentation_id, branding,
+                        tenant_id=tenant_id, creative_images=creative_images,
+                        user_image_refs=user_image_refs, slide_type=slide.get('type', 'content'),
+                        total_slides=len(slides),
+                        content_source=slide.get('content_source') or slide.get('contentSource'),
+                    )
+                    updated_html = _inject_company_logo_panel_fallback(updated_html, company_logo_url)
+                    slide['html'] = updated_html
+                    slides[idx] = slide
+                    successful_indexes.append(idx)
+                    if response_text:
+                        assistant_messages.append(response_text)
+                executed.append({'tool': tool, 'status': 'success' if successful_indexes else 'failed',
+                                 'indexes': successful_indexes, 'placement': 'right_panel_above_experience_years'})
             elif tool in ('generate_image', 'generate_design_image', 'insert_image_into_slide'):
                 prompt = params.get('prompt') or message
                 comp_name = params.get('component_name') or params.get('component') or ''

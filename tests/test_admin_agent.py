@@ -359,6 +359,25 @@ class AdminAgentTests(unittest.TestCase):
         self.assertIn('/uploads/creative/team-logo-1.png', payload['slidesData'][0]['html'])
         self.assertNotIn('##LOGO##', payload['slidesData'][0]['html'])
 
+    def test_designer_chat_prioritizes_company_logo_panel_over_previous_team_context(self):
+        module = self.application_module
+        images = {'team_members': [{
+            'name': 'Vision Gate', 'role': 'التطوير',
+            'logo': '/uploads/creative/team-logo-1.png',
+        }]}
+        company_request = 'انقل لوجو شركة بوابة الرؤية بداخل المربع في يمين الشريحة'
+        self.assertTrue(module._designer_company_logo_requested(company_request))
+        self.assertIsNone(module._find_designer_team_logo_request(
+            company_request,
+            [{'role': 'user', 'content': 'أضف لوجو Vision Gate في الشريحة 52'}],
+            images,
+        ))
+        fallback = module._inject_company_logo_panel_fallback(
+            '<div class="slide"><div>55</div></div>', '/tenant-assets/company.png')
+        self.assertIn('data-company-logo-placement="right-panel"', fallback)
+        self.assertIn('right:54px;top:92px', fallback)
+        self.assertIn('/tenant-assets/company.png', fallback)
+
 
 if __name__ == '__main__':
     unittest.main()
