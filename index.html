@@ -3068,6 +3068,11 @@
       transform-origin: top right;
       width: 1280px;
       height: 720px;
+      box-sizing: border-box;
+      /* The application body uses 1.65 line-height for form screens. Export renders
+         the slide in an isolated document with the browser's normal line-height; let
+         inline slide declarations still win while keeping inherited content identical. */
+      line-height: normal;
     }
 
     /* The application table rule is intentionally wide for data-entry tables, but generated
