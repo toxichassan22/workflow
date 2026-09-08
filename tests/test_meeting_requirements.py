@@ -7531,6 +7531,74 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         self.assertTrue(latest.endswith(os.path.basename(map_path)))
 
+    def test_map_refresh_replaces_background_and_keeps_latest_placeholder_after_finalize(self):
+        module = self.application_module
+        import slide_engine
+        latest = '/uploads/maps/catchment_latest.png'
+        html = (
+            '<div class="slide">'
+            '<div data-map-summary-background style="background-image:url(/uploads/maps/catchment_old.png);"></div>'
+            '<div data-map-summary-card>النطاق الجغرافي</div>'
+            '</div>'
+        )
+        replaced, changed = module._replace_slide_with_approved_map(html, 'catchment', latest)
+        self.assertTrue(changed)
+        self.assertIn(latest, replaced)
+        self.assertNotIn('catchment_old.png', replaced)
+
+        finalized = slide_engine.finalize_slide_html(
+            replaced, 'content', {}, {},
+            map_placeholders={
+                '##MAP_CATCHMENT##': latest,
+                '##MAP_CATCHMENT_SATELLITE##': latest,
+                '##MAP_CATCHMENT_ROADMAP##': latest,
+            },
+            content_source='catchment_areas',
+            allow_all_maps=True,
+        )
+        self.assertIn(latest, finalized)
+        self.assertNotIn('##MAP_CATCHMENT##', finalized)
+
+    def test_designer_chat_returns_latest_map_in_updated_slide(self):
+        module = self.application_module
+        client = self.app.test_client()
+        old_path = '/uploads/maps/catchment_old.png'
+        latest_file = tempfile.NamedTemporaryFile(
+            dir=module.maps_service.MAPS_DIR, suffix='_chat_latest.png', delete=False
+        )
+        latest_path = latest_file.name
+        latest_file.write(b'latest-map')
+        latest_file.close()
+        self.addCleanup(lambda: os.path.exists(latest_path) and os.unlink(latest_path))
+        slides = [{
+            'type': 'map_catchment',
+            'content_source': 'catchment_areas',
+            'title': 'خريطة النطاق الجغرافي واستيعاب المنطقة',
+            'html': '<div class="slide"><img src="' + old_path + '"></div>',
+        }]
+        created = client.post('/api/presentations', headers=self._headers(self.token_a), json={
+            'title': 'خريطة اختبار الشات', 'projectData': {}, 'slidesData': slides,
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        presentation_id = created.get_json()['presentationId']
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a, 'catchment', latest_path, '##MAP_CATCHMENT##',
+                presentation_id=presentation_id, metadata={}
+            )
+
+        response = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
+            'message': 'حدّث الخريطة',
+            'presentationId': presentation_id,
+            'slidesData': slides,
+            'slideIndex': 0,
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        reply = response.get_json()['data']
+        self.assertEqual(reply['actions'][0]['status'], 'success')
+        self.assertIn(os.path.basename(latest_path), reply['slidesData'][0]['html'])
+        self.assertNotIn(old_path, reply['slidesData'][0]['html'])
+
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""
         import slide_engine as engine

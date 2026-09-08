@@ -9582,16 +9582,30 @@ def _normalize_light_content_surface(html, slide_type='content'):
     root_style = style_match.group(2) if style_match else ''
     root_properties = _inline_style_properties(root_style)
     root_surface = _css_solid_color(root_properties.get('background-color') or root_properties.get('background'))
+    map_root_background = re.search(
+        r'\bbackground(?:-image)?\s*:\s*[^;]*(?:/uploads/maps/|/api/map-images/|##MAP_)[^;]*',
+        root_style, flags=re.IGNORECASE,
+    )
+    preserve_root_background = bool(
+        map_root_background and str(slide_type or '').strip().lower().startswith('map_')
+    )
+    preserved_background = map_root_background.group(0).strip().rstrip(';') if preserve_root_background else ''
     legacy_dark = (
         _is_dark_slide_surface(root_surface)
         or bool(re.search(r'data-slide-surface\s*=\s*["\']dark["\']', root_tag, flags=re.IGNORECASE))
         or bool(re.search(r'\bcolor\s*:\s*(?:#fff(?:fff)?|white)\b', root_style, flags=re.IGNORECASE))
     )
     root_tag = re.sub(r'\sdata-slide-surface\s*=\s*["\']dark["\']', '', root_tag, flags=re.IGNORECASE)
+    root_surface_declarations = 'background:#ffffff;'
+    if preserved_background:
+        root_surface_declarations += preserved_background + ';'
+    else:
+        root_surface_declarations += 'background-image:none;'
+    root_surface_declarations += 'color:#1e293b;'
     root_tag = _set_tag_style(
         root_tag,
         ('background', 'background-color', 'background-image', 'color'),
-        'background:#ffffff;background-image:none;color:#1e293b;',
+        root_surface_declarations,
     )
     html = html[:root_match.start()] + root_tag + html[root_match.end():]
     if not legacy_dark:

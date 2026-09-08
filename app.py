@@ -3335,29 +3335,47 @@ def _replace_slide_with_approved_map(html, map_type, map_url):
     for candidate in map_tokens:
         output = output.replace(candidate, map_url)
 
-    img_pattern = re.compile(r'<img\b[^>]*>', re.IGNORECASE)
-    map_tags = []
-    for match in img_pattern.finditer(output):
+    map_ref = re.compile(r'(?:/uploads/maps/|/api/map-images/|maps/|##map_)', re.IGNORECASE)
+    map_url_ref = str(map_url).lower()
+    media_tags = []
+    tag_pattern = re.compile(r'<[a-z][^>]*>', re.IGNORECASE)
+    for match in tag_pattern.finditer(output):
         tag = match.group(0)
         lowered = tag.lower()
-        if 'uploads/maps/' in lowered or 'maps/' in lowered or '##map_' in lowered:
-            map_tags.append(match)
+        is_image = lowered.startswith('<img')
+        is_map_background = (
+            'data-map-summary-background' in lowered
+            or bool(re.search(r'background(?:-image)?\s*:', lowered) and map_ref.search(lowered))
+        )
+        if is_image and (map_ref.search(lowered) or map_url_ref in lowered):
+            media_tags.append(('image', match))
+        elif is_map_background:
+            media_tags.append(('background', match))
 
     changed = False
-    if map_tags:
-        first = map_tags[0]
+    if media_tags:
+        first_kind, first = media_tags[0]
         first_tag = first.group(0)
-        src_pattern = re.compile(r'(\bsrc\s*=\s*)(["\'])(.*?)(\2)', re.IGNORECASE | re.DOTALL)
-        if src_pattern.search(first_tag):
-            first_tag = src_pattern.sub(lambda m: f'{m.group(1)}{m.group(2)}{map_url}{m.group(4)}', first_tag, count=1)
+        if first_kind == 'image':
+            src_pattern = re.compile(r'(\bsrc\s*=\s*)(["\'])(.*?)(\2)', re.IGNORECASE | re.DOTALL)
+            if src_pattern.search(first_tag):
+                first_tag = src_pattern.sub(lambda m: f'{m.group(1)}{m.group(2)}{map_url}{m.group(4)}', first_tag, count=1)
+            else:
+                first_tag = re.sub(r'\s*/>$', '>', first_tag)
+                first_tag = first_tag[:-1] + f' src="{map_url}">'
         else:
-            first_tag = re.sub(r'\s*/>$', '>', first_tag)
-            first_tag = first_tag[:-1] + f' src="{map_url}">'
+            background_pattern = re.compile(
+                r'(background(?:-image)?\s*:\s*url\(\s*["\']?)([^)"\']+)(["\']?\s*\))',
+                re.IGNORECASE,
+            )
+            first_tag = background_pattern.sub(
+                lambda m: f'{m.group(1)}{map_url}{m.group(3)}', first_tag, count=1
+            )
         if 'data-canonical-map=' not in first_tag.lower():
             first_tag = re.sub(r'\s*/>$', '>', first_tag)
             first_tag = first_tag[:-1] + f' data-canonical-map="{map_type}">'
         replacements = [(first.start(), first.end(), first_tag)]
-        replacements.extend((match.start(), match.end(), '') for match in map_tags[1:])
+        replacements.extend((match.start(), match.end(), '') for _, match in media_tags[1:])
         for start, end, value in reversed(replacements):
             output = output[:start] + value + output[end:]
         changed = True
@@ -4297,6 +4315,11 @@ def api_designer_chat():
                     slide['html'] = slide_engine.finalize_slide_html(
                         updated_html, slide.get('type', 'content'), project_data, branding,
                         creative_images=creative_images, tenant_id=tenant_id,
+                        map_placeholders={
+                            token: map_url,
+                            f'{token[:-2]}_SATELLITE##': map_url,
+                            f'{token[:-2]}_ROADMAP##': map_url,
+                        },
                         slide_num=idx + 1, slide_title=slide.get('title', f'شريحة {idx + 1}'),
                         total_slides=len(slides),
                         content_source=slide.get('content_source') or slide.get('contentSource'),
