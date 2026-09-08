@@ -225,6 +225,45 @@ class AdminAgentTests(unittest.TestCase):
         self.assertIn('اسأل بدل أن تخمّن', app_source)
         self.assertIn('الحقول الأصلية للنظام لا تُحذف', app_source)
 
+    def test_workspace_slide_edit_resolves_company_and_project_logos(self):
+        """Agent slide edits must use the same logo-aware finalizer as generation."""
+        client_html = '<div class="slide" style="width:1280px;height:720px;"><div>محتوى</div></div>'
+        response = _reply_with([], text=json.dumps({
+            'html': client_html,
+            'response': 'تم تحديث الشريحة',
+        }, ensure_ascii=False))
+        workspace = {
+            'projectData': {
+                'project_name': 'مشروع تجريبي',
+                'project_logo_file_id': 'project-logo-1',
+            },
+            'slidesData': [{
+                'title': 'نبذة عن المشروع',
+                'type': 'content',
+                'html': '<div class="slide" style="width:1280px;height:720px;"><div>قديم</div></div>',
+            }],
+        }
+        with self.app.app_context():
+            db.update_branding(self.tenant, logo_path=f'/tenant-assets/{self.tenant}/logo')
+            with patch.object(self.application_module, 'call_zai_chat', return_value=response) as mocked:
+                result = self.application_module._execute_agent_action(
+                    self.tenant,
+                    {'tool': 'edit_workspace_slide', 'params': {
+                        'slide_index': 0,
+                        'instruction': 'أضف شعار الشركة وشعار المشروع في موضع الهوية المخصص',
+                    }},
+                    workspace=workspace,
+                )
+
+        self.assertEqual(result['status'], 'success', result)
+        rendered = result['data']['slidesData'][0]['html']
+        self.assertIn(f'/tenant-assets/{self.tenant}/logo', rendered)
+        self.assertIn('/api/project-files/project-logo-1', rendered)
+        self.assertNotIn('##LOGO##', rendered)
+        self.assertNotIn('##PROJECT_LOGO##', rendered)
+        self.assertIn('##LOGO##', mocked.call_args.args[0])
+        self.assertIn('##PROJECT_LOGO##', mocked.call_args.args[0])
+
 
 if __name__ == '__main__':
     unittest.main()
