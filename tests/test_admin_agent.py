@@ -328,6 +328,7 @@ class AdminAgentTests(unittest.TestCase):
         fallback = module._inject_team_logo_fallback(
             '<div class="slide"><div>محتوى</div></div>', match['logo'], match['index'])
         self.assertIn(match['logo'], fallback)
+        self.assertIn('background:#0c2340', fallback)
         self.assertNotIn('##LOGO##', fallback)
 
     def test_designer_chat_inserts_the_selected_team_logo_on_named_slide(self):

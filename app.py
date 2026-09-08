@@ -3625,10 +3625,11 @@ def _inject_team_logo_fallback(html, team_logo, team_index):
     safe_url = html_lib.escape(str(team_logo), quote=True)
     markup = (
         f'<div data-team-logo-placement="{int(team_index)}" '
-        'style="position:absolute;left:44px;top:94px;width:170px;height:64px;'
-        'display:flex;align-items:center;justify-content:flex-start;z-index:4;overflow:hidden;">'
+        'style="position:absolute;left:44px;top:94px;width:188px;height:72px;'
+        'display:flex;align-items:center;justify-content:center;z-index:4;overflow:hidden;'
+        'padding:8px 12px;box-sizing:border-box;background:#0c2340;border-radius:8px;">'
         f'<img class="team-logo" src="{safe_url}" alt="" '
-        'style="max-width:100%;max-height:100%;object-fit:contain;object-position:left center;">'
+        'style="width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;object-position:center center;">'
         '</div>'
     )
     closing = re.search(r'</div>\s*$', html, flags=re.IGNORECASE)
