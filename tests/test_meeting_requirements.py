@@ -5619,6 +5619,55 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(project['tenantCreativeImages']['map_placeholders']['##MAP_OVERVIEW##'],
                          images['map_placeholders']['##MAP_OVERVIEW##'])
 
+    def test_map_hydration_keeps_clean_sidecar_out_of_generation_alias(self):
+        final_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_final.png', delete=False)
+        final_path = final_file.name
+        final_file.write(b'marked-map')
+        final_file.close()
+        editable_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_clean.png', delete=False)
+        editable_path = editable_file.name
+        editable_file.write(b'clean-sidecar')
+        editable_file.close()
+        for path in (final_path, editable_path):
+            self.addCleanup(lambda p=path: os.path.exists(p) and os.unlink(p))
+
+        metadata = {
+            'lat': 24.0,
+            'lng': 46.0,
+            'zoom': 12,
+            'center_lat': 24.0,
+            'center_lng': 46.0,
+            'map_highlight_version': self.application_module.maps_service.MAP_HIGHLIGHT_RENDER_VERSION,
+            'map_label_version': self.application_module.maps_service.MAP_LABEL_RENDER_VERSION,
+        }
+        with self.app.app_context():
+            db.add_map_image(self.tenant_a, 'catchment', final_path, '##MAP_CATCHMENT##',
+                             presentation_id='pres-clean-sidecar', metadata=metadata)
+            db.add_map_image(self.tenant_a, 'catchment_editable', editable_path,
+                             '##MAP_CATCHMENT_EDITABLE##', presentation_id='pres-clean-sidecar',
+                             metadata=metadata)
+            project, images = self.application_module._hydrate_map_assets_for_request(
+                {'tenantCreativeImages': {}},
+                {
+                    'map_placeholders': {
+                        '##MAP_CATCHMENT##': '/uploads/maps/current-marked.png',
+                        # This is the generation-only alias that the browser may
+                        # send back after a presentation chat turn.
+                        '##MAP_CATCHMENT_EDITABLE##': '/uploads/maps/current-marked.png',
+                    },
+                    'maps_persisted': True,
+                    'map_approvals': {'catchment': True},
+                },
+                self.tenant_a,
+                presentation_id='pres-clean-sidecar',
+            )
+
+        project_placeholders = project['tenantCreativeImages']['map_placeholders']
+        self.assertEqual(project_placeholders['##MAP_CATCHMENT##'], '/uploads/maps/current-marked.png')
+        self.assertTrue(project_placeholders['##MAP_CATCHMENT_EDITABLE##'].endswith(os.path.basename(editable_path)))
+        self.assertEqual(images['map_placeholders']['##MAP_CATCHMENT##'], '/uploads/maps/current-marked.png')
+        self.assertEqual(images['map_placeholders']['##MAP_CATCHMENT_EDITABLE##'], '/uploads/maps/current-marked.png')
+
     def test_approved_request_map_beats_older_google_row(self):
         google_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_google.png', delete=False)
         google_path = google_file.name

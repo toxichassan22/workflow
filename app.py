@@ -4428,8 +4428,16 @@ def api_designer_chat():
         # message («وطلعها أوضح») lands on them without asking again.
         # Both keys carry 0-based indexes; the chat speaks in 1-based slide numbers.
         persisted_project_data['designerChat']['focusIndexes'] = turn_focus
+        # ``creative_images`` is the generation view and intentionally aliases
+        # editable placeholders to the marked canonical image. Do not send that
+        # alias back to the browser: the location editor needs the persisted
+        # clean sidecar so its HTML labels are not drawn over raster labels.
+        response_creative_images = copy.deepcopy(creative_images)
+        source_creative_images = project_data.get('tenantCreativeImages') if isinstance(project_data, dict) else None
+        if isinstance(source_creative_images, dict) and isinstance(source_creative_images.get('map_placeholders'), dict):
+            response_creative_images['map_placeholders'] = copy.deepcopy(source_creative_images['map_placeholders'])
         return jsonify({'success': True, 'data': {'action': 'workspace_update', 'response': response_text,
-                                                   'slidesData': slides, 'creativeImages': creative_images,
+                                                   'slidesData': slides, 'creativeImages': response_creative_images,
                                                    'actions': executed, 'validation': validation,
                                                    'memory': chat_memory, 'focusIndexes': turn_focus,
                                                    'chatHistory': persisted_project_data['designerChat']['messages'],
@@ -6812,8 +6820,18 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
     requested_placeholders = request_images.get('map_placeholders')
     if isinstance(requested_placeholders, dict):
         for placeholder, path in requested_placeholders.items():
-            if path and _request_map_is_approved(request_images, placeholder):
-                placeholders[placeholder] = path
+            if not path or not _request_map_is_approved(request_images, placeholder):
+                continue
+            # The browser may already have received the generation-only alias
+            # below, where an editable sidecar points at the marked canonical
+            # image.  Never let that alias overwrite the clean sidecar in the
+            # project copy: the location editor renders its own labels over it.
+            if placeholder.endswith('_EDITABLE##'):
+                canonical = placeholder.replace('_EDITABLE##', '##')
+                requested_canonical = requested_placeholders.get(canonical)
+                if requested_canonical and str(path) == str(requested_canonical):
+                    continue
+            placeholders[placeholder] = path
 
     if placeholders and isinstance(source, dict):
         creative = source.get('tenantCreativeImages') if isinstance(source.get('tenantCreativeImages'), dict) else {}
@@ -6821,15 +6839,17 @@ def _hydrate_map_assets_for_request(project_data, images, tenant_id, presentatio
         source['tenantCreativeImages'] = creative
     # Older plans or an over-helpful model may ask for the editable sidecar token.
     # A generated presentation must always receive the approved, marked image;
-    # the sidecar is only for the interactive map editor.
-    for placeholder, path in list(placeholders.items()):
+    # the sidecar is only for the interactive map editor. Keep this alias in the
+    # request copy only; the project/browser copy above must retain the clean file.
+    generation_placeholders = dict(placeholders)
+    for placeholder, path in list(generation_placeholders.items()):
         if not placeholder.endswith('_EDITABLE##'):
             continue
         canonical = placeholder.replace('_EDITABLE##', '##')
-        if placeholders.get(canonical):
-            placeholders[placeholder] = placeholders[canonical]
-    if placeholders:
-        request_images['map_placeholders'] = placeholders
+        if generation_placeholders.get(canonical):
+            generation_placeholders[placeholder] = generation_placeholders[canonical]
+    if generation_placeholders:
+        request_images['map_placeholders'] = generation_placeholders
 
     # These values keep marker-aware layout and location summaries consistent with
     # the exact map image that was persisted for the open presentation.
