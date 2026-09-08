@@ -7638,9 +7638,17 @@ class MeetingRequirementsTests(unittest.TestCase):
             'presentationId': presentation_id,
             'slidesData': slides,
             'slideIndex': 0,
+            'history': [
+                {'role': 'user', 'content': 'أضف لوجو Vision Gate في الشريحة رقم 52'},
+                {'role': 'assistant', 'content': 'تمت إضافة الشعار.'},
+            ],
             'creativeImages': {
                 'map_placeholders': {'##MAP_CATCHMENT##': project_map},
                 'map_approvals': {'catchment': False},
+                'team_members': [{
+                    'name': 'Vision Gate', 'role': 'التطوير',
+                    'logo': '/uploads/creative/team-logo-1.png',
+                }],
             },
         })
         self.assertEqual(response.status_code, 200, response.get_json())

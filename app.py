@@ -4070,7 +4070,7 @@ def api_designer_chat():
         message, slides, current_index, [number - 1 for number in preferred_indexes]
     )
     requested_team_logo = _find_designer_team_logo_request(message, history_for_turn, creative_images)
-    if requested_team_logo:
+    if requested_team_logo and deterministic_plan is None:
         if is_all_slides_request:
             logo_target = 'all'
             logo_indexes = []
