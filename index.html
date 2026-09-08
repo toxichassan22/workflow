@@ -3075,6 +3075,35 @@
       line-height: normal;
     }
 
+    /* The isolated exporter normalizes the slide root before printing. Mirror those
+       root-only rules here while retaining the preview scale and the slide's inline
+       content padding. Otherwise imported roots using flex/offsets render differently
+       in the UI and can push the final content below the stage. */
+    .tenant-slide-stage .slide {
+      display: block !important;
+      float: none !important;
+      margin: 0 !important;
+      border: none !important;
+      box-shadow: none !important;
+      inset: auto !important;
+      top: 0 !important;
+      right: 0 !important;
+      bottom: auto !important;
+      left: auto !important;
+      zoom: 1 !important;
+      transform: scale(var(--slide-scale, 0.75)) !important;
+      transform-origin: top right !important;
+    }
+
+    /* Match the isolated PDF page reset for every element inside the slide. Inline
+       slide declarations still win, while browser-default heading/paragraph
+       margins cannot make the preview taller than the exported page. */
+    .tenant-slide-stage .slide * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
     /* The application table rule is intentionally wide for data-entry tables, but generated
        slides contain tables inside narrower content columns. Keep those tables inside the slide;
        exported slides do not load the application-wide table minimum. */

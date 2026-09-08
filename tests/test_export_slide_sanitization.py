@@ -105,6 +105,18 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             html,
         )
 
+    def test_slide_preview_matches_export_margin_reset(self):
+        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('display: block !important;', source)
+        self.assertIn('transform: scale(var(--slide-scale, 0.75)) !important;', source)
+        self.assertIn(
+            '.tenant-slide-stage .slide * {\n'
+            '      margin: 0;\n'
+            '      padding: 0;\n'
+            '      box-sizing: border-box;',
+            source,
+        )
+
     def test_authenticated_project_file_images_are_localized_for_export(self):
         """Legacy cover images and project logos use an authenticated route in the editor."""
         import tempfile
