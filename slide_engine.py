@@ -9399,10 +9399,53 @@ def _strip_existing_slide_chrome(html):
     return re.sub(r'\n[ \t]*(?:\n[ \t]*)+', '\n', html)
 
 
+def _slide_root_surface(html):
+    """Read a solid background from the generated slide root for chrome contrast."""
+    root = re.search(
+        r'<div\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\1[^>]*>',
+        str(html or ''), flags=re.IGNORECASE,
+    )
+    if not root:
+        return None
+    style_match = re.search(r'\bstyle\s*=\s*(["\'])(.*?)\1', root.group(0), flags=re.IGNORECASE)
+    if not style_match:
+        return None
+    styles = _inline_style_properties(style_match.group(2))
+    return _css_solid_color(styles.get('background-color') or styles.get('background'))
+
+
 def _presentation_chrome_html(title, project_title, company_name, primary, accent,
                               footer_background, footer_text, footer_accent, counter,
-                              project_logo=False):
+                              project_logo=False, slide_surface=None):
     """Return the single canonical light header and footer for content slides."""
+    surface = _css_solid_color(slide_surface)
+    dark_slide_surface = bool(
+        surface and contrast_ratio('#ffffff', surface) >= 4.5
+    )
+    if dark_slide_surface:
+        # SOL owns the slide canvas. When it deliberately chose a dark solid
+        # surface, the managed chrome must blend into that surface instead of
+        # introducing a separate white strip above it.
+        chrome_background = surface
+        chrome_text = readable_text_color('#ffffff', surface, (footer_text,))
+        chrome_accent = readable_text_color(accent, surface, (chrome_text,))
+        header_style = (
+            f'position:absolute;top:0;right:0;left:0;height:56px;background:{chrome_background};'
+            f'border-bottom:2px solid {chrome_accent};'
+        )
+        footer_style = (
+            f'background:{chrome_background};border-top:1px solid rgba(255,255,255,.16);'
+        )
+        footer_surface_text = chrome_text
+        footer_surface_accent = chrome_accent
+    else:
+        chrome_text = primary
+        chrome_accent = accent
+        header_style = f'position:absolute;top:0;right:0;left:0;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
+        footer_style = f'background:{footer_background};border-top:1px solid #e2e8f0;'
+        footer_surface_text = footer_text
+        footer_surface_accent = footer_accent
+
     logo_style = (
         'height:40px;width:auto;max-width:122px;object-fit:contain;display:inline-block;'
         'background:#ffffff;border-radius:6px;padding:3px 7px;box-sizing:border-box;'
@@ -9413,23 +9456,23 @@ def _presentation_chrome_html(title, project_title, company_name, primary, accen
     ) if project_logo else ''
     header = (
         f'<header class="slide-header" data-slide-header="1" dir="rtl" '
-        f'style="position:absolute;top:0;right:0;left:0;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
+        f'style="{header_style}'
         'display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
         'box-sizing:border-box;z-index:10;overflow:hidden;">'
         '<div style="display:flex;align-items:center;gap:10px;min-width:0;direction:ltr;">'
         f'<img class="presentation-chrome-logo" src="##LOGO##" alt="" style="{logo_style}" />'
         f'{project_logo_html}'
-        f'<span style="width:3px;height:28px;background:{accent};display:inline-block;flex:0 0 auto;"></span>'
-        f'<span style="font-size:16px;font-weight:700;color:{primary};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;">{title}</span>'
+        f'<span style="width:3px;height:28px;background:{chrome_accent};display:inline-block;flex:0 0 auto;"></span>'
+        f'<span style="font-size:16px;font-weight:700;color:{chrome_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;">{title}</span>'
         '</div></header>'
     )
     footer = (
         f'<footer class="slide-footer" data-slide-footer="1" dir="rtl" '
-        f'style="position:absolute;bottom:0;right:0;left:0;height:36px;background:{footer_background};'
-        f'border-top:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
+        f'style="position:absolute;bottom:0;right:0;left:0;height:36px;{footer_style}'
+        f'display:flex;align-items:center;justify-content:space-between;padding:0 24px;'
         'box-sizing:border-box;z-index:10;overflow:hidden;">'
-        f'<span style="font-size:12px;font-weight:700;color:{footer_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62%;">{project_title}</span>'
-        f'<span data-slide-counter="1" dir="ltr" style="display:inline-flex;align-items:center;justify-content:center;min-width:72px;font-size:12px;font-weight:700;color:{footer_accent};text-align:center;">{counter}</span>'
+        f'<span style="font-size:12px;font-weight:700;color:{footer_surface_text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62%;">{project_title}</span>'
+        f'<span data-slide-counter="1" dir="ltr" style="display:inline-flex;align-items:center;justify-content:center;min-width:72px;font-size:12px;font-weight:700;color:{footer_surface_accent};text-align:center;">{counter}</span>'
         '</footer>'
     )
     return header, footer
@@ -9473,6 +9516,7 @@ def _ensure_managed_chrome(html, slide_title=None, slide_num=None, total_slides=
         title, project_title, html_lib.escape(str(company_name)), primary, accent,
         footer_background, footer_text, footer_accent, footer_number,
         project_logo=bool(_project_logo_reference(project_source)),
+        slide_surface=_slide_root_surface(html),
     )
     html = re.sub(r'(<div[^>]*class=["\']slide["\'][^>]*>)', r'\1\n' + header_html, html, count=1)
     html = re.sub(r'(</div>\s*)$', '\n' + footer_html + r'\1', html, count=1)
@@ -10044,23 +10088,21 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 item['html'] = _strip_market_slide_media(item['html'])
         else:
             html = item.get('html') or ''
-            if 'data-slide-header' not in html:
-                # A stored slide that predates the canonical chrome (or lost it
-                # to an edit) converges here: the stale header/footer is
-                # replaced with the managed one instead of keeping a second
-                # visual language beside the fresh slides.
-                html = _strip_existing_slide_chrome(html)
-                html = _ensure_managed_chrome(
-                    html, slide_title=item.get('title'), slide_num=index,
-                    total_slides=total, branding=branding,
-                    project_data=project_data, tenant_id=tenant_id,
-                )
-                html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
-                html = _replace_data_placeholders(html, project_data, branding)
-                html = resolve_logo_in_html(
-                    html, tenant_id, _branding_cache=branding,
-                    project_logo=_project_logo_reference(project_data),
-                )
+            # Rebuild the managed chrome on every content slide. Older saved slides
+            # may already have the previous white header, so checking only for the
+            # marker would preserve the color conflict after the new adaptive rule.
+            html = _strip_existing_slide_chrome(html)
+            html = _ensure_managed_chrome(
+                html, slide_title=item.get('title'), slide_num=index,
+                total_slides=total, branding=branding,
+                project_data=project_data, tenant_id=tenant_id,
+            )
+            html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
+            html = _replace_data_placeholders(html, project_data, branding)
+            html = resolve_logo_in_html(
+                html, tenant_id, _branding_cache=branding,
+                project_logo=_project_logo_reference(project_data),
+            )
             item['html'] = _rewrite_slide_counter(html, slide_type, index, total)
             # Generation already applies the strict media ownership boundary in
             # finalize_slide_html().  Re-numbering is also used when an existing

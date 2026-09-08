@@ -798,6 +798,41 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('class="slide"', html)
         self.assertIn('height:56px', html)
 
+    def test_managed_chrome_follows_a_dark_sol_slide_surface(self):
+        """A SOL slide may intentionally use a dark canvas. The managed header/footer must
+        follow that surface instead of leaving a conflicting white strip above it."""
+        engine = self.application_module.slide_engine
+        branding = {
+            'primary_color': '#122a67',
+            'secondary_color': '#0f1f4d',
+            'accent_color': '#d8b36a',
+        }
+        html = engine.finalize_slide_html(
+            '<div class="slide" style="width:1280px;height:720px;background:#122a67;color:#ffffff;">'
+            '<div style="background:#ffffff;color:#122a67;">محتوى SOL</div></div>',
+            'content', {'project_name': 'المشروع'}, branding,
+            slide_num=4, slide_title='ملخص الموقع', total_slides=9,
+        )
+        header = re.search(r'<header\b[^>]*>', html, flags=re.IGNORECASE).group(0)
+        footer = re.search(r'<footer\b[^>]*>', html, flags=re.IGNORECASE).group(0)
+        self.assertIn('background:#122a67', header)
+        self.assertNotIn('background:#ffffff', header)
+        self.assertIn('background:#122a67', footer)
+
+        old = (
+            '<div class="slide" style="width:1280px;height:720px;background:#122a67;color:#fff;">'
+            '<header class="slide-header" data-slide-header="1" style="background:#ffffff;color:#122a67;">قديم</header>'
+            '<div>المحتوى</div>'
+            '<footer class="slide-footer" data-slide-footer="1" style="background:#122a67;">قديم</footer>'
+            '</div>'
+        )
+        renumbered = engine.renumber_presentation_slides(
+            [{'type': 'content', 'title': 'ملخص الموقع', 'html': old}],
+            branding=branding, project_data={'project_name': 'المشروع'},
+        )[0]['html']
+        self.assertIn('background:#122a67', re.search(r'<header\b[^>]*>', renumbered, flags=re.IGNORECASE).group(0))
+        self.assertNotIn('قديم', renumbered)
+
     def test_single_slide_retries_severely_unreadable_text(self):
         engine = self.application_module.slide_engine
         responses = iter([
