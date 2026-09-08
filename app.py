@@ -3576,11 +3576,16 @@ def _designer_team_logo_search_text(value):
 
 
 def _designer_company_logo_requested(message):
-    """Recognize an explicit company-brand request before consulting older team-logo context."""
+    """Recognize an explicit company-brand request before consulting older team-logo context.
+
+    Only the definite «الشركة» or the tenant's own proper nouns count as the company.
+    A bare «شركة» also starts team entity names («شركة الأصالة») and must stay on the
+    team-logo path when the message names that entity.
+    """
     text = _designer_team_logo_search_text(message)
     has_logo_word = bool(re.search(r'(?:logo|لوجو|شعار|علامة\s*تجارية)', text, flags=re.IGNORECASE))
     has_company_word = bool(re.search(
-        r'(?:الشركة|شركة|company|branding|بوابة\s*الرؤية|الرؤية\s*للتطوير)',
+        r'(?:الشركة|company|branding|بوابة\s*الرؤية|الرؤية\s*للتطوير)',
         text, flags=re.IGNORECASE,
     ))
     return has_logo_word and has_company_word
@@ -3607,26 +3612,33 @@ def _designer_team_logo_context(creative_images):
 
 
 def _find_designer_team_logo_request(message, history, creative_images):
-    """Resolve a named team entity in a logo request to its exact TEAM_LOGO token."""
+    """Resolve a named team entity in a logo request to its exact TEAM_LOGO token.
+
+    The current message alone must carry logo intent (شعار/لوجو/logo). Older turns
+    only resolve *which* entity a follow-up means («لم تتم إضافة اللوجو حل المشكلة»),
+    so a later «أضف وصفاً للصور» or «أعد تصميم الشريحة» never inherits a previous
+    logo request. A description/caption request (وصف/شرح/تعليق) and a generic image
+    request (صورة/تصميم/توليد) are not logo requests.
+    """
     if _designer_company_logo_requested(message):
         return None
     members = creative_images.get('team_members') if isinstance(creative_images, dict) else []
     if not isinstance(members, list) or not members:
         return None
-    user_turns = [
-        str(item.get('content') or '')
-        for item in history if isinstance(item, dict) and item.get('role') == 'user'
-    ]
-    user_turns.append(str(message or ''))
-    search_text = _designer_team_logo_search_text(' '.join(user_turns))
-    if not re.search(r'(?:logo|لوجو|شعار|علامة\s*تجارية)', search_text, flags=re.IGNORECASE):
+    current_search = _designer_team_logo_search_text(message)
+    if not re.search(r'(?:logo|لوجو|شعار|علامة\s*تجارية)', current_search, flags=re.IGNORECASE):
         return None
-    for index, member in enumerate(members, 1):
-        if not isinstance(member, dict) or not member.get('logo'):
-            continue
+    with_logo = [
+        (index, member)
+        for index, member in enumerate(members, 1)
+        if isinstance(member, dict) and member.get('logo')
+    ]
+    if not with_logo:
+        return None
+    for index, member in with_logo:
         name = str(member.get('name') or '').strip()
         name_key = _designer_team_logo_search_text(name)
-        if name_key and len(name_key) >= 3 and name_key in search_text:
+        if name_key and len(name_key) >= 3 and name_key in current_search:
             return {
                 'index': index,
                 'name': name,
@@ -3634,6 +3646,27 @@ def _find_designer_team_logo_request(message, history, creative_images):
                 'logo': str(member.get('logo') or '').strip(),
                 'token': f'##TEAM_LOGO_{index}##',
             }
+    # Follow-up without repeating the name («ضيف الشعار»، «لم تتم إضافة اللوجو حلها»):
+    # resolve to the most recently named entity in earlier user turns.
+    user_turns = [
+        str(item.get('content') or '')
+        for item in history if isinstance(item, dict) and item.get('role') == 'user'
+    ]
+    for past in reversed(user_turns):
+        past_search = _designer_team_logo_search_text(past)
+        if not past_search:
+            continue
+        for index, member in with_logo:
+            name = str(member.get('name') or '').strip()
+            name_key = _designer_team_logo_search_text(name)
+            if name_key and len(name_key) >= 3 and name_key in past_search:
+                return {
+                    'index': index,
+                    'name': name,
+                    'role': str(member.get('role') or '').strip(),
+                    'logo': str(member.get('logo') or '').strip(),
+                    'token': f'##TEAM_LOGO_{index}##',
+                }
     return None
 
 
@@ -3773,7 +3806,7 @@ def _build_designer_section_and_asset_context(slides, project_data, current_inde
     ]
 
     audit_lines.extend([
-        "- تمييز الشعارات: ##LOGO## للشركة فقط، ##PROJECT_LOGO## لشعار المشروع فقط، وشعارات جهات فريق العمل تستخدم ##TEAM_LOGO_N## حسب ترتيب القائمة التالية.",
+        "- تمييز الشعارات: ##LOGO## للشركة فقط، ##PROJECT_LOGO## لشعار المشروع فقط، وشعارات جهات فريق العمل تستخدم ##TEAM_LOGO_N## حسب ترتيب القائمة التالية. ممنوع إدراج أي شعار إلا إذا طلب المستخدم ذلك صراحة بكلمة شعار أو لوجو أو علامة تجارية في رسالته الحالية؛ فالصورة والوصف والشعار ثلاثة أشياء مختلفة: الوصف نص يضاف لصور موجودة، والصورة توليد معماري جديد، والشعار رمز جهة مرفوع.",
         "## شعارات جهات فريق العمل المتاحة:",
         _designer_team_logo_context(creative_images),
     ])
@@ -3862,7 +3895,11 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
         "\n\n## شعارات فريق العمل في هذا المشروع\n"
         + _designer_team_logo_context(creative_images)
         + "\nلا تضع شعار جهة فريق العمل في هيدر الشركة، ولا تستبدله بـ ##LOGO## أو ##PROJECT_LOGO##. "
-          "عند طلب شعار جهة محددة، أدرج الرمز المطابق داخل موضع محتوى مناسب في الشريحة."
+          "عند طلب شعار جهة محددة، أدرج الرمز المطابق داخل موضع محتوى مناسب في الشريحة. "
+          "ممنوع إدراج أي شعار (شركة أو مشروع أو فريق عمل) إلا إذا طلب المستخدم ذلك صراحة بكلمة "
+          "شعار أو لوجو أو علامة تجارية في رسالته الحالية. طلب وصف أو شرح أو تعليق على صور موجودة "
+          "يعني إضافة نص وصفي فقط دون أي شعار ودون توليد صورة جديدة، وطلب صورة أو تصميم أو توليد "
+          "يعني صورة معمارية جديدة وليس شعاراً."
     )
 
     # Capture Playwright vision screenshot of the current slide if available
@@ -4307,9 +4344,10 @@ def api_designer_chat():
 8. إذا طلب رسم أو مخطط مالي (شلال/حساسية/عوائد) -> اختر tool="insert_financial_chart".
 9. إذا طلب تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
 10. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
-11. إذا طلب المستخدم شعار جهة محددة من فريق العمل، ميّزها عن شعار الشركة واستخدم tool="insert_team_logo" مع team_index الصحيح.
-12. إذا طلب المستخدم نقل أو وضع شعار الشركة داخل المربع الكحلي في يمين الشريحة، استخدم tool="insert_company_logo_panel" ولا تستخدم شعار فريق العمل.
-13. في سائر طلبات التعديل والتنسيق -> اختر tool="edit_slides".
+ 11. إذا طلب المستخدم شعار جهة محددة من فريق العمل، ميّزها عن شعار الشركة واستخدم tool="insert_team_logo" مع team_index الصحيح. لا تستخدم هذه الأداة إلا إذا احتوت الرسالة الحالية نفسها على كلمة شعار أو لوجو أو علامة تجارية مع اسم الجهة؛ فطلب الصورة أو الوصف ليس طلب شعار.
+ 12. إذا طلب المستخدم نقل أو وضع شعار الشركة داخل المربع الكحلي في يمين الشريحة، استخدم tool="insert_company_logo_panel" ولا تستخدم شعار فريق العمل.
+ 13. في سائر طلبات التعديل والتنسيق -> اختر tool="edit_slides".
+ 14. فرّق بدقة بين الصورة والوصف والشعار: طلب وصف أو شرح أو تعليق أو كابشن لصور موجودة (مثل: «أضف وصفاً لصور التصور البصري») يعني تعديلاً نصياً فقط عبر tool="edit_slides" مع تعليمات إضافة نص وصفي تحت الصور الموجودة، دون توليد صورة جديدة ودون أي رمز شعار (ممنوع ##TEAM_LOGO_N## و##LOGO## و##PROJECT_LOGO##). وطلب صورة أو تصميم أو توليد صور جديدة يعني tool="generate_image" لصورة معمارية جديدة وليس شعاراً. ولا تستخدم أي رمز شعار إلا عند طلب شعار صريح في الرسالة الحالية.
 
 {audit_note}
 
