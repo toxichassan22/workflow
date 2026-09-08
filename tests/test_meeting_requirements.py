@@ -7516,7 +7516,9 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_explicit_map_refresh_falls_back_to_latest_saved_map_when_section_image_is_missing(self):
         module = self.application_module
-        map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_latest.png', delete=False)
+        map_file = tempfile.NamedTemporaryFile(
+            dir=module.maps_service.MAPS_DIR, suffix='_latest.png', delete=False
+        )
         map_path = map_file.name
         map_file.write(b'latest-map')
         map_file.close()
