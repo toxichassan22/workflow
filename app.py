@@ -3218,7 +3218,15 @@ def _canonical_map_type_for_slide(slide):
     slide_type = str(item.get('type') or '').strip().lower()
     source = str(item.get('content_source') or item.get('contentSource') or '').strip().lower()
     title = normalize_arabic_digits_py(str(item.get('title') or '').strip().lower())
-    html = str(item.get('html') or '').upper()
+    raw_html = str(item.get('html') or '')
+    html = raw_html.upper()
+
+    explicit_map = re.search(
+        r'data-canonical-map\s*=\s*["\'](overview|access|catchment|landmarks)["\']',
+        raw_html, flags=re.IGNORECASE,
+    )
+    if explicit_map:
+        return explicit_map.group(1).lower()
 
     for map_type in ('overview', 'access', 'catchment', 'landmarks'):
         if slide_type == f'map_{map_type}' or source in {
@@ -3264,15 +3272,15 @@ def _approved_canonical_map_url(map_type, project_data, creative_images=None):
 
 
 def _latest_canonical_map_url(map_type, project_data, creative_images=None,
-                              tenant_id=None, presentation_id=None):
+                              tenant_id=None, presentation_id=None, preferred_images=None):
     """Return the newest saved final map for an explicit chat refresh.
 
     A map edit deliberately releases that map's approval until the user reviews
     it again. That is correct for the workflow, but it must not make an explicit
     "update the map in this slide" request keep the old raster image. This helper
     therefore ignores the approval flag, never calls Google, and prefers the
-    newest persisted canonical row over browser state. The sidecar is never a
-    candidate here.
+    current marked image from the project section over presentation snapshots.
+    The sidecar is never a candidate here.
     """
     map_type = str(map_type or '').strip().lower()
     token = _CANONICAL_MAP_TOKENS.get(map_type)
@@ -3280,6 +3288,23 @@ def _latest_canonical_map_url(map_type, project_data, creative_images=None,
         return ''
 
     canonical_types = {map_type, f'{map_type}_satellite', f'{map_type}_roadmap'}
+
+    # The location section is the source of truth for the image the user has just
+    # approved or edited.  It is sent separately from project_data by the browser,
+    # so prefer it before consulting map_images, whose rows can belong to an older
+    # presentation snapshot.  This is only a file selection; it never generates a map.
+    preferred_sources = list(preferred_images or [])
+    preferred_sources.extend([creative_images, (project_data or {}).get('tenantCreativeImages')])
+    for source in preferred_sources:
+        if not isinstance(source, dict):
+            continue
+        placeholders = source.get('map_placeholders') if isinstance(source.get('map_placeholders'), dict) else {}
+        base = token[:-2]
+        for candidate in (token, f'{base}_SATELLITE##', f'{base}_ROADMAP##'):
+            value = placeholders.get(candidate)
+            if value and not str(value).startswith('##'):
+                return str(value)
+
     draft_id = (project_data or {}).get('draftId') or (project_data or {}).get('draft_id')
     if tenant_id and (presentation_id or draft_id):
         try:
@@ -3965,6 +3990,8 @@ def api_designer_chat():
     if not message:
         return jsonify({'success': False, 'error': 'الطلب فارغ'}), 400
     project_data = clean_project_data(data.get('projectData', {}))
+    request_creative_images = copy.deepcopy(data.get('creativeImages')) if isinstance(data.get('creativeImages'), dict) else {}
+    project_creative_images = copy.deepcopy(project_data.get('tenantCreativeImages')) if isinstance(project_data.get('tenantCreativeImages'), dict) else {}
     presentation_id = data.get('presentationId')
     slides = data.get('slidesData') if isinstance(data.get('slidesData'), list) else []
     current_index = data.get('slideIndex', 0)
@@ -4458,7 +4485,8 @@ def api_designer_chat():
                 targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
                 map_url = (_latest_canonical_map_url(
                     map_type, project_data, creative_images,
-                    tenant_id=tenant_id, presentation_id=presentation_id
+                    tenant_id=tenant_id, presentation_id=presentation_id,
+                    preferred_images=[request_creative_images, project_creative_images],
                 ) if refresh_requested else _approved_canonical_map_url(map_type, project_data, creative_images))
                 if not map_url:
                     missing_text = (
@@ -4482,19 +4510,10 @@ def api_designer_chat():
                     updated_html = resolve_designer_chat_placeholders(
                         updated_html, project_data, presentation_id, tenant_id, creative_images
                     )
-                    slide['html'] = slide_engine.finalize_slide_html(
-                        updated_html, slide.get('type', 'content'), project_data, branding,
-                        creative_images=creative_images, tenant_id=tenant_id,
-                        map_placeholders={
-                            token: map_url,
-                            f'{token[:-2]}_SATELLITE##': map_url,
-                            f'{token[:-2]}_ROADMAP##': map_url,
-                        },
-                        slide_num=idx + 1, slide_title=slide.get('title', f'شريحة {idx + 1}'),
-                        total_slides=len(slides),
-                        content_source=slide.get('content_source') or slide.get('contentSource'),
-                        allow_all_maps=True,
-                    )
+                    # A chat map refresh is a source swap, not a slide regeneration.
+                    # Keep the existing HTML/layout and carry the exact marked image
+                    # from the project section into the existing map slot.
+                    slide['html'] = updated_html
                     slides[idx] = slide
                     successful_targets.append(idx)
                 if successful_targets:
@@ -4675,9 +4694,12 @@ def api_designer_chat():
         # alias back to the browser: the location editor needs the persisted
         # clean sidecar so its HTML labels are not drawn over raster labels.
         response_creative_images = copy.deepcopy(creative_images)
-        source_creative_images = project_data.get('tenantCreativeImages') if isinstance(project_data, dict) else None
+        source_creative_images = request_creative_images or project_creative_images
         if isinstance(source_creative_images, dict) and isinstance(source_creative_images.get('map_placeholders'), dict):
-            response_creative_images['map_placeholders'] = copy.deepcopy(source_creative_images['map_placeholders'])
+            returned_placeholders = response_creative_images.get('map_placeholders')
+            returned_placeholders = dict(returned_placeholders) if isinstance(returned_placeholders, dict) else {}
+            returned_placeholders.update(source_creative_images['map_placeholders'])
+            response_creative_images['map_placeholders'] = returned_placeholders
         return jsonify({'success': True, 'data': {'action': 'workspace_update', 'response': response_text,
                                                    'slidesData': slides, 'creativeImages': response_creative_images,
                                                    'actions': executed, 'validation': validation,

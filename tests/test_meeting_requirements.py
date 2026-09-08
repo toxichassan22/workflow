@@ -7485,6 +7485,18 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(update_plan['actions'][0]['tool'], 'insert_canonical_map')
         self.assertTrue(update_plan['actions'][0]['params']['refresh'])
 
+        rendered_map_slide = {
+            'type': 'content',
+            'title': '',
+            'html': '<div class="slide"><div data-canonical-map="catchment">'
+                    '<img src="/uploads/maps/old.png"></div></div>',
+        }
+        rendered_plan = module._designer_deterministic_plan(
+            'حدث الخريطة في الشريحة رقم 1', [rendered_map_slide], 0, [0]
+        )
+        self.assertEqual(rendered_plan['actions'][0]['params']['map_type'], 'catchment')
+        self.assertTrue(rendered_plan['actions'][0]['params']['refresh'])
+
         creative = {
             'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/approved.png'},
             'map_approvals': {'catchment': True},
@@ -7502,7 +7514,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         creative['map_approvals']['catchment'] = False
         self.assertEqual(module._approved_canonical_map_url('catchment', {}, creative), '')
 
-    def test_explicit_map_refresh_uses_latest_saved_map_even_before_reapproval(self):
+    def test_explicit_map_refresh_falls_back_to_latest_saved_map_when_section_image_is_missing(self):
         module = self.application_module
         map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_latest.png', delete=False)
         map_path = map_file.name
@@ -7517,14 +7529,8 @@ class MeetingRequirementsTests(unittest.TestCase):
             )
             latest = module._latest_canonical_map_url(
                 'catchment',
-                {'tenantCreativeImages': {
-                    'map_approvals': {'catchment': False},
-                    'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/old.png'},
-                }},
-                {
-                    'map_approvals': {'catchment': False},
-                    'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/old-browser.png'},
-                },
+                {},
+                {},
                 tenant_id=self.tenant_a,
                 presentation_id='pres-refresh-map',
             )
@@ -7598,6 +7604,54 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(reply['actions'][0]['status'], 'success')
         self.assertIn(os.path.basename(latest_path), reply['slidesData'][0]['html'])
         self.assertNotIn(old_path, reply['slidesData'][0]['html'])
+
+    def test_designer_chat_copies_project_section_map_without_regenerating_slide(self):
+        module = self.application_module
+        client = self.app.test_client()
+        old_path = '/uploads/maps/catchment_old.png'
+        project_map = '/uploads/maps/catchment_project_section.png'
+        slides = [{
+            'type': 'map_catchment',
+            'content_source': 'catchment_areas',
+            'title': 'خريطة النطاق الجغرافي واستيعاب المنطقة',
+            'html': '<div class="slide"><div data-canonical-map="catchment">'
+                    '<img src="' + old_path + '"></div></div>',
+        }]
+        created = client.post('/api/presentations', headers=self._headers(self.token_a), json={
+            'title': 'نسخ صورة خريطة القسم', 'projectData': {}, 'slidesData': slides,
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        presentation_id = created.get_json()['presentationId']
+        stale_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_stale.png', delete=False)
+        stale_path = stale_file.name
+        stale_file.write(b'stale-map')
+        stale_file.close()
+        self.addCleanup(lambda: os.path.exists(stale_path) and os.unlink(stale_path))
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a, 'catchment', stale_path, '##MAP_CATCHMENT##',
+                presentation_id=presentation_id, metadata={}
+            )
+
+        response = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
+            'message': 'حدث الخريطة في الشريحة رقم 1',
+            'presentationId': presentation_id,
+            'slidesData': slides,
+            'slideIndex': 0,
+            'creativeImages': {
+                'map_placeholders': {'##MAP_CATCHMENT##': project_map},
+                'map_approvals': {'catchment': False},
+            },
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        reply = response.get_json()['data']
+        self.assertEqual(reply['actions'][0]['status'], 'success')
+        self.assertIn(project_map, reply['slidesData'][0]['html'])
+        self.assertNotIn(old_path, reply['slidesData'][0]['html'])
+        self.assertEqual(
+            reply['creativeImages']['map_placeholders']['##MAP_CATCHMENT##'],
+            project_map,
+        )
 
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""

@@ -21588,6 +21588,15 @@
         }
       });
 
+      // Map files are already complete marked images from the location section.
+      // The preview must fetch that exact file again after a replacement, even when
+      // a server-side edit reused the same URL and the browser still has the old
+      // bytes in its image cache.
+      cleanHtml = cleanHtml.replace(
+        /(?:\/uploads\/maps\/|\/api\/map-images\/)[^"'\s)]+/gi,
+        url => withCacheBust(url)
+      );
+
       // Cover slide auto-inject fallback if model omitted ##IMAGE_COVER##
       if (coverImage && (slideType === 'cover' || cleanHtml.includes('class="slide cover"') || cleanHtml.includes("class='slide cover'"))) {
         if (!cleanHtml.includes(coverImage)) {
@@ -22440,6 +22449,7 @@
 
       if (reply.creativeImages && typeof reply.creativeImages === 'object') {
         tenantCreativeImages = reply.creativeImages;
+        tenantProjectData = { ...tenantProjectData, tenantCreativeImages };
       }
       if (!Array.isArray(reply.chatHistory)) {
         tenantDesignerMessages.push({
