@@ -8051,6 +8051,63 @@ def _is_visual_concept_media_slide(slide):
     )))
 
 
+def _creative_asset_url(value):
+    source = value if isinstance(value, dict) else {'url': value}
+    url = str(
+        source.get('approvedImageUrl') or source.get('approved_image_url')
+        or source.get('imageUrl') or source.get('image_url')
+        or source.get('url') or source.get('path') or ''
+    ).strip()
+    if url.lower() in {'', 'available', 'blob:', 'undefined', 'null', 'none'} or url.lower().startswith('blob:'):
+        return ''
+    return url
+
+
+def _visual_media_token_url(token, creative_images):
+    images = creative_images if isinstance(creative_images, dict) else {}
+    name = str(token or '').strip().strip('#').upper()
+
+    match = re.fullmatch(r'(?:MOODBOARD_IMAGE|PROJECT_IMAGE)_(\d+)', name)
+    if match:
+        values = images.get('moodboard') or images.get('moodboardImages') or []
+        index = int(match.group(1)) - 1
+        return _creative_asset_url(values[index]) if isinstance(values, list) and index < len(values) else ''
+
+    match = re.fullmatch(r'(?:PLAN_IMAGE|2D_PLAN)_(\d+)', name)
+    if match:
+        values = images.get('plans') or images.get('plans2d') or []
+        index = int(match.group(1)) - 1
+        return _creative_asset_url(values[index]) if isinstance(values, list) and index < len(values) else ''
+
+    match = re.fullmatch(r'INTERIOR_(?:COMP_)?(\d+)_(?:IMG|IMAGE)_(\d+)', name)
+    if not match:
+        match = re.fullmatch(r'INTERIOR_C(\d+)_(?:IMG|IMAGE)_(\d+)', name)
+    if not match:
+        match = re.fullmatch(r'INTERIOR_(\d+)_(\d+)', name)
+    if match:
+        components = images.get('interior_components') or []
+        component_index = int(match.group(1)) - 1
+        image_index = int(match.group(2)) - 1
+        if isinstance(components, list) and component_index < len(components):
+            component = components[component_index]
+            values = component.get('images') if isinstance(component, dict) else []
+            if isinstance(values, list) and image_index < len(values):
+                return _creative_asset_url(values[image_index])
+        return ''
+
+    match = re.fullmatch(r'INTERIOR_(?:IMAGE_)?(\d+)', name)
+    if match:
+        values = images.get('interior') or images.get('interior_images') or []
+        index = int(match.group(1)) - 1
+        return _creative_asset_url(values[index]) if isinstance(values, list) and index < len(values) else ''
+    return ''
+
+
+def _visual_media_assets_available(slide, creative_images):
+    tokens = [str(token or '').strip() for token in ((slide or {}).get('image_tokens') or []) if str(token or '').strip()]
+    return bool(tokens) and all(_visual_media_token_url(token, creative_images) for token in tokens)
+
+
 def _build_visual_concept_media_slide(slide, branding=None):
     """Build a media visual-concept slide with prominent component/title header and captions."""
     tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
@@ -8672,7 +8729,7 @@ def _creative_image_values(images):
     moodboard = images.get('moodboard') or images.get('moodboardImages') or []
     if not isinstance(moodboard, list):
         moodboard = []
-    return str(cover), [str(img) if img else '' for img in moodboard]
+    return _creative_asset_url(cover), [_creative_asset_url(img) for img in moodboard]
 
 
 def _moodboard_url(index, moodboard):
@@ -10228,13 +10285,17 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     return _drop_unresolved_image_placeholders(html)
 
 
-def renumber_presentation_slides(slides, branding=None, project_data=None, tenant_id=None, allow_all_maps=False):
+def renumber_presentation_slides(slides, branding=None, project_data=None, tenant_id=None,
+                                 allow_all_maps=False, creative_images=None):
     source = slides if isinstance(slides, list) else []
     total = len(source)
     if not total:
         return []
     branding = dict(branding or (db.get_branding(tenant_id) if tenant_id else {}) or {})
     project_data = dict(project_data or {})
+    if not isinstance(creative_images, dict):
+        creative_images = project_data.get('tenantCreativeImages')
+    creative_images = dict(creative_images) if isinstance(creative_images, dict) else {}
     normalized = []
     current_section = ''
     for index, raw in enumerate(source):
@@ -10298,19 +10359,17 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             )
         elif slide_type in ('cover', 'closing', 'moodboard', 'section_divider'):
             if _is_fixed_section_divider(item, item.get('section_key')):
-                creative_images = project_data.get('tenantCreativeImages')
-                if not isinstance(creative_images, dict):
-                    creative_images = {}
-                if not creative_images.get('cover'):
+                divider_images = dict(creative_images)
+                if not divider_images.get('cover'):
                     fallback_cover = project_data.get('cover') or project_data.get('mainImageData')
                     if fallback_cover:
-                        creative_images = {**creative_images, 'cover': fallback_cover}
+                        divider_images['cover'] = fallback_cover
                 rebuilt = build_section_divider_slide(
                     item, index, total, branding, project_data
                 )
                 item['html'] = finalize_slide_html(
                     rebuilt, 'section_divider', project_data, branding,
-                    creative_images=creative_images, tenant_id=tenant_id,
+                    creative_images=divider_images, tenant_id=tenant_id,
                     slide_num=index, slide_title=item.get('title'),
                     total_slides=total, content_source=None,
                     allow_all_maps=allow_all_maps,
@@ -10320,6 +10379,17 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                     item.get('html') or '', slide_type, index, total)
             if slide_type != 'section_divider' and (item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source'))):
                 item['html'] = _strip_market_slide_media(item['html'])
+        elif _is_visual_concept_media_slide(item) and _visual_media_assets_available(item, creative_images):
+            # Stored presentations can predate the bounded visual-media template. Rebuild them
+            # from their preserved tokens so preview and export cannot reuse an unconstrained
+            # width:100% / height:auto image that extends below the 720px slide canvas.
+            rebuilt = _build_visual_concept_media_slide(item, branding=branding)
+            item['html'] = finalize_slide_html(
+                rebuilt, slide_type, project_data, branding,
+                creative_images=creative_images, tenant_id=tenant_id,
+                slide_num=index, slide_title=item.get('title'), total_slides=total,
+                content_source=item.get('content_source'), allow_all_maps=allow_all_maps,
+            )
         else:
             html = item.get('html') or ''
             # Rebuild the managed chrome on every content slide. Older saved slides

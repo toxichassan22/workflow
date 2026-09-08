@@ -1625,6 +1625,12 @@ def _augment_generation_images(images, project_data, tenant_id):
     return result
 
 
+def _presentation_creative_images(project_data, tenant_id):
+    source = project_data if isinstance(project_data, dict) else {}
+    saved = source.get('tenantCreativeImages') if isinstance(source.get('tenantCreativeImages'), dict) else {}
+    return _augment_generation_images(saved, source, tenant_id)
+
+
 def _get_images_info(images, project_data=None):
     interior_components = []
     moodboard_meta = []
@@ -4827,7 +4833,7 @@ def api_designer_chat():
 
         slides = slide_engine.renumber_presentation_slides(
             slides, branding=branding, project_data=project_data, tenant_id=tenant_id,
-            allow_all_maps=True,
+            allow_all_maps=True, creative_images=creative_images,
         )
         validation = _validate_workspace_data({'slidesData': slides})
         if not validation['valid']:
@@ -7389,6 +7395,7 @@ def api_save_presentation():
     slides_data = slide_engine.renumber_presentation_slides(
         slides_data, branding=branding, project_data=render_project_data,
         tenant_id=g.tenant_id,
+        creative_images=_presentation_creative_images(render_project_data, g.tenant_id),
     )
     slide_count = len(slides_data)
 
@@ -7421,6 +7428,7 @@ def api_get_presentation(pres_id):
     _prepare_generation_logo_context(render_project_data, branding, g.tenant_id)
     slides = slide_engine.renumber_presentation_slides(
         slides, branding=branding, project_data=render_project_data, tenant_id=g.tenant_id,
+        creative_images=_presentation_creative_images(render_project_data, g.tenant_id),
     )
     for s in slides:
         if isinstance(s, dict) and 'html' in s and isinstance(s['html'], str):
@@ -7461,6 +7469,7 @@ def api_update_presentation(pres_id):
         updates['slides_data'] = slide_engine.renumber_presentation_slides(
             updates['slides_data'], branding=update_branding,
             project_data=render_project_data, tenant_id=g.tenant_id,
+            creative_images=_presentation_creative_images(render_project_data, g.tenant_id),
         )
         updates['slide_count'] = len(updates['slides_data'])
 
@@ -9097,6 +9106,7 @@ def api_export():
             if slides_data:
                 slides_data = slide_engine.renumber_presentation_slides(
                     slides_data, branding=branding, project_data=render_project_data, tenant_id=g.tenant_id,
+                    creative_images=_presentation_creative_images(render_project_data, g.tenant_id),
                 )
                 slides_html, export_notes = _export_html_from_slides(slides_data)
                 if export_notes:
@@ -9145,6 +9155,7 @@ def api_export():
                 return jsonify({'error': 'slidesData is required for PPTX export'}), 400
             slides_data = slide_engine.renumber_presentation_slides(
                 slides_data, branding=branding, project_data=project_data, tenant_id=g.tenant_id,
+                creative_images=_presentation_creative_images(project_data, g.tenant_id),
             )
 
             pptx_path = generate_pptx(slides_data, project_name, branding, tenant_output_dir, g.tenant_id)
@@ -12801,6 +12812,7 @@ def api_restore_version(pres_id, version_id):
     old_slides = slide_engine.renumber_presentation_slides(
         old_slides, branding=db.get_branding(g.tenant_id), project_data=project_data,
         tenant_id=g.tenant_id,
+        creative_images=_presentation_creative_images(project_data, g.tenant_id),
     )
     db.update_presentation(pres_id, slides_data=old_slides, slide_count=len(old_slides))
     _record_change('presentation', pres_id, 'استرجاع نسخة',
@@ -15612,6 +15624,7 @@ HTML الحالي:
                 slides = slide_engine.renumber_presentation_slides(
                     slides, branding=db.get_branding(tenant_id), project_data=project_data,
                     tenant_id=tenant_id,
+                    creative_images=_presentation_creative_images(project_data, tenant_id),
                 )
                 pres_id = workspace.get('presentationId')
                 existing = db.get_presentation(pres_id, tenant_id=tenant_id) if pres_id else None

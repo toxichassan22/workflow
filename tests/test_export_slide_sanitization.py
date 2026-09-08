@@ -105,6 +105,78 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             html,
         )
 
+    def test_renumbering_migrates_legacy_visual_media_to_bounded_layout(self):
+        legacy_html = (
+            '<div class="slide" style="width:1280px;height:720px;overflow:hidden">'
+            '<div data-legacy-media-frame><img src="/uploads/old.png" '
+            'style="display:block;width:100%;height:auto"></div></div>'
+        )
+        slides = [
+            {
+                'title': 'مخطط الدور الأرضي',
+                'type': 'content',
+                'section_key': 'plans',
+                'content_source': 'plan_image:1',
+                'image_tokens': ['##PLAN_IMAGE_1##'],
+                'html': legacy_html,
+            },
+            {
+                'title': 'التصور الداخلي',
+                'type': 'content',
+                'section_key': 'interior',
+                'content_source': 'interior_images_group:1:1:2',
+                'image_tokens': ['##INTERIOR_COMP_1_IMG_1##', '##INTERIOR_COMP_1_IMG_2##'],
+                'html': legacy_html,
+            },
+            {
+                'title': 'التصور الخارجي',
+                'type': 'content',
+                'section_key': 'exterior',
+                'content_source': 'exterior_image:1',
+                'image_tokens': ['##MOODBOARD_IMAGE_1##'],
+                'html': legacy_html,
+            },
+        ]
+        creative_images = {
+            'plans': [{'url': '/uploads/plan.png'}],
+            'moodboard': [{'url': '/uploads/exterior.png'}],
+            'interior_components': [{
+                'images': [
+                    {'url': '/uploads/interior-1.png'},
+                    {'url': '/uploads/interior-2.png'},
+                ],
+            }],
+        }
+
+        migrated = slide_engine.renumber_presentation_slides(
+            slides,
+            branding={'primary_color': '#123456'},
+            project_data={'project_name': 'المشروع'},
+            creative_images=creative_images,
+        )
+
+        self.assertEqual(len(migrated), 3)
+        for slide in migrated:
+            self.assertIn('data-visual-media-only="1"', slide['html'])
+            self.assertIn('data-visual-media-grid="1"', slide['html'])
+            self.assertIn('height:100%;flex:1 1 0;min-height:0;overflow:hidden', slide['html'])
+            self.assertIn('object-fit:contain', slide['html'])
+            self.assertNotIn('data-legacy-media-frame', slide['html'])
+            self.assertNotIn('height:auto', slide['html'])
+        self.assertIn('/uploads/plan.png', migrated[0]['html'])
+        self.assertIn('/uploads/interior-1.png', migrated[1]['html'])
+        self.assertIn('/uploads/interior-2.png', migrated[1]['html'])
+        self.assertIn('/uploads/exterior.png', migrated[2]['html'])
+        self.assertEqual(
+            migrated,
+            slide_engine.renumber_presentation_slides(
+                migrated,
+                branding={'primary_color': '#123456'},
+                project_data={'project_name': 'المشروع'},
+                creative_images=creative_images,
+            ),
+        )
+
     def test_slide_preview_matches_export_margin_reset(self):
         source = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.assertIn('display: block !important;', source)
