@@ -3687,6 +3687,43 @@ DESIGNER_CHAT_MEMORY_MAX = 1800
 DESIGNER_CHAT_STORED_TURNS = 40
 
 
+def _normalize_designer_chat_messages(messages):
+    """Keep chat entries in one comparable shape before merging browser and DB history."""
+    normalized = []
+    for entry in messages if isinstance(messages, list) else []:
+        if not isinstance(entry, dict) or not str(entry.get('content') or '').strip():
+            continue
+        normalized.append({
+            'role': 'user' if entry.get('role') == 'user' else 'assistant',
+            'content': str(entry.get('content') or '')[:2000],
+            'slides': entry.get('slides') if isinstance(entry.get('slides'), list) else [],
+        })
+    return normalized
+
+
+def _merge_designer_chat_messages(stored_messages, incoming_messages):
+    """Merge a browser snapshot into saved history without replacing older turns."""
+    stored = _normalize_designer_chat_messages(stored_messages)
+    incoming = _normalize_designer_chat_messages(incoming_messages)
+    if not stored:
+        return incoming
+    if not incoming:
+        return stored
+    if incoming == stored or len(incoming) <= len(stored):
+        for start in range(len(stored) - len(incoming) + 1):
+            if stored[start:start + len(incoming)] == incoming:
+                return stored
+    if len(stored) <= len(incoming):
+        for start in range(len(incoming) - len(stored) + 1):
+            if incoming[start:start + len(stored)] == stored:
+                return incoming
+    max_overlap = min(len(stored), len(incoming))
+    for overlap in range(max_overlap, 0, -1):
+        if stored[-overlap:] == incoming[:overlap]:
+            return stored + incoming[overlap:]
+    return stored + incoming
+
+
 def _designer_chat_history_lines(history):
     """The conversation as prompt lines, with each turn's slide numbers attached."""
     lines = []
@@ -3801,9 +3838,13 @@ def api_designer_chat():
         any(kw in message.lower() for kw in ALL_SLIDES_KEYWORDS)
     )
 
-    # The conversation so far. Without it every turn started from nothing: the designer asked which
-    # slide, the user answered, and the answer arrived at a model that had never asked.
-    chat_memory, recent_history = _designer_chat_memory(data.get('history'), data.get('memory'))
+    # The conversation so far. Merge the browser snapshot with the presentation copy so a stale
+    # client cannot replace a complete saved conversation with only its last visible messages.
+    stored_chat = project_data.get('designerChat') if isinstance(project_data.get('designerChat'), dict) else {}
+    incoming_history = data.get('history') if isinstance(data.get('history'), list) else []
+    history_for_turn = _merge_designer_chat_messages(stored_chat.get('messages'), incoming_history)
+    memory_seed = data.get('memory') if isinstance(data.get('memory'), str) and data.get('memory') else stored_chat.get('memory')
+    chat_memory, recent_history = _designer_chat_memory(history_for_turn, memory_seed)
     history_lines = _designer_chat_history_lines(recent_history)
     focus_indexes = []
     for value in (data.get('focusIndexes') if isinstance(data.get('focusIndexes'), list) else []):
@@ -3921,6 +3962,30 @@ def api_designer_chat():
         if question and not deterministic_plan and not (
             explicit_indexes or _designer_actionable_edit_request(message)
         ):
+            ask_messages = list(history_for_turn)
+            if not ask_messages or ask_messages[-1].get('content') != message or ask_messages[-1].get('role') != 'user':
+                ask_messages.append({'role': 'user', 'content': message[:2000], 'slides': preferred_indexes[:]})
+            ask_messages.append({'role': 'assistant', 'content': question[:2000], 'slides': preferred_indexes[:]})
+            ask_chat = {
+                'presentationId': presentation_id or None,
+                'messages': ask_messages[-DESIGNER_CHAT_STORED_TURNS * 2:],
+                'memory': chat_memory,
+                'focusIndexes': preferred_indexes[:],
+            }
+            ask_project_data = dict(project_data)
+            ask_project_data['designerChat'] = ask_chat
+            if presentation_id:
+                db.update_presentation(presentation_id, tenant_id=g.tenant_id,
+                                       project_data=ask_project_data)
+            draft_id = ask_project_data.get('draftId') or ask_project_data.get('draft_id')
+            if draft_id:
+                try:
+                    db.save_project_draft(
+                        g.tenant_id, _project_draft_actor_id(), ask_project_data,
+                        ask_project_data.get('sectionStatuses'), 'draft', draft_id=draft_id
+                    )
+                except Exception as draft_error:
+                    print(f'[DESIGNER CHAT ASK SAVE] {draft_error}')
             return jsonify({'success': True, 'data': {
                 'action': 'ask',
                 'response': question,
@@ -3929,6 +3994,8 @@ def api_designer_chat():
                 'actions': [{'tool': 'ask', 'status': 'success'}],
                 'memory': chat_memory,
                 'focusIndexes': focus_indexes,
+                'chatHistory': ask_chat['messages'],
+                'saved': bool(presentation_id or draft_id),
             }})
 
         if question and (explicit_indexes or _designer_actionable_edit_request(message)):
@@ -4319,18 +4386,7 @@ def api_designer_chat():
             response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
         # Persist the conversation beside the edited workspace. Relying only on the browser draft
         # save meant a refresh between two turns restored old history and lost the new turn.
-        stored_chat = project_data.get('designerChat') if isinstance(project_data.get('designerChat'), dict) else {}
-        incoming_history = data.get('history') if isinstance(data.get('history'), list) else []
-        chat_seed = incoming_history or (stored_chat.get('messages') if isinstance(stored_chat.get('messages'), list) else [])
-        persisted_messages = []
-        for entry in chat_seed[-DESIGNER_CHAT_STORED_TURNS * 2:]:
-            if not isinstance(entry, dict) or not str(entry.get('content') or '').strip():
-                continue
-            persisted_messages.append({
-                'role': 'user' if entry.get('role') == 'user' else 'assistant',
-                'content': str(entry.get('content') or '')[:2000],
-                'slides': entry.get('slides') if isinstance(entry.get('slides'), list) else [],
-            })
+        persisted_messages = _normalize_designer_chat_messages(history_for_turn)[-DESIGNER_CHAT_STORED_TURNS * 2:]
         if not persisted_messages or persisted_messages[-1].get('content') != message or persisted_messages[-1].get('role') != 'user':
             persisted_messages.append({'role': 'user', 'content': message[:2000], 'slides': preferred_indexes[:]})
         persisted_messages.append({'role': 'assistant', 'content': response_text[:2000], 'slides': preferred_indexes[:]})
@@ -4373,10 +4429,11 @@ def api_designer_chat():
         # Both keys carry 0-based indexes; the chat speaks in 1-based slide numbers.
         persisted_project_data['designerChat']['focusIndexes'] = turn_focus
         return jsonify({'success': True, 'data': {'action': 'workspace_update', 'response': response_text,
-                                                  'slidesData': slides, 'creativeImages': creative_images,
-                                                  'actions': executed, 'validation': validation,
-                                                  'memory': chat_memory, 'focusIndexes': turn_focus,
-                                                  'saved': bool(presentation_id or draft_id)}})
+                                                   'slidesData': slides, 'creativeImages': creative_images,
+                                                   'actions': executed, 'validation': validation,
+                                                   'memory': chat_memory, 'focusIndexes': turn_focus,
+                                                   'chatHistory': persisted_project_data['designerChat']['messages'],
+                                                   'saved': bool(presentation_id or draft_id)}})
     except Exception as exc:
         print(f'[DESIGNER-CHAT ERROR] {exc}')
         return jsonify({'success': False, 'error': str(exc)}), 500

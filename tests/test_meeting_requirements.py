@@ -7288,6 +7288,30 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertNotIn('tenantDesignerMessages = [];\n      tenantChatSlideIndex', index_source)
         self.assertIn("'designerChat'", (ROOT / 'db.py').read_text(encoding='utf-8'))
 
+    def test_designer_chat_merges_saved_history_with_short_browser_snapshots(self):
+        module = self.application_module
+        stored = [
+            {'role': 'user', 'content': 'طلب 1', 'slides': [1]},
+            {'role': 'assistant', 'content': 'رد 1', 'slides': [1]},
+            {'role': 'user', 'content': 'طلب 2', 'slides': [2]},
+            {'role': 'assistant', 'content': 'رد 2', 'slides': [2]},
+        ]
+        short_browser_history = stored[-2:]
+        self.assertEqual(module._merge_designer_chat_messages(stored, short_browser_history), stored)
+        self.assertEqual(module._merge_designer_chat_messages(short_browser_history, stored), stored)
+        self.assertEqual(
+            module._merge_designer_chat_messages(stored, [
+                *stored, {'role': 'user', 'content': 'طلب 3', 'slides': [3]},
+            ]),
+            [*stored, {'role': 'user', 'content': 'طلب 3', 'slides': [3]}],
+        )
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("_merge_designer_chat_messages(stored_chat.get('messages'), incoming_history)", app_source)
+        self.assertIn("'chatHistory': persisted_project_data['designerChat']['messages']", app_source)
+        self.assertIn('function applyDesignerChatHistory(reply)', index_source)
+
     def test_designer_chat_supports_ranges_and_fast_structural_tasks(self):
         module = self.application_module
         slides = [{'title': f'شريحة {index}', 'html': '<div class="slide"></div>'}
