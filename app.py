@@ -3263,6 +3263,64 @@ def _approved_canonical_map_url(map_type, project_data, creative_images=None):
     return ''
 
 
+def _latest_canonical_map_url(map_type, project_data, creative_images=None,
+                              tenant_id=None, presentation_id=None):
+    """Return the newest saved final map for an explicit chat refresh.
+
+    A map edit deliberately releases that map's approval until the user reviews
+    it again. That is correct for the workflow, but it must not make an explicit
+    "update the map in this slide" request keep the old raster image. This helper
+    therefore ignores the approval flag, never calls Google, and prefers the
+    newest persisted canonical row over browser state. The sidecar is never a
+    candidate here.
+    """
+    map_type = str(map_type or '').strip().lower()
+    token = _CANONICAL_MAP_TOKENS.get(map_type)
+    if not token:
+        return ''
+
+    canonical_types = {map_type, f'{map_type}_satellite', f'{map_type}_roadmap'}
+    draft_id = (project_data or {}).get('draftId') or (project_data or {}).get('draft_id')
+    if tenant_id and (presentation_id or draft_id):
+        try:
+            rows = db.get_map_images(
+                tenant_id,
+                presentation_id=presentation_id,
+                draft_id=draft_id if not presentation_id else None,
+            )
+        except Exception:
+            rows = []
+        for row in rows:
+            if row.get('image_type') not in canonical_types:
+                continue
+            path = row.get('file_path')
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
+            except ValueError:
+                rel_path = 'uploads/maps/' + os.path.basename(path)
+            return '/' + rel_path
+
+    # Compatibility fallback for an unsaved draft or a request carrying a map
+    # that has not yet been written to map_images.
+    sources = []
+    nested = project_data.get('tenantCreativeImages') if isinstance(project_data, dict) else None
+    if isinstance(nested, dict):
+        sources.append(nested)
+    if isinstance(creative_images, dict) and creative_images not in sources:
+        sources.append(creative_images)
+    base = token[:-2]
+    candidates = (token, f'{base}_SATELLITE##', f'{base}_ROADMAP##')
+    for creative in sources:
+        placeholders = creative.get('map_placeholders') if isinstance(creative.get('map_placeholders'), dict) else {}
+        for candidate in candidates:
+            value = placeholders.get(candidate)
+            if value and not str(value).startswith('##'):
+                return str(value)
+    return ''
+
+
 def _replace_slide_with_approved_map(html, map_type, map_url):
     """Replace a slide's map media with one approved image and remove duplicate map tags."""
     if not html or not map_url:
@@ -3327,9 +3385,8 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
     numbers = [idx + 1 for idx in (target_indexes or [])]
 
     is_map_reload = bool(
-        re.search(r'(?:إعادة|اعادة|اعاده|أعد|اعد|عيد|رجع|رجّع)', normalized)
+        re.search(r'(?:إعادة|اعادة|اعاده|أعد|اعد|عيد|رجع|رجّع|حدّث|حدث|تحديث|جدّد|جدد|استبدل|استبدال)', normalized)
         and re.search(r'(?:خريطة|الخريطة|الخريطه|map)', normalized)
-        and re.search(r'(?:تحميل|إضافة|اضافة|إدراج|ادراج|استيراد|إعادتها|اعادتها)', normalized)
     )
     if is_map_reload:
         number = numbers[0] if numbers else current_index + 1
@@ -3337,9 +3394,10 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
         map_type = _canonical_map_type_for_slide(slides[index]) if 0 <= index < len(slides) else ''
         if map_type:
             return {
-                'response': f'سأعيد إدراج الخريطة المعتمدة في الشريحة رقم {number} من النسخة المحفوظة، دون طلب خريطة جديدة من جوجل.',
+                'response': f'سأحدّث خريطة الشريحة رقم {number} من أحدث نسخة محفوظة، دون طلب خريطة جديدة من جوجل.',
                 'actions': [{'tool': 'insert_canonical_map', 'params': {
                     'target': 'indexes', 'indexes': [number], 'map_type': map_type,
+                    'refresh': True,
                 }}],
             }
 
@@ -3913,7 +3971,7 @@ def api_designer_chat():
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
 - generate_image: params={{"prompt":"وصف دقيق للصورة المراد توليدها", "component_name":"اسم المكون إن وجد", "slideIndex":1, "position":"surgical|background|right|left|inline"}}
-- insert_canonical_map: params={{"map_type":"overview|access|catchment|landmarks", "target":"current|indexes", "slideIndex":1}}
+- insert_canonical_map: params={{"map_type":"overview|access|catchment|landmarks", "target":"current|indexes", "slideIndex":1, "refresh":true عند طلب تحديث خريطة موجودة}}
 - insert_financial_chart: params={{"chart_type":"waterfall|sensitivity|compound_flows|financing_structure", "target":"current|indexes", "slideIndex":1}}
 - delete_slide: params={{"slide_number":1-based}}
 - duplicate_slide: params={{"slide_number":1-based}}
@@ -3937,6 +3995,7 @@ def api_designer_chat():
 5. إذا طلب تغيير ترتيب (مثل: "انقل الشريحة 8 إلى 4") -> اختر tool="reorder_slides" مع from_index و to_index.
 6. إذا كانت شريحة مكتظة وطلب تقسيمها -> اختر tool="split_slide" مع slide_number.
 7. إذا طلب خريطة الموقع أو الوصول أو المعالم -> اختر tool="insert_canonical_map".
+   وإذا طلب تحديث أو إعادة تحميل أو استبدال خريطة موجودة في شريحة، أرسل refresh=true حتى تُستخدم أحدث نسخة محفوظة للخريطة نفسها.
 8. إذا طلب رسم أو مخطط مالي (شلال/حساسية/عوائد) -> اختر tool="insert_financial_chart".
 9. إذا طلب تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
 10. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
@@ -4212,6 +4271,7 @@ def api_designer_chat():
                 executed.append({'tool': tool, 'status': 'success', 'indexes': targets, 'image': image})
             elif tool in ('insert_canonical_map', 'insert_map'):
                 map_type = str(params.get('map_type') or 'overview').lower()
+                refresh_requested = params.get('refresh') is True or params.get('use_latest') is True
                 token_map = {
                     'overview': ('##MAP_OVERVIEW##', 'خريطة الموقع العام ونظرة جوية للأرض'),
                     'access': ('##MAP_ACCESS##', 'خريطة شبكة الطرق والمحاور الرئيسية للوصول'),
@@ -4220,9 +4280,17 @@ def api_designer_chat():
                 }
                 token, label = token_map.get(map_type, ('##MAP_OVERVIEW##', 'خريطة الموقع العام'))
                 targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
-                approved_url = _approved_canonical_map_url(map_type, project_data, creative_images)
-                if not approved_url:
-                    assistant_messages.append(f'لا توجد نسخة معتمدة محفوظة من خريطة {label} لإعادة إدراجها؛ لم يتم طلب خريطة جديدة من جوجل.')
+                map_url = (_latest_canonical_map_url(
+                    map_type, project_data, creative_images,
+                    tenant_id=tenant_id, presentation_id=presentation_id
+                ) if refresh_requested else _approved_canonical_map_url(map_type, project_data, creative_images))
+                if not map_url:
+                    missing_text = (
+                        f'لا توجد نسخة محفوظة حديثة من خريطة {label} لتحديثها.'
+                        if refresh_requested else
+                        f'لا توجد نسخة معتمدة محفوظة من خريطة {label} لإعادة إدراجها؛ لم يتم طلب خريطة جديدة من جوجل.'
+                    )
+                    assistant_messages.append(missing_text)
                     executed.append({'tool': tool, 'status': 'failed', 'indexes': targets,
                                      'map_type': map_type, 'reason': 'approved_map_missing'})
                     continue
@@ -4230,7 +4298,7 @@ def api_designer_chat():
                 for idx in targets:
                     slide = slides[idx] if isinstance(slides[idx], dict) else {}
                     updated_html, replaced = _replace_slide_with_approved_map(
-                        slide.get('html', ''), map_type, approved_url
+                        slide.get('html', ''), map_type, map_url
                     )
                     if not replaced:
                         assistant_messages.append(f'تعذر العثور على موضع خريطة {label} في الشريحة رقم {idx + 1}؛ لم يتم تغيير الشريحة.')
@@ -4249,10 +4317,14 @@ def api_designer_chat():
                     slides[idx] = slide
                     successful_targets.append(idx)
                 if successful_targets:
-                    assistant_messages.append(f'تمت إعادة إدراج خريطة {label} المعتمدة في الشرائح المحددة دون توليد نسخة من جوجل.')
+                    assistant_messages.append(
+                        f"تم تحديث خريطة {label} في الشرائح المحددة من أحدث نسخة محفوظة دون توليد نسخة من جوجل."
+                        if refresh_requested else
+                        f'تمت إعادة إدراج خريطة {label} المعتمدة في الشرائح المحددة دون توليد نسخة من جوجل.'
+                    )
                 executed.append({'tool': tool, 'status': 'success' if successful_targets else 'failed',
                                  'indexes': successful_targets, 'map_type': map_type,
-                                 'source': 'approved_persisted_map'})
+                                 'source': 'latest_persisted_map' if refresh_requested else 'approved_persisted_map'})
             elif tool in ('insert_financial_chart', 'update_financial_chart'):
                 chart_type = str(params.get('chart_type') or 'waterfall').lower()
                 targets = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)

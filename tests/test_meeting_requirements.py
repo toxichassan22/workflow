@@ -7420,6 +7420,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         plan = module._designer_deterministic_plan('أعد تحميل الخريطة للشريحة رقم 1', slides, 0, [0])
         self.assertEqual(plan['actions'][0]['tool'], 'insert_canonical_map')
         self.assertEqual(plan['actions'][0]['params']['map_type'], 'catchment')
+        self.assertTrue(plan['actions'][0]['params']['refresh'])
+
+        update_plan = module._designer_deterministic_plan('حدّث الخريطة في الشريحة رقم 1', slides, 0, [0])
+        self.assertEqual(update_plan['actions'][0]['tool'], 'insert_canonical_map')
+        self.assertTrue(update_plan['actions'][0]['params']['refresh'])
 
         creative = {
             'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/approved.png'},
@@ -7437,6 +7442,35 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         creative['map_approvals']['catchment'] = False
         self.assertEqual(module._approved_canonical_map_url('catchment', {}, creative), '')
+
+    def test_explicit_map_refresh_uses_latest_saved_map_even_before_reapproval(self):
+        module = self.application_module
+        map_file = tempfile.NamedTemporaryFile(dir=ROOT, suffix='_latest.png', delete=False)
+        map_path = map_file.name
+        map_file.write(b'latest-map')
+        map_file.close()
+        self.addCleanup(lambda: os.path.exists(map_path) and os.unlink(map_path))
+
+        with self.app.app_context():
+            db.add_map_image(
+                self.tenant_a, 'catchment', map_path, '##MAP_CATCHMENT##',
+                presentation_id='pres-refresh-map', metadata={}
+            )
+            latest = module._latest_canonical_map_url(
+                'catchment',
+                {'tenantCreativeImages': {
+                    'map_approvals': {'catchment': False},
+                    'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/old.png'},
+                }},
+                {
+                    'map_approvals': {'catchment': False},
+                    'map_placeholders': {'##MAP_CATCHMENT##': '/uploads/maps/old-browser.png'},
+                },
+                tenant_id=self.tenant_a,
+                presentation_id='pres-refresh-map',
+            )
+
+        self.assertTrue(latest.endswith(os.path.basename(map_path)))
 
     def test_untouched_financial_study_is_not_sent_as_approved_tables(self):
         """The section snapshots itself for every project, so defaults must not become facts."""
