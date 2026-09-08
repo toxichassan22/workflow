@@ -535,6 +535,40 @@
       background-color: rgba(59, 110, 145, .1);
     }
 
+    .ge-slide-edit-controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 6px;
+      padding: 8px 10px;
+      background: #f8fbfd;
+      border-bottom: 1px solid var(--line);
+      direction: rtl;
+    }
+
+    .ge-slide-edit-controls button {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--pd);
+      padding: 5px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .ge-slide-edit-controls button.active {
+      background: var(--pd);
+      border-color: var(--pd);
+      color: #fff;
+    }
+
+    .slide-element-editable {
+      cursor: move !important;
+      outline: 1px dashed rgba(37, 75, 102, .68);
+      outline-offset: 3px;
+    }
+
     :root {
       --p: #3B6E91;
       --pd: #254B66;
@@ -21281,6 +21315,7 @@
 
     let activeSlideIndex = 0;
     const slideInlineEditStates = {};
+    const slideElementEditStates = {};
     const TENANT_PRESENTATION_SECTION_TITLES = {
       overview: 'نبذة عن المشروع', components: 'مكونات المشروع', land: 'تحليل الأرض',
       location: 'تحليل الموقع الجغرافي', market: 'تحليل السوق', timeline: 'الجدول الزمني',
@@ -21699,7 +21734,7 @@
     function enableSlideInlineEditing(stage, index) {
       const slide = stage.querySelector('.slide');
       if (!slide) return;
-      const enabled = hasPermission('create_presentation');
+      const enabled = hasPermission('create_presentation') && !!slideInlineEditStates[index];
       const seen = new Set();
       collectSlideTextNodes(slide).forEach(node => {
         const el = node.parentElement;
@@ -21729,6 +21764,124 @@
       });
       // Re-fit the slide when toggling edit mode.
       autoFitSlideContent(stage);
+    }
+
+    function slideElementPath(root, element) {
+      const path = [];
+      let node = element;
+      while (node && node !== root) {
+        const parent = node.parentElement;
+        if (!parent) return null;
+        path.unshift(Array.prototype.indexOf.call(parent.children, node));
+        node = parent;
+      }
+      return node === root ? path : null;
+    }
+
+    function elementAtSlidePath(root, path) {
+      let node = root;
+      for (const index of path || []) {
+        if (!node || !node.children || !node.children[index]) return null;
+        node = node.children[index];
+      }
+      return node;
+    }
+
+    function slideDragTarget(slide, source) {
+      if (!slide || !source || source === slide) return null;
+      if (source.closest('[contenteditable], .presentation-chrome-logo, [data-canonical-map]')) return null;
+      let node = source.nodeType === 1 ? source : source.parentElement;
+      while (node && node !== slide) {
+        const style = window.getComputedStyle(node);
+        if (node.matches('[data-company-logo-placement], [data-team-logo-placement], img:not(.presentation-chrome-logo)')
+          || style.position === 'absolute') return node;
+        node = node.parentElement;
+      }
+      return null;
+    }
+
+    function commitSlideElementMove(stage, index, target, path, dx, dy) {
+      const slideData = tenantSlidesData[index];
+      if (!slideData || !slideData.html || (!dx && !dy)) return;
+      const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
+      const rawRoot = rawDoc.querySelector('.slide');
+      if (!rawRoot) return;
+      let rawTarget = null;
+      const placement = target.getAttribute('data-company-logo-placement')
+        || target.getAttribute('data-team-logo-placement');
+      if (placement) {
+        const attr = target.hasAttribute('data-company-logo-placement')
+          ? 'data-company-logo-placement' : 'data-team-logo-placement';
+        const safePlacement = String(placement).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        rawTarget = rawRoot.querySelector('[' + attr + '="' + safePlacement + '"]');
+      }
+      rawTarget = rawTarget || elementAtSlidePath(rawRoot, path);
+      if (!rawTarget) return;
+
+      const nextX = (Number(target.dataset.manualTranslateX) || 0) + dx;
+      const nextY = (Number(target.dataset.manualTranslateY) || 0) + dy;
+      const transform = 'translate(' + Math.round(nextX) + 'px, ' + Math.round(nextY) + 'px)';
+      target.dataset.manualTranslateX = String(Math.round(nextX));
+      target.dataset.manualTranslateY = String(Math.round(nextY));
+      target.style.transform = transform;
+      rawTarget.dataset.manualTranslateX = String(Math.round(nextX));
+      rawTarget.dataset.manualTranslateY = String(Math.round(nextY));
+      rawTarget.style.transform = transform;
+      slideData.html = rawRoot.outerHTML;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      triggerAutoSaveDraft();
+      toast('تم تحريك العنصر وحفظ موضعه في الشريحة');
+    }
+
+    function enableSlideElementDragging(stage, index) {
+      const slide = stage.querySelector('.slide');
+      if (!slide) return;
+      const enabled = hasPermission('create_presentation') && !!slideElementEditStates[index];
+      slide.classList.toggle('slide-element-editing', enabled);
+      if (!enabled) return;
+      stage.addEventListener('pointerdown', function handleSlidePointerDown(event) {
+        if (event.button !== 0) return;
+        const target = slideDragTarget(slide, event.target);
+        if (!target) return;
+        const path = slideElementPath(slide, target);
+        if (!path) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const startTranslateX = Number(target.dataset.manualTranslateX) || 0;
+        const startTranslateY = Number(target.dataset.manualTranslateY) || 0;
+        let moved = false;
+        target.classList.add('slide-element-editable');
+        target.setPointerCapture?.(event.pointerId);
+
+        const handlePointerMove = moveEvent => {
+          const dx = (moveEvent.clientX - startX) / scale;
+          const dy = (moveEvent.clientY - startY) / scale;
+          if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+          target.style.transform = 'translate(' + Math.round(startTranslateX + dx) + 'px, ' + Math.round(startTranslateY + dy) + 'px)';
+        };
+        const finish = endEvent => {
+          const dx = (endEvent.clientX - startX) / scale;
+          const dy = (endEvent.clientY - startY) / scale;
+          target.releasePointerCapture?.(event.pointerId);
+          target.removeEventListener('pointermove', handlePointerMove);
+          target.removeEventListener('pointerup', finish);
+          target.removeEventListener('pointercancel', finish);
+          target.classList.remove('slide-element-editable');
+          if (moved) commitSlideElementMove(stage, index, target, path, dx, dy);
+        };
+        target.addEventListener('pointermove', handlePointerMove);
+        target.addEventListener('pointerup', finish);
+        target.addEventListener('pointercancel', finish);
+      });
+    }
+
+    function toggleSlideElementEditing(index) {
+      slideElementEditStates[index] = !slideElementEditStates[index];
+      renderTenantSlides();
+      toast(slideElementEditStates[index] ? 'تم تفعيل تحريك عناصر الشريحة' : 'تم إيقاف تحريك العناصر');
     }
 
     function stopEditEvent(e) { e.stopPropagation(); }
@@ -21865,6 +22018,26 @@
         container.id = 'slide-card-' + i;
         container.style.cssText = 'margin-bottom:24px; position:relative;';
         container.onclick = () => selectTenantSlide(i);
+        if (hasPermission('create_presentation')) {
+          const editControls = document.createElement('div');
+          editControls.className = 'ge-slide-edit-controls';
+          editControls.innerHTML =
+            '<button type="button" class="' + (slideInlineEditStates[i] ? 'active' : '') + '" aria-label="تعديل نص الشريحة">'
+            + (slideInlineEditStates[i] ? 'إيقاف تعديل النص' : 'تعديل النص') + '</button>'
+            + '<button type="button" class="' + (slideElementEditStates[i] ? 'active' : '') + '" aria-label="تحريك عناصر الشريحة">'
+            + (slideElementEditStates[i] ? 'إيقاف تحريك العناصر' : 'تحريك العناصر') + '</button>';
+          const editTextButton = editControls.querySelector('button:first-child');
+          const moveElementButton = editControls.querySelector('button:last-child');
+          editTextButton.onclick = event => {
+            event.stopPropagation();
+            toggleSlideInlineEditing(i);
+          };
+          moveElementButton.onclick = event => {
+            event.stopPropagation();
+            toggleSlideElementEditing(i);
+          };
+          container.appendChild(editControls);
+        }
         const stage = document.createElement('div');
         stage.className = 'tenant-slide-stage';
         stage.style.setProperty('--stage-w', '960px');
@@ -21894,6 +22067,7 @@
           }
           autoFitSlideContent(stage);
           enableSlideInlineEditing(stage, i);
+          enableSlideElementDragging(stage, i);
         }
         cursor = end;
         if (cursor < containers.length) {

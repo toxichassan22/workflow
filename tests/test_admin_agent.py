@@ -378,6 +378,14 @@ class AdminAgentTests(unittest.TestCase):
         self.assertIn('right:54px;top:92px', fallback)
         self.assertIn('/tenant-assets/company.png', fallback)
 
+    def test_presentation_preview_exposes_text_and_element_editing(self):
+        source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('toggleSlideInlineEditing', source)
+        self.assertIn('toggleSlideElementEditing', source)
+        self.assertIn('commitSlideElementMove', source)
+        self.assertIn('data-company-logo-placement', source)
+        self.assertIn('تحريك العناصر', source)
+
 
 if __name__ == '__main__':
     unittest.main()
