@@ -264,6 +264,53 @@ class AdminAgentTests(unittest.TestCase):
         self.assertIn('##LOGO##', mocked.call_args.args[0])
         self.assertIn('##PROJECT_LOGO##', mocked.call_args.args[0])
 
+    def test_workspace_slide_edit_resolves_selected_team_logo(self):
+        """A team entity logo must stay distinct from the tenant/company logo."""
+        team_html = '<div class="slide" style="width:1280px;height:720px;"><img src="##TEAM_LOGO_1##" alt="Vision Gate"></div>'
+        response = _reply_with([], text=json.dumps({
+            'html': team_html,
+            'response': 'تمت إضافة شعار الجهة',
+        }, ensure_ascii=False))
+        workspace = {
+            'projectData': {
+                'project_name': 'مشروع تجريبي',
+                'team_selection': json.dumps({
+                    'excluded': [],
+                    'roles': {},
+                    'local': [{
+                        'localId': 'vision-gate',
+                        'name': 'Vision Gate',
+                        'role': 'التطوير',
+                        'logoFileId': 'team-logo-1',
+                    }],
+                }, ensure_ascii=False),
+            },
+            'slidesData': [{
+                'title': 'فريق العمل',
+                'type': 'content',
+                'html': '<div class="slide" style="width:1280px;height:720px;"><div>قديم</div></div>',
+            }],
+        }
+        with self.app.app_context():
+            with patch.object(self.application_module, '_generation_project_image_url',
+                              return_value='/uploads/creative/team-logo-1.png'), \
+                    patch.object(self.application_module, 'call_zai_chat', return_value=response) as mocked:
+                result = self.application_module._execute_agent_action(
+                    self.tenant,
+                    {'tool': 'edit_workspace_slide', 'params': {
+                        'slide_index': 0,
+                        'instruction': 'أضف شعار Vision Gate في مكانه المخصص داخل فريق العمل',
+                    }},
+                    workspace=workspace,
+                )
+
+        self.assertEqual(result['status'], 'success', result)
+        rendered = result['data']['slidesData'][0]['html']
+        self.assertIn('/uploads/creative/team-logo-1.png', rendered)
+        self.assertNotIn('##TEAM_LOGO_1##', rendered)
+        self.assertIn('Vision Gate', mocked.call_args.args[0])
+        self.assertIn('##TEAM_LOGO_1##', mocked.call_args.args[0])
+
 
 if __name__ == '__main__':
     unittest.main()

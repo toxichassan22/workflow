@@ -14015,6 +14015,7 @@ def api_training_chat():
 يمكن تمرير `slide_indices` كمصفوفة لتعديل أكثر من شريحة، وتنفذ الأداة التعديل لكل شريحة مع تحقق بعد كل تعديل.
 عند طلب إضافة شعار الشركة أو شعار المشروع إلى شريحة، استخدم الشعار الموجود فعلياً في الهوية أو بيانات المشروع:
 `##LOGO##` لشعار الشركة و`##PROJECT_LOGO##` لشعار المشروع. لا تكتب اسم الشعار كنص، ولا تستخدم رابطاً خارجياً أو صورة بديلة.
+شعار جهة من فريق العمل ليس شعار الشركة: استخدم الرمز `##TEAM_LOGO_N##`، حيث يطابق `N` ترتيب الجهة في قائمة فريق العمل الحالية، ولا تستبدله بـ `##LOGO##`.
 مكان شعار الشركة الافتراضي هو الهيدر المعتمد للشريحة، ويجب الحفاظ على الشعار الموجود إذا كان الهيدر يحتويه.
 
 ### 20. حفظ مساحة العمل:
@@ -15032,6 +15033,28 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
                 if not isinstance(creative_images, dict):
                     creative_images = {}
                 _prepare_generation_logo_context(project_data, branding, tenant_id)
+                creative_images = _augment_generation_images(creative_images, project_data, tenant_id)
+                team_logo_lines = []
+                for team_index, member in enumerate(creative_images.get('team_members') or [], 1):
+                    if not isinstance(member, dict):
+                        continue
+                    name = str(member.get('name') or f'الجهة {team_index}').strip()
+                    role = str(member.get('role') or '').strip()
+                    token = f'##TEAM_LOGO_{team_index}##'
+                    if member.get('logo'):
+                        team_logo_lines.append(
+                            f'- {name}' + (f' — {role}' if role else '')
+                            + f': الشعار متوفر ويجب استخدام {token} عند طلب شعار هذه الجهة.'
+                        )
+                    else:
+                        team_logo_lines.append(
+                            f'- {name}' + (f' — {role}' if role else '')
+                            + ': لا يوجد شعار مرفوع لهذه الجهة؛ لا تنشئ بديلاً.'
+                        )
+                team_logo_context = (
+                    '\n'.join(team_logo_lines)
+                    if team_logo_lines else 'لا توجد شعارات جهات فريق عمل متاحة في مساحة هذا المشروع.'
+                )
                 dynamic_rules = build_design_rules(branding)
                 edited = []
                 for index in indices:
@@ -15051,6 +15074,8 @@ html يجب أن يكون div class=\"slide\" واحداً كاملاً، بلا
 قواعد الشعارات:
 - شعار الشركة المعتمد يُستخدم بالرمز `##LOGO##` فقط، وتقوم المنظومة باستبداله تلقائياً بالشعار المرفوع للشركة.
 - شعار المشروع يُستخدم بالرمز `##PROJECT_LOGO##` فقط عند توفره، ولا تستبدله بشعار الشركة.
+- شعار جهة فريق العمل يُستخدم بالرمز `##TEAM_LOGO_N##` حسب ترتيب الجهة في القائمة التالية، ولا تستخدم `##LOGO##` له:
+{team_logo_context}
 - عند طلب إضافة شعار، ضعه في موضع الهوية المخصص داخل الهيدر أو الموضع الذي طلبه المستخدم، مع الحفاظ على أبعاده وتباينه.
 - لا تكتب اسم الشعار كنص ولا تنشئ رابطاً خارجياً ولا تستخدم صورة بديلة.
 
