@@ -4829,8 +4829,15 @@ class MeetingRequirementsTests(unittest.TestCase):
             '<div class="slide"><img src="##MAP_OVERVIEW##"></div>', 'map_overview',
             {'location_data_fetched_at': '2026-01-02T10:30:00Z'}, {'primary_color': '#123456'},
             map_placeholders={'##MAP_OVERVIEW##': '/uploads/maps/overview.png'})
-        self.assertIn('آخر تحديث لبيانات الموقع', stamped)
-        self.assertIn('2026-01-02 13:30', stamped)
+        self.assertIn('تم قياس زمن القيادة بتاريخ 02 / 01 / 2026 م (م = ميلادي) الساعة 01:30 م', stamped)
+        self.assertNotIn('آخر تحديث لبيانات الموقع', stamped)
+        self.assertNotIn('بتوقيت السعودية', stamped)
+        self.assertEqual(
+            self.application_module.slide_engine._location_data_timestamp(
+                {'location_data_fetched_at': '2026-01-02T00:05:00Z'}
+            ),
+            '02 / 01 / 2026 م (م = ميلادي) الساعة 03:05 ص',
+        )
         self.assertIn('input.dataset.lastValidValue', index_source)
         self.assertIn('تجاوز 100%', index_source)
         finance_body = index_source.split('function financeMovementRows(', 1)[1].split('function fundFeeScheduleRows(', 1)[0]

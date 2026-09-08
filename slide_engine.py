@@ -5680,7 +5680,12 @@ def _location_data_timestamp(project_data):
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         saudi = parsed.astimezone(timezone(timedelta(hours=3)))
-        return saudi.strftime('%Y-%m-%d %H:%M') + ' بتوقيت السعودية'
+        hour = saudi.hour % 12 or 12
+        period = 'ص' if saudi.hour < 12 else 'م'
+        return (
+            f'{saudi.day:02d} / {saudi.month:02d} / {saudi.year:04d} م '
+            f'(م = ميلادي) الساعة {hour:02d}:{saudi.minute:02d} {period}'
+        )
     except (TypeError, ValueError):
         return value
 
@@ -5689,7 +5694,7 @@ def _inject_location_data_timestamp(html, project_data):
     timestamp = _location_data_timestamp(project_data)
     if not timestamp or timestamp in html:
         return html
-    label = html_lib.escape('آخر تحديث لبيانات الموقع: ' + timestamp)
+    label = html_lib.escape('تم قياس زمن القيادة بتاريخ ' + timestamp)
     marker = (f'<div data-location-data-timestamp style="position:absolute;bottom:40px;right:24px;z-index:20;'
               f'font-size:11px;background:#ffffff;color:#172033;padding:4px 8px;border-radius:5px;">{label}</div>')
     return re.sub(r'(</div>\s*)$', marker + r'\1', html, count=1)
