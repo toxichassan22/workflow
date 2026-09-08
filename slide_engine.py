@@ -5522,7 +5522,7 @@ def build_slide_user_msg(slide, slide_num, total_slides, branding, project_data=
         'الصور ليست عنصراً افتراضياً في كل شريحة: استخدم فقط الصور والخرائط والرموز التي تنص عليها الخطة لهذه الشريحة. لا تضف صورة إلى شريحة نص أو جدول بلا حاجة، ولا تكرر أصلاً مرئياً في موضع آخر، مع الحفاظ على توزيع معقول للصور المتاحة عبر العرض الكامل',
         'الخرائط مسموحة في شرائح تحليل الموقع الجغرافي أو تحليل الأرض عند طلبها صراحة، أو في ملخص الموقع/الخريطة التنفيذي المحدد صراحة. في الجدول الزمني والدراسة المالية والمخططات والتصورات الخارجية والداخلية وفريق العمل وبقية الأقسام: ممنوع استخدام ##MAP_OVERVIEW## أو ##MAP_LANDMARKS## أو ##MAP_ACCESS## أو ##MAP_CATCHMENT## أو أي صورة من /uploads/maps/',
         'التزم بأساسيات التوليد دون استثناء: RTL، هوية الشركة، الهيدر والفوتر النظاميان، جذر slide واحد، تباين واضح، تدفق طبيعي بلا تداخل أو قص، وعدم اختراع أرقام أو نصوص أو صور أو أيقونات',
-        'استمرارية الخلفية إلزامية: إذا اخترت أو وجدت في الشريحة سطحاً داكناً، اجعل الـ canvas كله داكناً ومتصلاً. ممنوع وضع لوحة بيضاء كبيرة أو إطار أبيض يحمل كل المحتوى فوق الخلفية الداكنة؛ استخدم أسطحاً داكنة شفافة أو قريبة من لون الجذر، ونصاً فاتحاً وحدوداً خفيفة. عند التعديل حافظ على خلفية الجذر وهندسته ولا تعِد بناء الشريحة بلغة بصرية متعارضة',
+        'سطح شرائح المحتوى والفهرس والتحليلات فاتح وموحد: استخدم background أبيض أو فاتح لجذر slide مع نص داكن مقروء، ولا تضع إطاراً داكناً حول صفحة بيضاء ولا تحول الشريحة إلى واجهة داكنة. الخلفية الداكنة الكاملة محجوزة للغلاف والخاتمة وفواصل الأقسام ذات الصورة، وخلفية كل شعار مستقلة حسب تباين الشعار ولا تتغير بتغيير سطح الشريحة',
         'في قسم دراسة السوق استخدم horizontal_bar واحداً فقط في مقارنة المنافسين. ثبّت في هذه الشريحة الجدول يميناً والرسم يساراً، واترك لـ SOL حرية ابتكار التصميم البصري لبقية شرائح السوق من دون فرض جداول أو بطاقات أو شبكة محددة، ومن دون خرائط أو صور فوتوغرافية أو رسوم إضافية. انقل كل البيانات الواردة في نطاق الدراسة والمنافسين والملخص التنفيذي لسوق المشروع وملخص دراسة السوق والمصادر دون حذف أو إعادة صياغة للأرقام.',
         'لا تنشئ شريحة كاملة لإجابة قصيرة أو قيمة واحدة؛ ادمجها مع أقرب محتوى منطقي داخل المحور نفسه',
         'استخدم فواصل الآلاف بصريًا للمبالغ والمساحات والكميات دون تقريب، ولا تستخدمها للسنوات أو الهواتف أو الوثائق أو المعرفات أو الإحداثيات',
@@ -8742,6 +8742,8 @@ def build_index_slide(slide, slide_num, total_slides, branding=None, project_dat
     branding = branding or {}
     slide = slide or {}
     background = normalize_hex_color(branding.get('background_color'), '#f8fafc')
+    if contrast_ratio('#1e293b', background) < 4.5:
+        background = '#ffffff'
     text_color = readable_text_color(branding.get('text_color'), background)
     primary = readable_text_color(branding.get('primary_color'), background, (text_color,))
     accent = readable_text_color(branding.get('accent_color'), background, (primary, text_color))
@@ -9431,86 +9433,16 @@ def _slide_root_surface(html):
     return _css_solid_color(styles.get('background-color') or styles.get('background'))
 
 
-_LIGHT_SLIDE_SURFACE_COLORS = {
-    '#ffffff', '#fff', '#fafafa', '#f8fafc', '#f4f9fc', '#f5f5f5',
-    '#f0f4f8', '#eef2f7', '#f1f5f9', '#e2e8f0', '#dbe5ed', '#e5e7eb',
-}
-
-
 def _is_dark_slide_surface(surface):
-    """Return whether a solid slide surface can carry light content."""
+    """Return whether a solid surface is dark enough to have carried light text."""
     color = normalize_hex_color(surface, '')
     return bool(color and contrast_ratio('#ffffff', color) >= 4.5)
 
 
-def _is_light_slide_surface_color(value):
-    """Recognize the pale fills that become a broken white panel on a dark slide."""
-    color = _css_solid_color(value)
-    if not color:
-        return False
-    normalized = normalize_hex_color(color, '')
-    if normalized in _LIGHT_SLIDE_SURFACE_COLORS:
-        return True
-    # Catch common near-white custom values without treating gold/accent fills as panels.
-    channels = [int(normalized[index:index + 2], 16) for index in (1, 3, 5)]
-    return min(channels) >= 232
-
-
-def _dark_slide_style(style, surface, depth=1, exempt=False):
-    """Reconcile inline colors with a dark SOL-owned canvas.
-
-    SOL is allowed to choose the composition, but a later edit must not turn a dark
-    canvas into a dark frame around a white report page.  Keep small intentional
-    surfaces as a translucent tone and flatten direct, page-sized carriers.
-    """
-    if exempt:
-        return style
-    dark_tone = 'transparent' if depth <= 1 else 'rgba(255,255,255,0.08)'
-
-    def replace_background(match):
-        declaration = match.group(0)
-        value_match = re.search(r':\s*([^;]+)', declaration)
-        raw_value = value_match.group(1).strip() if value_match else ''
-        if not _is_light_slide_surface_color(raw_value):
-            return declaration
-        important = ' !important' if re.search(r'!important\s*$', raw_value, flags=re.IGNORECASE) else ''
-        return re.sub(r':\s*[^;]+', ':' + dark_tone + important, declaration, count=1)
-
-    style = re.sub(
-        r'\bbackground(?:-color)?\s*:\s*[^;]+',
-        replace_background,
-        style,
-        flags=re.IGNORECASE,
-    )
-
-    def replace_border(match):
-        declaration = match.group(0)
-        value_match = re.search(r'(#(?:[0-9a-f]{3}|[0-9a-f]{6})|white|rgba?\([^)]*\))', declaration, flags=re.IGNORECASE)
-        if not value_match or not _is_light_slide_surface_color(value_match.group(1)):
-            return declaration
-        return declaration[:value_match.start(1)] + 'rgba(255,255,255,0.22)' + declaration[value_match.end(1):]
-
-    style = re.sub(
-        r'\bborder(?:-(?:top|right|bottom|left))?\s*:\s*[^;]+',
-        replace_border,
-        style,
-        flags=re.IGNORECASE,
-    )
-
-    def replace_dark_text(match):
-        declaration = match.group(0)
-        value_match = re.search(r':\s*([^;]+)', declaration)
-        raw_value = value_match.group(1).strip() if value_match else ''
-        color = _css_solid_color(raw_value)
-        if not color or contrast_ratio('#ffffff', color) < 4.5:
-            return declaration
-        important = ' !important' if re.search(r'!important\s*$', raw_value, flags=re.IGNORECASE) else ''
-        return re.sub(r':\s*[^;]+', ':#f8fafc' + important, declaration, count=1)
-
-    return re.sub(r'(?<![-\w])color\s*:\s*[^;]+', replace_dark_text, style, flags=re.IGNORECASE)
-
-
 def _normalize_dark_slide_surface(html, slide_type='content'):
+    # Kept as a compatibility shim for older callers; ordinary content is now light.
+    return _normalize_light_content_surface(html, slide_type=slide_type)
+
     """Keep edited/generated dark slides dark instead of wrapping them in white pages.
 
     This is deliberately limited to content-like slides. Covers, closing slides, section
@@ -9584,37 +9516,151 @@ def _normalize_dark_slide_surface(html, slide_type='content'):
     return html[:inner_start] + ''.join(pieces) + html[inner_end:]
 
 
+def _light_content_style(style, inherited_surface='#ffffff', depth=1, exempt=False):
+    """Repair legacy dark-surface edits while keeping intentional brand blocks intact."""
+    if exempt:
+        return style, inherited_surface
+
+    def replace_legacy_background(match):
+        declaration = match.group(0)
+        value_match = re.search(r':\s*([^;]+)', declaration)
+        raw_value = value_match.group(1).strip() if value_match else ''
+        normalized = raw_value.lower().replace(' ', '')
+        if normalized in (
+            'transparent', 'rgba(255,255,255,0.08)', 'rgba(255,255,255,.08)',
+            'rgba(255,255,255,0.22)', 'rgba(255,255,255,.22)',
+        ):
+            replacement = '#f8fafc' if depth > 1 else '#ffffff'
+            return re.sub(r':\s*[^;]+', ':' + replacement, declaration, count=1)
+        return declaration
+
+    style = re.sub(
+        r'\bbackground(?:-color)?\s*:\s*[^;]+',
+        replace_legacy_background,
+        style,
+        flags=re.IGNORECASE,
+    )
+    style = re.sub(
+        r'(\bborder(?:-(?:top|right|bottom|left))?\s*:\s*[^;]*?)'
+        r'(?:white|#fff(?:fff)?|rgba\(\s*255\s*,\s*255\s*,\s*255\s*,\s*0?\.22\s*\))',
+        r'\1#e2e8f0',
+        style,
+        flags=re.IGNORECASE,
+    )
+
+    properties = _inline_style_properties(style)
+    surface = _css_solid_color(properties.get('background-color') or properties.get('background')) or inherited_surface
+    color_value = properties.get('color')
+    color = _css_solid_color(color_value)
+    if color and surface and contrast_ratio(color, surface) < 4.5:
+        readable = readable_text_color('#1e293b', surface, ('#0f172a', '#334155'))
+        style = re.sub(
+            r'(\bcolor\s*:)\s*[^;]+', r'\1' + readable, style,
+            count=1, flags=re.IGNORECASE,
+        )
+    return style, surface
+
+
+def _normalize_light_content_surface(html, slide_type='content'):
+    """Make ordinary content slides light; image-led slides keep their own contracts.
+
+    Some stored slides were previously treated as intentionally dark and received a
+    transparent/light-text content layer. Rebuild those slides on the normal white
+    content canvas, but leave logo contrast containers and image-led slide types alone.
+    """
+    if not html or slide_type in ('cover', 'closing', 'moodboard', 'section_divider'):
+        return html
+    root_match = re.search(
+        r'<(?P<tag>div)\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\2[^>]*>',
+        html, flags=re.IGNORECASE,
+    )
+    if not root_match:
+        return html
+
+    root_tag = root_match.group(0)
+    style_match = re.search(r'\bstyle\s*=\s*(["\'])(.*?)\1', root_tag, flags=re.IGNORECASE | re.DOTALL)
+    root_style = style_match.group(2) if style_match else ''
+    root_properties = _inline_style_properties(root_style)
+    root_surface = _css_solid_color(root_properties.get('background-color') or root_properties.get('background'))
+    legacy_dark = (
+        _is_dark_slide_surface(root_surface)
+        or bool(re.search(r'data-slide-surface\s*=\s*["\']dark["\']', root_tag, flags=re.IGNORECASE))
+        or bool(re.search(r'\bcolor\s*:\s*(?:#fff(?:fff)?|white)\b', root_style, flags=re.IGNORECASE))
+    )
+    root_tag = re.sub(r'\sdata-slide-surface\s*=\s*["\']dark["\']', '', root_tag, flags=re.IGNORECASE)
+    root_tag = _set_tag_style(
+        root_tag,
+        ('background', 'background-color', 'background-image', 'color'),
+        'background:#ffffff;background-image:none;color:#1e293b;',
+    )
+    html = html[:root_match.start()] + root_tag + html[root_match.end():]
+    if not legacy_dark:
+        return html
+
+    root_match = re.search(
+        r'<(?P<tag>div)\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\2[^>]*>',
+        html, flags=re.IGNORECASE,
+    )
+    if not root_match:
+        return html
+    root_end = _slide_element_end(html, root_match)
+    inner_start = root_match.end()
+    inner_end = max(inner_start, root_end - len('</div>'))
+    inner = html[inner_start:inner_end]
+    tag_re = re.compile(r'<(?P<closing>/)?(?P<tag>[a-z][\w:-]*)(?P<attrs>\s[^>]*)?>', re.IGNORECASE)
+    void_tags = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
+    pieces = []
+    cursor = 0
+    surface_stack = ['#ffffff']
+    for match in tag_re.finditer(inner):
+        pieces.append(inner[cursor:match.start()])
+        tag = match.group('tag').lower()
+        if match.group('closing'):
+            if len(surface_stack) > 1:
+                surface_stack.pop()
+            pieces.append(match.group(0))
+            cursor = match.end()
+            continue
+        attrs = match.group('attrs') or ''
+        class_match = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', attrs, flags=re.IGNORECASE | re.DOTALL)
+        class_text = (class_match.group(2) if class_match else '').lower()
+        exempt = (
+            tag in ('header', 'footer', 'style', 'script')
+            or 'presentation-chrome-logo' in class_text
+            or re.search(r'\blogo\b', class_text)
+            or re.search(r'\bdata-slide-(?:header|footer)\s*=', attrs, flags=re.IGNORECASE)
+            or re.search(r'\bdata-cover-overlay\s*=', attrs, flags=re.IGNORECASE)
+        )
+        style_match = re.search(r'\bstyle\s*=\s*(["\'])(.*?)\1', attrs, flags=re.IGNORECASE | re.DOTALL)
+        rewritten = match.group(0)
+        current_surface = surface_stack[-1]
+        if style_match and not exempt:
+            new_style, current_surface = _light_content_style(
+                style_match.group(2), current_surface, depth=len(surface_stack), exempt=False)
+            new_attrs = attrs[:style_match.start(2)] + new_style + attrs[style_match.end(2):]
+            attrs_start = match.start('attrs') - match.start()
+            attrs_end = match.end('attrs') - match.start()
+            rewritten = match.group(0)[:attrs_start] + new_attrs + match.group(0)[attrs_end:]
+        pieces.append(rewritten)
+        if tag not in void_tags and not match.group(0).rstrip().endswith('/>'):
+            surface_stack.append(current_surface)
+        cursor = match.end()
+    pieces.append(inner[cursor:])
+    return html[:inner_start] + ''.join(pieces) + html[inner_end:]
+
+
 def _presentation_chrome_html(title, project_title, company_name, primary, accent,
                               footer_background, footer_text, footer_accent, counter,
                               project_logo=False, slide_surface=None):
     """Return the single canonical light header and footer for content slides."""
-    surface = _css_solid_color(slide_surface)
-    dark_slide_surface = bool(
-        surface and contrast_ratio('#ffffff', surface) >= 4.5
-    )
-    if dark_slide_surface:
-        # SOL owns the slide canvas. When it deliberately chose a dark solid
-        # surface, the managed chrome must blend into that surface instead of
-        # introducing a separate white strip above it.
-        chrome_background = surface
-        chrome_text = readable_text_color('#ffffff', surface, (footer_text,))
-        chrome_accent = readable_text_color(accent, surface, (chrome_text,))
-        header_style = (
-            f'position:absolute;top:0;right:0;left:0;height:56px;background:{chrome_background};'
-            f'border-bottom:2px solid {chrome_accent};'
-        )
-        footer_style = (
-            f'background:{chrome_background};border-top:1px solid rgba(255,255,255,.16);'
-        )
-        footer_surface_text = chrome_text
-        footer_surface_accent = chrome_accent
-    else:
-        chrome_text = primary
-        chrome_accent = accent
-        header_style = f'position:absolute;top:0;right:0;left:0;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
-        footer_style = f'background:{footer_background};border-top:1px solid #e2e8f0;'
-        footer_surface_text = footer_text
-        footer_surface_accent = footer_accent
+    # Content chrome stays light regardless of any stale/model-authored root fill.
+    # Logo backing is applied independently later by _apply_logo_contrast_styles.
+    chrome_text = primary
+    chrome_accent = accent
+    header_style = f'position:absolute;top:0;right:0;left:0;height:56px;background:#ffffff;border-bottom:2px solid {primary};'
+    footer_style = f'background:{footer_background};border-top:1px solid #e2e8f0;'
+    footer_surface_text = footer_text
+    footer_surface_accent = footer_accent
 
     logo_style = (
         'height:40px;width:auto;max-width:122px;object-fit:contain;display:inline-block;'
@@ -10014,11 +10060,10 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
         )
     )
     is_cover_or_closing = is_cover or is_closing
-    # Keep a dark SOL canvas coherent after generation or an AI edit.  The model may
-    # return a large white report panel even when the original slide was intentionally
-    # dark; flatten/re-tone that carrier before the managed chrome is added.
-    if not is_cover_or_closing:
-        html = _normalize_dark_slide_surface(html, slide_type=slide_type)
+    # Ordinary content slides use the light report canvas. Covers, closings, dividers,
+    # and moodboards keep their image-led contracts.
+    if not is_cover_or_closing and slide_type not in ('moodboard', 'section_divider'):
+        html = _normalize_light_content_surface(html, slide_type=slide_type)
     # Sol and the deterministic financial renderer use different chrome. Remove
     # both forms first so preview and export always receive the same one.
     if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
@@ -10267,7 +10312,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             # may already have the previous white header, so checking only for the
             # marker would preserve the color conflict after the new adaptive rule.
             html = _strip_existing_slide_chrome(html)
-            html = _normalize_dark_slide_surface(html, slide_type=slide_type)
+            html = _normalize_light_content_surface(html, slide_type=slide_type)
             html = _ensure_managed_chrome(
                 html, slide_title=item.get('title'), slide_num=index,
                 total_slides=total, branding=branding,

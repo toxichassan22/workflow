@@ -2722,13 +2722,12 @@ def api_ai_edit_slide():
     from auth import get_optional_tenant_id
     tenant_id = get_optional_tenant_id() or 'default'
     branding = db.get_branding(tenant_id) or {}
-    current_surface = slide_engine._slide_root_surface(slide_html)
-    surface_note = ''
-    if slide_engine._is_dark_slide_surface(current_surface):
-        surface_note = (
-            f"\nسطح الشريحة الحالي داكن ({current_surface}) ويجب الحفاظ عليه كما هو. "
-            "لا تضف لوحة بيضاء أو إطاراً أبيض كبيراً داخل الشريحة؛ أبق المحتوى على السطح الداكن أو على درجات داكنة شفافة."
-        )
+    requested_slide_type = data.get('slideType') or data.get('slide_type') or 'content'
+    surface_note = '' if requested_slide_type in ('cover', 'closing', 'section_divider', 'moodboard') else (
+        "\nهذه شريحة محتوى عادية: استخدم canvas أبيض أو فاتحاً موحداً، ولا تنشئ إطاراً داكناً حول صفحة بيضاء. "
+        "الخلفية الداكنة الكاملة محجوزة للغلاف والخاتمة وفواصل الأقسام ذات الصورة. "
+        "خلفية كل شعار مستقلة حسب لونه وتباينه، فلا تغيّر حاوية الشعار عند تغيير خلفية الشريحة."
+    )
 
     vision_image_uri = None
     try:
@@ -2766,7 +2765,6 @@ def api_ai_edit_slide():
         if slide_number is None:
             raw_index = data.get('slideIndex')
             slide_number = (int(raw_index) + 1) if raw_index is not None else 2
-        requested_slide_type = data.get('slideType') or data.get('slide_type') or 'content'
         html = postprocess_slide(
             html,
             int(slide_number),
@@ -3605,15 +3603,12 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
     if len(clean_html) > 150000:
         clean_html = clean_html[:150000]
 
-    current_surface = slide_engine._slide_root_surface(html)
-    surface_note = ''
-    if slide_engine._is_dark_slide_surface(current_surface):
-        surface_note = (
-            f"\n\n## عقد سطح الشريحة الحالي\n"
-            f"الجذر الحالي يستخدم الخلفية الداكنة {current_surface}. هذه الخلفية جزء من هوية التكوين ويجب أن تبقى كما هي. "
-            "عدّل العناصر الداخلية فقط، ولا تضف لوحة بيضاء أو إطاراً أبيض كبيراً يحمل المحتوى. "
-            "اجعل أي أسطح داخلية داكنة أو شفافة، والنصوص فاتحة، وحافظ على النسب والهوامش والتسلسل البصري الموجود."
-        )
+    surface_note = '' if slide_type in ('cover', 'closing', 'section_divider', 'moodboard') else (
+        "\n\n## عقد سطح شريحة المحتوى\n"
+        "هذه شريحة محتوى عادية ويجب أن تبقى على canvas أبيض أو فاتح موحد، لا على إطار داكن حول صفحة بيضاء. "
+        "استخدم اللون الأساسي في العناوين ورؤوس الجداول والمساحات المحدودة فقط، واترك الخلفية الداكنة الكاملة للغلاف والخاتمة وفواصل الأقسام ذات الصورة. "
+        "خلفية شعار الشركة وشعار المشروع مستقلة لكل شعار حسب لونه وتباينه؛ لا تغيّرها عند تغيير خلفية الشريحة."
+    )
 
     prompt = f"""{rules}{training_note}{vision_note}{surface_note}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
@@ -3637,7 +3632,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
    - ممنوع وضع أي رموز أسهم (استخدم كلمات: أعلى، أسفل، يمين، يسار).
    - خلو الشريحة تماماً من أي نص تعليمي (No How-To text).
    - الحفاظ على مقاس الشريحة القياسي 1280x720 و overflow:hidden دون أشرطة تمرير.
-   - استمرارية السطح: إذا كانت الشريحة الحالية داكنة، لا تستبدلها بإطار داكن حول صفحة بيضاء، ولا تضف background أبيض أو فاتحاً لحاوية كبيرة؛ يجب أن يظل المحتوى جزءاً من الـ canvas الداكن.
+   - سطح الشريحة: شرائح المحتوى العادية فاتحة وموحدة، ولا تُبنى كواجهة داكنة أو كإطار داكن حول صفحة بيضاء. حافظ على خلفية كل شعار مستقلة حسب لونه.
 7. حرية إبداعية وتصميمية مطلقة لجميع أنواع الشرائح (Full Creative Freedom):
    - تمتلك كامل الصلاحية والحرية المطلقة لتعديل أو إعادة ابتكار وتصميم أي شريحة يطلبها المستخدم بلا أي استثناء أو قيود نوعية:
      * شرائح الفصول والأقسام الرئيسية (Section Dividers / الفصول): لك مطلق الحرية في إعادة تصميمها بتخطيطات إبداعية كاملة (مثل: إضافة كروت ملخصة لمحاور القسم، خطوط زمنية، إبراز مؤشرات أو أرقام قياسية، تقسيم الشريحة أفقياً أو عمودياً Split View، دمج صورة معمارية مع بطاقة داكنة ملكية، تدرجات لونية، خطوط عريضة، إلخ).
@@ -13946,6 +13941,9 @@ def api_training_chat():
 {{"tool": "edit_workspace_slide", "params": {{"slide_index": 0, "instruction": "..."}}}}
 ```
 يمكن تمرير `slide_indices` كمصفوفة لتعديل أكثر من شريحة، وتنفذ الأداة التعديل لكل شريحة مع تحقق بعد كل تعديل.
+عند طلب إضافة شعار الشركة أو شعار المشروع إلى شريحة، استخدم الشعار الموجود فعلياً في الهوية أو بيانات المشروع:
+`##LOGO##` لشعار الشركة و`##PROJECT_LOGO##` لشعار المشروع. لا تكتب اسم الشعار كنص، ولا تستخدم رابطاً خارجياً أو صورة بديلة.
+مكان شعار الشركة الافتراضي هو الهيدر المعتمد للشريحة، ويجب الحفاظ على الشعار الموجود إذا كان الهيدر يحتويه.
 
 ### 20. حفظ مساحة العمل:
 ```action
@@ -14952,6 +14950,16 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
                 result['message'] = 'رقم شريحة خارج نطاق مساحة العمل'
             else:
                 branding = db.get_branding(tenant_id) or {}
+                # Workspace editing used to stop at the raw model HTML. That bypassed the
+                # generation finalizer, so a requested company/project logo stayed as a token,
+                # or the managed header was rebuilt without the project's logo. Use the same
+                # project-aware finalization path as normal generation before returning the slide.
+                project_data = workspace.get('projectData') if isinstance(workspace.get('projectData'), dict) else {}
+                project_data = dict(project_data)
+                creative_images = workspace.get('creativeImages') or workspace.get('images') or {}
+                if not isinstance(creative_images, dict):
+                    creative_images = {}
+                _prepare_generation_logo_context(project_data, branding, tenant_id)
                 dynamic_rules = build_design_rules(branding)
                 edited = []
                 for index in indices:
@@ -14967,6 +14975,12 @@ def _execute_agent_action(tenant_id, action, reply_text=None, workspace=None):
 أعد JSON صالحاً فقط بالمفتاحين html و response.
 html يجب أن يكون div class=\"slide\" واحداً كاملاً، بلا markdown أو شرح خارجه.
 حافظ على المحتوى غير المطلوب تغييره، ولا تستخدم صوراً خارجية.
+
+قواعد الشعارات:
+- شعار الشركة المعتمد يُستخدم بالرمز `##LOGO##` فقط، وتقوم المنظومة باستبداله تلقائياً بالشعار المرفوع للشركة.
+- شعار المشروع يُستخدم بالرمز `##PROJECT_LOGO##` فقط عند توفره، ولا تستبدله بشعار الشركة.
+- عند طلب إضافة شعار، ضعه في موضع الهوية المخصص داخل الهيدر أو الموضع الذي طلبه المستخدم، مع الحفاظ على أبعاده وتباينه.
+- لا تكتب اسم الشعار كنص ولا تنشئ رابطاً خارجياً ولا تستخدم صورة بديلة.
 
 عنوان الشريحة: {slide.get('title', '')}
 الطلب: {instruction}
@@ -14990,7 +15004,19 @@ HTML الحالي:
                         result['status'] = 'error'
                         result['message'] = f'فشل التحقق من HTML للشريحة {index + 1}; لم يتم حفظ التعديل'
                         break
-                    slide['html'] = postprocess_slide(html, index + 1, tenant_id)
+                    slide['html'] = slide_engine.finalize_slide_html(
+                        html,
+                        slide.get('type') or 'content',
+                        project_data,
+                        branding,
+                        creative_images=creative_images,
+                        tenant_id=tenant_id,
+                        slide_num=index + 1,
+                        slide_title=slide.get('title', ''),
+                        total_slides=len(slides),
+                        content_source=slide.get('content_source'),
+                        allow_all_maps=True,
+                    )
                     if isinstance(parsed, dict) and parsed.get('response'):
                         slide['agentResponse'] = parsed['response']
                     edited.append(index)

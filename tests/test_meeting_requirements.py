@@ -767,10 +767,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         index_html = self.application_module.slide_engine.build_index_slide({
             'index_entries': [{'title': 'نبذة عن المشروع', 'page': 3}],
         }, 2, 5, branding, project)
-        self.assertIn('background:#005f78', index_html)
-        self.assertIn('color:#ffffff', index_html)
-        self.assertGreaterEqual(contrast_ratio('#ffffff', '#005f78'), 4.5)
-        self.assertNotIn('color:#111111', index_html)
+        self.assertIn('background:#ffffff', index_html)
+        self.assertIn('color:#111111', index_html)
 
         finished = self.application_module.slide_engine.finalize_slide_html(
             '<div class="slide" style="width:1280px;height:720px;background:#ffffff;color:#111111"><p>محتوى</p></div>',
@@ -798,9 +796,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('class="slide"', html)
         self.assertIn('height:56px', html)
 
-    def test_managed_chrome_follows_a_dark_sol_slide_surface(self):
-        """A SOL slide may intentionally use a dark canvas. The managed header/footer must
-        follow that surface instead of leaving a conflicting white strip above it."""
+    def test_content_surface_is_normalized_to_light_and_logos_stay_independent(self):
+        """A dark/model-authored content root is repaired to the light report canvas."""
         engine = self.application_module.slide_engine
         branding = {
             'primary_color': '#122a67',
@@ -815,9 +812,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         )
         header = re.search(r'<header\b[^>]*>', html, flags=re.IGNORECASE).group(0)
         footer = re.search(r'<footer\b[^>]*>', html, flags=re.IGNORECASE).group(0)
-        self.assertIn('background:#122a67', header)
-        self.assertNotIn('background:#ffffff', header)
+        self.assertIn('background:#ffffff', header)
         self.assertIn('background:#122a67', footer)
+        self.assertIn('background:#ffffff', re.search(r'<div class="slide"[^>]*>', html, flags=re.IGNORECASE).group(0))
+        self.assertNotIn('data-slide-surface="dark"', html)
 
         old = (
             '<div class="slide" style="width:1280px;height:720px;background:#122a67;color:#fff;">'
@@ -830,10 +828,11 @@ class MeetingRequirementsTests(unittest.TestCase):
             [{'type': 'content', 'title': 'ملخص الموقع', 'html': old}],
             branding=branding, project_data={'project_name': 'المشروع'},
         )[0]['html']
-        self.assertIn('background:#122a67', re.search(r'<header\b[^>]*>', renumbered, flags=re.IGNORECASE).group(0))
+        self.assertIn('background:#ffffff', re.search(r'<header\b[^>]*>', renumbered, flags=re.IGNORECASE).group(0))
+        self.assertIn('background:#ffffff', re.search(r'<div class="slide"[^>]*>', renumbered, flags=re.IGNORECASE).group(0))
         self.assertNotIn('قديم', renumbered)
 
-    def test_dark_slide_surface_flattens_white_content_page_after_generation_or_edit(self):
+    def test_legacy_dark_surface_is_repaired_without_touching_logo_contrast(self):
         engine = self.application_module.slide_engine
         branding = {
             'primary_color': '#122a67',
@@ -842,9 +841,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         }
         source = (
             '<div class="slide" style="width:1280px;height:720px;background:#122a67;color:#ffffff;">'
-            '<div style="background:#ffffff;border:1px solid #e2e8f0;color:#122a67;padding:24px;">'
-            '<h1 style="color:#0f172a;">العنوان</h1>'
-            '<table><tr style="background:#f8fafc;"><td style="color:#334155;">القيمة</td></tr></table>'
+            '<div style="background:transparent;border:1px solid rgba(255,255,255,.22);color:#f8fafc;padding:24px;">'
+            '<h1 style="color:#f8fafc;">العنوان</h1>'
+            '<table><tr style="background:rgba(255,255,255,.08);"><td style="color:#f8fafc;">القيمة</td></tr></table>'
             '</div></div>'
         )
         finished = engine.finalize_slide_html(
@@ -852,19 +851,18 @@ class MeetingRequirementsTests(unittest.TestCase):
             slide_num=4, slide_title='ملخص الموقع', total_slides=9,
         )
         content_region = re.search(r'</header>([\s\S]*?)<footer\b', finished, flags=re.IGNORECASE).group(1)
-        self.assertIn('data-slide-surface="dark"', finished)
-        self.assertNotIn('background:#ffffff', content_region)
-        self.assertNotIn('background:#f8fafc', content_region)
-        self.assertIn('background:transparent', content_region)
-        self.assertIn('color:#f8fafc', content_region)
+        self.assertNotIn('data-slide-surface="dark"', finished)
+        self.assertIn('background:#ffffff', re.search(r'<div class="slide"[^>]*>', finished, flags=re.IGNORECASE).group(0))
+        self.assertIn('background:#ffffff', content_region)
+        self.assertIn('color:#1e293b', content_region)
 
         renumbered = engine.renumber_presentation_slides(
             [{'type': 'content', 'title': 'ملخص الموقع', 'html': source}],
             branding=branding, project_data={'project_name': 'المشروع'},
         )[0]['html']
         content_region = re.search(r'</header>([\s\S]*?)<footer\b', renumbered, flags=re.IGNORECASE).group(1)
-        self.assertNotIn('background:#ffffff', content_region)
-        self.assertIn('data-slide-surface="dark"', renumbered)
+        self.assertIn('background:#ffffff', content_region)
+        self.assertNotIn('data-slide-surface="dark"', renumbered)
 
     def test_single_slide_retries_severely_unreadable_text(self):
         engine = self.application_module.slide_engine
@@ -881,7 +879,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         html = engine.generate_single_slide(
             'system', {'title': 'نبذة', 'type': 'content'}, 3, 8,
             {'primary_color': '#005f78'}, generated, project_data={})
-        self.assertIn('color:#ffffff', html)
+        self.assertIn('background:#ffffff', re.search(r'<div class="slide"[^>]*>', html, flags=re.IGNORECASE).group(0))
         self.assertEqual(len(prompts), 2)
         self.assertIn('فشل التباين', prompts[1])
         self.assertTrue(engine.slide_contrast_issues(
