@@ -7581,6 +7581,23 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('background-image:none', replaced)
         self.assertNotIn('##MAP_CATCHMENT##', replaced)
 
+    def test_map_refresh_prefers_dedicated_map_background_over_root_background(self):
+        module = self.application_module
+        latest = '/uploads/maps/catchment_latest.png'
+        html = (
+            '<div class="slide" style="background-image:url(##MAP_CATCHMENT##);">'
+            '<section><div data-canonical-map="catchment" '
+            'style="background-image:url(##MAP_CATCHMENT##);"></div></section>'
+            '</div>'
+        )
+        replaced, changed = module._replace_slide_with_approved_map(html, 'catchment', latest)
+        self.assertTrue(changed)
+        self.assertEqual(replaced.count(latest), 1)
+        self.assertIn('data-canonical-map="catchment"', replaced)
+        self.assertIn('background-image:url(/uploads/maps/catchment_latest.png)', replaced)
+        self.assertIn('background-image:none', replaced)
+        self.assertNotIn('##MAP_CATCHMENT##', replaced)
+
     def test_designer_chat_returns_latest_map_in_updated_slide(self):
         module = self.application_module
         client = self.app.test_client()

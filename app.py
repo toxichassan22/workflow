@@ -3423,7 +3423,22 @@ def _replace_slide_with_approved_map(html, map_type, map_url):
         # tag blindly made the refresh appear successful while leaving the
         # visible image slot empty.
         image_media = [(kind, match) for kind, match in media_tags if kind == 'image']
-        first_kind, first = image_media[0] if image_media else media_tags[0]
+        dedicated_backgrounds = [
+            (kind, match) for kind, match in media_tags
+            if kind == 'background' and re.search(
+                r'data-canonical-map\s*=|data-map-summary-background\b',
+                match.group(0),
+                flags=re.IGNORECASE,
+            )
+        ]
+        # Newer map slides use a dedicated background layer inside the map
+        # panel.  It is more authoritative than the legacy root background,
+        # which is normally covered by the slide content surface.
+        first_kind, first = (
+            image_media[0] if image_media else
+            dedicated_backgrounds[0] if dedicated_backgrounds else
+            media_tags[0]
+        )
         first_tag = first.group(0)
         if first_kind == 'image':
             src_pattern = re.compile(r'(\bsrc\s*=\s*)(["\'])(.*?)(\2)', re.IGNORECASE | re.DOTALL)
