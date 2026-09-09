@@ -16,6 +16,19 @@ set -e
 export PATH="$HOME/bin:$PATH"
 export GIT_LFS_SKIP_SMUDGE=1
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$SCRIPT_DIR/.env"
+  set +a
+elif [ -f "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env"
+  set +a
+fi
+
 REPO_DIR="${STAGING_REPO_DIR:-/home/demos/workflow.git}"
 APP_DIR="${STAGING_APP_DIR:-/home/demos/proposal-generator-staging}"
 WEB_ROOT="${STAGING_WEB_ROOT:-/home/demos/staging_html}"
