@@ -30,6 +30,16 @@ _TABLE_RE = re.compile(r"<table\b[^>]*>[\s\S]*?</table>", re.IGNORECASE)
 _TBODY_RE = re.compile(r"(<tbody\b[^>]*>)([\s\S]*?)(</tbody>)", re.IGNORECASE)
 _TR_RE = re.compile(r"<tr\b[^>]*>[\s\S]*?</tr>", re.IGNORECASE)
 _TD_RE = re.compile(r"<(?:td|th)\b[^>]*>[\s\S]*?</(?:td|th)>", re.IGNORECASE)
+_HTML_TOKEN_RE = re.compile(r"<!--[\s\S]*?-->|<![^>]*>|</?\s*[A-Za-z][^>]*>", re.DOTALL)
+_GENERATED_CAPTION_RE = re.compile(
+    r"<(?P<tag>div|p|figcaption)\b(?=[^>]*\bdata-project-image-description\s*=)[^>]*>"
+    r"[\s\S]*?</(?P=tag)\s*>",
+    re.IGNORECASE,
+)
+_VOID_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+    "meta", "param", "source", "track", "wbr",
+}
 
 
 def _clean_text(value: Any) -> str:
@@ -145,6 +155,121 @@ def _caption_already_follows(html: str, image_end: int, next_image_start: int, d
     return description and description in _clean_text(following)
 
 
+def _image_contexts(source: str) -> List[Dict[str, Any]]:
+    """Return image offsets and completed ancestor nodes for a HTML fragment."""
+
+    stack: List[Dict[str, Any]] = []
+    images: List[Dict[str, Any]] = []
+    for token in _HTML_TOKEN_RE.finditer(source):
+        raw = token.group(0)
+        if raw.startswith("<!--") or raw.startswith("<!"):
+            continue
+        name_match = re.match(r"</?\s*([A-Za-z][\w:-]*)", raw)
+        if not name_match:
+            continue
+        tag = name_match.group(1).lower()
+        if re.match(r"</", raw):
+            match_index = next(
+                (index for index in range(len(stack) - 1, -1, -1) if stack[index]["tag"] == tag),
+                None,
+            )
+            if match_index is None:
+                continue
+            for node in stack[match_index:]:
+                if node.get("close_start") is None:
+                    node["close_start"] = token.start()
+                    node["close_end"] = token.end()
+            del stack[match_index:]
+            continue
+
+        node = {
+            "tag": tag,
+            "start": token.start(),
+            "open_end": token.end(),
+            "opening": raw,
+            "close_start": None,
+            "close_end": None,
+        }
+        if tag == "img":
+            images.append({
+                "start": token.start(),
+                "end": token.end(),
+                "tag": raw,
+                "ancestors": list(stack),
+            })
+        if tag not in _VOID_TAGS and not raw.rstrip().endswith("/>"):
+            stack.append(node)
+    return images
+
+
+def _caption_anchor(source: str, image: Dict[str, Any], next_image_start: int) -> Tuple[int, str]:
+    """Place a caption outside a clipped media viewport, but inside a figure."""
+
+    usable = []
+    for node in reversed(image.get("ancestors") or []):
+        close_start = node.get("close_start")
+        close_end = node.get("close_end")
+        if close_start is None or close_end is None or close_end > next_image_start:
+            continue
+        before_image = source[node["open_end"]:image["start"]]
+        if _clean_text(before_image) or re.search(r"<img\b", before_image, re.IGNORECASE):
+            continue
+        usable.append(node)
+
+    # The old implementation inserted inside fixed-height/overflow-hidden image
+    # wrappers, so the caption existed in HTML but was clipped from the slide.
+    for node in usable:
+        opening = html_lib.unescape(str(node.get("opening") or "")).lower()
+        clipped_media = bool(re.search(
+            r"(?:overflow(?:-[xy])?\s*:\s*(?:hidden|clip)|(?:height|max-height)\s*:)",
+            opening,
+        ))
+        image_named = bool(re.search(
+            r"(?:class|id)\s*=\s*['\"][^'\"]*(?:image|media|photo|visual|frame|thumb)[^'\"]*['\"]",
+            opening,
+        ))
+        if clipped_media or image_named:
+            return int(node["close_end"]), "after"
+
+    for node in usable:
+        if node["tag"] == "figure":
+            return int(node["close_start"]), "before"
+        if node["tag"] in {"picture", "a"}:
+            return int(node["close_end"]), "after"
+    return int(image["end"]), "after"
+
+
+def _generated_caption_is_at_anchor(
+    source: str,
+    caption_match: re.Match[str],
+    anchor: int,
+    placement: str,
+) -> bool:
+    if placement == "before":
+        return caption_match.end() <= anchor and not source[caption_match.end():anchor].strip()
+    return caption_match.start() >= anchor and not source[anchor:caption_match.start()].strip()
+
+
+def _apply_caption_edits(
+    source: str,
+    removals: Sequence[Tuple[int, int]],
+    insertions: Sequence[Tuple[int, int, str]],
+) -> str:
+    normalized_removals = sorted(set(removals))
+    output = source
+    for start, end in sorted(normalized_removals, reverse=True):
+        output = output[:start] + output[end:]
+
+    grouped: Dict[int, List[Tuple[int, str]]] = {}
+    for position, order, markup in insertions:
+        shift = sum(end - start for start, end in normalized_removals if end <= position)
+        grouped.setdefault(position - shift, []).append((order, markup))
+    for position in sorted(grouped, reverse=True):
+        markup = "".join(item[1] for item in sorted(grouped[position], key=lambda item: item[0]))
+        output = output[:position] + markup + output[position:]
+    return output
+
+
 def add_missing_image_descriptions(
     html: str,
     descriptions: Dict[str, str],
@@ -152,33 +277,53 @@ def add_missing_image_descriptions(
     """Insert stored captions after matching images only when no caption is present."""
 
     source = str(html or "")
-    matches = list(_IMG_RE.finditer(source))
-    if not matches or not descriptions:
+    images = _image_contexts(source)
+    if not images or not descriptions:
         return source, 0, []
 
-    chunks: List[str] = []
-    cursor = 0
+    generated = list(_GENERATED_CAPTION_RE.finditer(source))
+    removals: List[Tuple[int, int]] = []
+    insertions: List[Tuple[int, int, str]] = []
     added: List[str] = []
-    for index, match in enumerate(matches):
-        chunks.append(source[cursor:match.end()])
-        cursor = match.end()
-        src_match = _SRC_RE.search(match.group(0))
+    changed = 0
+    for index, image in enumerate(images):
+        src_match = _SRC_RE.search(image["tag"])
         src = src_match.group(2).strip() if src_match else ""
         description = _description_for_src(src, descriptions)
-        next_start = matches[index + 1].start() if index + 1 < len(matches) else len(source)
-        if not description or _caption_already_follows(source, match.end(), next_start, description):
+        next_start = images[index + 1]["start"] if index + 1 < len(images) else len(source)
+        if not description:
+            continue
+        anchor, placement = _caption_anchor(source, image, next_start)
+        existing_generated = next((
+            match for match in generated
+            if image["end"] <= match.start() < next_start
+        ), None)
+        if existing_generated:
+            if _generated_caption_is_at_anchor(source, existing_generated, anchor, placement):
+                continue
+            # Repair captions created by the first release: preserve their exact
+            # wording, move them out of the clipped image viewport, and count a
+            # real visible-layout mutation instead of claiming a new caption.
+            removals.append((existing_generated.start(), existing_generated.end()))
+            insertions.append((anchor, index, existing_generated.group(0)))
+            added.append(_clean_text(existing_generated.group(0)) or description)
+            changed += 1
+            continue
+        if _caption_already_follows(source, image["end"], next_start, description):
             continue
         marker = hashlib.sha1((src + "\0" + description).encode("utf-8")).hexdigest()[:12]
+        tag = "figcaption" if placement == "before" else "div"
         caption = (
-            f'<div data-project-image-description="{marker}" data-visual-media-caption="1" '
-            'style="font-size:13px;line-height:1.55;color:#4b5563;margin-top:7px;'
-            'font-weight:400;text-align:right;">'
-            f'{html_lib.escape(description)}</div>'
+            f'<{tag} data-project-image-description="{marker}" data-visual-media-caption="1" '
+            'style="box-sizing:border-box;width:100%;display:block;position:relative;z-index:4;'
+            'font-size:13px;line-height:1.55;color:#4b5563;margin-top:7px;padding:4px 12px 0;'
+            'font-weight:400;text-align:right;white-space:normal;">'
+            f'{html_lib.escape(description)}</{tag}>'
         )
-        chunks.append(caption)
+        insertions.append((anchor, index, caption))
         added.append(description)
-    chunks.append(source[cursor:])
-    return "".join(chunks), len(added), added
+        changed += 1
+    return _apply_caption_edits(source, removals, insertions), changed, added
 
 
 def is_image_description_request(message: Any) -> bool:

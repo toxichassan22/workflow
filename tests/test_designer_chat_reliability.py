@@ -57,6 +57,42 @@ def test_adds_only_missing_matching_image_descriptions_and_is_idempotent():
     assert repeated == updated
 
 
+def test_caption_escapes_clipped_media_wrapper_and_repairs_old_insertions():
+    descriptions = {"photo.jpg": "وصف محفوظ يجب أن يظهر أسفل الصورة"}
+    html = (
+        '<div class="card"><h3>قاعة الاحتفالات</h3>'
+        '<div class="image-frame" style="height:325px;overflow:hidden">'
+        '<img src="/uploads/photo.jpg" style="width:100%;height:100%;object-fit:cover">'
+        '</div><div class="blank-space"></div></div>'
+    )
+
+    updated, count, _ = reliability.add_missing_image_descriptions(html, descriptions)
+    repeated, repeated_count, _ = reliability.add_missing_image_descriptions(updated, descriptions)
+
+    wrapper_close = updated.index('</div>', updated.index('<img'))
+    caption_start = updated.index('data-project-image-description')
+    assert count == 1
+    assert caption_start > wrapper_close
+    assert updated.count('data-project-image-description') == 1
+    assert repeated_count == 0
+    assert repeated == updated
+
+    broken = (
+        '<div class="card"><div style="height:325px;overflow:hidden">'
+        '<img src="/uploads/photo.jpg">'
+        '<div data-project-image-description="old" data-visual-media-caption="1" '
+        'style="font-size:13px">وصف محفوظ يجب أن يظهر أسفل الصورة</div>'
+        '</div></div>'
+    )
+    repaired, repaired_count, _ = reliability.add_missing_image_descriptions(broken, descriptions)
+    repaired_wrapper_close = repaired.index('</div>', repaired.index('<img'))
+    repaired_caption_start = repaired.index('data-project-image-description')
+
+    assert repaired_count == 1
+    assert repaired_caption_start > repaired_wrapper_close
+    assert repaired.count('data-project-image-description') == 1
+
+
 def test_detects_caption_requests_and_requested_split_count():
     assert reliability.is_image_description_request("حط وصف الصور المكتوب في بيانات المشروع")
     assert reliability.is_image_description_request("عايزه يضيف وصف لكل صورة")
