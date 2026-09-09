@@ -1124,7 +1124,18 @@ def _resolve_glm_html(slide, html, num, total):
             for img in soup.find_all('img'):
                 src = img.get('src', '') or ''
                 alt = img.get('alt', '') or ''
-                is_logo = (logo_data_uri and logo_data_uri[:40] in src) or any(w in (src + ' ' + alt).lower() for w in ['logo', 'manafe', 'منافع'])
+                src_lower = src.strip().lower()
+                if src_lower.startswith('data:') or src_lower.startswith('blob:'):
+                    is_logo = False
+                    img_class = img.get('class', '') or ''
+                    if isinstance(img_class, list):
+                        img_class = ' '.join(img_class)
+                    img_id = img.get('id', '') or ''
+                    tag_hint = (str(img_class) + ' ' + str(img_id) + ' ' + str(alt)).lower()
+                    if any(w in tag_hint for w in ['logo', 'manafe', 'منافع']):
+                        is_logo = bool(logo_data_uri and logo_data_uri[:40] in src)
+                else:
+                    is_logo = (logo_data_uri and logo_data_uri[:40] in src) or any(w in (src + ' ' + alt).lower() for w in ['logo', 'manafe', 'منافع'])
                 is_proj = not is_index and is_project_image(src)
                 if not is_logo and not is_proj:
                     img.decompose()
@@ -1164,7 +1175,11 @@ def _resolve_glm_html(slide, html, num, total):
                     url_match = re.search(r'url\s*\(\s*([^)]+)\s*\)', style, re.IGNORECASE)
                     if url_match:
                         bg_url = url_match.group(1).replace('"', '').replace("'", "").strip()
-                        is_logo = any(w in style.lower() for w in ['logo', 'manafe', 'منافع'])
+                        if bg_url.lower().startswith('data:') or bg_url.lower().startswith('blob:'):
+                            style_without_urls = re.sub(r'url\s*\([^)]*\)', '', style, flags=re.IGNORECASE).lower()
+                            is_logo = any(w in style_without_urls for w in ['logo', 'manafe', 'منافع'])
+                        else:
+                            is_logo = any(w in style.lower() for w in ['logo', 'manafe', 'منافع'])
                         is_proj = not is_index and is_project_image(bg_url)
                         if not is_logo and not is_proj:
                             new_style = re.sub(r'background(-image)?\s*:\s*url\([^)]*\);?', '', style, flags=re.IGNORECASE)

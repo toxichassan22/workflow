@@ -22252,7 +22252,11 @@
         + '<label class="slide-edit-color">لون الخلفية<input type="color" data-slide-edit-color="background" value="#ffffff"'
         + dis + '><input type="text" data-slide-edit-hex="background" value="#ffffff" maxlength="7" spellcheck="false" placeholder="#ffffff"'
         + dis + '></label>'
-        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-act="eyedropper"' + dis + '>قطارة</button>'
+        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="color"' + dis + '>قطارة النص</button>'
+        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="background"' + dis + '>قطارة الخلفية</button>'
+        + '<button type="button" data-slide-edit-act="fontup"' + dis + '>تكبير</button>'
+        + '<button type="button" data-slide-edit-act="fontdown"' + dis + '>تصغير</button>'
+        + '<button type="button" data-slide-edit-act="bold"' + dis + '>عريض</button>'
         + '<button type="button" data-slide-edit-act="del"' + dis + '>حذف العنصر</button>';
     }
 
@@ -22302,8 +22306,16 @@
           else if (act === 'redo') redoSlideEdit(index);
           else if (act === 'addtext') addSlideTextBox(index);
           else if (act === 'addimage') openSlideImagePicker(index);
-          else if (act === 'eyedropper') pickSlideElementColorWithEyedropper(index, 'color');
+          else if (act === 'fontup') adjustSlideElementFontSize(index, 2);
+          else if (act === 'fontdown') adjustSlideElementFontSize(index, -2);
+          else if (act === 'bold') toggleSlideElementBold(index);
           else if (act === 'del') deleteSelectedSlideElement(index);
+        });
+      });
+      editControls.querySelectorAll('[data-slide-edit-eyedropper]').forEach(btn => {
+        btn.addEventListener('click', event => {
+          event.stopPropagation();
+          pickSlideElementColorWithEyedropper(index, btn.getAttribute('data-slide-edit-eyedropper') || 'color');
         });
       });
       editControls.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
@@ -22390,7 +22402,8 @@
         }
       }
       card.querySelectorAll('[data-slide-edit-act="del"]').forEach(btn => { btn.disabled = !hasSel; });
-      card.querySelectorAll('[data-slide-edit-act="eyedropper"]').forEach(btn => { btn.disabled = !hasSel; });
+      card.querySelectorAll('[data-slide-edit-act="fontup"], [data-slide-edit-act="fontdown"], [data-slide-edit-act="bold"]').forEach(btn => { btn.disabled = !hasSel; });
+      card.querySelectorAll('[data-slide-edit-eyedropper]').forEach(btn => { btn.disabled = !hasSel; });
       card.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
         inp.disabled = !hasSel;
         if (hasSel) inp.value = inp.getAttribute('data-slide-edit-color') === 'color' ? textColor : bgColor;
@@ -22800,6 +22813,98 @@
       triggerAutoSaveDraft();
       syncSlideElementToolbar(index);
       toast('تم تغيير لون العنصر');
+    }
+
+    function slideElementFontSizePx(el) {
+      try {
+        const cs = window.getComputedStyle(el);
+        const size = parseFloat(cs.fontSize);
+        if (size && isFinite(size)) return size;
+      } catch (err) {}
+      return 16;
+    }
+
+    function applySlideElementFontSize(root, newSize, ratio) {
+      if (!root) return;
+      root.style.fontSize = Math.round(newSize) + 'px';
+      try {
+        root.querySelectorAll('*').forEach(el => {
+          const inline = el.style && el.style.fontSize;
+          if (inline) {
+            const current = parseFloat(inline);
+            if (current && isFinite(current)) {
+              el.style.fontSize = Math.max(8, Math.min(120, Math.round(current * ratio))) + 'px';
+            } else {
+              el.style.fontSize = Math.round(newSize) + 'px';
+            }
+          }
+        });
+      } catch (err) {}
+    }
+
+    function adjustSlideElementFontSize(index, delta) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.sel) { toast('حدد عنصرا أولا'); return; }
+      const stage = slideStageForIndex(index);
+      const slide = stage ? stage.querySelector('.slide') : null;
+      const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+      if (!target) return;
+      const current = slideElementFontSizePx(target);
+      const next = Math.max(8, Math.min(120, Math.round(current + delta)));
+      if (next === Math.round(current)) return;
+      const slideData = tenantSlidesData[index];
+      if (!slideData || !slideData.html) return;
+      const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
+      const rawRoot = rawDoc.querySelector('.slide');
+      const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, session.sel.path);
+      if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
+      pushSlideEditHistory(index);
+      const ratio = next / (current || next);
+      applySlideElementFontSize(target, next, ratio);
+      applySlideElementFontSize(rawTarget, next, ratio);
+      slideData.html = rawRoot.outerHTML;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      const selPath = session.sel.path;
+      selectSlideElement(stage, index, target, selPath);
+      toast('حجم النص ' + next + 'px');
+    }
+
+    function applySlideElementBold(root, makeBold) {
+      if (!root) return;
+      root.style.fontWeight = makeBold ? '700' : '400';
+      try {
+        root.querySelectorAll('*').forEach(el => { el.style.fontWeight = makeBold ? '700' : '400'; });
+      } catch (err) {}
+    }
+
+    function toggleSlideElementBold(index) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.sel) { toast('حدد عنصرا أولا'); return; }
+      const stage = slideStageForIndex(index);
+      const slide = stage ? stage.querySelector('.slide') : null;
+      const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+      if (!target) return;
+      let weight = 400;
+      try { weight = parseInt(window.getComputedStyle(target).fontWeight, 10) || 400; } catch (err) {}
+      if (String(window.getComputedStyle(target).fontWeight).toLowerCase() === 'bold') weight = 700;
+      const makeBold = weight < 600;
+      const slideData = tenantSlidesData[index];
+      if (!slideData || !slideData.html) return;
+      const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
+      const rawRoot = rawDoc.querySelector('.slide');
+      const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, session.sel.path);
+      if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
+      pushSlideEditHistory(index);
+      applySlideElementBold(target, makeBold);
+      applySlideElementBold(rawTarget, makeBold);
+      slideData.html = rawRoot.outerHTML;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      selectSlideElement(stage, index, target, session.sel.path);
+      toast(makeBold ? 'تم جعل النص عريضا' : 'تم جعل النص عاديا');
     }
 
     function deleteSelectedSlideElement(index) {
