@@ -1,0 +1,149 @@
+name: Apply designer chat persistence repair
+
+on:
+  push:
+    branches:
+      - fix/visible-image-captions
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/visible-image-captions
+      - name: Persist successful designer edits
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('index.html')
+          text = path.read_text(encoding='utf-8')
+
+          helper_anchor = "    async function sendTenantDesignerChat() {\n"
+          helper = r'''    async function persistTenantDesignerWorkspace(hadUnsavedChanges) {
+            try {
+              if (!tenantPresentationId) {
+                await saveProjectAsDraft(true);
+                return !tenantDraftDirty;
+              }
+              const presTitle = tenantPresentationTitle
+                || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
+              const saved = await api('PUT', '/api/presentations/' + tenantPresentationId, {
+                title: presTitle,
+                projectData: { ...tenantProjectData, tenantCreativeImages },
+                slidesData: tenantSlidesData,
+                slideCount: tenantSlidesData.length,
+                status: 'edited'
+              });
+              if (saved?.success === false || saved?.error) {
+                throw new Error(saved.error || 'تعذر حفظ العرض');
+              }
+              if (!hadUnsavedChanges) setDraftDirty(false);
+              return true;
+            } catch (error) {
+              console.error('[DESIGNER SAVE]', error);
+              return false;
+            }
+          }
+
+'''
+          if text.count(helper_anchor) != 1:
+              raise RuntimeError(f'designer helper anchor count: {text.count(helper_anchor)}')
+          text = text.replace(helper_anchor, helper + helper_anchor, 1)
+
+          scope_anchor = "      // Check if message specifies modifying all slides\n"
+          scope_replacement = (
+              "      // Preserve whether unrelated form edits were already dirty before this chat turn.\n"
+              "      const designerHadUnsavedChanges = tenantDraftDirty;\n\n"
+              + scope_anchor
+          )
+          if text.count(scope_anchor) != 1:
+              raise RuntimeError(f'designer dirty-state anchor count: {text.count(scope_anchor)}')
+          text = text.replace(scope_anchor, scope_replacement, 1)
+
+          old_tail = r'''      tenantProjectData.designerChat = designerChatPersistence();
+            renumberTenantSlides();
+            renderTenantSlides();
+            renderTenantDesignerChat();
+            triggerAutoSaveDraft();
+          }
+
+          async function renderPresentationFontStatus() {'''
+          new_tail = r'''      tenantProjectData.designerChat = designerChatPersistence();
+            renumberTenantSlides();
+            renderTenantSlides();
+            renderTenantDesignerChat();
+            triggerAutoSaveDraft();
+
+            const designerMutationSucceeded =
+              reply.action === 'add_slide' || reply.action === 'insert_slide' ||
+              (Array.isArray(reply.actions) && reply.actions.some(action => action?.status === 'success'));
+            if (designerMutationSucceeded) {
+              const persisted = await persistTenantDesignerWorkspace(designerHadUnsavedChanges);
+              if (!persisted) {
+                const latestAssistant = [...tenantDesignerMessages].reverse()
+                  .find(item => item?.role === 'assistant');
+                if (latestAssistant) {
+                  latestAssistant.content = String(latestAssistant.content || '') +
+                    ' تم تطبيق التعديل داخل الصفحة، لكن تعذر حفظه على الخادم؛ لا تغلق الصفحة قبل الضغط على حفظ كمسودة.';
+                }
+                renderTenantDesignerChat();
+                toast('تم التعديل، لكن فشل حفظه على الخادم');
+              }
+            }
+          }
+
+          async function renderPresentationFontStatus() {'''
+          if text.count(old_tail) != 1:
+              raise RuntimeError(f'designer persistence tail count: {text.count(old_tail)}')
+          text = text.replace(old_tail, new_tail, 1)
+          path.write_text(text, encoding='utf-8')
+
+          test = Path('tests/test_designer_chat_persistence.py')
+          test.write_text(r'''from pathlib import Path
+
+
+def test_successful_designer_edits_are_persisted_and_failures_are_visible():
+    text = Path('index.html').read_text(encoding='utf-8')
+    start = text.index('async function persistTenantDesignerWorkspace')
+    end = text.index('async function renderPresentationFontStatus', start)
+    section = text[start:end]
+    assert "await api('PUT', '/api/presentations/' + tenantPresentationId" in section
+    assert 'await saveProjectAsDraft(true);' in section
+    assert 'const designerHadUnsavedChanges = tenantDraftDirty;' in section
+    assert "action?.status === 'success'" in section
+    assert 'await persistTenantDesignerWorkspace(designerHadUnsavedChanges)' in section
+    assert 'لكن تعذر حفظه على الخادم' in section
+
+
+if __name__ == '__main__':
+    test_successful_designer_edits_are_persisted_and_failures_are_visible()
+    print('designer chat persistence test passed')
+''', encoding='utf-8')
+          PY
+          python tests/test_designer_chat_persistence.py
+          python -m py_compile designer_chat_reliability.py tests/test_designer_chat_reliability.py tests/test_designer_chat_persistence.py
+          python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          path = Path('tests/test_designer_chat_reliability.py')
+          spec = importlib.util.spec_from_file_location('caption_tests', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          tests = sorted(name for name in dir(module) if name.startswith('test_'))
+          for name in tests:
+              getattr(module, name)()
+          print(f'{len(tests)} reliability tests passed')
+          PY
+          git rm .github/workflows/apply-designer-chat-persistence.yml
+          git add index.html tests/test_designer_chat_persistence.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Persist successful designer chat edits'
+          git push origin HEAD:fix/visible-image-captions
