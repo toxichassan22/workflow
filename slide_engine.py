@@ -8242,6 +8242,33 @@ def _visual_media_rebuild_sources(slide, creative_images):
     return _legacy_visual_media_urls(slide), []
 
 
+def _extract_visual_concept_captions(html):
+    """Extract existing captions or description texts from visual slide HTML."""
+    if not html or not isinstance(html, str):
+        return []
+    explicit = re.findall(
+        r'<div[^>]*data-visual-media-caption="1"[^>]*>(.*?)</div>',
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if explicit:
+        results = [re.sub(r'<[^>]+>', '', cap).strip() for cap in explicit]
+        results = [cap for cap in results if cap]
+        if results:
+            return results
+    generic = re.findall(
+        r'<(?:div|p|span)[^>]*(?:class|data-role)=["\'][^"\']*(?:caption|description|desc)[^"\']*["\'][^>]*>(.*?)</(?:div|p|span)>',
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if generic:
+        results = [re.sub(r'<[^>]+>', '', cap).strip() for cap in generic]
+        results = [cap for cap in results if cap]
+        if results:
+            return results
+    return []
+
+
 def _build_visual_concept_media_slide(slide, branding=None):
     """Build a media visual-concept slide with prominent component/title header and captions."""
     tokens = [str(token).strip() for token in ((slide or {}).get('image_tokens') or []) if str(token).strip()]
@@ -8253,11 +8280,19 @@ def _build_visual_concept_media_slide(slide, branding=None):
     component_name = html_lib.escape(str((slide or {}).get('component_name') or '').strip())
 
     captions = (slide or {}).get('captions')
-    if not isinstance(captions, list):
+    if not isinstance(captions, list) or not any(str(c or '').strip() for c in captions):
         captions = (slide or {}).get('bullets')
+    if not isinstance(captions, list) or not any(str(c or '').strip() for c in captions):
+        extracted = _extract_visual_concept_captions((slide or {}).get('html'))
+        if extracted:
+            captions = extracted
+            if isinstance(slide, dict):
+                slide['captions'] = list(extracted)
     if not isinstance(captions, list):
         captions = []
     description = str((slide or {}).get('description') or '').strip()
+    if not description and captions:
+        description = str(captions[0] or '').strip()
 
     columns = 1 if len(tokens) == 1 else 2
 
@@ -10488,12 +10523,24 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     refresh_index_entries({'slides': normalized})
     for index, item in enumerate(normalized, 1):
         slide_type = str(item.get('type') or 'content')
-        # A designer-chat edit in this same turn already produced this HTML via the model
-        # (for example description bars added to visual slides). Rebuilding from the
-        # canonical template below would silently discard that edit while the chat reply
-        # still claims it was applied. Keep the edited HTML and only refresh chrome and
-        # counters. The flag is popped so it never persists into saved presentations.
-        keep_edited_html = bool(item.pop('_designer_keep_html', False))
+        # A designer-chat edit, user edit, or custom slide produced this HTML
+        # (for example description bars added to visual slides, custom cards, or layouts).
+        # Rebuilding from the canonical template would discard those edits.
+        # Keep the edited HTML and only refresh chrome and counters.
+        # This flag persists across presentation saves, draft reloads, and exports.
+        has_caption_in_html = bool(
+            'data-visual-media-caption="1"' in str(item.get('html') or '')
+        )
+        keep_edited_html = bool(
+            item.get('_designer_keep_html') or
+            item.get('is_custom') or
+            item.get('keep_html') or
+            item.get('custom_html') or
+            has_caption_in_html
+        )
+        if keep_edited_html:
+            item['_designer_keep_html'] = True
+            item['is_custom'] = True
         if slide_type == 'index':
             existing_html = item.get('html') or ''
             if existing_html and 'data-index-page' in existing_html:
@@ -10550,6 +10597,11 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 rebuild_item['image_tokens'] = media_sources
                 if canonical_tokens:
                     item['image_tokens'] = canonical_tokens
+                if not rebuild_item.get('captions'):
+                    extracted_caps = _extract_visual_concept_captions(item.get('html'))
+                    if extracted_caps:
+                        rebuild_item['captions'] = extracted_caps
+                        item['captions'] = extracted_caps
                 rebuilt = _build_visual_concept_media_slide(rebuild_item, branding=branding)
                 item['html'] = finalize_slide_html(
                     rebuilt, slide_type, project_data, branding,

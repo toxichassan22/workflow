@@ -22309,6 +22309,9 @@
       if (keep !== true && session && tenantSlidesData[index]) {
         tenantSlidesData[index].html = session.originalHtml;
         tenantProjectData.tenantSlidesData = tenantSlidesData;
+      } else if (keep === true && tenantSlidesData[index]) {
+        tenantSlidesData[index]._designer_keep_html = true;
+        tenantSlidesData[index].is_custom = true;
       }
       delete slideEditSessions[index];
       slideInlineEditStates[index] = false;
@@ -24089,6 +24092,8 @@
       const html = document.getElementById('slideEditHtml').value;
       tenantSlidesData[index].title = title;
       tenantSlidesData[index].html = html;
+      tenantSlidesData[index]._designer_keep_html = true;
+      tenantSlidesData[index].is_custom = true;
       document.getElementById('slideEditModal').remove();
       renderTenantSlides();
       triggerAutoSaveDraft();

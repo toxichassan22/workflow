@@ -575,6 +575,74 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             else:
                 sys.modules['fitz'] = original
 
+    def test_visual_concept_captions_preserved_across_renumbering(self):
+        """Visual concept captions added via designer chat or editing must survive multiple renumber passes."""
+        caption_text = "واجهة زجاجية حديثة بتصميم بانورامي فخم"
+        slide_html = (
+            '<div class="slide" data-slide-role="visual-concept-media">'
+            '  <div class="visual-media-card">'
+            '    <img src="/api/media/visual_1.png">'
+            f'    <div data-visual-media-caption="1">{caption_text}</div>'
+            '  </div>'
+            '</div>'
+        )
+        slide = {
+            'type': 'content',
+            'section_key': 'visual_concept',
+            'content_source': 'visual_concept:1',
+            'title': 'التصور البصري',
+            'image_tokens': ['##VISUAL_CONCEPT_1##'],
+            'html': slide_html,
+            '_designer_keep_html': True,
+        }
+
+        # First pass (designer chat turn end)
+        pass1 = slide_engine.renumber_presentation_slides([slide], project_data={'visual_concept': {'slots': {}}})
+        self.assertEqual(len(pass1), 1)
+        self.assertIn(caption_text, pass1[0]['html'])
+        self.assertTrue(pass1[0].get('_designer_keep_html'))
+        self.assertTrue(pass1[0].get('is_custom'))
+
+        # Second pass (save presentation / save draft)
+        pass2 = slide_engine.renumber_presentation_slides(pass1, project_data={'visual_concept': {'slots': {}}})
+        self.assertEqual(len(pass2), 1)
+        self.assertIn(caption_text, pass2[0]['html'])
+        self.assertTrue(pass2[0].get('_designer_keep_html'))
+        self.assertTrue(pass2[0].get('is_custom'))
+
+        # Third pass (reload presentation / preview / export)
+        pass3 = slide_engine.renumber_presentation_slides(pass2, project_data={'visual_concept': {'slots': {}}})
+        self.assertEqual(len(pass3), 1)
+        self.assertIn(caption_text, pass3[0]['html'])
+        self.assertTrue(pass3[0].get('_designer_keep_html'))
+        self.assertTrue(pass3[0].get('is_custom'))
+
+    def test_visual_concept_captions_extracted_and_restored_if_rebuilt(self):
+        """Even if flags are absent, captions in HTML are extracted and preserved on rebuild."""
+        caption_text = "بهو استقبال رئيسي بأسقف مزدوجة الارتفاع"
+        slide_html = (
+            '<div class="slide" data-slide-role="visual-concept-media">'
+            '  <div class="visual-media-card">'
+            '    <img src="/api/media/visual_2.png">'
+            f'    <div data-visual-media-caption="1">{caption_text}</div>'
+            '  </div>'
+            '</div>'
+        )
+        extracted = slide_engine._extract_visual_concept_captions(slide_html)
+        self.assertEqual(extracted, [caption_text])
+
+        slide_to_rebuild = {
+            'type': 'content',
+            'section_key': 'visual_concept',
+            'content_source': 'visual_concept:2',
+            'title': 'التصور البصري',
+            'image_tokens': ['##VISUAL_CONCEPT_2##'],
+            'html': slide_html,
+        }
+        rebuilt = slide_engine._build_visual_concept_media_slide(slide_to_rebuild)
+        self.assertIn(caption_text, rebuilt)
+        self.assertEqual(slide_to_rebuild.get('captions'), [caption_text])
+
 
 if __name__ == '__main__':
     unittest.main()

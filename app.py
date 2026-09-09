@@ -4551,6 +4551,10 @@ def api_designer_chat():
                         # canonical visual-media rebuild would otherwise discard edits
                         # such as added description bars while the reply claims success.
                         slides[idx]['_designer_keep_html'] = True
+                        slides[idx]['is_custom'] = True
+                        extracted_caps = slide_engine._extract_visual_concept_captions(updated_html)
+                        if extracted_caps:
+                            slides[idx]['captions'] = extracted_caps
                         if response_text:
                             assistant_messages.append(response_text)
                 else:
@@ -4566,6 +4570,10 @@ def api_designer_chat():
                         )
                         slide['html'] = html
                         slide['_designer_keep_html'] = True
+                        slide['is_custom'] = True
+                        extracted_caps = slide_engine._extract_visual_concept_captions(html)
+                        if extracted_caps:
+                            slide['captions'] = extracted_caps
                         slides[idx] = slide
                         if response_text:
                             assistant_messages.append(response_text)
@@ -4615,6 +4623,7 @@ def api_designer_chat():
                     )
                     slide['html'] = updated_html
                     slide['_designer_keep_html'] = True
+                    slide['is_custom'] = True
                     slides[idx] = slide
                     successful_indexes.append(idx)
                     if response_text:
@@ -4646,6 +4655,7 @@ def api_designer_chat():
                     updated_html = _inject_company_logo_panel_fallback(updated_html, company_logo_url)
                     slide['html'] = updated_html
                     slide['_designer_keep_html'] = True
+                    slide['is_custom'] = True
                     slides[idx] = slide
                     successful_indexes.append(idx)
                     if response_text:
