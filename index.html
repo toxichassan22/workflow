@@ -6330,18 +6330,6 @@
                 </select>
               </div>
               <div class="tenant-field">
-                <label>الباقة</label>
-                <select id="sagCreatePlan">
-                  <option value="free">Free</option>
-                  <option value="pro">Pro</option>
-                  <option value="enterprise">Enterprise</option>
-                </select>
-              </div>
-              <div class="tenant-field">
-                <label>الرصيد</label>
-                <input type="number" id="sagCreateCredit" min="0" step="0.01" value="0" required>
-              </div>
-              <div class="tenant-field">
                 <label>إعداد كلمة المرور</label>
                 <select id="sagCreatePasswordMode" onchange="toggleSagCompanyPassword()">
                   <option value="set_link">رابط تعيين كلمة المرور</option>
@@ -6350,7 +6338,10 @@
               </div>
               <div class="tenant-field" id="sagCreatePasswordWrap" style="display:none">
                 <label>كلمة المرور</label>
-                <input type="password" id="sagCreatePassword" minlength="10" autocomplete="new-password">
+                <div style="display:flex;gap:8px">
+                  <input type="password" id="sagCreatePassword" minlength="10" autocomplete="new-password" style="flex:1;min-width:0">
+                  <button type="button" class="btn ghost" onclick="generateSagCompanyPassword()">توليد تلقائي</button>
+                </div>
               </div>
               <div class="tenant-field full">
                 <label style="display:flex;align-items:center;gap:8px;margin:0">
@@ -24680,9 +24671,9 @@
       const modal = document.getElementById('sagCompanyCreateModal');
       const form = document.getElementById('sagCompanyCreateForm');
       form.reset();
-      document.getElementById('sagCreateCredit').value = '0';
       document.getElementById('sagCreateStatus').value = 'active';
       document.getElementById('sagCreatePasswordMode').value = 'set_link';
+      document.getElementById('sagCreatePassword').type = 'password';
       document.getElementById('sagCreateWelcomeEmail').checked = true;
       document.getElementById('sagCompanyCreateError').textContent = '';
       document.getElementById('sagCompanyCreateResult').style.display = 'none';
@@ -24701,7 +24692,30 @@
       const input = document.getElementById('sagCreatePassword');
       wrap.style.display = manual ? 'block' : 'none';
       input.required = manual;
-      if (!manual) input.value = '';
+      if (!manual) {
+        input.value = '';
+        input.type = 'password';
+      }
+    }
+
+    function generateStrongPassword() {
+      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+      const bytes = new Uint8Array(16);
+      let password = '';
+      do {
+        crypto.getRandomValues(bytes);
+        password = Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
+      } while (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password));
+      return password;
+    }
+
+    function generateSagCompanyPassword() {
+      const mode = document.getElementById('sagCreatePasswordMode');
+      if (mode) mode.value = 'manual';
+      toggleSagCompanyPassword();
+      const input = document.getElementById('sagCreatePassword');
+      input.value = generateStrongPassword();
+      input.type = 'text';
     }
 
     async function copySagText(value) {
@@ -24745,8 +24759,6 @@
         phone: document.getElementById('sagCreatePhone').value.trim(),
         username: document.getElementById('sagCreateUsername').value.trim().toLowerCase(),
         isActive: document.getElementById('sagCreateStatus').value === 'active',
-        plan: document.getElementById('sagCreatePlan').value,
-        creditBalance: document.getElementById('sagCreateCredit').value,
         passwordMode: document.getElementById('sagCreatePasswordMode').value,
         password: document.getElementById('sagCreatePassword').value,
         sendWelcomeEmail: document.getElementById('sagCreateWelcomeEmail').checked
@@ -24823,7 +24835,7 @@
           '<div class="tenant-actions" style="gap:6px">' +
           '<button class="btn small primary" onclick="showSagTenantDetails(\'' + t.id + '\')">عرض الحساب</button>' +
           '<button class="btn small ' + (t.isActive ? 'danger' : 'green') + '" onclick="sagToggleTenant(\'' + t.id + '\', ' + (!t.isActive) + ')">' + (t.isActive ? 'إيقاف' : 'تفعيل') + '</button>' +
-          '<button class="btn small ghost" onclick="sagResetTenantPassword(\'' + t.id + '\')">إعادة تعيين كلمة المرور</button>' +
+          '<button class="btn small ghost" onclick="openSagResetPassword(\'' + t.id + '\')">إعادة تعيين كلمة المرور</button>' +
           (t.isAdmin ? '' : '<button class="btn small danger" onclick="sagDeleteTenant(\'' + t.id + '\')">حذف</button>') +
           '</div></div>';
       }).join('');
@@ -25011,7 +25023,50 @@
       else { toast(data.error || 'فشل الحذف'); }
     }
 
-    async function sagResetTenantPassword(tenantId) {
+    function openSagResetPassword(tenantId) {
+      const existing = document.getElementById('sagResetPasswordModal');
+      if (existing) existing.remove();
+      const modal = document.createElement('div');
+      modal.id = 'sagResetPasswordModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:28px;max-width:520px;width:100%">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
+        '<h2 style="margin:0">إعادة تعيين كلمة المرور</h2>' +
+        '<button class="btn ghost" onclick="document.getElementById(\'sagResetPasswordModal\').remove()">إغلاق</button></div>' +
+        '<div class="tenant-field"><label>كلمة مرور جديدة</label>' +
+        '<div style="display:flex;gap:8px">' +
+        '<input type="text" id="sagResetPasswordValue" minlength="10" autocomplete="new-password" style="flex:1;min-width:0">' +
+        '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagResetPasswordValue\').value = generateStrongPassword()">توليد تلقائي</button>' +
+        '</div></div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;flex-wrap:wrap">' +
+        '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagResetPasswordModal\').remove()">إلغاء</button>' +
+        '<button type="button" class="btn ghost" onclick="sagResetPasswordWithLink(\'' + tenantId + '\')">رابط تعيين</button>' +
+        '<button type="button" class="btn primary" onclick="sagResetPasswordWithValue(\'' + tenantId + '\')">اعتماد</button>' +
+        '</div></div>';
+      document.body.appendChild(modal);
+    }
+
+    async function sagResetPasswordWithValue(tenantId) {
+      const password = document.getElementById('sagResetPasswordValue').value;
+      if (!password || password.length < 10) {
+        toast('كلمة المرور 10 أحرف على الأقل');
+        return;
+      }
+      showLoader('جاري تعيين كلمة المرور', 'حفظ كلمة المرور الجديدة', 15);
+      try {
+        const data = await api('POST', '/api/admin/tenants/' + tenantId + '/reset-password', { password });
+        if (!data.success) {
+          toast(data.error || 'تعذر تعيين كلمة المرور');
+          return;
+        }
+        document.getElementById('sagResetPasswordModal').remove();
+        toast('تم تعيين كلمة المرور');
+      } finally {
+        hideLoader();
+      }
+    }
+
+    async function sagResetPasswordWithLink(tenantId) {
       showLoader('جاري إنشاء رابط كلمة المرور', 'تأمين رابط جديد للاستخدام مرة واحدة', 15);
       try {
         const data = await api('POST', '/api/admin/tenants/' + tenantId + '/reset-password', { useSetupLink: true });
@@ -25020,6 +25075,7 @@
           return;
         }
         await copySagText(data.setupUrl);
+        document.getElementById('sagResetPasswordModal').remove();
         toast('تم إنشاء رابط كلمة المرور');
       } finally {
         hideLoader();
