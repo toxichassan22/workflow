@@ -610,8 +610,8 @@
 
     .slide-resize-handle {
       position: absolute;
-      width: 14px;
-      height: 14px;
+      width: 16px;
+      height: 16px;
       background: #fff;
       border: 2px solid var(--pd);
       border-radius: 4px;
@@ -22565,7 +22565,7 @@
         { dir: 'n', cursor: 'ns' }, { dir: 's', cursor: 'ns' },
         { dir: 'w', cursor: 'ew' }, { dir: 'e', cursor: 'ew' }
       ];
-      const HS = 14;
+      const HS = 16;
       const half = HS / 2;
       const positions = {
         nw: [x - half, y - half], ne: [x + w - half, y - half],
@@ -22591,84 +22591,98 @@
       });
     }
 
+    /* Free resize in any direction: the edge opposite the drag stays visually
+       fixed by compensating with translate. This works for absolute and flow
+       elements, LTR and RTL, without rewriting the element positioning. */
     function startSlideElementResize(stage, index, slide, target, dir, scale, event) {
       const path = slideElementPath(slide, target);
       if (!path) return;
-      const slideRect = slide.getBoundingClientRect();
-      const liveRect = target.getBoundingClientRect();
-      const startW = liveRect.width / scale;
-      const startH = liveRect.height / scale;
+      const touchW = dir.indexOf('e') !== -1 || dir.indexOf('w') !== -1;
+      const touchH = dir.indexOf('n') !== -1 || dir.indexOf('s') !== -1;
+      if (!touchW && !touchH) return;
+      const measure = () => {
+        const sRect = slide.getBoundingClientRect();
+        const r = target.getBoundingClientRect();
+        return {
+          left: (r.left - sRect.left) / scale,
+          top: (r.top - sRect.top) / scale,
+          width: r.width / scale,
+          height: r.height / scale
+        };
+      };
+      const base = measure();
       const startX = event.clientX;
       const startY = event.clientY;
       const computed = window.getComputedStyle(target);
-      const isAbsolute = computed.position === 'absolute';
       const isImage = slideElementIsImageBox(target);
-      const startLeft = (liveRect.left - slideRect.left) / scale;
-      const startTop = (liveRect.top - slideRect.top) / scale;
-      let normalizedLive = false;
-      if (isAbsolute) {
-        target.style.left = Math.round(startLeft) + 'px';
-        target.style.top = Math.round(startTop) + 'px';
-        target.style.right = 'auto';
-        target.style.bottom = 'auto';
-        target.style.transform = '';
-        target.dataset.manualTranslateX = '0';
-        target.dataset.manualTranslateY = '0';
-        normalizedLive = true;
+      const explicitHeight = !!(computed.height && computed.height !== 'auto');
+      let baseTx = Number(target.dataset.manualTranslateX) || 0;
+      let baseTy = Number(target.dataset.manualTranslateY) || 0;
+      let foreignPrefix = '';
+      const inlineTransform = String(target.style.transform || '').trim();
+      if (inlineTransform && !/^translate\(\s*-?\d+(?:\.\d+)?px\s*,\s*-?\d+(?:\.\d+)?px\s*\)$/.test(inlineTransform)) {
+        foreignPrefix = inlineTransform;
+        baseTx = 0;
+        baseTy = 0;
       }
-      const baseLeft = isAbsolute ? Math.round(startLeft) : null;
-      const baseTop = isAbsolute ? Math.round(startTop) : null;
+      let displayPromoted = false;
+      if (computed.display === 'inline') {
+        target.style.display = 'inline-block';
+        displayPromoted = true;
+      }
+      const writeTransform = (tx, ty) => {
+        target.style.transform = (foreignPrefix ? foreignPrefix + ' ' : '')
+          + 'translate(' + Math.round(tx) + 'px, ' + Math.round(ty) + 'px)';
+      };
+      let compX = 0;
+      let compY = 0;
       let moved = false;
+      writeTransform(baseTx, baseTy);
       const onMove = moveEvent => {
         const dw = (moveEvent.clientX - startX) / scale;
         const dh = (moveEvent.clientY - startY) / scale;
         if (Math.abs(dw) + Math.abs(dh) > 2) moved = true;
-        let newW = startW;
-        let newH = startH;
-        let newLeft = baseLeft;
-        let newTop = baseTop;
-        if (dir.indexOf('e') !== -1) newW = startW + dw;
-        if (dir.indexOf('w') !== -1) { newW = startW - dw; if (isAbsolute) newLeft = baseLeft + dw; }
-        if (dir.indexOf('s') !== -1) newH = startH + dh;
-        if (dir.indexOf('n') !== -1) { newH = startH - dh; if (isAbsolute) newTop = baseTop + dh; }
+        let newW = base.width;
+        let newH = base.height;
+        if (dir.indexOf('e') !== -1) newW = base.width + dw;
+        if (dir.indexOf('w') !== -1) newW = base.width - dw;
+        if (dir.indexOf('s') !== -1) newH = base.height + dh;
+        if (dir.indexOf('n') !== -1) newH = base.height - dh;
         newW = Math.max(24, Math.min(1280, Math.round(newW)));
         newH = Math.max(24, Math.min(720, Math.round(newH)));
-        if (dir === 'n' || dir === 's') newW = Math.round(startW);
-        if (dir === 'e' || dir === 'w') newH = Math.round(startH);
-        if (isAbsolute && (dir.indexOf('w') !== -1)) {
-          const maxLeft = baseLeft + startW - 24;
-          newLeft = Math.max(0, Math.min(Math.round(newLeft), maxLeft));
-          newW = Math.round(startW + (baseLeft - newLeft));
+        if (touchW) target.style.width = newW + 'px';
+        if (touchH) {
+          if (isImage) target.style.height = newH + 'px';
+          else {
+            target.style.minHeight = newH + 'px';
+            if (explicitHeight) target.style.height = newH + 'px';
+          }
         }
-        if (isAbsolute && (dir.indexOf('n') !== -1)) {
-          const maxTop = baseTop + startH - 24;
-          newTop = Math.max(0, Math.min(Math.round(newTop), maxTop));
-          newH = Math.round(startH + (baseTop - newTop));
-        }
-        target.style.width = newW + 'px';
-        if (isImage) {
-          target.style.height = newH + 'px';
-        } else if (dir !== 'e' && dir !== 'w') {
-          target.style.minHeight = newH + 'px';
-          if (computed.height && computed.height !== 'auto') target.style.height = newH + 'px';
-        }
-        if (isAbsolute && newLeft !== null && (dir.indexOf('w') !== -1)) target.style.left = Math.round(newLeft) + 'px';
-        if (isAbsolute && newTop !== null && (dir.indexOf('n') !== -1)) target.style.top = Math.round(newTop) + 'px';
+        const m = measure();
+        if (dir.indexOf('e') !== -1) compX += (base.left - m.left);
+        else if (dir.indexOf('w') !== -1) compX += ((base.left + base.width) - (m.left + m.width));
+        if (dir.indexOf('s') !== -1) compY += (base.top - m.top);
+        else if (dir.indexOf('n') !== -1) compY += ((base.top + base.height) - (m.top + m.height));
+        writeTransform(baseTx + compX, baseTy + compY);
       };
       const onUp = () => {
         window.removeEventListener('pointermove', onMove, true);
         window.removeEventListener('pointerup', onUp, true);
         window.removeEventListener('pointercancel', onUp, true);
         if (!moved) return;
-        const finalW = parseFloat(target.style.width) || startW;
+        const finalTx = Math.round(baseTx + compX);
+        const finalTy = Math.round(baseTy + compY);
+        writeTransform(finalTx, finalTy);
+        const finalW = touchW ? (parseFloat(target.style.width) || base.width) : null;
         let finalH = null;
-        if (isImage) finalH = parseFloat(target.style.height) || startH;
-        else if (dir !== 'e' && dir !== 'w') finalH = parseFloat(target.style.minHeight) || parseFloat(target.style.height) || startH;
-        const finalLeft = isAbsolute && (dir.indexOf('w') !== -1) ? (parseFloat(target.style.left) || baseLeft) : null;
-        const finalTop = isAbsolute && (dir.indexOf('n') !== -1) ? (parseFloat(target.style.top) || baseTop) : null;
+        if (touchH) {
+          if (isImage) finalH = parseFloat(target.style.height) || base.height;
+          else finalH = parseFloat(target.style.minHeight) || parseFloat(target.style.height) || base.height;
+        }
         commitSlideElementResize(stage, index, target, path, {
-          width: finalW, height: finalH, left: finalLeft, top: finalTop,
-          isImage: isImage, normalizedLive: normalizedLive, baseLeft: baseLeft, baseTop: baseTop
+          width: finalW, height: finalH, tx: finalTx, ty: finalTy,
+          isImage: isImage, explicitHeight: explicitHeight,
+          displayPromoted: displayPromoted, foreignPrefix: foreignPrefix
         });
         selectSlideElement(stage, index, target, path);
       };
@@ -22687,13 +22701,14 @@
       if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
       const widthPx = size && typeof size === 'object' ? size.width : size;
       const heightPx = size && typeof size === 'object' ? size.height : null;
-      const leftPx = size && typeof size === 'object' ? size.left : null;
-      const topPx = size && typeof size === 'object' ? size.top : null;
       const isImage = !!(size && typeof size === 'object' && size.isImage);
+      const explicitHeight = !!(size && typeof size === 'object' && size.explicitHeight);
       pushSlideEditHistory(index);
-      const widthValue = Math.max(24, Math.min(1280, Math.round(widthPx))) + 'px';
-      target.style.width = widthValue;
-      rawTarget.style.width = widthValue;
+      if (widthPx !== null && widthPx !== undefined) {
+        const widthValue = Math.max(24, Math.min(1280, Math.round(widthPx))) + 'px';
+        target.style.width = widthValue;
+        rawTarget.style.width = widthValue;
+      }
       if (heightPx !== null && heightPx !== undefined) {
         const heightValue = Math.max(24, Math.min(720, Math.round(heightPx))) + 'px';
         if (isImage) {
@@ -22702,45 +22717,27 @@
         } else {
           target.style.minHeight = heightValue;
           rawTarget.style.minHeight = heightValue;
-          if (target.style.height && target.style.height !== 'auto') target.style.height = heightValue;
-          if (rawTarget.style.height && rawTarget.style.height !== 'auto') rawTarget.style.height = heightValue;
+          if (explicitHeight) {
+            target.style.height = heightValue;
+            rawTarget.style.height = heightValue;
+          }
         }
       }
-      if (leftPx !== null && leftPx !== undefined) {
-        const leftValue = Math.max(0, Math.round(leftPx)) + 'px';
-        target.style.left = leftValue;
-        target.style.right = 'auto';
-        target.style.transform = '';
-        target.dataset.manualTranslateX = '0';
-        target.dataset.manualTranslateY = target.dataset.manualTranslateY || '0';
-        rawTarget.style.left = leftValue;
-        rawTarget.style.right = 'auto';
-        rawTarget.style.transform = '';
-        if (rawTarget.dataset) { rawTarget.dataset.manualTranslateX = '0'; }
-      }
-      if (topPx !== null && topPx !== undefined) {
-        const topValue = Math.max(0, Math.round(topPx)) + 'px';
-        target.style.top = topValue;
-        target.style.bottom = 'auto';
-        target.style.transform = target.style.transform || '';
-        if (leftPx === null || leftPx === undefined) {
-          target.style.transform = '';
-          target.dataset.manualTranslateX = '0';
-          target.dataset.manualTranslateY = '0';
+      if (size && typeof size === 'object' && (size.tx !== undefined || size.ty !== undefined)) {
+        const liveTransform = String(target.style.transform || '');
+        rawTarget.style.transform = liveTransform;
+        const m = liveTransform.match(/translate\(\s*(-?\d+)px\s*,\s*(-?\d+)px\s*\)\s*$/);
+        const dx = m ? m[1] : String(Math.round(size.tx || 0));
+        const dy = m ? m[2] : String(Math.round(size.ty || 0));
+        target.dataset.manualTranslateX = dx;
+        target.dataset.manualTranslateY = dy;
+        if (rawTarget.dataset) {
+          rawTarget.dataset.manualTranslateX = dx;
+          rawTarget.dataset.manualTranslateY = dy;
         }
-        rawTarget.style.top = topValue;
-        rawTarget.style.bottom = 'auto';
-        if (leftPx === null || leftPx === undefined) {
-          rawTarget.style.transform = '';
-          if (rawTarget.dataset) { rawTarget.dataset.manualTranslateX = '0'; rawTarget.dataset.manualTranslateY = '0'; }
-        }
-      } else if (leftPx !== null && leftPx !== undefined) {
-        rawTarget.style.transform = '';
-        if (rawTarget.dataset) { rawTarget.dataset.manualTranslateY = rawTarget.dataset.manualTranslateY || '0'; }
       }
-      if (window.getComputedStyle(target).position === 'absolute' && !target.style.left && !target.style.right) {
-        target.style.left = '0px';
-        rawTarget.style.left = '0px';
+      if (size && typeof size === 'object' && size.displayPromoted) {
+        rawTarget.style.display = 'inline-block';
       }
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
