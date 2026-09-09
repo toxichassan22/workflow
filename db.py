@@ -82,17 +82,22 @@ def _create_tables(conn):
     CREATE TABLE IF NOT EXISTS tenants (
         id TEXT PRIMARY KEY,
         company_name TEXT NOT NULL,
+        account_manager_name TEXT,
+        username TEXT,
+        phone TEXT,
         subdomain TEXT UNIQUE,
         domain TEXT,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         plan TEXT DEFAULT 'free',
+        credit_balance REAL DEFAULT 0,
         is_active INTEGER DEFAULT 1,
         is_admin INTEGER DEFAULT 0,
+        primary_user_id TEXT,
+        require_password_change INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         settings_json TEXT
     );
-
     CREATE TABLE IF NOT EXISTS tenant_branding (
         tenant_id TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
         primary_color TEXT DEFAULT '#3B6E91',
@@ -196,14 +201,28 @@ def _create_tables(conn):
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
+        username TEXT,
+        phone TEXT,
         email TEXT NOT NULL,
         password_hash TEXT NOT NULL,
         role TEXT DEFAULT 'employee',
         is_active INTEGER DEFAULT 1,
+        require_password_change INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
+
+    CREATE TABLE IF NOT EXISTS password_setup_tokens (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+        token_hash TEXT UNIQUE NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_password_setup_tokens_tenant ON password_setup_tokens(tenant_id);
 
     CREATE TABLE IF NOT EXISTS user_permissions (
         id TEXT PRIMARY KEY,
@@ -433,6 +452,62 @@ def _create_tables(conn):
     if 'domain' not in cols:
         conn.execute('ALTER TABLE tenants ADD COLUMN domain TEXT')
         print('[DB] Migration: added domain column to tenants')
+    for column, definition in (
+        ('account_manager_name', 'TEXT'),
+        ('username', 'TEXT'),
+        ('phone', 'TEXT'),
+        ('credit_balance', 'REAL DEFAULT 0'),
+        ('primary_user_id', 'TEXT'),
+        ('require_password_change', 'INTEGER DEFAULT 0'),
+    ):
+        if column not in cols:
+            conn.execute(f'ALTER TABLE tenants ADD COLUMN {column} {definition}')
+            print(f'[DB] Migration: added {column} column to tenants')
+
+    user_cols = [row['name'] for row in conn.execute('PRAGMA table_info(users)').fetchall()]
+    for column, definition in (
+        ('username', 'TEXT'),
+        ('phone', 'TEXT'),
+        ('require_password_change', 'INTEGER DEFAULT 0'),
+    ):
+        if column not in user_cols:
+            conn.execute(f'ALTER TABLE users ADD COLUMN {column} {definition}')
+            print(f'[DB] Migration: added {column} column to users')
+    # Backfill the primary company admin in two correlated steps. SQLite does not
+    # resolve an outer-table reference inside ORDER BY of an UPDATE subquery
+    # (no such column: tenants.email), so the email preference and the
+    # earliest-admin fallback run as separate statements that only correlate
+    # in WHERE and only order by inner columns.
+    conn.execute(
+        '''UPDATE tenants
+           SET primary_user_id = (
+               SELECT users.id FROM users
+               WHERE users.tenant_id = tenants.id
+                 AND users.role = 'company_admin'
+                 AND LOWER(users.email) = LOWER(tenants.email)
+               LIMIT 1
+           )
+           WHERE primary_user_id IS NULL'''
+    )
+    conn.execute(
+        '''UPDATE tenants
+           SET primary_user_id = (
+               SELECT users.id FROM users
+               WHERE users.tenant_id = tenants.id
+                 AND users.role = 'company_admin'
+               ORDER BY users.created_at
+               LIMIT 1
+           )
+           WHERE primary_user_id IS NULL'''
+    )
+    conn.execute(
+        '''UPDATE tenants
+           SET account_manager_name = (
+               SELECT users.name FROM users WHERE users.id = tenants.primary_user_id
+           )
+           WHERE COALESCE(account_manager_name, '') = ''
+             AND primary_user_id IS NOT NULL'''
+    )
 
     # Migration: add section_key column to tenant_input_fields
     cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenant_input_fields)').fetchall()]
@@ -530,14 +605,20 @@ def _seed_admin(conn):
 # Tenant CRUD
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_tenant(company_name, email, password_hash, subdomain=None, plan='free'):
+def create_tenant(company_name, email, password_hash, subdomain=None, plan='free',
+                  account_manager_name=None, username=None, phone=None,
+                  credit_balance=0, require_password_change=False):
     """Create a new tenant with branding row and default fields."""
     conn = get_db()
     tenant_id = str(uuid.uuid4())
 
     conn.execute(
-        'INSERT INTO tenants (id, company_name, subdomain, email, password_hash, plan) VALUES (?, ?, ?, ?, ?, ?)',
-        (tenant_id, company_name, subdomain, email, password_hash, plan)
+        '''INSERT INTO tenants
+           (id, company_name, account_manager_name, username, phone, subdomain, email,
+            password_hash, plan, credit_balance, require_password_change)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (tenant_id, company_name, account_manager_name, username, phone, subdomain, email,
+         password_hash, plan, credit_balance, 1 if require_password_change else 0)
     )
     conn.execute(
         'INSERT INTO tenant_branding (tenant_id, company_name, primary_color, secondary_color, accent_color, background_color, lock_slide_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -552,6 +633,16 @@ def get_tenant_by_email(email):
     """Fetch a tenant by email."""
     conn = get_db()
     row = conn.execute('SELECT * FROM tenants WHERE email = ?', (email,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_tenant_by_username(username):
+    """Fetch a tenant by username."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM tenants WHERE LOWER(username) = LOWER(?)',
+        (str(username or '').strip(),)
+    ).fetchone()
     return dict(row) if row else None
 
 
@@ -579,7 +670,11 @@ def get_all_tenants():
 def update_tenant(tenant_id, **fields):
     """Update tenant fields dynamically."""
     conn = get_db()
-    allowed = {'company_name', 'subdomain', 'plan', 'is_active', 'settings_json'}
+    allowed = {
+        'company_name', 'account_manager_name', 'username', 'phone', 'subdomain',
+        'domain', 'email', 'password_hash', 'plan', 'credit_balance', 'is_active',
+        'primary_user_id', 'require_password_change', 'settings_json'
+    }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False
@@ -588,6 +683,65 @@ def update_tenant(tenant_id, **fields):
     conn.execute(f'UPDATE tenants SET {set_clause} WHERE id = ?', values)
     conn.commit()
     return True
+
+
+def create_company_with_admin(company_name, manager_name, email, username, phone,
+                              password_hash, plan='free', credit_balance=0,
+                              is_active=True, require_password_change=False):
+    """Create a company, its workspace, and its primary company administrator atomically."""
+    conn = get_db()
+    tenant_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+    try:
+        conn.execute(
+            '''INSERT INTO tenants
+               (id, company_name, account_manager_name, username, phone, email, password_hash,
+                plan, credit_balance, is_active, primary_user_id, require_password_change)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (tenant_id, company_name, manager_name, username.lower(), phone, email.lower(),
+             password_hash, plan, credit_balance, 1 if is_active else 0, user_id,
+             1 if require_password_change else 0)
+        )
+        conn.execute(
+            '''INSERT INTO tenant_branding
+               (tenant_id, company_name, primary_color, secondary_color, accent_color,
+                background_color, lock_slide_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (tenant_id, company_name, '#3B6E91', '#254B66', '#6DA3C3', '#F4F9FC', 0)
+        )
+        _seed_default_fields(conn, tenant_id)
+        conn.execute(
+            '''INSERT INTO users
+               (id, tenant_id, name, username, phone, email, password_hash, role,
+                is_active, require_password_change)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'company_admin', ?, ?)''',
+            (user_id, tenant_id, manager_name, username.lower(), phone, email.lower(),
+             password_hash, 1 if is_active else 0, 1 if require_password_change else 0)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return tenant_id, user_id
+
+
+def get_tenant_profile_counts(tenant_id):
+    """Return company account totals without loading tenant-owned payloads."""
+    conn = get_db()
+    return {
+        'users': conn.execute(
+            'SELECT COUNT(*) AS c FROM users WHERE tenant_id = ?', (tenant_id,)
+        ).fetchone()['c'],
+        'projects': conn.execute(
+            'SELECT COUNT(*) AS c FROM project_drafts WHERE tenant_id = ?', (tenant_id,)
+        ).fetchone()['c'],
+        'presentations': conn.execute(
+            'SELECT COUNT(*) AS c FROM presentations WHERE tenant_id = ?', (tenant_id,)
+        ).fetchone()['c'],
+        'exports': conn.execute(
+            'SELECT COUNT(*) AS c FROM exports WHERE tenant_id = ?', (tenant_id,)
+        ).fetchone()['c'],
+    }
 
 
 def delete_tenant(tenant_id):
@@ -1601,13 +1755,18 @@ def get_stats():
 # Users CRUD (company employees/admins within a tenant)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_user(tenant_id, name, email, password_hash, role='employee'):
+def create_user(tenant_id, name, email, password_hash, role='employee',
+                username=None, phone=None, require_password_change=False):
     """Create a user (employee or company admin) within a tenant."""
     conn = get_db()
     user_id = str(uuid.uuid4())
     conn.execute(
-        'INSERT INTO users (id, tenant_id, name, email, password_hash, role, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)',
-        (user_id, tenant_id, name, email.lower(), password_hash, role)
+        '''INSERT INTO users
+           (id, tenant_id, name, username, phone, email, password_hash, role,
+            is_active, require_password_change)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)''',
+        (user_id, tenant_id, name, username.lower() if username else None, phone,
+         email.lower(), password_hash, role, 1 if require_password_change else 0)
     )
     conn.commit()
     return user_id
@@ -1624,6 +1783,19 @@ def get_user_by_email(email):
     return dict(row) if row else None
 
 
+def get_user_by_username(username):
+    """Fetch a user by username with tenant account state."""
+    conn = get_db()
+    row = conn.execute(
+        '''SELECT u.*, t.company_name, t.is_active AS tenant_active,
+                  t.is_admin AS tenant_is_admin
+           FROM users u JOIN tenants t ON u.tenant_id = t.id
+           WHERE LOWER(u.username) = LOWER(?)''',
+        (str(username or '').strip(),)
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def get_user_by_id(user_id):
     """Fetch a user by ID."""
     conn = get_db()
@@ -1635,7 +1807,9 @@ def get_users_by_tenant(tenant_id):
     """Get all users for a tenant."""
     conn = get_db()
     rows = conn.execute(
-        'SELECT id, name, email, role, is_active, created_at FROM users WHERE tenant_id = ? ORDER BY created_at',
+        '''SELECT id, name, username, phone, email, role, is_active,
+                  require_password_change, created_at
+           FROM users WHERE tenant_id = ? ORDER BY created_at''',
         (tenant_id,)
     ).fetchall()
     return [dict(r) for r in rows]
@@ -1644,16 +1818,103 @@ def get_users_by_tenant(tenant_id):
 def update_user(user_id, **fields):
     """Update a user."""
     conn = get_db()
-    allowed = {'name', 'email', 'password_hash', 'role', 'is_active'}
+    allowed = {
+        'name', 'username', 'phone', 'email', 'password_hash', 'role',
+        'is_active', 'require_password_change'
+    }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False
     if 'email' in updates:
         updates['email'] = updates['email'].lower()
+    if 'username' in updates and updates['username']:
+        updates['username'] = updates['username'].lower()
     set_clause = ', '.join(f'{k} = ?' for k in updates)
     values = list(updates.values()) + [user_id]
     conn.execute(f'UPDATE users SET {set_clause} WHERE id = ?', values)
     conn.commit()
+    return True
+
+
+def set_primary_company_admin(tenant_id, user_id):
+    """Assign an existing tenant user as the primary company administrator."""
+    conn = get_db()
+    user = conn.execute(
+        'SELECT * FROM users WHERE id = ? AND tenant_id = ?',
+        (user_id, tenant_id)
+    ).fetchone()
+    if not user:
+        return False
+    tenant = conn.execute(
+        'SELECT primary_user_id FROM tenants WHERE id = ?', (tenant_id,)
+    ).fetchone()
+    previous_user_id = tenant['primary_user_id'] if tenant else None
+    try:
+        if previous_user_id and previous_user_id != user_id:
+            conn.execute(
+                "UPDATE users SET role = 'employee' WHERE id = ? AND tenant_id = ?",
+                (previous_user_id, tenant_id)
+            )
+        conn.execute(
+            "UPDATE users SET role = 'company_admin', is_active = 1 WHERE id = ?",
+            (user_id,)
+        )
+        conn.execute(
+            '''UPDATE tenants
+               SET primary_user_id = ?, account_manager_name = ?, username = ?, phone = ?,
+                   email = ?, password_hash = ?, require_password_change = ?
+               WHERE id = ?''',
+            (user_id, user['name'], user['username'], user['phone'], user['email'],
+             user['password_hash'], user['require_password_change'], tenant_id)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return True
+
+
+def sync_primary_company_admin(tenant_id, **fields):
+    """Update the tenant account and its primary company administrator together."""
+    conn = get_db()
+    tenant = conn.execute(
+        'SELECT * FROM tenants WHERE id = ?', (tenant_id,)
+    ).fetchone()
+    if not tenant:
+        return False
+    user_id = tenant['primary_user_id']
+    user_updates = {}
+    tenant_updates = {}
+    mapping = {
+        'account_manager_name': 'name',
+        'username': 'username',
+        'phone': 'phone',
+        'email': 'email',
+        'password_hash': 'password_hash',
+        'require_password_change': 'require_password_change',
+        'is_active': 'is_active',
+    }
+    for key, value in fields.items():
+        tenant_updates[key] = value
+        if key in mapping:
+            user_updates[mapping[key]] = value
+    try:
+        if tenant_updates:
+            set_clause = ', '.join(f'{key} = ?' for key in tenant_updates)
+            conn.execute(
+                f'UPDATE tenants SET {set_clause} WHERE id = ?',
+                [*tenant_updates.values(), tenant_id]
+            )
+        if user_id and user_updates:
+            set_clause = ', '.join(f'{key} = ?' for key in user_updates)
+            conn.execute(
+                f'UPDATE users SET {set_clause} WHERE id = ? AND tenant_id = ?',
+                [*user_updates.values(), user_id, tenant_id]
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return True
 
 
@@ -2137,6 +2398,87 @@ def create_invite(tenant_id, email, expiry_days=7):
     )
     conn.commit()
     return token
+
+
+def create_password_setup_token(tenant_id, user_id, expiry_hours=24):
+    """Create a one-time password setup token and return its raw value."""
+    import hashlib as _hashlib
+    import secrets as _secrets
+    from datetime import timedelta
+    conn = get_db()
+    raw_token = _secrets.token_urlsafe(32)
+    token_hash = _hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+    token_id = str(uuid.uuid4())
+    expires_at = (datetime.now() + timedelta(hours=expiry_hours)).isoformat()
+    conn.execute(
+        '''UPDATE password_setup_tokens
+           SET used_at = ?
+           WHERE tenant_id = ? AND user_id = ? AND used_at IS NULL''',
+        (datetime.now().isoformat(), tenant_id, user_id)
+    )
+    conn.execute(
+        '''INSERT INTO password_setup_tokens
+           (id, tenant_id, user_id, token_hash, expires_at)
+           VALUES (?, ?, ?, ?, ?)''',
+        (token_id, tenant_id, user_id, token_hash, expires_at)
+    )
+    conn.commit()
+    return raw_token
+
+
+def get_password_setup_token(raw_token):
+    """Return a valid one-time password setup token."""
+    import hashlib as _hashlib
+    conn = get_db()
+    token_hash = _hashlib.sha256(str(raw_token or '').encode('utf-8')).hexdigest()
+    row = conn.execute(
+        '''SELECT pst.*, t.company_name, t.username, t.email
+           FROM password_setup_tokens pst
+           JOIN tenants t ON t.id = pst.tenant_id
+           WHERE pst.token_hash = ? AND pst.used_at IS NULL AND pst.expires_at > ?''',
+        (token_hash, datetime.now().isoformat())
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def complete_password_setup(raw_token, password_hash):
+    """Set the password for a valid setup token and consume it atomically."""
+    import hashlib as _hashlib
+    conn = get_db()
+    token_hash = _hashlib.sha256(str(raw_token or '').encode('utf-8')).hexdigest()
+    token = conn.execute(
+        '''SELECT * FROM password_setup_tokens
+           WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?''',
+        (token_hash, datetime.now().isoformat())
+    ).fetchone()
+    if not token:
+        return None
+    used_at = datetime.now().isoformat()
+    try:
+        conn.execute(
+            '''UPDATE users
+               SET password_hash = ?, require_password_change = 0, is_active = 1
+               WHERE id = ? AND tenant_id = ?''',
+            (password_hash, token['user_id'], token['tenant_id'])
+        )
+        conn.execute(
+            '''UPDATE tenants
+               SET password_hash = ?, require_password_change = 0
+               WHERE id = ? AND primary_user_id = ?''',
+            (password_hash, token['tenant_id'], token['user_id'])
+        )
+        conn.execute(
+            'UPDATE password_setup_tokens SET used_at = ? WHERE id = ?',
+            (used_at, token['id'])
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {
+        'tenant_id': token['tenant_id'],
+        'user_id': token['user_id'],
+    }
 
 
 def get_invite_by_token(token):

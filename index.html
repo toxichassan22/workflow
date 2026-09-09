@@ -5334,8 +5334,8 @@
 
       <div id="loginError" class="auth-error"></div>
       <form id="loginForm" class="auth-form active" onsubmit="handleLogin(event)">
-        <label>البريد الإلكتروني (أدمن الشركة)</label>
-        <input type="email" id="loginEmail" placeholder="admin@company.com" required>
+        <label>البريد الإلكتروني أو اسم المستخدم (أدمن الشركة)</label>
+        <input type="text" id="loginEmail" autocomplete="username" required>
         <label>كلمة المرور</label>
         <input type="password" id="loginPassword" placeholder="كلمة المرور" required>
         <button type="submit" class="auth-btn">دخول</button>
@@ -5343,8 +5343,8 @@
 
       <div id="employeeError" class="auth-error"></div>
       <form id="employeeForm" class="auth-form" onsubmit="handleEmployeeLogin(event)">
-        <label>البريد الإلكتروني (موظف)</label>
-        <input type="email" id="employeeEmail" placeholder="name@company.com" required>
+        <label>البريد الإلكتروني أو اسم المستخدم (موظف)</label>
+        <input type="text" id="employeeEmail" autocomplete="username" required>
         <label>كلمة المرور</label>
         <input type="password" id="employeePassword" placeholder="كلمة المرور" required>
         <button type="submit" class="auth-btn">دخول الموظف</button>
@@ -6257,7 +6257,10 @@
         <div>
           <h2>لوحة تحكم SAG - المالك الرئيسي</h2>
         </div>
-        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
+        <div class="tenant-actions">
+          <button class="btn primary" onclick="openSagCompanyCreate()">إضافة شركة جديدة</button>
+          <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة</button>
+        </div>
       </div>
 
       <!-- Stats Cards -->
@@ -6288,6 +6291,82 @@
 
       <!-- Tenant Details Modal -->
       <div id="sagTenantModal" style="display:none"></div>
+
+      <div id="sagCompanyCreateModal"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:20px">
+        <div style="background:#fff;border-radius:20px;padding:28px;max-width:760px;width:100%;max-height:90vh;overflow:auto">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px">
+            <h2 style="margin:0">إضافة شركة جديدة</h2>
+            <button type="button" class="btn ghost" onclick="closeSagCompanyCreate()">إغلاق</button>
+          </div>
+          <div id="sagCompanyCreateError" class="auth-error"></div>
+          <form id="sagCompanyCreateForm" onsubmit="createSagCompany(event)">
+            <div class="tenant-grid">
+              <div class="tenant-field">
+                <label>اسم الشركة</label>
+                <input type="text" id="sagCreateCompanyName" maxlength="120" required>
+              </div>
+              <div class="tenant-field">
+                <label>اسم مدير الحساب</label>
+                <input type="text" id="sagCreateManagerName" maxlength="120" required>
+              </div>
+              <div class="tenant-field">
+                <label>البريد الإلكتروني</label>
+                <input type="email" id="sagCreateEmail" autocomplete="off" required>
+              </div>
+              <div class="tenant-field">
+                <label>رقم الجوال</label>
+                <input type="tel" id="sagCreatePhone" inputmode="tel" autocomplete="off" required>
+              </div>
+              <div class="tenant-field">
+                <label>اسم المستخدم</label>
+                <input type="text" id="sagCreateUsername" autocomplete="off" minlength="3" maxlength="40" required>
+              </div>
+              <div class="tenant-field">
+                <label>حالة الحساب</label>
+                <select id="sagCreateStatus">
+                  <option value="active">نشط</option>
+                  <option value="inactive">موقوف</option>
+                </select>
+              </div>
+              <div class="tenant-field">
+                <label>الباقة</label>
+                <select id="sagCreatePlan">
+                  <option value="free">Free</option>
+                  <option value="pro">Pro</option>
+                  <option value="enterprise">Enterprise</option>
+                </select>
+              </div>
+              <div class="tenant-field">
+                <label>الرصيد</label>
+                <input type="number" id="sagCreateCredit" min="0" step="0.01" value="0" required>
+              </div>
+              <div class="tenant-field">
+                <label>إعداد كلمة المرور</label>
+                <select id="sagCreatePasswordMode" onchange="toggleSagCompanyPassword()">
+                  <option value="set_link">رابط تعيين كلمة المرور</option>
+                  <option value="manual">كلمة مرور يحددها المدير</option>
+                </select>
+              </div>
+              <div class="tenant-field" id="sagCreatePasswordWrap" style="display:none">
+                <label>كلمة المرور</label>
+                <input type="password" id="sagCreatePassword" minlength="10" autocomplete="new-password">
+              </div>
+              <div class="tenant-field full">
+                <label style="display:flex;align-items:center;gap:8px;margin:0">
+                  <input type="checkbox" id="sagCreateWelcomeEmail" checked style="width:auto">
+                  إرسال رسالة الترحيب
+                </label>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+              <button type="button" class="btn ghost" onclick="closeSagCompanyCreate()">إلغاء</button>
+              <button type="submit" class="btn primary" id="sagCreateCompanySubmit">إنشاء الحساب</button>
+            </div>
+          </form>
+          <div id="sagCompanyCreateResult" style="display:none"></div>
+        </div>
+      </div>
     </section>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -21913,6 +21992,24 @@
       return node;
     }
 
+    /* A static "shape": a block with its own visible surface (background,
+       image, border or shadow). These are the cards and panels behind texts
+       in flow layouts. Outline is deliberately ignored: hover and selection
+       outlines must never make an element look like a shape. */
+    function slideNodeIsVisualShape(node, style) {
+      if (!node || !style) return false;
+      const bg = String(style.backgroundColor || '').trim().toLowerCase();
+      if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return true;
+      const bgImg = String(style.backgroundImage || '').trim().toLowerCase();
+      if (bgImg && bgImg !== 'none') return true;
+      const borderW = parseFloat(style.borderTopWidth) || 0;
+      const borderStyle = String(style.borderTopStyle || '').trim().toLowerCase();
+      if (borderW > 0 && borderStyle && borderStyle !== 'none') return true;
+      const shadow = String(style.boxShadow || '').trim().toLowerCase();
+      if (shadow && shadow !== 'none') return true;
+      return false;
+    }
+
     function slideDragTarget(slide, source) {
       if (!slide || !source || source === slide) return null;
       if (source.closest && source.closest('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return null;
@@ -21931,6 +22028,15 @@
             && node.parentElement.hasAttribute && node.parentElement.hasAttribute('data-slide-imagebox')) {
             return node.parentElement;
           }
+          return node;
+        }
+        /* Flow-layout shapes: the deepest block with its own visible surface
+           wins, so an inner card is picked over a full-slide wrapper. Managed
+           chrome (header/footer/counters) is never a shape. The walk stops
+           before the slide root, which can never be selected. */
+        if (!node.closest('[data-slide-header], [data-slide-footer], header, footer')
+          && node.matches('div, section, aside, figure, table, ul')
+          && slideNodeIsVisualShape(node, style)) {
           return node;
         }
         node = node.parentElement;
@@ -22469,6 +22575,9 @@
     function selectSlideElement(stage, index, target, path) {
       const session = getSlideEditSession(index);
       if (!session || !stage || !target) return;
+      if (!path || !path.length) return;
+      const slide = stage.querySelector('.slide');
+      if (slide && target === slide) return;
       clearSlideElementSelection(stage);
       session.sel = {
         path: (path || []).slice(),
@@ -22484,6 +22593,11 @@
     function restoreSlideEditSelection(stage, index) {
       const session = getSlideEditSession(index);
       if (!session || !session.sel || !stage) return;
+      if (!session.sel.path || !session.sel.path.length) {
+        session.sel = null;
+        refreshSlideEditToolbar(index);
+        return;
+      }
       const slide = stage.querySelector('.slide');
       let target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
       if (target && session.sel.placement) {
@@ -22493,7 +22607,7 @@
         const found = slide.querySelector('[' + attr + '="' + safePlacement + '"]');
         if (found) target = found;
       }
-      if (!target || !slide.contains(target)) {
+      if (!target || !slide.contains(target) || target === slide) {
         session.sel = null;
         refreshSlideEditToolbar(index);
         return;
@@ -24500,6 +24614,7 @@
       persistVisualConceptDraftState();
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'presentation';
       renumberTenantSlides();
+      try { syncSlideEditSessionsAfterRender(); } catch (err) {}
       tenantProjectData = { ...tenantProjectData, tenantSlidePlan };
       const payload = {
         format: format,
@@ -24559,6 +24674,107 @@
 
     // SAG Super Admin
     let sagAllTenants = [];
+    let sagCurrentTenantId = null;
+
+    function openSagCompanyCreate() {
+      const modal = document.getElementById('sagCompanyCreateModal');
+      const form = document.getElementById('sagCompanyCreateForm');
+      form.reset();
+      document.getElementById('sagCreateCredit').value = '0';
+      document.getElementById('sagCreateStatus').value = 'active';
+      document.getElementById('sagCreatePasswordMode').value = 'set_link';
+      document.getElementById('sagCreateWelcomeEmail').checked = true;
+      document.getElementById('sagCompanyCreateError').textContent = '';
+      document.getElementById('sagCompanyCreateResult').style.display = 'none';
+      form.style.display = 'block';
+      toggleSagCompanyPassword();
+      modal.style.display = 'flex';
+    }
+
+    function closeSagCompanyCreate() {
+      document.getElementById('sagCompanyCreateModal').style.display = 'none';
+    }
+
+    function toggleSagCompanyPassword() {
+      const manual = document.getElementById('sagCreatePasswordMode').value === 'manual';
+      const wrap = document.getElementById('sagCreatePasswordWrap');
+      const input = document.getElementById('sagCreatePassword');
+      wrap.style.display = manual ? 'block' : 'none';
+      input.required = manual;
+      if (!manual) input.value = '';
+    }
+
+    async function copySagText(value) {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast('تم النسخ');
+      } catch (error) {
+        const input = document.createElement('textarea');
+        input.value = value;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+        toast('تم النسخ');
+      }
+    }
+
+    function renderSagSetupResult(host, title, setupUrl, emailSent) {
+      host.style.display = 'block';
+      host.innerHTML =
+        '<h3 style="margin:0 0 12px;color:var(--p)">' + escapeHtml(title) + '</h3>' +
+        '<div class="tenant-grid full">' +
+        '<div class="tenant-field"><label>رابط تعيين كلمة المرور</label>' +
+        '<input type="text" value="' + escapeHtml(setupUrl || '') + '" readonly></div>' +
+        '<div class="tenant-field"><label>حالة رسالة الترحيب</label><p style="margin:0">' +
+        (emailSent ? 'تم الإرسال' : 'لم يتم الإرسال') + '</p></div></div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">' +
+        '<button type="button" class="btn ghost" data-copy-setup-url>نسخ الرابط</button>' +
+        '<button type="button" class="btn primary" onclick="closeSagCompanyCreate()">إغلاق</button></div>';
+      host.querySelector('[data-copy-setup-url]').addEventListener('click', () => copySagText(setupUrl || ''));
+    }
+
+    async function createSagCompany(event) {
+      event.preventDefault();
+      const submit = document.getElementById('sagCreateCompanySubmit');
+      const errorHost = document.getElementById('sagCompanyCreateError');
+      const payload = {
+        companyName: document.getElementById('sagCreateCompanyName').value.trim(),
+        accountManagerName: document.getElementById('sagCreateManagerName').value.trim(),
+        email: document.getElementById('sagCreateEmail').value.trim().toLowerCase(),
+        phone: document.getElementById('sagCreatePhone').value.trim(),
+        username: document.getElementById('sagCreateUsername').value.trim().toLowerCase(),
+        isActive: document.getElementById('sagCreateStatus').value === 'active',
+        plan: document.getElementById('sagCreatePlan').value,
+        creditBalance: document.getElementById('sagCreateCredit').value,
+        passwordMode: document.getElementById('sagCreatePasswordMode').value,
+        password: document.getElementById('sagCreatePassword').value,
+        sendWelcomeEmail: document.getElementById('sagCreateWelcomeEmail').checked
+      };
+      errorHost.textContent = '';
+      submit.disabled = true;
+      showLoader('جاري إنشاء حساب الشركة', 'إنشاء الشركة والمستخدم الرئيسي', 12);
+      try {
+        const data = await api('POST', '/api/admin/tenants', payload);
+        if (!data.success) {
+          errorHost.textContent = data.error || 'تعذر إنشاء حساب الشركة';
+          return;
+        }
+        document.getElementById('sagCompanyCreateForm').style.display = 'none';
+        renderSagSetupResult(
+          document.getElementById('sagCompanyCreateResult'),
+          'تم إنشاء حساب الشركة والمستخدم الرئيسي بنجاح',
+          data.setupUrl,
+          data.welcomeEmailSent
+        );
+        const tenantsData = await api('GET', '/api/admin/tenants');
+        sagAllTenants = tenantsData.success ? tenantsData.tenants || [] : sagAllTenants;
+        renderSagTenants(sagAllTenants);
+      } finally {
+        submit.disabled = false;
+        hideLoader();
+      }
+    }
 
     async function openTenantAdmin() {
       showTenantPage('tenantAdminPage');
@@ -24598,17 +24814,17 @@
         const adminBadge = t.isAdmin ? ' | <span style="color:#7c3aed;font-weight:600">SAG Admin</span>' : '';
         return '<div class="tenant-presentation-card">' +
           '<div><h3>' + escapeHtml(t.companyName || '') + adminBadge + '</h3>' +
-          '<div class="meta">' + escapeHtml(t.email) + ' | ' + planBadge + ' | ' + statusBadge +
-          (t.domain ? ' | ' + escapeHtml(t.domain) : '') +
-          (t.subdomain ? ' | ' + escapeHtml(t.subdomain) : '') +
+          '<div class="meta">' + escapeHtml(t.accountManagerName || '') + ' | ' +
+          escapeHtml(t.email) + ' | ' + escapeHtml(t.username || '') + ' | ' +
+          planBadge + ' | ' + statusBadge + ' | رصيد ' +
+          Number(t.creditBalance || 0).toLocaleString('en-US') +
           (t.createdAt ? ' | ' + t.createdAt.slice(0, 10) : '') +
           '</div></div>' +
           '<div class="tenant-actions" style="gap:6px">' +
-          '<button class="btn small primary" onclick="showSagTenantDetails(\'' + t.id + '\')">تفاصيل</button>' +
-          '<button class="btn small ghost" onclick="sagEditTenantPlan(\'' + t.id + '\')">تغيير الخطة</button>' +
-          '<button class="btn small ' + (t.isActive ? 'danger' : 'green') + '" onclick="sagToggleTenant(\'' + t.id + '\', ' + (!t.isActive) + ')">' + (t.isActive ? 'تعطيل' : 'تفعيل') + '</button>' +
+          '<button class="btn small primary" onclick="showSagTenantDetails(\'' + t.id + '\')">عرض الحساب</button>' +
+          '<button class="btn small ' + (t.isActive ? 'danger' : 'green') + '" onclick="sagToggleTenant(\'' + t.id + '\', ' + (!t.isActive) + ')">' + (t.isActive ? 'إيقاف' : 'تفعيل') + '</button>' +
           '<button class="btn small ghost" onclick="sagResetTenantPassword(\'' + t.id + '\')">إعادة تعيين كلمة المرور</button>' +
-          (t.isAdmin ? '' : '<button class="btn small danger" onclick="sagDeleteTenant(\'' + t.id + '\', \'' + escapeHtml(t.companyName) + '\')">حذف</button>') +
+          (t.isAdmin ? '' : '<button class="btn small danger" onclick="sagDeleteTenant(\'' + t.id + '\')">حذف</button>') +
           '</div></div>';
       }).join('');
     }
@@ -24618,7 +24834,10 @@
       const plan = document.getElementById('sagFilterPlan').value;
       const status = document.getElementById('sagFilterStatus').value;
       let filtered = sagAllTenants.filter(t => {
-        if (q && !(t.companyName || '').toLowerCase().includes(q) && !(t.email || '').toLowerCase().includes(q) && !(t.domain || '').toLowerCase().includes(q)) return false;
+        const searchValue = [
+          t.companyName, t.accountManagerName, t.email, t.username, t.phone
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (q && !searchValue.includes(q)) return false;
         if (plan && t.plan !== plan) return false;
         if (status === 'active' && !t.isActive) return false;
         if (status === 'inactive' && t.isActive) return false;
@@ -24633,36 +24852,150 @@
       const t = data.tenant;
       const c = data.counts;
       const users = data.users || [];
-      const presentations = data.presentations || [];
-      const exports = data.exports || [];
-
+      sagCurrentTenantId = tenantId;
       const modal = document.getElementById('sagTenantModal');
       modal.style.display = 'flex';
       modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:28px;max-width:700px;width:100%;max-height:85vh;overflow:auto">' +
+      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:28px;max-width:900px;width:100%;max-height:90vh;overflow:auto">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
         '<h2 style="margin:0">' + escapeHtml(t.companyName) + '</h2>' +
         '<button class="btn ghost" onclick="document.getElementById(\'sagTenantModal\').style.display=\'none\'">إغلاق</button></div>' +
-        '<div class="tenant-grid" style="margin-bottom:16px">' +
-        '<div class="tenant-field"><label>الإيميل</label><p>' + escapeHtml(t.email) + '</p></div>' +
-        '<div class="tenant-field"><label>الخطة</label><p>' + (t.plan || 'free') + '</p></div>' +
-        '<div class="tenant-field"><label>الدومين</label><p>' + escapeHtml(t.domain || 'غير محدد') + '</p></div>' +
-        '<div class="tenant-field"><label>السابدومين</label><p>' + escapeHtml(t.subdomain || 'غير محدد') + '</p></div>' +
-        '<div class="tenant-field"><label>الحالة</label><p>' + (t.isActive ? 'نشط' : 'معطل') + '</p></div>' +
-        '<div class="tenant-field"><label>تاريخ التسجيل</label><p>' + escapeHtml(t.createdAt || '') + '</p></div>' +
-        '</div>' +
         '<div class="tenant-dashboard-cards" style="margin-bottom:16px">' +
-        '<div class="tenant-dash-card" style="cursor:default"><h3>' + c.users + '</h3><p>موظفين</p></div>' +
+        '<div class="tenant-dash-card" style="cursor:default"><h3>' + c.users + '</h3><p>مستخدمون</p></div>' +
+        '<div class="tenant-dash-card" style="cursor:default"><h3>' + c.projects + '</h3><p>دراسات</p></div>' +
         '<div class="tenant-dash-card" style="cursor:default"><h3>' + c.presentations + '</h3><p>عروض</p></div>' +
         '<div class="tenant-dash-card" style="cursor:default"><h3>' + c.exports + '</h3><p>تصديرات</p></div>' +
         '</div>' +
-        (users.length ? '<h3 style="margin:16px 0 8px">الموظفون</h3>' + users.map(u =>
-          '<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>' + escapeHtml(u.name) + '</strong> - ' + escapeHtml(u.email) + ' | ' + (u.role === 'company_admin' ? 'أدمن' : 'موظف') + ' | ' + (u.is_active ? 'نشط' : 'معطل') + '</div>'
-        ).join('') : '<p class="tenant-hint">لا يوجد موظفين</p>') +
-        (presentations.length ? '<h3 style="margin:16px 0 8px">العروض (' + presentations.length + ')</h3>' + presentations.slice(0, 10).map(p =>
-          '<div style="padding:8px 0;border-bottom:1px solid var(--line)">' + escapeHtml(p.title || 'بدون عنوان') + ' | ' + (p.slide_count || 0) + ' شريحة | ' + (p.status || 'draft') + '</div>'
-        ).join('') + (presentations.length > 10 ? '<p class="tenant-hint">+' + (presentations.length - 10) + ' عرض آخر</p>' : '') : '<p class="tenant-hint">لا توجد عروض</p>') +
+        '<form onsubmit="saveSagTenant(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
+        '<div class="tenant-field"><label>اسم الشركة</label><input id="sagDetailCompanyName" value="' + escapeHtml(t.companyName || '') + '" required></div>' +
+        '<div class="tenant-field"><label>اسم مدير الحساب</label><input id="sagDetailManagerName" value="' + escapeHtml(t.accountManagerName || '') + '" required></div>' +
+        '<div class="tenant-field"><label>البريد الإلكتروني</label><input type="email" id="sagDetailEmail" value="' + escapeHtml(t.email || '') + '" required></div>' +
+        '<div class="tenant-field"><label>رقم الجوال</label><input id="sagDetailPhone" value="' + escapeHtml(t.phone || '') + '" required></div>' +
+        '<div class="tenant-field"><label>اسم المستخدم</label><input id="sagDetailUsername" value="' + escapeHtml(t.username || '') + '" required></div>' +
+        '<div class="tenant-field"><label>تاريخ إنشاء الحساب</label><p style="margin:0">' + escapeHtml(t.createdAt || '') + '</p></div>' +
+        '<div class="tenant-field"><label>الباقة</label><select id="sagDetailPlan">' +
+        '<option value="free"' + (t.plan === 'free' ? ' selected' : '') + '>Free</option>' +
+        '<option value="pro"' + (t.plan === 'pro' ? ' selected' : '') + '>Pro</option>' +
+        '<option value="enterprise"' + (t.plan === 'enterprise' ? ' selected' : '') + '>Enterprise</option></select></div>' +
+        '<div class="tenant-field"><label>الرصيد</label><input type="number" id="sagDetailCredit" min="0" step="0.01" value="' + Number(t.creditBalance || 0) + '" required></div>' +
+        '<div class="tenant-field full"><label>حالة الحساب</label><select id="sagDetailStatus">' +
+        '<option value="active"' + (t.isActive ? ' selected' : '') + '>نشط</option>' +
+        '<option value="inactive"' + (!t.isActive ? ' selected' : '') + '>موقوف</option></select></div>' +
+        '</div><div style="display:flex;justify-content:flex-end;margin-top:14px">' +
+        '<button type="submit" class="btn primary">حفظ بيانات الشركة</button></div></form>' +
+        '<h3 style="margin:22px 0 10px">المستخدمون</h3>' +
+        '<div id="sagTenantUsers">' + renderSagTenantUsers(tenantId, t.primaryUserId, users) + '</div>' +
+        '<h3 style="margin:22px 0 10px">إضافة مستخدم</h3>' +
+        '<form onsubmit="sagAddTenantUser(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
+        '<div class="tenant-field"><label>الاسم</label><input id="sagNewUserName" required></div>' +
+        '<div class="tenant-field"><label>البريد الإلكتروني</label><input type="email" id="sagNewUserEmail" required></div>' +
+        '<div class="tenant-field"><label>اسم المستخدم</label><input id="sagNewUserUsername" minlength="3" maxlength="40" required></div>' +
+        '<div class="tenant-field"><label>رقم الجوال</label><input id="sagNewUserPhone" required></div>' +
+        '<div class="tenant-field full"><label>الدور</label><select id="sagNewUserRole">' +
+        '<option value="employee">موظف</option><option value="company_admin">أدمن شركة</option></select></div>' +
+        '</div><div style="display:flex;justify-content:flex-end;margin-top:14px">' +
+        '<button type="submit" class="btn primary">إضافة المستخدم</button></div></form>' +
         '</div>';
+    }
+
+    function renderSagTenantUsers(tenantId, primaryUserId, users) {
+      if (!users.length) return '<p class="tenant-hint">لا يوجد مستخدمون</p>';
+      return users.map(user => {
+        const primary = user.id === primaryUserId;
+        return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(user.name) +
+          (primary ? ' <span style="font-size:11px;color:var(--p)">مدير الحساب</span>' : '') + '</h3>' +
+          '<div class="meta">' + escapeHtml(user.email) + ' | ' + escapeHtml(user.username || '') +
+          ' | ' + escapeHtml(user.phone || '') + ' | ' +
+          (user.role === 'company_admin' ? 'أدمن شركة' : 'موظف') + ' | ' +
+          (user.is_active ? 'نشط' : 'موقوف') + '</div></div>' +
+          '<div class="tenant-actions">' +
+          (primary ? '' : '<button type="button" class="btn small ghost" onclick="sagSetPrimaryUser(\'' +
+            tenantId + '\', \'' + user.id + '\')">تعيين مدير الحساب</button>') +
+          '<button type="button" class="btn small ' + (user.is_active ? 'danger' : 'green') +
+          '" onclick="sagToggleTenantUser(\'' + tenantId + '\', \'' + user.id + '\', ' +
+          (!user.is_active) + ')">' + (user.is_active ? 'إيقاف' : 'تفعيل') + '</button>' +
+          (primary ? '' : '<button type="button" class="btn small danger" onclick="sagDeleteTenantUser(\'' +
+            tenantId + '\', \'' + user.id + '\')">حذف</button>') +
+          '</div></div>';
+      }).join('');
+    }
+
+    async function saveSagTenant(event, tenantId) {
+      event.preventDefault();
+      const payload = {
+        companyName: document.getElementById('sagDetailCompanyName').value.trim(),
+        accountManagerName: document.getElementById('sagDetailManagerName').value.trim(),
+        email: document.getElementById('sagDetailEmail').value.trim().toLowerCase(),
+        phone: document.getElementById('sagDetailPhone').value.trim(),
+        username: document.getElementById('sagDetailUsername').value.trim().toLowerCase(),
+        plan: document.getElementById('sagDetailPlan').value,
+        creditBalance: document.getElementById('sagDetailCredit').value,
+        isActive: document.getElementById('sagDetailStatus').value === 'active'
+      };
+      const data = await api('PUT', '/api/admin/tenants/' + tenantId, payload);
+      if (!data.success) {
+        toast(data.error || 'تعذر حفظ بيانات الشركة');
+        return;
+      }
+      toast('تم حفظ بيانات الشركة');
+      await openTenantAdmin();
+      await showSagTenantDetails(tenantId);
+    }
+
+    async function sagAddTenantUser(event, tenantId) {
+      event.preventDefault();
+      showLoader('جاري إضافة المستخدم', 'إنشاء الحساب ورابط كلمة المرور', 15);
+      try {
+        const data = await api('POST', '/api/admin/tenants/' + tenantId + '/users', {
+          name: document.getElementById('sagNewUserName').value.trim(),
+          email: document.getElementById('sagNewUserEmail').value.trim().toLowerCase(),
+          username: document.getElementById('sagNewUserUsername').value.trim().toLowerCase(),
+          phone: document.getElementById('sagNewUserPhone').value.trim(),
+          role: document.getElementById('sagNewUserRole').value,
+          useSetupLink: true
+        });
+        if (!data.success) {
+          toast(data.error || 'تعذر إضافة المستخدم');
+          return;
+        }
+        if (data.setupUrl) await copySagText(data.setupUrl);
+        toast('تمت إضافة المستخدم');
+        await showSagTenantDetails(tenantId);
+      } finally {
+        hideLoader();
+      }
+    }
+
+    async function sagSetPrimaryUser(tenantId, userId) {
+      const data = await api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId, { isPrimary: true });
+      if (!data.success) {
+        toast(data.error || 'تعذر تغيير مدير الحساب');
+        return;
+      }
+      toast('تم تغيير مدير الحساب');
+      await openTenantAdmin();
+      await showSagTenantDetails(tenantId);
+    }
+
+    async function sagToggleTenantUser(tenantId, userId, isActive) {
+      const data = await api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId, { is_active: isActive });
+      if (!data.success) {
+        toast(data.error || 'تعذر تحديث المستخدم');
+        return;
+      }
+      toast(isActive ? 'تم تفعيل المستخدم' : 'تم إيقاف المستخدم');
+      await showSagTenantDetails(tenantId);
+    }
+
+    async function sagDeleteTenantUser(tenantId, userId) {
+      if (!confirm('حذف المستخدم نهائياً؟')) return;
+      const data = await api('DELETE', '/api/admin/tenants/' + tenantId + '/users/' + userId);
+      if (!data.success) {
+        toast(data.error || 'تعذر حذف المستخدم');
+        return;
+      }
+      toast('تم حذف المستخدم');
+      await showSagTenantDetails(tenantId);
     }
 
     async function sagToggleTenant(tenantId, isActive) {
@@ -24671,28 +25004,26 @@
       else { toast(data.error || 'فشل'); }
     }
 
-    async function sagDeleteTenant(tenantId, name) {
-      if (!confirm('حذف الشركة "' + name + '" وكل بياناتها نهائياً؟')) return;
+    async function sagDeleteTenant(tenantId) {
+      if (!confirm('حذف الشركة وكل بياناتها نهائياً؟')) return;
       const data = await api('DELETE', '/api/admin/tenants/' + tenantId);
       if (data.success) { toast('تم حذف الشركة'); openTenantAdmin(); }
       else { toast(data.error || 'فشل الحذف'); }
     }
 
-    async function sagEditTenantPlan(tenantId) {
-      const plan = prompt('اختر الخطة (free / pro / enterprise):', 'free');
-      if (!plan || !['free', 'pro', 'enterprise'].includes(plan)) { if (plan) toast('خطة غير صحيحة'); return; }
-      const data = await api('PUT', '/api/admin/tenants/' + tenantId, { plan: plan });
-      if (data.success) { toast('تم تغيير الخطة إلى ' + plan); openTenantAdmin(); }
-      else { toast(data.error || 'فشل'); }
-    }
-
     async function sagResetTenantPassword(tenantId) {
-      const password = prompt('كلمة المرور الجديدة (10 أحرف على الأقل):');
-      if (!password) return;
-      if (password.length < 10) { toast('كلمة المرور قصيرة جداً'); return; }
-      const data = await api('POST', '/api/admin/tenants/' + tenantId + '/reset-password', { password });
-      if (data.success) { toast('تم إعادة تعيين كلمة المرور'); }
-      else { toast(data.error || 'فشل'); }
+      showLoader('جاري إنشاء رابط كلمة المرور', 'تأمين رابط جديد للاستخدام مرة واحدة', 15);
+      try {
+        const data = await api('POST', '/api/admin/tenants/' + tenantId + '/reset-password', { useSetupLink: true });
+        if (!data.success) {
+          toast(data.error || 'تعذر إنشاء الرابط');
+          return;
+        }
+        await copySagText(data.setupUrl);
+        toast('تم إنشاء رابط كلمة المرور');
+      } finally {
+        hideLoader();
+      }
     }
 
 
@@ -25641,12 +25972,17 @@
 
     function initTenant() {
       initScrollSpy();
+      const path = window.location.pathname;
+      const passwordSetupMatch = path.match(/^\/set-password\/(.+)$/);
+      if (passwordSetupMatch) {
+        showPasswordSetupPage(passwordSetupMatch[1]);
+        initGlobalRail();
+        return;
+      }
       const token = getTenantToken();
       if (token) {
         bootstrapTenant();
       } else {
-        // Check if we're on an invite page
-        const path = window.location.pathname;
         const inviteMatch = path.match(/^\/invite\/(.+)$/);
         if (inviteMatch) {
           showInvitePage(inviteMatch[1]);
@@ -25655,6 +25991,59 @@
         }
       }
       initGlobalRail();
+    }
+
+    async function showPasswordSetupPage(rawToken) {
+      const data = await api('GET', '/api/auth/password-setup/' + encodeURIComponent(rawToken));
+      const authPage = document.getElementById('tenantAuthPage');
+      document.getElementById('tenantAppPage').classList.remove('active');
+      authPage.classList.add('active');
+      if (!data.success) {
+        authPage.innerHTML = '<div class="auth-card"><h2>رابط كلمة المرور غير صالح</h2>' +
+          '<p>انتهت صلاحية الرابط أو تم استخدامه.</p>' +
+          '<button class="auth-btn" onclick="window.location.href=\'/\'">العودة لتسجيل الدخول</button></div>';
+        return;
+      }
+      authPage.innerHTML = '<div class="auth-card">' +
+        '<h2>تعيين كلمة المرور</h2>' +
+        '<p>' + escapeHtml(data.companyName || '') + '</p>' +
+        '<div class="tenant-grid full" style="margin-bottom:16px;text-align:right">' +
+        '<div class="tenant-field"><label>اسم المستخدم</label><p style="margin:0">' +
+        escapeHtml(data.username || '') + '</p></div></div>' +
+        '<div id="passwordSetupError" class="auth-error"></div>' +
+        '<form class="auth-form active" onsubmit="handlePasswordSetup(event, \'' +
+        rawToken.replace(/'/g, '') + '\')">' +
+        '<label>كلمة المرور الجديدة</label>' +
+        '<input type="password" id="passwordSetupValue" minlength="10" autocomplete="new-password" required>' +
+        '<label>تأكيد كلمة المرور</label>' +
+        '<input type="password" id="passwordSetupConfirm" minlength="10" autocomplete="new-password" required>' +
+        '<button type="submit" class="auth-btn">اعتماد كلمة المرور</button>' +
+        '</form></div>';
+    }
+
+    async function handlePasswordSetup(event, rawToken) {
+      event.preventDefault();
+      const password = document.getElementById('passwordSetupValue').value;
+      const confirmation = document.getElementById('passwordSetupConfirm').value;
+      const errorHost = document.getElementById('passwordSetupError');
+      errorHost.textContent = '';
+      if (password !== confirmation) {
+        errorHost.textContent = 'كلمتا المرور غير متطابقتين';
+        return;
+      }
+      const data = await api(
+        'POST',
+        '/api/auth/password-setup/' + encodeURIComponent(rawToken),
+        { password }
+      );
+      if (!data.success || !data.token) {
+        errorHost.textContent = data.error || 'تعذر اعتماد كلمة المرور';
+        return;
+      }
+      setTenantToken(data.token);
+      setTenantUser(data.tenant);
+      window.history.replaceState({}, '', '/app/dashboard');
+      await bootstrapTenant();
     }
 
     async function showInvitePage(inviteToken) {

@@ -17,7 +17,11 @@ import uuid as _uuid
 import threading
 import ipaddress
 import socket
+import smtplib
+import ssl
+import secrets
 from io import BytesIO
+from email.message import EmailMessage
 from urllib.parse import urljoin, urlsplit
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
@@ -9272,6 +9276,120 @@ def api_download_export(export_id):
 # AUTH ENDPOINTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+USERNAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{2,39}$')
+PHONE_RE = re.compile(r'^\+?[0-9]{8,15}$')
+ADMIN_COMPANY_PLANS = {'free', 'pro', 'enterprise'}
+
+
+def _normalize_phone(value):
+    translation = str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')
+    return re.sub(r'[\s()-]+', '', str(value or '').translate(translation))
+
+
+def _password_validation_error(password):
+    if len(password or '') < 10:
+        return 'Password must be at least 10 characters'
+    if not re.search(r'[A-Za-z]', password) or not re.search(r'[0-9]', password):
+        return 'Password must include letters and numbers'
+    return None
+
+
+def _generate_secure_password():
+    while True:
+        password = secrets.token_urlsafe(18)
+        if not _password_validation_error(password):
+            return password
+
+
+def _identity_conflict(email, username, tenant_id=None, user_id=None):
+    tenant_by_email = db.get_tenant_by_email(email)
+    if tenant_by_email and tenant_by_email.get('id') != tenant_id:
+        return 'Email already registered'
+    user_by_email = db.get_user_by_email(email)
+    if user_by_email and user_by_email.get('id') != user_id:
+        if not tenant_id or user_by_email.get('tenant_id') != tenant_id:
+            return 'Email already registered'
+        tenant = db.get_tenant_by_id(tenant_id)
+        if not tenant or tenant.get('primary_user_id') != user_by_email.get('id'):
+            return 'Email already registered'
+    tenant_by_username = db.get_tenant_by_username(username)
+    if tenant_by_username and tenant_by_username.get('id') != tenant_id:
+        return 'Username already registered'
+    user_by_username = db.get_user_by_username(username)
+    if user_by_username and user_by_username.get('id') != user_id:
+        if not tenant_id or user_by_username.get('tenant_id') != tenant_id:
+            return 'Username already registered'
+        tenant = db.get_tenant_by_id(tenant_id)
+        if not tenant or tenant.get('primary_user_id') != user_by_username.get('id'):
+            return 'Username already registered'
+    return None
+
+
+def _password_setup_url(raw_token):
+    base_url = (os.environ.get('APP_BASE_URL') or request.host_url).rstrip('/')
+    return f'{base_url}/set-password/{raw_token}'
+
+
+def _send_company_welcome_email(recipient, company_name, account_name, username, setup_url):
+    host = (os.environ.get('SMTP_HOST') or '').strip()
+    if not host:
+        return False
+    port = int(os.environ.get('SMTP_PORT') or 587)
+    smtp_user = (os.environ.get('SMTP_USER') or '').strip()
+    smtp_password = os.environ.get('SMTP_PASSWORD') or ''
+    sender = (os.environ.get('SMTP_FROM') or smtp_user or '').strip()
+    if not sender:
+        return False
+    message = EmailMessage()
+    message['Subject'] = f'مرحبًا بك في LandLoom AI - {company_name}'
+    message['From'] = sender
+    message['To'] = recipient
+    message.set_content(
+        f'مرحبًا {account_name}\n\n'
+        f'تم إنشاء حساب شركتك {company_name} في منصة LandLoom AI.\n'
+        f'اسم المستخدم: {username}\n'
+        f'رابط تعيين كلمة المرور: {setup_url}\n\n'
+        'هذا الرابط صالح للاستخدام مرة واحدة.'
+    )
+    try:
+        if str(os.environ.get('SMTP_SSL') or '').lower() in {'1', 'true', 'yes'}:
+            with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=20) as client:
+                if smtp_user:
+                    client.login(smtp_user, smtp_password)
+                client.send_message(message)
+        else:
+            with smtplib.SMTP(host, port, timeout=20) as client:
+                if str(os.environ.get('SMTP_TLS', 'true')).lower() not in {'0', 'false', 'no'}:
+                    client.starttls(context=ssl.create_default_context())
+                if smtp_user:
+                    client.login(smtp_user, smtp_password)
+                client.send_message(message)
+        return True
+    except Exception:
+        app.logger.exception('Company welcome email could not be sent')
+        return False
+
+
+def _company_payload(tenant):
+    return {
+        'id': tenant['id'],
+        'companyName': tenant['company_name'],
+        'accountManagerName': tenant.get('account_manager_name'),
+        'username': tenant.get('username'),
+        'phone': tenant.get('phone'),
+        'email': tenant['email'],
+        'plan': tenant.get('plan', 'free'),
+        'creditBalance': float(tenant.get('credit_balance') or 0),
+        'isActive': bool(tenant.get('is_active')),
+        'isAdmin': bool(tenant.get('is_admin')),
+        'primaryUserId': tenant.get('primary_user_id'),
+        'requirePasswordChange': bool(tenant.get('require_password_change')),
+        'subdomain': tenant.get('subdomain'),
+        'domain': tenant.get('domain'),
+        'createdAt': tenant.get('created_at'),
+    }
+
+
 @app.route('/api/auth/register', methods=['POST'])
 def api_register():
     """Register a new company (tenant). Creates company admin user automatically."""
@@ -9309,8 +9427,14 @@ def api_register():
             conn = db.get_db()
             conn.execute('UPDATE tenants SET domain = ? WHERE id = ?', (domain, tenant_id))
             conn.commit()
-        # Create company admin user
-        db.create_user(tenant_id, company_name, email, hash_password(password), role='company_admin')
+        user_id = db.create_user(
+            tenant_id, company_name, email, hash_password(password), role='company_admin'
+        )
+        db.update_tenant(
+            tenant_id,
+            primary_user_id=user_id,
+            account_manager_name=company_name,
+        )
     except db_driver.IntegrityError:
         return jsonify({'error': 'Email or subdomain already registered'}), 409
     token = create_token(tenant_id, email, is_admin=False, user_id=None, user_name=company_name, user_role='company_admin')
@@ -9325,17 +9449,21 @@ def api_register():
 def api_login():
     """Login a company admin (tenant) or employee (user). Auto-detects by email domain."""
     data = request.json or {}
-    email = (data.get('email') or '').strip().lower()
+    identity = (data.get('email') or data.get('username') or '').strip().lower()
     password = data.get('password', '')
 
-    if not email or not password:
+    if not identity or not password:
         return jsonify({'error': 'Email and password are required'}), 400
 
-    # Try tenant (company admin) login first
-    tenant = db.get_tenant_by_email(email)
+    tenant = db.get_tenant_by_email(identity) or db.get_tenant_by_username(identity)
     if tenant and verify_password(password, tenant['password_hash']):
         if not tenant.get('is_active'):
             return jsonify({'error': 'Account is deactivated'}), 403
+        if tenant.get('require_password_change'):
+            return jsonify({
+                'error': 'Password setup required',
+                'code': 'PASSWORD_SETUP_REQUIRED',
+            }), 403
         token = create_token(tenant['id'], tenant['email'], is_admin=bool(tenant.get('is_admin')),
                              user_name=tenant['company_name'], user_role='company_admin')
         return jsonify({
@@ -9348,6 +9476,7 @@ def api_login():
                 'isAdmin': bool(tenant.get('is_admin')),
                 'plan': tenant.get('plan', 'free'),
                 'domain': tenant.get('domain'),
+                'username': tenant.get('username'),
             },
             'user': {
                 'name': tenant['company_name'],
@@ -9355,13 +9484,17 @@ def api_login():
             }
         })
 
-    # Try user (employee) login - find by email
-    user = db.get_user_by_email(email)
+    user = db.get_user_by_email(identity) or db.get_user_by_username(identity)
     if user and verify_password(password, user['password_hash']):
         if not user.get('is_active'):
             return jsonify({'error': 'Account is deactivated'}), 403
         if not user.get('tenant_active'):
             return jsonify({'error': 'Company account is deactivated'}), 403
+        if user.get('require_password_change'):
+            return jsonify({
+                'error': 'Password setup required',
+                'code': 'PASSWORD_SETUP_REQUIRED',
+            }), 403
         token = create_token(user['tenant_id'], user['email'], is_admin=bool(user.get('tenant_is_admin')),
                              user_id=user['id'], user_name=user['name'], user_role=user['role'])
         tenant = db.get_tenant_by_id(user['tenant_id'])
@@ -9381,10 +9514,55 @@ def api_login():
                 'name': user['name'],
                 'email': user['email'],
                 'role': user['role'],
+                'username': user.get('username'),
             }
         })
 
     return jsonify({'error': 'Invalid email or password'}), 401
+
+
+@app.route('/api/auth/password-setup/<raw_token>', methods=['GET'])
+def api_password_setup_details(raw_token):
+    token = db.get_password_setup_token(raw_token)
+    if not token:
+        return jsonify({'error': 'Password setup link is invalid or expired'}), 404
+    return jsonify({
+        'success': True,
+        'companyName': token.get('company_name'),
+        'username': token.get('username'),
+        'email': token.get('email'),
+        'expiresAt': token.get('expires_at'),
+    })
+
+
+@app.route('/api/auth/password-setup/<raw_token>', methods=['POST'])
+def api_password_setup_complete(raw_token):
+    data = request.json or {}
+    password = data.get('password') or ''
+    error = _password_validation_error(password)
+    if error:
+        return jsonify({'error': error}), 400
+    completed = db.complete_password_setup(raw_token, hash_password(password))
+    if not completed:
+        return jsonify({'error': 'Password setup link is invalid or expired'}), 404
+    tenant = db.get_tenant_by_id(completed['tenant_id'])
+    user = db.get_user_by_id(completed['user_id'])
+    token = create_token(
+        tenant['id'], user['email'], is_admin=bool(tenant.get('is_admin')),
+        user_id=user['id'], user_name=user['name'], user_role=user['role']
+    )
+    return jsonify({
+        'success': True,
+        'token': token,
+        'tenant': _company_payload(tenant),
+        'user': {
+            'id': user['id'],
+            'name': user['name'],
+            'email': user['email'],
+            'username': user.get('username'),
+            'role': user['role'],
+        }
+    })
 
 
 @app.route('/api/auth/me', methods=['GET'])
@@ -13939,24 +14117,81 @@ def serve_tenant_font(tenant_id, filename):
 # ADMIN ENDPOINTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@app.route('/api/admin/tenants', methods=['GET'])
+@app.route('/api/admin/tenants', methods=['GET', 'POST'])
 @require_admin
 def api_admin_tenants():
-    """List all tenants (admin only)."""
+    """List or create tenant companies."""
+    if request.method == 'POST':
+        data = request.json or {}
+        company_name = (data.get('companyName') or '').strip()
+        manager_name = (data.get('accountManagerName') or '').strip()
+        email = (data.get('email') or '').strip().lower()
+        username = (data.get('username') or '').strip().lower()
+        phone = _normalize_phone(data.get('phone'))
+        plan = (data.get('plan') or 'free').strip().lower()
+        password_mode = data.get('passwordMode') or 'set_link'
+        password = data.get('password') or ''
+        is_active = bool(data.get('isActive', True))
+        send_welcome = bool(data.get('sendWelcomeEmail', True))
+        try:
+            credit_balance = float(data.get('creditBalance') or 0)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Credit balance must be a valid number'}), 400
+
+        if not company_name or not manager_name or not email or not username or not phone:
+            return jsonify({'error': 'All company and account fields are required'}), 400
+        if len(company_name) > 120 or len(manager_name) > 120:
+            return jsonify({'error': 'Company or account manager name is too long'}), 400
+        if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+            return jsonify({'error': 'Invalid email address'}), 400
+        if not USERNAME_RE.fullmatch(username):
+            return jsonify({'error': 'Invalid username'}), 400
+        if not PHONE_RE.fullmatch(phone):
+            return jsonify({'error': 'Invalid phone number'}), 400
+        if plan not in ADMIN_COMPANY_PLANS:
+            return jsonify({'error': 'Invalid plan'}), 400
+        if credit_balance < 0:
+            return jsonify({'error': 'Credit balance cannot be negative'}), 400
+        conflict = _identity_conflict(email, username)
+        if conflict:
+            return jsonify({'error': conflict}), 409
+        if password_mode == 'manual':
+            password_error = _password_validation_error(password)
+            if password_error:
+                return jsonify({'error': password_error}), 400
+            require_password_change = False
+        elif password_mode == 'set_link':
+            password = _generate_secure_password()
+            require_password_change = True
+        else:
+            return jsonify({'error': 'Invalid password mode'}), 400
+
+        try:
+            tenant_id, user_id = db.create_company_with_admin(
+                company_name, manager_name, email, username, phone,
+                hash_password(password), plan=plan, credit_balance=credit_balance,
+                is_active=is_active, require_password_change=require_password_change
+            )
+        except db_driver.IntegrityError:
+            return jsonify({'error': 'Email or username already registered'}), 409
+
+        setup_token = db.create_password_setup_token(tenant_id, user_id)
+        setup_url = _password_setup_url(setup_token)
+        email_sent = False
+        if send_welcome:
+            email_sent = _send_company_welcome_email(
+                email, company_name, manager_name, username, setup_url
+            )
+        tenant = db.get_tenant_by_id(tenant_id)
+        return jsonify({
+            'success': True,
+            'tenant': _company_payload(tenant),
+            'setupUrl': setup_url,
+            'welcomeEmailSent': email_sent,
+        }), 201
+
     tenants = db.get_all_tenants()
-    result = []
-    for t in tenants:
-        result.append({
-            'id': t['id'],
-            'companyName': t['company_name'],
-            'email': t['email'],
-            'plan': t.get('plan', 'free'),
-            'isActive': bool(t.get('is_active')),
-            'isAdmin': bool(t.get('is_admin')),
-            'subdomain': t.get('subdomain'),
-            'domain': t.get('domain'),
-            'createdAt': t.get('created_at'),
-        })
+    result = [_company_payload(tenant) for tenant in tenants]
     return jsonify({'success': True, 'tenants': result})
 
 
@@ -13964,13 +14199,93 @@ def api_admin_tenants():
 @require_admin
 def api_admin_update_tenant(tenant_id):
     """Update a tenant (admin only)."""
+    tenant = db.get_tenant_by_id(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
     data = request.json or {}
-    fields = {}
-    for k in ['company_name', 'subdomain', 'plan', 'is_active']:
-        if k in data:
-            fields[k] = data[k]
-    db.update_tenant(tenant_id, **fields)
-    return jsonify({'success': True})
+    company_fields = {}
+    account_fields = {}
+    key_map = {
+        'companyName': 'company_name',
+        'accountManagerName': 'account_manager_name',
+        'username': 'username',
+        'phone': 'phone',
+        'email': 'email',
+        'plan': 'plan',
+        'creditBalance': 'credit_balance',
+        'isActive': 'is_active',
+    }
+    for input_key, db_key in key_map.items():
+        if input_key in data:
+            company_fields[db_key] = data[input_key]
+    for db_key in ['company_name', 'account_manager_name', 'username', 'phone', 'email',
+                   'plan', 'credit_balance', 'is_active']:
+        if db_key in data:
+            company_fields[db_key] = data[db_key]
+
+    if 'company_name' in company_fields:
+        company_fields['company_name'] = str(company_fields['company_name'] or '').strip()
+        if not company_fields['company_name'] or len(company_fields['company_name']) > 120:
+            return jsonify({'error': 'Invalid company name'}), 400
+    if 'account_manager_name' in company_fields:
+        company_fields['account_manager_name'] = str(
+            company_fields['account_manager_name'] or ''
+        ).strip()
+        if not company_fields['account_manager_name']:
+            return jsonify({'error': 'Account manager name is required'}), 400
+    if 'email' in company_fields:
+        company_fields['email'] = str(company_fields['email'] or '').strip().lower()
+        if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', company_fields['email']):
+            return jsonify({'error': 'Invalid email address'}), 400
+    if 'username' in company_fields:
+        company_fields['username'] = str(company_fields['username'] or '').strip().lower()
+        if not USERNAME_RE.fullmatch(company_fields['username']):
+            return jsonify({'error': 'Invalid username'}), 400
+    if 'phone' in company_fields:
+        company_fields['phone'] = _normalize_phone(company_fields['phone'])
+        if not PHONE_RE.fullmatch(company_fields['phone']):
+            return jsonify({'error': 'Invalid phone number'}), 400
+    if 'plan' in company_fields and company_fields['plan'] not in ADMIN_COMPANY_PLANS:
+        return jsonify({'error': 'Invalid plan'}), 400
+    if 'credit_balance' in company_fields:
+        try:
+            company_fields['credit_balance'] = float(company_fields['credit_balance'])
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Credit balance must be a valid number'}), 400
+        if company_fields['credit_balance'] < 0:
+            return jsonify({'error': 'Credit balance cannot be negative'}), 400
+    if 'is_active' in company_fields:
+        company_fields['is_active'] = 1 if company_fields['is_active'] else 0
+
+    email = company_fields.get('email', tenant['email'])
+    username = company_fields.get('username', tenant.get('username'))
+    if email and username:
+        conflict = _identity_conflict(
+            email, username, tenant_id=tenant_id, user_id=tenant.get('primary_user_id')
+        )
+        if conflict:
+            return jsonify({'error': conflict}), 409
+
+    for key in ['account_manager_name', 'username', 'phone', 'email', 'is_active']:
+        if key in company_fields:
+            account_fields[key] = company_fields.pop(key)
+    try:
+        if company_fields:
+            db.update_tenant(tenant_id, **company_fields)
+        if account_fields:
+            db.sync_primary_company_admin(tenant_id, **account_fields)
+        if 'company_name' in company_fields:
+            db.update_branding(tenant_id, company_name=company_fields['company_name'])
+        primary_user_id = data.get('primaryUserId')
+        if primary_user_id and primary_user_id != tenant.get('primary_user_id'):
+            if not db.set_primary_company_admin(tenant_id, primary_user_id):
+                return jsonify({'error': 'User not found'}), 404
+    except db_driver.IntegrityError:
+        return jsonify({'error': 'Email or username already registered'}), 409
+    return jsonify({
+        'success': True,
+        'tenant': _company_payload(db.get_tenant_by_id(tenant_id)),
+    })
 
 
 @app.route('/api/admin/tenants/<tenant_id>', methods=['DELETE'])
@@ -13998,32 +14313,14 @@ def api_admin_tenant_details(tenant_id):
     if not tenant:
         return jsonify({'error': 'Tenant not found'}), 404
     users = db.get_users_by_tenant(tenant_id)
-    presentations = db.get_presentations(tenant_id)
     branding = db.get_branding(tenant_id)
-    exports = db.get_exports(tenant_id)
+    counts = db.get_tenant_profile_counts(tenant_id)
     return jsonify({
         'success': True,
-        'tenant': {
-            'id': tenant['id'],
-            'companyName': tenant['company_name'],
-            'email': tenant['email'],
-            'plan': tenant.get('plan', 'free'),
-            'isActive': bool(tenant.get('is_active')),
-            'isAdmin': bool(tenant.get('is_admin')),
-            'subdomain': tenant.get('subdomain'),
-            'domain': tenant.get('domain'),
-            'createdAt': tenant.get('created_at'),
-            'settingsJson': tenant.get('settings_json'),
-        },
+        'tenant': _company_payload(tenant),
         'users': users,
-        'presentations': presentations,
-        'exports': exports,
         'branding': branding,
-        'counts': {
-            'users': len(users),
-            'presentations': len(presentations),
-            'exports': len(exports),
-        }
+        'counts': counts,
     })
 
 
@@ -14035,15 +14332,152 @@ def api_admin_tenant_users(tenant_id):
     return jsonify({'success': True, 'users': users})
 
 
+@app.route('/api/admin/tenants/<tenant_id>/users', methods=['POST'])
+@require_admin
+def api_admin_add_tenant_user(tenant_id):
+    tenant = db.get_tenant_by_id(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    email = (data.get('email') or '').strip().lower()
+    username = (data.get('username') or '').strip().lower()
+    phone = _normalize_phone(data.get('phone'))
+    role = data.get('role') or 'employee'
+    use_setup_link = bool(data.get('useSetupLink', True))
+    password = data.get('password') or ''
+    if not name or not email or not username or not phone:
+        return jsonify({'error': 'All user fields are required'}), 400
+    if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        return jsonify({'error': 'Invalid email address'}), 400
+    if not USERNAME_RE.fullmatch(username):
+        return jsonify({'error': 'Invalid username'}), 400
+    if not PHONE_RE.fullmatch(phone):
+        return jsonify({'error': 'Invalid phone number'}), 400
+    if role not in {'employee', 'company_admin'}:
+        return jsonify({'error': 'Invalid role'}), 400
+    conflict = _identity_conflict(email, username)
+    if conflict:
+        return jsonify({'error': conflict}), 409
+    if use_setup_link:
+        password = _generate_secure_password()
+    else:
+        password_error = _password_validation_error(password)
+        if password_error:
+            return jsonify({'error': password_error}), 400
+    try:
+        user_id = db.create_user(
+            tenant_id, name, email, hash_password(password), role=role,
+            username=username, phone=phone, require_password_change=use_setup_link
+        )
+    except db_driver.IntegrityError:
+        return jsonify({'error': 'Email or username already registered'}), 409
+    setup_url = None
+    if use_setup_link:
+        setup_url = _password_setup_url(
+            db.create_password_setup_token(tenant_id, user_id)
+        )
+    return jsonify({
+        'success': True,
+        'user': db.get_user_by_id(user_id),
+        'setupUrl': setup_url,
+    }), 201
+
+
+@app.route('/api/admin/tenants/<tenant_id>/users/<user_id>', methods=['PUT', 'DELETE'])
+@require_admin
+def api_admin_update_tenant_user(tenant_id, user_id):
+    tenant = db.get_tenant_by_id(tenant_id)
+    user = db.get_user_by_id(user_id)
+    if not tenant or not user or user.get('tenant_id') != tenant_id:
+        return jsonify({'error': 'User not found'}), 404
+    if request.method == 'DELETE':
+        if tenant.get('primary_user_id') == user_id:
+            return jsonify({'error': 'Primary company admin cannot be deleted'}), 400
+        db.delete_user(user_id)
+        return jsonify({'success': True})
+    data = request.json or {}
+    updates = {}
+    for key in ['name', 'role', 'is_active']:
+        if key in data:
+            updates[key] = data[key]
+    if 'email' in data:
+        updates['email'] = str(data.get('email') or '').strip().lower()
+        if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', updates['email']):
+            return jsonify({'error': 'Invalid email address'}), 400
+    if 'username' in data:
+        updates['username'] = str(data.get('username') or '').strip().lower()
+        if not USERNAME_RE.fullmatch(updates['username']):
+            return jsonify({'error': 'Invalid username'}), 400
+    if 'phone' in data:
+        updates['phone'] = _normalize_phone(data.get('phone'))
+        if not PHONE_RE.fullmatch(updates['phone']):
+            return jsonify({'error': 'Invalid phone number'}), 400
+    if updates.get('role') not in {None, 'employee', 'company_admin'}:
+        return jsonify({'error': 'Invalid role'}), 400
+    email = updates.get('email', user['email'])
+    username = updates.get('username', user.get('username'))
+    conflict = _identity_conflict(email, username, tenant_id=tenant_id, user_id=user_id)
+    if conflict:
+        return jsonify({'error': conflict}), 409
+    if data.get('password'):
+        password_error = _password_validation_error(data['password'])
+        if password_error:
+            return jsonify({'error': password_error}), 400
+        updates['password_hash'] = hash_password(data['password'])
+        updates['require_password_change'] = 0
+    try:
+        db.update_user(user_id, **updates)
+        if data.get('isPrimary'):
+            db.set_primary_company_admin(tenant_id, user_id)
+        elif tenant.get('primary_user_id') == user_id and updates:
+            primary_fields = {}
+            reverse_mapping = {
+                'name': 'account_manager_name',
+                'username': 'username',
+                'phone': 'phone',
+                'email': 'email',
+                'password_hash': 'password_hash',
+                'require_password_change': 'require_password_change',
+                'is_active': 'is_active',
+            }
+            for key, value in updates.items():
+                if key in reverse_mapping:
+                    primary_fields[reverse_mapping[key]] = value
+            if primary_fields:
+                db.sync_primary_company_admin(tenant_id, **primary_fields)
+    except db_driver.IntegrityError:
+        return jsonify({'error': 'Email or username already registered'}), 409
+    return jsonify({'success': True, 'user': db.get_user_by_id(user_id)})
+
+
 @app.route('/api/admin/tenants/<tenant_id>/reset-password', methods=['POST'])
 @require_admin
 def api_admin_reset_tenant_password(tenant_id):
     """Reset a tenant's password (admin only)."""
+    tenant = db.get_tenant_by_id(tenant_id)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
     data = request.json or {}
     new_password = data.get('password', '')
-    if len(new_password) < 10:
-        return jsonify({'error': 'Password must be at least 10 characters'}), 400
-    db.update_tenant(tenant_id, password_hash=hash_password(new_password))
+    if data.get('useSetupLink') or not new_password:
+        user_id = tenant.get('primary_user_id')
+        if not user_id:
+            return jsonify({'error': 'Primary company admin is not configured'}), 400
+        raw_token = db.create_password_setup_token(tenant_id, user_id)
+        db.sync_primary_company_admin(tenant_id, require_password_change=1)
+        return jsonify({
+            'success': True,
+            'setupUrl': _password_setup_url(raw_token),
+        })
+    password_error = _password_validation_error(new_password)
+    if password_error:
+        return jsonify({'error': password_error}), 400
+    db.sync_primary_company_admin(
+        tenant_id,
+        password_hash=hash_password(new_password),
+        require_password_change=0,
+    )
     return jsonify({'success': True})
 
 
