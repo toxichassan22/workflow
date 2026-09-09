@@ -17537,15 +17537,22 @@
             try {
               const presTitle = tenantPresentationTitle
                 || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
-              await api('PUT', '/api/presentations/' + tenantPresentationId, {
+              const presResp = await api('PUT', '/api/presentations/' + tenantPresentationId, {
                 title: presTitle,
                 projectData: tenantProjectData,
                 slidesData: tenantSlidesData,
                 slideCount: tenantSlidesData.length,
                 status: 'edited'
               });
+              if (!presResp || presResp.success === false || presResp.error) {
+                throw new Error((presResp && presResp.error) || 'تعذرت مزامنة نسخة العرض');
+              }
             } catch (presErr) {
-              console.warn('Silent presentation sync error:', presErr);
+              // The draft itself is saved, but reopening the presentation would show
+              // stale slides. A silent catch here used to report full success while
+              // the visible copy stayed old, which reads exactly as "saved but lost".
+              console.warn('Presentation sync error:', presErr);
+              if (!silent) toast('تم حفظ المسودة، وتعذرت مزامنة نسخة العرض: ' + (presErr?.message || presErr));
             }
           }
           if (badge) {
@@ -22590,6 +22597,12 @@
          + '<button type="button" data-slide-edit-act="front"' + dis + '>أمام</button>'
          + '<button type="button" data-slide-edit-act="back"' + dis + '>خلف</button>'
          + '</div></div>'
+         + '<div class="slide-edit-group"><span class="slide-edit-group-title">الشفافية</span>'
+         + '<div class="slide-edit-group-items">'
+         + '<input type="range" min="5" max="100" step="5" value="100" data-slide-edit-opacity="range"'
+         + dis + ' style="width:110px" aria-label="الشفافية">'
+         + '<span data-slide-edit-opacity-readout style="font-size:12px;min-width:38px;text-align:center">100%</span>'
+         + '</div></div>'
         + '<div class="slide-edit-group"><span class="slide-edit-group-title">الألوان</span>'
         + '<div class="slide-edit-group-items">'
         + '<label class="slide-edit-color">لون النص<input type="color" data-slide-edit-color="color" value="#1e293b"'
@@ -22661,6 +22674,18 @@
         btn.addEventListener('click', event => {
           event.stopPropagation();
           pickSlideElementColorWithEyedropper(index, btn.getAttribute('data-slide-edit-eyedropper') || 'color');
+        });
+      });
+      editControls.querySelectorAll('[data-slide-edit-opacity="range"]').forEach(inp => {
+        inp.addEventListener('click', e => e.stopPropagation());
+        inp.addEventListener('pointerdown', e => e.stopPropagation());
+        inp.addEventListener('input', e => {
+          e.stopPropagation();
+          previewSlideElementOpacity(index, Number(inp.value));
+        });
+        inp.addEventListener('change', e => {
+          e.stopPropagation();
+          commitSlideElementOpacity(index, Number(inp.value));
         });
       });
       editControls.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
@@ -22748,6 +22773,7 @@
       }
       card.querySelectorAll('[data-slide-edit-act="del"]').forEach(btn => { btn.disabled = !hasSel; });
       card.querySelectorAll('[data-slide-edit-act="fontup"], [data-slide-edit-act="fontdown"], [data-slide-edit-act="bold"]').forEach(btn => { btn.disabled = !hasSel; });
+      card.querySelectorAll('[data-slide-edit-act="front"], [data-slide-edit-act="back"]').forEach(btn => { btn.disabled = !hasSel; });
       card.querySelectorAll('[data-slide-edit-eyedropper]').forEach(btn => { btn.disabled = !hasSel; });
       card.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
         inp.disabled = !hasSel;
@@ -22756,6 +22782,20 @@
       card.querySelectorAll('[data-slide-edit-hex]').forEach(inp => {
         inp.disabled = !hasSel;
         if (hasSel) inp.value = inp.getAttribute('data-slide-edit-hex') === 'color' ? textColor : bgColor;
+      });
+      let opacityPct = 100;
+      if (hasSel) {
+        const stage = card.querySelector('.tenant-slide-stage');
+        const slide = stage ? stage.querySelector('.slide') : null;
+        const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+        if (target) opacityPct = slideElementOpacityPct(target);
+      }
+      card.querySelectorAll('[data-slide-edit-opacity="range"]').forEach(inp => {
+        inp.disabled = !hasSel;
+        if (hasSel) inp.value = String(opacityPct);
+      });
+      card.querySelectorAll('[data-slide-edit-opacity-readout]').forEach(el => {
+        el.textContent = opacityPct + '%';
       });
     }
 
@@ -23169,6 +23209,53 @@
       triggerAutoSaveDraft();
       syncSlideElementToolbar(index);
       toast('تم تغيير لون العنصر');
+    }
+
+    function slideElementOpacityPct(el) {
+      try {
+        const value = parseFloat(window.getComputedStyle(el).opacity);
+        if (isFinite(value)) return Math.max(5, Math.min(100, Math.round(value * 100)));
+      } catch (err) {}
+      return 100;
+    }
+
+    function previewSlideElementOpacity(index, pct) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.sel) return;
+      const clamped = Math.max(5, Math.min(100, Math.round(Number(pct) || 100)));
+      const stage = slideStageForIndex(index);
+      const slide = stage ? stage.querySelector('.slide') : null;
+      const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+      if (!target) return;
+      target.style.opacity = String(clamped / 100);
+      const card = document.getElementById('slide-card-' + index);
+      const readout = card ? card.querySelector('[data-slide-edit-opacity-readout]') : null;
+      if (readout) readout.textContent = clamped + '%';
+    }
+
+    function commitSlideElementOpacity(index, pct) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.sel) { toast('حدد عنصرا أولا'); return; }
+      const clamped = Math.max(5, Math.min(100, Math.round(Number(pct) || 100)));
+      const stage = slideStageForIndex(index);
+      const slide = stage ? stage.querySelector('.slide') : null;
+      const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+      if (!target) return;
+      const slideData = tenantSlidesData[index];
+      if (!slideData || !slideData.html) return;
+      const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
+      const rawRoot = rawDoc.querySelector('.slide');
+      const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, session.sel.path);
+      if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
+      pushSlideEditHistory(index);
+      target.style.opacity = String(clamped / 100);
+      rawTarget.style.opacity = String(clamped / 100);
+      slideData.html = rawRoot.outerHTML;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      syncSlideElementToolbar(index);
+      toast('تم ضبط شفافية العنصر ' + clamped + '%');
     }
 
     function slideElementFontSizePx(el) {
@@ -24462,6 +24549,12 @@
       tenantPresentationTitle = p.title || '';
       tenantProjectMode = 'presentation';
       tenantProjectData = { ...(p.projectData || {}) };
+      // Keep saving to the draft this presentation was generated from. Without an
+      // id the next save mints a random one and forks a second draft row, so a
+      // later reopen can land on the older row and read as "saved but lost".
+      if (!tenantProjectData.draftId) {
+        tenantProjectData.draftId = p.draft_id || p.draftId || tenantProjectData.draft_id || null;
+      }
       tenantSlidesData = Array.isArray(p.slidesData)
         ? p.slidesData
         : (Array.isArray(tenantProjectData.tenantSlidesData) ? tenantProjectData.tenantSlidesData : []);
