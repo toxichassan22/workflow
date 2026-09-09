@@ -10,6 +10,11 @@ export GIT_LFS_SKIP_SMUDGE=1
 REPO_DIR="/home/demos/workflow.git"
 APP_DIR="/home/demos/proposal-generator"
 WEB_ROOT="/home/demos/public_html"
+# New hosting (landloom.ai) uses a different cPanel user: point these at the new
+# paths via PROD_REPO_DIR / PROD_APP_DIR / PROD_WEB_ROOT without editing above.
+REPO_DIR="${PROD_REPO_DIR:-$REPO_DIR}"
+APP_DIR="${PROD_APP_DIR:-$APP_DIR}"
+WEB_ROOT="${PROD_WEB_ROOT:-$WEB_ROOT}"
 PYTHON="$APP_DIR/venv/bin/python"
 PIP="$APP_DIR/venv/bin/pip"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"

@@ -403,8 +403,17 @@ class MeetingRequirementsTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/deploy.yml').read_text(encoding='utf-8')
         deploy_script = (ROOT / 'deploy.sh').read_text(encoding='utf-8')
         self.assertIn('&commit=${{ github.sha }}', workflow)
-        self.assertIn('https://sagdemos.store/api/deploy-webhook', workflow)
+        # Production moved off the dead sagdemos.store host: manual deploys go to
+        # PROD_BASE_URL, lab deploys go to STAGING_BASE_URL. Neither workflow may
+        # reference the old host anymore.
+        self.assertNotIn('sagdemos.store', workflow)
+        self.assertIn('PROD_BASE_URL', workflow)
+        staging_workflow = (ROOT / '.github/workflows/deploy-staging.yml').read_text(encoding='utf-8')
+        self.assertIn('STAGING_BASE_URL', staging_workflow)
+        self.assertIn('/api/deploy-webhook-staging', staging_workflow)
+        self.assertNotIn('sagdemos.store', staging_workflow)
         self.assertNotIn('sagdemo.site', workflow)
+        self.assertNotIn('sagdemo.site', staging_workflow)
         self.assertIn('TARGET_COMMIT="${1:-}"', deploy_script)
         self.assertIn('git reset --hard "$TARGET_COMMIT"', deploy_script)
         self.assertIn('REPO_DIR="/home/demos/workflow.git"', deploy_script)

@@ -1,9 +1,13 @@
-name: Auto Deploy to Hosting
+name: Deploy to Production Hosting
+
+# Production deploys are MANUAL ONLY for now.
+# The previous host is dead, and the landloom.ai root serves a static
+# coming-soon page that a production app deploy would overwrite. When the client
+# app gets its own home, set the PROD_BASE_URL repository secret
+# (e.g. https://app.landloom.ai) and press Run workflow.
+# Lab work deploys automatically via deploy-staging.yml on the staging branch.
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
@@ -11,17 +15,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Server Deployment Webhook
+        env:
+          PROD_BASE_URL: ${{ secrets.PROD_BASE_URL }}
         run: |
-          curl --fail-with-body --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 15 --max-time 120 -X POST "https://sagdemos.store/api/deploy-webhook?secret=${{ secrets.DEPLOY_WEBHOOK_SECRET }}&commit=${{ github.sha }}"
+          set -euo pipefail
+          if [ -z "${PROD_BASE_URL:-}" ]; then
+            echo "PROD_BASE_URL secret is not configured"
+            exit 1
+          fi
+          base="${PROD_BASE_URL%/}"
+          curl --fail-with-body --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 15 --max-time 120 -X POST "$base/api/deploy-webhook?secret=${{ secrets.DEPLOY_WEBHOOK_SECRET }}&commit=${{ github.sha }}"
 
       - name: Verify deployed commit
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
+          PROD_BASE_URL: ${{ secrets.PROD_BASE_URL }}
         run: |
           set -euo pipefail
+          base="${PROD_BASE_URL%/}"
           expected_short="${EXPECTED_COMMIT:0:7}"
           for attempt in $(seq 1 36); do
-            health="$(curl --fail --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 20 -H 'Cache-Control: no-cache' "https://sagdemos.store/health?deploy_check=${EXPECTED_COMMIT}")"
+            health="$(curl --fail --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 20 -H 'Cache-Control: no-cache' "$base/health?deploy_check=${EXPECTED_COMMIT}")"
             deployed="$(printf '%s' "$health" | jq -r '.deployed_commit // .commit // "unknown"')"
             echo "Deployment check ${attempt}/36: deployed=${deployed} expected=${EXPECTED_COMMIT}"
             if [ "$deployed" = "$EXPECTED_COMMIT" ] || [[ "$deployed" == "$expected_short"* ]]; then
@@ -34,12 +48,15 @@ jobs:
           exit 1
 
       - name: Verify land analysis route
+        env:
+          PROD_BASE_URL: ${{ secrets.PROD_BASE_URL }}
         run: |
           set -euo pipefail
+          base="${PROD_BASE_URL%/}"
           route_status="$(curl --silent --show-error --connect-timeout 10 --max-time 20 \
             -o /dev/null -w '%{http_code}' -X POST \
             -H 'Content-Type: application/json' --data '{}' \
-            'https://sagdemos.store/api/extract-croquis')"
+            "$base/api/extract-croquis")"
           if [ "$route_status" != "401" ]; then
             echo "Expected /api/extract-croquis to require authentication, got HTTP ${route_status}"
             exit 1

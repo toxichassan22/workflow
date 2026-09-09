@@ -1,12 +1,12 @@
 #!/bin/bash
 # Staging deployment script for cPanel shared hosting (lab copy next to production).
-# Production stays on /home/demos/proposal-generator + public_html from deploy.sh.
+# Production deploy.sh stays manual-only while landloom.ai root serves coming-soon.
 # This script never touches production paths: it syncs origin/staging into a
 # separate APP_DIR and restarts a separate gunicorn + .htaccess pair.
 #
 # Server setup (one time, on the host):
-#   STAGING_WEB_ROOT must point at the staging domain/subdomain DocumentRoot
-#   created in cPanel (for example /home/demos/test.<domain>).
+#   STAGING_WEB_ROOT must point at the staging subdomain DocumentRoot created in
+#   cPanel on the landloom.ai hosting (for example /home/<user>/test.landloom.ai).
 #   Set it by exporting STAGING_WEB_ROOT on the server before running, or by
 #   editing the default below once the DocumentRoot is known.
 # Optional overrides: STAGING_REPO_DIR, STAGING_APP_DIR, STAGING_BRANCH.

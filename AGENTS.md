@@ -16,12 +16,19 @@ Remote: `github` → `https://github.com/toxichassan22/workflow.git`.
 
 ## Hosting autodeploy
 
-GitHub Actions (`.github/workflows/deploy.yml`) POSTs to
-`https://sagdemos.store/api/deploy-webhook` after every `main` push. The
-cPanel account is `demos`; server paths are `/home/demos/workflow.git`,
-`/home/demos/proposal-generator`, and `/home/demos/public_html`. Do not
-put the cPanel password or `DEPLOY_WEBHOOK_SECRET` in the repo. Keep the
-secret in GitHub Actions secrets and in the server `.env` only.
+Hosting moved from `sagdemos.store` (dead) to `landloom.ai`. The `landloom.ai`
+root serves a static coming-soon page — never deploy the app to the root
+DocumentRoot. Lab work runs on a subdomain (e.g. `test.landloom.ai`) via
+`.github/workflows/deploy-staging.yml`, which POSTs to
+`$STAGING_BASE_URL/api/deploy-webhook-staging` on every `staging` push into the
+separate `proposal-generator-staging` app dir (own port, `.env` and DB).
+Production (`.github/workflows/deploy.yml`) is manual-only (`workflow_dispatch`)
+until the client app gets its own home; then set the `PROD_BASE_URL` secret.
+Server paths differ per cPanel user: `deploy.sh` / `start_server.sh` keep their
+old `/home/demos/...` defaults with `PROD_*` env overrides, the staging scripts
+use `STAGING_*` overrides. Do not put the cPanel password,
+`DEPLOY_WEBHOOK_SECRET` or any base URL in the repo. Keep secrets in GitHub
+Actions secrets and in the server `.env` only.
 
 ## No how-to text on screen
 

@@ -10,6 +10,11 @@ export PATH="$HOME/bin:$PATH"
 APP_DIR="/home/demos/proposal-generator"
 REPO_DIR="/home/demos/workflow.git"
 WEB_ROOT="/home/demos/public_html"
+# New hosting (landloom.ai) uses a different cPanel user: point these at the new
+# paths via PROD_APP_DIR / PROD_REPO_DIR / PROD_WEB_ROOT without editing above.
+APP_DIR="${PROD_APP_DIR:-$APP_DIR}"
+REPO_DIR="${PROD_REPO_DIR:-$REPO_DIR}"
+WEB_ROOT="${PROD_WEB_ROOT:-$WEB_ROOT}"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"
 DEPLOYMENT_MARKER="$APP_DIR/.deployed_commit"
 WATCHDOG_LOG="$APP_DIR/watchdog.log"
