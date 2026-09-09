@@ -26070,11 +26070,23 @@
         '<form class="auth-form active" onsubmit="handlePasswordSetup(event, \'' +
         rawToken.replace(/'/g, '') + '\')">' +
         '<label>كلمة المرور الجديدة</label>' +
-        '<input type="password" id="passwordSetupValue" minlength="10" autocomplete="new-password" required>' +
+        '<div style="display:flex;gap:8px;margin-bottom:12px">' +
+        '<input type="password" id="passwordSetupValue" minlength="10" autocomplete="new-password" required style="flex:1;min-width:0">' +
+        '<button type="button" class="btn ghost" onclick="togglePasswordSetupVisibility(\'passwordSetupValue\', this)">إظهار</button></div>' +
         '<label>تأكيد كلمة المرور</label>' +
-        '<input type="password" id="passwordSetupConfirm" minlength="10" autocomplete="new-password" required>' +
+        '<div style="display:flex;gap:8px">' +
+        '<input type="password" id="passwordSetupConfirm" minlength="10" autocomplete="new-password" required style="flex:1;min-width:0">' +
+        '<button type="button" class="btn ghost" onclick="togglePasswordSetupVisibility(\'passwordSetupConfirm\', this)">إظهار</button></div>' +
         '<button type="submit" class="auth-btn">اعتماد كلمة المرور</button>' +
         '</form></div>';
+    }
+
+    function togglePasswordSetupVisibility(inputId, btn) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.textContent = show ? 'إخفاء' : 'إظهار';
     }
 
     async function handlePasswordSetup(event, rawToken) {
