@@ -790,6 +790,45 @@ def _visual_concept_overview_map_url(project_data):
     return ''
 
 
+def _resolve_project_file_storage_path(stored, tenant_id=None):
+    """Resolve and validate a project file's physical path within the tenant root.
+
+    Handles absolute paths from migrated databases where the host prefix changed
+    (e.g. from /home/demos/... to /home/landloom/...).
+    """
+    if not stored or not stored.get('storage_path'):
+        return None
+    tenant = str(tenant_id or stored.get('tenant_id') or getattr(g, 'tenant_id', '') or '')
+    if not tenant:
+        return None
+    tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, tenant))
+    raw_path = str(stored.get('storage_path') or '').replace('\\', '/')
+    candidate = os.path.realpath(stored['storage_path'])
+    try:
+        if os.path.commonpath([tenant_root, candidate]) == tenant_root and os.path.isfile(candidate):
+            return candidate
+    except ValueError:
+        pass
+    # If migrated from another host, re-root relative to tenant_root
+    if f'/{tenant}/' in raw_path:
+        subpath = raw_path.split(f'/{tenant}/', 1)[1]
+        re_rooted = os.path.realpath(os.path.join(tenant_root, subpath.replace('/', os.sep)))
+        try:
+            if os.path.commonpath([tenant_root, re_rooted]) == tenant_root and os.path.isfile(re_rooted):
+                return re_rooted
+        except ValueError:
+            pass
+    elif '/project-documents/' in raw_path:
+        filename = os.path.basename(raw_path)
+        re_rooted = os.path.realpath(os.path.join(tenant_root, 'project-documents', filename))
+        try:
+            if os.path.commonpath([tenant_root, re_rooted]) == tenant_root and os.path.isfile(re_rooted):
+                return re_rooted
+        except ValueError:
+            pass
+    return None
+
+
 def _visual_concept_project_file_data_uri(file_id, tenant_id=None):
     tenant_id = tenant_id or getattr(g, 'tenant_id', None)
     if not tenant_id or not file_id:
@@ -800,14 +839,8 @@ def _visual_concept_project_file_data_uri(file_id, tenant_id=None):
     mime_type = stored.get('mime_type') or ''
     if not mime_type.startswith('image/'):
         return None
-    tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(tenant_id)))
-    storage_path = os.path.realpath(stored['storage_path'])
-    try:
-        if os.path.commonpath([tenant_root, storage_path]) != tenant_root:
-            return None
-    except ValueError:
-        return None
-    if not os.path.isfile(storage_path) or os.path.getsize(storage_path) > 15 * 1024 * 1024:
+    storage_path = _resolve_project_file_storage_path(stored, tenant_id)
+    if not storage_path or not os.path.isfile(storage_path) or os.path.getsize(storage_path) > 15 * 1024 * 1024:
         return None
     try:
         with open(storage_path, 'rb') as image_file:
@@ -1313,13 +1346,9 @@ def _project_logo_storage_path(project_data, tenant_id):
     if file_id:
         stored = db.get_project_file(tenant_id, str(file_id))
         if stored and stored.get('mime_type', '').startswith('image/'):
-            path = os.path.realpath(stored.get('storage_path') or '')
-            tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(tenant_id)))
-            try:
-                if os.path.commonpath([tenant_root, path]) == tenant_root and os.path.isfile(path):
-                    return path
-            except ValueError:
-                pass
+            path = _resolve_project_file_storage_path(stored, tenant_id)
+            if path and os.path.isfile(path):
+                return path
     relative = logo_value.split('?', 1)[0].lstrip('/')
     if relative.startswith('uploads/'):
         path = os.path.realpath(os.path.join(os.path.dirname(__file__), relative.replace('/', os.sep)))
@@ -14230,12 +14259,17 @@ def api_get_project_file(file_id):
     if not stored or not stored.get('storage_path'):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
 
-    tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(g.tenant_id)))
-    storage_path = os.path.realpath(stored['storage_path'])
-    if os.path.commonpath([tenant_root, storage_path]) != tenant_root:
-        print(f"[PROJECT FILE] rejected out-of-tenant path for {file_id}")
-        return jsonify({'success': False, 'error': 'مسار الملف غير مسموح'}), 403
-    if not os.path.isfile(storage_path):
+    storage_path = _resolve_project_file_storage_path(stored, g.tenant_id)
+    if not storage_path:
+        tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(g.tenant_id)))
+        raw_target = os.path.realpath(stored.get('storage_path') or '')
+        try:
+            inside = os.path.commonpath([tenant_root, raw_target]) == tenant_root
+        except ValueError:
+            inside = False
+        if not inside:
+            print(f"[PROJECT FILE] rejected out-of-tenant path for {file_id}")
+            return jsonify({'success': False, 'error': 'مسار الملف غير مسموح'}), 403
         return jsonify({'success': False, 'error': 'الملف غير متاح على السيرفر'}), 404
 
     mime_type = stored.get('mime_type') or 'application/octet-stream'
@@ -14263,17 +14297,19 @@ def api_delete_project_file(file_id):
     if stored.get('file_type') != 'competitor_logo':
         return jsonify({'success': False, 'error': 'لا يمكن حذف هذا النوع من الملفات من هنا'}), 400
 
-    tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(g.tenant_id)))
-    storage_path = os.path.realpath(stored.get('storage_path') or '')
+    storage_path = _resolve_project_file_storage_path(stored, g.tenant_id)
+    if not storage_path:
+        tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(g.tenant_id)))
+        raw_target = os.path.realpath(stored.get('storage_path') or '')
+        try:
+            inside = os.path.commonpath([tenant_root, raw_target]) == tenant_root
+        except ValueError:
+            inside = False
+        if not inside:
+            print(f"[PROJECT FILE] rejected delete outside tenant path for {file_id}")
+            return jsonify({'success': False, 'error': 'مسار الملف غير مسموح'}), 403
     try:
-        inside_tenant = os.path.commonpath([tenant_root, storage_path]) == tenant_root
-    except ValueError:
-        inside_tenant = False
-    if not inside_tenant:
-        print(f"[PROJECT FILE] rejected delete outside tenant path for {file_id}")
-        return jsonify({'success': False, 'error': 'مسار الملف غير مسموح'}), 403
-    try:
-        if os.path.isfile(storage_path):
+        if storage_path and os.path.isfile(storage_path):
             os.unlink(storage_path)
     except OSError as error:
         print(f"[PROJECT FILE] could not remove logo file {file_id}: {error}")
