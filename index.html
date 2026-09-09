@@ -23694,6 +23694,42 @@
         });
     }
 
+    async function requestTenantDesignerChat(payload, indicator) {
+      const queued = await apiWithTimeout(
+        'POST', '/api/designer-chat/jobs', payload, 30000,
+        'تعذر تسجيل مهمة تعديل العرض؛ لم يبدأ تنفيذ جديد.'
+      );
+      if (!queued?.jobId) return queued;
+
+      const started = Date.now();
+      const maxWaitMs = 60 * 60 * 1000;
+      let transientFailures = 0;
+      while (Date.now() - started < maxWaitMs) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const result = await apiWithTimeout(
+          'GET', '/api/designer-chat/jobs/' + encodeURIComponent(queued.jobId), null,
+          30000, 'تعذر تحديث حالة تعديل العرض مؤقتًا.'
+        );
+        if (result?.error_code === 'CLIENT_REQUEST_TIMEOUT' || String(result?.error || '').startsWith('Network error')) {
+          transientFailures += 1;
+          if (transientFailures < 5) continue;
+          return result;
+        }
+        transientFailures = 0;
+        const progress = Math.max(1, Math.min(99, Number(result?.progress || 5)));
+        if (indicator) {
+          setInlineLoaderProgress(indicator, progress, result?.message || 'جاري تنفيذ تعديل العرض...');
+        }
+        if (result?.status === 'completed' || (result?.success && result?.data)) return result;
+        if (result?.status === 'failed' || result?.status === 'not_found') return result;
+      }
+      return {
+        success: false,
+        error: 'استغرق تعديل العرض وقتًا أطول من ساعة ولم تصل نتيجة مؤكدة.',
+        error_code: 'DESIGNER_JOB_WAIT_TIMEOUT'
+      };
+    }
+
     async function sendTenantDesignerChat() {
       const input = document.getElementById('tenantChatInput');
       const message = input ? input.value.trim() : '';
@@ -23787,7 +23823,7 @@
         focusIndexes: tenantChatFocusIndexes,
         slideIndex: tenantChatSlideIndex,
         presentationId: tenantPresentationId,
-        creativeImages: tenantCreativeImages,
+        creativeImages: buildPresentationGenerationImages(),
         attachedImage: attachedImage ? attachedImage.dataUri : ''
       };
       // Once the workspace is dirty, send the in-memory copy as the source for the next turn.
@@ -23800,14 +23836,7 @@
         chatPayload.slidePlan = tenantSlidePlan;
         chatPayload.projectData = { ...tenantProjectData, tenantSlidesData };
       }
-      const data = await apiWithTimeout('POST', '/api/designer-chat', chatPayload,
-        300000, 'انتهت مهلة تنفيذ تعديل الشات؛ لم يتم تأكيد تغيير العرض.', {
-        onProgress: (sent, total) => {
-          if (!indicator || !total) return;
-          const pct = 10 + Math.round((Number(sent) / Number(total)) * 30);
-          setInlineLoaderProgress(indicator, pct, 'جاري رفع الطلب (' + sent + ' من ' + total + ')...');
-        }
-      });
+      const data = await requestTenantDesignerChat(chatPayload, indicator);
 
       if (indicator && data?.success) setInlineLoaderProgress(indicator, 100, 'اكتمل الطلب');
 
