@@ -41,6 +41,7 @@ import executive_content
 import population_service
 import slide_engine
 import change_tracking
+import designer_chat_reliability
 from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
 from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules, extract_slide_elements, build_font_css
 
@@ -16794,6 +16795,9 @@ def health():
 @app.route('/preview')
 def preview():
     return send_from_directory(os.path.dirname(__file__), 'preview.html')
+
+# Install queued designer-chat execution and deterministic reliability handlers.
+designer_chat_reliability.install(app, globals())
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == '__main__':
