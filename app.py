@@ -3555,6 +3555,80 @@ def _replace_slide_with_approved_map(html, map_type, map_url):
     return output, changed
 
 
+def is_watermark_request(message):
+    """Detect requests to add or remove slide watermarks or subtle background logos."""
+    if not message:
+        return False
+    normalized = normalize_arabic_digits_py(str(message).strip().lower())
+    patterns = (
+        r'watermark',
+        r'(?:ال)?(?:وتر|ووتر)\s*مارك',
+        r'(?:ال)?علام[ةه]\s*(?:ال)?مائي[ةه]',
+        r'(?:ال)?(?:شعار|لوجو)\s*(?:ال)?مائي',
+        r'(?:ال)?(?:شعار|لوجو)\s*كـ?علام[ةه]\s*مائي[ةه]',
+        r'(?:ال)?(?:شعار|لوجو)\s*(?:في|كـ?|بـ?)?\s*(?:ال)?خلفي[ةه]',
+        r'(?:ال)?(?:شعار|لوجو)\s*(?:خفيف|باهت)',
+    )
+    return any(re.search(pat, normalized) for pat in patterns)
+
+
+def _is_white_or_light_slide(slide):
+    """Check whether a slide has a white or light background."""
+    if not isinstance(slide, dict):
+        return True
+    stype = str(slide.get('type') or 'content').lower()
+    if stype in ('cover', 'divider', 'back_cover', 'closing'):
+        return False
+    html = str(slide.get('html') or '')
+    dark_patterns = (
+        r'background\s*:\s*#(?:0c2340|06121e|0a192f|0b1d33|111827|1f2937|000000|000)\b',
+        r'background-color\s*:\s*#(?:0c2340|06121e|0a192f|0b1d33|111827|1f2937|000000|000)\b',
+        r'linear-gradient\([^)]*#(?:0c2340|06121e|0a192f|0b1d33)',
+        r'class=["\'][^"\']*\b(?:dark-slide|cover-slide|divider-slide)\b',
+    )
+    for dp in dark_patterns:
+        if re.search(dp, html, re.IGNORECASE):
+            return False
+    return True
+
+
+def _apply_slide_watermark(html, logo_url, opacity=0.045):
+    """Inject an elegant watermark overlay into a slide HTML before the closing tag."""
+    if not html:
+        return html
+    cleaned = _remove_slide_watermark(html)
+    watermark_markup = (
+        '<div class="slide-watermark" data-slide-watermark="true" aria-hidden="true" '
+        'style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+        f'pointer-events:none;z-index:0;opacity:{opacity};overflow:hidden;">'
+        f'<img src="{logo_url}" alt="" style="width:480px;max-width:50%;max-height:50%;object-fit:contain;filter:grayscale(100%);">'
+        '</div>'
+    )
+    closing = re.search(r'</div>\s*$', cleaned, flags=re.IGNORECASE)
+    if not closing:
+        return cleaned + watermark_markup
+    return cleaned[:closing.start()] + watermark_markup + cleaned[closing.start():]
+
+
+def _remove_slide_watermark(html):
+    """Remove watermark overlay markup from a slide HTML."""
+    if not html:
+        return html
+    cleaned = re.sub(
+        r'<div\b[^>]*\bdata-slide-watermark=["\']true["\'][^>]*>[\s\S]*?</div>',
+        '',
+        html,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r'<div\b[^>]*\bclass=["\'][^"\']*\bslide-watermark\b[^"\']*["\'][^>]*>[\s\S]*?</div>',
+        '',
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned
+
+
 def _designer_deterministic_plan(message, slides, current_index, target_indexes):
     """Handle unambiguous structural commands without spending a planner turn first."""
     if not message or not slides:
@@ -3562,18 +3636,29 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
     normalized = normalize_arabic_digits_py(str(message).strip().lower())
     numbers = [idx + 1 for idx in (target_indexes or [])]
 
-    # Creative, redesign, or multi-slide generative requests belong to the AI agent
-    creative_patterns = (
-        r'(?:اعد|أعد|اعادة|إعادة)\s*(?:توليد|تصميم|صياغة|بناء|ابتكار)',
-        r'(?:صمم|ابتكر|طور|تطوير|حدث|تحديث)',
-        r'(?:مصمم[ةه]|قوي[ةه]|بصري[ااً]|ابداع|فخم|فخم[ةه]|عصري|احترافي)',
-        r'(?:اكثر|أكثر)\s*من\s*شريح[ةه]',
-        r'علي\s*اكثر|على\s*أكثر|على\s*اكثر|علي\s*أكثر',
-        r'شرايح\s*متعدد[ةه]|شرائح\s*متعدد[ةه]',
-        r'(?:تحسين|تطوير|تجديد|ابتكار)\s*(?:التصميم|الشكل|المظهر)',
-    )
-    if any(re.search(pat, normalized) for pat in creative_patterns):
-        return None
+    if is_watermark_request(message):
+        is_remove = bool(re.search(r'(?:احذف|حذف|امسح|إزالة|ازالة|ازل|شيل)\s*(?:العلامة|الـ\s*watermark|الووترمارك|الوترمارك|اللوجو|الشعار)?', normalized))
+        only_white = bool(re.search(r'(?:البيضاء|البيضه|الابيض|الأبيض|white|الفاتحة|الفاتحه)', normalized))
+        all_match = any(kw in normalized for kw in ('كل', 'جميع', 'كافة', 'العرض كامل', 'العرض كله', 'الشرائح كلها', 'الشرايح كلها'))
+        target_mode = 'all' if (all_match or not numbers) else 'indexes'
+        action_tool = 'remove_watermark' if is_remove else 'apply_watermark'
+        if is_remove:
+            resp_text = 'سأنفذ حذف العلامة المائية مع الحفاظ على كامل محتوى الشرائح.'
+        elif only_white:
+            resp_text = 'سأضيف العلامة المائية لشعار الشركة في خلفية الشرائح البيضاء مع الحفاظ التام على النصوص والتصميم.'
+        else:
+            resp_text = 'سأضيف العلامة المائية لشعار الشركة في خلفية الشرائح المحددة بأناقة وتناسق بصري تام.'
+        return {
+            'response': resp_text,
+            'actions': [{
+                'tool': action_tool,
+                'params': {
+                    'target': target_mode,
+                    'indexes': numbers if target_mode == 'indexes' else [],
+                    'only_white': only_white,
+                },
+            }],
+        }
 
     is_map_reload = bool(
         re.search(r'(?:إعادة|اعادة|اعاده|أعد|اعد|عيد|رجع|رجّع|حدّث|حدث|تحديث|جدّد|جدد|استبدل|استبدال)', normalized)
@@ -3591,6 +3676,19 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
                     'refresh': True,
                 }}],
             }
+
+    # Creative, redesign, or multi-slide generative requests belong to the AI agent
+    creative_patterns = (
+        r'(?:اعد|أعد|اعادة|إعادة)\s*(?:توليد|تصميم|صياغة|بناء|ابتكار)',
+        r'(?:صمم|ابتكر|طور|تطوير|حدث|تحديث)',
+        r'(?:مصمم[ةه]|قوي[ةه]|بصري[ااً]|ابداع|فخم|فخم[ةه]|عصري|احترافي)',
+        r'(?:اكثر|أكثر)\s*من\s*شريح[ةه]',
+        r'علي\s*اكثر|على\s*أكثر|على\s*اكثر|علي\s*أكثر',
+        r'شرايح\s*متعدد[ةه]|شرائح\s*متعدد[ةه]',
+        r'(?:تحسين|تطوير|تجديد|ابتكار)\s*(?:التصميم|الشكل|المظهر)',
+    )
+    if any(re.search(pat, normalized) for pat in creative_patterns):
+        return None
 
     if re.search(r'(?:احذف|حذف|امسح|إزالة|ازالة)\s*(?:الشريحة|شريحة|السلايد|سلايد)', normalized):
         targets = sorted(set(numbers or [current_index + 1]), reverse=True)
@@ -3934,7 +4032,7 @@ def _sanitize_designer_output(html):
     return html
 
 
-def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None, slide_type='content', total_slides=None, content_source=None):
+def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None, slide_type='content', total_slides=None, content_source=None, skip_vision=False):
     """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
         try:
@@ -3964,17 +4062,20 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
           "يعني صورة معمارية جديدة وليس شعاراً."
     )
 
-    # Capture Playwright vision screenshot of the current slide if available
+    # Capture Playwright vision screenshot of the current slide if available (skip in large bulk edits for speed)
     vision_image_uri = None
     vision_error = ''
-    try:
-        import generate_pdf_from_preview as renderer
-        vision_image_uri = renderer.render_slide_to_image_base64(html, branding=branding, tenant_id=tenant_id)
-        if not vision_image_uri:
-            vision_error = getattr(renderer, 'LAST_VISION_ERROR', '') or 'no_snapshot'
-    except Exception as ve:
-        vision_error = str(ve)
-        print(f"[DESIGNER-EDIT VISION] Screenshot failed: {ve}")
+    if not skip_vision:
+        try:
+            import generate_pdf_from_preview as renderer
+            vision_image_uri = renderer.render_slide_to_image_base64(html, branding=branding, tenant_id=tenant_id)
+            if not vision_image_uri:
+                vision_error = getattr(renderer, 'LAST_VISION_ERROR', '') or 'no_snapshot'
+        except Exception as ve:
+            vision_error = str(ve)
+            print(f"[DESIGNER-EDIT VISION] Screenshot failed: {ve}")
+    else:
+        vision_error = 'skipped_batch'
     _record_slide_vision_state(bool(vision_image_uri), vision_error)
     if vision_error:
         # Without the snapshot the model edits the markup blind, and it still claims success. The
@@ -4207,14 +4308,41 @@ def _designer_chat_memory(history, memory):
     return summary[-DESIGNER_CHAT_MEMORY_MAX:], recent
 
 
+def _report_designer_job_progress(job_id, tenant_id, progress_val, message_text, extra_data=None):
+    """Update background designer job progress file thread-safely for client polling."""
+    if not job_id or not tenant_id:
+        return
+    try:
+        current_job = _read_job('.designer_chat_jobs', tenant_id, job_id) or {}
+        updated_job = {
+            **current_job,
+            'status': 'running',
+            'success': True,
+            'progress': max(1, min(99, int(progress_val))),
+            'message': str(message_text or 'جاري معالجة الطلب...'),
+        }
+        if extra_data and isinstance(extra_data, dict):
+            updated_job.update(extra_data)
+        _write_job('.designer_chat_jobs', tenant_id, job_id, updated_job)
+    except Exception as err:
+        print(f"[JOB PROGRESS ERROR] {err}")
+
+
 @app.route('/api/designer-chat', methods=['POST'])
 @require_auth
 def api_designer_chat():
     """Agentic designer chat operating on one slide or the complete presentation."""
     data = request.json or {}
+    job_id = request.headers.get('X-Designer-Job-Id') or data.get('_job_id')
+    tenant_id = g.tenant_id
+
+    def report_designer_progress(progress_val, message_text, extra_data=None):
+        _report_designer_job_progress(job_id, tenant_id, progress_val, message_text, extra_data)
+
     message = (data.get('message') or '').strip()
     if not message:
         return jsonify({'success': False, 'error': 'الطلب فارغ'}), 400
+    report_designer_progress(10, 'جاري تحليل الطلب وتحديد نطاق التعديل...')
     project_data = clean_project_data(data.get('projectData', {}))
     request_creative_images = copy.deepcopy(data.get('creativeImages')) if isinstance(data.get('creativeImages'), dict) else {}
     project_creative_images = copy.deepcopy(project_data.get('tenantCreativeImages')) if isinstance(project_data.get('tenantCreativeImages'), dict) else {}
@@ -4296,7 +4424,8 @@ def api_designer_chat():
         message, slides, current_index, [number - 1 for number in preferred_indexes]
     )
     requested_company_logo = _designer_company_logo_requested(message)
-    if requested_company_logo and deterministic_plan is None:
+    is_panel_logo_request = any(w in message.lower() for w in ('مربع', 'يمين', 'بانل', 'سنوات الخبرة', 'فوق رقم', 'فوق 55', 'كحلي', 'panel'))
+    if requested_company_logo and is_panel_logo_request and deterministic_plan is None and not is_watermark_request(message):
         if is_all_slides_request:
             company_target = 'all'
             company_indexes = []
@@ -4376,10 +4505,12 @@ def api_designer_chat():
 - توليد صور حصرية للمكونات المعمارية والداخلية والخارجية ودمجها جراحياً داخل الشرائح مع بطاقة شرح توضيحي.
 - كن حاسماً ومبادراً، ولا تستخدم أداة ask إلا في الحالات المستحيلة الفهم تماماً. عندما يطلب المستخدم تعديلاً لأي شريحة مهما كان نوعها، نفّذه فوراً بحرية واحترافية وبدقة جراحية متناهية.
 {all_note} أعد JSON فقط:
-{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|generate_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
+{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|apply_watermark|remove_watermark|generate_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
+- apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true}} لإضافة علامة مائية لشعار الشركة في خلفية الشرائح
+- remove_watermark: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإزالة العلامة المائية من الشرائح
 - insert_team_logo: params={{"target":"current|all|indexes", "indexes":[1-based], "team_index":1-based}} لإضافة شعار جهة فريق العمل المرفوع فعلياً
 - insert_company_logo_panel: params={{"target":"current|all|indexes", "indexes":[1-based]}} لوضع شعار الشركة داخل المربع الكحلي فوق رقم سنوات الخبرة
 - generate_image: params={{"prompt":"وصف دقيق للصورة المراد توليدها", "component_name":"اسم المكون إن وجد", "slideIndex":1, "position":"surgical|background|right|left|inline"}}
@@ -4552,6 +4683,7 @@ def api_designer_chat():
             params = dict(action.get('params') or {}) if isinstance(action.get('params'), dict) else {}
             if tool_name in {
                 'edit_slides', 'edit_design_slide', 'edit_design_slides',
+                'apply_watermark', 'remove_watermark',
                 'generate_image', 'generate_design_image', 'insert_image_into_slide',
                 'insert_canonical_map', 'insert_map', 'insert_financial_chart', 'update_financial_chart',
                 'insert_team_logo', 'insert_company_logo_panel',
@@ -4571,10 +4703,49 @@ def api_designer_chat():
             params = action.get('params') if isinstance(action.get('params'), dict) else {}
             if tool in ('ask', 'chat_only', 'validate_design_workspace', 'save_design_workspace'):
                 continue
-            if tool in ('edit_slides', 'edit_design_slide', 'edit_design_slides'):
+            if tool in ('apply_watermark', 'remove_watermark'):
+                indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
+                only_white = params.get('only_white', True)
+                is_remove = (tool == 'remove_watermark')
+                logo_token = str(params.get('logo_token') or '##LOGO##').strip()
+                company_logo_url = str(
+                    branding.get('logo_path') or branding.get('logo') or branding.get('logo_url') or logo_token
+                ).strip()
+                affected_indexes = []
+                total_target = max(1, len(indexes))
+                report_designer_progress(20, 'جاري معالجة العلامة المائية للشرائح...')
+                for i, idx in enumerate(indexes):
+                    slide = slides[idx] if isinstance(slides[idx], dict) else {}
+                    if only_white and not _is_white_or_light_slide(slide):
+                        continue
+                    current_slide_html = slide.get('html', '')
+                    if is_remove:
+                        new_html = _remove_slide_watermark(current_slide_html)
+                    else:
+                        new_html = _apply_slide_watermark(current_slide_html, company_logo_url)
+                    slide['html'] = new_html
+                    slide['_designer_keep_html'] = True
+                    slide['is_custom'] = True
+                    slides[idx] = slide
+                    affected_indexes.append(idx)
+                    pct = int(20 + 75 * ((i + 1) / total_target))
+                    report_designer_progress(pct, f"تمت معالجة الشريحة {i + 1} من {total_target}...")
+
+                executed.append({
+                    'tool': tool,
+                    'status': 'success',
+                    'indexes': affected_indexes,
+                    'count': len(affected_indexes),
+                })
+                action_desc = 'حذف' if is_remove else 'إضافة'
+                assistant_messages.append(
+                    f"تم {action_desc} العلامة المائية بنجاح في خلفية {len(affected_indexes)} شريحة مع الحفاظ الكامل على النصوص والتصميم."
+                )
+            elif tool in ('edit_slides', 'edit_design_slide', 'edit_design_slides'):
                 indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
                 instruction = params.get('instruction') or message
                 if len(indexes) > 1:
+                    skip_vision = len(indexes) > 3
                     def _edit_worker(idx):
                         with app.app_context():
                             slide_item = slides[idx] if isinstance(slides[idx], dict) else {}
@@ -4592,34 +4763,38 @@ def api_designer_chat():
                                 slide_type=slide_item.get('type', 'content'),
                                 total_slides=len(slides),
                                 content_source=slide_item.get('content_source') or slide_item.get('contentSource'),
+                                skip_vision=skip_vision,
                             )
                             return idx, h, r
 
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(indexes))) as executor:
+                    max_workers = min(4, len(indexes))
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                         futures = [executor.submit(_edit_worker, idx) for idx in indexes]
                         results = []
+                        completed_count = 0
+                        total_slides_count = len(indexes)
                         for future in concurrent.futures.as_completed(futures):
+                            completed_count += 1
                             try:
-                                results.append(future.result())
+                                res = future.result()
+                                results.append(res)
+                                idx_res, updated_html_res, resp_text_res = res
+                                slides[idx_res]['html'] = updated_html_res
+                                slides[idx_res]['_designer_keep_html'] = True
+                                slides[idx_res]['is_custom'] = True
+                                extracted_caps = slide_engine._extract_visual_concept_captions(updated_html_res)
+                                if extracted_caps:
+                                    slides[idx_res]['captions'] = extracted_caps
+                                if resp_text_res:
+                                    assistant_messages.append(resp_text_res)
                             except Exception as exc:
                                 print(f"[PARALLEL EDIT ERROR] Slide edit failed: {exc}")
-
-                    results.sort(key=lambda x: x[0])
-                    for idx, updated_html, response_text in results:
-                        slides[idx]['html'] = updated_html
-                        # Keep this model-produced HTML through the renumber below: the
-                        # canonical visual-media rebuild would otherwise discard edits
-                        # such as added description bars while the reply claims success.
-                        slides[idx]['_designer_keep_html'] = True
-                        slides[idx]['is_custom'] = True
-                        extracted_caps = slide_engine._extract_visual_concept_captions(updated_html)
-                        if extracted_caps:
-                            slides[idx]['captions'] = extracted_caps
-                        if response_text:
-                            assistant_messages.append(response_text)
+                            pct = int(15 + 75 * (completed_count / total_slides_count))
+                            report_designer_progress(pct, f"تم تعديل الشريحة {completed_count} من {total_slides_count}...")
                 else:
                     for idx in indexes:
                         slide = slides[idx] if isinstance(slides[idx], dict) else {}
+                        report_designer_progress(40, f"جاري تعديل الشريحة {idx + 1}...")
                         html, response_text = _designer_edit_slide(
                             slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'),
                             instruction, idx, project_data, presentation_id, branding,
@@ -4637,6 +4812,7 @@ def api_designer_chat():
                         slides[idx] = slide
                         if response_text:
                             assistant_messages.append(response_text)
+                        report_designer_progress(85, f"تم الانتهاء من تعديل الشريحة {idx + 1}...")
                 executed.append({'tool': tool, 'status': 'success', 'indexes': indexes})
             elif tool == 'insert_team_logo':
                 raw_team_index = params.get('team_index') or params.get('teamIndex') or 0
@@ -4665,7 +4841,7 @@ def api_designer_chat():
                     "وحافظ على شعار الشركة الموجود وبقية محتوى الشريحة وتوازنها البصري."
                 )
                 successful_indexes = []
-                for idx in indexes:
+                for i, idx in enumerate(indexes):
                     slide = slides[idx] if isinstance(slides[idx], dict) else {}
                     updated_html, response_text = _designer_edit_slide(
                         slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'),
@@ -4675,9 +4851,6 @@ def api_designer_chat():
                         total_slides=len(slides),
                         content_source=slide.get('content_source') or slide.get('contentSource'),
                     )
-                    # The model normally inserts the token and the finalizer resolves it. Keep a
-                    # deterministic visible fallback for malformed-but-valid HTML that ignored the
-                    # explicit token, so a successful chat response can never silently omit the logo.
                     updated_html = _inject_team_logo_fallback(
                         updated_html, str(team_member.get('logo') or ''), team_index
                     )
@@ -4688,6 +4861,8 @@ def api_designer_chat():
                     successful_indexes.append(idx)
                     if response_text:
                         assistant_messages.append(response_text)
+                    pct = int(15 + 75 * ((i + 1) / max(1, len(indexes))))
+                    report_designer_progress(pct, f"تم إدراج الشعار في الشريحة {i + 1} من {len(indexes)}...")
                 executed.append({'tool': tool, 'status': 'success' if successful_indexes else 'failed',
                                  'indexes': successful_indexes, 'team_index': team_index,
                                  'token': team_token})
@@ -4702,7 +4877,7 @@ def api_designer_chat():
                     'ولا تضع الشعار في أعلى يسار الشريحة. حافظ على الرقم 55 وبقية النصوص والتنسيق.'
                 )
                 successful_indexes = []
-                for idx in indexes:
+                for i, idx in enumerate(indexes):
                     slide = slides[idx] if isinstance(slides[idx], dict) else {}
                     updated_html, response_text = _designer_edit_slide(
                         slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'),
@@ -4720,6 +4895,8 @@ def api_designer_chat():
                     successful_indexes.append(idx)
                     if response_text:
                         assistant_messages.append(response_text)
+                    pct = int(15 + 75 * ((i + 1) / max(1, len(indexes))))
+                    report_designer_progress(pct, f"تم وضع الشعار في الشريحة {i + 1} من {len(indexes)}...")
                 executed.append({'tool': tool, 'status': 'success' if successful_indexes else 'failed',
                                  'indexes': successful_indexes, 'placement': 'right_panel_above_experience_years'})
             elif tool in ('generate_image', 'generate_design_image', 'insert_image_into_slide'):
@@ -16197,6 +16374,13 @@ HTML الحالي:
                                 parsed = json.loads(match.group(0))
                             except (json.JSONDecodeError, TypeError):
                                 parsed = None
+                    html = (parsed.get('html') or '') if isinstance(parsed, dict) else ''
+                    if not html and isinstance(parsed, str):
+                        html = parsed
+                    if not html:
+                        match_slide = re.search(r'<div\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\'][\s\S]*?</div>\s*$', raw, re.IGNORECASE)
+                        if match_slide:
+                            html = match_slide.group(0)
                     matches = re.findall(r'<div\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\']', html or '', re.IGNORECASE)
                     if not isinstance(html, str) or (len(matches) != 1 and html.count('class="slide"') != 1 and html.count("class='slide'") != 1):
                         result['status'] = 'error'

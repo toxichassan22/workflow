@@ -904,6 +904,7 @@ def _verify_original_result(result, payload, namespace):
         "insert_company_logo_panel", "delete_slide", "remove_slide", "duplicate_slide",
         "clone_slide", "reorder_slides", "move_slide", "split_slide", "split_dense_slide",
         "create_slide", "create_design_slide", "merge_slides", "combine_slides",
+        "apply_watermark", "remove_watermark",
     }
     successful_mutations = [item for item in actions if item.get("tool") in mutating and item.get("status") == "success"]
     if not successful_mutations or not isinstance(data.get("slidesData"), list):
@@ -951,16 +952,21 @@ def install(app, namespace: Dict[str, Any]) -> None:
     app.view_functions["api_designer_chat"] = secured_designer_chat
 
     def run_job(flask_app, tenant_id, payload, job_id, authorization):
+        payload_with_job = dict(payload)
+        payload_with_job["_job_id"] = job_id
         with flask_app.test_request_context(
             "/api/designer-chat",
             method="POST",
-            json=payload,
-            headers={"Authorization": authorization},
+            json=payload_with_job,
+            headers={
+                "Authorization": authorization,
+                "X-Designer-Job-Id": job_id,
+            },
         ):
             try:
                 write_job(".designer_chat_jobs", tenant_id, job_id, {
                     "status": "running", "success": True, "progress": 10,
-                    "message": "جاري تنفيذ تعديل العرض...",
+                    "message": "جاري تنفيذ وتطبيق التعديل...",
                 })
                 result = flask_app.view_functions["api_designer_chat"]()
                 response = result[0] if isinstance(result, tuple) else result

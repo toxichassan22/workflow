@@ -176,3 +176,57 @@ def test_auto_heal_workspace_slides_unpacks_multiple_slides():
     assert "الجزء الثاني" in healed[1]["title"] or "الجزء 2" in healed[1]["title"]
     assert all(s["html"].count('class="slide"') == 1 for s in healed)
 
+
+def test_watermark_request_detection():
+    import app
+
+    user_req = "اضف في خلفيه جميع الشرائح البيضاء watermark ب لوجو الشركه vision gate"
+    assert app.is_watermark_request(user_req)
+    assert app.is_watermark_request("ضع علامة مائية لشعار الشركة في الشرائح")
+    assert app.is_watermark_request("احذف العلامة المائية من كل الشرائح")
+    assert app.is_watermark_request("لوجو خفيف في الخلفية")
+    assert not app.is_watermark_request("عدل النص في الشريحة 5")
+    assert not app.is_watermark_request("انقل لوجو شركة بوابة الرؤية بداخل المربع في يمين الشريحة")
+
+
+def test_watermark_injection_and_removal():
+    import app
+
+    html = '<div class="slide" style="width:1280px;height:720px;"><h1>محتوى تجريبي</h1></div>'
+    injected = app._apply_slide_watermark(html, "/uploads/logo.png")
+    assert 'class="slide-watermark"' in injected
+    assert 'data-slide-watermark="true"' in injected
+    assert '/uploads/logo.png' in injected
+    assert 'opacity:0.045' in injected
+
+    # Idempotent: injecting again replaces rather than duplicates
+    injected_twice = app._apply_slide_watermark(injected, "/uploads/logo.png")
+    assert injected_twice.count('class="slide-watermark"') == 1
+
+    # Removal cleans up completely
+    removed = app._remove_slide_watermark(injected)
+    assert 'class="slide-watermark"' not in removed
+    assert 'data-slide-watermark="true"' not in removed
+
+
+def test_watermark_deterministic_plan_handles_user_exact_request():
+    import app
+
+    user_req = "اضف في خلفيه جميع الشرائح البيضاء watermark ب لوجو الشركه vision gate"
+    slides = [
+        {"title": "الغلاف", "type": "cover", "html": '<div class="slide" style="background:#0c2340;"><h1>غلاف</h1></div>'},
+        {"title": "الملخص", "type": "content", "html": '<div class="slide"><h1>ملخص</h1></div>'},
+    ]
+    plan = app._designer_deterministic_plan(user_req, slides, 0, [])
+    assert plan is not None
+    assert len(plan["actions"]) == 1
+    action = plan["actions"][0]
+    assert action["tool"] == "apply_watermark"
+    assert action["params"]["target"] == "all"
+    assert action["params"]["only_white"] is True
+
+    # Dark slide filtering
+    assert not app._is_white_or_light_slide(slides[0])
+    assert app._is_white_or_light_slide(slides[1])
+
+
