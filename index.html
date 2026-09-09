@@ -5337,7 +5337,10 @@
         <label>البريد الإلكتروني أو اسم المستخدم (أدمن الشركة)</label>
         <input type="text" id="loginEmail" autocomplete="username" required>
         <label>كلمة المرور</label>
-        <input type="password" id="loginPassword" placeholder="كلمة المرور" required>
+        <div style="position:relative">
+          <input type="password" id="loginPassword" placeholder="كلمة المرور" required style="padding-left:64px">
+          <button type="button" onclick="togglePasswordVisibility('loginPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
+        </div>
         <button type="submit" class="auth-btn">دخول</button>
       </form>
 
@@ -5346,7 +5349,10 @@
         <label>البريد الإلكتروني أو اسم المستخدم (موظف)</label>
         <input type="text" id="employeeEmail" autocomplete="username" required>
         <label>كلمة المرور</label>
-        <input type="password" id="employeePassword" placeholder="كلمة المرور" required>
+        <div style="position:relative">
+          <input type="password" id="employeePassword" placeholder="كلمة المرور" required style="padding-left:64px">
+          <button type="button" onclick="togglePasswordVisibility('employeePassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
+        </div>
         <button type="submit" class="auth-btn">دخول الموظف</button>
       </form>
 
@@ -5357,7 +5363,10 @@
         <label>البريد الإلكتروني (للأدمن)</label>
         <input type="email" id="registerEmail" placeholder="admin@company.com" required>
         <label>كلمة المرور (10 أحرف على الأقل)</label>
-        <input type="password" id="registerPassword" placeholder="كلمة المرور" required minlength="10">
+        <div style="position:relative">
+          <input type="password" id="registerPassword" placeholder="كلمة المرور" required minlength="10" style="padding-left:64px">
+          <button type="button" onclick="togglePasswordVisibility('registerPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
+        </div>
         <label>دومين الشركة (اختياري)</label>
         <input type="text" id="registerDomain" placeholder="company.com">
         <label>النطاق الفرعي (اختياري)</label>
@@ -6080,7 +6089,10 @@
           </div>
           <div class="tenant-field">
             <label>كلمة المرور *</label>
-            <input type="password" id="newUserPassword" placeholder="6 أحرف على الأقل">
+            <div style="position:relative">
+              <input type="password" id="newUserPassword" placeholder="6 أحرف على الأقل" style="padding-left:64px">
+              <button type="button" onclick="togglePasswordVisibility('newUserPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
+            </div>
           </div>
           <div class="tenant-field">
             <label>الدور</label>
@@ -6339,7 +6351,10 @@
               <div class="tenant-field" id="sagCreatePasswordWrap" style="display:none">
                 <label>كلمة المرور</label>
                 <div style="display:flex;gap:8px">
-                  <input type="password" id="sagCreatePassword" minlength="10" autocomplete="new-password" style="flex:1;min-width:0">
+                  <div style="position:relative;flex:1;min-width:0">
+                    <input type="password" id="sagCreatePassword" minlength="10" autocomplete="new-password" style="width:100%;padding-left:64px">
+                    <button type="button" onclick="togglePasswordVisibility('sagCreatePassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
+                  </div>
                   <button type="button" class="btn ghost" onclick="generateSagCompanyPassword()">توليد تلقائي</button>
                 </div>
               </div>
@@ -24695,6 +24710,8 @@
       if (!manual) {
         input.value = '';
         input.type = 'password';
+        const toggle = input.parentElement ? input.parentElement.querySelector('button') : null;
+        if (toggle) toggle.textContent = 'إظهار';
       }
     }
 
@@ -24716,6 +24733,8 @@
       const input = document.getElementById('sagCreatePassword');
       input.value = generateStrongPassword();
       input.type = 'text';
+      const toggle = input.parentElement ? input.parentElement.querySelector('button') : null;
+      if (toggle) toggle.textContent = 'إخفاء';
     }
 
     async function copySagText(value) {
@@ -26081,12 +26100,16 @@
         '</form></div>';
     }
 
-    function togglePasswordSetupVisibility(inputId, btn) {
+    function togglePasswordVisibility(inputId, btn) {
       const input = document.getElementById(inputId);
       if (!input) return;
       const show = input.type === 'password';
       input.type = show ? 'text' : 'password';
-      btn.textContent = show ? 'إخفاء' : 'إظهار';
+      if (btn) btn.textContent = show ? 'إخفاء' : 'إظهار';
+    }
+
+    function togglePasswordSetupVisibility(inputId, btn) {
+      togglePasswordVisibility(inputId, btn);
     }
 
     async function handlePasswordSetup(event, rawToken) {
@@ -26131,7 +26154,9 @@
         '<label>الاسم الكامل *</label>' +
         '<input type="text" id="inviteName" placeholder="اسمك الكامل" required>' +
         '<label>كلمة المرور (6 أحرف على الأقل) *</label>' +
-        '<input type="password" id="invitePassword" placeholder="كلمة المرور" required minlength="6">' +
+        '<div style="position:relative">' +
+        '<input type="password" id="invitePassword" placeholder="كلمة المرور" required minlength="6" style="padding-left:64px">' +
+        '<button type="button" onclick="togglePasswordVisibility(\'invitePassword\', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button></div>' +
         '<button type="submit" class="auth-btn">إنشاء حسابي</button>' +
         '</form></div>';
       authPage.style.display = 'flex';
