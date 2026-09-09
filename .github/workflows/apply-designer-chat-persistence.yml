@@ -24,8 +24,11 @@ jobs:
 
           path = Path('index.html')
           text = path.read_text(encoding='utf-8')
+          send_anchor = "    async function sendTenantDesignerChat() {\n"
+          render_anchor = "    async function renderPresentationFontStatus() {"
+          send_start = text.index(send_anchor)
+          send_end = text.index(render_anchor, send_start)
 
-          helper_anchor = "    async function sendTenantDesignerChat() {\n"
           helper = r'''    async function persistTenantDesignerWorkspace(hadUnsavedChanges) {
             try {
               if (!tenantPresentationId) {
@@ -41,9 +44,7 @@ jobs:
                 slideCount: tenantSlidesData.length,
                 status: 'edited'
               });
-              if (saved?.success === false || saved?.error) {
-                throw new Error(saved.error || 'تعذر حفظ العرض');
-              }
+              if (saved?.success === false || saved?.error) throw new Error(saved.error || 'تعذر حفظ العرض');
               if (!hadUnsavedChanges) setDraftDirty(false);
               return true;
             } catch (error) {
@@ -53,78 +54,68 @@ jobs:
           }
 
 '''
-          if text.count(helper_anchor) != 1:
-              raise RuntimeError(f'designer helper anchor count: {text.count(helper_anchor)}')
-          text = text.replace(helper_anchor, helper + helper_anchor, 1)
+          if 'async function persistTenantDesignerWorkspace' not in text[send_start - 3000:send_start]:
+              text = text[:send_start] + helper + text[send_start:]
+              send_start += len(helper)
+              send_end += len(helper)
 
-          scope_anchor = "      // Check if message specifies modifying all slides\n"
-          scope_replacement = (
-              "      // Preserve whether unrelated form edits were already dirty before this chat turn.\n"
-              "      const designerHadUnsavedChanges = tenantDraftDirty;\n\n"
-              + scope_anchor
-          )
-          if text.count(scope_anchor) != 1:
-              raise RuntimeError(f'designer dirty-state anchor count: {text.count(scope_anchor)}')
-          text = text.replace(scope_anchor, scope_replacement, 1)
+          dirty_line = "      const designerHadUnsavedChanges = tenantDraftDirty;\n"
+          section = text[send_start:send_end]
+          if dirty_line not in section:
+              scope_anchor = "      // Check if message specifies modifying all slides\n"
+              scope_pos = text.index(scope_anchor, send_start, send_end)
+              insertion = "      // Remember whether unrelated edits were already unsaved before this chat turn.\n" + dirty_line + "\n"
+              text = text[:scope_pos] + insertion + text[scope_pos:]
+              send_end += len(insertion)
 
-          old_tail = r'''      tenantProjectData.designerChat = designerChatPersistence();
-            renumberTenantSlides();
-            renderTenantSlides();
-            renderTenantDesignerChat();
-            triggerAutoSaveDraft();
-          }
+          section = text[send_start:send_end]
+          if 'await persistTenantDesignerWorkspace(designerHadUnsavedChanges)' not in section:
+              trigger = "      triggerAutoSaveDraft();"
+              trigger_pos = text.rfind(trigger, send_start, send_end)
+              if trigger_pos < 0:
+                  raise RuntimeError('final designer dirty marker not found')
+              insert_pos = trigger_pos + len(trigger)
+              persistence = r'''
 
-          async function renderPresentationFontStatus() {'''
-          new_tail = r'''      tenantProjectData.designerChat = designerChatPersistence();
-            renumberTenantSlides();
-            renderTenantSlides();
-            renderTenantDesignerChat();
-            triggerAutoSaveDraft();
-
-            const designerMutationSucceeded =
-              reply.action === 'add_slide' || reply.action === 'insert_slide' ||
-              (Array.isArray(reply.actions) && reply.actions.some(action => action?.status === 'success'));
-            if (designerMutationSucceeded) {
-              const persisted = await persistTenantDesignerWorkspace(designerHadUnsavedChanges);
-              if (!persisted) {
-                const latestAssistant = [...tenantDesignerMessages].reverse()
-                  .find(item => item?.role === 'assistant');
-                if (latestAssistant) {
-                  latestAssistant.content = String(latestAssistant.content || '') +
-                    ' تم تطبيق التعديل داخل الصفحة، لكن تعذر حفظه على الخادم؛ لا تغلق الصفحة قبل الضغط على حفظ كمسودة.';
+              const designerMutationSucceeded =
+                reply.action === 'add_slide' || reply.action === 'insert_slide' ||
+                (Array.isArray(reply.actions) && reply.actions.some(action => action?.status === 'success'));
+              if (designerMutationSucceeded) {
+                const persisted = await persistTenantDesignerWorkspace(designerHadUnsavedChanges);
+                if (!persisted) {
+                  const latestAssistant = [...tenantDesignerMessages].reverse()
+                    .find(item => item?.role === 'assistant');
+                  if (latestAssistant) {
+                    latestAssistant.content = String(latestAssistant.content || '') +
+                      ' تم تطبيق التعديل داخل الصفحة، لكن تعذر حفظه على الخادم؛ لا تغلق الصفحة قبل الضغط على حفظ كمسودة.';
+                  }
+                  renderTenantDesignerChat();
+                  toast('تم التعديل، لكن فشل حفظه على الخادم');
                 }
-                renderTenantDesignerChat();
-                toast('تم التعديل، لكن فشل حفظه على الخادم');
-              }
-            }
-          }
+              }'''
+              text = text[:insert_pos] + persistence + text[insert_pos:]
 
-          async function renderPresentationFontStatus() {'''
-          if text.count(old_tail) != 1:
-              raise RuntimeError(f'designer persistence tail count: {text.count(old_tail)}')
-          text = text.replace(old_tail, new_tail, 1)
           path.write_text(text, encoding='utf-8')
-
           test = Path('tests/test_designer_chat_persistence.py')
-          test.write_text(r'''from pathlib import Path
+          test.write_text('''from pathlib import Path
 
 
 def test_successful_designer_edits_are_persisted_and_failures_are_visible():
-    text = Path('index.html').read_text(encoding='utf-8')
-    start = text.index('async function persistTenantDesignerWorkspace')
-    end = text.index('async function renderPresentationFontStatus', start)
+    text = Path("index.html").read_text(encoding="utf-8")
+    start = text.index("async function persistTenantDesignerWorkspace")
+    end = text.index("async function renderPresentationFontStatus", start)
     section = text[start:end]
     assert "await api('PUT', '/api/presentations/' + tenantPresentationId" in section
-    assert 'await saveProjectAsDraft(true);' in section
-    assert 'const designerHadUnsavedChanges = tenantDraftDirty;' in section
+    assert "await saveProjectAsDraft(true);" in section
+    assert "const designerHadUnsavedChanges = tenantDraftDirty;" in section
     assert "action?.status === 'success'" in section
-    assert 'await persistTenantDesignerWorkspace(designerHadUnsavedChanges)' in section
-    assert 'لكن تعذر حفظه على الخادم' in section
+    assert "await persistTenantDesignerWorkspace(designerHadUnsavedChanges)" in section
+    assert "لكن تعذر حفظه على الخادم" in section
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_successful_designer_edits_are_persisted_and_failures_are_visible()
-    print('designer chat persistence test passed')
+    print("designer chat persistence test passed")
 ''', encoding='utf-8')
           PY
           python tests/test_designer_chat_persistence.py
