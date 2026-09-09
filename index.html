@@ -631,6 +631,13 @@
       outline-offset: 3px;
     }
 
+    /* Watermark layer: click-through in normal view, selectable while editing. */
+    .slide-element-editing .slide-watermark,
+    .slide-element-editing [data-slide-watermark="true"] {
+      pointer-events: auto !important;
+      cursor: move;
+    }
+
     .slide-resize-handle {
       position: absolute;
       width: 16px;

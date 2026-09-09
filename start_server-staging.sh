@@ -9,6 +9,19 @@ set -e
 
 export PATH="$HOME/bin:$PATH"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$SCRIPT_DIR/.env"
+  set +a
+elif [ -f "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env"
+  set +a
+fi
+
 APP_DIR="${STAGING_APP_DIR:-/home/demos/proposal-generator-staging}"
 REPO_DIR="${STAGING_REPO_DIR:-/home/demos/workflow.git}"
 WEB_ROOT="${STAGING_WEB_ROOT:-/home/demos/staging_html}"
@@ -16,14 +29,6 @@ GUNICORN="$APP_DIR/venv/bin/gunicorn"
 DEPLOYMENT_MARKER="$APP_DIR/.deployed_commit"
 WATCHDOG_LOG="$APP_DIR/watchdog.log"
 HEALTH_PATH="/health"
-
-# Load optional overrides from the staging .env
-if [ -f "$APP_DIR/.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "$APP_DIR/.env"
-  set +a
-fi
 
 # Staging prefers its own port range so it never steals production port 8000.
 PORT="${STAGING_PORT:-${APP_PORT:-8001}}"

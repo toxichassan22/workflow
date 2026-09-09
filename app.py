@@ -3737,12 +3737,20 @@ def _is_white_or_light_slide(slide, minimum_luminance=0.45):
     color_token = r'(?:#[0-9a-f]{3,6}\b|rgba?\([^)]*\)|hsla?\([^)]*\)|[a-z]+)'
     # The root slide background decides: a white slide holding dark cards inside is
     # still a white slide, while a dark root stays dark even with light cards in it.
+    # The class token must be exactly `slide` — `\bslide\b` also matches
+    # `slide-inner` / `slide-footer`, which would read the wrong element.
     root_style = ''
-    root_match = re.search(r'<div\b[^>]*\bclass=["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>', html, flags=re.IGNORECASE)
-    if root_match:
-        style_match = re.search(r'\bstyle\s*=\s*["\']([^"\']*)["\']', root_match.group(0), flags=re.IGNORECASE)
+    for root_candidate in re.finditer(r'<div\b[^>]*>', html, flags=re.IGNORECASE):
+        tag_text = root_candidate.group(0)
+        class_match = re.search(r'\bclass\s*=\s*["\']([^"\']*)["\']', tag_text, flags=re.IGNORECASE)
+        if not class_match:
+            continue
+        if 'slide' not in class_match.group(1).split():
+            continue
+        style_match = re.search(r'\bstyle\s*=\s*["\']([^"\']*)["\']', tag_text, flags=re.IGNORECASE)
         if style_match:
             root_style = style_match.group(1)
+        break
     if root_style:
         root_colors = []
         for background in re.findall(r'background(?:-color)?\s*:\s*([^;]+)', root_style, flags=re.IGNORECASE):
@@ -3754,18 +3762,42 @@ def _is_white_or_light_slide(slide, minimum_luminance=0.45):
                 measured.append(luminance)
         if measured:
             return all(value >= minimum_luminance for value in measured)
-    background_colors = []
-    for background in re.findall(r'background(?:-color)?\s*:\s*([^;}"\']+)', html, flags=re.IGNORECASE):
-        background_colors.extend(re.findall(color_token, background, flags=re.IGNORECASE))
-    for color in background_colors:
-        luminance = _css_color_luminance(color)
-        if luminance is not None and luminance < minimum_luminance:
-            return False
+    # Fallback when the root carries no explicit background: only a full-cover
+    # background layer decides. Header/footer/table-header colors are dark by
+    # design on white slides and must never flip a white slide to dark — that
+    # is what silently skipped white slides from an only-white watermark run.
+    for tag in re.finditer(r'<div\b[^>]*\bstyle\s*=\s*["\']([^"\']*)["\'][^>]*>', html, flags=re.IGNORECASE):
+        style = tag.group(1) or ''
+        lowered = style.lower()
+        if 'absolute' not in lowered:
+            continue
+        compact = lowered.replace(' ', '')
+        full_cover = (
+            'inset:0' in compact
+            or ('top:0' in compact and 'bottom:0' in compact and 'left:0' in compact and 'right:0' in compact)
+            or ('width:1280' in compact and 'height:720' in compact)
+        )
+        if not full_cover:
+            continue
+        layer_colors = []
+        for background in re.findall(r'background(?:-color)?\s*:\s*([^;]+)', style, flags=re.IGNORECASE):
+            layer_colors.extend(re.findall(color_token, background, flags=re.IGNORECASE))
+        for color in layer_colors:
+            luminance = _css_color_luminance(color)
+            if luminance is not None and luminance < minimum_luminance:
+                return False
     return True
 
 
+# The watermark always renders above slide content layers (opaque cards and
+# images used to bury it at z-index 0). It stays click-through via
+# pointer-events:none; in manual slide-edit mode the client re-enables
+# pointer events so the layer can be selected, dragged and re-stacked.
+WATERMARK_Z_INDEX = 50
+
+
 def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
-    """Inject an elegant watermark overlay into a slide HTML before the closing tag."""
+    """Inject an elegant watermark overlay on top of a slide's content layers."""
     if not html:
         return html
     try:
@@ -3782,10 +3814,25 @@ def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
     watermark_markup = (
         '<div class="slide-watermark" data-slide-watermark="true" aria-hidden="true" '
         'style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
-        f'pointer-events:none;z-index:0;opacity:{opacity_value};overflow:hidden;">'
+        f'pointer-events:none;z-index:{WATERMARK_Z_INDEX};opacity:{opacity_value};overflow:hidden;">'
         f'<img src="{logo_url}" alt="" style="width:{width_value}px;max-width:50%;max-height:50%;object-fit:contain;filter:grayscale(100%);">'
         '</div>'
     )
+    # The overlay is absolutely positioned, so the slide root must establish
+    # positioning; most templates already carry position:relative.
+    root_tag = re.search(r'<div\b[^>]*>', cleaned, flags=re.IGNORECASE)
+    if root_tag:
+        tag_text = root_tag.group(0)
+        class_match = re.search(r'\bclass\s*=\s*["\']([^"\']*)["\']', tag_text, flags=re.IGNORECASE)
+        if class_match and 'slide' in class_match.group(1).split():
+            style_match = re.search(r'\bstyle\s*=\s*["\']([^"\']*)["\']', tag_text, flags=re.IGNORECASE)
+            if style_match and 'position' not in style_match.group(1).lower():
+                fixed_tag = tag_text.replace(
+                    style_match.group(0),
+                    'style="' + 'position:relative;' + style_match.group(1) + '"',
+                    1,
+                )
+                cleaned = cleaned[:root_tag.start()] + fixed_tag + cleaned[root_tag.end():]
     closing = re.search(r'</div>\s*$', cleaned, flags=re.IGNORECASE)
     if not closing:
         return cleaned + watermark_markup
@@ -4977,11 +5024,13 @@ def api_designer_chat():
                     branding.get('logo_path') or branding.get('logo') or branding.get('logo_url') or logo_token
                 ).strip()
                 affected_indexes = []
+                skipped_dark_indexes = []
                 total_target = max(1, len(indexes))
                 report_designer_progress(20, 'جاري معالجة العلامة المائية للشرائح...')
                 for i, idx in enumerate(indexes):
                     slide = slides[idx] if isinstance(slides[idx], dict) else {}
                     if only_white and not _is_white_or_light_slide(slide):
+                        skipped_dark_indexes.append(idx)
                         continue
                     current_slide_html = slide.get('html', '')
                     if is_remove:
@@ -5009,14 +5058,20 @@ def api_designer_chat():
                     'status': 'success',
                     'indexes': affected_indexes,
                     'count': len(affected_indexes),
+                    'skipped_indexes': [idx + 1 for idx in skipped_dark_indexes],
+                    'skipped_count': len(skipped_dark_indexes),
                 })
                 action_desc = 'حذف' if is_remove else 'إضافة'
                 if (not is_remove) and only_white:
-                    skipped_dark = len(indexes) - len(affected_indexes)
+                    skipped_dark = len(skipped_dark_indexes)
                     if skipped_dark > 0:
+                        skipped_numbers = ', '.join(str(idx + 1) for idx in sorted(skipped_dark_indexes)[:20])
+                        if skipped_dark > 20:
+                            skipped_numbers += f' وغيرها ({skipped_dark} إجمالاً)'
                         assistant_messages.append(
                             f"تم {action_desc} العلامة المائية بنجاح في خلفية {len(affected_indexes)} شريحة بيضاء "
-                            f"وتخطي {skipped_dark} شريحة داكنة مع الحفاظ الكامل على النصوص والتصميم."
+                            f"وتخطي {skipped_dark} شريحة داكنة (أرقام: {skipped_numbers}) "
+                            f"مع الحفاظ الكامل على النصوص والتصميم."
                         )
                     else:
                         assistant_messages.append(
