@@ -131,3 +131,45 @@ def test_material_change_rejects_unchanged_and_fallback_responses():
     assert not reliability.materially_changed(original, original + " ", "تم التعديل")
     assert not reliability.materially_changed(original, original + "<p>جديد</p>", "تم الحفاظ على تصميم الشريحة 1 لتعذر التعديل التلقائي عليها.")
     assert reliability.materially_changed(original, original + "<p>جديد</p>", "تم تحديث الشريحة")
+
+
+def test_arabic_split_phrasing_detection():
+    assert reliability.is_split_request("اقسم محتوي الملخص التنفيذي بحيث يظهر بشكل واضح و منظم و المحتوي كامل")
+    assert reliability.is_split_request("فكك محتوى الشريحة 5")
+    assert reliability.is_split_request("جزئ شريحة الدراسة المالية إلى قسمين")
+    assert reliability.is_split_request("وزع محتوى الشريحة 3 على شريحتين")
+    assert reliability.is_split_request("اقسمها إلى شريحتين")
+    assert not reliability.is_split_request("قسم التصور البصري")
+    assert not reliability.is_split_request("قسم مالي")
+
+
+def test_split_cards_or_blocks_partitions_evenly():
+    html = (
+        '<div class="slide" style="width:1280px;height:720px;">'
+        '<h2>الملخص التنفيذي</h2>'
+        '<div class="grid">'
+        '<div class="card"><h3>الموقع</h3><p>طريق الملك فهد</p></div>'
+        '<div class="card"><h3>المساحة</h3><p>15000 م2</p></div>'
+        '<div class="card"><h3>التكلفة</h3><p>120 مليون</p></div>'
+        '<div class="card"><h3>العائد</h3><p>18%</p></div>'
+        '</div></div>'
+    )
+    parts = reliability.split_cards_or_blocks(html, "الملخص التنفيذي", 2)
+    assert len(parts) == 2
+    assert "الموقع" in parts[0]["html"] and "المساحة" in parts[0]["html"]
+    assert "التكلفة" in parts[1]["html"] and "العائد" in parts[1]["html"]
+    assert all(part["html"].count('class="slide"') == 1 for part in parts)
+
+
+def test_auto_heal_workspace_slides_unpacks_multiple_slides():
+    multi_html = (
+        '<div class="slide" style="width:1280px;height:720px;"><h1>الجزء الأول</h1></div>'
+        '<div class="slide" style="width:1280px;height:720px;"><h1>الجزء الثاني</h1></div>'
+    )
+    slides = [{"title": "الملخص التنفيذي", "html": multi_html}]
+    healed = reliability._auto_heal_workspace_slides(slides)
+    assert len(healed) == 2
+    assert "الجزء الأول" in healed[0]["title"] or "الجزء 1" in healed[0]["title"]
+    assert "الجزء الثاني" in healed[1]["title"] or "الجزء 2" in healed[1]["title"]
+    assert all(s["html"].count('class="slide"') == 1 for s in healed)
+

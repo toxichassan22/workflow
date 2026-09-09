@@ -3165,13 +3165,48 @@ def detect_slide_indexes_from_message_py(text, slides):
             except ValueError:
                 continue
 
-    # 4. Check slide title matches
+    # 4. Check slide title and section matches
     if not found_indexes:
+        norm_clean = re.sub(r'[^\w\s]', ' ', norm_text)
+        sec_aliases = {
+            'executive_summary': ['الملخص التنفيذي', 'ملخص تنفيذي', 'الملخص'],
+            'financial': ['الدراسة المالية', 'التحليل المالي', 'الجانب المالي', 'دراسة مالية', 'المالية'],
+            'location': ['تحليل الموقع', 'موقع المشروع', 'خريطة الموقع', 'الموقع'],
+            'land': ['تحليل الأرض', 'كروكي الأرض', 'بيانات الأرض', 'الأرض', 'الارض'],
+            'market': ['تحليل السوق', 'دراسة السوق', 'السوق'],
+            'overview': ['نبذة عن المشروع', 'مقدمة المشروع', 'عن المشروع'],
+            'components': ['مكونات المشروع', 'عناصر المشروع', 'المكونات'],
+            'swot_risks': ['تحليل المخاطر', 'مصفوفة المخاطر', 'المخاطر', 'سوات', 'swot'],
+            'timeline': ['الجدول الزمني', 'مراحل المشروع', 'الجدول'],
+            'team': ['فريق العمل', 'فريق المشروع'],
+            'visual_concept': ['التصور البصري', 'الهوية البصرية', 'الرؤية البصرية'],
+            'cover': ['الغلاف', 'شريحة الغلاف'],
+            'conclusion': ['الخاتمة', 'شريحة الختام'],
+        }
         for idx, s in enumerate(slides):
-            title = (s.get('title') or '').strip().lower() if isinstance(s, dict) else ''
-            if len(title) >= 3 and title in norm_text:
+            if not isinstance(s, dict):
+                continue
+            title = (s.get('title') or '').strip().lower()
+            clean_title = re.sub(r'[^\w\s]', ' ', title).strip()
+            if len(clean_title) >= 3 and (clean_title in norm_clean or any(part in norm_clean for part in clean_title.split(' - ') if len(part.strip()) >= 4)):
                 if idx not in found_indexes:
                     found_indexes.append(idx)
+                    break
+            title_words = [w for w in clean_title.split() if len(w) >= 3 and w not in ('شريحة', 'صفحة', 'عرض', 'مشروع')]
+            if len(title_words) >= 2:
+                phrase = ' '.join(title_words[:2])
+                if phrase in norm_clean and idx not in found_indexes:
+                    found_indexes.append(idx)
+                    break
+            sec_key = (s.get('section_key') or s.get('sectionKey') or '').strip().lower()
+            if sec_key and sec_key in sec_aliases:
+                for alias in sec_aliases[sec_key]:
+                    if alias in norm_clean:
+                        if idx not in found_indexes:
+                            found_indexes.append(idx)
+                            break
+                if found_indexes:
+                    break
 
     return found_indexes
 
@@ -3572,11 +3607,12 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
             }}],
         }
 
-    if re.search(r'(?:قسّم|قسم|تقسيم)\s*(?:الشريحة|شريحة|السلايد|سلايد)', normalized):
-        number = numbers[0] if numbers else current_index + 1
+    if designer_chat_reliability.is_split_request(message):
+        detected = detect_slide_indexes_from_message_py(message, slides)
+        number = numbers[0] if numbers else ((detected[0] + 1) if detected else current_index + 1)
         return {
-            'response': f'سأقسم الشريحة رقم {number} إلى جزأين متوازنين.',
-            'actions': [{'tool': 'split_slide', 'params': {'slide_number': number}}],
+            'response': f'سأقسم محتوى الشريحة رقم {number} إلى أجزاء متوازنة مع الحفاظ على كامل المحتوى دون فقد أي تفاصيل.',
+            'actions': [{'tool': 'split_slide', 'params': {'slide_number': number, 'instruction': message}}],
         }
     return None
 
@@ -4293,7 +4329,12 @@ def api_designer_chat():
     branding = db.get_branding(g.tenant_id) or {}
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
     training_context = db.get_training_context(g.tenant_id) or ''
-    summary = [{'index': i + 1, 'title': s.get('title', '') if isinstance(s, dict) else ''} for i, s in enumerate(slides)]
+    summary = [{
+        'index': i + 1,
+        'title': s.get('title', '') if isinstance(s, dict) else '',
+        'section': s.get('section_key') or s.get('sectionKey') or '',
+        'type': s.get('type', 'content') if isinstance(s, dict) else 'content'
+    } for i, s in enumerate(slides)]
     all_note = "\n تنبيه هام جداً: المستخدم طلب صراحة تعديل جميع الشرائح دون استثناء! يجب أن تعيد target='all' في الأداة edit_slides." if is_all_slides_request else ""
     memory_note = f"\n\n## ذاكرة المحادثة (ملخص ما سبق)\n{chat_memory}" if chat_memory else ""
     history_note = ("\n\n## آخر رسائل المحادثة بالترتيب\n" + '\n'.join(history_lines)) if history_lines else ""
@@ -4310,19 +4351,19 @@ def api_designer_chat():
     audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index, creative_images)
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master).
-أنت تمتلك كامل الصلاحية والحرية الإبداعية المطلقة لتعديل أو إعادة تصميم أي شريحة في العرض دون استثناء:
+أنت تمتلك كامل الصلاحية والحرية الإبداعية والمطلقة لتعديل أو إعادة تصميم أي شريحة في العرض دون استثناء:
 - حرية مطلقة لتعديل وإعادة ابتكار شرائح الفصول والأقسام الرئيسية (Section Dividers / الفصول): لك كامل الحرية في إعادة تصميمها بتخطيطات إبداعية مبهرة (إضافة كروت ملخصة لمحاور القسم، خطوط زمنية، إبراز مؤشرات أو أرقام قياسية، تقسيم الشريحة أفقياً أو عمودياً Split View، دمج صور معمارية مع بطاقات داكنة ملكية، تدرجات لونية، خطوط عريضة).
 - حرية مطلقة لتعديل وتطوير شريحة الفهرس ومحتويات العرض (Index): تصميمها بشبكات عصرية أو بطاقات مرقمة فاخرة مع الحفاظ على وسم data-index-page="section_key".
 - حرية تعديل شرائح الغلاف والخاتمة وجميع شرائح المحتوى والخرائط والتحليلات.
 - تعديل CSS والتخطيط (رفع/تنزيل الهيدر، تغيير الأحجام، إزاحة العناصر يميناً/يساراً، تعديل الألوان والخطوط).
 - تعديل جراحي فوري لمحتوى أي شريحة (إضافة بطاقات، حذف عناصر، تعديل نصوص) دون مساس ببقية الشريحة.
-- إدارة دورة حياة الشرائح كاملة: حذف شريحة (delete_slide)، تكرار شريحة (duplicate_slide)، إعادة ترتيب الشرائح (reorder_slides)، أو تقسيم شريحة كثيفة إلى شريحتين (split_slide).
+- إدارة دورة حياة الشرائح كاملة: حذف شريحة (delete_slide)، تكرار شريحة (duplicate_slide)، إعادة ترتيب الشرائح (reorder_slides)، تقسيم شريحة كثيفة إلى شريحتين أو أكثر (split_slide)، دمج شريحتين (merge_slides)، أو إنشاء شريحة جديدة (create_slide).
 - إدراج الخرائط الأربع المعتمدة بدقة (insert_canonical_map): خريطة الموقع العام، خريطة شبكة الطرق والوصول، خريطة النطاق الجغرافي، وخريطة المعالم الحيوية.
 - إدراج وتعديل المخططات والرسوم المالية المعتمدة (insert_financial_chart): شلال التدفقات، تحليل الحساسية، التدفقات المركبة، وهيكل التمويل.
 - توليد صور حصرية للمكونات المعمارية والداخلية والخارجية ودمجها جراحياً داخل الشرائح مع بطاقة شرح توضيحي.
 - كن حاسماً ومبادراً، ولا تستخدم أداة ask إلا في الحالات المستحيلة الفهم تماماً. عندما يطلب المستخدم تعديلاً لأي شريحة مهما كان نوعها، نفّذه فوراً بحرية واحترافية وبدقة جراحية متناهية.
 {all_note} أعد JSON فقط:
-{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|generate_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|create_slide|ask|chat_only", "params":{{}}}}]}}
+{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|generate_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
@@ -4331,11 +4372,12 @@ def api_designer_chat():
 - generate_image: params={{"prompt":"وصف دقيق للصورة المراد توليدها", "component_name":"اسم المكون إن وجد", "slideIndex":1, "position":"surgical|background|right|left|inline"}}
 - insert_canonical_map: params={{"map_type":"overview|access|catchment|landmarks", "target":"current|indexes", "slideIndex":1, "refresh":true عند طلب تحديث خريطة موجودة}}
 - insert_financial_chart: params={{"chart_type":"waterfall|sensitivity|compound_flows|financing_structure", "target":"current|indexes", "slideIndex":1}}
-- delete_slide: params={{"slide_number":1-based}}
+- delete_slide: params={{"slide_number":1-based, "slide_numbers":[1-based]}}
 - duplicate_slide: params={{"slide_number":1-based}}
 - reorder_slides: params={{"from_index":1-based, "to_index":1-based}}
-- split_slide: params={{"slide_number":1-based}}
-- create_slide: params={{"title":"العنوان", "type":"content", "instruction":"محتوى الشريحة وتصميمها"}}
+- split_slide: params={{"slide_number":1-based, "parts":2, "instruction":"تفاصيل التقسيم والتنظيم"}}
+- merge_slides: params={{"slide_numbers":[1-based, 1-based], "instruction":"تفاصيل الدمج"}}
+- create_slide: params={{"title":"العنوان", "type":"content|cover|divider|table|kpi", "instruction":"محتوى الشريحة وتصميمها", "position":1-based}}
 - regenerate_maps: params={{"maptype":"roadmap|satellite|hybrid|terrain"}}
 - ask: params={{"question":"سؤال عربي واحد قصير"}} — لا تستخدمه إلا إذا كان الطلب مبهمًا تمامًا ويستحيل تخمينه.
 
@@ -4351,16 +4393,18 @@ def api_designer_chat():
 3. إذا طلب حذف شريحة (مثل: "احذف الشريحة 5") -> اختر tool="delete_slide" مع slide_number.
 4. إذا طلب تكرار شريحة (مثل: "كرر الشريحة 2") -> اختر tool="duplicate_slide" مع slide_number.
 5. إذا طلب تغيير ترتيب (مثل: "انقل الشريحة 8 إلى 4") -> اختر tool="reorder_slides" مع from_index و to_index.
-6. إذا كانت شريحة مكتظة وطلب تقسيمها -> اختر tool="split_slide" مع slide_number.
-7. إذا طلب خريطة الموقع أو الوصول أو المعالم -> اختر tool="insert_canonical_map".
+6. إذا طلب تقسيم أو تجزئة شريحة أو محتوى شريحة معينة (مثل: "اقسم محتوى الملخص التنفيذي" أو "جزئ الشريحة 4") -> اختر tool="split_slide" مع slide_number للشريحة المستهدفة.
+7. إذا طلب دمج شريحتين (مثل: "ادمج الشريحة 3 مع 4") -> اختر tool="merge_slides" مع slide_numbers.
+8. إذا طلب إنشاء أو إضافة شريحة جديدة -> اختر tool="create_slide" مع العنوان والمحتوى والموضع.
+9. إذا طلب خريطة الموقع أو الوصول أو المعالم -> اختر tool="insert_canonical_map".
    وإذا طلب تحديث أو إعادة تحميل أو استبدال خريطة موجودة في شريحة، أرسل refresh=true حتى تُستخدم أحدث نسخة محفوظة للخريطة نفسها.
-8. إذا طلب رسم أو مخطط مالي (شلال/حساسية/عوائد) -> اختر tool="insert_financial_chart".
-9. إذا طلب تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
-10. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
- 11. إذا طلب المستخدم شعار جهة محددة من فريق العمل، ميّزها عن شعار الشركة واستخدم tool="insert_team_logo" مع team_index الصحيح. لا تستخدم هذه الأداة إلا إذا احتوت الرسالة الحالية نفسها على كلمة شعار أو لوجو أو علامة تجارية مع اسم الجهة؛ فطلب الصورة أو الوصف ليس طلب شعار.
- 12. إذا طلب المستخدم نقل أو وضع شعار الشركة داخل المربع الكحلي في يمين الشريحة، استخدم tool="insert_company_logo_panel" ولا تستخدم شعار فريق العمل.
- 13. في سائر طلبات التعديل والتنسيق -> اختر tool="edit_slides".
- 14. فرّق بدقة بين الصورة والوصف والشعار: طلب وصف أو شرح أو تعليق أو كابشن لصور موجودة (مثل: «أضف وصفاً لصور التصور البصري») يعني تعديلاً نصياً فقط عبر tool="edit_slides" مع تعليمات إضافة نص وصفي تحت الصور الموجودة، دون توليد صورة جديدة ودون أي رمز شعار (ممنوع ##TEAM_LOGO_N## و##LOGO## و##PROJECT_LOGO##). وطلب صورة أو تصميم أو توليد صور جديدة يعني tool="generate_image" لصورة معمارية جديدة وليس شعاراً. ولا تستخدم أي رمز شعار إلا عند طلب شعار صريح في الرسالة الحالية.
+10. إذا طلب رسم أو مخطط مالي (شلال/حساسية/عوائد) -> اختر tool="insert_financial_chart".
+11. إذا طلب تغيير نوع الخريطة (شوارع/مرور/قمر صناعي/roadmap/satellite) -> اختر tool="regenerate_maps".
+12. إذا كان الطلب سؤالاً لا يتطلب تعديلاً -> اختر tool="chat_only".
+13. إذا طلب المستخدم شعار جهة محددة من فريق العمل، ميّزها عن شعار الشركة واستخدم tool="insert_team_logo" مع team_index الصحيح. لا تستخدم هذه الأداة إلا إذا احتوت الرسالة الحالية نفسها على كلمة شعار أو لوجو أو علامة تجارية مع اسم الجهة؛ فطلب الصورة أو الوصف ليس طلب شعار.
+14. إذا طلب المستخدم نقل أو وضع شعار الشركة داخل المربع الكحلي في يمين الشريحة، استخدم tool="insert_company_logo_panel" ولا تستخدم شعار فريق العمل.
+15. في سائر طلبات التعديل والتنسيق والتصميم -> اختر tool="edit_slides".
+16. فرّق بدقة بين الصورة والوصف والشعار: طلب وصف أو شرح أو تعليق أو كابشن لصور موجودة (مثل: «أضف وصفاً لصور التصور البصري») يعني تعديلاً نصياً فقط عبر tool="edit_slides" مع تعليمات إضافة نص وصفي تحت الصور الموجودة، دون توليد صورة جديدة ودون أي رمز شعار (ممنوع ##TEAM_LOGO_N## و##LOGO## و##PROJECT_LOGO##). وطلب صورة أو تصميم أو توليد صور جديدة يعني tool="generate_image" لصورة معمارية جديدة وليس شعاراً. ولا تستخدم أي رمز شعار إلا عند طلب شعار صريح في الرسالة الحالية.
 
 {audit_note}
 
@@ -4464,8 +4508,8 @@ def api_designer_chat():
                 actions = [{'tool': 'delete_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
             elif any(word in msg_lower for word in ('كرر الشريحة', 'تكرار الشريحة', 'انسخ الشريحة', 'استنساخ الشريحة', 'دبلر الشريحة')):
                 actions = [{'tool': 'duplicate_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
-            elif any(word in msg_lower for word in ('قسّم الشريحة', 'تقسيم الشريحة', 'قسم الشريحة', 'شريحتين')):
-                actions = [{'tool': 'split_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
+            elif designer_chat_reliability.is_split_request(message):
+                actions = [{'tool': 'split_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1), 'instruction': message}}]
             elif any(word in msg_lower for word in ('خريطة وصول', 'خريطة الطرق', 'طرق الوصول')) and not is_slide_edit_intent:
                 actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'access', 'slideIndex': current_index + 1}}]
             elif any(word in msg_lower for word in ('خريطة المعالم', 'المعالم القريبة', 'معالم حيوية')) and not is_slide_edit_intent:
@@ -4803,22 +4847,33 @@ def api_designer_chat():
                         assistant_messages.append(r_msg)
                 executed.append({'tool': tool, 'status': 'success', 'indexes': targets, 'chart_type': chart_type})
             elif tool in ('delete_slide', 'remove_slide'):
-                raw_num = params.get('slide_number') or params.get('slide_index') or params.get('index')
-                try:
-                    target_num = int(raw_num)
-                except (TypeError, ValueError):
-                    target_num = current_index + 1
-                del_idx = target_num - 1
-                if 0 <= del_idx < len(slides):
-                    if len(slides) > 1:
-                        removed = slides.pop(del_idx)
-                        assistant_messages.append(f'تم حذف الشريحة رقم {target_num} («{removed.get("title", "")}») بنجاح.')
-                        executed.append({'tool': tool, 'status': 'success', 'deleted_index': del_idx})
+                raw_nums = params.get('slide_numbers') or params.get('slide_number') or params.get('slide_index') or params.get('index')
+                target_nums = []
+                if isinstance(raw_nums, list):
+                    for v in raw_nums:
+                        try:
+                            target_nums.append(int(v))
+                        except (TypeError, ValueError):
+                            pass
+                else:
+                    try:
+                        target_nums.append(int(raw_nums))
+                    except (TypeError, ValueError):
+                        target_nums.append(current_index + 1)
+                del_indexes = sorted(set(n - 1 for n in target_nums if 0 <= n - 1 < len(slides)), reverse=True)
+                if del_indexes:
+                    if len(slides) - len(del_indexes) >= 1:
+                        removed_titles = []
+                        for d_idx in del_indexes:
+                            removed = slides.pop(d_idx)
+                            removed_titles.append(f'«{removed.get("title", f"شريحة {d_idx + 1}")}»')
+                        assistant_messages.append(f'تم حذف {len(del_indexes)} شريحة بنجاح ({", ".join(removed_titles)}).')
+                        executed.append({'tool': tool, 'status': 'success', 'deleted_indexes': del_indexes})
                     else:
-                        assistant_messages.append('لا يمكن حذف الشريحة الوحيدة المتبقية في العرض.')
+                        assistant_messages.append('لا يمكن حذف جميع الشرائح المتبقية في العرض.')
                         executed.append({'tool': tool, 'status': 'rejected', 'reason': 'single_slide'})
                 else:
-                    assistant_messages.append(f'رقم الشريحة {target_num} غير موجود في العرض.')
+                    assistant_messages.append('أرقام الشرائح المحددة للحذف غير صحيحة.')
                     executed.append({'tool': tool, 'status': 'failed', 'reason': 'out_of_bounds'})
             elif tool in ('duplicate_slide', 'clone_slide'):
                 raw_num = params.get('slide_number') or params.get('slide_index') or params.get('index')
@@ -4862,42 +4917,140 @@ def api_designer_chat():
                 sp_idx = target_num - 1
                 if 0 <= sp_idx < len(slides):
                     base_slide = slides[sp_idx]
-                    part2 = copy.deepcopy(base_slide)
-                    part1_title = base_slide.get('title', '') + ' - الجزء الأول'
-                    part2_title = base_slide.get('title', '') + ' - الجزء الثاني'
-                    base_slide['title'] = part1_title
-                    part2['title'] = part2_title
-                    
-                    instr_p1 = "قسّم محتوى هذه الشريحة واحتفظ فقط بالنصف الأول من البيانات والعناصر بشكل مريح وفسيح بدون أي حشو."
-                    instr_p2 = "قسّم محتوى هذه الشريحة واحتفظ فقط بالنصف الثاني من البيانات والعناصر المتبقية بشكل أنيق ومتناسق."
-                    
-                    h1, _ = _designer_edit_slide(base_slide.get('html', ''), part1_title, instr_p1, sp_idx, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs, slide_type=base_slide.get('type', 'content'), total_slides=len(slides) + 1)
-                    h2, _ = _designer_edit_slide(part2.get('html', ''), part2_title, instr_p2, sp_idx + 1, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs, slide_type=part2.get('type', 'content'), total_slides=len(slides) + 1)
-                    
-                    base_slide['html'] = h1
-                    base_slide['_designer_keep_html'] = True
-                    part2['html'] = h2
-                    part2['_designer_keep_html'] = True
-                    slides[sp_idx] = base_slide
-                    slides.insert(sp_idx + 1, part2)
-                    assistant_messages.append(f'تم تقسيم الشريحة رقم {target_num} بنجاح إلى شريحتين متناسقتين.')
-                    executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx})
+                    base_html = base_slide.get('html', '')
+                    base_title = base_slide.get('title', f'شريحة {target_num}')
+
+                    # 1. Check if slide contains a large table
+                    table_parts = designer_chat_reliability.split_table_slide(base_html, base_title, 'auto')
+                    if table_parts and len(table_parts) >= 2:
+                        generated = []
+                        for part in table_parts:
+                            p_slide = copy.deepcopy(base_slide)
+                            p_slide['title'] = part['title']
+                            p_slide['html'] = part['html']
+                            p_slide['_designer_keep_html'] = True
+                            generated.append(p_slide)
+                        slides[sp_idx:sp_idx + 1] = generated
+                        assistant_messages.append(f'تم تقسيم جدول الشريحة رقم {target_num} إلى {len(generated)} شرائح متوازنة.')
+                        executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
+                    else:
+                        req_parts = designer_chat_reliability.split_request_parts(params.get('instruction') or message)
+                        parts_count = req_parts if isinstance(req_parts, int) and req_parts >= 2 else 2
+
+                        part1_title = f"{base_title} - الجزء الأول"
+                        part2_title = f"{base_title} - الجزء الثاني"
+                        instr_p1 = f"قسّم محتوى هذه الشريحة واحتفظ فقط بالنصف الأول من البيانات والعناصر ({params.get('instruction') or message}) بشكل مريح وفسيح بدون أي حشو."
+                        instr_p2 = f"قسّم محتوى هذه الشريحة واحتفظ فقط بالنصف الثاني من البيانات والعناصر المتبقية ({params.get('instruction') or message}) بشكل أنيق ومتناسق."
+
+                        h1, _ = _designer_edit_slide(base_html, part1_title, instr_p1, sp_idx, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs, slide_type=base_slide.get('type', 'content'), total_slides=len(slides) + 1)
+                        h2, _ = _designer_edit_slide(base_html, part2_title, instr_p2, sp_idx + 1, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs, slide_type=base_slide.get('type', 'content'), total_slides=len(slides) + 1)
+
+                        if not designer_chat_reliability.materially_changed(base_html, h1) or not designer_chat_reliability.materially_changed(base_html, h2):
+                            card_parts = designer_chat_reliability.split_cards_or_blocks(base_html, base_title, parts_count)
+                            if card_parts and len(card_parts) >= 2:
+                                generated = []
+                                for cp in card_parts:
+                                    p_slide = copy.deepcopy(base_slide)
+                                    p_slide['title'] = cp['title']
+                                    p_slide['html'] = cp['html']
+                                    p_slide['_designer_keep_html'] = True
+                                    generated.append(p_slide)
+                                slides[sp_idx:sp_idx + 1] = generated
+                                assistant_messages.append(f'تم تقسيم محتوى وعناصر الشريحة رقم {target_num} إلى {len(generated)} شرائح متوازنة.')
+                                executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
+                            else:
+                                part1 = copy.deepcopy(base_slide)
+                                part2 = copy.deepcopy(base_slide)
+                                part1['title'] = part1_title
+                                part1['html'] = h1
+                                part1['_designer_keep_html'] = True
+                                part2['title'] = part2_title
+                                part2['html'] = h2
+                                part2['_designer_keep_html'] = True
+                                slides[sp_idx] = part1
+                                slides.insert(sp_idx + 1, part2)
+                                assistant_messages.append(f'تم تقسيم الشريحة رقم {target_num} بنجاح إلى شريحتين متناسقتين.')
+                                executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': 2})
+                        else:
+                            part1 = copy.deepcopy(base_slide)
+                            part2 = copy.deepcopy(base_slide)
+                            part1['title'] = part1_title
+                            part1['html'] = h1
+                            part1['_designer_keep_html'] = True
+                            part2['title'] = part2_title
+                            part2['html'] = h2
+                            part2['_designer_keep_html'] = True
+                            slides[sp_idx] = part1
+                            slides.insert(sp_idx + 1, part2)
+                            assistant_messages.append(f'تم تقسيم الشريحة رقم {target_num} بنجاح إلى شريحتين متناسقتين.')
+                            executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': 2})
                 else:
                     assistant_messages.append(f'رقم الشريحة {target_num} غير صحيح.')
                     executed.append({'tool': tool, 'status': 'failed', 'reason': 'out_of_bounds'})
+            elif tool in ('merge_slides', 'combine_slides'):
+                nums = params.get('slide_numbers') or [params.get('first_slide'), params.get('second_slide')]
+                resolved_nums = []
+                if isinstance(nums, list):
+                    for n in nums:
+                        try:
+                            resolved_nums.append(int(n))
+                        except (TypeError, ValueError):
+                            pass
+                if len(resolved_nums) >= 2:
+                    idx1 = min(resolved_nums[0] - 1, resolved_nums[1] - 1)
+                    idx2 = max(resolved_nums[0] - 1, resolved_nums[1] - 1)
+                elif len(slides) >= 2:
+                    idx1 = max(0, min(len(slides) - 2, current_index))
+                    idx2 = idx1 + 1
+                else:
+                    idx1, idx2 = -1, -1
+                if 0 <= idx1 < len(slides) and 0 <= idx2 < len(slides) and idx1 != idx2:
+                    slide1 = slides[idx1]
+                    slide2 = slides[idx2]
+                    merged_title = params.get('title') or slide1.get('title', '')
+                    merge_instruction = (
+                        f"ادمج محتوى وبيانات هاتين الشريحتين في شريحة واحدة متكاملة ومنظمة بدون أي حشو. "
+                        f"محتوى الشريحة الأولى: {slide1.get('title', '')}. "
+                        f"محتوى الشريحة الثانية: {slide2.get('title', '')}. "
+                        f"تعليمات الدمج: {params.get('instruction') or message}."
+                    )
+                    merged_html, r_msg = _designer_edit_slide(
+                        slide1.get('html', ''), merged_title, merge_instruction, idx1,
+                        project_data, presentation_id, branding, tenant_id=tenant_id,
+                        creative_images=creative_images, user_image_refs=user_image_refs,
+                        slide_type=slide1.get('type', 'content'), total_slides=len(slides) - 1,
+                    )
+                    slide1['html'] = merged_html
+                    slide1['title'] = merged_title
+                    slide1['_designer_keep_html'] = True
+                    slides[idx1] = slide1
+                    slides.pop(idx2)
+                    assistant_messages.append(f'تم دمج الشريحتين {idx1 + 1} و {idx2 + 1} في شريحة واحدة بنجاح.')
+                    executed.append({'tool': tool, 'status': 'success', 'merged_index': idx1, 'removed_index': idx2})
+                else:
+                    assistant_messages.append('تعذر دمج الشرائح المحددة؛ تحقق من أرقام الشرائح.')
+                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'invalid_indexes'})
             elif tool in ('create_slide', 'create_design_slide'):
                 title = params.get('title') or 'شريحة جديدة'
                 slide_type = params.get('type') or 'content'
                 plan_slide = {'title': title, 'type': slide_type, 'design_style': params.get('designStyle', 'cards'), 'bullets': []}
+                pos_raw = params.get('position') or params.get('after') or params.get('index')
+                try:
+                    pos = int(pos_raw) if pos_raw is not None else len(slides)
+                except (TypeError, ValueError):
+                    pos = len(slides)
+                pos = max(0, min(len(slides), pos))
                 html, _ = _designer_edit_slide(
                     '<div class="slide" style="width:1280px;height:720px;"><h1>' + title + '</h1></div>',
-                    title, params.get('instruction') or message, len(slides), project_data,
+                    title, params.get('instruction') or message, pos, project_data,
                     presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images,
                     user_image_refs=user_image_refs, slide_type=slide_type,
                     total_slides=len(slides) + 1,
                 )
-                slides.append({'html': html, 'title': title, 'type': slide_type, 'designStyle': plan_slide['design_style'], 'bullets': [], 'metrics': [], '_designer_keep_html': True})
-                executed.append({'tool': tool, 'status': 'success', 'index': len(slides) - 1})
+                new_slide = {'html': html, 'title': title, 'type': slide_type, 'designStyle': plan_slide['design_style'], 'bullets': [], 'metrics': [], '_designer_keep_html': True}
+                slides.insert(pos, new_slide)
+                executed.append({'tool': tool, 'status': 'success', 'index': pos})
+                assistant_messages.append(f'تمت إضافة الشريحة الجديدة «{title}» في الموضع {pos + 1}.')
             elif tool in ('regenerate_maps', 'update_map_style', 'change_map_type'):
                 maptype = params.get('maptype') or params.get('style') or 'roadmap'
                 executed.append({'tool': tool, 'status': 'deferred', 'maptype': maptype})
@@ -4905,11 +5058,28 @@ def api_designer_chat():
             else:
                 executed.append({'tool': tool, 'status': 'skipped', 'message': 'أداة غير معروفة'})
 
+        # Auto-heal any multi-slide containers or unpackable fragments into distinct slides
+        try:
+            import designer_chat_reliability
+            slides = designer_chat_reliability._auto_heal_workspace_slides(slides, globals())
+        except Exception:
+            pass
+
         slides = slide_engine.renumber_presentation_slides(
             slides, branding=branding, project_data=project_data, tenant_id=tenant_id,
             allow_all_maps=True, creative_images=creative_images,
         )
         validation = _validate_workspace_data({'slidesData': slides})
+        if not validation['valid']:
+            try:
+                import designer_chat_reliability
+                healed_slides = designer_chat_reliability._auto_heal_workspace_slides(slides, globals())
+                healed_val = _validate_workspace_data({'slidesData': healed_slides})
+                if healed_val['valid']:
+                    slides = healed_slides
+                    validation = healed_val
+            except Exception:
+                pass
         if not validation['valid']:
             return jsonify({'success': False, 'error': 'تم رفض التعديل لأن العرض يحتوي على شرائح غير صالحة', 'validation': validation}), 422
         slide_changes = change_tracking.describe_slide_changes(slides_before, slides)
@@ -15443,9 +15613,16 @@ def _workspace_slides(workspace):
 def _validate_workspace_data(workspace):
     slides = _workspace_slides(workspace)
     errors = []
+    slide_div_re = re.compile(r'<div\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\']', re.IGNORECASE)
     for index, slide in enumerate(slides):
         html = slide.get('html') if isinstance(slide, dict) else ''
-        if not isinstance(html, str) or html.count('class="slide"') != 1:
+        if not isinstance(html, str) or not html.strip():
+            errors.append({'slide_index': index, 'message': 'محتوى الشريحة فارغ'})
+            continue
+        matches = slide_div_re.findall(html)
+        if len(matches) != 1:
+            if html.count('class="slide"') == 1 or html.count("class='slide'") == 1:
+                continue
             errors.append({'slide_index': index, 'message': 'يجب أن تحتوي الشريحة على div class="slide" واحد فقط'})
     return {'valid': bool(slides) and not errors, 'slide_count': len(slides), 'errors': errors}
 
@@ -15959,8 +16136,8 @@ HTML الحالي:
                                 parsed = json.loads(match.group(0))
                             except (json.JSONDecodeError, TypeError):
                                 parsed = None
-                    html = parsed.get('html') if isinstance(parsed, dict) else None
-                    if not isinstance(html, str) or html.count('class="slide"') != 1:
+                    matches = re.findall(r'<div\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\']', html or '', re.IGNORECASE)
+                    if not isinstance(html, str) or (len(matches) != 1 and html.count('class="slide"') != 1 and html.count("class='slide'") != 1):
                         result['status'] = 'error'
                         result['message'] = f'فشل التحقق من HTML للشريحة {index + 1}; لم يتم حفظ التعديل'
                         break

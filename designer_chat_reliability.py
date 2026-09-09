@@ -200,10 +200,25 @@ def is_split_request(message: Any) -> bool:
     if not text:
         return False
     normalized = text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
-    return bool(re.search(
-        r"(?:قس[ّ]?م|تقسيم)\s*(?:(?:الشريحة|شريحة|السلايد|سلايد)|ها)",
-        normalized,
-    ))
+
+    # Guard: pure section title reference like "قسم التصور البصري"
+    if re.search(r"^\s*قسم\s+(?:التصور|الهوية|الفريق|المشروع|الارض|الأرض|الموقع|السوق|المالية|الخاتمة|الغلاف|المخططات)(?:\s+[\w\s]+)?$", normalized):
+        if not re.search(r"(?:إلى|الى|على|لـ)\s*(?:\d+|شريحت|جز|نصف)|محتو|كروت|بطاق", normalized):
+            return False
+
+    split_explicit_verb = r"(?:(?:أ|إ|ا)?قسم|تقسيم|تجزئة|جز[ّ]?ئ|فك[ّ]?ك|تفكيك|فص[ّ]?ل|شطر|وز[ّ]?ع)"
+    split_targets = r"(?:الشريحة|شريحة|السلايد|سلايد|ها|محتوى|محتوي|البيانات|بيانات|الجدول|جدول|الكروت|كروت|البطاقات|بطاقات|العناصر|عناصر|الفقرات|فقرات|الملخص|التنفيذي|الدراسة|المالية|الموقع|السوق|الأرض|الارض)"
+
+    if re.search(rf"{split_explicit_verb}\s*(?:.*?\b)?{split_targets}", normalized):
+        return True
+
+    if re.search(r"(?:قس[ّ]?م|تقسيم)\s*(?:(?:الشريحة|شريحة|السلايد|سلايد|محتوى|محتوي)|ها)", normalized):
+        return True
+
+    if re.search(r"(?:على|إلى|الى|لـ)?\s*(?:شريحتين|جزأين|جزئين|نصفين|قسمين)(?:\s+(?:متناسقتين|منفصلتين|متوازنتين))?", normalized) and re.search(r"(?:قسم|اقسم|توزيع|تجزئة|فصل|فكك|اعمل|اجعل|خل|خلي)", normalized):
+        return True
+
+    return False
 
 
 def split_request_parts(message: Any) -> SplitParts:
@@ -211,15 +226,16 @@ def split_request_parts(message: Any) -> SplitParts:
     normalized = text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
     if any(word in normalized for word in ("تلقائي", "اوتوماتيك", "حسب ما", "حسب المحتوى", "على حسب", "زي ما", "كما يرى")):
         return "auto"
-    match = re.search(r"(?:الى|إلى|لـ?|على)\s*(\d{1,2})\s*(?:شرائح|شرايح|سلايد)", normalized)
+    match = re.search(r"(?:الى|إلى|لـ?|على)\s*(\d{1,2})\s*(?:شرائح|شرايح|سلايد|أجزاء|اجزاء|قطع)?", normalized)
     if not match:
-        match = re.search(r"(\d{1,2})\s*(?:شرائح|شرايح|سلايد)", normalized)
+        match = re.search(r"(\d{1,2})\s*(?:شرائح|شرايح|سلايد|أجزاء|اجزاء)", normalized)
     if match:
         return max(2, min(20, int(match.group(1))))
     word_counts = (
         ("عشر", 10), ("تسع", 9), ("ثمان", 8), ("تماني", 8),
         ("سبع", 7), ("ست", 6), ("خمس", 5), ("اربع", 4), ("أربع", 4),
         ("تلات", 3), ("ثلاث", 3), ("اتنين", 2), ("اثنين", 2), ("شريحتين", 2),
+        ("شريحتان", 2), ("جزأين", 2), ("جزئين", 2), ("نصفين", 2), ("قسمين", 2),
     )
     for word, number in word_counts:
         if word in normalized:
@@ -350,6 +366,77 @@ def split_table_slide(
     return output
 
 
+def split_cards_or_blocks(html: str, title: str, num_parts: int = 2) -> List[Dict[str, str]]:
+    """Deterministically partition cards, metric boxes, list items, or paragraphs across slides."""
+    if not html or num_parts <= 1:
+        return [{"title": title, "html": html}]
+
+    # 1. Match card, metric, stat, col, box divs
+    div_card_re = re.compile(
+        r'<div\b[^>]*\bclass\s*=\s*["\'][^"\']*(?:card|metric|item|box|stat|col|widget)[^"\']*["\'][^>]*>',
+        re.IGNORECASE,
+    )
+    starts = [m.start() for m in div_card_re.finditer(html)]
+    blocks: List[Tuple[int, int, str]] = []
+    if len(starts) >= num_parts:
+        div_token = re.compile(r'<div\b[^>]*>|</div\s*>', re.IGNORECASE)
+        for i, start in enumerate(starts):
+            boundary = starts[i + 1] if i + 1 < len(starts) else len(html)
+            fragment = html[start:boundary]
+            depth = 0
+            cut = None
+            for token in div_token.finditer(fragment):
+                if token.group(0).lower().startswith("</div"):
+                    depth -= 1
+                    if depth <= 0:
+                        cut = token.end()
+                        break
+                else:
+                    depth += 1
+            if cut is not None:
+                blocks.append((start, start + cut, fragment[:cut]))
+
+    # 2. Fallback to <li> items
+    if len(blocks) < num_parts:
+        li_re = re.compile(r'<li\b[^>]*>[\s\S]*?</li>', re.IGNORECASE)
+        li_matches = list(li_re.finditer(html))
+        if len(li_matches) >= num_parts:
+            blocks = [(m.start(), m.end(), m.group(0)) for m in li_matches]
+
+    # 3. Fallback to <p> items
+    if len(blocks) < num_parts:
+        p_re = re.compile(r'<p\b[^>]*>[\s\S]*?</p>', re.IGNORECASE)
+        p_matches = list(p_re.finditer(html))
+        if len(p_matches) >= num_parts:
+            blocks = [(m.start(), m.end(), m.group(0)) for m in p_matches]
+
+    if len(blocks) < num_parts:
+        return []
+
+    total = len(blocks)
+    parts_count = min(num_parts, total)
+    base_size, rem = divmod(total, parts_count)
+    sizes = [base_size + (1 if i < rem else 0) for i in range(parts_count)]
+
+    output: List[Dict[str, str]] = []
+    offset = 0
+    clean_title = re.sub(r"\s*[-–—]\s*الجزء\s+\S+(?:\s+من\s+\S+)?\s*$", "", str(title or "")).strip() or "شريحة"
+    for p_idx, size in enumerate(sizes, start=1):
+        keep_indices = set(range(offset, offset + size))
+        offset += size
+
+        page_html = html
+        for b_idx in reversed(range(total)):
+            if b_idx not in keep_indices:
+                b_start, b_end, _ = blocks[b_idx]
+                page_html = page_html[:b_start] + page_html[b_end:]
+
+        p_title = f"{clean_title} - الجزء {p_idx} من {parts_count}"
+        output.append({"title": p_title, "html": page_html})
+
+    return output
+
+
 def estimate_semantic_parts(html: str, requested_parts: SplitParts = "auto") -> int:
     if requested_parts != "auto":
         try:
@@ -358,9 +445,9 @@ def estimate_semantic_parts(html: str, requested_parts: SplitParts = "auto") -> 
             pass
     source = re.sub(r"<(?:script|style)\b[^>]*>[\s\S]*?</(?:script|style)>", " ", str(html or ""), flags=re.IGNORECASE)
     text_length = len(_clean_text(source))
-    block_count = len(re.findall(r"<(?:li|p|article|section|tr)\b|class=[\"'][^\"']*(?:card|metric|item)", source, re.IGNORECASE))
-    parts = max(math.ceil(text_length / 1800), math.ceil(block_count / 9), 1)
-    return max(1, min(6, parts))
+    block_count = len(re.findall(r"<(?:li|p|article|section|tr)\b|class=[\"'][^\"']*(?:card|metric|item|col|grid)", source, re.IGNORECASE))
+    parts = max(math.ceil(text_length / 900), math.ceil(block_count / 5), 2)
+    return max(2, min(6, parts))
 
 
 def semantic_part_instruction(part_index: int, total_parts: int) -> str:
@@ -419,7 +506,82 @@ def _load_workspace(payload: Dict[str, Any], namespace: Dict[str, Any]):
     return project_data, slides, creative_images, branding, presentation_id
 
 
-def _target_indexes(payload: Dict[str, Any], slides: Sequence[Dict[str, Any]]) -> List[int]:
+def _canonicalize_single_slide_html(slide_html: str, full_html: str = "") -> str:
+    html = str(slide_html or "").strip()
+    if not html:
+        return html
+
+    style_blocks = ""
+    if full_html:
+        styles = re.findall(r'<style\b[^>]*>[\s\S]*?</style>', full_html, re.IGNORECASE)
+        if styles and not re.search(r'<style\b', html, re.IGNORECASE):
+            style_blocks = "\n".join(styles) + "\n"
+
+    def replace_slide_class(match):
+        attrs_before = match.group(1)
+        attrs_after = match.group(4)
+        return f'<div{attrs_before}class="slide"{attrs_after}'
+
+    normalized = re.sub(
+        r'<div(\b[^>]*?)\bclass\s*=\s*(["\'])([^"\']*?\bslide\b[^"\']*?)\2([^>]*>)',
+        replace_slide_class,
+        html,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if 'class="slide"' not in normalized and "class='slide'" not in normalized:
+        normalized = f'<div class="slide" style="width:1280px;height:720px;position:relative;overflow:hidden;box-sizing:border-box;">{normalized}</div>'
+
+    return style_blocks + normalized
+
+
+def _auto_heal_workspace_slides(slides: Sequence[Any], namespace: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    if not isinstance(slides, list):
+        return []
+    healed: List[Dict[str, Any]] = []
+
+    for idx, slide in enumerate(slides):
+        if not isinstance(slide, dict):
+            continue
+        html = str(slide.get("html") or "").strip()
+        if not html:
+            continue
+
+        extracted = []
+        try:
+            import design_templates
+            extracted = design_templates.extract_slide_elements(html)
+        except Exception:
+            pass
+
+        if not extracted:
+            m = re.findall(r'<div\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\'][\s\S]*?</div>', html, re.IGNORECASE)
+            if m:
+                extracted = m
+
+        if len(extracted) > 1:
+            base_title = slide.get("title") or f"شريحة {idx + 1}"
+            clean_title = re.sub(r"\s*[-–—]\s*الجزء\s+\d+.*$", "", base_title).strip()
+            for part_num, part_html in enumerate(extracted, start=1):
+                part_slide = copy.deepcopy(slide)
+                part_slide["title"] = f"{clean_title} - الجزء {part_num}"
+                part_slide["html"] = _canonicalize_single_slide_html(part_html, full_html=html)
+                part_slide["_designer_keep_html"] = True
+                healed.append(part_slide)
+        elif len(extracted) == 1:
+            slide_copy = copy.deepcopy(slide)
+            slide_copy["html"] = _canonicalize_single_slide_html(extracted[0], full_html=html)
+            healed.append(slide_copy)
+        else:
+            slide_copy = copy.deepcopy(slide)
+            wrapped = f'<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;box-sizing:border-box;background:#ffffff;">{html}</div>'
+            slide_copy["html"] = wrapped
+            healed.append(slide_copy)
+
+    return healed
+
+
+def _target_indexes(payload: Dict[str, Any], slides: Sequence[Dict[str, Any]], namespace: Dict[str, Any] = None) -> List[int]:
     total = len(slides)
     message = str(payload.get("message") or "")
     scope = str(payload.get("target") or payload.get("scope") or "").lower()
@@ -449,6 +611,40 @@ def _target_indexes(payload: Dict[str, Any], slides: Sequence[Dict[str, Any]]) -
         index = int(match.group(1)) - 1
         if 0 <= index < total:
             return [index]
+
+    # Match slide titles and section names
+    norm_msg = re.sub(r'[^\w\s]', ' ', normalized).lower()
+    for idx, s in enumerate(slides):
+        if not isinstance(s, dict):
+            continue
+        title = (s.get("title") or "").strip().lower()
+        if len(title) >= 3:
+            norm_title = re.sub(r'[^\w\s]', ' ', title).strip()
+            if norm_title and norm_title in norm_msg:
+                return [idx]
+        section = (s.get("section_key") or s.get("sectionKey") or "").strip().lower()
+        engine = (namespace or {}).get("slide_engine")
+        sec_titles = getattr(engine, "PRESENTATION_SECTION_TITLES", {}) if engine else {}
+        sec_title = sec_titles.get(section, "")
+        if not sec_title:
+            default_sec_titles = {
+                "executive_summary": "الملخص التنفيذي",
+                "financial": "الدراسة المالية",
+                "location": "تحليل الموقع",
+                "land": "تحليل الأرض",
+                "market": "تحليل السوق",
+                "overview": "نبذة عن المشروع",
+                "components": "مكونات المشروع",
+                "swot_risks": "تحليل المخاطر",
+                "timeline": "الجدول الزمني",
+                "team": "فريق العمل",
+            }
+            sec_title = default_sec_titles.get(section, "")
+        if sec_title and len(sec_title) >= 3:
+            norm_sec = re.sub(r'[^\w\s]', ' ', sec_title).strip().lower()
+            if norm_sec and norm_sec in norm_msg:
+                return [idx]
+
     try:
         current = int(payload.get("slideIndex", 0))
     except (TypeError, ValueError):
@@ -476,16 +672,20 @@ def _finalize_slides(slides, project_data, creative_images, branding, namespace)
 def _workspace_response(message, slides, creative_images, actions, focus, payload, namespace):
     from flask import jsonify
 
+    slides = _auto_heal_workspace_slides(slides, namespace=namespace)
     validation = {"valid": True, "issues": []}
     validator = namespace.get("_validate_workspace_data")
     if validator:
         validation = validator({"slidesData": slides})
         if not validation.get("valid"):
-            return jsonify({
-                "success": False,
-                "error": "تم رفض التعديل لأن العرض يحتوي على شرائح غير صالحة",
-                "validation": validation,
-            }), 422
+            slides = _auto_heal_workspace_slides(slides, namespace=namespace)
+            validation = validator({"slidesData": slides})
+            if not validation.get("valid"):
+                return jsonify({
+                    "success": False,
+                    "error": "تم رفض التعديل لأن العرض يحتوي على شرائح غير صالحة",
+                    "validation": validation,
+                }), 422
     return jsonify({
         "success": True,
         "data": {
@@ -547,7 +747,7 @@ def _handle_split(payload, namespace):
     project_data, slides, creative_images, branding, presentation_id = _load_workspace(payload, namespace)
     if not slides:
         return jsonify({"success": False, "error": "لا توجد شرائح مفتوحة لتنفيذ الطلب"}), 400
-    indexes = _target_indexes(payload, slides)
+    indexes = _target_indexes(payload, slides, namespace=namespace)
     if not indexes:
         return jsonify({"success": False, "error": "لم يتم تحديد الشريحة المطلوب تقسيمها"}), 400
     index = indexes[0]
@@ -565,16 +765,6 @@ def _handle_split(payload, namespace):
             generated.append(slide)
     else:
         parts = estimate_semantic_parts(base.get("html", ""), requested)
-        if parts <= 1:
-            return _workspace_response(
-                f"محتوى الشريحة رقم {index + 1} يقع ضمن السعة الآمنة؛ لم يتم تقسيمها عشوائيًا.",
-                slides,
-                creative_images,
-                [{"tool": "split_slide", "status": "noop", "parts": 1, "split_index": index}],
-                [index + 1],
-                payload,
-                namespace,
-            )
         strategy = "semantic"
         editor = namespace.get("_designer_edit_slide")
         if not editor:
@@ -612,21 +802,32 @@ def _handle_split(payload, namespace):
             not materially_changed(base.get("html", ""), output, response)
             for _, _, output, response in results
         ):
-            return _workspace_response(
-                "تعذر إنشاء كل أجزاء الشريحة دون فقد محتوى؛ تم الإبقاء على الشريحة الأصلية كما هي.",
-                slides,
-                creative_images,
-                [{"tool": "split_slide", "status": "failed", "reason": "incomplete_split"}],
-                [index + 1],
-                payload,
-                namespace,
-            )
-        for _, title, output, _ in results:
-            slide = copy.deepcopy(base)
-            slide["title"] = title
-            slide["html"] = output
-            slide["_designer_keep_html"] = True
-            generated.append(slide)
+            card_parts = split_cards_or_blocks(base.get("html", ""), base.get("title", f"شريحة {index + 1}"), parts)
+            if card_parts and len(card_parts) >= 2:
+                strategy = "balanced_cards_or_blocks"
+                for part in card_parts:
+                    slide = copy.deepcopy(base)
+                    slide["title"] = part["title"]
+                    slide["html"] = part["html"]
+                    slide["_designer_keep_html"] = True
+                    generated.append(slide)
+            else:
+                return _workspace_response(
+                    "تعذر إنشاء كل أجزاء الشريحة دون فقد محتوى؛ تم الإبقاء على الشريحة الأصلية كما هي.",
+                    slides,
+                    creative_images,
+                    [{"tool": "split_slide", "status": "failed", "reason": "incomplete_split"}],
+                    [index + 1],
+                    payload,
+                    namespace,
+                )
+        else:
+            for _, title, output, _ in results:
+                slide = copy.deepcopy(base)
+                slide["title"] = title
+                slide["html"] = output
+                slide["_designer_keep_html"] = True
+                generated.append(slide)
 
     slides[index:index + 1] = generated
     slides = _finalize_slides(slides, project_data, creative_images, branding, namespace)
@@ -635,6 +836,8 @@ def _handle_split(payload, namespace):
             f"تم تقسيم جدول الشريحة رقم {index + 1} إلى {len(generated)} شرائح متوازنة، "
             "مع تكرار رأس الجدول والحفاظ على كل صف مرة واحدة."
         )
+    elif strategy == "balanced_cards_or_blocks":
+        message = f"تم تقسيم عناصر ومحتوى الشريحة رقم {index + 1} إلى {len(generated)} شرائح متوازنة مع الحفاظ على كامل المحتوى."
     else:
         message = f"تم تقسيم الشريحة رقم {index + 1} فعليًا إلى {len(generated)} شرائح متوازنة حسب معنى المحتوى."
     focus = list(range(index + 1, index + len(generated) + 1))
