@@ -22185,7 +22185,7 @@
       const session = slideEditSessions[index];
       if (session) session.sel = null;
       triggerAutoSaveDraft();
-      renderTenantSlides();
+      refreshSingleSlideCard(index);
       toast('تم حذف العنصر من الشريحة');
     }
 
@@ -22372,7 +22372,7 @@
       };
       slideInlineEditStates[index] = true;
       slideElementEditStates[index] = true;
-      renderTenantSlides();
+      refreshSingleSlideCard(index);
       toast('وضع التحرير مفعّل لهذه الشريحة');
     }
 
@@ -22397,7 +22397,7 @@
       slideElementEditStates[index] = false;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       triggerAutoSaveDraft();
-      renderTenantSlides();
+      refreshSingleSlideCard(index);
       toast(keep === true ? 'تم اعتماد تعديلات الشريحة' : 'تم إلغاء تعديلات الشريحة');
     }
 
@@ -22411,7 +22411,7 @@
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
-      renderTenantSlides();
+      refreshSingleSlideCard(index);
     }
 
     function redoSlideEdit(index) {
@@ -22424,12 +22424,62 @@
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
-      renderTenantSlides();
+      refreshSingleSlideCard(index);
     }
 
     function slideStageForIndex(index) {
       const card = document.getElementById('slide-card-' + index);
       return card ? card.querySelector('.tenant-slide-stage') : null;
+    }
+
+    /* Single-card refresh for manual edit flows (تعديل/اعتماد/الغاء/تراجع/تقدم/حذف
+       عنصر/إضافة نص/إضافة صورة). renderTenantSlides() rebuilds every card, which
+       makes all slides flash and resets the scroll position. Rebuilding only the
+       touched card keeps every other card (and the viewport) exactly where it was. */
+    function refreshSingleSlideCard(index) {
+      const wrap = document.getElementById('tenantSlidesMain');
+      const oldCard = document.getElementById('slide-card-' + index);
+      const slide = tenantSlidesData[index];
+      if (!wrap || !oldCard || !slide || !slide.html) { renderTenantSlides(); return; }
+      const savedScrollTop = wrap.scrollTop;
+      const container = document.createElement('div');
+      container.className = 'ge-slide-card' + (index === activeSlideIndex ? ' active-slide' : '');
+      container.id = 'slide-card-' + index;
+      container.style.cssText = 'margin-bottom:24px; position:relative;';
+      container.onclick = () => selectTenantSlide(index);
+      if (hasPermission('create_presentation')) {
+        const editControls = document.createElement('div');
+        editControls.className = 'ge-slide-edit-controls';
+        const editSession = getSlideEditSession(index);
+        slideInlineEditStates[index] = !!editSession;
+        slideElementEditStates[index] = !!editSession;
+        editControls.innerHTML = slideEditToolbarHTML(index);
+        wireSlideEditControls(editControls, index);
+        container.appendChild(editControls);
+      }
+      const stage = document.createElement('div');
+      stage.className = 'tenant-slide-stage';
+      stage.style.setProperty('--stage-w', '960px');
+      stage.style.setProperty('--stage-h', '540px');
+      stage.style.setProperty('--slide-scale', '0.75');
+      stage.innerHTML = processSlideHtmlClient(slide.html, slide.type)
+        || '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(slide.title || '') + '</div>';
+      if (!stage.querySelector('.slide')) {
+        stage.innerHTML = '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(slide.title || '') + '</div>';
+      }
+      container.appendChild(stage);
+      oldCard.replaceWith(container);
+      autoFitSlideContent(stage);
+      enableSlideInlineEditing(stage, index);
+      enableSlideElementDragging(stage, index);
+      restoreSlideEditSelection(stage, index);
+      try {
+        wrap.style.scrollBehavior = 'auto';
+        wrap.scrollTop = savedScrollTop;
+        wrap.style.scrollBehavior = '';
+      } catch (err) {
+        try { wrap.scrollTop = savedScrollTop; } catch (err2) {}
+      }
     }
 
     function slideEditToolbarHTML(index) {
@@ -23170,7 +23220,7 @@
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
-      renderTenantSlides();
+      refreshSingleSlideCard(index);
       toast('تمت إضافة مربع نص جديد');
       setTimeout(() => {
         try {
@@ -23184,10 +23234,6 @@
           const path = slideElementPath(slide, newBox);
           if (!path) return;
           selectSlideElement(stage, index, newBox, path);
-          const card = document.getElementById('slide-card-' + index);
-          if (card && card.scrollIntoView) {
-            try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (err) {}
-          }
           const editable = newBox.hasAttribute('contenteditable') ? newBox
             : (newBox.querySelector('[contenteditable]') || newBox);
           if (editable && editable.focus) {
@@ -23233,7 +23279,7 @@
         tenantProjectData.tenantSlidesData = tenantSlidesData;
         touchSlideEditSession(index);
         triggerAutoSaveDraft();
-        renderTenantSlides();
+        refreshSingleSlideCard(index);
         toast('تمت إضافة الصورة');
       };
       reader.onerror = () => toast('تعذر قراءة الصورة');
@@ -24003,7 +24049,34 @@
         selectTenantSlide(insertIdx);
       } else if (Array.isArray(reply.slidesData)) {
         const oldLength = tenantSlidesData.length;
-        tenantSlidesData = reply.slidesData;
+        // Guard against a model reply that silently drops slides: entries without a
+        // slide root would render as broken cards, and a shorter deck without a delete
+        // request means slides were lost. Neither is applied quietly.
+        const incoming = reply.slidesData.filter(item => item && typeof item.html === 'string' && containsSlideRoot(item.html));
+        const deleteIntent = /حذف|احذف|امسح|شيل|إزالة|ازالة/.test(message + ' ' + String((reply && reply.response) || ''));
+        if (!incoming.length) {
+          tenantDesignerMessages.push({
+            role: 'assistant',
+            content: 'تعذر تنفيذ الطلب. لم يتم تغيير العرض.',
+            slides: tenantChatFocusIndexes.slice()
+          });
+          tenantProjectData.designerChat = designerChatPersistence();
+          renderTenantDesignerChat();
+          triggerAutoSaveDraft();
+          return;
+        }
+        if (incoming.length < oldLength && !deleteIntent) {
+          tenantDesignerMessages.push({
+            role: 'assistant',
+            content: 'لم يتم تطبيق التعديل لأن النتيجة أسقطت ' + (oldLength - incoming.length) + ' من ' + oldLength + ' شريحة. أعد إرسال الطلب.',
+            slides: tenantChatFocusIndexes.slice()
+          });
+          tenantProjectData.designerChat = designerChatPersistence();
+          renderTenantDesignerChat();
+          triggerAutoSaveDraft();
+          return;
+        }
+        tenantSlidesData = incoming;
         if (requestedInsertAfter && tenantSlidesData.length > oldLength) {
           const lastIdx = tenantSlidesData.length - 1;
           const targetIdx = Math.max(0, Math.min(requestedInsertAfter, tenantSlidesData.length - 1));
