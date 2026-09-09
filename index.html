@@ -610,15 +610,24 @@
 
     .slide-resize-handle {
       position: absolute;
-      width: 18px;
-      height: 18px;
+      width: 14px;
+      height: 14px;
       background: #fff;
       border: 2px solid var(--pd);
-      border-radius: 5px;
-      cursor: nwse-resize;
+      border-radius: 4px;
       z-index: 300;
       box-sizing: border-box;
+      touch-action: none;
     }
+
+    .slide-resize-handle.rh-nw { cursor: nwse-resize; }
+    .slide-resize-handle.rh-se { cursor: nwse-resize; }
+    .slide-resize-handle.rh-ne { cursor: nesw-resize; }
+    .slide-resize-handle.rh-sw { cursor: nesw-resize; }
+    .slide-resize-handle.rh-n { cursor: ns-resize; }
+    .slide-resize-handle.rh-s { cursor: ns-resize; }
+    .slide-resize-handle.rh-e { cursor: ew-resize; }
+    .slide-resize-handle.rh-w { cursor: ew-resize; }
 
     .slide-move-handle {
       position: absolute;
@@ -658,6 +667,29 @@
     .slide-edit-color input[type=color]:disabled {
       opacity: .45;
       cursor: default;
+    }
+
+    .slide-edit-color input[type=text] {
+      width: 68px;
+      height: 24px;
+      padding: 0 6px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #fff;
+      font-size: 11px;
+      direction: ltr;
+      text-align: center;
+      box-sizing: border-box;
+    }
+
+    .slide-edit-color input[type=text]:disabled {
+      opacity: .45;
+    }
+
+    .slide-edit-eyedropper {
+      height: 24px;
+      padding: 0 8px;
+      font-size: 11px;
     }
 
     :root {
@@ -21884,12 +21916,23 @@
     function slideDragTarget(slide, source) {
       if (!slide || !source || source === slide) return null;
       if (source.closest && source.closest('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return null;
-      if (source.closest('[contenteditable], .presentation-chrome-logo, [data-canonical-map]')) return null;
+      if (source.closest && source.closest('[contenteditable]')) return null;
+      if (source.closest && source.closest('[data-slide-textbox], [data-slide-imagebox]')) {
+        const box = source.closest('[data-slide-textbox], [data-slide-imagebox]');
+        if (box && slide.contains(box)) return box;
+      }
+      if (source.closest && source.closest('.presentation-chrome-logo, [data-canonical-map]')) return null;
       let node = source.nodeType === 1 ? source : source.parentElement;
       while (node && node !== slide) {
         const style = window.getComputedStyle(node);
         if (node.matches('[data-company-logo-placement], [data-team-logo-placement], img:not(.presentation-chrome-logo)')
-          || style.position === 'absolute') return node;
+          || style.position === 'absolute') {
+          if (node.tagName === 'IMG' && node.parentElement && node.parentElement !== slide
+            && node.parentElement.hasAttribute && node.parentElement.hasAttribute('data-slide-imagebox')) {
+            return node.parentElement;
+          }
+          return node;
+        }
         node = node.parentElement;
       }
       return null;
@@ -22037,9 +22080,15 @@
       stage.addEventListener('click', function handleSlideEditClick(event) {
         if (!getSlideEditSession(index)) return;
         if (event.target.closest('.slide-element-selected, .slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return;
+        if (event.target.closest && event.target.closest('[contenteditable]')) return;
+        const session = slideEditSessions[index];
+        if (session && session.sel) {
+          const slideEl = stage.querySelector('.slide');
+          const selected = slideEl ? elementAtSlidePath(slideEl, session.sel.path) : null;
+          if (selected && (selected === event.target || selected.contains(event.target))) return;
+        }
         if (slideDragTarget(slide, event.target)) return;
         clearSlideElementSelection(stage);
-        const session = slideEditSessions[index];
         if (session) session.sel = null;
         syncSlideElementToolbar(index);
       });
@@ -22062,8 +22111,16 @@
     const SLIDE_EDIT_HISTORY_LIMIT = 30;
 
     function slideEditFingerprint(slide) {
+      const title = String((slide && slide.title) || '');
       const html = String((slide && slide.html) || '');
-      return String((slide && slide.title) || '') + '|' + html.length + '|' + html.slice(0, 64);
+      const normalized = html
+        .replace(/data-slide-counter=["'][^"']*["\'][^>]*>[\s\S]*?</g, 'data-slide-counter>')
+        .replace(/\s+data-slide-counter=["'][^"']*["\']/g, ' data-slide-counter');
+      let hash = 5381;
+      for (let i = 0; i < normalized.length; i++) {
+        hash = ((hash << 5) + hash + normalized.charCodeAt(i)) | 0;
+      }
+      return title + '|' + normalized.length + '|' + (hash >>> 0).toString(36);
     }
 
     function getSlideEditSession(index) {
@@ -22090,7 +22147,20 @@
       session.undo.push(tenantSlidesData[index].html);
       if (session.undo.length > SLIDE_EDIT_HISTORY_LIMIT) session.undo.shift();
       session.redo = [];
+      refreshSlideEditToolbar(index);
       return true;
+    }
+
+    function syncSlideEditSessionsAfterRender() {
+      try {
+        Object.keys(slideEditSessions).forEach(k => {
+          const idx = Number(k);
+          const sess = slideEditSessions[k];
+          const sld = tenantSlidesData[idx];
+          if (!sess || !sld) { delete slideEditSessions[k]; return; }
+          sess.fp = slideEditFingerprint(sld);
+        });
+      } catch (err) {}
     }
 
     function startSlideEditSession(index) {
@@ -22169,6 +22239,7 @@
       const canUndo = session.undo.length > 0;
       const canRedo = session.redo.length > 0;
       const hasSel = !!session.sel;
+      const dis = hasSel ? '' : ' disabled';
       return '<button type="button" class="active" data-slide-edit-act="commit">اعتماد</button>'
         + '<button type="button" data-slide-edit-act="undo"' + (canUndo ? '' : ' disabled') + '>تراجع</button>'
         + '<button type="button" data-slide-edit-act="redo"' + (canRedo ? '' : ' disabled') + '>تقدم</button>'
@@ -22176,10 +22247,47 @@
         + '<button type="button" data-slide-edit-act="addtext">إضافة نص</button>'
         + '<button type="button" data-slide-edit-act="addimage">إضافة صورة</button>'
         + '<label class="slide-edit-color">لون النص<input type="color" data-slide-edit-color="color" value="#1e293b"'
-        + (hasSel ? '' : ' disabled') + '></label>'
+        + dis + '><input type="text" data-slide-edit-hex="color" value="#1e293b" maxlength="7" spellcheck="false" placeholder="#000000"'
+        + dis + '></label>'
         + '<label class="slide-edit-color">لون الخلفية<input type="color" data-slide-edit-color="background" value="#ffffff"'
-        + (hasSel ? '' : ' disabled') + '></label>'
-        + '<button type="button" data-slide-edit-act="del"' + (hasSel ? '' : ' disabled') + '>حذف العنصر</button>';
+        + dis + '><input type="text" data-slide-edit-hex="background" value="#ffffff" maxlength="7" spellcheck="false" placeholder="#ffffff"'
+        + dis + '></label>'
+        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-act="eyedropper"' + dis + '>قطارة</button>'
+        + '<button type="button" data-slide-edit-act="del"' + dis + '>حذف العنصر</button>';
+    }
+
+    function normalizeHexColor(value) {
+      let text = String(value || '').trim();
+      if (!text) return '';
+      if (text.charAt(0) !== '#') text = '#' + text;
+      const short = text.match(/^#([0-9a-fA-F]{3})$/);
+      if (short) {
+        return '#' + short[1].split('').map(ch => (ch + ch).toLowerCase()).join('');
+      }
+      const full = text.match(/^#([0-9a-fA-F]{6})$/);
+      if (full) return '#' + full[1].toLowerCase();
+      return '';
+    }
+
+    async function pickSlideElementColorWithEyedropper(index, kind) {
+      const session = getSlideEditSession(index);
+      if (!session || !session.sel) { toast('حدد عنصرا أولا'); return; }
+      try {
+        if (!window.EyeDropper) { toast('القطارة غير مدعومة في هذا المتصفح'); return; }
+        const dropper = new window.EyeDropper();
+        const result = await dropper.open();
+        const hex = normalizeHexColor(result && result.sRGBHex);
+        if (!hex) return;
+        previewSlideElementColor(index, kind, hex);
+        const card = document.getElementById('slide-card-' + index);
+        const colorInput = card ? card.querySelector('[data-slide-edit-color="' + kind + '"]') : null;
+        if (colorInput) colorInput.value = hex;
+        const hexInput = card ? card.querySelector('[data-slide-edit-hex="' + kind + '"]') : null;
+        if (hexInput) hexInput.value = hex;
+        commitSlideElementColor(index, kind, hex);
+      } catch (err) {
+        if (err && err.name !== 'AbortError') toast('تعذر التقاط اللون');
+      }
     }
 
     function wireSlideEditControls(editControls, index) {
@@ -22194,6 +22302,7 @@
           else if (act === 'redo') redoSlideEdit(index);
           else if (act === 'addtext') addSlideTextBox(index);
           else if (act === 'addimage') openSlideImagePicker(index);
+          else if (act === 'eyedropper') pickSlideElementColorWithEyedropper(index, 'color');
           else if (act === 'del') deleteSelectedSlideElement(index);
         });
       });
@@ -22202,12 +22311,39 @@
         inp.addEventListener('pointerdown', e => e.stopPropagation());
         inp.addEventListener('input', e => {
           e.stopPropagation();
-          previewSlideElementColor(index, inp.getAttribute('data-slide-edit-color'), inp.value);
+          const kind = inp.getAttribute('data-slide-edit-color');
+          const card = inp.closest('.ge-slide-card');
+          const hexInput = card ? card.querySelector('[data-slide-edit-hex="' + kind + '"]') : null;
+          if (hexInput) hexInput.value = inp.value;
+          previewSlideElementColor(index, kind, inp.value);
         });
         inp.addEventListener('change', e => {
           e.stopPropagation();
           commitSlideElementColor(index, inp.getAttribute('data-slide-edit-color'));
         });
+      });
+      editControls.querySelectorAll('[data-slide-edit-hex]').forEach(inp => {
+        inp.addEventListener('click', e => e.stopPropagation());
+        inp.addEventListener('pointerdown', e => e.stopPropagation());
+        inp.addEventListener('keydown', e => e.stopPropagation());
+        const applyHex = commit => {
+          const kind = inp.getAttribute('data-slide-edit-hex');
+          const hex = normalizeHexColor(inp.value);
+          if (!hex) {
+            inp.style.borderColor = '#dc2626';
+            if (commit) toast('كود اللون غير صالح (مثال #1e293b)');
+            return;
+          }
+          inp.style.borderColor = '';
+          inp.value = hex;
+          const card = inp.closest('.ge-slide-card');
+          const colorInput = card ? card.querySelector('[data-slide-edit-color="' + kind + '"]') : null;
+          if (colorInput) colorInput.value = hex;
+          previewSlideElementColor(index, kind, hex);
+          if (commit) commitSlideElementColor(index, kind, hex);
+        };
+        inp.addEventListener('input', () => applyHex(false));
+        inp.addEventListener('change', () => applyHex(true));
       });
     }
 
@@ -22254,9 +22390,14 @@
         }
       }
       card.querySelectorAll('[data-slide-edit-act="del"]').forEach(btn => { btn.disabled = !hasSel; });
+      card.querySelectorAll('[data-slide-edit-act="eyedropper"]').forEach(btn => { btn.disabled = !hasSel; });
       card.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
         inp.disabled = !hasSel;
         if (hasSel) inp.value = inp.getAttribute('data-slide-edit-color') === 'color' ? textColor : bgColor;
+      });
+      card.querySelectorAll('[data-slide-edit-hex]').forEach(inp => {
+        inp.disabled = !hasSel;
+        if (hasSel) inp.value = inp.getAttribute('data-slide-edit-hex') === 'color' ? textColor : bgColor;
       });
     }
 
@@ -22341,6 +22482,16 @@
       syncSlideElementToolbar(index);
     }
 
+    function slideElementIsImageBox(target) {
+      if (!target) return false;
+      if (target.tagName === 'IMG') return true;
+      if (target.hasAttribute && (target.hasAttribute('data-slide-imagebox'))) return true;
+      try {
+        if (target.children && target.children.length === 1 && target.children[0].tagName === 'IMG') return true;
+      } catch (err) {}
+      return false;
+    }
+
     function positionSlideEditHandles(stage, target) {
       if (!stage || !target) return;
       stage.querySelectorAll('.slide-resize-handle, .slide-move-handle').forEach(el => el.remove());
@@ -22382,63 +22533,138 @@
           target.style.transform = 'translate(' + Math.round(baseX + dx) + 'px, ' + Math.round(baseY + dy) + 'px)';
         };
         const onUp = upEvent => {
+          window.removeEventListener('pointermove', onMove, true);
+          window.removeEventListener('pointerup', onUp, true);
+          window.removeEventListener('pointercancel', onUp, true);
           const dx = (upEvent.clientX - startX) / scale;
           const dy = (upEvent.clientY - startY) / scale;
-          moveHandle.removeEventListener('pointermove', onMove);
-          moveHandle.removeEventListener('pointerup', onUp);
-          moveHandle.removeEventListener('pointercancel', onUp);
           if (moved) commitSlideElementMove(stage, index, target, path, dx, dy);
           selectSlideElement(stage, index, target, path);
         };
-        moveHandle.addEventListener('pointermove', onMove);
-        moveHandle.addEventListener('pointerup', onUp);
-        moveHandle.addEventListener('pointercancel', onUp);
-        try { moveHandle.setPointerCapture(event.pointerId); } catch (err) {}
+        window.addEventListener('pointermove', onMove, true);
+        window.addEventListener('pointerup', onUp, true);
+        window.addEventListener('pointercancel', onUp, true);
       });
 
-      const resizeHandle = document.createElement('div');
-      resizeHandle.className = 'slide-resize-handle';
-      resizeHandle.style.left = Math.max(0, x + w - 18) + 'px';
-      resizeHandle.style.top = Math.max(0, y + h - 18) + 'px';
-      slide.appendChild(resizeHandle);
-      resizeHandle.addEventListener('pointerdown', event => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const path = slideElementPath(slide, target);
-        if (!path) return;
-        const liveRect = target.getBoundingClientRect();
-        const startW = liveRect.width / scale;
-        const startH = liveRect.height / scale;
-        const startX = event.clientX;
-        const startY = event.clientY;
-        const isImage = target.tagName === 'IMG';
-        let moved = false;
-        const onMove = moveEvent => {
-          const dw = (moveEvent.clientX - startX) / scale;
-          const dh = (moveEvent.clientY - startY) / scale;
-          if (Math.abs(dw) + Math.abs(dh) > 2) moved = true;
-          target.style.width = Math.max(24, Math.min(1280, Math.round(startW + dw))) + 'px';
-          if (isImage) target.style.height = Math.max(24, Math.min(720, Math.round(startH + dh))) + 'px';
-        };
-        const onUp = () => {
-          resizeHandle.removeEventListener('pointermove', onMove);
-          resizeHandle.removeEventListener('pointerup', onUp);
-          resizeHandle.removeEventListener('pointercancel', onUp);
-          if (!moved) return;
-          const finalW = parseFloat(target.style.width) || startW;
-          const finalH = isImage ? (parseFloat(target.style.height) || startH) : null;
-          commitSlideElementResize(stage, index, target, path, finalW, finalH);
-          selectSlideElement(stage, index, target, path);
-        };
-        resizeHandle.addEventListener('pointermove', onMove);
-        resizeHandle.addEventListener('pointerup', onUp);
-        resizeHandle.addEventListener('pointercancel', onUp);
-        try { resizeHandle.setPointerCapture(event.pointerId); } catch (err) {}
+      const HANDLE_DEFS = [
+        { dir: 'nw', cursor: 'nwse' }, { dir: 'ne', cursor: 'nesw' },
+        { dir: 'sw', cursor: 'nesw' }, { dir: 'se', cursor: 'nwse' },
+        { dir: 'n', cursor: 'ns' }, { dir: 's', cursor: 'ns' },
+        { dir: 'w', cursor: 'ew' }, { dir: 'e', cursor: 'ew' }
+      ];
+      const HS = 14;
+      const half = HS / 2;
+      const positions = {
+        nw: [x - half, y - half], ne: [x + w - half, y - half],
+        sw: [x - half, y + h - half], se: [x + w - half, y + h - half],
+        n: [x + w / 2 - half, y - half], s: [x + w / 2 - half, y + h - half],
+        w: [x - half, y + h / 2 - half], e: [x + w - half, y + h / 2 - half]
+      };
+      HANDLE_DEFS.forEach(def => {
+        const handle = document.createElement('div');
+        handle.className = 'slide-resize-handle rh-' + def.dir;
+        handle.dataset.resizeDir = def.dir;
+        handle.title = 'سحب للتحجيم';
+        const pos = positions[def.dir];
+        handle.style.left = Math.max(-half, Math.min(pos[0], 1280 - half)) + 'px';
+        handle.style.top = Math.max(-half, Math.min(pos[1], 720 - half)) + 'px';
+        slide.appendChild(handle);
+        handle.addEventListener('pointerdown', event => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          startSlideElementResize(stage, index, slide, target, def.dir, scale, event);
+        });
       });
     }
 
-    function commitSlideElementResize(stage, index, target, path, widthPx, heightPx) {
+    function startSlideElementResize(stage, index, slide, target, dir, scale, event) {
+      const path = slideElementPath(slide, target);
+      if (!path) return;
+      const slideRect = slide.getBoundingClientRect();
+      const liveRect = target.getBoundingClientRect();
+      const startW = liveRect.width / scale;
+      const startH = liveRect.height / scale;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const computed = window.getComputedStyle(target);
+      const isAbsolute = computed.position === 'absolute';
+      const isImage = slideElementIsImageBox(target);
+      const startLeft = (liveRect.left - slideRect.left) / scale;
+      const startTop = (liveRect.top - slideRect.top) / scale;
+      let normalizedLive = false;
+      if (isAbsolute) {
+        target.style.left = Math.round(startLeft) + 'px';
+        target.style.top = Math.round(startTop) + 'px';
+        target.style.right = 'auto';
+        target.style.bottom = 'auto';
+        target.style.transform = '';
+        target.dataset.manualTranslateX = '0';
+        target.dataset.manualTranslateY = '0';
+        normalizedLive = true;
+      }
+      const baseLeft = isAbsolute ? Math.round(startLeft) : null;
+      const baseTop = isAbsolute ? Math.round(startTop) : null;
+      let moved = false;
+      const onMove = moveEvent => {
+        const dw = (moveEvent.clientX - startX) / scale;
+        const dh = (moveEvent.clientY - startY) / scale;
+        if (Math.abs(dw) + Math.abs(dh) > 2) moved = true;
+        let newW = startW;
+        let newH = startH;
+        let newLeft = baseLeft;
+        let newTop = baseTop;
+        if (dir.indexOf('e') !== -1) newW = startW + dw;
+        if (dir.indexOf('w') !== -1) { newW = startW - dw; if (isAbsolute) newLeft = baseLeft + dw; }
+        if (dir.indexOf('s') !== -1) newH = startH + dh;
+        if (dir.indexOf('n') !== -1) { newH = startH - dh; if (isAbsolute) newTop = baseTop + dh; }
+        newW = Math.max(24, Math.min(1280, Math.round(newW)));
+        newH = Math.max(24, Math.min(720, Math.round(newH)));
+        if (dir === 'n' || dir === 's') newW = Math.round(startW);
+        if (dir === 'e' || dir === 'w') newH = Math.round(startH);
+        if (isAbsolute && (dir.indexOf('w') !== -1)) {
+          const maxLeft = baseLeft + startW - 24;
+          newLeft = Math.max(0, Math.min(Math.round(newLeft), maxLeft));
+          newW = Math.round(startW + (baseLeft - newLeft));
+        }
+        if (isAbsolute && (dir.indexOf('n') !== -1)) {
+          const maxTop = baseTop + startH - 24;
+          newTop = Math.max(0, Math.min(Math.round(newTop), maxTop));
+          newH = Math.round(startH + (baseTop - newTop));
+        }
+        target.style.width = newW + 'px';
+        if (isImage) {
+          target.style.height = newH + 'px';
+        } else if (dir !== 'e' && dir !== 'w') {
+          target.style.minHeight = newH + 'px';
+          if (computed.height && computed.height !== 'auto') target.style.height = newH + 'px';
+        }
+        if (isAbsolute && newLeft !== null && (dir.indexOf('w') !== -1)) target.style.left = Math.round(newLeft) + 'px';
+        if (isAbsolute && newTop !== null && (dir.indexOf('n') !== -1)) target.style.top = Math.round(newTop) + 'px';
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove, true);
+        window.removeEventListener('pointerup', onUp, true);
+        window.removeEventListener('pointercancel', onUp, true);
+        if (!moved) return;
+        const finalW = parseFloat(target.style.width) || startW;
+        let finalH = null;
+        if (isImage) finalH = parseFloat(target.style.height) || startH;
+        else if (dir !== 'e' && dir !== 'w') finalH = parseFloat(target.style.minHeight) || parseFloat(target.style.height) || startH;
+        const finalLeft = isAbsolute && (dir.indexOf('w') !== -1) ? (parseFloat(target.style.left) || baseLeft) : null;
+        const finalTop = isAbsolute && (dir.indexOf('n') !== -1) ? (parseFloat(target.style.top) || baseTop) : null;
+        commitSlideElementResize(stage, index, target, path, {
+          width: finalW, height: finalH, left: finalLeft, top: finalTop,
+          isImage: isImage, normalizedLive: normalizedLive, baseLeft: baseLeft, baseTop: baseTop
+        });
+        selectSlideElement(stage, index, target, path);
+      };
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('pointercancel', onUp, true);
+    }
+
+    function commitSlideElementResize(stage, index, target, path, size) {
       const slideData = tenantSlidesData[index];
       if (!slideData || !slideData.html || !target) return;
       if (!getSlideEditSession(index)) return;
@@ -22446,14 +22672,62 @@
       const rawRoot = rawDoc.querySelector('.slide');
       const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, path);
       if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
+      const widthPx = size && typeof size === 'object' ? size.width : size;
+      const heightPx = size && typeof size === 'object' ? size.height : null;
+      const leftPx = size && typeof size === 'object' ? size.left : null;
+      const topPx = size && typeof size === 'object' ? size.top : null;
+      const isImage = !!(size && typeof size === 'object' && size.isImage);
       pushSlideEditHistory(index);
       const widthValue = Math.max(24, Math.min(1280, Math.round(widthPx))) + 'px';
       target.style.width = widthValue;
       rawTarget.style.width = widthValue;
       if (heightPx !== null && heightPx !== undefined) {
         const heightValue = Math.max(24, Math.min(720, Math.round(heightPx))) + 'px';
-        target.style.height = heightValue;
-        rawTarget.style.height = heightValue;
+        if (isImage) {
+          target.style.height = heightValue;
+          rawTarget.style.height = heightValue;
+        } else {
+          target.style.minHeight = heightValue;
+          rawTarget.style.minHeight = heightValue;
+          if (target.style.height && target.style.height !== 'auto') target.style.height = heightValue;
+          if (rawTarget.style.height && rawTarget.style.height !== 'auto') rawTarget.style.height = heightValue;
+        }
+      }
+      if (leftPx !== null && leftPx !== undefined) {
+        const leftValue = Math.max(0, Math.round(leftPx)) + 'px';
+        target.style.left = leftValue;
+        target.style.right = 'auto';
+        target.style.transform = '';
+        target.dataset.manualTranslateX = '0';
+        target.dataset.manualTranslateY = target.dataset.manualTranslateY || '0';
+        rawTarget.style.left = leftValue;
+        rawTarget.style.right = 'auto';
+        rawTarget.style.transform = '';
+        if (rawTarget.dataset) { rawTarget.dataset.manualTranslateX = '0'; }
+      }
+      if (topPx !== null && topPx !== undefined) {
+        const topValue = Math.max(0, Math.round(topPx)) + 'px';
+        target.style.top = topValue;
+        target.style.bottom = 'auto';
+        target.style.transform = target.style.transform || '';
+        if (leftPx === null || leftPx === undefined) {
+          target.style.transform = '';
+          target.dataset.manualTranslateX = '0';
+          target.dataset.manualTranslateY = '0';
+        }
+        rawTarget.style.top = topValue;
+        rawTarget.style.bottom = 'auto';
+        if (leftPx === null || leftPx === undefined) {
+          rawTarget.style.transform = '';
+          if (rawTarget.dataset) { rawTarget.dataset.manualTranslateX = '0'; rawTarget.dataset.manualTranslateY = '0'; }
+        }
+      } else if (leftPx !== null && leftPx !== undefined) {
+        rawTarget.style.transform = '';
+        if (rawTarget.dataset) { rawTarget.dataset.manualTranslateY = rawTarget.dataset.manualTranslateY || '0'; }
+      }
+      if (window.getComputedStyle(target).position === 'absolute' && !target.style.left && !target.style.right) {
+        target.style.left = '0px';
+        rawTarget.style.left = '0px';
       }
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
@@ -22462,18 +22736,46 @@
       toast('تم تغيير حجم العنصر');
     }
 
+    function applySlideElementColorValue(root, kind, value) {
+      if (!root) return;
+      if (kind === 'color') {
+        root.style.color = value;
+        try {
+          root.querySelectorAll('*').forEach(el => {
+            el.style.color = value;
+            const tag = String(el.tagName || '').toLowerCase();
+            if (tag === 'svg' || tag === 'path' || tag === 'rect' || tag === 'circle' || tag === 'ellipse' || tag === 'polygon' || tag === 'polyline' || tag === 'line' || tag === 'text' || tag === 'tspan') {
+              try { el.style.fill = value; } catch (err) {}
+            }
+          });
+          const rootTag = String(root.tagName || '').toLowerCase();
+          if (rootTag === 'svg' || rootTag === 'path' || rootTag === 'rect' || rootTag === 'circle' || rootTag === 'ellipse' || rootTag === 'polygon') {
+            try { root.style.fill = value; } catch (err) {}
+          }
+        } catch (err) {}
+      } else {
+        root.style.backgroundColor = value;
+        try {
+          const rootTag = String(root.tagName || '').toLowerCase();
+          if (rootTag === 'svg' || rootTag === 'path' || rootTag === 'rect' || rootTag === 'circle' || rootTag === 'ellipse' || rootTag === 'polygon') {
+            try { root.style.fill = value; } catch (err) {}
+          }
+        } catch (err) {}
+      }
+    }
+
     function previewSlideElementColor(index, kind, value) {
       const session = getSlideEditSession(index);
       if (!session || !session.sel) return;
+      const hex = normalizeHexColor(value) || value;
       const stage = slideStageForIndex(index);
       const slide = stage ? stage.querySelector('.slide') : null;
       const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
       if (!target) return;
-      if (kind === 'color') target.style.color = value;
-      else target.style.backgroundColor = value;
+      applySlideElementColorValue(target, kind, hex);
     }
 
-    function commitSlideElementColor(index, kind) {
+    function commitSlideElementColor(index, kind, explicitValue) {
       const session = getSlideEditSession(index);
       if (!session || !session.sel) return;
       const stage = slideStageForIndex(index);
@@ -22481,7 +22783,8 @@
       const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
       const card = document.getElementById('slide-card-' + index);
       const input = card ? card.querySelector('[data-slide-edit-color="' + kind + '"]') : null;
-      if (!target || !input) return;
+      const value = normalizeHexColor(explicitValue || (input && input.value)) || (input && input.value);
+      if (!target || !value) return;
       const slideData = tenantSlidesData[index];
       if (!slideData || !slideData.html) return;
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
@@ -22489,17 +22792,13 @@
       const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, session.sel.path);
       if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
       pushSlideEditHistory(index);
-      if (kind === 'color') {
-        target.style.color = input.value;
-        rawTarget.style.color = input.value;
-      } else {
-        target.style.backgroundColor = input.value;
-        rawTarget.style.backgroundColor = input.value;
-      }
+      applySlideElementColorValue(target, kind, value);
+      applySlideElementColorValue(rawTarget, kind, value);
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
+      syncSlideElementToolbar(index);
       toast('تم تغيير لون العنصر');
     }
 
@@ -22520,11 +22819,17 @@
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
       const rawRoot = rawDoc.querySelector('.slide');
       if (!rawRoot) return;
+      if (window.getComputedStyle && rawRoot.style && !rawRoot.style.position) rawRoot.style.position = 'relative';
       pushSlideEditHistory(index);
+      const existingCount = rawRoot.querySelectorAll('[data-slide-textbox]').length;
+      const cascade = (existingCount % 6) * 28;
+      const top = 260 + cascade;
+      const right = 400 + cascade;
       const box = rawDoc.createElement('div');
       box.setAttribute('data-slide-textbox', '1');
-      box.setAttribute('style', 'position:absolute;top:300px;right:440px;width:400px;min-height:60px;'
-        + 'padding:12px 16px;box-sizing:border-box;background:#ffffff;border:1px dashed #94a3b8;'
+      box.setAttribute('style', 'position:absolute;top:' + top + 'px;right:' + right + 'px;width:400px;min-height:60px;'
+        + 'padding:12px 16px;box-sizing:border-box;background:#ffffff;border:1px solid #e2e8f0;'
+        + 'box-shadow:0 2px 12px rgba(15,40,70,.08);'
         + 'border-radius:10px;color:#1e293b;font-size:18px;font-weight:600;text-align:center;z-index:5;');
       box.textContent = 'نص جديد';
       rawRoot.appendChild(box);
@@ -22534,6 +22839,35 @@
       triggerAutoSaveDraft();
       renderTenantSlides();
       toast('تمت إضافة مربع نص جديد');
+      setTimeout(() => {
+        try {
+          if (!getSlideEditSession(index)) return;
+          const stage = slideStageForIndex(index);
+          const slide = stage ? stage.querySelector('.slide') : null;
+          if (!stage || !slide) return;
+          const boxes = slide.querySelectorAll('[data-slide-textbox]');
+          const newBox = boxes[boxes.length - 1];
+          if (!newBox) return;
+          const path = slideElementPath(slide, newBox);
+          if (!path) return;
+          selectSlideElement(stage, index, newBox, path);
+          const card = document.getElementById('slide-card-' + index);
+          if (card && card.scrollIntoView) {
+            try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (err) {}
+          }
+          const editable = newBox.hasAttribute('contenteditable') ? newBox
+            : (newBox.querySelector('[contenteditable]') || newBox);
+          if (editable && editable.focus) {
+            editable.focus({ preventScroll: true });
+            try {
+              const range = document.createRange();
+              range.selectNodeContents(editable);
+              const sel = window.getSelection();
+              if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+            } catch (err) {}
+          }
+        } catch (err) {}
+      }, 350);
     }
 
     function addSlideImageFromDevice(index, file) {
@@ -22674,6 +23008,7 @@
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
       renumberTenantSlides();
+      try { syncSlideEditSessionsAfterRender(); } catch (err) {}
       // If branding hasn't loaded yet (failed/slow earlier), retry it and re-render
       // when it arrives so the real logo replaces the sample one automatically.
       if (!tenantBranding && !renderTenantSlides._brandingRetry) {

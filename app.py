@@ -1828,19 +1828,27 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
 
     def _fix_logo_img(match):
         img_tag = match.group(0)
-        if 'project_logo' in img_tag.lower() or '##project_logo##' in img_tag.lower() or 'project-logo' in img_tag.lower():
+        lowered = img_tag.lower()
+        src_match = re.search(r'\bsrc\s*=\s*["\']([^"\']*)["\']', img_tag, flags=re.IGNORECASE)
+        src_value = str(src_match.group(1) if src_match else '').strip()
+        src_lower = src_value.lower()
+        if src_lower.startswith('data:') or src_lower.startswith('blob:'):
+            return img_tag
+        if '/uploads/creative/' in lowered or '/api/project-files/' in lowered or 'project-files' in lowered:
+            return img_tag
+        if 'project_logo' in lowered or '##project_logo##' in lowered or 'project-logo' in lowered:
             return img_tag
         # The managed chrome contains a company logo and, when available, a
         # project logo.  A resolved project-file URL does not contain the
         # semantic marker above, so the legacy compatibility pass used to
         # rewrite it back to the company logo.  Preserve resolved chrome URLs;
         # only placeholders and known company-logo fallbacks need replacement.
-        if 'presentation-chrome-logo' in img_tag.lower():
-            src_match = re.search(r'\bsrc\s*=\s*["\']([^"\']*)["\']', img_tag, flags=re.IGNORECASE)
-            src = str(src_match.group(1) if src_match else '').strip().lower()
+        if 'presentation-chrome-logo' in lowered:
+            src = src_lower
             if src and not src.startswith('##') and not src.startswith('/assets/logo.png'):
                 return img_tag
-        if 'logo' in img_tag.lower() or '##LOGO##' in img_tag or 'tenant-assets' in img_tag:
+        tag_without_src = re.sub(r'src\s*=\s*["\'][^"\']*["\']', '', img_tag, flags=re.IGNORECASE).lower()
+        if 'logo' in tag_without_src or '##LOGO##' in img_tag or 'tenant-assets' in img_tag:
             if 'src=' in img_tag.lower():
                 img_tag = re.sub(r'src=["\'][^"\']*["\']', f'src="{logo_url}"', img_tag, flags=re.IGNORECASE)
             else:

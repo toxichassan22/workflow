@@ -9412,13 +9412,24 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None, project_log
 
     def _fix_logo_img(match):
         img_tag = match.group(0)
-        if 'project_logo' in img_tag.lower() or '##project_logo##' in img_tag.lower() or 'project-logo' in img_tag.lower():
+        lowered = img_tag.lower()
+        # Never touch embedded uploads: data/blob URLs are user content, and a base64
+        # payload can easily contain the substring "logo" by chance. Checking the whole
+        # tag for "logo" used to rewrite such uploads to the company logo.
+        src_match = re.search(r'src\s*=\s*["\']([^"\']*)["\']', img_tag, flags=re.IGNORECASE)
+        src_value = (src_match.group(1) if src_match else '').strip()
+        src_lower = src_value.lower()
+        if src_lower.startswith('data:image/') or src_lower.startswith('data:') or src_lower.startswith('blob:'):
+            return img_tag
+        if 'project_logo' in lowered or '##project_logo##' in lowered or 'project-logo' in lowered:
             return img_tag
         if project_logo and project_logo in img_tag:
             return img_tag
-        if '/uploads/creative/' in img_tag.lower():
+        if '/uploads/creative/' in lowered or '/api/project-files/' in lowered or 'project-files' in lowered:
             return img_tag
-        if 'logo' in img_tag.lower() or '##LOGO##' in img_tag or 'tenant-assets' in img_tag:
+        # Check logo hints outside the src value only, so base64 payloads never match.
+        tag_without_src = re.sub(r'src\s*=\s*["\'][^"\']*["\']', '', img_tag, flags=re.IGNORECASE).lower()
+        if 'logo' in tag_without_src or '##logo##' in lowered or 'tenant-assets' in lowered:
             if 'src=' in img_tag.lower():
                 img_tag = re.sub(r'src=["\'][^"\']*["\']', f'src="{logo_url}"', img_tag, flags=re.IGNORECASE)
             else:
@@ -10286,7 +10297,10 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
             tag = match.group(0)
             src_match = re.search(r'src=["\']([^"\']*)["\']', tag, re.IGNORECASE)
             src = (src_match.group(1) if src_match else '').strip()
-            if '##LOGO##' in src or '##PROJECT_LOGO##' in src or 'logo' in src.lower():
+            if src.lower().startswith('data:') or src.lower().startswith('blob:'):
+                return tag
+            tag_without_src = re.sub(r'src=["\'][^"\']*["\']', '', tag, flags=re.IGNORECASE)
+            if '##LOGO##' in src or '##PROJECT_LOGO##' in src or 'logo' in tag_without_src.lower():
                 return tag
             return ''
         html = re.sub(r'<img\b[^>]*>', _strip_cover_extra_images, html, flags=re.IGNORECASE)
