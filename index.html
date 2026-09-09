@@ -1782,7 +1782,7 @@
     }
 
     .tenant-live-gen-banner {
-      background: linear-gradient(135deg, #102a43 0%, #1a4d6f 100%);
+      background: linear-gradient(135deg, var(--p) 0%, var(--pd) 100%);
       color: #fff;
       padding: 12px 24px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.12);
@@ -1860,7 +1860,7 @@
 
     .tenant-live-gen-fill {
       height: 100%;
-      background: linear-gradient(90deg, #c5a880 0%, #e2c9a6 100%);
+      background: var(--g);
       border-radius: 4px;
       transition: width 0.4s ease;
     }
@@ -1874,17 +1874,17 @@
     }
 
     .ge-slide-card.generating-live {
-      border: 2px solid #3b82f6 !important;
-      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15) !important;
+      border: 2px solid var(--p) !important;
+      box-shadow: 0 0 0 4px var(--soft) !important;
     }
 
     .ge-thumb.generating-live {
-      border-color: #3b82f6 !important;
-      background: #eff6ff !important;
+      border-color: var(--p) !important;
+      background: var(--soft) !important;
     }
 
     .ge-thumb.generating-live .ge-thumb-num {
-      background: #3b82f6 !important;
+      background: var(--p) !important;
       color: #fff !important;
     }
 
@@ -1904,8 +1904,8 @@
     }
 
     .live-gen-skeleton-pulse {
-      background: linear-gradient(135deg, #f0f7ff 0%, #e0f2fe 100%);
-      border: 2px dashed #93c5fd;
+      background: var(--soft);
+      border: 2px dashed var(--p);
     }
 
     @keyframes pulseDot {
@@ -6366,10 +6366,10 @@
     <section id="tenantGenerationPage" class="tenant-page">
       <div style="max-width:640px;width:100%;text-align:center;margin:0 auto;">
         <div
-          style="display:inline-flex;align-items:center;gap:6px;padding:4px 16px;border-radius:999px;background:rgba(26,77,111,0.08);color:#1a4d6f;font-size:12px;font-weight:700;margin-bottom:16px;">
+          style="display:inline-flex;align-items:center;gap:6px;padding:4px 16px;border-radius:999px;background:var(--soft);color:var(--p);font-size:12px;font-weight:700;margin-bottom:16px;">
           معالجة وتصميم العرض الاستثماري
         </div>
-        <h2 id="genTitle" style="margin:0 0 8px;font-size:24px;font-weight:800;color:#1a4d6f;">جاري بناء وتصميم العرض...
+        <h2 id="genTitle" style="margin:0 0 8px;font-size:24px;font-weight:800;color:var(--p);">جاري بناء وتصميم العرض...
         </h2>
         <p id="genSubtitle" style="margin:0 0 24px;color:var(--muted);font-size:14px;min-height:20px;font-weight:500;">
           جاري تحليل بيانات المشروع وإعداد الهيكل...</p>
@@ -6378,11 +6378,11 @@
         <div
           style="background:#eef2f6;border-radius:999px;height:12px;overflow:hidden;margin-bottom:10px;padding:2px;box-shadow:inset 0 1px 2px rgba(0,0,0,0.06);">
           <div id="genBar"
-            style="height:100%;width:0%;background:linear-gradient(90deg,#1a4d6f,#3b82f6);border-radius:999px;transition:width .4s ease;">
+            style="height:100%;width:0%;background:linear-gradient(90deg,var(--p),var(--pd));border-radius:999px;transition:width .4s ease;">
           </div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;padding:0 4px;">
-          <span id="genPct" style="font-size:26px;font-weight:800;color:#1a4d6f;font-feature-settings:'tnum';">0%</span>
+          <span id="genPct" style="font-size:26px;font-weight:800;color:var(--p);font-feature-settings:'tnum';">0%</span>
           <span id="genEta"
             style="font-size:12px;color:var(--muted);font-weight:600;background:#f8fafc;padding:3px 10px;border-radius:6px;border:1px solid #e2e8f0;"></span>
         </div>
@@ -6593,12 +6593,12 @@
       const label = el.querySelector('span:first-child');
       const status = el.querySelector('.gen-step-status');
       if (state === 'active') {
-        el.style.background = '#f0f7ff';
-        el.style.borderColor = '#93c5fd';
-        el.style.boxShadow = '0 2px 6px rgba(59,130,246,0.08)';
-        if (dot) { dot.style.background = '#1a4d6f'; dot.style.color = '#fff'; }
-        if (label) { label.style.color = '#1a4d6f'; label.style.fontWeight = '700'; }
-        if (status) { status.textContent = 'جاري التنفيذ...'; status.style.color = '#2563eb'; status.style.fontWeight = '600'; }
+        el.style.background = 'var(--soft)';
+        el.style.borderColor = 'var(--p)';
+        el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)';
+        if (dot) { dot.style.background = 'var(--p)'; dot.style.color = '#fff'; }
+        if (label) { label.style.color = 'var(--p)'; label.style.fontWeight = '700'; }
+        if (status) { status.textContent = 'جاري التنفيذ...'; status.style.color = 'var(--p)'; status.style.fontWeight = '600'; }
       } else if (state === 'done') {
         el.style.background = '#f0fdf4';
         el.style.borderColor = '#bbf7d0';
@@ -21369,10 +21369,10 @@
             const stageInner = document.getElementById('slide-stage-inner-' + i);
             if (stageInner) {
               stageInner.className = 'slide live-gen-skeleton-stage live-gen-skeleton-pulse';
-              stageInner.innerHTML = '<div style="font-size:12px;font-weight:700;color:#2563eb;letter-spacing:1px">جاري توليد الشريحة ' + (i + 1) + ' من ' + totalSlides + '</div>' +
-                '<div style="font-size:24px;font-weight:700;color:#1a4d6f;margin:8px 0">' + escapeHtml(plan.title || '') + '</div>' +
-                '<div style="font-size:14px;color:#2563eb;font-weight:600;display:flex;align-items:center;gap:8px">' +
-                '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#2563eb;animation:pulseDot 1s infinite alternate"></span>' +
+              stageInner.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--p);letter-spacing:1px">جاري توليد الشريحة ' + (i + 1) + ' من ' + totalSlides + '</div>' +
+                '<div style="font-size:24px;font-weight:700;color:var(--pd);margin:8px 0">' + escapeHtml(plan.title || '') + '</div>' +
+                '<div style="font-size:14px;color:var(--p);font-weight:600;display:flex;align-items:center;gap:8px">' +
+                '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--p);animation:pulseDot 1s infinite alternate"></span>' +
                 'جاري صياغة المحتوى وبناء التصميم...' +
                 '</div>';
             }
