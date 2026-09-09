@@ -141,6 +141,9 @@ def test_arabic_split_phrasing_detection():
     assert reliability.is_split_request("اقسمها إلى شريحتين")
     assert not reliability.is_split_request("قسم التصور البصري")
     assert not reliability.is_split_request("قسم مالي")
+    assert not reliability.is_split_request("اعد توليد قسم الملخص التنفيذي علي اكثر من شريحه مصممه جيدا و قويه بصريا و كل المحتوي الخاص بها واضح")
+    assert not reliability.is_split_request("صمم قسم الدراسة المالية بتصميم قوي وفخم")
+    assert not reliability.is_split_request("اعد تصميم قسم الموقع على شريحتين متناسقتين بصريا")
 
 
 def test_split_cards_or_blocks_partitions_evenly():

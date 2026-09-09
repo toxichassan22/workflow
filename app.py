@@ -3562,6 +3562,19 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
     normalized = normalize_arabic_digits_py(str(message).strip().lower())
     numbers = [idx + 1 for idx in (target_indexes or [])]
 
+    # Creative, redesign, or multi-slide generative requests belong to the AI agent
+    creative_patterns = (
+        r'(?:اعد|أعد|اعادة|إعادة)\s*(?:توليد|تصميم|صياغة|بناء|ابتكار)',
+        r'(?:صمم|ابتكر|طور|تطوير|حدث|تحديث)',
+        r'(?:مصمم[ةه]|قوي[ةه]|بصري[ااً]|ابداع|فخم|فخم[ةه]|عصري|احترافي)',
+        r'(?:اكثر|أكثر)\s*من\s*شريح[ةه]',
+        r'علي\s*اكثر|على\s*أكثر|على\s*اكثر|علي\s*أكثر',
+        r'شرايح\s*متعدد[ةه]|شرائح\s*متعدد[ةه]',
+        r'(?:تحسين|تطوير|تجديد|ابتكار)\s*(?:التصميم|الشكل|المظهر)',
+    )
+    if any(re.search(pat, normalized) for pat in creative_patterns):
+        return None
+
     is_map_reload = bool(
         re.search(r'(?:إعادة|اعادة|اعاده|أعد|اعد|عيد|رجع|رجّع|حدّث|حدث|تحديث|جدّد|جدد|استبدل|استبدال)', normalized)
         and re.search(r'(?:خريطة|الخريطة|الخريطه|map)', normalized)
@@ -4405,6 +4418,9 @@ def api_designer_chat():
 14. إذا طلب المستخدم نقل أو وضع شعار الشركة داخل المربع الكحلي في يمين الشريحة، استخدم tool="insert_company_logo_panel" ولا تستخدم شعار فريق العمل.
 15. في سائر طلبات التعديل والتنسيق والتصميم -> اختر tool="edit_slides".
 16. فرّق بدقة بين الصورة والوصف والشعار: طلب وصف أو شرح أو تعليق أو كابشن لصور موجودة (مثل: «أضف وصفاً لصور التصور البصري») يعني تعديلاً نصياً فقط عبر tool="edit_slides" مع تعليمات إضافة نص وصفي تحت الصور الموجودة، دون توليد صورة جديدة ودون أي رمز شعار (ممنوع ##TEAM_LOGO_N## و##LOGO## و##PROJECT_LOGO##). وطلب صورة أو تصميم أو توليد صور جديدة يعني tool="generate_image" لصورة معمارية جديدة وليس شعاراً. ولا تستخدم أي رمز شعار إلا عند طلب شعار صريح في الرسالة الحالية.
+17. إذا طلب المستخدم إعادة توليد أو تصميم قسم كامل أو توزيع محتوى شريحة على عدة شرائح (مثل: «أعد توليد قسم الملخص التنفيذي على أكثر من شريحة مصممة جيداً وقوية بصرياً»):
+- أنت Agent كامل الصلاحية: اختر الشريحة أو الشرائح المناسبة من قائمة الشرائح، ونفذ التقسيم والتوزيع الفاخر عبر tool="split_slide" مع تحديد slide_number و parts وتضمين تعليمات التصميم الجمالي والتوزيع المتناسق في instruction، أو ادمج بين edit_slides و create_slide.
+- احرص دائماً على الحفاظ التام على كامل الأرقام والبيانات والمؤشرات دون حذف أي تفصيل، وتوزيعها في كروت فاخرة وأقسام متوازنة مريحة بصرياً وخالية من أي إيموجي أو أيقونات.
 
 {audit_note}
 
@@ -4934,19 +4950,70 @@ def api_designer_chat():
                         assistant_messages.append(f'تم تقسيم جدول الشريحة رقم {target_num} إلى {len(generated)} شرائح متوازنة.')
                         executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
                     else:
+                        parts_param = params.get('parts')
                         req_parts = designer_chat_reliability.split_request_parts(params.get('instruction') or message)
-                        parts_count = req_parts if isinstance(req_parts, int) and req_parts >= 2 else 2
+                        if isinstance(parts_param, int) and parts_param >= 2:
+                            parts_count = min(parts_param, 6)
+                        elif isinstance(req_parts, int) and req_parts >= 2:
+                            parts_count = min(req_parts, 6)
+                        else:
+                            parts_count = 2
 
-                        part1_title = f"{base_title} - الجزء الأول"
-                        part2_title = f"{base_title} - الجزء الثاني"
-                        instr_p1 = f"قسّم محتوى هذه الشريحة واحتفظ فقط بالنصف الأول من البيانات والعناصر ({params.get('instruction') or message}) بشكل مريح وفسيح بدون أي حشو."
-                        instr_p2 = f"قسّم محتوى هذه الشريحة واحتفظ فقط بالنصف الثاني من البيانات والعناصر المتبقية ({params.get('instruction') or message}) بشكل أنيق ومتناسق."
+                        clean_base_title = re.sub(r'\s*[-–—]\s*الجزء\s+\S+(?:\s+من\s+\S+)?\s*$', '', str(base_title or '')).strip() or f'شريحة {target_num}'
+                        part_ordinals = ['الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس']
+                        part_titles = [
+                            f"{clean_base_title} - الجزء {part_ordinals[i] if i < len(part_ordinals) else (i + 1)}"
+                            for i in range(parts_count)
+                        ]
 
-                        h1, _ = _designer_edit_slide(base_html, part1_title, instr_p1, sp_idx, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs, slide_type=base_slide.get('type', 'content'), total_slides=len(slides) + 1)
-                        h2, _ = _designer_edit_slide(base_html, part2_title, instr_p2, sp_idx + 1, project_data, presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images, user_image_refs=user_image_refs, slide_type=base_slide.get('type', 'content'), total_slides=len(slides) + 1)
+                        try:
+                            flask_app = current_app._get_current_object()
+                        except Exception:
+                            flask_app = None
 
-                        if not designer_chat_reliability.materially_changed(base_html, h1) or not designer_chat_reliability.materially_changed(base_html, h2):
-                            card_parts = designer_chat_reliability.split_cards_or_blocks(base_html, base_title, parts_count)
+                        def _render_part_job(p_idx):
+                            def _do():
+                                p_title = part_titles[p_idx]
+                                p_num = p_idx + 1
+                                p_instr = (
+                                    f"هذه عملية توزيع وإعادة تصميم محتوى الشريحة على {parts_count} شرائح بتصميم فاخر وقوي بصرياً. "
+                                    f"أنشئ الشريحة ({p_title}): احتفظ فقط بالجزء {p_num} من أصل {parts_count} من عناصر وبيانات ومؤشرات الشريحة الأصلية. "
+                                    f"تعليمات المستخدم الإضافية: {params.get('instruction') or message}. "
+                                    "حافظ على فخامة التصميم، المساحات المريحة، والوضوح التام بدون أي إيموجي أو أيقونات."
+                                )
+                                out_html, r_text = _designer_edit_slide(
+                                    base_html, p_title, p_instr, sp_idx + p_idx,
+                                    project_data, presentation_id, branding,
+                                    tenant_id=tenant_id, creative_images=creative_images,
+                                    user_image_refs=user_image_refs,
+                                    slide_type=base_slide.get('type', 'content'),
+                                    total_slides=len(slides) + parts_count - 1,
+                                    content_source=base_slide.get('content_source') or base_slide.get('contentSource'),
+                                )
+                                return p_idx, p_title, out_html, r_text
+
+                            if flask_app:
+                                with flask_app.app_context():
+                                    from flask import g
+                                    g.tenant_id = tenant_id
+                                    return _do()
+                            return _do()
+
+                        part_results = []
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, parts_count)) as executor:
+                            futures = [executor.submit(_render_part_job, i) for i in range(parts_count)]
+                            for f in concurrent.futures.as_completed(futures):
+                                try:
+                                    part_results.append(f.result())
+                                except Exception as err:
+                                    print(f"[SPLIT SLIDE ERROR] {err}")
+                        part_results.sort(key=lambda item: item[0])
+
+                        if len(part_results) != parts_count or any(
+                            not designer_chat_reliability.materially_changed(base_html, res[2], res[3])
+                            for res in part_results
+                        ):
+                            card_parts = designer_chat_reliability.split_cards_or_blocks(base_html, clean_base_title, parts_count)
                             if card_parts and len(card_parts) >= 2:
                                 generated = []
                                 for cp in card_parts:
@@ -4956,34 +5023,30 @@ def api_designer_chat():
                                     p_slide['_designer_keep_html'] = True
                                     generated.append(p_slide)
                                 slides[sp_idx:sp_idx + 1] = generated
-                                assistant_messages.append(f'تم تقسيم محتوى وعناصر الشريحة رقم {target_num} إلى {len(generated)} شرائح متوازنة.')
+                                assistant_messages.append(f'تم توزيع محتوى وعناصر الشريحة رقم {target_num} إلى {len(generated)} شرائح متوازنة.')
                                 executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
                             else:
-                                part1 = copy.deepcopy(base_slide)
-                                part2 = copy.deepcopy(base_slide)
-                                part1['title'] = part1_title
-                                part1['html'] = h1
-                                part1['_designer_keep_html'] = True
-                                part2['title'] = part2_title
-                                part2['html'] = h2
-                                part2['_designer_keep_html'] = True
-                                slides[sp_idx] = part1
-                                slides.insert(sp_idx + 1, part2)
-                                assistant_messages.append(f'تم تقسيم الشريحة رقم {target_num} بنجاح إلى شريحتين متناسقتين.')
-                                executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': 2})
+                                generated = []
+                                for p_idx, p_title, p_html, _ in (part_results if part_results else [(0, part_titles[0], base_html, '')]):
+                                    p_slide = copy.deepcopy(base_slide)
+                                    p_slide['title'] = p_title
+                                    p_slide['html'] = p_html
+                                    p_slide['_designer_keep_html'] = True
+                                    generated.append(p_slide)
+                                slides[sp_idx:sp_idx + 1] = generated
+                                assistant_messages.append(f'تم توزيع الشريحة رقم {target_num} على {len(generated)} شرائح.')
+                                executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
                         else:
-                            part1 = copy.deepcopy(base_slide)
-                            part2 = copy.deepcopy(base_slide)
-                            part1['title'] = part1_title
-                            part1['html'] = h1
-                            part1['_designer_keep_html'] = True
-                            part2['title'] = part2_title
-                            part2['html'] = h2
-                            part2['_designer_keep_html'] = True
-                            slides[sp_idx] = part1
-                            slides.insert(sp_idx + 1, part2)
-                            assistant_messages.append(f'تم تقسيم الشريحة رقم {target_num} بنجاح إلى شريحتين متناسقتين.')
-                            executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': 2})
+                            generated = []
+                            for p_idx, p_title, p_html, _ in part_results:
+                                p_slide = copy.deepcopy(base_slide)
+                                p_slide['title'] = p_title
+                                p_slide['html'] = p_html
+                                p_slide['_designer_keep_html'] = True
+                                generated.append(p_slide)
+                            slides[sp_idx:sp_idx + 1] = generated
+                            assistant_messages.append(f'تم تقسيم الشريحة رقم {target_num} بنجاح إلى {len(generated)} شرائح متناسقة ومصممة بعناية.')
+                            executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
                 else:
                     assistant_messages.append(f'رقم الشريحة {target_num} غير صحيح.')
                     executed.append({'tool': tool, 'status': 'failed', 'reason': 'out_of_bounds'})

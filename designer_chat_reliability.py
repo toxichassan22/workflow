@@ -201,21 +201,37 @@ def is_split_request(message: Any) -> bool:
         return False
     normalized = text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
 
-    # Guard: pure section title reference like "قسم التصور البصري"
+    # Guard 1: Creative generation or redesign instructions are for the AI agent, not a mechanical split
+    creative_agent_intent = bool(re.search(
+        r"(?:(?:أ|إ|ا)?عد\s*(?:توليد|تصميم|صياغة|بناء|ابتكار)|"
+        r"(?:توليد|تصميم|ابتكار|تطوير|تحديث)\s+قسم|"
+        r"مصمم[ةه]\s+جيد[ااً]|قوي[ةه]\s+بصري[ااً]|بصري[ااً]|"
+        r"فخم[ةه]?|إبداع|ابداع|تصميم\s+جديد)",
+        normalized
+    ))
+    if creative_agent_intent:
+        return False
+
+    # Guard 2: Section references where "قسم" is a noun (section), e.g. "في قسم كذا", "اعد توليد قسم كذا"
+    if re.search(r"(?:في|عن|من|لكل|لهذا|بشأن|بخصوص|(?:أ|إ|ا)?عد\s+توليد|(?:أ|إ|ا)?عد\s+تصميم)\s+قسم\s+", normalized):
+        if not re.search(r"(?:إلى|الى|على|لـ)\s*(?:\d+|شريحت|جز|نصف)|فكك|جزئ|شطر", normalized):
+            return False
+
+    # Guard 3: Pure section title reference like "قسم التصور البصري"
     if re.search(r"^\s*قسم\s+(?:التصور|الهوية|الفريق|المشروع|الارض|الأرض|الموقع|السوق|المالية|الخاتمة|الغلاف|المخططات)(?:\s+[\w\s]+)?$", normalized):
         if not re.search(r"(?:إلى|الى|على|لـ)\s*(?:\d+|شريحت|جز|نصف)|محتو|كروت|بطاق", normalized):
             return False
 
-    split_explicit_verb = r"(?:(?:أ|إ|ا)?قسم|تقسيم|تجزئة|جز[ّ]?ئ|فك[ّ]?ك|تفكيك|فص[ّ]?ل|شطر|وز[ّ]?ع)"
+    split_explicit_verb = r"(?:(?:أ|إ|ا)قسم|قس[ّ]?م|تقسيم|تجزئة|جز[ّ]?ئ|فك[ّ]?ك|تفكيك|فص[ّ]?ل|شطر|وز[ّ]?ع)"
     split_targets = r"(?:الشريحة|شريحة|السلايد|سلايد|ها|محتوى|محتوي|البيانات|بيانات|الجدول|جدول|الكروت|كروت|البطاقات|بطاقات|العناصر|عناصر|الفقرات|فقرات|الملخص|التنفيذي|الدراسة|المالية|الموقع|السوق|الأرض|الارض)"
 
     if re.search(rf"{split_explicit_verb}\s*(?:.*?\b)?{split_targets}", normalized):
         return True
 
-    if re.search(r"(?:قس[ّ]?م|تقسيم)\s*(?:(?:الشريحة|شريحة|السلايد|سلايد|محتوى|محتوي)|ها)", normalized):
+    if re.search(r"(?:قس[ّ]?م|تقسيم)\s*(?:(?:الشريحة|شريحة|السلايد|سلايد|محتوى|محتوي|الجدول|جدول)|ها)", normalized):
         return True
 
-    if re.search(r"(?:على|إلى|الى|لـ)?\s*(?:شريحتين|جزأين|جزئين|نصفين|قسمين)(?:\s+(?:متناسقتين|منفصلتين|متوازنتين))?", normalized) and re.search(r"(?:قسم|اقسم|توزيع|تجزئة|فصل|فكك|اعمل|اجعل|خل|خلي)", normalized):
+    if re.search(r"(?:على|إلى|الى|لـ)?\s*(?:شريحتين|جزأين|جزئين|نصفين|قسمين)(?:\s+(?:متناسقتين|منفصلتين|متوازنتين))?", normalized) and re.search(r"(?:اقسم|قس[ّ]?م|توزيع|تجزئة|فصل|فكك|اعمل|اجعل|خل|خلي)", normalized):
         return True
 
     return False
@@ -741,14 +757,16 @@ def _handle_image_descriptions(payload, namespace):
     )
 
 
-def _handle_split(payload, namespace):
-    from flask import jsonify, g
+def _handle_split(payload, namespace, original_call=None):
+    from flask import jsonify, g, current_app
 
     project_data, slides, creative_images, branding, presentation_id = _load_workspace(payload, namespace)
     if not slides:
         return jsonify({"success": False, "error": "لا توجد شرائح مفتوحة لتنفيذ الطلب"}), 400
     indexes = _target_indexes(payload, slides, namespace=namespace)
     if not indexes:
+        if original_call:
+            return _verify_original_result(original_call(), payload, namespace)
         return jsonify({"success": False, "error": "لم يتم تحديد الشريحة المطلوب تقسيمها"}), 400
     index = indexes[0]
     base = slides[index] if isinstance(slides[index], dict) else {}
@@ -764,30 +782,46 @@ def _handle_split(payload, namespace):
             slide["_designer_keep_html"] = True
             generated.append(slide)
     else:
+        try:
+            flask_app = current_app._get_current_object()
+        except Exception:
+            flask_app = None
+        tenant_id = getattr(g, "tenant_id", None) or project_data.get("tenant_id")
+
         parts = estimate_semantic_parts(base.get("html", ""), requested)
         strategy = "semantic"
         editor = namespace.get("_designer_edit_slide")
         if not editor:
+            if original_call:
+                return _verify_original_result(original_call(), payload, namespace)
             return jsonify({"success": False, "error": "محرر الشرائح غير متاح"}), 503
         total_after = len(slides) + parts - 1
 
         def render_part(number):
-            title = f"{base.get('title', f'شريحة {index + 1}')} - الجزء {number} من {parts}"
-            output, response = editor(
-                base.get("html", ""),
-                title,
-                semantic_part_instruction(number, parts),
-                index + number - 1,
-                project_data,
-                presentation_id,
-                branding,
-                tenant_id=g.tenant_id,
-                creative_images=creative_images,
-                slide_type=base.get("type", "content"),
-                total_slides=total_after,
-                content_source=base.get("content_source") or base.get("contentSource"),
-            )
-            return number, title, output, response
+            def _invoke():
+                title = f"{base.get('title', f'شريحة {index + 1}')} - الجزء {number} من {parts}"
+                output, response = editor(
+                    base.get("html", ""),
+                    title,
+                    semantic_part_instruction(number, parts),
+                    index + number - 1,
+                    project_data,
+                    presentation_id,
+                    branding,
+                    tenant_id=tenant_id,
+                    creative_images=creative_images,
+                    slide_type=base.get("type", "content"),
+                    total_slides=total_after,
+                    content_source=base.get("content_source") or base.get("contentSource"),
+                )
+                return number, title, output, response
+
+            if flask_app:
+                with flask_app.app_context():
+                    from flask import g
+                    g.tenant_id = tenant_id
+                    return _invoke()
+            return _invoke()
 
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, parts)) as executor:
@@ -812,6 +846,9 @@ def _handle_split(payload, namespace):
                     slide["_designer_keep_html"] = True
                     generated.append(slide)
             else:
+                if original_call:
+                    print("[DESIGNER RELIABILITY SPLIT] Fast split incomplete; delegating to full AI agent.")
+                    return _verify_original_result(original_call(), payload, namespace)
                 return _workspace_response(
                     "تعذر إنشاء كل أجزاء الشريحة دون فقد محتوى؛ تم الإبقاء على الشريحة الأصلية كما هي.",
                     slides,
@@ -866,7 +903,7 @@ def _verify_original_result(result, payload, namespace):
         "insert_map", "insert_financial_chart", "update_financial_chart", "insert_team_logo",
         "insert_company_logo_panel", "delete_slide", "remove_slide", "duplicate_slide",
         "clone_slide", "reorder_slides", "move_slide", "split_slide", "split_dense_slide",
-        "create_slide", "create_design_slide",
+        "create_slide", "create_design_slide", "merge_slides", "combine_slides",
     }
     successful_mutations = [item for item in actions if item.get("tool") in mutating and item.get("status") == "success"]
     if not successful_mutations or not isinstance(data.get("slidesData"), list):
@@ -905,7 +942,9 @@ def install(app, namespace: Dict[str, Any]) -> None:
         if is_image_description_request(payload.get("message")):
             return _handle_image_descriptions(payload, namespace)
         if is_split_request(payload.get("message")):
-            return _handle_split(payload, namespace)
+            split_res = _handle_split(payload, namespace, original_call=original)
+            if split_res is not None:
+                return split_res
         return _verify_original_result(original(), payload, namespace)
 
     secured_designer_chat = require_auth(reliable_designer_chat)
