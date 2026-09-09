@@ -5123,7 +5123,6 @@ def api_designer_chat():
 
         # Auto-heal any multi-slide containers or unpackable fragments into distinct slides
         try:
-            import designer_chat_reliability
             slides = designer_chat_reliability._auto_heal_workspace_slides(slides, globals())
         except Exception:
             pass
@@ -5135,7 +5134,6 @@ def api_designer_chat():
         validation = _validate_workspace_data({'slidesData': slides})
         if not validation['valid']:
             try:
-                import designer_chat_reliability
                 healed_slides = designer_chat_reliability._auto_heal_workspace_slides(slides, globals())
                 healed_val = _validate_workspace_data({'slidesData': healed_slides})
                 if healed_val['valid']:
