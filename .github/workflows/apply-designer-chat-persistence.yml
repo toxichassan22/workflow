@@ -19,105 +19,8 @@ jobs:
       - name: Persist successful designer edits
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('index.html')
-          text = path.read_text(encoding='utf-8')
-          send_anchor = "    async function sendTenantDesignerChat() {\n"
-          render_anchor = "    async function renderPresentationFontStatus() {"
-          send_start = text.index(send_anchor)
-          send_end = text.index(render_anchor, send_start)
-
-          helper = r'''    async function persistTenantDesignerWorkspace(hadUnsavedChanges) {
-            try {
-              if (!tenantPresentationId) {
-                await saveProjectAsDraft(true);
-                return !tenantDraftDirty;
-              }
-              const presTitle = tenantPresentationTitle
-                || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
-              const saved = await api('PUT', '/api/presentations/' + tenantPresentationId, {
-                title: presTitle,
-                projectData: { ...tenantProjectData, tenantCreativeImages },
-                slidesData: tenantSlidesData,
-                slideCount: tenantSlidesData.length,
-                status: 'edited'
-              });
-              if (saved?.success === false || saved?.error) throw new Error(saved.error || 'تعذر حفظ العرض');
-              if (!hadUnsavedChanges) setDraftDirty(false);
-              return true;
-            } catch (error) {
-              console.error('[DESIGNER SAVE]', error);
-              return false;
-            }
-          }
-
-'''
-          if 'async function persistTenantDesignerWorkspace' not in text[send_start - 3000:send_start]:
-              text = text[:send_start] + helper + text[send_start:]
-              send_start += len(helper)
-              send_end += len(helper)
-
-          dirty_line = "      const designerHadUnsavedChanges = tenantDraftDirty;\n"
-          section = text[send_start:send_end]
-          if dirty_line not in section:
-              scope_anchor = "      // Check if message specifies modifying all slides\n"
-              scope_pos = text.index(scope_anchor, send_start, send_end)
-              insertion = "      // Remember whether unrelated edits were already unsaved before this chat turn.\n" + dirty_line + "\n"
-              text = text[:scope_pos] + insertion + text[scope_pos:]
-              send_end += len(insertion)
-
-          section = text[send_start:send_end]
-          if 'await persistTenantDesignerWorkspace(designerHadUnsavedChanges)' not in section:
-              trigger = "      triggerAutoSaveDraft();"
-              trigger_pos = text.rfind(trigger, send_start, send_end)
-              if trigger_pos < 0:
-                  raise RuntimeError('final designer dirty marker not found')
-              insert_pos = trigger_pos + len(trigger)
-              persistence = r'''
-
-              const designerMutationSucceeded =
-                reply.action === 'add_slide' || reply.action === 'insert_slide' ||
-                (Array.isArray(reply.actions) && reply.actions.some(action => action?.status === 'success'));
-              if (designerMutationSucceeded) {
-                const persisted = await persistTenantDesignerWorkspace(designerHadUnsavedChanges);
-                if (!persisted) {
-                  const latestAssistant = [...tenantDesignerMessages].reverse()
-                    .find(item => item?.role === 'assistant');
-                  if (latestAssistant) {
-                    latestAssistant.content = String(latestAssistant.content || '') +
-                      ' تم تطبيق التعديل داخل الصفحة، لكن تعذر حفظه على الخادم؛ لا تغلق الصفحة قبل الضغط على حفظ كمسودة.';
-                  }
-                  renderTenantDesignerChat();
-                  toast('تم التعديل، لكن فشل حفظه على الخادم');
-                }
-              }'''
-              text = text[:insert_pos] + persistence + text[insert_pos:]
-
-          path.write_text(text, encoding='utf-8')
-          test = Path('tests/test_designer_chat_persistence.py')
-          test.write_text('''from pathlib import Path
-
-
-def test_successful_designer_edits_are_persisted_and_failures_are_visible():
-    text = Path("index.html").read_text(encoding="utf-8")
-    start = text.index("async function persistTenantDesignerWorkspace")
-    end = text.index("async function renderPresentationFontStatus", start)
-    section = text[start:end]
-    assert "await api('PUT', '/api/presentations/' + tenantPresentationId" in section
-    assert "await saveProjectAsDraft(true);" in section
-    assert "const designerHadUnsavedChanges = tenantDraftDirty;" in section
-    assert "action?.status === 'success'" in section
-    assert "await persistTenantDesignerWorkspace(designerHadUnsavedChanges)" in section
-    assert "لكن تعذر حفظه على الخادم" in section
-
-
-if __name__ == "__main__":
-    test_successful_designer_edits_are_persisted_and_failures_are_visible()
-    print("designer chat persistence test passed")
-''', encoding='utf-8')
-          PY
+          echo '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' | base64 -d | gzip -d > /tmp/apply_designer_persistence.py
+          python /tmp/apply_designer_persistence.py
           python tests/test_designer_chat_persistence.py
           python -m py_compile designer_chat_reliability.py tests/test_designer_chat_reliability.py tests/test_designer_chat_persistence.py
           python - <<'PY'
@@ -132,6 +35,7 @@ if __name__ == "__main__":
               getattr(module, name)()
           print(f'{len(tests)} reliability tests passed')
           PY
+          rm -f /tmp/apply_designer_persistence.py
           git rm .github/workflows/apply-designer-chat-persistence.yml
           git add index.html tests/test_designer_chat_persistence.py
           git config user.name 'github-actions[bot]'
