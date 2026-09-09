@@ -22010,6 +22010,7 @@
       }
       stage.addEventListener('mouseover', function handleSlideHover(event) {
         if (!enabled) return;
+        if (slideElementDragActive) return;
         removeDeleteBtn();
         const target = slideDragTarget(slide, event.target);
         if (!target) return;
@@ -22041,12 +22042,14 @@
       });
       stage.addEventListener('pointerdown', function handleSlidePointerDown(event) {
         if (event.button !== 0) return;
+        if (slideElementDragActive) return;
         const target = slideDragTarget(slide, event.target);
         if (!target) return;
         const path = slideElementPath(slide, target);
         if (!path) return;
         event.preventDefault();
         event.stopPropagation();
+        slideElementDragActive = true;
         const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
         const startX = event.clientX;
         const startY = event.clientY;
@@ -22070,6 +22073,7 @@
           target.removeEventListener('pointerup', finish);
           target.removeEventListener('pointercancel', finish);
           target.classList.remove('slide-element-editable');
+          slideElementDragActive = false;
           if (moved) commitSlideElementMove(stage, index, target, path, dx, dy);
           selectSlideElement(stage, index, target, path);
         };
@@ -22109,6 +22113,10 @@
        images and positioned blocks drag). */
     const slideEditSessions = {};
     const SLIDE_EDIT_HISTORY_LIMIT = 30;
+    /* Mutual exclusion: only one element drag (move or resize) may run at a
+       time per page. A second pointerdown while one is active is ignored, so
+       two sessions can never write the same slide concurrently. */
+    let slideElementDragActive = false;
 
     function slideEditFingerprint(slide) {
       const title = String((slide && slide.title) || '');
@@ -22455,7 +22463,7 @@
     function clearSlideElementSelection(stage) {
       if (!stage) return;
       stage.querySelectorAll('.slide-element-selected').forEach(el => el.classList.remove('slide-element-selected'));
-      stage.querySelectorAll('.slide-resize-handle, .slide-move-handle').forEach(el => el.remove());
+      stage.querySelectorAll('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn').forEach(el => el.remove());
     }
 
     function selectSlideElement(stage, index, target, path) {
@@ -22530,10 +22538,12 @@
       slide.appendChild(moveHandle);
       moveHandle.addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
+        if (slideElementDragActive) return;
         event.preventDefault();
         event.stopPropagation();
         const path = slideElementPath(slide, target);
         if (!path) return;
+        slideElementDragActive = true;
         const startX = event.clientX;
         const startY = event.clientY;
         const baseX = Number(target.dataset.manualTranslateX) || 0;
@@ -22549,6 +22559,7 @@
           window.removeEventListener('pointermove', onMove, true);
           window.removeEventListener('pointerup', onUp, true);
           window.removeEventListener('pointercancel', onUp, true);
+          slideElementDragActive = false;
           const dx = (upEvent.clientX - startX) / scale;
           const dy = (upEvent.clientY - startY) / scale;
           if (moved) commitSlideElementMove(stage, index, target, path, dx, dy);
@@ -22595,11 +22606,13 @@
        fixed by compensating with translate. This works for absolute and flow
        elements, LTR and RTL, without rewriting the element positioning. */
     function startSlideElementResize(stage, index, slide, target, dir, scale, event) {
+      if (slideElementDragActive) return;
       const path = slideElementPath(slide, target);
       if (!path) return;
       const touchW = dir.indexOf('e') !== -1 || dir.indexOf('w') !== -1;
       const touchH = dir.indexOf('n') !== -1 || dir.indexOf('s') !== -1;
       if (!touchW && !touchH) return;
+      slideElementDragActive = true;
       const measure = () => {
         const sRect = slide.getBoundingClientRect();
         const r = target.getBoundingClientRect();
@@ -22669,6 +22682,7 @@
         window.removeEventListener('pointermove', onMove, true);
         window.removeEventListener('pointerup', onUp, true);
         window.removeEventListener('pointercancel', onUp, true);
+        slideElementDragActive = false;
         if (!moved) return;
         const finalTx = Math.round(baseTx + compX);
         const finalTy = Math.round(baseTy + compY);
