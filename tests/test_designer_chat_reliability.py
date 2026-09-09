@@ -198,6 +198,9 @@ def test_watermark_injection_and_removal():
     assert 'data-slide-watermark="true"' in injected
     assert '/uploads/logo.png' in injected
     assert 'opacity:0.045' in injected
+    # The overlay renders above content layers, never buried behind them.
+    assert 'z-index:50' in injected
+    assert 'z-index:0' not in injected
 
     # Idempotent: injecting again replaces rather than duplicates
     injected_twice = app._apply_slide_watermark(injected, "/uploads/logo.png")
@@ -228,6 +231,57 @@ def test_watermark_deterministic_plan_handles_user_exact_request():
     # Dark slide filtering
     assert not app._is_white_or_light_slide(slides[0])
     assert app._is_white_or_light_slide(slides[1])
+
+
+def test_watermark_white_detection_ignores_inner_dark_chrome():
+    import app
+
+    # A white content slide carries a dark footer and dark table headers by
+    # design — the root background decides, so it stays a white slide.
+    white_with_dark_chrome = {
+        "title": "المكونات",
+        "type": "content",
+        "html": (
+            '<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;'
+            'overflow:hidden;background:#ffffff;">'
+            '<div style="position:absolute;top:0;right:0;left:0;height:64px;background:#ffffff;"></div>'
+            '<table><thead><tr style="background:#0c2340;color:#fff;"><th>بند</th></tr></thead></table>'
+            '<div style="position:absolute;bottom:0;right:0;left:0;height:44px;background:#0c2340;"></div>'
+            '</div>'
+        ),
+    }
+    assert app._is_white_or_light_slide(white_with_dark_chrome)
+
+    # A root without an explicit background but only a dark footer inside is
+    # still a white slide — inner chrome must not flip the verdict.
+    no_root_bg_with_footer = {
+        "title": "ملخص",
+        "type": "content",
+        "html": (
+            '<div class="slide" style="width:1280px;height:720px;position:relative;">'
+            '<h1>ملخص</h1>'
+            '<div style="position:absolute;bottom:0;right:0;left:0;height:44px;background:#0c2340;"></div>'
+            '</div>'
+        ),
+    }
+    assert app._is_white_or_light_slide(no_root_bg_with_footer)
+
+    # Genuinely dark slides stay dark: dark root, or a full-cover dark layer
+    # when the root itself carries no background.
+    assert not app._is_white_or_light_slide({
+        "title": "غلاف",
+        "type": "content",
+        "html": '<div class="slide" style="width:1280px;height:720px;background:#0c2340;"><h1>غلاف</h1></div>',
+    })
+    assert not app._is_white_or_light_slide({
+        "title": "غلاف",
+        "type": "content",
+        "html": (
+            '<div class="slide" style="width:1280px;height:720px;position:relative;">'
+            '<div style="position:absolute;inset:0;background:#0c2340;"></div>'
+            '</div>'
+        ),
+    })
 
 
 def test_watermark_survives_model_regeneration():
