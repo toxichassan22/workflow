@@ -23730,6 +23730,32 @@
       };
     }
 
+    async function persistTenantDesignerWorkspace(hadUnsavedChanges) {
+      try {
+        if (!tenantPresentationId) {
+          await saveProjectAsDraft(true);
+          return !tenantDraftDirty;
+        }
+        const presTitle = tenantPresentationTitle
+          || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
+        const saved = await api('PUT', '/api/presentations/' + tenantPresentationId, {
+          title: presTitle,
+          projectData: { ...tenantProjectData, tenantCreativeImages },
+          slidesData: tenantSlidesData,
+          slideCount: tenantSlidesData.length,
+          status: 'edited'
+        });
+        if (saved?.success === false || saved?.error) {
+          throw new Error(saved.error || 'تعذر حفظ العرض');
+        }
+        if (!hadUnsavedChanges) setDraftDirty(false);
+        return true;
+      } catch (error) {
+        console.error('[DESIGNER SAVE]', error);
+        return false;
+      }
+    }
+
     async function sendTenantDesignerChat() {
       const input = document.getElementById('tenantChatInput');
       const message = input ? input.value.trim() : '';
@@ -23767,6 +23793,9 @@
         triggerAutoSaveDraft();
         return;
       }
+
+      // Preserve unrelated unsaved form edits from before this chat turn.
+      const designerHadUnsavedChanges = tenantDraftDirty;
 
       // Check if message specifies modifying all slides
       const ALL_SLIDES_REGEX = /كل\s*(الشرائح|الشرايح|الرايح|السلايدات|شريحة|الكل)|جميع\s*الشرائح|كافة\s*الشرائح|الشرائح\s*كلها|الشرايح\s*كلها|العرض\s*(كامل|كله)|في\s*الكل|على\s*الكل/i;
@@ -23921,6 +23950,23 @@
       renderTenantSlides();
       renderTenantDesignerChat();
       triggerAutoSaveDraft();
+
+      const designerMutationSucceeded =
+        reply.action === 'add_slide' || reply.action === 'insert_slide' ||
+        (Array.isArray(reply.actions) && reply.actions.some(action => action?.status === 'success'));
+      if (designerMutationSucceeded) {
+        const persisted = await persistTenantDesignerWorkspace(designerHadUnsavedChanges);
+        if (!persisted) {
+          const latestAssistant = [...tenantDesignerMessages].reverse()
+            .find(item => item?.role === 'assistant');
+          if (latestAssistant) {
+            latestAssistant.content = String(latestAssistant.content || '') +
+              ' تم تطبيق التعديل داخل الصفحة، لكن تعذر حفظه على الخادم؛ لا تغلق الصفحة قبل الضغط على حفظ كمسودة.';
+          }
+          renderTenantDesignerChat();
+          toast('تم التعديل، لكن فشل حفظه على الخادم');
+        }
+      }
     }
 
     async function renderPresentationFontStatus() {
