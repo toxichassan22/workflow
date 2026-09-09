@@ -3577,14 +3577,37 @@ def _is_white_or_light_slide(slide):
     if not isinstance(slide, dict):
         return True
     stype = str(slide.get('type') or 'content').lower()
-    if stype in ('cover', 'divider', 'back_cover', 'closing'):
+    if stype in ('cover', 'divider', 'back_cover', 'closing', 'section_divider', 'index'):
         return False
     html = str(slide.get('html') or '')
+    dark_hexes = (
+        '0c2340|06121e|0a192f|0b1d33|111827|1f2937|000000|000|'
+        '1a4d6f|254b66|1e3a5f|0f2a43|1f3a5f|212529|343a40|212121|263238'
+    )
+    # The root slide background decides: a white slide holding dark cards inside is
+    # still a white slide, while a dark root stays dark even with light cards in it.
+    root_style = ''
+    root_match = re.search(r'<div\b[^>]*\bclass=["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>', html, flags=re.IGNORECASE)
+    if root_match:
+        style_match = re.search(r'\bstyle\s*=\s*["\']([^"\']*)["\']', root_match.group(0), flags=re.IGNORECASE)
+        if style_match:
+            root_style = style_match.group(1)
+    if root_style:
+        if re.search(r'background(?:-color)?\s*:\s*#(?:' + dark_hexes + r')\b', root_style, flags=re.IGNORECASE):
+            return False
+        if re.search(r'linear-gradient\([^)]*#(?:' + dark_hexes + r')\b', root_style, flags=re.IGNORECASE):
+            return False
+        if re.search(r'rgba?\(\s*\d{1,2}\s*,\s*\d{1,2}\s*,\s*\d{1,2}\s*[,)]', root_style):
+            return False
+        if re.search(r'background(?:-color)?\s*:\s*#(?:fff|ffffff)\b', root_style, flags=re.IGNORECASE):
+            return True
+        if re.search(r'rgba?\(\s*25[0-5]\s*,\s*25[0-5]\s*,\s*25[0-5]\s*[,)]', root_style):
+            return True
     dark_patterns = (
-        r'background\s*:\s*#(?:0c2340|06121e|0a192f|0b1d33|111827|1f2937|000000|000)\b',
-        r'background-color\s*:\s*#(?:0c2340|06121e|0a192f|0b1d33|111827|1f2937|000000|000)\b',
-        r'linear-gradient\([^)]*#(?:0c2340|06121e|0a192f|0b1d33)',
-        r'class=["\'][^"\']*\b(?:dark-slide|cover-slide|divider-slide)\b',
+        r'background(?:-color)?\s*:\s*#(?:' + dark_hexes + r')\b',
+        r'linear-gradient\([^)]*#(?:' + dark_hexes + r')',
+        r'rgba?\(\s*\d{1,2}\s*,\s*\d{1,2}\s*,\s*\d{1,2}\s*[,)]',
+        r'class=["\'][^"\']*\b(?:dark-slide|cover-slide|divider-slide|slide-dark|bg-dark|dark-mode)\b',
     )
     for dp in dark_patterns:
         if re.search(dp, html, re.IGNORECASE):
@@ -3592,16 +3615,26 @@ def _is_white_or_light_slide(slide):
     return True
 
 
-def _apply_slide_watermark(html, logo_url, opacity=0.045):
+def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
     """Inject an elegant watermark overlay into a slide HTML before the closing tag."""
     if not html:
         return html
+    try:
+        opacity_value = float(opacity)
+    except (TypeError, ValueError):
+        opacity_value = 0.045
+    opacity_value = min(0.25, max(0.01, opacity_value))
+    try:
+        width_value = int(width_px)
+    except (TypeError, ValueError):
+        width_value = 480
+    width_value = min(900, max(200, width_value))
     cleaned = _remove_slide_watermark(html)
     watermark_markup = (
         '<div class="slide-watermark" data-slide-watermark="true" aria-hidden="true" '
         'style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
-        f'pointer-events:none;z-index:0;opacity:{opacity};overflow:hidden;">'
-        f'<img src="{logo_url}" alt="" style="width:480px;max-width:50%;max-height:50%;object-fit:contain;filter:grayscale(100%);">'
+        f'pointer-events:none;z-index:0;opacity:{opacity_value};overflow:hidden;">'
+        f'<img src="{logo_url}" alt="" style="width:{width_value}px;max-width:50%;max-height:50%;object-fit:contain;filter:grayscale(100%);">'
         '</div>'
     )
     closing = re.search(r'</div>\s*$', cleaned, flags=re.IGNORECASE)
@@ -3642,8 +3675,18 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
         all_match = any(kw in normalized for kw in ('كل', 'جميع', 'كافة', 'العرض كامل', 'العرض كله', 'الشرائح كلها', 'الشرايح كلها'))
         target_mode = 'all' if (all_match or not numbers) else 'indexes'
         action_tool = 'remove_watermark' if is_remove else 'apply_watermark'
+        size_up = bool(re.search(r'(?:أكبر|اكبر|كبّر|كبر|واضح|واضحه|أوضح|اوضح|أظهر|اظهر|ظاهر|أجلى|اجلى|bigger|\bbig\b|\bclear\b|clearer)', normalized))
+        size_down = bool(re.search(r'(?:أصغر|اصغر|صغّر|صغر|أخف|اخف|خفيف|خفيفه|شفاف|أفتح|افتح|smaller|\bsmall\b|\bfaint\b)', normalized))
+        if size_up and not size_down:
+            wm_opacity, wm_width = 0.10, 640
+        elif size_down and not size_up:
+            wm_opacity, wm_width = 0.03, 400
+        else:
+            wm_opacity, wm_width = 0.045, 480
         if is_remove:
             resp_text = 'سأنفذ حذف العلامة المائية مع الحفاظ على كامل محتوى الشرائح.'
+        elif size_up and not size_down:
+            resp_text = 'سأجعل العلامة المائية أكبر وأوضح في خلفية الشرائح مع الحفاظ التام على النصوص والتصميم.'
         elif only_white:
             resp_text = 'سأضيف العلامة المائية لشعار الشركة في خلفية الشرائح البيضاء مع الحفاظ التام على النصوص والتصميم.'
         else:
@@ -3656,6 +3699,8 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
                     'target': target_mode,
                     'indexes': numbers if target_mode == 'indexes' else [],
                     'only_white': only_white,
+                    'opacity': wm_opacity,
+                    'width_px': wm_width,
                 },
             }],
         }
@@ -4509,7 +4554,7 @@ def api_designer_chat():
 
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
-- apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true}} لإضافة علامة مائية لشعار الشركة في خلفية الشرائح
+- apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true, "opacity":0.045, "width_px":480}} لإضافة علامة مائية لشعار الشركة في خلفية الشرائح — أرسل only_white=true فقط إذا ذكر المستخدم الشرائح البيضاء أو الفاتحة صراحة، وأرسل opacity حتى 0.12 مع width_px حتى 640 إذا طلب علامة أكبر أو أوضح
 - remove_watermark: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإزالة العلامة المائية من الشرائح
 - insert_team_logo: params={{"target":"current|all|indexes", "indexes":[1-based], "team_index":1-based}} لإضافة شعار جهة فريق العمل المرفوع فعلياً
 - insert_company_logo_panel: params={{"target":"current|all|indexes", "indexes":[1-based]}} لوضع شعار الشركة داخل المربع الكحلي فوق رقم سنوات الخبرة
@@ -4705,7 +4750,9 @@ def api_designer_chat():
                 continue
             if tool in ('apply_watermark', 'remove_watermark'):
                 indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
-                only_white = params.get('only_white', True)
+                # Default off: without an explicit white-only request every targeted
+                # slide gets the watermark, otherwise dark slides were silently skipped.
+                only_white = params.get('only_white', False)
                 is_remove = (tool == 'remove_watermark')
                 logo_token = str(params.get('logo_token') or '##LOGO##').strip()
                 company_logo_url = str(
@@ -4722,7 +4769,15 @@ def api_designer_chat():
                     if is_remove:
                         new_html = _remove_slide_watermark(current_slide_html)
                     else:
-                        new_html = _apply_slide_watermark(current_slide_html, company_logo_url)
+                        try:
+                            wm_opacity = float(params.get('opacity', 0.045))
+                        except (TypeError, ValueError):
+                            wm_opacity = 0.045
+                        try:
+                            wm_width = int(params.get('width_px', 480))
+                        except (TypeError, ValueError):
+                            wm_width = 480
+                        new_html = _apply_slide_watermark(current_slide_html, company_logo_url, opacity=wm_opacity, width_px=wm_width)
                     slide['html'] = new_html
                     slide['_designer_keep_html'] = True
                     slide['is_custom'] = True
@@ -4738,9 +4793,21 @@ def api_designer_chat():
                     'count': len(affected_indexes),
                 })
                 action_desc = 'حذف' if is_remove else 'إضافة'
-                assistant_messages.append(
-                    f"تم {action_desc} العلامة المائية بنجاح في خلفية {len(affected_indexes)} شريحة مع الحفاظ الكامل على النصوص والتصميم."
-                )
+                if (not is_remove) and only_white:
+                    skipped_dark = len(indexes) - len(affected_indexes)
+                    if skipped_dark > 0:
+                        assistant_messages.append(
+                            f"تم {action_desc} العلامة المائية بنجاح في خلفية {len(affected_indexes)} شريحة بيضاء "
+                            f"وتخطي {skipped_dark} شريحة داكنة مع الحفاظ الكامل على النصوص والتصميم."
+                        )
+                    else:
+                        assistant_messages.append(
+                            f"تم {action_desc} العلامة المائية بنجاح في خلفية {len(affected_indexes)} شريحة مع الحفاظ الكامل على النصوص والتصميم."
+                        )
+                else:
+                    assistant_messages.append(
+                        f"تم {action_desc} العلامة المائية بنجاح في خلفية {len(affected_indexes)} شريحة مع الحفاظ الكامل على النصوص والتصميم."
+                    )
             elif tool in ('edit_slides', 'edit_design_slide', 'edit_design_slides'):
                 indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
                 instruction = params.get('instruction') or message
