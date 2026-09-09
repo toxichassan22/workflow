@@ -17374,7 +17374,7 @@ def deploy_webhook():
 
 @app.route('/api/deploy-webhook-staging', methods=['GET', 'POST'])
 def deploy_webhook_staging():
-    """Staging counterpart of deploy_webhook: deploys origin/staging into the
+    """Staging counterpart of deploy_webhook: deploys origin/lab into the
     separate proposal-generator-staging directory. Production paths are never
     touched here, so lab experiments cannot overwrite client data."""
     env_secret = os.environ.get('DEPLOY_WEBHOOK_SECRET_STAGING') or os.environ.get('DEPLOY_WEBHOOK_SECRET')

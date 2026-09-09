@@ -5,7 +5,7 @@ name: Deploy to Production Hosting
 # coming-soon page that a production app deploy would overwrite. When the client
 # app gets its own home, set the PROD_BASE_URL repository secret
 # (e.g. https://app.landloom.ai) and press Run workflow.
-# Lab work deploys automatically via deploy-staging.yml on the staging branch.
+# Lab work deploys automatically via deploy-staging.yml on the lab branch.
 
 on:
   workflow_dispatch:

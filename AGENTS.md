@@ -8,7 +8,8 @@ This is a standing owner rule. After a requested change is done and verified:
 
 - Commit only the files that belong to that change. Do not commit local leftovers
   (`*.png`, PDFs, `model_benchmark/`, `sandbox/`, `الطلوبات لليوم.md`, etc.).
-- Push `main` to `github/main` in the same turn. Do not wait to be asked again.
+- Push `lab` to `github/lab` in the same turn. Do not wait to be asked again.
+  Never push `main` unless the owner explicitly asks for it in that turn.
 - If the user asked to implement something, shipping means commit **and** push.
   A local-only commit is unfinished work.
 
@@ -20,7 +21,7 @@ Hosting moved from `sagdemos.store` (dead) to `landloom.ai`. The `landloom.ai`
 root serves a static coming-soon page — never deploy the app to the root
 DocumentRoot. Lab work runs on a subdomain (e.g. `test.landloom.ai`) via
 `.github/workflows/deploy-staging.yml`, which POSTs to
-`$STAGING_BASE_URL/api/deploy-webhook-staging` on every `staging` push into the
+`$STAGING_BASE_URL/api/deploy-webhook-staging` on every `lab` push into the
 separate `proposal-generator-staging` app dir (own port, `.env` and DB).
 Production (`.github/workflows/deploy.yml`) is manual-only (`workflow_dispatch`)
 until the client app gets its own home; then set the `PROD_BASE_URL` secret.

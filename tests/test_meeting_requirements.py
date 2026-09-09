@@ -411,6 +411,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         staging_workflow = (ROOT / '.github/workflows/deploy-staging.yml').read_text(encoding='utf-8')
         self.assertIn('STAGING_BASE_URL', staging_workflow)
         self.assertIn('/api/deploy-webhook-staging', staging_workflow)
+        # Lab work always ships to the lab branch, never to main.
+        self.assertIn('- lab', staging_workflow)
         self.assertNotIn('sagdemos.store', staging_workflow)
         self.assertNotIn('sagdemo.site', workflow)
         self.assertNotIn('sagdemo.site', staging_workflow)

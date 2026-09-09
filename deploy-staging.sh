@@ -1,7 +1,7 @@
 #!/bin/bash
 # Staging deployment script for cPanel shared hosting (lab copy next to production).
 # Production deploy.sh stays manual-only while landloom.ai root serves coming-soon.
-# This script never touches production paths: it syncs origin/staging into a
+# This script never touches production paths: it syncs origin/lab into a
 # separate APP_DIR and restarts a separate gunicorn + .htaccess pair.
 #
 # Server setup (one time, on the host):
@@ -19,7 +19,7 @@ export GIT_LFS_SKIP_SMUDGE=1
 REPO_DIR="${STAGING_REPO_DIR:-/home/demos/workflow.git}"
 APP_DIR="${STAGING_APP_DIR:-/home/demos/proposal-generator-staging}"
 WEB_ROOT="${STAGING_WEB_ROOT:-/home/demos/staging_html}"
-BRANCH="${STAGING_BRANCH:-staging}"
+BRANCH="${STAGING_BRANCH:-lab}"
 PYTHON="$APP_DIR/venv/bin/python"
 PIP="$APP_DIR/venv/bin/pip"
 GUNICORN="$APP_DIR/venv/bin/gunicorn"

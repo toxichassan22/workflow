@@ -1,7 +1,7 @@
 name: Auto Deploy to Staging Hosting
 
-# Lab copy next to production. Pushes to staging deploy origin/staging into
-# proposal-generator-staging; production (deploy.yml on main) is untouched.
+# Lab copy next to production. Pushes to lab deploy origin/lab into
+# proposal-generator-staging; production (deploy.yml, manual only) is untouched.
 # Required repository secrets:
 #   STAGING_BASE_URL       e.g. https://test.example.com (no trailing slash needed)
 #   DEPLOY_WEBHOOK_SECRET  same webhook secret the server expects
@@ -9,7 +9,7 @@ name: Auto Deploy to Staging Hosting
 on:
   push:
     branches:
-      - staging
+      - lab
   workflow_dispatch:
 
 jobs:
