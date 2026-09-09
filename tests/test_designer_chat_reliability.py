@@ -93,6 +93,37 @@ def test_caption_escapes_clipped_media_wrapper_and_repairs_old_insertions():
     assert repaired.count('data-project-image-description') == 1
 
 
+def test_visual_caption_is_persisted_in_canonical_slide_metadata():
+    descriptions = {
+        "a.jpg": "وصف جديد محفوظ",
+        "b.jpg": "وصف البيانات للصورة الثانية",
+    }
+    slide = {
+        "image_tokens": ["##MOODBOARD_IMAGE_1##", "##MOODBOARD_IMAGE_2##"],
+        "html": (
+            '<div><div class="image-frame" style="height:300px;overflow:hidden">'
+            '<img src="/uploads/a.jpg"></div></div>'
+            '<div><div class="image-frame" style="height:300px;overflow:hidden">'
+            '<img src="/uploads/b.jpg"></div>'
+            '<div data-visual-media-caption="1">وصف ظاهر موجود</div></div>'
+        ),
+    }
+
+    updated, count, _ = reliability.add_missing_image_descriptions(slide["html"], descriptions)
+    slide["html"] = updated
+    changed, persisted = reliability.sync_slide_caption_metadata(slide, descriptions)
+
+    assert count == 1
+    assert changed
+    assert persisted == 2
+    assert slide["captions"] == ["وصف جديد محفوظ", "وصف ظاهر موجود"]
+    assert "description" not in slide
+
+    changed_again, persisted_again = reliability.sync_slide_caption_metadata(slide, descriptions)
+    assert not changed_again
+    assert persisted_again == 0
+
+
 def test_detects_caption_requests_and_requested_split_count():
     assert reliability.is_image_description_request("حط وصف الصور المكتوب في بيانات المشروع")
     assert reliability.is_image_description_request("عايزه يضيف وصف لكل صورة")

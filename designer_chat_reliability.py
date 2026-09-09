@@ -36,6 +36,11 @@ _GENERATED_CAPTION_RE = re.compile(
     r"[\s\S]*?</(?P=tag)\s*>",
     re.IGNORECASE,
 )
+_VISIBLE_CAPTION_RE = re.compile(
+    r"(?:<(?:div|p)\b(?=[^>]*\bdata-(?:project-image-description|visual-media-caption)\s*=)"
+    r"[^>]*>[\s\S]*?</(?:div|p)\s*>|<figcaption\b[^>]*>[\s\S]*?</figcaption\s*>)",
+    re.IGNORECASE,
+)
 _VOID_TAGS = {
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
     "meta", "param", "source", "track", "wbr",
@@ -268,6 +273,55 @@ def _apply_caption_edits(
         markup = "".join(item[1] for item in sorted(grouped[position], key=lambda item: item[0]))
         output = output[:position] + markup + output[position:]
     return output
+
+
+def image_caption_slots(html: str, descriptions: Dict[str, str]) -> List[str]:
+    """Return visible captions for matching project images in media order."""
+
+    source = str(html or "")
+    images = _image_contexts(source)
+    slots: List[str] = []
+    for index, image in enumerate(images):
+        src_match = _SRC_RE.search(image["tag"])
+        src = src_match.group(2).strip() if src_match else ""
+        stored = _description_for_src(src, descriptions)
+        if not stored:
+            continue
+        next_start = images[index + 1]["start"] if index + 1 < len(images) else len(source)
+        following = source[image["end"]:next_start]
+        caption_match = _VISIBLE_CAPTION_RE.search(following)
+        visible = _clean_text(caption_match.group(0)) if caption_match else ""
+        if not visible and stored in _clean_text(following):
+            visible = stored
+        slots.append(visible or stored)
+    return slots
+
+
+def sync_slide_caption_metadata(
+    slide: Dict[str, Any],
+    descriptions: Dict[str, str],
+) -> Tuple[bool, int]:
+    """Persist visual captions in canonical slide fields used during reload rebuilds."""
+
+    slots = image_caption_slots(slide.get("html", ""), descriptions)
+    if not slots:
+        return False, 0
+    existing = slide.get("captions")
+    captions = list(existing) if isinstance(existing, list) else []
+    added = 0
+    while len(captions) < len(slots):
+        captions.append("")
+    for index, caption in enumerate(slots):
+        if not _clean_text(captions[index]) and caption:
+            captions[index] = caption
+            added += 1
+    changed = captions != existing
+    if changed:
+        slide["captions"] = captions
+    if len(captions) == 1 and captions[0] and not _clean_text(slide.get("description")):
+        slide["description"] = captions[0]
+        changed = True
+    return changed, added
 
 
 def add_missing_image_descriptions(
@@ -656,18 +710,24 @@ def _handle_image_descriptions(payload, namespace):
     indexes = _target_indexes(payload, slides)
     changed = []
     added = 0
+    metadata_secured = 0
     for index in indexes:
         slide = slides[index] if isinstance(slides[index], dict) else {}
         updated, count, _ = add_missing_image_descriptions(slide.get("html", ""), descriptions)
-        if count:
+        slide["html"] = updated
+        metadata_changed, metadata_added = sync_slide_caption_metadata(slide, descriptions)
+        if count or metadata_changed:
             slide["html"] = updated
-            slide["_designer_keep_html"] = True
+            if count:
+                slide["_designer_keep_html"] = True
             slides[index] = slide
             changed.append(index)
             added += count
+            metadata_secured += metadata_added
     slides = _finalize_slides(slides, project_data, creative_images, branding, namespace)
-    if added:
-        message = f"تمت إضافة {added} من أوصاف الصور المحفوظة إلى الصور التي كان وصفها غير ظاهر."
+    effective = max(added, metadata_secured)
+    if effective:
+        message = f"تمت إضافة وتثبيت {effective} من أوصاف الصور المحفوظة لتظل ظاهرة بعد الحفظ وإعادة التحميل."
         status = "success"
     elif descriptions:
         message = "كل الصور المطابقة لها أوصاف ظاهرة بالفعل؛ لم تتم إضافة نص مكرر."
@@ -679,7 +739,10 @@ def _handle_image_descriptions(payload, namespace):
         message,
         slides,
         creative_images,
-        [{"tool": "apply_image_descriptions", "status": status, "indexes": changed, "descriptions_added": added}],
+        [{
+            "tool": "apply_image_descriptions", "status": status, "indexes": changed,
+            "descriptions_added": added, "descriptions_persisted": metadata_secured,
+        }],
         [index + 1 for index in (changed or indexes)],
         payload,
         namespace,
