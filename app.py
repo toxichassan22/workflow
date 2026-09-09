@@ -17372,6 +17372,63 @@ def deploy_webhook():
     return jsonify({'error': 'deploy.sh not found'}), 404
 
 
+@app.route('/api/deploy-webhook-staging', methods=['GET', 'POST'])
+def deploy_webhook_staging():
+    """Staging counterpart of deploy_webhook: deploys origin/staging into the
+    separate proposal-generator-staging directory. Production paths are never
+    touched here, so lab experiments cannot overwrite client data."""
+    env_secret = os.environ.get('DEPLOY_WEBHOOK_SECRET_STAGING') or os.environ.get('DEPLOY_WEBHOOK_SECRET')
+    if not env_secret:
+        return jsonify({'error': 'DEPLOY_WEBHOOK_SECRET not configured in environment'}), 403
+
+    secret = request.args.get('secret') or request.headers.get('X-Deploy-Secret') or (request.json.get('secret') if (request.is_json and request.json) else None)
+    if not secret or secret != env_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    requested_commit = request.args.get('commit') or (
+        request.json.get('commit') if (request.is_json and request.json) else None
+    )
+    if requested_commit and not re.fullmatch(r'[0-9a-fA-F]{40}', str(requested_commit)):
+        return jsonify({'error': 'Invalid deployment commit'}), 400
+
+    deploy_script = '/home/demos/proposal-generator-staging/deploy-staging.sh'
+    if not os.path.exists(deploy_script):
+        deploy_script = os.path.join(os.path.dirname(__file__), 'deploy-staging.sh')
+
+    if os.path.exists(deploy_script):
+        try:
+            import subprocess
+            command = ['bash', deploy_script]
+            if requested_commit:
+                command.append(str(requested_commit))
+
+            deploy_log_path = '/home/demos/proposal-generator-staging/deploy.log'
+            if not os.path.exists(os.path.dirname(deploy_log_path)):
+                deploy_log_path = os.path.join(os.path.dirname(__file__), 'deploy-staging.log')
+
+            log_fh = None
+            try:
+                log_fh = open(deploy_log_path, 'a', encoding='utf-8')
+                log_fh.write(f"\n--- Staging deployment triggered at {datetime.now().isoformat()} for commit {requested_commit or 'latest'} ---\n")
+                log_fh.flush()
+            except OSError:
+                log_fh = None
+
+            popen_kwargs = {'start_new_session': True}
+            if log_fh is not None:
+                popen_kwargs['stdout'] = log_fh
+                popen_kwargs['stderr'] = subprocess.STDOUT
+
+            subprocess.Popen(command, **popen_kwargs)
+            return jsonify({'status': 'Staging deployment triggered successfully',
+                            'target': 'staging',
+                            'expected_commit': requested_commit,
+                            'timestamp': datetime.now().isoformat()}), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'deploy-staging.sh not found'}), 404
+
+
 @app.route('/favicon.ico')
 def favicon():
     if os.path.exists(os.path.join(os.path.dirname(__file__), 'favicon.ico')):
