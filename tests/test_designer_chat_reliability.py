@@ -230,3 +230,29 @@ def test_watermark_deterministic_plan_handles_user_exact_request():
     assert app._is_white_or_light_slide(slides[1])
 
 
+def test_watermark_survives_model_regeneration():
+    import app
+
+    source = app._apply_slide_watermark(
+        '<div class="slide" style="width:1280px;height:720px;"><h1>old</h1></div>',
+        "/uploads/logo.png",
+        opacity=0.10,
+        width_px=640,
+    )
+    regenerated = '<div class="slide" style="width:1280px;height:720px;"><h1>new</h1></div>'
+    carried = app._carry_slide_watermark(source, regenerated)
+    assert 'data-slide-watermark="true"' in carried
+    assert 'opacity:0.1' in carried
+    assert 'width:640px' in carried
+    assert '<h1>new</h1>' in carried
+
+    # A slide that never had one gains nothing
+    assert app._carry_slide_watermark(regenerated, regenerated) == regenerated
+
+    # Removal requests must not resurrect it, other edits must keep it
+    assert app._is_watermark_removal_instruction("احذف العلامة المائية من الشريحة")
+    assert not app._is_watermark_removal_instruction("احذف البطاقة الثانية من الشريحة")
+    assert not app._is_watermark_removal_instruction("كبر العلامة المائية وخليها واضحة")
+
+
+

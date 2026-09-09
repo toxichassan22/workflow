@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import math
+import colorsys
 from datetime import datetime, timezone
 import re
 import base64
@@ -3572,18 +3573,139 @@ def is_watermark_request(message):
     return any(re.search(pat, normalized) for pat in patterns)
 
 
-def _is_white_or_light_slide(slide):
-    """Check whether a slide has a white or light background."""
+# Named CSS colors used on slides. Any company brand color arrives as hex or as
+# rgb()/hsl() and is measured by luminance below — detection never depends on
+# a fixed brand palette, so a new company color cannot break it.
+_CSS_NAMED_COLORS = {
+    'black': '#000000', 'white': '#ffffff',
+    'navy': '#000080', 'darkblue': '#00008b', 'mediumblue': '#0000cd', 'blue': '#0000ff',
+    'royalblue': '#4169e1', 'steelblue': '#4682b4', 'skyblue': '#87ceeb',
+    'lightskyblue': '#87cefa', 'lightblue': '#add8e6', 'powderblue': '#b0e0e6',
+    'midnightblue': '#191970', 'slateblue': '#6a5acd', 'darkslateblue': '#483d8b',
+    'indigo': '#4b0082', 'darkviolet': '#9400d3', 'blueviolet': '#8a2be2',
+    'purple': '#800080', 'darkred': '#8b0000', 'red': '#ff0000', 'maroon': '#800000',
+    'brown': '#a52a2a', 'chocolate': '#d2691e', 'sienna': '#a0522d',
+    'orange': '#ffa500', 'darkorange': '#ff8c00', 'coral': '#ff7f50',
+    'tomato': '#ff6347', 'orangered': '#ff4500', 'salmon': '#fa8072',
+    'darksalmon': '#e9967a', 'lightsalmon': '#ffa07a',
+    'pink': '#ffc0cb', 'lightpink': '#ffb6c1', 'hotpink': '#ff69b4',
+    'gold': '#ffd700', 'goldenrod': '#daa520', 'darkgoldenrod': '#b8860b',
+    'yellow': '#ffff00', 'lightyellow': '#ffffe0', 'lemonchiffon': '#fffacd',
+    'lightgoldenrodyellow': '#fafad2', 'khaki': '#f0e68c', 'darkkhaki': '#bdb76b',
+    'olive': '#808000', 'olivedrab': '#6b8e23', 'darkolivegreen': '#556b2f',
+    'yellowgreen': '#9acd32', 'greenyellow': '#adff2f', 'chartreuse': '#7fff00',
+    'lawngreen': '#7cfc00', 'lime': '#00ff00', 'limegreen': '#32cd32',
+    'springgreen': '#00ff7f', 'mediumspringgreen': '#00fa9a',
+    'forestgreen': '#228b22', 'green': '#008000', 'darkgreen': '#006400',
+    'seagreen': '#2e8b57', 'mediumseagreen': '#3cb371', 'lightgreen': '#90ee90',
+    'palegreen': '#98fb98', 'teal': '#008080', 'lightseagreen': '#20b2aa',
+    'turquoise': '#40e0d0', 'mediumturquoise': '#48d1cc', 'darkturquoise': '#00ced1',
+    'paleturquoise': '#afeeee', 'aqua': '#00ffff', 'cyan': '#00ffff',
+    'gray': '#808080', 'grey': '#808080', 'darkgray': '#a9a9a9', 'darkgrey': '#a9a9a9',
+    'dimgray': '#696969', 'dimgrey': '#696969', 'slategray': '#708090',
+    'slategrey': '#708090', 'darkslategray': '#2f4f4f', 'darkslategrey': '#2f4f4f',
+    'lightslategray': '#778899', 'lightslategrey': '#778899', 'silver': '#c0c0c0',
+    'lightgray': '#d3d3d3', 'lightgrey': '#d3d3d3', 'gainsboro': '#dcdcdc',
+    'whitesmoke': '#f5f5f5', 'ghostwhite': '#f8f8ff', 'aliceblue': '#f0f8ff',
+    'azure': '#f0ffff', 'mintcream': '#f5fffa', 'honeydew': '#f0fff0',
+    'beige': '#f5f5dc', 'ivory': '#fffff0', 'linen': '#faf0e6',
+    'seashell': '#fff5ee', 'snow': '#fffafa', 'floralwhite': '#fffaf0',
+    'oldlace': '#fdf5e6', 'cornsilk': '#fff8dc', 'papayawhip': '#ffefd5',
+    'blanchedalmond': '#ffebcd', 'bisque': '#ffe4c4', 'moccasin': '#ffe4b5',
+    'navajowhite': '#ffdead', 'wheat': '#f5deb3', 'tan': '#d2b48c',
+}
+
+
+def _parse_css_color_to_rgb(value):
+    """Parse any CSS color (hex, rgb()/rgba(), hsl()/hsla(), named) into (r, g, b, alpha)."""
+    text = str(value or '').strip().lower()
+    if not text or text == 'transparent':
+        return None
+    short = re.fullmatch(r'#([0-9a-f]{3})', text)
+    if short:
+        digits = short.group(1)
+        return (int(digits[0] * 2, 16), int(digits[1] * 2, 16), int(digits[2] * 2, 16), 1.0)
+    full = re.fullmatch(r'#([0-9a-f]{6})', text)
+    if full:
+        digits = full.group(1)
+        return (int(digits[0:2], 16), int(digits[2:4], 16), int(digits[4:6], 16), 1.0)
+    rgb = re.fullmatch(r'rgba?\(\s*([^)]+)\)', text)
+    if rgb:
+        parts = [part.strip() for part in rgb.group(1).split(',')]
+        if len(parts) in (3, 4):
+            try:
+                channels = []
+                for part in parts[:3]:
+                    if part.endswith('%'):
+                        channels.append(min(255.0, max(0.0, float(part[:-1]) * 2.55)))
+                    else:
+                        channels.append(min(255.0, max(0.0, float(part))))
+                alpha = 1.0
+                if len(parts) == 4:
+                    alpha_text = parts[3]
+                    alpha = float(alpha_text[:-1]) / 100.0 if alpha_text.endswith('%') else float(alpha_text)
+                    alpha = min(1.0, max(0.0, alpha))
+                return (channels[0], channels[1], channels[2], alpha)
+            except (TypeError, ValueError):
+                pass
+    hsl = re.fullmatch(r'hsla?\(\s*([^)]+)\)', text)
+    if hsl:
+        parts = [part.strip() for part in hsl.group(1).split(',')]
+        if len(parts) in (3, 4):
+            try:
+                hue = (float(parts[0].rstrip('deg')) % 360.0) / 360.0
+                saturation = min(1.0, max(0.0, float(parts[1].rstrip('%')) / 100.0))
+                lightness = min(1.0, max(0.0, float(parts[2].rstrip('%')) / 100.0))
+                red, green, blue = colorsys.hls_to_rgb(hue, lightness, saturation)
+                alpha = 1.0
+                if len(parts) == 4:
+                    alpha_text = parts[3]
+                    alpha = float(alpha_text[:-1]) / 100.0 if alpha_text.endswith('%') else float(alpha_text)
+                    alpha = min(1.0, max(0.0, alpha))
+                return (red * 255.0, green * 255.0, blue * 255.0, alpha)
+            except (TypeError, ValueError):
+                pass
+    named = _CSS_NAMED_COLORS.get(text)
+    if named:
+        return _parse_css_color_to_rgb(named)
+    return None
+
+
+def _css_color_luminance(value):
+    """WCAG relative luminance (0-1) of any CSS color, composited over white when translucent."""
+    parsed = _parse_css_color_to_rgb(value)
+    if not parsed:
+        return None
+    red, green, blue, alpha = parsed
+    red = alpha * red + (1.0 - alpha) * 255.0
+    green = alpha * green + (1.0 - alpha) * 255.0
+    blue = alpha * blue + (1.0 - alpha) * 255.0
+    linear = []
+    for channel in (red / 255.0, green / 255.0, blue / 255.0):
+        channel = min(1.0, max(0.0, channel))
+        linear.append(channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _is_white_or_light_slide(slide, minimum_luminance=0.45):
+    """Check whether a slide has a white or light background.
+
+    Every background color in every shade is measured by luminance, so any
+    company brand color is classified correctly without a fixed palette.
+    """
     if not isinstance(slide, dict):
         return True
     stype = str(slide.get('type') or 'content').lower()
     if stype in ('cover', 'divider', 'back_cover', 'closing', 'section_divider', 'index'):
         return False
     html = str(slide.get('html') or '')
-    dark_hexes = (
-        '0c2340|06121e|0a192f|0b1d33|111827|1f2937|000000|000|'
-        '1a4d6f|254b66|1e3a5f|0f2a43|1f3a5f|212529|343a40|212121|263238'
-    )
+    if re.search(
+        r'class=["\'][^"\']*\b(?:dark-slide|cover-slide|divider-slide|slide-dark|bg-dark|dark-mode)\b',
+        html,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    color_token = r'(?:#[0-9a-f]{3,6}\b|rgba?\([^)]*\)|hsla?\([^)]*\)|[a-z]+)'
     # The root slide background decides: a white slide holding dark cards inside is
     # still a white slide, while a dark root stays dark even with light cards in it.
     root_style = ''
@@ -3593,24 +3715,22 @@ def _is_white_or_light_slide(slide):
         if style_match:
             root_style = style_match.group(1)
     if root_style:
-        if re.search(r'background(?:-color)?\s*:\s*#(?:' + dark_hexes + r')\b', root_style, flags=re.IGNORECASE):
-            return False
-        if re.search(r'linear-gradient\([^)]*#(?:' + dark_hexes + r')\b', root_style, flags=re.IGNORECASE):
-            return False
-        if re.search(r'rgba?\(\s*\d{1,2}\s*,\s*\d{1,2}\s*,\s*\d{1,2}\s*[,)]', root_style):
-            return False
-        if re.search(r'background(?:-color)?\s*:\s*#(?:fff|ffffff)\b', root_style, flags=re.IGNORECASE):
-            return True
-        if re.search(r'rgba?\(\s*25[0-5]\s*,\s*25[0-5]\s*,\s*25[0-5]\s*[,)]', root_style):
-            return True
-    dark_patterns = (
-        r'background(?:-color)?\s*:\s*#(?:' + dark_hexes + r')\b',
-        r'linear-gradient\([^)]*#(?:' + dark_hexes + r')',
-        r'rgba?\(\s*\d{1,2}\s*,\s*\d{1,2}\s*,\s*\d{1,2}\s*[,)]',
-        r'class=["\'][^"\']*\b(?:dark-slide|cover-slide|divider-slide|slide-dark|bg-dark|dark-mode)\b',
-    )
-    for dp in dark_patterns:
-        if re.search(dp, html, re.IGNORECASE):
+        root_colors = []
+        for background in re.findall(r'background(?:-color)?\s*:\s*([^;]+)', root_style, flags=re.IGNORECASE):
+            root_colors.extend(re.findall(color_token, background, flags=re.IGNORECASE))
+        measured = []
+        for color in root_colors:
+            luminance = _css_color_luminance(color)
+            if luminance is not None:
+                measured.append(luminance)
+        if measured:
+            return all(value >= minimum_luminance for value in measured)
+    background_colors = []
+    for background in re.findall(r'background(?:-color)?\s*:\s*([^;}"\']+)', html, flags=re.IGNORECASE):
+        background_colors.extend(re.findall(color_token, background, flags=re.IGNORECASE))
+    for color in background_colors:
+        luminance = _css_color_luminance(color)
+        if luminance is not None and luminance < minimum_luminance:
             return False
     return True
 
@@ -3660,6 +3780,71 @@ def _remove_slide_watermark(html):
         flags=re.IGNORECASE,
     )
     return cleaned
+
+
+def _watermark_spec_from_html(html):
+    """Read the watermark overlay spec (logo, opacity, width) already on a slide."""
+    if not html:
+        return None
+    match = re.search(
+        r'<div\b[^>]*\bdata-slide-watermark=["\']true["\'][^>]*>([\s\S]*?)</div\s*>',
+        str(html),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        match = re.search(
+            r'<div\b[^>]*\bclass=["\'][^"\']*\bslide-watermark\b[^"\']*["\'][^>]*>([\s\S]*?)</div\s*>',
+            str(html),
+            flags=re.IGNORECASE,
+        )
+    if not match:
+        return None
+    div_tag = match.group(0)[:match.group(0).find('>') + 1]
+    inner = match.group(1) or ''
+    opacity = 0.045
+    opacity_match = re.search(r'opacity\s*:\s*([0-9.]+)', div_tag, flags=re.IGNORECASE)
+    if opacity_match:
+        try:
+            opacity = float(opacity_match.group(1))
+        except (TypeError, ValueError):
+            opacity = 0.045
+    width = 480
+    width_match = re.search(r'width\s*:\s*(\d+)\s*px', inner, flags=re.IGNORECASE)
+    if width_match:
+        try:
+            width = int(width_match.group(1))
+        except (TypeError, ValueError):
+            width = 480
+    logo_match = re.search(r'<img\b[^>]*\bsrc\s*=\s*["\']([^"\']+)["\']', inner, flags=re.IGNORECASE)
+    logo_url = logo_match.group(1).strip() if logo_match else ''
+    if not logo_url:
+        return None
+    return {'logo_url': logo_url, 'opacity': opacity, 'width_px': width}
+
+
+def _carry_slide_watermark(source_html, output_html):
+    """Keep a slide watermark across model regeneration that drops it.
+
+    The model rebuilds the whole slide and almost never reproduces the overlay
+    div, so without this any later AI edit silently deletes the watermark.
+    """
+    if not output_html or _watermark_spec_from_html(output_html):
+        return output_html
+    spec = _watermark_spec_from_html(source_html)
+    if not spec:
+        return output_html
+    return _apply_slide_watermark(
+        output_html, spec['logo_url'],
+        opacity=spec['opacity'], width_px=spec['width_px'],
+    )
+
+
+def _is_watermark_removal_instruction(instruction):
+    """Check whether an edit instruction asks to remove the watermark itself."""
+    normalized = normalize_arabic_digits_py(str(instruction or '').strip().lower())
+    if not re.search(r'(?:احذف|حذف|امسح|إزالة|ازالة|ازل|شيل)', normalized):
+        return False
+    return bool(re.search(r'(?:watermark|الوترمارك|الووترمارك|العلامة|علامة\s*مائي|لوجو|شعار)', normalized))
 
 
 def _designer_deterministic_plan(message, slides, current_index, target_indexes):
@@ -4235,6 +4420,10 @@ HTML الحالي:
                     allow_all_maps=True,
                 )
                 output = _sanitize_designer_output(output)
+                # The model rebuilds the slide and drops the watermark overlay div.
+                # Carry it over so any later AI edit cannot silently delete it.
+                if not _is_watermark_removal_instruction(instruction):
+                    output = _carry_slide_watermark(html, output)
                 response_text = parsed.get('response') or 'تم تحديث الشريحة بنجاح.'
                 if vision_error:
                     response_text += ' التعديل جرى على الكود بدون معاينة بصرية للشريحة.'
@@ -5187,7 +5376,7 @@ def api_designer_chat():
                         for part in table_parts:
                             p_slide = copy.deepcopy(base_slide)
                             p_slide['title'] = part['title']
-                            p_slide['html'] = part['html']
+                            p_slide['html'] = _carry_slide_watermark(base_html, part['html'])
                             p_slide['_designer_keep_html'] = True
                             generated.append(p_slide)
                         slides[sp_idx:sp_idx + 1] = generated
@@ -5263,7 +5452,7 @@ def api_designer_chat():
                                 for cp in card_parts:
                                     p_slide = copy.deepcopy(base_slide)
                                     p_slide['title'] = cp['title']
-                                    p_slide['html'] = cp['html']
+                                    p_slide['html'] = _carry_slide_watermark(base_html, cp['html'])
                                     p_slide['_designer_keep_html'] = True
                                     generated.append(p_slide)
                                 slides[sp_idx:sp_idx + 1] = generated
@@ -5274,7 +5463,7 @@ def api_designer_chat():
                                 for p_idx, p_title, p_html, _ in (part_results if part_results else [(0, part_titles[0], base_html, '')]):
                                     p_slide = copy.deepcopy(base_slide)
                                     p_slide['title'] = p_title
-                                    p_slide['html'] = p_html
+                                    p_slide['html'] = _carry_slide_watermark(base_html, p_html)
                                     p_slide['_designer_keep_html'] = True
                                     generated.append(p_slide)
                                 slides[sp_idx:sp_idx + 1] = generated
@@ -5285,7 +5474,7 @@ def api_designer_chat():
                             for p_idx, p_title, p_html, _ in part_results:
                                 p_slide = copy.deepcopy(base_slide)
                                 p_slide['title'] = p_title
-                                p_slide['html'] = p_html
+                                p_slide['html'] = _carry_slide_watermark(base_html, p_html)
                                 p_slide['_designer_keep_html'] = True
                                 generated.append(p_slide)
                             slides[sp_idx:sp_idx + 1] = generated

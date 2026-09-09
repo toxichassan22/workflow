@@ -7674,8 +7674,11 @@
       setLiveGenBanner(true, 'إعادة توليد الشريحة ' + (context.slideIndex + 1) + ' من ' + tenantSlidesData.length,
         'لن تتأثر بقية الشرائح', 35);
       try {
+        const previousHtml = tenantSlidesData[context.slideIndex] ? tenantSlidesData[context.slideIndex].html : '';
         tenantSlidesData[context.slideIndex] = await generateTenantSlideReplacement(
           context.slideIndex, buildPresentationGenerationImages());
+        tenantSlidesData[context.slideIndex].html = copyWatermarkMarkup(
+          previousHtml, tenantSlidesData[context.slideIndex].html);
         tenantProjectData.tenantSlidesData = tenantSlidesData;
         renumberTenantSlides();
         renderTenantSlides();
@@ -7745,6 +7748,8 @@
             slide: await generateTenantSlideFromSnapshot(
               planSlide, firstIndex + position, projectedTotal, generationImages, {})
           });
+          replacements[replacements.length - 1].slide.html = applyDeckWatermarkToHtml(
+            replacements[replacements.length - 1].slide.html);
         }
 
         const targetSet = new Set(targetIndexes);
@@ -22432,6 +22437,49 @@
       return card ? card.querySelector('.tenant-slide-stage') : null;
     }
 
+    /* Deck watermark inheritance: the overlay div is deck chrome. A freshly
+       generated slide (chat insert, single or section regeneration) carries no
+       watermark, so the deck copy is cloned into it — the same spec the server
+       keeps with _carry_slide_watermark. */
+    function watermarkMarkupFromHtml(html) {
+      const source = String(html || '');
+      let match = source.match(/<div\b[^>]*\bdata-slide-watermark=["']true["'][^>]*>[\s\S]*?<\/div\s*>/i);
+      if (!match) match = source.match(/<div\b[^>]*\bclass=["'][^"']*\bslide-watermark\b[^"']*["'][^>]*>[\s\S]*?<\/div\s*>/i);
+      return match ? match[0] : '';
+    }
+
+    function stripWatermarkMarkup(html) {
+      let out = String(html || '');
+      out = out.replace(/<div\b[^>]*\bdata-slide-watermark=["']true["'][^>]*>[\s\S]*?<\/div\s*>/gi, '');
+      out = out.replace(/<div\b[^>]*\bclass=["'][^"']*\bslide-watermark\b[^"']*["'][^>]*>[\s\S]*?<\/div\s*>/gi, '');
+      return out;
+    }
+
+    function copyWatermarkMarkup(sourceHtml, targetHtml) {
+      if (!targetHtml) return targetHtml;
+      const markup = watermarkMarkupFromHtml(sourceHtml);
+      if (!markup) return targetHtml;
+      if (watermarkMarkupFromHtml(targetHtml)) return targetHtml;
+      const cleaned = stripWatermarkMarkup(targetHtml);
+      const closing = cleaned.match(/<\/div\s*>\s*$/i);
+      if (!closing || closing.index === undefined) return cleaned + markup;
+      return cleaned.slice(0, closing.index) + markup + cleaned.slice(closing.index);
+    }
+
+    function deckWatermarkMarkup() {
+      for (const slide of (tenantSlidesData || [])) {
+        const markup = watermarkMarkupFromHtml(slide && slide.html);
+        if (markup) return markup;
+      }
+      return '';
+    }
+
+    function applyDeckWatermarkToHtml(html) {
+      const markup = deckWatermarkMarkup();
+      if (!markup || !html) return html;
+      return copyWatermarkMarkup(markup, html);
+    }
+
     /* Single-card refresh for manual edit flows (تعديل/اعتماد/الغاء/تراجع/تقدم/حذف
        عنصر/إضافة نص/إضافة صورة). renderTenantSlides() rebuilds every card, which
        makes all slides flash and resets the scroll position. Rebuilding only the
@@ -24046,6 +24094,8 @@
           content_source: reply.contentSource || reply.content_source || ''
         };
         tenantSlidesData.splice(insertIdx, 0, newSlide);
+        newSlide.html = applyDeckWatermarkToHtml(newSlide.html);
+        tenantProjectData.tenantSlidesData = tenantSlidesData;
         selectTenantSlide(insertIdx);
       } else if (Array.isArray(reply.slidesData)) {
         const oldLength = tenantSlidesData.length;
@@ -24102,6 +24152,7 @@
       }
       tenantProjectData.designerChat = designerChatPersistence();
       renumberTenantSlides();
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
       renderTenantSlides();
       renderTenantDesignerChat();
       triggerAutoSaveDraft();
