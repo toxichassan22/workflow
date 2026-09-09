@@ -537,7 +537,7 @@
 
     .ge-slide-edit-controls {
       display: flex;
-      align-items: center;
+      align-items: stretch;
       justify-content: flex-start;
       gap: 6px;
       padding: 8px 10px;
@@ -601,6 +601,29 @@
     .ge-slide-edit-controls button:disabled {
       opacity: .45;
       cursor: default;
+    }
+
+    .slide-edit-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+
+    .slide-edit-group-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .slide-edit-group-items {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
     }
 
     .slide-element-selected {
@@ -7072,6 +7095,62 @@
     let tenantDesignerChatMemory = '';
     let tenantChatFocusIndexes = [];
     const DESIGNER_CHAT_HISTORY_KEPT = 40;
+    // Busy state for the designer chat progress indicator. renderTenantDesignerChat() rebuilds
+    // #tenantChatMessages from tenantDesignerMessages, so a DOM-only typing indicator would be
+    // wiped by any re-render (for example opening a slide edit session mid-generation).
+    // Keeping progress here lets the indicator survive those re-renders.
+    let tenantDesignerChatBusy = null;
+
+    function updateDesignerChatStatus() {
+      const status = document.querySelector('#tenantSlidesChat .ge-chat-panel-status');
+      if (!status) return;
+      if (tenantDesignerChatBusy && tenantDesignerChatBusy.message) {
+        status.textContent = tenantDesignerChatBusy.message;
+      } else {
+        status.textContent = 'جاهز للتعديل';
+      }
+    }
+
+    function setDesignerChatBusy(message) {
+      tenantDesignerChatBusy = {
+        progress: 5,
+        message: String(message || 'جاري تنفيذ التعديل...')
+      };
+      updateDesignerChatStatus();
+    }
+
+    function updateDesignerChatBusy(progress, message) {
+      if (!tenantDesignerChatBusy) return;
+      const value = Math.max(0, Math.min(100, Math.round(Number(progress) || 0)));
+      tenantDesignerChatBusy.progress = value;
+      if (message) tenantDesignerChatBusy.message = String(message);
+      const indicator = document.getElementById('tenantChatTypingIndicator');
+      if (indicator) setInlineLoaderProgress(indicator, value, tenantDesignerChatBusy.message);
+      updateDesignerChatStatus();
+    }
+
+    function clearDesignerChatBusy() {
+      tenantDesignerChatBusy = null;
+      const indicator = document.getElementById('tenantChatTypingIndicator');
+      if (indicator) indicator.remove();
+      updateDesignerChatStatus();
+    }
+
+    function restoreDesignerChatBusyIndicator() {
+      if (!tenantDesignerChatBusy) return;
+      const messages = document.getElementById('tenantChatMessages');
+      if (!messages) return;
+      if (document.getElementById('tenantChatTypingIndicator')) return;
+      const hint = messages.querySelector('.tenant-hint');
+      if (hint) hint.remove();
+      const indicator = document.createElement('div');
+      indicator.id = 'tenantChatTypingIndicator';
+      indicator.className = 'tenant-chat-message assistant typing';
+      showInlineLoader(indicator, tenantDesignerChatBusy.message);
+      setInlineLoaderProgress(indicator, tenantDesignerChatBusy.progress, tenantDesignerChatBusy.message);
+      messages.appendChild(indicator);
+      messages.scrollTop = messages.scrollHeight;
+    }
 
     function designerChatPersistence(presentationId = tenantPresentationId) {
       return {
@@ -22363,24 +22442,39 @@
       const canRedo = session.redo.length > 0;
       const hasSel = !!session.sel;
       const dis = hasSel ? '' : ' disabled';
-      return '<button type="button" class="active" data-slide-edit-act="commit">اعتماد</button>'
+      return '<div class="slide-edit-group"><span class="slide-edit-group-title">الجلسة</span>'
+        + '<div class="slide-edit-group-items">'
+        + '<button type="button" class="active" data-slide-edit-act="commit">اعتماد</button>'
+        + '<button type="button" data-slide-edit-act="cancel">الغاء</button>'
+        + '</div></div>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">السجل</span>'
+        + '<div class="slide-edit-group-items">'
         + '<button type="button" data-slide-edit-act="undo"' + (canUndo ? '' : ' disabled') + '>تراجع</button>'
         + '<button type="button" data-slide-edit-act="redo"' + (canRedo ? '' : ' disabled') + '>تقدم</button>'
-        + '<button type="button" data-slide-edit-act="cancel">الغاء</button>'
+        + '</div></div>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">إضافة</span>'
+        + '<div class="slide-edit-group-items">'
         + '<button type="button" data-slide-edit-act="addtext">إضافة نص</button>'
         + '<button type="button" data-slide-edit-act="addimage">إضافة صورة</button>'
-        + '<label class="slide-edit-color">لون النص<input type="color" data-slide-edit-color="color" value="#1e293b"'
-        + dis + '><input type="text" data-slide-edit-hex="color" value="#1e293b" maxlength="7" spellcheck="false" placeholder="#000000"'
-        + dis + '></label>'
-        + '<label class="slide-edit-color">لون الخلفية<input type="color" data-slide-edit-color="background" value="#ffffff"'
-        + dis + '><input type="text" data-slide-edit-hex="background" value="#ffffff" maxlength="7" spellcheck="false" placeholder="#ffffff"'
-        + dis + '></label>'
-        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="color"' + dis + '>قطارة النص</button>'
-        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="background"' + dis + '>قطارة الخلفية</button>'
+        + '</div></div>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">تنسيق النص</span>'
+        + '<div class="slide-edit-group-items">'
         + '<button type="button" data-slide-edit-act="fontup"' + dis + '>تكبير</button>'
         + '<button type="button" data-slide-edit-act="fontdown"' + dis + '>تصغير</button>'
         + '<button type="button" data-slide-edit-act="bold"' + dis + '>عريض</button>'
-        + '<button type="button" data-slide-edit-act="del"' + dis + '>حذف العنصر</button>';
+        + '<button type="button" data-slide-edit-act="del"' + dis + '>حذف العنصر</button>'
+        + '</div></div>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">الألوان</span>'
+        + '<div class="slide-edit-group-items">'
+        + '<label class="slide-edit-color">لون النص<input type="color" data-slide-edit-color="color" value="#1e293b"'
+        + dis + '><input type="text" data-slide-edit-hex="color" value="#1e293b" maxlength="7" spellcheck="false" placeholder="#000000"'
+        + dis + '></label>'
+        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="color"' + dis + '>قطارة النص</button>'
+        + '<label class="slide-edit-color">لون الخلفية<input type="color" data-slide-edit-color="background" value="#ffffff"'
+        + dis + '><input type="text" data-slide-edit-hex="background" value="#ffffff" maxlength="7" spellcheck="false" placeholder="#ffffff"'
+        + dis + '></label>'
+        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="background"' + dis + '>قطارة الخلفية</button>'
+        + '</div></div>';
     }
 
     function normalizeHexColor(value) {
@@ -23246,6 +23340,10 @@
     function renderTenantSlides() {
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
+      // Manual edit flows (تعديل/اعتماد/تراجع/تقدم/الغاء) re-render the whole list.
+      // Clearing the container resets scrollTop to 0, which looked like a 3-4 slide
+      // jump. Preserve the exact pixel so the view stays fixed on the same slide.
+      const savedScrollTop = wrap.scrollTop;
       renumberTenantSlides();
       try { syncSlideEditSessionsAfterRender(); } catch (err) {}
       // If branding hasn't loaded yet (failed/slow earlier), retry it and re-render
@@ -23305,6 +23403,15 @@
         wrap.appendChild(container);
         containers.push({ container, stage, slide: s, index: i });
       });
+
+      // Instant restore (no smooth animation) so the view does not visibly move.
+      try {
+        wrap.style.scrollBehavior = 'auto';
+        wrap.scrollTop = savedScrollTop;
+        wrap.style.scrollBehavior = '';
+      } catch (err) {
+        try { wrap.scrollTop = savedScrollTop; } catch (err2) {}
+      }
 
       renderTenantSlidesSidebar();
       renderTenantDesignerChat();
@@ -23540,6 +23647,8 @@
 
       if (!tenantDesignerMessages.length) {
         messages.innerHTML = '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
+        restoreDesignerChatBusyIndicator();
+        updateDesignerChatStatus();
         return;
       }
       messages.innerHTML = tenantDesignerMessages.map(message =>
@@ -23549,7 +23658,9 @@
           : '') +
         escapeHtml(message.content) + '</div>'
       ).join('');
+      restoreDesignerChatBusyIndicator();
       messages.scrollTop = messages.scrollHeight;
+      updateDesignerChatStatus();
     }
 
     function detectMoveSlideCommand(text) {
@@ -23720,7 +23831,8 @@
         }
         transientFailures = 0;
         const progress = Math.max(1, Math.min(99, Number(result?.progress || 5)));
-        if (indicator) {
+        updateDesignerChatBusy(progress, result?.message || 'جاري تنفيذ تعديل العرض...');
+        if (indicator && document.contains(indicator)) {
           setInlineLoaderProgress(indicator, progress, result?.message || 'جاري تنفيذ تعديل العرض...');
         }
         if (result?.status === 'completed' || (result?.success && result?.data)) return result;
@@ -23798,16 +23910,10 @@
       if (target1BasedIndexes.length) tenantChatFocusIndexes = target1BasedIndexes.slice();
 
       const messagesDiv = document.getElementById('tenantChatMessages');
-      let indicator = null;
-      if (messagesDiv) {
-        indicator = document.createElement('div');
-        indicator.id = 'tenantChatTypingIndicator';
-        indicator.className = 'tenant-chat-message assistant typing';
-        showInlineLoader(indicator, 'جاري تنفيذ التعديل...');
-        setInlineLoaderProgress(indicator, 10, 'جاري تجهيز الطلب...');
-        messagesDiv.appendChild(indicator);
-        messagesDiv.scrollTop = messagesDiv.scrollHeight;
-      }
+      setDesignerChatBusy('جاري تجهيز الطلب...');
+      restoreDesignerChatBusyIndicator();
+      let indicator = document.getElementById('tenantChatTypingIndicator');
+      if (messagesDiv) messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
       // The turn carries the conversation behind it: recent turns verbatim and the older ones as
       // the memory the server compressed. A dirty workspace also carries its current slides so
@@ -23839,11 +23945,13 @@
         chatPayload.slidePlan = tenantSlidePlan;
         chatPayload.projectData = { ...tenantProjectData, tenantSlidesData };
       }
-      const data = await requestTenantDesignerChat(chatPayload, indicator);
-
-      if (indicator && data?.success) setInlineLoaderProgress(indicator, 100, 'اكتمل الطلب');
-
-      if (indicator) indicator.remove();
+      let data = null;
+      try {
+        data = await requestTenantDesignerChat(chatPayload, indicator);
+      } finally {
+        updateDesignerChatBusy(100, 'اكتمل الطلب');
+        clearDesignerChatBusy();
+      }
 
       const reply = data && data.data ? data.data : null;
       if (!data.success || !reply) {
