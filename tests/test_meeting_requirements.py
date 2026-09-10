@@ -9551,6 +9551,45 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('data-slide-watermark="true"', slides[0]['html'],
                       'Watermark must survive presentation save and reload')
 
+    def test_watermark_size_survives_presentation_get(self):
+        """GET /api/presentations/<id> must not shrink the watermark logo.
+
+        The read path used to run the legacy logo pass after the engine
+        renumber. That pass matched the watermark overlay img (its src carries
+        tenant-assets) and appended max-height:50px;width:auto, collapsing
+        width:480px to a ~50px mark on every open/refresh — and the next save
+        persisted the shrink."""
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        app_mod = self.application_module
+        logo_url = '/uploads/creative/tenant-x/logo.png'
+        watermarked_html = app_mod._apply_slide_watermark(
+            '<div class="slide"><h1>محتوى</h1></div>', logo_url, width_px=480
+        )
+        created = client.post('/api/presentations', headers=headers, json={
+            'title': 'عرض حجم العلامة المائية',
+            'projectData': {},
+            'slidesData': [{'html': watermarked_html, 'title': 'شريحة', 'type': 'content', 'is_custom': True}],
+            'slideCount': 1,
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        pres_id = created.get_json()['presentationId']
+
+        fetched = client.get(f'/api/presentations/{pres_id}', headers=headers)
+        self.assertEqual(fetched.status_code, 200, fetched.get_json())
+        html = fetched.get_json()['presentation']['slidesData'][0]['html']
+        self.assertIn('data-slide-watermark="true"', html)
+        marker = html.find('slide-watermark')
+        watermark_img = re.search(r'<img\b[^>]*>', html[marker:])
+        self.assertIsNotNone(watermark_img, 'Watermark overlay must keep its img')
+        tag = watermark_img.group(0)
+        self.assertIn('width:480px', tag,
+                      'Watermark width must survive a presentation GET (refresh/reopen)')
+        self.assertNotIn('max-height:50px', tag,
+                         'GET must not append the legacy 50px logo sizing to the watermark')
+        self.assertNotIn('width:auto', tag,
+                         'GET must not override the watermark width with width:auto')
+
     def test_watermark_idempotent_on_repeated_normalization(self):
         """Applying the watermark twice must not duplicate the watermark element."""
         app_mod = self.application_module

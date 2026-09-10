@@ -8146,9 +8146,19 @@ def api_get_presentation(pres_id):
         slides, branding=branding, project_data=render_project_data, tenant_id=g.tenant_id,
         creative_images=_presentation_creative_images(render_project_data, g.tenant_id),
     )
+    project_logo_ref = slide_engine._project_logo_reference(render_project_data)
     for s in slides:
         if isinstance(s, dict) and 'html' in s and isinstance(s['html'], str):
-            s['html'] = resolve_logo_in_html(s['html'], g.tenant_id, _branding_cache=branding)
+            # Resolve through the engine copy: it fixes ##LOGO## tokens and broken
+            # logo paths exactly like the legacy pass, but never appends the 50px
+            # logo sizing over an explicit height. The legacy pass matched the
+            # watermark overlay img (its src carries tenant-assets) and appended
+            # max-height:50px;width:auto, collapsing width:480px to a ~50px mark
+            # on every open/refresh — and the next save persisted the shrink.
+            s['html'] = slide_engine.resolve_logo_in_html(
+                s['html'], g.tenant_id, _branding_cache=branding,
+                project_logo=project_logo_ref,
+            )
     pres['slide_count'] = len(slides)
     pres['slidesData'] = slides
     return jsonify({'success': True, 'presentation': pres})
