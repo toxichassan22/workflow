@@ -7243,6 +7243,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('costByPresentation', index_html)
         self.assertIn('costByProject[d.id]', index_html)
         self.assertIn('costByPresentation[item.id]', index_html)
+        self.assertIn('maps_cost_usd', index_html)
         self.assertIn('التكلفة: ', index_html)
 
     def test_presentation_creation_links_prior_draft_spend_without_stealing(self):
