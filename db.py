@@ -3678,7 +3678,8 @@ def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
         for row in conn.execute(
             'SELECT draft_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost, '
             'COALESCE(SUM(total_tokens), 0) AS tokens '
-            f'FROM ai_usage_events WHERE tenant_id = ? AND draft_id IN ({marks}) GROUP BY draft_id',
+            'FROM ai_usage_events WHERE tenant_id = ? AND draft_id IN '
+            f'({marks}) AND presentation_id IS NULL GROUP BY draft_id',
             [tenant_id] + draft_ids,
         ).fetchall():
             row = dict(row)
@@ -3689,7 +3690,8 @@ def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
                 target['total_tokens'] += int(row['tokens'] or 0)
         for row in conn.execute(
             'SELECT draft_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
-            f'FROM map_usage_events WHERE tenant_id = ? AND draft_id IN ({marks}) GROUP BY draft_id',
+            'FROM map_usage_events WHERE tenant_id = ? AND draft_id IN '
+            f'({marks}) AND presentation_id IS NULL GROUP BY draft_id',
             [tenant_id] + draft_ids,
         ).fetchall():
             row = dict(row)
@@ -3743,3 +3745,26 @@ def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
     for entry in list(projects.values()) + list(presentations.values()):
         entry['cost_usd'] = entry['ai_cost_usd'] + entry['maps_cost_usd']
     return {'projects': projects, 'presentations': presentations}
+
+
+def link_draft_usage_to_presentation(tenant_id, draft_id, presentation_id):
+    """Attribute unattributed draft spend to a newly saved presentation.
+
+    Slide generation runs before the presentation exists, so its rows carry
+    the draft id but no presentation id. Linking them at save time is what
+    puts a cost on the presentation row. Rows already linked to an earlier
+    presentation are never stolen: only unattributed rows move.
+    """
+    if not tenant_id or not draft_id or not presentation_id:
+        return 0
+    conn = get_db()
+    linked = 0
+    for table in ('ai_usage_events', 'map_usage_events'):
+        cursor = conn.execute(
+            f'UPDATE {table} SET presentation_id = ? '
+            'WHERE tenant_id = ? AND draft_id = ? AND presentation_id IS NULL',
+            (str(presentation_id), tenant_id, str(draft_id)),
+        )
+        linked += cursor.rowcount or 0
+    conn.commit()
+    return linked

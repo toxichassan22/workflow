@@ -8988,6 +8988,11 @@ def api_save_presentation():
     )
     _record_change('presentation', pres_id, 'إنشاء العرض',
                    [f'العنوان: «{title}»', f'عدد الشرائح: {slide_count}'])
+    try:
+        db.link_draft_usage_to_presentation(
+            g.tenant_id, project_data.get('draftId') or project_data.get('draft_id'), pres_id)
+    except Exception as link_error:
+        print(f"[AI-USAGE] usage link failed for presentation {pres_id}: {link_error}")
     return jsonify({'success': True, 'presentationId': pres_id}), 201
 
 
@@ -17842,6 +17847,13 @@ HTML الحالي:
                     db.update_presentation(pres_id, title=title, project_data=project_data, slides_data=slides, slide_count=len(slides), status='edited')
                 else:
                     pres_id = db.create_presentation(tenant_id, title, project_data, slides, len(slides))
+                    try:
+                        db.link_draft_usage_to_presentation(
+                            tenant_id,
+                            (project_data or {}).get('draftId') or (project_data or {}).get('draft_id'),
+                            pres_id)
+                    except Exception as link_error:
+                        print(f"[AI-USAGE] usage link failed for presentation {pres_id}: {link_error}")
                 result['presentationId'] = pres_id
                 result['data'] = {
                     'presentationId': pres_id,

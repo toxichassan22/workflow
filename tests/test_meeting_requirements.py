@@ -7245,6 +7245,53 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('costByPresentation[item.id]', index_html)
         self.assertIn('التكلفة: ', index_html)
 
+    def test_presentation_creation_links_prior_draft_spend_without_stealing(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        draft_id = 'draft-usage-link'
+        response = client.post('/api/project-draft', headers=headers, json={
+            'draftId': draft_id,
+            'draftData': {'draftId': draft_id, 'project_name': 'Link Project'},
+            'sectionStatuses': {},
+        })
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                self.tenant_a, 'model-a', flow='slide', total_tokens=70,
+                cost_usd=0.05, draft_id=draft_id)
+            db.record_maps_usage_event(
+                self.tenant_a, 'staticmap', 1, 0.002, flow='overview', draft_id=draft_id)
+
+        def _save_file(title):
+            created = client.post('/api/presentations', headers=headers, json={
+                'title': title,
+                'projectData': {'draftId': draft_id, 'project_name': 'Link Project'},
+                'slidesData': [{'title': 'Cover', 'type': 'cover', 'html': '<div class="slide">Cover</div>'}],
+                'slideCount': 1,
+            })
+            self.assertEqual(created.status_code, 201)
+            return created.get_json()['presentationId']
+
+        first_id = _save_file('First File')
+        totals = client.get(
+            f'/api/usage-totals?draftIds={draft_id}&presentationIds={first_id}',
+            headers=headers).get_json()
+        self.assertAlmostEqual(totals['presentations'][first_id]['cost_usd'], 0.052)
+        self.assertEqual(totals['presentations'][first_id]['calls'], 2)
+        self.assertAlmostEqual(totals['projects'][draft_id]['cost_usd'], 0.052)
+
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                self.tenant_a, 'model-a', flow='slide', total_tokens=30,
+                cost_usd=0.03, draft_id=draft_id)
+        second_id = _save_file('Second File')
+        totals = client.get(
+            f'/api/usage-totals?draftIds={draft_id}&presentationIds={first_id},{second_id}',
+            headers=headers).get_json()
+        self.assertAlmostEqual(totals['presentations'][first_id]['cost_usd'], 0.052)
+        self.assertAlmostEqual(totals['presentations'][second_id]['cost_usd'], 0.03)
+        self.assertAlmostEqual(totals['projects'][draft_id]['cost_usd'], 0.082)
+
     def test_slide_reordering_is_named_in_change_history(self):
         old_slides = [
             {'title': 'الأولى', 'type': 'content', 'html': '<div class="slide">أ</div>'},
