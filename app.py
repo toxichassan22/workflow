@@ -4397,6 +4397,129 @@ def _sanitize_designer_output(html):
     return html
 
 
+def _is_land_boundary_diagram_slide(title=None, content_source=None, html=None):
+    """Detect the deterministic land-boundary diagram slide.
+
+    It is the only slide the system rebuilds from documented land facts
+    (content_source == 'land_boundary_diagram'), so the designer model must
+    receive those facts explicitly — otherwise it claims success without any
+    visible change.
+    """
+    if str(content_source or '').strip() == 'land_boundary_diagram':
+        return True
+    title_text = str(title or '')
+    if 'مخطط اتجاهي' in title_text or 'حدود الأرض' in title_text:
+        return True
+    html_text = str(html or '')
+    if 'data-boundary-diagram' in html_text or 'data-boundary-direction' in html_text:
+        return True
+    return False
+
+
+def _designer_boundary_facts_note(project_data):
+    """Render the documented boundary facts for the designer-chat prompt."""
+    try:
+        data = slide_engine._extract_land_boundary_diagram_data(
+            project_data if isinstance(project_data, dict) else {}
+        )
+    except Exception:
+        return ''
+    if not isinstance(data, dict):
+        return ''
+    lines = []
+    for key, label in (('north', 'الشمال'), ('south', 'الجنوب'),
+                       ('east', 'الشرق'), ('west', 'الغرب')):
+        raw_item = data.get(key)
+        item = raw_item if isinstance(raw_item, dict) else {}
+        length = str(item.get('length') or '').strip() or 'غير موثق'
+        neighbour = str(item.get('street_name') or item.get('description') or '').strip() or 'غير موثق'
+        width = str(item.get('street_width') or '').strip() or 'غير موثق'
+        facade = 'واجهة على شارع' if item.get('is_facade') else 'جار'
+        lines.append(f'- {label}: طول الحد {length}، البيان الموثق {neighbour}، عرض الشارع {width}، التصنيف {facade}')
+    facades_summary = str(data.get('facades_summary') or '').strip() or 'غير موثق'
+    key_view = str(data.get('key_view') or '').strip() or 'غير موثق'
+    return (
+        "\n\n## بيانات الحدود الموثقة لهذه الشريحة (المصدر الوحيد — ممنوع الاختراع)\n"
+        + "\n".join(lines)
+        + f"\n- ملخص الواجهات الموثق: {facades_summary}"
+        + f"\n- الجهة المميزة الموثقة: {key_view}"
+        + "\nقواعد ملزمة عند تعديل شريحة مخطط الحدود:"
+        + "\n- المواضع الجغرافية ثابتة: الشمال أعلى، الجنوب أسفل، الشرق والغرب على الجانبين."
+        + " لا تبدل الاتجاهات ولا تنقل بطاقة من موضعها."
+        + "\n- حافظ على وسم data-boundary-direction لكل اتجاه كما هو."
+        + "\n- اعرض طول كل حد ووصف الشارع أو الجار وعرض الشارع من البيانات أعلاه فقط."
+        + " أي بيان مكتوب «غير موثق» اترك خانته كما هي ولا تخترع له نصاً."
+        + "\n- إن طلب المستخدم إضافة بيان غير موجود في القائمة أعلاه، نفذ ما يمكن تنفيذه"
+        + " من تنسيق، واذكر في الرد بوضوح أن البيان المطلوب غير موثق في بيانات المشروع"
+        + " بدل ادعاء إضافته."
+    )
+
+
+def _designer_project_context(project_data, creative_images=None, tenant_id=None):
+    """Give the planner and every slide edit the complete project source of truth."""
+    source = project_data if isinstance(project_data, dict) else {}
+    parts = [
+        "## ملف بيانات المشروع الكامل — مصدر الحقيقة الملزم",
+        "هذه أحدث بيانات متاحة لملف المشروع. استخدم كل حقل مطلوب كما هو، ولا تقل إن المعلومة غير موجودة قبل البحث في هذا الملف كاملًا. إذا ورد رابط Google Maps فهو رابط المشروع الفعلي ويمكن إدراجه نصيًا عند طلب المستخدم.",
+        slide_engine.build_project_facts(source, tenant_id),
+    ]
+    for note in (
+        _designer_boundary_facts_note(source),
+        slide_engine._timeline_data_note(source),
+        slide_engine._financial_data_note(source),
+    ):
+        if str(note or '').strip():
+            parts.append(str(note).strip())
+    asset_note = _get_images_info(creative_images or {}, source)
+    if str(asset_note or '').strip():
+        parts.append("## الأصول والخرائط والصور المتاحة فعليًا\n" + asset_note.strip())
+    return '\n\n'.join(parts)
+
+
+def _designer_project_data_for_request(request_project_data, presentation, tenant_id):
+    """Merge the presentation snapshot with its latest saved draft and current request.
+
+    The linked draft is loaded by id so opening an older presentation never sends Sol stale
+    project facts, while an unrelated newer project owned by the same user is never mixed in.
+    Current browser values win because they may contain edits made after the last explicit save.
+    """
+    cleaned_request = clean_project_data(request_project_data) if isinstance(request_project_data, dict) else {}
+    request_data = cleaned_request if isinstance(cleaned_request, dict) else {}
+    presentation_data = {}
+    if isinstance(presentation, dict):
+        raw = presentation.get('project_data')
+        if isinstance(raw, dict):
+            cleaned_presentation = clean_project_data(raw)
+            presentation_data = cleaned_presentation if isinstance(cleaned_presentation, dict) else {}
+        elif isinstance(raw, str) and raw.strip():
+            try:
+                decoded = json.loads(raw)
+                cleaned_presentation = clean_project_data(decoded) if isinstance(decoded, dict) else {}
+                presentation_data = cleaned_presentation if isinstance(cleaned_presentation, dict) else {}
+            except (TypeError, ValueError):
+                presentation_data = {}
+    presentation_draft_id = presentation.get('draft_id') if isinstance(presentation, dict) else None
+    draft_id = (
+        presentation_draft_id
+        or presentation_data.get('draftId') or presentation_data.get('draft_id')
+        or request_data.get('draftId') or request_data.get('draft_id')
+    )
+    draft_data = {}
+    if tenant_id and draft_id:
+        try:
+            draft = db.get_project_draft_by_id(tenant_id, str(draft_id))
+            if isinstance(draft, dict) and isinstance(draft.get('draft_data'), dict):
+                cleaned_draft = clean_project_data(draft['draft_data'])
+                draft_data = cleaned_draft if isinstance(cleaned_draft, dict) else {}
+        except Exception as exc:
+            print(f'[DESIGNER-CHAT] Could not load linked draft {draft_id}: {exc}')
+    merged = {**presentation_data, **draft_data, **request_data}
+    if draft_id:
+        merged['draftId'] = str(draft_id)
+    cleaned_merged = clean_project_data(merged)
+    return cleaned_merged if isinstance(cleaned_merged, dict) else {}
+
+
 def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None, slide_type='content', total_slides=None, content_source=None, skip_vision=False):
     """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
@@ -4490,7 +4613,13 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
         "خلفية شعار الشركة وشعار المشروع مستقلة لكل شعار حسب لونه وتباينه؛ لا تغيّرها عند تغيير خلفية الشريحة."
     )
 
+    is_boundary_slide = _is_land_boundary_diagram_slide(
+        title=title, content_source=content_source, html=html)
+    project_context = _designer_project_context(project_data, creative_images, tenant_id)
+
     prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}
+
+{project_context}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
 1. قواعد الإزاحات والتخطيط الجراحي (Spatial & Layout Precision):
    - تحكّم دقيق بكسلي ونسبية في CSS: رفع أو تنزيل الهيدر، ضبط هوامش البطاقات الداخلية (padding) والخارجية (margins)، وتغيير حجم البطاقات والمسافات البينية (gap).
@@ -4544,6 +4673,9 @@ HTML الحالي:
                 # Restore any preserved base64 images
                 for ph, b64_str in base64_map.items():
                     output = output.replace(ph, b64_str)
+                if not designer_chat_reliability.materially_changed(html, output, parsed.get('response')):
+                    print(f'[DESIGNER-EDIT] model returned no change on attempt {attempt}')
+                    continue
 
                 output = resolve_designer_chat_placeholders(output, project_data, presentation_id,
                                                            tenant_id, creative_images)
@@ -4559,6 +4691,39 @@ HTML الحالي:
                 # Carry it over so any later AI edit cannot silently delete it.
                 if not _is_watermark_removal_instruction(instruction):
                     output = _carry_slide_watermark(html, output)
+                if is_boundary_slide:
+                    # The boundary diagram is rebuilt from documented facts: a model
+                    # reply that drops a documented length corrupts the slide, and a
+                    # data-add request with no visible text change is a false success.
+                    # Retry instead of returning either.
+                    try:
+                        boundary_data = slide_engine._extract_land_boundary_diagram_data(
+                            project_data if isinstance(project_data, dict) else {}
+                        )
+                    except Exception:
+                        boundary_data = {}
+                    if isinstance(boundary_data, dict):
+                        dropped = []
+                        for _dir_key in ('north', 'south', 'east', 'west'):
+                            _raw_item = boundary_data.get(_dir_key)
+                            _item = _raw_item if isinstance(_raw_item, dict) else {}
+                            _length = str(_item.get('length') or '').strip()
+                            _number = re.search(r'\d+(?:\.\d+)?', _length)
+                            if _number and _number.group(0) not in str(output or ''):
+                                dropped.append(_dir_key)
+                        if dropped:
+                            print(f'[DESIGNER-EDIT] boundary slide dropped lengths {dropped} on attempt {attempt}')
+                            continue
+                    _wants_data = any(word in str(instruction or '') for word in (
+                        'حدود', 'شارع', 'شوارع', 'جار', 'جيران', 'اتجاه',
+                        'بيانات', 'طول', 'واجهة',
+                    ))
+                    if _wants_data:
+                        _strip_tags = lambda value: re.sub(
+                            r'\s+', ' ', re.sub(r'<[^>]+>', ' ', str(value or ''))).strip()
+                        if _strip_tags(output) == _strip_tags(html):
+                            print(f'[DESIGNER-EDIT] boundary slide no visible change on attempt {attempt}')
+                            continue
                 response_text = parsed.get('response') or 'تم تحديث الشريحة بنجاح.'
                 if vision_error:
                     response_text += ' التعديل جرى على الكود بدون معاينة بصرية للشريحة.'
@@ -4712,10 +4877,10 @@ def api_designer_chat():
     if not message:
         return jsonify({'success': False, 'error': 'الطلب فارغ'}), 400
     report_designer_progress(10, 'جاري تحليل الطلب وتحديد نطاق التعديل...')
-    project_data = clean_project_data(data.get('projectData', {}))
+    request_project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     request_creative_images = copy.deepcopy(data.get('creativeImages')) if isinstance(data.get('creativeImages'), dict) else {}
-    project_creative_images = copy.deepcopy(project_data.get('tenantCreativeImages')) if isinstance(project_data.get('tenantCreativeImages'), dict) else {}
     presentation_id = data.get('presentationId')
+    presentation = None
     slides = data.get('slidesData') if isinstance(data.get('slidesData'), list) else []
     current_index = data.get('slideIndex', 0)
     try:
@@ -4724,20 +4889,18 @@ def api_designer_chat():
         current_index = 0
 
     if presentation_id:
-        pres = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
-        if not pres:
+        presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
+        if not presentation:
             return jsonify({'success': False, 'error': 'العرض غير موجود أو لا يتبع هذه الشركة'}), 404
-        if not project_data and pres.get('project_data'):
+        if not slides and presentation.get('slides_data'):
             try:
-                project_data = clean_project_data(json.loads(pres['project_data']))
-            except Exception:
-                project_data = {}
-        if not slides and pres.get('slides_data'):
-            try:
-                slides = json.loads(pres['slides_data'])
+                slides = json.loads(presentation['slides_data'])
             except Exception:
                 slides = []
 
+    project_data = _designer_project_data_for_request(
+        request_project_data, presentation, tenant_id)
+    project_creative_images = copy.deepcopy(project_data.get('tenantCreativeImages')) if isinstance(project_data.get('tenantCreativeImages'), dict) else {}
     project_data, creative_images = _hydrate_map_assets_for_request(
         project_data, data.get('creativeImages', {}), g.tenant_id,
         presentation_id=presentation_id,
@@ -4807,7 +4970,10 @@ def api_designer_chat():
     )
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
     audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index, creative_images)
+    project_context = _designer_project_context(project_data, creative_images, tenant_id)
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
+
+{project_context}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master).
 أنت تمتلك كامل الصلاحية والحرية الإبداعية والمطلقة لتعديل أو إعادة تصميم أي شريحة في العرض دون استثناء:
 - حرية مطلقة لتعديل وإعادة ابتكار شرائح الفصول والأقسام الرئيسية (Section Dividers / الفصول): لك كامل الحرية في إعادة تصميمها بتخطيطات إبداعية مبهرة (إضافة كروت ملخصة لمحاور القسم، خطوط زمنية، إبراز مؤشرات أو أرقام قياسية، تقسيم الشريحة أفقياً أو عمودياً Split View، دمج صور معمارية مع بطاقات داكنة ملكية، تدرجات لونية، خطوط عريضة).
@@ -5034,6 +5200,7 @@ def api_designer_chat():
             elif tool in ('edit_slides', 'edit_design_slide', 'edit_design_slides'):
                 indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
                 instruction = params.get('instruction') or message
+                changed_indexes = []
                 if indexes:
                     report_designer_progress(20, f'جاري تعديل الشريحة {indexes[0] + 1}...',
                                             {'phase': 'editing', 'activeSlideIndex': indexes[0], 'actionNumber': action_number})
@@ -5063,50 +5230,59 @@ def api_designer_chat():
                     max_workers = min(4, len(indexes))
                     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                         futures = [executor.submit(_edit_worker, idx) for idx in indexes]
-                        results = []
                         completed_count = 0
                         total_slides_count = len(indexes)
                         for future in concurrent.futures.as_completed(futures):
                             completed_count += 1
                             try:
-                                res = future.result()
-                                results.append(res)
-                                idx_res, updated_html_res, resp_text_res = res
-                                slides[idx_res]['html'] = updated_html_res
-                                slides[idx_res]['_designer_keep_html'] = True
-                                slides[idx_res]['is_custom'] = True
-                                extracted_caps = slide_engine._extract_visual_concept_captions(updated_html_res)
-                                if extracted_caps:
-                                    slides[idx_res]['captions'] = extracted_caps
+                                idx_res, updated_html_res, resp_text_res = future.result()
+                                original_html_res = slides[idx_res].get('html', '')
+                                if designer_chat_reliability.materially_changed(
+                                        original_html_res, updated_html_res, resp_text_res):
+                                    slides[idx_res]['html'] = updated_html_res
+                                    slides[idx_res]['_designer_keep_html'] = True
+                                    slides[idx_res]['is_custom'] = True
+                                    changed_indexes.append(idx_res)
+                                    extracted_caps = slide_engine._extract_visual_concept_captions(updated_html_res)
+                                    if extracted_caps:
+                                        slides[idx_res]['captions'] = extracted_caps
                                 if resp_text_res:
                                     assistant_messages.append(resp_text_res)
                             except Exception as exc:
                                 print(f"[PARALLEL EDIT ERROR] Slide edit failed: {exc}")
                             pct = int(15 + 75 * (completed_count / total_slides_count))
-                            report_designer_progress(pct, f"تم تعديل الشريحة {completed_count} من {total_slides_count}...")
+                            report_designer_progress(pct, f"تمت معالجة الشريحة {completed_count} من {total_slides_count}...")
                 else:
                     for idx in indexes:
                         slide = slides[idx] if isinstance(slides[idx], dict) else {}
+                        original_html = slide.get('html', '')
                         report_designer_progress(40, f"جاري تعديل الشريحة {idx + 1}...")
                         html, response_text = _designer_edit_slide(
-                            slide.get('html', ''), slide.get('title', f'شريحة {idx + 1}'),
+                            original_html, slide.get('title', f'شريحة {idx + 1}'),
                             instruction, idx, project_data, presentation_id, branding,
                             tenant_id=tenant_id, creative_images=creative_images,
                             user_image_refs=user_image_refs, slide_type=slide.get('type', 'content'),
                             total_slides=len(slides),
                             content_source=slide.get('content_source') or slide.get('contentSource'),
                         )
-                        slide['html'] = html
-                        slide['_designer_keep_html'] = True
-                        slide['is_custom'] = True
-                        extracted_caps = slide_engine._extract_visual_concept_captions(html)
-                        if extracted_caps:
-                            slide['captions'] = extracted_caps
-                        slides[idx] = slide
+                        if designer_chat_reliability.materially_changed(original_html, html, response_text):
+                            slide['html'] = html
+                            slide['_designer_keep_html'] = True
+                            slide['is_custom'] = True
+                            changed_indexes.append(idx)
+                            extracted_caps = slide_engine._extract_visual_concept_captions(html)
+                            if extracted_caps:
+                                slide['captions'] = extracted_caps
+                            slides[idx] = slide
                         if response_text:
                             assistant_messages.append(response_text)
-                        report_designer_progress(85, f"تم الانتهاء من تعديل الشريحة {idx + 1}...")
-                executed.append({'tool': tool, 'status': 'success', 'indexes': indexes})
+                        report_designer_progress(85, f"تم الانتهاء من معالجة الشريحة {idx + 1}...")
+                executed.append({
+                    'tool': tool,
+                    'status': 'success' if changed_indexes else 'noop',
+                    'indexes': sorted(changed_indexes),
+                    'requested_indexes': indexes,
+                })
             elif tool == 'insert_team_logo':
                 raw_team_index = params.get('team_index') or params.get('teamIndex') or 0
                 try:
@@ -5619,9 +5795,17 @@ def api_designer_chat():
         touched += [n + 1 for item in executed if isinstance(item, dict)
                     for n in (item.get('indexes') or []) if isinstance(n, int)]
         turn_focus = sorted(dict.fromkeys(touched)) or focus_indexes
-        response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
-        if assistant_messages:
-            response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
+        successful_execution = any(
+            isinstance(item, dict) and item.get('status') == 'success'
+            for item in executed
+        )
+        if successful_execution:
+            response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
+            if assistant_messages:
+                response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
+        else:
+            detail = ' '.join(dict.fromkeys(assistant_messages)).strip()
+            response_text = 'لم يتم تنفيذ أي تعديل على العرض.' + (f' {detail}' if detail else '')
         # Return the updated conversation beside the edited workspace. The browser keeps both in
         # memory until the user explicitly presses save; writing here would make a failed edit
         # impossible to discard with a refresh.

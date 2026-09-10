@@ -7439,7 +7439,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('presentationId: presentationId || null', index_source)
         self.assertIn('restoreDesignerChat(tenantProjectData, tenantPresentationId)', index_source)
         self.assertNotIn('let draftAutoSaveTimer = null;', index_source)
-        self.assertIn('chatPayload.projectData = { ...tenantProjectData, tenantSlidesData };', index_source)
+        self.assertIn('const currentFormData = await collectTenantFormData();', index_source)
+        self.assertIn('tenantProjectData = { ...tenantProjectData, ...currentFormData };', index_source)
+        self.assertIn('projectData: buildDesignerChatProjectData(tenantProjectData),', index_source)
+        self.assertIn("'tenantSlidesData', 'tenantSlidePlan', 'pageDrafts', 'tenantCreativeImages', 'designerChat'", index_source)
+        self.assertNotIn('chatPayload.projectData = { ...tenantProjectData, tenantSlidesData };', index_source)
         self.assertIn("'saved': False", app_source)
         self.assertIn('class="slide-toolbar-chat-context"', index_source)
         self.assertIn('class="ge-chat-panel-status"', index_source)
@@ -7453,6 +7457,151 @@ class MeetingRequirementsTests(unittest.TestCase):
         # The conversation is restored with the file instead of being wiped on open.
         self.assertNotIn('tenantDesignerMessages = [];\n      tenantChatSlideIndex', index_source)
         self.assertIn("'designerChat'", (ROOT / 'db.py').read_text(encoding='utf-8'))
+
+    def test_designer_chat_boundary_slide_receives_documented_facts_and_rejects_false_success(self):
+        """The boundary diagram is built by the system, so the designer model used to answer
+        data-add requests with no project facts and report success on an unchanged slide."""
+        module = self.application_module
+        boundary_html = (
+            '<div class="slide" dir="rtl" style="width:1280px;height:720px;">'
+            '<div data-boundary-diagram="1">'
+            '<div data-boundary-direction="north"><span>الشمال</span><span>109 م</span></div>'
+            '<div data-boundary-direction="south"><span>الجنوب</span><span>98 م</span></div>'
+            '<div data-boundary-direction="east"><span>الشرق</span><span>80.3 م</span></div>'
+            '<div data-boundary-direction="west"><span>الغرب</span><span>59.5 م</span></div>'
+            '</div></div>'
+        )
+        project_data = {
+            'project_name': 'مشروع الواجهة',
+            'location_address': 'https://maps.google.com/?q=21.6001,39.1001',
+            'boundary_lengths': 'الشمال: 109 م، الجنوب: 98 م، الشرق: 80.3 م، الغرب: 59.5 م',
+            'directions_table': json.dumps([
+                {'direction': 'north', 'description': 'شارع الملك فهد'},
+            ], ensure_ascii=False),
+        }
+        self.assertTrue(module._is_land_boundary_diagram_slide(
+            title='مخطط اتجاهي لحدود الأرض', content_source='land_boundary_diagram', html=boundary_html))
+        self.assertFalse(module._is_land_boundary_diagram_slide(
+            title='الغلاف', content_source='', html='<div class="slide"></div>'))
+        note = module._designer_boundary_facts_note(project_data)
+        for value in ('109', '98', '80.3', '59.5', 'شارع الملك فهد'):
+            self.assertIn(value, note)
+        self.assertIn('ممنوع الاختراع', note)
+
+        with self.app.app_context():
+            branding = db.get_branding(self.tenant_a) or {}
+        instruction = 'أضف بيانات الحدود الموثقة لكل اتجاه في موضعه الجغرافي الصحيح'
+
+        def run_edit(model_html, model_response='تمت الإضافة'):
+            captured = []
+            response = {'choices': [{'message': {'content': json.dumps({
+                'html': model_html, 'response': model_response,
+            }, ensure_ascii=False)}}]}
+
+            def fake_chat(prompt, *args, **kwargs):
+                captured.append(prompt)
+                return response
+
+            with self.app.test_request_context(), \
+                    patch.object(module, 'call_zai_chat', side_effect=fake_chat):
+                module.g.tenant_id = self.tenant_a
+                return module._designer_edit_slide(
+                    boundary_html, 'مخطط اتجاهي لحدود الأرض', instruction, 8,
+                    project_data, None, branding, tenant_id=self.tenant_a,
+                    slide_type='content', total_slides=74,
+                    content_source='land_boundary_diagram', skip_vision=True,
+                ), captured
+
+        # The documented facts reach the model prompt.
+        changed_html = boundary_html.replace(
+            '109 م', '109 م<div>شارع الملك فهد</div>')
+        (out_html, out_response), captured = run_edit(changed_html)
+        self.assertTrue(any('بيانات الحدود الموثقة' in prompt for prompt in captured))
+        self.assertTrue(any('شارع الملك فهد' in prompt for prompt in captured))
+        self.assertTrue(any('https://maps.google.com/?q=21.6001,39.1001' in prompt for prompt in captured))
+        self.assertTrue(any('ملف بيانات المشروع الكامل' in prompt for prompt in captured))
+        self.assertIn('شارع الملك فهد', out_html)
+        self.assertIn('تمت الإضافة', out_response)
+
+        # An identical slide reported as success is retried, then honestly kept.
+        (kept_html, kept_response), _ = run_edit(boundary_html)
+        self.assertIn('تم الحفاظ على تصميم الشريحة', kept_response)
+
+        # A reply that drops a documented length is rejected the same way.
+        dropped_html = boundary_html.replace('109 م', '')
+        self.assertNotIn('109', dropped_html)
+        (_, dropped_response), _ = run_edit(dropped_html)
+        self.assertIn('تم الحفاظ على تصميم الشريحة', dropped_response)
+
+    def test_designer_chat_uses_the_latest_linked_draft_and_current_browser_values(self):
+        """A saved presentation is only a slide snapshot. Sol must read the current linked project
+        draft, while values sent by the open browser remain newer than that saved draft."""
+        module = self.application_module
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        draft_id = 'designer-current-project-facts'
+        saved_link = 'https://maps.google.com/?q=24.7136,46.6753'
+        stale_link = 'https://maps.google.com/?q=21.4858,39.1925'
+        browser_link = 'https://maps.google.com/?q=25.2048,55.2708'
+        unrelated_draft_id = 'designer-unrelated-project'
+        saved = client.post('/api/project-draft', headers=headers, json={'draftData': {
+            'draftId': draft_id,
+            'project_name': 'المشروع المحدث',
+            'location_address': saved_link,
+            'allowed_uses': 'سكني وتجاري',
+        }})
+        self.assertTrue(saved.get_json()['success'], saved.get_json())
+        unrelated = client.post('/api/project-draft', headers=headers, json={'draftData': {
+            'draftId': unrelated_draft_id,
+            'project_name': 'مشروع آخر غير مرتبط',
+            'allowed_uses': 'صناعي',
+        }})
+        self.assertTrue(unrelated.get_json()['success'], unrelated.get_json())
+        slide = {'title': 'نبذة عن المشروع', 'type': 'content',
+                 'html': '<div class="slide" style="width:1280px;height:720px"><h1>قديم</h1></div>'}
+        with self.app.app_context():
+            presentation_id = db.create_presentation(
+                self.tenant_a, 'عرض قديم',
+                project_data={'draftId': draft_id, 'project_name': 'الاسم القديم',
+                              'location_address': stale_link},
+                slides_data=[slide], slide_count=1, draft_id=draft_id,
+            )
+
+        captured = []
+        planner_reply = {'choices': [{'message': {'content': json.dumps({
+            'response': 'تم العثور على رابط المشروع.',
+            'actions': [{'tool': 'chat_only', 'params': {}}],
+        }, ensure_ascii=False)}}]}
+
+        def fake_chat(prompt, *args, **kwargs):
+            captured.append(prompt)
+            return planner_reply
+
+        with patch.object(module, 'call_zai_chat', side_effect=fake_chat):
+            response = client.post('/api/designer-chat', headers=headers, json={
+                'presentationId': presentation_id,
+                'message': 'ما رابط جوجل ماب الموجود في بيانات المشروع؟',
+            })
+        self.assertTrue(response.get_json()['success'], response.get_json())
+        self.assertIn(saved_link, captured[-1])
+        self.assertIn('المشروع المحدث', captured[-1])
+        self.assertIn('سكني وتجاري', captured[-1])
+        self.assertNotIn(stale_link, captured[-1])
+
+        captured.clear()
+        with patch.object(module, 'call_zai_chat', side_effect=fake_chat):
+            response = client.post('/api/designer-chat', headers=headers, json={
+                'presentationId': presentation_id,
+                'projectData': {'draftId': unrelated_draft_id, 'location_address': browser_link},
+                'message': 'ما رابط جوجل ماب الموجود في بيانات المشروع؟',
+            })
+        self.assertTrue(response.get_json()['success'], response.get_json())
+        self.assertIn(browser_link, captured[-1])
+        self.assertIn('المشروع المحدث', captured[-1])
+        self.assertIn('سكني وتجاري', captured[-1])
+        self.assertNotIn('مشروع آخر غير مرتبط', captured[-1])
+        self.assertNotIn(saved_link, captured[-1])
+        self.assertNotIn(stale_link, captured[-1])
 
     def test_designer_chat_does_not_save_draft_until_explicit_save(self):
         client = self.app.test_client()

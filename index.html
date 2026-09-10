@@ -6941,6 +6941,17 @@
       return slim;
     }
 
+    const DESIGNER_PROJECT_PAYLOAD_DROPPED = [
+      'tenantSlidesData', 'tenantSlidePlan', 'pageDrafts', 'tenantCreativeImages', 'designerChat'
+    ];
+
+    function buildDesignerChatProjectData(data) {
+      const source = data && typeof data === 'object' ? data : {};
+      return Object.fromEntries(Object.entries(source).filter(
+        ([key]) => !DESIGNER_PROJECT_PAYLOAD_DROPPED.includes(key)
+      ));
+    }
+
     // Generating from a name alone leaves the model nothing to work from, and the design rules
     // forbid inventing facts, so the deck comes back fabricated. The button still works.
     const GENERATION_MIN_FACTS = 6;
@@ -24210,6 +24221,17 @@
       }
 
       if (tenantDesignerChatBusy) return;
+      setDesignerChatBusy('جاري تجهيز بيانات المشروع...');
+      try {
+        if (typeof collectTenantFormData === 'function' && document.getElementById('tenantProjectForm')) {
+          const currentFormData = await collectTenantFormData();
+          tenantProjectData = { ...tenantProjectData, ...currentFormData };
+        }
+      } catch (error) {
+        clearDesignerChatBusy();
+        toast(error?.message || 'تعذر تجهيز بيانات المشروع الحالية.');
+        return;
+      }
       // Send the untouched message and conversation. A number is not a client-side
       // command, and even a slide reference does not authorize an edit or navigation.
       const targetScope = tenantChatSlideScope === 'all' ? 'all' : 'auto';
@@ -24228,7 +24250,7 @@
       triggerAutoSaveDraft();
 
       const messagesDiv = document.getElementById('tenantChatMessages');
-      setDesignerChatBusy('جاري تجهيز الطلب...');
+      updateDesignerChatBusy(5, 'جاري تجهيز الطلب...');
       restoreDesignerChatBusyIndicator();
       let indicator = document.getElementById('tenantChatTypingIndicator');
       if (messagesDiv) messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -24250,6 +24272,7 @@
         focusIndexes: tenantChatFocusIndexes,
         slideIndex: tenantChatSlideIndex,
         presentationId: tenantPresentationId,
+        projectData: buildDesignerChatProjectData(tenantProjectData),
         creativeImages: buildPresentationGenerationImages(),
         attachedImage: attachedImage ? attachedImage.dataUri : ''
       };
@@ -24261,7 +24284,6 @@
         chatPayload.slideTitle = tenantSlidesData[tenantChatSlideIndex]?.title || '';
         chatPayload.slidesData = tenantSlidesData;
         chatPayload.slidePlan = tenantSlidePlan;
-        chatPayload.projectData = { ...tenantProjectData, tenantSlidesData };
       }
       let data = null;
       try {
