@@ -9847,13 +9847,22 @@ def api_export():
             slide_count = len(slides_data) if slides_data else slides_html.count('class="slide"')
             generate_pdf(slides_html, branding, pdf_path, g.tenant_id)
             relative_url = f'/outputs/{g.tenant_id}/{os.path.basename(pdf_path)}'
+            # Which renderer wrote the file: 'chromium' / 'chromium-isolated' is the
+            # faithful export, 'fitz-fallback' keeps the page count but shifts the
+            # layout (white strip left, clipped right) when no browser runs on host.
+            try:
+                import generate_pdf_from_preview as _deck_renderer
+                pdf_engine = getattr(_deck_renderer, 'LAST_PDF_ENGINE', '') or 'unknown'
+            except Exception:
+                pdf_engine = 'unknown'
+            print(f'[EXPORT] engine={pdf_engine} pages={slide_count} file={os.path.basename(pdf_path)}')
 
             # Record export
             export_id = db.create_export(presentation_id, g.tenant_id, 'pdf', pdf_path)
             if presentation_id:
                 _record_change('presentation', presentation_id, 'تصدير',
                                [f'صُدّر العرض بصيغة PDF ({slide_count} شريحة)'])
-            return jsonify({'success': True, 'url': f'/api/exports/{export_id}/download', 'exportId': export_id, 'format': 'pdf'})
+            return jsonify({'success': True, 'url': f'/api/exports/{export_id}/download', 'exportId': export_id, 'format': 'pdf', 'engine': pdf_engine})
 
         elif fmt == 'pptx':
             from exports.pptx_export import generate_pptx

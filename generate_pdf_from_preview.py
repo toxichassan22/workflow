@@ -10,6 +10,77 @@ from slide_engine import resolve_logo_in_html
 
 BASE_DIR = Path(__file__).resolve().parent
 
+# Which renderer wrote the last deck PDF. The PyMuPDF fallback keeps the page
+# count but shifts every 1280px slide right (~22px white strip on the left,
+# clipped content on the right) and writes 1280x720pt pages instead of
+# Chromium's 960x540pt, so a file it produced must never pass as a normal
+# export. The export route reports this value; the server log states it too.
+LAST_PDF_ENGINE = ''
+
+CHROMIUM_LAUNCH_ARGS = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--font-render-hinting=none",
+]
+
+# Where a host-wide browser lives when Playwright's bundled download cannot
+# run (shared hosting without the OS libraries Chromium needs). An explicit
+# CHROMIUM_PATH (or CHROME_PATH) wins; the well-known locations are probed
+# after Playwright's own binary.
+_SYSTEM_CHROMIUM_CANDIDATES = (
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/opt/google/chrome/chrome',
+)
+
+
+def _chromium_executable_candidates():
+    seen = []
+    for env_name in ('CHROMIUM_PATH', 'CHROME_PATH'):
+        configured = (os.environ.get(env_name) or '').strip()
+        if configured and configured not in seen:
+            seen.append(configured)
+    import shutil
+    for name in ('chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable'):
+        found = shutil.which(name)
+        if found and found not in seen:
+            seen.append(found)
+    for path in _SYSTEM_CHROMIUM_CANDIDATES:
+        if path not in seen:
+            seen.append(path)
+    return [path for path in seen if path and os.path.isfile(path)]
+
+
+def _launch_chromium(playwright):
+    """Launch a Chromium for deck rendering, trying harder than the default.
+
+    Playwright's bundled binary is tried first with the exact arguments the
+    export has always used. When it cannot start (the usual shared-hosting
+    failure is missing OS libraries), an admin-provided CHROMIUM_PATH and the
+    host-wide browser locations are tried before giving up. Returns the
+    (browser, description) pair; raises RuntimeError naming every attempt so
+    the server log — not a silently degraded PDF — carries the failure.
+    """
+    errors = []
+    try:
+        browser = playwright.chromium.launch(args=list(CHROMIUM_LAUNCH_ARGS))
+        return browser, 'bundled-chromium'
+    except Exception as exc:
+        errors.append(f'bundled: {exc}'[:300])
+    for candidate in _chromium_executable_candidates():
+        try:
+            browser = playwright.chromium.launch(
+                args=list(CHROMIUM_LAUNCH_ARGS), executable_path=candidate
+            )
+            return browser, f'system-chromium:{candidate}'
+        except Exception as exc:
+            errors.append(f'{candidate}: {exc}'[:300])
+    raise RuntimeError('no launchable Chromium (' + ' | '.join(errors[:6]) + ')')
+
 
 def _generate_pdf_with_fitz(html, out_path, slides=None, layout_css='', font_css=''):
     """Pure-Python fallback using PyMuPDF when Playwright is unavailable."""
@@ -227,6 +298,8 @@ def _resolve_project_file_urls(html, tenant_id):
 
 
 def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
+    global LAST_PDF_ENGINE
+    LAST_PDF_ENGINE = ''
     if not out_path:
         raise ValueError("out_path is required")
     out_path = Path(out_path)
@@ -328,15 +401,8 @@ svg[data-chart], svg.combo-chart { max-width:100% !important; max-height:320px !
         from playwright.sync_api import sync_playwright
         print("[PDF] Launching Playwright...")
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--font-render-hinting=none"
-                ]
-            )
+            browser, launch_how = _launch_chromium(p)
+            print(f"[PDF] Chromium ready via {launch_how}")
             page = browser.new_page()
             page.set_viewport_size({"width": 1280, "height": 720})
 
@@ -415,21 +481,31 @@ svg[data-chart], svg.combo-chart { max-width:100% !important; max-height:320px !
                 margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
             )
             chromium_pdf_written = True
+            isolated = False
             if slides and _pdf_page_count(out_path) < len(slides):
                 print('[PDF] Chromium produced a short deck; printing isolated Chromium pages.')
                 _generate_pdf_pages_with_playwright(page, slides, layout_css, font_css, out_path, tmp_dir)
+                isolated = True
             browser.close()
         print("[PDF] Generation complete!")
         produced = str(out_path)
+        LAST_PDF_ENGINE = 'chromium-isolated' if isolated else 'chromium'
+        print(f"[PDF] engine={LAST_PDF_ENGINE}")
     except Exception as e:
         if chromium_pdf_written:
             print(f"[PDF] Isolated Chromium recovery failed ({e}); refusing a degraded PyMuPDF file.")
             traceback.print_exc()
             raise
         print(f"[PDF] Playwright failed ({e}); falling back to PyMuPDF.")
+        print("[PDF] WARNING: the PyMuPDF fallback keeps the page count but shifts every "
+              "1280px slide right (white strip on the left, clipped content on the right). "
+              "Fix the browser on this host instead of trusting this file: check "
+              "playwright_install.log / .vision_status or set CHROMIUM_PATH.")
         traceback.print_exc()
         produced = _generate_pdf_with_fitz(html, out_path, slides, layout_css, font_css)
         layout_report = []
+        LAST_PDF_ENGINE = 'fitz-fallback'
+        print("[PDF] engine=fitz-fallback (degraded layout)")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
     _verify_pdf_page_count(produced, len(slides), layout_report)
@@ -567,15 +643,7 @@ svg[data-chart], svg.combo-chart {{ max-width:100% !important; max-height:320px 
             f.write(full_html)
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--font-render-hinting=none"
-                ]
-            )
+            browser, _launch_how = _launch_chromium(p)
             page = browser.new_page(viewport={"width": width, "height": height})
             page.goto(resolved_html_path.as_uri(), wait_until="load", timeout=15000)
             try:

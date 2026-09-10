@@ -734,6 +734,19 @@ isolated slide per page; sending the whole deck through it produced 7 pages for 
 could vary in either direction. `tests/test_export_slide_sanitization.py` guards all of it, and the old
 `test_ignores_unbalanced_slide` (which asserted the dropping) is gone.
 
+**A deck PDF without Chromium is a shifted deck, not a smaller one.** The PyMuPDF fallback keeps
+the page count but lays every 1280px slide ~22px too far right (white strip on the left, clipped
+content on the right) and writes 1280x720pt pages instead of Chromium's 960x540pt — measured, not
+assumed. That is how a new host (or a staging dir) ships a "successful" export that looks broken
+next to the old host: the code is identical, the browser is what differs. `_launch_chromium()`
+tries the bundled binary first, then `CHROMIUM_PATH` / `CHROME_PATH` and the well-known system
+locations, and names every failed attempt in the server log. `generate_pdf()` records the outcome
+in `LAST_PDF_ENGINE` (`chromium` / `chromium-isolated` / `fitz-fallback`), `/api/export` returns
+it as `engine`, and the fallback prints an explicit degraded-layout warning. Verify a suspect host
+with `/health?vision=1` (`slide_vision.available`), `playwright_install.log` / `.vision_status`,
+or the PDF page size (17.78x10in means the fallback wrote it). Do not "fix" the shift with a
+negative margin: the offset varies with the markup, so a magic number only moves the damage.
+
 The failure also has to be actionable, so a page count alone is not enough:
 
 - `_export_html_from_slides()` inspects **each** entry of `slides_data`: an entry whose html has no

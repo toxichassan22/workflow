@@ -643,6 +643,96 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         self.assertIn(caption_text, rebuilt)
         self.assertEqual(slide_to_rebuild.get('captions'), [caption_text])
 
+    def test_chromium_launcher_uses_configured_system_binary_when_bundled_fails(self):
+        """A host whose bundled Chromium cannot start (missing OS libraries) still
+        exports faithfully when the admin points CHROMIUM_PATH at a working binary."""
+        import os
+        import tempfile
+        import types
+        from unittest.mock import patch
+
+        import generate_pdf_from_preview as engine
+
+        calls = []
+
+        class _StubChromium:
+            def launch(self, *args, **kwargs):
+                calls.append(kwargs)
+                if kwargs.get('executable_path') == fake_path:
+                    return object()
+                raise RuntimeError('missing shared libraries')
+
+        stub = types.SimpleNamespace(chromium=_StubChromium())
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fake_path = os.path.join(tmp_dir, 'chrome')
+            with open(fake_path, 'wb') as handle:
+                handle.write(b'fake')
+            with patch.dict(os.environ, {'CHROMIUM_PATH': fake_path, 'CHROME_PATH': ''}):
+                browser, how = engine._launch_chromium(stub)
+        self.assertIsNotNone(browser)
+        self.assertIn('system-chromium', how)
+        self.assertIn(fake_path, how)
+        self.assertTrue(any('executable_path' not in call for call in calls))
+
+    def test_chromium_launcher_names_every_attempt_when_nothing_starts(self):
+        import os
+        import types
+        from unittest.mock import patch
+
+        import generate_pdf_from_preview as engine
+
+        class _StubChromium:
+            def launch(self, *args, **kwargs):
+                raise RuntimeError('missing shared libraries')
+
+        stub = types.SimpleNamespace(chromium=_StubChromium())
+        with patch.dict(os.environ, {'CHROMIUM_PATH': '', 'CHROME_PATH': ''}, clear=False):
+            with patch.object(engine, '_chromium_executable_candidates', return_value=[]):
+                with self.assertRaises(RuntimeError) as raised:
+                    engine._launch_chromium(stub)
+        self.assertIn('bundled', str(raised.exception))
+
+    def test_fallback_marks_degraded_engine(self):
+        """The PyMuPDF fallback keeps the page count but shifts the layout, so the
+        export must record which engine wrote the file instead of passing silently."""
+        import sys
+        import tempfile
+        import types
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import fitz
+        import generate_pdf_from_preview as engine
+
+        playwright_stub = types.ModuleType('playwright.sync_api')
+        playwright_stub.sync_playwright = lambda: (_ for _ in ()).throw(RuntimeError('forced failure'))
+        slides = '\n'.join(f'<div class="slide"><p>{index}</p></div>' for index in range(3))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / 'fitz-engine.pdf'
+            with patch.dict(sys.modules, {'playwright.sync_api': playwright_stub}):
+                with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                    engine.generate_pdf(slides, {}, pdf_path)
+            self.assertEqual(engine.LAST_PDF_ENGINE, 'fitz-fallback')
+            with fitz.open(pdf_path) as document:
+                self.assertEqual(document.page_count, 3)
+
+    def test_chromium_export_marks_faithful_engine(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import fitz
+        import generate_pdf_from_preview as engine
+
+        slides = '\n'.join(f'<div class="slide"><p>{index}</p></div>' for index in range(3))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / 'chromium-engine.pdf'
+            with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                engine.generate_pdf(slides, {}, pdf_path)
+            self.assertIn(engine.LAST_PDF_ENGINE, ('chromium', 'chromium-isolated'))
+            with fitz.open(pdf_path) as document:
+                self.assertEqual(document.page_count, 3)
+
 
 if __name__ == '__main__':
     unittest.main()
