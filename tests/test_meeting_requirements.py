@@ -9633,6 +9633,19 @@ class MeetingRequirementsTests(unittest.TestCase):
             app_mod._apply_slide_watermark(white_html, '/logo.png'), dark_html)
         self.assertIn(expected_filter, carried)
 
+        # A mark stored with the legacy filter upgrades on renumber
+        # (open/save/export) without re-applying the watermark.
+        engine = self.application_module.slide_engine
+        legacy_mark = app_mod._apply_slide_watermark(white_html, '/logo.png')
+        legacy_mark = legacy_mark.replace(expected_filter, 'grayscale(100%)')
+        renumbered = engine.renumber_presentation_slides(
+            [{'html': legacy_mark, 'title': 'شريحة', 'type': 'content', 'is_custom': True}])
+        self.assertIn(expected_filter, renumbered[0]['html'])
+
+        # The preview carries the same display-time healing for draft-held slides.
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn(expected_filter, index_source)
+
     def test_watermark_idempotent_on_repeated_normalization(self):
         """Applying the watermark twice must not duplicate the watermark element."""
         app_mod = self.application_module

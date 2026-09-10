@@ -3796,12 +3796,6 @@ def _is_white_or_light_slide(slide, minimum_luminance=0.45):
 WATERMARK_Z_INDEX = 50
 
 
-# Fixed watermark gray: any logo — light, white-textured or dark — renders as a
-# flat #888888 silhouette with its alpha preserved (grayscale, then to black,
-# then inverted up to mid gray), so it stays visible on any surface.
-WATERMARK_GRAY_FILTER = 'grayscale(100%) brightness(0) invert(53.3%)'
-
-
 def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
     """Inject an elegant watermark overlay on top of a slide's content layers."""
     if not html:
@@ -3823,7 +3817,7 @@ def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
         '<div class="slide-watermark" data-slide-watermark="true" aria-hidden="true" '
         'style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
         f'pointer-events:none;z-index:{WATERMARK_Z_INDEX};opacity:{opacity_value};overflow:hidden;">'
-        f'<img src="{logo_url}" alt="" style="width:{width_value}px;max-width:50%;max-height:50%;object-fit:contain;filter:{WATERMARK_GRAY_FILTER};">'
+        f'<img src="{logo_url}" alt="" style="width:{width_value}px;max-width:50%;max-height:50%;object-fit:contain;filter:{slide_engine.WATERMARK_GRAY_FILTER};">'
         '</div>'
     )
     # The overlay is absolutely positioned, so the slide root must establish

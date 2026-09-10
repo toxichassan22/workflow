@@ -10481,6 +10481,43 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
     return _drop_unresolved_image_placeholders(html)
 
 
+# Fixed watermark gray shared with app._apply_slide_watermark: any logo renders
+# as a flat #888888 silhouette (alpha preserved), so light logos stay visible.
+WATERMARK_GRAY_FILTER = 'grayscale(100%) brightness(0) invert(53.3%)'
+
+
+def _normalize_watermark_ink(html):
+    """Upgrade saved watermark overlays to the fixed readable gray.
+
+    Marks stored before the gray rule carry older filters; rewriting the filter
+    declaration inside the overlay (and only there) heals them on the next
+    open/save/export without re-applying the watermark.
+    """
+    if not html or 'watermark' not in str(html).lower():
+        return html
+    source = str(html)
+
+    def heal_overlay(match):
+        overlay = match.group(0)
+        healed, count = re.subn(
+            r'filter\s*:\s*[^;]+',
+            'filter:' + WATERMARK_GRAY_FILTER,
+            overlay,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        return healed if count else overlay
+
+    source = re.sub(
+        r'<div\b[^>]*\bdata-slide-watermark=["\']true["\'][^>]*>[\s\S]*?</div\s*>',
+        heal_overlay, source, flags=re.IGNORECASE,
+    )
+    return re.sub(
+        r'<div\b[^>]*\bclass=["\'][^"\']*\bslide-watermark\b[^"\']*["\'][^>]*>[\s\S]*?</div\s*>',
+        heal_overlay, source, flags=re.IGNORECASE,
+    )
+
+
 def renumber_presentation_slides(slides, branding=None, project_data=None, tenant_id=None,
                                  allow_all_maps=False, creative_images=None):
     source = slides if isinstance(slides, list) else []
@@ -10496,6 +10533,8 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     current_section = ''
     for index, raw in enumerate(source):
         item = dict(raw) if isinstance(raw, dict) else {'html': str(raw or '')}
+        if item.get('html'):
+            item['html'] = _normalize_watermark_ink(item['html'])
         slide_type = str(item.get('type') or '').strip().lower()
         title = str(item.get('title') or '').strip()
         html = str(item.get('html') or '')

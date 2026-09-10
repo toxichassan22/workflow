@@ -21973,6 +21973,14 @@
         }
       }
 
+      // Heal pre-gray watermarks for display (mirror of the server-side
+      // normalization): a saved overlay keeps its old filter until the next
+      // save persists the healed one.
+      cleanHtml = cleanHtml.replace(
+        /(<div\b[^>]*\bdata-slide-watermark=["']true["'][^>]*>[\s\S]*?<img\b[^>]*style="[^"]*?)filter\s*:\s*[^;"]+/gi,
+        '$1filter:grayscale(100%) brightness(0) invert(53.3%)'
+      );
+
       cleanHtml = cleanHtml.replace(/##[a-zA-Z0-9_]+##/g, '');
       return cleanHtml;
     }
