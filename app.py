@@ -608,6 +608,7 @@ def api_usage_totals():
         return [part.strip() for part in (value or '').split(',') if part.strip()][:200]
 
     try:
+        _backfill_missing_ai_costs()
         return jsonify({
             'success': True,
             **db.get_usage_totals(

@@ -7215,9 +7215,11 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertAlmostEqual(project['maps_cost_usd'], 0.004)
         self.assertAlmostEqual(project['cost_usd'], 0.034)
         self.assertEqual(project['calls'], 3)
+        self.assertEqual(project['total_tokens'], 150)
         presentation = totals['presentations'][presentation_id]
         self.assertAlmostEqual(presentation['cost_usd'], 0.014)
         self.assertEqual(presentation['calls'], 2)
+        self.assertEqual(presentation['total_tokens'], 50)
         foreign = client.get(
             f'/api/usage-totals?draftIds={draft_id}&presentationIds={presentation_id}',
             headers=self._headers(self.token_b)).get_json()
@@ -7235,6 +7237,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('function formatUsageCost(usd)', index_html)
         self.assertIn('costByProject', index_html)
         self.assertIn('costByPresentation', index_html)
+        self.assertIn('costByProject[d.id]', index_html)
+        self.assertIn('costByPresentation[item.id]', index_html)
         self.assertIn('التكلفة: ', index_html)
 
     def test_slide_reordering_is_named_in_change_history(self):

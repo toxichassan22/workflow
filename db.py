@@ -3644,7 +3644,7 @@ def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
     presentation_ids = [str(p) for p in (presentation_ids or []) if p][:200]
 
     def _zero():
-        return {'cost_usd': 0.0, 'ai_cost_usd': 0.0, 'maps_cost_usd': 0.0, 'calls': 0}
+        return {'cost_usd': 0.0, 'ai_cost_usd': 0.0, 'maps_cost_usd': 0.0, 'calls': 0, 'total_tokens': 0}
 
     projects = {d: _zero() for d in draft_ids}
     presentations = {p: _zero() for p in presentation_ids}
@@ -3671,7 +3671,8 @@ def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
     if draft_ids:
         marks = ', '.join(['?'] * len(draft_ids))
         for row in conn.execute(
-            'SELECT draft_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
+            'SELECT draft_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost, '
+            'COALESCE(SUM(total_tokens), 0) AS tokens '
             f'FROM ai_usage_events WHERE tenant_id = ? AND draft_id IN ({marks}) GROUP BY draft_id',
             [tenant_id] + draft_ids,
         ).fetchall():
@@ -3680,6 +3681,7 @@ def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
             if target is not None:
                 target['calls'] += int(row['calls'] or 0)
                 target['ai_cost_usd'] += float(row['cost'] or 0.0)
+                target['total_tokens'] += int(row['tokens'] or 0)
         for row in conn.execute(
             'SELECT draft_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
             f'FROM map_usage_events WHERE tenant_id = ? AND draft_id IN ({marks}) GROUP BY draft_id',
@@ -3694,21 +3696,44 @@ def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
     if all_pres:
         pres_list = sorted(all_pres)
         marks = ', '.join(['?'] * len(pres_list))
-        for table, key in (('ai_usage_events', 'ai_cost_usd'), ('map_usage_events', 'maps_cost_usd')):
-            for row in conn.execute(
-                'SELECT presentation_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
-                f'FROM {table} WHERE tenant_id = ? AND presentation_id IN ({marks}) GROUP BY presentation_id',
-                [tenant_id] + pres_list,
-            ).fetchall():
-                row = dict(row)
-                pres_id = str(row.get('presentation_id'))
-                if pres_id in presentations:
-                    presentations[pres_id]['calls'] += int(row['calls'] or 0)
-                    presentations[pres_id][key] += float(row['cost'] or 0.0)
-                for draft_id, linked in pres_of_draft.items():
-                    if pres_id in linked:
-                        projects[draft_id]['calls'] += int(row['calls'] or 0)
-                        projects[draft_id][key] += float(row['cost'] or 0.0)
+        for row in conn.execute(
+            'SELECT presentation_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost, '
+            'COALESCE(SUM(total_tokens), 0) AS tokens '
+            'FROM ai_usage_events WHERE tenant_id = ? AND presentation_id IN '
+            f'({marks}) GROUP BY presentation_id',
+            [tenant_id] + pres_list,
+        ).fetchall():
+            row = dict(row)
+            pres_id = str(row.get('presentation_id'))
+            calls = int(row['calls'] or 0)
+            cost = float(row['cost'] or 0.0)
+            tokens = int(row['tokens'] or 0)
+            if pres_id in presentations:
+                presentations[pres_id]['calls'] += calls
+                presentations[pres_id]['ai_cost_usd'] += cost
+                presentations[pres_id]['total_tokens'] += tokens
+            for draft_id, linked in pres_of_draft.items():
+                if pres_id in linked:
+                    projects[draft_id]['calls'] += calls
+                    projects[draft_id]['ai_cost_usd'] += cost
+                    projects[draft_id]['total_tokens'] += tokens
+        marks = ', '.join(['?'] * len(pres_list))
+        for row in conn.execute(
+            'SELECT presentation_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
+            f'FROM map_usage_events WHERE tenant_id = ? AND presentation_id IN ({marks}) GROUP BY presentation_id',
+            [tenant_id] + pres_list,
+        ).fetchall():
+            row = dict(row)
+            pres_id = str(row.get('presentation_id'))
+            calls = int(row['calls'] or 0)
+            cost = float(row['cost'] or 0.0)
+            if pres_id in presentations:
+                presentations[pres_id]['calls'] += calls
+                presentations[pres_id]['maps_cost_usd'] += cost
+            for draft_id, linked in pres_of_draft.items():
+                if pres_id in linked:
+                    projects[draft_id]['calls'] += calls
+                    projects[draft_id]['maps_cost_usd'] += cost
 
     for entry in list(projects.values()) + list(presentations.values()):
         entry['cost_usd'] = entry['ai_cost_usd'] + entry['maps_cost_usd']

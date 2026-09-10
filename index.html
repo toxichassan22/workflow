@@ -8442,7 +8442,7 @@
           const date = (item.updatedAt || item.createdAt || '').slice(0, 16).replace('T', ' ');
           const itemCost = costByPresentation[item.id];
           return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
-            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + ' | التكلفة: ' + formatUsageCost(itemCost?.cost_usd || 0) + '</div></div>' +
+            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + ' | التكلفة: ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) : '—') + '</div></div>' +
             '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
             '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات</button></div></div>';
         }).join('') + '</section>'
@@ -25493,7 +25493,7 @@
         const statusText = d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
         const projectCost = costByProject[d.id];
-        const costText = 'التكلفة: ' + formatUsageCost(projectCost?.cost_usd || 0);
+        const costText = 'التكلفة: ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) : '—');
         const recovery = recoveryByDraft[d.id] || null;
         const fields = recovery ? recovery.fieldCount + ' حقل ممتلئ' : '';
         const snapshot = recovery?.snapshot;
