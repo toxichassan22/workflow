@@ -744,6 +744,32 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         self.assertIn('libnss3.so', shortened)
         self.assertLessEqual(len(shortened), 130 + 260 + 10)
 
+    def test_extra_args_join_every_launch_attempt(self):
+        """CHROMIUM_EXTRA_ARGS lets the admin iterate flags from the host
+        environment with only an app restart between tries."""
+        import os
+        import types
+        from unittest.mock import patch
+
+        import generate_pdf_from_preview as engine
+
+        seen = []
+
+        class _StubChromium:
+            def launch(self, *args, **kwargs):
+                seen.append(list(kwargs.get('args') or []))
+                return object()
+
+        stub = types.SimpleNamespace(chromium=_StubChromium())
+        with patch.dict(os.environ, {'CHROMIUM_EXTRA_ARGS': '--disable-software-rasterizer --no-first-run'}):
+            browser, _how = engine._launch_chromium(stub)
+        self.assertIsNotNone(browser)
+        self.assertTrue(seen)
+        for args in seen:
+            self.assertIn('--disable-software-rasterizer', args)
+            self.assertIn('--no-first-run', args)
+            self.assertIn('--no-sandbox', args)
+
     def test_fallback_marks_degraded_engine(self):
         """The PyMuPDF fallback keeps the page count but shifts the layout, so the
         export must record which engine wrote the file instead of passing silently."""

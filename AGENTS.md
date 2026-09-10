@@ -741,7 +741,9 @@ assumed. That is how a new host (or a staging dir) ships a "successful" export t
 next to the old host: the code is identical, the browser is what differs. `_launch_chromium()`
 tries the bundled binary first (then its single-process and new-headless rescues for restricted
 containers), then `CHROMIUM_PATH` / `CHROME_PATH` and the well-known system
-locations, and names every failed attempt in the server log. `short_browser_error()` keeps the
+locations, and names every failed attempt in the server log. `CHROMIUM_EXTRA_ARGS`
+appends admin-supplied flags to every attempt, so flag combinations can be iterated from the
+host environment with only an app restart between tries. `short_browser_error()` keeps the
 tail of a launch message because Playwright opens with hundreds of characters of flags and only
 names the missing library at the end — a head-only slice is what hid a dead browser behind
 "Target page, context or browser has been closed". `generate_pdf()` records the outcome

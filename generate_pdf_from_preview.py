@@ -38,6 +38,16 @@ _SYSTEM_CHROMIUM_CANDIDATES = (
 )
 
 
+def _extra_chromium_args():
+    """Admin-supplied flags without a redeploy (e.g. '--disable-software-rasterizer').
+
+    Read from CHROMIUM_EXTRA_ARGS as whitespace-separated tokens and appended
+    to every launch attempt, so flag combinations can be iterated from the
+    host environment with only an app restart between tries.
+    """
+    return (os.environ.get('CHROMIUM_EXTRA_ARGS') or '').split()
+
+
 def _chromium_executable_candidates():
     seen = []
     for env_name in ('CHROMIUM_PATH', 'CHROME_PATH'):
@@ -82,17 +92,19 @@ def _launch_chromium(playwright):
     headless shell), then an admin-provided CHROMIUM_PATH and the host-wide
     browser locations. Returns the (browser, description) pair; raises
     RuntimeError naming every attempt so the server log — not a silently
-    degraded PDF — carries the failure.
+    degraded PDF — carries the failure. CHROMIUM_EXTRA_ARGS tokens join every
+    attempt, so flags can be iterated from the host environment.
     """
+    base_args = list(CHROMIUM_LAUNCH_ARGS) + _extra_chromium_args()
     errors = []
     try:
-        browser = playwright.chromium.launch(args=list(CHROMIUM_LAUNCH_ARGS))
+        browser = playwright.chromium.launch(args=list(base_args))
         return browser, 'bundled-chromium'
     except Exception as exc:
         errors.append(f'bundled: {short_browser_error(exc)}')
     try:
         browser = playwright.chromium.launch(
-            args=list(CHROMIUM_LAUNCH_ARGS) + ['--no-zygote', '--single-process']
+            args=list(base_args) + ['--no-zygote', '--single-process']
         )
         return browser, 'bundled-chromium-single-process'
     except Exception as exc:
@@ -101,7 +113,7 @@ def _launch_chromium(playwright):
     os.environ['PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW'] = '1'
     try:
         try:
-            browser = playwright.chromium.launch(args=list(CHROMIUM_LAUNCH_ARGS))
+            browser = playwright.chromium.launch(args=list(base_args))
             return browser, 'bundled-chromium-headless-new'
         except Exception as exc:
             errors.append(f'bundled-headless-new: {short_browser_error(exc)}')
@@ -113,7 +125,7 @@ def _launch_chromium(playwright):
     for candidate in _chromium_executable_candidates():
         try:
             browser = playwright.chromium.launch(
-                args=list(CHROMIUM_LAUNCH_ARGS), executable_path=candidate
+                args=list(base_args), executable_path=candidate
             )
             return browser, f'system-chromium:{candidate}'
         except Exception as exc:
