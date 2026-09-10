@@ -1,43 +1,14 @@
 FROM python:3.11-slim
 
-# Install Arabic/system fonts (no LibreOffice needed - PDF uses Playwright)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    fonts-noto-core \
-    fonts-noto-extra \
-    fonts-arabeyes \
-    fonts-noto-naskh-arabic \
-    fontconfig \
-    && fc-cache -f \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
-# Make project-root startup hooks importable during Python initialization.
-# This is required for sitecustomize.py to load before gunicorn imports app:app.
+
+# Keep the project root importable during Python startup so sitecustomize.py
+# is loaded before gunicorn imports app:app.
 ENV PYTHONPATH=/app
 
-# Install Python dependencies
-COPY requirements.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers inside app directory for Hugging Face permissions
-ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
-RUN playwright install --with-deps chromium
-
-# Copy all project files (fonts_bundle.json contains the real bundled font data)
 COPY . .
 
-# Create writable directories and fix permissions for HF non-root user
-RUN mkdir -p /app/outputs /app/uploads /app/.cache && \
-    chmod -R 777 /app/outputs /app/uploads /app/.cache
-
-# Ensure fontconfig finds Arabic fonts
-ENV FONTCONFIG_PATH=/etc/fonts
-
-EXPOSE 7860
-
-HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
-    CMD python -c "import os, sys, urllib.request; urllib.request.urlopen('http://localhost:' + os.environ.get('PORT','7860') + '/health'); sys.exit(0)"
-
-CMD exec gunicorn --bind 0.0.0.0:${PORT:-7860} --timeout 120 --workers 1 --threads 4 app:app
+CMD exec gunicorn --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 8 --timeout 300 --graceful-timeout 30 app:app
