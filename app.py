@@ -17519,7 +17519,7 @@ def _slide_vision_probe(force=False):
         if not state['available']:
             state['error'] = getattr(renderer, 'LAST_VISION_ERROR', '') or 'renderer_returned_nothing'
     except Exception as exc:
-        state['error'] = str(exc)[:300]
+        state['error'] = renderer.short_browser_error(exc)
     _record_slide_vision_state(state['available'], state['error'], source='probe')
     return dict(_SLIDE_VISION_STATE)
 

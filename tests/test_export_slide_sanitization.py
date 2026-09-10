@@ -691,6 +691,58 @@ class ExportSlideSanitizationTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError) as raised:
                     engine._launch_chromium(stub)
         self.assertIn('bundled', str(raised.exception))
+        self.assertIn('bundled-single-process', str(raised.exception))
+        self.assertIn('bundled-headless-new', str(raised.exception))
+
+    def test_chromium_launcher_prefers_single_process_rescue(self):
+        """A bundled binary that dies on the default spawn may still run
+        single-process without zygote — the known restricted-container rescue."""
+        import types
+
+        import generate_pdf_from_preview as engine
+
+        class _StubChromium:
+            def launch(self, *args, **kwargs):
+                args = kwargs.get('args') or []
+                if '--single-process' in args:
+                    return object()
+                raise RuntimeError('Target page, context or browser has been closed')
+
+        stub = types.SimpleNamespace(chromium=_StubChromium())
+        browser, how = engine._launch_chromium(stub)
+        self.assertIsNotNone(browser)
+        self.assertEqual(how, 'bundled-chromium-single-process')
+
+    def test_headless_new_attempt_restores_environment(self):
+        import os
+        import types
+        from unittest.mock import patch
+
+        import generate_pdf_from_preview as engine
+
+        class _StubChromium:
+            def launch(self, *args, **kwargs):
+                raise RuntimeError('missing shared libraries')
+
+        stub = types.SimpleNamespace(chromium=_StubChromium())
+        with patch.dict(os.environ, {'CHROMIUM_PATH': '', 'CHROME_PATH': ''}, clear=False):
+            os.environ.pop('PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW', None)
+            with patch.object(engine, '_chromium_executable_candidates', return_value=[]):
+                with self.assertRaises(RuntimeError):
+                    engine._launch_chromium(stub)
+            self.assertNotIn('PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW', os.environ)
+
+    def test_browser_error_keeps_the_diagnosis_tail(self):
+        """Playwright opens with hundreds of chars of flags and names the missing
+        library at the end — the slice must keep the tail, not just the head."""
+        import generate_pdf_from_preview as engine
+
+        message = 'BrowserType.launch: ' + ' '.join(f'--flag-{n}' for n in range(80))
+        message += ' Host system is missing dependencies: libnss3.so libatk.so'
+        shortened = engine.short_browser_error(RuntimeError(message))
+        self.assertIn('BrowserType.launch', shortened)
+        self.assertIn('libnss3.so', shortened)
+        self.assertLessEqual(len(shortened), 130 + 260 + 10)
 
     def test_fallback_marks_degraded_engine(self):
         """The PyMuPDF fallback keeps the page count but shifts the layout, so the

@@ -739,8 +739,12 @@ the page count but lays every 1280px slide ~22px too far right (white strip on t
 content on the right) and writes 1280x720pt pages instead of Chromium's 960x540pt — measured, not
 assumed. That is how a new host (or a staging dir) ships a "successful" export that looks broken
 next to the old host: the code is identical, the browser is what differs. `_launch_chromium()`
-tries the bundled binary first, then `CHROMIUM_PATH` / `CHROME_PATH` and the well-known system
-locations, and names every failed attempt in the server log. `generate_pdf()` records the outcome
+tries the bundled binary first (then its single-process and new-headless rescues for restricted
+containers), then `CHROMIUM_PATH` / `CHROME_PATH` and the well-known system
+locations, and names every failed attempt in the server log. `short_browser_error()` keeps the
+tail of a launch message because Playwright opens with hundreds of characters of flags and only
+names the missing library at the end — a head-only slice is what hid a dead browser behind
+"Target page, context or browser has been closed". `generate_pdf()` records the outcome
 in `LAST_PDF_ENGINE` (`chromium` / `chromium-isolated` / `fitz-fallback`), `/api/export` returns
 it as `engine`, and the fallback prints an explicit degraded-layout warning. Verify a suspect host
 with `/health?vision=1` (`slide_vision.available`), `playwright_install.log` / `.vision_status`,

@@ -55,22 +55,61 @@ def _chromium_executable_candidates():
     return [path for path in seen if path and os.path.isfile(path)]
 
 
+def short_browser_error(exc, head=130, tail=260):
+    """One-line launch error that keeps the diagnosis, which lives at the end.
+
+    Playwright's message opens with the launching command line (hundreds of
+    characters of flags) and only names the missing library — or the real
+    crash reason — in its last lines. A plain [:300] slice therefore keeps the
+    flags and eats the diagnosis, which is exactly what hid a dead browser
+    behind "Target page, context or browser has been closed".
+    """
+    text = f'{type(exc).__name__}: {exc}'.replace('\n', ' ').replace('\r', ' ')
+    text = ' '.join(text.split())
+    if len(text) > head + tail + 5:
+        return text[:head] + ' ... ' + text[-tail:]
+    return text
+
+
 def _launch_chromium(playwright):
     """Launch a Chromium for deck rendering, trying harder than the default.
 
     Playwright's bundled binary is tried first with the exact arguments the
-    export has always used. When it cannot start (the usual shared-hosting
-    failure is missing OS libraries), an admin-provided CHROMIUM_PATH and the
-    host-wide browser locations are tried before giving up. Returns the
-    (browser, description) pair; raises RuntimeError naming every attempt so
-    the server log — not a silently degraded PDF — carries the failure.
+    export has always used. A downloaded binary that dies on start is the
+    usual shared-hosting state: the file exists, so reinstalling changes
+    nothing. The next attempts cover the known container rescues
+    (single-process without zygote, full-Chromium new headless instead of the
+    headless shell), then an admin-provided CHROMIUM_PATH and the host-wide
+    browser locations. Returns the (browser, description) pair; raises
+    RuntimeError naming every attempt so the server log — not a silently
+    degraded PDF — carries the failure.
     """
     errors = []
     try:
         browser = playwright.chromium.launch(args=list(CHROMIUM_LAUNCH_ARGS))
         return browser, 'bundled-chromium'
     except Exception as exc:
-        errors.append(f'bundled: {exc}'[:300])
+        errors.append(f'bundled: {short_browser_error(exc)}')
+    try:
+        browser = playwright.chromium.launch(
+            args=list(CHROMIUM_LAUNCH_ARGS) + ['--no-zygote', '--single-process']
+        )
+        return browser, 'bundled-chromium-single-process'
+    except Exception as exc:
+        errors.append(f'bundled-single-process: {short_browser_error(exc)}')
+    previous_headless_new = os.environ.get('PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW')
+    os.environ['PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW'] = '1'
+    try:
+        try:
+            browser = playwright.chromium.launch(args=list(CHROMIUM_LAUNCH_ARGS))
+            return browser, 'bundled-chromium-headless-new'
+        except Exception as exc:
+            errors.append(f'bundled-headless-new: {short_browser_error(exc)}')
+    finally:
+        if previous_headless_new is None:
+            os.environ.pop('PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW', None)
+        else:
+            os.environ['PLAYWRIGHT_CHROMIUM_USE_HEADLESS_NEW'] = previous_headless_new
     for candidate in _chromium_executable_candidates():
         try:
             browser = playwright.chromium.launch(
@@ -78,8 +117,8 @@ def _launch_chromium(playwright):
             )
             return browser, f'system-chromium:{candidate}'
         except Exception as exc:
-            errors.append(f'{candidate}: {exc}'[:300])
-    raise RuntimeError('no launchable Chromium (' + ' | '.join(errors[:6]) + ')')
+            errors.append(f'{candidate}: {short_browser_error(exc)}')
+    raise RuntimeError('no launchable Chromium (' + ' | '.join(errors[:8]) + ')')
 
 
 def _generate_pdf_with_fitz(html, out_path, slides=None, layout_css='', font_css=''):

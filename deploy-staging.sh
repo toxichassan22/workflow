@@ -138,7 +138,8 @@ try:
         error = f'chromium {browser.version}'
         browser.close()
 except Exception as exc:
-    error = str(exc)[:600]
+    err = ' '.join(f'{type(exc).__name__}: {exc}'.split())
+    error = err if len(err) <= 600 else err[:150] + ' ... ' + err[-440:]
 print(json.dumps({'available': available, 'error': error, 'installLog': detail}, ensure_ascii=False))
 PY
   mv "$APP_DIR/.vision_status.tmp" "$APP_DIR/.vision_status" 2>/dev/null
