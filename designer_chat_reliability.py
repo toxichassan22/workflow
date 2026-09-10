@@ -904,7 +904,7 @@ def _verify_original_result(result, payload, namespace):
         "insert_company_logo_panel", "delete_slide", "remove_slide", "duplicate_slide",
         "clone_slide", "reorder_slides", "move_slide", "split_slide", "split_dense_slide",
         "create_slide", "create_design_slide", "merge_slides", "combine_slides",
-        "apply_watermark", "remove_watermark",
+        "apply_watermark", "remove_watermark", "apply_image_descriptions",
     }
     successful_mutations = [item for item in actions if item.get("tool") in mutating and item.get("status") == "success"]
     if not successful_mutations or not isinstance(data.get("slidesData"), list):
@@ -940,12 +940,8 @@ def install(app, namespace: Dict[str, Any]) -> None:
         from flask import request
 
         payload = request.get_json(silent=True) or {}
-        if is_image_description_request(payload.get("message")):
-            return _handle_image_descriptions(payload, namespace)
-        if is_split_request(payload.get("message")):
-            split_res = _handle_split(payload, namespace, original_call=original)
-            if split_res is not None:
-                return split_res
+        # Language interpretation belongs to the contextual planner. Deterministic
+        # rendering remains available after it chooses an operation and its scope.
         return _verify_original_result(original(), payload, namespace)
 
     secured_designer_chat = require_auth(reliable_designer_chat)

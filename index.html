@@ -7123,6 +7123,10 @@
         progress: 5,
         message: String(message || 'جاري تنفيذ التعديل...')
       };
+      document.querySelectorAll('[onclick*="sendTenantDesignerChat"]').forEach(button => {
+        button.dataset.designerWasDisabled = String(button.disabled);
+        button.disabled = true;
+      });
       updateDesignerChatStatus();
     }
 
@@ -7138,6 +7142,10 @@
 
     function clearDesignerChatBusy() {
       tenantDesignerChatBusy = null;
+      document.querySelectorAll('[data-designer-was-disabled]').forEach(button => {
+        button.disabled = button.dataset.designerWasDisabled === 'true';
+        delete button.dataset.designerWasDisabled;
+      });
       const indicator = document.getElementById('tenantChatTypingIndicator');
       if (indicator) indicator.remove();
       updateDesignerChatStatus();
@@ -17527,34 +17535,42 @@
           badge.innerHTML = 'جاري الحفظ... ' + pct + '%';
         } : null;
 
+        // Both records receive the same immutable snapshot, not two different
+        // generations of the live workspace separated by an asynchronous save.
+        const snapshot = JSON.parse(JSON.stringify(data));
+        const savedPresentationId = tenantPresentationId;
+        const savedPresentationTitle = tenantPresentationTitle;
         const resp = await api('POST', '/api/project-draft',
-          { draftData: data, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' },
+          { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' },
           false, { onProgress });
         if (resp.draftId) tenantProjectData.draftId = resp.draftId;
         if (resp.success) {
-          tenantDraftDirty = false;
-          if (syncPresentation && tenantPresentationId && tenantSlidesData && tenantSlidesData.length) {
+          if (syncPresentation && savedPresentationId && snapshot.tenantSlidesData.length) {
             try {
-              const presTitle = tenantPresentationTitle
-                || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
-              const presResp = await api('PUT', '/api/presentations/' + tenantPresentationId, {
+              const presTitle = savedPresentationTitle
+                || snapshot.project_name || snapshot.projectName || 'عرض بدون عنوان';
+              const presResp = await api('PUT', '/api/presentations/' + savedPresentationId, {
                 title: presTitle,
-                projectData: tenantProjectData,
-                slidesData: tenantSlidesData,
-                slideCount: tenantSlidesData.length,
+                projectData: snapshot,
+                slidesData: snapshot.tenantSlidesData,
+                slideCount: snapshot.tenantSlidesData.length,
                 status: 'edited'
               });
-              if (!presResp || presResp.success === false || presResp.error) {
-                throw new Error((presResp && presResp.error) || 'تعذرت مزامنة نسخة العرض');
-              }
+              if (!presResp?.success) throw new Error(presResp?.error || 'تعذر حفظ العرض');
             } catch (presErr) {
-              // The draft itself is saved, but reopening the presentation would show
-              // stale slides. A silent catch here used to report full success while
-              // the visible copy stayed old, which reads exactly as "saved but lost".
-              console.warn('Presentation sync error:', presErr);
-              if (!silent) toast('تم حفظ المسودة، وتعذرت مزامنة نسخة العرض: ' + (presErr?.message || presErr));
+              console.error('[PRESENTATION SAVE]', presErr);
+              setDraftDirty(true);
+              tenantArchiveCache = null;
+              if (badge) {
+                badge.style.background = '#fee2e2';
+                badge.style.color = '#991b1b';
+                badge.textContent = 'المسودة محفوظة؛ تعذر حفظ العرض';
+              }
+              if (!silent) toast('حُفظت المسودة، لكن تعذر حفظ العرض: ' + (presErr?.message || presErr));
+              return false;
             }
           }
+          tenantDraftDirty = false;
           if (badge) {
             const timeStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
             badge.style.background = '#dcfce7';
@@ -24067,6 +24083,7 @@
       const started = Date.now();
       const maxWaitMs = 60 * 60 * 1000;
       let transientFailures = 0;
+      let lastExecutionTarget = '';
       while (Date.now() - started < maxWaitMs) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         const result = await apiWithTimeout(
@@ -24081,6 +24098,16 @@
         transientFailures = 0;
         const progress = Math.max(1, Math.min(99, Number(result?.progress || 5)));
         updateDesignerChatBusy(progress, result?.message || 'جاري تنفيذ تعديل العرض...');
+        // Navigate only after the executor starts editing a model-selected slide.
+        // Deduplicate polling events so manual scrolling is not constantly undone.
+        if (result?.phase === 'editing' && Number.isInteger(result.activeSlideIndex)
+          && result.activeSlideIndex >= 0 && result.activeSlideIndex < tenantSlidesData.length) {
+          const executionTarget = String(result.actionNumber) + ':' + result.activeSlideIndex;
+          if (executionTarget !== lastExecutionTarget) {
+            lastExecutionTarget = executionTarget;
+            selectTenantSlide(result.activeSlideIndex);
+          }
+        }
         if (indicator && document.contains(indicator)) {
           setInlineLoaderProgress(indicator, progress, result?.message || 'جاري تنفيذ تعديل العرض...');
         }
@@ -24104,46 +24131,11 @@
         return;
       }
 
-      const sectionRequest = detectTenantSectionRegenerationRequest(message);
-      if (sectionRequest) {
-        tenantDesignerMessages.push({ role: 'user', content: message, slides: [] });
-        if (input) { input.value = ''; growTenantChatInput(input); }
-        clearTenantChatAttachment();
-        tenantProjectData.designerChat = designerChatPersistence();
-        renderTenantDesignerChat();
-        triggerAutoSaveDraft();
-        await regenerateTenantSection(sectionRequest.key, sectionRequest.label);
-        return;
-      }
-
-      // Fast instant client-side execution for slide movement commands
-      const moveCmd = detectMoveSlideCommand(message);
-      if (moveCmd) {
-        tenantDesignerMessages.push({ role: 'user', content: message });
-        if (input) input.value = '';
-        moveTenantSlide(moveCmd.fromIdx, moveCmd.toIdx);
-        tenantDesignerMessages.push({
-          role: 'assistant',
-          content: 'تم نقل الشريحة رقم ' + (moveCmd.fromIdx + 1) + ' لتصبح الشريحة رقم ' + (moveCmd.toIdx + 1) + ' فوراً وبدون الحاجة لإعادة التوليد!'
-        });
-        tenantProjectData.designerChat = designerChatPersistence();
-        renderTenantDesignerChat();
-        triggerAutoSaveDraft();
-        return;
-      }
-
-      // Check if message specifies modifying all slides
-      const ALL_SLIDES_REGEX = /كل\s*(الشرائح|الشرايح|الرايح|السلايدات|شريحة|الكل)|جميع\s*الشرائح|كافة\s*الشرائح|الشرائح\s*كلها|الشرايح\s*كلها|العرض\s*(كامل|كله)|في\s*الكل|على\s*الكل/i;
-      const isAllSlidesRequest = ALL_SLIDES_REGEX.test(message) || tenantChatSlideScope === 'all';
-
-      const detectedIndexes = detectSlideIndexesFromMessage(message);
-      let targetScope = isAllSlidesRequest ? 'all' : (detectedIndexes.length > 0 ? 'indexes' : (tenantChatSlideScope === 'auto' ? 'auto' : tenantChatSlideScope));
-      const target1BasedIndexes = detectedIndexes.map(idx => idx + 1);
-
-      // If not explicit all slides, attempt smart slide detection to highlight for user
-      if (!isAllSlidesRequest && detectedIndexes.length > 0) {
-        selectTenantSlide(detectedIndexes[0]);
-      }
+      if (tenantDesignerChatBusy) return;
+      // Send the untouched message and conversation. A number is not a client-side
+      // command, and even a slide reference does not authorize an edit or navigation.
+      const targetScope = tenantChatSlideScope === 'all' ? 'all' : 'auto';
+      const target1BasedIndexes = [];
 
       tenantDesignerMessages.push({
         role: 'user',
@@ -24156,7 +24148,6 @@
       tenantProjectData.designerChat = designerChatPersistence();
       renderTenantDesignerChat();
       triggerAutoSaveDraft();
-      if (target1BasedIndexes.length) tenantChatFocusIndexes = target1BasedIndexes.slice();
 
       const messagesDiv = document.getElementById('tenantChatMessages');
       setDesignerChatBusy('جاري تجهيز الطلب...');
@@ -24197,13 +24188,14 @@
       let data = null;
       try {
         data = await requestTenantDesignerChat(chatPayload, indicator);
+      } catch (error) {
+        data = { success: false, error: error?.message || 'تعذر تنفيذ الطلب.' };
       } finally {
-        updateDesignerChatBusy(100, 'اكتمل الطلب');
         clearDesignerChatBusy();
       }
 
       const reply = data && data.data ? data.data : null;
-      if (!data.success || !reply) {
+      if (!data?.success || !reply) {
         tenantDesignerMessages.push({
           role: 'assistant',
           content: (data && data.error) || 'تعذر تنفيذ الطلب. لم يتم تغيير العرض.'
@@ -24219,7 +24211,7 @@
 
       // The designer asked instead of guessing: show the question, change nothing, keep the answer
       // in the input's turn. Guessing and then editing wrongly is worse than one question.
-      if (reply.action === 'ask') {
+      if (reply.action === 'ask' || reply.action === 'chat_only') {
         if (!Array.isArray(reply.chatHistory)) {
           tenantDesignerMessages.push({
             role: 'assistant',
@@ -24234,12 +24226,10 @@
         return;
       }
 
-      // Smart insertion & position handling for requested slide index
-      const insertAfterMatch = message.match(/(?:تحت|بعد)\s*الشريحة\s*(?:رقم\s*)?(\d+)/i) || message.match(/(?:شريحة|سلايد)\s*رقم\s*(\d+)/i);
-      let requestedInsertAfter = insertAfterMatch ? parseInt(insertAfterMatch[1], 10) : null;
-
+      // The executor owns structural positions; do not reinterpret the message
+      // and move its last slide a second time after applying the returned workspace.
       if (reply.action === 'add_slide' || reply.action === 'insert_slide') {
-        const insertAfter = reply.insertAfterIndex !== undefined ? Number(reply.insertAfterIndex) : (requestedInsertAfter || (tenantChatSlideIndex + 1));
+        const insertAfter = reply.insertAfterIndex !== undefined ? Number(reply.insertAfterIndex) : (tenantChatSlideIndex + 1);
         const insertIdx = Math.max(0, Math.min(insertAfter, tenantSlidesData.length));
         const newSlide = {
           title: reply.title || 'شريحة جديدة',
@@ -24282,13 +24272,7 @@
           return;
         }
         tenantSlidesData = incoming;
-        if (requestedInsertAfter && tenantSlidesData.length > oldLength) {
-          const lastIdx = tenantSlidesData.length - 1;
-          const targetIdx = Math.max(0, Math.min(requestedInsertAfter, tenantSlidesData.length - 1));
-          const [newSlide] = tenantSlidesData.splice(lastIdx, 1);
-          tenantSlidesData.splice(targetIdx, 0, newSlide);
-          selectTenantSlide(targetIdx);
-        } else if (tenantSlidesData.length < oldLength) {
+        if (tenantSlidesData.length < oldLength) {
           activeSlideIndex = Math.max(0, Math.min(activeSlideIndex, tenantSlidesData.length - 1));
           tenantChatSlideIndex = Math.max(0, Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1));
         }
