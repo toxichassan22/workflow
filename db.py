@@ -661,6 +661,66 @@ def get_tenant_by_subdomain(subdomain):
     return dict(row) if row else None
 
 
+_SLUG_RE = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?')
+
+
+def _normalize_slug(value):
+    """Lowercase a candidate and fold username characters into URL-safe form."""
+    slug = re.sub(r'[^a-z0-9-]', '', str(value or '').strip().lower().replace('_', '-').replace('.', '-').replace(' ', '-'))
+    slug = re.sub(r'-{2,}', '-', slug).strip('-')
+    return slug if slug and _SLUG_RE.fullmatch(slug) else ''
+
+
+def tenant_slug(tenant):
+    """Stable latin slug identifying a company in role-prefixed URLs.
+
+    Prefers the explicit ``subdomain``, then the latin ``username`` (folded to
+    URL-safe form). Both are already UNIQUE values. Arabic company names are
+    never used: they break URL encoding and every rename would invalidate
+    bookmarks. The ``t-<id8>`` fallback keeps tenants without either value
+    addressable.
+    """
+    if not tenant:
+        return ''
+    for key in ('subdomain', 'username'):
+        slug = _normalize_slug(tenant.get(key))
+        if slug:
+            return slug
+    tenant_id = str(tenant.get('id') or '').strip()
+    return ('t-' + re.sub(r'[^a-z0-9]', '', tenant_id.lower())[:8]) if tenant_id else ''
+
+
+def get_tenant_by_slug(slug):
+    """Resolve a URL slug back to its tenant (subdomain, username, or id fallback)."""
+    raw = str(slug or '').strip().lower()
+    if not raw:
+        return None
+    conn = get_db()
+    for candidate in dict.fromkeys([raw, _normalize_slug(raw)]):
+        if not candidate:
+            continue
+        row = conn.execute(
+            'SELECT * FROM tenants WHERE LOWER(subdomain) = ? AND is_active = 1', (candidate,)
+        ).fetchone()
+        if row:
+            return dict(row)
+        row = conn.execute(
+            'SELECT * FROM tenants WHERE LOWER(REPLACE(REPLACE(username, ?, ?), ?, ?)) = ? AND is_active = 1',
+            ('_', '-', '.', '-', candidate)
+        ).fetchone()
+        if row:
+            return dict(row)
+    if raw.startswith('t-'):
+        suffix = re.sub(r'[^a-z0-9]', '', raw[2:])
+        if suffix:
+            row = conn.execute(
+                'SELECT * FROM tenants WHERE REPLACE(LOWER(id), ?, ?) LIKE ? AND is_active = 1',
+                ('-', '', suffix + '%')
+            ).fetchone()
+            return dict(row) if row else None
+    return None
+
+
 def get_all_tenants():
     """Fetch all tenants (admin only)."""
     conn = get_db()

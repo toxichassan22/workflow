@@ -10687,6 +10687,7 @@ def _company_payload(tenant):
         'requirePasswordChange': bool(tenant.get('require_password_change')),
         'subdomain': tenant.get('subdomain'),
         'domain': tenant.get('domain'),
+        'slug': db.tenant_slug(tenant),
         'createdAt': tenant.get('created_at'),
     }
 
@@ -10742,7 +10743,8 @@ def api_register():
     return jsonify({
         'success': True,
         'token': token,
-        'tenant': {'id': tenant_id, 'companyName': company_name, 'email': email, 'domain': domain}
+        'tenant': {'id': tenant_id, 'companyName': company_name, 'email': email, 'domain': domain,
+                   'slug': db.tenant_slug({'id': tenant_id, 'subdomain': subdomain, 'username': None})}
     }), 201
 
 
@@ -10778,6 +10780,7 @@ def api_login():
                 'plan': tenant.get('plan', 'free'),
                 'domain': tenant.get('domain'),
                 'username': tenant.get('username'),
+                'slug': db.tenant_slug(tenant),
             },
             'user': {
                 'name': tenant['company_name'],
@@ -10809,6 +10812,7 @@ def api_login():
                 'isAdmin': bool(tenant.get('is_admin')),
                 'plan': tenant.get('plan', 'free'),
                 'domain': tenant.get('domain'),
+                'slug': db.tenant_slug(tenant),
             },
             'user': {
                 'id': user['id'],
@@ -10881,6 +10885,7 @@ def api_me():
             'plan': t.get('plan', 'free'),
             'subdomain': t.get('subdomain'),
             'domain': t.get('domain'),
+            'slug': db.tenant_slug(t),
         }
     }
     if g.user_id:
@@ -17947,7 +17952,21 @@ def index():
 @app.route('/app', methods=['GET'])
 @app.route('/app/<path:page>')
 def tenant_app_page(page=''):
-    """Serve the SPA shell for bookmarkable tenant workspace pages."""
+    """Serve the SPA shell for bookmarkable tenant workspace pages (legacy prefix)."""
+    return index()
+
+
+@app.route('/superadmin', methods=['GET'])
+@app.route('/superadmin/<path:page>')
+def superadmin_app_page(page=''):
+    """Serve the SPA shell for the super-admin workspace (role guard runs client-side)."""
+    return index()
+
+
+@app.route('/c/<slug>', methods=['GET'])
+@app.route('/c/<slug>/<path:page>')
+def company_app_page(slug='', page=''):
+    """Serve the SPA shell for a company workspace; slug mismatch redirects client-side."""
     return index()
 
 

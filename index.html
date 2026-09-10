@@ -8176,6 +8176,89 @@
     };
     const TENANT_ROUTE_PAGES = Object.fromEntries(Object.entries(TENANT_PAGE_ROUTES).map(([page, route]) => [route, page]));
 
+    // Role-prefixed URLs: super-admin lives under /superadmin, each company under
+    // /c/<slug> where slug is the stable latin subdomain/username (never the Arabic
+    // company name or a user name). /app/* stays as a legacy alias that resolves
+    // to the canonical address instead of breaking bookmarks.
+    const TENANT_ROUTE_SUFFIXES = {
+      tenantDashboardPage: 'dashboard',
+      tenantProjectPage: 'projects/new',
+      tenantProjectPresentationsPage: 'projects/presentations',
+      tenantVisualConceptPage: 'projects/visual-concept',
+      tenantGenerationPage: 'projects/generation',
+      tenantSlidesPage: 'presentations/current',
+      tenantPresentationsPage: 'presentations',
+      tenantSettingsPage: 'settings',
+      tenantTeamPage: 'settings/team',
+      tenantFieldsPage: 'settings/fields',
+      tenantUsersPage: 'settings/users',
+      tenantTrainingPage: 'settings/training',
+      tenantAIRulesPage: 'settings/ai-rules',
+      tenantApprovalsPage: 'approvals',
+      tenantAdminPage: 'admin'
+    };
+    const TENANT_SUFFIX_PAGES = Object.fromEntries(Object.entries(TENANT_ROUTE_SUFFIXES).map(([page, suffix]) => [suffix, page]));
+
+    function tenantUrlSlug() {
+      const raw = (tenantUser && (tenantUser.slug || tenantUser.subdomain || tenantUser.username)) || '';
+      const slug = String(raw).trim().toLowerCase().replace(/[_.]+/g, '-').replace(/[^a-z0-9-]+/g, '').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
+      return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug) ? slug : '';
+    }
+
+    function tenantPathPrefix() {
+      if (tenantUser && tenantUser.isAdmin) return '/superadmin';
+      const slug = tenantUrlSlug();
+      return slug ? '/c/' + slug : '/app';
+    }
+
+    function tenantCanonicalRoute(pageId) {
+      const suffix = TENANT_ROUTE_SUFFIXES[pageId];
+      if (!suffix) return null;
+      if (tenantUser && tenantUser.isAdmin) {
+        return pageId === 'tenantAdminPage' ? '/superadmin/admin' : '/superadmin/' + suffix;
+      }
+      return tenantPathPrefix() + '/' + suffix;
+    }
+
+    function resolveTenantRoutePath(path) {
+      const clean = String(path || '/').replace(/\/+$/, '') || '/';
+      if (clean === '/superadmin') return { pageId: 'tenantAdminPage', prefix: '/superadmin', urlSlug: '' };
+      if (clean.startsWith('/superadmin/')) {
+        const suffix = clean.slice('/superadmin/'.length);
+        const pageId = TENANT_SUFFIX_PAGES[suffix];
+        return pageId ? { pageId, prefix: '/superadmin', urlSlug: '' } : null;
+      }
+      const companyMatch = clean.match(/^\/c\/([^\/]+)(\/(.*))?$/);
+      if (companyMatch) {
+        const urlSlug = companyMatch[1].toLowerCase();
+        const suffix = (companyMatch[3] || '').replace(/\/+$/, '');
+        if (!suffix) return { pageId: 'tenantDashboardPage', prefix: '/c/' + urlSlug, urlSlug };
+        const pageId = TENANT_SUFFIX_PAGES[suffix];
+        return pageId ? { pageId, prefix: '/c/' + urlSlug, urlSlug } : null;
+      }
+      return null;
+    }
+
+    function enforceTenantRouteGuard(pageId, urlSlug) {
+      if (!tenantUser) return pageId;
+      const isSagAdmin = !!tenantUser.isAdmin;
+      if (urlSlug && !isSagAdmin && urlSlug !== tenantUrlSlug() && tenantUrlSlug()) return 'TENANT_SLUG_MISMATCH';
+      if (pageId === 'tenantAdminPage' && !isSagAdmin) return 'TENANT_ADMIN_FORBIDDEN';
+      return pageId;
+    }
+
+    function canonicalizeTenantUrl(pageId, replace) {
+      const canonical = (typeof tenantCanonicalRoute === 'function') ? tenantCanonicalRoute(pageId) : null;
+      const current = window.location.pathname;
+      if (!canonical || current === canonical) return;
+      const resolved = (typeof resolveTenantRoutePath === 'function') ? resolveTenantRoutePath(current) : null;
+      const legacy = !resolved && !!(TENANT_PAGE_ROUTES[pageId] && current === TENANT_PAGE_ROUTES[pageId]);
+      if (replace || legacy || (resolved && resolved.prefix !== tenantPathPrefix())) {
+        const state = buildTenantNavigationState(pageId, {});
+        window.history.replaceState(state, '', canonical + window.location.search);
+      }
+    }
+
     function getBrowserNavigationState() {
       const query = new URLSearchParams(window.location.search);
       const state = history.state && typeof history.state === 'object' ? history.state : {};
@@ -8188,7 +8271,8 @@
     }
 
     function tenantNavigationUrl(pageId, state) {
-      const route = TENANT_PAGE_ROUTES[pageId] || window.location.pathname;
+      const canonical = (typeof tenantCanonicalRoute === 'function') ? tenantCanonicalRoute(pageId) : null;
+      const route = canonical || TENANT_PAGE_ROUTES[pageId] || window.location.pathname;
       const query = new URLSearchParams();
       if (pageId === 'tenantProjectPage' && state.activeSection) query.set('section', state.activeSection);
       if (pageId === 'tenantProjectPresentationsPage' && state.draftId) query.set('draftId', state.draftId);
@@ -8209,7 +8293,7 @@
     }
 
     function showTenantPage(pageId, fromHistory = false) {
-      if (!fromHistory && TENANT_PAGE_ROUTES[pageId]) syncTenantBrowserHistory(pageId);
+      if (!fromHistory && (TENANT_PAGE_ROUTES[pageId] || (typeof tenantCanonicalRoute === 'function' && tenantCanonicalRoute(pageId)))) syncTenantBrowserHistory(pageId);
       document.querySelectorAll('.tenant-page').forEach(el => el.classList.remove('active'));
       const el = document.getElementById(pageId);
       if (el) el.classList.add('active');
@@ -8249,7 +8333,17 @@
       // address bar and leave the screen untouched.
       if (!getTenantToken()) return;
       const path = window.location.pathname;
-      const pageId = TENANT_ROUTE_PAGES[path];
+      const resolved = (typeof resolveTenantRoutePath === 'function') ? resolveTenantRoutePath(path) : null;
+      const pageId = (resolved && resolved.pageId) || TENANT_ROUTE_PAGES[path];
+      if (resolved && typeof enforceTenantRouteGuard === 'function') {
+        const guard = enforceTenantRouteGuard(pageId, resolved.urlSlug);
+        if (guard === 'TENANT_SLUG_MISMATCH' || guard === 'TENANT_ADMIN_FORBIDDEN') {
+          showTenantPage('tenantDashboardPage', true);
+          syncTenantBrowserHistory('tenantDashboardPage', {}, true);
+          return;
+        }
+        if (typeof canonicalizeTenantUrl === 'function') canonicalizeTenantUrl(pageId, true);
+      }
       if (pageId) {
         if (pageId === 'tenantProjectPresentationsPage') {
           const draftId = new URLSearchParams(window.location.search).get('draftId');
@@ -8816,8 +8910,18 @@
       showTenantApp();
       // A path the user actually asked for wins over the last-visited page, so deep links and
       // refreshes land where the URL says instead of somewhere remembered in localStorage.
-      const requestedPage = TENANT_ROUTE_PAGES[window.location.pathname];
+      const resolvedRequested = (typeof resolveTenantRoutePath === 'function') ? resolveTenantRoutePath(window.location.pathname) : null;
+      const requestedPage = (resolvedRequested && resolvedRequested.pageId) || TENANT_ROUTE_PAGES[window.location.pathname];
       const requestedSection = new URLSearchParams(window.location.search).get('section');
+      if (resolvedRequested && typeof enforceTenantRouteGuard === 'function') {
+        const guard = enforceTenantRouteGuard(requestedPage, resolvedRequested.urlSlug);
+        if (guard === 'TENANT_SLUG_MISMATCH' || guard === 'TENANT_ADMIN_FORBIDDEN') {
+          showTenantPage('tenantDashboardPage', true);
+          syncTenantBrowserHistory('tenantDashboardPage', {}, true);
+          return;
+        }
+      }
+      if (requestedPage && typeof canonicalizeTenantUrl === 'function') canonicalizeTenantUrl(requestedPage, true);
       if (requestedPage) {
         if (requestedPage === 'tenantVisualConceptPage') {
           const navigation = getTenantNavigationState();
@@ -27322,7 +27426,11 @@
       }
       setTenantToken(data.token);
       setTenantUser(data.tenant);
-      window.history.replaceState({}, '', '/app/dashboard');
+      try {
+        tenantUser = data.tenant;
+        const next = (typeof tenantCanonicalRoute === 'function' && tenantCanonicalRoute('tenantDashboardPage')) || '/app/dashboard';
+        window.history.replaceState({}, '', next);
+      } catch (e) { window.history.replaceState({}, '', '/app/dashboard'); }
       await bootstrapTenant();
     }
 

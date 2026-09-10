@@ -4601,7 +4601,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         html_headers = {'Accept': 'text/html'}
         for path in ('/', '/app', '/app/dashboard', '/app/projects/new',
                      '/app/projects/visual-concept',
-                     '/app/settings/users', '/projects/123/financial'):
+                     '/app/settings/users', '/projects/123/financial',
+                     '/superadmin', '/superadmin/admin',
+                     '/c/acme/dashboard', '/c/acme/presentations/current'):
             response = client.get(path, headers=html_headers)
             self.assertEqual(response.status_code, 200, f'{path} should serve the SPA shell')
 
@@ -4611,6 +4613,26 @@ class MeetingRequirementsTests(unittest.TestCase):
         # Non-GET and non-HTML requests must not be answered with the shell either.
         self.assertEqual(client.post('/definitely-not-a-route').status_code, 404)
         self.assertEqual(client.get('/definitely-not-a-route').status_code, 404)
+
+    def test_role_prefixed_routes_resolve_to_a_stable_latin_slug(self):
+        """Super-admin lives under /superadmin, each company under /c/<slug>.
+
+        The slug is the stable latin subdomain/username, never the Arabic company
+        name or a user name, and /app/* stays as a legacy alias."""
+        self.assertEqual(db.tenant_slug({'id': 'abc', 'subdomain': 'Acme-Co', 'username': None}), 'acme-co')
+        self.assertEqual(db.tenant_slug({'id': 'abc', 'subdomain': None, 'username': 'acme-user'}), 'acme-user')
+        self.assertEqual(db.tenant_slug({'id': 'abc', 'subdomain': None, 'username': 'Acme_User'}), 'acme-user')
+        fallback = db.tenant_slug({'id': 'ABCDEF12-3456', 'subdomain': None, 'username': None})
+        self.assertTrue(fallback.startswith('t-'))
+        self.assertNotIn(' ', fallback)
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        for token in ('TENANT_ROUTE_SUFFIXES', 'tenantPathPrefix', 'tenantCanonicalRoute',
+                      'resolveTenantRoutePath', 'enforceTenantRouteGuard',
+                      'canonicalizeTenantUrl', '/superadmin', "'/c/' + slug"):
+            self.assertIn(token, index_source)
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn("'/superadmin", app_source)
+        self.assertIn("'/c/<slug>'", app_source)
 
     def test_back_navigation_never_leaves_the_app(self):
         """"/" and unmapped paths fell through popstate, so the view and the URL disagreed and the
@@ -4622,7 +4644,10 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn("showTenantPage('tenantDashboardPage', true);\n      syncTenantBrowserHistory('tenantDashboardPage', {}, true);",
                       index_source)
         # A requested path wins over the remembered page, and "/" is rewritten to a real route.
-        self.assertIn('const requestedPage = TENANT_ROUTE_PAGES[window.location.pathname];', index_source)
+        # Role-prefixed URLs resolve through resolveTenantRoutePath first, with the legacy
+        # /app map kept as fallback so old bookmarks still land on the requested page.
+        self.assertIn('resolveTenantRoutePath(window.location.pathname)', index_source)
+        self.assertIn('TENANT_ROUTE_PAGES[window.location.pathname]', index_source)
         self.assertIn("if (window.location.pathname === '/') {", index_source)
         self.assertIn('if (current && TENANT_PAGE_ROUTES[current]) syncTenantBrowserHistory(current, {}, true);',
                       index_source)

@@ -189,6 +189,7 @@ def require_company_admin(f):
 
         user_role = payload.get('user_role')
         user_id = payload.get('user_id')
+        is_super_admin = bool(tenant.get('is_admin'))
         if not is_super_admin and user_role != 'company_admin' and user_id is not None:
             return jsonify({'error': 'Company admin access required'}), 403
 
