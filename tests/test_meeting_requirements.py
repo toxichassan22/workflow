@@ -9608,11 +9608,12 @@ class MeetingRequirementsTests(unittest.TestCase):
             '<div class="slide"><h1>محتوى</h1></div>', '/logo.png')
         self.assertIn('opacity:0.045', default)
 
-    def test_watermark_ink_adapts_to_slide_surface(self):
-        """White logo text must stay visible: dark ink on light slides, white ink on dark ones.
+    def test_watermark_logo_normalized_to_fixed_gray(self):
+        """Every watermark renders as a flat #888888 silhouette on any surface.
 
-        Image-led surfaces keep the legacy grayscale compromise because a
-        photo's brightness is unknowable server-side."""
+        A light logo (with or without white text) vanishes on light slides, so
+        the overlay filter flattens any source to mid gray with alpha preserved:
+        grayscale, then to black, then inverted up to #888888."""
         app_mod = self.application_module
         white_html = ('<div class="slide" style="width:1280px;height:720px;background:#ffffff;">'
                       '<h1>محتوى</h1></div>')
@@ -9621,29 +9622,16 @@ class MeetingRequirementsTests(unittest.TestCase):
         photo_html = ('<div class="slide" style="width:1280px;height:720px;'
                       "background-image:url('/uploads/cover.png');\">"
                       '<h1>محتوى</h1></div>')
+        expected_filter = 'grayscale(100%) brightness(0) invert(53.3%)'
 
-        light_mark = app_mod._apply_slide_watermark(white_html, '/logo.png')
-        self.assertIn('brightness(0)', light_mark)
-        self.assertNotIn('invert(1)', light_mark)
+        for html in (white_html, dark_html, photo_html):
+            mark = app_mod._apply_slide_watermark(html, '/logo.png')
+            self.assertIn(expected_filter, mark)
 
-        dark_mark = app_mod._apply_slide_watermark(dark_html, '/logo.png')
-        self.assertIn('brightness(0)', dark_mark)
-        self.assertIn('invert(1)', dark_mark)
-
-        forced = app_mod._apply_slide_watermark(white_html, '/logo.png', ink='light')
-        self.assertIn('invert(1)', forced)
-
-        legacy = app_mod._apply_slide_watermark(photo_html, '/logo.png')
-        self.assertIn('grayscale(100%)', legacy)
-        self.assertNotIn('brightness(0)', legacy)
-
-        # A legacy mark upgrades to a readable ink when carried onto a flat surface.
-        carried = app_mod._carry_slide_watermark(legacy, white_html)
-        self.assertIn('brightness(0)', carried)
-        self.assertNotIn('invert(1)', carried)
-        # ...and an explicit ink survives the carry unchanged.
-        carried_dark = app_mod._carry_slide_watermark(dark_mark, dark_html)
-        self.assertIn('invert(1)', carried_dark)
+        # The gray survives a model regeneration carry unchanged.
+        carried = app_mod._carry_slide_watermark(
+            app_mod._apply_slide_watermark(white_html, '/logo.png'), dark_html)
+        self.assertIn(expected_filter, carried)
 
     def test_watermark_idempotent_on_repeated_normalization(self):
         """Applying the watermark twice must not duplicate the watermark element."""
