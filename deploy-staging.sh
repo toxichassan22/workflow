@@ -16,6 +16,18 @@ set -e
 export PATH="$HOME/bin:$PATH"
 export GIT_LFS_SKIP_SMUDGE=1
 
+for lib_dir in \
+  "$HOME/chromium-libs/usr/lib64" \
+  "$HOME/chromium-libs/lib64" \
+  "$HOME/chromium-libs" \
+  "/home/landloom/chromium-libs/usr/lib64" \
+  "/home/landloom/chromium-libs/lib64" \
+  "/home/landloom/chromium-libs"; do
+  if [ -d "$lib_dir" ]; then
+    export LD_LIBRARY_PATH="$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/.env" ]; then
   set -a
@@ -131,11 +143,12 @@ except OSError as exc:
     detail = f'no install log: {exc}'
 available, error = False, ''
 try:
+    import generate_pdf_from_preview as gp
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser, how = gp._launch_chromium(p)
         available = True
-        error = f'chromium {browser.version}'
+        error = f'chromium {browser.version} via {how}'
         browser.close()
 except Exception as exc:
     err = ' '.join(f'{type(exc).__name__}: {exc}'.split())

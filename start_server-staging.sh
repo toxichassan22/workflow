@@ -9,6 +9,18 @@ set -e
 
 export PATH="$HOME/bin:$PATH"
 
+for lib_dir in \
+  "$HOME/chromium-libs/usr/lib64" \
+  "$HOME/chromium-libs/lib64" \
+  "$HOME/chromium-libs" \
+  "/home/landloom/chromium-libs/usr/lib64" \
+  "/home/landloom/chromium-libs/lib64" \
+  "/home/landloom/chromium-libs"; do
+  if [ -d "$lib_dir" ]; then
+    export LD_LIBRARY_PATH="$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/.env" ]; then
   set -a

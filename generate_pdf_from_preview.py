@@ -45,6 +45,29 @@ _SYSTEM_CHROMIUM_CANDIDATES = (
 )
 
 
+def _configure_chromium_environment():
+    """Ensure sideloaded libraries in ~/chromium-libs are in LD_LIBRARY_PATH."""
+    candidates = [
+        str(Path.home() / 'chromium-libs' / 'usr' / 'lib64'),
+        str(Path.home() / 'chromium-libs' / 'lib64'),
+        str(Path.home() / 'chromium-libs'),
+        '/home/landloom/chromium-libs/usr/lib64',
+        '/home/landloom/chromium-libs/lib64',
+        '/home/landloom/chromium-libs',
+    ]
+    current = os.environ.get('LD_LIBRARY_PATH', '')
+    existing = current.split(':') if current else []
+    changed = False
+    for c in candidates:
+        if os.path.isdir(c) and c not in existing:
+            existing.insert(0, c)
+            changed = True
+    if changed:
+        os.environ['LD_LIBRARY_PATH'] = ':'.join(existing)
+
+_configure_chromium_environment()
+
+
 def _extra_chromium_args():
     """Admin-supplied flags without a redeploy (e.g. '--disable-software-rasterizer').
 
@@ -222,6 +245,17 @@ def _chromium_executable_candidates():
     for path in _SYSTEM_CHROMIUM_CANDIDATES:
         if path not in seen:
             seen.append(path)
+    # Also probe playwright-installed binaries in ~/.cache/ms-playwright
+    cache_root = Path.home() / '.cache' / 'ms-playwright'
+    if cache_root.is_dir():
+        for pattern in ('**/headless_shell', '**/chrome', '**/chrome.exe', '**/headless_shell.exe'):
+            try:
+                for p in cache_root.glob(pattern):
+                    sp = str(p)
+                    if sp not in seen and p.is_file() and os.access(p, os.X_OK):
+                        seen.append(sp)
+            except Exception:
+                pass
     return [path for path in seen if path and os.path.isfile(path)]
 
 
@@ -430,12 +464,22 @@ def _generate_pdf_with_fitz(html, out_path, slides=None, layout_css='', font_css
     """Pure-Python fallback using PyMuPDF when Playwright is unavailable."""
     print("[FONT] WARNING: PyMuPDF fallback cannot render @font-face/base64 fonts; custom font may not apply")
     import fitz
+    fitz_base_css = """
+@page { size: 1280px 720px; margin: 0; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #pdf-export-root { margin: 0 !important; padding: 0 !important; width: 1280px !important; height: 720px !important; overflow: hidden !important; background: #fff; direction: rtl; }
+.pdf-export-page { width: 1280px !important; height: 720px !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; position: relative !important; display: block !important; }
+.slide { width: 1280px !important; height: 720px !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; position: relative !important; display: block !important; }
+img { max-width: 100%; max-height: 100%; object-fit: contain; }
+svg[data-chart], svg.combo-chart { max-width: 100% !important; max-height: 320px !important; height: auto !important; display: block; }
+"""
+    combined_css = fitz_base_css + "\n" + (layout_css or '')
     if slides:
         output = fitz.open()
         try:
             for slide in slides:
                 page_html = f'''<!DOCTYPE html>
-<html dir="rtl"><head><meta charset="utf-8"><style>{layout_css}</style></head>
+<html dir="rtl"><head><meta charset="utf-8"><style>{combined_css}</style></head>
 <body id="pdf-export-root" style="margin:0;padding:0;background:#fff;">
 <div class="pdf-export-page">{slide}</div><style>{font_css}</style></body></html>'''
                 source = fitz.open('html', page_html.encode('utf-8'), width=1280, height=720)
@@ -455,8 +499,13 @@ def _generate_pdf_with_fitz(html, out_path, slides=None, layout_css='', font_css
             output.close()
         return str(out_path)
     # Render HTML to a 1280x720 pt page; may not be pixel-perfect but avoids 502s.
-    src = fitz.open('html', html.encode('utf-8'), width=1280, height=720)
+    if '<head>' in html:
+        html_with_page = html.replace('<head>', f'<head><style>{fitz_base_css}</style>', 1)
+    else:
+        html_with_page = f'<style>{fitz_base_css}</style>' + html
+    src = fitz.open('html', html_with_page.encode('utf-8'), width=1280, height=720)
     src.save(out_path)
+    src.close()
     return str(out_path)
 
 
@@ -708,11 +757,14 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     # wrapper outside the slide: its fixed size and break remain in flow even when the slide itself
     # does not.
     layout_css = """
+@page { size: 1280px 720px; margin: 0; }
 * { margin:0; padding:0; box-sizing:border-box; }
-.pdf-export-page, .slide { width:1280px; height:720px; direction:rtl; position:relative; overflow:hidden; }
+html, body { margin:0 !important; padding:0 !important; width:1280px !important; height:720px !important; overflow:hidden !important; }
+.pdf-export-page, .slide { width:1280px !important; height:720px !important; direction:rtl; position:relative !important; overflow:hidden !important; margin:0 !important; padding:0 !important; }
 img { max-width:100%; max-height:100%; object-fit:contain; }
 svg[data-chart], svg.combo-chart { max-width:100% !important; max-height:320px !important; height:auto !important; display:block; }
 @media print {
+    @page { size: 1280px 720px; margin: 0; }
     body#pdf-export-root { background:white !important; margin:0 !important; padding:0 !important; width:1280px !important; height:auto !important; display:block !important; columns:auto !important; column-count:auto !important; column-width:auto !important; grid-template-columns:none !important; grid-template-rows:none !important; gap:0 !important; overflow:visible !important; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
     body#pdf-export-root > .pdf-export-page { margin:0 !important; border:none !important; page-break-after:always !important; break-after:page !important; page-break-inside:avoid !important; break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; overflow:hidden !important; }
     body#pdf-export-root > .pdf-export-page:last-of-type { page-break-after:auto !important; break-after:auto !important; }
@@ -1018,8 +1070,28 @@ svg[data-chart], svg.combo-chart {{ max-width:100% !important; max-height:320px 
             return f"data:image/png;base64,{base64.b64encode(buf).decode('utf-8')}"
     except Exception as e:
         LAST_VISION_ERROR = f'{type(e).__name__}: {e}'
-        print(f"[VISION ERROR] Failed to render slide snapshot: {e}")
-        return None
+        print(f"[VISION ERROR] Playwright snapshot failed ({e}); trying PyMuPDF fallback")
+        try:
+            import fitz
+            fitz_vision_css = f"""
+@page {{ size: {width}px {height}px; margin: 0; }}
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+html, body, #pdf-export-root {{ margin: 0 !important; padding: 0 !important; width: {width}px !important; height: {height}px !important; overflow: hidden !important; background: #fff; direction: rtl; }}
+.slide {{ width: {width}px !important; height: {height}px !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; position: relative !important; display: block !important; }}
+img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
+"""
+            fitz_doc_html = f"""<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"><style>{fitz_vision_css}</style><style>{font_css}</style></head><body style="margin:0;padding:0;background:#fff;">{html}</body></html>"""
+            src = fitz.open('html', fitz_doc_html.encode('utf-8'), width=width, height=height)
+            pdf_bytes = src.convert_to_pdf()
+            src.close()
+            with fitz.open('pdf', pdf_bytes) as doc:
+                pix = doc[0].get_pixmap()
+                png_bytes = pix.tobytes('png')
+            print("[VISION] Rendered slide snapshot via PyMuPDF fallback")
+            return f"data:image/png;base64,{base64.b64encode(png_bytes).decode('utf-8')}"
+        except Exception as fe:
+            print(f"[VISION ERROR] PyMuPDF vision fallback failed: {fe}")
+            return None
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
