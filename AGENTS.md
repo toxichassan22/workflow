@@ -752,6 +752,11 @@ it as `engine`, and the fallback prints an explicit degraded-layout warning. Ver
 with `/health?vision=1` (`slide_vision.available`), `playwright_install.log` / `.vision_status`,
 or the PDF page size (17.78x10in means the fallback wrote it). Do not "fix" the shift with a
 negative margin: the offset varies with the markup, so a magic number only moves the damage.
+On rootless shared hosting (no yum/dnf/rpm2cpio) the missing EL libraries are side-loaded into
+`~/chromium-libs` with `scripts/rootless_rpm_extract.py` (stdlib only) and exposed through
+`LD_LIBRARY_PATH` in the staging `.env`, which `start_server-staging.sh` and `deploy-staging.sh`
+both export; never place those libs inside the app dir, rsync wipes nothing there but a fresh
+clone must keep working without them.
 
 The failure also has to be actionable, so a page count alone is not enough:
 
