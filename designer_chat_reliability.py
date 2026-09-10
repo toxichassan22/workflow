@@ -940,12 +940,8 @@ def install(app, namespace: Dict[str, Any]) -> None:
         from flask import request
 
         payload = request.get_json(silent=True) or {}
-        if is_image_description_request(payload.get("message")):
-            return _handle_image_descriptions(payload, namespace)
-        if is_split_request(payload.get("message")):
-            split_res = _handle_split(payload, namespace, original_call=original)
-            if split_res is not None:
-                return split_res
+        # Language interpretation belongs to the contextual planner. Deterministic
+        # rendering remains available after it chooses an operation and its scope.
         return _verify_original_result(original(), payload, namespace)
 
     secured_designer_chat = require_auth(reliable_designer_chat)

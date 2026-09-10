@@ -4623,17 +4623,9 @@ def api_designer_chat():
     # at all: no log entry, no version, and no record of the instruction behind it.
     slides_before = copy.deepcopy(slides)
 
-    ALL_SLIDES_KEYWORDS = (
-        'كل الشرائح', 'كل الشرايح', 'جميع الشرائح', 'كافة الشرائح', 
-        'كل شريحة', 'كل السلايدات', 'الشرائح كلها', 'الشرايح كلها',
-        'في الكل', 'على الكل', 'كل الرايح', 'العرض كامل', 'العرض كله',
-        'كل السلايدز', 'شرايح كلها', 'عدل في كل', 'تعديل كل'
-    )
-    is_all_slides_request = (
-        data.get('target') == 'all' or 
-        data.get('scope') == 'all' or 
-        any(kw in message.lower() for kw in ALL_SLIDES_KEYWORDS)
-    )
+    # Only a scope explicitly selected in the UI is a constraint. The model
+    # interprets natural language, including negation, corrections and numbers.
+    is_all_slides_request = data.get('target') == 'all' or data.get('scope') == 'all'
 
     # The conversation so far. Merge the browser snapshot with the presentation copy so a stale
     # client cannot replace a complete saved conversation with only its last visible messages.
@@ -4652,55 +4644,9 @@ def api_designer_chat():
         if 1 <= number <= len(slides) and number not in focus_indexes:
             focus_indexes.append(number)
 
-    explicit_indexes = [idx + 1 for idx in detect_slide_indexes_from_message_py(message, slides)]
-    preferred_indexes = explicit_indexes or focus_indexes
-    deterministic_plan = _designer_deterministic_plan(
-        message, slides, current_index, [number - 1 for number in preferred_indexes]
-    )
-    requested_company_logo = _designer_company_logo_requested(message)
-    is_panel_logo_request = any(w in message.lower() for w in ('مربع', 'يمين', 'بانل', 'سنوات الخبرة', 'فوق رقم', 'فوق 55', 'كحلي', 'panel'))
-    if requested_company_logo and is_panel_logo_request and deterministic_plan is None and not is_watermark_request(message):
-        if is_all_slides_request:
-            company_target = 'all'
-            company_indexes = []
-        elif preferred_indexes:
-            company_target = 'indexes'
-            company_indexes = preferred_indexes[:]
-        else:
-            company_target = 'current'
-            company_indexes = []
-        deterministic_plan = {
-            'response': 'سأنقل شعار الشركة المعتمد إلى داخل المربع الكحلي في يمين الشريحة فوق رقم سنوات الخبرة، مع الحفاظ على محتوى الشريحة.',
-            'actions': [{
-                'tool': 'insert_company_logo_panel',
-                'params': {'target': company_target, 'indexes': company_indexes},
-            }],
-        }
-    requested_team_logo = _find_designer_team_logo_request(message, history_for_turn, creative_images)
-    if requested_team_logo and deterministic_plan is None:
-        if is_all_slides_request:
-            logo_target = 'all'
-            logo_indexes = []
-        elif preferred_indexes:
-            logo_target = 'indexes'
-            logo_indexes = preferred_indexes[:]
-        else:
-            logo_target = 'current'
-            logo_indexes = []
-        deterministic_plan = {
-            'response': (
-                f"سأضيف شعار جهة فريق العمل «{requested_team_logo['name']}» باستخدام الشعار المرفوع لها "
-                "داخل موضع محتوى مناسب، مع إبقاء شعار الشركة منفصلاً."
-            ),
-            'actions': [{
-                'tool': 'insert_team_logo',
-                'params': {
-                    'target': logo_target,
-                    'indexes': logo_indexes,
-                    'team_index': requested_team_logo['index'],
-                },
-            }],
-        }
+    # Focus is conversational context, not an instruction inferred from this turn.
+    # In particular, a number may answer a value question rather than name a slide.
+    preferred_indexes = list(focus_indexes)
 
     branding = db.get_branding(g.tenant_id) or {}
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
@@ -4715,14 +4661,15 @@ def api_designer_chat():
     memory_note = f"\n\n## ذاكرة المحادثة (ملخص ما سبق)\n{chat_memory}" if chat_memory else ""
     history_note = ("\n\n## آخر رسائل المحادثة بالترتيب\n" + '\n'.join(history_lines)) if history_lines else ""
     focus_note = (
-        f"\n\n## الشرائح التي تدور عنها المحادثة الآن: {'، '.join(str(n) for n in focus_indexes)}\n"
-        "إذا لم تذكر الرسالة الحالية رقم شريحة فهي تكمل الحديث عن هذه الشرائح نفسها — استخدمها في "
-        "indexes ولا تسأل عن رقم الشريحة من جديد، ولا تعتبرها الشريحة الحالية بالمصادفة."
+        f"\n\n## نطاق الحديث السابق: {'، '.join(str(n) for n in focus_indexes)}\n"
+        "هذا سياق سابق وليس أمراً جديداً. اربط الإشارات والردود القصيرة بالسؤال السابق وبالطلب "
+        "غير المنفذ، واسمح للرسالة الحالية بتغيير الموضوع أو تصحيح الطلب أو إلغائه."
     ) if focus_indexes else ""
     explicit_scope_note = (
-        f"\n\n## نطاق صريح من رسالة المستخدم: الشرائح {'، '.join(str(n) for n in explicit_indexes)}\n"
-        "هذا النطاق مُلزم. لا توسّع التعديل إلى شرائح أخرى ولا تستبدله بالشريحة الحالية."
-    ) if explicit_indexes else ""
+        f"\n\n## الشريحة الظاهرة في المعاينة: {current_index + 1}\n"
+        "موضع المعاينة سياق فقط، وليس دليلاً أن المستخدم طلب تعديل هذه الشريحة. "
+        "حدّد النية والنطاق من المحادثة والرسالة الحالية معاً."
+    )
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
     audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index, creative_images)
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
@@ -4737,7 +4684,8 @@ def api_designer_chat():
 - إدراج الخرائط الأربع المعتمدة بدقة (insert_canonical_map): خريطة الموقع العام، خريطة شبكة الطرق والوصول، خريطة النطاق الجغرافي، وخريطة المعالم الحيوية.
 - إدراج وتعديل المخططات والرسوم المالية المعتمدة (insert_financial_chart): شلال التدفقات، تحليل الحساسية، التدفقات المركبة، وهيكل التمويل.
 - توليد صور حصرية للمكونات المعمارية والداخلية والخارجية ودمجها جراحياً داخل الشرائح مع بطاقة شرح توضيحي.
-- كن حاسماً ومبادراً، ولا تستخدم أداة ask إلا في الحالات المستحيلة الفهم تماماً. عندما يطلب المستخدم تعديلاً لأي شريحة مهما كان نوعها، نفّذه فوراً بحرية واحترافية وبدقة جراحية متناهية.
+- نفّذ الطلب الواضح، واسأل سؤالاً محدداً عندما يؤثر الغموض على الإجراء أو النطاق أو القيمة. لا تخمّن تعديلاً لم يطلبه المستخدم، ولا تعتبر مجرد ذكر رقم إذناً بالتعديل.
+- الرد على سؤال سابق يكمل ذلك الطلب فقط. رسالة التصحيح أو الإلغاء تلغي الاستنتاج السابق. عند اختيار edit_slides اكتب instruction مكتملة تحمل التعديل والقيمة والقيود المفهومة من المحادثة، لا تنسخ الرد القصير وحده إلى المحرر.
 {all_note} أعد JSON فقط:
 {{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|apply_watermark|remove_watermark|generate_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
 
@@ -4745,6 +4693,7 @@ def api_designer_chat():
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
 - apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true, "opacity":0.045, "width_px":480}} لإضافة علامة مائية لشعار الشركة في خلفية الشرائح — أرسل only_white=true فقط إذا ذكر المستخدم الشرائح البيضاء أو الفاتحة صراحة، وأرسل opacity حتى 0.12 مع width_px حتى 640 إذا طلب علامة أكبر أو أوضح
 - remove_watermark: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإزالة العلامة المائية من الشرائح
+- apply_image_descriptions: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإضافة أوصاف الصور المحفوظة بالفعل دون توليد صور أو اختراع وصف
 - insert_team_logo: params={{"target":"current|all|indexes", "indexes":[1-based], "team_index":1-based}} لإضافة شعار جهة فريق العمل المرفوع فعلياً
 - insert_company_logo_panel: params={{"target":"current|all|indexes", "indexes":[1-based]}} لوضع شعار الشركة داخل المربع الكحلي فوق رقم سنوات الخبرة
 - generate_image: params={{"prompt":"وصف دقيق للصورة المراد توليدها", "component_name":"اسم المكون إن وجد", "slideIndex":1, "position":"surgical|background|right|left|inline"}}
@@ -4757,7 +4706,8 @@ def api_designer_chat():
 - merge_slides: params={{"slide_numbers":[1-based, 1-based], "instruction":"تفاصيل الدمج"}}
 - create_slide: params={{"title":"العنوان", "type":"content|cover|divider|table|kpi", "instruction":"محتوى الشريحة وتصميمها", "position":1-based}}
 - regenerate_maps: params={{"maptype":"roadmap|satellite|hybrid|terrain"}}
-- ask: params={{"question":"سؤال عربي واحد قصير"}} — لا تستخدمه إلا إذا كان الطلب مبهمًا تمامًا ويستحيل تخمينه.
+- ask: params={{"question":"سؤال عربي واحد قصير يحسم الغموض"}} — ينهي الدور دون تنفيذ أي تعديل.
+- chat_only: params={{}} للرد أو الشرح أو تأكيد الإلغاء دون تعديل العرض.
 
 قواعد إضافة واستخدام الخرائط:
 1. ##MAP_ACCESS## : لخريطة شبكة الطرق والمحاور والوصول.
@@ -4767,7 +4717,7 @@ def api_designer_chat():
 
 قواعد الفهم الذكي:
 1. إذا كان الطلب يتضمن تعديل كل الشرائح -> اختر target="all".
-2. إذا حدد المستخدم شرائح بأرقامها أو بأسماءها (مثل: "30", "تلاتين", "7 و 9", "شريحة الموقع") -> ضع أرقام تلك الشرائح في indexes كأرقام (1-based).
+2. حدّد معنى الأرقام من السياق: قد تكون قيمة أو حجم خط أو نسبة أو عدد عناصر أو رقم شريحة. لا تختَر indexes إلا عندما يشير الكلام أو جواب السؤال السابق إلى شرائح بالفعل. ذكر شريحة وحده ليس طلب تعديل؛ إذا غاب الإجراء المطلوب اسأل عنه. أرقام indexes تبدأ من 1.
 3. إذا طلب حذف شريحة (مثل: "احذف الشريحة 5") -> اختر tool="delete_slide" مع slide_number.
 4. إذا طلب تكرار شريحة (مثل: "كرر الشريحة 2") -> اختر tool="duplicate_slide" مع slide_number.
 5. إذا طلب تغيير ترتيب (مثل: "انقل الشريحة 8 إلى 4") -> اختر tool="reorder_slides" مع from_index و to_index.
@@ -4801,15 +4751,11 @@ def api_designer_chat():
         planner_prompt += ("\n\nأرفق المستخدم صورة مع رسالته. انظر إليها قبل التخطيط، وإن لم يكن دورها"
                           " واضحًا فاسأل عنه بأداة ask.")
     try:
-        if deterministic_plan:
-            plan = deterministic_plan
-            actions = plan['actions']
-        else:
-            planner_raw = extract_chat_content(
-                call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300),
-                'DESIGNER-PLANNER')
-            plan = _designer_json_response(planner_raw)
-            actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
+        planner_raw = extract_chat_content(
+            call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300),
+            'DESIGNER-PLANNER')
+        plan = _designer_json_response(planner_raw)
+        actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
 
         # A question is an answer on its own: nothing is edited until the user replies.
         question = ''
@@ -4819,9 +4765,7 @@ def api_designer_chat():
                 question = str(params.get('question') or '').strip()
                 if question:
                     break
-        if question and not deterministic_plan and not (
-            explicit_indexes or _designer_actionable_edit_request(message)
-        ):
+        if question:
             ask_messages = list(history_for_turn)
             if not ask_messages or ask_messages[-1].get('content') != message or ask_messages[-1].get('role') != 'user':
                 ask_messages.append({'role': 'user', 'content': message[:2000], 'slides': preferred_indexes[:]})
@@ -4846,98 +4790,43 @@ def api_designer_chat():
                 'saved': False,
             }})
 
-        if question and (explicit_indexes or _designer_actionable_edit_request(message)):
-            fallback_target = 'indexes' if preferred_indexes else 'current'
-            actions = [{'tool': 'edit_slides', 'params': {
-                'target': fallback_target,
-                'indexes': preferred_indexes,
-                'slideIndex': current_index + 1,
-                'instruction': message,
-            }}]
+        if not actions or any(not isinstance(action, dict) for action in actions):
+            return jsonify({'success': False, 'error': 'لم تصل خطة تنفيذ صالحة؛ لم يتغير العرض.',
+                            'error_code': 'DESIGNER_INVALID_PLAN'}), 502
 
-        if not actions:
-            if is_all_slides_request:
-                target = 'all'
-                target_indexes = []
-            else:
-                req_indexes = explicit_indexes or (data.get('indexes') if isinstance(data.get('indexes'), list) else [])
-                if not req_indexes:
-                    req_indexes = [idx + 1 for idx in detect_slide_indexes_from_message_py(message, slides)]
-                if not req_indexes:
-                    # «صحّحها» after «الشريحة 8 فيها مشكلة» means slide 8, not whichever slide the
-                    # preview happens to be scrolled to.
-                    req_indexes = list(focus_indexes)
-                if req_indexes:
-                    target = 'indexes'
-                    target_indexes = req_indexes
-                else:
-                    target = 'current'
-                    target_indexes = [current_index + 1]
-
-            msg_lower = message.lower()
-            is_slide_edit_intent = any(word in msg_lower for word in (
-                'عدل', 'تعديل', 'غير', 'تغيير', 'حرك', 'تحريك', 'صغر', 'تصغير', 'كبر', 'تكبير',
-                'احذف', 'حذف', 'امسح', 'انقل', 'نقل', 'مكان', 'إزاحة', 'ازاحة', 'يمين', 'يسار',
-                'فوق', 'تحت', 'أعلى', 'اسفل', 'هيدر', 'فوتر', 'خط', 'لون', 'خلفية', 'كارت', 'بطاقة',
-                'نص', 'عنوان', 'تنسيق', 'أبعاد', 'ابعاد', 'مسافة', 'تباعد', 'ارتفاع', 'عرض', 'حجم'
-            ))
-            if any(word in msg_lower for word in ('شوارع', 'مرور', 'roadmap', 'ملاحة', 'شوارع محيطة')) and not is_slide_edit_intent:
-                actions = [{'tool': 'regenerate_maps', 'params': {'maptype': 'roadmap'}}]
-            elif any(word in msg_lower for word in ('قمر صناعي', 'satellite', 'فضائي')) and not is_slide_edit_intent:
-                actions = [{'tool': 'regenerate_maps', 'params': {'maptype': 'satellite'}}]
-            elif any(word in msg_lower for word in ('احذف الشريحة', 'حذف الشريحة', 'امسح الشريحة', 'إزالة الشريحة', 'احذف شريحة')):
-                actions = [{'tool': 'delete_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
-            elif any(word in msg_lower for word in ('كرر الشريحة', 'تكرار الشريحة', 'انسخ الشريحة', 'استنساخ الشريحة', 'دبلر الشريحة')):
-                actions = [{'tool': 'duplicate_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1)}}]
-            elif designer_chat_reliability.is_split_request(message):
-                actions = [{'tool': 'split_slide', 'params': {'slide_number': (target_indexes[0] if target_indexes else current_index + 1), 'instruction': message}}]
-            elif any(word in msg_lower for word in ('خريطة وصول', 'خريطة الطرق', 'طرق الوصول')) and not is_slide_edit_intent:
-                actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'access', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('خريطة المعالم', 'المعالم القريبة', 'معالم حيوية')) and not is_slide_edit_intent:
-                actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'landmarks', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('نطاق التأثير', 'النطاق الجغرافي', 'خريطة النطاق')) and not is_slide_edit_intent:
-                actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'catchment', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('خريطة الموقع', 'موقع عام', 'خريطة الارض')) and not is_slide_edit_intent:
-                actions = [{'tool': 'insert_canonical_map', 'params': {'map_type': 'overview', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('مخطط مالي', 'رسم بياني مالي', 'شلال التدفقات', 'تحليل الحساسية')) and not is_slide_edit_intent:
-                actions = [{'tool': 'insert_financial_chart', 'params': {'chart_type': 'waterfall', 'slideIndex': current_index + 1}}]
-            elif any(word in msg_lower for word in ('توليد صورة', 'أنشئ صورة', 'انشئ صورة', 'صورة جديدة', 'صوره جديده', 'ولد صورة')) and not is_slide_edit_intent:
-                actions = [{'tool': 'generate_image', 'params': {'prompt': message, 'target': target, 'indexes': target_indexes, 'slideIndex': current_index + 1}}]
-            else:
-                actions = [{'tool': 'edit_slides', 'params': {'target': target, 'indexes': target_indexes, 'slideIndex': current_index + 1, 'instruction': message}}]
+        if all(action.get('tool') == 'chat_only' for action in actions):
+            response_text = str(plan.get('response') or '').strip()
+            chat_messages = list(history_for_turn)
+            chat_messages.append({'role': 'user', 'content': message[:2000], 'slides': []})
+            chat_messages.append({'role': 'assistant', 'content': response_text[:2000], 'slides': []})
+            return jsonify({'success': True, 'data': {
+                'action': 'chat_only', 'response': response_text, 'actions': [],
+                'memory': chat_memory, 'focusIndexes': focus_indexes,
+                'chatHistory': chat_messages[-DESIGNER_CHAT_STORED_TURNS * 2:], 'saved': False,
+            }})
 
         executed = []
         assistant_messages = []
         tenant_id = g.tenant_id
-        scoped_actions = []
-        for action in actions:
-            if not isinstance(action, dict):
-                continue
-            tool_name = action.get('tool') or ''
-            params = dict(action.get('params') or {}) if isinstance(action.get('params'), dict) else {}
-            if tool_name in {
-                'edit_slides', 'edit_design_slide', 'edit_design_slides',
-                'apply_watermark', 'remove_watermark',
-                'generate_image', 'generate_design_image', 'insert_image_into_slide',
-                'insert_canonical_map', 'insert_map', 'insert_financial_chart', 'update_financial_chart',
-                'insert_team_logo', 'insert_company_logo_panel',
-            }:
-                if is_all_slides_request:
-                    params['target'] = 'all'
-                elif explicit_indexes:
-                    params['target'] = 'indexes'
-                    params['indexes'] = explicit_indexes
-                elif focus_indexes and not params.get('indexes') and params.get('target', 'current') in {'current', 'auto'}:
-                    params['target'] = 'indexes'
-                    params['indexes'] = focus_indexes
-            scoped_actions.append({**action, 'params': params})
-        actions = scoped_actions
-        for action in actions:
+        for action_number, action in enumerate(actions):
             tool = action.get('tool') if isinstance(action, dict) else ''
             params = action.get('params') if isinstance(action.get('params'), dict) else {}
             if tool in ('ask', 'chat_only', 'validate_design_workspace', 'save_design_workspace'):
                 continue
-            if tool in ('apply_watermark', 'remove_watermark'):
+            if tool == 'apply_image_descriptions':
+                indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
+                descriptions = designer_chat_reliability.collect_image_descriptions(project_data, creative_images)
+                changed = []
+                for idx in indexes:
+                    report_designer_progress(35, f'جاري تعديل الشريحة {idx + 1}...',
+                                            {'phase': 'editing', 'activeSlideIndex': idx, 'actionNumber': action_number})
+                    updated, count, _ = designer_chat_reliability.add_missing_image_descriptions(slides[idx].get('html', ''), descriptions)
+                    if count:
+                        slides[idx].update(html=updated, _designer_keep_html=True, is_custom=True)
+                        changed.append(idx)
+                executed.append({'tool': tool, 'status': 'success' if changed else 'noop', 'indexes': changed})
+                assistant_messages.append(f'أضيفت الأوصاف المحفوظة إلى {len(changed)} شريحة.' if changed else 'لا توجد أوصاف محفوظة ناقصة ومطابقة للصور المستهدفة.')
+            elif tool in ('apply_watermark', 'remove_watermark'):
                 indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
                 # Default off: without an explicit white-only request every targeted
                 # slide gets the watermark, otherwise dark slides were silently skipped.
@@ -4954,6 +4843,8 @@ def api_designer_chat():
                     slide = slides[idx] if isinstance(slides[idx], dict) else {}
                     if only_white and not _is_white_or_light_slide(slide):
                         continue
+                    report_designer_progress(25, f'جاري تعديل الشريحة {idx + 1}...',
+                                            {'phase': 'editing', 'activeSlideIndex': idx, 'actionNumber': action_number})
                     current_slide_html = slide.get('html', '')
                     if is_remove:
                         new_html = _remove_slide_watermark(current_slide_html)
@@ -5000,6 +4891,9 @@ def api_designer_chat():
             elif tool in ('edit_slides', 'edit_design_slide', 'edit_design_slides'):
                 indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
                 instruction = params.get('instruction') or message
+                if indexes:
+                    report_designer_progress(20, f'جاري تعديل الشريحة {indexes[0] + 1}...',
+                                            {'phase': 'editing', 'activeSlideIndex': indexes[0], 'actionNumber': action_number})
                 if len(indexes) > 1:
                     skip_vision = len(indexes) > 3
                     def _edit_worker(idx):
