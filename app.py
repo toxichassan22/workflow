@@ -230,17 +230,13 @@ db.init_db()
 # Configuration
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # strip(): a stray \r (CRLF endings) or spaces in .env would corrupt auth headers
-ZAI_KEY = (os.environ.get("ZAI_KEY") or "").strip() or None
 OPENROUTER_KEY = (os.environ.get("OPENROUTER_KEY") or "").strip() or None
-GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip() or None
-ZAI_BASE = 'https://api.z.ai/api/paas/v4'
 OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
 GEMINI_TEXT_MODEL = "google/gemini-3.8-flash"
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 GLM_MODEL = GEMINI_TEXT_MODEL
 GLM_OPENROUTER_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-5.6-sol')
-GLM_USE_OPENROUTER = True
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
 IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
@@ -254,15 +250,12 @@ if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY')
-print(f"[CONFIG] ZAI_KEY: {'SET' if ZAI_KEY else 'MISSING'}")
 print(f"[CONFIG] OPENROUTER_KEY: {'SET' if OPENROUTER_KEY else 'MISSING'}")
-print(f"[CONFIG] GEMINI_API_KEY: {'SET' if GEMINI_API_KEY else 'MISSING'}")
-print(f"[CONFIG] GLM_USE_OPENROUTER: {GLM_USE_OPENROUTER}")
 print(f"[CONFIG] GOOGLE_MAPS_API_KEY: {'SET' if GOOGLE_MAPS_API_KEY else 'MISSING'}")
 print(f"[CONFIG] JWT_SECRET: {auth.JWT_SECRET_SOURCE.upper()}")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Helper: Call GLM (ZAI API or OpenRouter fallback)
+# Helper: Call the text/design model through OpenRouter
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def _has_chat_choices(response):
     return (

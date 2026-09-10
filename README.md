@@ -58,8 +58,7 @@ The repo includes a `render.yaml` Blueprint that deploys the Flask backend and t
    - `DATABASE_URL` — copy the **Internal Connection String** from your existing Render Postgres (`dpg-d9fmm13rjlhs73alaau0-a`)
    - `ADMIN_EMAIL` — super-admin email address (e.g. `admin@yourdomain.com`)
    - `ADMIN_PASSWORD` — strong password (12+ characters)
-   - `ZAI_KEY` — your Z.ai API key
-   - `OPENROUTER_KEY` — your OpenRouter API key
+   - `OPENROUTER_KEY` — your OpenRouter API key (all AI text/image generation)
    - `GOOGLE_MAPS_API_KEY` — your Google Maps API key
 4. Save the environment variables and trigger a deploy.
 5. Once the deploy succeeds, open the service URL. The first request will create all Postgres tables and seed the admin account.

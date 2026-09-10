@@ -64,7 +64,7 @@ the very next line then stripped. Do not wire it back in.
 
 - Backend: Flask, single file `app.py` (~7.4k lines). DB layer in `db.py` (SQLite locally, Postgres via `DATABASE_URL`).
 - Frontend: one single-page app, `index.html` (~13.7k lines). All JS lives in **one inline `<script>` block** starting at line ~4195, so every function shares one scope.
-- PDF handling: PyMuPDF (`fitz`). AI: OpenRouter / Z.ai (GLM) — see `.env`.
+- PDF handling: PyMuPDF (`fitz`). AI: OpenRouter for all text/image generation — see `.env`.
 
 ## Schema gotchas
 

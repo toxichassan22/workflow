@@ -17,11 +17,7 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: ZAI_KEY
-        sync: false
       - key: OPENROUTER_KEY
         sync: false
       - key: GOOGLE_MAPS_API_KEY
         sync: false
-      - key: GLM_USE_OPENROUTER
-        value: "false"
