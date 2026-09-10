@@ -5,7 +5,8 @@ import importlib.machinery
 import re
 import sys
 
-_LOGO_RE = re.compile(r'(<img\b[^>]*class=["\'][^"\']*\bpresentation-chrome-logo\b[^"\']*["\'][^>]*>)', re.I)
+_LOGO_RE = re.compile(r'(<(?:img|div|span)\b[^>]*class=["\'][^"\']*\bpresentation-chrome-logo\b[^"\']*["\'][^>]*>)', re.I)
+_STYLE_RE = re.compile(r'\bstyle\s*=\s*(["\'])(.*?)\1', re.I | re.S)
 _DIM_RE = re.compile(r'\b(width|height|max-width|max-height)\s*:\s*([^;"\']+)', re.I)
 _LEGACY_HEIGHTS = {"40px", "48px", "50px"}
 _RECOVERY_HEIGHT = "78px"
@@ -17,8 +18,14 @@ def _capture_logo_dimensions(html):
         return captured
     for tag in _LOGO_RE.findall(html):
         dims = {}
-        for name, value in _DIM_RE.findall(tag):
-            dims[name.lower()] = value.strip()
+        match = _STYLE_RE.search(tag)
+        if match:
+            for name, value in _DIM_RE.findall(match.group(2)):
+                dims[name.lower()] = value.strip()
+        for name in ("width", "height", "max-width", "max-height"):
+            attr = re.search(r'\b' + re.escape(name) + r'\s*=\s*["\']([^"\']+)', tag, re.I)
+            if attr:
+                dims[name] = attr.group(1).strip()
         if dims:
             captured.append(dims)
     return captured
@@ -34,24 +41,27 @@ def _restore_logo_dimensions(html, captured):
         if index >= len(captured):
             return match.group(0)
         tag = match.group(0)
-        dims = captured[index]
+        dims = dict(captured[index])
         index += 1
-        # The old managed-chrome pass collapsed manually resized divider logos
-        # to the canonical 40/48/50px heights. Preserve the user's explicit
-        # dimensions, and recover that known legacy clamp when encountered.
         if dims.get("height", "").strip().lower() in _LEGACY_HEIGHTS:
-            dims = dict(dims)
             dims["height"] = _RECOVERY_HEIGHT
             dims["max-height"] = _RECOVERY_HEIGHT
-        for name, value in dims.items():
-            pattern = re.compile(r'(["\'])([^"\']*?)\b' + re.escape(name) + r'\s*:\s*[^;"\']*', re.I)
-            if pattern.search(tag):
-                tag = pattern.sub(lambda m: m.group(1) + m.group(2) + name + ":" + value, tag, count=1)
-            else:
-                if 'style=' in tag.lower():
-                    tag = re.sub(r'(<img\b[^>]*\bstyle\s*=\s*["\'])([^"\']*)', lambda m: m.group(1) + m.group(2).rstrip(';') + ';' + name + ':' + value + '!important;', tag, count=1, flags=re.I)
+        style_match = _STYLE_RE.search(tag)
+        if style_match:
+            quote = style_match.group(1)
+            style = style_match.group(2)
+            for name, value in dims.items():
+                pattern = re.compile(r'(^|;)\s*' + re.escape(name) + r'\s*:\s*[^;]*', re.I)
+                replacement = r'\1' + name + ':' + value + '!important'
+                if pattern.search(style):
+                    style = pattern.sub(replacement, style, count=1)
                 else:
-                    tag = tag[:-1] + ' style="' + name + ':' + value + '!important;">'
+                    style = style.rstrip(';') + ';' + name + ':' + value + '!important;'
+            start, end = style_match.span(2)
+            tag = tag[:start] + style + tag[end:]
+        else:
+            style = ''.join(name + ':' + value + '!important;' for name, value in dims.items())
+            tag = tag[:-1] + ' style="' + style + '">'
         return tag
 
     return _LOGO_RE.sub(replace, html)
@@ -77,8 +87,6 @@ def _patch_slide_engine(module):
     if getattr(module, "_workflow_logo_resize_patch", False):
         return
     module._workflow_logo_resize_patch = True
-    # Patch the exact styling layer that writes the managed 40/48/80px logo
-    # sizes, not just one caller of it.
     _wrap_html_function(module, "_apply_logo_contrast_styles")
     _wrap_html_function(module, "resolve_logo_in_html")
 
