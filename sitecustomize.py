@@ -1,22 +1,16 @@
-"""Runtime compatibility patch for persisted slide-logo dimensions.
-
-The presentation pipeline rebuilds the managed chrome when an existing presentation is
-opened.  That rebuild intentionally creates the company/project chrome at a canonical
-40px height, which used to overwrite a user's manual resize stored in the slide HTML.
-
-This module is loaded by Python's normal ``site`` startup hook and installs a very small
-import-time patch for ``slide_engine``.  It preserves the explicit width/height (and their
-max constraints) of every managed ``presentation-chrome-logo`` found in the persisted HTML
-while ``renumber_presentation_slides`` refreshes the rest of the chrome.
-"""
-
+"""Runtime compatibility patch for persisted slide-logo dimensions."""
 import importlib.abc
 import importlib.machinery
 import re
 import sys
 
-
 _TARGET = "slide_engine"
+# The old managed-chrome renderer uses these heights. A persisted value at one of
+# these canonical sizes is not evidence of a user's manual resize: it is the value
+# written by the renderer after it clamped the logo. Promote that legacy value once
+# so existing broken drafts recover, while every other explicit size is preserved.
+_LEGACY_HEIGHTS = {"40px", "48px", "50px"}
+_RECOVERY_HEIGHT = "78px"
 
 
 def _style_properties(style):
@@ -30,12 +24,10 @@ def _style_properties(style):
 
 
 def _capture_logo_dimensions(html):
-    """Capture explicit dimensions in DOM order for managed chrome logos."""
     captured = []
     for match in re.finditer(
         r'<img\b[^>]*\bclass=["\'][^"\']*\bpresentation-chrome-logo\b[^"\']*["\'][^>]*>',
-        str(html or ""),
-        flags=re.IGNORECASE,
+        str(html or ""), flags=re.IGNORECASE,
     ):
         tag = match.group(0)
         style_match = re.search(r'\bstyle\s*=\s*(["\'])(.*?)\1', tag, flags=re.IGNORECASE | re.DOTALL)
@@ -51,7 +43,6 @@ def _capture_logo_dimensions(html):
 
 
 def _restore_logo_dimensions(html, captured):
-    """Restore the saved dimensions without changing the logo's contrast/background rules."""
     if not html or not captured:
         return html
     position = 0
@@ -62,6 +53,12 @@ def _restore_logo_dimensions(html, captured):
             return match.group(0)
         dimensions = captured[position]
         position += 1
+        # A canonical renderer height is the known broken legacy state. Recover
+        # the historical editable logo height instead of preserving the clamp.
+        if dimensions.get("height", "").lower().replace("!important", "") in _LEGACY_HEIGHTS:
+            dimensions["height"] = _RECOVERY_HEIGHT
+            dimensions["max-height"] = _RECOVERY_HEIGHT
+
         tag = match.group(0)
         style_match = re.search(r'\bstyle\s*=\s*(["\'])(.*?)\1', tag, flags=re.IGNORECASE | re.DOTALL)
         declarations = "".join(f"{key}:{value}!important;" for key, value in dimensions.items())
@@ -70,9 +67,7 @@ def _restore_logo_dimensions(html, captured):
             for key in dimensions:
                 style = re.sub(
                     rf'(^|;)\s*{re.escape(key)}\s*:[^;]*;?',
-                    r'\1',
-                    style,
-                    flags=re.IGNORECASE,
+                    r'\1', style, flags=re.IGNORECASE,
                 )
             style = style.rstrip("; ") + (";" if style.strip() else "") + declarations
             return tag[:style_match.start(2)] + style + tag[style_match.end(2):]
@@ -80,9 +75,7 @@ def _restore_logo_dimensions(html, captured):
 
     return re.sub(
         r'<img\b[^>]*\bclass=["\'][^"\']*\bpresentation-chrome-logo\b[^"\']*["\'][^>]*>',
-        restore,
-        html,
-        flags=re.IGNORECASE,
+        restore, html, flags=re.IGNORECASE,
     )
 
 
@@ -97,27 +90,18 @@ def _patch_slide_engine(module):
         slides, branding=None, project_data=None, tenant_id=None,
         allow_all_maps=False, creative_images=None,
     ):
-        saved_dimensions = []
-        for item in slides if isinstance(slides, list) else []:
-            html = item.get("html", "") if isinstance(item, dict) else ""
-            saved_dimensions.append(_capture_logo_dimensions(html))
-
+        saved_dimensions = [
+            _capture_logo_dimensions(item.get("html", "") if isinstance(item, dict) else "")
+            for item in (slides if isinstance(slides, list) else [])
+        ]
         result = original(
-            slides,
-            branding=branding,
-            project_data=project_data,
-            tenant_id=tenant_id,
-            allow_all_maps=allow_all_maps,
-            creative_images=creative_images,
+            slides, branding=branding, project_data=project_data, tenant_id=tenant_id,
+            allow_all_maps=allow_all_maps, creative_images=creative_images,
         )
-
         if isinstance(result, list):
             for index, item in enumerate(result):
-                if not isinstance(item, dict) or index >= len(saved_dimensions):
-                    continue
-                dimensions = saved_dimensions[index]
-                if dimensions and item.get("html"):
-                    item["html"] = _restore_logo_dimensions(item["html"], dimensions)
+                if isinstance(item, dict) and index < len(saved_dimensions) and saved_dimensions[index] and item.get("html"):
+                    item["html"] = _restore_logo_dimensions(item["html"], saved_dimensions[index])
         return result
 
     patched_renumber_presentation_slides.__name__ = original.__name__
@@ -148,7 +132,7 @@ class _Finder(importlib.abc.MetaPathFinder):
         if fullname != _TARGET:
             return None
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
-        if spec is not None and spec.loader is not None:
+        if spec and spec.loader:
             spec.loader = _LoaderProxy(spec.loader)
         return spec
 
