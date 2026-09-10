@@ -296,6 +296,40 @@ def _apply_css_cascade(root):
     apply_all(root)
 
 
+def _parse_gradient_color(value):
+    """First color stop of a linear-gradient (site uses gradients for rules)."""
+    if not value or 'gradient' not in str(value).lower():
+        return None
+    inner = str(value)
+    inner = inner[inner.lower().find('gradient'):]
+    for regex in (_RGB_RE, _HEX_RE):
+        match = regex.search(inner)
+        if match:
+            try:
+                if regex is _RGB_RE:
+                    return RGBColor(int(match.group(1)), int(match.group(2)),
+                                    int(match.group(3)))
+                return _hex_to_rgb('#' + match.group(1)[:6])
+            except ValueError:
+                continue
+    return None
+
+
+def _parse_rgba_alpha(value):
+    """Transparency percentage (0-100) of an rgba() color, else None."""
+    match = re.search(r'rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([\d.]+)\s*\)',
+                      str(value or '').lower())
+    if not match:
+        return None
+    try:
+        alpha = max(0.0, min(1.0, float(match.group(1))))
+    except ValueError:
+        return None
+    if alpha >= 1.0:
+        return None
+    return (1.0 - alpha) * 100.0
+
+
 def _parse_color(value):
     """Return an RGBColor or None for a CSS color value."""
     if not value:
@@ -524,10 +558,15 @@ def _image_bytes(src, tenant_id=None):
         parsed = urlparse(src)
         if parsed.scheme in ('http', 'https'):
             import requests
-            resp = requests.get(src, timeout=15)
+            try:
+                resp = requests.get(src, timeout=20, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            except Exception:
+                return None
             if resp.ok and resp.content:
                 ctype = str(resp.headers.get('Content-Type', '')).lower()
-                if 'image' in ctype or src.lower().split('?')[0].endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif')):
+                if 'image' in ctype or src.lower().split('?')[0].endswith(
+                        ('.png', '.jpg', '.jpeg', '.webp', '.gif')):
                     return resp.content
                 # Accept it anyway when Pillow can open it
                 try:
@@ -671,6 +710,7 @@ def _inline_runs(node):
         color = _parse_color(n.style.get('color'))
         if color is not None:
             child_fmt['color'] = color
+            child_fmt['alpha'] = _parse_rgba_alpha(n.style.get('color'))
         size = _parse_font_size(n.style.get('font-size'), None)
         if size:
             child_fmt['size_px'] = size
@@ -685,7 +725,8 @@ def _inline_runs(node):
         for child in n.children:
             walk(child, child_fmt)
 
-    base = {'bold': False, 'italic': False, 'size_px': None, 'color': None, 'link': None}
+    base = {'bold': False, 'italic': False, 'size_px': None, 'color': None,
+            'alpha': None, 'link': None}
     if node.text and node.text.strip():
         text = _strip_icons(node.text).replace('\xa0', ' ')
         if text.strip():
@@ -708,6 +749,28 @@ def _para_align(node, default=PP_ALIGN.RIGHT):
     align = str(node.style.get('text-align', '')).lower()
     return {'left': PP_ALIGN.LEFT, 'center': PP_ALIGN.CENTER,
             'right': PP_ALIGN.RIGHT, 'justify': PP_ALIGN.JUSTIFY}.get(align, default)
+
+
+def _set_run_alpha(run, alpha_pct):
+    """Transparency on a text run (for rgba() tints and watermarks)."""
+    if not alpha_pct:
+        return
+    try:
+        from pptx.oxml.ns import qn
+        rPr = run._r.get_or_add_rPr()
+        solid = rPr.find(qn('a:solidFill'))
+        if solid is None:
+            return
+        clr = solid.find(qn('a:srgbClr'))
+        if clr is None:
+            return
+        if clr.find(qn('a:alpha')) is not None:
+            return
+        alpha = clr.makeelement(qn('a:alpha'),
+                                {'val': str(int((100 - alpha_pct) * 1000))})
+        clr.append(alpha)
+    except Exception:
+        pass
 
 
 def _set_list_bullet(para, ordered=False, level=0):
@@ -734,12 +797,34 @@ def _set_list_bullet(para, ordered=False, level=0):
 def _add_paragraph(text_frame, runs, align=PP_ALIGN.RIGHT, space_after_pt=4.0,
                    line_spacing=1.15, first=False, bullet=None, level=0,
                    default_size_px=14.0, default_color=None, default_bold=False,
-                   font_name='Arial', ordered=False):
+                   font_name='Arial', ordered=False, default_alpha=None):
     if first and len(text_frame.paragraphs) == 1 and not text_frame.paragraphs[0].runs:
         para = text_frame.paragraphs[0]
     else:
         para = text_frame.add_paragraph()
     para.alignment = align
+    try:
+        # Explicit base direction: without it PowerPoint guesses from the
+        # first characters, so "72 / 01" flips to "01 / 72" and embedded
+        # numbers jump inside Arabic sentences.
+        from pptx.oxml.ns import qn  # noqa: F401 (ensures oxml available)
+        direction = None
+        for text, _fmt in runs:
+            for ch in str(text):
+                if 'A' <= ch <= 'Z' or 'a' <= ch <= 'z' or '0' <= ch <= '9':
+                    direction = '0'
+                    break
+                if ('\u0590' <= ch <= '\u08FF' or '\uFB50' <= ch <= '\uFDFF'
+                        or '\uFE70' <= ch <= '\uFEFF'):
+                    direction = '1'
+                    break
+            if direction is not None:
+                break
+        if direction is None:
+            direction = '1'
+        para._p.get_or_add_pPr().set('rtl', direction)
+    except Exception:
+        pass
     try:
         para.level = min(int(level), 8)
     except Exception:
@@ -780,6 +865,7 @@ def _add_paragraph(text_frame, runs, align=PP_ALIGN.RIGHT, space_after_pt=4.0,
                     run.font.color.rgb = color
                 except Exception:
                     pass
+                _set_run_alpha(run, fmt.get('alpha') or default_alpha)
             try:
                 run.font.bold = bool(fmt.get('bold') or default_bold)
                 run.font.italic = bool(fmt.get('italic'))
@@ -807,7 +893,23 @@ def _node_bg(node):
     # background shorthand may carry url(...) — only accept pure colors here
     if 'url(' in str(bg).lower():
         return None
-    return _parse_color(bg)
+    color = _parse_color(bg)
+    if color is None and 'gradient' in str(bg).lower():
+        color = _parse_gradient_color(bg)
+    return color
+
+
+def _node_bg_alpha(node):
+    """(fill color, transparency pct) honouring rgba() tints."""
+    bg = node.style.get('background', '') or node.style.get('background-color', '')
+    if 'url(' in str(bg).lower():
+        return None, None
+    color = _parse_color(bg)
+    if color is None and 'gradient' in str(bg).lower():
+        color = _parse_gradient_color(bg)
+    if color is None:
+        return None, None
+    return color, _parse_rgba_alpha(bg)
 
 
 def _is_hidden(node):
@@ -893,11 +995,13 @@ class Block:
 
 class TextBlock(Block):
     def __init__(self, node, size_px, bold=False, color=None, align=None,
-                 space_after=6.0, bullet=False, level=0, anchor_top=False):
+                 space_after=6.0, bullet=False, level=0, anchor_top=False,
+                 alpha=None):
         self.node = node
         self.size_px = size_px
         self.bold = bold
         self.color = color
+        self.alpha = alpha
         self.align = align
         self.space_after = space_after
         self.bullet = bullet
@@ -937,6 +1041,7 @@ class TextBlock(Block):
                                bullet=self.bullet if first else False,
                                level=self.level, default_size_px=self.size_px,
                                default_color=self.color, default_bold=self.bold,
+                               default_alpha=self.alpha,
                                font_name=ctx.font_name)
                 first = False
         _no_line(box)
@@ -944,10 +1049,11 @@ class TextBlock(Block):
 
 
 class ListBlock(Block):
-    def __init__(self, node, size_px=14.0, color=None):
+    def __init__(self, node, size_px=14.0, color=None, alpha=None):
         self.node = node
         self.size_px = size_px
         self.color = color
+        self.alpha = alpha
 
     def _items(self):
         items = []
@@ -985,7 +1091,7 @@ class ListBlock(Block):
         ordered = self.node.tag == 'ol'
         for idx, item in enumerate(items, 1):
             if isinstance(item, Node) and item.tag in ('ul', 'ol'):
-                sub = ListBlock(item, self.size_px, self.color)
+                sub = ListBlock(item, self.size_px, self.color, self.alpha)
                 for sub_item in sub._items():
                     runs = _clean_runs(_inline_runs(sub_item))
                     if runs:
@@ -993,6 +1099,7 @@ class ListBlock(Block):
                                        bullet=not ordered, level=1,
                                        default_size_px=self.size_px,
                                        default_color=self.color,
+                                       default_alpha=self.alpha,
                                        font_name=ctx.font_name)
                         first = False
                 continue
@@ -1002,7 +1109,8 @@ class ListBlock(Block):
             _add_paragraph(box.text_frame, runs, align=align, first=first,
                            bullet=True, level=0, ordered=ordered,
                            default_size_px=self.size_px,
-                           default_color=self.color, font_name=ctx.font_name)
+                           default_color=self.color, default_alpha=self.alpha,
+                           font_name=ctx.font_name)
             first = False
         _no_line(box)
         return height_px
@@ -1207,18 +1315,19 @@ class CardBlock(Block):
 
     def render(self, slide, shapes, left_px, top_px, width_px, ctx, max_h_px):
         height_px = min(self.estimate(width_px, ctx), max(40.0, max_h_px))
-        fill = _node_bg(self.node)
-        shape = shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+        fill, fill_alpha = _node_bg_alpha(self.node)
+        shape = shapes.add_shape(_card_shape_type(self.node),
                                  _px_to_emu(left_px), _px_to_emu(top_px),
                                  _px_to_emu(width_px), _px_to_emu(height_px))
         if fill is not None:
-            _set_shape_fill(shape, fill)
+            _set_shape_fill(shape, fill, alpha_pct=fill_alpha)
         else:
             try:
                 shape.fill.background()
             except Exception:
                 pass
-        _no_line(shape)
+        if not _apply_border(shape, self.node):
+            _no_line(shape)
         try:
             shape.text_frame.word_wrap = True
         except Exception:
@@ -1252,6 +1361,15 @@ class CardBlock(Block):
         return height_px
 
 
+def _col_spec(kid):
+    """Explicit column width hint: width, then min/max-width (icon boxes)."""
+    for prop in ('width', 'min-width', 'max-width', 'flex-basis'):
+        value = _parse_px(kid.style.get(prop, ''), None)
+        if value:
+            return value
+    return None
+
+
 def _split_widths(specs, total_w, gap=20.0):
     """Column widths: explicit px specs honoured, rest shared equally."""
     n = len(specs)
@@ -1265,27 +1383,46 @@ def _split_widths(specs, total_w, gap=20.0):
 
 
 class ColumnsBlock(Block):
-    def __init__(self, columns, rtl=True, widths=None):
-        # columns: list of list[Block] in DOM order; widths: px specs or None
+    def __init__(self, columns, rtl=True, widths=None, align='fill'):
+        # columns: list of list[Block] in DOM order; widths: px specs or None.
+        # align fill spreads across the full width; start hugs the row start
+        # (right in RTL) at natural widths — for inline-flex pills/badges.
         self.columns = columns
         self.rtl = rtl
         self.widths = widths
+        self.align = align
 
-    def _geometry(self, width_px):
+    def _geometry(self, width_px, ctx=None):
         n = max(1, len(self.columns))
         gap = 20.0
         specs = list(self.widths or []) + [None] * n
-        return _split_widths(specs[:n], width_px, gap), gap
+        specs = specs[:n]
+        if self.align != 'fill':
+            # Caller supplies concrete widths (natural estimates); never stretch.
+            widths = [min(s or 0, width_px) if s else width_px / n for s in specs]
+            return widths, gap
+        return _split_widths(specs, width_px, gap), gap
 
     def estimate(self, width_px, ctx):
-        widths, _gap = self._geometry(width_px)
+        widths, gap = self._geometry(width_px, ctx)
+        if self.align != 'fill':
+            return sum(widths) + gap * (max(0, len(widths) - 1))
         return max((sum(b.estimate(cw, ctx) + 6.0 for b in col)
                     for col, cw in zip(self.columns, widths)),
                    default=0.0)
 
     def render(self, slide, shapes, left_px, top_px, width_px, ctx, max_h_px):
-        widths, gap = self._geometry(width_px)
+        widths, gap = self._geometry(width_px, ctx)
         n = len(self.columns)
+        total = sum(widths) + gap * max(0, n - 1)
+        if self.align == 'fill' or total >= width_px:
+            x0 = left_px
+        elif self.align == 'center':
+            x0 = left_px + (width_px - total) / 2
+        elif (self.align == 'start') == (not self.rtl):
+            x0 = left_px  # LTR start / RTL end
+        else:
+            x0 = left_px + width_px - total  # RTL start / LTR end
         # x offsets in visual order; RTL reverses DOM order
         order = list(range(n))
         if self.rtl:
@@ -1296,7 +1433,7 @@ class ColumnsBlock(Block):
             cursor += widths[i] + gap
         heights = []
         for i, col in enumerate(self.columns):
-            x = left_px + x_offsets[i]
+            x = x0 + x_offsets[i]
             cw = widths[i]
             y = top_px
             for b in col:
@@ -1319,11 +1456,13 @@ class SpacerBlock(Block):
 
 
 class RuleBlock(Block):
-    def __init__(self, color=None, width_px=None, height_px=3.0, centered=True):
+    def __init__(self, color=None, width_px=None, height_px=3.0, centered=True,
+                 oval=False):
         self.color = color
         self.width_px = width_px
         self.height_px = height_px
         self.centered = centered
+        self.oval = oval
 
     def estimate(self, width_px, ctx):
         return self.height_px + 7.0
@@ -1331,7 +1470,8 @@ class RuleBlock(Block):
     def render(self, slide, shapes, left_px, top_px, width_px, ctx, max_h_px):
         w = min(self.width_px or width_px, width_px)
         x = left_px + (width_px - w) / 2 if self.centered else left_px
-        bar = shapes.add_shape(MSO_SHAPE.RECTANGLE, _px_to_emu(x),
+        bar = shapes.add_shape(MSO_SHAPE.OVAL if self.oval else MSO_SHAPE.RECTANGLE,
+                               _px_to_emu(x),
                                _px_to_emu(top_px + 3), _px_to_emu(w),
                                _px_to_emu(self.height_px))
         _set_shape_fill(bar, self.color or RGBColor(0xCB, 0xD5, 0xE1))
@@ -1441,6 +1581,46 @@ class RawImageBlock(Block):
         return h
 
 
+class BgImageBlock(Block):
+    """Panel with a background image and editable content on top."""
+
+    def __init__(self, src, inner, tenant_id=None):
+        self.src = src
+        self.inner = inner
+        self.tenant_id = tenant_id
+
+    def estimate(self, width_px, ctx):
+        if not self.inner:
+            data = _image_bytes(self.src, self.tenant_id)
+            if data:
+                iw, ih = _image_size(data)
+                if iw and ih:
+                    return min(width_px * ih / iw, 460.0)
+            return 200.0
+        total = sum(b.estimate(width_px, ctx) + 6.0 for b in self.inner)
+        return max(total, 120.0)
+
+    def render(self, slide, shapes, left_px, top_px, width_px, ctx, max_h_px):
+        height_px = min(self.estimate(width_px, ctx), max(60.0, max_h_px))
+        data = _image_bytes(self.src, self.tenant_id)
+        if data:
+            iw, ih = _image_size(data)
+            ih_px = width_px * ih / iw if iw and ih else height_px
+            try:
+                # cover-fit the panel so no gaps show behind the content
+                shapes.add_picture(BytesIO(data), _px_to_emu(left_px),
+                                   _px_to_emu(top_px), _px_to_emu(width_px),
+                                   _px_to_emu(max(height_px, min(ih_px, max_h_px))))
+            except Exception:
+                pass
+        y = top_px + 10.0
+        for b in self.inner:
+            used = b.render(slide, shapes, left_px + 10.0, y, width_px - 20.0,
+                            ctx, max(20.0, top_px + height_px - 10.0 - y))
+            y += used + 6.0
+        return height_px
+
+
 def _svg_text_fallback(node):
     texts = []
     for t in node.find_all({'text', 'tspan'}):
@@ -1453,6 +1633,11 @@ def _svg_text_fallback(node):
         n.children = [val]
         blocks.append(TextBlock(n, 12.0, space_after=3.0))
     return blocks
+
+
+def _text_color_alpha(node):
+    raw = node.style.get('color', '')
+    return _parse_color(raw), _parse_rgba_alpha(raw)
 
 
 def _node_to_blocks(node, ctx, rtl=True):
@@ -1469,25 +1654,26 @@ def _node_to_blocks(node, ctx, rtl=True):
 
     if tag in ('h1', 'h2', 'h3', 'h4'):
         size = _parse_font_size(node.style.get('font-size'), _HEADING_SIZES[tag])
-        color = _parse_color(node.style.get('color'))
+        color, alpha = _text_color_alpha(node)
         bold = True
         if not node.get_text().strip():
             return []
-        return [TextBlock(node, size, bold=bold, color=color, space_after=8.0)]
+        return [TextBlock(node, size, bold=bold, color=color, alpha=alpha,
+                          space_after=8.0)]
 
     if tag == 'p':
         if not node.get_text().strip():
             return []
         size = _parse_font_size(node.style.get('font-size'), 13.0)
-        color = _parse_color(node.style.get('color'))
-        return [TextBlock(node, size, color=color, space_after=6.0)]
+        color, alpha = _text_color_alpha(node)
+        return [TextBlock(node, size, color=color, alpha=alpha, space_after=6.0)]
 
     if tag in ('ul', 'ol'):
         if not node.get_text().strip():
             return []
         size = _parse_font_size(node.style.get('font-size'), 13.0)
-        color = _parse_color(node.style.get('color'))
-        return [ListBlock(node, size, color)]
+        color, alpha = _text_color_alpha(node)
+        return [ListBlock(node, size, color, alpha)]
 
     if tag == 'li':
         if not node.get_text().strip():
@@ -1504,6 +1690,12 @@ def _node_to_blocks(node, ctx, rtl=True):
     if tag == 'img':
         src = node.attrs.get('src', '')
         if not src or '##' in src:
+            # Fall back to the first srcset candidate when src is missing.
+            srcset = str(node.attrs.get('srcset', '') or '')
+            first = srcset.split(',')[0].strip().split()[0] if srcset.strip() else ''
+            if first and '##' not in first:
+                src = first
+        if not src or '##' in src:
             return []
         h = _parse_px(node.style.get('height'), None)
         return [ImageBlock(src, node.attrs.get('alt', ''), height_px=h)]
@@ -1513,14 +1705,17 @@ def _node_to_blocks(node, ctx, rtl=True):
                           or _parse_color(node.style.get('color')))]
 
     if tag in ('div', 'span') and not node.get_text().strip() and not node.find_all({'img', 'table', 'svg', 'ul', 'ol'}):
-        # Thin decorative bar (gold rules under titles etc.)
+        # Thin decorative bar (gold rules under titles etc.) or dot.
         w = _parse_px(node.style.get('width'), None)
         h = _parse_px(node.style.get('height'), None)
         fill = _node_bg(node)
-        if fill is not None and h is not None and h <= 12 and (w or 0) >= 20:
-            return [RuleBlock(fill, width_px=w, height_px=h)]
-        if fill is not None and w is not None and w <= 12 and (h or 0) >= 20:
-            return [RuleBlock(fill, width_px=w, height_px=h, centered=False)]
+        if fill is not None and w is not None and h is not None:
+            if w <= 18 and h <= 18:
+                return [RuleBlock(fill, width_px=w, height_px=h)]
+            if w >= 20 and h <= 12:
+                return [RuleBlock(fill, width_px=w, height_px=h)]
+            if h >= 20 and w <= 12:
+                return [RuleBlock(fill, width_px=w, height_px=h, centered=False)]
         if not node.children:
             return []
 
@@ -1544,6 +1739,15 @@ def _node_to_blocks(node, ctx, rtl=True):
         h = _parse_px(node.style.get('height'), 0)
         if (w and w < 40) or (h and h < 40):
             return []
+        kids = [c for c in node.children
+                if isinstance(c, Node) and not _is_hidden(c) and c.tag not in _SKIP_TAGS]
+        if kids:
+            # Panel keeps its picture AND its content (overlays, captions).
+            inner = []
+            for kid in kids:
+                inner.extend(_node_to_blocks(kid, ctx, rtl))
+            if inner:
+                return [BgImageBlock(bg_url, inner, ctx.tenant_id)]
         return [ImageBlock(bg_url)]
 
     children_blocks = []
@@ -1554,8 +1758,8 @@ def _node_to_blocks(node, ctx, rtl=True):
             ghost = Node('span', {})
             ghost.children = [child]
             size = _parse_font_size(node.style.get('font-size'), 13.0)
-            color = _parse_color(node.style.get('color'))
-            children_blocks.append(TextBlock(ghost, size, color=color))
+            color, alpha = _text_color_alpha(node)
+            children_blocks.append(TextBlock(ghost, size, color=color, alpha=alpha))
 
     if not children_blocks:
         return []
@@ -1571,7 +1775,15 @@ def _node_to_blocks(node, ctx, rtl=True):
                 if sub:
                     pairs.append((kid, sub))
             if len(pairs) >= 2:
-                widths = [_parse_px(k.style.get('width'), None) for k, _s in pairs]
+                display = str(node.style.get('display', '')).lower()
+                if 'inline-flex' in display \
+                        and not _parse_px(node.style.get('width'), None):
+                    # Pills/badges hug their content instead of filling the row.
+                    widths = [min(_col_spec(k) or _estimate_node_width(k, ctx, 500.0),
+                                  600.0) for k, _s in pairs]
+                    return [ColumnsBlock([s for _k, s in pairs], rtl=rtl,
+                                         widths=widths, align='start')]
+                widths = [_col_spec(k) for k, _s in pairs]
                 return [ColumnsBlock([s for _k, s in pairs], rtl=rtl, widths=widths)]
         # fall through to stacked rendering
 
@@ -2062,6 +2274,42 @@ def _parse_side_bar(node):
     return None
 
 
+def _parse_border(value):
+    """Full border shorthand (2px solid #color) -> (width_pt, RGBColor)."""
+    if not value:
+        return None
+    text = str(value).strip().lower()
+    if 'none' in text or 'hidden' in text:
+        return None
+    width = _parse_px(text, None)
+    color = _parse_color(text)
+    if width is not None and width >= 0.75 and color is not None:
+        return (width * 0.75, color)
+    return None
+
+
+def _card_shape_type(node):
+    if '50%' in str(node.style.get('border-radius', '')):
+        return MSO_SHAPE.OVAL
+    return MSO_SHAPE.ROUNDED_RECTANGLE
+
+
+def _apply_border(shape, node):
+    """Apply a full border (circles, outlined cards) to a shape."""
+    for prop in ('border', 'border-top', 'border-right', 'border-bottom', 'border-left'):
+        parsed = _parse_border(node.style.get(prop, ''))
+        if parsed is not None:
+            width_pt, color = parsed
+            try:
+                shape.line.fill.solid()
+                shape.line.fill.fore_color.rgb = color
+                shape.line.width = Pt(width_pt)
+            except Exception:
+                pass
+            return True
+    return False
+
+
 def _render_designed_slide(slide, shapes, root, body_kids, title, project_label,
                            ctx, branding, primary, slide_type='cover'):
     """Render a designed slide (cover / closing / divider) from its own body.
@@ -2164,14 +2412,27 @@ def _render_flow(slide, shapes, blocks, ctx, left_px, top_px, width_px, max_h_px
     return y - top_px
 
 
-def _flow_blocks(kids, ctx, rtl=True):
+def _inherited_text_style(parent):
+    """Text style a bare-text ghost inherits from its container."""
+    if parent is None or not isinstance(parent, Node):
+        return {}
+    return {prop: parent.style[prop] for prop in
+            ('color', 'font-size', 'font-weight', 'font-style',
+             'text-align', 'direction', 'line-height')
+            if prop in parent.style}
+
+
+def _flow_blocks(kids, ctx, rtl=True, inherit_from=None):
     blocks = []
+    inherited = _inherited_text_style(inherit_from)
     for kid in kids:
         if isinstance(kid, Node):
             blocks.extend(_node_to_blocks(kid, ctx, rtl))
         elif isinstance(kid, str) and kid.strip():
             ghost = Node('p', {})
             ghost.children = [kid]
+            if inherited:
+                ghost.style = dict(inherited)
             blocks.extend(_node_to_blocks(ghost, ctx, rtl))
     return blocks
 
@@ -2229,17 +2490,31 @@ def _render_abs_node(slide, shapes, node, ctx, rect, depth=0):
         return h
     # Generic container: background shape, then children (absolute at offsets,
     # flow remainder inside with the container's own gravity).
-    fill = _node_bg(node)
+    fill, fill_alpha = _node_bg_alpha(node)
     bg_url = _extract_bg_url(node.style.get('background-image', '')
                              or node.style.get('background', ''))
-    if bg_url and not [c for c in node.children if isinstance(c, Node)]:
-        return ImageBlock(bg_url).render(slide, shapes, x, y, w, ctx, h)
-    if fill is not None:
-        shape = shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+    if bg_url:
+        try:
+            data = _image_bytes(bg_url, ctx.tenant_id)
+            if data:
+                shapes.add_picture(BytesIO(data), _px_to_emu(x), _px_to_emu(y),
+                                   _px_to_emu(w), _px_to_emu(h))
+        except Exception:
+            pass
+    has_full_border = _parse_border(node.style.get('border', '')) is not None
+    if fill is not None or has_full_border:
+        shape = shapes.add_shape(_card_shape_type(node),
                                  _px_to_emu(x), _px_to_emu(y),
                                  _px_to_emu(w), _px_to_emu(h))
-        _set_shape_fill(shape, fill)
-        _no_line(shape)
+        if fill is not None:
+            _set_shape_fill(shape, fill, alpha_pct=fill_alpha)
+        else:
+            try:
+                shape.fill.background()
+            except Exception:
+                pass
+        if not _apply_border(shape, node):
+            _no_line(shape)
     side_bar = _parse_side_bar(node)
     if side_bar is not None:
         side, bar_w, bar_color = side_bar
@@ -2270,6 +2545,14 @@ def _render_abs_node(slide, shapes, node, ctx, rect, depth=0):
                  if not (isinstance(c, Node) and (c.tag in _SKIP_TAGS or _is_hidden(c)
                                                  or _abs_rect(c, w, h) is not None))]
     for kid in abs_kids:
+        if _is_veil(kid, w, h):
+            # Nested gradient overlay (image panels): darken the panel.
+            overlay = shapes.add_shape(MSO_SHAPE.RECTANGLE,
+                                       _px_to_emu(x), _px_to_emu(y),
+                                       _px_to_emu(w), _px_to_emu(h))
+            _set_shape_fill(overlay, RGBColor(0x0B, 0x1F, 0x33), alpha_pct=35)
+            _no_line(overlay)
+            continue
         sub = _anchored_rect(kid, w, h, ctx) or _abs_rect(kid, w, h)
         _render_abs_node(slide, shapes, kid, ctx,
                          (x + sub[0], y + sub[1], sub[2], sub[3]), depth + 1)
@@ -2286,14 +2569,14 @@ def _render_abs_node(slide, shapes, node, ctx, rect, depth=0):
                     pairs.append((kid, sub))
             if len(pairs) >= 2:
                 pad = _parse_px(node.style.get('padding', ''), 0.0) or 0.0
-                widths = [_parse_px(k.style.get('width'), None) for k, _s in pairs]
+                widths = [_col_spec(k) for k, _s in pairs]
                 ColumnsBlock([s for _k, s in pairs], rtl=rtl,
                              widths=widths).render(
                     slide, shapes, x + pad, y + pad, w - pad * 2, ctx, h - pad * 2)
                 grid_handled = True
     if grid_handled:
         return h
-    flow_blocks = _flow_blocks(flow_kids, ctx, rtl)
+    flow_blocks = _flow_blocks(flow_kids, ctx, rtl, inherit_from=node)
     if flow_blocks:
         halign, valign = _container_gravity(node)
         _render_flow(slide, shapes, flow_blocks, ctx, x + pad, y + pad,
@@ -2427,14 +2710,15 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
         content_w = SLIDE_W_PX - 72.0
 
         # Absolutely-positioned overlays (badges, logo strips) keep their rects.
+        # Positions are slide-relative, so anchor against the full slide.
         for kid in body_kids:
             if isinstance(kid, Node) and not _is_hidden(kid):
-                rect = _anchored_rect(kid, SLIDE_W_PX, content_bottom, ctx)
+                rect = _anchored_rect(kid, SLIDE_W_PX, SLIDE_H_PX, ctx)
                 if rect is not None and not _is_veil(kid):
                     _render_abs_node(slide, shapes, kid, ctx, rect)
         blocks = _flow_blocks([k for k in body_kids
                                if not (isinstance(k, Node)
-                                       and _abs_rect(k, SLIDE_W_PX, content_bottom) is not None)],
+                                       and _abs_rect(k, SLIDE_W_PX, SLIDE_H_PX) is not None)],
                               ctx)
 
         if not blocks and title and not header_title:
