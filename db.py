@@ -3631,3 +3631,85 @@ def delete_map_images(tenant_id, presentation_id=None, image_type=None):
         params.append(image_type)
     conn.execute(query, params)
     conn.commit()
+
+
+def get_usage_totals(tenant_id, draft_ids=(), presentation_ids=()):
+    """Bulk spend per project and per presentation for list screens.
+
+    A project total covers its own draft rows plus every presentation linked
+    to it through presentations.draft_id. A presentation total covers only
+    its own rows. AI and Maps costs are summed separately and combined.
+    """
+    draft_ids = [str(d) for d in (draft_ids or []) if d][:200]
+    presentation_ids = [str(p) for p in (presentation_ids or []) if p][:200]
+
+    def _zero():
+        return {'cost_usd': 0.0, 'ai_cost_usd': 0.0, 'maps_cost_usd': 0.0, 'calls': 0}
+
+    projects = {d: _zero() for d in draft_ids}
+    presentations = {p: _zero() for p in presentation_ids}
+    if not draft_ids and not presentation_ids:
+        return {'projects': projects, 'presentations': presentations}
+    conn = get_db()
+
+    pres_of_draft = {}
+    if draft_ids:
+        marks = ', '.join(['?'] * len(draft_ids))
+        for row in conn.execute(
+            'SELECT id, draft_id FROM presentations '
+            f'WHERE tenant_id = ? AND draft_id IN ({marks})',
+            [tenant_id] + draft_ids,
+        ).fetchall():
+            row = dict(row)
+            if row.get('draft_id') and row.get('id'):
+                pres_of_draft.setdefault(str(row['draft_id']), []).append(str(row['id']))
+
+    all_pres = set(presentation_ids)
+    for pres_list in pres_of_draft.values():
+        all_pres.update(pres_list)
+
+    if draft_ids:
+        marks = ', '.join(['?'] * len(draft_ids))
+        for row in conn.execute(
+            'SELECT draft_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
+            f'FROM ai_usage_events WHERE tenant_id = ? AND draft_id IN ({marks}) GROUP BY draft_id',
+            [tenant_id] + draft_ids,
+        ).fetchall():
+            row = dict(row)
+            target = projects.get(str(row.get('draft_id')))
+            if target is not None:
+                target['calls'] += int(row['calls'] or 0)
+                target['ai_cost_usd'] += float(row['cost'] or 0.0)
+        for row in conn.execute(
+            'SELECT draft_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
+            f'FROM map_usage_events WHERE tenant_id = ? AND draft_id IN ({marks}) GROUP BY draft_id',
+            [tenant_id] + draft_ids,
+        ).fetchall():
+            row = dict(row)
+            target = projects.get(str(row.get('draft_id')))
+            if target is not None:
+                target['calls'] += int(row['calls'] or 0)
+                target['maps_cost_usd'] += float(row['cost'] or 0.0)
+
+    if all_pres:
+        pres_list = sorted(all_pres)
+        marks = ', '.join(['?'] * len(pres_list))
+        for table, key in (('ai_usage_events', 'ai_cost_usd'), ('map_usage_events', 'maps_cost_usd')):
+            for row in conn.execute(
+                'SELECT presentation_id, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost '
+                f'FROM {table} WHERE tenant_id = ? AND presentation_id IN ({marks}) GROUP BY presentation_id',
+                [tenant_id] + pres_list,
+            ).fetchall():
+                row = dict(row)
+                pres_id = str(row.get('presentation_id'))
+                if pres_id in presentations:
+                    presentations[pres_id]['calls'] += int(row['calls'] or 0)
+                    presentations[pres_id][key] += float(row['cost'] or 0.0)
+                for draft_id, linked in pres_of_draft.items():
+                    if pres_id in linked:
+                        projects[draft_id]['calls'] += int(row['calls'] or 0)
+                        projects[draft_id][key] += float(row['cost'] or 0.0)
+
+    for entry in list(projects.values()) + list(presentations.values()):
+        entry['cost_usd'] = entry['ai_cost_usd'] + entry['maps_cost_usd']
+    return {'projects': projects, 'presentations': presentations}

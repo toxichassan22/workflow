@@ -600,6 +600,27 @@ def api_ai_usage():
         return jsonify({'success': False, 'error': 'تعذر تحميل الاستهلاك'}), 500
 
 
+@app.route('/api/usage-totals', methods=['GET'])
+@require_auth
+def api_usage_totals():
+    """Bulk spend for list screens: per-project totals plus per-presentation costs."""
+    def _ids(value):
+        return [part.strip() for part in (value or '').split(',') if part.strip()][:200]
+
+    try:
+        return jsonify({
+            'success': True,
+            **db.get_usage_totals(
+                g.tenant_id,
+                draft_ids=_ids(request.args.get('draftIds') or request.args.get('draft_ids')),
+                presentation_ids=_ids(request.args.get('presentationIds') or request.args.get('presentation_ids')),
+            ),
+        })
+    except Exception as exc:
+        print(f"[AI-USAGE] totals failed: {exc}")
+        return jsonify({'success': False, 'error': 'تعذر تحميل الإجماليات'}), 500
+
+
 def extract_chat_content(response, label="GLM"):
     """Safely extract text content from ZAI/GLM API response.
     Raises a descriptive exception if the response is malformed."""

@@ -7175,6 +7175,68 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('بانتظار التعميد', index_html)
         self.assertIn(".filter(group => group.items.length)", index_html)
 
+    def test_usage_totals_aggregate_project_files_and_scope_by_tenant(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        draft_id = 'draft-usage-totals'
+        response = client.post('/api/project-draft', headers=headers, json={
+            'draftId': draft_id,
+            'draftData': {'draftId': draft_id, 'project_name': 'Usage Project'},
+            'sectionStatuses': {},
+        })
+        self.assertEqual(response.status_code, 200)
+        created = client.post('/api/presentations', headers=headers, json={
+            'title': 'Usage Presentation',
+            'projectData': {'draftId': draft_id, 'project_name': 'Usage Project'},
+            'slidesData': [{'title': 'Cover', 'type': 'cover', 'html': '<div class="slide">Cover</div>'}],
+            'slideCount': 1,
+        })
+        self.assertEqual(created.status_code, 201)
+        presentation_id = created.get_json()['presentationId']
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                self.tenant_a, 'model-a', flow='slide', total_tokens=100,
+                cost_usd=0.02, draft_id=draft_id)
+            db.record_ai_usage_event(
+                self.tenant_a, 'model-a', flow='slide', total_tokens=50,
+                cost_usd=0.01, presentation_id=presentation_id)
+            db.record_maps_usage_event(
+                self.tenant_a, 'staticmap', 2, 0.002, flow='overview',
+                presentation_id=presentation_id)
+            db.record_ai_usage_event(
+                self.tenant_b, 'model-a', flow='slide', total_tokens=999,
+                cost_usd=9.99, draft_id='draft-usage-totals-foreign')
+        totals = client.get(
+            f'/api/usage-totals?draftIds={draft_id}&presentationIds={presentation_id}',
+            headers=headers).get_json()
+        self.assertTrue(totals['success'])
+        project = totals['projects'][draft_id]
+        self.assertAlmostEqual(project['ai_cost_usd'], 0.03)
+        self.assertAlmostEqual(project['maps_cost_usd'], 0.004)
+        self.assertAlmostEqual(project['cost_usd'], 0.034)
+        self.assertEqual(project['calls'], 3)
+        presentation = totals['presentations'][presentation_id]
+        self.assertAlmostEqual(presentation['cost_usd'], 0.014)
+        self.assertEqual(presentation['calls'], 2)
+        foreign = client.get(
+            f'/api/usage-totals?draftIds={draft_id}&presentationIds={presentation_id}',
+            headers=self._headers(self.token_b)).get_json()
+        self.assertEqual(foreign['projects'][draft_id]['calls'], 0)
+        self.assertEqual(foreign['presentations'][presentation_id]['calls'], 0)
+        unknown = client.get(
+            '/api/usage-totals?draftIds=no-such-draft', headers=headers).get_json()
+        self.assertEqual(unknown['projects']['no-such-draft']['cost_usd'], 0.0)
+        denied = client.get(f'/api/usage-totals?draftIds={draft_id}')
+        self.assertEqual(denied.status_code, 401)
+
+        index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("'/api/usage-totals?draftIds='", index_html)
+        self.assertIn("'/api/usage-totals?presentationIds='", index_html)
+        self.assertIn('function formatUsageCost(usd)', index_html)
+        self.assertIn('costByProject', index_html)
+        self.assertIn('costByPresentation', index_html)
+        self.assertIn('التكلفة: ', index_html)
+
     def test_slide_reordering_is_named_in_change_history(self):
         old_slides = [
             {'title': 'الأولى', 'type': 'content', 'html': '<div class="slide">أ</div>'},

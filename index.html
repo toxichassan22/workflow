@@ -8425,6 +8425,12 @@
       const presentations = response?.success && Array.isArray(response.presentations)
         ? response.presentations.slice().sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
         : [];
+      let costByPresentation = {};
+      const presentationIds = presentations.map(item => item.id).filter(Boolean);
+      if (presentationIds.length) {
+        const totalsData = await api('GET', '/api/usage-totals?presentationIds=' + encodeURIComponent(presentationIds.join(','))).catch(() => null);
+        if (totalsData?.success && totalsData.presentations) costByPresentation = totalsData.presentations;
+      }
       const groups = [
         { key: 'draft', label: 'مسودة', items: presentations.filter(item => !['pending_approval', 'approved'].includes(item.status)) },
         { key: 'pending_approval', label: 'بانتظار التعميد', items: presentations.filter(item => item.status === 'pending_approval') },
@@ -8434,8 +8440,9 @@
         '<section style="margin:0 0 22px"><h3 style="margin-bottom:10px;color:var(--p)">' + group.label + '</h3>' +
         group.items.map(item => {
           const date = (item.updatedAt || item.createdAt || '').slice(0, 16).replace('T', ' ');
+          const itemCost = costByPresentation[item.id];
           return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
-            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + '</div></div>' +
+            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + ' | التكلفة: ' + formatUsageCost(itemCost?.cost_usd || 0) + '</div></div>' +
             '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
             '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات</button></div></div>';
         }).join('') + '</section>'
@@ -25475,10 +25482,18 @@
         (recoveryData.drafts || []).forEach(item => { recoveryByDraft[item.draftId] = item; });
       }
       const drafts = draftsData?.success && Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
+      let costByProject = {};
+      const projectIds = drafts.map(d => d.id).filter(Boolean);
+      if (projectIds.length) {
+        const totalsData = await api('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(','))).catch(() => null);
+        if (totalsData?.success && totalsData.projects) costByProject = totalsData.projects;
+      }
       const html = drafts.length ? drafts.map(d => {
         const title = d.title || 'مشروع بدون عنوان';
         const statusText = d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
+        const projectCost = costByProject[d.id];
+        const costText = 'التكلفة: ' + formatUsageCost(projectCost?.cost_usd || 0);
         const recovery = recoveryByDraft[d.id] || null;
         const fields = recovery ? recovery.fieldCount + ' حقل ممتلئ' : '';
         const snapshot = recovery?.snapshot;
@@ -25489,7 +25504,7 @@
         return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid ' +
           (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px">' +
           '<div><h3>' + escapeHtml(title) + '</h3><div class="meta">' + statusText + ' | ' + date +
-          (fields ? ' | ' + fields : '') + '</div>' + note + '</div><div class="tenant-actions">' +
+          (fields ? ' | ' + fields : '') + ' | ' + costText + '</div>' + note + '</div><div class="tenant-actions">' +
           '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
           '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
           (restorable ? '<button class="btn small" style="background:#b45309;color:#fff" onclick="restoreProjectDraft(\'' + d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>' : '') +
@@ -26406,6 +26421,15 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+    }
+
+    function formatUsageCost(usd) {
+      const value = Number(usd) || 0;
+      const digits = value >= 1 ? 2 : value >= 0.01 ? 2 : 4;
+      const text = '$' + (value >= 1
+        ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : value.toFixed(digits));
+      return '<span dir="ltr">' + text + '</span>';
     }
 
 
