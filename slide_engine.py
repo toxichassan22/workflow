@@ -9025,6 +9025,77 @@ def build_index_slide(slide, slide_num, total_slides, branding=None, project_dat
     )
 
 
+def _usable_slide_image_url(value):
+    url = html_lib.unescape(str(value or '').strip()).strip().strip('"\'')
+    lowered = url.lower()
+    if not url or url.startswith('#') or '##' in url:
+        return ''
+    if lowered in {'none', 'undefined', 'null', 'about:blank'}:
+        return ''
+    if lowered.startswith(('blob:', 'javascript:')):
+        return ''
+    return url
+
+
+def _slide_background_image_url(html):
+    for match in re.finditer(
+        r'background(?:-image)?\s*:\s*url\(\s*["\']?([^"\')]+)["\']?\s*\)',
+        str(html or ''), flags=re.IGNORECASE,
+    ):
+        url = _usable_slide_image_url(match.group(1))
+        if url:
+            return url
+    return ''
+
+
+def _cover_image_url_from_html(html):
+    """Find the actual cover image without mistaking an earlier logo for it."""
+    source = str(html or '')
+    for match in re.finditer(
+        r'background(?:-image)?\s*:\s*url\(\s*["\']?([^"\')]+)["\']?\s*\)',
+        source, flags=re.IGNORECASE,
+    ):
+        url = _usable_slide_image_url(match.group(1))
+        if url and 'logo' not in url.lower():
+            return url
+    for match in re.finditer(
+        r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', source, flags=re.IGNORECASE,
+    ):
+        url = _usable_slide_image_url(match.group(1))
+        if url and 'logo' not in url.lower():
+            return url
+    return ''
+
+
+def _force_section_divider_background(html, cover_url):
+    """Make a divider use the deck's real cover even when its saved CSS is empty or stale."""
+    cover = _usable_slide_image_url(cover_url)
+    if not html or not cover:
+        return html
+    declaration = (
+        "background-image:url('" + _css_url(cover) + "')!important;"
+        'background-size:cover!important;background-position:center center!important;'
+        'background-repeat:no-repeat!important;'
+    )
+    source = str(html)
+    source, count = re.subn(
+        r'background(?:-image)?\s*:\s*(?:url\([^)]*\)|none)\s*;?',
+        declaration, source, count=1, flags=re.IGNORECASE,
+    )
+    if count:
+        return source
+    background = (
+        '<div data-section-divider-background="1" aria-hidden="true" '
+        'style="position:absolute;top:0;right:0;left:0;bottom:0;'
+        + declaration + '"></div>'
+    )
+    return re.sub(
+        r'(<div\b[^>]*\bclass=["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>)',
+        lambda match: match.group(1) + background,
+        source, count=1, flags=re.IGNORECASE,
+    )
+
+
 def build_section_divider_slide(slide, slide_num, total_slides, branding=None, project_data=None):
     """Render a section divider: the main image, darkened, with the section name over it.
 
@@ -9059,8 +9130,8 @@ def build_section_divider_slide(slide, slide_num, total_slides, branding=None, p
         f'<div class="slide" dir="rtl" style="width:{width}px;height:{height}px;position:relative;'
         f'overflow:hidden;box-sizing:border-box;background:{divider_background};">'
         # The approved main image, full bleed.
-        '<div style="position:absolute;top:0;right:0;left:0;bottom:0;background-image:url(##IMAGE_COVER##);'
-        'background-size:cover;background-position:center center;"></div>'
+        '<div data-section-divider-background="1" style="position:absolute;top:0;right:0;left:0;bottom:0;'
+        'background-image:url(##IMAGE_COVER##);background-size:cover;background-position:center center;"></div>'
         # Navy veil: dark enough for white text on any photo, light enough that the photo shows.
         f'<div style="position:absolute;top:0;right:0;left:0;bottom:0;background:linear-gradient(160deg,'
         f'{_hex_to_rgba(divider_background, "0.94")} 0%,{_hex_to_rgba(divider_background, "0.82")} 45%,'
@@ -10585,13 +10656,8 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 s_type = str(s_dict.get('type') or '').lower()
                 s_html = str(s_dict.get('html') or '')
                 if s_type == 'cover' or 'cover' in s_html:
-                    m = re.search(r'background-image\s*:\s*url\(["\']?([^"\'()]+)["\']?\)', s_html, re.IGNORECASE)
-                    if m and not m.group(1).startswith('data:') and not m.group(1).startswith('#'):
-                        discovered_cover = m.group(1).strip()
-                        break
-                    m2 = re.search(r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', s_html, re.IGNORECASE)
-                    if m2 and not m2.group(1).startswith('data:') and not m2.group(1).startswith('#') and 'logo' not in m2.group(1).lower():
-                        discovered_cover = m2.group(1).strip()
+                    discovered_cover = _cover_image_url_from_html(s_html)
+                    if discovered_cover:
                         break
         if discovered_cover:
             creative_images['cover'] = discovered_cover
@@ -10684,7 +10750,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                     fallback_cover = project_data.get('cover') or project_data.get('mainImageData')
                     if fallback_cover:
                         divider_images['cover'] = fallback_cover
-                cover_target = divider_images.get('cover') or ''
+                cover_target = _creative_asset_url(divider_images.get('cover'))
                 if not keep_edited_html:
                     rebuilt = build_section_divider_slide(
                         item, index, total, branding, project_data
@@ -10702,13 +10768,9 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                     if cover_target:
                         for cover_pat in [r'#*IMAGE_COVER#*', r'#*COVER_IMAGE#*', r'#*MAIN_IMAGE#*', r'#*PROJECT_IMAGE_COVER#*']:
                             curr_html = re.sub(cover_pat, cover_target, curr_html, flags=re.IGNORECASE)
-                        if 'background-image' not in curr_html:
-                            bg_div = (
-                                f'<div style="position:absolute;top:0;right:0;left:0;bottom:0;'
-                                f'background-image:url({cover_target});background-size:cover;background-position:center center;"></div>'
-                            )
-                            curr_html = re.sub(r'(<div\b[^>]*\bclass=["\'][^"\']*\bslide[^"\']*["\'][^>]*>)', r'\1' + bg_div, curr_html, count=1, flags=re.IGNORECASE)
                     item['html'] = curr_html
+                if cover_target:
+                    item['html'] = _force_section_divider_background(item.get('html') or '', cover_target)
             else:
                 curr_html = _rewrite_slide_counter(
                     item.get('html') or '', slide_type, index, total)

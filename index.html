@@ -21811,6 +21811,31 @@
       return out;
     }
 
+    function forceSectionDividerBackgroundHtml(html, coverImage) {
+      if (!html || !coverImage) return String(html || '');
+      const safeCover = String(coverImage).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const declaration = "background-image:url('" + safeCover + "')!important;" +
+        'background-size:cover!important;background-position:center center!important;' +
+        'background-repeat:no-repeat!important;';
+      let replaced = false;
+      let output = String(html).replace(
+        /background(?:-image)?\s*:\s*(?:url\([^)]*\)|none)\s*;?/i,
+        () => {
+          replaced = true;
+          return declaration;
+        }
+      );
+      if (!replaced) {
+        const background = '<div data-section-divider-background="1" aria-hidden="true" ' +
+          'style="position:absolute;top:0;right:0;left:0;bottom:0;' + declaration + '"></div>';
+        output = output.replace(
+          /(<div\b[^>]*\bclass=["'][^"']*\bslide\b[^"']*["'][^>]*>)/i,
+          '$1' + background
+        );
+      }
+      return output;
+    }
+
     function processSlideHtmlClient(html, slideType) {
       if (!html) return '';
       let cleanHtml = stripSlideFontDeclarations(html);
@@ -21955,7 +21980,9 @@
       );
 
       // Cover and divider slides auto-inject fallback if model omitted ##IMAGE_COVER##
-      if (coverImage && (slideType === 'cover' || slideType === 'section_divider' || cleanHtml.includes('class="slide cover"') || cleanHtml.includes("class='slide cover'"))) {
+      if (coverImage && slideType === 'section_divider') {
+        cleanHtml = forceSectionDividerBackgroundHtml(cleanHtml, coverImage);
+      } else if (coverImage && (slideType === 'cover' || cleanHtml.includes('class="slide cover"') || cleanHtml.includes("class='slide cover'"))) {
         if (!cleanHtml.includes(coverImage) && !cleanHtml.includes('background-image')) {
           const bgDiv = '<div aria-hidden="true" style="position:absolute;inset:0;z-index:0;background-image:url(\'' + coverImage.replace(/'/g, "\\'") + '\');background-size:cover;background-position:center;"></div>';
           cleanHtml = cleanHtml.replace(/(<div[^>]*class=["']slide[^"']*["'][^>]*>)/i, '$1' + bgDiv);
@@ -25102,9 +25129,8 @@
           let sHtml = String(item.html || '');
           const sType = String(item.type || '').toLowerCase();
           sHtml = sHtml.replace(/#*(?:IMAGE_COVER|COVER_IMAGE|MAIN_IMAGE|PROJECT_IMAGE_COVER)#*/gi, exportCover);
-          if (sType === 'section_divider' && !sHtml.includes('background-image')) {
-            const bgDiv = '<div style="position:absolute;top:0;right:0;left:0;bottom:0;background-image:url(' + exportCover.replace(/'/g, "\\'") + ');background-size:cover;background-position:center center;"></div>';
-            sHtml = sHtml.replace(/(<div\b[^>]*\bclass=["'][^"']*\bslide[^"']*["'][^>]*>)/i, '$1' + bgDiv);
+          if (sType === 'section_divider') {
+            sHtml = forceSectionDividerBackgroundHtml(sHtml, exportCover);
           }
           item.html = sHtml;
         });

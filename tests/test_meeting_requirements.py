@@ -944,6 +944,22 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('مكونات المشروع', bare)
         self.assertIn('15 — 60', bare)
 
+        # Saved cover slides can place logos before their full-bleed image. Export still discovers
+        # the real image and rebuilds every divider with that exact URL.
+        repaired = engine.renumber_presentation_slides([
+            {
+                'title': 'الغلاف', 'type': 'cover',
+                'html': '<div class="slide"><img src="/uploads/company-logo.png">'
+                        '<img src="/uploads/creative/approved-cover.jpg"></div>',
+            },
+            {
+                'title': 'نبذة عن المشروع', 'type': 'section_divider', 'section_key': 'overview',
+                'html': '<div class="slide" style="background-image:none">نبذة عن المشروع</div>',
+            },
+        ], branding=branding, project_data={'project_name': 'THE VIEW'}, creative_images={})
+        self.assertIn('/uploads/creative/approved-cover.jpg', repaired[1]['html'])
+        self.assertNotIn('background-image:none', repaired[1]['html'])
+
         # The planner knows the type, and the validator accepts it.
         prompt = engine.build_slide_plan_prompt({'project_name': 'THE VIEW'}, branding)
         self.assertIn('section_divider', prompt)

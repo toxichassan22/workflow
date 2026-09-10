@@ -6,7 +6,11 @@ import tempfile
 import traceback
 from pathlib import Path
 from design_templates import build_font_css, extract_slide_elements, sanitize_slide_html_for_export
-from slide_engine import resolve_logo_in_html
+from slide_engine import (
+    _cover_image_url_from_html,
+    _force_section_divider_background,
+    resolve_logo_in_html,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -690,6 +694,21 @@ def _resolve_project_file_urls(html, tenant_id):
     return _PROJECT_FILE_URL_RE.sub(replace, html)
 
 
+def _heal_section_divider_backgrounds(slides, cover_uri):
+    if not cover_uri:
+        return list(slides or [])
+    healed = []
+    for slide in slides or []:
+        source = str(slide or '')
+        is_divider = (
+            'data-section-divider-background' in source
+            or 'section_divider' in source
+            or ('linear-gradient(160deg' in source and 'font-size:58px' in source)
+        )
+        healed.append(_force_section_divider_background(source, cover_uri) if is_divider else source)
+    return healed
+
+
 def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     global LAST_PDF_ENGINE
     LAST_PDF_ENGINE = ''
@@ -729,15 +748,8 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     # Resolve relative asset URLs so Playwright can load local images/fonts
     html = _resolve_asset_urls(html)
 
-    # Discover cover image if needed for placeholders or missing divider backgrounds
-    cover_uri = ''
-    cover_match = re.search(r'background-image\s*:\s*url\(["\']?([^"\'()]+)["\']?\)', html, re.IGNORECASE)
-    if cover_match and not cover_match.group(1).startswith('#') and 'logo' not in cover_match.group(1).lower():
-        cover_uri = cover_match.group(1).strip()
-    if not cover_uri:
-        img_match = re.search(r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', html, re.IGNORECASE)
-        if img_match and not img_match.group(1).startswith('#') and 'logo' not in img_match.group(1).lower():
-            cover_uri = img_match.group(1).strip()
+    # Discover the actual cover image even when one or more logo tags precede it.
+    cover_uri = _cover_image_url_from_html(html)
     if not cover_uri and tenant_id:
         for ext in ('.png', '.jpg', '.jpeg', '.webp'):
             cp = BASE_DIR / 'uploads' / str(tenant_id) / 'creative' / f'cover{ext}'
@@ -762,20 +774,7 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     slide_tags = len(re.findall(r'<div\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\1', html, re.I))
     slides = extract_slide_elements(html)
     if cover_uri and slides:
-        healed_slides = []
-        for slide in slides:
-            is_divider = (
-                'section_divider' in slide
-                or ('linear-gradient(160deg' in slide and 'font-size:58px' in slide)
-            )
-            if is_divider and 'background-image' not in slide:
-                bg_div = (
-                    f'<div style="position:absolute;top:0;right:0;left:0;bottom:0;'
-                    f'background-image:url({cover_uri});background-size:cover;background-position:center center;"></div>'
-                )
-                slide = re.sub(r'(<div\b[^>]*\bclass=["\'][^"\']*\bslide[^"\']*["\'][^>]*>)', r'\1' + bg_div, slide, count=1, flags=re.IGNORECASE)
-            healed_slides.append(slide)
-        slides = healed_slides
+        slides = _heal_section_divider_backgrounds(slides, cover_uri)
     if slides:
         html = "\n".join(f'<div class="pdf-export-page">{slide}</div>' for slide in slides)
     if slide_tags and len(slides) != slide_tags:

@@ -376,6 +376,30 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             self.assertIn(local_uri, resolved)
             self.assertNotIn('/api/project-files/file-1', resolved)
 
+    def test_divider_background_is_recovered_from_cover_after_logo(self):
+        import generate_pdf_from_preview as engine
+
+        cover_slide = (
+            '<div class="slide">'
+            '<img src="/uploads/tenant/company-logo.png">'
+            '<img src="/uploads/creative/tenant/approved-cover.jpg">'
+            '</div>'
+        )
+        divider = (
+            '<div class="slide" style="background:#163574">'
+            '<div data-section-divider-background="1" style="background-image:none"></div>'
+            '<div style="background:linear-gradient(160deg,#163574 0%,#163574 100%)"></div>'
+            '<div style="font-size:58px">نبذة عن المشروع</div>'
+            '</div>'
+        )
+
+        cover_url = slide_engine._cover_image_url_from_html(cover_slide)
+        healed = engine._heal_section_divider_backgrounds([cover_slide, divider], cover_url)
+
+        self.assertEqual(cover_url, '/uploads/creative/tenant/approved-cover.jpg')
+        self.assertIn("background-image:url('/uploads/creative/tenant/approved-cover.jpg')!important", healed[1])
+        self.assertNotIn('background-image:none', healed[1])
+
     def test_unresolvable_project_file_url_is_left_untouched(self):
         import tempfile
         from unittest.mock import patch
