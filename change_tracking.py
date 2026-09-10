@@ -22,6 +22,25 @@ _STYLE_RE = re.compile(r'\sstyle\s*=\s*"[^"]*"', re.IGNORECASE)
 _IMG_SRC_RE = re.compile(r'<img[^>]+src\s*=\s*"([^"]+)"', re.IGNORECASE)
 _BG_URL_RE = re.compile(r'url\(\s*[\'"]?([^\'")]+)', re.IGNORECASE)
 _PLACEHOLDER_RE = re.compile(r'##[A-Z0-9_]+##')
+_WATERMARK_RE = re.compile(
+    r'<div\b[^>]*\b(?:data-slide-watermark=["\']true["\']|class=["\'][^"\']*\bslide-watermark\b)[^>]*>',
+    re.IGNORECASE,
+)
+
+
+def _watermark_state(html):
+    """Visible/hidden/absent state of the per-slide watermark layer."""
+    source = str(html or '')
+    match = _WATERMARK_RE.search(source)
+    if not match:
+        return 'absent'
+    tag = match.group(0)
+    visible_attr = re.search(r'data-watermark-visible\s*=\s*["\']([^"\']*)["\']', tag, re.IGNORECASE)
+    if visible_attr and visible_attr.group(1).strip().lower() == 'false':
+        return 'hidden'
+    if re.search(r'display\s*:\s*none', tag, re.IGNORECASE):
+        return 'hidden'
+    return 'visible'
 
 MAX_LINES = 60
 MAX_TEXT_IN_LINE = 120
@@ -36,6 +55,16 @@ def _text_of(html):
 
 def _images_of(html):
     source = str(html or '')
+    # The watermark overlay carries its own <img>; it is reported as a
+    # watermark line above, never as a generic photo count change.
+    source = re.sub(
+        r'<div\b[^>]*\bdata-slide-watermark=["\']true["\'][^>]*>[\s\S]*?</div\s*>',
+        '', source, flags=re.IGNORECASE,
+    )
+    source = re.sub(
+        r'<div\b[^>]*\bclass=["\'][^"\']*\bslide-watermark\b[^"\']*["\'][^>]*>[\s\S]*?</div\s*>',
+        '', source, flags=re.IGNORECASE,
+    )
     found = _IMG_SRC_RE.findall(source) + _BG_URL_RE.findall(source)
     return [item.strip() for item in found if item.strip()]
 
@@ -127,6 +156,18 @@ def describe_slide_changes(old_slides, new_slides):
         old_html = _slide_html(old_slide)
         new_html = _slide_html(new_slide)
         if old_html != new_html:
+            old_mark, new_mark = _watermark_state(old_html), _watermark_state(new_html)
+            if old_mark != new_mark:
+                if old_mark == 'absent' and new_mark == 'visible':
+                    slide_lines.append('العلامة المائية: أُظهرت')
+                elif old_mark == 'hidden' and new_mark == 'visible':
+                    slide_lines.append('العلامة المائية: أُظهرت مجددًا')
+                elif new_mark == 'hidden' and old_mark == 'visible':
+                    slide_lines.append('العلامة المائية: أُخفيت')
+                elif new_mark == 'absent' and old_mark in ('visible', 'hidden'):
+                    slide_lines.append('العلامة المائية: أُزيلت')
+                elif old_mark == 'absent' and new_mark == 'hidden':
+                    slide_lines.append('العلامة المائية: أُضيفت مخفية')
             old_text, new_text = _text_of(old_html), _text_of(new_html)
             if old_text != new_text:
                 slide_lines.extend(_text_difference_lines(old_text, new_text))

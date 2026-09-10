@@ -9960,6 +9960,356 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertEqual(twice.count('data-slide-watermark="true"'), 1,
                          'Applying watermark twice must not duplicate the element')
 
+    def test_watermark_branding_column_exists_and_migrates_existing_databases(self):
+        import sqlite3
+
+        with self.app.app_context():
+            columns = {row['name'] for row in db.get_db().execute('PRAGMA table_info(tenant_branding)').fetchall()}
+        self.assertIn('watermark_path', columns)
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute('CREATE TABLE tenant_branding (tenant_id TEXT PRIMARY KEY, lock_slide_count INTEGER DEFAULT 0)')
+            db._migrate_branding_columns(conn)
+            migrated = {row['name'] for row in conn.execute('PRAGMA table_info(tenant_branding)').fetchall()}
+            self.assertIn('watermark_path', migrated)
+        finally:
+            conn.close()
+
+    def test_watermark_upload_is_independent_and_has_no_system_logo_fallback(self):
+        from PIL import Image
+
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        logo_path = f'/tenant-assets/{self.tenant_a}/logo'
+        client.delete('/api/upload/watermark', headers=headers)
+        with self.app.app_context():
+            db.update_branding(self.tenant_a, logo_path=logo_path)
+            db.update_branding(self.tenant_b, watermark_path=None)
+
+        missing = client.get(f'/tenant-assets/{self.tenant_b}/watermark')
+        self.assertEqual(missing.status_code, 404)
+
+        png = io.BytesIO()
+        Image.new('RGBA', (4, 4), (20, 40, 60, 128)).save(png, format='PNG')
+        png.seek(0)
+        uploaded = client.post('/api/upload/watermark', headers=headers, data={
+            'file': (png, 'company-watermark.png'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(uploaded.status_code, 200, uploaded.get_json())
+        branding = uploaded.get_json()['branding']
+        self.assertEqual(branding['logo_path'], logo_path)
+        self.assertEqual(branding['watermark_path'], f'/tenant-assets/{self.tenant_a}/watermark')
+        watermark_png = Path(self.application_module.UPLOADS_DIR) / self.tenant_a / 'watermark.png'
+        self.assertTrue(watermark_png.is_file())
+
+        jpeg = io.BytesIO()
+        Image.new('RGB', (4, 4), (80, 100, 120)).save(jpeg, format='JPEG')
+        jpeg.seek(0)
+        replaced = client.post('/api/upload/watermark', headers=headers, data={
+            'file': (jpeg, 'replacement.jpg'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(replaced.status_code, 200, replaced.get_json())
+        self.assertFalse(watermark_png.exists(), 'changing the extension must remove the stale source file')
+        self.assertTrue((watermark_png.parent / 'watermark.jpg').is_file())
+
+        served = client.get(f'/tenant-assets/{self.tenant_a}/watermark')
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served.mimetype, 'image/jpeg')
+        served.close()
+
+        deleted = client.delete('/api/upload/watermark', headers=headers)
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        self.assertEqual(deleted.get_json()['branding']['logo_path'], logo_path)
+        self.assertIsNone(deleted.get_json()['branding']['watermark_path'])
+        self.assertEqual(client.get(f'/tenant-assets/{self.tenant_a}/watermark').status_code, 404)
+
+    def test_designer_chat_uses_uploaded_watermark_for_all_and_selected_slides(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        watermark_path = f'/tenant-assets/{self.tenant_a}/watermark'
+        logo_path = f'/tenant-assets/{self.tenant_a}/logo'
+        with self.app.app_context():
+            db.update_branding(self.tenant_a, logo_path=logo_path, watermark_path=watermark_path)
+
+        slides = [
+            {'title': f'شريحة {number}', 'type': 'content',
+             'html': f'<div class="slide"><h1>محتوى {number}</h1></div>'}
+            for number in range(1, 4)
+        ]
+        apply_all_plan = json.dumps({
+            'response': 'سأضيف العلامة المائية إلى كل الشرائح.',
+            'actions': [{'tool': 'apply_watermark', 'params': {'target': 'all'}}],
+        }, ensure_ascii=False)
+        with patch.object(self.application_module, 'call_zai_chat', return_value={
+            'choices': [{'message': {'content': apply_all_plan}}]
+        }):
+            applied = client.post('/api/designer-chat', headers=headers, json={
+                'message': 'أظهر العلامة المائية في كل الشرائح',
+                'slidesData': slides,
+                'slideIndex': 0,
+            })
+        self.assertEqual(applied.status_code, 200, applied.get_json())
+        applied_data = applied.get_json()['data']
+        self.assertEqual(applied_data['actions'][0]['indexes'], [0, 1, 2])
+        for slide in applied_data['slidesData']:
+            spec = self.application_module._watermark_spec_from_html(slide['html'])
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec['logo_url'], watermark_path)
+
+        remove_selected_plan = json.dumps({
+            'response': 'سأخفي العلامة المائية من الشريحة الثانية.',
+            'actions': [{'tool': 'remove_watermark', 'params': {
+                'target': 'indexes', 'indexes': [2],
+            }}],
+        }, ensure_ascii=False)
+        with patch.object(self.application_module, 'call_zai_chat', return_value={
+            'choices': [{'message': {'content': remove_selected_plan}}]
+        }):
+            removed = client.post('/api/designer-chat', headers=headers, json={
+                'message': 'اخف العلامة المائية من الشريحة 2',
+                'slidesData': applied_data['slidesData'],
+                'slideIndex': 0,
+            })
+        self.assertEqual(removed.status_code, 200, removed.get_json())
+        removed_slides = removed.get_json()['data']['slidesData']
+        self.assertTrue(self.application_module._is_watermark_visible(removed_slides[0]['html']))
+        # Hiding keeps the layer with its geometry so a later show restores it.
+        hidden_spec = self.application_module._watermark_spec_from_html(removed_slides[1]['html'])
+        self.assertIsNotNone(hidden_spec)
+        self.assertFalse(hidden_spec['visible'])
+        self.assertTrue(self.application_module._is_watermark_visible(removed_slides[2]['html']))
+
+        apply_selected_plan = json.dumps({
+            'response': 'سأضيف العلامة المائية إلى الشرائح المحددة.',
+            'actions': [{'tool': 'apply_watermark', 'params': {
+                'target': 'indexes', 'indexes': [1, 3],
+            }}],
+        }, ensure_ascii=False)
+        with patch.object(self.application_module, 'call_zai_chat', return_value={
+            'choices': [{'message': {'content': apply_selected_plan}}]
+        }):
+            selected = client.post('/api/designer-chat', headers=headers, json={
+                'message': 'أظهر العلامة المائية في الشرائح 1 و3',
+                'slidesData': slides,
+                'slideIndex': 1,
+            })
+        selected_slides = selected.get_json()['data']['slidesData']
+        self.assertIsNotNone(self.application_module._watermark_spec_from_html(selected_slides[0]['html']))
+        self.assertIsNone(self.application_module._watermark_spec_from_html(selected_slides[1]['html']))
+        self.assertIsNotNone(self.application_module._watermark_spec_from_html(selected_slides[2]['html']))
+
+    def test_designer_chat_does_not_fall_back_to_logo_when_watermark_is_missing(self):
+        client = self.app.test_client()
+        with self.app.app_context():
+            db.update_branding(
+                self.tenant_a,
+                logo_path=f'/tenant-assets/{self.tenant_a}/logo',
+                watermark_path=None,
+            )
+        plan = json.dumps({
+            'response': 'سأضيف العلامة المائية.',
+            'actions': [{'tool': 'apply_watermark', 'params': {'target': 'current'}}],
+        }, ensure_ascii=False)
+        slide = {'title': 'شريحة', 'type': 'content', 'html': '<div class="slide"><h1>محتوى</h1></div>'}
+        with patch.object(self.application_module, 'call_zai_chat', return_value={
+            'choices': [{'message': {'content': plan}}]
+        }):
+            response = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
+                'message': 'أظهر العلامة المائية', 'slidesData': [slide], 'slideIndex': 0,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        data = response.get_json()['data']
+        self.assertEqual(data['failureReason'], 'watermark_missing')
+        self.assertEqual(data['actions'][0]['status'], 'failed')
+        self.assertNotIn('data-slide-watermark="true"', data['slidesData'][0]['html'])
+
+    def test_manual_slide_watermark_control_tracks_html_and_edit_history(self):
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('id="settingsWatermarkPreview"', index_source)
+        self.assertIn('id="watermarkFileInput"', index_source)
+        self.assertIn("api('POST', '/api/upload/watermark', form, true)", index_source)
+        self.assertIn("api('DELETE', '/api/upload/watermark')", index_source)
+        self.assertIn("showLoader('رفع العلامة المائية'", index_source)
+        self.assertIn('setWatermarkSettingsBusy(true);', index_source)
+
+        toolbar = index_source.split('function slideEditToolbarHTML(index)', 1)[1]
+        toolbar = toolbar.split('\n    function normalizeHexColor', 1)[0]
+        self.assertIn('data-slide-edit-watermark="toggle"', toolbar)
+        self.assertIn('إظهار العلامة المائية', toolbar)
+        self.assertIn('isWatermarkVisible(tenantSlidesData[index]', toolbar)
+
+        toggle = index_source.split('function setSlideWatermarkVisibility(index, visible)', 1)[1]
+        toggle = toggle.split('\n    function deckWatermarkMarkup', 1)[0]
+        self.assertIn('tenantBranding.watermark_path', toggle)
+        self.assertIn('pushSlideEditHistory(index)', toggle)
+        self.assertIn('setHtmlWatermarkVisible(slide.html', toggle)
+        self.assertIn('isWatermarkVisible(slide.html)', toggle)
+        self.assertIn('لم تُرفع علامة مائية للشركة', toggle)
+        self.assertIn('slide._designer_keep_html = true;', toggle)
+        self.assertIn('slide.is_custom = true;', toggle)
+        self.assertIn('touchSlideEditSession(index);', toggle)
+        self.assertIn('tenantProjectData.tenantSlidesData = tenantSlidesData;', toggle)
+        self.assertIn('triggerAutoSaveDraft();', toggle)
+        self.assertIn('refreshSingleSlideCard(index);', toggle)
+
+        engine = self.application_module.slide_engine
+        watermark_path = f'/tenant-assets/{self.tenant_a}/watermark'
+        html = self.application_module._apply_slide_watermark(
+            '<div class="slide"><h1>محتوى</h1></div>', watermark_path)
+        resolved = engine.resolve_logo_in_html(
+            html, self.tenant_a,
+            _branding_cache={'logo_path': f'/tenant-assets/{self.tenant_a}/logo'},
+        )
+        self.assertEqual(self.application_module._watermark_spec_from_html(resolved)['logo_url'], watermark_path)
+
+    def test_watermark_upload_rejects_svg_fake_and_oversized_images(self):
+        from PIL import Image
+
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        client.delete('/api/upload/watermark', headers=headers)
+
+        svg = client.post('/api/upload/watermark', headers=headers, data={
+            'file': (io.BytesIO(b'<svg xmlns="http://www.w3.org/2000/svg"></svg>'), 'mark.svg'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(svg.status_code, 400)
+
+        fake = client.post('/api/upload/watermark', headers=headers, data={
+            'file': (io.BytesIO(b'%PDF-1.4 not an image'), 'mark.png'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(fake.status_code, 400)
+
+        big_png = io.BytesIO()
+        Image.new('RGB', (8, 8), (10, 20, 30)).save(big_png, format='PNG')
+        big_payload = big_png.getvalue() + b'\x00' * (6 * 1024 * 1024)
+        too_big = client.post('/api/upload/watermark', headers=headers, data={
+            'file': (io.BytesIO(big_payload), 'mark.png'),
+        }, content_type='multipart/form-data')
+        self.assertEqual(too_big.status_code, 400)
+
+        with self.app.app_context():
+            self.assertIsNone((db.get_branding(self.tenant_a) or {}).get('watermark_path'))
+
+    def test_watermark_branding_put_cannot_set_client_path(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        with self.app.app_context():
+            db.update_branding(self.tenant_a, watermark_path=None)
+        response = client.put('/api/branding', headers=headers, json={
+            'watermark_path': '/etc/passwd',
+            'company_name': 'شركة الاختبار',
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        with self.app.app_context():
+            branding = db.get_branding(self.tenant_a) or {}
+        self.assertNotEqual(branding.get('watermark_path'), '/etc/passwd')
+        self.assertEqual(branding.get('company_name'), 'شركة الاختبار')
+
+    def test_watermark_hide_preserves_geometry_and_legacy_counts_as_visible(self):
+        app_mod = self.application_module
+        base = '<div class="slide"><h1>محتوى</h1></div>'
+        watermark_url = f'/tenant-assets/{self.tenant_a}/watermark'
+        shown = app_mod._apply_slide_watermark(base, watermark_url, opacity=0.2, width_px=600)
+        # Simulate a user move: the logo img carries a manual translate.
+        moved = shown.replace('width:600px;', 'width:600px;transform:translate(40px, 30px);')
+        hidden = app_mod._set_slide_watermark_visible(moved, False)
+        spec = app_mod._watermark_spec_from_html(hidden)
+        self.assertIsNotNone(spec)
+        self.assertFalse(spec['visible'])
+        self.assertIn('translate(40px, 30px)', hidden)
+        self.assertIn('width:600px', hidden)
+        reshown = app_mod._set_slide_watermark_visible(hidden, True)
+        respec = app_mod._watermark_spec_from_html(reshown)
+        self.assertTrue(respec['visible'])
+        self.assertIn('translate(40px, 30px)', reshown)
+        self.assertIn('opacity:0.2', reshown)
+
+        legacy = ('<div class="slide-watermark" data-slide-watermark="true" aria-hidden="true" '
+                  'style="position:absolute;inset:0;display:flex;opacity:0.045;">'
+                  '<img src="/tenant-assets/t/watermark"></div>')
+        self.assertTrue(app_mod._watermark_spec_from_html(legacy)['visible'])
+        self.assertTrue(app_mod._is_watermark_visible(legacy))
+
+        # Re-applying a visible mark keeps the user geometry instead of resetting it.
+        kept = app_mod._apply_slide_watermark(moved, watermark_url, opacity=0.045, width_px=480)
+        self.assertIn('translate(40px, 30px)', kept)
+        self.assertIn('opacity:0.2', kept)
+
+    def test_watermark_carry_copies_layer_verbatim_and_keeps_hidden(self):
+        app_mod = self.application_module
+        watermark_url = f'/tenant-assets/{self.tenant_a}/watermark'
+        source = app_mod._apply_slide_watermark(
+            '<div class="slide"><h1>قديم</h1></div>', watermark_url, opacity=0.3, width_px=600)
+        source = source.replace('width:600px;', 'width:600px;transform:translate(25px, 10px);')
+        carried = app_mod._carry_slide_watermark(source, '<div class="slide"><h1>جديد</h1></div>')
+        self.assertIn('translate(25px, 10px)', carried)
+        self.assertIn('opacity:0.3', carried)
+        self.assertIn(watermark_url, carried)
+
+        hidden_source = app_mod._set_slide_watermark_visible(source, False)
+        carried_hidden = app_mod._carry_slide_watermark(
+            hidden_source, '<div class="slide"><h1>جديد</h1></div>')
+        self.assertFalse(app_mod._is_watermark_visible(carried_hidden))
+        self.assertIn('translate(25px, 10px)', carried_hidden)
+
+    def test_watermark_deterministic_verbs_scope_and_no_size_up_on_show(self):
+        app_mod = self.application_module
+        slides = [
+            {'title': 'شريحة 1', 'type': 'content', 'html': '<div class="slide"><h1>واحد</h1></div>'},
+            {'title': 'شريحة 2', 'type': 'content', 'html': '<div class="slide"><h1>اثنان</h1></div>'},
+        ]
+        hide_plan = app_mod._designer_deterministic_plan('اخفي العلامة المائية من الشريحة 2', slides, 0, [1])
+        self.assertEqual(hide_plan['actions'][0]['tool'], 'remove_watermark')
+        self.assertEqual(hide_plan['actions'][0]['params']['target'], 'indexes')
+
+        disable_plan = app_mod._designer_deterministic_plan('عطّل العلامة المائية', slides, 0, [])
+        self.assertEqual(disable_plan['actions'][0]['tool'], 'remove_watermark')
+        self.assertEqual(disable_plan['actions'][0]['params']['target'], 'current')
+
+        show_plan = app_mod._designer_deterministic_plan('أظهر العلامة المائية', slides, 0, [])
+        self.assertEqual(show_plan['actions'][0]['tool'], 'apply_watermark')
+        self.assertEqual(show_plan['actions'][0]['params']['target'], 'current')
+        # «إظهار» is visibility only, never an implicit enlarge.
+        self.assertEqual(show_plan['actions'][0]['params']['opacity'], 0.045)
+        self.assertEqual(show_plan['actions'][0]['params']['width_px'], 480)
+
+        bigger_plan = app_mod._designer_deterministic_plan('اجعل العلامة المائية أكبر', slides, 0, [])
+        self.assertEqual(bigger_plan['actions'][0]['params']['width_px'], 640)
+
+    def test_watermark_change_log_names_show_hide_per_slide(self):
+        import change_tracking
+
+        old = [{'title': 'شريحة 1', 'html': '<div class="slide"><h1>نص</h1></div>'}]
+        shown_html = self.application_module._apply_slide_watermark(
+            old[0]['html'], f'/tenant-assets/{self.tenant_a}/watermark')
+        lines = change_tracking.describe_slide_changes(old, [{'title': 'شريحة 1', 'html': shown_html}])
+        self.assertTrue(any('العلامة المائية' in line and 'أُظهرت' in line for line in lines),
+                        lines)
+        hidden_html = self.application_module._set_slide_watermark_visible(shown_html, False)
+        hide_lines = change_tracking.describe_slide_changes(
+            [{'title': 'شريحة 1', 'html': shown_html}], [{'title': 'شريحة 1', 'html': hidden_html}])
+        self.assertTrue(any('أُخفيت' in line for line in hide_lines), hide_lines)
+        # The watermark img itself must not also count as a generic photo change.
+        self.assertFalse(any(line.endswith('إلى 1') and 'الصور' in line for line in lines), lines)
+
+    def test_watermark_hidden_layers_stay_out_of_exports(self):
+        from exports import pptx_export
+        from generate_pdf_from_preview import _strip_hidden_watermark_overlays
+
+        app_mod = self.application_module
+        watermark_url = f'/tenant-assets/{self.tenant_a}/watermark'
+        visible = app_mod._apply_slide_watermark(
+            '<div class="slide"><h1>نص</h1></div>', watermark_url)
+        hidden = app_mod._set_slide_watermark_visible(visible, False)
+        self.assertIn('data-slide-watermark', _strip_hidden_watermark_overlays(visible))
+        self.assertNotIn('data-slide-watermark', _strip_hidden_watermark_overlays(hidden))
+        prepared_hidden = pptx_export._prepare_slide_html(hidden, self.tenant_a)
+        self.assertNotIn('data-slide-watermark', prepared_hidden)
+        prepared_visible = pptx_export._prepare_slide_html(visible, self.tenant_a)
+        self.assertIn('data-slide-watermark', prepared_visible)
+
     def test_presentation_sync_failure_is_reported_not_swallowed(self):
         """saveProjectAsDraftNow must report a presentation PUT failure instead of
         silently claiming full success. The JS must not mark the draft clean on failure."""

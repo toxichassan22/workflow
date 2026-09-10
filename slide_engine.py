@@ -9538,6 +9538,10 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None, project_log
         src_lower = src_value.lower()
         if src_lower.startswith('data:image/') or src_lower.startswith('data:') or src_lower.startswith('blob:'):
             return img_tag
+        # A company watermark is a separate branding asset. Its tenant-assets URL
+        # must never be rewritten to the company logo by this compatibility pass.
+        if re.search(r'/tenant-assets/[^/]+/watermark(?:[?#]|$)', src_lower):
+            return img_tag
         if 'project_logo' in lowered or '##project_logo##' in lowered or 'project-logo' in lowered:
             return img_tag
         if project_logo and project_logo in img_tag:

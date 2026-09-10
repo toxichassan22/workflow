@@ -12,6 +12,38 @@ from slide_engine import (
     resolve_logo_in_html,
 )
 
+def _strip_hidden_watermark_overlays(html):
+    """Drop hidden watermark layers from an export copy.
+
+    The saved slide keeps the hidden layer for a later show; the exported
+    file must not draw it. Visible layers pass through untouched.
+    """
+    if not html or 'watermark' not in str(html).lower():
+        return html
+    source = str(html)
+
+    def _drop_if_hidden(match):
+        overlay = match.group(0)
+        tag_end = overlay.find('>')
+        tag = overlay[:tag_end + 1] if tag_end != -1 else overlay
+        hidden_attr = re.search(
+            r'data-watermark-visible\s*=\s*["\']([^"\']*)["\']', tag, flags=re.IGNORECASE)
+        if hidden_attr and hidden_attr.group(1).strip().lower() == 'false':
+            return ''
+        if re.search(r'display\s*:\s*none', tag, flags=re.IGNORECASE):
+            return ''
+        return overlay
+
+    source = re.sub(
+        r'<div\b[^>]*\bdata-slide-watermark=["\']true["\'][^>]*>[\s\S]*?</div\s*>',
+        _drop_if_hidden, source, flags=re.IGNORECASE,
+    )
+    return re.sub(
+        r'<div\b[^>]*\bclass=["\'][^"\']*\bslide-watermark\b[^"\']*["\'][^>]*>[\s\S]*?</div\s*>',
+        _drop_if_hidden, source, flags=re.IGNORECASE,
+    )
+
+
 BASE_DIR = Path(__file__).resolve().parent
 
 # Which renderer wrote the last deck PDF. The PyMuPDF fallback keeps the page
@@ -728,22 +760,26 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     # Resolve tenant logo placeholders and broken paths
     tenant_id = tenant_id or (branding or {}).get('tenant_id')
     html = resolve_logo_in_html(html, tenant_id)
+    html = _strip_hidden_watermark_overlays(html)
     html = _resolve_project_file_urls(html, tenant_id)
 
-    # Convert the logo reference to an actual file URI so Playwright can render it
-    def _local_logo_uri(tid):
+    # Convert branding image routes to real file URIs so offline Playwright
+    # rendering preserves both the company logo and its separate watermark.
+    def _local_tenant_image_uri(tid, base_name):
         if not tid:
             return None
         for ext in ('.png', '.jpg', '.jpeg', '.webp'):
-            p = BASE_DIR / 'uploads' / str(tid) / f'logo{ext}'
+            p = BASE_DIR / 'uploads' / str(tid) / f'{base_name}{ext}'
             if p.exists():
                 return p.as_uri()
         return None
 
-    logo_uri = _local_logo_uri(tenant_id)
+    logo_uri = _local_tenant_image_uri(tenant_id, 'logo')
     if logo_uri:
-        # Replace /tenant-assets/<tenant>/logo?... with the real file URI
         html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/logo(?:\?[^\s"\'\\)]+)?', logo_uri, html)
+    watermark_uri = _local_tenant_image_uri(tenant_id, 'watermark')
+    if watermark_uri:
+        html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/watermark(?:\?[^\s"\'\\)]+)?', watermark_uri, html)
 
     # Resolve relative asset URLs so Playwright can load local images/fonts
     html = _resolve_asset_urls(html)
@@ -1041,19 +1077,23 @@ def render_slide_to_image_base64(slide_html, branding=None, tenant_id=None, widt
     try:
         tenant_id = tenant_id or (branding or {}).get('tenant_id')
         html = resolve_logo_in_html(slide_html, tenant_id)
+        html = _strip_hidden_watermark_overlays(html)
 
-        def _local_logo_uri(tid):
+        def _local_tenant_image_uri(tid, base_name):
             if not tid:
                 return None
             for ext in ('.png', '.jpg', '.jpeg', '.webp'):
-                p = BASE_DIR / 'uploads' / str(tid) / f'logo{ext}'
+                p = BASE_DIR / 'uploads' / str(tid) / f'{base_name}{ext}'
                 if p.exists():
                     return p.as_uri()
             return None
 
-        logo_uri = _local_logo_uri(tenant_id)
+        logo_uri = _local_tenant_image_uri(tenant_id, 'logo')
         if logo_uri and tenant_id:
             html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/logo(?:\?[^\s"\'\\)]+)?', logo_uri, html)
+        watermark_uri = _local_tenant_image_uri(tenant_id, 'watermark')
+        if watermark_uri and tenant_id:
+            html = re.sub(r'/tenant-assets/' + re.escape(str(tenant_id)) + r'/watermark(?:\?[^\s"\'\\)]+)?', watermark_uri, html)
 
         html = _resolve_project_file_urls(html, tenant_id)
         html = _resolve_asset_urls(html)

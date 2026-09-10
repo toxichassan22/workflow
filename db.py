@@ -106,6 +106,7 @@ def _create_tables(conn):
         background_color TEXT DEFAULT '#F4F9FC',
         text_color TEXT DEFAULT '#333333',
         logo_path TEXT,
+        watermark_path TEXT,
         company_name TEXT,
         tagline TEXT,
         font_family TEXT DEFAULT 'The Sans Arabic',
@@ -767,7 +768,7 @@ def update_branding(tenant_id, **fields):
     conn = get_db()
     allowed = {
         'primary_color', 'secondary_color', 'accent_color', 'background_color', 'text_color',
-        'logo_path', 'company_name', 'tagline', 'font_family', 'font_arabic',
+        'logo_path', 'watermark_path', 'company_name', 'tagline', 'font_family', 'font_arabic',
         'design_template', 'reference_image_path',
         'header_enabled', 'footer_enabled', 'header_height', 'footer_height',
         'card_style', 'slide_ratio', 'moodboard_enabled', 'cover_image_enabled', 'moodboard_count',
@@ -1442,6 +1443,7 @@ def _migrate_branding_columns(conn):
             'font_file_path': "ALTER TABLE tenant_branding ADD COLUMN font_file_path TEXT",
             'font_file_data': "ALTER TABLE tenant_branding ADD COLUMN font_file_data TEXT",
             'generation_rules': "ALTER TABLE tenant_branding ADD COLUMN generation_rules TEXT",
+            'watermark_path': "ALTER TABLE tenant_branding ADD COLUMN watermark_path TEXT",
         }
         for col, sql in migrations.items():
             if col not in existing_cols:

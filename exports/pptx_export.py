@@ -594,11 +594,17 @@ def _resolve_image_bytes(src, tenant_id=None):
             return None
         # Local repo paths: uploads/... assets/... /uploads/... /tenant-assets/...
         rel = src.split('?')[0].split('#')[0].lstrip('/')
-        if rel.startswith('tenant-assets/'):
+        is_tenant_asset = rel.startswith('tenant-assets/')
+        if is_tenant_asset:
             rel = 'uploads/' + rel[len('tenant-assets/'):]
         candidate = (BASE_DIR / rel)
         if candidate.is_file():
             return candidate.read_bytes()
+        if is_tenant_asset and not candidate.suffix:
+            for ext in ('.png', '.jpg', '.jpeg', '.webp'):
+                extended = Path(str(candidate) + ext)
+                if extended.is_file():
+                    return extended.read_bytes()
         # Tenant logo shorthand or bare filename under the tenant dir
         if tenant_id and '/' not in rel:
             for ext in ('', '.png', '.jpg', '.jpeg', '.webp'):
@@ -2679,11 +2685,45 @@ def _render_abs_node(slide, shapes, node, ctx, rect, depth=0):
 # Main entry
 # --------------------------------------------------------------------------
 
+def _strip_hidden_watermark_overlays(html):
+    """Drop hidden watermark layers so they stay invisible in every export.
+
+    A hidden layer keeps its geometry in the saved slide for a later show;
+    the export must not draw it. Visible layers pass through untouched with
+    their source, position, size and opacity intact.
+    """
+    if not html or 'watermark' not in str(html).lower():
+        return html
+    source = str(html)
+
+    def _drop_if_hidden(match):
+        overlay = match.group(0)
+        tag_end = overlay.find('>')
+        tag = overlay[:tag_end + 1] if tag_end != -1 else overlay
+        hidden_attr = re.search(
+            r'data-watermark-visible\s*=\s*["\']([^"\']*)["\']', tag, flags=re.IGNORECASE)
+        if hidden_attr and hidden_attr.group(1).strip().lower() == 'false':
+            return ''
+        if re.search(r'display\s*:\s*none', tag, flags=re.IGNORECASE):
+            return ''
+        return overlay
+
+    source = re.sub(
+        r'<div\b[^>]*\bdata-slide-watermark=["\']true["\'][^>]*>[\s\S]*?</div\s*>',
+        _drop_if_hidden, source, flags=re.IGNORECASE,
+    )
+    return re.sub(
+        r'<div\b[^>]*\bclass=["\'][^"\']*\bslide-watermark\b[^"\']*["\'][^>]*>[\s\S]*?</div\s*>',
+        _drop_if_hidden, source, flags=re.IGNORECASE,
+    )
+
+
 def _prepare_slide_html(html, tenant_id):
     try:
         html = resolve_logo_in_html(html, tenant_id)
     except Exception:
         pass
+    html = _strip_hidden_watermark_overlays(html)
     try:
         html = _resolve_project_file_urls(html, tenant_id)
     except Exception:

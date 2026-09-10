@@ -1350,15 +1350,36 @@ _GENERATION_PROJECT_IMAGE_CACHE = {}
 _LOGO_APPEARANCE_CACHE = {}
 
 
+TENANT_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp')
+
+
+def _tenant_image_storage_candidates(tenant_id, base_name):
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', str(tenant_id or '')):
+        return []
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', str(base_name or '')):
+        return []
+    tenant_dir = os.path.realpath(os.path.join(UPLOADS_DIR, str(tenant_id)))
+    return [os.path.join(tenant_dir, f'{base_name}{extension}')
+            for extension in TENANT_IMAGE_EXTENSIONS]
+
+
+def _tenant_image_storage_path(tenant_id, base_name):
+    candidates = [path for path in _tenant_image_storage_candidates(tenant_id, base_name)
+                  if os.path.isfile(path)]
+    return max(candidates, key=os.path.getmtime) if candidates else ''
+
+
 def _tenant_logo_storage_path(tenant_id):
-    tenant_dir = os.path.realpath(os.path.join(UPLOADS_DIR, str(tenant_id or '')))
-    candidates = [os.path.join(tenant_dir, f'logo{extension}')
-                  for extension in ('.png', '.jpg', '.jpeg', '.webp')]
-    candidates = [path for path in candidates if os.path.isfile(path)]
-    if candidates:
-        return max(candidates, key=os.path.getmtime)
+    stored = _tenant_image_storage_path(tenant_id, 'logo')
+    if stored:
+        return stored
     fallback = os.path.join(os.path.dirname(__file__), 'assets', 'logo.png')
     return fallback if os.path.isfile(fallback) else ''
+
+
+def _tenant_watermark_storage_path(tenant_id):
+    """Return only the tenant's uploaded watermark, with no logo fallback."""
+    return _tenant_image_storage_path(tenant_id, 'watermark')
 
 
 def _project_logo_storage_path(project_data, tenant_id):
@@ -1925,6 +1946,8 @@ def resolve_logo_in_html(html, tenant_id=None, _branding_cache=None):
         src_value = str(src_match.group(1) if src_match else '').strip()
         src_lower = src_value.lower()
         if src_lower.startswith('data:') or src_lower.startswith('blob:'):
+            return img_tag
+        if re.search(r'/tenant-assets/[^/]+/watermark(?:[?#]|$)', src_lower):
             return img_tag
         if '/uploads/creative/' in lowered or '/api/project-files/' in lowered or 'project-files' in lowered:
             return img_tag
@@ -3854,9 +3877,19 @@ WATERMARK_Z_INDEX = 50
 
 
 def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
-    """Inject an elegant watermark overlay on top of a slide's content layers."""
+    """Inject an elegant watermark overlay on top of a slide's content layers.
+
+    A single centered layer only. Re-applying never duplicates the layer and
+    never resets a user move/resize/opacity: a visible watermark is kept as
+    is, a hidden one is unhidden with its saved geometry intact.
+    """
     if not html:
         return html
+    existing = _watermark_spec_from_html(html)
+    if existing:
+        if existing.get('visible', True):
+            return html
+        return _set_slide_watermark_visible(html, True, logo_url)
     try:
         opacity_value = float(opacity)
     except (TypeError, ValueError):
@@ -3871,7 +3904,7 @@ def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
     width_value = min(900, max(200, width_value))
     cleaned = _remove_slide_watermark(html)
     watermark_markup = (
-        '<div class="slide-watermark" data-slide-watermark="true" aria-hidden="true" '
+        '<div class="slide-watermark" data-slide-watermark="true" data-watermark-visible="true" aria-hidden="true" '
         'style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
         f'pointer-events:none;z-index:{WATERMARK_Z_INDEX};opacity:{opacity_value};overflow:hidden;">'
         f'<img src="{logo_url}" alt="" style="width:{width_value}px;max-width:50%;max-height:50%;object-fit:contain;filter:{slide_engine.WATERMARK_GRAY_FILTER};">'
@@ -3918,7 +3951,12 @@ def _remove_slide_watermark(html):
 
 
 def _watermark_spec_from_html(html):
-    """Read the watermark overlay spec (logo, opacity, width) already on a slide."""
+    """Read the watermark overlay spec (logo, opacity, width, visibility).
+
+    Overlays saved before the visibility flag carry no
+    ``data-watermark-visible`` attribute and count as visible, so opening an
+    older presentation never flips them off.
+    """
     if not html:
         return None
     match = re.search(
@@ -3934,7 +3972,8 @@ def _watermark_spec_from_html(html):
         )
     if not match:
         return None
-    div_tag = match.group(0)[:match.group(0).find('>') + 1]
+    full_markup = match.group(0)
+    div_tag = full_markup[:full_markup.find('>') + 1]
     inner = match.group(1) or ''
     opacity = 0.045
     opacity_match = re.search(r'opacity\s*:\s*([0-9.]+)', div_tag, flags=re.IGNORECASE)
@@ -3954,7 +3993,78 @@ def _watermark_spec_from_html(html):
     logo_url = logo_match.group(1).strip() if logo_match else ''
     if not logo_url:
         return None
-    return {'logo_url': logo_url, 'opacity': opacity, 'width_px': width}
+    visible_match = re.search(r'data-watermark-visible\s*=\s*["\']([^"\']*)["\']', div_tag, flags=re.IGNORECASE)
+    if visible_match:
+        visible = visible_match.group(1).strip().lower() != 'false'
+    else:
+        visible = True
+    if re.search(r'display\s*:\s*none', div_tag, flags=re.IGNORECASE):
+        visible = False
+    return {'logo_url': logo_url, 'opacity': opacity, 'width_px': width,
+            'visible': visible, 'markup': full_markup}
+
+
+def _watermark_markup_from_html(html):
+    """Return the raw watermark overlay markup, or an empty string."""
+    spec = _watermark_spec_from_html(html)
+    return spec.get('markup', '') if spec else ''
+
+
+def _is_watermark_visible(html):
+    """Whether the slide currently shows its watermark layer."""
+    spec = _watermark_spec_from_html(html)
+    return bool(spec and spec.get('visible', True))
+
+
+def _set_slide_watermark_visible(html, visible, logo_url=None):
+    """Show or hide the watermark layer while keeping its geometry.
+
+    Hiding keeps position, size and opacity in the saved HTML so showing it
+    again restores exactly what the user had. Showing a hidden layer never
+    rebuilds it from defaults.
+    """
+    if not html:
+        return html
+    spec = _watermark_spec_from_html(html)
+    if not spec:
+        if not visible or not logo_url:
+            return html
+        return _apply_slide_watermark(html, logo_url)
+    if bool(spec.get('visible', True)) == bool(visible):
+        return html
+    markup = spec.get('markup', '')
+    if not markup:
+        return html
+    div_end = markup.find('>')
+    if div_end == -1:
+        return html
+    div_tag = markup[:div_end + 1]
+    rest = markup[div_end + 1:]
+    if re.search(r'data-watermark-visible\s*=', div_tag, flags=re.IGNORECASE):
+        div_tag = re.sub(
+            r'data-watermark-visible\s*=\s*["\'][^"\']*["\']',
+            'data-watermark-visible="%s"' % ('true' if visible else 'false'),
+            div_tag, count=1, flags=re.IGNORECASE,
+        )
+    else:
+        div_tag = div_tag[:-1] + ' data-watermark-visible="%s">' % ('true' if visible else 'false')
+    if visible:
+        div_tag = re.sub(r'display\s*:\s*none\s*;?', 'display:flex;', div_tag, flags=re.IGNORECASE)
+        if 'display' not in div_tag.lower():
+            div_tag = div_tag[:-1] + ' style="display:flex;">' if 'style=' not in div_tag.lower() else div_tag
+    else:
+        if re.search(r'display\s*:\s*flex', div_tag, flags=re.IGNORECASE):
+            div_tag = re.sub(r'display\s*:\s*flex', 'display:none', div_tag, count=1, flags=re.IGNORECASE)
+        elif re.search(r'display\s*:', div_tag, flags=re.IGNORECASE):
+            div_tag = re.sub(r'display\s*:\s*[^;]+', 'display:none', div_tag, count=1, flags=re.IGNORECASE)
+        else:
+            style_match = re.search(r'style\s*=\s*(["\'])(.*?)\1', div_tag, flags=re.IGNORECASE)
+            if style_match:
+                div_tag = (div_tag[:style_match.start(2)] + 'display:none;'
+                           + style_match.group(2) + div_tag[style_match.end(2):])
+            else:
+                div_tag = div_tag[:-1] + ' style="display:none;">'
+    return html.replace(markup, div_tag + rest, 1)
 
 
 def _carry_slide_watermark(source_html, output_html):
@@ -3962,22 +4072,40 @@ def _carry_slide_watermark(source_html, output_html):
 
     The model rebuilds the whole slide and almost never reproduces the overlay
     div, so without this any later AI edit silently deletes the watermark.
+    The saved layer is copied verbatim — source, position, size, opacity and
+    hidden state — so a user move is never lost and a hidden watermark is
+    never reshown without a request.
     """
     if not output_html or _watermark_spec_from_html(output_html):
         return output_html
     spec = _watermark_spec_from_html(source_html)
-    if not spec:
+    if not spec or not spec.get('markup'):
         return output_html
-    return _apply_slide_watermark(
-        output_html, spec['logo_url'],
-        opacity=spec['opacity'], width_px=spec['width_px'],
-    )
+    markup = spec['markup']
+    cleaned = _remove_slide_watermark(output_html)
+    root_tag = re.search(r'<div\b[^>]*>', cleaned, flags=re.IGNORECASE)
+    if root_tag:
+        tag_text = root_tag.group(0)
+        class_match = re.search(r'\bclass\s*=\s*["\']([^"\']*)["\']', tag_text, flags=re.IGNORECASE)
+        if class_match and 'slide' in class_match.group(1).split():
+            style_match = re.search(r'\bstyle\s*=\s*["\']([^"\']*)["\']', tag_text, flags=re.IGNORECASE)
+            if style_match and 'position' not in style_match.group(1).lower():
+                fixed_tag = tag_text.replace(
+                    style_match.group(0),
+                    'style="' + 'position:relative;' + style_match.group(1) + '"',
+                    1,
+                )
+                cleaned = cleaned[:root_tag.start()] + fixed_tag + cleaned[root_tag.end():]
+    closing = re.search(r'</div>\s*$', cleaned, flags=re.IGNORECASE)
+    if not closing:
+        return cleaned + markup
+    return cleaned[:closing.start()] + markup + cleaned[closing.start():]
 
 
 def _is_watermark_removal_instruction(instruction):
     """Check whether an edit instruction asks to remove the watermark itself."""
     normalized = normalize_arabic_digits_py(str(instruction or '').strip().lower())
-    if not re.search(r'(?:احذف|حذف|امسح|إزالة|ازالة|ازل|شيل)', normalized):
+    if not re.search(r'(?:احذف|حذف|امسح|إزالة|ازالة|ازل|شيل|اخف|إخفاء|اخفاء|خف|عطل|عطّل|تعطيل|لغاء\s*(?:ال)?تفعيل|ايقاف|إيقاف)', normalized):
         return False
     return bool(re.search(r'(?:watermark|الوترمارك|الووترمارك|العلامة|علامة\s*مائي|لوجو|شعار)', normalized))
 
@@ -3990,12 +4118,15 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
     numbers = [idx + 1 for idx in (target_indexes or [])]
 
     if is_watermark_request(message):
-        is_remove = bool(re.search(r'(?:احذف|حذف|امسح|إزالة|ازالة|ازل|شيل)\s*(?:العلامة|الـ\s*watermark|الووترمارك|الوترمارك|اللوجو|الشعار)?', normalized))
+        is_remove = bool(re.search(r'(?:احذف|حذف|امسح|إزالة|ازالة|ازل|شيل|اخف|إخفاء|اخفاء|خف|عطّل|عطل|تعطيل|لغاء\s*(?:ال)?تفعيل|ايقاف|إيقاف)', normalized))
         only_white = bool(re.search(r'(?:البيضاء|البيضه|الابيض|الأبيض|white|الفاتحة|الفاتحه)', normalized))
         all_match = any(kw in normalized for kw in ('كل', 'جميع', 'كافة', 'العرض كامل', 'العرض كله', 'الشرائح كلها', 'الشرايح كلها'))
-        target_mode = 'all' if (all_match or not numbers) else 'indexes'
+        # No scope named: the current slide only. "All" needs an explicit كل/جميع.
+        target_mode = 'all' if all_match else ('indexes' if numbers else 'current')
         action_tool = 'remove_watermark' if is_remove else 'apply_watermark'
-        size_up = bool(re.search(r'(?:أكبر|اكبر|كبّر|كبر|واضح|واضحه|أوضح|اوضح|أظهر|اظهر|ظاهر|أجلى|اجلى|bigger|\bbig\b|\bclear\b|clearer)', normalized))
+        # «إظهار» names visibility, never size: only an explicit bigger/clearer
+        # request grows the mark.
+        size_up = bool(re.search(r'(?:أكبر|اكبر|كبّر|كبر|واضح|واضحه|أوضح|اوضح|ظاهر|أجلى|اجلى|bigger|\bbig\b|\bclear\b|clearer)', normalized))
         size_down = bool(re.search(r'(?:أصغر|اصغر|صغّر|صغر|أخف|اخف|خفيف|خفيفه|شفاف|أفتح|افتح|smaller|\bsmall\b|\bfaint\b)', normalized))
         if size_up and not size_down:
             wm_opacity, wm_width = 0.10, 640
@@ -4008,9 +4139,9 @@ def _designer_deterministic_plan(message, slides, current_index, target_indexes)
         elif size_up and not size_down:
             resp_text = 'سأجعل العلامة المائية أكبر وأوضح في خلفية الشرائح مع الحفاظ التام على النصوص والتصميم.'
         elif only_white:
-            resp_text = 'سأضيف العلامة المائية لشعار الشركة في خلفية الشرائح البيضاء مع الحفاظ التام على النصوص والتصميم.'
+            resp_text = 'سأضيف العلامة المائية المعتمدة في خلفية الشرائح البيضاء مع الحفاظ التام على النصوص والتصميم.'
         else:
-            resp_text = 'سأضيف العلامة المائية لشعار الشركة في خلفية الشرائح المحددة بأناقة وتناسق بصري تام.'
+            resp_text = 'سأضيف العلامة المائية المعتمدة في خلفية الشرائح المحددة بأناقة وتناسق بصري تام.'
         return {
             'response': resp_text,
             'actions': [{
@@ -5136,7 +5267,14 @@ def api_designer_chat():
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
     audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index, creative_images)
     project_context = _designer_project_context(project_data, creative_images, tenant_id)
+    watermark_note = (
+        'العلامة المائية المستقلة معتمدة ومتاحة لأداة apply_watermark.'
+        if branding.get('watermark_path') else
+        'لا توجد علامة مائية مرفوعة في إعدادات الشركة؛ لا تستبدلها بشعار الشركة.'
+    )
     planner_prompt = f"""{build_design_rules(branding)}{training_note}
+
+{watermark_note}
 
 {project_context}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master).
@@ -5157,8 +5295,8 @@ def api_designer_chat():
 
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
-- apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true, "opacity":0.045, "width_px":480}} لإضافة علامة مائية لشعار الشركة في خلفية الشرائح — أرسل only_white=true فقط إذا ذكر المستخدم الشرائح البيضاء أو الفاتحة صراحة، والافتراضي opacity=0.045 وwidth_px=480. إذا ذكر المستخدم نسبة أو قيمة شفافية صريحة (مثل 50%) فأرسلها كما هي حتى 1.0 ونفّذها فورًا دون اقتراح بديل، وإذا رفض اقتراحًا سابقًا أو كرر قيمة صريحة فلا تعِد طرح نفس السؤال بأداة ask. أرسل width_px حتى 640 إذا طلب علامة أكبر
-- remove_watermark: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإزالة العلامة المائية من الشرائح
+- apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true, "opacity":0.045, "width_px":480}} لإظهار العلامة المائية المستقلة المعتمدة في إعدادات الشركة في خلفية الشرائح — صيغ فعّل/أظهر/إظهار/أضف تعني هذه الأداة، و«إظهار» تعني الرؤية فقط وليست تكبيرًا. النطاق الافتراضي current عند عدم تحديد أرقام؛ أرسل all فقط عند طلب كل الشرائح صراحة (كل/جميع/العرض كله)، وأرسل indexes مع الأرقام العربية أو الإنجليزية المذكورة. أرسل only_white=true فقط إذا ذكر المستخدم الشرائح البيضاء أو الفاتحة صراحة، والافتراضي opacity=0.045 وwidth_px=480. إذا ذكر المستخدم نسبة أو قيمة شفافية صريحة (مثل 50%) فأرسلها كما هي حتى 1.0 ونفّذها فورًا دون اقتراح بديل، وإذا رفض اقتراحًا سابقًا أو كرر قيمة صريحة فلا تعِد طرح نفس السؤال بأداة ask. أرسل width_px حتى 640 إذا طلب علامة أكبر
+- remove_watermark: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإخفاء العلامة المائية من الشرائح — صيغ اخف/إخفاء/عطّل/إلغاء التفعيل/احذف تعني هذه الأداة مع نفس قواعد النطاق أعلاه
 - apply_image_descriptions: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإضافة أوصاف الصور المحفوظة بالفعل دون توليد صور أو اختراع وصف
 - insert_team_logo: params={{"target":"current|all|indexes", "indexes":[1-based], "team_index":1-based}} لإضافة شعار جهة فريق العمل المرفوع فعلياً
 - insert_company_logo_panel: params={{"target":"current|all|indexes", "indexes":[1-based]}} لوضع شعار الشركة داخل المربع الكحلي فوق رقم سنوات الخبرة
@@ -5298,10 +5436,14 @@ def api_designer_chat():
                 # slide gets the watermark, otherwise dark slides were silently skipped.
                 only_white = params.get('only_white', False)
                 is_remove = (tool == 'remove_watermark')
-                logo_token = str(params.get('logo_token') or '##LOGO##').strip()
-                company_logo_url = str(
-                    branding.get('logo_path') or branding.get('logo') or branding.get('logo_url') or logo_token
-                ).strip()
+                watermark_url = str(branding.get('watermark_path') or '').strip()
+                if not is_remove and not watermark_url:
+                    assistant_messages.append('لا توجد علامة مائية مرفوعة في إعدادات الشركة؛ لم تتغير أي شريحة.')
+                    executed.append({
+                        'tool': tool, 'status': 'failed', 'indexes': [],
+                        'reason': 'watermark_missing',
+                    })
+                    continue
                 affected_indexes = []
                 skipped_dark_indexes = []
                 total_target = max(1, len(indexes))
@@ -5315,7 +5457,9 @@ def api_designer_chat():
                                             {'phase': 'editing', 'activeSlideIndex': idx, 'actionNumber': action_number})
                     current_slide_html = slide.get('html', '')
                     if is_remove:
-                        new_html = _remove_slide_watermark(current_slide_html)
+                        # Hiding keeps the saved position/size/opacity so a later
+                        # show restores exactly what the user had.
+                        new_html = _set_slide_watermark_visible(current_slide_html, False)
                     else:
                         try:
                             wm_opacity = float(params.get('opacity', 0.045))
@@ -5325,7 +5469,7 @@ def api_designer_chat():
                             wm_width = int(params.get('width_px', 480))
                         except (TypeError, ValueError):
                             wm_width = 480
-                        new_html = _apply_slide_watermark(current_slide_html, company_logo_url, opacity=wm_opacity, width_px=wm_width)
+                        new_html = _apply_slide_watermark(current_slide_html, watermark_url, opacity=wm_opacity, width_px=wm_width)
                     slide['html'] = new_html
                     slide['_designer_keep_html'] = True
                     slide['is_custom'] = True
@@ -6111,6 +6255,10 @@ def api_get_branding():
 def api_update_branding():
     """Update branding settings for the current tenant."""
     data = request.json or {}
+    # The watermark file is set only through its upload endpoint; a
+    # client-sent path must never choose the file on disk.
+    data = {key: value for key, value in data.items()
+            if key != 'watermark_path'}
     db.update_branding(g.tenant_id, **data)
     branding = db.get_branding(g.tenant_id)
     return jsonify({'success': True, 'branding': branding})
@@ -14238,26 +14386,61 @@ def api_log_presentation_edit(pres_id):
 
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), 'uploads')
 ALLOWED_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
+# Watermark is a small branding silhouette, not a photo: cap bytes and pixels so a
+# huge upload cannot exhaust disk or memory. The saved file keeps its own bytes,
+# so a PNG alpha channel is preserved as uploaded.
+TENANT_WATERMARK_MAX_BYTES = 5 * 1024 * 1024
+TENANT_WATERMARK_MAX_DIMENSION = 4000
 
 
 def _save_tenant_image(uploaded_file, base_name):
     from PIL import Image, UnidentifiedImageError
 
+    # The stored filename is always <base_name><extension>; the client filename
+    # only supplies the extension. A client-sent path can never choose where
+    # the file lands, and SVG is rejected here by the extension allow-list.
     extension = os.path.splitext(uploaded_file.filename or '')[1].lower()
     if extension not in ALLOWED_IMAGE_EXTENSIONS:
         raise ValueError('Only PNG, JPG, JPEG, and WEBP images are supported')
     try:
-        image = Image.open(uploaded_file.stream)
-        image.verify()
         uploaded_file.stream.seek(0)
+        raw_bytes = uploaded_file.stream.read()
+        uploaded_file.stream.seek(0)
+    except (OSError, ValueError):
+        raise ValueError('Invalid image file')
+    if base_name == 'watermark' and len(raw_bytes) > TENANT_WATERMARK_MAX_BYTES:
+        raise ValueError('Image exceeds the 5MB watermark limit')
+    try:
+        image = Image.open(BytesIO(raw_bytes))
+        actual_format = str(image.format or '').upper()
+        image.load()
+        width, height = image.size
     except (UnidentifiedImageError, OSError):
         raise ValueError('Invalid image file')
+    if actual_format not in ('PNG', 'JPEG', 'JPG', 'WEBP'):
+        raise ValueError('Invalid image file')
+    if base_name == 'watermark' and max(width, height) > TENANT_WATERMARK_MAX_DIMENSION:
+        raise ValueError('Image dimensions exceed the 4000px watermark limit')
+    try:
+        uploaded_file.stream.seek(0)
+    except (OSError, ValueError):
+        pass
 
     tenant_dir = os.path.join(UPLOADS_DIR, g.tenant_id)
     os.makedirs(tenant_dir, exist_ok=True)
     normalized_extension = '.jpg' if extension == '.jpeg' else extension
     file_path = os.path.join(tenant_dir, f'{base_name}{normalized_extension}')
     uploaded_file.save(file_path)
+    # The public branding URLs omit the extension. Keep exactly one current
+    # source file so changing PNG to WEBP cannot serve an older sibling.
+    target_path = os.path.realpath(file_path)
+    for stale_path in _tenant_image_storage_candidates(g.tenant_id, base_name):
+        if os.path.realpath(stale_path) == target_path or not os.path.isfile(stale_path):
+            continue
+        try:
+            os.unlink(stale_path)
+        except OSError as error:
+            print(f'[TENANT IMAGE] could not remove stale {base_name} file: {error}')
     return file_path, normalized_extension
 
 
@@ -14786,6 +14969,45 @@ def api_upload_logo():
     return jsonify({'success': True, 'logoPath': relative_path})
 
 
+@app.route('/api/upload/watermark', methods=['POST'])
+@require_permission('company_settings')
+def api_upload_watermark():
+    """Upload the company's watermark as a branding asset separate from its logo."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'error': 'No filename'}), 400
+
+    try:
+        _save_tenant_image(file, 'watermark')
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+
+    relative_path = f'/tenant-assets/{g.tenant_id}/watermark'
+    db.update_branding(g.tenant_id, watermark_path=relative_path)
+    return jsonify({
+        'success': True,
+        'watermarkPath': relative_path,
+        'branding': db.get_branding(g.tenant_id),
+    })
+
+
+@app.route('/api/upload/watermark', methods=['DELETE'])
+@require_permission('company_settings')
+def api_delete_watermark():
+    """Clear the configured watermark without changing the company logo."""
+    for watermark_path in _tenant_image_storage_candidates(g.tenant_id, 'watermark'):
+        if not os.path.isfile(watermark_path):
+            continue
+        try:
+            os.unlink(watermark_path)
+        except OSError as error:
+            print(f'[TENANT IMAGE] could not remove watermark file: {error}')
+    db.update_branding(g.tenant_id, watermark_path=None)
+    return jsonify({'success': True, 'branding': db.get_branding(g.tenant_id)})
+
+
 @app.route('/api/upload/reference-image', methods=['POST'])
 @require_permission('company_settings')
 def api_upload_reference():
@@ -15235,6 +15457,30 @@ def serve_tenant_logo(tenant_id):
         resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
         return resp
     return jsonify({'error': 'Logo not found'}), 404
+
+
+@app.route('/tenant-assets/<tenant_id>/watermark')
+def serve_tenant_watermark(tenant_id):
+    """Serve only an explicitly uploaded watermark; never fall back to a logo."""
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', str(tenant_id or '')):
+        return jsonify({'error': 'Watermark not found'}), 404
+    branding = db.get_branding(tenant_id) or {}
+    if not str(branding.get('watermark_path') or '').strip():
+        return jsonify({'error': 'Watermark not found'}), 404
+    watermark_path = _tenant_watermark_storage_path(tenant_id)
+    tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, tenant_id))
+    try:
+        inside_tenant = bool(watermark_path) and os.path.commonpath(
+            [tenant_root, os.path.realpath(watermark_path)]) == tenant_root
+    except ValueError:
+        inside_tenant = False
+    if not inside_tenant:
+        return jsonify({'error': 'Watermark not found'}), 404
+    extension = os.path.splitext(watermark_path)[1].lower()
+    mimetype = 'image/png' if extension == '.png' else 'image/jpeg' if extension in ('.jpg', '.jpeg') else 'image/webp'
+    resp = send_file(watermark_path, mimetype=mimetype)
+    resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
+    return resp
 
 
 @app.route('/tenant-assets/<tenant_id>/fonts/<filename>')

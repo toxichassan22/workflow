@@ -305,8 +305,53 @@ def test_watermark_survives_model_regeneration():
 
     # Removal requests must not resurrect it, other edits must keep it
     assert app._is_watermark_removal_instruction("احذف العلامة المائية من الشريحة")
+    assert app._is_watermark_removal_instruction("اخفي العلامة المائية من الشريحة 2")
+    assert app._is_watermark_removal_instruction("إخفاء العلامة المائية")
+    assert app._is_watermark_removal_instruction("عطّل العلامة المائية")
+    assert app._is_watermark_removal_instruction("إلغاء تفعيل العلامة المائية")
     assert not app._is_watermark_removal_instruction("احذف البطاقة الثانية من الشريحة")
     assert not app._is_watermark_removal_instruction("كبر العلامة المائية وخليها واضحة")
+
+
+def test_watermark_hide_show_verbs_and_current_scope():
+    import app
+
+    slides = [
+        {"title": "شريحة 1", "type": "content", "html": '<div class="slide"><h1>واحد</h1></div>'},
+        {"title": "شريحة 2", "type": "content", "html": '<div class="slide"><h1>اثنان</h1></div>'},
+    ]
+    show = app._designer_deterministic_plan("فعّل العلامة المائية", slides, 0, [])
+    assert show["actions"][0]["tool"] == "apply_watermark"
+    assert show["actions"][0]["params"]["target"] == "current"
+
+    show2 = app._designer_deterministic_plan("أظهر العلامة المائية في الشرائح 1 و 2", slides, 0, [0, 1])
+    assert show2["actions"][0]["tool"] == "apply_watermark"
+    assert show2["actions"][0]["params"]["target"] == "indexes"
+    assert show2["actions"][0]["params"]["opacity"] == 0.045
+
+    hide = app._designer_deterministic_plan("اخف العلامة المائية", slides, 1, [])
+    assert hide["actions"][0]["tool"] == "remove_watermark"
+    assert hide["actions"][0]["params"]["target"] == "current"
+
+    everything = app._designer_deterministic_plan("أظهر العلامة المائية في كل الشرائح", slides, 0, [])
+    assert everything["actions"][0]["params"]["target"] == "all"
+
+
+def test_watermark_visibility_state_survives_carry():
+    import app
+
+    base = '<div class="slide"><h1>محتوى</h1></div>'
+    shown = app._apply_slide_watermark(base, "/tenant-assets/t/watermark", opacity=0.2, width_px=600)
+    moved = shown.replace("width:600px;", "width:600px;transform:translate(12px, 8px);")
+    hidden = app._set_slide_watermark_visible(moved, False)
+    assert app._watermark_spec_from_html(hidden)["visible"] is False
+    reshown = app._set_slide_watermark_visible(hidden, True)
+    assert "translate(12px, 8px)" in reshown
+    assert "opacity:0.2" in reshown
+    carried = app._carry_slide_watermark(moved, base)
+    assert "translate(12px, 8px)" in carried
+    carried_hidden = app._carry_slide_watermark(hidden, base)
+    assert app._is_watermark_visible(carried_hidden) is False
 
 
 

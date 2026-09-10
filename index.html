@@ -626,6 +626,24 @@
       flex-wrap: wrap;
     }
 
+    .slide-edit-watermark {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--pd);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .slide-edit-watermark input {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      cursor: pointer;
+    }
+
     .slide-element-selected {
       outline: 2px solid #c5a059 !important;
       outline-offset: 3px;
@@ -5671,6 +5689,18 @@
             <input type="file" id="logoFileInput" accept="image/*" style="display:none"
               onchange="handleLogoUpload(this)">
           </div>
+          <div class="tenant-field">
+            <label>العلامة المائية</label>
+            <div id="settingsWatermarkPreview" class="tenant-upload-box" style="cursor:default">لا توجد علامة مائية</div>
+            <div class="tenant-btns" style="margin-top:8px">
+              <button type="button" class="btn ghost" id="settingsWatermarkUploadButton"
+                onclick="document.getElementById('watermarkFileInput').click()">رفع علامة مائية</button>
+              <button type="button" class="btn ghost" id="settingsWatermarkDeleteButton"
+                onclick="deleteTenantWatermark()">حذف العلامة المائية</button>
+            </div>
+            <input type="file" id="watermarkFileInput" accept="image/png,image/jpeg,image/webp" style="display:none"
+              onchange="handleWatermarkUpload(this)">
+          </div>
         </div>
 
         <div class="tenant-btns">
@@ -7886,8 +7916,8 @@
             slide: await generateTenantSlideFromSnapshot(
               planSlide, firstIndex + position, projectedTotal, generationImages, {})
           });
-          replacements[replacements.length - 1].slide.html = applyDeckWatermarkToHtml(
-            replacements[replacements.length - 1].slide.html);
+          // Regenerated section slides start without a watermark; the user
+          // enables it per slide from the edit toolbar.
         }
 
         const targetSet = new Set(targetIndexes);
@@ -9147,6 +9177,7 @@
       // previews
       const logoPreview = document.getElementById('settingsLogoPreview');
       if (logoPreview) logoPreview.innerHTML = b.logo_path ? '<img src="/tenant-assets/' + tenantUser.id + '/logo?t=' + Date.now() + '" alt="logo" style="max-height:120px">' : 'اضغط لرفع لوجو الشركة (PNG/JPG/WEBP)';
+      renderSettingsWatermarkPreview(b);
       const refPreview = document.getElementById('settingsRefPreview');
       if (refPreview) refPreview.textContent = b.reference_image_path ? 'تم رفع صورة مرجعية' : 'اضغط لرفع صورة مرجعية للاستيل التصميمي';
       await loadTenantFonts();
@@ -9239,6 +9270,82 @@
         toast('تم رفع اللوجو');
       } else {
         toast(data.error || 'فشل رفع اللوجو');
+      }
+    }
+
+    function renderSettingsWatermarkPreview(branding) {
+      const current = branding || tenantBranding || {};
+      const preview = document.getElementById('settingsWatermarkPreview');
+      const deleteButton = document.getElementById('settingsWatermarkDeleteButton');
+      const uploadButton = document.getElementById('settingsWatermarkUploadButton');
+      if (preview) {
+        preview.replaceChildren();
+        if (current.watermark_path) {
+          const image = document.createElement('img');
+          const separator = String(current.watermark_path).includes('?') ? '&' : '?';
+          image.src = current.watermark_path + separator + 't=' + Date.now();
+          image.alt = 'العلامة المائية';
+          preview.appendChild(image);
+        } else {
+          preview.textContent = 'لا توجد علامة مائية';
+        }
+      }
+      if (deleteButton) deleteButton.disabled = !current.watermark_path;
+      if (uploadButton) uploadButton.textContent = current.watermark_path ? 'استبدال العلامة المائية' : 'رفع علامة مائية';
+    }
+
+    function setWatermarkSettingsBusy(busy) {
+      const uploadButton = document.getElementById('settingsWatermarkUploadButton');
+      const deleteButton = document.getElementById('settingsWatermarkDeleteButton');
+      const input = document.getElementById('watermarkFileInput');
+      if (uploadButton) uploadButton.disabled = !!busy;
+      if (deleteButton) deleteButton.disabled = !!busy || !(tenantBranding && tenantBranding.watermark_path);
+      if (input) input.disabled = !!busy;
+    }
+
+    async function handleWatermarkUpload(input) {
+      if (!input.files || !input.files[0]) return;
+      const form = new FormData();
+      form.append('file', input.files[0]);
+      let completion = 'تعذر رفع العلامة المائية';
+      setWatermarkSettingsBusy(true);
+      showLoader('رفع العلامة المائية', 'جاري رفع الملف...', 10, { reset: true, maxProgress: 90 });
+      try {
+        const data = await api('POST', '/api/upload/watermark', form, true);
+        if (!data.success) {
+          toast(data.error || completion);
+          return;
+        }
+        updateLoaderProgress(82, 'جاري تحديث الهوية البصرية...');
+        tenantBranding = data.branding || { ...(tenantBranding || {}), watermark_path: data.watermarkPath };
+        renderSettingsWatermarkPreview(tenantBranding);
+        completion = 'تم رفع العلامة المائية';
+        toast(completion);
+      } finally {
+        input.value = '';
+        setWatermarkSettingsBusy(false);
+        hideLoader(completion);
+      }
+    }
+
+    async function deleteTenantWatermark() {
+      if (!(tenantBranding && tenantBranding.watermark_path)) return;
+      let completion = 'تعذر حذف العلامة المائية';
+      setWatermarkSettingsBusy(true);
+      showLoader('حذف العلامة المائية', 'جاري تحديث الهوية البصرية...', 15, { reset: true, maxProgress: 90 });
+      try {
+        const data = await api('DELETE', '/api/upload/watermark');
+        if (!data.success) {
+          toast(data.error || completion);
+          return;
+        }
+        tenantBranding = data.branding || { ...(tenantBranding || {}), watermark_path: null };
+        renderSettingsWatermarkPreview(tenantBranding);
+        completion = 'تم حذف العلامة المائية';
+        toast(completion);
+      } finally {
+        setWatermarkSettingsBusy(false);
+        hideLoader(completion);
       }
     }
 
@@ -22663,6 +22770,58 @@
       return match ? match[0] : '';
     }
 
+    function isWatermarkVisible(html) {
+      const markup = watermarkMarkupFromHtml(html);
+      if (!markup) return false;
+      const tagEnd = markup.indexOf('>');
+      const tag = tagEnd === -1 ? markup : markup.slice(0, tagEnd + 1);
+      const attr = tag.match(/data-watermark-visible\s*=\s*["']([^"']*)["']/i);
+      // Overlays saved before the visibility flag carry no attribute and
+      // count as visible, so opening an older presentation never flips them.
+      if (attr) {
+        if (String(attr[1]).trim().toLowerCase() === 'false') return false;
+      }
+      if (/display\s*:\s*none/i.test(tag)) return false;
+      return true;
+    }
+
+    function setWatermarkMarkupVisible(markup, visible) {
+      let out = String(markup || '');
+      if (!out) return out;
+      const end = out.indexOf('>');
+      if (end === -1) return out;
+      let tag = out.slice(0, end + 1);
+      const rest = out.slice(end + 1);
+      if (/data-watermark-visible\s*=/i.test(tag)) {
+        tag = tag.replace(/data-watermark-visible\s*=\s*["'][^"']*["']/i,
+          'data-watermark-visible="' + (visible ? 'true' : 'false') + '"');
+      } else {
+        tag = tag.slice(0, -1) + ' data-watermark-visible="' + (visible ? 'true' : 'false') + '">';
+      }
+      if (visible) {
+        tag = tag.replace(/display\s*:\s*none\s*;?/gi, 'display:flex;');
+      } else if (/display\s*:\s*flex/i.test(tag)) {
+        tag = tag.replace(/display\s*:\s*flex/i, 'display:none');
+      } else if (/display\s*:/i.test(tag)) {
+        tag = tag.replace(/display\s*:\s*[^;]+/i, 'display:none');
+      } else {
+        const styleMatch = tag.match(/style\s*=\s*(["'])(.*?)\1/i);
+        if (styleMatch) {
+          tag = tag.slice(0, styleMatch.index) + 'style=' + styleMatch[1] + 'display:none;'
+            + styleMatch[2] + styleMatch[1] + tag.slice(styleMatch.index + styleMatch[0].length);
+        } else {
+          tag = tag.slice(0, -1) + ' style="display:none;">';
+        }
+      }
+      return tag + rest;
+    }
+
+    function setHtmlWatermarkVisible(html, visible) {
+      const markup = watermarkMarkupFromHtml(html);
+      if (!markup) return html;
+      return String(html).replace(markup, setWatermarkMarkupVisible(markup, visible));
+    }
+
     function stripWatermarkMarkup(html) {
       let out = String(html || '');
       out = out.replace(/<div\b[^>]*\bdata-slide-watermark=["']true["'][^>]*>[\s\S]*?<\/div\s*>/gi, '');
@@ -22690,10 +22849,54 @@
       return cleaned.slice(0, closing.index) + markup + cleaned.slice(closing.index);
     }
 
+    function tenantWatermarkMarkup() {
+      const watermarkUrl = String((tenantBranding && tenantBranding.watermark_path) || '').trim();
+      if (!watermarkUrl) return '';
+      const safeUrl = escapeHtml(watermarkUrl);
+      return '<div class="slide-watermark" data-slide-watermark="true" data-watermark-visible="true" aria-hidden="true" '
+        + 'style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+        + 'pointer-events:none;z-index:50;opacity:0.045;overflow:hidden;">'
+        + '<img src="' + safeUrl + '" alt="" style="width:480px;max-width:50%;max-height:50%;'
+        + 'object-fit:contain;filter:grayscale(100%) brightness(0) invert(53.3%);"></div>';
+    }
+
+    function setSlideWatermarkVisibility(index, visible) {
+      const session = getSlideEditSession(index);
+      const slide = tenantSlidesData[index];
+      if (!session || !slide || !slide.html) return false;
+      const markup = watermarkMarkupFromHtml(slide.html);
+      const shown = isWatermarkVisible(slide.html);
+      if (visible && !(tenantBranding && tenantBranding.watermark_path) && !markup) {
+        toast('لم تُرفع علامة مائية للشركة');
+        refreshSlideEditToolbar(index);
+        return false;
+      }
+      if (shown === !!visible) return true;
+      if (!pushSlideEditHistory(index)) return false;
+      if (visible) {
+        slide.html = markup
+          ? setHtmlWatermarkVisible(slide.html, true)
+          : copyWatermarkMarkup(tenantWatermarkMarkup(), stripWatermarkMarkup(slide.html));
+      } else {
+        // Hiding keeps the saved position/size/opacity so showing it again
+        // restores exactly what the user had.
+        slide.html = markup ? setHtmlWatermarkVisible(slide.html, false) : slide.html;
+      }
+      slide._designer_keep_html = true;
+      slide.is_custom = true;
+      session.sel = null;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      refreshSingleSlideCard(index);
+      toast(visible ? 'تم إظهار العلامة المائية' : 'تم إخفاء العلامة المائية');
+      return true;
+    }
+
     function deckWatermarkMarkup() {
       for (const slide of (tenantSlidesData || [])) {
         const markup = watermarkMarkupFromHtml(slide && slide.html);
-        if (markup) return normalizeWatermarkLayer(markup);
+        if (markup && isWatermarkVisible(slide && slide.html)) return normalizeWatermarkLayer(markup);
       }
       return '';
     }
@@ -22764,6 +22967,7 @@
       const canRedo = session.redo.length > 0;
       const hasSel = !!session.sel;
       const dis = hasSel ? '' : ' disabled';
+      const watermarkChecked = isWatermarkVisible(tenantSlidesData[index] && tenantSlidesData[index].html) ? ' checked' : '';
       return '<div class="slide-edit-group"><span class="slide-edit-group-title">الجلسة</span>'
         + '<div class="slide-edit-group-items">'
         + '<button type="button" class="active" data-slide-edit-act="commit">اعتماد</button>'
@@ -22779,6 +22983,10 @@
         + '<button type="button" data-slide-edit-act="addtext">إضافة نص</button>'
         + '<button type="button" data-slide-edit-act="addimage">إضافة صورة</button>'
         + '</div></div>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">العلامة المائية</span>'
+        + '<div class="slide-edit-group-items"><label class="slide-edit-watermark">'
+        + '<input type="checkbox" data-slide-edit-watermark="toggle"' + watermarkChecked + '>إظهار العلامة المائية'
+        + '</label></div></div>'
         + '<div class="slide-edit-group"><span class="slide-edit-group-title">تنسيق النص</span>'
         + '<div class="slide-edit-group-items">'
         + '<button type="button" data-slide-edit-act="fontup"' + dis + '>تكبير</button>'
@@ -22862,6 +23070,14 @@
           else if (act === 'del') deleteSelectedSlideElement(index);
           else if (act === 'front') adjustSlideElementLayer(index, 1);
           else if (act === 'back') adjustSlideElementLayer(index, -1);
+        });
+      });
+      editControls.querySelectorAll('[data-slide-edit-watermark="toggle"]').forEach(inp => {
+        inp.addEventListener('click', event => event.stopPropagation());
+        inp.addEventListener('pointerdown', event => event.stopPropagation());
+        inp.addEventListener('change', event => {
+          event.stopPropagation();
+          setSlideWatermarkVisibility(index, inp.checked);
         });
       });
       editControls.querySelectorAll('[data-slide-edit-eyedropper]').forEach(btn => {
@@ -24546,7 +24762,8 @@
           content_source: reply.contentSource || reply.content_source || ''
         };
         tenantSlidesData.splice(insertIdx, 0, newSlide);
-        newSlide.html = applyDeckWatermarkToHtml(newSlide.html);
+        // New slides start without a watermark; the user enables it per
+        // slide from the edit toolbar or the designer chat.
         tenantProjectData.tenantSlidesData = tenantSlidesData;
         selectTenantSlide(insertIdx);
       } else if (Array.isArray(reply.slidesData)) {

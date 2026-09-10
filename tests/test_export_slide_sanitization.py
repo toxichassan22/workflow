@@ -1,4 +1,5 @@
 import base64
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ExportSlideSanitizationTests(unittest.TestCase):
+    def test_pptx_resolves_extensionless_tenant_watermark_asset(self):
+        from exports import pptx_export
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tenant_dir = root / 'uploads' / 'tenant-a'
+            tenant_dir.mkdir(parents=True)
+            expected = b'watermark-image-bytes'
+            (tenant_dir / 'watermark.png').write_bytes(expected)
+            original_root = pptx_export.BASE_DIR
+            try:
+                pptx_export.BASE_DIR = root
+                actual = pptx_export._resolve_image_bytes(
+                    '/tenant-assets/tenant-a/watermark?t=1', tenant_id='tenant-a')
+            finally:
+                pptx_export.BASE_DIR = original_root
+            self.assertEqual(actual, expected)
+
+    def test_hidden_watermark_layers_stay_out_of_exports(self):
+        from exports import pptx_export
+        from generate_pdf_from_preview import _strip_hidden_watermark_overlays
+
+        visible = ('<div class="slide"><h1>نص</h1>'
+                   '<div class="slide-watermark" data-slide-watermark="true" '
+                   'data-watermark-visible="true" style="position:absolute;inset:0;display:flex;opacity:0.045;">'
+                   '<img src="/tenant-assets/t/watermark"></div></div>')
+        hidden = visible.replace('data-watermark-visible="true"', 'data-watermark-visible="false"').replace(
+            'display:flex', 'display:none')
+        self.assertIn('data-slide-watermark', _strip_hidden_watermark_overlays(visible))
+        self.assertNotIn('data-slide-watermark', _strip_hidden_watermark_overlays(hidden))
+        self.assertIn('data-slide-watermark', pptx_export._prepare_slide_html(visible, 't'))
+        self.assertNotIn('data-slide-watermark', pptx_export._prepare_slide_html(hidden, 't'))
+
     def test_discards_text_after_each_slide(self):
         html = (
             '<div class="slide"><div>one</div></div>!\n'
