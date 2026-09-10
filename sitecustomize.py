@@ -1,5 +1,5 @@
 # Startup hook for the workflow app.
-# Loaded via PYTHONPATH=/app from Dockerfile so the patch is active before app imports slide_engine.
+# Loaded from site-packages by Dockerfile before gunicorn imports app:app.
 import importlib.abc
 import importlib.machinery
 import re
@@ -18,9 +18,9 @@ def _capture_logo_dimensions(html):
         return captured
     for tag in _LOGO_RE.findall(html):
         dims = {}
-        match = _STYLE_RE.search(tag)
-        if match:
-            for name, value in _DIM_RE.findall(match.group(2)):
+        style_match = _STYLE_RE.search(tag)
+        if style_match:
+            for name, value in _DIM_RE.findall(style_match.group(2)):
                 dims[name.lower()] = value.strip()
         for name in ("width", "height", "max-width", "max-height"):
             attr = re.search(r'\b' + re.escape(name) + r'\s*=\s*["\']([^"\']+)', tag, re.I)
