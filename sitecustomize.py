@@ -1,158 +1,116 @@
-"""Runtime compatibility patch for persisted slide-logo dimensions."""
+# Startup hook for the workflow app.
+# Loaded via PYTHONPATH=/app from Dockerfile so the patch is active before app imports slide_engine.
 import importlib.abc
 import importlib.machinery
 import re
 import sys
 
-_TARGET = "slide_engine"
+_LOGO_RE = re.compile(r'(<img\b[^>]*class=["\'][^"\']*\bpresentation-chrome-logo\b[^"\']*["\'][^>]*>)', re.I)
+_DIM_RE = re.compile(r'\b(width|height|max-width|max-height)\s*:\s*([^;"\']+)', re.I)
 _LEGACY_HEIGHTS = {"40px", "48px", "50px"}
 _RECOVERY_HEIGHT = "78px"
 
 
-def _style_properties(style):
-    result = {}
-    for declaration in str(style or "").split(";"):
-        if ":" not in declaration:
-            continue
-        name, value = declaration.split(":", 1)
-        result[name.strip().lower()] = value.strip()
-    return result
-
-
 def _capture_logo_dimensions(html):
     captured = []
-    for match in re.finditer(
-        r'<img\b[^>]*\bclass=["\'][^"\']*\bpresentation-chrome-logo\b[^"\']*["\'][^>]*>',
-        str(html or ""), flags=re.IGNORECASE,
-    ):
-        tag = match.group(0)
-        style_match = re.search(r'\bstyle\s*=\s*(["\'])(.*?)\1', tag, flags=re.IGNORECASE | re.DOTALL)
-        props = _style_properties(style_match.group(2) if style_match else "")
-        dimensions = {
-            key: props[key]
-            for key in ("width", "height", "max-width", "max-height")
-            if props.get(key)
-        }
-        if dimensions:
-            captured.append(dimensions)
+    if not isinstance(html, str):
+        return captured
+    for tag in _LOGO_RE.findall(html):
+        dims = {}
+        for name, value in _DIM_RE.findall(tag):
+            dims[name.lower()] = value.strip()
+        if dims:
+            captured.append(dims)
     return captured
 
 
 def _restore_logo_dimensions(html, captured):
-    if not html or not captured:
+    if not isinstance(html, str) or not captured:
         return html
-    position = 0
+    index = 0
 
-    def restore(match):
-        nonlocal position
-        if position >= len(captured):
+    def replace(match):
+        nonlocal index
+        if index >= len(captured):
             return match.group(0)
-        dimensions = dict(captured[position])
-        position += 1
-        height = dimensions.get("height", "").lower().replace("!important", "").strip()
-        if height in _LEGACY_HEIGHTS:
-            dimensions["height"] = _RECOVERY_HEIGHT
-            dimensions["max-height"] = _RECOVERY_HEIGHT
-
         tag = match.group(0)
-        style_match = re.search(r'\bstyle\s*=\s*(["\'])(.*?)\1', tag, flags=re.IGNORECASE | re.DOTALL)
-        declarations = "".join(f"{key}:{value}!important;" for key, value in dimensions.items())
-        if style_match:
-            style = style_match.group(2)
-            for key in dimensions:
-                style = re.sub(
-                    rf'(^|;)\s*{re.escape(key)}\s*:[^;]*;?',
-                    r'\1', style, flags=re.IGNORECASE,
-                )
-            style = style.rstrip("; ") + (";" if style.strip() else "") + declarations
-            return tag[:style_match.start(2)] + style + tag[style_match.end(2):]
-        return tag.replace("<img", f'<img style="{declarations}"', 1)
+        dims = captured[index]
+        index += 1
+        # The old managed-chrome pass collapsed manually resized divider logos
+        # to the canonical 40/48/50px heights. Preserve the user's explicit
+        # dimensions, and recover that known legacy clamp when encountered.
+        if dims.get("height", "").strip().lower() in _LEGACY_HEIGHTS:
+            dims = dict(dims)
+            dims["height"] = _RECOVERY_HEIGHT
+            dims["max-height"] = _RECOVERY_HEIGHT
+        for name, value in dims.items():
+            pattern = re.compile(r'(["\'])([^"\']*?)\b' + re.escape(name) + r'\s*:\s*[^;"\']*', re.I)
+            if pattern.search(tag):
+                tag = pattern.sub(lambda m: m.group(1) + m.group(2) + name + ":" + value, tag, count=1)
+            else:
+                if 'style=' in tag.lower():
+                    tag = re.sub(r'(<img\b[^>]*\bstyle\s*=\s*["\'])([^"\']*)', lambda m: m.group(1) + m.group(2).rstrip(';') + ';' + name + ':' + value + '!important;', tag, count=1, flags=re.I)
+                else:
+                    tag = tag[:-1] + ' style="' + name + ':' + value + '!important;">'
+        return tag
 
-    return re.sub(
-        r'<img\b[^>]*\bclass=["\'][^"\']*\bpresentation-chrome-logo\b[^"\']*["\'][^>]*>',
-        restore, html, flags=re.IGNORECASE,
-    )
+    return _LOGO_RE.sub(replace, html)
 
 
 def _wrap_html_function(module, name):
     original = getattr(module, name, None)
-    if not callable(original) or getattr(original, "_workflow_logo_resize_wrapper", False):
+    if not callable(original) or getattr(original, "_workflow_logo_resize_wrapped", False):
         return
 
     def wrapped(html, *args, **kwargs):
         captured = _capture_logo_dimensions(html)
         result = original(html, *args, **kwargs)
-        return _restore_logo_dimensions(result, captured) if captured else result
+        return _restore_logo_dimensions(result, captured)
 
-    wrapped.__name__ = original.__name__
-    wrapped.__doc__ = original.__doc__
-    wrapped.__wrapped__ = original
-    wrapped._workflow_logo_resize_wrapper = True
+    wrapped._workflow_logo_resize_wrapped = True
+    wrapped.__name__ = getattr(original, "__name__", name)
+    wrapped.__doc__ = getattr(original, "__doc__", None)
     setattr(module, name, wrapped)
 
 
 def _patch_slide_engine(module):
     if getattr(module, "_workflow_logo_resize_patch", False):
         return
-
-    # Patch the exact chrome-styling layer. This is the important part: the
-    # renderer can call it from several paths, not only from renumbering.
-    _wrap_html_function(module, "_apply_logo_contrast_styles")
-
-    original = getattr(module, "renumber_presentation_slides", None)
-    if not callable(original):
-        return
-
-    def patched_renumber_presentation_slides(
-        slides, branding=None, project_data=None, tenant_id=None,
-        allow_all_maps=False, creative_images=None,
-    ):
-        saved_dimensions = [
-            _capture_logo_dimensions(item.get("html", "") if isinstance(item, dict) else "")
-            for item in (slides if isinstance(slides, list) else [])
-        ]
-        result = original(
-            slides, branding=branding, project_data=project_data, tenant_id=tenant_id,
-            allow_all_maps=allow_all_maps, creative_images=creative_images,
-        )
-        if isinstance(result, list):
-            for index, item in enumerate(result):
-                if isinstance(item, dict) and index < len(saved_dimensions) and saved_dimensions[index] and item.get("html"):
-                    item["html"] = _restore_logo_dimensions(item["html"], saved_dimensions[index])
-        return result
-
-    patched_renumber_presentation_slides.__name__ = original.__name__
-    patched_renumber_presentation_slides.__doc__ = original.__doc__
-    patched_renumber_presentation_slides.__wrapped__ = original
-    module.renumber_presentation_slides = patched_renumber_presentation_slides
     module._workflow_logo_resize_patch = True
+    # Patch the exact styling layer that writes the managed 40/48/80px logo
+    # sizes, not just one caller of it.
+    _wrap_html_function(module, "_apply_logo_contrast_styles")
+    _wrap_html_function(module, "resolve_logo_in_html")
 
 
-class _LoaderProxy:
-    def __init__(self, loader):
-        self._loader = loader
+class _SlideEngineLoader(importlib.abc.Loader):
+    def __init__(self, original_loader):
+        self.original_loader = original_loader
 
     def create_module(self, spec):
-        creator = getattr(self._loader, "create_module", None)
-        return creator(spec) if creator else None
+        if hasattr(self.original_loader, "create_module"):
+            return self.original_loader.create_module(spec)
+        return None
 
     def exec_module(self, module):
-        self._loader.exec_module(module)
+        self.original_loader.exec_module(module)
         _patch_slide_engine(module)
 
-    def __getattr__(self, name):
-        return getattr(self._loader, name)
 
-
-class _Finder(importlib.abc.MetaPathFinder):
+class _SlideEngineFinder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname != _TARGET:
+        if fullname != "slide_engine":
             return None
-        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
-        if spec and spec.loader:
-            spec.loader = _LoaderProxy(spec.loader)
-        return spec
+        for finder in sys.meta_path:
+            if finder is self:
+                continue
+            if hasattr(finder, "find_spec"):
+                spec = finder.find_spec(fullname, path, target)
+                if spec is not None and spec.loader is not None:
+                    spec.loader = _SlideEngineLoader(spec.loader)
+                    return spec
+        return None
 
 
-if not any(isinstance(item, _Finder) for item in sys.meta_path):
-    sys.meta_path.insert(0, _Finder())
+if not any(isinstance(finder, _SlideEngineFinder) for finder in sys.meta_path):
+    sys.meta_path.insert(0, _SlideEngineFinder())
