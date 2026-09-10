@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
+# Make project-root startup hooks importable during Python initialization.
+# This is required for sitecustomize.py to load before gunicorn imports app:app.
+ENV PYTHONPATH=/app
 
 # Install Python dependencies
 COPY requirements.txt ./
