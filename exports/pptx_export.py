@@ -24,7 +24,12 @@ from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 from pptx.dml.color import RGBColor
 
-from design_templates import normalize_hex_color, sanitize_slide_html_for_export
+from design_templates import (
+    dark_surface_color,
+    normalize_hex_color,
+    readable_text_color,
+    sanitize_slide_html_for_export,
+)
 from generate_pdf_from_preview import _resolve_asset_urls, _resolve_project_file_urls
 from slide_engine import resolve_logo_in_html
 
@@ -93,6 +98,202 @@ def _parse_style(style):
         if name and value:
             out[name] = value
     return out
+
+
+# --------------------------------------------------------------------------
+# CSS cascade resolver — generated slides style body components (KPI cards,
+# financial tables, chart boxes) through <style> classes, not inline styles.
+# Without resolving them every grid stacks vertically and every table loses
+# its centering, sizes and zebra striping.
+# --------------------------------------------------------------------------
+
+_SIMPLE_SELECTOR_RE = re.compile(r'''
+    ^(?P<tag>[a-zA-Z][a-zA-Z0-9_-]*)?
+    (?P<rest>.*)$''', re.VERBOSE)
+_SELECTOR_TOKEN_RE = re.compile(r'''
+    \#(?P<id>[A-Za-z0-9_-]+)
+    | \.(?P<class>[A-Za-z0-9_-]+)
+    | \[(?P<attr>[A-Za-z0-9_-]+)(?:=(?P<q>["']?)(?P<val>.*?)(?P=q))?\]
+    | :(?P<pseudo>[A-Za-z-]+(?:\([^)]*\))?)''', re.VERBOSE)
+
+
+def _parse_simple_selector(part):
+    """Parse one compound selector into tag/id/classes/attrs/pseudos."""
+    part = part.strip()
+    if not part:
+        return None
+    match = _SIMPLE_SELECTOR_RE.match(part)
+    tag = (match.group('tag') or '').lower() or None
+    rest = match.group('rest') or ''
+    sel_id, classes, attrs, pseudos = None, [], [], []
+    for tok in _SELECTOR_TOKEN_RE.finditer(rest):
+        if tok.group('id'):
+            sel_id = tok.group('id')
+        elif tok.group('class'):
+            classes.append(tok.group('class'))
+        elif tok.group('attr'):
+            attrs.append((tok.group('attr').lower(), tok.group('val')))
+        elif tok.group('pseudo'):
+            pseudos.append(tok.group('pseudo').lower())
+    # Anything unparsed (combinators inside, universal *) -> treat carefully
+    leftover = _SELECTOR_TOKEN_RE.sub('', rest).strip()
+    if leftover not in ('', '*'):
+        return None
+    if tag == '*':
+        tag = None
+    return {'tag': tag, 'id': sel_id, 'classes': classes,
+            'attrs': attrs, 'pseudos': pseudos}
+
+
+def _parse_selector(selector):
+    """Split a full selector into compound parts (descendant/child chains)."""
+    selector = re.sub(r'\s*>\s*', ' ', selector.strip())
+    selector = re.sub(r'\s+', ' ', selector)
+    if not selector or '@' in selector:
+        return None
+    parts = []
+    for chunk in selector.split(' '):
+        parsed = _parse_simple_selector(chunk)
+        if parsed is None:
+            return None
+        parts.append(parsed)
+    return parts or None
+
+
+def _selector_specificity(parts):
+    ids = sum(1 for p in parts if p['id'])
+    cls = sum(len(p['classes']) + len(p['attrs']) + len(p['pseudos']) for p in parts)
+    tags = sum(1 for p in parts if p['tag'])
+    return (ids, cls, tags)
+
+
+def _match_simple(node, simple):
+    if simple['tag'] and node.tag != simple['tag']:
+        return False
+    if simple['id'] and node.attrs.get('id') != simple['id']:
+        return False
+    classes = node.classes()
+    for cls in simple['classes']:
+        if cls not in classes:
+            return False
+    for name, val in simple['attrs']:
+        actual = node.attrs.get(name)
+        if actual is None:
+            return False
+        if val is not None and str(actual) != val:
+            return False
+    pos, is_last = node.sibling_position()
+    for pseudo in simple['pseudos']:
+        if pseudo.startswith('nth-child'):
+            arg = pseudo[len('nth-child'):].strip('() ')
+            if arg == 'even':
+                if pos % 2:
+                    return False
+            elif arg == 'odd':
+                if not pos % 2:
+                    return False
+            else:
+                return False  # unsupported functional form: skip, do not over-match
+        elif pseudo == 'first-child':
+            if pos != 1:
+                return False
+        elif pseudo == 'last-child':
+            if not is_last:
+                return False
+        elif pseudo.startswith(('before', 'after', 'first-line', 'first-letter',
+                                'selection', 'marker', 'placeholder')):
+            return False  # generated content is not in the DOM
+        # other pseudos (:hover, :root ...) are ignored = treated as match
+    return True
+
+
+def _match_selector(node, parts):
+    if not _match_simple(node, parts[-1]):
+        return False
+    ancestor = node.parent
+    for part in reversed(parts[:-1]):
+        found = False
+        while ancestor is not None and ancestor.tag != 'root':
+            if _match_simple(ancestor, part):
+                found = True
+                ancestor = ancestor.parent
+                break
+            ancestor = ancestor.parent
+        if not found:
+            return False
+    return True
+
+
+def _collect_css_rules(css_text):
+    """Parse raw CSS into (parts, specificity, important_decls, normal_decls, order)."""
+    rules = []
+    order = 0
+    css_text = re.sub(r'/\*.*?\*/', '', css_text or '', flags=re.S)
+    for chunk in css_text.split('}'):
+        if '{' not in chunk:
+            continue
+        selectors_raw, _, decls_raw = chunk.partition('{')
+        if '@' in selectors_raw:
+            continue  # @media / @font-face / @import
+        decls = {}
+        for part in _split_declarations(decls_raw):
+            if ':' not in part:
+                continue
+            name, _, value = part.partition(':')
+            name, value = name.strip().lower(), value.strip()
+            if not name or not value or name.startswith('*'):
+                continue
+            important = bool(re.search(r'!important\s*$', value, re.I))
+            value = re.sub(r'\s*!important\s*$', '', value, flags=re.I).strip()
+            if value:
+                decls[name] = (value, important)
+        if not decls:
+            continue
+        for selector in selectors_raw.split(','):
+            parts = _parse_selector(selector)
+            if parts:
+                rules.append((parts, _selector_specificity(parts), decls, order))
+                order += 1
+    return rules
+
+
+def _apply_css_cascade(root):
+    """Merge matching <style> rules into every node's style (inline wins)."""
+    css_texts = []
+    for style_node in root.find_all({'style'}):
+        css_texts.append(style_node.get_text())
+    if not css_texts:
+        return
+    rules = []
+    for css in css_texts:
+        rules.extend(_collect_css_rules(css))
+    if not rules:
+        return
+
+    def _apply_to(node):
+        merged, important = {}, {}
+        for parts, spec, decls, order in rules:
+            if _match_selector(node, parts):
+                for name, (value, imp) in decls.items():
+                    target = important if imp else merged
+                    key = (spec, order)
+                    if name not in target or key >= target[name][0]:
+                        target[name] = (key, value)
+        computed = {n: v for n, (_k, v) in merged.items()}
+        computed.update({n: v for n, (_k, v) in important.items()})
+        computed.update(node.style)  # inline style attribute wins
+        node.style = computed
+
+    # full-tree application via parent pointers (nth-child resolves its own
+    # sibling position, so no ancestor bookkeeping is needed here)
+    def apply_all(node):
+        if not isinstance(node, Node):
+            return
+        _apply_to(node)
+        for child in node.children:
+            apply_all(child)
+
+    apply_all(root)
 
 
 def _parse_color(value):
@@ -193,7 +394,7 @@ _SKIP_TAGS = {'style', 'script', 'noscript', 'head', 'meta', 'link', 'title'}
 
 
 class Node:
-    __slots__ = ('tag', 'attrs', 'style', 'children', 'text')
+    __slots__ = ('tag', 'attrs', 'style', 'children', 'text', 'parent')
 
     def __init__(self, tag, attrs=None):
         self.tag = tag
@@ -201,9 +402,23 @@ class Node:
         self.style = _parse_style(self.attrs.get('style', ''))
         self.children = []
         self.text = ''
+        self.parent = None
 
     def classes(self):
         return set(str(self.attrs.get('class', '')).split())
+
+    def sibling_position(self):
+        """1-based element index among siblings + whether it is the last one."""
+        parent = self.parent
+        if parent is None:
+            return 1, True
+        idx, total = 0, 0
+        for child in parent.children:
+            if isinstance(child, Node):
+                total += 1
+                if child is self:
+                    idx = total
+        return idx or 1, (idx == total)
 
     def get_text(self):
         parts = [self.text]
@@ -238,6 +453,7 @@ class _TreeBuilder(HTMLParser):
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
         node = Node(tag, attrs)
+        node.parent = self._stack[-1]
         self._stack[-1].children.append(node)
         if tag not in self.VOID:
             self._stack.append(node)
@@ -264,6 +480,10 @@ def _parse_html(html):
     builder = _TreeBuilder()
     try:
         builder.feed(str(html or ''))
+    except Exception:
+        pass
+    try:
+        _apply_css_cascade(builder.root)
     except Exception:
         pass
     return builder.root
@@ -834,8 +1054,9 @@ class ImageBlock(Block):
 
 
 class TableBlock(Block):
-    def __init__(self, node):
+    def __init__(self, node, rtl=True):
         self.node = node
+        self.rtl = rtl
 
     def _grid(self):
         rows = []
@@ -915,7 +1136,10 @@ class TableBlock(Block):
             except Exception:
                 pass
             for c in range(ncols):
-                node = grid[r][c]
+                # PowerPoint tables lay out left-to-right while an RTL HTML
+                # table starts at the right: mirror the column order.
+                src_c = (ncols - 1 - c) if self.rtl else c
+                node = grid[r][src_c]
                 cell = table.cell(r, c)
                 try:
                     cell.margin_top = _px_to_emu(3)
@@ -1011,9 +1235,10 @@ class CardBlock(Block):
 
 
 class ColumnsBlock(Block):
-    def __init__(self, columns):
-        # columns: list of list[Block]
+    def __init__(self, columns, rtl=True):
+        # columns: list of list[Block] in DOM order
         self.columns = columns
+        self.rtl = rtl
 
     def estimate(self, width_px, ctx):
         n = max(1, len(self.columns))
@@ -1028,9 +1253,11 @@ class ColumnsBlock(Block):
         cw = (width_px - gap * (n - 1)) / n
         heights = []
         for i, col in enumerate(self.columns):
+            # In RTL the first DOM column sits at the right.
+            x = left_px + ((n - 1 - i) if self.rtl else i) * (cw + gap)
             y = top_px
             for b in col:
-                used = b.render(slide, shapes, left_px + i * (cw + gap), y, cw,
+                used = b.render(slide, shapes, x, y, cw,
                                 ctx, max(20.0, max_h_px - (y - top_px)))
                 y += used + 6.0
             heights.append(y - top_px)
@@ -1071,7 +1298,116 @@ class RuleBlock(Block):
 _HEADING_SIZES = {'h1': 26.0, 'h2': 23.0, 'h3': 19.0, 'h4': 16.0}
 
 
-def _node_to_blocks(node, ctx):
+def _node_dir(node, parent_rtl=True):
+    """Effective base direction of a node (dir attr or CSS direction)."""
+    direct = str(node.attrs.get('dir', '') or '').strip().lower()
+    if direct == 'rtl':
+        return True
+    if direct == 'ltr':
+        return False
+    css = str(node.style.get('direction', '') or '').strip().lower()
+    if css == 'rtl':
+        return True
+    if css == 'ltr':
+        return False
+    return parent_rtl
+
+
+_ARABIC_RE = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]')
+
+
+def _serialize_svg(node):
+    """Serialize an svg Node subtree back to an SVG document string."""
+    import html as _html
+
+    def esc_attr(value):
+        return _html.escape(str(value), quote=True)
+
+    def walk(n):
+        if isinstance(n, str):
+            return _html.escape(n)
+        if not isinstance(n, Node):
+            return ''
+        attrs = ''.join(f' {k}="{esc_attr(v)}"' for k, v in n.attrs.items())
+        inner = n.text + ''.join(walk(c) for c in n.children)
+        if not inner and n.tag.lower() not in ('text', 'tspan', 'title', 'desc'):
+            return f'<{n.tag}{attrs}/>'
+        return f'<{n.tag}{attrs}>{inner}</{n.tag}>'
+
+    svg = walk(node)
+    if 'xmlns' not in svg[:200]:
+        svg = svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"', 1)
+    return svg
+
+
+def _rasterize_svg(node, scale=2.0):
+    """Render an SVG node to PNG bytes. Returns None when the SVG carries
+    Arabic text (MuPDF cannot shape it — those stay editable text instead)."""
+    try:
+        if _ARABIC_RE.search(node.get_text() or ''):
+            return None
+        svg = _serialize_svg(node)
+        import fitz
+        doc = fitz.open(stream=svg.encode('utf-8'), filetype='svg')
+        if not len(doc):
+            return None
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(scale, scale))
+        if not pix.width or not pix.height:
+            return None
+        return pix.tobytes('png')
+    except Exception:
+        return None
+
+
+class RawImageBlock(Block):
+    """Picture from already-loaded bytes (e.g. a rasterized chart)."""
+
+    def __init__(self, data, width_px=None, height_px=None):
+        self.data = data
+        self.width_px = width_px
+        self.height_px = height_px
+
+    def estimate(self, width_px, ctx):
+        if not self.data:
+            return 0.0
+        iw, ih = _image_size(self.data)
+        w = self.width_px or width_px
+        w = min(w, width_px)
+        h = self.height_px or (w * ih / iw if iw and ih else w * 0.5625)
+        return min(h, 460.0)
+
+    def render(self, slide, shapes, left_px, top_px, width_px, ctx, max_h_px):
+        if not self.data:
+            return 0.0
+        iw, ih = _image_size(self.data)
+        w = min(self.width_px or width_px, width_px)
+        h = self.height_px or (w * ih / iw if iw and ih else w * 0.5625)
+        h = min(h, max(30.0, max_h_px))
+        if iw and ih and h < (w * ih / iw) - 1:
+            w = h * iw / ih
+        try:
+            shapes.add_picture(BytesIO(self.data), _px_to_emu(left_px),
+                               _px_to_emu(top_px), _px_to_emu(w), _px_to_emu(h))
+        except Exception:
+            return 0.0
+        return h
+
+
+def _svg_text_fallback(node):
+    texts = []
+    for t in node.find_all({'text', 'tspan'}):
+        val = _strip_icons(t.get_text()).strip()
+        if val:
+            texts.append(val)
+    blocks = []
+    for val in texts[:12]:
+        n = Node('p', {})
+        n.children = [val]
+        blocks.append(TextBlock(n, 12.0, space_after=3.0))
+    return blocks
+
+
+def _node_to_blocks(node, ctx, rtl=True):
     """Convert a flow node into a list of Blocks."""
     if not isinstance(node, Node) or _is_hidden(node):
         return []
@@ -1081,6 +1417,7 @@ def _node_to_blocks(node, ctx):
         return []
 
     tag = node.tag
+    rtl = _node_dir(node, rtl)
 
     if tag in ('h1', 'h2', 'h3', 'h4'):
         size = _parse_font_size(node.style.get('font-size'), _HEADING_SIZES[tag])
@@ -1110,7 +1447,7 @@ def _node_to_blocks(node, ctx):
         return [ListBlock(Node('ul', {}), 13.0, None)]
 
     if tag == 'table':
-        block = TableBlock(node)
+        block = TableBlock(node, rtl=rtl)
         grid, _ = block._grid()
         if not grid:
             return []
@@ -1128,22 +1465,12 @@ def _node_to_blocks(node, ctx):
                           or _parse_color(node.style.get('color')))]
 
     if tag == 'svg':
-        texts = []
-        for t in node.find_all({'text', 'tspan'}):
-            val = _strip_icons(t.get_text()).strip()
-            if val:
-                texts.append(val)
-        if not texts:
-            return []
-        ghost = Node('div', {})
-        ghost.children = list(texts)
-        size = 12.0
-        blocks = []
-        for val in texts[:12]:
-            n = Node('p', {})
-            n.children = [val]
-            blocks.append(TextBlock(n, size, space_after=3.0))
-        return blocks
+        png = _rasterize_svg(node)
+        if png:
+            w = _parse_px(node.attrs.get('width'), 0) or _parse_px(node.style.get('width'), 0)
+            h = _parse_px(node.attrs.get('height'), 0) or _parse_px(node.style.get('height'), 0)
+            return [RawImageBlock(png, width_px=w or None, height_px=h or None)]
+        return _svg_text_fallback(node)
 
     if tag == 'br':
         return [SpacerBlock(6.0)]
@@ -1162,7 +1489,7 @@ def _node_to_blocks(node, ctx):
     children_blocks = []
     for child in node.children:
         if isinstance(child, Node):
-            children_blocks.extend(_node_to_blocks(child, ctx))
+            children_blocks.extend(_node_to_blocks(child, ctx, rtl))
         elif isinstance(child, str) and child.strip():
             ghost = Node('span', {})
             ghost.children = [child]
@@ -1180,11 +1507,11 @@ def _node_to_blocks(node, ctx):
         if len(kids) >= 2:
             cols = []
             for kid in kids:
-                sub = _node_to_blocks(kid, ctx)
+                sub = _node_to_blocks(kid, ctx, rtl)
                 if sub:
                     cols.append(sub)
             if len(cols) >= 2:
-                return [ColumnsBlock(cols)]
+                return [ColumnsBlock(cols, rtl=rtl)]
         # fall through to stacked rendering
 
     # Cards: background color / border / radius -> grouped shape
@@ -1231,6 +1558,20 @@ def _header_title(header):
     h = header.find_all({'h1', 'h2', 'h3'})
     if h:
         return _strip_icons(h[0].get_text()).strip()
+    # Canonical chrome carries the title in a bold 16px span, not a heading.
+    for node in header.find_all({'span', 'div', 'p'}):
+        if _is_hidden(node):
+            continue
+        try:
+            weight = str(node.style.get('font-weight', '')).lower()
+            bold = weight in ('bold', '700', '800', '900') or (
+                weight.isdigit() and int(weight) >= 700)
+        except Exception:
+            bold = False
+        size = _parse_font_size(node.style.get('font-size'), 0)
+        text = _strip_icons(node.get_text()).strip()
+        if bold and size >= 14 and text and len(text) <= 160:
+            return text
     return _strip_icons(header.get_text()).strip()[:120]
 
 
@@ -1241,33 +1582,98 @@ def _header_logos(header):
             if img.attrs.get('src') and '##' not in img.attrs.get('src', '')][:3]
 
 
+def _header_accent(header, branding):
+    """Accent-bar color used in the header (defaults to branding accent)."""
+    if header is not None:
+        for node in header.find_all({'span', 'div'}):
+            w = _parse_px(node.style.get('width'), 0)
+            h = _parse_px(node.style.get('height'), 0)
+            if 1 <= w <= 8 and h >= 16:
+                color = _parse_color(node.style.get('background-color', '')
+                                     or node.style.get('background', ''))
+                if color is not None:
+                    return color
+    try:
+        return _hex_to_rgb(normalize_hex_color(
+            (branding or {}).get('accent_color'), '#c4a35a'))
+    except Exception:
+        return RGBColor(0xC4, 0xA3, 0x5A)
+
+
+def _footer_parts(footer, project_name, counter):
+    """Extract (project, middle, counter) texts from a footer node."""
+    project, middle = project_name, ''
+    if footer is not None:
+        spans = [n for n in footer.find_all({'span', 'div'})
+                 if not _is_hidden(n) and _strip_icons(n.get_text()).strip()]
+        counter_node = None
+        for n in footer.find_all({'span', 'div'}):
+            if n.attrs.get('data-slide-counter') is not None:
+                counter_node = n
+                break
+        texts = []
+        for n in spans:
+            if n is counter_node:
+                continue
+            # skip wrappers that merely contain the other spans
+            t = _strip_icons(n.get_text()).strip()
+            if t and all(t != _strip_icons(o.get_text()).strip() for o in spans if o is not n):
+                texts.append(t)
+            elif t and n.tag == 'span':
+                texts.append(t)
+        # de-duplicate while keeping order, drop counter-looking strings
+        seen = []
+        for t in texts:
+            if t == counter or re.fullmatch(r'[\d\s—\-–/]+', t):
+                continue
+            if t not in seen:
+                seen.append(t)
+        if seen:
+            project = seen[0]
+        if len(seen) > 1:
+            middle = seen[1][:140]
+        if counter_node is not None:
+            found = _strip_icons(counter_node.get_text()).strip()
+            if found:
+                counter = found
+    return project, middle, counter
+
+
+def _footer_colors(branding, primary):
+    try:
+        primary_hex = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+        secondary = (branding or {}).get('secondary_color')
+        bg_hex = dark_surface_color(primary_hex, secondary)
+        bg = _hex_to_rgb(bg_hex)
+    except Exception:
+        bg = RGBColor(0x1F, 0x2A, 0x37)
+        bg_hex = '#1f2a37'
+    try:
+        fg = _hex_to_rgb(readable_text_color('#ffffff', bg_hex, ('#0f172a',)))
+    except Exception:
+        fg = RGBColor(0xFF, 0xFF, 0xFF)
+    try:
+        accent_hex = normalize_hex_color((branding or {}).get('accent_color'), '#c4a35a')
+        accent = _hex_to_rgb(readable_text_color(accent_hex, bg_hex, ('#ffffff',)))
+    except Exception:
+        accent = fg
+    return bg, fg, accent
+
+
 def _render_header_band(slide, shapes, header, title, ctx, primary, top_px=0.0):
-    height_px = 64.0
+    height_px = 56.0
     band = shapes.add_shape(MSO_SHAPE.RECTANGLE, _px_to_emu(0), _px_to_emu(top_px),
                             _px_to_emu(SLIDE_W_PX), _px_to_emu(height_px))
     _set_shape_fill(band, RGBColor(0xFF, 0xFF, 0xFF))
     _no_line(band)
-    # Title (right side, RTL)
-    text = _strip_icons(title).strip()
-    if text:
-        box = shapes.add_textbox(_px_to_emu(150), _px_to_emu(top_px + 10),
-                                 _px_to_emu(SLIDE_W_PX - 200), _px_to_emu(46))
-        try:
-            box.text_frame.word_wrap = True
-            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-        except Exception:
-            pass
-        ghost = Node('span', {})
-        ghost.children = [text]
-        _add_paragraph(box.text_frame, [(text, {'bold': True, 'italic': False,
-                                                'size_px': None, 'color': None,
-                                                'link': None})],
-                       align=PP_ALIGN.RIGHT, first=True, default_size_px=20.0,
-                       default_color=primary, default_bold=True,
-                       font_name=ctx.font_name)
-        _no_line(box)
-    # Logos (left side)
-    x = 28.0
+    # 2px primary rule under the header, like the site chrome.
+    rule = shapes.add_shape(MSO_SHAPE.RECTANGLE, _px_to_emu(0),
+                            _px_to_emu(top_px + height_px - 2),
+                            _px_to_emu(SLIDE_W_PX), _px_to_emu(2))
+    _set_shape_fill(rule, primary)
+    _no_line(rule)
+    # Logos (left side, LTR order like the site header)
+    x = 24.0
     for src in _header_logos(header):
         data = _image_bytes(src, ctx.tenant_id)
         if not data:
@@ -1275,52 +1681,95 @@ def _render_header_band(slide, shapes, header, title, ctx, primary, top_px=0.0):
         iw, ih = _image_size(data)
         h = 40.0
         w = h * iw / ih if iw and ih else 90.0
+        w = min(w, 122.0)
         try:
-            shapes.add_picture(BytesIO(data), _px_to_emu(x), _px_to_emu(top_px + 12),
+            shapes.add_picture(BytesIO(data), _px_to_emu(x), _px_to_emu(top_px + 8),
                                _px_to_emu(w), _px_to_emu(h))
         except Exception:
             continue
-        x += w + 14.0
-        if x > 300:
+        x += w + 10.0
+        if x > 320:
             break
+    # Accent bar + title
+    text = _strip_icons(title).strip()
+    if _header_logos(header):
+        bar = shapes.add_shape(MSO_SHAPE.RECTANGLE, _px_to_emu(x),
+                               _px_to_emu(top_px + 14), _px_to_emu(3), _px_to_emu(28))
+        _set_shape_fill(bar, _header_accent(header, ctx.branding))
+        _no_line(bar)
+        x += 12.0
+    if text:
+        box = shapes.add_textbox(_px_to_emu(x), _px_to_emu(top_px + 8),
+                                 _px_to_emu(max(200.0, SLIDE_W_PX - x - 24)),
+                                 _px_to_emu(42))
+        try:
+            box.text_frame.word_wrap = True
+            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        except Exception:
+            pass
+        _add_paragraph(box.text_frame, [(text, {'bold': True, 'italic': False,
+                                                'size_px': None, 'color': None,
+                                                'link': None})],
+                       align=PP_ALIGN.RIGHT, first=True, default_size_px=16.0,
+                       default_color=primary, default_bold=True,
+                       font_name=ctx.font_name)
+        _no_line(box)
     return height_px
 
 
 def _render_footer_band(slide, shapes, footer, project_name, counter, ctx, bottom_px=720.0):
-    height_px = 40.0
+    height_px = 36.0
     top_px = bottom_px - height_px
+    bg, fg, accent = _footer_colors(ctx.branding, ctx.primary)
+    project, middle, counter = _footer_parts(footer, project_name, counter)
     band = shapes.add_shape(MSO_SHAPE.RECTANGLE, _px_to_emu(0), _px_to_emu(top_px),
                             _px_to_emu(SLIDE_W_PX), _px_to_emu(height_px))
-    _set_shape_fill(band, RGBColor(0x1F, 0x2A, 0x37))
+    _set_shape_fill(band, bg)
     _no_line(band)
     # Project name (right)
-    if project_name:
-        box = shapes.add_textbox(_px_to_emu(620), _px_to_emu(top_px + 6),
-                                 _px_to_emu(SLIDE_W_PX - 660), _px_to_emu(28))
+    if project:
+        box = shapes.add_textbox(_px_to_emu(640), _px_to_emu(top_px + 5),
+                                 _px_to_emu(SLIDE_W_PX - 664), _px_to_emu(26))
         try:
             box.text_frame.word_wrap = True
+            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         except Exception:
             pass
-        _add_paragraph(box.text_frame, [(project_name, {'bold': False, 'italic': False,
-                                                        'size_px': None, 'color': None,
-                                                        'link': None})],
+        _add_paragraph(box.text_frame, [(project, {'bold': True, 'italic': False,
+                                                   'size_px': None, 'color': None,
+                                                   'link': None})],
                        align=PP_ALIGN.RIGHT, first=True, default_size_px=12.0,
-                       default_color=RGBColor(0xFF, 0xFF, 0xFF),
+                       default_color=fg, default_bold=True,
                        font_name=ctx.font_name)
+        _no_line(box)
+    # Middle description (center)
+    if middle:
+        box = shapes.add_textbox(_px_to_emu(300), _px_to_emu(top_px + 7),
+                                 _px_to_emu(330), _px_to_emu(22))
+        try:
+            box.text_frame.word_wrap = True
+            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        except Exception:
+            pass
+        _add_paragraph(box.text_frame, [(middle, {'bold': False, 'italic': False,
+                                                  'size_px': None, 'color': None,
+                                                  'link': None})],
+                       align=PP_ALIGN.CENTER, first=True, default_size_px=10.0,
+                       default_color=fg, font_name=ctx.font_name)
         _no_line(box)
     # Counter (left, LTR)
     if counter:
-        box = shapes.add_textbox(_px_to_emu(40), _px_to_emu(top_px + 6),
-                                 _px_to_emu(220), _px_to_emu(28))
+        box = shapes.add_textbox(_px_to_emu(24), _px_to_emu(top_px + 5),
+                                 _px_to_emu(180), _px_to_emu(26))
         try:
             box.text_frame.word_wrap = True
         except Exception:
             pass
-        _add_paragraph(box.text_frame, [(counter, {'bold': False, 'italic': False,
+        _add_paragraph(box.text_frame, [(counter, {'bold': True, 'italic': False,
                                                    'size_px': None, 'color': None,
                                                    'link': None})],
-                       align=PP_ALIGN.LEFT, first=True, default_size_px=11.0,
-                       default_color=RGBColor(0xFF, 0xFF, 0xFF),
+                       align=PP_ALIGN.LEFT, first=True, default_size_px=12.0,
+                       default_color=accent, default_bold=True,
                        font_name=ctx.font_name)
         _no_line(box)
     return height_px
@@ -1585,10 +2034,10 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
         _render_footer_band(slide, shapes, footer, project_label, counter, ctx,
                             bottom_px=SLIDE_H_PX)
 
-        content_top = 84.0
-        content_bottom = SLIDE_H_PX - 58.0
-        content_left = 48.0
-        content_w = SLIDE_W_PX - 96.0
+        content_top = 80.0
+        content_bottom = SLIDE_H_PX - 50.0
+        content_left = 36.0
+        content_w = SLIDE_W_PX - 72.0
 
         blocks = []
         for kid in body_kids:
