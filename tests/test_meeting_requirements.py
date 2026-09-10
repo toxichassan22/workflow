@@ -10254,6 +10254,29 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertFalse(app_mod._is_watermark_visible(carried_hidden))
         self.assertIn('translate(25px, 10px)', carried_hidden)
 
+    def test_watermark_reapply_repoints_stale_source_without_losing_geometry(self):
+        app_mod = self.application_module
+        old_src = f'/tenant-assets/{self.tenant_a}/logo'
+        new_src = f'/tenant-assets/{self.tenant_a}/watermark'
+        base = '<div class="slide"><h1>محتوى</h1></div>'
+        old_layer = app_mod._apply_slide_watermark(base, old_src, opacity=0.2, width_px=600)
+        old_layer = old_layer.replace('width:600px;', 'width:600px;transform:translate(40px, 30px);')
+        refreshed = app_mod._apply_slide_watermark(old_layer, new_src)
+        self.assertIn(new_src, refreshed)
+        self.assertNotIn(old_src, refreshed)
+        self.assertIn('translate(40px, 30px)', refreshed)
+        self.assertIn('opacity:0.2', refreshed)
+        self.assertEqual(refreshed.count('data-slide-watermark'), 1)
+
+        hidden_old = app_mod._set_slide_watermark_visible(old_layer, False)
+        reshown = app_mod._set_slide_watermark_visible(hidden_old, True, new_src)
+        self.assertTrue(app_mod._is_watermark_visible(reshown))
+        self.assertIn(new_src, reshown)
+        self.assertIn('translate(40px, 30px)', reshown)
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('function refreshWatermarkSrc(html, newUrl)', index_source)
+
     def test_watermark_deterministic_verbs_scope_and_no_size_up_on_show(self):
         app_mod = self.application_module
         slides = [

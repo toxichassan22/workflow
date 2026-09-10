@@ -3876,20 +3876,52 @@ def _is_white_or_light_slide(slide, minimum_luminance=0.45):
 WATERMARK_Z_INDEX = 50
 
 
+def _watermark_src_key(url):
+    """Normalized watermark src for staleness checks (ignores cache-busters)."""
+    return str(url or '').split('?', 1)[0].split('#', 1)[0].strip()
+
+
+def _refresh_watermark_source(html, new_url):
+    """Point an existing watermark layer at the current company file.
+
+    Only the ``<img>`` src is swapped; position, size, opacity and hidden
+    state are preserved. Returns the HTML unchanged when there is no layer
+    or when it already points at the current file.
+    """
+    if not html or not new_url:
+        return html
+    spec = _watermark_spec_from_html(html)
+    if not spec or not spec.get('markup'):
+        return html
+    if _watermark_src_key(spec.get('logo_url')) == _watermark_src_key(new_url):
+        return html
+    markup = spec['markup']
+    refreshed, count = re.subn(
+        r'(<img\b[^>]*\bsrc\s*=\s*["\'])[^"\']+(["\'])',
+        lambda match: match.group(1) + new_url + match.group(2),
+        markup, count=1, flags=re.IGNORECASE,
+    )
+    if not count:
+        return html
+    return html.replace(markup, refreshed, 1)
+
+
 def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
     """Inject an elegant watermark overlay on top of a slide's content layers.
 
     A single centered layer only. Re-applying never duplicates the layer and
-    never resets a user move/resize/opacity: a visible watermark is kept as
-    is, a hidden one is unhidden with its saved geometry intact.
+    never resets a user move/resize/opacity: a visible watermark keeps its
+    geometry and is only re-pointed at the current company file, a hidden
+    one is unhidden with its saved geometry intact.
     """
     if not html:
         return html
     existing = _watermark_spec_from_html(html)
     if existing:
+        refreshed = _refresh_watermark_source(html, logo_url)
         if existing.get('visible', True):
-            return html
-        return _set_slide_watermark_visible(html, True, logo_url)
+            return refreshed
+        return _set_slide_watermark_visible(refreshed, True, logo_url)
     try:
         opacity_value = float(opacity)
     except (TypeError, ValueError):
@@ -4030,7 +4062,15 @@ def _set_slide_watermark_visible(html, visible, logo_url=None):
         if not visible or not logo_url:
             return html
         return _apply_slide_watermark(html, logo_url)
+    # Showing an existing layer also re-points it at the current company
+    # file, so a replaced upload appears in place of the old mark without
+    # losing the saved position/size/opacity.
+    if visible and logo_url:
+        html = _refresh_watermark_source(html, logo_url)
+        spec = _watermark_spec_from_html(html) or spec
     if bool(spec.get('visible', True)) == bool(visible):
+        # Already in the requested state, but the src refresh above (if any)
+        # is still returned so a replaced file appears without another toggle.
         return html
     markup = spec.get('markup', '')
     if not markup:

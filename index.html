@@ -22816,6 +22816,21 @@
       return tag + rest;
     }
 
+    function watermarkSrcKey(url) {
+      return String(url || '').split('?')[0].split('#')[0].trim();
+    }
+
+    function refreshWatermarkSrc(html, newUrl) {
+      const markup = watermarkMarkupFromHtml(html);
+      if (!markup || !newUrl) return html;
+      const srcMatch = markup.match(/<img\b[^>]*\bsrc\s*=\s*["']([^"']*)["']/i);
+      const current = srcMatch ? srcMatch[1] : '';
+      if (watermarkSrcKey(current) === watermarkSrcKey(newUrl)) return html;
+      const refreshed = markup.replace(/(<img\b[^>]*\bsrc\s*=\s*["'])[^"']*(["'])/i,
+        '$1' + newUrl.replace(/\$/g, '$$$$') + '$2');
+      return String(html).replace(markup, refreshed);
+    }
+
     function setHtmlWatermarkVisible(html, visible) {
       const markup = watermarkMarkupFromHtml(html);
       if (!markup) return html;
@@ -22866,10 +22881,30 @@
       if (!session || !slide || !slide.html) return false;
       const markup = watermarkMarkupFromHtml(slide.html);
       const shown = isWatermarkVisible(slide.html);
-      if (visible && !(tenantBranding && tenantBranding.watermark_path) && !markup) {
+      const currentUrl = String((tenantBranding && tenantBranding.watermark_path) || '').trim();
+      if (visible && !currentUrl && !markup) {
         toast('لم تُرفع علامة مائية للشركة');
         refreshSlideEditToolbar(index);
         return false;
+      }
+      // Showing re-points the layer at the current company file, so a
+      // replaced upload appears in place of the old mark without losing the
+      // saved position/size/opacity.
+      if (visible && markup && currentUrl) {
+        const refreshed = refreshWatermarkSrc(slide.html, currentUrl);
+        if (refreshed !== slide.html) {
+          if (!pushSlideEditHistory(index)) return false;
+          slide.html = setHtmlWatermarkVisible(refreshed, true);
+          slide._designer_keep_html = true;
+          slide.is_custom = true;
+          session.sel = null;
+          tenantProjectData.tenantSlidesData = tenantSlidesData;
+          touchSlideEditSession(index);
+          triggerAutoSaveDraft();
+          refreshSingleSlideCard(index);
+          toast('تم إظهار العلامة المائية');
+          return true;
+        }
       }
       if (shown === !!visible) return true;
       if (!pushSlideEditHistory(index)) return false;
