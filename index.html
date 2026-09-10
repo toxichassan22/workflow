@@ -7116,6 +7116,10 @@
         progress: 5,
         message: String(message || 'جاري تنفيذ التعديل...')
       };
+      document.querySelectorAll('[onclick*="sendTenantDesignerChat"]').forEach(button => {
+        button.dataset.designerWasDisabled = String(button.disabled);
+        button.disabled = true;
+      });
       updateDesignerChatStatus();
     }
 
@@ -7131,6 +7135,10 @@
 
     function clearDesignerChatBusy() {
       tenantDesignerChatBusy = null;
+      document.querySelectorAll('[data-designer-was-disabled]').forEach(button => {
+        button.disabled = button.dataset.designerWasDisabled === 'true';
+        delete button.dataset.designerWasDisabled;
+      });
       const indicator = document.getElementById('tenantChatTypingIndicator');
       if (indicator) indicator.remove();
       updateDesignerChatStatus();
@@ -17520,27 +17528,42 @@
           badge.innerHTML = 'جاري الحفظ... ' + pct + '%';
         } : null;
 
+        // Both records receive the same immutable snapshot, not two different
+        // generations of the live workspace separated by an asynchronous save.
+        const snapshot = JSON.parse(JSON.stringify(data));
+        const savedPresentationId = tenantPresentationId;
+        const savedPresentationTitle = tenantPresentationTitle;
         const resp = await api('POST', '/api/project-draft',
-          { draftData: data, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' },
+          { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft' },
           false, { onProgress });
         if (resp.draftId) tenantProjectData.draftId = resp.draftId;
         if (resp.success) {
-          tenantDraftDirty = false;
-          if (syncPresentation && tenantPresentationId && tenantSlidesData && tenantSlidesData.length) {
+          if (syncPresentation && savedPresentationId && snapshot.tenantSlidesData.length) {
             try {
-              const presTitle = tenantPresentationTitle
-                || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
-              await api('PUT', '/api/presentations/' + tenantPresentationId, {
+              const presTitle = savedPresentationTitle
+                || snapshot.project_name || snapshot.projectName || 'عرض بدون عنوان';
+              const presResp = await api('PUT', '/api/presentations/' + savedPresentationId, {
                 title: presTitle,
-                projectData: tenantProjectData,
-                slidesData: tenantSlidesData,
-                slideCount: tenantSlidesData.length,
+                projectData: snapshot,
+                slidesData: snapshot.tenantSlidesData,
+                slideCount: snapshot.tenantSlidesData.length,
                 status: 'edited'
               });
+              if (!presResp?.success) throw new Error(presResp?.error || 'تعذر حفظ العرض');
             } catch (presErr) {
-              console.warn('Silent presentation sync error:', presErr);
+              console.error('[PRESENTATION SAVE]', presErr);
+              setDraftDirty(true);
+              tenantArchiveCache = null;
+              if (badge) {
+                badge.style.background = '#fee2e2';
+                badge.style.color = '#991b1b';
+                badge.textContent = 'المسودة محفوظة؛ تعذر حفظ العرض';
+              }
+              if (!silent) toast('حُفظت المسودة، لكن تعذر حفظ العرض: ' + (presErr?.message || presErr));
+              return false;
             }
           }
+          tenantDraftDirty = false;
           if (badge) {
             const timeStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
             badge.style.background = '#dcfce7';
@@ -24017,7 +24040,11 @@
       let data = null;
       try {
         data = await requestTenantDesignerChat(chatPayload, indicator);
-      } catch (error)
+      } catch (error) {
+        data = { success: false, error: error?.message || 'تعذر تنفيذ الطلب.' };
+      } finally {
+        clearDesignerChatBusy();
+      }
 
       const reply = data && data.data ? data.data : null;
       if (!data?.success || !reply) {

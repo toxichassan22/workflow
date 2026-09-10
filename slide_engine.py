@@ -10248,6 +10248,15 @@ def _strip_market_slide_media(html):
         protect_competitor_region, html, flags=re.IGNORECASE | re.DOTALL,
     )
 
+    # A requested watermark is presentation decoration, not market content.
+    # Protect its image by its containing element: the resolved URL need not
+    # contain the word logo and the image itself may carry no class.
+    html = re.sub(
+        r'<div\b(?=[^>]*(?:\bdata-slide-watermark\s*=\s*["\']true["\']|'
+        r'\bclass\s*=\s*["\'][^"\']*\bslide-watermark\b))[^>]*>.*?</div\s*>',
+        protect_competitor_region, html, flags=re.IGNORECASE | re.DOTALL,
+    )
+
     def keep_image(match):
         tag = match.group(0)
         lowered_tag = tag.lower()
@@ -10536,7 +10545,8 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item.get('is_custom') or
             item.get('keep_html') or
             item.get('custom_html') or
-            has_caption_in_html
+            has_caption_in_html or
+            re.search(r'\bdata-slide-watermark\s*=\s*["\']true["\']', str(item.get('html') or ''), re.IGNORECASE)
         )
         if keep_edited_html:
             item['_designer_keep_html'] = True
