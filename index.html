@@ -631,9 +631,15 @@
       outline-offset: 3px;
     }
 
-    /* Watermark layer: click-through in normal view, selectable while editing. */
+    /* Keep the full-slide watermark overlay click-through while editing; only
+       the visible logo receives pointer events for selection and dragging. */
     .slide-element-editing .slide-watermark,
     .slide-element-editing [data-slide-watermark="true"] {
+      pointer-events: none !important;
+    }
+
+    .slide-element-editing .slide-watermark > img,
+    .slide-element-editing [data-slide-watermark="true"] > img {
       pointer-events: auto !important;
       cursor: move;
     }

@@ -9802,6 +9802,17 @@ class MeetingRequirementsTests(unittest.TestCase):
                       '_strip_market_slide_media must not remove the watermark element')
         self.assertIn(logo_url, stripped)
 
+    def test_watermark_overlay_does_not_block_manual_slide_editing(self):
+        """Only the visible watermark logo may receive pointer events in edit mode."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        watermark_css = index_source.split(
+            '/* Keep the full-slide watermark overlay click-through while editing;', 1
+        )[1].split('.slide-resize-handle', 1)[0]
+        self.assertIn('pointer-events: none !important;', watermark_css)
+        self.assertIn('.slide-element-editing .slide-watermark > img,', watermark_css)
+        self.assertIn('[data-slide-watermark="true"] > img', watermark_css)
+        self.assertIn('pointer-events: auto !important;', watermark_css)
+
     def test_watermark_survives_renumber_presentation_slides(self):
         """renumber_presentation_slides must not strip the watermark from a slide."""
         engine = self.application_module.slide_engine

@@ -3847,9 +3847,9 @@ def _is_white_or_light_slide(slide, minimum_luminance=0.45):
 
 
 # The watermark always renders above slide content layers (opaque cards and
-# images used to bury it at z-index 0). It stays click-through via
-# pointer-events:none; in manual slide-edit mode the client re-enables
-# pointer events so the layer can be selected, dragged and re-stacked.
+# images used to bury it at z-index 0). Its full-slide overlay stays
+# click-through; in manual edit mode the client enables pointer events only on
+# the visible logo so it can be selected without blocking the slide beneath it.
 WATERMARK_Z_INDEX = 50
 
 
