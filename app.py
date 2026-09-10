@@ -3796,7 +3796,30 @@ def _is_white_or_light_slide(slide, minimum_luminance=0.45):
 WATERMARK_Z_INDEX = 50
 
 
-def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
+WATERMARK_INK_FILTERS = {
+    'dark': 'grayscale(100%) brightness(0)',
+    'light': 'grayscale(100%) brightness(0) invert(1)',
+    'legacy': 'grayscale(100%)',
+}
+
+
+def _watermark_ink_for_html(html):
+    """Pick a watermark ink readable on this slide without guessing photo brightness.
+
+    Flat measurable surfaces get a solid ink (dark on light slides, white on
+    dark slides) so white logo text stays visible instead of vanishing. Surfaces
+    carrying images keep the legacy grayscale compromise because a photo's
+    brightness is unknowable here.
+    """
+    text = str(html or '')
+    if re.search(r'url\s*\(', text, flags=re.IGNORECASE):
+        return 'legacy'
+    if _is_white_or_light_slide({'type': 'content', 'html': text}):
+        return 'dark'
+    return 'light'
+
+
+def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480, ink='auto'):
     """Inject an elegant watermark overlay on top of a slide's content layers."""
     if not html:
         return html
@@ -3804,18 +3827,24 @@ def _apply_slide_watermark(html, logo_url, opacity=0.045, width_px=480):
         opacity_value = float(opacity)
     except (TypeError, ValueError):
         opacity_value = 0.045
-    opacity_value = min(0.25, max(0.01, opacity_value))
+    # Owner rule: an explicit user opacity is honored up to fully opaque (1.0).
+    # The subtle default (0.045) stays at the call sites that omit it.
+    opacity_value = min(1.0, max(0.01, opacity_value))
     try:
         width_value = int(width_px)
     except (TypeError, ValueError):
         width_value = 480
     width_value = min(900, max(200, width_value))
+    ink = str(ink or 'auto').strip().lower()
+    if ink not in WATERMARK_INK_FILTERS:
+        ink = _watermark_ink_for_html(html)
+    ink_filter = WATERMARK_INK_FILTERS[ink]
     cleaned = _remove_slide_watermark(html)
     watermark_markup = (
         '<div class="slide-watermark" data-slide-watermark="true" aria-hidden="true" '
         'style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
         f'pointer-events:none;z-index:{WATERMARK_Z_INDEX};opacity:{opacity_value};overflow:hidden;">'
-        f'<img src="{logo_url}" alt="" style="width:{width_value}px;max-width:50%;max-height:50%;object-fit:contain;filter:grayscale(100%);">'
+        f'<img src="{logo_url}" alt="" style="width:{width_value}px;max-width:50%;max-height:50%;object-fit:contain;filter:{ink_filter};">'
         '</div>'
     )
     # The overlay is absolutely positioned, so the slide root must establish
@@ -3859,7 +3888,7 @@ def _remove_slide_watermark(html):
 
 
 def _watermark_spec_from_html(html):
-    """Read the watermark overlay spec (logo, opacity, width) already on a slide."""
+    """Read the watermark overlay spec (logo, opacity, width, ink) already on a slide."""
     if not html:
         return None
     match = re.search(
@@ -3895,7 +3924,13 @@ def _watermark_spec_from_html(html):
     logo_url = logo_match.group(1).strip() if logo_match else ''
     if not logo_url:
         return None
-    return {'logo_url': logo_url, 'opacity': opacity, 'width_px': width}
+    ink = None
+    filter_match = re.search(r'filter\s*:\s*([^;]+)', inner, flags=re.IGNORECASE)
+    if filter_match:
+        filt = filter_match.group(1).lower().replace(' ', '')
+        if 'brightness(0)' in filt:
+            ink = 'light' if 'invert(1)' in filt else 'dark'
+    return {'logo_url': logo_url, 'opacity': opacity, 'width_px': width, 'ink': ink}
 
 
 def _carry_slide_watermark(source_html, output_html):
@@ -3909,9 +3944,12 @@ def _carry_slide_watermark(source_html, output_html):
     spec = _watermark_spec_from_html(source_html)
     if not spec:
         return output_html
+    # A legacy mark with no ink is re-resolved against the new surface, so an
+    # old grayscale watermark upgrades to a readable ink on regeneration.
+    ink = spec.get('ink') or _watermark_ink_for_html(output_html)
     return _apply_slide_watermark(
         output_html, spec['logo_url'],
-        opacity=spec['opacity'], width_px=spec['width_px'],
+        opacity=spec['opacity'], width_px=spec['width_px'], ink=ink,
     )
 
 
@@ -4767,7 +4805,7 @@ def api_designer_chat():
 
 الأدوات المتاحة:
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
-- apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true, "opacity":0.045, "width_px":480}} لإضافة علامة مائية لشعار الشركة في خلفية الشرائح — أرسل only_white=true فقط إذا ذكر المستخدم الشرائح البيضاء أو الفاتحة صراحة، وأرسل opacity حتى 0.12 مع width_px حتى 640 إذا طلب علامة أكبر أو أوضح
+- apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true, "opacity":0.045, "width_px":480}} لإضافة علامة مائية لشعار الشركة في خلفية الشرائح — أرسل only_white=true فقط إذا ذكر المستخدم الشرائح البيضاء أو الفاتحة صراحة، والافتراضي opacity=0.045 وwidth_px=480. إذا ذكر المستخدم نسبة أو قيمة شفافية صريحة (مثل 50%) فأرسلها كما هي حتى 1.0 ونفّذها فورًا دون اقتراح بديل، وإذا رفض اقتراحًا سابقًا أو كرر قيمة صريحة فلا تعِد طرح نفس السؤال بأداة ask. أرسل width_px حتى 640 إذا طلب علامة أكبر. الحبر تلقائي (داكن على السطح الفاتح وأبيض على الداكن) فلا ترسله إلا لتثبيت ink:"dark" أو ink:"light" صراحة
 - remove_watermark: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإزالة العلامة المائية من الشرائح
 - apply_image_descriptions: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإضافة أوصاف الصور المحفوظة بالفعل دون توليد صور أو اختراع وصف
 - insert_team_logo: params={{"target":"current|all|indexes", "indexes":[1-based], "team_index":1-based}} لإضافة شعار جهة فريق العمل المرفوع فعلياً
@@ -4935,7 +4973,10 @@ def api_designer_chat():
                             wm_width = int(params.get('width_px', 480))
                         except (TypeError, ValueError):
                             wm_width = 480
-                        new_html = _apply_slide_watermark(current_slide_html, company_logo_url, opacity=wm_opacity, width_px=wm_width)
+                        wm_ink = str(params.get('ink') or 'auto').strip().lower()
+                        if wm_ink not in WATERMARK_INK_FILTERS:
+                            wm_ink = _watermark_ink_for_html(current_slide_html)
+                        new_html = _apply_slide_watermark(current_slide_html, company_logo_url, opacity=wm_opacity, width_px=wm_width, ink=wm_ink)
                     slide['html'] = new_html
                     slide['_designer_keep_html'] = True
                     slide['is_custom'] = True

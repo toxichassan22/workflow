@@ -22130,6 +22130,14 @@
       return false;
     }
 
+    /* Watermark-aware target: geometry ops (frame/move/resize) use the logo img
+       itself, while overlay-level ops (opacity/layer/delete) walk back up via
+       watermarkOverlayOf(). */
+    function watermarkOverlayOf(node) {
+      if (!node || !node.closest) return null;
+      return node.closest('[data-slide-watermark="true"], .slide-watermark');
+    }
+
     function slideDragTarget(slide, source) {
       if (!slide || !source || source === slide) return null;
       if (source.closest && source.closest('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return null;
@@ -22144,7 +22152,12 @@
          click-through via pointer-events:none. */
       if (source.closest) {
         const watermark = source.closest('[data-slide-watermark="true"], .slide-watermark');
-        if (watermark && slide.contains(watermark)) return watermark;
+        if (watermark && slide.contains(watermark)) {
+          // The overlay is a full-slide inset:0 layer; selecting it stretched
+          // the edit frame over the whole slide. Handles must hug the logo img.
+          const logo = watermark.querySelector('img');
+          return (logo && watermark.contains(logo)) ? logo : watermark;
+        }
       }
       let node = source.nodeType === 1 ? source : source.parentElement;
       while (node && node !== slide) {
@@ -22219,8 +22232,12 @@
       if (!rawRoot) return;
       const rawTarget = findSlideRawTarget(rawRoot, target, path);
       if (!rawTarget || !rawTarget.parentElement) return;
+      // Deleting the logo must remove the whole watermark overlay,
+      // not leave an empty full-slide layer behind.
+      const deleteTarget = watermarkOverlayOf(rawTarget) || rawTarget;
+      if (!deleteTarget.parentElement) return;
       pushSlideEditHistory(index);
-      rawTarget.parentElement.removeChild(rawTarget);
+      deleteTarget.parentElement.removeChild(deleteTarget);
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
@@ -22261,7 +22278,10 @@
           removeDeleteBtn();
           commitSlideElementDelete(stage, index, target, path);
         });
-        target.appendChild(btn);
+        // A selected watermark target is the logo img itself (a void element),
+        // so the hover button docks on its overlay instead of throwing.
+        const btnHost = (target.tagName === 'IMG' && target.parentElement) ? target.parentElement : target;
+        btnHost.appendChild(btn);
         activeDeleteBtn = btn;
       });
       stage.addEventListener('mouseout', function handleSlideHoverOut(event) {
@@ -22803,7 +22823,9 @@
       if (hasSel) {
         const stage = card.querySelector('.tenant-slide-stage');
         const slide = stage ? stage.querySelector('.slide') : null;
-        const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+        let target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
+        // Watermark opacity lives on the overlay layer, not the logo img.
+        target = watermarkOverlayOf(target) || target;
         if (target) opacityPct = slideElementOpacityPct(target);
       }
       card.querySelectorAll('[data-slide-edit-opacity="range"]').forEach(inp => {
@@ -23014,6 +23036,13 @@
       const touchH = dir.indexOf('n') !== -1 || dir.indexOf('s') !== -1;
       if (!touchW && !touchH) return;
       slideElementDragActive = true;
+      // A hand-resized watermark logo owns its size: drop the 50% display caps
+      // before measuring, or the drag would start from the clamped box and the
+      // commit would shrink the stored width.
+      if (target.tagName === 'IMG' && watermarkOverlayOf(target)) {
+        target.style.maxWidth = 'none';
+        target.style.maxHeight = 'none';
+      }
       const measure = () => {
         const sRect = slide.getBoundingClientRect();
         const r = target.getBoundingClientRect();
@@ -23154,6 +23183,16 @@
       if (size && typeof size === 'object' && size.displayPromoted) {
         rawTarget.style.display = 'inline-block';
       }
+      // Persist the caps dropped at drag start, or the next reload would clamp
+      // the hand-picked watermark size back to 50% of the slide.
+      if (target.tagName === 'IMG' && watermarkOverlayOf(target)) {
+        target.style.maxWidth = 'none';
+        target.style.maxHeight = 'none';
+      }
+      if (rawTarget.tagName === 'IMG' && watermarkOverlayOf(rawTarget)) {
+        rawTarget.style.maxWidth = 'none';
+        rawTarget.style.maxHeight = 'none';
+      }
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
@@ -23243,7 +23282,7 @@
       const slide = stage ? stage.querySelector('.slide') : null;
       const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
       if (!target) return;
-      target.style.opacity = String(clamped / 100);
+      (watermarkOverlayOf(target) || target).style.opacity = String(clamped / 100);
       const card = document.getElementById('slide-card-' + index);
       const readout = card ? card.querySelector('[data-slide-edit-opacity-readout]') : null;
       if (readout) readout.textContent = clamped + '%';
@@ -23264,8 +23303,8 @@
       const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, session.sel.path);
       if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
       pushSlideEditHistory(index);
-      target.style.opacity = String(clamped / 100);
-      rawTarget.style.opacity = String(clamped / 100);
+      (watermarkOverlayOf(target) || target).style.opacity = String(clamped / 100);
+      (watermarkOverlayOf(rawTarget) || rawTarget).style.opacity = String(clamped / 100);
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
@@ -23385,12 +23424,15 @@
       const slide = stage ? stage.querySelector('.slide') : null;
       const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
       if (!target) return;
+      // Layer order belongs to the watermark overlay itself: re-stacking the
+      // logo img alone would do nothing visible inside its own layer.
+      const layerTarget = watermarkOverlayOf(target) || target;
       let current = 0;
       try {
-        const inline = parseInt(target.style.zIndex, 10);
+        const inline = parseInt(layerTarget.style.zIndex, 10);
         if (isFinite(inline)) current = inline;
         else {
-          const computed = parseInt(window.getComputedStyle(target).zIndex, 10);
+          const computed = parseInt(window.getComputedStyle(layerTarget).zIndex, 10);
           if (isFinite(computed)) current = computed;
         }
       } catch (err) {}
@@ -23402,10 +23444,11 @@
       const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, session.sel.path);
       if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
       pushSlideEditHistory(index);
-      if (!target.style.position || target.style.position === 'static') target.style.position = 'relative';
-      target.style.zIndex = String(next);
-      if (!rawTarget.style.position || rawTarget.style.position === 'static') rawTarget.style.position = 'relative';
-      rawTarget.style.zIndex = String(next);
+      const rawLayerTarget = watermarkOverlayOf(rawTarget) || rawTarget;
+      if (!layerTarget.style.position || layerTarget.style.position === 'static') layerTarget.style.position = 'relative';
+      layerTarget.style.zIndex = String(next);
+      if (!rawLayerTarget.style.position || rawLayerTarget.style.position === 'static') rawLayerTarget.style.position = 'relative';
+      rawLayerTarget.style.zIndex = String(next);
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
