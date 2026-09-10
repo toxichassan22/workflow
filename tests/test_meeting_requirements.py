@@ -7492,7 +7492,8 @@ class MeetingRequirementsTests(unittest.TestCase):
             branding = db.get_branding(self.tenant_a) or {}
         instruction = 'أضف بيانات الحدود الموثقة لكل اتجاه في موضعه الجغرافي الصحيح'
 
-        def run_edit(model_html, model_response='تمت الإضافة'):
+        def run_edit(model_html, model_response='تمت الإضافة', request_instruction=instruction,
+                     current_html=boundary_html):
             captured = []
             response = {'choices': [{'message': {'content': json.dumps({
                 'html': model_html, 'response': model_response,
@@ -7506,7 +7507,7 @@ class MeetingRequirementsTests(unittest.TestCase):
                     patch.object(module, 'call_zai_chat', side_effect=fake_chat):
                 module.g.tenant_id = self.tenant_a
                 return module._designer_edit_slide(
-                    boundary_html, 'مخطط اتجاهي لحدود الأرض', instruction, 8,
+                    current_html, 'مخطط اتجاهي لحدود الأرض', request_instruction, 8,
                     project_data, None, branding, tenant_id=self.tenant_a,
                     slide_type='content', total_slides=74,
                     content_source='land_boundary_diagram', skip_vision=True,
@@ -7516,22 +7517,148 @@ class MeetingRequirementsTests(unittest.TestCase):
         changed_html = boundary_html.replace(
             '109 م', '109 م<div>شارع الملك فهد</div>')
         (out_html, out_response), captured = run_edit(changed_html)
+        self.assertEqual(len(captured), 1)
         self.assertTrue(any('بيانات الحدود الموثقة' in prompt for prompt in captured))
         self.assertTrue(any('شارع الملك فهد' in prompt for prompt in captured))
         self.assertTrue(any('https://maps.google.com/?q=21.6001,39.1001' in prompt for prompt in captured))
         self.assertTrue(any('ملف بيانات المشروع الكامل' in prompt for prompt in captured))
         self.assertIn('شارع الملك فهد', out_html)
-        self.assertIn('تمت الإضافة', out_response)
+        self.assertIn('أحدث بيانات المشروع', out_response)
 
-        # An identical slide reported as success is retried, then honestly kept.
-        (kept_html, kept_response), _ = run_edit(boundary_html)
-        self.assertIn('تم الحفاظ على تصميم الشريحة', kept_response)
+        # An identical model reply no longer strands this system-built slide. The server rebuilds
+        # it from the latest linked project facts and reports only the verified change.
+        (rebuilt_html, rebuilt_response), rebuild_calls = run_edit(boundary_html)
+        self.assertEqual(len(rebuild_calls), 1)
+        for value in ('109', '98', '80.3', '59.5', 'شارع الملك فهد'):
+            self.assertIn(value, rebuilt_html)
+        self.assertIn('أحدث بيانات المشروع', rebuilt_response)
+        self.assertNotIn('تم الحفاظ على تصميم الشريحة', rebuilt_response)
 
-        # A reply that drops a documented length is rejected the same way.
+        # A model reply that drops a documented length is rejected, then repaired by the same
+        # deterministic path instead of being exposed as a successful mutation.
         dropped_html = boundary_html.replace('109 م', '')
         self.assertNotIn('109', dropped_html)
-        (_, dropped_response), _ = run_edit(dropped_html)
-        self.assertIn('تم الحفاظ على تصميم الشريحة', dropped_response)
+        (repaired_html, repaired_response), repair_calls = run_edit(dropped_html)
+        self.assertEqual(len(repair_calls), 1)
+        self.assertIn('109', repaired_html)
+        self.assertIn('شارع الملك فهد', repaired_html)
+        self.assertIn('أحدث بيانات المشروع', repaired_response)
+
+        # The exact saved project link is inserted by the server even when Sol returns the old
+        # system slide unchanged and claims that it completed the request.
+        maps_instruction = 'أضف رابط Google Maps الخاص بالمشروع إلى الشريحة'
+        (maps_html, maps_response), maps_calls = run_edit(
+            boundary_html,
+            model_response='تم الحفاظ على تصميم الشريحة لتعذر التعديل التلقائي عليها.',
+            request_instruction=maps_instruction,
+        )
+        self.assertEqual(len(maps_calls), 1)
+        self.assertIn('data-project-map-link="1"', maps_html)
+        self.assertIn(project_data['location_address'], maps_html)
+        self.assertIn('رابط Google Maps', maps_response)
+        self.assertNotIn('تم الحفاظ على تصميم الشريحة', maps_response)
+
+    def test_designer_chat_job_polling_is_recoverable_and_result_is_fetched_once(self):
+        module = self.application_module
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        job_id = 'designer-result-ready-job'
+        module._write_job('.designer_chat_jobs', self.tenant_a, job_id, {
+            'status': 'completed',
+            'success': True,
+            'progress': 100,
+            'data': {
+                'action': 'workspace_update',
+                'slidesData': [{'title': 'اختبار', 'html': '<div class="slide"></div>'}],
+            },
+        })
+
+        metadata_response = client.get(
+            '/api/designer-chat/jobs/' + job_id, headers=headers)
+        self.assertEqual(metadata_response.status_code, 200)
+        metadata = metadata_response.get_json()
+        self.assertNotIn('data', metadata)
+        self.assertTrue(metadata['resultReady'])
+        self.assertEqual(metadata['jobId'], job_id)
+        self.assertIn('heartbeatAt', metadata)
+
+        result_response = client.get(
+            '/api/designer-chat/jobs/' + job_id + '?includeResult=1', headers=headers)
+        self.assertEqual(result_response.status_code, 200)
+        result = result_response.get_json()
+        self.assertEqual(result['data']['slidesData'][0]['title'], 'اختبار')
+
+        stale_job_id = 'designer-stale-heartbeat-job'
+        module._write_job('.designer_chat_jobs', self.tenant_a, stale_job_id, {
+            'status': 'running', 'success': True, 'progress': 40,
+        })
+        stale_path = module._job_path('.designer_chat_jobs', self.tenant_a, stale_job_id)
+        old_heartbeat = time.time() - 120
+        os.utime(stale_path, (old_heartbeat, old_heartbeat))
+        stale_response = client.get(
+            '/api/designer-chat/jobs/' + stale_job_id, headers=headers).get_json()
+        self.assertTrue(stale_response['stale'])
+        self.assertEqual(stale_response['status'], 'running')
+
+        # Registering the same request id is idempotent, including when two Gunicorn workers
+        # reach the route together. Reusing it for another request is rejected rather than
+        # launching a second AI call under an ambiguous identifier.
+        request_id = 'designer-idempotent-request'
+        request_payload = {
+            'requestId': request_id,
+            'message': 'عدّل عنوان الشريحة',
+            'presentationId': 'presentation-one',
+            'projectData': {'draftId': 'draft-one'},
+            'slideIndex': 0,
+        }
+        with patch.object(module.designer_chat_reliability.threading, 'Thread') as thread_class:
+            queued = client.post('/api/designer-chat/jobs', headers=headers, json=request_payload)
+            reused = client.post('/api/designer-chat/jobs', headers=headers, json=request_payload)
+            conflict = client.post('/api/designer-chat/jobs', headers=headers, json={
+                **request_payload,
+                'message': 'احذف الشريحة',
+            })
+        self.assertEqual(queued.status_code, 202, queued.get_json())
+        self.assertEqual(reused.status_code, 202, reused.get_json())
+        self.assertTrue(reused.get_json()['reused'])
+        self.assertEqual(conflict.status_code, 409, conflict.get_json())
+        self.assertEqual(conflict.get_json()['failureReason'], 'request_id_conflict')
+        self.assertEqual(thread_class.call_count, 1)
+        stored_job = module._read_job('.designer_chat_jobs', self.tenant_a, request_id)
+        self.assertTrue(stored_job.get('requestHash'))
+        self.assertFalse(os.path.exists(module._job_path(
+            '.designer_chat_jobs', self.tenant_a, request_id) + '.claim'))
+
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        poll_body = index_source.split('async function requestTenantDesignerChat(', 1)[1]
+        poll_body = poll_body.split('\n    function applyTenantDesignerChatResult', 1)[0]
+        self.assertIn('T_DESIGNER_JOBS_KEY', index_source)
+        self.assertIn('persistTenantDesignerJob(metadata)', poll_body)
+        self.assertIn('requestId: metadata.jobId', poll_body)
+        self.assertIn('?includeResult=0', poll_body)
+        self.assertIn('?includeResult=1', poll_body)
+        self.assertNotIn('transientFailures < 5', poll_body)
+        self.assertIn('async function resumeTenantDesignerChatJob()', index_source)
+        self.assertGreaterEqual(index_source.count('void resumeTenantDesignerChatJob();'), 3)
+        self.assertIn('function applyTenantDesignerChatResult(data, message, input = null)', index_source)
+        self.assertIn('function tenantDesignerServerJobMatches(metadata, serverJob)', index_source)
+        self.assertGreaterEqual(index_source.count('tenantDesignerServerJobMatches(metadata,'), 3)
+        self.assertIn("status === 'not_found' || status === 'stale'", index_source)
+        self.assertIn('const recoveryPayload = resumeJob.hadAttachment ? null : {', index_source)
+        self.assertIn('requestTenantDesignerChat(recoveryPayload, indicator, resumeJob)', index_source)
+        self.assertIn('function designerChatWorkspaceSignature()', index_source)
+        self.assertIn('function tenantDesignerJobCanApply(metadata)', index_source)
+        self.assertIn('workspaceSignature: String(', index_source)
+        self.assertIn('await new Promise(resolve => setTimeout(resolve, 80));', index_source)
+
+        app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertIn("temp_path = f'{path}.tmp-", app_source)
+        self.assertIn('os.fsync(fh.fileno())', app_source)
+        self.assertIn('os.replace(temp_path, path)', app_source)
+        self.assertIn('progress_callback=lambda attempt, total', app_source)
+        reliability_source = (ROOT / 'designer_chat_reliability.py').read_text(encoding='utf-8')
+        self.assertIn('os.O_CREAT | os.O_EXCL', reliability_source)
+        self.assertIn('request_id_conflict', reliability_source)
 
     def test_designer_chat_uses_the_latest_linked_draft_and_current_browser_values(self):
         """A saved presentation is only a slide snapshot. Sol must read the current linked project

@@ -14,7 +14,9 @@ import re
 import concurrent.futures
 import copy
 import json
+import os
 import threading
+import time
 import uuid
 from functools import wraps
 from pathlib import PurePosixPath
@@ -934,6 +936,7 @@ def install(app, namespace: Dict[str, Any]) -> None:
     require_auth = namespace["require_auth"]
     write_job = namespace["_write_job"]
     read_job = namespace["_read_job"]
+    job_path = namespace["_job_path"]
 
     @wraps(original)
     def reliable_designer_chat():
@@ -947,9 +950,79 @@ def install(app, namespace: Dict[str, Any]) -> None:
     secured_designer_chat = require_auth(reliable_designer_chat)
     app.view_functions["api_designer_chat"] = secured_designer_chat
 
+    def job_context(payload):
+        project_data = payload.get("projectData") if isinstance(payload.get("projectData"), dict) else {}
+        context = {
+            "presentationId": payload.get("presentationId") or None,
+            "draftId": project_data.get("draftId") or project_data.get("draft_id") or None,
+        }
+        # The retry key is valid only for the exact AI request. Hashing the complete payload
+        # prevents a stale tab from reusing an old result after slides, facts, images, history or
+        # attachments have changed, without storing a second copy of that large request on disk.
+        identity = {
+            key: value for key, value in payload.items()
+            if key not in {"requestId", "_job_id"}
+        }
+        encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        context["requestHash"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        return context
+
+    def claim_job(tenant_id, job_id, initial_payload):
+        """Create one queued record across Gunicorn workers before starting the AI thread."""
+        path = job_path(".designer_chat_jobs", tenant_id, job_id)
+        claim_path = path + ".claim"
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            try:
+                descriptor = os.open(claim_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                existing = read_job(".designer_chat_jobs", tenant_id, job_id)
+                if existing:
+                    return False, existing
+                try:
+                    if time.time() - os.path.getmtime(claim_path) > 30:
+                        os.unlink(claim_path)
+                        continue
+                except OSError:
+                    pass
+                time.sleep(0.025)
+                continue
+            try:
+                existing = read_job(".designer_chat_jobs", tenant_id, job_id)
+                if existing:
+                    return False, existing
+                write_job(".designer_chat_jobs", tenant_id, job_id, initial_payload)
+                return True, initial_payload
+            finally:
+                os.close(descriptor)
+                try:
+                    os.unlink(claim_path)
+                except OSError:
+                    pass
+        existing = read_job(".designer_chat_jobs", tenant_id, job_id)
+        if existing:
+            return False, existing
+        raise RuntimeError("Designer chat job registration lock timed out")
+
     def run_job(flask_app, tenant_id, payload, job_id, authorization):
         payload_with_job = dict(payload)
         payload_with_job["_job_id"] = job_id
+        job_record_context = job_context(payload)
+        heartbeat_stop = threading.Event()
+
+        def heartbeat():
+            # Touching the published file does not race with its JSON contents. The status route
+            # reads the mtime as a heartbeat, so a killed worker is distinguishable from a model
+            # call that is still legitimately taking several minutes.
+            path = job_path(".designer_chat_jobs", tenant_id, job_id)
+            while not heartbeat_stop.wait(15):
+                try:
+                    os.utime(path, None)
+                except OSError:
+                    pass
+
+        heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+        heartbeat_thread.start()
         with flask_app.test_request_context(
             "/api/designer-chat",
             method="POST",
@@ -961,6 +1034,7 @@ def install(app, namespace: Dict[str, Any]) -> None:
         ):
             try:
                 write_job(".designer_chat_jobs", tenant_id, job_id, {
+                    **job_record_context,
                     "status": "running", "success": True, "progress": 10,
                     "message": "جاري تنفيذ وتطبيق التعديل...",
                 })
@@ -969,18 +1043,28 @@ def install(app, namespace: Dict[str, Any]) -> None:
                 status_code = result[1] if isinstance(result, tuple) and len(result) > 1 else response.status_code
                 body = response.get_json(silent=True) or {}
                 succeeded = 200 <= int(status_code) < 300 and body.get("success")
-                write_job(".designer_chat_jobs", tenant_id, job_id, {
+                response_data = body.get("data") if isinstance(body.get("data"), dict) else {}
+                failure_reason = body.get("failureReason") or response_data.get("failureReason")
+                final_payload = {
                     **body,
+                    **job_record_context,
                     "status": "completed" if succeeded else "failed",
                     "success": bool(succeeded),
                     "progress": 100,
                     "message": "اكتمل تنفيذ تعديل العرض" if succeeded else body.get("error", "تعذر تعديل العرض"),
-                })
+                }
+                if failure_reason:
+                    final_payload["failureReason"] = failure_reason
+                write_job(".designer_chat_jobs", tenant_id, job_id, final_payload)
             except Exception as error:
+                flask_app.logger.exception("Designer chat background job failed")
                 write_job(".designer_chat_jobs", tenant_id, job_id, {
+                    **job_record_context,
                     "status": "failed", "success": False, "progress": 100,
                     "error": f"تعذر تنفيذ تعديل العرض: {error}", "failureReason": "job_failed",
                 })
+            finally:
+                heartbeat_stop.set()
 
     def queue_job():
         from flask import current_app, g, jsonify, request
@@ -988,11 +1072,39 @@ def install(app, namespace: Dict[str, Any]) -> None:
         payload = request.get_json(silent=True) or {}
         if not str(payload.get("message") or "").strip():
             return jsonify({"success": False, "error": "الطلب فارغ"}), 400
-        job_id = str(uuid.uuid4())
-        write_job(".designer_chat_jobs", g.tenant_id, job_id, {
-            "status": "queued", "success": True, "progress": 1,
-            "message": "تم استلام طلب تعديل العرض",
-        })
+        requested_id = str(payload.get("requestId") or "").strip()
+        if requested_id and not re.fullmatch(r"[A-Za-z0-9-]{8,64}", requested_id):
+            return jsonify({"success": False, "error": "معرف الطلب غير صالح"}), 400
+        job_id = requested_id or str(uuid.uuid4())
+        queued_context = job_context(payload)
+        try:
+            created, existing = claim_job(g.tenant_id, job_id, {
+                **queued_context,
+                "status": "queued", "success": True, "progress": 1,
+                "message": "تم استلام طلب تعديل العرض",
+            })
+        except RuntimeError as error:
+            app.logger.error("Designer chat job registration failed: %s", error)
+            return jsonify({
+                "success": False,
+                "error": "تعذر تسجيل مهمة تعديل العرض مؤقتًا",
+                "failureReason": "job_registration_failed",
+            }), 503
+        if not created:
+            if existing.get("requestHash") and existing.get("requestHash") != queued_context["requestHash"]:
+                return jsonify({
+                    "success": False,
+                    "error": "معرف الطلب مستخدم لمهمة تعديل أخرى",
+                    "failureReason": "request_id_conflict",
+                }), 409
+            return jsonify({
+                "success": True,
+                "jobId": job_id,
+                "status": existing.get("status") or "queued",
+                "progress": existing.get("progress") or 1,
+                "message": existing.get("message") or "مهمة تعديل العرض مسجلة",
+                "reused": True,
+            }), 202
         threading.Thread(
             target=run_job,
             args=(current_app._get_current_object(), g.tenant_id, payload, job_id, request.headers.get("Authorization", "")),
@@ -1004,7 +1116,7 @@ def install(app, namespace: Dict[str, Any]) -> None:
         }), 202
 
     def job_status(job_id):
-        from flask import g, jsonify
+        from flask import g, jsonify, request
 
         if not re.fullmatch(r"[A-Za-z0-9-]{8,64}", str(job_id or "")):
             return jsonify({"success": False, "error": "معرف مهمة غير صالح"}), 400
@@ -1015,7 +1127,22 @@ def install(app, namespace: Dict[str, Any]) -> None:
                 "error": "مهمة تعديل العرض غير موجودة أو انتهت صلاحيتها",
                 "failureReason": "job_not_found",
             }), 404
-        return jsonify(job)
+        try:
+            heartbeat_at = os.path.getmtime(job_path(".designer_chat_jobs", g.tenant_id, job_id))
+        except OSError:
+            heartbeat_at = float(job.get("updatedAt") or 0)
+        response_job = dict(job)
+        response_job["jobId"] = str(job_id)
+        response_job["heartbeatAt"] = heartbeat_at
+        if response_job.get("status") in {"queued", "running"} and heartbeat_at:
+            response_job["stale"] = time.time() - heartbeat_at > 90
+            if response_job["stale"]:
+                response_job["message"] = "توقفت تحديثات مهمة تعديل العرض على الخادم"
+        include_result = request.args.get("includeResult") == "1"
+        if not include_result:
+            response_job["resultReady"] = response_job.get("status") == "completed" and isinstance(response_job.get("data"), dict)
+            response_job.pop("data", None)
+        return jsonify(response_job)
 
     app.add_url_rule(
         "/api/designer-chat/jobs",

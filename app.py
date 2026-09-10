@@ -4520,7 +4520,71 @@ def _designer_project_data_for_request(request_project_data, presentation, tenan
     return cleaned_merged if isinstance(cleaned_merged, dict) else {}
 
 
-def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None, slide_type='content', total_slides=None, content_source=None, skip_vision=False):
+def _designer_requests_boundary_data(instruction):
+    text = str(instruction or '').casefold()
+    return any(word in text for word in (
+        'حدود', 'شارع', 'شوارع', 'جار', 'جيران', 'اتجاه',
+        'طول', 'واجهة',
+    ))
+
+
+def _designer_requests_google_maps_link(instruction):
+    text = str(instruction or '').casefold()
+    return 'رابط' in text and any(word in text for word in ('جوجل', 'google', 'خرائط', 'ماب'))
+
+
+def _designer_project_maps_link(project_data):
+    source = project_data if isinstance(project_data, dict) else {}
+    for key in ('location_address', 'location_maps_link', 'maps_link'):
+        value = str(source.get(key) or '').strip()
+        if re.match(r'^https?://', value, flags=re.IGNORECASE):
+            return value
+    return ''
+
+
+def _inject_designer_project_maps_link(html, link):
+    """Insert the exact stored map link when the user explicitly asks for it."""
+    if not html or not link:
+        return html, False
+    safe_link = html_lib.escape(str(link), quote=True)
+    markup = (
+        '<a data-project-map-link="1" href="' + safe_link + '" target="_blank" rel="noopener" '
+        'style="position:absolute;left:220px;right:220px;bottom:38px;z-index:8;'
+        'font-size:11px;line-height:1.4;font-weight:700;text-align:center;color:#0c5670;'
+        'text-decoration:underline;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">'
+        'رابط موقع المشروع على Google Maps</a>'
+    )
+    existing = re.search(
+        r'<a\b[^>]*\bdata-project-map-link=["\'][^"\']+["\'][^>]*>[\s\S]*?</a>',
+        str(html), flags=re.IGNORECASE,
+    )
+    if existing:
+        updated = str(html)[:existing.start()] + markup + str(html)[existing.end():]
+        return updated, updated != html
+    closing = re.search(r'</div>\s*$', str(html), flags=re.IGNORECASE)
+    if not closing:
+        return html, False
+    return str(html)[:closing.start()] + markup + str(html)[closing.start():], True
+
+
+def _designer_edit_failure_detail(reasons):
+    unique = list(dict.fromkeys(str(reason or '') for reason in reasons if reason))
+    if 'dropped_boundary_data' in unique:
+        return 'نتيجة المصمم أسقطت أطوال حدود موثقة، فتم رفضها لحماية بيانات المشروع.'
+    if unique and set(unique) == {'no_material_change'}:
+        return 'أعاد المصمم الشريحة نفسها دون تغيير قابل للتحقق.'
+    if 'invalid_html' in unique:
+        return 'لم يُرجع المصمم شريحة HTML صالحة يمكن تطبيقها.'
+    if 'provider_error' in unique:
+        return 'تعذر الحصول على نتيجة صالحة من مزود التصميم بعد المحاولات المتاحة.'
+    if 'maps_link_missing' in unique:
+        return 'لا يوجد رابط Google Maps محفوظ في بيانات هذا المشروع.'
+    if 'boundary_data_unchanged' in unique:
+        return 'أحدث بيانات الحدود مطابقة لما هو ظاهر بالفعل في الشريحة.'
+    return 'لم تنتج المحاولات تغييرًا فعليًا صالحًا للتطبيق.'
+
+
+def _designer_edit_slide(html, title, instruction, slide_index, project_data, presentation_id, branding, tenant_id=None, creative_images=None, user_image_refs=None, slide_type='content', total_slides=None, content_source=None, skip_vision=False, progress_callback=None):
     """Ask GLM/Sol for one complete slide and retry malformed responses with Playwright Vision guidance."""
     if not tenant_id:
         try:
@@ -4615,6 +4679,39 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
 
     is_boundary_slide = _is_land_boundary_diagram_slide(
         title=title, content_source=content_source, html=html)
+    boundary_data_request = is_boundary_slide and _designer_requests_boundary_data(instruction)
+    requested_maps_link = is_boundary_slide and _designer_requests_google_maps_link(instruction)
+    project_maps_link = _designer_project_maps_link(project_data) if requested_maps_link else ''
+    canonical_boundary_html = ''
+    if boundary_data_request and slide_engine._has_land_boundary_data(project_data):
+        try:
+            canonical_boundary_html = slide_engine._build_land_boundary_diagram_slide(
+                {
+                    'title': title,
+                    'type': slide_type or 'content',
+                    'content_source': content_source or 'land_boundary_diagram',
+                },
+                project_data,
+                branding,
+                slide_num=slide_index + 1,
+                total_slides=total_slides or (slide_index + 1),
+            )
+            canonical_boundary_html = resolve_designer_chat_placeholders(
+                canonical_boundary_html, project_data, presentation_id, tenant_id, creative_images)
+            canonical_boundary_html = slide_engine.finalize_slide_html(
+                canonical_boundary_html, slide_type or 'content', project_data, branding,
+                creative_images=creative_images, tenant_id=tenant_id,
+                slide_num=slide_index + 1, slide_title=title,
+                total_slides=total_slides or (slide_index + 1), content_source=content_source,
+                allow_all_maps=True,
+            )
+            canonical_boundary_html = _sanitize_designer_output(canonical_boundary_html)
+            if not _is_watermark_removal_instruction(instruction):
+                canonical_boundary_html = _carry_slide_watermark(html, canonical_boundary_html)
+        except Exception:
+            canonical_boundary_html = ''
+            app.logger.exception(
+                '[DESIGNER-EDIT] deterministic boundary build failed for slide %s', slide_index + 1)
     project_context = _designer_project_context(project_data, creative_images, tenant_id)
 
     prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}
@@ -4657,7 +4754,13 @@ HTML الحالي:
 الطلب:
 {instruction}"""
 
+    failure_reasons = []
     for attempt in range(1, 4):
+        if callable(progress_callback):
+            try:
+                progress_callback(attempt, 3)
+            except Exception as progress_error:
+                app.logger.warning('[DESIGNER-EDIT] progress callback failed: %s', progress_error)
         try:
             raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=16000, model=SLIDE_TEXT_MODEL, image_references=image_refs, timeout=300), 'DESIGNER-EDIT')
             parsed = _designer_json_response(raw)
@@ -4673,7 +4776,11 @@ HTML الحالي:
                 # Restore any preserved base64 images
                 for ph, b64_str in base64_map.items():
                     output = output.replace(ph, b64_str)
-                if not designer_chat_reliability.materially_changed(html, output, parsed.get('response')):
+                model_changed = designer_chat_reliability.materially_changed(
+                    html, output, parsed.get('response'))
+                if (not model_changed and not canonical_boundary_html
+                        and not (requested_maps_link and project_maps_link)):
+                    failure_reasons.append('no_material_change')
                     print(f'[DESIGNER-EDIT] model returned no change on attempt {attempt}')
                     continue
 
@@ -4691,6 +4798,11 @@ HTML الحالي:
                 # Carry it over so any later AI edit cannot silently delete it.
                 if not _is_watermark_removal_instruction(instruction):
                     output = _carry_slide_watermark(html, output)
+                # Content requests on this system-owned slide always use the canonical builder.
+                # Sol may choose the operation, but it cannot relocate directions, omit documented
+                # neighbours or substitute stale data in the resulting boundary diagram.
+                if canonical_boundary_html:
+                    output = canonical_boundary_html
                 if is_boundary_slide:
                     # The boundary diagram is rebuilt from documented facts: a model
                     # reply that drops a documented length corrupts the slide, and a
@@ -4712,25 +4824,49 @@ HTML الحالي:
                             if _number and _number.group(0) not in str(output or ''):
                                 dropped.append(_dir_key)
                         if dropped:
+                            failure_reasons.append('dropped_boundary_data')
                             print(f'[DESIGNER-EDIT] boundary slide dropped lengths {dropped} on attempt {attempt}')
                             continue
-                    _wants_data = any(word in str(instruction or '') for word in (
-                        'حدود', 'شارع', 'شوارع', 'جار', 'جيران', 'اتجاه',
-                        'بيانات', 'طول', 'واجهة',
-                    ))
-                    if _wants_data:
+                    if boundary_data_request:
                         _strip_tags = lambda value: re.sub(
                             r'\s+', ' ', re.sub(r'<[^>]+>', ' ', str(value or ''))).strip()
-                        if _strip_tags(output) == _strip_tags(html):
-                            print(f'[DESIGNER-EDIT] boundary slide no visible change on attempt {attempt}')
-                            continue
-                response_text = parsed.get('response') or 'تم تحديث الشريحة بنجاح.'
+                        if _strip_tags(output) == _strip_tags(html) and not requested_maps_link:
+                            failure_reasons.append('boundary_data_unchanged')
+                            print(f'[DESIGNER-EDIT] boundary data already current on attempt {attempt}')
+                            return output, (
+                                f'تم الحفاظ على تصميم الشريحة {slide_index + 1}. '
+                                'أحدث بيانات الحدود مطابقة لما هو ظاهر بالفعل في الشريحة.'
+                            )
+                inserted_requested_maps_link = False
+                if requested_maps_link:
+                    if not project_maps_link:
+                        failure_reasons.append('maps_link_missing')
+                        print(f'[DESIGNER-EDIT] no stored Google Maps link for slide {slide_index + 1}')
+                        continue
+                    output, inserted_requested_maps_link = _inject_designer_project_maps_link(
+                        output, project_maps_link)
+                    if 'data-project-map-link="1"' not in output:
+                        failure_reasons.append('invalid_html')
+                        print(f'[DESIGNER-EDIT] could not insert Google Maps link on attempt {attempt}')
+                        continue
+                response_text = (
+                    'تم تحديث مخطط الحدود من أحدث بيانات المشروع الموثقة.'
+                    if canonical_boundary_html
+                    else (parsed.get('response') or 'تم تحديث الشريحة بنجاح.')
+                )
+                if inserted_requested_maps_link:
+                    if not model_changed and not canonical_boundary_html:
+                        response_text = 'تمت إضافة رابط Google Maps المحفوظ للمشروع.'
+                    else:
+                        response_text += ' تمت إضافة رابط Google Maps المحفوظ للمشروع.'
                 if vision_error:
                     response_text += ' التعديل جرى على الكود بدون معاينة بصرية للشريحة.'
                 return output, response_text
+            failure_reasons.append('invalid_html')
             print(f'[DESIGNER-EDIT] invalid HTML on attempt {attempt}')
-        except Exception as exc:
-            print(f'[DESIGNER-EDIT] attempt {attempt} failed: {exc}')
+        except Exception:
+            failure_reasons.append('provider_error')
+            app.logger.exception('[DESIGNER-EDIT] attempt %s failed for slide %s', attempt, slide_index + 1)
 
     fallback = resolve_designer_chat_placeholders(
         html, project_data, presentation_id, tenant_id, creative_images)
@@ -4742,7 +4878,36 @@ HTML الحالي:
         allow_all_maps=True,
     )
     fallback = _sanitize_designer_output(fallback)
-    return fallback, f'تم الحفاظ على تصميم الشريحة {slide_index + 1} لتعذر التعديل التلقائي عليها.'
+
+    # The boundary diagram is a deterministic system slide. If Sol cannot safely edit it, rebuild
+    # it from the newest linked-draft facts instead of returning the old snapshot. This gives new
+    # streets, neighbours, widths and lengths a reliable path without weakening the no-op guard.
+    deterministic = canonical_boundary_html or fallback
+    rebuilt_boundary = bool(canonical_boundary_html) and designer_chat_reliability.materially_changed(
+        html, deterministic, 'إعادة بناء شريحة الحدود من أحدث بيانات المشروع')
+    if canonical_boundary_html and not rebuilt_boundary:
+        failure_reasons.append('boundary_data_unchanged')
+
+    inserted_maps_link = False
+    if requested_maps_link:
+        if project_maps_link:
+            deterministic, inserted_maps_link = _inject_designer_project_maps_link(
+                deterministic, project_maps_link)
+        else:
+            failure_reasons.append('maps_link_missing')
+
+    if (rebuilt_boundary or inserted_maps_link) and designer_chat_reliability.materially_changed(
+            html, deterministic, 'تحديث حتمي من بيانات المشروع'):
+        completed = []
+        if rebuilt_boundary:
+            completed.append('تم تحديث مخطط الحدود من أحدث بيانات المشروع الموثقة')
+        if inserted_maps_link:
+            completed.append('تمت إضافة رابط Google Maps المحفوظ للمشروع')
+        return deterministic, '، و'.join(completed) + '.'
+
+    detail = _designer_edit_failure_detail(failure_reasons)
+    print(f'[DESIGNER-EDIT] slide {slide_index + 1} rejected after 3 attempts: {failure_reasons}')
+    return fallback, f'تم الحفاظ على تصميم الشريحة {slide_index + 1} لتعذر التعديل التلقائي عليها. {detail}'
 
 
 DESIGNER_CHAT_VERBATIM_TURNS = 10
@@ -5264,6 +5429,10 @@ def api_designer_chat():
                             user_image_refs=user_image_refs, slide_type=slide.get('type', 'content'),
                             total_slides=len(slides),
                             content_source=slide.get('content_source') or slide.get('contentSource'),
+                            progress_callback=lambda attempt, total: report_designer_progress(
+                                min(78, 35 + attempt * 12),
+                                f"جاري تنفيذ محاولة تعديل الشريحة {attempt} من {total}...",
+                            ),
                         )
                         if designer_chat_reliability.materially_changed(original_html, html, response_text):
                             slide['html'] = html
@@ -5280,6 +5449,7 @@ def api_designer_chat():
                 executed.append({
                     'tool': tool,
                     'status': 'success' if changed_indexes else 'noop',
+                    'reason': None if changed_indexes else 'no_verified_change',
                     'indexes': sorted(changed_indexes),
                     'requested_indexes': indexes,
                 })
@@ -5799,11 +5969,16 @@ def api_designer_chat():
             isinstance(item, dict) and item.get('status') == 'success'
             for item in executed
         )
+        failure_reason = None
         if successful_execution:
             response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
             if assistant_messages:
                 response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
         else:
+            failure_reason = next((
+                item.get('reason') for item in executed
+                if isinstance(item, dict) and item.get('reason')
+            ), 'no_verified_change')
             detail = ' '.join(dict.fromkeys(assistant_messages)).strip()
             response_text = 'لم يتم تنفيذ أي تعديل على العرض.' + (f' {detail}' if detail else '')
         # Return the updated conversation beside the edited workspace. The browser keeps both in
@@ -5835,12 +6010,17 @@ def api_designer_chat():
             returned_placeholders = dict(returned_placeholders) if isinstance(returned_placeholders, dict) else {}
             returned_placeholders.update(source_creative_images['map_placeholders'])
             response_creative_images['map_placeholders'] = returned_placeholders
-        return jsonify({'success': True, 'data': {'action': 'workspace_update', 'response': response_text,
-                                                   'slidesData': slides, 'creativeImages': response_creative_images,
-                                                   'actions': executed, 'validation': validation,
-                                                   'memory': chat_memory, 'focusIndexes': turn_focus,
-                                                   'chatHistory': persisted_project_data['designerChat']['messages'],
-                                                   'saved': False}})
+        response_data = {
+            'action': 'workspace_update', 'response': response_text,
+            'slidesData': slides, 'creativeImages': response_creative_images,
+            'actions': executed, 'validation': validation,
+            'memory': chat_memory, 'focusIndexes': turn_focus,
+            'chatHistory': persisted_project_data['designerChat']['messages'],
+            'saved': False,
+        }
+        if failure_reason:
+            response_data['failureReason'] = failure_reason
+        return jsonify({'success': True, 'data': response_data})
     except Exception as exc:
         print(f'[DESIGNER-CHAT ERROR] {exc}')
         return jsonify({'success': False, 'error': str(exc)}), 500
@@ -12773,18 +12953,36 @@ def _write_job(namespace, tenant_id, job_id, payload):
     payload = dict(payload)
     payload['updatedAt'] = time.time()
     body = json.dumps(payload, ensure_ascii=False)
+    # Polling can be served by another Gunicorn worker, so a process-local lock alone cannot
+    # stop that worker from opening the file between truncate() and the final write. Publish a
+    # fully flushed sibling file with os.replace(); readers then see either the old complete JSON
+    # or the new complete JSON, never a partial document that looks like job_not_found.
+    temp_path = f'{path}.tmp-{os.getpid()}-{threading.get_ident()}-{time.time_ns()}'
     with _MARKET_JOB_LOCK:
-        last_error = None
-        for _ in range(8):
+        try:
+            with open(temp_path, 'w', encoding='utf-8') as fh:
+                fh.write(body)
+                fh.flush()
+                try:
+                    os.fsync(fh.fileno())
+                except OSError:
+                    pass
+            last_error = None
+            for _ in range(8):
+                try:
+                    os.replace(temp_path, path)
+                    return
+                except OSError as error:
+                    last_error = error
+                    time.sleep(0.03)
+            if last_error:
+                raise last_error
+        finally:
             try:
-                with open(path, 'w', encoding='utf-8') as fh:
-                    fh.write(body)
-                return
-            except OSError as error:
-                last_error = error
-                time.sleep(0.03)
-        if last_error:
-            raise last_error
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 def _read_job(namespace, tenant_id, job_id):

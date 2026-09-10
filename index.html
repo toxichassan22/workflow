@@ -6702,6 +6702,7 @@
     const T_TOKEN_KEY = 'tenant_token';
     const T_TENANT_KEY = 'tenant_user';
     const T_NAVIGATION_KEY = 'tenant_navigation_state';
+    const T_DESIGNER_JOBS_KEY = 'tenant_designer_jobs_v1';
     let tenantToken = null;
     let tenantUser = null;
     let tenantBranding = null;
@@ -7118,6 +7119,7 @@
     // wiped by any re-render (for example opening a slide edit session mid-generation).
     // Keeping progress here lets the indicator survive those re-renders.
     let tenantDesignerChatBusy = null;
+    let tenantDesignerJobPollPromise = null;
 
     function updateDesignerChatStatus() {
       const status = document.querySelector('#tenantSlidesChat .ge-chat-panel-status');
@@ -7129,10 +7131,11 @@
       }
     }
 
-    function setDesignerChatBusy(message) {
+    function setDesignerChatBusy(message, workspaceKey = designerChatWorkspaceKey()) {
       tenantDesignerChatBusy = {
         progress: 5,
-        message: String(message || 'جاري تنفيذ التعديل...')
+        message: String(message || 'جاري تنفيذ التعديل...'),
+        workspaceKey: String(workspaceKey || '')
       };
       document.querySelectorAll('[onclick*="sendTenantDesignerChat"]').forEach(button => {
         button.dataset.designerWasDisabled = String(button.disabled);
@@ -7151,7 +7154,9 @@
       updateDesignerChatStatus();
     }
 
-    function clearDesignerChatBusy() {
+    function clearDesignerChatBusy(workspaceKey = '') {
+      if (workspaceKey && tenantDesignerChatBusy?.workspaceKey
+        && tenantDesignerChatBusy.workspaceKey !== workspaceKey) return;
       tenantDesignerChatBusy = null;
       document.querySelectorAll('[data-designer-was-disabled]').forEach(button => {
         button.disabled = button.dataset.designerWasDisabled === 'true';
@@ -7176,6 +7181,107 @@
       setInlineLoaderProgress(indicator, tenantDesignerChatBusy.progress, tenantDesignerChatBusy.message);
       messages.appendChild(indicator);
       messages.scrollTop = messages.scrollHeight;
+    }
+
+    function designerChatWorkspaceKey(presentationId = tenantPresentationId, projectData = tenantProjectData) {
+      const tenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
+      const draftId = projectData && (projectData.draftId || projectData.draft_id);
+      const workspaceId = presentationId
+        ? 'presentation:' + String(presentationId)
+        : (draftId ? 'draft:' + String(draftId) : '');
+      return tenantId && workspaceId ? String(tenantId) + '|' + workspaceId : '';
+    }
+
+    function designerChatWorkspaceSignature() {
+      let serialized = '';
+      try {
+        serialized = JSON.stringify({ slides: tenantSlidesData, creativeImages: tenantCreativeImages });
+      } catch (error) {
+        serialized = String(tenantSlidesData.length);
+      }
+      let hash = 2166136261;
+      for (let index = 0; index < serialized.length; index++) {
+        hash ^= serialized.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }
+      return serialized.length + ':' + (hash >>> 0).toString(16);
+    }
+
+    function readTenantDesignerJobs() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(T_DESIGNER_JOBS_KEY) || '{}');
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function persistTenantDesignerJob(metadata) {
+      if (!metadata || !metadata.jobId || !metadata.workspaceKey) return;
+      const jobs = readTenantDesignerJobs();
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      Object.keys(jobs).forEach(key => {
+        if (!jobs[key] || Number(jobs[key].startedAt || 0) < cutoff) delete jobs[key];
+      });
+      jobs[metadata.workspaceKey] = {
+        jobId: String(metadata.jobId),
+        workspaceKey: String(metadata.workspaceKey),
+        presentationId: metadata.presentationId || null,
+        draftId: metadata.draftId || null,
+        message: String(metadata.message || '').slice(0, 2000),
+        target: String(metadata.target || 'auto'),
+        scope: String(metadata.scope || metadata.target || 'auto'),
+        indexes: Array.isArray(metadata.indexes) ? metadata.indexes.slice(0, 30) : [],
+        slideIndex: Number.isInteger(Number(metadata.slideIndex)) ? Number(metadata.slideIndex) : 0,
+        hadAttachment: !!metadata.hadAttachment,
+        workspaceSignature: String(metadata.workspaceSignature || ''),
+        startedAt: Number(metadata.startedAt || Date.now()),
+        updatedAt: Number(metadata.updatedAt || Date.now()),
+        status: String(metadata.status || 'queued')
+      };
+      try {
+        localStorage.setItem(T_DESIGNER_JOBS_KEY, JSON.stringify(jobs));
+      } catch (error) {
+        console.warn('[DESIGNER JOB] Could not persist active job', error);
+      }
+    }
+
+    function currentTenantDesignerJob() {
+      const workspaceKey = designerChatWorkspaceKey();
+      if (!workspaceKey) return null;
+      const job = readTenantDesignerJobs()[workspaceKey];
+      return job && job.workspaceKey === workspaceKey ? job : null;
+    }
+
+    function clearTenantDesignerJob(metadata) {
+      if (!metadata || !metadata.workspaceKey) return;
+      const jobs = readTenantDesignerJobs();
+      const current = jobs[metadata.workspaceKey];
+      if (current && (!metadata.jobId || String(current.jobId) === String(metadata.jobId))) {
+        delete jobs[metadata.workspaceKey];
+        try {
+          localStorage.setItem(T_DESIGNER_JOBS_KEY, JSON.stringify(jobs));
+        } catch (error) {
+          console.warn('[DESIGNER JOB] Could not clear completed job', error);
+        }
+      }
+    }
+
+    function tenantDesignerJobMatchesWorkspace(metadata) {
+      return !!metadata && metadata.workspaceKey === designerChatWorkspaceKey();
+    }
+
+    function tenantDesignerServerJobMatches(metadata, serverJob) {
+      if (!metadata || !serverJob || typeof serverJob !== 'object') return true;
+      const sameWhenPresent = (expected, actual) => !expected || !actual || String(expected) === String(actual);
+      return sameWhenPresent(metadata.jobId, serverJob.jobId)
+        && sameWhenPresent(metadata.presentationId, serverJob.presentationId)
+        && sameWhenPresent(metadata.draftId, serverJob.draftId);
+    }
+
+    function tenantDesignerJobCanApply(metadata) {
+      return !metadata?.workspaceSignature
+        || metadata.workspaceSignature === designerChatWorkspaceSignature();
     }
 
     function designerChatPersistence(presentationId = tenantPresentationId) {
@@ -24162,76 +24268,448 @@
         });
     }
 
-    async function requestTenantDesignerChat(payload, indicator) {
-      const queued = await apiWithTimeout(
-        'POST', '/api/designer-chat/jobs', payload, 30000,
-        'تعذر تسجيل مهمة تعديل العرض؛ لم يبدأ تنفيذ جديد.'
-      );
-      if (!queued?.jobId) return queued;
+    function newTenantDesignerRequestId() {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+      }
+      return 'designer-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 14);
+    }
 
-      const started = Date.now();
+    function isTransientDesignerChatResponse(result) {
+      return result?.error_code === 'CLIENT_REQUEST_TIMEOUT'
+        || String(result?.error || '').startsWith('Network error');
+    }
+
+    function isTerminalDesignerChatJob(result) {
+      const status = String(result?.status || '');
+      return status === 'completed' || status === 'failed'
+        || status === 'not_found' || status === 'stale';
+    }
+
+    async function requestTenantDesignerChat(payload, indicator, resumedJob = null) {
+      const workspaceKey = resumedJob?.workspaceKey || designerChatWorkspaceKey();
+      const requestId = resumedJob?.jobId || newTenantDesignerRequestId();
+      const metadata = {
+        jobId: String(requestId),
+        workspaceKey: String(workspaceKey || ''),
+        presentationId: resumedJob?.presentationId || tenantPresentationId || null,
+        draftId: resumedJob?.draftId || tenantProjectData?.draftId || tenantProjectData?.draft_id || null,
+        message: resumedJob?.message || payload?.message || '',
+        target: resumedJob?.target || payload?.target || 'auto',
+        scope: resumedJob?.scope || payload?.scope || payload?.target || 'auto',
+        indexes: Array.isArray(resumedJob?.indexes) ? resumedJob.indexes
+          : (Array.isArray(payload?.indexes) ? payload.indexes : []),
+        slideIndex: Number(resumedJob?.slideIndex ?? payload?.slideIndex ?? 0),
+        hadAttachment: !!(resumedJob?.hadAttachment || payload?.attachedImage),
+        workspaceSignature: String(
+          resumedJob?.workspaceSignature || designerChatWorkspaceSignature()),
+        startedAt: Number(resumedJob?.startedAt || Date.now()),
+        updatedAt: Date.now(),
+        status: String(resumedJob?.status || 'queued')
+      };
+      if (!metadata.workspaceKey) {
+        return {
+          success: false,
+          status: 'failed',
+          error: 'تعذر ربط مهمة تعديل العرض بالمشروع الحالي.',
+          failureReason: 'workspace_missing',
+          _designerJob: metadata
+        };
+      }
+
+      const jobPath = '/api/designer-chat/jobs/' + encodeURIComponent(metadata.jobId);
+      const queuePayload = payload ? { ...payload, requestId: metadata.jobId } : null;
+      persistTenantDesignerJob(metadata);
+      if (!resumedJob) {
+        // localStorage is shared by tabs. A short settle window lets the last workspace claim win,
+        // so two simultaneous clicks do not launch two differently keyed AI jobs.
+        await new Promise(resolve => setTimeout(resolve, 80));
+        const activeClaim = currentTenantDesignerJob();
+        if (activeClaim && String(activeClaim.jobId) !== metadata.jobId) {
+          return {
+            success: false,
+            status: 'superseded',
+            error: 'توجد مهمة تعديل أخرى نشطة لنفس العرض.',
+            failureReason: 'workspace_job_superseded',
+            _designerJob: metadata
+          };
+        }
+      }
+
+      async function submitOrRecoverJob() {
+        if (!queuePayload) return null;
+        return apiWithTimeout(
+          'POST', '/api/designer-chat/jobs', queuePayload, 30000,
+          'تعذر تأكيد تسجيل مهمة تعديل العرض مؤقتًا.'
+        );
+      }
+
+      if (!resumedJob) {
+        const queued = await submitOrRecoverJob();
+        if (queued?.jobId) {
+          metadata.jobId = String(queued.jobId);
+          metadata.status = String(queued.status || 'queued');
+          metadata.updatedAt = Date.now();
+          persistTenantDesignerJob(metadata);
+        } else if (!isTransientDesignerChatResponse(queued)) {
+          return {
+            ...(queued || {}),
+            success: false,
+            status: 'failed',
+            error: queued?.error || 'تعذر تسجيل مهمة تعديل العرض.',
+            _designerJob: metadata
+          };
+        }
+      }
+
+      const pollingStarted = Date.now();
       const maxWaitMs = 60 * 60 * 1000;
-      let transientFailures = 0;
+      let retryDelay = 2000;
+      let queueRecoveryAttempts = 0;
       let lastExecutionTarget = '';
-      while (Date.now() - started < maxWaitMs) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      while (Date.now() - pollingStarted < maxWaitMs) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
         const result = await apiWithTimeout(
-          'GET', '/api/designer-chat/jobs/' + encodeURIComponent(queued.jobId), null,
+          'GET', jobPath + '?includeResult=0', null,
           30000, 'تعذر تحديث حالة تعديل العرض مؤقتًا.'
         );
-        if (result?.error_code === 'CLIENT_REQUEST_TIMEOUT' || String(result?.error || '').startsWith('Network error')) {
-          transientFailures += 1;
-          if (transientFailures < 5) continue;
-          return result;
+        if (isTransientDesignerChatResponse(result)) {
+          retryDelay = Math.min(10000, Math.round(retryDelay * 1.5));
+          if (tenantDesignerJobMatchesWorkspace(metadata)) {
+            updateDesignerChatBusy(
+              tenantDesignerChatBusy?.progress || 5,
+              'مهمة تعديل العرض مستمرة وجار استعادة الاتصال...'
+            );
+          }
+          continue;
         }
-        transientFailures = 0;
+
+        if (!tenantDesignerServerJobMatches(metadata, result)) {
+          return {
+            success: false,
+            status: 'failed',
+            error: 'تعذر تطبيق نتيجة مهمة لا تخص العرض الحالي.',
+            failureReason: 'job_workspace_mismatch',
+            _designerJob: metadata
+          };
+        }
+
+        const status = String(result?.status || '');
+        if (result?.stale && (status === 'queued' || status === 'running')) {
+          return {
+            ...(result || {}),
+            success: false,
+            status: 'stale',
+            error: 'توقفت تحديثات مهمة تعديل العرض على الخادم قبل وصول نتيجة مؤكدة.',
+            failureReason: 'job_stale',
+            _designerJob: metadata
+          };
+        }
+        if (status === 'not_found' && queuePayload && queueRecoveryAttempts < 3) {
+          queueRecoveryAttempts += 1;
+          const recovered = await submitOrRecoverJob();
+          if (recovered?.jobId || isTransientDesignerChatResponse(recovered)) {
+            retryDelay = Math.min(10000, 2000 * (queueRecoveryAttempts + 1));
+            continue;
+          }
+          return {
+            ...(recovered || result || {}),
+            success: false,
+            status: 'failed',
+            error: recovered?.error || result?.error || 'تعذر استعادة مهمة تعديل العرض.',
+            _designerJob: metadata
+          };
+        }
+
+        metadata.status = status || metadata.status;
+        metadata.updatedAt = Date.now();
+        persistTenantDesignerJob(metadata);
+        retryDelay = 2000;
         const progress = Math.max(1, Math.min(99, Number(result?.progress || 5)));
-        updateDesignerChatBusy(progress, result?.message || 'جاري تنفيذ تعديل العرض...');
-        // Navigate only after the executor starts editing a model-selected slide.
-        // Deduplicate polling events so manual scrolling is not constantly undone.
-        if (result?.phase === 'editing' && Number.isInteger(result.activeSlideIndex)
-          && result.activeSlideIndex >= 0 && result.activeSlideIndex < tenantSlidesData.length) {
-          const executionTarget = String(result.actionNumber) + ':' + result.activeSlideIndex;
-          if (executionTarget !== lastExecutionTarget) {
-            lastExecutionTarget = executionTarget;
-            selectTenantSlide(result.activeSlideIndex);
+        if (tenantDesignerJobMatchesWorkspace(metadata)) {
+          updateDesignerChatBusy(progress, result?.message || 'جاري تنفيذ تعديل العرض...');
+          // Navigate only after the executor starts editing a model-selected slide.
+          // Deduplicate polling events so manual scrolling is not constantly undone.
+          if (result?.phase === 'editing' && Number.isInteger(result.activeSlideIndex)
+            && result.activeSlideIndex >= 0 && result.activeSlideIndex < tenantSlidesData.length) {
+            const executionTarget = String(result.actionNumber) + ':' + result.activeSlideIndex;
+            if (executionTarget !== lastExecutionTarget) {
+              lastExecutionTarget = executionTarget;
+              selectTenantSlide(result.activeSlideIndex);
+            }
+          }
+          if (indicator && document.contains(indicator)) {
+            setInlineLoaderProgress(indicator, progress, result?.message || 'جاري تنفيذ تعديل العرض...');
           }
         }
-        if (indicator && document.contains(indicator)) {
-          setInlineLoaderProgress(indicator, progress, result?.message || 'جاري تنفيذ تعديل العرض...');
+
+        if (status === 'completed') {
+          while (Date.now() - pollingStarted < maxWaitMs) {
+            const completed = await apiWithTimeout(
+              'GET', jobPath + '?includeResult=1', null,
+              120000, 'اكتملت المهمة وتعذر استلام نتيجتها مؤقتًا.'
+            );
+            if (isTransientDesignerChatResponse(completed)) {
+              if (tenantDesignerJobMatchesWorkspace(metadata)) {
+                updateDesignerChatBusy(99, 'اكتمل التعديل وجار استلام النتيجة...');
+              }
+              await new Promise(resolve => setTimeout(resolve, retryDelay));
+              retryDelay = Math.min(10000, Math.round(retryDelay * 1.5));
+              continue;
+            }
+            if (!tenantDesignerServerJobMatches(metadata, completed)) {
+              return {
+                success: false,
+                status: 'failed',
+                error: 'تعذر تطبيق نتيجة مهمة لا تخص العرض الحالي.',
+                failureReason: 'job_workspace_mismatch',
+                _designerJob: metadata
+              };
+            }
+            if (!completed?.data) {
+              return {
+                ...(completed || {}),
+                success: false,
+                status: 'failed',
+                error: completed?.error || 'اكتملت المهمة دون نتيجة قابلة للتطبيق.',
+                failureReason: completed?.failureReason || 'result_missing',
+                _designerJob: metadata
+              };
+            }
+            completed._designerJob = metadata;
+            return completed;
+          }
         }
-        if (result?.status === 'completed' || (result?.success && result?.data)) return result;
-        if (result?.status === 'failed' || result?.status === 'not_found') return result;
+        if (status === 'failed' || status === 'not_found') {
+          result._designerJob = metadata;
+          return result;
+        }
       }
       return {
         success: false,
+        status: 'waiting',
         error: 'استغرق تعديل العرض وقتًا أطول من ساعة ولم تصل نتيجة مؤكدة.',
-        error_code: 'DESIGNER_JOB_WAIT_TIMEOUT'
+        error_code: 'DESIGNER_JOB_WAIT_TIMEOUT',
+        _designerJob: metadata
       };
+    }
+
+    function applyTenantDesignerChatResult(data, message, input = null) {
+      const reply = data && data.data ? data.data : null;
+      if (!data?.success || !reply) {
+        tenantDesignerMessages.push({
+          role: 'assistant',
+          content: (data && data.error) || 'تعذر تنفيذ الطلب. لم يتم تغيير العرض.'
+        });
+        tenantProjectData.designerChat = designerChatPersistence();
+        renderTenantDesignerChat();
+        triggerAutoSaveDraft();
+        return false;
+      }
+
+      applyDesignerChatHistory(reply);
+      applyDesignerChatMemory(reply);
+
+      // The designer asked instead of guessing: show the question, change nothing, keep the answer
+      // in the input's turn. Guessing and then editing wrongly is worse than one question.
+      if (reply.action === 'ask' || reply.action === 'chat_only') {
+        if (!Array.isArray(reply.chatHistory)) {
+          tenantDesignerMessages.push({
+            role: 'assistant',
+            content: reply.response || 'تعذر تحديد التعديل دون معلومات إضافية.',
+            slides: tenantChatFocusIndexes.slice()
+          });
+        }
+        tenantProjectData.designerChat = designerChatPersistence();
+        renderTenantDesignerChat();
+        triggerAutoSaveDraft();
+        if (input) input.focus();
+        return true;
+      }
+
+      // The executor owns structural positions; do not reinterpret the message
+      // and move its last slide a second time after applying the returned workspace.
+      if (reply.action === 'add_slide' || reply.action === 'insert_slide') {
+        const insertAfter = reply.insertAfterIndex !== undefined ? Number(reply.insertAfterIndex) : (tenantChatSlideIndex + 1);
+        const insertIdx = Math.max(0, Math.min(insertAfter, tenantSlidesData.length));
+        const newSlide = {
+          title: reply.title || 'شريحة جديدة',
+          html: reply.html,
+          type: reply.type || 'content',
+          section_key: reply.sectionKey || reply.section_key || '',
+          content_source: reply.contentSource || reply.content_source || ''
+        };
+        tenantSlidesData.splice(insertIdx, 0, newSlide);
+        newSlide.html = applyDeckWatermarkToHtml(newSlide.html);
+        tenantProjectData.tenantSlidesData = tenantSlidesData;
+        selectTenantSlide(insertIdx);
+      } else if (Array.isArray(reply.slidesData)) {
+        const oldLength = tenantSlidesData.length;
+        // Guard against a model reply that silently drops slides: entries without a
+        // slide root would render as broken cards, and a shorter deck without a delete
+        // request means slides were lost. Neither is applied quietly.
+        const incoming = reply.slidesData.filter(item => item && typeof item.html === 'string' && containsSlideRoot(item.html));
+        const deleteIntent = /حذف|احذف|امسح|شيل|إزالة|ازالة/.test(String(message || '') + ' ' + String(reply.response || ''));
+        if (!incoming.length) {
+          tenantDesignerMessages.push({
+            role: 'assistant',
+            content: 'تعذر تنفيذ الطلب. لم يتم تغيير العرض.',
+            slides: tenantChatFocusIndexes.slice()
+          });
+          tenantProjectData.designerChat = designerChatPersistence();
+          renderTenantDesignerChat();
+          triggerAutoSaveDraft();
+          return false;
+        }
+        if (incoming.length < oldLength && !deleteIntent) {
+          tenantDesignerMessages.push({
+            role: 'assistant',
+            content: 'لم يتم تطبيق التعديل لأن النتيجة أسقطت ' + (oldLength - incoming.length) + ' من ' + oldLength + ' شريحة.',
+            slides: tenantChatFocusIndexes.slice()
+          });
+          tenantProjectData.designerChat = designerChatPersistence();
+          renderTenantDesignerChat();
+          triggerAutoSaveDraft();
+          return false;
+        }
+        tenantSlidesData = incoming;
+        if (tenantSlidesData.length < oldLength) {
+          activeSlideIndex = Math.max(0, Math.min(activeSlideIndex, tenantSlidesData.length - 1));
+          tenantChatSlideIndex = Math.max(0, Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1));
+        }
+      }
+
+      if (reply.creativeImages && typeof reply.creativeImages === 'object') {
+        tenantCreativeImages = reply.creativeImages;
+        tenantProjectData = { ...tenantProjectData, tenantCreativeImages };
+      }
+      if (!Array.isArray(reply.chatHistory)) {
+        tenantDesignerMessages.push({
+          role: 'assistant',
+          content: reply.response || 'تم تنفيذ الطلب وتحديث العرض.',
+          slides: tenantChatFocusIndexes.slice()
+        });
+      }
+      tenantProjectData.designerChat = designerChatPersistence();
+      renumberTenantSlides();
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      renderTenantSlides();
+      renderTenantDesignerChat();
+      triggerAutoSaveDraft();
+      return true;
+    }
+
+    async function resumeTenantDesignerChatJob() {
+      const workspaceKey = designerChatWorkspaceKey();
+      if (tenantDesignerChatBusy?.workspaceKey && tenantDesignerChatBusy.workspaceKey !== workspaceKey) {
+        clearDesignerChatBusy(tenantDesignerChatBusy.workspaceKey);
+      }
+      const job = currentTenantDesignerJob();
+      if (!job || !tenantDesignerJobMatchesWorkspace(job)) return;
+      if (tenantDesignerChatBusy?.workspaceKey === workspaceKey) return;
+      if (tenantDesignerJobPollPromise?.workspaceKey === workspaceKey) return;
+
+      const lastTurn = tenantDesignerMessages[tenantDesignerMessages.length - 1];
+      if (job.message && (!lastTurn || lastTurn.role !== 'user' || lastTurn.content !== job.message)) {
+        tenantDesignerMessages.push({ role: 'user', content: job.message, slides: [] });
+        tenantProjectData.designerChat = designerChatPersistence();
+        triggerAutoSaveDraft();
+      }
+      const resumeJob = {
+        ...job,
+        workspaceSignature: designerChatWorkspaceSignature(),
+        updatedAt: Date.now()
+      };
+      persistTenantDesignerJob(resumeJob);
+      setDesignerChatBusy('جاري استعادة مهمة تعديل العرض...', workspaceKey);
+      renderTenantDesignerChat();
+      restoreDesignerChatBusyIndicator();
+      const indicator = document.getElementById('tenantChatTypingIndicator');
+      const input = document.getElementById('tenantChatInput');
+      const recoveryPayload = resumeJob.hadAttachment ? null : {
+        message: resumeJob.message,
+        target: resumeJob.target || 'auto',
+        scope: resumeJob.scope || resumeJob.target || 'auto',
+        indexes: Array.isArray(resumeJob.indexes) ? resumeJob.indexes : [],
+        history: tenantDesignerMessages.slice(0, -1).slice(-DESIGNER_CHAT_HISTORY_KEPT).map(item => ({
+          role: item.role === 'user' ? 'user' : 'assistant',
+          content: String(item.content || '').slice(0, 2000),
+          slides: Array.isArray(item.slides) ? item.slides : []
+        })),
+        memory: tenantDesignerChatMemory,
+        focusIndexes: tenantChatFocusIndexes,
+        slideIndex: Number(resumeJob.slideIndex || 0),
+        presentationId: resumeJob.presentationId || tenantPresentationId,
+        projectData: buildDesignerChatProjectData(tenantProjectData),
+        creativeImages: buildPresentationGenerationImages()
+      };
+      if (recoveryPayload && (tenantDraftDirty || !recoveryPayload.presentationId)) {
+        recoveryPayload.slideHtml = tenantSlidesData[recoveryPayload.slideIndex]?.html || '';
+        recoveryPayload.slideTitle = tenantSlidesData[recoveryPayload.slideIndex]?.title || '';
+        recoveryPayload.slidesData = tenantSlidesData;
+        recoveryPayload.slidePlan = tenantSlidePlan;
+      }
+      const promise = requestTenantDesignerChat(recoveryPayload, indicator, resumeJob);
+      const pollRecord = { workspaceKey, promise };
+      tenantDesignerJobPollPromise = pollRecord;
+      try {
+        const data = await promise;
+        if (!tenantDesignerJobMatchesWorkspace(resumeJob)) return;
+        if (!tenantDesignerJobCanApply(resumeJob)) {
+          applyTenantDesignerChatResult({
+            success: false,
+            status: 'failed',
+            error: 'لم تُطبق النتيجة لأن العرض تغير أثناء تنفيذ المهمة.'
+          }, resumeJob.message, input);
+          clearTenantDesignerJob(resumeJob);
+          return;
+        }
+        applyTenantDesignerChatResult(data, resumeJob.message, input);
+        if (isTerminalDesignerChatJob(data)) clearTenantDesignerJob(resumeJob);
+      } catch (error) {
+        if (tenantDesignerJobMatchesWorkspace(job)) {
+          applyTenantDesignerChatResult({
+            success: false,
+            status: 'waiting',
+            error: error?.message || 'تعذر استعادة نتيجة تعديل العرض مؤقتًا.'
+          }, resumeJob.message, input);
+        }
+      } finally {
+        if (tenantDesignerJobPollPromise === pollRecord) tenantDesignerJobPollPromise = null;
+        clearDesignerChatBusy(workspaceKey);
+      }
     }
 
     async function sendTenantDesignerChat() {
       const input = document.getElementById('tenantChatInput');
       const message = input ? input.value.trim() : '';
       const attachedImage = tenantChatAttachedImage;
-      if (!message) { toast('اكتب التعديل المطلوب أولاً'); return; }
+      if (!message) { toast('التعديل المطلوب فارغ'); return; }
       if (!tenantSlidesData.length && !tenantPresentationId) {
-        toast('افتح عرضاً أو ولّد الشرائح أولاً');
+        toast('لا يوجد عرض مفتوح للتعديل');
         return;
       }
 
+      const activeJob = currentTenantDesignerJob();
+      if (activeJob) {
+        void resumeTenantDesignerChatJob();
+        return;
+      }
       if (tenantDesignerChatBusy) return;
-      setDesignerChatBusy('جاري تجهيز بيانات المشروع...');
+      let requestWorkspaceKey = designerChatWorkspaceKey();
+      setDesignerChatBusy('جاري تجهيز بيانات المشروع...', requestWorkspaceKey);
       try {
         if (typeof collectTenantFormData === 'function' && document.getElementById('tenantProjectForm')) {
           const currentFormData = await collectTenantFormData();
           tenantProjectData = { ...tenantProjectData, ...currentFormData };
         }
       } catch (error) {
-        clearDesignerChatBusy();
+        clearDesignerChatBusy(requestWorkspaceKey);
         toast(error?.message || 'تعذر تجهيز بيانات المشروع الحالية.');
         return;
       }
+      requestWorkspaceKey = designerChatWorkspaceKey();
+      if (tenantDesignerChatBusy) tenantDesignerChatBusy.workspaceKey = requestWorkspaceKey;
       // Send the untouched message and conversation. A number is not a client-side
       // command, and even a slide reference does not authorize an edit or navigation.
       const targetScope = tenantChatSlideScope === 'all' ? 'all' : 'auto';
@@ -24252,7 +24730,7 @@
       const messagesDiv = document.getElementById('tenantChatMessages');
       updateDesignerChatBusy(5, 'جاري تجهيز الطلب...');
       restoreDesignerChatBusyIndicator();
-      let indicator = document.getElementById('tenantChatTypingIndicator');
+      const indicator = document.getElementById('tenantChatTypingIndicator');
       if (messagesDiv) messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
       // The turn carries the conversation behind it: recent turns verbatim and the older ones as
@@ -24289,112 +24767,28 @@
       try {
         data = await requestTenantDesignerChat(chatPayload, indicator);
       } catch (error) {
-        data = { success: false, error: error?.message || 'تعذر تنفيذ الطلب.' };
+        data = { success: false, status: 'waiting', error: error?.message || 'تعذر تنفيذ الطلب.' };
       } finally {
-        clearDesignerChatBusy();
+        clearDesignerChatBusy(requestWorkspaceKey);
       }
 
-      const reply = data && data.data ? data.data : null;
-      if (!data?.success || !reply) {
-        tenantDesignerMessages.push({
-          role: 'assistant',
-          content: (data && data.error) || 'تعذر تنفيذ الطلب. لم يتم تغيير العرض.'
-        });
-        tenantProjectData.designerChat = designerChatPersistence();
-        renderTenantDesignerChat();
-        triggerAutoSaveDraft();
+      const job = data?._designerJob || null;
+      if (data?.status === 'superseded') {
+        applyTenantDesignerChatResult(data, message, input);
         return;
       }
-
-      applyDesignerChatHistory(reply);
-      applyDesignerChatMemory(reply);
-
-      // The designer asked instead of guessing: show the question, change nothing, keep the answer
-      // in the input's turn. Guessing and then editing wrongly is worse than one question.
-      if (reply.action === 'ask' || reply.action === 'chat_only') {
-        if (!Array.isArray(reply.chatHistory)) {
-          tenantDesignerMessages.push({
-            role: 'assistant',
-            content: reply.response || 'وضّح المطلوب.',
-            slides: tenantChatFocusIndexes.slice()
-          });
-        }
-        tenantProjectData.designerChat = designerChatPersistence();
-        renderTenantDesignerChat();
-        triggerAutoSaveDraft();
-        if (input) input.focus();
+      if (job && !tenantDesignerJobMatchesWorkspace(job)) return;
+      if (job && !tenantDesignerJobCanApply(job)) {
+        applyTenantDesignerChatResult({
+          success: false,
+          status: 'failed',
+          error: 'لم تُطبق النتيجة لأن العرض تغير أثناء تنفيذ المهمة.'
+        }, message, input);
+        clearTenantDesignerJob(job);
         return;
       }
-
-      // The executor owns structural positions; do not reinterpret the message
-      // and move its last slide a second time after applying the returned workspace.
-      if (reply.action === 'add_slide' || reply.action === 'insert_slide') {
-        const insertAfter = reply.insertAfterIndex !== undefined ? Number(reply.insertAfterIndex) : (tenantChatSlideIndex + 1);
-        const insertIdx = Math.max(0, Math.min(insertAfter, tenantSlidesData.length));
-        const newSlide = {
-          title: reply.title || 'شريحة جديدة',
-          html: reply.html,
-          type: reply.type || 'content',
-          section_key: reply.sectionKey || reply.section_key || '',
-          content_source: reply.contentSource || reply.content_source || ''
-        };
-        tenantSlidesData.splice(insertIdx, 0, newSlide);
-        newSlide.html = applyDeckWatermarkToHtml(newSlide.html);
-        tenantProjectData.tenantSlidesData = tenantSlidesData;
-        selectTenantSlide(insertIdx);
-      } else if (Array.isArray(reply.slidesData)) {
-        const oldLength = tenantSlidesData.length;
-        // Guard against a model reply that silently drops slides: entries without a
-        // slide root would render as broken cards, and a shorter deck without a delete
-        // request means slides were lost. Neither is applied quietly.
-        const incoming = reply.slidesData.filter(item => item && typeof item.html === 'string' && containsSlideRoot(item.html));
-        const deleteIntent = /حذف|احذف|امسح|شيل|إزالة|ازالة/.test(message + ' ' + String((reply && reply.response) || ''));
-        if (!incoming.length) {
-          tenantDesignerMessages.push({
-            role: 'assistant',
-            content: 'تعذر تنفيذ الطلب. لم يتم تغيير العرض.',
-            slides: tenantChatFocusIndexes.slice()
-          });
-          tenantProjectData.designerChat = designerChatPersistence();
-          renderTenantDesignerChat();
-          triggerAutoSaveDraft();
-          return;
-        }
-        if (incoming.length < oldLength && !deleteIntent) {
-          tenantDesignerMessages.push({
-            role: 'assistant',
-            content: 'لم يتم تطبيق التعديل لأن النتيجة أسقطت ' + (oldLength - incoming.length) + ' من ' + oldLength + ' شريحة. أعد إرسال الطلب.',
-            slides: tenantChatFocusIndexes.slice()
-          });
-          tenantProjectData.designerChat = designerChatPersistence();
-          renderTenantDesignerChat();
-          triggerAutoSaveDraft();
-          return;
-        }
-        tenantSlidesData = incoming;
-        if (tenantSlidesData.length < oldLength) {
-          activeSlideIndex = Math.max(0, Math.min(activeSlideIndex, tenantSlidesData.length - 1));
-          tenantChatSlideIndex = Math.max(0, Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1));
-        }
-      }
-
-      if (reply.creativeImages && typeof reply.creativeImages === 'object') {
-        tenantCreativeImages = reply.creativeImages;
-        tenantProjectData = { ...tenantProjectData, tenantCreativeImages };
-      }
-      if (!Array.isArray(reply.chatHistory)) {
-        tenantDesignerMessages.push({
-          role: 'assistant',
-          content: reply.response || 'تم تنفيذ الطلب وتحديث العرض.',
-          slides: tenantChatFocusIndexes.slice()
-        });
-      }
-      tenantProjectData.designerChat = designerChatPersistence();
-      renumberTenantSlides();
-      tenantProjectData.tenantSlidesData = tenantSlidesData;
-      renderTenantSlides();
-      renderTenantDesignerChat();
-      triggerAutoSaveDraft();
+      applyTenantDesignerChatResult(data, message, input);
+      if (job && isTerminalDesignerChatJob(data)) clearTenantDesignerJob(job);
     }
 
     async function renderPresentationFontStatus() {
@@ -24689,6 +25083,7 @@
       showTenantPage('tenantSlidesPage');
       refreshGlobalRail();
       toast('تم فتح العرض: ' + (p.title || ''));
+      void resumeTenantDesignerChatJob();
     }
 
     async function openTenantPresentations(force = false) {
@@ -24852,6 +25247,7 @@
           tenantSlidesData.length);
         refreshGlobalRail();
         toast('تم فتح المسودة المحفوظة بنجاح');
+        void resumeTenantDesignerChatJob();
         return true;
       } catch (e) {
         hideLoader();
