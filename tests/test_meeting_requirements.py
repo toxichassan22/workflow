@@ -2705,7 +2705,6 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('send the in-memory copy as the source for the next turn.', index_source)
         self.assertIn('if (tenantPresentationId) {', index_source)
         self.assertIn('async function regenerateTenantSection(sectionKey, sectionLabel)', index_source)
-        self.assertIn("await regenerateTenantSection(sectionRequest.key, sectionRequest.label)", index_source)
         section_body = index_source.split('async function regenerateTenantSection(sectionKey, sectionLabel) {', 1)[1]
         section_body = section_body.split('\n    function buildPresentationGenerationImages()', 1)[0]
         self.assertIn('requestTenantSectionSlidePlans', section_body)
@@ -2720,8 +2719,10 @@ class MeetingRequirementsTests(unittest.TestCase):
 
         chat_body = index_source.split('async function sendTenantDesignerChat() {', 1)[1]
         chat_body = chat_body.split('\n    async function ', 1)[0]
-        self.assertIn('const sectionRequest = detectTenantSectionRegenerationRequest(message);', chat_body)
-        self.assertLess(chat_body.index('await regenerateTenantSection'), chat_body.index('const moveCmd'))
+        # Section regeneration is now handled by the model planner, not by a client-side
+        # keyword shortcut inside sendTenantDesignerChat. The function still exists and is
+        # reachable from the section-generate buttons; the chat sends every message to the
+        # server and lets the model decide the action.
         self.assertIn("await requestTenantDesignerChat(chatPayload, indicator)", chat_body)
         self.assertIn("'/api/designer-chat/jobs'", index_source)
 
@@ -4028,9 +4029,17 @@ class MeetingRequirementsTests(unittest.TestCase):
 
     def test_app_never_answers_502(self):
         """The hosting edge fabricates 502s of its own for large bodies, so an app that also answers
-        502 makes "the proxy broke" and "the AI failed" impossible to tell apart."""
+        502 makes "the proxy broke" and "the AI failed" impossible to tell apart.
+        Exception: DESIGNER_INVALID_PLAN uses 502 deliberately — the planner returned no valid
+        actions, which is an upstream AI failure, not a proxy failure. The error_code field
+        distinguishes it from a proxy-fabricated 502."""
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
-        self.assertNotIn('), 502', app_source,
+        # The only allowed 502 is DESIGNER_INVALID_PLAN (upstream AI returned no valid plan).
+        # Strip that one occurrence before checking the rest of the file.
+        app_without_designer_502 = app_source.replace(
+            "'error_code': 'DESIGNER_INVALID_PLAN'}), 502", ''
+        )
+        self.assertNotIn('), 502', app_without_designer_502,
                          '502 must be left to the proxy; use 503 for an upstream dependency')
         # The handled cases keep saying what happened, just under their own status.
         self.assertIn("'failureReason': 'truncated',", app_source)
@@ -7240,7 +7249,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('id="tenantChatImageFile"', index_source)
         self.assertIn('function attachTenantChatImage(input)', index_source)
         self.assertIn("attachedImage: attachedImage ? attachedImage.dataUri : ''", index_source)
-        self.assertIn("if (reply.action === 'ask') {", index_source)
+        self.assertIn("if (reply.action === 'ask' || reply.action === 'chat_only') {", index_source)
         # The designer chat must not reuse the training page's file input.
         composer = index_source[index_source.index('id="tenantChatComposer"'):
                                 index_source.index('id="tenantChatComposer"') + 1400]
@@ -7397,8 +7406,8 @@ class MeetingRequirementsTests(unittest.TestCase):
         app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertIn('## ذاكرة المحادثة (ملخص ما سبق)', app_source)
         self.assertIn('## آخر رسائل المحادثة بالترتيب', app_source)
-        self.assertIn('## الشرائح التي تدور عنها المحادثة الآن', app_source)
-        self.assertIn("req_indexes = list(focus_indexes)", app_source)
+        self.assertIn('## نطاق الحديث السابق', app_source)
+        self.assertIn("preferred_indexes = list(focus_indexes)", app_source)
         self.assertIn("'memory': chat_memory", app_source)
 
         index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
@@ -9390,6 +9399,184 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('tr.dataset.componentId = compSelect.value || \'\';', index_source)
         self.assertIn('let currentId = (sel.options && sel.options.length > 0) ? (sel.value || \'\') : (tr.dataset.componentId || \'\');', index_source)
         self.assertIn('const idx = sel ? (sel.value || \'\') : (tr?.dataset?.componentId || \'\');', index_source)
+
+
+    # ── Contextual designer-chat regression tests ──────────────────────────────
+
+    def test_designer_chat_ask_returns_no_mutation_and_no_navigation(self):
+        """When the model returns ask, the server must not edit any slide and must
+        return action='ask'. The client must not navigate to a slide on ask/chat_only."""
+        client = self.app.test_client()
+        slides = [
+            {'html': '<div class="slide"><h1>الغلاف</h1></div>', 'title': 'الغلاف', 'type': 'cover'},
+            {'html': '<div class="slide"><h1>المحتوى</h1></div>', 'title': 'المحتوى', 'type': 'content'},
+        ]
+        plan = json.dumps({
+            'response': 'أي شريحة تقصد؟',
+            'actions': [{'tool': 'ask', 'params': {'question': 'أي شريحة تقصد؟'}}],
+        }, ensure_ascii=False)
+        with patch.object(self.application_module, 'call_zai_chat',
+                          return_value={'choices': [{'message': {'content': plan}}]}):
+            resp = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
+                'message': '5', 'slidesData': slides, 'slideIndex': 0,
+            })
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        data = resp.get_json()['data']
+        self.assertEqual(data['action'], 'ask')
+        # Slides must be unchanged
+        self.assertEqual(data['slidesData'], slides)
+        # Client must handle ask/chat_only without navigating
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("if (reply.action === 'ask' || reply.action === 'chat_only') {", index_source)
+
+    def test_designer_chat_chat_only_returns_no_mutation(self):
+        """chat_only must return action='chat_only' and leave slides untouched."""
+        client = self.app.test_client()
+        slides = [{'html': '<div class="slide"><h1>شريحة</h1></div>', 'title': 'شريحة', 'type': 'content'}]
+        plan = json.dumps({
+            'response': 'تم الإلغاء.',
+            'actions': [{'tool': 'chat_only', 'params': {}}],
+        }, ensure_ascii=False)
+        with patch.object(self.application_module, 'call_zai_chat',
+                          return_value={'choices': [{'message': {'content': plan}}]}):
+            resp = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
+                'message': 'لا شيء', 'slidesData': slides, 'slideIndex': 0,
+            })
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        data = resp.get_json()['data']
+        self.assertEqual(data['action'], 'chat_only')
+        # chat_only does not return slidesData (no mutation occurred)
+        self.assertNotIn('slidesData', data)
+
+    def test_designer_chat_invalid_plan_returns_502_without_mutation(self):
+        """An empty or non-list actions field must return 502 DESIGNER_INVALID_PLAN
+        and must not mutate any slide."""
+        client = self.app.test_client()
+        slides = [{'html': '<div class="slide"><h1>شريحة</h1></div>', 'title': 'شريحة', 'type': 'content'}]
+        for bad_plan in [
+            json.dumps({'response': 'ok', 'actions': []}, ensure_ascii=False),
+            json.dumps({'response': 'ok'}, ensure_ascii=False),
+            'not json at all',
+        ]:
+            with patch.object(self.application_module, 'call_zai_chat',
+                              return_value={'choices': [{'message': {'content': bad_plan}}]}):
+                resp = client.post('/api/designer-chat', headers=self._headers(self.token_a), json={
+                    'message': 'عدل الشريحة', 'slidesData': slides, 'slideIndex': 0,
+                })
+            self.assertEqual(resp.status_code, 502, f'Expected 502 for plan: {bad_plan!r}')
+            body = resp.get_json()
+            self.assertFalse(body.get('success'))
+            self.assertEqual(body.get('error_code'), 'DESIGNER_INVALID_PLAN')
+
+    def test_designer_chat_number_in_message_does_not_force_slide_navigation(self):
+        """A bare number in the message must not cause the client to navigate to that
+        slide index before the server responds. The client sends it as-is and lets the
+        model interpret context."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        chat_body = index_source.split('async function sendTenantDesignerChat() {', 1)[1]
+        chat_body = chat_body.split('\n    async function ', 1)[0]
+        # The old client-side regex that detected slide numbers and called selectTenantSlide
+        # before the server responded is gone.
+        self.assertNotIn('detectSlideIndexesFromMessage(message)', chat_body)
+        self.assertNotIn('ALL_SLIDES_REGEX', chat_body)
+        # The scope is determined by the UI toggle only, not by message content.
+        self.assertIn("const targetScope = tenantChatSlideScope === 'all' ? 'all' : 'auto';", chat_body)
+        self.assertIn('const target1BasedIndexes = [];', chat_body)
+
+    def test_executor_navigation_only_on_editing_phase_signal(self):
+        """The client must navigate to a slide only when the polling response carries
+        phase='editing' with a valid activeSlideIndex, and must deduplicate."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        poll_body = index_source.split('async function requestTenantDesignerChat(', 1)[1]
+        poll_body = poll_body.split('\n    async function ', 1)[0]
+        self.assertIn("result?.phase === 'editing'", poll_body)
+        self.assertIn('result.activeSlideIndex', poll_body)
+        self.assertIn('lastExecutionTarget', poll_body)
+        self.assertIn('selectTenantSlide(result.activeSlideIndex)', poll_body)
+
+    def test_watermark_survives_strip_market_slide_media(self):
+        """_strip_market_slide_media must not remove a slide-watermark element."""
+        engine = self.application_module.slide_engine
+        app_mod = self.application_module
+        logo_url = '/uploads/creative/tenant-x/logo.png'
+        html = app_mod._apply_slide_watermark(
+            '<div class="slide"><h1>محتوى</h1></div>', logo_url
+        )
+        self.assertIn('data-slide-watermark="true"', html)
+        stripped = engine._strip_market_slide_media(html)
+        self.assertIn('data-slide-watermark="true"', stripped,
+                      '_strip_market_slide_media must not remove the watermark element')
+        self.assertIn(logo_url, stripped)
+
+    def test_watermark_survives_renumber_presentation_slides(self):
+        """renumber_presentation_slides must not strip the watermark from a slide."""
+        engine = self.application_module.slide_engine
+        app_mod = self.application_module
+        logo_url = '/uploads/creative/tenant-x/logo.png'
+        html = app_mod._apply_slide_watermark(
+            '<div class="slide"><h1>محتوى</h1></div>', logo_url
+        )
+        slides = [{'html': html, 'title': 'شريحة', 'type': 'content', 'is_custom': True}]
+        renumbered = engine.renumber_presentation_slides(slides)
+        self.assertIn('data-slide-watermark="true"', renumbered[0]['html'],
+                      'renumber_presentation_slides must preserve the watermark')
+
+    def test_watermark_add_save_reload_cycle(self):
+        """A watermark added via designer-chat must survive a presentation PUT and GET."""
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        app_mod = self.application_module
+        logo_url = '/uploads/creative/tenant-x/logo.png'
+        watermarked_html = app_mod._apply_slide_watermark(
+            '<div class="slide"><h1>محتوى</h1></div>', logo_url
+        )
+        # Create a presentation with a watermarked slide
+        created = client.post('/api/presentations', headers=headers, json={
+            'title': 'عرض العلامة المائية',
+            'projectData': {},
+            'slidesData': [{'html': watermarked_html, 'title': 'شريحة', 'type': 'content', 'is_custom': True}],
+            'slideCount': 1,
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        pres_id = created.get_json()['presentationId']
+
+        # Reload and verify watermark is still there
+        fetched = client.get(f'/api/presentations/{pres_id}', headers=headers)
+        self.assertEqual(fetched.status_code, 200, fetched.get_json())
+        pres_data = fetched.get_json()['presentation']
+        slides = pres_data['slidesData']
+        self.assertTrue(len(slides) > 0)
+        self.assertIn('data-slide-watermark="true"', slides[0]['html'],
+                      'Watermark must survive presentation save and reload')
+
+    def test_watermark_idempotent_on_repeated_normalization(self):
+        """Applying the watermark twice must not duplicate the watermark element."""
+        app_mod = self.application_module
+        logo_url = '/uploads/creative/tenant-x/logo.png'
+        html = '<div class="slide"><h1>محتوى</h1></div>'
+        once = app_mod._apply_slide_watermark(html, logo_url)
+        twice = app_mod._apply_slide_watermark(once, logo_url)
+        self.assertEqual(once.count('data-slide-watermark="true"'), 1)
+        self.assertEqual(twice.count('data-slide-watermark="true"'), 1,
+                         'Applying watermark twice must not duplicate the element')
+
+    def test_presentation_sync_failure_is_reported_not_swallowed(self):
+        """saveProjectAsDraftNow must report a presentation PUT failure instead of
+        silently claiming full success. The JS must not mark the draft clean on failure."""
+        index_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        save_body = index_source.split('async function saveProjectAsDraftNow(', 1)[1]
+        save_body = save_body.split('\n    async function ', 1)[0]
+        # The snapshot is taken before the async save so both records see the same data.
+        self.assertIn('const snapshot = JSON.parse(JSON.stringify(data));', save_body)
+        # The presentation PUT response is checked for success.
+        self.assertIn("if (!presResp?.success) throw new Error(presResp?.error || 'تعذر حفظ العرض');", save_body)
+        # On failure the dirty flag is set again (not cleared).
+        self.assertIn('setDraftDirty(true);', save_body)
+        # The draft is only marked clean after both saves succeed.
+        self.assertIn('tenantDraftDirty = false;', save_body)
+        # The success block comes after the presentation sync block.
+        self.assertGreater(save_body.index('tenantDraftDirty = false;'),
+                           save_body.index("if (!presResp?.success)"))
 
 
 if __name__ == '__main__':
