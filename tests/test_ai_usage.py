@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 import auth
 import db
 import maps_service
+import reference_analyzer
 
 
 class _FakeResponse:
@@ -195,6 +196,31 @@ class AiUsageTests(unittest.TestCase):
         self.assertEqual({row['flow'] for row in rows}, {'other'})
 
     # ── Summary endpoint ─────────────────────────────────────────────────
+
+    def test_reference_image_analysis_exposes_metering(self):
+        module = self.application_module
+        payload = {
+            'id': 'gen-ref-1',
+            'choices': [{'message': {'content': (
+                '{"colors": {}, "design_style": "modern", "layout_type": "grid", '
+                '"card_style": "flat", "header_style": "minimal", "notes": "x"}')}}],
+            'usage': {'prompt_tokens': 500, 'completion_tokens': 60, 'total_tokens': 560},
+        }
+        image_path = os.path.join(self.temp_dir.name, 'ref.png')
+        with open(image_path, 'wb') as handle:
+            handle.write(b'\x89PNG\r\n\x1a\nfakepng')
+        with patch.object(reference_analyzer.requests, 'post',
+                          return_value=_FakeResponse(payload)):
+            result, metering = reference_analyzer.analyze_reference_image(image_path, 'key')
+        self.assertEqual(result['design_style'], 'modern')
+        self.assertEqual(metering['generation_id'], 'gen-ref-1')
+        self.assertEqual(metering['usage']['total_tokens'], 560)
+        with self.app.app_context():
+            module._record_ai_usage(
+                {'tenant_id': self.tenant_id, 'flow': 'image', 'draft_id': 'draft-ref-meter'},
+                metering['model'], 'ok', metering['usage'], metering['generation_id'])
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-ref-meter')
+        self.assertEqual(summary['totals']['total_tokens'], 560)
 
     def test_usage_summary_endpoint_is_tenant_scoped(self):
         module = self.application_module

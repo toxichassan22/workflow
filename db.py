@@ -3430,14 +3430,19 @@ def get_ai_usage_summary(tenant_id, draft_id=None, presentation_id=None, limit=5
     return {'totals': totals, 'by_flow': by_flow, 'by_model': by_model, 'recent': recent}
 
 
-def get_ai_usage_pending_costs(limit=15):
+def get_ai_usage_pending_costs(limit=15, tenant_id=None):
     """Newest events that carry a generation id but no dollar cost yet."""
     conn = get_db()
+    clauses = ['cost_usd IS NULL', 'generation_id IS NOT NULL']
+    params = []
+    if tenant_id:
+        clauses.append('tenant_id = ?')
+        params.append(tenant_id)
+    params.append(int(limit))
     rows = conn.execute(
         'SELECT id, generation_id, created_at FROM ai_usage_events '
-        'WHERE cost_usd IS NULL AND generation_id IS NOT NULL '
-        'ORDER BY created_at DESC LIMIT ?',
-        (int(limit),)
+        f"WHERE {' AND '.join(clauses)} ORDER BY created_at DESC LIMIT ?",
+        params
     ).fetchall()
     return [dict(r) for r in rows]
 

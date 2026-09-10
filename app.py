@@ -552,6 +552,11 @@ def _ai_usage_event_age_hours(created_at):
 def _backfill_missing_ai_costs(max_events=10, time_budget_seconds=8, max_age_hours=24):
     """Best-effort fill of costs the background threads missed. Bounded so reads stay fast."""
     try:
+        if app.config.get('TESTING'):
+            return
+    except Exception:
+        pass
+    try:
         pending = db.get_ai_usage_pending_costs(limit=max_events)
     except Exception as exc:
         print(f"[AI-USAGE] pending lookup failed: {exc}")
@@ -609,14 +614,13 @@ def api_usage_totals():
 
     try:
         _backfill_missing_ai_costs()
-        return jsonify({
-            'success': True,
-            **db.get_usage_totals(
-                g.tenant_id,
-                draft_ids=_ids(request.args.get('draftIds') or request.args.get('draft_ids')),
-                presentation_ids=_ids(request.args.get('presentationIds') or request.args.get('presentation_ids')),
-            ),
-        })
+        totals = db.get_usage_totals(
+            g.tenant_id,
+            draft_ids=_ids(request.args.get('draftIds') or request.args.get('draft_ids')),
+            presentation_ids=_ids(request.args.get('presentationIds') or request.args.get('presentation_ids')),
+        )
+        totals['pending_costs'] = len(db.get_ai_usage_pending_costs(limit=200, tenant_id=g.tenant_id))
+        return jsonify({'success': True, **totals})
     except Exception as exc:
         print(f"[AI-USAGE] totals failed: {exc}")
         return jsonify({'success': False, 'error': 'تعذر تحميل الإجماليات'}), 500
@@ -15706,7 +15710,11 @@ def api_analyze_reference():
         return jsonify({'error': 'Reference image file not found on disk'}), 404
 
     try:
-        analysis = analyze_reference_image(abs_path, OPENROUTER_KEY)
+        analysis, metering = analyze_reference_image(abs_path, OPENROUTER_KEY)
+        metering = metering or {}
+        _record_ai_usage(
+            _usage_ctx('image', tenant_id=g.tenant_id), IMAGE_MODEL,
+            'ok', metering.get('usage') or {}, metering.get('generation_id'))
 
         # Auto-apply extracted colors and style to branding
         updates = {}

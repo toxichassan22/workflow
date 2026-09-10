@@ -7206,6 +7206,9 @@ class MeetingRequirementsTests(unittest.TestCase):
             db.record_ai_usage_event(
                 self.tenant_b, 'model-a', flow='slide', total_tokens=999,
                 cost_usd=9.99, draft_id='draft-usage-totals-foreign')
+            db.record_ai_usage_event(
+                self.tenant_a, 'model-a', flow='slide', total_tokens=10,
+                generation_id='gen-usage-pending', draft_id=draft_id)
         totals = client.get(
             f'/api/usage-totals?draftIds={draft_id}&presentationIds={presentation_id}',
             headers=headers).get_json()
@@ -7214,8 +7217,9 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertAlmostEqual(project['ai_cost_usd'], 0.03)
         self.assertAlmostEqual(project['maps_cost_usd'], 0.004)
         self.assertAlmostEqual(project['cost_usd'], 0.034)
-        self.assertEqual(project['calls'], 3)
-        self.assertEqual(project['total_tokens'], 150)
+        self.assertEqual(project['calls'], 4)
+        self.assertEqual(project['total_tokens'], 160)
+        self.assertGreaterEqual(totals['pending_costs'], 1)
         presentation = totals['presentations'][presentation_id]
         self.assertAlmostEqual(presentation['cost_usd'], 0.014)
         self.assertEqual(presentation['calls'], 2)

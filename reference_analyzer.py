@@ -34,7 +34,8 @@ def encode_image_to_base64(image_path):
 def analyze_reference_image(image_path, openrouter_key):
     """
     Analyze a reference design image using Gemini Vision.
-    Returns a dict with colors, design_style, layout_type, card_style, header_style, notes.
+    Returns (result_dict, metering_dict) where metering carries the provider
+    generation id and token usage so the caller can record the spend.
     """
     if not openrouter_key:
         raise ValueError("OpenRouter API key is required for image analysis")
@@ -142,4 +143,23 @@ def analyze_reference_image(image_path, openrouter_key):
         raise Exception("No JSON in vision API response")
 
     result = json.loads(json_match.group())
-    return result
+    metering = {'generation_id': None, 'usage': {}, 'model': VISION_MODEL}
+    try:
+        generation_id = data.get('id')
+        metering['generation_id'] = generation_id if isinstance(generation_id, str) and generation_id else None
+        usage = data.get('usage')
+        if isinstance(usage, dict):
+            def _num(value):
+                try:
+                    return int(value or 0)
+                except (TypeError, ValueError):
+                    return 0
+
+            metering['usage'] = {
+                'prompt_tokens': _num(usage.get('prompt_tokens')),
+                'completion_tokens': _num(usage.get('completion_tokens')),
+                'total_tokens': _num(usage.get('total_tokens')),
+            }
+    except Exception:
+        pass
+    return result, metering
