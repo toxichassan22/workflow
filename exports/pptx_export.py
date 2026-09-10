@@ -2618,7 +2618,31 @@ def _slide_counter_text(slide, index, total):
     return f'{index + 1:02d} — {total:02d}'
 
 
-def generate_pptx(slides_data, project_name, branding=None, output_dir=None, tenant_id=None):
+def _verify_pptx_slide_count(output_path, expected):
+    """Refuse to hand back a PPTX with fewer slides than the deck holds.
+
+    Same rule as the PDF side: a short file is a failed export, not a smaller
+    export. The file is reopened and counted so a silently dropped slide (or
+    a worker killed mid-save leaving a truncated zip) surfaces as an error
+    instead of a finished download.
+    """
+    try:
+        written = len(Presentation(output_path).slides)
+    except Exception as exc:
+        raise RuntimeError(f'تعذر التحقق من ملف PPTX: {exc}')
+    print(f"[PPTX] slides={written} expected={expected}")
+    try:
+        print(f"[PPTX] file={os.path.basename(str(output_path))}")
+    except UnicodeEncodeError:
+        print(os.path.basename(str(output_path)).encode('ascii', errors='backslashreplace').decode('ascii'))
+    if written < expected:
+        raise RuntimeError(
+            f'تعذر تصدير العرض كاملاً: الملف يحتوي {written} شريحة مقابل {expected} شريحة.')
+    return written
+
+
+def generate_pptx(slides_data, project_name, branding=None, output_dir=None,
+                  tenant_id=None):
     """
     Generate an editable PPTX from slide HTML.
 
@@ -2667,6 +2691,9 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
     prs.slide_height = slide_h
     blank = prs.slide_layouts[6]
     total = len(slides_data or [])
+    if not total:
+        raise ValueError('slides_data is required for PPTX export')
+    print(f"[PPTX] Building {total} editable slides...")
 
     for index, raw in enumerate(slides_data or []):
         slide_data = dict(raw) if isinstance(raw, dict) else {'html': str(raw or '')}
@@ -2676,6 +2703,8 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
 
         slide = prs.slides.add_slide(blank)
         shapes = slide.shapes
+        if (index + 1) % 10 == 0 or (index + 1) == total:
+            print(f"[PPTX] slide {index + 1}/{total}...")
 
         root = _find_slide_root(_parse_html(html))
         bg = _parse_color(root.style.get('background-color', '')
@@ -2733,6 +2762,7 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
                         if c.isalnum() or c in '-_ ')[:50].strip() or 'presentation'
     output_path = os.path.join(output_dir, f"{safe_name}_{int(time.time())}.pptx")
     prs.save(output_path)
+    _verify_pptx_slide_count(output_path, total)
     return output_path
 
 

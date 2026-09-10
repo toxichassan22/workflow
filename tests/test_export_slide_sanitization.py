@@ -811,6 +811,47 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             with fitz.open(pdf_path) as document:
                 self.assertEqual(document.page_count, 3)
 
+    def test_print_chunk_size_thresholds(self):
+        import os
+        from unittest.mock import patch
+
+        import generate_pdf_from_preview as engine
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('PDF_PRINT_CHUNK', None)
+            self.assertEqual(engine._print_chunk_size(6), 0)
+            self.assertEqual(engine._print_chunk_size(74), engine._CHUNKED_PRINT_SIZE)
+        with patch.dict(os.environ, {'PDF_PRINT_CHUNK': 'off'}):
+            self.assertEqual(engine._print_chunk_size(74), 0)
+        with patch.dict(os.environ, {'PDF_PRINT_CHUNK': '4'}):
+            self.assertEqual(engine._print_chunk_size(74), 4)
+
+    def test_chunked_export_keeps_every_page_in_order(self):
+        """Long decks print in small Chromium documents and merge, so one heavy
+        print cannot take the whole export past small-host limits."""
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import fitz
+        import generate_pdf_from_preview as engine
+
+        slides = '\n'.join(
+            f'<div class="slide" style="background:#0b4f6c!important"><p>chunked-{index}</p></div>'
+            for index in range(6)
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            pdf_path = Path(tmp_dir) / 'chunked.pdf'
+            with patch.dict(os.environ, {'PDF_PRINT_CHUNK': '2'}):
+                with patch.object(engine, 'build_font_css', return_value=('', 'Arial')):
+                    engine.generate_pdf(slides, {}, pdf_path)
+            self.assertEqual(engine.LAST_PDF_ENGINE, 'chromium-chunked')
+            with fitz.open(pdf_path) as document:
+                self.assertEqual(document.page_count, 6)
+                for index in range(6):
+                    self.assertIn(f'chunked-{index}', document[index].get_text())
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -133,6 +133,139 @@ def _launch_chromium(playwright):
     raise RuntimeError('no launchable Chromium (' + ' | '.join(errors[:8]) + ')')
 
 
+# Past this many slides a single Chromium document peaks small-host account
+# limits (the worker is SIGKilled with no traceback and no log line), while
+# the same deck prints fine in small groups.
+_CHUNKED_PRINT_THRESHOLD = 25
+_CHUNKED_PRINT_SIZE = 10
+
+
+def _print_chunk_size(slide_count):
+    """How many slides go into one Chromium print document (0 = single print).
+
+    PDF_PRINT_CHUNK overrides: a positive integer forces that group size,
+    'off'/'0' keeps the historical single print. By default ('auto') decks
+    longer than _CHUNKED_PRINT_THRESHOLD slides print in groups of
+    _CHUNKED_PRINT_SIZE and merge, keeping peak renderer memory flat.
+    """
+    raw = (os.environ.get('PDF_PRINT_CHUNK') or 'auto').strip().lower()
+    if raw in ('off', '0', 'no', 'false'):
+        return 0
+    if raw not in ('', 'auto'):
+        try:
+            forced = int(raw)
+            return forced if forced > 0 else 0
+        except ValueError:
+            pass
+    if (slide_count or 0) > _CHUNKED_PRINT_THRESHOLD:
+        return _CHUNKED_PRINT_SIZE
+    return 0
+
+
+def _chunk_document_html(chunk_slides, layout_css, font_css):
+    body = "\n".join(f'<div class="pdf-export-page">{slide}</div>' for slide in chunk_slides)
+    return f"""<!DOCTYPE html>
+<html dir="rtl">
+<head>
+<meta charset="utf-8">
+<style>{layout_css}</style>
+</head>
+<body id="pdf-export-root" style="margin:0;padding:0;background:#fff;">{body}<style>{font_css}</style></body>
+</html>"""
+
+
+def _probe_print_layout(page, offset=0):
+    """Measure the printed layout, naming slides by their deck-wide number."""
+    try:
+        page.emulate_media(media='print')
+        report = page.evaluate(
+            """() => Array.from(document.querySelectorAll('.slide')).map((el, i) => {
+                const cs = getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return {
+                    index: i + 1,
+                    position: cs.position,
+                    display: cs.display,
+                    cssFloat: cs.float,
+                    breakAfter: cs.breakAfter || cs.pageBreakAfter,
+                    height: Math.round(rect.height),
+                    width: Math.round(rect.width),
+                };
+            })"""
+        )
+    except Exception as error:
+        print(f"[PDF] layout probe failed: {error}")
+        return []
+    for item in report or []:
+        if isinstance(item, dict) and isinstance(item.get('index'), int):
+            item['index'] += offset
+    return report
+
+
+def _generate_pdf_chunked(playwright, slides, layout_css, font_css, out_path, tmp_root):
+    """Print a long deck in small documents and merge, keeping memory flat.
+
+    Each group loads in a fresh page that is closed before the next group
+    starts, so peak renderer memory stays near one group instead of the whole
+    deck. Returns (produced_path, layout_report) like the single print.
+    """
+    chunk_size = _print_chunk_size(len(slides)) or len(slides)
+    groups = [slides[i:i + chunk_size] for i in range(0, len(slides), chunk_size)]
+    print(f"[PDF] Printing {len(slides)} slides in {len(groups)} Chromium documents...")
+    browser, launch_how = _launch_chromium(playwright)
+    print(f"[PDF] Chromium ready via {launch_how}")
+    chunk_paths = []
+    layout_report = []
+    try:
+        for number, group in enumerate(groups, 1):
+            html_path = tmp_root / f'chunk-{number}.html'
+            html_path.write_text(
+                _chunk_document_html(group, layout_css, font_css), encoding='utf-8')
+            page = browser.new_page()
+            try:
+                page.set_viewport_size({"width": 1280, "height": 720})
+                page.goto(html_path.as_uri(), wait_until="load", timeout=30000)
+                try:
+                    page.evaluate("() => document.fonts.ready")
+                    page.wait_for_function(
+                        "() => Array.from(document.images).every(i => i.complete)",
+                        timeout=30000,
+                    )
+                except Exception:
+                    pass
+                layout_report.extend(
+                    _probe_print_layout(page, offset=(number - 1) * chunk_size))
+                chunk_path = tmp_root / f'chunk-{number}.pdf'
+                print(f"[PDF] Printing chunk {number}/{len(groups)} ({len(group)} slides)...")
+                page.pdf(
+                    path=str(chunk_path),
+                    width="1280px",
+                    height="720px",
+                    print_background=True,
+                    margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
+                )
+                chunk_paths.append(chunk_path)
+            finally:
+                page.close()
+    finally:
+        try:
+            browser.close()
+        except Exception:
+            pass
+    import fitz
+    merged_path = tmp_root / 'chunked-merged.pdf'
+    output = fitz.open()
+    try:
+        for chunk_path in chunk_paths:
+            with fitz.open(str(chunk_path)) as source:
+                output.insert_pdf(source)
+        output.save(str(merged_path))
+    finally:
+        output.close()
+    _replace_output_file(merged_path, out_path)
+    return str(out_path), layout_report
+
+
 def _generate_pdf_with_fitz(html, out_path, slides=None, layout_css='', font_css=''):
     """Pure-Python fallback using PyMuPDF when Playwright is unavailable."""
     print("[FONT] WARNING: PyMuPDF fallback cannot render @font-face/base64 fonts; custom font may not apply")
@@ -452,6 +585,18 @@ svg[data-chart], svg.combo-chart { max-width:100% !important; max-height:320px !
         from playwright.sync_api import sync_playwright
         print("[PDF] Launching Playwright...")
         with sync_playwright() as p:
+            chunk_size = _print_chunk_size(len(slides))
+            if slides and chunk_size and len(slides) > chunk_size:
+                # Long image-heavy decks peak small-host limits in one print;
+                # groups keep memory flat. The finally below still cleans up.
+                produced, layout_report = _generate_pdf_chunked(
+                    p, slides, layout_css, font_css, out_path, tmp_root)
+                chromium_pdf_written = True
+                LAST_PDF_ENGINE = 'chromium-chunked'
+                print("[PDF] Generation complete!")
+                print(f"[PDF] engine={LAST_PDF_ENGINE}")
+                _verify_pdf_page_count(produced, len(slides), layout_report)
+                return produced
             browser, launch_how = _launch_chromium(p)
             print(f"[PDF] Chromium ready via {launch_how}")
             page = browser.new_page()

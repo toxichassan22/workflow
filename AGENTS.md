@@ -756,7 +756,16 @@ On rootless shared hosting (no yum/dnf/rpm2cpio) the missing EL libraries are si
 `~/chromium-libs` with `scripts/rootless_rpm_extract.py` (stdlib only) and exposed through
 `LD_LIBRARY_PATH` in the staging `.env`, which `start_server-staging.sh` and `deploy-staging.sh`
 both export; never place those libs inside the app dir, rsync wipes nothing there but a fresh
-clone must keep working without them.
+clone must keep working without them. Side-load only what `ldd` names as missing: a preemptive
+`sqlite-libs` shadowed the system sqlite and broke worker boot with
+`undefined symbol: sqlite3_deserialize`.
+
+A long image-heavy deck can still die after the browser works: one 74-slide print peaks past
+account limits (CloudLinux LVE SIGKills the worker — no traceback, no log line, yet the file
+lands on disk), while the same deck prints fine in small groups. Past
+`_CHUNKED_PRINT_THRESHOLD` slides (25) `generate_pdf()` therefore prints groups of
+`_CHUNKED_PRINT_SIZE` (10) in a fresh page each and merges (`chromium-chunked` engine);
+`PDF_PRINT_CHUNK` overrides (`off`/N). Small decks keep the exact single-print path.
 
 The failure also has to be actionable, so a page count alone is not enough:
 
@@ -769,6 +778,11 @@ The failure also has to be actionable, so a page count alone is not enough:
 - `GET /api/build` reports the commit the live code came from. «هل نزل الإصلاح؟» previously had no
   answer for a server-side fix; the frontend could at least be checked by fetching the page and
   grepping for a new function name.
+
+PPTX (`exports/pptx_export.py`, native python-pptx, no browser) carries the same guarantee:
+`_verify_pptx_slide_count()` reopens the saved file and raises on a short deck, `/api/export`
+answers `engine: 'pptx-native'` with `slideCount`, and progress prints every 10 slides so a long
+build is visible in the log instead of silent.
 
 ## The designer chat has a memory
 
