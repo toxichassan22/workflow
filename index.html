@@ -25084,11 +25084,18 @@
       renumberTenantSlides();
       try { syncSlideEditSessionsAfterRender(); } catch (err) {}
       tenantProjectData = { ...tenantProjectData, tenantSlidePlan };
+      const exportProjectData = { ...tenantProjectData };
+      delete exportProjectData.tenantSlidesData;
+      delete exportProjectData.designerChat;
+      delete exportProjectData.tenantArchiveCache;
+      delete exportProjectData.draftHistory;
+      delete exportProjectData.chatHistory;
+      delete exportProjectData.designerChatSessions;
       const payload = {
         format: format,
         presentationId: tenantPresentationId,
         projectName: projectName,
-        projectData: tenantProjectData,
+        projectData: exportProjectData,
         slidesData: tenantSlidesData
       };
       let data = null;

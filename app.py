@@ -100,6 +100,7 @@ def decompress_gzip_request_body():
         request._cached_data = data
         request.environ['wsgi.input'] = io.BytesIO(data)
         request.environ['CONTENT_LENGTH'] = str(len(data))
+        request.__dict__.pop('_cached_json', None)
     except Exception:
         app.logger.warning('Could not decompress gzipped request body', exc_info=True)
 
@@ -133,27 +134,48 @@ def reassemble_chunked_request_body():
     total = meta.get('total')
     use_gzip = bool(meta.get('gzip'))
     if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', upload_id) or not isinstance(total, int) or not (1 <= total <= 1024):
+        app.logger.warning(f"[CHUNK] Invalid chunked body reference: id={upload_id!r} total={total!r}")
         return jsonify({'error': 'Invalid chunked body reference'}), 400
     import gzip as _gzip
     import io
     import shutil as _shutil
+    import time as _time
     chunk_dir = os.path.join(UPLOADS_DIR, '.body_chunks', upload_id)
     parts = []
-    try:
-        for i in range(total):
-            with open(os.path.join(chunk_dir, f'{i}.part'), 'rb') as fh:
-                parts.append(fh.read())
-    except OSError:
-        return jsonify({'error': 'Missing uploaded body chunks'}), 400
+    missing_index = None
+    for _attempt in range(5):
+        missing_index = None
+        parts = []
+        try:
+            for i in range(total):
+                part_file = os.path.join(chunk_dir, f'{i}.part')
+                if not os.path.isfile(part_file):
+                    missing_index = i
+                    break
+                with open(part_file, 'rb') as fh:
+                    parts.append(fh.read())
+            if missing_index is None and len(parts) == total:
+                break
+        except OSError:
+            missing_index = i if 'i' in locals() else 0
+        _time.sleep(0.05)
+
+    if missing_index is not None or len(parts) != total:
+        existing = os.listdir(chunk_dir) if os.path.isdir(chunk_dir) else 'none'
+        app.logger.warning(f"[CHUNK] Missing uploaded body chunks for {upload_id}: missing={missing_index} total={total} existing={existing}")
+        return jsonify({'error': 'Missing uploaded body chunks', 'missing': missing_index, 'total': total}), 400
+
     raw = b''.join(parts)
     if use_gzip:
         try:
             raw = _gzip.decompress(raw)
-        except Exception:
+        except Exception as err:
+            app.logger.warning(f"[CHUNK] Could not decompress chunked body for {upload_id} (len={len(raw)}): {err}")
             return jsonify({'error': 'Could not decompress chunked body'}), 400
     request._cached_data = raw
     request.environ['wsgi.input'] = io.BytesIO(raw)
     request.environ['CONTENT_LENGTH'] = str(len(raw))
+    request.__dict__.pop('_cached_json', None)
     _shutil.rmtree(chunk_dir, ignore_errors=True)
 
 
@@ -170,7 +192,7 @@ def api_body_chunk():
         return jsonify({'error': 'Invalid upload id'}), 400
     if not isinstance(idx, int) or not isinstance(total, int) or isinstance(idx, bool) or isinstance(total, bool) or not (0 <= idx < total <= 1024):
         return jsonify({'error': 'Invalid chunk index'}), 400
-    if not isinstance(b64, str) or len(b64) > 24 * 1024:
+    if not isinstance(b64, str) or len(b64) > 64 * 1024:
         return jsonify({'error': 'Chunk too large'}), 400
     try:
         raw = base64.b64decode(b64, validate=True)
@@ -184,6 +206,11 @@ def api_body_chunk():
     os.makedirs(chunk_dir, exist_ok=True)
     with open(os.path.join(chunk_dir, f'{int(idx)}.part'), 'wb') as fh:
         fh.write(raw)
+        fh.flush()
+        try:
+            os.fsync(fh.fileno())
+        except OSError:
+            pass
     # Best-effort sweep of stale chunk dirs (>15 min)
     try:
         now = time.time()
@@ -9795,6 +9822,26 @@ def api_export():
     Input: {format: 'pdf'|'pptx', slidesHtml: '...', slidesData: [...], projectName: '...'}
     """
     data = request.json or {}
+    # Safety net: if __chunked_body reached route handler, perform inline reassembly
+    if '__chunked_body' in data and isinstance(data.get('__chunked_body'), dict):
+        meta = data['__chunked_body']
+        fallback_id = str(meta.get('id', ''))
+        fallback_total = meta.get('total')
+        fallback_gzip = bool(meta.get('gzip'))
+        chunk_dir = os.path.join(UPLOADS_DIR, '.body_chunks', fallback_id)
+        if os.path.isdir(chunk_dir) and isinstance(fallback_total, int) and (1 <= fallback_total <= 1024):
+            try:
+                parts = [open(os.path.join(chunk_dir, f'{i}.part'), 'rb').read() for i in range(fallback_total)]
+                raw = b''.join(parts)
+                if fallback_gzip:
+                    import gzip as _gzip
+                    raw = _gzip.decompress(raw)
+                data = json.loads(raw.decode('utf-8'))
+                import shutil as _shutil
+                _shutil.rmtree(chunk_dir, ignore_errors=True)
+                print(f"[EXPORT] Inline chunked body reassembly succeeded for {fallback_id}")
+            except Exception as _fb_err:
+                print(f"[EXPORT] Inline chunked body reassembly failed: {_fb_err}")
     fmt = data.get('format', 'pdf').lower()
     project_name = data.get('projectName', 'presentation')
     export_notes = []
@@ -17246,7 +17293,7 @@ def static_map_uploads(path):
     maps_dir = os.path.join(UPLOADS_DIR, 'maps')
     full_path = os.path.join(maps_dir, path)
     if os.path.isfile(full_path):
-        return send_from_directory(maps_dir, path)
+        return send_from_directory(maps_dir, path, max_age=3600)
     return jsonify({'error': 'Map image not found', 'error_code': 'MAP_ASSET_MISSING'}), 404
 
 
@@ -17260,7 +17307,7 @@ def static_creative_upload(tenant_id, filename):
     creative_dir = os.path.join(UPLOADS_DIR, 'creative', safe_tenant)
     if not os.path.isfile(os.path.join(creative_dir, safe_filename)):
         return jsonify({'error': 'Not found'}), 404
-    return send_from_directory(creative_dir, safe_filename)
+    return send_from_directory(creative_dir, safe_filename, max_age=86400)
 
 
 @app.route('/uploads/<path:path>')
@@ -17270,7 +17317,7 @@ def static_uploads(path):
     filename = os.path.basename(path)
     possible_map = os.path.join(maps_dir, filename)
     if os.path.isfile(possible_map):
-        return send_from_directory(maps_dir, filename)
+        return send_from_directory(maps_dir, filename, max_age=3600)
     return jsonify({'error': 'Not found'}), 404
 
 APP_STARTED_AT = datetime.now(timezone.utc).isoformat()

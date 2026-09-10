@@ -93,7 +93,7 @@ mkdir -p "$WEB_ROOT"
 cd "$APP_DIR"
 setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --workers 2 \
-  --threads 2 \
+  --threads 4 \
   --timeout 300 \
   --graceful-timeout 30 \
   --max-requests 200 \

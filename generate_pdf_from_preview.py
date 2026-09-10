@@ -23,6 +23,13 @@ CHROMIUM_LAUNCH_ARGS = [
     "--disable-dev-shm-usage",
     "--disable-gpu",
     "--font-render-hinting=none",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--mute-audio",
+    "--no-first-run",
+    "--js-flags=--max-old-space-size=256",
 ]
 
 # Where a host-wide browser lives when Playwright's bundled download cannot
@@ -46,6 +53,159 @@ def _extra_chromium_args():
     host environment with only an app restart between tries.
     """
     return (os.environ.get('CHROMIUM_EXTRA_ARGS') or '').split()
+
+
+def _export_image_limits():
+    try:
+        max_side = int(os.environ.get('EXPORT_IMAGE_MAX_SIDE') or 1280)
+    except ValueError:
+        max_side = 1280
+    try:
+        quality = int(os.environ.get('EXPORT_IMAGE_JPEG_QUALITY') or 82)
+    except ValueError:
+        quality = 82
+    return max(320, max_side), min(95, max(50, quality))
+
+
+def fit_image_bytes(data):
+    """Downscale an oversized export image to display size (never upscale).
+
+    Slides render at 1280x720, so a 4000px source only adds weight: a ~2.5MB
+    PNG photo becomes ~200KB JPEG with no visible difference on the page.
+    Returns the original bytes whenever fitting would not help or fails, so
+    this can wrap any image path without risking the export itself.
+    """
+    if not data or len(data) < 150 * 1024:
+        return data
+    try:
+        from io import BytesIO as _BytesIO
+        from PIL import Image as _Image
+        with _Image.open(_BytesIO(data)) as handle:
+            handle.load()
+            width, height = handle.size
+            mode = handle.mode
+            has_alpha = (
+                mode in ('RGBA', 'LA', 'PA')
+                or (mode == 'P' and 'transparency' in handle.info)
+            )
+            source_format = str(handle.format or '').upper()
+            picture = handle.convert('RGB' if not has_alpha else 'RGBA')
+            if has_alpha:
+                try:
+                    extrema = picture.getextrema()
+                    if picture.mode == 'RGBA' and len(extrema) >= 4 and isinstance(extrema[3], tuple):
+                        if extrema[3][0] >= 255:
+                            picture = picture.convert('RGB')
+                            has_alpha = False
+                except Exception:
+                    pass
+        max_side, quality = _export_image_limits()
+        longest = max(width, height)
+        if longest > max_side:
+            scale = max_side / float(longest)
+            picture = picture.resize(
+                (max(1, int(width * scale)), max(1, int(height * scale))),
+                _Image.LANCZOS,
+            )
+        photo_like = (source_format in ('JPEG', 'JPG', 'WEBP') or len(data) > 400 * 1024)
+        out = _BytesIO()
+        if has_alpha or not photo_like:
+            if longest <= max_side and source_format == 'PNG' and len(data) <= 400 * 1024:
+                return data
+            picture.save(out, format='PNG')
+        else:
+            picture.save(out, format='JPEG', quality=quality, optimize=True,
+                         progressive=True)
+        fitted = out.getvalue()
+        return fitted if 0 < len(fitted) < len(data) else data
+    except Exception:
+        return data
+
+
+def _local_file_bytes_from_url(url):
+    from urllib.parse import unquote, urlparse
+    path = Path(unquote(urlparse(url).path))
+    if os.name == 'nt' and len(str(path)) > 2 and str(path)[1] == ':':
+        path = Path(str(path)[1:])
+    try:
+        if path.is_file() and path.stat().st_size:
+            return path.read_bytes(), path.suffix.lower()
+    except OSError:
+        pass
+    return None, ''
+
+
+def fit_export_images_in_html(html, tmp_root):
+    """Rewrite oversized image sources in export HTML to fitted copies.
+
+    ``file://`` URLs become fitted files under tmp_root (reused by content
+    hash, which also lets Chromium deduplicate them into one object), and
+    oversized ``data:`` URIs are re-encoded smaller inline. Anything else —
+    remote URLs, missing files, small images — is left untouched.
+    """
+    if not html or 'img' not in html.lower() and 'url(' not in html.lower():
+        return html
+    import base64 as _base64
+    import hashlib as _hashlib
+    fitted_files = {}
+
+    def _fit_data_uri(url):
+        header, _, payload = url.partition(',')
+        if ';base64' not in header or not payload:
+            return None
+        try:
+            raw = _base64.b64decode(payload)
+        except Exception:
+            return None
+        fitted = fit_image_bytes(raw)
+        if fitted == raw:
+            return None
+        mime = 'image/png' if fitted[:8] == b'\x89PNG\r\n\x1a\n' else 'image/jpeg'
+        return f'data:{mime};base64,' + _base64.b64encode(fitted).decode('ascii')
+
+    def _fit_file_url(url):
+        clean = url.split('?')[0].split('#')[0]
+        if clean in fitted_files:
+            return fitted_files[clean]
+        raw, _suffix = _local_file_bytes_from_url(clean)
+        if not raw:
+            return None
+        fitted = fit_image_bytes(raw)
+        if fitted == raw:
+            fitted_files[clean] = None
+            return None
+        ext = '.png' if fitted[:8] == b'\x89PNG\r\n\x1a\n' else '.jpg'
+        name = 'export-img-' + _hashlib.md5(fitted).hexdigest() + ext
+        target = Path(tmp_root) / name
+        try:
+            if not target.is_file():
+                target.write_bytes(fitted)
+        except OSError:
+            return None
+        uri = target.as_uri()
+        fitted_files[clean] = uri
+        return uri
+
+    def _replace_attribute(match):
+        replacement = _fit_data_uri(match.group('url')) if match.group('url').lower().startswith('data:') else _fit_file_url(match.group('url'))
+        if not replacement:
+            return match.group(0)
+        return match.group('prefix') + replacement + match.group('quote')
+
+    def _replace_css_url(match):
+        replacement = _fit_data_uri(match.group('url')) if match.group('url').lower().startswith('data:') else _fit_file_url(match.group('url'))
+        if not replacement:
+            return match.group(0)
+        quote = match.group('q') or '"'
+        return f'url({quote}{replacement}{quote})'
+
+    html = re.sub(
+        r'''(?P<prefix>(?:src|href)\s*=\s*["'])(?P<url>(?:file://[^"']+|data:image/[^"']+))(?P<quote>["'])''',
+        _replace_attribute, html, flags=re.IGNORECASE)
+    html = re.sub(
+        r'''url\(\s*(?P<q>["']?)(?P<url>(?:file://[^)"']+|data:image/[^)"']+))(?P=q)\s*\)''',
+        _replace_css_url, html, flags=re.IGNORECASE)
+    return html
 
 
 def _chromium_executable_candidates():
@@ -136,8 +296,8 @@ def _launch_chromium(playwright):
 # Past this many slides a single Chromium document peaks small-host account
 # limits (the worker is SIGKilled with no traceback and no log line), while
 # the same deck prints fine in small groups.
-_CHUNKED_PRINT_THRESHOLD = 25
-_CHUNKED_PRINT_SIZE = 10
+_CHUNKED_PRINT_THRESHOLD = 10
+_CHUNKED_PRINT_SIZE = 6
 
 
 def _print_chunk_size(slide_count):
@@ -520,6 +680,15 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     # Resolve relative asset URLs so Playwright can load local images/fonts
     html = _resolve_asset_urls(html)
 
+    # A home for fitted image copies (cleaned with the preview dir below).
+    tmp_dir = tempfile.mkdtemp(prefix='pdf_preview_')
+    tmp_root = Path(tmp_dir).resolve()
+
+    # Downscale oversized images before extraction so the single print, the
+    # chunked documents and the fallback all render the fitted copies while
+    # the stored originals stay untouched.
+    html = fit_export_images_in_html(html, tmp_root)
+
     # Strip any previously-baked font-family declarations so the tenant font wins
     html = sanitize_slide_html_for_export(html)
     slide_tags = len(re.findall(r'<div\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\1', html, re.I))
@@ -569,9 +738,7 @@ svg[data-chart], svg.combo-chart { max-width:100% !important; max-height:320px !
         else:
             html = html + f"<style>{font_css}</style>"
 
-    # Use a temporary directory for the preview HTML so it is cleaned up automatically
-    tmp_dir = tempfile.mkdtemp(prefix='pdf_preview_')
-    tmp_root = Path(tmp_dir).resolve()
+    # The preview HTML lives in the same temporary directory.
     resolved_html_path = tmp_root / 'preview.html'
     if resolved_html_path.parent != tmp_root:
         raise RuntimeError('Invalid preview html path')

@@ -30,7 +30,7 @@ from design_templates import (
     readable_text_color,
     sanitize_slide_html_for_export,
 )
-from generate_pdf_from_preview import _resolve_asset_urls, _resolve_project_file_urls
+from generate_pdf_from_preview import _resolve_asset_urls, _resolve_project_file_urls, fit_image_bytes
 from slide_engine import resolve_logo_in_html
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -535,6 +535,22 @@ def _find_slide_root(root):
 # --------------------------------------------------------------------------
 
 def _image_bytes(src, tenant_id=None):
+    """Resolve an <img> src / background url, fitted to display size.
+
+    The stored originals are never touched; fitting only shrinks what the
+    deck embeds (a 2.5MB source photo becomes ~200KB) and python-pptx still
+    deduplicates identical results into one media part.
+    """
+    data = _resolve_image_bytes(src, tenant_id)
+    if not data:
+        return None
+    try:
+        return fit_image_bytes(data)
+    except Exception:
+        return data
+
+
+def _resolve_image_bytes(src, tenant_id=None):
     """Resolve an <img> src / background url to raw image bytes."""
     if not src:
         return None
@@ -1457,19 +1473,27 @@ class SpacerBlock(Block):
 
 class RuleBlock(Block):
     def __init__(self, color=None, width_px=None, height_px=3.0, centered=True,
-                 oval=False):
+                 oval=False, align=None):
         self.color = color
         self.width_px = width_px
         self.height_px = height_px
         self.centered = centered
         self.oval = oval
+        # align overrides centered: 'start' | 'center' | 'end'
+        self.align = align
 
     def estimate(self, width_px, ctx):
         return self.height_px + 7.0
 
     def render(self, slide, shapes, left_px, top_px, width_px, ctx, max_h_px):
         w = min(self.width_px or width_px, width_px)
-        x = left_px + (width_px - w) / 2 if self.centered else left_px
+        mode = self.align or ('center' if self.centered else 'start')
+        if mode == 'center':
+            x = left_px + (width_px - w) / 2
+        elif mode == 'end':
+            x = left_px + width_px - w
+        else:
+            x = left_px
         bar = shapes.add_shape(MSO_SHAPE.OVAL if self.oval else MSO_SHAPE.RECTANGLE,
                                _px_to_emu(x),
                                _px_to_emu(top_px + 3), _px_to_emu(w),
@@ -1702,18 +1726,20 @@ def _node_to_blocks(node, ctx, rtl=True):
 
     if tag == 'hr':
         return [RuleBlock(_parse_color(node.style.get('background-color'))
-                          or _parse_color(node.style.get('color')))]
+                          or _parse_color(node.style.get('color')),
+                          align=_css_rule_align(node))]
 
     if tag in ('div', 'span') and not node.get_text().strip() and not node.find_all({'img', 'table', 'svg', 'ul', 'ol'}):
         # Thin decorative bar (gold rules under titles etc.) or dot.
         w = _parse_px(node.style.get('width'), None)
         h = _parse_px(node.style.get('height'), None)
         fill = _node_bg(node)
+        rule_align = _css_rule_align(node)
         if fill is not None and w is not None and h is not None:
             if w <= 18 and h <= 18:
-                return [RuleBlock(fill, width_px=w, height_px=h)]
+                return [RuleBlock(fill, width_px=w, height_px=h, align=rule_align)]
             if w >= 20 and h <= 12:
-                return [RuleBlock(fill, width_px=w, height_px=h)]
+                return [RuleBlock(fill, width_px=w, height_px=h, align=rule_align)]
             if h >= 20 and w <= 12:
                 return [RuleBlock(fill, width_px=w, height_px=h, centered=False)]
         if not node.children:
@@ -2201,12 +2227,67 @@ def _estimate_node_width(node, ctx, cap=1280.0):
         return min(200.0, cap)
 
 
+def _css_auto_margin(node, side):
+    """Whether CSS margin on `left`/`right` is auto (shorthand-aware)."""
+    if str(node.style.get(f'margin-{side}', '')).strip().lower() == 'auto':
+        return True
+    margin = str(node.style.get('margin', '')).strip().lower()
+    if 'auto' not in margin:
+        return False
+    parts = [p for p in re.split(r'\s+', margin) if p]
+    if not parts:
+        return False
+    if len(parts) == 1:
+        return parts[0] == 'auto'
+    if len(parts) == 2:
+        return parts[1] == 'auto'
+    if len(parts) == 3:
+        return parts[1] == 'auto'
+    return parts[3 if side == 'left' else 1] == 'auto'
+
+
+def _css_rule_align(node):
+    """RuleBlock align from margin auto: left:auto -> end, right:auto -> start."""
+    if _css_auto_margin(node, 'left'):
+        return 'end'
+    if _css_auto_margin(node, 'right'):
+        return 'start'
+    return None
+
+
+def _is_full_bleed_bg_layer(node, cw=1280.0, ch=720.0):
+    """A child that only carries a full-slide background image (no content)."""
+    if not isinstance(node, Node) or _is_hidden(node):
+        return False
+    if node.tag in _SKIP_TAGS:
+        return False
+    if (node.get_text() or '').strip():
+        return False
+    if node.find_all({'img', 'table', 'svg', 'ul', 'ol', 'p', 'h1', 'h2', 'h3', 'h4'}):
+        return False
+    for child in node.children:
+        if isinstance(child, Node) and not _is_hidden(child) and (child.get_text() or '').strip():
+            return False
+    url = _extract_bg_url(node.style.get('background-image', '')
+                         or node.style.get('background', ''))
+    if not url:
+        return False
+    rect = _abs_rect(node, cw, ch)
+    if rect is None:
+        return False
+    _x, _y, w, h = rect
+    return w >= cw * 0.9 and h >= ch * 0.9
+
+
 def _anchored_rect(node, cw, ch, ctx):
     """Absolute rect with shrink-to-fit fallback for open/bottom-anchored boxes.
 
     CSS absolute boxes without explicit height size to their content; stretching
     them to the slide edge misplaces bottom-anchored strips and stretches side
-    rules. Estimate the content height when the markup leaves it open.
+    rules. Estimate the content height when the markup leaves it open. Boxes
+    with only left/right (no width) also shrink-to-fit so a bottom counter
+    does not become a full-width strip, and bottom anchoring still applies
+    after that shrink (project name at bottom-right, counter at bottom-left).
     """
     rect = _abs_rect(node, cw, ch)
     if rect is None:
@@ -2216,29 +2297,39 @@ def _anchored_rect(node, cw, ch, ctx):
     if width_given is None:
         left = _parse_len(node.style.get('left'), cw)
         right = _parse_len(node.style.get('right'), cw)
-        if left is None and right is not None:
+        if left is not None and right is None:
+            est_w = _estimate_node_width(node, ctx, max(20.0, cw - left))
+            w = min(max(est_w, 20.0), max(20.0, cw - left))
+            x = left
+        elif left is None and right is not None:
             # Right-anchored open box (flex rows, labels): shrink-to-fit and
             # hug the right edge like the browser instead of filling the row.
-            est_w = _estimate_node_width(node, ctx, cw - right)
-            est_w = min(max(est_w, 20.0), cw - right)
-            return (cw - right - est_w, y, est_w, h)
+            est_w = _estimate_node_width(node, ctx, max(20.0, cw - right))
+            w = min(max(est_w, 20.0), max(20.0, cw - right))
+            x = cw - right - w
     explicit_h = _parse_len(node.style.get('height'), ch)
-    if explicit_h is not None:
-        return rect
     top = _parse_len(node.style.get('top'), ch)
     if top is None and node.style.get('inset', '').strip():
         it, _ir, _ib, _il = _parse_insets(node.style.get('inset'), cw, ch)
         top = it
     bottom = _parse_len(node.style.get('bottom'), ch)
+    if explicit_h is not None:
+        if top is None and bottom is not None:
+            return (x, ch - bottom - h, w, h)
+        if top is not None and bottom is None:
+            return (x, top, w, h)
+        if top is not None and bottom is not None:
+            return (x, top, w, max(h, ch - top - bottom) if h < (ch - top - bottom) else h)
+        return (x, y, w, h)
     if top is not None and bottom is None:
         # Open-ended: shrink to content instead of filling to the slide edge.
         est = _estimate_node_height(node, ctx, w)
         return (x, y, w, min(est, ch - y))
     if top is None and bottom is not None:
         est = _estimate_node_height(node, ctx, w)
-        est = min(est, ch - bottom)
+        est = min(est, max(20.0, ch - bottom))
         return (x, ch - bottom - est, w, est)
-    return rect
+    return (x, y, w, h)
 
 
 def _is_veil(node, cw=1280.0, ch=720.0):
