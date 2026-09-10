@@ -65,6 +65,11 @@ the very next line then stripped. Do not wire it back in.
 - Backend: Flask, single file `app.py` (~7.4k lines). DB layer in `db.py` (SQLite locally, Postgres via `DATABASE_URL`).
 - Frontend: one single-page app, `index.html` (~13.7k lines). All JS lives in **one inline `<script>` block** starting at line ~4195, so every function shares one scope.
 - PDF handling: PyMuPDF (`fitz`). AI: OpenRouter for all text/image generation — see `.env`.
+- Spend metering: every OpenRouter call lands in `ai_usage_events` (tokens verbatim, dollars via
+  `/generation`), every billable Maps call in `map_usage_events` (units × `MAPS_SKU_UNIT_PRICES`,
+  which are estimates — verify in Cloud Billing, override with `MAPS_SKU_PRICES` JSON). Both are
+  attributed per tenant/draft/presentation and served tenant-scoped from `GET /api/ai-usage`.
+  Metering helpers never raise; cached map reads and failed calls record nothing.
 
 ## Schema gotchas
 

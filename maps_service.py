@@ -303,6 +303,116 @@ def _check_maps_rate_limit(tenant_id):
     return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Maps spend metering: Google returns no per-call cost, so every billable
+# request is counted here with its SKU and a unit price in dollars. Prices are
+# estimates from public Maps Platform pricing — verify them against Cloud
+# Billing and override with the MAPS_SKU_PRICES env var (a JSON object mapping
+# SKU names to dollars). The unit price is stored on each row, so a later
+# price change never rewrites history. Only completed provider requests are
+# recorded: served-from-cache reads and failed calls carry no spend.
+# ─────────────────────────────────────────────────────────────────────────────
+MAPS_SKU_UNIT_PRICES = {
+    'geocode': 0.005,
+    'staticmap': 0.002,
+    'places_text': 0.032,
+    'places_nearby': 0.032,
+    'distance_matrix': 0.005,
+    'directions': 0.005,
+    'streetview': 0.007,
+    'roads': 0.01,
+}
+try:
+    _maps_price_overrides = json.loads(os.environ.get('MAPS_SKU_PRICES') or '{}')
+    if isinstance(_maps_price_overrides, dict):
+        for _sku, _price in _maps_price_overrides.items():
+            if _sku in MAPS_SKU_UNIT_PRICES:
+                MAPS_SKU_UNIT_PRICES[_sku] = float(_price)
+except Exception as _price_error:
+    print(f"[MAPS USAGE] ignoring invalid MAPS_SKU_PRICES: {_price_error}")
+
+MAPS_USAGE_FLOWS = (
+    'overview', 'access', 'catchment', 'landmarks', 'site', 'geocode',
+    'places', 'matrix', 'maps', 'other',
+)
+
+_maps_usage_local = threading.local()
+
+
+def maps_usage_ctx(flow, tenant_id=None, draft_id=None, presentation_id=None, data=None):
+    """Build the metering context for Maps calls. Unknown ids stay None."""
+    if isinstance(data, dict):
+        project_data = data.get('projectData')
+        if draft_id is None:
+            draft_id = data.get('draftId') or data.get('draft_id')
+            if draft_id is None and isinstance(project_data, dict):
+                draft_id = project_data.get('draftId') or project_data.get('draft_id')
+        if presentation_id is None:
+            presentation_id = data.get('presentationId') or data.get('presentation_id')
+    return {
+        'tenant_id': tenant_id,
+        'draft_id': draft_id,
+        'presentation_id': presentation_id,
+        'flow': flow if flow in MAPS_USAGE_FLOWS else 'other',
+    }
+
+
+class maps_usage_scope:
+    """Thread-local metering context: every metered call inside the block
+    inherits the tenant, draft, presentation and flow unless it carries its
+    own explicit context."""
+
+    def __init__(self, ctx):
+        self.ctx = dict(ctx) if isinstance(ctx, dict) else {}
+        self.previous = None
+
+    def __enter__(self):
+        self.previous = getattr(_maps_usage_local, 'ctx', None)
+        _maps_usage_local.ctx = self.ctx
+        return self.ctx
+
+    def __exit__(self, *exc):
+        _maps_usage_local.ctx = self.previous
+        return False
+
+
+def _current_maps_ctx():
+    ctx = getattr(_maps_usage_local, 'ctx', None)
+    return dict(ctx) if isinstance(ctx, dict) else {}
+
+
+def _record_maps_usage(usage_ctx, sku, units=1):
+    """Persist one billable Google call. Never raises: metering must not break mapping."""
+    try:
+        ctx = dict(usage_ctx) if isinstance(usage_ctx, dict) else _current_maps_ctx()
+        units = max(0, int(units or 0))
+        if units <= 0:
+            return None
+        flow = ctx.get('flow') or 'other'
+        if flow not in MAPS_USAGE_FLOWS:
+            flow = 'other'
+        import db as _db
+        try:
+            return _db.record_maps_usage_event(
+                ctx.get('tenant_id'), sku, units,
+                MAPS_SKU_UNIT_PRICES.get(sku, 0.0),
+                flow=flow, draft_id=ctx.get('draft_id'),
+                presentation_id=ctx.get('presentation_id'),
+            )
+        except RuntimeError:
+            import app as _flask_app
+            with _flask_app.app.app_context():
+                return _db.record_maps_usage_event(
+                    ctx.get('tenant_id'), sku, units,
+                    MAPS_SKU_UNIT_PRICES.get(sku, 0.0),
+                    flow=flow, draft_id=ctx.get('draft_id'),
+                    presentation_id=ctx.get('presentation_id'),
+                )
+    except Exception as exc:
+        print(f"[MAPS USAGE] record failed: {exc}")
+        return None
+
+
 def _get_api_key():
     return os.environ.get('GOOGLE_MAPS_API_KEY', '') or GOOGLE_API_KEY
 
@@ -412,7 +522,7 @@ def extract_coords_from_maps_link(url):
     return None
 
 
-def geocode_address(address, tenant_id=None):
+def geocode_address(address, tenant_id=None, usage_ctx=None):
     """Convert address string to lat/lng using Geocoding API.
     Prefers ROOFTOP precision results when available."""
     if not _has_api_key():
@@ -451,6 +561,9 @@ def geocode_address(address, tenant_id=None):
                 ])
         if tenant_id:
             _record_maps_call(tenant_id)
+        _record_maps_usage(
+            usage_ctx or maps_usage_ctx('geocode', tenant_id=tenant_id),
+            'geocode', 1)
         return {
             'success': True,
             'lat': loc['lat'],
@@ -478,7 +591,7 @@ def _normalize_city_name(value):
     return CITY_ALIASES.get(normalized)
 
 
-def reverse_geocode_location(lat, lng, tenant_id=None, language='en'):
+def reverse_geocode_location(lat, lng, tenant_id=None, language='en', usage_ctx=None):
     if not _has_api_key():
         return {}
     try:
@@ -493,6 +606,9 @@ def reverse_geocode_location(lat, lng, tenant_id=None, language='en'):
         result = payload['results'][0]
         if tenant_id:
             _record_maps_call(tenant_id)
+        _record_maps_usage(
+            usage_ctx or maps_usage_ctx('geocode', tenant_id=tenant_id),
+            'geocode', 1)
         return {
             'formatted_address': result.get('formatted_address', ''),
             'place_id': result.get('place_id'),
@@ -658,7 +774,7 @@ def _map_cache_path(lat, lng, maptype, zoom, markers=None, paths=None, size=None
 
 def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720), output_path=None,
                    maptype='satellite', styles=None, use_google_markers=False, language='ar',
-                   bypass_cache=False):
+                   bypass_cache=False, usage_ctx=None):
     """Generate a static map image with optional markers and paths (cached by lat,lng,maptype,zoom)."""
     if not _has_api_key():
         return _api_key_error()
@@ -696,6 +812,7 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
     res = _download_image(url, params, cache_path)
     if not res.get('success'):
         return res
+    _record_maps_usage(usage_ctx, 'staticmap', 1)
     if output_path != cache_path:
         shutil.copyfile(cache_path, output_path)
     return {'success': True, 'path': output_path, 'size': os.path.getsize(output_path), 'cached': False}
@@ -1076,7 +1193,7 @@ def classify_landmark_category(types):
     return 'اجتماعي/خدمي'
 
 
-def find_place_near(name, lat, lng, radius_m=20000, language='ar'):
+def find_place_near(name, lat, lng, radius_m=20000, language='ar', usage_ctx=None):
     """Locate a named landmark around the site with Places text search.
 
     Geocoding a landmark name together with the project address returns the *address*,
@@ -1118,6 +1235,7 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar'):
         latitude, longitude = location.get('latitude'), location.get('longitude')
         if latitude is None or longitude is None:
             return None
+        _record_maps_usage(usage_ctx, 'places_text', 1)
         return {
             'lat': float(latitude),
             'lng': float(longitude),
@@ -1128,7 +1246,7 @@ def find_place_near(name, lat, lng, radius_m=20000, language='ar'):
         return None
 
 
-def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, include_all=False, included_types=None):
+def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, include_all=False, included_types=None, usage_ctx=None):
     """Find nearby landmarks using Places API (New).
     Filters out irrelevant place types like gas stations, parking, ATMs, etc."""
     if not _has_api_key():
@@ -1210,6 +1328,8 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
             }
             print(f"[GOOGLE PLACES ERROR] http={response.status_code} status={provider_status or 'unknown'} message={message}")
             return safe_error
+
+        _record_maps_usage(usage_ctx, 'places_nearby', 1)
 
         # Places API (New) answers a valid search that matches nothing with HTTP 200 and an empty
         # body, "{}", omitting the places key entirely. Treating that as a provider error turned a
@@ -1310,18 +1430,18 @@ def get_driving_times(origin_lat, origin_lng, destinations):
     return {'success': True, 'times': times}
 
 
-def get_drive_matrix(origin, destinations):
+def get_drive_matrix(origin, destinations, usage_ctx=None):
     """Return driving metrics in chunks so large curated landmark lists remain supported."""
     if not destinations:
         return []
     chunk_size = 25
     combined = []
     for start in range(0, len(destinations), chunk_size):
-        combined.extend(_get_drive_matrix_chunk(origin, destinations[start:start + chunk_size]))
+        combined.extend(_get_drive_matrix_chunk(origin, destinations[start:start + chunk_size], usage_ctx=usage_ctx))
     return combined
 
 
-def _get_drive_matrix_chunk(origin, destinations):
+def _get_drive_matrix_chunk(origin, destinations, usage_ctx=None):
     """Return [{name, distance_km, duration_min}] for one driving matrix request.
 
     origin may be (lat, lng) or a dict with lat/lng keys.
@@ -1370,6 +1490,7 @@ def _get_drive_matrix_chunk(origin, destinations):
         if data.get('status') != 'OK':
             print(f"[DRIVE MATRIX] API error: {data.get('status')}")
             return []
+        _record_maps_usage(usage_ctx, 'distance_matrix', len(points))
 
         rows = data.get('rows', [])
         if not rows:
@@ -1402,7 +1523,7 @@ def _get_drive_matrix_chunk(origin, destinations):
         return []
 
 
-def get_street_view(lat, lng, heading=None, pitch=0, fov=90, size=(640, 480), output_path=None):
+def get_street_view(lat, lng, heading=None, pitch=0, fov=90, size=(640, 480), output_path=None, usage_ctx=None):
     """Download a Street View static image."""
     if not _has_api_key():
         return _api_key_error()
@@ -1422,7 +1543,10 @@ def get_street_view(lat, lng, heading=None, pitch=0, fov=90, size=(640, 480), ou
     if heading is not None:
         params['heading'] = heading
 
-    return _download_image(url, params, output_path)
+    res = _download_image(url, params, output_path)
+    if res.get('success'):
+        _record_maps_usage(usage_ctx, 'streetview', 1)
+    return res
 
 
 def _build_markers(lat, lng, landmarks=None, label_start=1):
@@ -1719,7 +1843,7 @@ def survey_polygon_from_project(project_data, site_lat, site_lng, tolerance_km=8
     return coords
 
 
-def _google_bounds_polygon(lat, lng, tenant_id=None, max_span_m=400):
+def _google_bounds_polygon(lat, lng, tenant_id=None, max_span_m=400, usage_ctx=None):
     """Last automatic resort: the Geocoding bounds rectangle for the address.
 
     This is a rectangle, not a real outline, so it is only accepted when it is small
@@ -1735,6 +1859,9 @@ def _google_bounds_polygon(lat, lng, tenant_id=None, max_span_m=400):
         data = response.json()
         if data.get('status') != 'OK':
             return None
+        _record_maps_usage(
+            usage_ctx or maps_usage_ctx('geocode', tenant_id=tenant_id),
+            'geocode', 1)
         for result in data.get('results', []):
             geometry = result.get('geometry') or {}
             bounds = geometry.get('bounds')
@@ -2407,7 +2534,7 @@ def _decode_polyline(polyline_str):
     return coordinates
 
 
-def _snap_to_roads(lat, lng, tenant_id=None):
+def _snap_to_roads(lat, lng, tenant_id=None, usage_ctx=None):
     """Snap coordinates to nearest road using Google Roads API for precision."""
     if not _has_api_key():
         return None
@@ -2425,6 +2552,9 @@ def _snap_to_roads(lat, lng, tenant_id=None):
             if loc.get('latitude') and loc.get('longitude'):
                 if tenant_id:
                     _record_maps_call(tenant_id)
+                _record_maps_usage(
+                    usage_ctx or maps_usage_ctx('maps', tenant_id=tenant_id),
+                    'roads', 1)
                 return {
                     'lat': loc['latitude'],
                     'lng': loc['longitude'],
@@ -2435,7 +2565,7 @@ def _snap_to_roads(lat, lng, tenant_id=None):
     return None
 
 
-def _google_directions_route(origin_lat, origin_lng, destination_lat, destination_lng, tenant_id=None):
+def _google_directions_route(origin_lat, origin_lng, destination_lat, destination_lng, tenant_id=None, usage_ctx=None):
     """Return Google Maps road geometry; never fall back to a third-party router."""
     if not _has_api_key():
         return None
@@ -2462,6 +2592,9 @@ def _google_directions_route(origin_lat, origin_lng, destination_lat, destinatio
             return None
         if tenant_id:
             _record_maps_call(tenant_id)
+        _record_maps_usage(
+            usage_ctx or maps_usage_ctx('maps', tenant_id=tenant_id),
+            'directions', 1)
         leg = (route.get('legs') or [{}])[0]
         distance = leg.get('distance') or {}
         duration = leg.get('duration_in_traffic') or leg.get('duration') or {}
@@ -2479,7 +2612,7 @@ def _google_directions_route(origin_lat, origin_lng, destination_lat, destinatio
         return None
 
 
-def _google_reverse_geocode_road(lat, lng, tenant_id=None):
+def _google_reverse_geocode_road(lat, lng, tenant_id=None, usage_ctx=None):
     """Ask Google which named road is nearest to a point used for an access route."""
     if not _has_api_key():
         return ''
@@ -2496,6 +2629,9 @@ def _google_reverse_geocode_road(lat, lng, tenant_id=None):
                 if 'route' in component.get('types', []):
                     if tenant_id:
                         _record_maps_call(tenant_id)
+                    _record_maps_usage(
+                        usage_ctx or maps_usage_ctx('geocode', tenant_id=tenant_id),
+                        'geocode', 1)
                     return component.get('long_name') or ''
     except Exception as error:
         print(f"[GOOGLE ROAD NAME ERROR] {error}")
@@ -3573,13 +3709,18 @@ def recompose_landmarks_map(project_data, tenant_id, presentation_id=None, draft
         return _recompose_landmarks_map(project_data, tenant_id, effective_id)
 
 
-def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):
+def generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True, usage_flow=None):
     effective_id = presentation_id or (f'draft_{draft_id}' if draft_id else None) or (project_data or {}).get('draft_id') or (project_data or {}).get('draftId') or 'unscoped'
     lock_key = (str(tenant_id), str(effective_id))
     with _MAP_GENERATION_LOCKS_GUARD:
         lock = _MAP_GENERATION_LOCKS.setdefault(lock_key, threading.Lock())
     with lock:
-        return _generate_all_map_images(project_data, tenant_id, presentation_id, force, branding, draft_id, highlight_site)
+        flow = usage_flow if usage_flow in MAPS_USAGE_FLOWS else 'maps'
+        scope_ctx = maps_usage_ctx(
+            flow, tenant_id=tenant_id, presentation_id=presentation_id,
+            draft_id=draft_id or (project_data or {}).get('draftId') or (project_data or {}).get('draft_id'))
+        with maps_usage_scope(scope_ctx):
+            return _generate_all_map_images(project_data, tenant_id, presentation_id, force, branding, draft_id, highlight_site)
 
 
 def _generate_all_map_images(project_data, tenant_id, presentation_id=None, force=False, branding=None, draft_id=None, highlight_site=True):

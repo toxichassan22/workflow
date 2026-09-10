@@ -573,15 +573,27 @@ def _backfill_missing_ai_costs(max_events=10, time_budget_seconds=8, max_age_hou
 @app.route('/api/ai-usage', methods=['GET'])
 @require_auth
 def api_ai_usage():
-    """Tenant-scoped OpenRouter consumption: totals by flow and model plus recent events."""
+    """Tenant-scoped consumption: OpenRouter totals plus Maps spend, with combined cost."""
     draft_id = (request.args.get('draftId') or request.args.get('draft_id') or '').strip() or None
     presentation_id = (request.args.get('presentationId') or request.args.get('presentation_id') or '').strip() or None
     try:
         _backfill_missing_ai_costs()
+        ai_usage = db.get_ai_usage_summary(
+            g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
+        maps_usage = db.get_maps_usage_summary(
+            g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
+        ai_cost = float(ai_usage['totals'].get('cost_usd') or 0.0)
+        maps_cost = float(maps_usage['totals'].get('cost_usd') or 0.0)
         return jsonify({
             'success': True,
-            'usage': db.get_ai_usage_summary(
-                g.tenant_id, draft_id=draft_id, presentation_id=presentation_id),
+            'usage': ai_usage,
+            'maps': maps_usage,
+            'combined': {
+                'calls': int(ai_usage['totals'].get('calls') or 0) + int(maps_usage['totals'].get('calls') or 0),
+                'cost_usd': ai_cost + maps_cost,
+                'ai_cost_usd': ai_cost,
+                'maps_cost_usd': maps_cost,
+            },
         })
     except Exception as exc:
         print(f"[AI-USAGE] summary failed: {exc}")
@@ -7551,7 +7563,8 @@ def api_geocode():
         if coords:
             print(f"[MAPS LINK] Extracted coords from link: {coords}")
             place = maps_service.reverse_geocode_location(
-                coords['lat'], coords['lng'], tenant_id=g.tenant_id, language='ar'
+                coords['lat'], coords['lng'], tenant_id=g.tenant_id, language='ar',
+                usage_ctx=maps_service.maps_usage_ctx('geocode', g.tenant_id, data=data)
             ) or {}
             names = market_study.extract_city_district(
                 place.get('address_components') or [],
@@ -7603,7 +7616,7 @@ def api_nearby_landmarks():
     radius = data.get('radius', 20000)
     if lat is None or lng is None:
         return jsonify({'error': 'lat and lng are required'}), 400
-    result = maps_service.get_nearby_landmarks(float(lat), float(lng), int(radius), max_results=int(data.get('maxResults', 20)), include_all=True)
+    result = maps_service.get_nearby_landmarks(float(lat), float(lng), int(radius), max_results=int(data.get('maxResults', 20)), include_all=True, usage_ctx=maps_service.maps_usage_ctx('places', g.tenant_id, data=data))
     status = 502 if result.get('error') and not result.get('success') else 200
     return jsonify(result), status
 
@@ -7627,7 +7640,7 @@ def api_preview_map_data():
     if lat is None or lng is None:
         address = project_data.get('location_address') or project_data.get('location', '')
         if address and not address.startswith('http'):
-            geo = maps_service.geocode_address(address, tenant_id=g.tenant_id)
+            geo = maps_service.geocode_address(address, tenant_id=g.tenant_id, usage_ctx=maps_service.maps_usage_ctx('geocode', g.tenant_id, data=data))
             if geo.get('success'):
                 lat = geo['lat']
                 lng = geo['lng']
@@ -7645,7 +7658,7 @@ def api_preview_map_data():
     landmarks_warning = None
 
     if not landmarks:
-        places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True)
+        places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True, usage_ctx=maps_service.maps_usage_ctx('places', g.tenant_id, data=data))
         if places.get('success'):
             landmarks = places['landmarks']
             if not landmarks:
@@ -7657,7 +7670,7 @@ def api_preview_map_data():
     for lm in landmarks:
         if lm.get('lat') is None or lm.get('lng') is None:
             query = f"{lm['name']}, {location_context}" if location_context else lm['name']
-            geo = maps_service.geocode_address(query, tenant_id=g.tenant_id)
+            geo = maps_service.geocode_address(query, tenant_id=g.tenant_id, usage_ctx=maps_service.maps_usage_ctx('geocode', g.tenant_id, data=data))
             if geo.get('success'):
                 lm['lat'] = geo['lat']
                 lm['lng'] = geo['lng']
@@ -7679,7 +7692,7 @@ def api_preview_map_data():
     geocoded = [lm for lm in landmarks if lm.get('lat') is not None and lm.get('lng') is not None]
     matrix = []
     if data.get('calculateDriving') and geocoded:
-        matrix = maps_service.get_drive_matrix((lat, lng), geocoded)
+        matrix = maps_service.get_drive_matrix((lat, lng), geocoded, usage_ctx=maps_service.maps_usage_ctx('matrix', g.tenant_id, data=data))
         for i, lm in enumerate(geocoded):
             if i < len(matrix) and matrix[i]:
                 entry = matrix[i]
@@ -8015,7 +8028,7 @@ def api_analyze_site():
         )
         source = 'existing_coordinates'
         if (lat is None or lng is None) and address and not str(address).startswith('http'):
-            geo = maps_service.geocode_address(address, tenant_id=g.tenant_id)
+            geo = maps_service.geocode_address(address, tenant_id=g.tenant_id, usage_ctx=maps_service.maps_usage_ctx('site', g.tenant_id, data=data))
             if geo.get('success'):
                 lat, lng = geo['lat'], geo['lng']
                 source = 'geocoding'
@@ -8023,9 +8036,11 @@ def api_analyze_site():
     if lat is None or lng is None:
         return jsonify({'success': False, 'error': 'أدخل رابط Google Maps أو عنوان الموقع أولاً'}), 400
 
-    fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon, diagnostics = _collect_site_fields(
-        project_data, g.tenant_id, lat, lng
-    )
+    site_maps_ctx = maps_service.maps_usage_ctx('site', g.tenant_id, data=data)
+    with maps_service.maps_usage_scope(site_maps_ctx):
+        fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon, diagnostics = _collect_site_fields(
+            project_data, g.tenant_id, lat, lng
+        )
     fields.pop('secondary_roads', None)
     fields['location_polygon_source'] = (
         'manual' if project_data.get('location_polygon_source') == 'manual'
@@ -8259,6 +8274,7 @@ def api_generate_single_map_image():
             force=False,
             branding=branding,
             highlight_site=highlight_site,
+            usage_flow=map_type,
         )
     if result.get('error'):
         return jsonify({'success': False, 'error': result['error']}), 400

@@ -455,6 +455,23 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_aiusage_draft ON ai_usage_events(draft_id);
     CREATE INDEX IF NOT EXISTS idx_aiusage_presentation ON ai_usage_events(presentation_id);
     CREATE INDEX IF NOT EXISTS idx_aiusage_created ON ai_usage_events(created_at);
+
+    CREATE TABLE IF NOT EXISTS map_usage_events (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        draft_id TEXT,
+        presentation_id TEXT,
+        flow TEXT NOT NULL DEFAULT 'other',
+        sku TEXT NOT NULL,
+        units INTEGER DEFAULT 0,
+        unit_price_usd REAL DEFAULT 0,
+        cost_usd REAL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_mapusage_tenant ON map_usage_events(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_mapusage_draft ON map_usage_events(draft_id);
+    CREATE INDEX IF NOT EXISTS idx_mapusage_presentation ON map_usage_events(presentation_id);
+    CREATE INDEX IF NOT EXISTS idx_mapusage_created ON map_usage_events(created_at);
     """)
 
     branding_cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenant_branding)').fetchall()]
@@ -3423,6 +3440,71 @@ def get_ai_usage_pending_costs(limit=15):
         (int(limit),)
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def record_maps_usage_event(tenant_id, sku, units, unit_price_usd,
+                            flow='other', draft_id=None, presentation_id=None):
+    """Persist one billable Google Maps call.
+
+    The unit price is stored on the row, so a later price change never rewrites
+    history. Only completed provider requests are recorded: cached reads and
+    failed calls carry no spend.
+    """
+    conn = get_db()
+    event_id = str(uuid.uuid4())
+    units = max(0, int(units or 0))
+    price = float(unit_price_usd or 0.0)
+    conn.execute(
+        '''INSERT INTO map_usage_events
+           (id, tenant_id, draft_id, presentation_id, flow, sku, units, unit_price_usd, cost_usd)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (event_id, tenant_id, draft_id, presentation_id, flow or 'other',
+         sku, units, price, units * price)
+    )
+    conn.commit()
+    return event_id
+
+
+def get_maps_usage_summary(tenant_id, draft_id=None, presentation_id=None, limit=50):
+    """Tenant-scoped Maps spend grouped by flow and SKU, plus recent events."""
+    clauses = ['tenant_id = ?']
+    params = [tenant_id]
+    if draft_id:
+        clauses.append('draft_id = ?')
+        params.append(draft_id)
+    if presentation_id:
+        clauses.append('presentation_id = ?')
+        params.append(presentation_id)
+    where = 'WHERE ' + ' AND '.join(clauses)
+    conn = get_db()
+    totals = dict(conn.execute(
+        'SELECT COUNT(*) AS calls, '
+        'COALESCE(SUM(units), 0) AS units, '
+        'COALESCE(SUM(cost_usd), 0) AS cost_usd '
+        f'FROM map_usage_events {where}',
+        params
+    ).fetchone())
+    by_flow = [dict(r) for r in conn.execute(
+        'SELECT flow, COUNT(*) AS calls, '
+        'COALESCE(SUM(units), 0) AS units, '
+        'COALESCE(SUM(cost_usd), 0) AS cost_usd '
+        f'FROM map_usage_events {where} GROUP BY flow ORDER BY cost_usd DESC',
+        params
+    ).fetchall()]
+    by_sku = [dict(r) for r in conn.execute(
+        'SELECT sku, COUNT(*) AS calls, '
+        'COALESCE(SUM(units), 0) AS units, '
+        'COALESCE(SUM(cost_usd), 0) AS cost_usd '
+        f'FROM map_usage_events {where} GROUP BY sku ORDER BY cost_usd DESC',
+        params
+    ).fetchall()]
+    recent = [dict(r) for r in conn.execute(
+        'SELECT id, draft_id, presentation_id, flow, sku, units, unit_price_usd, '
+        'cost_usd, created_at '
+        f'FROM map_usage_events {where} ORDER BY created_at DESC LIMIT ?',
+        params + [int(limit)]
+    ).fetchall()]
+    return {'totals': totals, 'by_flow': by_flow, 'by_sku': by_sku, 'recent': recent}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
