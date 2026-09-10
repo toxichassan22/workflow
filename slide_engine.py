@@ -8898,7 +8898,18 @@ def _creative_image_values(images):
     """Return the generated cover and moodboard image URLs in a safe shape with fallbacks."""
     if not isinstance(images, dict):
         return '', []
-    cover = images.get('cover') or images.get('mainImageData') or ''
+    cover = (
+        images.get('cover')
+        or images.get('coverImage')
+        or images.get('cover_image')
+        or images.get('mainImageData')
+        or images.get('project_image_cover')
+        or images.get('imageUrl')
+        or images.get('url')
+        or ''
+    )
+    if isinstance(cover, dict):
+        cover = cover.get('url') or cover.get('imageUrl') or cover.get('approvedImageUrl') or ''
     moodboard = images.get('moodboard') or images.get('moodboardImages') or []
     if not isinstance(moodboard, list):
         moodboard = []
@@ -10471,6 +10482,23 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
             full_width=content_source == 'site_analysis',
         )
     html = _apply_logo_contrast_styles(html, branding, project_data, slide_type)
+    creative_images = dict(creative_images) if isinstance(creative_images, dict) else {}
+    if not creative_images.get('cover'):
+        p_cover = (
+            (project_data or {}).get('cover')
+            or (project_data or {}).get('coverImage')
+            or (project_data or {}).get('cover_image')
+            or (project_data or {}).get('mainImageData')
+            or (project_data or {}).get('project_image_cover')
+            or ((project_data or {}).get('tenantCreativeImages') or {}).get('cover')
+            or ((project_data or {}).get('tenantCreativeImages') or {}).get('coverImage')
+            or ((project_data or {}).get('tenantCreativeImages') or {}).get('mainImageData')
+            or ((project_data or {}).get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('approvedImageUrl')
+            or ((project_data or {}).get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('imageUrl')
+            or ((project_data or {}).get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('url')
+        )
+        if p_cover:
+            creative_images['cover'] = p_cover
     html = _replace_creative_image_placeholders(html, creative_images, slide_type, content_source)
     html = _replace_data_placeholders(html, project_data, branding)
     html = resolve_logo_in_html(
@@ -10529,6 +10557,44 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     if not isinstance(creative_images, dict):
         creative_images = project_data.get('tenantCreativeImages')
     creative_images = dict(creative_images) if isinstance(creative_images, dict) else {}
+    if not creative_images.get('cover'):
+        discovered_cover = (
+            creative_images.get('coverImage')
+            or creative_images.get('cover_image')
+            or creative_images.get('mainImageData')
+            or creative_images.get('project_image_cover')
+            or creative_images.get('imageUrl')
+            or creative_images.get('url')
+            or project_data.get('cover')
+            or project_data.get('coverImage')
+            or project_data.get('cover_image')
+            or project_data.get('mainImageData')
+            or project_data.get('project_image_cover')
+            or (project_data.get('tenantCreativeImages') or {}).get('cover')
+            or (project_data.get('tenantCreativeImages') or {}).get('coverImage')
+            or (project_data.get('tenantCreativeImages') or {}).get('mainImageData')
+            or (project_data.get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('approvedImageUrl')
+            or (project_data.get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('imageUrl')
+            or (project_data.get('visual_concept') or {}).get('slots', {}).get('cover', {}).get('url')
+        )
+        if isinstance(discovered_cover, dict):
+            discovered_cover = discovered_cover.get('url') or discovered_cover.get('imageUrl') or discovered_cover.get('approvedImageUrl') or ''
+        if not discovered_cover:
+            for s in source:
+                s_dict = s if isinstance(s, dict) else {}
+                s_type = str(s_dict.get('type') or '').lower()
+                s_html = str(s_dict.get('html') or '')
+                if s_type == 'cover' or 'cover' in s_html:
+                    m = re.search(r'background-image\s*:\s*url\(["\']?([^"\'()]+)["\']?\)', s_html, re.IGNORECASE)
+                    if m and not m.group(1).startswith('data:') and not m.group(1).startswith('#'):
+                        discovered_cover = m.group(1).strip()
+                        break
+                    m2 = re.search(r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', s_html, re.IGNORECASE)
+                    if m2 and not m2.group(1).startswith('data:') and not m2.group(1).startswith('#') and 'logo' not in m2.group(1).lower():
+                        discovered_cover = m2.group(1).strip()
+                        break
+        if discovered_cover:
+            creative_images['cover'] = discovered_cover
     normalized = []
     current_section = ''
     for index, raw in enumerate(source):
@@ -10612,25 +10678,45 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 allow_all_maps=allow_all_maps,
             )
         elif slide_type in ('cover', 'closing', 'moodboard', 'section_divider'):
-            if _is_fixed_section_divider(item, item.get('section_key')) and not keep_edited_html:
+            if (slide_type == 'section_divider' or _is_fixed_section_divider(item, item.get('section_key'))):
                 divider_images = dict(creative_images)
                 if not divider_images.get('cover'):
                     fallback_cover = project_data.get('cover') or project_data.get('mainImageData')
                     if fallback_cover:
                         divider_images['cover'] = fallback_cover
-                rebuilt = build_section_divider_slide(
-                    item, index, total, branding, project_data
-                )
-                item['html'] = finalize_slide_html(
-                    rebuilt, 'section_divider', project_data, branding,
-                    creative_images=divider_images, tenant_id=tenant_id,
-                    slide_num=index, slide_title=item.get('title'),
-                    total_slides=total, content_source=None,
-                    allow_all_maps=allow_all_maps,
-                )
+                cover_target = divider_images.get('cover') or ''
+                if not keep_edited_html:
+                    rebuilt = build_section_divider_slide(
+                        item, index, total, branding, project_data
+                    )
+                    item['html'] = finalize_slide_html(
+                        rebuilt, 'section_divider', project_data, branding,
+                        creative_images=divider_images, tenant_id=tenant_id,
+                        slide_num=index, slide_title=item.get('title'),
+                        total_slides=total, content_source=None,
+                        allow_all_maps=allow_all_maps,
+                    )
+                else:
+                    curr_html = _rewrite_slide_counter(
+                        item.get('html') or '', slide_type, index, total)
+                    if cover_target:
+                        for cover_pat in [r'#*IMAGE_COVER#*', r'#*COVER_IMAGE#*', r'#*MAIN_IMAGE#*', r'#*PROJECT_IMAGE_COVER#*']:
+                            curr_html = re.sub(cover_pat, cover_target, curr_html, flags=re.IGNORECASE)
+                        if 'background-image' not in curr_html:
+                            bg_div = (
+                                f'<div style="position:absolute;top:0;right:0;left:0;bottom:0;'
+                                f'background-image:url({cover_target});background-size:cover;background-position:center center;"></div>'
+                            )
+                            curr_html = re.sub(r'(<div\b[^>]*\bclass=["\'][^"\']*\bslide[^"\']*["\'][^>]*>)', r'\1' + bg_div, curr_html, count=1, flags=re.IGNORECASE)
+                    item['html'] = curr_html
             else:
-                item['html'] = _rewrite_slide_counter(
+                curr_html = _rewrite_slide_counter(
                     item.get('html') or '', slide_type, index, total)
+                cover_target = creative_images.get('cover') or project_data.get('cover') or project_data.get('mainImageData') or ''
+                if cover_target:
+                    for cover_pat in [r'#*IMAGE_COVER#*', r'#*COVER_IMAGE#*', r'#*MAIN_IMAGE#*', r'#*PROJECT_IMAGE_COVER#*']:
+                        curr_html = re.sub(cover_pat, cover_target, curr_html, flags=re.IGNORECASE)
+                item['html'] = curr_html
             if slide_type != 'section_divider' and (item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source'))):
                 item['html'] = _strip_market_slide_media(item['html'])
         else:

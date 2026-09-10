@@ -21954,9 +21954,9 @@
         url => withCacheBust(url)
       );
 
-      // Cover slide auto-inject fallback if model omitted ##IMAGE_COVER##
-      if (coverImage && (slideType === 'cover' || cleanHtml.includes('class="slide cover"') || cleanHtml.includes("class='slide cover'"))) {
-        if (!cleanHtml.includes(coverImage)) {
+      // Cover and divider slides auto-inject fallback if model omitted ##IMAGE_COVER##
+      if (coverImage && (slideType === 'cover' || slideType === 'section_divider' || cleanHtml.includes('class="slide cover"') || cleanHtml.includes("class='slide cover'"))) {
+        if (!cleanHtml.includes(coverImage) && !cleanHtml.includes('background-image')) {
           const bgDiv = '<div aria-hidden="true" style="position:absolute;inset:0;z-index:0;background-image:url(\'' + coverImage.replace(/'/g, "\\'") + '\');background-size:cover;background-position:center;"></div>';
           cleanHtml = cleanHtml.replace(/(<div[^>]*class=["']slide[^"']*["'][^>]*>)/i, '$1' + bgDiv);
         }
@@ -25091,6 +25091,24 @@
       delete exportProjectData.draftHistory;
       delete exportProjectData.chatHistory;
       delete exportProjectData.designerChatSessions;
+      const exportCover = (
+        (tenantCreativeImages && (tenantCreativeImages.cover || tenantCreativeImages.coverImage || tenantCreativeImages.mainImageData)) ||
+        (exportProjectData && (exportProjectData.cover || exportProjectData.coverImage || exportProjectData.mainImageData)) ||
+        ''
+      );
+      if (exportCover && Array.isArray(tenantSlidesData)) {
+        tenantSlidesData.forEach(item => {
+          if (!item || typeof item !== 'object') return;
+          let sHtml = String(item.html || '');
+          const sType = String(item.type || '').toLowerCase();
+          sHtml = sHtml.replace(/#*(?:IMAGE_COVER|COVER_IMAGE|MAIN_IMAGE|PROJECT_IMAGE_COVER)#*/gi, exportCover);
+          if (sType === 'section_divider' && !sHtml.includes('background-image')) {
+            const bgDiv = '<div style="position:absolute;top:0;right:0;left:0;bottom:0;background-image:url(' + exportCover.replace(/'/g, "\\'") + ');background-size:cover;background-position:center center;"></div>';
+            sHtml = sHtml.replace(/(<div\b[^>]*\bclass=["'][^"']*\bslide[^"']*["'][^>]*>)/i, '$1' + bgDiv);
+          }
+          item.html = sHtml;
+        });
+      }
       const payload = {
         format: format,
         presentationId: tenantPresentationId,

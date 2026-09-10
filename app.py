@@ -1602,7 +1602,23 @@ def _visual_concept_generation_images(project_data, tenant_id):
             'name': str(item.get('fileName') or '').strip(),
         })
 
+    cover_item = slot_value('cover') or slots.get('cover') or slots.get('main') or slots.get('primary') or {}
+    cover_url = _generation_asset_url(cover_item, tenant_id)
+    if not cover_url:
+        cover_url = (
+            _generation_asset_url(creative.get('cover'), tenant_id)
+            or _generation_asset_url(creative.get('coverImage'), tenant_id)
+            or _generation_asset_url(creative.get('mainImageData'), tenant_id)
+            or _generation_asset_url(source.get('cover'), tenant_id)
+            or _generation_asset_url(source.get('coverImage'), tenant_id)
+            or _generation_asset_url(source.get('cover_image'), tenant_id)
+            or _generation_asset_url(source.get('mainImageData'), tenant_id)
+            or _generation_asset_url(source.get('project_image_cover'), tenant_id)
+            or ''
+        )
+
     return {
+        'cover': cover_url,
         'moodboard': moodboard,
         'moodboard_meta': moodboard_meta,
         'interior_components': interior_components,
@@ -1628,6 +1644,20 @@ def _augment_generation_images(images, project_data, tenant_id):
         if not isinstance(values, list):
             return 0
         return sum(real_asset_count(component.get('images')) for component in values if isinstance(component, dict))
+
+    if not result.get('cover'):
+        result['cover'] = (
+            persisted_visual.get('cover')
+            or _generation_asset_url(result.get('cover'), tenant_id)
+            or _generation_asset_url(result.get('coverImage'), tenant_id)
+            or _generation_asset_url(result.get('mainImageData'), tenant_id)
+            or _generation_asset_url((project_data or {}).get('cover'), tenant_id)
+            or _generation_asset_url((project_data or {}).get('coverImage'), tenant_id)
+            or _generation_asset_url((project_data or {}).get('cover_image'), tenant_id)
+            or _generation_asset_url((project_data or {}).get('mainImageData'), tenant_id)
+            or _generation_asset_url((project_data or {}).get('project_image_cover'), tenant_id)
+            or ''
+        )
 
     # A compact plan request carries the word ``available`` instead of URLs. If the client state
     # was stale, prefer the persisted visual-concept state when it contains more media so no
