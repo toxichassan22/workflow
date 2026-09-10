@@ -435,6 +435,26 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_project_files_tenant ON project_files(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_project_files_draft ON project_files(tenant_id, draft_id);
     CREATE INDEX IF NOT EXISTS idx_project_files_hash ON project_files(tenant_id, sha256);
+
+    CREATE TABLE IF NOT EXISTS ai_usage_events (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        draft_id TEXT,
+        presentation_id TEXT,
+        flow TEXT NOT NULL DEFAULT 'other',
+        model TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'ok',
+        prompt_tokens INTEGER DEFAULT 0,
+        completion_tokens INTEGER DEFAULT 0,
+        total_tokens INTEGER DEFAULT 0,
+        cost_usd REAL,
+        generation_id TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_aiusage_tenant ON ai_usage_events(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_aiusage_draft ON ai_usage_events(draft_id);
+    CREATE INDEX IF NOT EXISTS idx_aiusage_presentation ON ai_usage_events(presentation_id);
+    CREATE INDEX IF NOT EXISTS idx_aiusage_created ON ai_usage_events(created_at);
     """)
 
     branding_cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenant_branding)').fetchall()]
@@ -3306,6 +3326,101 @@ def get_ai_rules_log(tenant_id, limit=50):
     rows = conn.execute(
         'SELECT * FROM ai_rules_log WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?',
         (tenant_id, limit)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Usage Metering (OpenRouter consumption per tenant, draft and presentation)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def record_ai_usage_event(tenant_id, model, flow='other', status='ok',
+                          prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                          cost_usd=None, generation_id=None,
+                          draft_id=None, presentation_id=None):
+    """Persist one metered OpenRouter call.
+
+    Token figures are copied verbatim from the provider response, never
+    estimated. A row is written even when the provider returned no usage so
+    the attempt itself stays visible.
+    """
+    conn = get_db()
+    event_id = str(uuid.uuid4())
+    conn.execute(
+        '''INSERT INTO ai_usage_events
+           (id, tenant_id, draft_id, presentation_id, flow, model, status,
+            prompt_tokens, completion_tokens, total_tokens, cost_usd, generation_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (event_id, tenant_id, draft_id, presentation_id, flow or 'other', model,
+         status or 'ok', int(prompt_tokens or 0), int(completion_tokens or 0),
+         int(total_tokens or 0), cost_usd, generation_id)
+    )
+    conn.commit()
+    return event_id
+
+
+def update_ai_usage_cost(event_id, cost_usd):
+    """Fill in the dollar cost of a usage event once the provider reports it."""
+    conn = get_db()
+    conn.execute(
+        'UPDATE ai_usage_events SET cost_usd = ? WHERE id = ?',
+        (float(cost_usd), event_id)
+    )
+    conn.commit()
+
+
+def get_ai_usage_summary(tenant_id, draft_id=None, presentation_id=None, limit=50):
+    """Tenant-scoped consumption totals grouped by flow and model, plus recent events."""
+    clauses = ['tenant_id = ?']
+    params = [tenant_id]
+    if draft_id:
+        clauses.append('draft_id = ?')
+        params.append(draft_id)
+    if presentation_id:
+        clauses.append('presentation_id = ?')
+        params.append(presentation_id)
+    where = 'WHERE ' + ' AND '.join(clauses)
+    conn = get_db()
+    totals = dict(conn.execute(
+        'SELECT COUNT(*) AS calls, '
+        'COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, '
+        'COALESCE(SUM(completion_tokens), 0) AS completion_tokens, '
+        'COALESCE(SUM(total_tokens), 0) AS total_tokens, '
+        'COALESCE(SUM(cost_usd), 0) AS cost_usd '
+        f'FROM ai_usage_events {where}',
+        params
+    ).fetchone())
+    by_flow = [dict(r) for r in conn.execute(
+        'SELECT flow, COUNT(*) AS calls, '
+        'COALESCE(SUM(total_tokens), 0) AS total_tokens, '
+        'COALESCE(SUM(cost_usd), 0) AS cost_usd '
+        f'FROM ai_usage_events {where} GROUP BY flow ORDER BY total_tokens DESC',
+        params
+    ).fetchall()]
+    by_model = [dict(r) for r in conn.execute(
+        'SELECT model, COUNT(*) AS calls, '
+        'COALESCE(SUM(total_tokens), 0) AS total_tokens, '
+        'COALESCE(SUM(cost_usd), 0) AS cost_usd '
+        f'FROM ai_usage_events {where} GROUP BY model ORDER BY total_tokens DESC',
+        params
+    ).fetchall()]
+    recent = [dict(r) for r in conn.execute(
+        'SELECT id, draft_id, presentation_id, flow, model, status, prompt_tokens, '
+        'completion_tokens, total_tokens, cost_usd, generation_id, created_at '
+        f'FROM ai_usage_events {where} ORDER BY created_at DESC LIMIT ?',
+        params + [int(limit)]
+    ).fetchall()]
+    return {'totals': totals, 'by_flow': by_flow, 'by_model': by_model, 'recent': recent}
+
+
+def get_ai_usage_pending_costs(limit=15):
+    """Newest events that carry a generation id but no dollar cost yet."""
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT id, generation_id, created_at FROM ai_usage_events '
+        'WHERE cost_usd IS NULL AND generation_id IS NOT NULL '
+        'ORDER BY created_at DESC LIMIT ?',
+        (int(limit),)
     ).fetchall()
     return [dict(r) for r in rows]
 

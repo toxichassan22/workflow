@@ -266,7 +266,7 @@ def _has_chat_choices(response):
     )
 
 
-def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None):
+def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None):
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     model_name = model or GLM_OPENROUTER_MODEL
@@ -314,19 +314,25 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
         text = response.text or ''
         if not text.strip():
             print(f"[OPENROUTER EMPTY BODY] status={response.status_code} model={model_name} cap={max_tokens}")
+            _record_ai_usage(usage_ctx, model_name, 'error')
             return {"error": {"message": f"مزوّد الذكاء الاصطناعي رد بجسم فارغ (HTTP {response.status_code})"}}
         try:
             data = response.json()
         except Exception as json_err:
             print(f"[OPENROUTER UNPARSEABLE] status={response.status_code} model={model_name} json_err={json_err} body={text[:200]!r}")
+            _record_ai_usage(usage_ctx, model_name, 'error')
             return {"error": {"message": f"استجابة المزوّد ليست JSON صالحًا (HTTP {response.status_code})"}}
         if response.status_code >= 400:
             error = data.get('error', {}) if isinstance(data, dict) else data
             print(f"[OPENROUTER HTTP ERROR] status={response.status_code} model={model_name} error={error}")
+            generation_id, error_usage = _extract_openrouter_usage(data)
+            _record_ai_usage(usage_ctx, model_name, 'error', error_usage, generation_id)
             if isinstance(error, dict) and 'message' in error:
                 error['message'] = f"[{response.status_code}] {error['message']}"
                 return {"error": error}
             return {"error": error if isinstance(error, dict) else {"message": f"[{response.status_code}] {error}"}}
+        generation_id, usage = _extract_openrouter_usage(data)
+        _record_ai_usage(usage_ctx, model_name, 'ok', usage, generation_id)
         return data
     except requests.exceptions.Timeout:
         print(f"[OPENROUTER TIMEOUT] model={model_name} cap={max_tokens} timeout={timeout}")
@@ -340,7 +346,7 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
 
 
 def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300,
-                  reasoning_effort=None, response_format=None, model=None, image_references=None):
+                  reasoning_effort=None, response_format=None, model=None, image_references=None, usage_ctx=None):
     """Compatibility wrapper: text/design work uses configured models through OpenRouter."""
     if not OPENROUTER_KEY:
         return {"error": {"message": "OPENROUTER_KEY is required for the text model"}}
@@ -354,19 +360,21 @@ def call_zai_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000,
         reasoning_effort=reasoning_effort,
         response_format=response_format,
         image_references=image_references,
+        usage_ctx=usage_ctx,
     )
 
 
-def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300, model=None, image_references=None):
+def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300, model=None, image_references=None, usage_ctx=None):
     """
     Race multiple identical GLM calls in parallel and return the first valid response.
     Helps when a single model invocation is slow or returns malformed/empty content.
+    Every attempt is metered separately: the provider bills each one.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def _attempt():
         try:
-            resp = call_zai_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, model=model, image_references=image_references)
+            resp = call_zai_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, model=model, image_references=image_references, usage_ctx=usage_ctx)
             if not _has_chat_choices(resp):
                 return None
             content = extract_chat_content(resp, 'GLM-PARALLEL')
@@ -389,6 +397,195 @@ def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tok
         executor.shutdown(wait=False, cancel_futures=True)
 
     raise Exception(f"All {attempts} parallel GLM attempts failed")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AI usage metering: per-call OpenRouter consumption, attributed per tenant,
+# draft and presentation. Token figures are copied verbatim from the provider
+# response. Dollar cost is resolved per generation id off the request path.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AI_USAGE_FLOWS = (
+    'slide', 'slide_plan', 'designer_chat', 'training_chat', 'land', 'site',
+    'market', 'executive', 'project_data', 'image', 'other',
+)
+
+
+def _usage_ctx(flow, data=None, draft_id=None, presentation_id=None, tenant_id=None):
+    """Build the metering context for one AI call. Unknown ids stay None."""
+    if isinstance(data, dict):
+        project_data = data.get('projectData')
+        if draft_id is None:
+            draft_id = data.get('draftId') or data.get('draft_id')
+            if draft_id is None and isinstance(project_data, dict):
+                draft_id = project_data.get('draftId') or project_data.get('draft_id')
+        if presentation_id is None:
+            presentation_id = data.get('presentationId') or data.get('presentation_id')
+    if tenant_id is None:
+        try:
+            tenant_id = getattr(g, 'tenant_id', None)
+        except Exception:
+            tenant_id = None
+    return {
+        'tenant_id': tenant_id,
+        'draft_id': draft_id,
+        'presentation_id': presentation_id,
+        'flow': flow if flow in AI_USAGE_FLOWS else 'other',
+    }
+
+
+def _extract_openrouter_usage(data):
+    """Return (generation_id, usage_dict) copied from a provider response, never raising."""
+    try:
+        if not isinstance(data, dict):
+            return None, {}
+        generation_id = data.get('id')
+        if not isinstance(generation_id, str) or not generation_id:
+            generation_id = None
+        usage = data.get('usage')
+        if not isinstance(usage, dict):
+            return generation_id, {}
+
+        def _num(value):
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        return generation_id, {
+            'prompt_tokens': _num(usage.get('prompt_tokens')),
+            'completion_tokens': _num(usage.get('completion_tokens')),
+            'total_tokens': _num(usage.get('total_tokens')),
+        }
+    except Exception:
+        return None, {}
+
+
+def _record_ai_usage(usage_ctx, model, status='ok', usage=None, generation_id=None):
+    """Persist one metered provider call. Never raises: metering must not break generation."""
+    try:
+        ctx = dict(usage_ctx or {})
+        tenant_id = ctx.get('tenant_id')
+        if tenant_id is None:
+            try:
+                tenant_id = getattr(g, 'tenant_id', None)
+            except Exception:
+                tenant_id = None
+        usage = usage or {}
+        flow = ctx.get('flow') or 'other'
+        if flow not in AI_USAGE_FLOWS:
+            flow = 'other'
+        with app.app_context():
+            event_id = db.record_ai_usage_event(
+                tenant_id, model or 'unknown',
+                flow=flow, status=status,
+                prompt_tokens=usage.get('prompt_tokens', 0),
+                completion_tokens=usage.get('completion_tokens', 0),
+                total_tokens=usage.get('total_tokens', 0),
+                draft_id=ctx.get('draft_id'),
+                presentation_id=ctx.get('presentation_id'),
+                generation_id=generation_id,
+            )
+        if generation_id and status == 'ok':
+            _backfill_ai_usage_cost_async(event_id, generation_id)
+        return event_id
+    except Exception as exc:
+        print(f"[AI-USAGE] record failed: {exc}")
+        return None
+
+
+def _fetch_openrouter_generation_cost(generation_id, timeout=15):
+    """Ask OpenRouter what one generation actually cost. Returns dollars or None."""
+    try:
+        if not OPENROUTER_KEY or not generation_id:
+            return None
+        response = requests.get(
+            f"{OPENROUTER_BASE}/generation?id={generation_id}",
+            headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
+            timeout=timeout,
+        )
+        payload = response.json()
+        data = payload.get('data') if isinstance(payload, dict) else None
+        cost = (data or {}).get('total_cost')
+        return float(cost) if cost is not None else None
+    except Exception as exc:
+        print(f"[AI-USAGE] cost lookup failed for {generation_id}: {exc}")
+        return None
+
+
+def _backfill_ai_usage_cost(event_id, generation_id):
+    """Resolve one event's dollar cost inside a worker thread."""
+    try:
+        with app.app_context():
+            if app.config.get('TESTING'):
+                return
+            cost = _fetch_openrouter_generation_cost(generation_id)
+            if cost is not None:
+                db.update_ai_usage_cost(event_id, cost)
+    except Exception as exc:
+        print(f"[AI-USAGE] cost backfill failed: {exc}")
+
+
+def _backfill_ai_usage_cost_async(event_id, generation_id):
+    """Resolve the dollar cost off the request path."""
+    try:
+        thread = threading.Thread(
+            target=_backfill_ai_usage_cost,
+            args=(event_id, generation_id),
+            daemon=True,
+        )
+        thread.start()
+    except Exception as exc:
+        print(f"[AI-USAGE] cost thread failed: {exc}")
+
+
+def _ai_usage_event_age_hours(created_at):
+    try:
+        stamp = str(created_at or '').replace(' ', 'T')[:19]
+        moment = datetime.fromisoformat(stamp)
+        if moment.tzinfo is not None:
+            moment = moment.replace(tzinfo=None)
+        return (datetime.utcnow() - moment).total_seconds() / 3600.0
+    except Exception:
+        return 0.0
+
+
+def _backfill_missing_ai_costs(max_events=10, time_budget_seconds=8, max_age_hours=24):
+    """Best-effort fill of costs the background threads missed. Bounded so reads stay fast."""
+    try:
+        pending = db.get_ai_usage_pending_costs(limit=max_events)
+    except Exception as exc:
+        print(f"[AI-USAGE] pending lookup failed: {exc}")
+        return
+    started = time.monotonic()
+    for row in pending:
+        if time.monotonic() - started > time_budget_seconds:
+            break
+        if _ai_usage_event_age_hours(row.get('created_at')) > max_age_hours:
+            continue
+        cost = _fetch_openrouter_generation_cost(row.get('generation_id'))
+        if cost is not None:
+            try:
+                db.update_ai_usage_cost(row['id'], cost)
+            except Exception as exc:
+                print(f"[AI-USAGE] cost update failed: {exc}")
+
+
+@app.route('/api/ai-usage', methods=['GET'])
+@require_auth
+def api_ai_usage():
+    """Tenant-scoped OpenRouter consumption: totals by flow and model plus recent events."""
+    draft_id = (request.args.get('draftId') or request.args.get('draft_id') or '').strip() or None
+    presentation_id = (request.args.get('presentationId') or request.args.get('presentation_id') or '').strip() or None
+    try:
+        _backfill_missing_ai_costs()
+        return jsonify({
+            'success': True,
+            'usage': db.get_ai_usage_summary(
+                g.tenant_id, draft_id=draft_id, presentation_id=presentation_id),
+        })
+    except Exception as exc:
+        print(f"[AI-USAGE] summary failed: {exc}")
+        return jsonify({'success': False, 'error': 'تعذر تحميل الاستهلاك'}), 500
 
 
 def extract_chat_content(response, label="GLM"):
@@ -459,7 +656,7 @@ def _image_response_url(data):
     return None
 
 
-def call_image_api(prompt):
+def call_image_api(prompt, usage_ctx=None):
     # AI4: Check if OpenRouter key is configured
     if not OPENROUTER_KEY:
         print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
@@ -478,6 +675,10 @@ def call_image_api(prompt):
         }
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=120)
         data = response.json()
+        generation_id, img_usage = _extract_openrouter_usage(data)
+        _record_ai_usage(usage_ctx or _usage_ctx('image'), IMAGE_MODEL,
+                         'ok' if response.status_code < 400 and 'error' not in data else 'error',
+                         img_usage, generation_id)
         # AI4: Detect specific error codes and return descriptive messages
         if response.status_code == 401:
             print("[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)")
@@ -546,7 +747,7 @@ def _prepare_image_reference_for_model(reference):
         return None
 
 
-def call_image_api_with_reference(reference_image_base64, prompt):
+def call_image_api_with_reference(reference_image_base64, prompt, usage_ctx=None):
     # AI4: Check if OpenRouter key is configured
     if not OPENROUTER_KEY:
         print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
@@ -572,6 +773,10 @@ def call_image_api_with_reference(reference_image_base64, prompt):
         }
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=120)
         data = response.json()
+        generation_id, img_usage = _extract_openrouter_usage(data)
+        _record_ai_usage(usage_ctx or _usage_ctx('image'), IMAGE_MODEL,
+                         'ok' if response.status_code < 400 and 'error' not in data else 'error',
+                         img_usage, generation_id)
         # AI4: Detect specific error codes
         if response.status_code == 401:
             print("[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)")
@@ -1106,10 +1311,11 @@ def _visual_concept_sanitize_prompt(prompt):
     return _visual_concept_text(prompt, 12000)
 
 
-def call_image_api_with_references(prompt, references=None):
+def call_image_api_with_references(prompt, references=None, usage_ctx=None):
     if not OPENROUTER_KEY:
         print('[IMAGE ERROR] OPENROUTER_KEY is not configured')
         return None
+    ctx = usage_ctx or _usage_ctx('image')
     prepared = []
     for reference in references or []:
         item = _prepare_image_reference_for_model(reference) if isinstance(reference, str) and not str(reference).startswith('data:image/') else reference
@@ -1120,9 +1326,9 @@ def call_image_api_with_references(prompt, references=None):
             if resolved:
                 prepared.append(resolved)
     if not prepared:
-        return call_image_api(prompt)
+        return call_image_api(prompt, usage_ctx=ctx)
     if len(prepared) == 1:
-        return call_image_api_with_reference(prepared[0], prompt)
+        return call_image_api_with_reference(prepared[0], prompt, usage_ctx=ctx)
     try:
         headers = {
             'Authorization': f'Bearer {OPENROUTER_KEY}',
@@ -1140,6 +1346,10 @@ def call_image_api_with_references(prompt, references=None):
         }
         response = requests.post(f'{OPENROUTER_BASE}/chat/completions', headers=headers, json=payload, timeout=120)
         data = response.json()
+        generation_id, img_usage = _extract_openrouter_usage(data)
+        _record_ai_usage(ctx, IMAGE_MODEL,
+                         'ok' if response.status_code not in (401, 402, 429) and 'error' not in data else 'error',
+                         img_usage, generation_id)
         if response.status_code in (401, 402, 429) or 'error' in data:
             print(f"[IMAGE ERROR] Visual concept multi-reference failed: {data.get('error') if isinstance(data, dict) else response.status_code}")
             return None
@@ -1147,7 +1357,7 @@ def call_image_api_with_references(prompt, references=None):
         if image_url:
             return image_url
         print('[IMAGE ERROR] Multi-reference response contained no image; retrying with the first reference')
-        return call_image_api_with_reference(prepared[0], prompt)
+        return call_image_api_with_reference(prepared[0], prompt, usage_ctx=ctx)
     except Exception as error:
         print('[IMAGE ERROR]', error)
     return None
@@ -1194,6 +1404,7 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
         model=GEMINI_TEXT_MODEL,
         response_format={'type': 'json_object'},
         image_references=image_references or None,
+        usage_ctx=_usage_ctx('image'),
     )
     parsed = _designer_json_response(_get_chat_response_text(response) or extract_chat_content(response, 'VISUAL-CONCEPT-PROMPT'))
     prompt = _visual_concept_sanitize_prompt(parsed.get('prompt') or parsed.get('cover_prompt'))
@@ -2035,7 +2246,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
                     "ولا تتوقف قبل اكتماله. لا تكتب أي شرح أو markdown."
                 )
             print(f"[SLIDE-{slide_num}] Attempt {attempt}: {slide_title}")
-            response = call_zai_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL)
+            response = call_zai_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide'))
             if 'choices' not in response or not response.get('choices'):
                 print(f"[SLIDE-{slide_num}] ERROR: no choices (attempt {attempt})")
                 continue
@@ -2192,7 +2403,7 @@ def api_generate():
     print(f"[GENERATE] Prompt length: {len(prompt)} chars (4 batches)")
 
     try:
-        response = call_zai_chat(prompt, "قم بإنشاء العرض التقديمي الكامل.", max_tokens=16000)
+        response = call_zai_chat(prompt, "قم بإنشاء العرض التقديمي الكامل.", max_tokens=16000, usage_ctx=_usage_ctx('slide'))
 
         raw = extract_chat_content(response, "GENERATE")
         print(f"[GENERATE] GLM response: {len(raw)} chars")
@@ -2352,7 +2563,7 @@ Return ONLY valid JSON: {{"titles": [{{"title": "عنوان الشريحة", "bu
 """
 
     try:
-        response = call_zai_chat(prompt, f"اكتب الهيكل المكون من {target_count} شريحة.", max_tokens=4000)
+        response = call_zai_chat(prompt, f"اكتب الهيكل المكون من {target_count} شريحة.", max_tokens=4000, usage_ctx=_usage_ctx('slide_plan'))
         raw = extract_chat_content(response, "OUTLINE")
 
         json_match = re.search(r'\{[\s\S]*"titles"[\s\S]*\}', raw)
@@ -2504,7 +2715,7 @@ def api_get_image_prompts():
     )
 
     try:
-        res = call_zai_chat(sys_prompt, user_msg, temperature=0.7, max_tokens=2500)
+        res = call_zai_chat(sys_prompt, user_msg, temperature=0.7, max_tokens=2500, usage_ctx=_usage_ctx('image'))
         if res and 'choices' in res and res['choices']:
             content = res['choices'][0]['message']['content'].strip()
             if '```json' in content:
@@ -2825,7 +3036,7 @@ def api_generate_content():
     prompt = f"اكتب محتوى للشريحة: {slide_data.get('title', '')}\n\nبيانات المشروع:\n{json.dumps(project_data, ensure_ascii=False, indent=2)}"
 
     try:
-        response = call_zai_chat(prompt, "اكتب المحتوى.", max_tokens=2000)
+        response = call_zai_chat(prompt, "اكتب المحتوى.", max_tokens=2000, usage_ctx=_usage_ctx('slide'))
         content = extract_chat_content(response, "CONTENT")
         return jsonify({'success': True, 'content': content})
     except Exception as e:
@@ -2876,7 +3087,7 @@ def api_ai_edit_slide():
 أعد الشريحة بالـ HTML المعدّل."""
 
     try:
-        response = call_zai_chat(prompt, "عدّل الشريحة.", max_tokens=4000, model=SLIDE_TEXT_MODEL, image_references=image_refs)
+        response = call_zai_chat(prompt, "عدّل الشريحة.", max_tokens=4000, model=SLIDE_TEXT_MODEL, image_references=image_refs, usage_ctx=_usage_ctx('slide'))
         html = extract_chat_content(response, "EDIT")
         html = extract_html_from_glm({'choices': [{'message': {'content': html}}]})
         
@@ -2923,7 +3134,7 @@ def api_ai_chat():
 {{"action": "reply", "response": "نص الرد"}}"""
 
     try:
-        response = call_zai_chat(prompt, message, max_tokens=2000)
+        response = call_zai_chat(prompt, message, max_tokens=2000, usage_ctx=_usage_ctx('slide'))
         reply = extract_chat_content(response, "CHAT")
 
         parsed = _extract_json_from_text(reply)
@@ -2965,7 +3176,7 @@ def api_generate_bullets():
     prompt = f"اكتب 3-5 نقاط مختصرة للشريحة: {title}\n\nبيانات المشروع:\n{json.dumps(project_data, ensure_ascii=False, indent=2)}"
 
     try:
-        response = call_zai_chat(prompt, "اكتب النقاط.", max_tokens=1000)
+        response = call_zai_chat(prompt, "اكتب النقاط.", max_tokens=1000, usage_ctx=_usage_ctx('slide'))
         content = extract_chat_content(response, "BULLETS")
         # Bullet glyphs are stripped from the model's output; written as escapes so the source
         # itself stays free of icon characters.
@@ -4926,7 +5137,7 @@ HTML الحالي:
             except Exception as progress_error:
                 app.logger.warning('[DESIGNER-EDIT] progress callback failed: %s', progress_error)
         try:
-            raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=16000, model=SLIDE_TEXT_MODEL, image_references=image_refs, timeout=300), 'DESIGNER-EDIT')
+            raw = extract_chat_content(call_zai_chat(prompt, instruction, max_tokens=16000, model=SLIDE_TEXT_MODEL, image_references=image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', project_data, presentation_id=presentation_id)), 'DESIGNER-EDIT')
             parsed = _designer_json_response(raw)
             output = parsed.get('html') or parsed.get('content') or parsed.get('slide_html')
             if not output and raw and '<div' in raw and 'slide' in raw:
@@ -5160,7 +5371,7 @@ def _designer_chat_memory(history, memory):
             "عنها بأرقامها، والمشاكل التي ذُكرت، والتعديلات التي نُفّذت، والقرارات وتفضيلات المستخدم، "
             "وأي سؤال لم يُجب عليه بعد. بلا مقدمات وبلا تنسيق زائد.",
             f"الذاكرة السابقة:\n{memory or 'لا توجد'}\n\nالمحادثة الأقدم:\n{older_text}",
-            max_tokens=700, model=SLIDE_TEXT_MODEL), 'DESIGNER-MEMORY')
+            max_tokens=700, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('designer_chat')), 'DESIGNER-MEMORY')
         summary = str(summary or '').strip()
     except Exception as error:
         print(f"[DESIGNER MEMORY] compression failed: {error}")
@@ -5389,7 +5600,7 @@ def api_designer_chat():
                           " واضحًا فاسأل عنه بأداة ask.")
     try:
         planner_raw = extract_chat_content(
-            call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300),
+            call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
             'DESIGNER-PLANNER')
         plan = _designer_json_response(planner_raw)
         actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
@@ -6250,7 +6461,7 @@ def api_generate_cover_prompt():
 اكتب فقط البرومبت بدون أي شرح."""
 
     try:
-        response = call_zai_chat(glm_prompt, "اكتب البرومبت.", max_tokens=500)
+        response = call_zai_chat(glm_prompt, "اكتب البرومبت.", max_tokens=500, usage_ctx=_usage_ctx('image', data))
         prompt = extract_chat_content(response, "COVER-PROMPT").strip()
 
         # Clean up the prompt
@@ -6763,7 +6974,7 @@ def api_ai_input_builder():
 """
 
     try:
-        response = call_zai_chat(system_prompt, user_prompt, temperature=0.7, max_tokens=4000)
+        response = call_zai_chat(system_prompt, user_prompt, temperature=0.7, max_tokens=4000, usage_ctx=_usage_ctx('project_data', data))
         content = extract_chat_content(response, "AI-INPUT-BUILDER")
         suggestions = _parse_ai_fields_json(content)
 
@@ -6858,7 +7069,7 @@ def api_ai_build_fields():
 """
 
     try:
-        response = call_zai_chat(system_prompt, user_prompt, temperature=0.7, max_tokens=4000)
+        response = call_zai_chat(system_prompt, user_prompt, temperature=0.7, max_tokens=4000, usage_ctx=_usage_ctx('project_data', data))
         content = extract_chat_content(response, "AI-BUILD-FIELDS")
         suggestions = _parse_ai_fields_json(content)
 
@@ -7083,7 +7294,8 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
                 max_tokens=12000,
                 attempts=1,
                 timeout=75,
-                model=LUNA_TEXT_MODEL
+                model=LUNA_TEXT_MODEL,
+                usage_ctx=_usage_ctx('slide_plan', project_data, tenant_id=tenant_id)
             )
             content = extract_chat_content(response, "SLIDE-PLAN")
             plan = parse_slide_plan(content, effective_branding, project_data)
@@ -7549,6 +7761,10 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
             timeout=90,
         )
         payload = response.json()
+        generation_id, vision_usage = _extract_openrouter_usage(payload)
+        _record_ai_usage(_usage_ctx('site'), IMAGE_MODEL,
+                         'ok' if response.status_code < 400 and 'error' not in payload else 'error',
+                         vision_usage, generation_id)
         content = payload.get('choices', [{}])[0].get('message', {}).get('content', '')
         if isinstance(content, list):
             content = ' '.join(str(part.get('text', '')) if isinstance(part, dict) else str(part) for part in content)
@@ -7924,7 +8140,7 @@ def api_site_analysis():
         try:
             response = call_zai_chat(
                 system_prompt, prompt, max_tokens=SITE_ANALYSIS_MAX_TOKENS,
-                reasoning_effort='max')
+                reasoning_effort='max', usage_ctx=_usage_ctx('site', data))
             analysis = extract_chat_content(response, 'SITE-ANALYSIS').strip()
         except Exception as primary_error:
             if not OPENROUTER_KEY:
@@ -7935,7 +8151,8 @@ def api_site_analysis():
                 prompt,
                 temperature=None,
                 max_tokens=SITE_ANALYSIS_MAX_TOKENS,
-                model=LUNA_TEXT_MODEL
+                model=LUNA_TEXT_MODEL,
+                usage_ctx=_usage_ctx('site', data)
             )
             analysis = extract_chat_content(fallback, 'SITE-ANALYSIS-FALLBACK').strip()
         warnings = [value for value in (
@@ -8214,7 +8431,7 @@ def api_generate_slide_single():
     def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
         if training_context:
             sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
-        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL)
+        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
 
     # Apply the same ownership repair used by the full-plan normalizer before
     # rendering and before returning slide metadata. A single-slide retry can
@@ -8390,7 +8607,7 @@ def api_generate_slides():
     def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
         if training_context:
             sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
-        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL)
+        return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
 
     try:
         htmls = generate_all_slides(
@@ -12139,6 +12356,7 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_token
             max_tokens=cap, model=LAND_ANALYSIS_MODEL,
             response_format={'type': 'json_object'} if use_json_mode else None,
             provider=LAND_ANALYSIS_PROVIDER,
+            usage_ctx=_usage_ctx('land'),
         )
         if _has_chat_choices(res):
             choices = res.get('choices') or []
@@ -13241,6 +13459,7 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None):
                 provider=provider,
                 tools=attempt_tools,
                 timeout=240,
+                usage_ctx=_usage_ctx('market'),
             )
             last_error = _chat_error_message(last_response)
             text = _get_chat_response_text(last_response)
@@ -13496,6 +13715,7 @@ def api_generate_executive_content():
                     max_tokens=cap,
                     reasoning_effort='low',
                     response_format={'type': 'json_object'},
+                    usage_ctx=_usage_ctx('executive', data),
                 )
                 if isinstance(response, dict) and 'error' in response:
                     msg = _chat_error_message(response)
@@ -13521,6 +13741,7 @@ def api_generate_executive_content():
                     max_tokens=cap,
                     model=LUNA_TEXT_MODEL,
                     reasoning_effort='low',
+                    usage_ctx=_usage_ctx('executive', data),
                     response_format={'type': 'json_object'},
                 )
                 if isinstance(fallback, dict) and 'error' in fallback:
@@ -16061,6 +16282,10 @@ def api_upload_training_image():
             resp = _req.post("https://openrouter.ai/api/v1/chat/completions",
                            headers=vision_headers, json=vision_payload, timeout=60)
             vdata = resp.json()
+            generation_id, training_vision_usage = _extract_openrouter_usage(vdata)
+            _record_ai_usage(_usage_ctx('training_chat', tenant_id=g.tenant_id), LUNA_TEXT_MODEL,
+                             'ok' if resp.status_code < 400 and 'error' not in vdata else 'error',
+                             training_vision_usage, generation_id)
             if 'choices' in vdata and vdata['choices']:
                 analysis_text = vdata['choices'][0].get('message', {}).get('content', '')
             elif 'error' in vdata:
@@ -16412,7 +16637,8 @@ def api_training_chat():
         # reasoning instead of the fast text model, and with room to plan several tool calls.
         response = call_zai_chat(system_prompt, user_prompt, max_tokens=6000,
                                  model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
-                                 image_references=attachment_images or None)
+                                 image_references=attachment_images or None,
+                                 usage_ctx=_usage_ctx('training_chat', data))
         reply = extract_chat_content(response, 'SUPER-AGENT')
     except Exception as e:
         print(f'[SUPER-AGENT] AI reply failed: {e}')
@@ -17371,7 +17597,7 @@ html يجب أن يكون div class=\"slide\" واحداً كاملاً، بلا
 الطلب: {instruction}
 HTML الحالي:
 {current_html}"""
-                    response = call_zai_chat(edit_prompt, instruction, max_tokens=6000)
+                    response = call_zai_chat(edit_prompt, instruction, max_tokens=6000, usage_ctx=_usage_ctx('training_chat', workspace, tenant_id=tenant_id))
                     raw = extract_chat_content(response, 'SUPER-AGENT-SLIDE-EDIT').strip()
                     raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw).strip()
                     parsed = None
@@ -17452,7 +17678,8 @@ HTML الحالي:
                             max_tokens=6000,
                             attempts=2,
                             timeout=45,
-                            model=SLIDE_TEXT_MODEL
+                            model=SLIDE_TEXT_MODEL,
+                            usage_ctx=_usage_ctx('training_chat', tenant_id=tenant_id)
                         )
                         plan = slide_engine.parse_slide_plan(extract_chat_content(plan_resp, "AGENT-SLIDE-PLAN"), plan_branding, project_data)
                         break
@@ -17492,7 +17719,7 @@ HTML الحالي:
                 def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
                     if training_context:
                         sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
-                    return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2)
+                    return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, usage_ctx=_usage_ctx('training_chat', workspace, tenant_id=tenant_id))
                 htmls = generate_all_slides(
                     slide_plan, project_data, branding, _get_images_info(images, project_data), call_glm_fn,
                     map_placeholders=(images.get('map_placeholders', {}) if isinstance(images, dict) else {}),

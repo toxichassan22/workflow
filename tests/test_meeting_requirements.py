@@ -5309,7 +5309,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         success = {'choices': [{'message': {'content': '{"ok":1}'}, 'finish_reason': 'stop'}]}
         caps = []
 
-        def fake_call(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None):
+        def fake_call(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, usage_ctx=None):
             caps.append(max_tokens)
             return refusal if max_tokens > 25898 else success
 
@@ -5357,7 +5357,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         formats = []
 
         def fake_call(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None,
-                      timeout=300, reasoning_effort=None, response_format=None, provider=None):
+                      timeout=300, reasoning_effort=None, response_format=None, provider=None, usage_ctx=None):
             formats.append(response_format)
             return blocked if response_format else success
 
