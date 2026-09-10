@@ -5,10 +5,6 @@ import re
 import sys
 
 _TARGET = "slide_engine"
-# The old managed-chrome renderer uses these heights. A persisted value at one of
-# these canonical sizes is not evidence of a user's manual resize: it is the value
-# written by the renderer after it clamped the logo. Promote that legacy value once
-# so existing broken drafts recover, while every other explicit size is preserved.
 _LEGACY_HEIGHTS = {"40px", "48px", "50px"}
 _RECOVERY_HEIGHT = "78px"
 
@@ -51,11 +47,10 @@ def _restore_logo_dimensions(html, captured):
         nonlocal position
         if position >= len(captured):
             return match.group(0)
-        dimensions = captured[position]
+        dimensions = dict(captured[position])
         position += 1
-        # A canonical renderer height is the known broken legacy state. Recover
-        # the historical editable logo height instead of preserving the clamp.
-        if dimensions.get("height", "").lower().replace("!important", "") in _LEGACY_HEIGHTS:
+        height = dimensions.get("height", "").lower().replace("!important", "").strip()
+        if height in _LEGACY_HEIGHTS:
             dimensions["height"] = _RECOVERY_HEIGHT
             dimensions["max-height"] = _RECOVERY_HEIGHT
 
@@ -79,9 +74,31 @@ def _restore_logo_dimensions(html, captured):
     )
 
 
+def _wrap_html_function(module, name):
+    original = getattr(module, name, None)
+    if not callable(original) or getattr(original, "_workflow_logo_resize_wrapper", False):
+        return
+
+    def wrapped(html, *args, **kwargs):
+        captured = _capture_logo_dimensions(html)
+        result = original(html, *args, **kwargs)
+        return _restore_logo_dimensions(result, captured) if captured else result
+
+    wrapped.__name__ = original.__name__
+    wrapped.__doc__ = original.__doc__
+    wrapped.__wrapped__ = original
+    wrapped._workflow_logo_resize_wrapper = True
+    setattr(module, name, wrapped)
+
+
 def _patch_slide_engine(module):
     if getattr(module, "_workflow_logo_resize_patch", False):
         return
+
+    # Patch the exact chrome-styling layer. This is the important part: the
+    # renderer can call it from several paths, not only from renumbering.
+    _wrap_html_function(module, "_apply_logo_contrast_styles")
+
     original = getattr(module, "renumber_presentation_slides", None)
     if not callable(original):
         return
