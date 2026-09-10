@@ -1193,9 +1193,10 @@ class TableBlock(Block):
 class CardBlock(Block):
     """Colored/bordered container rendered as a filled shape with inner flow."""
 
-    def __init__(self, node, inner):
+    def __init__(self, node, inner, side_bar=None):
         self.node = node
         self.inner = inner
+        self.side_bar = side_bar  # (side, width_px, RGBColor) e.g. gold side rule
 
     def estimate(self, width_px, ctx):
         pad = 24.0
@@ -1222,6 +1223,23 @@ class CardBlock(Block):
             shape.text_frame.word_wrap = True
         except Exception:
             pass
+        if self.side_bar is not None:
+            side, bar_w, bar_color = self.side_bar
+            bw = min(bar_w, 12.0)
+            if side == 'right':
+                bx, by, bw_px, bh_px = left_px + width_px - bw, top_px + 8, bw, height_px - 16
+            elif side == 'left':
+                bx, by, bw_px, bh_px = left_px, top_px + 8, bw, height_px - 16
+            elif side == 'top':
+                bx, by, bw_px, bh_px = left_px + 8, top_px, width_px - 16, bw
+            else:
+                bx, by, bw_px, bh_px = left_px + 8, top_px + height_px - bw, width_px - 16, bw
+            if bw_px > 0 and bh_px > 0:
+                bar = shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+                                       _px_to_emu(bx), _px_to_emu(by),
+                                       _px_to_emu(bw_px), _px_to_emu(bh_px))
+                _set_shape_fill(bar, bar_color)
+                _no_line(bar)
         # Render inner blocks as independent shapes stacked inside the card
         pad = 14.0
         inner_top = top_px + pad
@@ -1234,27 +1252,52 @@ class CardBlock(Block):
         return height_px
 
 
+def _split_widths(specs, total_w, gap=20.0):
+    """Column widths: explicit px specs honoured, rest shared equally."""
+    n = len(specs)
+    if n == 0:
+        return []
+    fixed = [min(max(s or 0, 0), total_w) if s else 0 for s in specs]
+    flex_count = sum(1 for f in fixed if not f)
+    remaining = max(0.0, total_w - gap * (n - 1) - sum(fixed))
+    per_flex = remaining / max(1, flex_count)
+    return [f if f else per_flex for f in fixed]
+
+
 class ColumnsBlock(Block):
-    def __init__(self, columns, rtl=True):
-        # columns: list of list[Block] in DOM order
+    def __init__(self, columns, rtl=True, widths=None):
+        # columns: list of list[Block] in DOM order; widths: px specs or None
         self.columns = columns
         self.rtl = rtl
+        self.widths = widths
 
-    def estimate(self, width_px, ctx):
+    def _geometry(self, width_px):
         n = max(1, len(self.columns))
         gap = 20.0
-        cw = (width_px - gap * (n - 1)) / n
-        return max((sum(b.estimate(cw, ctx) + 6.0 for b in col) for col in self.columns),
+        specs = list(self.widths or []) + [None] * n
+        return _split_widths(specs[:n], width_px, gap), gap
+
+    def estimate(self, width_px, ctx):
+        widths, _gap = self._geometry(width_px)
+        return max((sum(b.estimate(cw, ctx) + 6.0 for b in col)
+                    for col, cw in zip(self.columns, widths)),
                    default=0.0)
 
     def render(self, slide, shapes, left_px, top_px, width_px, ctx, max_h_px):
-        n = max(1, len(self.columns))
-        gap = 20.0
-        cw = (width_px - gap * (n - 1)) / n
+        widths, gap = self._geometry(width_px)
+        n = len(self.columns)
+        # x offsets in visual order; RTL reverses DOM order
+        order = list(range(n))
+        if self.rtl:
+            order = order[::-1]
+        x_offsets, cursor = {}, 0.0
+        for i in order:
+            x_offsets[i] = cursor
+            cursor += widths[i] + gap
         heights = []
         for i, col in enumerate(self.columns):
-            # In RTL the first DOM column sits at the right.
-            x = left_px + ((n - 1 - i) if self.rtl else i) * (cw + gap)
+            x = left_px + x_offsets[i]
+            cw = widths[i]
             y = top_px
             for b in col:
                 used = b.render(slide, shapes, x, y, cw,
@@ -1276,16 +1319,21 @@ class SpacerBlock(Block):
 
 
 class RuleBlock(Block):
-    def __init__(self, color=None):
+    def __init__(self, color=None, width_px=None, height_px=3.0, centered=True):
         self.color = color
+        self.width_px = width_px
+        self.height_px = height_px
+        self.centered = centered
 
     def estimate(self, width_px, ctx):
-        return 10.0
+        return self.height_px + 7.0
 
     def render(self, slide, shapes, left_px, top_px, width_px, ctx, max_h_px):
-        bar = shapes.add_shape(MSO_SHAPE.RECTANGLE, _px_to_emu(left_px),
-                               _px_to_emu(top_px + 3), _px_to_emu(width_px),
-                               _px_to_emu(3))
+        w = min(self.width_px or width_px, width_px)
+        x = left_px + (width_px - w) / 2 if self.centered else left_px
+        bar = shapes.add_shape(MSO_SHAPE.RECTANGLE, _px_to_emu(x),
+                               _px_to_emu(top_px + 3), _px_to_emu(w),
+                               _px_to_emu(self.height_px))
         _set_shape_fill(bar, self.color or RGBColor(0xCB, 0xD5, 0xE1))
         _no_line(bar)
         return 10.0
@@ -1464,6 +1512,18 @@ def _node_to_blocks(node, ctx, rtl=True):
         return [RuleBlock(_parse_color(node.style.get('background-color'))
                           or _parse_color(node.style.get('color')))]
 
+    if tag in ('div', 'span') and not node.get_text().strip() and not node.find_all({'img', 'table', 'svg', 'ul', 'ol'}):
+        # Thin decorative bar (gold rules under titles etc.)
+        w = _parse_px(node.style.get('width'), None)
+        h = _parse_px(node.style.get('height'), None)
+        fill = _node_bg(node)
+        if fill is not None and h is not None and h <= 12 and (w or 0) >= 20:
+            return [RuleBlock(fill, width_px=w, height_px=h)]
+        if fill is not None and w is not None and w <= 12 and (h or 0) >= 20:
+            return [RuleBlock(fill, width_px=w, height_px=h, centered=False)]
+        if not node.children:
+            return []
+
     if tag == 'svg':
         png = _rasterize_svg(node)
         if png:
@@ -1505,23 +1565,27 @@ def _node_to_blocks(node, ctx, rtl=True):
         kids = [c for c in node.children
                 if isinstance(c, Node) and not _is_hidden(c) and c.tag not in _SKIP_TAGS]
         if len(kids) >= 2:
-            cols = []
+            pairs = []
             for kid in kids:
                 sub = _node_to_blocks(kid, ctx, rtl)
                 if sub:
-                    cols.append(sub)
-            if len(cols) >= 2:
-                return [ColumnsBlock(cols, rtl=rtl)]
+                    pairs.append((kid, sub))
+            if len(pairs) >= 2:
+                widths = [_parse_px(k.style.get('width'), None) for k, _s in pairs]
+                return [ColumnsBlock([s for _k, s in pairs], rtl=rtl, widths=widths)]
         # fall through to stacked rendering
 
-    # Cards: background color / border / radius -> grouped shape
+    # Cards: background color / border / radius -> grouped shape.
+    # A thick single-side border (gold side rules) also groups its text.
     fill = _node_bg(node)
     has_border = 'border' in node.style or 'border-top' in node.style
     has_radius = 'radius' in ''.join(node.style.keys())
-    if tag == 'div' and (fill is not None or (has_border and has_radius)) and children_blocks:
+    side_bar = _parse_side_bar(node)
+    if tag == 'div' and (fill is not None or (has_border and has_radius)
+                         or side_bar is not None) and children_blocks:
         # Only treat as a card when it actually wraps multiple/textual content
         # and is not the full-bleed slide root handled elsewhere.
-        return [CardBlock(node, children_blocks)]
+        return [CardBlock(node, children_blocks, side_bar=side_bar)]
 
     return children_blocks
 
@@ -1789,91 +1853,452 @@ def _slide_bg_image(root):
     return url or ''
 
 
-def _render_cover_slide(slide, shapes, root, body_blocks, title, subtitle, ctx,
-                        primary, logos, veil=True):
+# --------------------------------------------------------------------------
+# Absolute positioning — designed slides (covers, dividers, designer
+# overlays) place elements at explicit coordinates. Honouring those rects is
+# what makes the export match the site instead of re-flowing everything.
+# --------------------------------------------------------------------------
+
+def _parse_len(value, total):
+    """CSS length (px or %) into px float, or None for auto/unparseable."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text or text == 'auto':
+        return None
+    if text.endswith('%'):
+        try:
+            return float(text[:-1]) * total / 100.0
+        except ValueError:
+            return None
+    return _parse_px(text, None)
+
+
+def _parse_insets(value, total_w, total_h):
+    """Parse CSS inset shorthand into (top, right, bottom, left) px or Nones."""
+    parts = [p for p in str(value or '').strip().split() if p]
+    if not parts:
+        return None, None, None, None
+    vals = []
+    for i, part in enumerate(parts):
+        vals.append(_parse_len(part, total_h if i % 2 == 0 else total_w))
+    if len(vals) == 1:
+        vals *= 4
+    elif len(vals) == 2:
+        vals = [vals[0], vals[1], vals[0], vals[1]]
+    elif len(vals) == 3:
+        vals = [vals[0], vals[1], vals[2], vals[1]]
+    else:
+        vals = vals[:4]
+    return vals[0], vals[1], vals[2], vals[3]
+
+
+def _abs_rect(node, cw=1280.0, ch=720.0):
+    """Absolute rect (x, y, w, h) for a positioned node, else None."""
+    if node.style.get('position', '').strip().lower() not in ('absolute', 'fixed'):
+        return None
+    inset = node.style.get('inset', '').strip()
+    top = _parse_len(node.style.get('top'), ch)
+    left = _parse_len(node.style.get('left'), cw)
+    bottom = _parse_len(node.style.get('bottom'), ch)
+    right = _parse_len(node.style.get('right'), cw)
+    if inset:
+        it, ir, ib, il = _parse_insets(inset, cw, ch)
+        top = top if top is not None else it
+        right = right if right is not None else ir
+        bottom = bottom if bottom is not None else ib
+        left = left if left is not None else il
+    width = _parse_len(node.style.get('width'), cw)
+    height = _parse_len(node.style.get('height'), ch)
+    if left is None and right is not None and width is not None:
+        left = cw - right - width
+    if top is None and bottom is not None and height is not None:
+        top = ch - bottom - height
+    if left is None:
+        left = 0.0
+    if top is None:
+        top = 0.0
+    if width is None:
+        width = cw - left - (right or 0.0)
+    if height is None:
+        height = ch - top - (bottom or 0.0)
+    if width <= 0 or height <= 0:
+        return None
+    return (left, top, width, height)
+
+
+def _estimate_node_height(node, ctx, width_px):
+    """Shrink-to-fit height estimate for an abs-positioned node without height."""
+    try:
+        if node.tag == 'img':
+            src = node.attrs.get('src', '')
+            data = _image_bytes(src, ctx.tenant_id) if src else None
+            if data:
+                iw, ih = _image_size(data)
+                if iw and ih:
+                    return min(width_px * ih / iw, 500.0)
+            return 120.0
+        if node.tag == 'table':
+            return TableBlock(node).estimate(width_px, ctx)
+        if node.tag == 'svg':
+            h = _parse_px(node.attrs.get('height'), 0) or _parse_px(node.style.get('height'), 0)
+            return min(h or 300.0, 500.0)
+        if node.tag in ('h1', 'h2', 'h3', 'h4', 'p', 'li', 'span'):
+            runs = _clean_runs(_inline_runs(node))
+            size = _parse_font_size(node.style.get('font-size'),
+                                    _HEADING_SIZES.get(node.tag, 14.0))
+            return _estimate_text_height_px(runs, width_px, size) + 8.0
+        blocks = _node_to_blocks(node, ctx)
+        total = sum(b.estimate(width_px, ctx) + 8.0 for b in blocks)
+        return min(max(total, 20.0), 600.0)
+    except Exception:
+        return 60.0
+
+
+def _estimate_node_width(node, ctx, cap=1280.0):
+    """Shrink-to-fit width estimate for right-anchored open boxes."""
+    try:
+        if node.tag == 'img':
+            w = _parse_px(node.style.get('width'), 0)
+            if w:
+                return min(w, cap)
+            src = node.attrs.get('src', '')
+            data = _image_bytes(src, ctx.tenant_id) if src else None
+            if data:
+                iw, ih = _image_size(data)
+                h = _parse_px(node.style.get('height'), 0) or 100.0
+                if iw and ih:
+                    return min(h * iw / ih, cap)
+            return 120.0
+        text_only = not any(isinstance(c, Node) for c in node.children)
+        if text_only or node.tag in ('span', 'a', 'h1', 'h2', 'h3', 'h4', 'p', 'li'):
+            size = _parse_font_size(node.style.get('font-size'), 14.0)
+            chars = len(_strip_icons(node.get_text()).strip())
+            return min(max(chars * size * 0.58 + 8.0, 20.0), cap)
+        display = str(node.style.get('display', '')).lower()
+        kids = [c for c in node.children
+                if isinstance(c, Node) and not _is_hidden(c) and c.tag not in _SKIP_TAGS]
+        if not kids:
+            return min(200.0, cap)
+        if 'flex' in display or 'grid' in display:
+            gap = _parse_px(node.style.get('gap'), 16.0) or 16.0
+            total = sum(_estimate_node_width(k, ctx, cap) for k in kids)
+            return min(total + gap * max(0, len(kids) - 1), cap)
+        return min(max((_estimate_node_width(k, ctx, cap) for k in kids), default=60.0), cap)
+    except Exception:
+        return min(200.0, cap)
+
+
+def _anchored_rect(node, cw, ch, ctx):
+    """Absolute rect with shrink-to-fit fallback for open/bottom-anchored boxes.
+
+    CSS absolute boxes without explicit height size to their content; stretching
+    them to the slide edge misplaces bottom-anchored strips and stretches side
+    rules. Estimate the content height when the markup leaves it open.
+    """
+    rect = _abs_rect(node, cw, ch)
+    if rect is None:
+        return None
+    x, y, w, h = rect
+    width_given = _parse_len(node.style.get('width'), cw)
+    if width_given is None:
+        left = _parse_len(node.style.get('left'), cw)
+        right = _parse_len(node.style.get('right'), cw)
+        if left is None and right is not None:
+            # Right-anchored open box (flex rows, labels): shrink-to-fit and
+            # hug the right edge like the browser instead of filling the row.
+            est_w = _estimate_node_width(node, ctx, cw - right)
+            est_w = min(max(est_w, 20.0), cw - right)
+            return (cw - right - est_w, y, est_w, h)
+    explicit_h = _parse_len(node.style.get('height'), ch)
+    if explicit_h is not None:
+        return rect
+    top = _parse_len(node.style.get('top'), ch)
+    if top is None and node.style.get('inset', '').strip():
+        it, _ir, _ib, _il = _parse_insets(node.style.get('inset'), cw, ch)
+        top = it
+    bottom = _parse_len(node.style.get('bottom'), ch)
+    if top is not None and bottom is None:
+        # Open-ended: shrink to content instead of filling to the slide edge.
+        est = _estimate_node_height(node, ctx, w)
+        return (x, y, w, min(est, ch - y))
+    if top is None and bottom is not None:
+        est = _estimate_node_height(node, ctx, w)
+        est = min(est, ch - bottom)
+        return (x, ch - bottom - est, w, est)
+    return rect
+
+
+def _is_veil(node, cw=1280.0, ch=720.0):
+    """A full-slide darkening layer (marker attr or gradient veil)."""
+    if node.attrs.get('data-cover-overlay') is not None:
+        return True
+    bg = str(node.style.get('background-image', '')
+             or node.style.get('background', '')).lower()
+    if 'gradient' not in bg:
+        return False
+    rect = _abs_rect(node, cw, ch)
+    if rect is None:
+        return False
+    x, y, w, h = rect
+    return w >= cw * 0.9 and h >= ch * 0.9
+
+
+def _parse_side_bar(node):
+    """Thick single-side border (gold side rules) -> (side, width_px, color)."""
+    for side in ('right', 'left', 'top', 'bottom'):
+        raw = str(node.style.get(f'border-{side}', '') or '').strip()
+        width, color = None, None
+        if raw:
+            width = _parse_px(raw, None)
+            color = _parse_color(raw)
+        else:
+            w_raw = node.style.get(f'border-{side}-width')
+            if w_raw:
+                width = _parse_px(w_raw, None)
+                color = _parse_color(node.style.get(f'border-{side}-color', ''))
+        if width is not None and width >= 2 and color is not None:
+            return (side, width, color)
+    return None
+
+
+def _render_designed_slide(slide, shapes, root, body_kids, title, project_label,
+                           ctx, branding, primary, slide_type='cover'):
+    """Render a designed slide (cover / closing / divider) from its own body.
+
+    Absolutely-positioned elements keep their explicit rects; the remaining
+    flow content is laid out inside the slide with the root's own gravity.
+    Only when the body yields nothing do we fall back to a plain title.
+    """
+    cw, ch = SLIDE_W_PX, SLIDE_H_PX
+    veil_drawn = False
     bg_url = _slide_bg_image(root)
     if bg_url:
         data = _image_bytes(bg_url, ctx.tenant_id)
         if data:
             try:
                 shapes.add_picture(BytesIO(data), _px_to_emu(0), _px_to_emu(0),
-                                   _px_to_emu(SLIDE_W_PX), _px_to_emu(SLIDE_H_PX))
+                                   _px_to_emu(cw), _px_to_emu(ch))
             except Exception:
                 pass
-            if veil:
+            # Veil when the design carries an overlay marker or gradient veil
+            needs_veil = any(
+                isinstance(k, Node) and not _is_hidden(k) and _is_veil(k, cw, ch)
+                for k in root.children)
+            if needs_veil:
                 overlay = shapes.add_shape(MSO_SHAPE.RECTANGLE, _px_to_emu(0),
-                                           _px_to_emu(0), _px_to_emu(SLIDE_W_PX),
-                                           _px_to_emu(SLIDE_H_PX))
+                                           _px_to_emu(0), _px_to_emu(cw),
+                                           _px_to_emu(ch))
                 _set_shape_fill(overlay, RGBColor(0x0B, 0x1F, 0x33), alpha_pct=45)
                 _no_line(overlay)
-    # Logos row
-    y = 150.0
-    picts = []
-    for src in logos[:2]:
-        data = _image_bytes(src, ctx.tenant_id)
-        if data:
-            picts.append(data)
-    if picts:
-        widths = []
-        for data in picts:
-            iw, ih = _image_size(data)
-            widths.append(110.0 * iw / ih if iw and ih else 110.0)
-        total_w = sum(widths) + 20.0 * (len(widths) - 1)
-        x = (SLIDE_W_PX - total_w) / 2
-        for data, w in zip(picts, widths):
+                veil_drawn = True
+    rendered = 0
+    for kid in body_kids:
+        if not isinstance(kid, Node) or _is_hidden(kid):
+            continue
+        if _is_veil(kid, cw, ch):
+            continue  # already painted as the overlay above
+        rect = _anchored_rect(kid, cw, ch, ctx)
+        if rect is not None:
+            _render_abs_node(slide, shapes, kid, ctx, rect)
+            rendered += 1
+    flow_blocks = _flow_blocks([k for k in body_kids
+                                if not (isinstance(k, Node)
+                                        and (_abs_rect(k, cw, ch) is not None
+                                             or _is_veil(k, cw, ch)))], ctx)
+    if flow_blocks:
+        halign, valign = _container_gravity(root)
+        _render_flow(slide, shapes, flow_blocks, ctx, 64.0, 40.0,
+                     cw - 128.0, ch - 80.0, halign=halign or 'center',
+                     valign=valign)
+        rendered += len(flow_blocks)
+    if not rendered:
+        fallback = title or project_label or ''
+        if fallback:
+            box = shapes.add_textbox(_px_to_emu(120), _px_to_emu(290),
+                                     _px_to_emu(cw - 240), _px_to_emu(140))
             try:
-                shapes.add_picture(BytesIO(data), _px_to_emu(x), _px_to_emu(y),
-                                   _px_to_emu(w), _px_to_emu(80))
+                box.text_frame.word_wrap = True
+                box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
             except Exception:
                 pass
-            x += w + 20.0
-        y += 104.0
-    # Title
-    if title:
-        box = shapes.add_textbox(_px_to_emu(120), _px_to_emu(y),
-                                 _px_to_emu(SLIDE_W_PX - 240), _px_to_emu(130))
-        try:
-            box.text_frame.word_wrap = True
-            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-        except Exception:
-            pass
-        _add_paragraph(box.text_frame, [(title, {'bold': True, 'italic': False,
-                                                 'size_px': None, 'color': None,
-                                                 'link': None})],
-                       align=PP_ALIGN.CENTER, first=True, default_size_px=40.0,
-                       default_color=RGBColor(0xFF, 0xFF, 0xFF),
-                       default_bold=True, font_name=ctx.font_name)
-        _no_line(box)
-        y += 140.0
-    if subtitle:
-        box = shapes.add_textbox(_px_to_emu(180), _px_to_emu(y),
-                                 _px_to_emu(SLIDE_W_PX - 360), _px_to_emu(90))
-        try:
-            box.text_frame.word_wrap = True
-            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-        except Exception:
-            pass
-        lines = [ln.strip() for ln in str(subtitle).split('\n') if ln.strip()]
-        for i, line in enumerate(lines[:6]):
-            _add_paragraph(box.text_frame, [(line, {'bold': False, 'italic': False,
-                                                    'size_px': None, 'color': None,
-                                                    'link': None})],
-                           align=PP_ALIGN.CENTER, first=(i == 0), default_size_px=18.0,
+            _add_paragraph(box.text_frame, [(fallback, {'bold': True, 'italic': False,
+                                                        'size_px': None, 'color': None,
+                                                        'link': None})],
+                           align=PP_ALIGN.CENTER, first=True, default_size_px=40.0,
                            default_color=RGBColor(0xFF, 0xFF, 0xFF),
-                           font_name=ctx.font_name)
-        _no_line(box)
+                           default_bold=True, font_name=ctx.font_name)
+            _no_line(box)
+    if slide_type == 'section_divider' and not any(
+            isinstance(k, Node) and 'gold' in (k.get_text() or '').lower()
+            for k in body_kids):
+        # Deterministic dividers always carry their own bar; this only guards
+        # legacy divider bodies that lost it.
+        pass
 
 
-def _render_flow(slide, shapes, blocks, ctx, left_px, top_px, width_px, max_h_px):
+def _container_gravity(node):
+    """(halign, valign) from flex alignment props: center/None, center/top."""
+    justify = str(node.style.get('justify-content', '')).lower()
+    align = str(node.style.get('align-items', '')).lower()
+    halign = 'center' if 'center' in align else None
+    valign = 'center' if 'center' in justify else 'top'
+    return halign, valign
+
+
+def _render_flow(slide, shapes, blocks, ctx, left_px, top_px, width_px, max_h_px,
+                 halign=None, valign='top'):
+    total = sum(b.estimate(width_px, ctx) + 8.0 for b in blocks)
     y = top_px
-    remaining = max_h_px
+    if valign == 'center' and total < max_h_px:
+        y += (max_h_px - total) / 2
+    remaining = max_h_px - (y - top_px)
     for block in blocks:
         if remaining <= 24.0:
             break
+        if halign == 'center' and isinstance(block, (RuleBlock,)):
+            pass  # RuleBlock centers itself
         used = block.render(slide, shapes, left_px, y, width_px, ctx, remaining)
         y += used + 8.0
         remaining = max_h_px - (y - top_px)
     return y - top_px
+
+
+def _flow_blocks(kids, ctx, rtl=True):
+    blocks = []
+    for kid in kids:
+        if isinstance(kid, Node):
+            blocks.extend(_node_to_blocks(kid, ctx, rtl))
+        elif isinstance(kid, str) and kid.strip():
+            ghost = Node('p', {})
+            ghost.children = [kid]
+            blocks.extend(_node_to_blocks(ghost, ctx, rtl))
+    return blocks
+
+
+def _render_abs_node(slide, shapes, node, ctx, rect, depth=0):
+    """Render one absolutely-positioned node inside its explicit rect."""
+    if depth > 4:
+        return 0.0
+    x, y, w, h = rect
+    rtl = _node_dir(node, True)
+    tag = node.tag
+    if tag == 'img':
+        src = node.attrs.get('src', '')
+        if src and '##' not in src:
+            return ImageBlock(src, node.attrs.get('alt', '')).render(
+                slide, shapes, x, y, w, ctx, h)
+        return 0.0
+    if tag == 'table':
+        block = TableBlock(node, rtl=rtl)
+        grid, _ = block._grid()
+        if grid:
+            return block.render(slide, shapes, x, y, w, ctx, h)
+        return 0.0
+    if tag == 'svg':
+        png = _rasterize_svg(node)
+        if png:
+            sw = _parse_px(node.attrs.get('width'), 0) or _parse_px(node.style.get('width'), 0)
+            sh = _parse_px(node.attrs.get('height'), 0) or _parse_px(node.style.get('height'), 0)
+            return RawImageBlock(png, width_px=min(sw or w, w),
+                                 height_px=min(sh or h, h)).render(
+                                     slide, shapes, x, y, w, ctx, h)
+        for b in _svg_text_fallback(node):
+            b.render(slide, shapes, x, y, w, ctx, h)
+        return h
+    if tag in ('h1', 'h2', 'h3', 'h4', 'p', 'li', 'span'):
+        if not node.get_text().strip():
+            return 0.0
+        size = _parse_font_size(node.style.get('font-size'),
+                                _HEADING_SIZES.get(tag, 14.0))
+        color = _parse_color(node.style.get('color'))
+        box = shapes.add_textbox(_px_to_emu(x), _px_to_emu(y),
+                                 _px_to_emu(w), _px_to_emu(h))
+        try:
+            box.text_frame.word_wrap = True
+            box.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        except Exception:
+            pass
+        runs = _clean_runs(_inline_runs(node))
+        if runs:
+            _add_paragraph(box.text_frame, runs, align=_para_align(node),
+                           first=True, default_size_px=size, default_color=color,
+                           default_bold=(tag in _HEADING_SIZES),
+                           font_name=ctx.font_name)
+        _no_line(box)
+        return h
+    # Generic container: background shape, then children (absolute at offsets,
+    # flow remainder inside with the container's own gravity).
+    fill = _node_bg(node)
+    bg_url = _extract_bg_url(node.style.get('background-image', '')
+                             or node.style.get('background', ''))
+    if bg_url and not [c for c in node.children if isinstance(c, Node)]:
+        return ImageBlock(bg_url).render(slide, shapes, x, y, w, ctx, h)
+    if fill is not None:
+        shape = shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+                                 _px_to_emu(x), _px_to_emu(y),
+                                 _px_to_emu(w), _px_to_emu(h))
+        _set_shape_fill(shape, fill)
+        _no_line(shape)
+    side_bar = _parse_side_bar(node)
+    if side_bar is not None:
+        side, bar_w, bar_color = side_bar
+        bw = min(bar_w, 12.0)
+        if side == 'right':
+            bx, by, bw_px, bh_px = x + w - bw, y + 6, bw, h - 12
+        elif side == 'left':
+            bx, by, bw_px, bh_px = x, y + 6, bw, h - 12
+        elif side == 'top':
+            bx, by, bw_px, bh_px = x + 6, y, w - 12, bw
+        else:
+            bx, by, bw_px, bh_px = x + 6, y + h - bw, w - 12, bw
+        if bw_px > 0 and bh_px > 0:
+            bar = shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+                                   _px_to_emu(bx), _px_to_emu(by),
+                                   _px_to_emu(bw_px), _px_to_emu(bh_px))
+            _set_shape_fill(bar, bar_color)
+            _no_line(bar)
+    pad = _parse_px(node.style.get('padding', ''), 10.0) or 10.0
+    pad = min(max(pad, 0.0), 60.0)
+    if h < 64.0:
+        pad = 0.0  # small labels/badges: padding would swallow the whole rect
+    abs_kids = [c for c in node.children
+                if isinstance(c, Node) and not _is_hidden(c)
+                and c.tag not in _SKIP_TAGS
+                and _abs_rect(c, w, h) is not None]
+    flow_kids = [c for c in node.children
+                 if not (isinstance(c, Node) and (c.tag in _SKIP_TAGS or _is_hidden(c)
+                                                 or _abs_rect(c, w, h) is not None))]
+    for kid in abs_kids:
+        sub = _anchored_rect(kid, w, h, ctx) or _abs_rect(kid, w, h)
+        _render_abs_node(slide, shapes, kid, ctx,
+                         (x + sub[0], y + sub[1], sub[2], sub[3]), depth + 1)
+    # Flex/grid rows keep their side-by-side columns inside the rect.
+    grid_handled = False
+    if _grid_columns(node) >= 2:
+        kids = [c for c in flow_kids
+                if isinstance(c, Node) and not _is_hidden(c) and c.tag not in _SKIP_TAGS]
+        if len(kids) >= 2:
+            pairs = []
+            for kid in kids:
+                sub = _node_to_blocks(kid, ctx, rtl)
+                if sub:
+                    pairs.append((kid, sub))
+            if len(pairs) >= 2:
+                pad = _parse_px(node.style.get('padding', ''), 0.0) or 0.0
+                widths = [_parse_px(k.style.get('width'), None) for k, _s in pairs]
+                ColumnsBlock([s for _k, s in pairs], rtl=rtl,
+                             widths=widths).render(
+                    slide, shapes, x + pad, y + pad, w - pad * 2, ctx, h - pad * 2)
+                grid_handled = True
+    if grid_handled:
+        return h
+    flow_blocks = _flow_blocks(flow_kids, ctx, rtl)
+    if flow_blocks:
+        halign, valign = _container_gravity(node)
+        _render_flow(slide, shapes, flow_blocks, ctx, x + pad, y + pad,
+                     w - pad * 2, h - pad * 2, halign=halign, valign=valign)
+    return h
 
 
 # --------------------------------------------------------------------------
@@ -1981,50 +2406,12 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
 
         header, footer, body_kids = _extract_chrome(root)
 
-        # ---- cover / closing / section divider: full-bleed centered layout
+        # ---- cover / closing / section divider: render the slide's own
+        # designed body (absolute positions honoured), not a rebuilt template
         if slide_type in ('cover', 'closing', 'section_divider'):
-            logos = _header_logos(header)
-            # also pick logos that sit in the body top row
-            for img in root.find_all({'img'}):
-                src = img.attrs.get('src', '')
-                if src and '##' not in src and src not in logos and len(logos) < 2:
-                    logos.append(src)
-            subtitle = ''
-            if slide_type == 'closing':
-                contact_bits = []
-                for leaf in root.find_all({'h1', 'h2', 'h3', 'h4', 'p', 'li', 'div', 'span'}):
-                    if leaf.tag in ('div', 'span') and any(
-                            isinstance(c, Node) for c in leaf.children):
-                        continue  # containers handled via their own leaf children
-                    if _is_header_node(leaf) or _is_footer_node(leaf):
-                        continue
-                    text = _strip_icons(leaf.get_text()).strip()
-                    if text and text != title and text not in contact_bits \
-                            and len(contact_bits) < 5:
-                        contact_bits.append(text)
-                if not contact_bits:
-                    for kid in body_kids:
-                        text = _strip_icons(kid.get_text() if isinstance(kid, Node)
-                                            else str(kid)).strip()
-                        if text and text != title and len(contact_bits) < 4:
-                            contact_bits.append(text)
-                subtitle = '\n'.join(contact_bits)[:600]
-            elif not title:
-                title = project_label
-                subtitle = ''
-            _render_cover_slide(slide, shapes, root, [], title, subtitle, ctx,
-                                primary, logos, veil=True)
-            if slide_type == 'section_divider':
-                bar = shapes.add_shape(MSO_SHAPE.RECTANGLE,
-                                       _px_to_emu((SLIDE_W_PX - 220) / 2),
-                                       _px_to_emu(430), _px_to_emu(220), _px_to_emu(6))
-                try:
-                    accent = _hex_to_rgb(normalize_hex_color(
-                        branding.get('accent_color'), '#d4af37'))
-                except Exception:
-                    accent = RGBColor(0xD4, 0xAF, 0x37)
-                _set_shape_fill(bar, accent)
-                _no_line(bar)
+            _render_designed_slide(slide, shapes, root, body_kids, title,
+                                   project_label, ctx, branding, primary,
+                                   slide_type=slide_type)
             continue
 
         # ---- regular content slide
@@ -2039,14 +2426,16 @@ def generate_pptx(slides_data, project_name, branding=None, output_dir=None, ten
         content_left = 36.0
         content_w = SLIDE_W_PX - 72.0
 
-        blocks = []
+        # Absolutely-positioned overlays (badges, logo strips) keep their rects.
         for kid in body_kids:
-            if isinstance(kid, Node):
-                blocks.extend(_node_to_blocks(kid, ctx))
-            elif isinstance(kid, str) and kid.strip():
-                ghost = Node('p', {})
-                ghost.children = [kid]
-                blocks.extend(_node_to_blocks(ghost, ctx))
+            if isinstance(kid, Node) and not _is_hidden(kid):
+                rect = _anchored_rect(kid, SLIDE_W_PX, content_bottom, ctx)
+                if rect is not None and not _is_veil(kid):
+                    _render_abs_node(slide, shapes, kid, ctx, rect)
+        blocks = _flow_blocks([k for k in body_kids
+                               if not (isinstance(k, Node)
+                                       and _abs_rect(k, SLIDE_W_PX, content_bottom) is not None)],
+                              ctx)
 
         if not blocks and title and not header_title:
             ghost = Node('h2', {})
