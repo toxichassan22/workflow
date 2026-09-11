@@ -3300,6 +3300,39 @@
       color: var(--txt);
     }
 
+    .sag-modal-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 20px;
+      max-width: 900px;
+      width: 100%;
+      max-height: 90vh;
+      overflow: auto;
+      box-shadow: 0 18px 45px rgba(37, 75, 102, .18);
+    }
+
+    .sag-modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .sag-modal-head h2 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--pd);
+    }
+
+    .sag-modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 12px;
+    }
+
     @media (max-width: 760px) {
       .sag-filters {
         grid-template-columns: 1fr;
@@ -26291,15 +26324,15 @@
       const modal = document.getElementById('sagTenantModal');
       modal.style.display = 'flex';
       modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:28px;max-width:900px;width:100%;max-height:90vh;overflow:auto">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
-        '<h2 style="margin:0">' + escapeHtml(t.companyName) + '</h2>' +
+      modal.innerHTML = '<div class="sag-modal-card">' +
+        '<div class="sag-modal-head">' +
+        '<h2>' + escapeHtml(t.companyName) + '</h2>' +
         '<button class="btn ghost" onclick="document.getElementById(\'sagTenantModal\').style.display=\'none\'">إغلاق</button></div>' +
-        '<div class="tenant-dashboard-cards" style="margin-bottom:16px">' +
-        '<div class="tenant-dash-card" style="cursor:default"><h3>' + c.users + '</h3><p>مستخدمون</p></div>' +
-        '<div class="tenant-dash-card" style="cursor:default"><h3>' + c.projects + '</h3><p>دراسات</p></div>' +
-        '<div class="tenant-dash-card" style="cursor:default"><h3>' + c.presentations + '</h3><p>عروض</p></div>' +
-        '<div class="tenant-dash-card" style="cursor:default"><h3>' + c.exports + '</h3><p>تصديرات</p></div>' +
+        '<div class="tenant-dashboard-cards" style="margin-bottom:14px">' +
+        '<div class="tenant-dash-card stat"><h3>' + c.users + '</h3><p>مستخدمون</p></div>' +
+        '<div class="tenant-dash-card stat"><h3>' + c.projects + '</h3><p>دراسات</p></div>' +
+        '<div class="tenant-dash-card stat"><h3>' + c.presentations + '</h3><p>عروض</p></div>' +
+        '<div class="tenant-dash-card stat"><h3>' + c.exports + '</h3><p>تصديرات</p></div>' +
         '</div>' +
         '<form onsubmit="saveSagTenant(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
         '<div class="tenant-field"><label>اسم الشركة</label><input id="sagDetailCompanyName" value="' + escapeHtml(t.companyName || '') + '" required></div>' +
@@ -26316,11 +26349,11 @@
         '<div class="tenant-field full"><label>حالة الحساب</label><select id="sagDetailStatus">' +
         '<option value="active"' + (t.isActive ? ' selected' : '') + '>نشط</option>' +
         '<option value="inactive"' + (!t.isActive ? ' selected' : '') + '>موقوف</option></select></div>' +
-        '</div><div style="display:flex;justify-content:flex-end;margin-top:14px">' +
+        '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">حفظ بيانات الشركة</button></div></form>' +
-        '<h3 style="margin:22px 0 10px">المستخدمون</h3>' +
+        '<h3 class="dash-section-title" style="margin-top:18px">المستخدمون</h3>' +
         '<div id="sagTenantUsers">' + renderSagTenantUsers(tenantId, t.primaryUserId, users) + '</div>' +
-        '<h3 style="margin:22px 0 10px">إضافة مستخدم</h3>' +
+        '<h3 class="dash-section-title" style="margin-top:18px">إضافة مستخدم</h3>' +
         '<form onsubmit="sagAddTenantUser(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
         '<div class="tenant-field"><label>الاسم</label><input id="sagNewUserName" required></div>' +
         '<div class="tenant-field"><label>البريد الإلكتروني</label><input type="email" id="sagNewUserEmail" required></div>' +
@@ -26328,7 +26361,7 @@
         '<div class="tenant-field"><label>رقم الجوال</label><input id="sagNewUserPhone" required></div>' +
         '<div class="tenant-field full"><label>الدور</label><select id="sagNewUserRole">' +
         '<option value="employee">موظف</option><option value="company_admin">أدمن شركة</option></select></div>' +
-        '</div><div style="display:flex;justify-content:flex-end;margin-top:14px">' +
+        '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">إضافة المستخدم</button></div></form>' +
         '</div>';
     }
