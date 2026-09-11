@@ -306,18 +306,24 @@ def _check_maps_rate_limit(tenant_id):
 # ─────────────────────────────────────────────────────────────────────────────
 # Maps spend metering: Google returns no per-call cost, so every billable
 # request is counted here with its SKU and a unit price in dollars. Prices are
-# estimates from public Maps Platform pricing — verify them against Cloud
-# Billing and override with the MAPS_SKU_PRICES env var (a JSON object mapping
-# SKU names to dollars). The unit price is stored on each row, so a later
-# price change never rewrites history. Only completed provider requests are
-# recorded: served-from-cache reads and failed calls carry no spend.
+# ceiling estimates from the public Maps Platform price list (global, 2026)
+# covering the highest tier each call can land in. Distance Matrix always sends
+# traffic parameters so it bills as Advanced. Places calls use the New API
+# where the nearby search field mask can reach the Enterprise tier. Static
+# Maps follows the current price list, not the legacy one. Verify them against
+# Cloud Billing and override with the MAPS_SKU_PRICES env var (a JSON object
+# mapping SKU names to dollars). The unit price is stored on each row, so a
+# later price change never rewrites history. Only completed provider requests
+# are recorded: served-from-cache reads and failed calls carry no spend.
+# Google free usage caps are intentionally NOT subtracted: the recorded cost
+# is the billable figure and any free allowance stays a platform margin.
 # ─────────────────────────────────────────────────────────────────────────────
 MAPS_SKU_UNIT_PRICES = {
     'geocode': 0.005,
-    'staticmap': 0.002,
-    'places_text': 0.032,
-    'places_nearby': 0.032,
-    'distance_matrix': 0.005,
+    'staticmap': 0.014,
+    'places_text': 0.035,
+    'places_nearby': 0.040,
+    'distance_matrix': 0.010,
     'directions': 0.005,
     'streetview': 0.007,
     'roads': 0.01,

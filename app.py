@@ -575,6 +575,38 @@ def _backfill_missing_ai_costs(max_events=10, time_budget_seconds=8, max_age_hou
                 print(f"[AI-USAGE] cost update failed: {exc}")
 
 
+def _require_billing_balance(flow_key):
+    """Pre-flight wallet guard for expensive operations.
+
+    Returns None when the operation may proceed, otherwise a (body, status)
+    tuple the route must return. Enforcement is off unless BILLING_ENFORCE=1,
+    so existing behaviour and tests are unchanged until the owner enables it.
+    Metering itself never raises; only this explicit billing guard can refuse.
+    """
+    try:
+        if not db.billing_enforcement_enabled():
+            return None
+    except Exception:
+        return None
+    try:
+        estimate = float(db.get_billing_flow_estimates().get(flow_key) or 0.0)
+    except (TypeError, ValueError):
+        estimate = 0.0
+    try:
+        balance = db.get_tenant_balance(g.tenant_id)
+    except Exception:
+        return None
+    if balance < estimate:
+        return jsonify({
+            'success': False,
+            'error': 'الرصيد غير كافٍ لتشغيل هذه العملية. اشحن رصيد الشركة ثم أعد المحاولة',
+            'error_code': 'INSUFFICIENT_BALANCE',
+            'required_usd': round(estimate, 2),
+            'available_usd': round(balance, 2),
+        }), 402
+    return None
+
+
 @app.route('/api/ai-usage', methods=['GET'])
 @require_auth
 def api_ai_usage():
@@ -589,6 +621,23 @@ def api_ai_usage():
             g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
         ai_cost = float(ai_usage['totals'].get('cost_usd') or 0.0)
         maps_cost = float(maps_usage['totals'].get('cost_usd') or 0.0)
+        try:
+            unbilled = db.get_unbilled_usage(
+                g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
+            billing_info = {
+                'balance_usd': db.get_tenant_balance(g.tenant_id),
+                'multiplier': db.get_billing_multiplier(),
+                'enforced': db.billing_enforcement_enabled(),
+                'unbilled': unbilled,
+            }
+        except Exception as billing_exc:
+            print(f"[BILLING] unbilled lookup failed: {billing_exc}")
+            billing_info = {
+                'balance_usd': 0.0,
+                'multiplier': db.get_billing_multiplier(),
+                'enforced': False,
+                'unbilled': None,
+            }
         return jsonify({
             'success': True,
             'usage': ai_usage,
@@ -599,6 +648,7 @@ def api_ai_usage():
                 'ai_cost_usd': ai_cost,
                 'maps_cost_usd': maps_cost,
             },
+            'billing': billing_info,
         })
     except Exception as exc:
         print(f"[AI-USAGE] summary failed: {exc}")
@@ -624,6 +674,89 @@ def api_usage_totals():
     except Exception as exc:
         print(f"[AI-USAGE] totals failed: {exc}")
         return jsonify({'success': False, 'error': 'تعذر تحميل الإجماليات'}), 500
+
+
+@app.route('/api/billing/ledger', methods=['GET'])
+@require_auth
+def api_billing_ledger():
+    """Wallet balance, unbilled usage and ledger history for the tenant."""
+    try:
+        limit = request.args.get('limit') or 50
+        try:
+            limit = max(1, min(200, int(limit)))
+        except (TypeError, ValueError):
+            limit = 50
+        return jsonify({
+            'success': True,
+            'balance_usd': db.get_tenant_balance(g.tenant_id),
+            'multiplier': db.get_billing_multiplier(),
+            'enforced': db.billing_enforcement_enabled(),
+            'unbilled': db.get_unbilled_usage(g.tenant_id),
+            'entries': db.get_ledger_entries(g.tenant_id, limit=limit),
+        })
+    except Exception as exc:
+        print(f"[BILLING] ledger failed: {exc}")
+        return jsonify({'success': False, 'error': 'تعذر تحميل سجل الفوترة'}), 500
+
+
+@app.route('/api/billing/checkout', methods=['POST'])
+@require_auth
+def api_billing_checkout():
+    """Bill all unbilled usage in scope. Idempotent: a repeat call (or a
+    retried request with the same idempotency key) bills nothing twice."""
+    data = request.json or {}
+    draft_id = (data.get('draftId') or data.get('draft_id') or '').strip() or None
+    presentation_id = (data.get('presentationId') or data.get('presentation_id') or '').strip() or None
+    idempotency_key = (
+        request.headers.get('X-Idempotency-Key')
+        or data.get('idempotencyKey') or data.get('idempotency_key') or ''
+    ).strip() or None
+    try:
+        result = db.bill_unbilled_usage(
+            g.tenant_id, draft_id=draft_id, presentation_id=presentation_id,
+            idempotency_key=idempotency_key, note=data.get('note'))
+    except db.InsufficientBalance as short:
+        return jsonify({
+            'success': False,
+            'error': 'الرصيد غير كافٍ لإتمام الفوترة. اشحن رصيد الشركة ثم أعد المحاولة',
+            'error_code': 'INSUFFICIENT_BALANCE',
+            'required_usd': round(short.required_usd, 2),
+            'available_usd': round(short.available_usd, 2),
+        }), 402
+    except Exception as exc:
+        print(f"[BILLING] checkout failed: {exc}")
+        return jsonify({'success': False, 'error': 'تعذر إتمام الفوترة'}), 500
+    if not result.get('billed'):
+        return jsonify({'success': True, 'billed': False, 'reason': result.get('reason'),
+                        'balance_usd': db.get_tenant_balance(g.tenant_id)})
+    return jsonify({'success': True, 'billed': True, 'entry': result.get('entry'),
+                    'balance_usd': result.get('balance_usd')})
+
+
+@app.route('/api/billing/topup', methods=['POST'])
+@require_company_admin
+def api_billing_topup():
+    """Charge the tenant wallet (manual top-up recorded in the ledger)."""
+    data = request.json or {}
+    try:
+        amount = float(data.get('amount_usd') or data.get('amount') or 0.0)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'مبلغ الشحن غير صالح'}), 400
+    if amount <= 0:
+        return jsonify({'success': False, 'error': 'مبلغ الشحن يجب أن يكون أكبر من صفر'}), 400
+    idempotency_key = (
+        request.headers.get('X-Idempotency-Key')
+        or data.get('idempotencyKey') or data.get('idempotency_key') or ''
+    ).strip() or None
+    try:
+        result = db.record_ledger_credit(
+            g.tenant_id, amount, note=data.get('note'),
+            idempotency_key=idempotency_key)
+    except Exception as exc:
+        print(f"[BILLING] topup failed: {exc}")
+        return jsonify({'success': False, 'error': 'تعذر شحن الرصيد'}), 500
+    return jsonify({'success': True, 'credited': result.get('credited'),
+                    'entry': result.get('entry'), 'balance_usd': result.get('balance_usd')})
 
 
 def extract_chat_content(response, label="GLM"):
@@ -7500,6 +7633,9 @@ def api_slide_plan():
     """
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
+    _billing_guard = _require_billing_balance('slide_plan')
+    if _billing_guard is not None:
+        return _billing_guard
     presentation_id = str(data.get('presentationId') or '').strip()
     if presentation_id and not project_data:
         presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
@@ -8024,13 +8160,15 @@ def api_analyze_site():
     """Resolve and enrich site data without generating map images."""
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
+    _billing_guard = _require_billing_balance('analyze_site')
+    if _billing_guard is not None:
+        return _billing_guard
     if data.get('generateMaps') is True:
         return jsonify({
             'success': False,
             'error': 'توليد الخرائط متاح لكل خريطة على حدة بعد اعتماد تحليل الموقع',
             'error_code': 'INDIVIDUAL_MAP_GENERATION_REQUIRED',
         }), 400
-
     address = project_data.get('location_address') or project_data.get('location') or ''
     link = address if isinstance(address, str) and address.startswith('http') else (
         project_data.get('location_maps_link') or project_data.get('maps_link')
@@ -8104,6 +8242,9 @@ def api_analyze_site():
 @require_permission('create_presentation')
 def api_site_analysis():
     data = request.json or {}
+    _billing_guard = _require_billing_balance('site_analysis')
+    if _billing_guard is not None:
+        return _billing_guard
     raw_project_data = clean_project_data(data.get('projectData', {}))
     analysis_keys = (
         'project_name', 'project_type', 'project_subtype', 'project_idea', 'description', 'project_description',
@@ -8221,6 +8362,9 @@ def api_site_analysis():
 @require_auth
 def api_generate_single_map_image():
     data = request.json or {}
+    _billing_guard = _require_billing_balance('map_image')
+    if _billing_guard is not None:
+        return _billing_guard
     map_type = str(data.get('mapType') or '').strip().lower()
     if map_type not in {'overview', 'landmarks', 'access', 'catchment'}:
         return jsonify({'success': False, 'error': 'نوع خريطة غير صالح'}), 400
@@ -8376,6 +8520,9 @@ def api_generate_slide_single():
     """Generate a single slide by index. Returns one slide HTML."""
     from slide_engine import generate_single_slide, build_design_rules, finalize_slide_html
     data = request.json or {}
+    _billing_guard = _require_billing_balance('slide_single')
+    if _billing_guard is not None:
+        return _billing_guard
     project_data = clean_project_data(data.get('projectData', {}))
     presentation_id = str(data.get('presentationId') or '').strip() or None
     project_data, request_images = _hydrate_map_assets_for_request(
@@ -13696,6 +13843,10 @@ def _market_job_worker(app, tenant_id, kind, data, job_id):
 
 def _start_market_job(kind, executor):
     data = request.json or {}
+    _billing_guard = _require_billing_balance(
+        'market_competitors' if kind == 'competitors' else 'market_summary')
+    if _billing_guard is not None:
+        return _billing_guard
     use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
     if not use_background:
         result = executor(data)
@@ -14012,6 +14163,9 @@ def api_extract_croquis():
     Tests keep the original synchronous response unless they pass background=true.
     """
     data = request.json or {}
+    _billing_guard = _require_billing_balance('croquis')
+    if _billing_guard is not None:
+        return _billing_guard
     use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
     if not use_background:
         return _execute_extract_croquis()

@@ -449,12 +449,21 @@ def _create_tables(conn):
         total_tokens INTEGER DEFAULT 0,
         cost_usd REAL,
         generation_id TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
+        created_at TEXT DEFAULT (datetime('now')),
+        cost_source TEXT,
+        attempt_status TEXT DEFAULT 'pending',
+        reconcile_attempts INTEGER DEFAULT 0,
+        next_retry_at TEXT,
+        updated_at TEXT DEFAULT (datetime('now')),
+        response_cost_usd REAL,
+        generation_cost_usd REAL,
+        cost_raw TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_aiusage_tenant ON ai_usage_events(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_aiusage_draft ON ai_usage_events(draft_id);
     CREATE INDEX IF NOT EXISTS idx_aiusage_presentation ON ai_usage_events(presentation_id);
     CREATE INDEX IF NOT EXISTS idx_aiusage_created ON ai_usage_events(created_at);
+    CREATE INDEX IF NOT EXISTS idx_aiusage_reconcile ON ai_usage_events(tenant_id, attempt_status, next_retry_at);
 
     CREATE TABLE IF NOT EXISTS map_usage_events (
         id TEXT PRIMARY KEY,
@@ -472,6 +481,27 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_mapusage_draft ON map_usage_events(draft_id);
     CREATE INDEX IF NOT EXISTS idx_mapusage_presentation ON map_usage_events(presentation_id);
     CREATE INDEX IF NOT EXISTS idx_mapusage_created ON map_usage_events(created_at);
+
+    CREATE TABLE IF NOT EXISTS tenant_ledger (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT REFERENCES tenants(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL DEFAULT 'debit',
+        amount_usd REAL NOT NULL DEFAULT 0,
+        raw_cost_usd REAL NOT NULL DEFAULT 0,
+        multiplier REAL NOT NULL DEFAULT 1,
+        maps_cost_usd REAL NOT NULL DEFAULT 0,
+        ai_cost_usd REAL NOT NULL DEFAULT 0,
+        maps_events_count INTEGER NOT NULL DEFAULT 0,
+        ai_events_count INTEGER NOT NULL DEFAULT 0,
+        draft_id TEXT,
+        presentation_id TEXT,
+        idempotency_key TEXT UNIQUE,
+        note TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_ledger_tenant ON tenant_ledger(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_ledger_created ON tenant_ledger(created_at);
+    CREATE INDEX IF NOT EXISTS idx_ledger_idempotency ON tenant_ledger(idempotency_key);
     """)
 
     branding_cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenant_branding)').fetchall()]
@@ -511,6 +541,24 @@ def _create_tables(conn):
         if column not in user_cols:
             conn.execute(f'ALTER TABLE users ADD COLUMN {column} {definition}')
             print(f'[DB] Migration: added {column} column to users')
+
+    # Billing ledger link. Each usage row carries the id of the ledger entry
+    # that billed it, so checkout bills the unbilled scope only and a retry
+    # or a parallel request can never bill the same event twice.
+    for _usage_table in ('ai_usage_events', 'map_usage_events'):
+        try:
+            _usage_cols = [row['name'] for row in conn.execute(f'PRAGMA table_info({_usage_table})').fetchall()]
+        except Exception:
+            _usage_cols = []
+        if _usage_cols and 'billed_ledger_id' not in _usage_cols:
+            conn.execute(f'ALTER TABLE {_usage_table} ADD COLUMN billed_ledger_id TEXT')
+            print(f'[DB] Migration: added billed_ledger_id column to {_usage_table}')
+    try:
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_aiusage_billed ON ai_usage_events(billed_ledger_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_mapusage_billed ON map_usage_events(billed_ledger_id)')
+    except Exception:
+        pass
+    _migrate_ai_usage_attempt_columns(conn)
     # Backfill the primary company admin in two correlated steps. SQLite does not
     # resolve an outer-table reference inside ORDER BY of an UPDATE subquery
     # (no such column: tenants.email), so the email preference and the
@@ -598,6 +646,38 @@ def _create_tables(conn):
                     raise ValueError('Invalid migration column definition')
                 conn.execute(f'ALTER TABLE project_drafts ADD COLUMN {column} {definition}')
                 print(f'[DB] Migration: added {column} column to project_drafts')
+
+
+def _migrate_ai_usage_attempt_columns(conn):
+    """Add attempt and settlement columns to ai_usage_events on existing databases.
+
+    Old rows keep their stored cost and are never marked complete here
+    verification of their generation id happens only through the explicit
+    review path.
+    """
+    try:
+        existing = [row['name'] for row in conn.execute('PRAGMA table_info(ai_usage_events)').fetchall()]
+    except Exception:
+        return
+    if not existing:
+        return
+    for column, definition in (
+        ('cost_source', 'TEXT'),
+        ('attempt_status', "TEXT DEFAULT 'pending'"),
+        ('reconcile_attempts', 'INTEGER DEFAULT 0'),
+        ('next_retry_at', 'TEXT'),
+        ('updated_at', 'TEXT'),
+        ('response_cost_usd', 'REAL'),
+        ('generation_cost_usd', 'REAL'),
+        ('cost_raw', 'TEXT'),
+    ):
+        if column not in existing:
+            conn.execute(f'ALTER TABLE ai_usage_events ADD COLUMN {column} {definition}')
+            print(f'[DB] Migration: added {column} column to ai_usage_events')
+    try:
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_aiusage_reconcile ON ai_usage_events(tenant_id, attempt_status, next_retry_at)')
+    except Exception:
+        pass
 
 
 def _seed_admin(conn):
@@ -3510,6 +3590,262 @@ def get_maps_usage_summary(tenant_id, draft_id=None, presentation_id=None, limit
         params + [int(limit)]
     ).fetchall()]
     return {'totals': totals, 'by_flow': by_flow, 'by_sku': by_sku, 'recent': recent}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Billing ledger (tenant wallet debits backed by unbilled usage events)
+# ─────────────────────────────────────────────────────────────────────────────
+
+BILLING_MULTIPLIER_DEFAULT = 1.6
+
+
+class InsufficientBalance(Exception):
+    """Raised when a tenant wallet cannot cover a billing amount."""
+
+    def __init__(self, required_usd=0.0, available_usd=0.0):
+        self.required_usd = float(required_usd or 0.0)
+        self.available_usd = float(available_usd or 0.0)
+        super().__init__(
+            f'Insufficient balance: required ${self.required_usd:.2f}, '
+            f'available ${self.available_usd:.2f}'
+        )
+
+
+def get_billing_multiplier():
+    """Markup applied to raw provider cost at billing time. Env-overridable."""
+    try:
+        value = float(os.environ.get('BILLING_MULTIPLIER') or BILLING_MULTIPLIER_DEFAULT)
+    except (TypeError, ValueError):
+        value = BILLING_MULTIPLIER_DEFAULT
+    return max(0.0, value)
+
+
+def billing_enforcement_enabled():
+    """Pre-flight balance checks run only when explicitly enabled."""
+    return str(os.environ.get('BILLING_ENFORCE') or '').strip() == '1'
+
+
+def get_billing_flow_estimates():
+    """Conservative billed-USD estimates per expensive flow. Env-overridable."""
+    defaults = {
+        'analyze_site': 1.0,
+        'site_analysis': 0.5,
+        'map_image': 0.5,
+        'slide_plan': 0.5,
+        'slide_single': 0.25,
+        'market_competitors': 1.0,
+        'market_summary': 1.0,
+        'croquis': 0.5,
+    }
+    try:
+        overrides = json.loads(os.environ.get('BILLING_PREFLIGHT_ESTIMATES') or '{}')
+    except (TypeError, ValueError):
+        overrides = {}
+    if isinstance(overrides, dict):
+        for key, value in overrides.items():
+            try:
+                defaults[key] = max(0.0, float(value))
+            except (TypeError, ValueError):
+                continue
+    return defaults
+
+
+def get_tenant_balance(tenant_id):
+    """Current wallet balance in USD. Never raises for a missing tenant."""
+    try:
+        conn = get_db()
+        row = conn.execute(
+            'SELECT credit_balance FROM tenants WHERE id = ?', (tenant_id,)
+        ).fetchone()
+    except Exception:
+        return 0.0
+    if row is None:
+        return 0.0
+    try:
+        return float(dict(row).get('credit_balance') or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _unbilled_scope_clause(tenant_id, draft_id=None, presentation_id=None):
+    clauses = ['tenant_id = ?', 'billed_ledger_id IS NULL']
+    params = [tenant_id]
+    if draft_id:
+        clauses.append('draft_id = ?')
+        params.append(draft_id)
+    if presentation_id:
+        clauses.append('presentation_id = ?')
+        params.append(presentation_id)
+    return 'WHERE ' + ' AND '.join(clauses), params
+
+
+def get_unbilled_usage(tenant_id, draft_id=None, presentation_id=None):
+    """Raw cost of usage events that no ledger entry has billed yet."""
+    conn = get_db()
+    ai_where, ai_params = _unbilled_scope_clause(tenant_id, draft_id, presentation_id)
+    maps_where, maps_params = _unbilled_scope_clause(tenant_id, draft_id, presentation_id)
+    ai_row = conn.execute(
+        'SELECT COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost_usd '
+        f'FROM ai_usage_events {ai_where}',
+        ai_params
+    ).fetchone()
+    maps_row = conn.execute(
+        'SELECT COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost_usd '
+        f'FROM map_usage_events {maps_where}',
+        maps_params
+    ).fetchone()
+    ai_calls = int(dict(ai_row).get('calls') or 0)
+    maps_calls = int(dict(maps_row).get('calls') or 0)
+    ai_cost = float(dict(ai_row).get('cost_usd') or 0.0)
+    maps_cost = float(dict(maps_row).get('cost_usd') or 0.0)
+    return {
+        'ai_calls': ai_calls,
+        'maps_calls': maps_calls,
+        'ai_cost_usd': ai_cost,
+        'maps_cost_usd': maps_cost,
+        'raw_cost_usd': ai_cost + maps_cost,
+    }
+
+
+def bill_unbilled_usage(tenant_id, draft_id=None, presentation_id=None,
+                        idempotency_key=None, multiplier=None, note=None):
+    """Bill every unbilled usage event in scope. Fully idempotent.
+
+    The claim step marks unbilled rows with the new ledger id in a single
+    UPDATE, so a retry or a parallel request finds an empty unbilled scope
+    instead of billing the same events twice. The wallet debit is a
+    conditional UPDATE on the balance it read, so a lost race surfaces as
+    InsufficientBalance rather than an overdraft. One commit covers the
+    claim, the ledger row and the debit. Any failure rolls everything back.
+    """
+    conn = get_db()
+    if idempotency_key:
+        existing = conn.execute(
+            'SELECT * FROM tenant_ledger WHERE tenant_id = ? AND idempotency_key = ?',
+            (tenant_id, idempotency_key)
+        ).fetchone()
+        if existing:
+            return {'billed': False, 'reason': 'idempotency_key_replayed',
+                    'entry': dict(existing)}
+    ledger_id = str(uuid.uuid4())
+    try:
+        try:
+            active_multiplier = float(multiplier) if multiplier is not None else get_billing_multiplier()
+        except (TypeError, ValueError):
+            active_multiplier = get_billing_multiplier()
+        active_multiplier = max(0.0, active_multiplier)
+        ai_where, ai_params = _unbilled_scope_clause(tenant_id, draft_id, presentation_id)
+        maps_where, maps_params = _unbilled_scope_clause(tenant_id, draft_id, presentation_id)
+        ai_claim = conn.execute(
+            'UPDATE ai_usage_events SET billed_ledger_id = ? ' + ai_where,
+            tuple([ledger_id] + ai_params)
+        )
+        maps_claim = conn.execute(
+            'UPDATE map_usage_events SET billed_ledger_id = ? ' + maps_where,
+            tuple([ledger_id] + maps_params)
+        )
+        ai_count = ai_claim.rowcount if ai_claim.rowcount is not None else 0
+        maps_count = maps_claim.rowcount if maps_claim.rowcount is not None else 0
+        if ai_count <= 0 and maps_count <= 0:
+            conn.rollback()
+            return {'billed': False, 'reason': 'no_unbilled_events'}
+        ai_cost = float(dict(conn.execute(
+            'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM ai_usage_events WHERE billed_ledger_id = ?',
+            (ledger_id,)
+        ).fetchone()).get('total') or 0.0)
+        maps_cost = float(dict(conn.execute(
+            'SELECT COALESCE(SUM(cost_usd), 0) AS total FROM map_usage_events WHERE billed_ledger_id = ?',
+            (ledger_id,)
+        ).fetchone()).get('total') or 0.0)
+        raw_cost = ai_cost + maps_cost
+        billed_amount = round(raw_cost * active_multiplier + 1e-9, 2)
+        debit = conn.execute(
+            'UPDATE tenants SET credit_balance = credit_balance - ? '
+            'WHERE id = ? AND credit_balance >= ?',
+            (billed_amount, tenant_id, billed_amount)
+        )
+        if (debit.rowcount or 0) <= 0:
+            conn.rollback()
+            raise InsufficientBalance(billed_amount, get_tenant_balance(tenant_id))
+        conn.execute(
+            '''INSERT INTO tenant_ledger
+               (id, tenant_id, kind, amount_usd, raw_cost_usd, multiplier,
+                maps_cost_usd, ai_cost_usd, maps_events_count, ai_events_count,
+                draft_id, presentation_id, idempotency_key, note)
+               VALUES (?, ?, 'debit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (ledger_id, tenant_id, billed_amount, raw_cost, active_multiplier,
+             maps_cost, ai_cost, max(0, int(maps_count)), max(0, int(ai_count)),
+             draft_id, presentation_id, idempotency_key, note)
+        )
+        conn.commit()
+    except InsufficientBalance:
+        raise
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    entry = conn.execute(
+        'SELECT * FROM tenant_ledger WHERE id = ?', (ledger_id,)
+    ).fetchone()
+    return {'billed': True, 'entry': dict(entry),
+            'balance_usd': get_tenant_balance(tenant_id)}
+
+
+def record_ledger_credit(tenant_id, amount_usd, note=None, idempotency_key=None):
+    """Top up a tenant wallet. Records a credit entry and adds the balance."""
+    amount = round(float(amount_usd or 0.0) + 1e-9, 2)
+    if amount <= 0:
+        raise ValueError('Credit amount must be positive')
+    conn = get_db()
+    if idempotency_key:
+        existing = conn.execute(
+            'SELECT * FROM tenant_ledger WHERE tenant_id = ? AND idempotency_key = ?',
+            (tenant_id, idempotency_key)
+        ).fetchone()
+        if existing:
+            return {'credited': False, 'reason': 'idempotency_key_replayed',
+                    'entry': dict(existing)}
+    ledger_id = str(uuid.uuid4())
+    try:
+        conn.execute(
+            'UPDATE tenants SET credit_balance = COALESCE(credit_balance, 0) + ? WHERE id = ?',
+            (amount, tenant_id)
+        )
+        conn.execute(
+            '''INSERT INTO tenant_ledger
+               (id, tenant_id, kind, amount_usd, raw_cost_usd, multiplier,
+                maps_cost_usd, ai_cost_usd, maps_events_count, ai_events_count,
+                draft_id, presentation_id, idempotency_key, note)
+               VALUES (?, ?, 'credit', ?, 0, 1, 0, 0, 0, 0, NULL, NULL, ?, ?)''',
+            (ledger_id, tenant_id, amount, idempotency_key, note)
+        )
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    entry = conn.execute(
+        'SELECT * FROM tenant_ledger WHERE id = ?', (ledger_id,)
+    ).fetchone()
+    return {'credited': True, 'entry': dict(entry),
+            'balance_usd': get_tenant_balance(tenant_id)}
+
+
+def get_ledger_entries(tenant_id, limit=50):
+    """Newest ledger entries for a tenant."""
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT id, kind, amount_usd, raw_cost_usd, multiplier, maps_cost_usd, '
+        'ai_cost_usd, maps_events_count, ai_events_count, draft_id, '
+        'presentation_id, idempotency_key, note, created_at '
+        'FROM tenant_ledger WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?',
+        (tenant_id, int(limit))
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -71,6 +71,27 @@ the very next line then stripped. Do not wire it back in.
   attributed per tenant/draft/presentation and served tenant-scoped from `GET /api/ai-usage`.
   Metering helpers never raise; cached map reads and failed calls record nothing.
 
+## Billing ledger (tenant wallet)
+
+- `tenant_ledger` records wallet movements: `debit` rows from checkout, `credit`
+  rows from top-ups. Amounts are USD; the billed amount is raw provider cost
+  (`ai_cost_usd` + `maps_cost_usd`) times `BILLING_MULTIPLIER` (default 1.6).
+- `ai_usage_events` / `map_usage_events` carry `billed_ledger_id`. Checkout
+  (`db.bill_unbilled_usage`) claims unbilled rows with one UPDATE per table, so
+  a retry or parallel request bills nothing twice; the debit is a conditional
+  UPDATE on the balance, so a lost race raises `InsufficientBalance` (HTTP 402
+  `INSUFFICIENT_BALANCE`) instead of overdrawing. One commit covers claim,
+  ledger row and debit; any failure rolls back.
+- Google free usage caps are intentionally NOT subtracted: recorded cost is the
+  billable figure and free allowance stays a platform margin.
+- Checkout is explicit only: `POST /api/billing/checkout` (idempotent via
+  `X-Idempotency-Key`), top-up is `POST /api/billing/topup`
+  (`require_company_admin`), history is `GET /api/billing/ledger`.
+- Pre-flight (`_require_billing_balance`) guards analyze-site, site-analysis,
+  map-image, slide-plan, slide-single, market jobs and croquis, but runs only
+  when `BILLING_ENFORCE=1` (default 0). Never enforce unconditionally: tests
+  create zero-balance tenants and expect generation to succeed.
+
 ## Schema gotchas
 
 `_create_tables()` runs one big SQL script and the fallback runner splits statements on `;`.
