@@ -3333,6 +3333,13 @@
       margin-top: 12px;
     }
 
+    .sag-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 0 0 14px;
+    }
+
     @media (max-width: 760px) {
       .sag-filters {
         grid-template-columns: 1fr;
@@ -26118,6 +26125,7 @@
     // SAG Super Admin
     let sagAllTenants = [];
     let sagCurrentTenantId = null;
+    let sagTenantActiveTab = 'company';
 
     function openSagCompanyCreate() {
       const modal = document.getElementById('sagCompanyCreateModal');
@@ -26314,12 +26322,26 @@
       renderSagTenants(filtered);
     }
 
+    function showSagTenantTab(tab) {
+      const isCompany = tab !== 'users';
+      sagTenantActiveTab = isCompany ? 'company' : 'users';
+      const companyPane = document.getElementById('sagTenantTabCompany');
+      const usersPane = document.getElementById('sagTenantTabUsers');
+      const btnCompany = document.getElementById('sagTabBtnCompany');
+      const btnUsers = document.getElementById('sagTabBtnUsers');
+      if (companyPane) companyPane.style.display = isCompany ? '' : 'none';
+      if (usersPane) usersPane.style.display = isCompany ? 'none' : '';
+      if (btnCompany) { btnCompany.classList.toggle('primary', isCompany); btnCompany.classList.toggle('ghost', !isCompany); }
+      if (btnUsers) { btnUsers.classList.toggle('primary', !isCompany); btnUsers.classList.toggle('ghost', isCompany); }
+    }
+
     async function showSagTenantDetails(tenantId) {
       const data = await api('GET', '/api/admin/tenants/' + tenantId + '/details');
       if (!data.success) { toast('فشل تحميل التفاصيل'); return; }
       const t = data.tenant;
       const c = data.counts;
       const users = data.users || [];
+      if (sagCurrentTenantId !== tenantId) sagTenantActiveTab = 'company';
       sagCurrentTenantId = tenantId;
       const modal = document.getElementById('sagTenantModal');
       modal.style.display = 'flex';
@@ -26334,6 +26356,11 @@
         '<div class="tenant-dash-card stat"><h3>' + c.presentations + '</h3><p>عروض</p></div>' +
         '<div class="tenant-dash-card stat"><h3>' + c.exports + '</h3><p>تصديرات</p></div>' +
         '</div>' +
+        '<div class="sag-tabs">' +
+        '<button type="button" id="sagTabBtnCompany" class="btn small primary" onclick="showSagTenantTab(\'company\')">معلومات الشركة</button>' +
+        '<button type="button" id="sagTabBtnUsers" class="btn small ghost" onclick="showSagTenantTab(\'users\')">المستخدمون</button>' +
+        '</div>' +
+        '<div id="sagTenantTabCompany">' +
         '<form onsubmit="saveSagTenant(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
         '<div class="tenant-field"><label>اسم الشركة</label><input id="sagDetailCompanyName" value="' + escapeHtml(t.companyName || '') + '" required></div>' +
         '<div class="tenant-field"><label>اسم مدير الحساب</label><input id="sagDetailManagerName" value="' + escapeHtml(t.accountManagerName || '') + '" required></div>' +
@@ -26351,7 +26378,9 @@
         '<option value="inactive"' + (!t.isActive ? ' selected' : '') + '>موقوف</option></select></div>' +
         '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">حفظ بيانات الشركة</button></div></form>' +
-        '<h3 class="dash-section-title" style="margin-top:18px">المستخدمون</h3>' +
+        '</div>' +
+        '<div id="sagTenantTabUsers" style="display:none">' +
+        '<h3 class="dash-section-title">المستخدمون</h3>' +
         '<div id="sagTenantUsers">' + renderSagTenantUsers(tenantId, t.primaryUserId, users) + '</div>' +
         '<h3 class="dash-section-title" style="margin-top:18px">إضافة مستخدم</h3>' +
         '<form onsubmit="sagAddTenantUser(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
@@ -26363,7 +26392,9 @@
         '<option value="employee">موظف</option><option value="company_admin">أدمن شركة</option></select></div>' +
         '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">إضافة المستخدم</button></div></form>' +
+        '</div>' +
         '</div>';
+      if (sagTenantActiveTab === 'users') showSagTenantTab('users');
     }
 
     function renderSagTenantUsers(tenantId, primaryUserId, users) {
