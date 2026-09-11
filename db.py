@@ -4310,6 +4310,16 @@ def get_project_file(tenant_id, file_id):
     return dict(row) if row else None
 
 
+def get_project_file_by_id(file_id):
+    """Cross-tenant lookup, used only behind a super-admin check."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM project_files WHERE id = ?',
+        (file_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def delete_project_file(tenant_id, file_id):
     conn = get_db()
     row = conn.execute(

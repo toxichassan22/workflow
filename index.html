@@ -26361,7 +26361,7 @@
       if (!data || !data.success) { host.innerHTML = '<p class="tenant-hint">تعذر التحميل</p>'; return; }
       host.dataset.loaded = '1';
       if (tab === 'drafts') host.innerHTML = renderSagTenantDrafts(data.drafts || []);
-      else if (tab === 'presentations') host.innerHTML = renderSagTenantPresentations(data.presentations || []);
+      else if (tab === 'presentations') host.innerHTML = renderSagTenantPresentations(data.presentations || [], tenantId);
       else if (tab === 'exports') host.innerHTML = renderSagTenantExports(data.exports || []);
       else host.innerHTML = renderSagTenantActivity(data.activity || []);
     }
@@ -26376,14 +26376,91 @@
       }).join('');
     }
 
-    function renderSagTenantPresentations(presentations) {
+    function renderSagTenantPresentations(presentations, tenantId) {
       if (!presentations.length) return '<p class="tenant-hint">لا توجد عروض</p>';
       return presentations.map(p => {
         const status = p.status === 'pending_approval' ? 'بانتظار التعميد' : p.status === 'approved' ? 'معتمد' : 'مسودة';
         const date = (p.updatedAt || p.createdAt || '').slice(0, 16).replace('T', ' ');
         return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
-          '<div class="meta">' + (p.slideCount || 0) + ' شريحة | ' + status + ' | ' + escapeHtml(date) + '</div></div></div>';
+          '<div class="meta">' + (p.slideCount || 0) + ' شريحة | ' + status + ' | ' + escapeHtml(date) + '</div></div>' +
+          '<div class="tenant-actions">' +
+          '<button type="button" class="btn small primary" onclick="openSagPresentationPreview(\'' + tenantId + '\', \'' + p.id + '\')">معاينة</button>' +
+          '</div></div>';
       }).join('');
+    }
+
+    let sagPreviewSlides = [];
+    let sagPreviewIndex = 0;
+
+    async function openSagPresentationPreview(tenantId, presId) {
+      showLoader('جاري تحميل العرض', '');
+      try {
+        const data = await api('GET', '/api/admin/tenants/' + tenantId + '/presentations/' + presId);
+        if (!data.success) { toast('تعذر تحميل العرض'); return; }
+        sagPreviewSlides = ((data.presentation && data.presentation.slidesData) || []).filter(s => s && s.html);
+        if (!sagPreviewSlides.length) { toast('العرض بدون شرائح'); return; }
+        sagPreviewIndex = 0;
+        const existing = document.getElementById('sagPreviewModal');
+        if (existing) existing.remove();
+        const modal = document.createElement('div');
+        modal.id = 'sagPreviewModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+        modal.innerHTML = '<div class="sag-modal-card" style="max-width:1100px">' +
+          '<div class="sag-modal-head"><h2>' + escapeHtml(data.presentation.title || 'عرض') + '</h2>' +
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          '<span id="sagPreviewCounter" class="tenant-hint"></span>' +
+          '<button class="btn ghost" onclick="document.getElementById(\'sagPreviewModal\').remove()">إغلاق</button>' +
+          '</div></div>' +
+          '<div id="sagPreviewWrap" style="overflow:hidden;border:1px solid var(--line);border-radius:12px;background:#fff">' +
+          '<div id="sagPreviewStage"></div></div>' +
+          '<div class="sag-modal-actions" style="justify-content:space-between">' +
+          '<button type="button" class="btn ghost" onclick="sagPreviewStep(-1)">السابق</button>' +
+          '<button type="button" class="btn ghost" onclick="sagPreviewStep(1)">التالي</button>' +
+          '</div></div>';
+        document.body.appendChild(modal);
+        renderSagPreviewSlide();
+        if (!window._sagPreviewResizeBound) {
+          window._sagPreviewResizeBound = true;
+          window.addEventListener('resize', () => { fitSagPreviewStage(); });
+        }
+      } finally {
+        hideLoader();
+      }
+    }
+
+    function sagPreviewStep(delta) {
+      sagPreviewIndex += delta;
+      renderSagPreviewSlide();
+    }
+
+    function renderSagPreviewSlide() {
+      const host = document.getElementById('sagPreviewStage');
+      const counter = document.getElementById('sagPreviewCounter');
+      if (!host) return;
+      const total = sagPreviewSlides.length;
+      if (!total) return;
+      sagPreviewIndex = Math.max(0, Math.min(sagPreviewIndex, total - 1));
+      if (counter) counter.textContent = (sagPreviewIndex + 1) + ' / ' + total;
+      host.innerHTML = sagPreviewSlides[sagPreviewIndex].html || '';
+      host.querySelectorAll('img[data-team-logo]').forEach(img => {
+        attachProjectFileThumbnail(img, img.dataset.teamLogo);
+      });
+      host.querySelectorAll('img[src*="/api/project-files/"]').forEach(img => {
+        const match = /\/api\/project-files\/([^/?#]+)/.exec(img.getAttribute('src') || '');
+        if (match) attachProjectFileThumbnail(img, match[1]);
+      });
+      fitSagPreviewStage();
+    }
+
+    function fitSagPreviewStage() {
+      const wrap = document.getElementById('sagPreviewWrap');
+      const stage = document.getElementById('sagPreviewStage');
+      if (!wrap || !stage) return;
+      const scale = Math.min(1, wrap.clientWidth / 1280);
+      stage.style.width = '1280px';
+      stage.style.transform = 'scale(' + scale + ')';
+      stage.style.transformOrigin = 'top right';
+      wrap.style.height = (720 * scale) + 'px';
     }
 
     function renderSagTenantExports(exports) {

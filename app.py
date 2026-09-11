@@ -15782,14 +15782,20 @@ def api_get_project_file(file_id):
 
     Uploads are only reachable through this route: the record is looked up inside the
     caller's tenant, and the stored path must resolve inside that tenant's upload folder.
+    A super admin previewing another company falls back to a cross-tenant lookup; the
+    path is still confined inside the owning tenant's folder.
     """
     stored = db.get_project_file(g.tenant_id, str(file_id))
+    resolve_tenant = g.tenant_id
+    if not stored and getattr(g, 'is_admin', False):
+        stored = db.get_project_file_by_id(str(file_id))
+        resolve_tenant = (stored or {}).get('tenant_id') or g.tenant_id
     if not stored or not stored.get('storage_path'):
         return jsonify({'success': False, 'error': 'الملف غير موجود'}), 404
 
-    storage_path = _resolve_project_file_storage_path(stored, g.tenant_id)
+    storage_path = _resolve_project_file_storage_path(stored, resolve_tenant)
     if not storage_path:
-        tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(g.tenant_id)))
+        tenant_root = os.path.realpath(os.path.join(UPLOADS_DIR, str(resolve_tenant)))
         raw_target = os.path.realpath(stored.get('storage_path') or '')
         try:
             inside = os.path.commonpath([tenant_root, raw_target]) == tenant_root
@@ -16944,6 +16950,38 @@ def api_admin_tenant_activity(tenant_id):
     if error:
         return error
     return jsonify({'success': True, 'activity': db.get_tenant_recent_activity(tenant_id)})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/presentations/<pres_id>', methods=['GET'])
+@require_admin
+def api_admin_tenant_presentation(tenant_id, pres_id):
+    """Full read-only presentation of any tenant (super admin preview only)."""
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    pres = db.get_presentation(pres_id, tenant_id=tenant_id)
+    if not pres:
+        return jsonify({'error': 'Presentation not found'}), 404
+    pres['projectData'] = json.loads(pres['project_data']) if pres.get('project_data') else {}
+    pres['projectData'] = _merge_persisted_map_assets(pres['projectData'], tenant_id, presentation_id=pres_id)
+    slides = json.loads(pres['slides_data']) if pres.get('slides_data') else []
+    branding = db.get_branding(tenant_id) or {}
+    render_project_data = copy.deepcopy(pres['projectData'])
+    _prepare_generation_logo_context(render_project_data, branding, tenant_id)
+    slides = slide_engine.renumber_presentation_slides(
+        slides, branding=branding, project_data=render_project_data, tenant_id=tenant_id,
+        creative_images=_presentation_creative_images(render_project_data, tenant_id),
+    )
+    project_logo_ref = slide_engine._project_logo_reference(render_project_data)
+    for s in slides:
+        if isinstance(s, dict) and 'html' in s and isinstance(s['html'], str):
+            s['html'] = slide_engine.resolve_logo_in_html(
+                s['html'], tenant_id, _branding_cache=branding,
+                project_logo=project_logo_ref,
+            )
+    pres['slide_count'] = len(slides)
+    pres['slidesData'] = slides
+    return jsonify({'success': True, 'presentation': pres})
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
