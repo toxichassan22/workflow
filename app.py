@@ -309,39 +309,43 @@ def call_openrouter_chat(system_prompt, user_content, temperature=0.7, max_token
         payload["tools"] = tools
     if plugins:
         payload["plugins"] = plugins
+    attempt_id = _begin_ai_attempt_record(usage_ctx, model_name)
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
         text = response.text or ''
         if not text.strip():
             print(f"[OPENROUTER EMPTY BODY] status={response.status_code} model={model_name} cap={max_tokens}")
-            _record_ai_usage(usage_ctx, model_name, 'error')
+            _settle_ai_attempt_record(attempt_id, 'error', {}, None)
             return {"error": {"message": f"مزوّد الذكاء الاصطناعي رد بجسم فارغ (HTTP {response.status_code})"}}
         try:
             data = response.json()
         except Exception as json_err:
             print(f"[OPENROUTER UNPARSEABLE] status={response.status_code} model={model_name} json_err={json_err} body={text[:200]!r}")
-            _record_ai_usage(usage_ctx, model_name, 'error')
+            _settle_ai_attempt_record(attempt_id, 'error', {}, None)
             return {"error": {"message": f"استجابة المزوّد ليست JSON صالحًا (HTTP {response.status_code})"}}
         if response.status_code >= 400:
             error = data.get('error', {}) if isinstance(data, dict) else data
             print(f"[OPENROUTER HTTP ERROR] status={response.status_code} model={model_name} error={error}")
             generation_id, error_usage = _extract_openrouter_usage(data)
-            _record_ai_usage(usage_ctx, model_name, 'error', error_usage, generation_id)
+            _settle_ai_attempt_record(attempt_id, 'error', error_usage, generation_id)
             if isinstance(error, dict) and 'message' in error:
                 error['message'] = f"[{response.status_code}] {error['message']}"
                 return {"error": error}
             return {"error": error if isinstance(error, dict) else {"message": f"[{response.status_code}] {error}"}}
         generation_id, usage = _extract_openrouter_usage(data)
-        _record_ai_usage(usage_ctx, model_name, 'ok', usage, generation_id)
+        _settle_ai_attempt_record(attempt_id, 'ok', usage, generation_id)
         return data
     except requests.exceptions.Timeout:
         print(f"[OPENROUTER TIMEOUT] model={model_name} cap={max_tokens} timeout={timeout}")
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
         return {"error": {"message": f"انتهت مهلة الاتصال بالمزوّد ({timeout} ثانية)"}}
     except requests.exceptions.ConnectionError as exc:
         print(f"[OPENROUTER CONNECTION] model={model_name} {exc}")
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
         return {"error": {"message": "انقطع الاتصال بالمزوّد قبل اكتمال الطلب"}}
     except Exception as exc:
         print(f"[OPENROUTER EXCEPTION] model={model_name} {exc}")
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
         return {"error": {"message": str(exc)}}
 
 
@@ -433,8 +437,69 @@ def _usage_ctx(flow, data=None, draft_id=None, presentation_id=None, tenant_id=N
     }
 
 
+def _parse_openrouter_cost(value):
+    """Validate one provider dollar figure. Unknown never becomes zero.
+
+    Returns (cost_float_or_None, raw_text_or_None). Correct zero stays zero.
+    Non-numeric, non-finite and negative figures return (None, None).
+    """
+    try:
+        if value is None:
+            return None, None
+        if isinstance(value, bool):
+            return None, None
+        import math as _math
+        if isinstance(value, float) and (not _math.isfinite(value)):
+            return None, None
+        text = str(value).strip()
+        if not text:
+            return None, None
+        amount = Decimal(text)
+        if not amount.is_finite():
+            return None, None
+        if amount < 0:
+            return None, None
+        return float(amount), text
+    except (InvalidOperation, ValueError, TypeError, AttributeError):
+        return None, None
+    except Exception:
+        return None, None
+
+
+def _extract_openrouter_cost(data):
+    """Read the billed amount from a chat response. Never estimates, never sums parts.
+
+    OpenRouter defines usage.cost as the amount deducted for the request and
+    /generation total_cost as the generation cost. Sub-detail fields are
+    never added on top of that total.
+    """
+    try:
+        if not isinstance(data, dict):
+            return None, None
+        usage = data.get('usage')
+        if isinstance(usage, dict):
+            for key in ('cost', 'total_cost'):
+                if usage.get(key) is not None:
+                    cost, raw = _parse_openrouter_cost(usage.get(key))
+                    if cost is not None:
+                        return cost, raw
+        direct = data.get('cost')
+        if direct is not None and not isinstance(direct, dict):
+            cost, raw = _parse_openrouter_cost(direct)
+            if cost is not None:
+                return cost, raw
+        return None, None
+    except Exception:
+        return None, None
+
+
 def _extract_openrouter_usage(data):
-    """Return (generation_id, usage_dict) copied from a provider response, never raising."""
+    """Return (generation_id, usage_dict) copied from a provider response, never raising.
+
+    usage_dict carries verbatim token counts plus cost_usd/cost_raw when the
+    response itself states the billed amount. Missing or corrupt cost stays
+    None so the attempt remains pending instead of a misleading zero.
+    """
     try:
         if not isinstance(data, dict):
             return None, {}
@@ -443,7 +508,12 @@ def _extract_openrouter_usage(data):
             generation_id = None
         usage = data.get('usage')
         if not isinstance(usage, dict):
-            return generation_id, {}
+            cost, raw = _extract_openrouter_cost(data)
+            out = {}
+            if cost is not None:
+                out['cost_usd'] = cost
+                out['cost_raw'] = raw
+            return generation_id, out
 
         def _num(value):
             try:
@@ -451,29 +521,115 @@ def _extract_openrouter_usage(data):
             except (TypeError, ValueError):
                 return 0
 
-        return generation_id, {
+        result = {
             'prompt_tokens': _num(usage.get('prompt_tokens')),
             'completion_tokens': _num(usage.get('completion_tokens')),
             'total_tokens': _num(usage.get('total_tokens')),
         }
+        cost, raw = _parse_openrouter_cost(usage.get('cost'))
+        if cost is None:
+            cost, raw = _parse_openrouter_cost(usage.get('total_cost'))
+        if cost is not None:
+            result['cost_usd'] = cost
+            result['cost_raw'] = raw
+        return generation_id, result
     except Exception:
         return None, {}
 
 
-def _record_ai_usage(usage_ctx, model, status='ok', usage=None, generation_id=None):
-    """Persist one metered provider call. Never raises: metering must not break generation."""
+def _resolve_ai_attempt_ctx(usage_ctx):
     try:
         ctx = dict(usage_ctx or {})
-        tenant_id = ctx.get('tenant_id')
-        if tenant_id is None:
-            try:
-                tenant_id = getattr(g, 'tenant_id', None)
-            except Exception:
-                tenant_id = None
-        usage = usage or {}
-        flow = ctx.get('flow') or 'other'
-        if flow not in AI_USAGE_FLOWS:
-            flow = 'other'
+    except Exception:
+        ctx = {}
+    tenant_id = ctx.get('tenant_id')
+    if tenant_id is None:
+        try:
+            tenant_id = getattr(g, 'tenant_id', None)
+        except Exception:
+            tenant_id = None
+    flow = ctx.get('flow') or 'other'
+    if flow not in AI_USAGE_FLOWS:
+        flow = 'other'
+    return tenant_id, flow, ctx.get('draft_id'), ctx.get('presentation_id')
+
+
+def _begin_ai_attempt_record(usage_ctx, model):
+    """Create the one row that owns a real provider attempt, before sending."""
+    try:
+        tenant_id, flow, draft_id, presentation_id = _resolve_ai_attempt_ctx(usage_ctx)
+        with app.app_context():
+            return db.begin_ai_usage_attempt(
+                tenant_id, model or 'unknown', flow=flow,
+                draft_id=draft_id, presentation_id=presentation_id)
+    except Exception as exc:
+        print(f"[AI-USAGE] begin attempt failed: {exc}")
+        return None
+
+
+def _settle_ai_attempt_record(event_id, status, usage, generation_id):
+    """Settle the same row created before sending. Never inserts a second row."""
+    if not event_id:
+        return
+    try:
+        usage = dict(usage or {})
+        cost = usage.get('cost_usd')
+        raw = usage.get('cost_raw')
+        coerced, parsed_raw = (None, None)
+        if cost is not None:
+            coerced, parsed_raw = _parse_openrouter_cost(cost)
+        if raw is None:
+            raw = parsed_raw
+        if coerced is not None:
+            attempt_status = 'settled'
+            cost_source = 'response'
+        elif generation_id:
+            attempt_status = 'pending'
+            cost_source = None
+            coerced = None
+        else:
+            attempt_status = 'unresolved'
+            cost_source = None
+            coerced = None
+        with app.app_context():
+            db.update_ai_usage_attempt(
+                event_id, status=status or 'ok',
+                prompt_tokens=usage.get('prompt_tokens', 0),
+                completion_tokens=usage.get('completion_tokens', 0),
+                total_tokens=usage.get('total_tokens', 0),
+                generation_id=generation_id,
+                cost_usd=coerced, cost_source=cost_source, cost_raw=raw,
+                response_cost_usd=coerced if cost_source == 'response' else None,
+                attempt_status=attempt_status,
+                clear_next_retry=(attempt_status == 'settled'),
+            )
+        if generation_id and coerced is None:
+            _backfill_ai_usage_cost_async(event_id, generation_id)
+    except Exception as exc:
+        print(f"[AI-USAGE] settle attempt failed: {exc}")
+
+
+def _record_ai_usage(usage_ctx, model, status='ok', usage=None, generation_id=None,
+                     cost_usd=None, cost_source=None):
+    """Persist one metered provider call. Never raises: metering must not break generation."""
+    try:
+        tenant_id, flow, draft_id, presentation_id = _resolve_ai_attempt_ctx(usage_ctx)
+        usage = dict(usage or {})
+        direct_cost = cost_usd if cost_usd is not None else usage.get('cost_usd')
+        direct_raw = usage.get('cost_raw')
+        coerced, parsed_raw = (None, None)
+        if direct_cost is not None:
+            coerced, parsed_raw = _parse_openrouter_cost(direct_cost)
+        if direct_raw is None:
+            direct_raw = parsed_raw
+        source = cost_source if cost_source in ('response', 'generation', 'review') else None
+        if coerced is not None and source is None:
+            source = 'response'
+        if coerced is None:
+            source = None
+        if source is None:
+            direct_raw = None
+        attempt_status = 'settled' if coerced is not None else ('pending' if generation_id else 'unresolved')
         with app.app_context():
             event_id = db.record_ai_usage_event(
                 tenant_id, model or 'unknown',
@@ -481,11 +637,15 @@ def _record_ai_usage(usage_ctx, model, status='ok', usage=None, generation_id=No
                 prompt_tokens=usage.get('prompt_tokens', 0),
                 completion_tokens=usage.get('completion_tokens', 0),
                 total_tokens=usage.get('total_tokens', 0),
-                draft_id=ctx.get('draft_id'),
-                presentation_id=ctx.get('presentation_id'),
+                cost_usd=coerced, cost_raw=direct_raw, cost_source=source,
+                response_cost_usd=coerced if source == 'response' else None,
+                generation_cost_usd=coerced if source in ('generation', 'review') else None,
+                attempt_status=attempt_status,
+                draft_id=draft_id,
+                presentation_id=presentation_id,
                 generation_id=generation_id,
             )
-        if generation_id and status == 'ok':
+        if generation_id and coerced is None:
             _backfill_ai_usage_cost_async(event_id, generation_id)
         return event_id
     except Exception as exc:
@@ -493,23 +653,166 @@ def _record_ai_usage(usage_ctx, model, status='ok', usage=None, generation_id=No
         return None
 
 
-def _fetch_openrouter_generation_cost(generation_id, timeout=15):
-    """Ask OpenRouter what one generation actually cost. Returns dollars or None."""
+def _query_openrouter_generation(generation_id, timeout=15):
+    """Ask OpenRouter what one generation cost. Returns (cost, raw, outcome).
+
+    outcome is one of ok, not_found, rate_limited, network, invalid,
+    missing_key or bad_response. HTTP, payload shape and the echoed id are
+    all checked before any figure is accepted.
+    """
     try:
         if not OPENROUTER_KEY or not generation_id:
-            return None
+            return None, None, 'missing_key'
         response = requests.get(
             f"{OPENROUTER_BASE}/generation?id={generation_id}",
             headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
             timeout=timeout,
         )
-        payload = response.json()
+        if response.status_code == 404:
+            return None, None, 'not_found'
+        if response.status_code == 429:
+            return None, None, 'rate_limited'
+        if response.status_code >= 400:
+            return None, None, 'bad_response'
+        try:
+            payload = response.json()
+        except Exception:
+            return None, None, 'bad_response'
         data = payload.get('data') if isinstance(payload, dict) else None
-        cost = (data or {}).get('total_cost')
-        return float(cost) if cost is not None else None
+        if not isinstance(data, dict):
+            return None, None, 'invalid'
+        echoed = data.get('id')
+        if isinstance(echoed, str) and echoed and echoed != generation_id:
+            return None, None, 'invalid'
+        cost, raw = _parse_openrouter_cost(data.get('total_cost'))
+        if cost is None:
+            return None, None, 'invalid'
+        return cost, raw, 'ok'
+    except requests.exceptions.Timeout:
+        return None, None, 'network'
+    except requests.exceptions.ConnectionError:
+        return None, None, 'network'
     except Exception as exc:
         print(f"[AI-USAGE] cost lookup failed for {generation_id}: {exc}")
-        return None
+        return None, None, 'network'
+
+
+def _fetch_openrouter_generation_cost(generation_id, timeout=15):
+    """Ask OpenRouter what one generation actually cost. Returns dollars or None."""
+    cost, _raw, _outcome = _query_openrouter_generation(generation_id, timeout=timeout)
+    return cost
+
+
+AI_RECONCILE_MAX_ATTEMPTS = int(os.environ.get('AI_RECONCILE_MAX_ATTEMPTS') or 6)
+_AI_RECONCILE_LOCK = threading.Lock()
+_AI_RECONCILE_IN_FLIGHT = set()
+
+
+def _ai_reconcile_delay_seconds(attempts, outcome):
+    try:
+        base = int(attempts or 0)
+    except (TypeError, ValueError):
+        base = 0
+    if outcome == 'rate_limited':
+        delay = 600 * (base + 1)
+    elif outcome == 'not_found':
+        delay = 120 * (base + 1)
+    else:
+        delay = 120 * (2 ** min(max(base, 0), 4))
+    return max(60, min(3600, int(delay)))
+
+
+def _reconcile_single_ai_event(event_id, generation_id, timeout=15, is_review=False):
+    """Resolve one attempt in place. Updates the row, never appends a cost row."""
+    if not event_id or not generation_id:
+        return {'ok': False, 'outcome': 'invalid'}
+    with _AI_RECONCILE_LOCK:
+        if event_id in _AI_RECONCILE_IN_FLIGHT:
+            return {'ok': False, 'outcome': 'in_flight'}
+        _AI_RECONCILE_IN_FLIGHT.add(event_id)
+    try:
+        try:
+            claimed = db.claim_ai_usage_reconcile_row(event_id, delay_seconds=300)
+        except Exception:
+            claimed = True
+        if not claimed:
+            return {'ok': False, 'outcome': 'claimed'}
+        cost, raw, outcome = _query_openrouter_generation(generation_id, timeout=timeout)
+        try:
+            current_rows = db.get_db().execute(
+                'SELECT cost_usd, response_cost_usd, reconcile_attempts FROM ai_usage_events WHERE id = ?',
+                (str(event_id),)).fetchall()
+            current = dict(current_rows[0]) if current_rows else {}
+        except Exception:
+            current = {}
+        attempts = 0
+        try:
+            attempts = int(current.get('reconcile_attempts') or 0)
+        except (TypeError, ValueError):
+            attempts = 0
+        if outcome == 'ok' and cost is not None:
+            source = 'review' if (is_review or current.get('cost_usd') is not None) else 'generation'
+            db.update_ai_usage_attempt(
+                event_id, cost_usd=cost, cost_source=source, cost_raw=raw,
+                generation_cost_usd=cost, attempt_status='settled',
+                clear_next_retry=True)
+            return {'ok': True, 'outcome': 'ok', 'cost_usd': cost, 'cost_source': source}
+        if attempts + 1 >= AI_RECONCILE_MAX_ATTEMPTS:
+            db.update_ai_usage_attempt(event_id, attempt_status='needs_review', clear_next_retry=True)
+            return {'ok': False, 'outcome': outcome, 'needs_review': True}
+        delay = _ai_reconcile_delay_seconds(attempts, outcome)
+        try:
+            from datetime import timedelta as _td
+            nxt = (datetime.utcnow() + _td(seconds=delay)).strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            nxt = None
+        db.update_ai_usage_attempt(event_id, next_retry_at=nxt)
+        return {'ok': False, 'outcome': outcome}
+    finally:
+        with _AI_RECONCILE_LOCK:
+            _AI_RECONCILE_IN_FLIGHT.discard(event_id)
+
+
+def _reconcile_ai_scope(limit=10, time_budget_seconds=8, tenant_id=None, draft_id=None,
+                        presentation_id=None, include_settled=False, force=False):
+    """Stateful limited reconcile that survives restarts via DB columns.
+
+    Runs in bounded batches on the existing background path and resumes when
+    the consumption view opens or the explicit review action runs. No new
+    scheduler service is created. Oldest rows go first so busy scopes never
+    starve their earliest attempts.
+    """
+    if not force:
+        try:
+            if app.config.get('TESTING'):
+                return {'reconciled': 0, 'checked': 0, 'skipped_testing': True}
+        except Exception:
+            pass
+    try:
+        pending = db.get_ai_events_needing_reconcile(
+            limit=limit, tenant_id=tenant_id, draft_id=draft_id,
+            presentation_id=presentation_id, include_settled=include_settled)
+    except Exception as exc:
+        print(f"[AI-USAGE] pending lookup failed: {exc}")
+        return {'reconciled': 0, 'checked': 0}
+    started = time.monotonic()
+    reconciled = 0
+    checked = 0
+    needs_review = 0
+    for row in pending:
+        remaining = time_budget_seconds - (time.monotonic() - started)
+        if remaining <= 0:
+            break
+        checked += 1
+        result = _reconcile_single_ai_event(
+            row.get('id'), row.get('generation_id'),
+            timeout=max(3, min(15, remaining)),
+            is_review=bool(include_settled and row.get('cost_usd') is not None))
+        if result.get('ok'):
+            reconciled += 1
+        if result.get('needs_review'):
+            needs_review += 1
+    return {'reconciled': reconciled, 'checked': checked, 'needs_review': needs_review}
 
 
 def _backfill_ai_usage_cost(event_id, generation_id):
@@ -518,9 +821,7 @@ def _backfill_ai_usage_cost(event_id, generation_id):
         with app.app_context():
             if app.config.get('TESTING'):
                 return
-            cost = _fetch_openrouter_generation_cost(generation_id)
-            if cost is not None:
-                db.update_ai_usage_cost(event_id, cost)
+            _reconcile_single_ai_event(event_id, generation_id)
     except Exception as exc:
         print(f"[AI-USAGE] cost backfill failed: {exc}")
 
@@ -549,30 +850,14 @@ def _ai_usage_event_age_hours(created_at):
         return 0.0
 
 
-def _backfill_missing_ai_costs(max_events=10, time_budget_seconds=8, max_age_hours=24):
-    """Best-effort fill of costs the background threads missed. Bounded so reads stay fast."""
-    try:
-        if app.config.get('TESTING'):
-            return
-    except Exception:
-        pass
-    try:
-        pending = db.get_ai_usage_pending_costs(limit=max_events)
-    except Exception as exc:
-        print(f"[AI-USAGE] pending lookup failed: {exc}")
-        return
-    started = time.monotonic()
-    for row in pending:
-        if time.monotonic() - started > time_budget_seconds:
-            break
-        if _ai_usage_event_age_hours(row.get('created_at')) > max_age_hours:
-            continue
-        cost = _fetch_openrouter_generation_cost(row.get('generation_id'))
-        if cost is not None:
-            try:
-                db.update_ai_usage_cost(row['id'], cost)
-            except Exception as exc:
-                print(f"[AI-USAGE] cost update failed: {exc}")
+def _backfill_missing_ai_costs(max_events=10, time_budget_seconds=8, max_age_hours=None, tenant_id=None):
+    """Best-effort fill of costs the background threads missed. Bounded so reads stay fast.
+
+    No age cutoff is applied: rows older than 24 hours stay eligible until
+    they settle or move to needs_review. max_age_hours is kept only for
+    caller compatibility and is ignored.
+    """
+    _reconcile_ai_scope(limit=max_events, time_budget_seconds=time_budget_seconds, tenant_id=tenant_id)
 
 
 def _require_billing_balance(flow_key):
@@ -614,13 +899,33 @@ def api_ai_usage():
     draft_id = (request.args.get('draftId') or request.args.get('draft_id') or '').strip() or None
     presentation_id = (request.args.get('presentationId') or request.args.get('presentation_id') or '').strip() or None
     try:
-        _backfill_missing_ai_costs()
+        try:
+            _reconcile_ai_scope(limit=5, time_budget_seconds=3, tenant_id=g.tenant_id,
+                                draft_id=draft_id, presentation_id=presentation_id)
+        except Exception as exc:
+            import traceback as _tb
+            print(f"[AI-USAGE] scoped reconcile failed: {exc}\n{_tb.format_exc(limit=5)}")
         ai_usage = db.get_ai_usage_summary(
             g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
         maps_usage = db.get_maps_usage_summary(
             g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
         ai_cost = float(ai_usage['totals'].get('cost_usd') or 0.0)
         maps_cost = float(maps_usage['totals'].get('cost_usd') or 0.0)
+        try:
+            reconcile_status = db.get_ai_usage_status_counts(
+                g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
+        except Exception:
+            reconcile_status = {}
+        events_page = None
+        if request.args.get('page') is not None or request.args.get('pageSize') is not None:
+            try:
+                events_page = db.get_ai_usage_events_page(
+                    g.tenant_id, draft_id=draft_id, presentation_id=presentation_id,
+                    page=request.args.get('page') or 1,
+                    page_size=request.args.get('pageSize') or request.args.get('page_size') or 20)
+            except Exception as exc:
+                print(f"[AI-USAGE] events page failed: {exc}")
+                events_page = None
         try:
             unbilled = db.get_unbilled_usage(
                 g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
@@ -638,7 +943,7 @@ def api_ai_usage():
                 'enforced': False,
                 'unbilled': None,
             }
-        return jsonify({
+        body = {
             'success': True,
             'usage': ai_usage,
             'maps': maps_usage,
@@ -649,10 +954,50 @@ def api_ai_usage():
                 'maps_cost_usd': maps_cost,
             },
             'billing': billing_info,
-        })
+            'reconcile': reconcile_status,
+        }
+        if events_page is not None:
+            body['events'] = events_page
+        return jsonify(body)
     except Exception as exc:
         print(f"[AI-USAGE] summary failed: {exc}")
         return jsonify({'success': False, 'error': 'تعذر تحميل الاستهلاك'}), 500
+
+
+@app.route('/api/ai-usage/reconcile', methods=['POST'])
+@require_company_admin
+def api_ai_usage_reconcile():
+    """Explicit scoped review of OpenRouter costs, including settled rows when asked.
+
+    Compares stored rows against /generation without inventing requests:
+    only rows that already carry a generation_id are touched, unknown
+    requests are never imported and timing proximity never attributes them.
+    """
+    data = request.json or {}
+    draft_id = (data.get('draftId') or data.get('draft_id') or '').strip() or None
+    presentation_id = (data.get('presentationId') or data.get('presentation_id') or '').strip() or None
+    try:
+        limit = int(data.get('limit') or 20)
+    except (TypeError, ValueError):
+        limit = 20
+    limit = max(1, min(50, limit))
+    include_settled = bool(data.get('includeSettled') or data.get('include_settled'))
+    try:
+        result = _reconcile_ai_scope(
+            limit=limit, time_budget_seconds=25, tenant_id=g.tenant_id,
+            draft_id=draft_id, presentation_id=presentation_id,
+            include_settled=include_settled, force=True)
+        try:
+            status = db.get_ai_usage_status_counts(
+                g.tenant_id, draft_id=draft_id, presentation_id=presentation_id)
+        except Exception:
+            status = {}
+        result['reconcile'] = status
+        result['success'] = True
+        return jsonify(result)
+    except Exception as exc:
+        print(f"[AI-USAGE] reconcile failed: {exc}")
+        return jsonify({'success': False, 'error': 'تعذر إتمام المطابقة'}), 500
 
 
 @app.route('/api/usage-totals', methods=['GET'])
@@ -663,13 +1008,28 @@ def api_usage_totals():
         return [part.strip() for part in (value or '').split(',') if part.strip()][:200]
 
     try:
-        _backfill_missing_ai_costs()
+        _backfill_missing_ai_costs(max_events=5, time_budget_seconds=3, tenant_id=g.tenant_id)
+        draft_ids = _ids(request.args.get('draftIds') or request.args.get('draft_ids'))
+        presentation_ids = _ids(request.args.get('presentationIds') or request.args.get('presentation_ids'))
         totals = db.get_usage_totals(
             g.tenant_id,
-            draft_ids=_ids(request.args.get('draftIds') or request.args.get('draft_ids')),
-            presentation_ids=_ids(request.args.get('presentationIds') or request.args.get('presentation_ids')),
+            draft_ids=draft_ids,
+            presentation_ids=presentation_ids,
         )
-        totals['pending_costs'] = len(db.get_ai_usage_pending_costs(limit=200, tenant_id=g.tenant_id))
+        try:
+            scoped = db.get_ai_usage_status_counts(g.tenant_id)
+            totals['pending_costs'] = int(scoped.get('pending_costs') or 0)
+            totals['reconcile'] = scoped
+        except Exception:
+            try:
+                totals['pending_costs'] = len(db.get_ai_usage_pending_costs(limit=200, tenant_id=g.tenant_id))
+            except Exception:
+                totals['pending_costs'] = 0
+        try:
+            totals['reconcile_by_scope'] = db.get_ai_reconcile_by_scope(
+                g.tenant_id, draft_ids=draft_ids, presentation_ids=presentation_ids)
+        except Exception as exc:
+            print(f"[AI-USAGE] scoped status failed: {exc}")
         return jsonify({'success': True, **totals})
     except Exception as exc:
         print(f"[AI-USAGE] totals failed: {exc}")
@@ -832,6 +1192,8 @@ def call_image_api(prompt, usage_ctx=None):
     if not OPENROUTER_KEY:
         print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
         return None
+    ctx = usage_ctx or _usage_ctx('image')
+    attempt_id = _begin_ai_attempt_record(ctx, IMAGE_MODEL)
     try:
         headers = {
             "Authorization": f"Bearer {OPENROUTER_KEY}",
@@ -847,9 +1209,10 @@ def call_image_api(prompt, usage_ctx=None):
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=120)
         data = response.json()
         generation_id, img_usage = _extract_openrouter_usage(data)
-        _record_ai_usage(usage_ctx or _usage_ctx('image'), IMAGE_MODEL,
-                         'ok' if response.status_code < 400 and 'error' not in data else 'error',
-                         img_usage, generation_id)
+        _settle_ai_attempt_record(
+            attempt_id,
+            'ok' if response.status_code < 400 and 'error' not in data else 'error',
+            img_usage, generation_id)
         # AI4: Detect specific error codes and return descriptive messages
         if response.status_code == 401:
             print("[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)")
@@ -870,10 +1233,13 @@ def call_image_api(prompt, usage_ctx=None):
         print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Response: {str(data)[:300]}")
     except requests.exceptions.Timeout:
         print("[IMAGE ERROR] OpenRouter API request timed out")
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
     except requests.exceptions.ConnectionError:
         print("[IMAGE ERROR] Cannot connect to OpenRouter API")
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
     except Exception as e:
         print("[IMAGE ERROR]", str(e))
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
     return None
 
 def _prepare_image_reference_for_model(reference):
@@ -923,9 +1289,12 @@ def call_image_api_with_reference(reference_image_base64, prompt, usage_ctx=None
     if not OPENROUTER_KEY:
         print("[IMAGE ERROR] OPENROUTER_KEY is not configured")
         return None
+    ctx = usage_ctx or _usage_ctx('image')
+    attempt_id = _begin_ai_attempt_record(ctx, IMAGE_MODEL)
     try:
         reference_for_model = _prepare_image_reference_for_model(reference_image_base64)
         if not reference_for_model:
+            _settle_ai_attempt_record(attempt_id, 'error', {}, None)
             return None
         headers = {
             "Authorization": f"Bearer {OPENROUTER_KEY}",
@@ -945,9 +1314,10 @@ def call_image_api_with_reference(reference_image_base64, prompt, usage_ctx=None
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=120)
         data = response.json()
         generation_id, img_usage = _extract_openrouter_usage(data)
-        _record_ai_usage(usage_ctx or _usage_ctx('image'), IMAGE_MODEL,
-                         'ok' if response.status_code < 400 and 'error' not in data else 'error',
-                         img_usage, generation_id)
+        _settle_ai_attempt_record(
+            attempt_id,
+            'ok' if response.status_code < 400 and 'error' not in data else 'error',
+            img_usage, generation_id)
         # AI4: Detect specific error codes
         if response.status_code == 401:
             print("[IMAGE ERROR] OpenRouter API key is invalid or expired (401 Unauthorized)")
@@ -968,10 +1338,13 @@ def call_image_api_with_reference(reference_image_base64, prompt, usage_ctx=None
         print(f"[IMAGE ERROR] API returned no image (status {response.status_code}). Response: {str(data)[:300]}")
     except requests.exceptions.Timeout:
         print("[IMAGE ERROR] OpenRouter API request timed out")
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
     except requests.exceptions.ConnectionError:
         print("[IMAGE ERROR] Cannot connect to OpenRouter API")
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
     except Exception as e:
         print("[IMAGE ERROR]", str(e))
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
     return None
 
 
@@ -1500,6 +1873,7 @@ def call_image_api_with_references(prompt, references=None, usage_ctx=None):
         return call_image_api(prompt, usage_ctx=ctx)
     if len(prepared) == 1:
         return call_image_api_with_reference(prepared[0], prompt, usage_ctx=ctx)
+    multi_attempt_id = _begin_ai_attempt_record(ctx, IMAGE_MODEL)
     try:
         headers = {
             'Authorization': f'Bearer {OPENROUTER_KEY}',
@@ -1518,9 +1892,10 @@ def call_image_api_with_references(prompt, references=None, usage_ctx=None):
         response = requests.post(f'{OPENROUTER_BASE}/chat/completions', headers=headers, json=payload, timeout=120)
         data = response.json()
         generation_id, img_usage = _extract_openrouter_usage(data)
-        _record_ai_usage(ctx, IMAGE_MODEL,
-                         'ok' if response.status_code not in (401, 402, 429) and 'error' not in data else 'error',
-                         img_usage, generation_id)
+        _settle_ai_attempt_record(
+            multi_attempt_id,
+            'ok' if response.status_code not in (401, 402, 429) and 'error' not in data else 'error',
+            img_usage, generation_id)
         if response.status_code in (401, 402, 429) or 'error' in data:
             print(f"[IMAGE ERROR] Visual concept multi-reference failed: {data.get('error') if isinstance(data, dict) else response.status_code}")
             return None
@@ -1529,8 +1904,15 @@ def call_image_api_with_references(prompt, references=None, usage_ctx=None):
             return image_url
         print('[IMAGE ERROR] Multi-reference response contained no image; retrying with the first reference')
         return call_image_api_with_reference(prepared[0], prompt, usage_ctx=ctx)
+    except requests.exceptions.Timeout:
+        print('[IMAGE ERROR] OpenRouter API request timed out')
+        _settle_ai_attempt_record(multi_attempt_id, 'error', {}, None)
+    except requests.exceptions.ConnectionError:
+        print('[IMAGE ERROR] Cannot connect to OpenRouter API')
+        _settle_ai_attempt_record(multi_attempt_id, 'error', {}, None)
     except Exception as error:
         print('[IMAGE ERROR]', error)
+        _settle_ai_attempt_record(multi_attempt_id, 'error', {}, None)
     return None
 
 
@@ -7903,6 +8285,7 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
     """Ask the vision model for a conservative building-only polygon estimate."""
     if not OPENROUTER_KEY or not image_path or not os.path.isfile(image_path):
         return None
+    site_attempt_id = _begin_ai_attempt_record(_usage_ctx('site'), IMAGE_MODEL)
     try:
         from reference_analyzer import encode_image_to_base64
         from PIL import Image
@@ -7937,9 +8320,10 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
         )
         payload = response.json()
         generation_id, vision_usage = _extract_openrouter_usage(payload)
-        _record_ai_usage(_usage_ctx('site'), IMAGE_MODEL,
-                         'ok' if response.status_code < 400 and 'error' not in payload else 'error',
-                         vision_usage, generation_id)
+        _settle_ai_attempt_record(
+            site_attempt_id,
+            'ok' if response.status_code < 400 and 'error' not in payload else 'error',
+            vision_usage, generation_id)
         content = payload.get('choices', [{}])[0].get('message', {}).get('content', '')
         if isinstance(content, list):
             content = ' '.join(str(part.get('text', '')) if isinstance(part, dict) else str(part) for part in content)
@@ -7967,8 +8351,20 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
         if area < 20 or area > 100000:
             return None
         return normalized
+    except requests.exceptions.Timeout:
+        print('[SITE BOUNDARY VISION] OpenRouter timeout')
+        _settle_ai_attempt_record(site_attempt_id, 'error', {}, None)
+        return None
+    except requests.exceptions.ConnectionError as error:
+        print(f'[SITE BOUNDARY VISION] {error}')
+        _settle_ai_attempt_record(site_attempt_id, 'error', {}, None)
+        return None
     except Exception as error:
         print(f'[SITE BOUNDARY VISION] {error}')
+        try:
+            _settle_ai_attempt_record(site_attempt_id, 'error', {}, None)
+        except Exception:
+            pass
         return None
 
 
@@ -15869,11 +16265,24 @@ def api_analyze_reference():
         return jsonify({'error': 'Reference image file not found on disk'}), 404
 
     try:
-        analysis, metering = analyze_reference_image(abs_path, OPENROUTER_KEY)
+        recorded = {}
+
+        def _record_reference_metering(metering):
+            if recorded.get('done'):
+                return
+            recorded['done'] = True
+            try:
+                metering = metering or {}
+                _record_ai_usage(
+                    _usage_ctx('image', tenant_id=g.tenant_id), IMAGE_MODEL,
+                    'ok', metering.get('usage') or {}, metering.get('generation_id'))
+            except Exception as exc:
+                print(f"[AI-USAGE] reference metering failed: {exc}")
+
+        analysis, metering = analyze_reference_image(abs_path, OPENROUTER_KEY, on_metering=_record_reference_metering)
         metering = metering or {}
-        _record_ai_usage(
-            _usage_ctx('image', tenant_id=g.tenant_id), IMAGE_MODEL,
-            'ok', metering.get('usage') or {}, metering.get('generation_id'))
+        if not recorded.get('done'):
+            _record_reference_metering(metering)
 
         # Auto-apply extracted colors and style to branding
         updates = {}
@@ -15899,6 +16308,14 @@ def api_analyze_reference():
         })
     except Exception as e:
         print(f"[ANALYZE-REFERENCE ERROR] {e}")
+        try:
+            if not recorded.get('done'):
+                _record_ai_usage(
+                    _usage_ctx('image', tenant_id=g.tenant_id), IMAGE_MODEL,
+                    'error', {}, None)
+                recorded['done'] = True
+        except Exception:
+            pass
         return jsonify({'error': str(e)}), 500
 
 
@@ -16484,13 +16901,23 @@ def api_upload_training_image():
                 "X-Title": f"Real Estate Proposal Generator - Tenant Training ({g.tenant_id[:8]})"
             }
             import requests as _req
-            resp = _req.post("https://openrouter.ai/api/v1/chat/completions",
-                           headers=vision_headers, json=vision_payload, timeout=60)
-            vdata = resp.json()
+            training_attempt_id = _begin_ai_attempt_record(
+                _usage_ctx('training_chat', tenant_id=g.tenant_id), LUNA_TEXT_MODEL)
+            try:
+                resp = _req.post("https://openrouter.ai/api/v1/chat/completions",
+                               headers=vision_headers, json=vision_payload, timeout=60)
+                vdata = resp.json()
+            except requests.exceptions.Timeout:
+                _settle_ai_attempt_record(training_attempt_id, 'error', {}, None)
+                raise
+            except requests.exceptions.ConnectionError:
+                _settle_ai_attempt_record(training_attempt_id, 'error', {}, None)
+                raise
             generation_id, training_vision_usage = _extract_openrouter_usage(vdata)
-            _record_ai_usage(_usage_ctx('training_chat', tenant_id=g.tenant_id), LUNA_TEXT_MODEL,
-                             'ok' if resp.status_code < 400 and 'error' not in vdata else 'error',
-                             training_vision_usage, generation_id)
+            _settle_ai_attempt_record(
+                training_attempt_id,
+                'ok' if resp.status_code < 400 and 'error' not in vdata else 'error',
+                training_vision_usage, generation_id)
             if 'choices' in vdata and vdata['choices']:
                 analysis_text = vdata['choices'][0].get('message', {}).get('content', '')
             elif 'error' in vdata:

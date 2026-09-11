@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,13 +21,6 @@ import auth
 import db
 import maps_service
 import reference_analyzer
-
-
-class _FakeResponse:
-    def __init__(self, payload, status_code=200):
-        self._payload = payload
-        self.status_code = status_code
-        self.text = json.dumps(payload, ensure_ascii=False)
 
 
 class _FakeResponse:
@@ -239,6 +233,426 @@ class AiUsageTests(unittest.TestCase):
 
         forbidden = client.get('/api/ai-usage?draftId=draft-endpoint')
         self.assertEqual(forbidden.status_code, 401)
+
+    # ── Response cost first ────────────────────────────────────────────
+
+    def test_direct_response_cost_is_saved_immediately(self):
+        module = self.application_module
+        payload = {
+            'id': 'gen-direct-1',
+            'choices': [{'message': {'content': 'hello'}}],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 5, 'total_tokens': 15,
+                      'cost': 0.0123},
+        }
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', return_value=_FakeResponse(payload)), \
+                 patch.object(module, '_backfill_ai_usage_cost_async') as backfill:
+                data = module.call_openrouter_chat(
+                    'sys', 'hi', max_tokens=10,
+                    usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-direct',
+                               'flow': 'slide'})
+            self.assertIn('choices', data)
+            backfill.assert_not_called()
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-direct')
+        self.assertEqual(summary['totals']['calls'], 1)
+        self.assertAlmostEqual(summary['totals']['cost_usd'], 0.0123)
+        row = summary['recent'][0]
+        self.assertEqual(row['generation_id'], 'gen-direct-1')
+        self.assertEqual(row['cost_source'], 'response')
+        self.assertEqual(row['attempt_status'], 'settled')
+
+    def test_zero_response_cost_is_valid_and_settled(self):
+        module = self.application_module
+        payload = {
+            'id': 'gen-zero-1',
+            'choices': [{'message': {'content': 'hello'}}],
+            'usage': {'prompt_tokens': 5, 'completion_tokens': 5, 'total_tokens': 10, 'cost': 0},
+        }
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', return_value=_FakeResponse(payload)), \
+                 patch.object(module, '_backfill_ai_usage_cost_async') as backfill:
+                module.call_openrouter_chat(
+                    'sys', 'hi', max_tokens=10,
+                    usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-zero', 'flow': 'slide'})
+            backfill.assert_not_called()
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-zero')
+        self.assertEqual(summary['recent'][0]['cost_usd'], 0)
+        self.assertEqual(summary['recent'][0]['cost_source'], 'response')
+        self.assertEqual(summary['recent'][0]['attempt_status'], 'settled')
+
+    def test_missing_cost_stays_pending_not_zero(self):
+        module = self.application_module
+        payload = {
+            'id': 'gen-missing-1',
+            'choices': [{'message': {'content': 'hello'}}],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 5, 'total_tokens': 15},
+        }
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', return_value=_FakeResponse(payload)):
+                module.call_openrouter_chat(
+                    'sys', 'hi', max_tokens=10,
+                    usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-missing', 'flow': 'slide'})
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-missing')
+        self.assertIsNone(summary['recent'][0]['cost_usd'])
+        self.assertEqual(summary['recent'][0]['attempt_status'], 'pending')
+        self.assertEqual(summary['totals']['cost_usd'], 0)
+        with self.app.app_context():
+            pending = db.get_ai_usage_pending_costs(limit=50, tenant_id=self.tenant_id)
+        self.assertIn(summary['recent'][0]['id'], [row['id'] for row in pending])
+
+    def test_corrupt_cost_values_stay_unknown(self):
+        module = self.application_module
+        for bad in ('abc', -1, float('inf'), float('nan'), True, ''):
+            cost, raw = module._parse_openrouter_cost(bad)
+            self.assertIsNone(cost, bad)
+            self.assertIsNone(raw, bad)
+        payload = {
+            'id': 'gen-bad-1',
+            'choices': [{'message': {'content': 'hello'}}],
+            'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2, 'cost': 'abc'},
+        }
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', return_value=_FakeResponse(payload)):
+                module.call_openrouter_chat(
+                    'sys', 'hi', max_tokens=10,
+                    usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-bad', 'flow': 'slide'})
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-bad')
+        self.assertIsNone(summary['recent'][0]['cost_usd'])
+        self.assertEqual(summary['recent'][0]['attempt_status'], 'pending')
+
+    def test_cost_is_never_estimated_from_tokens(self):
+        module = self.application_module
+        _id, usage = module._extract_openrouter_usage(
+            {'id': 'gen-noest', 'usage': {'prompt_tokens': 1000, 'completion_tokens': 500,
+                                         'total_tokens': 1500}})
+        self.assertNotIn('cost_usd', usage)
+        with self.app.app_context():
+            event_id = db.record_ai_usage_event(
+                self.tenant_id, 'model-e', flow='slide', prompt_tokens=1000,
+                completion_tokens=500, total_tokens=1500, draft_id='draft-noest')
+            row = db.get_db().execute(
+                'SELECT cost_usd FROM ai_usage_events WHERE id = ?', (event_id,)).fetchone()
+        self.assertIsNone(dict(row)['cost_usd'])
+
+    def test_sub_detail_costs_are_not_summed(self):
+        module = self.application_module
+        _id, usage = module._extract_openrouter_usage(
+            {'id': 'gen-sub', 'usage': {'prompt_tokens': 10, 'completion_tokens': 5,
+                                       'total_tokens': 15, 'cost': 0.005,
+                                       'prompt_cost': 0.003, 'completion_cost': 0.004}})
+        self.assertAlmostEqual(usage['cost_usd'], 0.005)
+
+    def test_paid_error_attempt_keeps_cost(self):
+        module = self.application_module
+        payload = {'error': {'message': 'billing hit'},
+                   'id': 'gen-paid-err',
+                   'usage': {'prompt_tokens': 20, 'completion_tokens': 0,
+                             'total_tokens': 20, 'cost': 0.004}}
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', return_value=_FakeResponse(payload, 402)), \
+                 patch.object(module, '_backfill_ai_usage_cost_async') as backfill:
+                data = module.call_openrouter_chat(
+                    'sys', 'hi', max_tokens=10,
+                    usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-paid-err',
+                               'flow': 'market'})
+            self.assertIn('error', data)
+            backfill.assert_not_called()
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-paid-err')
+        self.assertEqual(summary['recent'][0]['status'], 'error')
+        self.assertAlmostEqual(summary['recent'][0]['cost_usd'], 0.004)
+        self.assertEqual(summary['recent'][0]['cost_source'], 'response')
+
+    def test_single_row_per_attempt_for_all_outcomes(self):
+        module = self.application_module
+        import requests as _requests
+
+        def _count(draft):
+            with self.app.app_context():
+                return int(dict(db.get_db().execute(
+                    'SELECT COUNT(*) AS n FROM ai_usage_events WHERE draft_id = ?',
+                    (draft,)).fetchone())['n'])
+
+        payload = {'id': 'gen-once-1', 'choices': [{'message': {'content': 'ok'}}],
+                   'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2}}
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', return_value=_FakeResponse(payload)):
+                module.call_openrouter_chat('s', 'u', usage_ctx={'tenant_id': self.tenant_id,
+                                                                'draft_id': 'draft-once-ok', 'flow': 'slide'})
+        self.assertEqual(_count('draft-once-ok'), 1)
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', side_effect=_requests.exceptions.Timeout()):
+                module.call_openrouter_chat('s', 'u', usage_ctx={'tenant_id': self.tenant_id,
+                                                                'draft_id': 'draft-once-to', 'flow': 'slide'})
+        self.assertEqual(_count('draft-once-to'), 1)
+        with self.app.app_context():
+            row = dict(db.get_db().execute(
+                'SELECT cost_usd, generation_id, attempt_status FROM ai_usage_events WHERE draft_id = ?',
+                ('draft-once-to',)).fetchone())
+        self.assertIsNone(row['cost_usd'])
+        self.assertIsNone(row['generation_id'])
+        self.assertEqual(row['attempt_status'], 'unresolved')
+
+    def test_timeout_and_connection_record_unresolved(self):
+        module = self.application_module
+        import requests as _requests
+        for exc in (_requests.exceptions.Timeout(), _requests.exceptions.ConnectionError('down')):
+            draft = f"draft-unres-{type(exc).__name__}"
+            with self.app.app_context():
+                with patch.object(module.requests, 'post', side_effect=exc):
+                    data = module.call_openrouter_chat(
+                        's', 'u', usage_ctx={'tenant_id': self.tenant_id, 'draft_id': draft,
+                                            'flow': 'slide'})
+                self.assertIn('error', data)
+                summary = db.get_ai_usage_summary(self.tenant_id, draft_id=draft)
+            self.assertIsNone(summary['recent'][0]['cost_usd'])
+            self.assertEqual(summary['recent'][0]['attempt_status'], 'unresolved')
+
+    def test_reference_callback_records_cost_before_invalid_content(self):
+        seen = {}
+
+        def _cb(metering):
+            seen.update(metering)
+
+        payload = {'id': 'gen-refbad-1',
+                   'choices': [{'message': {'content': 'not json at all'}}],
+                   'usage': {'prompt_tokens': 100, 'completion_tokens': 10, 'total_tokens': 110,
+                             'cost': 0.007}}
+        image_path = os.path.join(self.temp_dir.name, 'ref-bad.png')
+        with open(image_path, 'wb') as handle:
+            handle.write(b'\x89PNG\r\n\x1a\nfakepng')
+        with patch.object(reference_analyzer.requests, 'post', return_value=_FakeResponse(payload)):
+            with self.assertRaises(Exception):
+                reference_analyzer.analyze_reference_image(image_path, 'key', on_metering=_cb)
+        self.assertEqual(seen['generation_id'], 'gen-refbad-1')
+        self.assertAlmostEqual(seen['cost_usd'], 0.007)
+        module = self.application_module
+        with self.app.app_context():
+            module._record_ai_usage(
+                {'tenant_id': self.tenant_id, 'flow': 'image', 'draft_id': 'draft-refbad'},
+                seen['model'], 'ok', seen['usage'], seen['generation_id'])
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-refbad')
+        self.assertAlmostEqual(summary['totals']['cost_usd'], 0.007)
+
+    def test_parallel_attempts_each_leave_one_row(self):
+        module = self.application_module
+        first = {'id': 'gen-par-1', 'choices': [{'message': {'content': 'first'}}],
+                 'usage': {'prompt_tokens': 5, 'completion_tokens': 5, 'total_tokens': 10}}
+        second = {'id': 'gen-par-2', 'choices': [{'message': {'content': 'second'}}],
+                  'usage': {'prompt_tokens': 6, 'completion_tokens': 6, 'total_tokens': 12}}
+        calls = [first, second]
+
+        def _fake_post(*args, **kwargs):
+            import time as _time
+            payload = calls.pop(0) if calls else second
+            if payload['id'] == 'gen-par-1':
+                _time.sleep(0.05)
+            return _FakeResponse(payload)
+
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', side_effect=_fake_post):
+                result = module.call_zai_chat_parallel(
+                    'sys', 'hello', max_tokens=10, attempts=2,
+                    usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-parallel',
+                               'flow': 'slide'})
+            self.assertTrue(module._has_chat_choices(result))
+            import time as _time
+            _time.sleep(0.3)
+            rows = db.get_db().execute(
+                'SELECT generation_id FROM ai_usage_events WHERE draft_id = ?',
+                ('draft-parallel',)).fetchall()
+        ids = {dict(r)['generation_id'] for r in rows}
+        self.assertIn('gen-par-1', ids)
+        self.assertIn('gen-par-2', ids)
+
+    def test_generation_404_then_success(self):
+        module = self.application_module
+        with self.app.app_context():
+            event_id = db.record_ai_usage_event(
+                self.tenant_id, 'model-r', flow='slide', total_tokens=10,
+                generation_id='gen-retry-404', draft_id='draft-retry-404')
+            with patch.object(module.requests, 'get',
+                              return_value=_FakeResponse({'error': 'not ready'}, 404)):
+                result = module._reconcile_single_ai_event(event_id, 'gen-retry-404')
+            self.assertFalse(result['ok'])
+            self.assertEqual(result['outcome'], 'not_found')
+            row = dict(db.get_db().execute(
+                'SELECT cost_usd, attempt_status, reconcile_attempts FROM ai_usage_events WHERE id = ?',
+                (event_id,)).fetchone())
+            self.assertIsNone(row['cost_usd'])
+            self.assertNotEqual(row['attempt_status'], 'settled')
+            db.update_ai_usage_attempt(event_id, clear_next_retry=True)
+            with patch.object(module.requests, 'get',
+                              return_value=_FakeResponse({'data': {'id': 'gen-retry-404',
+                                                                  'total_cost': 0.009}})):
+                result = module._reconcile_single_ai_event(event_id, 'gen-retry-404')
+            self.assertTrue(result['ok'])
+            row = dict(db.get_db().execute(
+                'SELECT cost_usd, cost_source, attempt_status FROM ai_usage_events WHERE id = ?',
+                (event_id,)).fetchone())
+            self.assertAlmostEqual(row['cost_usd'], 0.009)
+            self.assertEqual(row['cost_source'], 'generation')
+
+    def test_generation_429_keeps_pending_with_backoff(self):
+        module = self.application_module
+        with self.app.app_context():
+            event_id = db.record_ai_usage_event(
+                self.tenant_id, 'model-r', flow='slide', generation_id='gen-retry-429',
+                draft_id='draft-retry-429')
+            with patch.object(module.requests, 'get',
+                              return_value=_FakeResponse({'error': 'slow down'}, 429)):
+                result = module._reconcile_single_ai_event(event_id, 'gen-retry-429')
+            self.assertFalse(result['ok'])
+            self.assertEqual(result['outcome'], 'rate_limited')
+            row = dict(db.get_db().execute(
+                'SELECT cost_usd, attempt_status, next_retry_at FROM ai_usage_events WHERE id = ?',
+                (event_id,)).fetchone())
+            self.assertIsNone(row['cost_usd'])
+            self.assertIsNotNone(row['next_retry_at'])
+
+    def test_records_older_than_24h_stay_eligible(self):
+        module = self.application_module
+        with self.app.app_context():
+            event_id = db.record_ai_usage_event(
+                self.tenant_id, 'model-old', flow='slide', generation_id='gen-old-1',
+                draft_id='draft-old')
+            db.get_db().execute(
+                "UPDATE ai_usage_events SET created_at = datetime('now', '-30 hours') WHERE id = ?",
+                (event_id,))
+            db.get_db().commit()
+            pending = db.get_ai_events_needing_reconcile(limit=50, tenant_id=self.tenant_id,
+                                                         draft_id='draft-old')
+            self.assertIn(event_id, [row['id'] for row in pending])
+            with patch.object(module.requests, 'get',
+                              return_value=_FakeResponse({'data': {'id': 'gen-old-1',
+                                                                  'total_cost': 0.003}})):
+                result = module._reconcile_ai_scope(
+                    limit=10, time_budget_seconds=5, tenant_id=self.tenant_id,
+                    draft_id='draft-old', force=True)
+            self.assertEqual(result['reconciled'], 1)
+
+    def test_concurrent_reconcile_claim_prevents_double_work(self):
+        with self.app.app_context():
+            event_id = db.record_ai_usage_event(
+                self.tenant_id, 'model-c', flow='slide', generation_id='gen-claim-1',
+                draft_id='draft-claim')
+            first = db.claim_ai_usage_reconcile_row(event_id, delay_seconds=600)
+            second = db.claim_ai_usage_reconcile_row(event_id, delay_seconds=600)
+        self.assertTrue(first)
+        self.assertFalse(second)
+
+    def test_review_updates_row_without_appending_cost(self):
+        module = self.application_module
+        with self.app.app_context():
+            event_id = db.record_ai_usage_event(
+                self.tenant_id, 'model-h', flow='slide', total_tokens=20, cost_usd=0.01,
+                cost_source='response', response_cost_usd=0.01, generation_id='gen-hist-1',
+                draft_id='draft-hist')
+            before = int(dict(db.get_db().execute(
+                'SELECT COUNT(*) AS n FROM ai_usage_events WHERE draft_id = ?',
+                ('draft-hist',)).fetchone())['n'])
+            with patch.object(module.requests, 'get',
+                              return_value=_FakeResponse({'data': {'id': 'gen-hist-1',
+                                                                  'total_cost': 0.015}})):
+                result = module._reconcile_single_ai_event(event_id, 'gen-hist-1', is_review=True)
+            self.assertTrue(result['ok'])
+            after = int(dict(db.get_db().execute(
+                'SELECT COUNT(*) AS n FROM ai_usage_events WHERE draft_id = ?',
+                ('draft-hist',)).fetchone())['n'])
+            self.assertEqual(before, after)
+            row = dict(db.get_db().execute(
+                'SELECT cost_usd, cost_source, response_cost_usd, generation_cost_usd '
+                'FROM ai_usage_events WHERE id = ?', (event_id,)).fetchone())
+            self.assertAlmostEqual(row['cost_usd'], 0.015)
+            self.assertEqual(row['cost_source'], 'review')
+            self.assertAlmostEqual(row['response_cost_usd'], 0.01)
+            self.assertAlmostEqual(row['generation_cost_usd'], 0.015)
+
+    def test_truckplex_decimal_difference_is_not_float_noise(self):
+        provider_total = Decimal('0.76317')
+        system_total = Decimal('0.75577005')
+        self.assertEqual(provider_total - system_total, Decimal('0.00739995'))
+        summed = db.decimal_cost_total(['0.75577005', 0.0, None, 'invalid'])
+        self.assertEqual(summed, Decimal('0.75577005'))
+
+    def test_generation_id_mismatch_is_rejected(self):
+        module = self.application_module
+        with patch.object(module.requests, 'get',
+                          return_value=_FakeResponse({'data': {'id': 'other-id',
+                                                              'total_cost': 0.5}})):
+            self.assertIsNone(module._fetch_openrouter_generation_cost('gen-expect-1'))
+
+    def test_image_timeout_records_unresolved_attempt(self):
+        module = self.application_module
+        import requests as _requests
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', side_effect=_requests.exceptions.Timeout()):
+                self.assertIsNone(module.call_image_api(
+                    'a villa', usage_ctx={'tenant_id': self.tenant_id,
+                                          'draft_id': 'draft-img-to', 'flow': 'image'}))
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-img-to')
+        self.assertEqual(summary['totals']['calls'], 1)
+        self.assertIsNone(summary['recent'][0]['cost_usd'])
+        self.assertEqual(summary['recent'][0]['attempt_status'], 'unresolved')
+
+    def test_events_page_and_status_counts(self):
+        with self.app.app_context():
+            for index in range(5):
+                db.record_ai_usage_event(
+                    self.tenant_id, 'model-p', flow='slide', total_tokens=index,
+                    draft_id='draft-page')
+            page = db.get_ai_usage_events_page(self.tenant_id, draft_id='draft-page',
+                                               page=1, page_size=2)
+            self.assertEqual(page['total'], 5)
+            self.assertEqual(page['pages'], 3)
+            self.assertEqual(len(page['items']), 2)
+            self.assertIn('generation_id', page['items'][0])
+            self.assertIn('cost_source', page['items'][0])
+            status = db.get_ai_usage_status_counts(self.tenant_id, draft_id='draft-page')
+            self.assertEqual(status['total'], 5)
+            self.assertIn(status['state'], ('pending', 'needs_review', 'settled'))
+            self.assertIn(status['state_label'], ('قيد الاستكمال', 'تحتاج مطابقة', 'التكلفة المسجلة'))
+
+    def test_reconcile_endpoint_is_scoped_and_company_protected(self):
+        module = self.application_module
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                self.tenant_id, 'model-e2', flow='slide', generation_id='gen-ep-1',
+                draft_id='draft-ep')
+        client = self.app.test_client()
+        denied = client.post('/api/ai-usage/reconcile', json={'draftId': 'draft-ep'})
+        self.assertEqual(denied.status_code, 401)
+        employee_token = auth.create_token(
+            self.tenant_id, 'emp@example.test', user_id='emp-1', user_name='Emp',
+            user_role='employee')
+        forbidden = client.post(
+            '/api/ai-usage/reconcile', json={'draftId': 'draft-ep'},
+            headers={'Authorization': f'Bearer {employee_token}'})
+        self.assertIn(forbidden.status_code, (403, 401))
+        with patch.object(module.requests, 'get',
+                          return_value=_FakeResponse({'data': {'id': 'gen-ep-1',
+                                                              'total_cost': 0.011}})):
+            response = client.post('/api/ai-usage/reconcile', json={'draftId': 'draft-ep'},
+                                   headers=self._headers())
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body['success'])
+        self.assertEqual(body['checked'], 1)
+        self.assertEqual(body['reconciled'], 1)
+
+    def test_usage_events_endpoint_supports_pagination(self):
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                self.tenant_id, 'model-pg', flow='slide', draft_id='draft-pg-page')
+        client = self.app.test_client()
+        response = client.get('/api/ai-usage?draftId=draft-pg-page&page=1&pageSize=10',
+                              headers=self._headers())
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body['success'])
+        self.assertIn('reconcile', body)
+        self.assertIn('events', body)
+        self.assertEqual(body['events']['total'], 1)
+        self.assertEqual(body['events']['items'][0]['model'], 'model-pg')
 
 
 class MapsUsageTests(unittest.TestCase):

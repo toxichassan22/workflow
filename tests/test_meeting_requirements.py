@@ -7293,6 +7293,91 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertAlmostEqual(totals['presentations'][second_id]['cost_usd'], 0.03)
         self.assertAlmostEqual(totals['projects'][draft_id]['cost_usd'], 0.082)
 
+    def test_ai_attempt_columns_migrate_on_existing_database(self):
+        import sqlite3
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), 'ai-migrate.db')
+        original = db.DB_PATH
+        try:
+            db.DB_PATH = path
+            db.init_db()
+            conn = sqlite3.connect(path)
+            conn.execute('DROP TABLE IF EXISTS ai_usage_events')
+            conn.execute('''CREATE TABLE ai_usage_events (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT,
+                draft_id TEXT,
+                presentation_id TEXT,
+                flow TEXT NOT NULL DEFAULT 'other',
+                model TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'ok',
+                prompt_tokens INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                cost_usd REAL,
+                generation_id TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )''')
+            conn.execute("INSERT INTO ai_usage_events (id, tenant_id, model, cost_usd, generation_id) "
+                         "VALUES ('legacy-1', 't1', 'model-a', 0.02, 'gen-legacy-1')")
+            conn.commit()
+            conn.close()
+            db.init_db()
+            conn = sqlite3.connect(path)
+            names = {row[1] for row in conn.execute('PRAGMA table_info(ai_usage_events)').fetchall()}
+            for column in ('cost_source', 'attempt_status', 'reconcile_attempts',
+                           'next_retry_at', 'updated_at', 'response_cost_usd',
+                           'generation_cost_usd', 'cost_raw'):
+                self.assertIn(column, names)
+            row = conn.execute("SELECT cost_usd, generation_id FROM ai_usage_events WHERE id='legacy-1'").fetchone()
+            conn.close()
+            self.assertAlmostEqual(row[0], 0.02)
+            self.assertEqual(row[1], 'gen-legacy-1')
+        finally:
+            db.DB_PATH = original
+
+    def test_usage_totals_expose_uncapped_reconcile_status(self):
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        draft_id = 'draft-usage-reconcile-status'
+        client.post('/api/project-draft', headers=headers, json={
+            'draftId': draft_id,
+            'draftData': {'draftId': draft_id, 'project_name': 'Reconcile Project'},
+            'sectionStatuses': {},
+        })
+        with self.app.app_context():
+            db.record_ai_usage_event(
+                self.tenant_a, 'model-a', flow='slide', total_tokens=10,
+                cost_usd=0.01, cost_source='response', draft_id=draft_id)
+            db.record_ai_usage_event(
+                self.tenant_a, 'model-a', flow='slide', total_tokens=10,
+                generation_id='gen-pending-scope', draft_id=draft_id)
+            db.record_ai_usage_event(
+                self.tenant_a, 'model-a', flow='slide', total_tokens=10,
+                draft_id=draft_id)
+        totals = client.get(
+            f'/api/usage-totals?draftIds={draft_id}', headers=headers).get_json()
+        self.assertTrue(totals['success'])
+        self.assertIn('reconcile', totals)
+        self.assertIn('reconcile_by_scope', totals)
+        by_draft = totals['reconcile_by_scope']['by_draft'][draft_id]
+        self.assertEqual(by_draft['pending'], 1)
+        self.assertEqual(by_draft['unresolved'], 1)
+        self.assertEqual(by_draft['state'], 'pending')
+        self.assertEqual(by_draft['state_label'], 'قيد الاستكمال')
+        index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('aiReconcileStatusText', index_html)
+        self.assertIn('قيد الاستكمال', index_html)
+        self.assertIn('تحتاج مطابقة', index_html)
+        self.assertIn('التكلفة المسجلة', index_html)
+        self.assertIn('/api/ai-usage/reconcile', index_html)
+
+    def test_truckplex_arithmetic_difference_uses_decimal(self):
+        from decimal import Decimal
+        provider = Decimal('0.76317')
+        system = Decimal('0.75577005')
+        self.assertEqual(provider - system, Decimal('0.00739995'))
+
     def test_slide_reordering_is_named_in_change_history(self):
         old_slides = [
             {'title': 'الأولى', 'type': 'content', 'html': '<div class="slide">أ</div>'},

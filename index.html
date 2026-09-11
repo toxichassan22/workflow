@@ -8427,9 +8427,11 @@
         : [];
       let costByPresentation = {};
       const presentationIds = presentations.map(item => item.id).filter(Boolean);
+      let reconcileByPresentation = {};
       if (presentationIds.length) {
         const totalsData = await api('GET', '/api/usage-totals?presentationIds=' + encodeURIComponent(presentationIds.join(','))).catch(() => null);
         if (totalsData?.success && totalsData.presentations) costByPresentation = totalsData.presentations;
+        if (totalsData?.reconcile_by_scope?.by_presentation) reconcileByPresentation = totalsData.reconcile_by_scope.by_presentation;
       }
       const groups = [
         { key: 'draft', label: 'مسودة', items: presentations.filter(item => !['pending_approval', 'approved'].includes(item.status)) },
@@ -8442,8 +8444,9 @@
           const date = (item.updatedAt || item.createdAt || '').slice(0, 16).replace('T', ' ');
           const itemCost = costByPresentation[item.id];
           const itemMapsCost = Number(itemCost?.maps_cost_usd) || 0;
+          const itemReconcile = aiReconcileStatusText(reconcileByPresentation[item.id]);
           return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
-            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + ' | التكلفة: ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) + (itemMapsCost > 0 ? ' (خرائط: ' + formatUsageCost(itemMapsCost) + ')' : '') : '—') + '</div></div>' +
+            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + ' | التكلفة: ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) + (itemMapsCost > 0 ? ' (خرائط: ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | ' + itemReconcile : '') : '—') + '</div></div>' +
             '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
             '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات</button></div></div>';
         }).join('') + '</section>'
@@ -25485,9 +25488,11 @@
       const drafts = draftsData?.success && Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
       let costByProject = {};
       const projectIds = drafts.map(d => d.id).filter(Boolean);
+      let reconcileByDraft = {};
       if (projectIds.length) {
         const totalsData = await api('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(','))).catch(() => null);
         if (totalsData?.success && totalsData.projects) costByProject = totalsData.projects;
+        if (totalsData?.reconcile_by_scope?.by_draft) reconcileByDraft = totalsData.reconcile_by_scope.by_draft;
       }
       const html = drafts.length ? drafts.map(d => {
         const title = d.title || 'مشروع بدون عنوان';
@@ -25495,7 +25500,8 @@
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
         const projectCost = costByProject[d.id];
         const projectMapsCost = Number(projectCost?.maps_cost_usd) || 0;
-        const costText = 'التكلفة: ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (خرائط: ' + formatUsageCost(projectMapsCost) + ')' : '') : '—');
+        const projectReconcile = aiReconcileStatusText(reconcileByDraft[d.id]);
+        const costText = 'التكلفة: ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (خرائط: ' + formatUsageCost(projectMapsCost) + ')' : '') + (projectReconcile ? ' | ' + projectReconcile : '') : '—');
         const recovery = recoveryByDraft[d.id] || null;
         const fields = recovery ? recovery.fieldCount + ' حقل ممتلئ' : '';
         const snapshot = recovery?.snapshot;
@@ -26432,6 +26438,35 @@
         ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : value.toFixed(digits));
       return '<span dir="ltr">' + text + '</span>';
+    }
+
+    function aiReconcileStatusText(entry) {
+      if (!entry || typeof entry !== 'object') return '';
+      const state = entry.state || '';
+      if (state === 'pending') return 'قيد الاستكمال';
+      if (state === 'needs_review') return 'تحتاج مطابقة';
+      if (state === 'settled') return 'التكلفة المسجلة';
+      const pending = Number(entry.pending || 0) + Number(entry.in_flight || 0);
+      const review = Number(entry.unresolved || 0) + Number(entry.needs_review || 0);
+      if (pending > 0) return 'قيد الاستكمال';
+      if (review > 0) return 'تحتاج مطابقة';
+      return '';
+    }
+
+    async function fetchAiUsageEvents(draftId, page, pageSize) {
+      const params = [];
+      if (draftId) params.push('draftId=' + encodeURIComponent(draftId));
+      params.push('page=' + encodeURIComponent(page || 1));
+      params.push('pageSize=' + encodeURIComponent(pageSize || 20));
+      return api('GET', '/api/ai-usage?' + params.join('&')).catch(() => null);
+    }
+
+    async function reconcileAiUsage(draftId, presentationId, includeSettled) {
+      const payload = {};
+      if (draftId) payload.draftId = draftId;
+      if (presentationId) payload.presentationId = presentationId;
+      if (includeSettled) payload.includeSettled = true;
+      return api('POST', '/api/ai-usage/reconcile', payload).catch(() => null);
     }
 
 

@@ -31,11 +31,58 @@ def encode_image_to_base64(image_path):
     return f"data:{mime};base64,{img_data}"
 
 
-def analyze_reference_image(image_path, openrouter_key):
+def _extract_reference_metering(data, model_name):
+    """Copy generation id, tokens and direct response cost before content parsing."""
+    metering = {'generation_id': None, 'usage': {}, 'model': model_name,
+                'cost_usd': None, 'cost_raw': None}
+    try:
+        generation_id = data.get('id') if isinstance(data, dict) else None
+        metering['generation_id'] = generation_id if isinstance(generation_id, str) and generation_id else None
+        usage = data.get('usage') if isinstance(data, dict) else None
+        if isinstance(usage, dict):
+            def _num(value):
+                try:
+                    return int(value or 0)
+                except (TypeError, ValueError):
+                    return 0
+
+            metering['usage'] = {
+                'prompt_tokens': _num(usage.get('prompt_tokens')),
+                'completion_tokens': _num(usage.get('completion_tokens')),
+                'total_tokens': _num(usage.get('total_tokens')),
+            }
+            for key in ('cost', 'total_cost'):
+                raw_value = usage.get(key)
+                if raw_value is None or isinstance(raw_value, bool):
+                    continue
+                try:
+                    from decimal import Decimal
+                    import math as _math
+                    if isinstance(raw_value, float) and (not _math.isfinite(raw_value)):
+                        continue
+                    amount = Decimal(str(raw_value).strip())
+                    if not amount.is_finite() or amount < 0:
+                        continue
+                    metering['cost_usd'] = float(amount)
+                    metering['cost_raw'] = str(raw_value).strip()
+                    metering['usage']['cost_usd'] = float(amount)
+                    metering['usage']['cost_raw'] = str(raw_value).strip()
+                    break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return metering
+
+
+def analyze_reference_image(image_path, openrouter_key, on_metering=None):
     """
     Analyze a reference design image using Gemini Vision.
     Returns (result_dict, metering_dict) where metering carries the provider
     generation id and token usage so the caller can record the spend.
+    When on_metering is supplied it is invoked with the metering dict
+    immediately after the provider response arrives and before content
+    parsing, so a paid response with invalid content never loses its cost.
     """
     if not openrouter_key:
         raise ValueError("OpenRouter API key is required for image analysis")
@@ -124,6 +171,12 @@ def analyze_reference_image(image_path, openrouter_key):
         timeout=60
     )
     data = response.json()
+    metering = _extract_reference_metering(data, VISION_MODEL)
+    if callable(on_metering):
+        try:
+            on_metering(dict(metering))
+        except Exception:
+            pass
 
     if 'error' in data:
         err = data['error']
@@ -143,23 +196,4 @@ def analyze_reference_image(image_path, openrouter_key):
         raise Exception("No JSON in vision API response")
 
     result = json.loads(json_match.group())
-    metering = {'generation_id': None, 'usage': {}, 'model': VISION_MODEL}
-    try:
-        generation_id = data.get('id')
-        metering['generation_id'] = generation_id if isinstance(generation_id, str) and generation_id else None
-        usage = data.get('usage')
-        if isinstance(usage, dict):
-            def _num(value):
-                try:
-                    return int(value or 0)
-                except (TypeError, ValueError):
-                    return 0
-
-            metering['usage'] = {
-                'prompt_tokens': _num(usage.get('prompt_tokens')),
-                'completion_tokens': _num(usage.get('completion_tokens')),
-                'total_tokens': _num(usage.get('total_tokens')),
-            }
-    except Exception:
-        pass
     return result, metering
