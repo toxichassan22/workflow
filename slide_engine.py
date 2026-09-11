@@ -5892,6 +5892,61 @@ def _normalize_map_summary_layout(html, marker_side='right', full_width=False):
                   normalize_card, html, flags=re.IGNORECASE)
 
 
+def _has_real_map_background(html):
+    if not html:
+        return False
+    if re.search(r'##MAP_[A-Z0-9_]+##', html, re.I):
+        return True
+    for m in re.finditer(r'data-map-summary-background[^>]*style=[\'"]([^\'"]+)[\'"]', html, re.I):
+        style = m.group(1)
+        url_match = re.search(r'url\(\s*[\'"]?([^\'"\)]+)[\'"]?\s*\)', style, re.I)
+        if url_match:
+            val = url_match.group(1).strip()
+            if val and val.lower() != 'none':
+                return True
+    for m in re.finditer(r'<img\b[^>]*\bdata-map-summary-background\b[^>]*src=[\'"]([^\'"]+)[\'"]', html, re.I):
+        val = m.group(1).strip()
+        if val:
+            return True
+    return False
+
+
+def _unwrap_spurious_map_summary_cards(html):
+    """Unwrap data-map-summary-card wrappers when there is no real map background."""
+    if not html or 'data-map-summary-card' not in html:
+        return html
+    if _has_real_map_background(html):
+        return html
+    html = re.sub(r'<div\b[^>]*\bdata-map-summary-background\b[^>]*>\s*</div>', '', html, flags=re.I)
+    html = re.sub(r'<img\b[^>]*\bdata-map-summary-background\b[^>]*>', '', html, flags=re.I)
+    while True:
+        card_open = re.search(r'<div\b[^>]*\bdata-map-summary-card\b[^>]*>', html, re.I)
+        if not card_open:
+            break
+        start_pos = card_open.start()
+        content_start = card_open.end()
+        depth = 1
+        content_end = None
+        match_end = None
+        div_pattern = re.compile(r'<\s*(/)?\s*div\b[^>]*>', re.I)
+        for m in div_pattern.finditer(html, content_start):
+            if m.group(1):
+                depth -= 1
+                if depth == 0:
+                    content_end = m.start()
+                    match_end = m.end()
+                    break
+            else:
+                depth += 1
+        if content_end is not None and match_end is not None:
+            inner = html[content_start:content_end]
+            html = html[:start_pos] + inner + html[match_end:]
+        else:
+            html = html[:start_pos] + html[content_start:]
+            break
+    return html
+
+
 _PRESENTATION_EXACT_NUMBER_CONTEXT = re.compile(
     r'تاريخ|هاتف|جوال|وثيقة|صك|مخطط|قطعة|معرف|إحداث|خط العرض|خط الطول|'
     r'phone|mobile|date|document|identifier|latitude|longitude|\blat\b|\blng\b|\bid\b',
@@ -10529,7 +10584,15 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
                 total_slides=total_slides,
             )
     html = _canonicalize_slide_root_class(html)
-    is_map_summary = content_source == 'site_analysis' or (content_source == 'executive_content.summary' and '##MAP_' in str(html or ''))
+    is_map_summary = (
+        content_source in ('site_analysis', 'executive_content.summary')
+        and (
+            '##MAP_' in str(html or '')
+            or 'data-map-summary-background' in str(html or '')
+            or 'data-map-summary-card' in str(html or '')
+            or bool(re.search(r'/uploads/maps/|/api/map-images/', str(html or '')))
+        )
+    )
     if is_map_summary:
         html = _ensure_map_summary_structure(html)
     html = postprocess_slide(
@@ -10581,7 +10644,8 @@ def finalize_slide_html(html, slide_type, project_data, branding, creative_image
         project_logo=_project_logo_reference(project_data),
     )
     html = _format_presentation_numeric_text(html)
-    return _drop_unresolved_image_placeholders(html)
+    html = _drop_unresolved_image_placeholders(html)
+    return _unwrap_spurious_map_summary_cards(html)
 
 
 # Fixed watermark gray shared with app._apply_slide_watermark: any logo renders

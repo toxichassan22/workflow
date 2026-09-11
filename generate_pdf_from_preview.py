@@ -9,6 +9,7 @@ from design_templates import build_font_css, extract_slide_elements, sanitize_sl
 from slide_engine import (
     _cover_image_url_from_html,
     _force_section_divider_background,
+    _unwrap_spurious_map_summary_cards,
     resolve_logo_in_html,
 )
 
@@ -809,6 +810,8 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     html = sanitize_slide_html_for_export(html)
     slide_tags = len(re.findall(r'<div\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\1', html, re.I))
     slides = extract_slide_elements(html)
+    if slides:
+        slides = [_unwrap_spurious_map_summary_cards(slide) for slide in slides]
     if cover_uri and slides:
         slides = _heal_section_divider_backgrounds(slides, cover_uri)
     if slides:
@@ -838,6 +841,15 @@ svg[data-chart], svg.combo-chart { max-width:100% !important; max-height:320px !
     body#pdf-export-root > .pdf-export-page { margin:0 !important; border:none !important; page-break-after:always !important; break-after:page !important; page-break-inside:avoid !important; break-inside:avoid !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; overflow:hidden !important; }
     body#pdf-export-root > .pdf-export-page:last-of-type { page-break-after:auto !important; break-after:auto !important; }
     body#pdf-export-root > .pdf-export-page > .slide { margin:0 !important; border:none !important; width:1280px !important; height:720px !important; box-shadow:none !important; position:relative !important; display:block !important; float:none !important; inset:auto !important; transform:none !important; zoom:1 !important; }
+    .slide [style*="columns"], .slide [style*="column-count"], .slide [data-site-analysis-text], .slide [data-map-summary-card] {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+        column-fill: balance !important;
+    }
+    .slide .col, .slide [style*="columns"] > *, .slide [style*="column-count"] > * {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }
 }
 """
 
@@ -1100,6 +1112,7 @@ def render_slide_to_image_base64(slide_html, branding=None, tenant_id=None, widt
         html = sanitize_slide_html_for_export(html)
         slides = extract_slide_elements(html)
         if slides:
+            slides = [_unwrap_spurious_map_summary_cards(slide) for slide in slides]
             html = slides[0]
 
         font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
@@ -1109,6 +1122,17 @@ html, body {{ margin:0; padding:0; background:#fff; direction:rtl; width:{width}
 .slide {{ width:{width}px !important; height:{height}px !important; direction:rtl; position:relative; overflow:hidden; }}
 img {{ max-width:100%; max-height:100%; object-fit:contain; }}
 svg[data-chart], svg.combo-chart {{ max-width:100% !important; max-height:320px !important; height:auto !important; display:block; }}
+@media print {{
+    .slide [style*="columns"], .slide [style*="column-count"], .slide [data-site-analysis-text], .slide [data-map-summary-card] {{
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+        column-fill: balance !important;
+    }}
+    .slide .col, .slide [style*="columns"] > *, .slide [style*="column-count"] > * {{
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }}
+}}
 """
 
         full_html = f"""<!DOCTYPE html>

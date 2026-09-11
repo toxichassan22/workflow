@@ -910,6 +910,55 @@ class ExportSlideSanitizationTests(unittest.TestCase):
                 for index in range(6):
                     self.assertIn(f'chunked-{index}', document[index].get_text())
 
+    def test_spurious_map_summary_card_is_unwrapped_and_preserves_content_in_pdf(self):
+        from slide_engine import _unwrap_spurious_map_summary_cards, finalize_slide_html
+
+        raw_slide = (
+            '<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;background:#fff;overflow:hidden;">'
+            '<div style="position:absolute;top:70px;right:24px;width:180px;height:580px;background:#002B49;color:#fff;">'
+            '<div>الملخص التحليلي للموقع</div></div>'
+            '<div style="position:absolute;top:110px;right:220px;left:24px;bottom:56px;">'
+            '<div style="columns:3;column-gap:20px;height:100%;overflow:hidden;">'
+            '<div class="col"><h3>الرؤية الاستثمارية</h3><p>تفاصيل الرؤية الاستثمارية للمشروع</p></div>'
+            '<div class="col"><h3>الخدمات والأعمال</h3><p>تفاصيل الخدمات والأعمال التجارية</p></div>'
+            '<div class="col"><h3>نطاق التأثير</h3><p>تفاصيل نطاق التأثير ومناطق الالتقاط</p></div>'
+            '</div></div></div>'
+        )
+
+        finalized = finalize_slide_html(
+            raw_slide, 'content', {'_map_marker_side': 'right'}, {'primary_color': '#002B49'},
+            content_source='site_analysis'
+        )
+        self.assertNotIn('data-map-summary-card', finalized)
+        self.assertNotIn('data-map-summary-background', finalized)
+
+        legacy_saved = (
+            '<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;background:#fff;overflow:hidden;">'
+            '<div data-map-summary-background style="position:absolute;top:56px;left:0;right:0;bottom:36px;"></div>'
+            '<div data-map-summary-card style="position:absolute;top:76px;bottom:56px;left:24px;right:24px;">'
+            '<div style="position:absolute;top:70px;right:24px;width:180px;height:580px;background:#002B49;color:#fff;">'
+            '<div>الملخص التحليلي للموقع</div></div>'
+            '<div style="position:absolute;top:110px;right:220px;left:24px;bottom:56px;">'
+            '<div style="columns:3;column-gap:20px;height:100%;overflow:hidden;">'
+            '<div class="col"><h3>الرؤية الاستثمارية</h3><p>تفاصيل الرؤية الاستثمارية للمشروع</p></div>'
+            '</div></div></div></div>'
+        )
+        unwrapped = _unwrap_spurious_map_summary_cards(legacy_saved)
+        self.assertNotIn('data-map-summary-card', unwrapped)
+        self.assertNotIn('data-map-summary-background', unwrapped)
+        self.assertIn('الملخص التحليلي للموقع', unwrapped)
+        self.assertIn('الرؤية الاستثمارية', unwrapped)
+
+        real_map_slide = (
+            '<div class="slide">'
+            '<div data-map-summary-background style="background-image:url(/uploads/maps/overview.png);"></div>'
+            '<div data-map-summary-card>ملخص الموقع على الخريطة</div></div>'
+        )
+        kept = _unwrap_spurious_map_summary_cards(real_map_slide)
+        self.assertIn('data-map-summary-card', kept)
+        self.assertIn('data-map-summary-background', kept)
+
 
 if __name__ == '__main__':
     unittest.main()
+
