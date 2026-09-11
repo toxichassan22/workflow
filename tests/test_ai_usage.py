@@ -729,6 +729,48 @@ class AiUsageTests(unittest.TestCase):
         self.assertEqual(ctx['draft_id'], 'd-inner')
         ctx = module._usage_ctx('slide', {'draftId': 'd-outer'}, presentation_id='p-1')
         self.assertEqual(ctx['presentation_id'], 'p-1')
+        ctx = module._usage_ctx('slide', {'draftId': 'd-outer'}, draft_id='d-explicit')
+        self.assertEqual(ctx['draft_id'], 'd-explicit')
+
+    def test_designer_chat_attributes_draft_via_linked_presentation(self):
+        module = self.application_module
+        client = self.app.test_client()
+        created = client.post(
+            '/api/presentations',
+            json={'title': 'Designer Draft Link',
+                  'projectData': {'draftId': 'draft-designer-link'},
+                  'slidesData': [{'title': 'Cover', 'type': 'cover',
+                                  'html': '<div class="slide">Cover</div>'}],
+                  'slideCount': 1},
+            headers=self._headers())
+        self.assertEqual(created.status_code, 201)
+        presentation_id = created.get_json()['presentationId']
+        seen = []
+
+        def _fake_chat(*args, **kwargs):
+            seen.append(kwargs.get('usage_ctx'))
+            return {'choices': [{'message': {'content':
+                '{"actions": [{"tool": "ask", "params": {"question": "أي شريحة؟"}}]}'}}],
+                    'usage': {'prompt_tokens': 10, 'completion_tokens': 5,
+                              'total_tokens': 15},
+                    'id': 'gen-designer-attr'}
+
+        with self.app.app_context():
+            with patch.object(module, 'call_zai_chat', side_effect=_fake_chat):
+                response = client.post(
+                    '/api/designer-chat',
+                    json={'message': 'غير اللون',
+                          'presentationId': presentation_id,
+                          'slidesData': [{'title': 'Cover', 'type': 'cover',
+                                          'html': '<div class="slide">Cover</div>'}]},
+                    headers=self._headers())
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body.get('success'))
+        self.assertTrue(seen)
+        for ctx in seen:
+            self.assertEqual(ctx.get('draft_id'), 'draft-designer-link')
+            self.assertEqual(ctx.get('presentation_id'), presentation_id)
 
 
 class MapsUsageTests(unittest.TestCase):

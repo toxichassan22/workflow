@@ -6030,6 +6030,22 @@ def api_designer_chat():
     # has no real image behind ##TEAM_LOGO_N## and falls back to the company logo.
     creative_images = _augment_generation_images(creative_images, project_data, g.tenant_id)
 
+    # Every designer turn is project spend: resolve the draft once so no model
+    # call in this flow can land outside the project total. The client often
+    # sends no draftId here, so the linked presentation is the fallback source.
+    designer_draft_id = (
+        data.get('draftId') or data.get('draft_id')
+        or (request_project_data.get('draftId') or request_project_data.get('draft_id')
+            if isinstance(request_project_data, dict) else None)
+        or (project_data.get('draftId') or project_data.get('draft_id')
+            if isinstance(project_data, dict) else None)
+        or (presentation.get('draft_id') if isinstance(presentation, dict) else None)
+    )
+    if designer_draft_id:
+        data.setdefault('draftId', str(designer_draft_id))
+        if isinstance(project_data, dict):
+            project_data.setdefault('draftId', str(designer_draft_id))
+
     # Backward-compatible one-slide clients still work.
     if not slides and data.get('slideHtml'):
         slides = [{'html': data.get('slideHtml'), 'title': data.get('slideTitle', ''), 'type': 'content', 'designStyle': 'cards'}]
