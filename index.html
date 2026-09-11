@@ -8868,12 +8868,21 @@
           case 'tenantSettingsPage':
             await openTenantSettings();
             return true;
+          case 'tenantTeamPage':
+            await openTenantTeam();
+            return true;
           case 'tenantFieldsPage':
             await openTenantFields();
             return true;
           case 'tenantPresentationsPage':
             await openTenantPresentations();
             return true;
+          case 'tenantProjectPresentationsPage': {
+            const presentationsDraftId = state.draftId || currentProjectPresentationsDraftId();
+            if (presentationsDraftId) await openProjectDraftById(presentationsDraftId);
+            await loadProjectPresentationsPage(presentationsDraftId);
+            return true;
+          }
           case 'tenantUsersPage':
             await openTenantUsers();
             return true;
@@ -8975,6 +8984,27 @@
             renderTenantSlides();
             setSlidesEditorInfo('', 0);
           }
+        } else if (requestedPage === 'tenantDashboardPage') {
+          showTenantPage(requestedPage, true);
+        } else if (requestedPage === 'tenantPresentationsPage') {
+          await openTenantPresentations();
+        } else if (requestedPage === 'tenantSettingsPage') {
+          await openTenantSettings();
+        } else if (requestedPage === 'tenantTeamPage') {
+          await openTenantTeam();
+        } else if (requestedPage === 'tenantFieldsPage') {
+          await openTenantFields();
+        } else if (requestedPage === 'tenantUsersPage') {
+          await openTenantUsers();
+        } else if (requestedPage === 'tenantTrainingPage') {
+          await openTenantTraining();
+        } else if (requestedPage === 'tenantAIRulesPage') {
+          await openTenantAIRules();
+        } else if (requestedPage === 'tenantApprovalsPage') {
+          await openTenantApprovals();
+        } else if (requestedPage === 'tenantAdminPage') {
+          if (tenantUser.isAdmin) await openTenantAdmin();
+          else { showTenantPage('tenantDashboardPage', true); syncTenantBrowserHistory('tenantDashboardPage', {}, true); }
         } else {
           showTenantPage(requestedPage, true);
         }
