@@ -437,6 +437,21 @@ def _usage_ctx(flow, data=None, draft_id=None, presentation_id=None, tenant_id=N
     }
 
 
+def _usage_ctx_optional(flow, data=None, draft_id=None, presentation_id=None):
+    """Metering context for public endpoints that skip require_auth.
+
+    Logged-in browsers still send their token, so the spend is attributed to
+    the company without turning the endpoint into a 401 for anyone else.
+    """
+    try:
+        from auth import get_optional_tenant_id
+        tenant_id = get_optional_tenant_id()
+    except Exception:
+        tenant_id = None
+    return _usage_ctx(flow, data, draft_id=draft_id, presentation_id=presentation_id,
+                      tenant_id=tenant_id)
+
+
 def _parse_openrouter_cost(value):
     """Validate one provider dollar figure. Unknown never becomes zero.
 
@@ -1916,7 +1931,7 @@ def call_image_api_with_references(prompt, references=None, usage_ctx=None):
     return None
 
 
-def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', instruction='', image_references=None):
+def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', instruction='', image_references=None, usage_ctx=None):
     current = _visual_concept_sanitize_prompt(current_prompt)
     request_text = _visual_concept_text(instruction, 4000)
     if current and request_text:
@@ -1957,7 +1972,7 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
         model=GEMINI_TEXT_MODEL,
         response_format={'type': 'json_object'},
         image_references=image_references or None,
-        usage_ctx=_usage_ctx('image'),
+        usage_ctx=usage_ctx or _usage_ctx('image'),
     )
     parsed = _designer_json_response(_get_chat_response_text(response) or extract_chat_content(response, 'VISUAL-CONCEPT-PROMPT'))
     prompt = _visual_concept_sanitize_prompt(parsed.get('prompt') or parsed.get('cover_prompt'))
@@ -2770,7 +2785,7 @@ def postprocess_slide(html, slide_num=None, tenant_id=None, slide_title=None, to
         branding=branding,
     )
 
-def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=2, total=None, title=None):
+def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=2, total=None, title=None, usage_ctx=None):
     """Generate one complete slide, retrying with a stricter prompt when needed."""
     slide_title = title or f'شريحة {slide_num}'
     style = _suggest_design_style(slide_title, slide_type='content')
@@ -2799,7 +2814,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
                     "ولا تتوقف قبل اكتماله. لا تكتب أي شرح أو markdown."
                 )
             print(f"[SLIDE-{slide_num}] Attempt {attempt}: {slide_title}")
-            response = call_zai_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide'))
+            response = call_zai_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL, usage_ctx=usage_ctx or _usage_ctx('slide'))
             if 'choices' not in response or not response.get('choices'):
                 print(f"[SLIDE-{slide_num}] ERROR: no choices (attempt {attempt})")
                 continue
@@ -2956,7 +2971,7 @@ def api_generate():
     print(f"[GENERATE] Prompt length: {len(prompt)} chars (4 batches)")
 
     try:
-        response = call_zai_chat(prompt, "قم بإنشاء العرض التقديمي الكامل.", max_tokens=16000, usage_ctx=_usage_ctx('slide'))
+        response = call_zai_chat(prompt, "قم بإنشاء العرض التقديمي الكامل.", max_tokens=16000, usage_ctx=_usage_ctx_optional('slide', data))
 
         raw = extract_chat_content(response, "GENERATE")
         print(f"[GENERATE] GLM response: {len(raw)} chars")
@@ -2997,11 +3012,15 @@ def api_generate_images():
 
     images = {'cover': None, 'moodboard': []}
 
+    # Meter every image against the requesting project: without the draft id
+    # the spend lands outside the project total while still billing the key.
+    img_ctx = _usage_ctx_optional('image', data)
+
     # 1. Cover image. The wizard requests moodboard-only images at its next step.
     if include_cover:
         print("[IMAGES] Generating cover image...")
         cover_prompt = f"Modern luxury {project_type} building in {location}, professional architectural photography, elegant design, high quality, no text, no watermark"
-        images['cover'] = persist_generated_image(call_image_api(cover_prompt), getattr(g, 'tenant_id', None))
+        images['cover'] = persist_generated_image(call_image_api(cover_prompt, usage_ctx=img_ctx), getattr(g, 'tenant_id', None))
         print(f"[IMAGES] Cover: {'OK' if images['cover'] else 'FAILED'}")
 
     # 2. Moodboard images — use reference image (main image) to maintain visual consistency
@@ -3026,9 +3045,9 @@ def api_generate_images():
     for i, prompt in enumerate(moodboard_prompts):
         print(f"[IMAGES] Generating moodboard {i+1}/{target_count} (ref: {'yes' if reference_image else 'no'})...")
         if reference_image:
-            img = persist_generated_image(call_image_api_with_reference(reference_image, prompt), getattr(g, 'tenant_id', None))
+            img = persist_generated_image(call_image_api_with_reference(reference_image, prompt, usage_ctx=img_ctx), getattr(g, 'tenant_id', None))
         else:
-            img = persist_generated_image(call_image_api(prompt), getattr(g, 'tenant_id', None))
+            img = persist_generated_image(call_image_api(prompt, usage_ctx=img_ctx), getattr(g, 'tenant_id', None))
         images['moodboard'].append(img)
         print(f"[IMAGES] Moodboard {i+1}/{target_count}: {'OK' if img else 'FAILED'}")
         if i < len(moodboard_prompts) - 1:
@@ -3116,7 +3135,7 @@ Return ONLY valid JSON: {{"titles": [{{"title": "عنوان الشريحة", "bu
 """
 
     try:
-        response = call_zai_chat(prompt, f"اكتب الهيكل المكون من {target_count} شريحة.", max_tokens=4000, usage_ctx=_usage_ctx('slide_plan'))
+        response = call_zai_chat(prompt, f"اكتب الهيكل المكون من {target_count} شريحة.", max_tokens=4000, usage_ctx=_usage_ctx_optional('slide_plan', request.json))
         raw = extract_chat_content(response, "OUTLINE")
 
         json_match = re.search(r'\{[\s\S]*"titles"[\s\S]*\}', raw)
@@ -3168,9 +3187,9 @@ def api_generate_main_image():
 
     try:
         if reference:
-            image = call_image_api_with_reference(reference, prompt)
+            image = call_image_api_with_reference(reference, prompt, usage_ctx=_usage_ctx_optional('image', data))
         else:
-            image = call_image_api(prompt)
+            image = call_image_api(prompt, usage_ctx=_usage_ctx_optional('image', data))
 
         if image:
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
@@ -3193,9 +3212,9 @@ def api_generate_slide_image():
 
     try:
         if reference:
-            image = call_image_api_with_reference(reference, prompt)
+            image = call_image_api_with_reference(reference, prompt, usage_ctx=_usage_ctx_optional('image', request.json))
         else:
-            image = call_image_api(prompt)
+            image = call_image_api(prompt, usage_ctx=_usage_ctx_optional('image', request.json))
 
         if image:
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
@@ -3216,9 +3235,9 @@ def api_generate_image_single():
 
     try:
         if reference:
-            image = call_image_api_with_reference(reference, prompt)
+            image = call_image_api_with_reference(reference, prompt, usage_ctx=_usage_ctx_optional('image', request.json))
         else:
-            image = call_image_api(prompt)
+            image = call_image_api(prompt, usage_ctx=_usage_ctx_optional('image', request.json))
 
         if image:
             return jsonify({'success': True, 'image': persist_generated_image(image, getattr(g, 'tenant_id', None))})
@@ -3268,7 +3287,7 @@ def api_get_image_prompts():
     )
 
     try:
-        res = call_zai_chat(sys_prompt, user_msg, temperature=0.7, max_tokens=2500, usage_ctx=_usage_ctx('image'))
+        res = call_zai_chat(sys_prompt, user_msg, temperature=0.7, max_tokens=2500, usage_ctx=_usage_ctx_optional('image', data))
         if res and 'choices' in res and res['choices']:
             content = res['choices'][0]['message']['content'].strip()
             if '```json' in content:
@@ -3372,7 +3391,8 @@ def api_visual_concept_prompt():
     instruction = _visual_concept_text(data.get('instruction') or data.get('message'), 4000)
     try:
         prompt, reply = _visual_concept_generate_prompt_text(
-            facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references
+            facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references,
+            usage_ctx=_usage_ctx('image', data),
         )
         if not prompt:
             return jsonify({'success': False, 'error': 'تعذر إنشاء وصف التصور البصري', 'error_code': 'TEXT_PROVIDER_INVALID'}), 503
@@ -3415,7 +3435,7 @@ def api_visual_concept_generate():
             'error_code': 'COVER_REQUIRED',
         }), 400
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
-    image = call_image_api_with_references(prompt, references)
+    image = call_image_api_with_references(prompt, references, usage_ctx=_usage_ctx('image', data))
     if not image:
         if not OPENROUTER_KEY:
             return jsonify({'success': False, 'error': 'مفتاح OpenRouter غير مُعدّ', 'error_code': 'NO_API_KEY'}), 400
@@ -3459,7 +3479,8 @@ def api_visual_concept_chat():
     references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
     try:
         prompt, reply = _visual_concept_generate_prompt_text(
-            facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references
+            facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references,
+            usage_ctx=_usage_ctx('image', data),
         )
         if not prompt:
             return jsonify({'success': False, 'error': 'تعذر تعديل وصف التصور البصري', 'error_code': 'TEXT_PROVIDER_INVALID'}), 503
@@ -3498,13 +3519,17 @@ def api_designer_generate():
     start_time = time.time()
 
     try:
+        # The attempt context is captured here in the request scope: worker
+        # threads share no Flask context, so building it inside the worker
+        # would lose the tenant and the project attribution.
+        designer_slide_ctx = _usage_ctx('slide', request.json)
         # Run slides in parallel with 4 concurrent workers
         results = [None] * slide_count
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             future_to_idx = {}
             for i in range(slide_count):
                 slide_title = outline[i].get('title') if i < len(outline) else None
-                future = executor.submit(generate_single_slide, system_prompt, i + 1, g.tenant_id, total=slide_count, title=slide_title)
+                future = executor.submit(generate_single_slide, system_prompt, i + 1, g.tenant_id, total=slide_count, title=slide_title, usage_ctx=designer_slide_ctx)
                 future_to_idx[future] = i
 
             for future in concurrent.futures.as_completed(future_to_idx):
@@ -3521,7 +3546,8 @@ def api_designer_generate():
             for slide_num in missing:
                 slide_title = outline[slide_num - 1].get('title') if slide_num - 1 < len(outline) else None
                 results[slide_num - 1] = generate_single_slide(
-                    system_prompt, slide_num, g.tenant_id, max_retries=1, total=slide_count, title=slide_title
+                    system_prompt, slide_num, g.tenant_id, max_retries=1, total=slide_count, title=slide_title,
+                    usage_ctx=designer_slide_ctx,
                 )
 
         elapsed = round(time.time() - start_time, 1)
@@ -3589,7 +3615,7 @@ def api_generate_content():
     prompt = f"اكتب محتوى للشريحة: {slide_data.get('title', '')}\n\nبيانات المشروع:\n{json.dumps(project_data, ensure_ascii=False, indent=2)}"
 
     try:
-        response = call_zai_chat(prompt, "اكتب المحتوى.", max_tokens=2000, usage_ctx=_usage_ctx('slide'))
+        response = call_zai_chat(prompt, "اكتب المحتوى.", max_tokens=2000, usage_ctx=_usage_ctx_optional('slide', request.json))
         content = extract_chat_content(response, "CONTENT")
         return jsonify({'success': True, 'content': content})
     except Exception as e:
@@ -3640,7 +3666,7 @@ def api_ai_edit_slide():
 أعد الشريحة بالـ HTML المعدّل."""
 
     try:
-        response = call_zai_chat(prompt, "عدّل الشريحة.", max_tokens=4000, model=SLIDE_TEXT_MODEL, image_references=image_refs, usage_ctx=_usage_ctx('slide'))
+        response = call_zai_chat(prompt, "عدّل الشريحة.", max_tokens=4000, model=SLIDE_TEXT_MODEL, image_references=image_refs, usage_ctx=_usage_ctx_optional('slide', data, presentation_id=presentation_id))
         html = extract_chat_content(response, "EDIT")
         html = extract_html_from_glm({'choices': [{'message': {'content': html}}]})
         
@@ -3687,7 +3713,7 @@ def api_ai_chat():
 {{"action": "reply", "response": "نص الرد"}}"""
 
     try:
-        response = call_zai_chat(prompt, message, max_tokens=2000, usage_ctx=_usage_ctx('slide'))
+        response = call_zai_chat(prompt, message, max_tokens=2000, usage_ctx=_usage_ctx_optional('slide', data))
         reply = extract_chat_content(response, "CHAT")
 
         parsed = _extract_json_from_text(reply)
@@ -3729,7 +3755,7 @@ def api_generate_bullets():
     prompt = f"اكتب 3-5 نقاط مختصرة للشريحة: {title}\n\nبيانات المشروع:\n{json.dumps(project_data, ensure_ascii=False, indent=2)}"
 
     try:
-        response = call_zai_chat(prompt, "اكتب النقاط.", max_tokens=1000, usage_ctx=_usage_ctx('slide'))
+        response = call_zai_chat(prompt, "اكتب النقاط.", max_tokens=1000, usage_ctx=_usage_ctx_optional('slide', request.json))
         content = extract_chat_content(response, "BULLETS")
         # Bullet glyphs are stripped from the model's output; written as escapes so the source
         # itself stays free of icon characters.
@@ -5897,7 +5923,7 @@ def _designer_chat_history_lines(history):
     return lines
 
 
-def _designer_chat_memory(history, memory):
+def _designer_chat_memory(history, memory, usage_ctx=None):
     """Keep the conversation whole: recent turns verbatim, older ones compressed into one memory.
 
     The chat used to receive nothing but the current message, so it asked «أي شريحة؟», the user
@@ -5924,7 +5950,8 @@ def _designer_chat_memory(history, memory):
             "عنها بأرقامها، والمشاكل التي ذُكرت، والتعديلات التي نُفّذت، والقرارات وتفضيلات المستخدم، "
             "وأي سؤال لم يُجب عليه بعد. بلا مقدمات وبلا تنسيق زائد.",
             f"الذاكرة السابقة:\n{memory or 'لا توجد'}\n\nالمحادثة الأقدم:\n{older_text}",
-            max_tokens=700, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('designer_chat')), 'DESIGNER-MEMORY')
+            max_tokens=700, model=SLIDE_TEXT_MODEL,
+            usage_ctx=usage_ctx or _usage_ctx('designer_chat')), 'DESIGNER-MEMORY')
         summary = str(summary or '').strip()
     except Exception as error:
         print(f"[DESIGNER MEMORY] compression failed: {error}")
@@ -6024,7 +6051,9 @@ def api_designer_chat():
     incoming_history = data.get('history') if isinstance(data.get('history'), list) else []
     history_for_turn = _merge_designer_chat_messages(stored_chat.get('messages'), incoming_history)
     memory_seed = data.get('memory') if isinstance(data.get('memory'), str) and data.get('memory') else stored_chat.get('memory')
-    chat_memory, recent_history = _designer_chat_memory(history_for_turn, memory_seed)
+    chat_memory, recent_history = _designer_chat_memory(
+        history_for_turn, memory_seed,
+        usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id))
     history_lines = _designer_chat_history_lines(recent_history)
     focus_indexes = []
     for value in (data.get('focusIndexes') if isinstance(data.get('focusIndexes'), list) else []):
@@ -6492,10 +6521,11 @@ def api_designer_chat():
                             break
 
                 ref_images = _find_component_reference_image(comp_name or prompt or message, project_data, creative_images)
+                designer_image_ctx = _usage_ctx('image', project_data, presentation_id=presentation_id, tenant_id=tenant_id)
                 if ref_images:
-                    image_raw = call_image_api_with_references(prompt, references=ref_images)
+                    image_raw = call_image_api_with_references(prompt, references=ref_images, usage_ctx=designer_image_ctx)
                 else:
-                    image_raw = call_image_api(prompt)
+                    image_raw = call_image_api(prompt, usage_ctx=designer_image_ctx)
 
                 image = persist_generated_image(image_raw, tenant_id)
                 if not image:
@@ -8281,11 +8311,11 @@ def _map_image_point_to_coords(x, y, width, height, center_lat, center_lng, zoom
     return lat, lng
 
 
-def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zoom):
+def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zoom, usage_ctx=None):
     """Ask the vision model for a conservative building-only polygon estimate."""
     if not OPENROUTER_KEY or not image_path or not os.path.isfile(image_path):
         return None
-    site_attempt_id = _begin_ai_attempt_record(_usage_ctx('site'), IMAGE_MODEL)
+    site_attempt_id = _begin_ai_attempt_record(usage_ctx or _usage_ctx('site'), IMAGE_MODEL)
     try:
         from reference_analyzer import encode_image_to_base64
         from PIL import Image
@@ -12743,7 +12773,7 @@ def split_regulation_table_batches(table_pages, batch_size=None):
     return [rows[start:start + limit] for start in range(0, len(rows), limit)]
 
 
-def _extract_full_regulation_evidence(source, site_facts):
+def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
     source_name = source.get('name') or 'ملف اشتراطات'
     context = str(source.get('context') or '')
     table_pages = source.get('table_pages') if isinstance(source.get('table_pages'), list) else []
@@ -12778,7 +12808,8 @@ def _extract_full_regulation_evidence(source, site_facts):
         result, _cap, error = _run_land_json_stage(
             stage_name, base_prompt, user_content,
             REGULATION_EVIDENCE_MAX_TOKENS, REGULATION_EVIDENCE_MIN_TOKENS,
-            REGULATION_EVIDENCE_MAX_TOKENS * 2
+            REGULATION_EVIDENCE_MAX_TOKENS * 2,
+            usage_ctx=usage_ctx,
         )
         if error:
             warnings.append(f'تعذر استخراج جزء من أدلة {source_name}: {error}')
@@ -12927,7 +12958,7 @@ def _chat_error_message(res):
     return str(error or 'unknown provider error')[:400]
 
 
-def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_tokens=None, truncation_ceiling=None):
+def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_tokens=None, truncation_ceiling=None, usage_ctx=None):
     """Call the vision model, lowering the reserved cap when the provider cannot afford it.
 
     Gateway failures (HTTP 5xx) are usually transient, so they are retried with the same cap
@@ -12946,7 +12977,7 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_token
             max_tokens=cap, model=LAND_ANALYSIS_MODEL,
             response_format={'type': 'json_object'} if use_json_mode else None,
             provider=LAND_ANALYSIS_PROVIDER,
-            usage_ctx=_usage_ctx('land'),
+            usage_ctx=usage_ctx or _usage_ctx('land'),
         )
         if _has_chat_choices(res):
             choices = res.get('choices') or []
@@ -12984,13 +13015,14 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_token
     return res, cap, message
 
 
-def _run_land_json_stage(stage_name, system_prompt, user_content, max_tokens, min_tokens, truncation_ceiling):
+def _run_land_json_stage(stage_name, system_prompt, user_content, max_tokens, min_tokens, truncation_ceiling, usage_ctx=None):
     response, used_cap, provider_error = _call_land_analysis_model(
         system_prompt,
         user_content,
         max_tokens,
         min_tokens=min_tokens,
         truncation_ceiling=truncation_ceiling,
+        usage_ctx=usage_ctx,
     )
     if not _has_chat_choices(response):
         return {}, used_cap, provider_error
@@ -14008,7 +14040,7 @@ def _read_market_job(tenant_id, job_id):
     return _read_job('.market_jobs', tenant_id, job_id)
 
 
-def _call_market_study_model(system_prompt, user_content, max_tokens=None):
+def _call_market_study_model(system_prompt, user_content, max_tokens=None, usage_ctx=None):
     """Search-backed market call with JSON, provider, and credit fallbacks."""
     cap = max(2000, int(max_tokens or MARKET_STUDY_MAX_TOKENS))
     # One search cannot price several competitors, so the model is allowed a search per
@@ -14049,7 +14081,7 @@ def _call_market_study_model(system_prompt, user_content, max_tokens=None):
                 provider=provider,
                 tools=attempt_tools,
                 timeout=240,
-                usage_ctx=_usage_ctx('market'),
+                usage_ctx=usage_ctx or _usage_ctx('market'),
             )
             last_error = _chat_error_message(last_response)
             text = _get_chat_response_text(last_response)
@@ -14137,7 +14169,8 @@ def _execute_market_competitors(data):
     mode = 'fill' if str(data.get('mode') or '').strip() == 'fill' else 'generate'
     system_prompt = market_study.build_consultant_system_prompt()
     user_prompt = market_study.build_competitors_user_prompt(payload, existing, mode=mode)
-    res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=6000)
+    res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=6000,
+                                                       usage_ctx=_usage_ctx('market', data))
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
         reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
@@ -14182,7 +14215,8 @@ def _execute_market_summary(data):
     user_prompt = market_study.build_summary_user_prompt(
         payload, competitors, current_summary, current_sources=current_sources, current_swot=current_swot
     )
-    res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS)
+    res, provider_error = _call_market_study_model(system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
+                                                       usage_ctx=_usage_ctx('market', data))
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
         reason = 'insufficient_credit' if 'afford' in (provider_error or '').lower() else parse_error
@@ -14410,7 +14444,8 @@ def api_market_study_competitor_logo():
             'وlogo_source_url الصفحة الرسمية التي تثبت الشعار. إذا لم تجد دليلًا رسميًا أعد القيم فارغة.'
         )
         response, provider_error = _call_market_study_model(
-            market_study.build_consultant_system_prompt(), discovery_prompt, max_tokens=1600)
+            market_study.build_consultant_system_prompt(), discovery_prompt, max_tokens=1600,
+            usage_ctx=_usage_ctx('market', data))
         parsed, parse_error = _parse_market_model_json(response)
         discovered_official = str(parsed.get('official_url') or parsed.get('logo_source_url') or '').strip()
         citations = _market_citation_urls(response)
@@ -14432,7 +14467,8 @@ def api_market_study_competitor_logo():
             'وlogo_source_url صفحة الموقع الرسمي. إذا لم تجده أعد القيمتين فارغتين.'
         )
         response, provider_error = _call_market_study_model(
-            market_study.build_consultant_system_prompt(), prompt, max_tokens=1200)
+            market_study.build_consultant_system_prompt(), prompt, max_tokens=1200,
+            usage_ctx=_usage_ctx('market', data))
         parsed, parse_error = _parse_market_model_json(response)
         if parse_error:
             return jsonify({'success': False, 'error': provider_error or 'لم يُعثر على شعار رسمي'}), 404
@@ -14847,7 +14883,8 @@ def _execute_extract_croquis():
             }] + vision_parts
             facts_result, facts_cap, facts_error = _run_land_json_stage(
                 'site_facts', facts_prompt, facts_payload,
-                LAND_FACTS_MAX_TOKENS, LAND_FACTS_MIN_TOKENS, LAND_FACTS_MAX_TOKENS * 2
+                LAND_FACTS_MAX_TOKENS, LAND_FACTS_MIN_TOKENS, LAND_FACTS_MAX_TOKENS * 2,
+                usage_ctx=_usage_ctx('land', data),
             )
             if facts_error:
                 vision_warnings.append('تعذر استخراج حقائق الكروكي الأولية؛ تم استخدام بيانات المشروع المدخلة فقط.')
@@ -14869,7 +14906,8 @@ def _execute_extract_croquis():
                     if entry.get('name') == source_name
                 ]
                 source_for_evidence = {**source, 'table_pages': source_tables}
-                extracted_evidence = _extract_full_regulation_evidence(source_for_evidence, site_facts)
+                extracted_evidence = _extract_full_regulation_evidence(
+                    source_for_evidence, site_facts, usage_ctx=_usage_ctx('land', data))
                 vision_warnings.extend(extracted_evidence.get('warnings', []))
                 if not extracted_evidence.get('evidence') and not extracted_evidence.get('uncertainties'):
                     if not source.get('context') and not source_tables:
@@ -14929,7 +14967,8 @@ def _execute_extract_croquis():
 
             try:
                 res, used_cap, provider_error = _call_land_analysis_model(
-                    system_prompt, user_content, LAND_ANALYSIS_MAX_TOKENS)
+                    system_prompt, user_content, LAND_ANALYSIS_MAX_TOKENS,
+                    usage_ctx=_usage_ctx('land', data))
                 if _has_chat_choices(res):
                     raw_resp = _get_chat_response_text(res)
                     choices = res.get('choices') if isinstance(res, dict) else []

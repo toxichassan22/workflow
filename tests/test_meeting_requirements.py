@@ -148,7 +148,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # The cap is negotiated in _call_land_analysis_model: too low truncates the JSON, too high
         # is refused outright because the provider reserves max_tokens against the balance.
         self.assertIn('_call_land_analysis_model(\n', app_source)
-        self.assertIn('LAND_ANALYSIS_MAX_TOKENS)', app_source)
+        self.assertIn('LAND_ANALYSIS_MAX_TOKENS', app_source)
 
     def test_pdf_scan_orientation_adds_high_resolution_table_tiles(self):
         import base64

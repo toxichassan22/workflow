@@ -654,6 +654,82 @@ class AiUsageTests(unittest.TestCase):
         self.assertEqual(body['events']['total'], 1)
         self.assertEqual(body['events']['items'][0]['model'], 'model-pg')
 
+    # ── Project attribution ──────────────────────────────────────────
+
+    def test_image_generation_carries_draft_attribution(self):
+        module = self.application_module
+        payload = {
+            'id': 'gen-img-attr-1',
+            'choices': [{'message': {'content': 'ok'}}],
+            'usage': {'prompt_tokens': 50, 'completion_tokens': 8000, 'total_tokens': 8050,
+                      'cost': 0.028},
+        }
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', return_value=_FakeResponse(payload)):
+                url = module.call_image_api(
+                    'a villa', usage_ctx={'tenant_id': self.tenant_id,
+                                          'draft_id': 'draft-img-attr', 'flow': 'image'})
+            self.assertIsNone(url)
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-img-attr')
+        self.assertEqual(summary['totals']['calls'], 1)
+        self.assertAlmostEqual(summary['totals']['cost_usd'], 0.028)
+        self.assertEqual(summary['recent'][0]['generation_id'], 'gen-img-attr-1')
+
+    def test_generate_images_endpoint_attributes_project(self):
+        import base64 as _b64
+        module = self.application_module
+        tiny_png = 'data:image/png;base64,' + _b64.b64encode(b'fakepngbytes').decode('ascii')
+        payload = {
+            'id': 'gen-imgs-ep-1',
+            'choices': [{'message': {'images': [tiny_png]}}],
+            'usage': {'prompt_tokens': 100, 'completion_tokens': 2000, 'total_tokens': 2100,
+                      'cost': 0.02},
+        }
+        with self.app.app_context():
+            with patch.object(module.requests, 'post', return_value=_FakeResponse(payload)):
+                client = self.app.test_client()
+                response = client.post(
+                    '/api/generate-images',
+                    json={'draftId': 'draft-imgs-ep', 'projectData': {'draftId': 'draft-imgs-ep'},
+                          'includeCover': True, 'count': 1},
+                    headers=self._headers())
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.get_json()['success'])
+            summary = db.get_ai_usage_summary(self.tenant_id, draft_id='draft-imgs-ep')
+        self.assertGreaterEqual(summary['totals']['calls'], 1)
+        self.assertGreaterEqual(summary['totals']['cost_usd'], 0.02)
+
+    def test_market_model_call_forwards_project_scope(self):
+        module = self.application_module
+        seen = []
+        fake = {'choices': [{'message': {'content': '{"competitors": []}'}}],
+                'usage': {'prompt_tokens': 5, 'completion_tokens': 5, 'total_tokens': 10},
+                'id': 'gen-mkt-attr'}
+
+        def _fake_chat(*args, **kwargs):
+            seen.append(kwargs.get('usage_ctx'))
+            return dict(fake)
+
+        with self.app.app_context():
+            with patch.object(module, 'call_openrouter_chat', side_effect=_fake_chat):
+                module._call_market_study_model(
+                    'sys', 'user', max_tokens=2000,
+                    usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-mkt-attr',
+                               'flow': 'market'})
+        self.assertTrue(seen)
+        self.assertEqual(seen[0].get('draft_id'), 'draft-mkt-attr')
+        self.assertEqual(seen[0].get('flow'), 'market')
+
+    def test_usage_ctx_reads_outer_and_inner_draft_ids(self):
+        module = self.application_module
+        ctx = module._usage_ctx('slide', {'draftId': 'd-outer',
+                                          'projectData': {'draftId': 'd-inner'}})
+        self.assertEqual(ctx['draft_id'], 'd-outer')
+        ctx = module._usage_ctx('slide', {'projectData': {'draft_id': 'd-inner'}})
+        self.assertEqual(ctx['draft_id'], 'd-inner')
+        ctx = module._usage_ctx('slide', {'draftId': 'd-outer'}, presentation_id='p-1')
+        self.assertEqual(ctx['presentation_id'], 'p-1')
+
 
 class MapsUsageTests(unittest.TestCase):
     @classmethod
