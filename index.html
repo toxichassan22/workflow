@@ -19010,6 +19010,7 @@
     }
 
     async function regenerateMapPreview(mapType) {
+      if (!hasPermission('generate_maps')) { toast('لا تملك صلاحية توليد الخرائط'); return false; }
       const approvals = tenantCreativeImages.map_approvals || {};
       if (!tenantProjectData.location_analysis_approved) { toast('اعتماد تحليل الموقع مطلوب قبل توليد الخرائط'); return false; }
       if (mapType !== 'overview' && !approvals.overview) { toast('اعتماد خريطة الأرض مطلوب أولًا'); return false; }
@@ -21564,6 +21565,7 @@
     }
 
     async function generateVisualConceptPrompt(slotId, instruction) {
+      if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked(slotId)) {
         toast(isVisualConceptInteriorSlot(slotId) ? 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.' : 'اعتمد الصورة الرئيسية أولاً.');
         return;
@@ -21592,6 +21594,7 @@
     }
 
     async function generateVisualConceptImage(slotId) {
+      if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       // Never hold a slot reference across an await or a render: renderVisualConceptPage
       // reassigns tenantVisualConceptState through normalizeVisualConceptState, so a
       // captured slot is detached and the generated image was written to a dead object.
@@ -21706,6 +21709,7 @@
     }
 
     async function sendVisualConceptChat(slotId) {
+      if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked(slotId)) {
         toast(isVisualConceptInteriorSlot(slotId) ? 'أضف مكونات المشروع واعتمد الصورة الرئيسية أولاً.' : 'اعتمد الصورة الرئيسية أولاً.');
         return;
@@ -27662,6 +27666,8 @@
       dashboard: 'الرئيسية',
       create_presentation: 'إنشاء عرض جديد',
       view_presentations: 'عرض العروض السابقة',
+      generate_images: 'توليد الصور',
+      generate_maps: 'توليد الخرائط',
       company_settings: 'إعدادات الشركة',
       custom_fields: 'الحقول المخصصة',
       manage_users: 'إدارة الموظفين',

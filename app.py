@@ -2960,6 +2960,7 @@ def _extract_json_from_text(text):
 # ENDPOINT 1: Generate all slides HTML with GLM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route('/api/generate', methods=['POST'])
+@require_permission('create_presentation')
 def api_generate():
     data = request.json
     project_data = clean_project_data(data.get('projectData', {}))
@@ -2991,6 +2992,7 @@ def api_generate():
 # ENDPOINT 2: Generate images (1 cover + 4 moodboard)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route('/api/generate-images', methods=['POST'])
+@require_permission('generate_images')
 def api_generate_images():
     data = request.json
     project_data = clean_project_data(data.get('projectData', {}))
@@ -3167,6 +3169,7 @@ def api_generate_titles():
 
 
 @app.route('/api/generate-main-image', methods=['POST'])
+@require_permission('generate_images')
 def api_generate_main_image():
     """Compatibility: Generate main cover image"""
     data = request.json or {}
@@ -3204,6 +3207,7 @@ def api_generate_main_image():
 
 
 @app.route('/api/generate-slide-image', methods=['POST'])
+@require_permission('generate_images')
 def api_generate_slide_image():
     """Compatibility: Generate image for a specific slide"""
     prompt = request.json.get('prompt', '')
@@ -3227,6 +3231,7 @@ def api_generate_slide_image():
 
 
 @app.route('/api/generate-image', methods=['POST'])
+@require_permission('generate_images')
 def api_generate_image_single():
     """Compatibility: Generate single image (singular)"""
     prompt = request.json.get('prompt', '')
@@ -3250,6 +3255,7 @@ def api_generate_image_single():
 
 
 @app.route('/api/get-image-prompts', methods=['POST'])
+@require_permission('generate_images')
 def api_get_image_prompts():
     """Use GLM 5.1 to generate hyper-realistic, project-tailored architectural prompts for cover and moodboard images."""
     data = request.json or {}
@@ -3343,7 +3349,7 @@ def api_get_image_prompts():
 
 
 @app.route('/api/visual-concept/preflight', methods=['POST'])
-@require_auth
+@require_permission('generate_images')
 def api_visual_concept_preflight():
     data = request.get_json(silent=True) or {}
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover') or 'cover'
@@ -3365,7 +3371,7 @@ def api_visual_concept_preflight():
 
 
 @app.route('/api/visual-concept/prompt', methods=['POST'])
-@require_auth
+@require_permission('generate_images')
 def api_visual_concept_prompt():
     data = request.get_json(silent=True) or {}
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
@@ -3410,7 +3416,7 @@ def api_visual_concept_prompt():
 
 
 @app.route('/api/visual-concept/generate', methods=['POST'])
-@require_auth
+@require_permission('generate_images')
 def api_visual_concept_generate():
     data = request.get_json(silent=True) or {}
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
@@ -3451,7 +3457,7 @@ def api_visual_concept_generate():
 
 
 @app.route('/api/visual-concept/chat', methods=['POST'])
-@require_auth
+@require_permission('generate_images')
 def api_visual_concept_chat():
     data = request.get_json(silent=True) or {}
     slot_id = _visual_concept_normalize_slot(data.get('slotId') or 'cover')
@@ -5983,7 +5989,7 @@ def _report_designer_job_progress(job_id, tenant_id, progress_val, message_text,
 
 
 @app.route('/api/designer-chat', methods=['POST'])
-@require_auth
+@require_permission('create_presentation')
 def api_designer_chat():
     """Agentic designer chat operating on one slide or the complete presentation."""
     data = request.json or {}
@@ -7026,6 +7032,7 @@ def api_project_data():
 
 
 @app.route('/api/generate-cover-prompt', methods=['POST'])
+@require_permission('generate_images')
 def api_generate_cover_prompt():
     """Compatibility: Generate detailed cover image prompt using GLM"""
     data = request.json
@@ -8801,7 +8808,7 @@ def api_site_analysis():
 
 
 @app.route('/api/generate-map-image', methods=['POST'])
-@require_auth
+@require_permission('generate_maps')
 def api_generate_single_map_image():
     data = request.json or {}
     _billing_guard = _require_billing_balance('map_image')
@@ -9713,6 +9720,132 @@ def api_get_project_draft():
     return jsonify({'success': True, 'draft': draft})
 
 
+# Draft keys that are not tenant_input_fields rows but still belong to a governed
+# field section. The widget sections (timeline, financial, team, market study,
+# visual concept, executive content) have no field-section keys, so their blobs
+# stay outside section enforcement until they get governable sections.
+DRAFT_FIELD_SECTION_BLOBS = {
+    'land_documents_analysis': 'land_croquis',
+    'survey_coordinates': 'land_croquis',
+    'directions_table': 'land_croquis',
+    'site_analysis': 'location',
+}
+
+
+def _draft_field_section_map(tenant_id):
+    """Map every draft key the section UI governs to its section key."""
+    section_map = {}
+    try:
+        for field in db.get_fields(tenant_id):
+            field_key = field.get('field_key')
+            if field_key:
+                section_map[field_key] = field.get('section_key') or 'general'
+    except Exception:
+        pass
+    for prebuilt in db.PREBUILT_FIELDS:
+        section_map.setdefault(prebuilt['key'], prebuilt.get('section_key', 'general'))
+    section_map.update(DRAFT_FIELD_SECTION_BLOBS)
+    return section_map
+
+
+def _draft_section_of_key(section_map, key):
+    """Resolve a draft key (including *_file_id/_file_meta companions) to a section."""
+    section = section_map.get(key)
+    if section:
+        return section
+    for suffix in ('_file_ids', '_file_meta', '_file_id'):
+        if key.endswith(suffix):
+            return section_map.get(key[:-len(suffix)])
+    return None
+
+
+def _draft_value_has_content(value):
+    """True when a value carries something worth refusing to write blindly."""
+    if value is None or value is False:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, dict):
+        return any(_draft_value_has_content(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_draft_value_has_content(item) for item in value)
+    return True
+
+
+def _draft_values_equal(first, second):
+    """Compare draft values so an untouched hidden section never looks edited."""
+    if first == second:
+        return True
+    try:
+        return json.dumps(first, ensure_ascii=False, sort_keys=True) == json.dumps(
+            second, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return False
+
+
+def _enforce_draft_field_sections(draft_data, stored_data, section_statuses, stored_statuses):
+    """Refuse a blocked section write while keeping the allowed work saveable.
+
+    Hidden sections are not rendered, so a legitimate save carries their stored
+    values unchanged (or omits them). Only incoming content that differs from
+    storage is a real write to a section the actor cannot reach, and that is
+    refused with 403. Anything else is restored from storage so a stale or
+    partial client can neither edit nor wipe what it cannot see.
+    Returns (forbidden_sections, restored_sections).
+    """
+    allowed = db.get_user_field_sections(g.user_id, g.tenant_id)
+    denied = {key for key, granted in allowed.items() if not granted} - {'general'}
+    if not denied:
+        return [], []
+    section_map = _draft_field_section_map(g.tenant_id)
+    stored = stored_data if isinstance(stored_data, dict) else {}
+    forbidden = []
+    restored = []
+
+    section_labels = {s['key']: s.get('label') or s['key'] for s in db.get_all_sections(g.tenant_id)}
+    for key in list(draft_data.keys()):
+        section = _draft_section_of_key(section_map, key)
+        if section not in denied:
+            continue
+        incoming_value = draft_data.get(key)
+        stored_value = stored.get(key)
+        if _draft_values_equal(incoming_value, stored_value):
+            continue
+        if _draft_value_has_content(incoming_value):
+            label = section_labels.get(section, section)
+            if label not in forbidden:
+                forbidden.append(label)
+            continue
+        if key in stored:
+            draft_data[key] = stored_value
+            restored.append(key)
+        else:
+            draft_data.pop(key, None)
+
+    # A key the client omitted must not wipe storage either: the save overwrites
+    # the whole row, and a hidden section is absent precisely because it was not
+    # rendered.
+    inverted = {}
+    for field_key, section in section_map.items():
+        if section in denied:
+            inverted.setdefault(section, []).append(field_key)
+    for section, field_keys in inverted.items():
+        for field_key in field_keys:
+            if field_key not in draft_data and field_key in stored:
+                draft_data[field_key] = stored[field_key]
+                restored.append(field_key)
+
+    if isinstance(section_statuses, dict) and section_statuses:
+        previous = stored_statuses if isinstance(stored_statuses, dict) else {}
+        for section in denied:
+            if section in section_statuses and section_statuses[section] != previous.get(section, 'draft'):
+                section_statuses[section] = previous.get(section, 'draft')
+                restored.append('status:' + section)
+    return forbidden, restored
+
+
 @app.route('/api/project-draft', methods=['POST'])
 @require_auth
 def api_save_project_draft():
@@ -9742,6 +9875,27 @@ def api_save_project_draft():
     previous = db.get_project_draft_by_id(g.tenant_id, previous_id) if previous_id else None
     previous_data = (previous or {}).get('draft_data') if isinstance(previous, dict) else {}
     previous_statuses = (previous or {}).get('section_statuses') if isinstance(previous, dict) else {}
+    # A section the actor cannot open cannot be written through the save either.
+    # Company admins and tenant-direct logins bypass: require_permission already
+    # grants them every permission, and section toggles govern employees only.
+    if g.user_id and (g.user_role or 'employee') != 'company_admin' and not g.is_admin:
+        forbidden_sections, restored_keys = _enforce_draft_field_sections(
+            draft_data, previous_data, section_statuses, previous_statuses)
+        if restored_keys:
+            app.logger.warning(
+                '[DRAFT SAVE] Restored %d blocked-section value(s) for tenant=%s actor=%s: %s',
+                len(restored_keys), g.tenant_id, _project_draft_actor_id(), restored_keys[:12]
+            )
+        if forbidden_sections:
+            app.logger.warning(
+                '[DRAFT SAVE] Refused blocked-section write: tenant=%s actor=%s sections=%s',
+                g.tenant_id, _project_draft_actor_id(), forbidden_sections
+            )
+            return jsonify({
+                'error': 'لا تملك صلاحية حفظ بيانات قسم: ' + '، '.join(forbidden_sections),
+                'error_code': 'SECTION_FORBIDDEN',
+                'sections': forbidden_sections,
+            }), 403
     try:
         draft_id = db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
@@ -14321,7 +14475,7 @@ def _start_market_job(kind, executor):
 
 
 @app.route('/api/executive-content/generate', methods=['POST'])
-@require_auth
+@require_permission('create_presentation')
 def api_generate_executive_content():
     """Rewrite one executive-content block from already collected project facts."""
     data = request.json or {}
@@ -14428,13 +14582,13 @@ def api_market_study_catalog():
 
 
 @app.route('/api/market-study/competitors', methods=['POST'])
-@require_auth
+@require_permission('create_presentation')
 def api_market_study_competitors():
     return _start_market_job('competitors', _execute_market_competitors)
 
 
 @app.route('/api/market-study/summary', methods=['POST'])
-@require_auth
+@require_permission('create_presentation')
 def api_market_study_summary():
     return _start_market_job('summary', _execute_market_summary)
 
@@ -14601,7 +14755,7 @@ def _land_job_worker(app, tenant_id, data, job_id):
 
 
 @app.route('/api/extract-croquis', methods=['POST'])
-@require_auth
+@require_permission('create_presentation')
 def api_extract_croquis():
     """Accept a land-analysis request.
 
@@ -17321,7 +17475,7 @@ def api_training_chat():
 
 ### 8. تعديل صلاحيات موظف:
 ```action
-{{"tool": "set_permission", "params": {{"user_email": "...", "permission": "dashboard|create_presentation|view_presentations|company_settings|custom_fields|manage_users|ai_rules|training_data|approvals|export_files", "granted": true}}}}
+  {{"tool": "set_permission", "params": {{"user_email": "...", "permission": "dashboard|create_presentation|view_presentations|generate_images|generate_maps|company_settings|custom_fields|manage_users|ai_rules|training_data|approvals|export_files", "granted": true}}}}
 ```
 
 ### 9. تفعيل/تعطيل موظف:
