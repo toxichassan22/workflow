@@ -26573,8 +26573,6 @@
             tenantId + '\', \'' + user.id + '\')">تعديل</button>' +
           '<button type="button" class="btn small primary" onclick="openSagUserPermissions(\'' +
             tenantId + '\', \'' + user.id + '\', \'' + escapeHtml(user.name) + '\')">صلاحيات</button>' +
-          '<button type="button" class="btn small ghost" onclick="openSagUserPassword(\'' +
-            tenantId + '\', \'' + user.id + '\', \'' + escapeHtml(user.name) + '\')">كلمة المرور</button>' +
           (primary ? '' : '<button type="button" class="btn small ghost" onclick="sagSetPrimaryUser(\'' +
             tenantId + '\', \'' + user.id + '\')">تعيين مدير الحساب</button>') +
           '<button type="button" class="btn small ' + (user.is_active ? 'danger' : 'green') +
@@ -26754,6 +26752,11 @@
         '<div class="tenant-field"><label>البريد الإلكتروني</label><input type="email" id="sagEditUserEmail" value="' + escapeHtml(user.email || '') + '" required></div>' +
         '<div class="tenant-field"><label>اسم المستخدم</label><input id="sagEditUserUsername" value="' + escapeHtml(user.username || '') + '" minlength="3" maxlength="40" required></div>' +
         '<div class="tenant-field"><label>رقم الجوال</label><input id="sagEditUserPhone" value="' + escapeHtml(user.phone || '') + '"></div>' +
+        '<div class="tenant-field"><label>كلمة مرور جديدة</label>' +
+        '<div style="display:flex;gap:8px">' +
+        '<input type="text" id="sagEditUserPassword" minlength="10" autocomplete="new-password" placeholder="فارغة للإبقاء على الحالية" style="flex:1;min-width:0">' +
+        '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagEditUserPassword\').value = generateStrongPassword()">توليد تلقائي</button>' +
+        '</div></div>' +
         '<div class="tenant-field full"><label>الدور</label><select id="sagEditUserRole">' +
         '<option value="employee"' + (user.role !== 'company_admin' ? ' selected' : '') + '>موظف</option>' +
         '<option value="company_admin"' + (user.role === 'company_admin' ? ' selected' : '') + '>أدمن شركة</option></select></div>' +
@@ -26773,6 +26776,14 @@
         phone: document.getElementById('sagEditUserPhone').value.trim(),
         role: document.getElementById('sagEditUserRole').value
       };
+      const newPassword = document.getElementById('sagEditUserPassword').value;
+      if (newPassword) {
+        if (newPassword.length < 10) {
+          toast('كلمة المرور 10 أحرف على الأقل');
+          return;
+        }
+        payload.password = newPassword;
+      }
       if (!payload.name || !payload.email || !payload.username) {
         toast('الاسم والبريد واسم المستخدم مطلوبة');
         return;
@@ -26787,48 +26798,6 @@
         document.getElementById('sagUserEditModal').remove();
         toast('تم حفظ بيانات المستخدم');
         await showSagTenantDetails(tenantId);
-      } finally {
-        hideLoader();
-      }
-    }
-
-    function openSagUserPassword(tenantId, userId, userName) {
-      const existing = document.getElementById('sagUserPasswordModal');
-      if (existing) existing.remove();
-      const modal = document.createElement('div');
-      modal.id = 'sagUserPasswordModal';
-      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      modal.innerHTML = '<div style="background:#fff;border-radius:16px;padding:20px;max-width:520px;width:100%">' +
-        '<div class="sag-modal-head">' +
-        '<h2>كلمة المرور: ' + escapeHtml(userName) + '</h2>' +
-        '<button class="btn ghost" onclick="document.getElementById(\'sagUserPasswordModal\').remove()">إغلاق</button></div>' +
-        '<div class="tenant-field"><label>كلمة مرور جديدة</label>' +
-        '<div style="display:flex;gap:8px">' +
-        '<input type="text" id="sagUserPasswordValue" minlength="10" autocomplete="new-password" style="flex:1;min-width:0">' +
-        '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagUserPasswordValue\').value = generateStrongPassword()">توليد تلقائي</button>' +
-        '</div></div>' +
-        '<div class="sag-modal-actions">' +
-        '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagUserPasswordModal\').remove()">إلغاء</button>' +
-        '<button type="button" class="btn primary" onclick="sagSetUserPassword(\'' + tenantId + '\', \'' + userId + '\')">اعتماد</button>' +
-        '</div></div>';
-      document.body.appendChild(modal);
-    }
-
-    async function sagSetUserPassword(tenantId, userId) {
-      const password = document.getElementById('sagUserPasswordValue').value;
-      if (!password || password.length < 10) {
-        toast('كلمة المرور 10 أحرف على الأقل');
-        return;
-      }
-      showLoader('جاري تعيين كلمة المرور', 'حفظ كلمة المرور الجديدة', 15);
-      try {
-        const data = await api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId, { password });
-        if (!data.success) {
-          toast(data.error || 'تعذر تعيين كلمة المرور');
-          return;
-        }
-        document.getElementById('sagUserPasswordModal').remove();
-        toast('تم تعيين كلمة المرور');
       } finally {
         hideLoader();
       }
