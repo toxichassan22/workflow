@@ -2547,6 +2547,19 @@ def get_change_log(tenant_id, target_type, target_id, limit=200):
     return entries
 
 
+def get_tenant_recent_activity(tenant_id, limit=100):
+    """Newest-first change_log rows across a whole tenant (super-admin visibility)."""
+    conn = get_db()
+    rows = conn.execute(
+        '''SELECT user_name, source, action, summary, target_type, target_id, created_at
+           FROM change_log
+           WHERE tenant_id = ?
+           ORDER BY created_at DESC LIMIT ?''',
+        (tenant_id, max(1, min(int(limit or 100), 300)))
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def _json_list(value):
     if isinstance(value, list):
         return list(value)

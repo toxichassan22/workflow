@@ -26322,17 +26322,87 @@
       renderSagTenants(filtered);
     }
 
+    const SAG_TENANT_TABS = ['company', 'users', 'drafts', 'presentations', 'exports', 'activity'];
+
+    function sagTenantPaneId(tab) {
+      return 'sagTenantTab' + tab.charAt(0).toUpperCase() + tab.slice(1);
+    }
+
+    function sagTenantBtnId(tab) {
+      return 'sagTabBtn' + tab.charAt(0).toUpperCase() + tab.slice(1);
+    }
+
     function showSagTenantTab(tab) {
-      const isCompany = tab !== 'users';
-      sagTenantActiveTab = isCompany ? 'company' : 'users';
-      const companyPane = document.getElementById('sagTenantTabCompany');
-      const usersPane = document.getElementById('sagTenantTabUsers');
-      const btnCompany = document.getElementById('sagTabBtnCompany');
-      const btnUsers = document.getElementById('sagTabBtnUsers');
-      if (companyPane) companyPane.style.display = isCompany ? '' : 'none';
-      if (usersPane) usersPane.style.display = isCompany ? 'none' : '';
-      if (btnCompany) { btnCompany.classList.toggle('primary', isCompany); btnCompany.classList.toggle('ghost', !isCompany); }
-      if (btnUsers) { btnUsers.classList.toggle('primary', !isCompany); btnUsers.classList.toggle('ghost', isCompany); }
+      if (!SAG_TENANT_TABS.includes(tab)) tab = 'company';
+      sagTenantActiveTab = tab;
+      SAG_TENANT_TABS.forEach(name => {
+        const pane = document.getElementById(sagTenantPaneId(name));
+        const btn = document.getElementById(sagTenantBtnId(name));
+        const active = name === tab;
+        if (pane) pane.style.display = active ? '' : 'none';
+        if (btn) { btn.classList.toggle('primary', active); btn.classList.toggle('ghost', !active); }
+      });
+      if (['drafts', 'presentations', 'exports', 'activity'].includes(tab)) {
+        sagLoadTenantDataPane(sagCurrentTenantId, tab);
+      }
+    }
+
+    async function sagLoadTenantDataPane(tenantId, tab) {
+      const bodies = {
+        drafts: 'sagTenantDraftsList',
+        presentations: 'sagTenantPresentationsList',
+        exports: 'sagTenantExportsList',
+        activity: 'sagTenantActivityList'
+      };
+      const host = document.getElementById(bodies[tab]);
+      if (!host || !tenantId || host.dataset.loaded === '1') return;
+      showInlineLoader(host, 'جاري التحميل...');
+      const data = await api('GET', '/api/admin/tenants/' + tenantId + '/' + tab).catch(() => ({ success: false }));
+      if (!data || !data.success) { host.innerHTML = '<p class="tenant-hint">تعذر التحميل</p>'; return; }
+      host.dataset.loaded = '1';
+      if (tab === 'drafts') host.innerHTML = renderSagTenantDrafts(data.drafts || []);
+      else if (tab === 'presentations') host.innerHTML = renderSagTenantPresentations(data.presentations || []);
+      else if (tab === 'exports') host.innerHTML = renderSagTenantExports(data.exports || []);
+      else host.innerHTML = renderSagTenantActivity(data.activity || []);
+    }
+
+    function renderSagTenantDrafts(drafts) {
+      if (!drafts.length) return '<p class="tenant-hint">لا توجد ملفات مشاريع</p>';
+      return drafts.map(d => {
+        const status = d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
+        const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
+        return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(d.title || 'مشروع بدون عنوان') + '</h3>' +
+          '<div class="meta">' + status + ' | ' + escapeHtml(date) + '</div></div></div>';
+      }).join('');
+    }
+
+    function renderSagTenantPresentations(presentations) {
+      if (!presentations.length) return '<p class="tenant-hint">لا توجد عروض</p>';
+      return presentations.map(p => {
+        const status = p.status === 'pending_approval' ? 'بانتظار التعميد' : p.status === 'approved' ? 'معتمد' : 'مسودة';
+        const date = (p.updatedAt || p.createdAt || '').slice(0, 16).replace('T', ' ');
+        return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
+          '<div class="meta">' + (p.slideCount || 0) + ' شريحة | ' + status + ' | ' + escapeHtml(date) + '</div></div></div>';
+      }).join('');
+    }
+
+    function renderSagTenantExports(exports) {
+      if (!exports.length) return '<p class="tenant-hint">لا توجد تصديرات</p>';
+      return exports.map(e => {
+        const date = (e.createdAt || '').slice(0, 16).replace('T', ' ');
+        return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(e.format || 'ملف') + '</h3>' +
+          '<div class="meta">' + escapeHtml(date) + '</div></div></div>';
+      }).join('');
+    }
+
+    function renderSagTenantActivity(activity) {
+      if (!activity.length) return '<p class="tenant-hint">لا يوجد سجل تعديلات</p>';
+      return activity.map(a => {
+        const date = (a.created_at || '').slice(0, 16).replace('T', ' ');
+        const target = a.target_type === 'presentation' ? 'عرض' : a.target_type === 'draft' ? 'ملف مشروع' : escapeHtml(a.target_type || '');
+        return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(a.action || 'تعديل') + '</h3>' +
+          '<div class="meta">' + escapeHtml(a.user_name || '') + ' | ' + escapeHtml(a.summary || '') + ' | ' + target + ' | ' + escapeHtml(date) + '</div></div></div>';
+      }).join('');
     }
 
     async function showSagTenantDetails(tenantId) {
@@ -26359,6 +26429,10 @@
         '<div class="sag-tabs">' +
         '<button type="button" id="sagTabBtnCompany" class="btn small primary" onclick="showSagTenantTab(\'company\')">معلومات الشركة</button>' +
         '<button type="button" id="sagTabBtnUsers" class="btn small ghost" onclick="showSagTenantTab(\'users\')">المستخدمون</button>' +
+        '<button type="button" id="sagTabBtnDrafts" class="btn small ghost" onclick="showSagTenantTab(\'drafts\')">المشاريع</button>' +
+        '<button type="button" id="sagTabBtnPresentations" class="btn small ghost" onclick="showSagTenantTab(\'presentations\')">العروض</button>' +
+        '<button type="button" id="sagTabBtnExports" class="btn small ghost" onclick="showSagTenantTab(\'exports\')">التصديرات</button>' +
+        '<button type="button" id="sagTabBtnActivity" class="btn small ghost" onclick="showSagTenantTab(\'activity\')">سجل التعديلات</button>' +
         '</div>' +
         '<div id="sagTenantTabCompany">' +
         '<form onsubmit="saveSagTenant(event, \'' + tenantId + '\')"><div class="tenant-grid">' +
@@ -26393,8 +26467,16 @@
         '</div><div class="sag-modal-actions">' +
         '<button type="submit" class="btn primary">إضافة المستخدم</button></div></form>' +
         '</div>' +
+        '<div id="sagTenantTabDrafts" style="display:none">' +
+        '<h3 class="dash-section-title">المشاريع</h3><div id="sagTenantDraftsList"></div></div>' +
+        '<div id="sagTenantTabPresentations" style="display:none">' +
+        '<h3 class="dash-section-title">العروض</h3><div id="sagTenantPresentationsList"></div></div>' +
+        '<div id="sagTenantTabExports" style="display:none">' +
+        '<h3 class="dash-section-title">التصديرات</h3><div id="sagTenantExportsList"></div></div>' +
+        '<div id="sagTenantTabActivity" style="display:none">' +
+        '<h3 class="dash-section-title">سجل التعديلات</h3><div id="sagTenantActivityList"></div></div>' +
         '</div>';
-      if (sagTenantActiveTab === 'users') showSagTenantTab('users');
+      showSagTenantTab(sagTenantActiveTab);
     }
 
     function renderSagTenantUsers(tenantId, primaryUserId, users) {
@@ -26408,6 +26490,10 @@
           (user.role === 'company_admin' ? 'أدمن شركة' : 'موظف') + ' | ' +
           (user.is_active ? 'نشط' : 'موقوف') + '</div></div>' +
           '<div class="tenant-actions">' +
+          '<button type="button" class="btn small primary" onclick="openSagUserPermissions(\'' +
+            tenantId + '\', \'' + user.id + '\', \'' + escapeHtml(user.name) + '\')">صلاحيات</button>' +
+          '<button type="button" class="btn small ghost" onclick="openSagUserPassword(\'' +
+            tenantId + '\', \'' + user.id + '\', \'' + escapeHtml(user.name) + '\')">كلمة المرور</button>' +
           (primary ? '' : '<button type="button" class="btn small ghost" onclick="sagSetPrimaryUser(\'' +
             tenantId + '\', \'' + user.id + '\')">تعيين مدير الحساب</button>') +
           '<button type="button" class="btn small ' + (user.is_active ? 'danger' : 'green') +
@@ -26495,6 +26581,121 @@
       }
       toast('تم حذف المستخدم');
       await showSagTenantDetails(tenantId);
+    }
+
+    let editingSagUserPermissions = null;
+
+    async function openSagUserPermissions(tenantId, userId, userName) {
+      const [permData, sectionData] = await Promise.all([
+        api('GET', '/api/admin/tenants/' + tenantId + '/users/' + userId + '/permissions'),
+        api('GET', '/api/admin/tenants/' + tenantId + '/users/' + userId + '/field-sections')
+      ]);
+      if (!permData.success || !sectionData.success) { toast('تعذر تحميل الصلاحيات'); return; }
+      const perms = permData.permissions || {};
+      const keys = permData.availableKeys || [];
+      const sections = sectionData.sections || {};
+      const availableSections = sectionData.available || [];
+      editingSagUserPermissions = { tenantId, userId, userName, availableSections };
+
+      const permRows = keys.map(key => {
+        const label = PERMISSION_LABELS[key] || key;
+        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">' +
+          '<label>' + label + '</label>' +
+          '<input type="checkbox" id="sperm_' + key + '" ' + (perms[key] ? 'checked' : '') + '>' +
+          '</div>';
+      }).join('');
+
+      const sectionRows = availableSections.map(s => {
+        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">' +
+          '<label>' + escapeHtml(s.label) + '</label>' +
+          '<input type="checkbox" id="ssection_' + s.key + '" ' + (sections[s.key] ? 'checked' : '') + '>' +
+          '</div>';
+      }).join('');
+
+      const existing = document.getElementById('sagUserPermissionsModal');
+      if (existing) existing.remove();
+      const modal = document.createElement('div');
+      modal.id = 'sagUserPermissionsModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+      modal.innerHTML = '<div style="background:#fff;border-radius:16px;padding:20px;max-width:520px;width:100%;max-height:85vh;overflow:auto">' +
+        '<div class="sag-modal-head">' +
+        '<h2>صلاحيات: ' + escapeHtml(userName) + '</h2>' +
+        '<button class="btn ghost" onclick="document.getElementById(\'sagUserPermissionsModal\').remove()">إغلاق</button></div>' +
+        '<h4 style="margin:12px 0 8px;color:var(--pd)">صلاحيات التطبيق</h4>' +
+        permRows +
+        '<h4 style="margin:16px 0 8px;color:var(--pd)">أقسام فورم المشروع</h4>' +
+        sectionRows +
+        '<div class="sag-modal-actions">' +
+        '<button class="btn primary" onclick="saveSagUserPermissions()">حفظ الصلاحيات</button>' +
+        '</div></div>';
+      document.body.appendChild(modal);
+    }
+
+    async function saveSagUserPermissions() {
+      if (!editingSagUserPermissions) return;
+      const { tenantId, userId } = editingSagUserPermissions;
+      const permissions = {};
+      Object.keys(PERMISSION_LABELS).forEach(key => {
+        const cb = document.getElementById('sperm_' + key);
+        permissions[key] = cb ? cb.checked : false;
+      });
+      const sections = {};
+      (editingSagUserPermissions.availableSections || []).forEach(s => {
+        const cb = document.getElementById('ssection_' + s.key);
+        sections[s.key] = cb ? cb.checked : false;
+      });
+      showLoader('جاري حفظ الصلاحيات', '');
+      const [permRes, sectionRes] = await Promise.all([
+        api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId + '/permissions', { permissions }),
+        api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId + '/field-sections', { sections })
+      ]);
+      hideLoader();
+      const modal = document.getElementById('sagUserPermissionsModal');
+      if (modal) modal.remove();
+      if (permRes.success && sectionRes.success) { toast('تم حفظ الصلاحيات'); }
+      else { toast(permRes.error || sectionRes.error || 'فشل الحفظ'); }
+    }
+
+    function openSagUserPassword(tenantId, userId, userName) {
+      const existing = document.getElementById('sagUserPasswordModal');
+      if (existing) existing.remove();
+      const modal = document.createElement('div');
+      modal.id = 'sagUserPasswordModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+      modal.innerHTML = '<div style="background:#fff;border-radius:16px;padding:20px;max-width:520px;width:100%">' +
+        '<div class="sag-modal-head">' +
+        '<h2>كلمة المرور: ' + escapeHtml(userName) + '</h2>' +
+        '<button class="btn ghost" onclick="document.getElementById(\'sagUserPasswordModal\').remove()">إغلاق</button></div>' +
+        '<div class="tenant-field"><label>كلمة مرور جديدة</label>' +
+        '<div style="display:flex;gap:8px">' +
+        '<input type="text" id="sagUserPasswordValue" minlength="10" autocomplete="new-password" style="flex:1;min-width:0">' +
+        '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagUserPasswordValue\').value = generateStrongPassword()">توليد تلقائي</button>' +
+        '</div></div>' +
+        '<div class="sag-modal-actions">' +
+        '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagUserPasswordModal\').remove()">إلغاء</button>' +
+        '<button type="button" class="btn primary" onclick="sagSetUserPassword(\'' + tenantId + '\', \'' + userId + '\')">اعتماد</button>' +
+        '</div></div>';
+      document.body.appendChild(modal);
+    }
+
+    async function sagSetUserPassword(tenantId, userId) {
+      const password = document.getElementById('sagUserPasswordValue').value;
+      if (!password || password.length < 10) {
+        toast('كلمة المرور 10 أحرف على الأقل');
+        return;
+      }
+      showLoader('جاري تعيين كلمة المرور', 'حفظ كلمة المرور الجديدة', 15);
+      try {
+        const data = await api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId, { password });
+        if (!data.success) {
+          toast(data.error || 'تعذر تعيين كلمة المرور');
+          return;
+        }
+        document.getElementById('sagUserPasswordModal').remove();
+        toast('تم تعيين كلمة المرور');
+      } finally {
+        hideLoader();
+      }
     }
 
     async function sagToggleTenant(tenantId, isActive) {

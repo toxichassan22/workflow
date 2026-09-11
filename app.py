@@ -16808,6 +16808,144 @@ def api_admin_reset_tenant_password(tenant_id):
     return jsonify({'success': True})
 
 
+def _admin_tenant_or_404(tenant_id):
+    tenant = db.get_tenant_by_id(tenant_id)
+    if not tenant:
+        return None, (jsonify({'error': 'Tenant not found'}), 404)
+    return tenant, None
+
+
+def _admin_tenant_user_or_404(tenant_id, user_id):
+    tenant, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return None, None, error
+    user = db.get_user_by_id(user_id)
+    if not user or user.get('tenant_id') != tenant_id:
+        return tenant, None, (jsonify({'error': 'User not found'}), 404)
+    return tenant, user, None
+
+
+@app.route('/api/admin/tenants/<tenant_id>/users/<user_id>/permissions', methods=['GET'])
+@require_admin
+def api_admin_get_tenant_user_permissions(tenant_id, user_id):
+    """Get effective permissions for any tenant's user (super admin only)."""
+    _, user, error = _admin_tenant_user_or_404(tenant_id, user_id)
+    if error:
+        return error
+    perms = db.get_user_permissions(user_id, user.get('role', 'employee'))
+    return jsonify({'success': True, 'permissions': perms, 'availableKeys': db.PERMISSION_KEYS})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/users/<user_id>/permissions', methods=['PUT'])
+@require_admin
+def api_admin_set_tenant_user_permissions(tenant_id, user_id):
+    """Set permissions for any tenant's user (super admin only)."""
+    _, user, error = _admin_tenant_user_or_404(tenant_id, user_id)
+    if error:
+        return error
+    data = request.json or {}
+    permissions = data.get('permissions', {})
+    for key, granted in permissions.items():
+        if key not in db.PERMISSION_KEYS:
+            return jsonify({'error': f'Unknown permission key: {key}'}), 400
+        db.set_user_permission(user_id, key, bool(granted))
+    perms = db.get_user_permissions(user_id, user.get('role', 'employee'))
+    return jsonify({'success': True, 'permissions': perms})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/users/<user_id>/field-sections', methods=['GET'])
+@require_admin
+def api_admin_get_tenant_user_field_sections(tenant_id, user_id):
+    """Get field section visibility for any tenant's user (super admin only)."""
+    _, user, error = _admin_tenant_user_or_404(tenant_id, user_id)
+    if error:
+        return error
+    sections = db.get_user_field_sections(user_id, tenant_id)
+    return jsonify({'success': True, 'sections': sections, 'available': db.get_all_sections(tenant_id)})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/users/<user_id>/field-sections', methods=['PUT'])
+@require_admin
+def api_admin_set_tenant_user_field_sections(tenant_id, user_id):
+    """Set field section visibility for any tenant's user (super admin only)."""
+    _, user, error = _admin_tenant_user_or_404(tenant_id, user_id)
+    if error:
+        return error
+    data = request.json or {}
+    sections = data.get('sections', {})
+    all_keys = {s['key'] for s in db.get_all_sections(tenant_id)}
+    for key, granted in sections.items():
+        if key in all_keys:
+            db.set_user_field_section(user_id, key, bool(granted))
+    sections = db.get_user_field_sections(user_id)
+    return jsonify({'success': True, 'sections': sections})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/drafts', methods=['GET'])
+@require_admin
+def api_admin_tenant_drafts(tenant_id):
+    """List project files of any tenant (super admin only, summaries)."""
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    drafts = db.get_all_project_draft_summaries(tenant_id, limit=200)
+    return jsonify({'success': True, 'drafts': drafts})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/presentations', methods=['GET'])
+@require_admin
+def api_admin_tenant_presentations(tenant_id):
+    """List presentations of any tenant (super admin only)."""
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    presentations = db.get_presentations(tenant_id, limit=200)
+    result = []
+    for p in presentations:
+        draft_id = p.get('draft_id')
+        if not draft_id and p.get('project_data'):
+            try:
+                project_data = json.loads(p['project_data']) if isinstance(p['project_data'], str) else p['project_data']
+            except (TypeError, ValueError):
+                project_data = {}
+            if isinstance(project_data, dict):
+                draft_id = project_data.get('draftId') or project_data.get('draft_id')
+        result.append({
+            'id': p['id'],
+            'title': p['title'],
+            'draftId': draft_id,
+            'slideCount': p.get('slide_count', 0),
+            'status': p.get('status', 'draft'),
+            'createdAt': p.get('created_at'),
+            'updatedAt': p.get('updated_at'),
+        })
+    return jsonify({'success': True, 'presentations': result})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/exports', methods=['GET'])
+@require_admin
+def api_admin_tenant_exports(tenant_id):
+    """List exports of any tenant (super admin only, metadata without download)."""
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    result = [
+        {'id': e['id'], 'format': e['format'], 'createdAt': e.get('created_at')}
+        for e in db.get_exports(tenant_id)
+    ]
+    return jsonify({'success': True, 'exports': result})
+
+
+@app.route('/api/admin/tenants/<tenant_id>/activity', methods=['GET'])
+@require_admin
+def api_admin_tenant_activity(tenant_id):
+    """Recent change history across any tenant (super admin only)."""
+    _, error = _admin_tenant_or_404(tenant_id)
+    if error:
+        return error
+    return jsonify({'success': True, 'activity': db.get_tenant_recent_activity(tenant_id)})
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Training Data (per-tenant GLM training)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
