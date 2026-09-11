@@ -3199,59 +3199,120 @@
 
     .tenant-dashboard-cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
     }
 
     .tenant-dash-card {
       background: #fff;
       border: 1px solid var(--line);
-      border-radius: 22px;
-      padding: 26px;
-      box-shadow: var(--shadow);
+      border-radius: 14px;
+      padding: 16px 14px;
+      box-shadow: 0 2px 8px rgba(37, 75, 102, .06);
       cursor: pointer;
       transition: .18s;
       text-align: center;
     }
 
+    .tenant-dash-card.stat {
+      cursor: default;
+    }
+
     .tenant-dash-card:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, .1);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(37, 75, 102, .10);
     }
 
     .tenant-dash-card h3 {
-      margin: 0 0 8px;
-      color: var(--p);
-      font-size: 22px;
+      margin: 0 0 4px;
+      color: var(--pd);
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1.2;
     }
 
     .tenant-dash-card p {
-      color: var(--muted);
-      font-size: 14px;
+      margin: 0;
+      color: #4A6572;
+      font-size: 13px;
+      line-height: 1.7;
     }
 
     .tenant-presentation-card {
       background: #fff;
       border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 18px;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, .04);
-      margin-bottom: 14px;
+      border-radius: 14px;
+      padding: 14px 16px;
+      box-shadow: 0 2px 8px rgba(37, 75, 102, .05);
+      margin-bottom: 10px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 12px;
+      flex-wrap: wrap;
     }
 
     .tenant-presentation-card h3 {
-      margin: 0;
-      color: var(--p);
-      font-size: 18px;
+      margin: 0 0 4px;
+      color: var(--pd);
+      font-size: 16px;
+      font-weight: 800;
+      line-height: 1.6;
     }
 
     .tenant-presentation-card .meta {
-      color: var(--muted);
-      font-size: 12px;
+      color: #526B7A;
+      font-size: 12.5px;
+      line-height: 1.9;
+    }
+
+    .tenant-presentation-card .tenant-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .dash-section-title {
+      margin: 0 0 10px;
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--pd);
+    }
+
+    .sag-filters {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .sag-filters input,
+    .sag-filters select {
+      width: 100%;
+      min-width: 0;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      font: inherit;
+      font-size: 13px;
+      background: #fff;
+      color: var(--txt);
+    }
+
+    @media (max-width: 760px) {
+      .sag-filters {
+        grid-template-columns: 1fr;
+      }
+
+      .tenant-presentation-card {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .tenant-presentation-card .tenant-actions {
+        justify-content: flex-start;
+      }
     }
 
     .tenant-slide-preview-wrap {
@@ -5508,17 +5569,17 @@
       </div>
 
       <div id="dashboardStats" class="tenant-dashboard-stats"
-        style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px;">
-        <div class="tenant-dash-card" style="cursor:default">
-          <h3 style="font-size:32px; margin:0; color:var(--p);" id="dashStatTotal">0</h3>
-          <p style="margin:4px 0 0; color:var(--muted);">إجمالي العروض</p>
+        style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px;">
+        <div class="tenant-dash-card stat" style="cursor:default">
+          <h3 style="font-size:26px; margin:0 0 4px; color:var(--pd);" id="dashStatTotal">0</h3>
+          <p style="margin:0; font-size:13px;">إجمالي العروض</p>
         </div>
-        <div class="tenant-dash-card tenant-admin-only" style="cursor:default">
-          <h3 style="font-size:32px; margin:0; color:var(--p);" id="dashStatPending">0</h3>
-          <p style="margin:4px 0 0; color:var(--muted);">بانتظار التعميد</p>
+        <div class="tenant-dash-card stat tenant-admin-only" style="cursor:default">
+          <h3 style="font-size:26px; margin:0 0 4px; color:var(--pd);" id="dashStatPending">0</h3>
+          <p style="margin:0; font-size:13px;">بانتظار التعميد</p>
         </div>
       </div>
-      <h3 style="margin-bottom: 12px;">آخر العروض</h3>
+      <h3 class="dash-section-title">آخر العروض</h3>
       <div id="dashboardRecentList">
         <p class="tenant-hint">جاري التحميل...</p>
       </div>
@@ -6345,19 +6406,16 @@
       <div id="sagAdminStats" class="tenant-dashboard-cards" style="margin-bottom:20px"></div>
 
       <!-- Search & Filter -->
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+      <div class="sag-filters">
         <input type="text" id="sagSearchInput" placeholder="بحث بالاسم أو الإيميل أو الدومين..."
-          style="flex:1;min-width:200px;padding:10px 14px;border:1px solid var(--line);border-radius:12px"
           oninput="filterSagTenants()">
-        <select id="sagFilterPlan" style="padding:10px 14px;border:1px solid var(--line);border-radius:12px"
-          onchange="filterSagTenants()">
+        <select id="sagFilterPlan" onchange="filterSagTenants()">
           <option value="">كل الخطط</option>
           <option value="free">Free</option>
           <option value="pro">Pro</option>
           <option value="enterprise">Enterprise</option>
         </select>
-        <select id="sagFilterStatus" style="padding:10px 14px;border:1px solid var(--line);border-radius:12px"
-          onchange="filterSagTenants()">
+        <select id="sagFilterStatus" onchange="filterSagTenants()">
           <option value="">كل الحالات</option>
           <option value="active">نشط</option>
           <option value="inactive">معطل</option>
@@ -26176,9 +26234,9 @@
         { label: 'إجمالي التصديرات', value: stats.exports || stats.total_exports || 0 },
       ];
       el.innerHTML = cards.map(c =>
-        '<div class="tenant-dash-card" style="cursor:default">' +
-        '<h3 style="font-size:28px;margin:0">' + c.value + '</h3>' +
-        '<p style="margin:4px 0 0;color:var(--muted)">' + c.label + '</p></div>'
+        '<div class="tenant-dash-card stat">' +
+        '<h3>' + c.value + '</h3>' +
+        '<p>' + c.label + '</p></div>'
       ).join('');
     }
 
