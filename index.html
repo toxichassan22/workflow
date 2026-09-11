@@ -26126,6 +26126,7 @@
     let sagAllTenants = [];
     let sagCurrentTenantId = null;
     let sagTenantActiveTab = 'company';
+    let sagModalUsers = [];
 
     function openSagCompanyCreate() {
       const modal = document.getElementById('sagCompanyCreateModal');
@@ -26490,6 +26491,7 @@
       const users = data.users || [];
       if (sagCurrentTenantId !== tenantId) sagTenantActiveTab = 'company';
       sagCurrentTenantId = tenantId;
+      sagModalUsers = users;
       const modal = document.getElementById('sagTenantModal');
       modal.style.display = 'flex';
       modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -26567,6 +26569,8 @@
           (user.role === 'company_admin' ? 'أدمن شركة' : 'موظف') + ' | ' +
           (user.is_active ? 'نشط' : 'موقوف') + '</div></div>' +
           '<div class="tenant-actions">' +
+          '<button type="button" class="btn small ghost" onclick="openSagUserEdit(\'' +
+            tenantId + '\', \'' + user.id + '\')">تعديل</button>' +
           '<button type="button" class="btn small primary" onclick="openSagUserPermissions(\'' +
             tenantId + '\', \'' + user.id + '\', \'' + escapeHtml(user.name) + '\')">صلاحيات</button>' +
           '<button type="button" class="btn small ghost" onclick="openSagUserPassword(\'' +
@@ -26731,6 +26735,61 @@
       if (modal) modal.remove();
       if (permRes.success && sectionRes.success) { toast('تم حفظ الصلاحيات'); }
       else { toast(permRes.error || sectionRes.error || 'فشل الحفظ'); }
+    }
+
+    function openSagUserEdit(tenantId, userId) {
+      const user = (sagModalUsers || []).find(u => u.id === userId);
+      if (!user) { toast('تعذر تحميل بيانات المستخدم'); return; }
+      const existing = document.getElementById('sagUserEditModal');
+      if (existing) existing.remove();
+      const modal = document.createElement('div');
+      modal.id = 'sagUserEditModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+      modal.innerHTML = '<div style="background:#fff;border-radius:16px;padding:20px;max-width:560px;width:100%;max-height:85vh;overflow:auto">' +
+        '<div class="sag-modal-head">' +
+        '<h2>تعديل المستخدم</h2>' +
+        '<button class="btn ghost" onclick="document.getElementById(\'sagUserEditModal\').remove()">إغلاق</button></div>' +
+        '<div class="tenant-grid">' +
+        '<div class="tenant-field"><label>الاسم</label><input id="sagEditUserName" value="' + escapeHtml(user.name || '') + '" required></div>' +
+        '<div class="tenant-field"><label>البريد الإلكتروني</label><input type="email" id="sagEditUserEmail" value="' + escapeHtml(user.email || '') + '" required></div>' +
+        '<div class="tenant-field"><label>اسم المستخدم</label><input id="sagEditUserUsername" value="' + escapeHtml(user.username || '') + '" minlength="3" maxlength="40" required></div>' +
+        '<div class="tenant-field"><label>رقم الجوال</label><input id="sagEditUserPhone" value="' + escapeHtml(user.phone || '') + '"></div>' +
+        '<div class="tenant-field full"><label>الدور</label><select id="sagEditUserRole">' +
+        '<option value="employee"' + (user.role !== 'company_admin' ? ' selected' : '') + '>موظف</option>' +
+        '<option value="company_admin"' + (user.role === 'company_admin' ? ' selected' : '') + '>أدمن شركة</option></select></div>' +
+        '</div>' +
+        '<div class="sag-modal-actions">' +
+        '<button type="button" class="btn ghost" onclick="document.getElementById(\'sagUserEditModal\').remove()">إلغاء</button>' +
+        '<button type="button" class="btn primary" onclick="sagSaveUserEdit(\'' + tenantId + '\', \'' + user.id + '\')">حفظ</button>' +
+        '</div></div>';
+      document.body.appendChild(modal);
+    }
+
+    async function sagSaveUserEdit(tenantId, userId) {
+      const payload = {
+        name: document.getElementById('sagEditUserName').value.trim(),
+        email: document.getElementById('sagEditUserEmail').value.trim().toLowerCase(),
+        username: document.getElementById('sagEditUserUsername').value.trim().toLowerCase(),
+        phone: document.getElementById('sagEditUserPhone').value.trim(),
+        role: document.getElementById('sagEditUserRole').value
+      };
+      if (!payload.name || !payload.email || !payload.username) {
+        toast('الاسم والبريد واسم المستخدم مطلوبة');
+        return;
+      }
+      showLoader('جاري حفظ بيانات المستخدم', '');
+      try {
+        const data = await api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId, payload);
+        if (!data.success) {
+          toast(data.error || 'تعذر حفظ بيانات المستخدم');
+          return;
+        }
+        document.getElementById('sagUserEditModal').remove();
+        toast('تم حفظ بيانات المستخدم');
+        await showSagTenantDetails(tenantId);
+      } finally {
+        hideLoader();
+      }
     }
 
     function openSagUserPassword(tenantId, userId, userName) {
