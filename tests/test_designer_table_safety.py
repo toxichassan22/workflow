@@ -389,6 +389,28 @@ class TableDeletionSafetyTests(unittest.TestCase):
         first = reliability.apply_table_delete_request(slide(), 'احذف صف البناء')
         self.assert_blocked(first['html'], 'احذف صف البناء', 'row_name_not_found')
 
+    def test_invisible_bidi_marks_and_definite_article_flexibility(self):
+        source = slide(table(header='<tr><th>&rlm;الحالة</th><th>اسم المشروع</th><th>المساحة م²</th><th>المصدر والملاحظات</th></tr>',
+                             rows=['<tr><td>نشط</td><td>مشروع 1</td><td>250</td><td>توثيق</td></tr>',
+                                   '<tr><td>مكتمل</td><td>مشروع 2</td><td>180</td><td>سجل</td></tr>'],
+                             footer=''))
+        # With and without definite article
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود الحاله من شريحه 21')['changed'])
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود الحالة من شريحه 21')['changed'])
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود حاله من شريحه 21')['changed'])
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود حالة من شريحه 21')['changed'])
+
+        # Area with superscript units, digit units, or bare name
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود المساحة')['changed'])
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود المساحه')['changed'])
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود مساحة')['changed'])
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود المساحة م2')['changed'])
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود المساحة م²')['changed'])
+
+        # Compound header with conjunction
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود المصدر والملاحظات')['changed'])
+        self.assertTrue(reliability.apply_table_delete_request(source, 'احذف عمود مصدر وملاحظات')['changed'])
+
 
 if __name__ == '__main__':
     unittest.main()

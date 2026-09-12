@@ -479,7 +479,7 @@ def semantic_part_instruction(part_index: int, total_parts: int) -> str:
 
 
 _AR_DIGITS_TABLE_EDIT = str.maketrans(
-    "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹أإآٱىة", "01234567890123456789اااايه"
+    "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹²³أإآٱىة", "0123456789012345678923اااايه"
 )
 
 _TABLE_EDIT_VERBS = (
@@ -529,9 +529,10 @@ _TABLE_EDIT_STOPWORDS = {
 
 
 def _normalize_table_edit_text(message: Any) -> str:
-    text = str(message or "").casefold().translate(_AR_DIGITS_TABLE_EDIT)
-    text = re.sub(r"[\u0640\u064b-\u065f\u0670]", "", text)
-    return re.sub(r"\s+", " ", text).strip()
+    text = html_lib.unescape(str(message or ""))
+    text = text.casefold().translate(_AR_DIGITS_TABLE_EDIT)
+    text = re.sub(r"[\u0640\u064b-\u065f\u0670\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]", "", text)
+    return re.sub(r"[\u00a0\s]+", " ", text).strip()
 
 
 def _table_word_pattern(words: Sequence[str]) -> str:
@@ -569,7 +570,9 @@ def _table_selector(value: str) -> Union[Dict[str, Any], None]:
                "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10}
     if value in english:
         return {"by": "number", "number": english[value]}
-    if not value or any(ch.isdigit() or ch in (chr(10), chr(13)) for ch in value):
+    if not value or any(ch in (chr(10), chr(13)) for ch in value):
+        return None
+    if re.fullmatch(r"\d+(?:\s+\d+)+", value):
         return None
     return {"by": "name", "name": value}
 
@@ -955,8 +958,21 @@ def _remove_data_row_from_table(table_html: str, data_index: int) -> Union[str, 
 
 def _strip_table_units(text: str) -> str:
     t = re.sub(r"[\(\[\{].*?[\)\]\}]", "", str(text or ""))
-    t = re.sub(r"\b(?:ر\.?س|ريال|م٢|م2|متر\s+مربع|نسبة|نسبه)\b", "", t)
+    t = re.sub(r"(?<!\w)(?:ر\.?س\.?|ريال(?:\s+سعودي)?|م[٢2²]|متر\s+مربع|نسب[ةه])(?!\w)", "", t)
     return re.sub(r"\s+", " ", t).strip()
+
+
+def _strip_definite_article(text: str) -> str:
+    """Strip Arabic definite article 'ال' from words for flexible column header matching."""
+    words = []
+    for w in str(text or "").split():
+        if w.startswith("وال") and len(w) > 4:
+            words.append("و" + w[3:])
+        elif w.startswith("ال") and len(w) > 3:
+            words.append(w[2:])
+        else:
+            words.append(w)
+    return " ".join(words)
 
 
 def apply_table_delete_request(html: str, message: Any) -> Dict[str, Any]:
@@ -1022,18 +1038,26 @@ def apply_table_delete_request(html: str, message: Any) -> Dict[str, Any]:
             else:
                 needle = _normalize_table_edit_text(target.get("text") or target.get("name"))
                 if kind == "row":
+                    clean_needle = _normalize_table_edit_text(_strip_table_units(needle))
                     for index, row in enumerate(rows):
                         labels = [_table_node_text(cell) for cell in row["cells"]]
                         contains = target.get("contains") and re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", " ".join(labels))
                         clean_labels = [_normalize_table_edit_text(_strip_table_units(cell_text)) for cell_text in labels]
-                        if needle and (needle in labels or contains or needle in clean_labels):
+                        if needle and (needle in labels or contains or needle in clean_labels or (clean_needle and clean_needle in clean_labels)):
                             hits.append((table_index, table, info, index))
                 else:
                     indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
                                if needle and _table_node_text(cell) == needle}
                     if not indexes and needle:
+                        clean_needle = _normalize_table_edit_text(_strip_table_units(needle))
                         indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
-                                   if _normalize_table_edit_text(_strip_table_units(_table_node_text(cell))) == needle}
+                                   if _normalize_table_edit_text(_strip_table_units(_table_node_text(cell))) in (needle, clean_needle)}
+                    if not indexes and needle:
+                        no_al_needle = _strip_definite_article(needle)
+                        no_al_clean = _strip_definite_article(_normalize_table_edit_text(_strip_table_units(needle)))
+                        indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
+                                   if _strip_definite_article(_table_node_text(cell)) == no_al_needle
+                                   or _strip_definite_article(_normalize_table_edit_text(_strip_table_units(_table_node_text(cell)))) in (no_al_needle, no_al_clean)}
                     hits.extend((table_index, table, info, index) for index in sorted(indexes))
         if len(hits) != 1:
             result["reason"] = "ambiguous_table_target" if hits else (
