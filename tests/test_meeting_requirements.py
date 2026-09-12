@@ -6622,7 +6622,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         # The activities are chosen in the components table, so the regulated list belongs there.
         self.assertIn('id="componentsAllowedUsesNote"', index_source)
         self.assertIn('function renderComponentsAllowedUsesNote(allowedUses, status)', index_source)
-        self.assertIn("'الاستخدامات المسموحة تنظيميًا: ' + uses", index_source)
+        self.assertIn("'<span>الاستخدامات المسموحة تنظيميًا:</span> ' + escapeHtml(uses)", index_source)
         self.assertIn('renderComponentsAllowedUsesNote(allowedUses, status);', index_source)
 
     def test_access_road_names_do_not_change_between_regenerations(self):
@@ -7244,7 +7244,7 @@ class MeetingRequirementsTests(unittest.TestCase):
         self.assertIn('costByProject[d.id]', index_html)
         self.assertIn('costByPresentation[item.id]', index_html)
         self.assertIn('maps_cost_usd', index_html)
-        self.assertIn('التكلفة: ', index_html)
+        self.assertIn("'<span>التكلفة:</span> '", index_html)
 
     def test_presentation_creation_links_prior_draft_spend_without_stealing(self):
         client = self.app.test_client()

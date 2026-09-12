@@ -54,7 +54,12 @@
     "nav.new_proposal": "عرض جديد",
     "nav.projects": "المشاريع",
     "nav.staff": "الموظفون",
-    "presentation.conflict_confirm": "توجد نسخة أحدث محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟"
+    "presentation.conflict_confirm": "توجد نسخة أحدث محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟",
+    "app.title": "منصة العروض التقديمية | مولّد عروض المشاريع",
+    "financial.warn_sale_exit_outside_roi": "التخارج البيعي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.",
+    "financial.warn_operating_exit_outside_roi": "التخارج التشغيلي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.",
+    "financial.warn_sale_exit_outside_irr": "التخارج البيعي في السنة {year} خارج فترة IRR المختارة.",
+    "financial.warn_operating_exit_outside_irr": "التخارج التشغيلي في السنة {year} خارج فترة IRR المختارة."
   }/*I18N_AR_END*/;
 
   var WFI18N_EN = /*I18N_EN_BEGIN*/{
@@ -77,7 +82,12 @@
     "nav.new_proposal": "New proposal",
     "nav.projects": "Projects",
     "nav.staff": "Staff",
-    "presentation.conflict_confirm": "A newer version is saved on the server (revision {rev}). Do you want to overwrite it with your current changes?"
+    "presentation.conflict_confirm": "A newer version is saved on the server (revision {rev}). Do you want to overwrite it with your current changes?",
+    "app.title": "Proposal Platform | Project Proposal Generator",
+    "financial.warn_sale_exit_outside_roi": "Sale exit in year {year} is outside the ROI window and is therefore excluded from ROI.",
+    "financial.warn_operating_exit_outside_roi": "Operating exit in year {year} is outside the ROI window and is therefore excluded from ROI.",
+    "financial.warn_sale_exit_outside_irr": "Sale exit in year {year} is outside the selected IRR window.",
+    "financial.warn_operating_exit_outside_irr": "Operating exit in year {year} is outside the selected IRR window."
   }/*I18N_EN_END*/;
 
   // Legacy exact-match map: full Arabic chrome strings rendered by old
@@ -2835,7 +2845,38 @@
   "إلغاء اعتماد بيانات الكروكي": "Unlock Croquis Data",
   "بيانات الأرض والكروكي والاشتراطات": "Land, Croquis & Regulations Data",
   "الفترة / الأسابيع": "Period / Weeks",
-  "تجاري / تجزئة": "Commercial / Retail"
+  "تجاري / تجزئة": "Commercial / Retail",
+  "خرائط": "Maps",
+  "نسخة محفوظة في العرض": "Snapshot saved in",
+  "تحتوي": "containing",
+  "مبني": "Built-up",
+  "بيعي/تأجيري": "Sale/lease",
+  "وحدة": "units",
+  "(افتراضي)": "(Default)",
+  "مكون": "Component",
+  "مدير": "Manager",
+  "رسالة": "Message",
+  "طلب بواسطة": "Requested by",
+  "خطأ": "Error",
+  "تكلفة التخارج": "Exit cost",
+  "سنوات التطوير": "Development years",
+  "من السنة": "From year",
+  "حتى السنة": "to year",
+  "من أصل": "of",
+  "المتبقي": "remaining",
+  "تم تخصيص": "Allocated",
+  "إظهار العلامة المائية": "Show watermark",
+  "ويتبقى": "remaining",
+  "شرائح": "slides",
+  "مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض بمقدار": "Total component built-up area exceeds above-ground BUA by",
+  "عدّل المساحات قبل اعتماد النتائج أو التصدير.": "Adjust the areas before approving the results or exporting.",
+  "المساحة المتبقية المُدخلة": "Entered remaining area",
+  "تتجاوز المساحة البيعية في بنود الإيرادات": "exceeds saleable area in revenue lines",
+  "صافي التخارج البيعي": "Net sale exit proceeds",
+  "من إجمالي": "of gross",
+  "بعد تكاليف التخارج.": "after exit costs.",
+  "النظام:": "System:",
+  "أنت:": "You:"
 }/*I18N_EN_AUTO_END*/;
 
 
@@ -2898,11 +2939,16 @@
         btn.textContent = (lang === 'ar') ? t('lang.switch_to_english') : t('lang.switch_to_arabic');
       }
     } catch (e) { /* button absent on some views */ }
+    try {
+      if (typeof document !== 'undefined' && document.title) {
+        document.title = t('app.title');
+      }
+    } catch (e) { /* ignore */ }
   }
 
   // Exact-match legacy translator: renders old render functions and backend
   // field labels in English without rewriting every call site. A text node
-  // (or a placeholder/title/aria-label/value attribute) whose FULL trimmed
+  // (or a placeholder/title/aria-label/alt/value attribute) whose FULL trimmed
   // text is a known Arabic chrome string is swapped; user data, numbers and
   // interpolated sentences never match and are left untouched. New code must
   // still use WFT()/data-i18n — this map only absorbs the legacy long tail.
@@ -2914,7 +2960,8 @@
     '.visual-concept-chat-message', '#aiRulesChatLog', '#trainingChatLog'
   ].join(',');
   // Attribute pass uses the same skips minus textarea: a textarea body is
-  // user content, but its placeholder is chrome.
+  // user content, but its placeholder is chrome. Image alt text is chrome
+  // too (it surfaces visibly when an image fails to load).
   var AUTO_ATTR_SKIP_SELECTOR = [
     'script', 'style', 'select', 'option', 'optgroup', '[contenteditable]',
     '.slide', '.ge-slide-card', '.pdf-export-page',
@@ -3015,7 +3062,7 @@
     var found = [];
     try {
       found = scope.querySelectorAll(
-        'input[placeholder],textarea[placeholder],[title],[aria-label],' +
+        'input[placeholder],textarea[placeholder],[title],[aria-label],[alt],' +
         'input[type=button][value],input[type=submit][value]');
     } catch (e) { /* ignore */ }
     for (var a = 0; a < found.length; a++) {
@@ -3024,6 +3071,7 @@
       autoSwapAttr(el, 'placeholder');
       autoSwapAttr(el, 'title');
       autoSwapAttr(el, 'aria-label');
+      autoSwapAttr(el, 'alt');
       if (el.tagName === 'INPUT' && (el.type === 'button' || el.type === 'submit')) {
         autoSwapAttr(el, 'value');
       }
@@ -3196,7 +3244,7 @@
     try {
       autoObserver.observe(document.documentElement, {
         childList: true, subtree: true, characterData: true, attributes: true,
-        attributeFilter: ['placeholder', 'title', 'aria-label']
+        attributeFilter: ['placeholder', 'title', 'aria-label', 'alt']
       });
     } catch (e) { /* ignore */ }
   }

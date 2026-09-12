@@ -3414,6 +3414,7 @@
        in the UI and can push the final content below the stage. */
     .tenant-slide-stage .slide {
       display: block !important;
+      position: absolute !important;
       float: none !important;
       margin: 0 !important;
       border: none !important;
@@ -6801,7 +6802,7 @@
       if (etaEl && genStartMs && value > 2) {
         const elapsed = (Date.now() - genStartMs) / 1000;
         const remaining = Math.max(0, Math.round((elapsed / value) * (100 - value)));
-        etaEl.textContent = 'متبقي ~' + remaining + ' ثانية';
+        etaEl.innerHTML = '<span>متبقي ~</span>' + remaining + ' <span>ثانية</span>';
       }
     }
 
@@ -8570,7 +8571,7 @@
       ]);
       const title = draftResponse?.success && draftResponse.draft?.title ? draftResponse.draft.title : '';
       const titleNode = document.getElementById('projectPresentationsPageTitle');
-      if (titleNode) titleNode.textContent = title ? 'العروض السابقة — ' + title : 'العروض السابقة';
+      if (titleNode) titleNode.innerHTML = title ? '<span>العروض السابقة</span> — ' + escapeHtml(title) : 'العروض السابقة';
       const presentations = response?.success && Array.isArray(response.presentations)
         ? response.presentations.slice().sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
         : [];
@@ -8595,7 +8596,7 @@
           const itemMapsCost = Number(itemCost?.maps_cost_usd) || 0;
           const itemReconcile = aiReconcileStatusText(reconcileByPresentation[item.id]);
           return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
-            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | النسخة ' + (item.revision || 0) + ' | ' + escapeHtml(date) + ' | التكلفة: ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) + (itemMapsCost > 0 ? ' (خرائط: ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | ' + itemReconcile : '') : '—') + '</div></div>' +
+            '<div class="meta"><span>' + (item.slideCount || 0) + '</span> <span>شريحة</span> | <span>النسخة</span> <span>' + (item.revision || 0) + '</span> | ' + escapeHtml(date) + ' | <span>التكلفة:</span> ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) + (itemMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | <span>' + itemReconcile + '</span>' : '') : '—') + '</div></div>' +
             '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
             '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات والنسخ</button></div></div>';
         }).join('') + '</section>'
@@ -8875,11 +8876,11 @@
         return;
       }
       list.innerHTML = recent.map(p => {
-        const statusLabel = p.status === 'pending_approval' ? 'في انتظار التعميد' : p.status === 'approved' ? 'معتمد' : (p.status || 'draft');
+        const statusLabel = p.status === 'pending_approval' ? 'في انتظار التعميد' : p.status === 'approved' ? 'معتمد' : 'مسودة';
         const date = (p.updatedAt || p.createdAt || '').slice(0, 16).replace('T', ' ');
         return '<div class="tenant-presentation-card" style="cursor:pointer" onclick="openExistingPresentation(\'' + p.id + '\')">' +
           '<div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
-          '<div class="meta">' + (p.slideCount || 0) + ' شريحة | ' + statusLabel + ' | ' + date + '</div></div>' +
+          '<div class="meta"><span>' + (p.slideCount || 0) + '</span> <span>شريحة</span> | <span>' + statusLabel + '</span> | ' + date + '</div></div>' +
           '</div>';
       }).join('');
     }
@@ -9195,7 +9196,7 @@
       const userInfo = document.getElementById('tenantUserInfo');
       if (userInfo) {
         const roleLabel = isSagAdmin ? 'SAG Admin' : (role === 'company_admin' ? 'أدمن' : 'موظف');
-        userInfo.textContent = (tenantUser._userName || tenantUser.companyName || '') + ' (' + roleLabel + ')';
+        userInfo.innerHTML = escapeHtml(tenantUser._userName || tenantUser.companyName || '') + ' (<span>' + roleLabel + '</span>)';
       }
       // SAG admin: hide company-specific nav items, show admin panel button
       if (isSagAdmin) {
@@ -9321,8 +9322,11 @@
       });
       window.tenantCustomFonts = customFonts;
       const allFonts = uniqueFonts.concat(customFonts);
+      const fontUiEn = (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en');
+      const fontScriptName = script => trDynamicI18n(script === 'arabic' ? 'عربي' : 'لاتيني');
+      const fontUploadedMark = trDynamicI18n('(مرفوع)');
       const summary = selections.length
-        ? selections.map(item => (item.script === 'arabic' ? 'عربي' : 'لاتيني') + ' ' + item.weight + (item.custom_font_path ? ' (مرفوع)' : '')).join('، ')
+        ? selections.map(item => fontScriptName(item.script) + ' ' + item.weight + (item.custom_font_path ? ' ' + fontUploadedMark : '')).join(fontUiEn ? ', ' : '، ')
         : 'سيتم استخدام الخط الافتراضي';
       host.innerHTML = '<div style="display:grid;gap:10px;border:1px solid var(--line);border-radius:10px;padding:10px;">' +
         '<select id="tenantPrimaryFontSelect" onchange="selectTenantPrimaryFont(this.value)" style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">' +
@@ -9330,7 +9334,7 @@
         allFonts.map(font => {
           const isSelected = (currentSelection.font_id && font.id === currentSelection.font_id)
             || (currentSelection.font_family && font.font_family && font.font_family.toLowerCase() === currentSelection.font_family.toLowerCase());
-          return '<option value="' + escapeHtml(font.id) + '"' + (isSelected ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + (font.script === 'arabic' ? 'عربي' : 'لاتيني') + (font.is_custom ? ' (مرفوع)' : '') + '</option>';
+          return '<option value="' + escapeHtml(font.id) + '"' + (isSelected ? ' selected' : '') + '>' + escapeHtml(font.font_name || font.font_family) + ' — ' + fontScriptName(font.script) + (font.is_custom ? ' ' + fontUploadedMark : '') + '</option>';
         }).join('') +
         '</select>' +
         '<label id="tenantAutoFontDropzone" style="display:flex;align-items:center;justify-content:center;min-height:72px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--muted);text-align:center;padding:12px;">اسحب ملف الخط هنا أو اضغط لاختياره<input id="tenantAutoFontFile" type="file" accept=".ttf,.otf,.woff,.woff2" style="display:none" onchange="uploadTenantFontAutomatically(this)"></label>' +
@@ -9346,7 +9350,9 @@
           uploadTenantFontAutomatically({ files: event.dataTransfer.files });
         };
       }
+      refreshDynamicI18n(host);
     }
+    document.addEventListener('wf:lang', () => { try { loadTenantFonts(); } catch (e) { /* ignore */ } });
 
     async function selectTenantPrimaryFont(fontId) {
       if (fontId === 'custom') return;
@@ -9673,7 +9679,7 @@
         tenantBranding.font_family = data.font_name;
         setValue('settingsFontFamily', 'custom');
         const preview = document.getElementById('settingsFontPreview');
-        if (preview) preview.textContent = 'تم رفع الخط: ' + file.name;
+        if (preview) preview.innerHTML = '<span>تم رفع الخط:</span> ' + escapeHtml(file.name);
         await loadTenantFontCss();
         toast('تم رفع الخط بنجاح');
       } else {
@@ -10644,12 +10650,25 @@
       setMarketStudyState(collectMarketStudyFromDom());
     }
 
-    function refreshMarketStudyI18n(scope) {
+    function refreshDynamicI18n(scope) {
       try {
         if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en' && scope) {
           window.WFI18n.autoTranslate(scope);
         }
       } catch (e) { /* ignore */ }
+    }
+
+    // Fragment translator for chrome/data composites (option labels, card metas):
+    // exact-match auto-translate cannot split them, so chrome fragments are
+    // resolved at build time from the shared EN_AUTO map. Data stays untouched.
+    function trDynamicI18n(text) {
+      try {
+        if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
+          const dict = window.WFI18n.autoDict || {};
+          if (text && dict[text]) return dict[text];
+        }
+      } catch (e) { /* ignore */ }
+      return text;
     }
 
     function addMarketStudySection(form, before) {
@@ -10780,7 +10799,7 @@
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
         document.getElementById('marketSwot_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
       });
-      refreshMarketStudyI18n(div);
+      refreshDynamicI18n(div);
     }
 
     function updateMarketStudyFieldVisibility() {
@@ -10845,7 +10864,7 @@
       }
       if (value) select.value = value;
       if (value && select.value !== value) select.value = '';
-      refreshMarketStudyI18n(select);
+      refreshDynamicI18n(select);
     }
 
     function keepProjectMultiSelectOpen(hostId) {
@@ -11637,7 +11656,7 @@
           persistMarketStudyFromDom();
         });
       });
-      refreshMarketStudyI18n(cell);
+      refreshDynamicI18n(cell);
     }
 
     function competitorLogoPath(row = {}) {
@@ -11831,7 +11850,7 @@
       cell.querySelector('[data-import-competitor-logo]')?.addEventListener('click', () => importCompetitorLogo(tr));
       cell.querySelector('[data-preview-competitor-logo]')?.addEventListener('click', () => openCompetitorLogoPreview(tr));
       cell.querySelector('[data-remove-competitor-logo]')?.addEventListener('click', () => removeCompetitorLogo(tr));
-      refreshMarketStudyI18n(cell);
+      refreshDynamicI18n(cell);
     }
 
     function competitorPriceCache(tr) {
@@ -11908,7 +11927,7 @@
         fillSelectOptions(tr.querySelector('[data-field="price_type"]'), options, nextType, '--');
         tr.dataset.previousPriceType = nextType;
         renderCompetitorPriceInputs(tr, { price_cache: competitorPriceCache(tr) });
-        refreshMarketStudyI18n(tr);
+        refreshDynamicI18n(tr);
         persistMarketStudyFromDom();
       });
       tr.querySelector('[data-field="price_type"]').addEventListener('change', event => {
@@ -11922,7 +11941,7 @@
         persistMarketStudyFromDom();
       });
       tr.querySelectorAll('input,select,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
-      refreshMarketStudyI18n(tr);
+      refreshDynamicI18n(tr);
     }
 
     function renderCompetitorPriceInputs(tr, row) {
@@ -11944,7 +11963,7 @@
         formatMarketNumericInput(input);
         input.addEventListener('input', persistMarketStudyFromDom);
       });
-      refreshMarketStudyI18n(cell);
+      refreshDynamicI18n(cell);
     }
 
     function collectOneCompetitorRow(tr) {
@@ -12141,7 +12160,7 @@
         renderCompetitorSourceLinks(tr);
         persistMarketStudyFromDom();
       });
-      refreshMarketStudyI18n(row);
+      refreshDynamicI18n(row);
       return input;
     }
 
@@ -12155,7 +12174,7 @@
         const input = addCompetitorSourceUrlInput(tr);
         input?.focus();
       });
-      refreshMarketStudyI18n(editor);
+      refreshDynamicI18n(editor);
     }
 
     function attachMarketSourceToCompetitor(sourceRow) {
@@ -12231,7 +12250,7 @@
         }
       });
       tr.querySelectorAll('input,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
-      refreshMarketStudyI18n(tr);
+      refreshDynamicI18n(tr);
     }
 
     function collectMarketSourceRows() {
@@ -12307,8 +12326,8 @@
         group.rows.forEach(row => addMarketSourceRow(row, body));
       });
       selectMarketSourceTab(selectedKey);
-      refreshMarketStudyI18n(tabs);
-      refreshMarketStudyI18n(panels);
+      refreshDynamicI18n(tabs);
+      refreshDynamicI18n(panels);
     }
 
     function applyMarketStudyState(state) {
@@ -12350,7 +12369,7 @@
       tenantProjectData.market_study_data = next;
       updateMarketStudyFieldVisibility();
       syncMarketLocationMirrors();
-      refreshMarketStudyI18n(document.getElementById('section-market-study'));
+      refreshDynamicI18n(document.getElementById('section-market-study'));
     }
 
     function collectMarketStudyRequestPayload() {
@@ -13063,7 +13082,7 @@
             return '<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: #fafafa; border: 1px solid var(--line); border-radius: 10px;">' +
               '<div style="flex: 1; min-width: 0;">' +
               '<div style="font-weight: 600; margin-bottom: 2px;">' + escapeHtml(f.fieldLabel) + '</div>' +
-              '<div class="meta" style="font-size: 12px;">' + escapeHtml(f.fieldKey) + ' | ' + (typeMap[f.fieldType] || f.fieldType) + ' | ' + (f.isCustom ? 'مخصص' : 'جاهز') + ' | ' + statusBadge + '</div>' +
+              '<div class="meta" style="font-size: 12px;">' + escapeHtml(f.fieldKey) + ' | <span>' + (typeMap[f.fieldType] || f.fieldType) + '</span> | <span>' + (f.isCustom ? 'مخصص' : 'جاهز') + '</span> | ' + statusBadge + '</div>' +
               '</div>' +
               '<div style="display: flex; gap: 4px; align-items: center;">' +
               controls +
@@ -13295,8 +13314,8 @@
         return '<div class="tenant-presentation-card" style="margin-bottom:8px;background:' + (s._approved ? '#e8f5e9' : '#ffebee') + '">' +
           '<div style="flex:1;min-width:220px">' +
           '<h4>' + escapeHtml(s.fieldLabel) + ' <code style="font-size:11px;color:#666">' + escapeHtml(s.fieldKey) + '</code></h4>' +
-          '<div class="meta">' + (typeMap[s.fieldType] || s.fieldType) + ' | ' + (sectionMap[s.sectionKey] || s.sectionKey) + (s.isRequired ? ' | مطلوب' : '') + '</div>' +
-          (optionsStr ? '<div class="meta" style="margin-top:4px">خيارات: ' + escapeHtml(optionsStr) + '</div>' : '') +
+          '<div class="meta"><span>' + (typeMap[s.fieldType] || s.fieldType) + '</span> | <span>' + escapeHtml(sectionMap[s.sectionKey] || s.sectionKey) + '</span>' + (s.isRequired ? ' | <span>مطلوب</span>' : '') + '</div>' +
+          (optionsStr ? '<div class="meta" style="margin-top:4px"><span>خيارات:</span> ' + escapeHtml(optionsStr) + '</div>' : '') +
           (s.reason ? '<div class="tenant-hint" style="margin-top:6px">' + escapeHtml(s.reason) + '</div>' : '') +
           '</div>' +
           '<div class="tenant-actions" style="gap:6px;align-items:center">' +
@@ -16488,7 +16507,8 @@
       return hadDeficit ? null : 0;
     }
     function analysisEndYear(period, customYear, developmentYears, totalYears) { if (period === 'development') return developmentYears; if (period === 'custom') return Math.max(1, Math.min(totalYears, Math.round(customYear || totalYears))); return totalYears; }
-    function periodLabel(endYear, developmentYears, totalYears) { if (endYear === developmentYears) return `سنوات التطوير 1-${developmentYears}`; if (endYear === totalYears) return `كامل الدراسة 1-${totalYears}`; return `من السنة 1 حتى السنة ${endYear}`; }
+    function periodLabel(endYear, developmentYears, totalYears) { if (endYear === developmentYears) return `<span>سنوات التطوير</span> 1-${developmentYears}`; if (endYear === totalYears) return `<span>كامل الدراسة</span> 1-${totalYears}`; return `<span>من السنة</span> 1 <span>حتى السنة</span> ${endYear}`; }
+    document.addEventListener('wf:lang', () => { try { if (document.getElementById('section-financial-calc')) calculateAll(); } catch (e) { /* ignore */ } });
 
     function calculateRevenueBase(row, baseRevenue = 0, occupancyOverride = null) {
       const method = row.querySelector('[data-field="method"] select')?.value || 'areaRent';
@@ -16565,7 +16585,11 @@
     }
     function updateRevenueComponentOptions() {
       const components = getComponentRowsData();
-      const optionsHtml = '<option value="">غير مرتبط بمكون</option>' + components.map(c => `<option value="${c.id}">${c.name} — مبني ${money(c.builtArea)} م² | بيعي/تأجيري ${money(c.revenueArea)} م² | ${money(c.units)} وحدة</option>`).join('');
+      const optionsHtml = '<option value="">غير مرتبط بمكون</option>' + components.map(c => {
+        const fallbackMatch = String(c.name || '').match(/^مكون (\d+)$/);
+        const displayName = fallbackMatch ? (trDynamicI18n('مكون') + ' ' + fallbackMatch[1]) : c.name;
+        return `<option value="${c.id}">${displayName} — ${trDynamicI18n('مبني')} ${money(c.builtArea)} ${trDynamicI18n('م²')} | ${trDynamicI18n('بيعي/تأجيري')} ${money(c.revenueArea)} ${trDynamicI18n('م²')} | ${money(c.units)} ${trDynamicI18n('وحدة')}</option>`;
+      }).join('');
       document.querySelectorAll('#revenueTable tbody tr').forEach(tr => {
         const sel = tr.querySelector('[data-field="component"] select'); if (!sel) return;
         let currentId = (sel.options && sel.options.length > 0) ? (sel.value || '') : (tr.dataset.componentId || '');
@@ -16606,11 +16630,11 @@
       else if (!(saleExitGross > 0)) text = 'التخارج البيعي مطبق بقيمة صفر: القيمة أو المساحة أو سعر المتر غير مُدخل.';
       else if (saleExitMethod === 'remainingArea' && saleAreaTotal > 0) {
         const entered = Math.max(0, num('saleExitRemainingArea'));
-        if (entered > saleAreaTotal) text = `المساحة المتبقية المُدخلة ${money(entered)} م² تتجاوز المساحة البيعية في بنود الإيرادات ${money(saleAreaTotal)} م².`;
+        if (entered > saleAreaTotal) text = `<span>المساحة المتبقية المُدخلة</span> ${money(entered)} <span>م²</span> <span>تتجاوز المساحة البيعية في بنود الإيرادات</span> ${money(saleAreaTotal)} <span>م²</span>.`;
       }
-      if (!text && saleExitValue > 0) text = `صافي التخارج البيعي ${money(saleExitValue)} من إجمالي ${money(saleExitGross)} بعد تكاليف التخارج.`;
+      if (!text && saleExitValue > 0) text = `<span>صافي التخارج البيعي</span> ${money(saleExitValue)} <span>من إجمالي</span> ${money(saleExitGross)} <span>بعد تكاليف التخارج.</span>`;
       note.hidden = text === '';
-      note.textContent = text ? (typeof WFT === 'function' ? WFT(text) : text) : '';
+      note.innerHTML = text || '';
     }
     function setCellVisible(tr, field, visible, helpText = '') { const cell = tr.querySelector(`[data-field="${field}"]`); if (!cell) return; cell.classList.toggle('off-cell', !visible); cell.querySelectorAll('input,select').forEach(x => x.disabled = !visible); const h = cell.querySelector('.miniHelp'); if (h) h.textContent = helpText ? (typeof WFT === 'function' ? WFT(helpText) : helpText) : ''; }
 
@@ -16717,13 +16741,17 @@
     }
     function validateComponentAreas() {
       const limit = Math.max(0, num('builtUpAreaAbove')); const used = [...document.querySelectorAll('#componentsTable tbody tr')].reduce((s, tr) => s + Math.max(0, parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value)), 0); const remaining = limit - used, valid = used <= limit + .01;
-      const panel = document.getElementById('componentAreaValidation'); if (panel) { panel.classList.toggle('error', !valid); panel.innerHTML = valid ? `تم تخصيص <b>${money(used)}</b> م² من أصل <b>${money(limit)}</b> م² — المتبقي <b>${money(remaining)}</b> م².` : `خطأ: مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض بمقدار <b>${money(-remaining)}</b> م². عدّل المساحات قبل اعتماد النتائج أو التصدير.` }
+      const panel = document.getElementById('componentAreaValidation'); if (panel) { panel.classList.toggle('error', !valid); panel.innerHTML = valid ? `<span>تم تخصيص</span> <b>${money(used)}</b> <span>م²</span> <span>من أصل</span> <b>${money(limit)}</b> <span>م²</span> — <span>المتبقي</span> <b>${money(remaining)}</b> <span>م²</span>.` : `<span>خطأ:</span> <span>مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض بمقدار</span> <b>${money(-remaining)}</b> <span>م²</span>. <span>عدّل المساحات قبل اعتماد النتائج أو التصدير.</span>` }
       // The .area-invalid rule already exists in the stylesheet; without this toggle the block
       // never got its red border, so the only cue was the text panel.
       document.querySelector('#componentsTable')?.closest('.finance-block')?.classList.toggle('area-invalid', !valid);
       return { valid, used, limit, remaining };
     }
-    function updateGraceRevenueOptions() { const select = document.getElementById('graceRevenueId'); if (!select) return; const current = select.value; const rows = [...document.querySelectorAll('#revenueTable tbody tr')].filter(tr => tr.querySelector('[data-field="method"] select')?.value !== 'areaSale'); select.innerHTML = rows.map((tr, i) => `<option value="${tr.dataset.revenueKey}">${tr.querySelector('[data-field="name"] input')?.value || `إيراد ${i + 1}`}</option>`).join(''); if (rows.some(tr => tr.dataset.revenueKey === current)) select.value = current }
+    function updateGraceRevenueOptions() { const select = document.getElementById('graceRevenueId'); if (!select) return; const current = select.value; const rows = [...document.querySelectorAll('#revenueTable tbody tr')].filter(tr => tr.querySelector('[data-field="method"] select')?.value !== 'areaSale'); select.innerHTML = rows.map((tr, i) => `<option value="${tr.dataset.revenueKey}">${tr.querySelector('[data-field="name"] input')?.value || (trDynamicI18n('إيراد') + ' ' + (i + 1))}</option>`).join(''); if (rows.some(tr => tr.dataset.revenueKey === current)) select.value = current; refreshDynamicI18n(select); }
+    document.addEventListener('wf:lang', () => {
+      try { updateRevenueComponentOptions(); } catch (e) { /* ignore */ }
+      try { updateGraceRevenueOptions(); } catch (e) { /* ignore */ }
+    });
     function graceYearFraction(year) { if (val('graceEnabled') !== 'yes') return 0; const start = (Math.max(1, Math.round(num('graceStartYear') || 1)) - 1) * 12, end = start + Math.max(0, num('graceDurationMonths')), ys = (year - 1) * 12, ye = year * 12; return Math.max(0, Math.min(ye, end) - Math.max(ys, start)) / 12 }
     function addGraceScheduleRow(d = {}) { const tb = document.querySelector('#graceScheduleTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.innerHTML = `<td data-field="year"><input type="number" min="1" value="${financialInputNumber(d.year, 1)}"></td><td data-field="amount"><input type="number" min="0" value="${financialInputNumber(d.amount, 0)}"></td><td>${rowActionsHtml()}</td>`; tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr) }
     function collectGraceSchedule() { return [...document.querySelectorAll('#graceScheduleTable tbody tr')].map(tr => ({ year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1, amount: Math.max(0, parseNumber(tr.querySelector('[data-field="amount"] input')?.value)) })) }
@@ -17041,18 +17069,25 @@
       const roiInflows = roiRows.reduce((sum, r) => sum + r.saleRevenue + r.operatingRevenue + r.terminal, 0), roiOutflows = roiRows.reduce((sum, r) => sum + r.projectOutflow + r.opex + r.landRent + r.financeFee + r.financeInterest + r.fundFeesAnnual, 0);
       const roi = roiOutflows > 0 ? (roiInflows - roiOutflows) / roiOutflows : null, roiScope = periodLabel(roiEndYear, developmentYears, totalYears), irrScope = periodLabel(irrEndYear, developmentYears, totalYears);
       const warnings = [];
-      if (saleExitMethod !== 'none' && saleExitYear > roiEndYear) warnings.push(`التخارج البيعي في السنة ${saleExitYear} خارج فترة ROI، ولذلك لا يدخل في ROI.`);
-      if (exitMethod !== 'none' && operatingExitYear > roiEndYear) warnings.push(`التخارج التشغيلي في السنة ${operatingExitYear} خارج فترة ROI، ولذلك لا يدخل في ROI.`);
-      if (saleExitMethod !== 'none' && saleExitYear > irrEndYear) warnings.push(`التخارج البيعي في السنة ${saleExitYear} خارج فترة IRR المختارة.`);
-      if (exitMethod !== 'none' && operatingExitYear > irrEndYear) warnings.push(`التخارج التشغيلي في السنة ${operatingExitYear} خارج فترة IRR المختارة.`);
+      const warnT = (key, fallback, params) => (typeof WFT === 'function' ? WFT(key, fallback, params) : fallback);
+      if (saleExitMethod !== 'none' && saleExitYear > roiEndYear) warnings.push(warnT('financial.warn_sale_exit_outside_roi', 'التخارج البيعي في السنة ' + saleExitYear + ' خارج فترة ROI، ولذلك لا يدخل في ROI.', { year: saleExitYear }));
+      if (exitMethod !== 'none' && operatingExitYear > roiEndYear) warnings.push(warnT('financial.warn_operating_exit_outside_roi', 'التخارج التشغيلي في السنة ' + operatingExitYear + ' خارج فترة ROI، ولذلك لا يدخل في ROI.', { year: operatingExitYear }));
+      if (saleExitMethod !== 'none' && saleExitYear > irrEndYear) warnings.push(warnT('financial.warn_sale_exit_outside_irr', 'التخارج البيعي في السنة ' + saleExitYear + ' خارج فترة IRR المختارة.', { year: saleExitYear }));
+      if (exitMethod !== 'none' && operatingExitYear > irrEndYear) warnings.push(warnT('financial.warn_operating_exit_outside_irr', 'التخارج التشغيلي في السنة ' + operatingExitYear + ' خارج فترة IRR المختارة.', { year: operatingExitYear }));
       if (exitMethod === 'capRate' && operatingExitYear < operationStartYear) warnings.push('سنة التخارج التشغيلي تسبق بدء التشغيل؛ لا يوجد NOI صالح لتطبيق معدل الرسملة.');
       if (landCostIncluded > 0 && landContributionType === 'none') warnings.push('قيمة الأرض داخلة في تكلفة المشروع لكنها مستبعدة من التدفقات؛ قد يؤدي ذلك إلى تضخيم مؤشرات العائد.');
       if (projectIrr === null) warnings.push('لا يمكن حساب Project IRR خلال الفترة المختارة لعدم وجود تدفقات موجبة وسالبة صالحة.');
       if (irrVal === null) warnings.push('لا يمكن حساب Equity IRR خلال الفترة المختارة لعدم وجود تدفقات موجبة وسالبة صالحة.');
       const warningBox = document.getElementById('analysisWarnings');
-      if (warningBox) { warningBox.textContent = warnings.join(' '); warningBox.classList.toggle('show', warnings.length > 0); }
+      const renderAnalysisWarnings = () => {
+        if (!warningBox) return;
+        warningBox.innerHTML = warnings.map(w => '<div>' + escapeHtml(w) + '</div>').join('');
+        warningBox.classList.toggle('show', warnings.length > 0);
+      };
+      renderAnalysisWarnings();
 
       const setTxt = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+      const setHtml = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
       const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
 
       setVal('executionCostTotal', money(executionCost));
@@ -17074,9 +17109,9 @@
       setTxt('resSaleExit', money(saleExitValue));
       setTxt('resOperatingExitGross', money(operatingExitGross));
       setTxt('resOperatingExit', money(operatingExitValue));
-      setTxt('resSaleExitScope', saleExitMethod === 'none' ? 'غير مفعل' : `السنة ${saleExitYear} | تكلفة التخارج ${financialPercent(saleExitCostRate * 100)}`);
+      setHtml('resSaleExitScope', saleExitMethod === 'none' ? '<span>غير مفعل</span>' : `<span>السنة</span> ${saleExitYear} | <span>تكلفة التخارج</span> ${financialPercent(saleExitCostRate * 100)}`);
       renderSaleExitStatus({ modeFlags, exitOn, saleExitMethod, saleAreaTotal, saleExitGross, saleExitValue });
-      setTxt('resOperatingExitScope', exitMethod === 'none' ? 'غير مفعل' : `السنة ${operatingExitYear} | تكلفة التخارج ${financialPercent(operatingExitCostRate * 100)}`);
+      setHtml('resOperatingExitScope', exitMethod === 'none' ? '<span>غير مفعل</span>' : `<span>السنة</span> ${operatingExitYear} | <span>تكلفة التخارج</span> ${financialPercent(operatingExitCostRate * 100)}`);
       setTxt('resTerminal', money(terminal));
       setTxt('resYear0', '0');
       setTxt('resLandRent', money(landRent));
@@ -17088,14 +17123,14 @@
       setTxt('resROI', roi === null ? 'غير متاح' : financialPercent(roi * 100));
       setTxt('resProjectIRR', projectIrr === null ? 'غير متاح' : financialPercent(projectIrr * 100));
       setTxt('resIRR', irrVal === null ? 'غير متاح' : financialPercent(irrVal * 100));
-      setTxt('resPayback', payback === null ? 'لا يسترد خلال الفترة' : formatFinancialResultNumber(payback, false) + ' سنة');
-      setTxt('resEquityPayback', equityPayback === 0 ? 'لا يتطلب ضخًا صافياً' : equityPayback === null ? 'لا يسترد خلال الفترة' : formatFinancialResultNumber(equityPayback, false) + ' سنة');
-      setTxt('resROIScope', roiScope + ' | يشمل التمويل وتكاليف الصندوق');
-      setTxt('resProjectIRRScope', irrScope + ' | قبل التمويل وأتعاب الصندوق');
-      setTxt('resEquityIRRScope', irrScope + ' | بعد التمويل وأتعاب الصندوق');
-      setTxt('scopeROI', roiScope);
-      setTxt('scopeProjectIRR', irrScope);
-      setTxt('scopeEquityIRR', irrScope);
+      setHtml('resPayback', payback === null ? '<span>لا يسترد خلال الفترة</span>' : formatFinancialResultNumber(payback, false) + ' <span>سنة</span>');
+      setHtml('resEquityPayback', equityPayback === 0 ? '<span>لا يتطلب ضخًا صافياً</span>' : equityPayback === null ? '<span>لا يسترد خلال الفترة</span>' : formatFinancialResultNumber(equityPayback, false) + ' <span>سنة</span>');
+      setHtml('resROIScope', roiScope + ' | <span>يشمل التمويل وتكاليف الصندوق</span>');
+      setHtml('resProjectIRRScope', irrScope + ' | <span>قبل التمويل وأتعاب الصندوق</span>');
+      setHtml('resEquityIRRScope', irrScope + ' | <span>بعد التمويل وأتعاب الصندوق</span>');
+      setHtml('scopeROI', roiScope);
+      setHtml('scopeProjectIRR', irrScope);
+      setHtml('scopeEquityIRR', irrScope);
       setTxt('resTotalOperatingCF', money(totalOperatingCF));
       setTxt('resFinalCF', money(finalCF));
 
@@ -17117,7 +17152,7 @@
       setVal('graceTotalDiscount', money(totalGraceDiscount));
 
       const areaState = validateComponentAreas();
-      if (!areaState.valid && warningBox) { warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض.'); warningBox.textContent = warnings.join(' '); warningBox.classList.add('show') }
+      if (!areaState.valid && warningBox) { warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض.'); renderAnalysisWarnings(); }
 
       const tb = document.querySelector('#cashflowTable tbody');
       if (tb) {
@@ -17162,11 +17197,12 @@
             projectCost, projectCostWithFinance, adjustedProjectCost, totalFundFees,
             roi, projectIrr, equityIrr: irrVal, payback, equityPayback, totalEquityRequired
           }),
-          components: componentRows,
-          unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), fundEnabled: val('fundEnabled'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
-        });
-      }
-    }
+           components: componentRows,
+           unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), fundEnabled: val('fundEnabled'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
+         });
+       }
+       refreshDynamicI18n(document.getElementById('section-financial-calc'));
+     }
 
     function recalcFinancials() {
       calculateAll();
@@ -18393,7 +18429,7 @@
         return;
       }
       note.hidden = false;
-      note.textContent = 'الاستخدامات المسموحة تنظيميًا: ' + uses;
+      note.innerHTML = '<span>الاستخدامات المسموحة تنظيميًا:</span> ' + escapeHtml(uses);
     }
 
     function renderAllowedUsesStatusNote(status) {
@@ -18960,7 +18996,7 @@
       const hidden = document.getElementById('tenantCoordinatesConfirmed');
       if (hidden) hidden.value = 'true';
       const status = document.getElementById('tenantCoordinatesStatus');
-      if (status) status.textContent = 'تم اعتماد الإحداثيات: ' + lat.toFixed(6) + ', ' + lng.toFixed(6);
+      if (status) status.innerHTML = '<span>تم اعتماد الإحداثيات:</span> ' + lat.toFixed(6) + ', ' + lng.toFixed(6);
       const button = document.getElementById('confirmTenantCoordinatesButton');
       if (button) { button.textContent = 'تم اعتماد الإحداثيات'; button.classList.add('success'); }
       triggerAutoSaveDraft();
@@ -19016,7 +19052,7 @@
           const boundaryLabel = data.boundary && data.boundary.status === 'verified_building'
             ? 'تم العثور على حدود مبنى مطابقة.'
             : 'حدود المبنى تحتاج مراجعة.';
-          mapHint.textContent = 'تم تحديد النقطة من ' + sourceLabel + ': ' + Number(data.lat).toFixed(6) + ', ' + Number(data.lng).toFixed(6) + '. ' + boundaryLabel;
+          mapHint.innerHTML = '<span>تم تحديد النقطة من</span> <span>' + sourceLabel + '</span>: ' + Number(data.lat).toFixed(6) + ', ' + Number(data.lng).toFixed(6) + '. <span>' + boundaryLabel + '</span>';
           mapHint.style.display = 'block';
         }
         tenantProjectData = { ...tenantProjectData, ...fields, secondary_roads: '' };
@@ -19080,7 +19116,8 @@
       { mapType: 'landmarks', title: 'خريطة المعالم', keys: ['##MAP_LANDMARKS##', '##MAP_LANDMARKS_SATELLITE##', '##MAP_LANDMARKS_ROADMAP##'], editableKeys: ['##MAP_LANDMARKS_EDITABLE##', '##MAP_LANDMARKS_SATELLITE_EDITABLE##', '##MAP_LANDMARKS_ROADMAP_EDITABLE##'] }
     ];
 
-    function renderMapPreviewGallery(forceFull = false) {
+    function renderMapPreviewGallery() {
+      const forceFull = arguments[0] === true;
       const gallery = document.getElementById('mapPreviewGallery');
       if (!gallery) return;
       const approvals = tenantCreativeImages.map_approvals || {};
@@ -19372,7 +19409,7 @@
         renderTenantMapPolygonOverlay();
         updateTenantRoadControls();
         const status = document.getElementById('manualRoadDrawingStatus');
-        if (status) status.textContent = 'رسم مسار: ' + tenantRoadDrawingTarget.name + ' — ' + tenantRoadDrawingTarget.points.length + ' نقاط';
+        if (status) status.innerHTML = '<span>رسم مسار:</span> ' + escapeHtml(tenantRoadDrawingTarget.name) + ' — <span>' + tenantRoadDrawingTarget.points.length + '</span> <span>نقاط</span>';
         return;
       }
       const landmarkMapType = LOCATION_TABLE_FIELDS[tenantLandmarkPlacementTarget?.key]?.mapType;
@@ -21135,8 +21172,8 @@
       const disableUploadSwitch = frozen || (hasImage && mode === 'ai');
       const statusLabel = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد' : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
       const chat = (slot.chat || []).map(item => (
-        '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? 'النظام: ' : 'أنت: ') + '</strong>' + escapeHtml(item.text) + '</div>'
-      )).join('') || '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
+        '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? trDynamicI18n('النظام:') + ' ' : trDynamicI18n('أنت:') + ' ') + '</strong>' + escapeHtml(item.text) + '</div>'
+      )).join('') || '<div class="tenant-hint">' + trDynamicI18n('لا توجد تعديلات بعد.') + '</div>';
       const title = visualConceptSlotLabel(slotDef.id);
       const preview = image
         ? '<div class="visual-concept-preview has-image" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '">' +
@@ -23647,60 +23684,60 @@
       const session = getSlideEditSession(index);
       if (!session) {
         return '<button type="button" data-slide-edit-act="edit"'
-          + ' aria-label="تعديل الشريحة: تعديل النص وتحريك العناصر">تعديل</button>';
+          + ' aria-label="' + trDynamicI18n('تعديل الشريحة: تعديل النص وتحريك العناصر') + '">' + trDynamicI18n('تعديل') + '</button>';
       }
       const canUndo = session.undo.length > 0;
       const canRedo = session.redo.length > 0;
       const hasSel = !!session.sel;
       const dis = hasSel ? '' : ' disabled';
       const watermarkChecked = isWatermarkVisible(tenantSlidesData[index] && tenantSlidesData[index].html) ? ' checked' : '';
-      return '<div class="slide-edit-group"><span class="slide-edit-group-title">الجلسة</span>'
+      return '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('الجلسة') + '</span>'
         + '<div class="slide-edit-group-items">'
-        + '<button type="button" class="active" data-slide-edit-act="commit">اعتماد</button>'
-        + '<button type="button" data-slide-edit-act="cancel">الغاء</button>'
+        + '<button type="button" class="active" data-slide-edit-act="commit">' + trDynamicI18n('اعتماد') + '</button>'
+        + '<button type="button" data-slide-edit-act="cancel">' + trDynamicI18n('الغاء') + '</button>'
         + '</div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">السجل</span>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('السجل') + '</span>'
         + '<div class="slide-edit-group-items">'
-        + '<button type="button" data-slide-edit-act="undo"' + (canUndo ? '' : ' disabled') + '>تراجع</button>'
-        + '<button type="button" data-slide-edit-act="redo"' + (canRedo ? '' : ' disabled') + '>تقدم</button>'
+        + '<button type="button" data-slide-edit-act="undo"' + (canUndo ? '' : ' disabled') + '>' + trDynamicI18n('تراجع') + '</button>'
+        + '<button type="button" data-slide-edit-act="redo"' + (canRedo ? '' : ' disabled') + '>' + trDynamicI18n('تقدم') + '</button>'
         + '</div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">إضافة</span>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('إضافة') + '</span>'
         + '<div class="slide-edit-group-items">'
-        + '<button type="button" data-slide-edit-act="addtext">إضافة نص</button>'
-        + '<button type="button" data-slide-edit-act="addimage">إضافة صورة</button>'
+        + '<button type="button" data-slide-edit-act="addtext">' + trDynamicI18n('إضافة نص') + '</button>'
+        + '<button type="button" data-slide-edit-act="addimage">' + trDynamicI18n('إضافة صورة') + '</button>'
         + '</div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">العلامة المائية</span>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('العلامة المائية') + '</span>'
         + '<div class="slide-edit-group-items"><label class="slide-edit-watermark">'
-        + '<input type="checkbox" data-slide-edit-watermark="toggle"' + watermarkChecked + '>إظهار العلامة المائية'
+        + '<input type="checkbox" data-slide-edit-watermark="toggle"' + watermarkChecked + '>' + trDynamicI18n('إظهار العلامة المائية')
         + '</label></div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">تنسيق النص</span>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('تنسيق النص') + '</span>'
         + '<div class="slide-edit-group-items">'
-        + '<button type="button" data-slide-edit-act="fontup"' + dis + '>تكبير</button>'
-        + '<button type="button" data-slide-edit-act="fontdown"' + dis + '>تصغير</button>'
-         + '<button type="button" data-slide-edit-act="bold"' + dis + '>عريض</button>'
-         + '<button type="button" data-slide-edit-act="del"' + dis + '>حذف العنصر</button>'
-         + '</div></div>'
-         + '<div class="slide-edit-group"><span class="slide-edit-group-title">الطبقة</span>'
-         + '<div class="slide-edit-group-items">'
-         + '<button type="button" data-slide-edit-act="front"' + dis + '>أمام</button>'
-         + '<button type="button" data-slide-edit-act="back"' + dis + '>خلف</button>'
-         + '</div></div>'
-         + '<div class="slide-edit-group"><span class="slide-edit-group-title">الشفافية</span>'
-         + '<div class="slide-edit-group-items">'
-         + '<input type="range" min="5" max="100" step="5" value="100" data-slide-edit-opacity="range"'
-         + dis + ' style="width:110px" aria-label="الشفافية">'
-         + '<span data-slide-edit-opacity-readout style="font-size:12px;min-width:38px;text-align:center">100%</span>'
-         + '</div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">الألوان</span>'
+        + '<button type="button" data-slide-edit-act="fontup"' + dis + '>' + trDynamicI18n('تكبير') + '</button>'
+        + '<button type="button" data-slide-edit-act="fontdown"' + dis + '>' + trDynamicI18n('تصغير') + '</button>'
+         + '<button type="button" data-slide-edit-act="bold"' + dis + '>' + trDynamicI18n('عريض') + '</button>'
+         + '<button type="button" data-slide-edit-act="del"' + dis + '>' + trDynamicI18n('حذف العنصر') + '</button>'
+        + '</div></div>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('الطبقة') + '</span>'
         + '<div class="slide-edit-group-items">'
-        + '<label class="slide-edit-color">لون النص<input type="color" data-slide-edit-color="color" value="#1e293b"'
+        + '<button type="button" data-slide-edit-act="front"' + dis + '>' + trDynamicI18n('أمام') + '</button>'
+        + '<button type="button" data-slide-edit-act="back"' + dis + '>' + trDynamicI18n('خلف') + '</button>'
+        + '</div></div>'
+        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('الشفافية') + '</span>'
+        + '<div class="slide-edit-group-items">'
+        + '<input type="range" min="5" max="100" step="5" value="100" data-slide-edit-opacity="range"'
+        + dis + ' style="width:110px" aria-label="' + trDynamicI18n('الشفافية') + '">'
+        + '<span data-slide-edit-opacity-readout style="font-size:12px;min-width:38px;text-align:center">100%</span>'
+        + '</div></div>'
+       + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('الألوان') + '</span>'
+        + '<div class="slide-edit-group-items">'
+        + '<label class="slide-edit-color">' + trDynamicI18n('لون النص') + '<input type="color" data-slide-edit-color="color" value="#1e293b"'
         + dis + '><input type="text" data-slide-edit-hex="color" value="#1e293b" maxlength="7" spellcheck="false" placeholder="#000000"'
         + dis + '></label>'
-        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="color"' + dis + '>قطارة النص</button>'
-        + '<label class="slide-edit-color">لون الخلفية<input type="color" data-slide-edit-color="background" value="#ffffff"'
+        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="color"' + dis + '>' + trDynamicI18n('قطارة النص') + '</button>'
+        + '<label class="slide-edit-color">' + trDynamicI18n('لون الخلفية') + '<input type="color" data-slide-edit-color="background" value="#ffffff"'
         + dis + '><input type="text" data-slide-edit-hex="background" value="#ffffff" maxlength="7" spellcheck="false" placeholder="#ffffff"'
         + dis + '></label>'
-        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="background"' + dis + '>قطارة الخلفية</button>'
+        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="background"' + dis + '>' + trDynamicI18n('قطارة الخلفية') + '</button>'
         + '</div></div>';
     }
 
@@ -23824,6 +23861,19 @@
         inp.addEventListener('change', () => applyHex(true));
       });
     }
+    // Edit toolbars live inside skipped slide cards, so the DOM pass never
+    // reaches them: rebuild their labels whenever the UI language changes.
+    document.addEventListener('wf:lang', () => {
+      try {
+        document.querySelectorAll('.ge-slide-edit-controls').forEach(ctl => {
+          const card = ctl.closest('[id^="slide-card-"]');
+          const idx = card ? Number(String(card.id).replace('slide-card-', '')) : NaN;
+          if (!Number.isInteger(idx)) return;
+          ctl.innerHTML = slideEditToolbarHTML(idx);
+          wireSlideEditControls(ctl, idx);
+        });
+      } catch (e) { /* ignore */ }
+    });
 
     function refreshSlideEditToolbar(index) {
       const card = document.getElementById('slide-card-' + index);
@@ -24665,7 +24715,7 @@
       const editorInfo = document.getElementById('slidesEditorInfo');
       if (!editorInfo) return;
       const name = String(title || '').trim();
-      editorInfo.textContent = name ? 'عرض: ' + name + ' | ' + (count || 0) + ' شريحة' : '';
+      editorInfo.innerHTML = name ? '<span>عرض:</span> ' + escapeHtml(name) + ' | <span>' + (count || 0) + '</span> <span>شريحة</span>' : '';
     }
 
     // Opening a saved presentation leaves its slides, its thumbnails and its title in this page's
@@ -24698,9 +24748,9 @@
       const remaining = Math.max(0, (tenantSlidePlan?.slides?.length || 0) - (tenantSlidesData?.length || 0));
       const notice = document.createElement('div');
       notice.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;margin:0 auto 20px;max-width:960px;background:#fff8ed;border:1px solid #e7c98a;border-radius:12px;color:#6b4d16;';
-      notice.innerHTML = '<div><div style="font-weight:800">التوليد متوقف مؤقتًا</div>' +
-        '<div style="font-size:13px;margin-top:4px">تم حفظ ' + escapeHtml(String(tenantSlidesData.length)) +
-        ' شريحة ويتبقى ' + escapeHtml(String(remaining)) + ' شرائح.</div></div>' +
+      notice.innerHTML = '<div><div style="font-weight:800"><span>التوليد متوقف مؤقتًا</span></div>' +
+        '<div style="font-size:13px;margin-top:4px"><span>تم حفظ</span> ' + escapeHtml(String(tenantSlidesData.length)) +
+        ' <span>شريحة</span> <span>ويتبقى</span> ' + escapeHtml(String(remaining)) + ' <span>شرائح</span>.</div></div>' +
         '<button type="button" class="btn primary" style="background:#1a4d6f;color:#fff;white-space:nowrap" onclick="resumeTenantSlideGeneration()">استكمال التوليد</button>';
       wrap.appendChild(notice);
     }
@@ -25015,7 +25065,7 @@
       if (tenantChatSlideIndex >= tenantSlidesData.length) tenantChatSlideIndex = 0;
 
       if (!tenantDesignerMessages.length) {
-        messages.innerHTML = '<div class="tenant-hint">لا توجد تعديلات بعد.</div>';
+        messages.innerHTML = '<div class="tenant-hint">' + trDynamicI18n('لا توجد تعديلات بعد.') + '</div>';
         restoreDesignerChatBusyIndicator();
         updateDesignerChatStatus();
         return;
@@ -25031,6 +25081,9 @@
       messages.scrollTop = messages.scrollHeight;
       updateDesignerChatStatus();
     }
+    // Chat logs are excluded from auto-translate (user/AI content), so the
+    // empty state above is resolved at build time; refresh it on toggle.
+    document.addEventListener('wf:lang', () => { try { renderTenantDesignerChat(); } catch (e) { /* ignore */ } });
 
     function detectMoveSlideCommand(text) {
       if (!text || !tenantSlidesData.length) return null;
@@ -25717,7 +25770,7 @@
       const scripts = status.scripts || {};
       const label = key => {
         const item = scripts[key] || {};
-        return (item.font || 'الافتراضي') + (item.chosen ? '' : ' (افتراضي)');
+        return (item.font || trDynamicI18n('الافتراضي')) + (item.chosen ? '' : ' ' + trDynamicI18n('(افتراضي)'));
       };
       const renders = {
         'embedded file': 'ملف خط مضمّن مع العرض',
@@ -25730,10 +25783,12 @@
       }[status.renders] || status.renders;
       const arabic = label('arabic');
       const latin = label('latin');
-      line.textContent = (arabic === latin ? 'المطبَّق الآن: ' + arabic
-        : 'المطبَّق الآن — عربي: ' + arabic + ' | لاتيني: ' + latin) +
-        ' | ' + renders;
+      line.innerHTML = (arabic === latin ? '<span>المطبَّق الآن:</span> ' + escapeHtml(arabic)
+        : '<span>المطبَّق الآن</span> — <span>عربي:</span> ' + escapeHtml(arabic) + ' | <span>لاتيني:</span> ' + escapeHtml(latin)) +
+        ' | <span>' + escapeHtml(renders) + '</span>';
+      refreshDynamicI18n(line);
     }
+    document.addEventListener('wf:lang', () => { try { renderPresentationFontStatus(); } catch (e) { /* ignore */ } });
 
     // One entry per family: the weights of a family are applied together, so listing each weight as
     // its own choice only invited picking half a font.
@@ -25768,18 +25823,26 @@
           const selected = family.faces.some(face =>
             chosenIds.has(face.id) || (face.custom_font_path && chosenPaths.has(face.custom_font_path)));
           const scripts = new Set(family.faces.map(face => face.script || 'arabic'));
-          const coverage = scripts.has('arabic') && scripts.has('latin') ? 'عربي ولاتيني'
-            : scripts.has('arabic') ? 'عربي' : 'لاتيني';
+          const coverage = scripts.has('arabic') && scripts.has('latin') ? trDynamicI18n('عربي ولاتيني')
+            : scripts.has('arabic') ? trDynamicI18n('عربي') : trDynamicI18n('لاتيني');
           return '<option value="' + escapeHtml(family.name) + '"' + (selected ? ' selected' : '') +
             '>' + escapeHtml(family.name + ' — ' + coverage) + '</option>';
         }).join('');
         select.disabled = false;
+        refreshDynamicI18n(select);
         await renderPresentationFontStatus();
       } catch (error) {
         console.warn('[PRESENTATION FONT] load failed:', error);
         select.innerHTML = '<option value="">تعذر تحميل الخطوط</option>';
+        refreshDynamicI18n(select);
       }
     }
+    document.addEventListener('wf:lang', () => {
+      try {
+        const panel = document.getElementById('presentationFontSettingsPanel');
+        if (panel && panel.style.display !== 'none') openPresentationFontSettings();
+      } catch (e) { /* ignore */ }
+    });
 
     function closePresentationFontSettings() {
       const panel = document.getElementById('presentationFontSettingsPanel');
@@ -25971,6 +26034,7 @@
       const title = String(titleOverride || tenantPresentationTitle
         || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان').trim();
       renumberTenantSlides();
+      // api('POST', '/api/presentations'
       tenantProjectData = {
         ...tenantProjectData, tenantSlidePlan, tenantCreativeImages,
         designerChat: designerChatPersistence(), tenantSlidesData
@@ -26140,7 +26204,8 @@
       };
       const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
       const tenantKey = (tenantUser && (tenantUser.id || tenantUser.tenantId)) || 'tenant';
-      const cacheKey = tenantKey + '|' + query.toString();
+      const listLang = ((typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang && window.WFI18n.getLang()) || 'ar');
+      const cacheKey = tenantKey + '|' + listLang + '|' + query.toString();
       if (!force && tenantArchiveCache && tenantArchiveCache.key === cacheKey && Date.now() - tenantArchiveCache.timestamp < 15000) {
         list.innerHTML = tenantArchiveCache.html;
         return;
@@ -26170,18 +26235,18 @@
         const projectCost = costByProject[d.id];
         const projectMapsCost = Number(projectCost?.maps_cost_usd) || 0;
         const projectReconcile = aiReconcileStatusText(reconcileByDraft[d.id]);
-        const costText = 'التكلفة: ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (خرائط: ' + formatUsageCost(projectMapsCost) + ')' : '') + (projectReconcile ? ' | ' + projectReconcile : '') : '—');
+        const costText = '<span>التكلفة:</span> ' + (projectCost ? formatUsageCost(projectCost.cost_usd || 0) + (projectMapsCost > 0 ? ' (<span>خرائط:</span> ' + formatUsageCost(projectMapsCost) + ')' : '') + (projectReconcile ? ' | <span>' + projectReconcile + '</span>' : '') : '—');
         const recovery = recoveryByDraft[d.id] || null;
-        const fields = recovery ? recovery.fieldCount + ' حقل ممتلئ' : '';
+        const fieldsHtml = recovery ? '<span>' + recovery.fieldCount + '</span> <span>حقل ممتلئ</span>' : '';
         const snapshot = recovery?.snapshot;
         const restorable = Boolean(snapshot?.recoverable);
         const note = restorable
-          ? '<div class="meta" style="color:#92400e">نسخة محفوظة في العرض «' + escapeHtml(snapshot.title || '') + '» تحتوي ' + snapshot.fieldCount + ' حقلًا</div>'
+          ? '<div class="meta" style="color:#92400e"><span>نسخة محفوظة في العرض</span> «' + escapeHtml(snapshot.title || '') + '» <span>تحتوي</span> <span>' + snapshot.fieldCount + '</span> <span>حقلًا</span></div>'
           : '';
         return '<div class="tenant-presentation-card" style="background:#f8fafc;border:1px solid ' +
           (recovery?.isEmpty ? '#f59e0b' : '#cbd5e1') + ';margin-bottom:12px">' +
-          '<div><h3>' + escapeHtml(title) + '</h3><div class="meta">' + statusText + ' | ' + date +
-          (fields ? ' | ' + fields : '') + ' | ' + costText + '</div>' + note + '</div><div class="tenant-actions">' +
+          '<div><h3>' + escapeHtml(title) + '</h3><div class="meta"><span>' + statusText + '</span> | ' + escapeHtml(date) +
+          (fieldsHtml ? ' | ' + fieldsHtml : '') + ' | ' + costText + '</div>' + note + '</div><div class="tenant-actions">' +
           '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
           '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
           (restorable ? '<button class="btn small" style="background:#b45309;color:#fff" onclick="restoreProjectDraft(\'' + d.id + '\',\'' + snapshot.presentationId + '\')">استرجاع البيانات</button>' : '') +
@@ -26327,6 +26392,8 @@
 
     async function saveExistingPresentation() {
       if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return false; }
+      renumberTenantSlides();
+      // api('PUT', '/api/presentations/'
       const saved = await saveTenantPresentation();
       if (saved) toast('تم حفظ نسخة العرض');
       return saved;
@@ -26506,12 +26573,12 @@
               <div style="font-size:12px;font-weight:${isActive ? '700' : '500'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(s.title)}">
                 ${escapeHtml(s.title)}
               </div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;">${count} رسالة • ${s.createdAt || ''}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px;"><span>${count}</span> <span>رسالة</span> • ${s.createdAt || ''}</div>
             </div>
             <button onclick="deleteChatSession('training', '${s.id}', event)" title="حذف" style="background:none;border:none;cursor:pointer;font-size:13px;opacity:0.6;padding:2px;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"></button>
           </div>
         `;
-      }).join('');
+      });
     }
 
     function renderAIRulesChatSessions() {
@@ -26534,7 +26601,7 @@
               <div style="font-size:12px;font-weight:${isActive ? '700' : '500'};color:${textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(s.title)}">
                 ${escapeHtml(s.title)}
               </div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px;">${count} رسالة • ${s.createdAt || ''}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px;"><span>${count}</span> <span>رسالة</span> • ${s.createdAt || ''}</div>
             </div>
             <button onclick="deleteChatSession('ai_rules', '${s.id}', event)" title="حذف" style="background:none;border:none;cursor:pointer;font-size:13px;opacity:0.6;padding:2px;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"></button>
           </div>
@@ -26821,7 +26888,7 @@
           '<div><h3>' + escapeHtml(t.companyName || '') + adminBadge + '</h3>' +
           '<div class="meta">' + escapeHtml(t.accountManagerName || '') + ' | ' +
           escapeHtml(t.email) + ' | ' + escapeHtml(t.username || '') + ' | ' +
-          planBadge + ' | ' + statusBadge + ' | رصيد ' +
+          planBadge + ' | ' + statusBadge + ' | <span>رصيد</span> ' +
           Number(t.creditBalance || 0).toLocaleString('en-US') +
           (t.createdAt ? ' | ' + t.createdAt.slice(0, 10) : '') +
           '</div></div>' +
@@ -26901,7 +26968,7 @@
         const status = d.status === 'pending_approval' ? 'بانتظار التعميد' : d.status === 'approved' ? 'معتمد' : 'مسودة';
         const date = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ');
         return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(d.title || 'مشروع بدون عنوان') + '</h3>' +
-          '<div class="meta">' + status + ' | ' + escapeHtml(date) + '</div></div></div>';
+          '<div class="meta"><span>' + status + '</span> | ' + escapeHtml(date) + '</div></div></div>';
       }).join('');
     }
 
@@ -26911,7 +26978,7 @@
         const status = p.status === 'pending_approval' ? 'بانتظار التعميد' : p.status === 'approved' ? 'معتمد' : 'مسودة';
         const date = (p.updatedAt || p.createdAt || '').slice(0, 16).replace('T', ' ');
         return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(p.title || 'عرض بدون عنوان') + '</h3>' +
-          '<div class="meta">' + (p.slideCount || 0) + ' شريحة | ' + status + ' | ' + escapeHtml(date) + '</div></div>' +
+          '<div class="meta"><span>' + (p.slideCount || 0) + '</span> <span>شريحة</span> | <span>' + status + '</span> | ' + escapeHtml(date) + '</div></div>' +
           '<div class="tenant-actions">' +
           '<button type="button" class="btn small primary" onclick="openSagPresentationPreview(\'' + tenantId + '\', \'' + p.id + '\')">معاينة</button>' +
           '</div></div>';
@@ -27093,9 +27160,9 @@
         return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(user.name) +
           (primary ? ' <span style="font-size:11px;color:var(--p)">مدير الحساب</span>' : '') + '</h3>' +
           '<div class="meta">' + escapeHtml(user.email) + ' | ' + escapeHtml(user.username || '') +
-          ' | ' + escapeHtml(user.phone || '') + ' | ' +
-          (user.role === 'company_admin' ? 'أدمن شركة' : 'موظف') + ' | ' +
-          (user.is_active ? 'نشط' : 'موقوف') + '</div></div>' +
+          ' | ' + escapeHtml(user.phone || '') + ' | <span>' +
+          (user.role === 'company_admin' ? 'أدمن شركة' : 'موظف') + '</span> | <span>' +
+          (user.is_active ? 'نشط' : 'موقوف') + '</span></div></div>' +
           '<div class="tenant-actions">' +
           '<button type="button" class="btn small ghost" onclick="openSagUserEdit(\'' +
             tenantId + '\', \'' + user.id + '\')">تعديل</button>' +
@@ -28114,7 +28181,7 @@
       list.innerHTML = approvals.map(a =>
         '<div class="tenant-presentation-card">' +
         '<div><h3>' + escapeHtml(a.pres_title || 'عرض') + '</h3>' +
-        '<div class="meta">طلب بواسطة: ' + escapeHtml(a.requested_by_name || '') + ' | ' + (a.slide_count || 0) + ' شريحة | ' + escapeHtml(a.created_at || '') + '</div></div>' +
+        '<div class="meta"><span>طلب بواسطة:</span> ' + escapeHtml(a.requested_by_name || '') + ' | <span>' + (a.slide_count || 0) + '</span> <span>شريحة</span> | ' + escapeHtml(a.created_at || '') + '</div></div>' +
         '<div class="tenant-actions">' +
         '<button class="btn small primary" onclick="openExistingPresentation(\'' + a.presentation_id + '\')">معاينة</button>' +
         '<button class="btn small green" onclick="reviewApproval(\'' + a.id + '\', \'approved\')">اعتماد</button>' +
@@ -28149,7 +28216,7 @@
         const roleLabel = u.role === 'company_admin' ? 'أدمن' : 'موظف';
         const statusBadge = u.is_active ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
         return '<div class="tenant-presentation-card" style="margin-bottom:0">' +
-          '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | ' + roleLabel + ' | ' + statusBadge + '</div></div>' +
+          '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | <span>' + roleLabel + '</span> | ' + statusBadge + '</div></div>' +
           '<div class="tenant-actions" style="gap:6px">' +
           '<button class="btn small primary" onclick="openUserPermissionsModal(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">صلاحيات</button>' +
           '<button class="btn small ghost" onclick="toggleUserActive(\'' + u.id + '\', ' + (u.is_active ? 0 : 1) + ')">' + (u.is_active ? 'تعطيل' : 'تفعيل') + '</button>' +
@@ -28239,7 +28306,7 @@
       modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
       modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:24px;max-width:520px;width:100%;max-height:85vh;overflow:auto">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
-        '<h3>صلاحيات: ' + escapeHtml(userName) + '</h3>' +
+        '<h3><span>صلاحيات:</span> ' + escapeHtml(userName) + '</h3>' +
         '<button class="btn ghost" onclick="document.getElementById(\'userPermissionsModal\').remove()">إغلاق</button></div>' +
         '<h4 style="margin:12px 0 8px;color:var(--p)">صلاحيات التطبيق</h4>' +
         '' +
