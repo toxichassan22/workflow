@@ -19096,6 +19096,12 @@ HTML الحالي:
             result['status'] = 'error'
             result['message'] = f'أداة غير معروفة: {tool}'
 
+    except db.PresentationRevisionConflict as error:
+        result['status'] = 'error'
+        result['error_code'] = 'PRESENTATION_REVISION_CONFLICT'
+        result['currentRevision'] = error.current_revision
+        result['expectedRevision'] = error.expected_revision
+        result['message'] = 'تغير العرض منذ فتحه؛ لم تُحفظ هذه التغييرات'
     except Exception as e:
         result['status'] = 'error'
         result['message'] = str(e)
