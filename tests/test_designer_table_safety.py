@@ -246,6 +246,25 @@ class TableDeletionSafetyTests(unittest.TestCase):
         source = slide(table().replace('<caption>', '<colgroup><col><col span="2"></colgroup><caption>', 1))
         self.assert_blocked(source, 'delete column 2', 'column_layout_unsupported')
 
+    def test_width_only_colgroup_deletes_matching_col_element(self):
+        body = ('<table id="costs"><colgroup><col span="1" style="width:50%"><col style="width:30%"><col style="width:20%"></colgroup>'
+                '<caption>التكاليف</caption><thead>' + HEADER + '</thead><tbody>\n'
+                + '\n<!-- retained -->\n'.join(ROWS) + '\n</tbody>' + FOOT + '</table>')
+        source = slide(body)
+        expected = source
+        for cell in ('<th>السعر</th>', '<td data-x="a > b">100</td>', '<td>200</td>',
+                     '<td>300</td>', '<td>600</td>', '<col style="width:30%">'):
+            expected = expected.replace(cell, '')
+        self.assert_applied(source, 'احذف عمود السعر', expected)
+
+    def test_spanned_or_mismatched_colgroup_stays_blocked(self):
+        two_col = ('<table><thead><tr><th>A</th><th>B</th></tr></thead><tbody>'
+                   '<tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></tbody></table>')
+        self.assert_blocked(slide(two_col.replace('<table>', '<table><colgroup span="2"></colgroup>', 1)),
+                            'delete column 1', 'column_layout_unsupported')
+        self.assert_blocked(slide(two_col.replace('<table>', '<table><colgroup><col><col><col></colgroup>', 1)),
+                            'delete column 1', 'column_layout_unsupported')
+
     def test_empty_table_guard_is_atomic_for_single_and_multiple_targets(self):
         self.assert_blocked(slide(table([ROWS[0]])), 'delete row 1', 'would_empty_table')
         self.assert_blocked(slide(), 'delete rows 1, 2, 3', 'would_empty_table')

@@ -832,6 +832,62 @@ def _table_edit_info(table: Dict[str, Any], source: str) -> Dict[str, Any]:
             "header_cells": [source[cell["start"]:cell["end"]] for row in headers for cell in row["cells"]]}
 
 
+def _col_span_value(node: Dict[str, Any]) -> Union[int, None]:
+    """A <col>/<colgroup> span as an int, or None when it is not a plain single column."""
+    raw = node.get("attrs", {}).get("span", "1")
+    if not re.fullmatch(r"1", str(raw).strip()):
+        return None
+    return 1
+
+
+def _column_layout(table: Dict[str, Any]) -> Union[List[Dict[str, Any]], None]:
+    """Expand <col>/<colgroup> specs to one node per table column, or None when complex.
+
+    Only width/style-only layouts qualify: every <col> covers exactly one column, every
+    <colgroup> is closed and either holds <col> children or covers one column itself.
+    Anything else (spans, unclosed groups, stray nodes) keeps the column delete blocked,
+    because the matching <col> cannot be removed by pure span deletion.
+    """
+    cols = table.get("cols") or []
+    if not cols:
+        return []
+    sequence: List[Dict[str, Any]] = []
+    for node in cols:
+        if not isinstance(node, dict):
+            return None
+        if node.get("end") is None:
+            return None
+        parent = node.get("parent") or {}
+        if node.get("tag") == "col":
+            if parent.get("tag") not in ("table", "colgroup"):
+                return None
+            if _col_span_value(node) != 1:
+                return None
+            if parent.get("tag") == "colgroup":
+                # Covered through the group below; counting it here would double-count.
+                continue
+            sequence.append(node)
+        elif node.get("tag") == "colgroup":
+            if parent.get("tag") != "table":
+                return None
+            children = [child for child in node.get("children", [])
+                        if isinstance(child, dict) and child.get("tag") == "col"]
+            if children:
+                if "span" in node.get("attrs", {}) and str(node["attrs"]["span"]).strip() != "1":
+                    return None
+                for child in children:
+                    if child.get("end") is None or _col_span_value(child) != 1:
+                        return None
+                    sequence.append(child)
+            else:
+                if _col_span_value(node) != 1:
+                    return None
+                sequence.append(node)
+        else:
+            return None
+    return sequence
+
+
 def _table_safety_reason(table: Dict[str, Any], kind: str) -> str:
     if table["nested"]:
         return "nested_table_unsupported"
@@ -844,7 +900,13 @@ def _table_safety_reason(table: Dict[str, Any], kind: str) -> str:
                     return "merged_cells_unsupported"
     if kind == "column":
         if table["cols"]:
-            return "column_layout_unsupported"
+            widths = {len(row["cells"]) for row in table["rows"]}
+            layout = _column_layout(table)
+            # A width-only <colgroup> is fine: the matching <col> is removed together
+            # with the cells. Anything else (spans, unclosed groups, count mismatch)
+            # stays blocked so column widths cannot silently shift onto other columns.
+            if layout is None or len(widths) != 1 or len(layout) != next(iter(widths)):
+                return "column_layout_unsupported"
         if len({len(row["cells"]) for row in table["rows"]}) > 1:
             return "non_rectangular_table"
     return ""
@@ -964,6 +1026,20 @@ def apply_table_delete_request(html: str, message: Any) -> Dict[str, Any]:
         return result
     doomed = ([info["data_rows"][index] for index in indexes] if kind == "row" else
               [row["cells"][index] for row in table["rows"] for index in indexes])
+    if kind == "column" and table.get("cols"):
+        # A width-only <colgroup> stays consistent only when the matching <col> leaves
+        # together with the cells; otherwise the surviving columns inherit wrong widths.
+        # (Safety above already validated the layout; this re-check is defensive.)
+        layout = _column_layout(table)
+        if layout is None or len(layout) != count:
+            result["reason"] = "column_layout_unsupported"
+            return result
+        seen_col_ids = set()
+        for index in indexes:
+            node = layout[index]
+            if id(node) not in seen_col_ids:
+                seen_col_ids.add(id(node))
+                doomed.append(node)
     changes = [{"start": node["start"], "end": node["end"], "kind": kind,
                 "tableIndex": table_index, "removedHtml": source[node["start"]:node["end"]]} for node in doomed]
     description = "تم حذف الصفوف المحددة مع الحفاظ على بقية المحتوى والتنسيق." if kind == "row" else "تم حذف الأعمدة المحددة مع الحفاظ على بقية المحتوى والتنسيق."
