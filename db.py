@@ -2081,9 +2081,10 @@ def commit_presentation_revision(tenant_id, presentation_id=None, *,
             summary = str(summary or '').strip() or (
                 'استعادة نسخة قديمة للشرائح فقط' if target and target['legacy'] else
                 'استعادة مراجعة العرض' if target else 'إنشاء العرض' if created else 'تعديل العرض')
+            record_action = action if action not in ('create', 'edit') else ('إنشاء العرض' if created else action)
             version_id = _insert_presentation_revision(
                 conn, state, revision, user_id=user_id, user_name=user_name, source=source,
-                action='create' if created else action, summary=summary, details=lines,
+                action=record_action, summary=summary, details=lines,
                 previous_id=previous_id, restored_from=restore_version_id)
         # No-op saves may update bookkeeping/status but never mutate a past snapshot.
         updated_at = datetime.now().isoformat() if changed else current.get('updated_at')

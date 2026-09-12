@@ -2694,16 +2694,31 @@
       color: var(--p);
     }
 
+    html[lang="en"] #section-financial-calc .help.input::before,
+    html[dir="ltr"] #section-financial-calc .help.input::before {
+      content: "Input: " !important;
+    }
+
     #section-financial-calc .help.calc::before {
       content: "محسوب: ";
       font-weight: 900;
       color: var(--green);
     }
 
+    html[lang="en"] #section-financial-calc .help.calc::before,
+    html[dir="ltr"] #section-financial-calc .help.calc::before {
+      content: "Calculated: " !important;
+    }
+
     #section-financial-calc .help.formula::before {
       content: "الفورمولا: ";
       font-weight: 900;
       color: #1e5b92;
+    }
+
+    html[lang="en"] #section-financial-calc .help.formula::before,
+    html[dir="ltr"] #section-financial-calc .help.formula::before {
+      content: "Formula: " !important;
     }
 
     #section-financial-calc .table-wrap {
@@ -2898,6 +2913,11 @@
       content: "غير مطلوب";
       font-size: 11px !important;
       color: #aaa !important;
+    }
+
+    html[lang="en"] #section-financial-calc td.off-cell:after,
+    html[dir="ltr"] #section-financial-calc td.off-cell:after {
+      content: "Not Required" !important;
     }
 
     #section-financial-calc td.off-cell>* {
@@ -5161,16 +5181,31 @@
       color: #123B6D !important;
     }
 
+    html[lang="en"] #section-financial-calc .help.input::before,
+    html[dir="ltr"] #section-financial-calc .help.input::before {
+      content: "Input: " !important;
+    }
+
     #section-financial-calc .help.calc::before {
       content: "محسوب: " !important;
       font-weight: 900 !important;
       color: #0d7b55 !important;
     }
 
+    html[lang="en"] #section-financial-calc .help.calc::before,
+    html[dir="ltr"] #section-financial-calc .help.calc::before {
+      content: "Calculated: " !important;
+    }
+
     #section-financial-calc .help.formula::before {
       content: "الفورمولا: " !important;
       font-weight: 900 !important;
       color: #1e5b92 !important;
+    }
+
+    html[lang="en"] #section-financial-calc .help.formula::before,
+    html[dir="ltr"] #section-financial-calc .help.formula::before {
+      content: "Formula: " !important;
     }
 
     #section-financial-calc .table-wrap {
@@ -10609,6 +10644,14 @@
       setMarketStudyState(collectMarketStudyFromDom());
     }
 
+    function refreshMarketStudyI18n(scope) {
+      try {
+        if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en' && scope) {
+          window.WFI18n.autoTranslate(scope);
+        }
+      } catch (e) { /* ignore */ }
+    }
+
     function addMarketStudySection(form, before) {
       const div = document.createElement('div');
       div.className = 'tenant-form-section';
@@ -10737,6 +10780,7 @@
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
         document.getElementById('marketSwot_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
       });
+      refreshMarketStudyI18n(div);
     }
 
     function updateMarketStudyFieldVisibility() {
@@ -10801,6 +10845,7 @@
       }
       if (value) select.value = value;
       if (value && select.value !== value) select.value = '';
+      refreshMarketStudyI18n(select);
     }
 
     function keepProjectMultiSelectOpen(hostId) {
@@ -11260,6 +11305,47 @@
         window.__wfClassificationLangBound = true;
         document.addEventListener('wf:lang', () => {
           try { syncProjectClassificationFields(); } catch (e) { /* ignore */ }
+          try { renderLocationWorkflowState(); } catch (e) { /* ignore */ }
+          try {
+            const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+            const dict = (typeof window.WFI18n !== 'undefined' && window.WFI18n.autoDict) || (typeof WFI18N_EN_AUTO !== 'undefined' ? WFI18N_EN_AUTO : (window.WFI18N_EN_AUTO || null));
+            document.querySelectorAll('#tenantProjectForm label[data-ar-label]').forEach(lblEl => {
+              const raw = lblEl.dataset.arLabel;
+              const req = lblEl.dataset.isRequired === '1' ? ' *' : '';
+              const badge = lblEl.querySelector('.tenant-client-required-badge');
+              let text = raw;
+              if (isEn && dict) {
+                text = dict[raw] || (raw.indexOf('²') !== -1 && dict[raw.replace(/²/g, '2')]) || (raw.indexOf('2') !== -1 && dict[raw.replace(/2/g, '²')]) || raw;
+              }
+              lblEl.textContent = text + req;
+              if (badge) {
+                badge.textContent = isEn ? 'Client-Entered Only' : 'إدخال العميل';
+                lblEl.appendChild(badge);
+              }
+            });
+            document.querySelectorAll('.tenant-section-title').forEach(st => {
+              const secLbl = st.querySelector('.project-section-title-label');
+              if (secLbl && secLbl.dataset.arText) {
+                secLbl.textContent = isEn && dict && dict[secLbl.dataset.arText] ? dict[secLbl.dataset.arText] : secLbl.dataset.arText;
+              }
+              const b = st.querySelector('.section-status-badge');
+              if (b && b.dataset.arText) {
+                b.textContent = isEn && dict && dict[b.dataset.arText] ? dict[b.dataset.arText] : b.dataset.arText;
+              }
+              const genBtn = st.querySelector('.section-presentation-btn');
+              if (genBtn && genBtn.dataset.arText) {
+                genBtn.textContent = isEn && dict && dict[genBtn.dataset.arText] ? dict[genBtn.dataset.arText] : genBtn.dataset.arText;
+              }
+              const lockBtn = st.querySelector('.section-approve-btn:not(.section-presentation-btn)');
+              if (lockBtn && lockBtn.dataset.arText) {
+                lockBtn.textContent = isEn && dict && dict[lockBtn.dataset.arText] ? dict[lockBtn.dataset.arText] : lockBtn.dataset.arText;
+              }
+            });
+            const formEl = document.getElementById('tenantProjectForm');
+            if (formEl && isEn && typeof window.WFI18n !== 'undefined') {
+              window.WFI18n.autoTranslate(formEl);
+            }
+          } catch (e) { /* ignore */ }
         });
       }
       syncProjectClassificationFields();
@@ -11551,6 +11637,7 @@
           persistMarketStudyFromDom();
         });
       });
+      refreshMarketStudyI18n(cell);
     }
 
     function competitorLogoPath(row = {}) {
@@ -11744,6 +11831,7 @@
       cell.querySelector('[data-import-competitor-logo]')?.addEventListener('click', () => importCompetitorLogo(tr));
       cell.querySelector('[data-preview-competitor-logo]')?.addEventListener('click', () => openCompetitorLogoPreview(tr));
       cell.querySelector('[data-remove-competitor-logo]')?.addEventListener('click', () => removeCompetitorLogo(tr));
+      refreshMarketStudyI18n(cell);
     }
 
     function competitorPriceCache(tr) {
@@ -11820,6 +11908,7 @@
         fillSelectOptions(tr.querySelector('[data-field="price_type"]'), options, nextType, '--');
         tr.dataset.previousPriceType = nextType;
         renderCompetitorPriceInputs(tr, { price_cache: competitorPriceCache(tr) });
+        refreshMarketStudyI18n(tr);
         persistMarketStudyFromDom();
       });
       tr.querySelector('[data-field="price_type"]').addEventListener('change', event => {
@@ -11833,6 +11922,7 @@
         persistMarketStudyFromDom();
       });
       tr.querySelectorAll('input,select,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+      refreshMarketStudyI18n(tr);
     }
 
     function renderCompetitorPriceInputs(tr, row) {
@@ -11854,6 +11944,7 @@
         formatMarketNumericInput(input);
         input.addEventListener('input', persistMarketStudyFromDom);
       });
+      refreshMarketStudyI18n(cell);
     }
 
     function collectOneCompetitorRow(tr) {
@@ -12050,6 +12141,7 @@
         renderCompetitorSourceLinks(tr);
         persistMarketStudyFromDom();
       });
+      refreshMarketStudyI18n(row);
       return input;
     }
 
@@ -12063,6 +12155,7 @@
         const input = addCompetitorSourceUrlInput(tr);
         input?.focus();
       });
+      refreshMarketStudyI18n(editor);
     }
 
     function attachMarketSourceToCompetitor(sourceRow) {
@@ -12138,6 +12231,7 @@
         }
       });
       tr.querySelectorAll('input,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+      refreshMarketStudyI18n(tr);
     }
 
     function collectMarketSourceRows() {
@@ -12213,6 +12307,8 @@
         group.rows.forEach(row => addMarketSourceRow(row, body));
       });
       selectMarketSourceTab(selectedKey);
+      refreshMarketStudyI18n(tabs);
+      refreshMarketStudyI18n(panels);
     }
 
     function applyMarketStudyState(state) {
@@ -12254,6 +12350,7 @@
       tenantProjectData.market_study_data = next;
       updateMarketStudyFieldVisibility();
       syncMarketLocationMirrors();
+      refreshMarketStudyI18n(document.getElementById('section-market-study'));
     }
 
     function collectMarketStudyRequestPayload() {
@@ -13310,6 +13407,10 @@
       tenantFieldSections = (sectionsData && sectionsData.available) || [];
       tenantAllowedFieldSections = (sectionsData && sectionsData.allowed) || {};
       renderTenantProjectForm(tenantFields);
+      if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
+        const formEl = document.getElementById('tenantProjectForm');
+        if (formEl) window.WFI18n.autoTranslate(formEl);
+      }
       return true;
     }
 
@@ -13413,6 +13514,9 @@
       updateRevenueComponentOptions();
       updateDynamicFields();
       calculateAll();
+      if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en' && financialRoot) {
+        window.WFI18n.autoTranslate(financialRoot);
+      }
     }
 
     // A rebuilt form is empty until hydrateTenantProjectForm() fills it from the draft. Its blank
@@ -13623,20 +13727,28 @@
     });
 
     function createProjectSectionHeader(sectionKey, label, options = {}) {
+      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+      const dict = (typeof window.WFI18n !== 'undefined' && window.WFI18n.autoDict) || (typeof WFI18N_EN_AUTO !== 'undefined' ? WFI18N_EN_AUTO : (window.WFI18N_EN_AUTO || null));
+      const tr = text => (isEn && dict && dict[text]) ? dict[text] : text;
+
       const title = document.createElement('h3');
       title.className = 'tenant-section-title';
+      title.dataset.sectionKey = sectionKey;
+      title.dataset.arLabel = label;
 
       const underConstruction = !!options.underConstruction;
       const status = underConstruction ? 'draft' : (tenantProjectSectionStatuses[sectionKey] === 'approved' ? 'approved' : 'draft');
       const badge = document.createElement('span');
       badge.id = 'badge-' + sectionKey;
       badge.className = 'section-status-badge ' + status;
-      badge.textContent = underConstruction ? 'تحت الإنشاء' : (status === 'approved' ? 'معتمد' : 'مسودة');
+      badge.textContent = underConstruction ? tr('تحت الإنشاء') : (status === 'approved' ? tr('معتمد') : tr('مسودة'));
+      badge.dataset.arText = underConstruction ? 'تحت الإنشاء' : (status === 'approved' ? 'معتمد' : 'مسودة');
       title.appendChild(badge);
 
       const titleText = document.createElement('span');
       titleText.className = 'project-section-title-label';
-      titleText.textContent = label;
+      titleText.textContent = tr(label);
+      titleText.dataset.arText = label;
       title.appendChild(titleText);
 
       if (!underConstruction) {
@@ -13646,6 +13758,8 @@
           generateButton.className = 'section-approve-btn section-presentation-btn';
           generateButton.dataset.sectionLockIgnore = '1';
           generateButton.textContent = 'توليد عرض القسم';
+          if (typeof tr === 'function') generateButton.textContent = tr(generateButton.textContent);
+          generateButton.dataset.arText = 'توليد عرض القسم';
           generateButton.addEventListener('click', () => generateProjectSectionPresentation(sectionKey, label));
           title.appendChild(generateButton);
         }
@@ -13655,6 +13769,8 @@
         toggleButton.id = 'section-lock-toggle-' + sectionKey;
         toggleButton.dataset.sectionLockIgnore = '1';
         toggleButton.textContent = status === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';
+        if (typeof tr === 'function') toggleButton.textContent = tr(toggleButton.textContent);
+        toggleButton.dataset.arText = status === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';
         toggleButton.addEventListener('click', () => {
           const next = (tenantProjectSectionStatuses[sectionKey] === 'approved') ? 'draft' : 'approved';
           setSectionStatus(sectionKey, next);
@@ -13694,6 +13810,9 @@
         ...Object.keys(statuses || {}),
         ...Array.from(document.querySelectorAll('#tenantProjectForm .tenant-form-section[data-section]:not([data-under-construction="1"])')).map(section => section.dataset.section)
       ]);
+      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+      const dict = (typeof window.WFI18n !== 'undefined' && window.WFI18n.autoDict) || (typeof WFI18N_EN_AUTO !== 'undefined' ? WFI18N_EN_AUTO : (window.WFI18N_EN_AUTO || null));
+      const tr = text => (isEn && dict && dict[text]) ? dict[text] : text;
       keys.forEach(sectionKey => {
         if (!sectionKey) return;
         const section = getProjectSectionElement(sectionKey);
@@ -13703,10 +13822,14 @@
         const badge = document.getElementById('badge-' + sectionKey);
         if (badge) {
           badge.className = 'section-status-badge ' + normalizedStatus;
-          badge.textContent = normalizedStatus === 'approved' ? 'معتمد' : 'مسودة';
+          badge.textContent = normalizedStatus === 'approved' ? tr('معتمد') : tr('مسودة');
+          badge.dataset.arText = normalizedStatus === 'approved' ? 'معتمد' : 'مسودة';
         }
         const toggle = document.getElementById('section-lock-toggle-' + sectionKey);
-        if (toggle) toggle.textContent = normalizedStatus === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';
+        if (toggle) {
+          toggle.textContent = normalizedStatus === 'approved' ? tr('الغاء الاعتماد') : tr('اعتماد');
+          toggle.dataset.arText = normalizedStatus === 'approved' ? 'الغاء الاعتماد' : 'اعتماد';
+        }
         updateProjectSidebarStatus(sectionKey, normalizedStatus);
       });
     }
@@ -14344,6 +14467,14 @@
         updateTenantMapInteractionState();
       }
       renderMapPreviewGallery();
+      if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
+        const panel = document.getElementById('locationAnalysisApprovalPanel');
+        const controlsEl = document.getElementById('locationMapGenerationControls');
+        const galleryEl = document.getElementById('mapPreviewGallery');
+        if (panel) window.WFI18n.autoTranslate(panel);
+        if (controlsEl) window.WFI18n.autoTranslate(controlsEl);
+        if (galleryEl) window.WFI18n.autoTranslate(galleryEl);
+      }
     }
 
     function openLocationTableMap(mapType) {
@@ -15031,10 +15162,20 @@
     }
 
     function tenantProjectFieldLabel(field) {
-      if (field.fieldKey === 'main_roads') return 'الطرق الرئيسية المحيطة';
-      if (field.fieldKey === 'city_landmarks') return 'أهم المعالم الرئيسية في المدينة';
-      if (field.fieldKey === 'project_mixed_components') return 'أنواع المشروع متعدد الاستخدامات';
-      return field.fieldLabel;
+      let lbl = field.fieldLabel;
+      if (field.fieldKey === 'main_roads') lbl = 'الطرق الرئيسية المحيطة';
+      else if (field.fieldKey === 'city_landmarks') lbl = 'أهم المعالم الرئيسية في المدينة';
+      else if (field.fieldKey === 'project_mixed_components') lbl = 'أنواع المشروع متعدد الاستخدامات';
+      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+      const dict = (typeof window.WFI18n !== 'undefined' && window.WFI18n.autoDict) || (typeof WFI18N_EN_AUTO !== 'undefined' ? WFI18N_EN_AUTO : (window.WFI18N_EN_AUTO || null));
+      if (isEn && dict) {
+        if (dict[lbl]) return dict[lbl];
+        const alt2 = lbl.indexOf('²') !== -1 ? lbl.replace(/²/g, '2') : null;
+        if (alt2 && dict[alt2]) return dict[alt2];
+        const altSup = lbl.indexOf('2') !== -1 ? lbl.replace(/2/g, '²') : null;
+        if (altSup && dict[altSup]) return dict[altSup];
+      }
+      return lbl;
     }
 
     async function geocodeTenantLocationLink(input, latInput, lngInput, force = false) {
@@ -15102,12 +15243,20 @@
           div.className = 'tenant-field' + (f.fieldType === 'textarea' || f.fieldKey === 'location_address' || f.fieldKey === 'project_type' ? ' full' : '');
           const isClientEnteredLandField = sectionKey === 'land_croquis' && TENANT_CLIENT_ENTERED_LAND_FIELDS.has(f.fieldKey);
           if (isClientEnteredLandField) div.classList.add('tenant-client-required-field');
+          const rawLabel = (f.fieldKey === 'main_roads') ? 'الطرق الرئيسية المحيطة' :
+            (f.fieldKey === 'city_landmarks') ? 'أهم المعالم الرئيسية في المدينة' :
+            (f.fieldKey === 'project_mixed_components') ? 'أنواع المشروع متعدد الاستخدامات' : f.fieldLabel;
           const label = document.createElement('label');
+          label.dataset.arLabel = rawLabel;
+          label.dataset.isRequired = f.isRequired ? '1' : '';
           label.textContent = tenantProjectFieldLabel(f) + (f.isRequired ? ' *' : '');
           if (isClientEnteredLandField) {
             const badge = document.createElement('span');
             badge.className = 'tenant-client-required-badge';
+            const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
             badge.textContent = 'إدخال العميل';
+            if (isEn) badge.textContent = 'Client-Entered Only';
+            badge.dataset.arText = 'إدخال العميل';
             label.appendChild(badge);
           }
           let input;
@@ -16461,9 +16610,9 @@
       }
       if (!text && saleExitValue > 0) text = `صافي التخارج البيعي ${money(saleExitValue)} من إجمالي ${money(saleExitGross)} بعد تكاليف التخارج.`;
       note.hidden = text === '';
-      note.textContent = text;
+      note.textContent = text ? (typeof WFT === 'function' ? WFT(text) : text) : '';
     }
-    function setCellVisible(tr, field, visible, helpText = '') { const cell = tr.querySelector(`[data-field="${field}"]`); if (!cell) return; cell.classList.toggle('off-cell', !visible); cell.querySelectorAll('input,select').forEach(x => x.disabled = !visible); const h = cell.querySelector('.miniHelp'); if (h) h.textContent = helpText || ''; }
+    function setCellVisible(tr, field, visible, helpText = '') { const cell = tr.querySelector(`[data-field="${field}"]`); if (!cell) return; cell.classList.toggle('off-cell', !visible); cell.querySelectorAll('input,select').forEach(x => x.disabled = !visible); const h = cell.querySelector('.miniHelp'); if (h) h.textContent = helpText ? (typeof WFT === 'function' ? WFT(helpText) : helpText) : ''; }
 
     function updateDynamicFields() {
       const landMethod = val('landValueMethod');
@@ -16472,7 +16621,7 @@
       setWrapVisible('landRentRateWrap', rentMethod === 'percentLandValue'); setWrapVisible('manualAnnualLandRentWrap', rentMethod === 'annualFixed'); setWrapVisible('monthlyLandRentWrap', rentMethod === 'monthlyFixed');
       const exitOn = val('exitEnabled') !== 'no';
       const exitMethod = val('exitMethod'); const exitInput = document.getElementById('exitInput');
-      if (exitInput) { exitInput.disabled = !exitOn || exitMethod === 'none'; exitInput.closest('div')?.classList.toggle('dynamic-off', !exitOn || exitMethod === 'none'); const lbl = exitInput.closest('div')?.querySelector('label'); if (lbl) { lbl.textContent = exitMethod === 'capRate' ? 'Cap Rate %' : exitMethod === 'fixed' ? 'قيمة البيع الثابتة' : exitMethod === 'noiMultiple' ? 'مضاعف NOI' : exitMethod === 'revenueMultiple' ? 'مضاعف الإيرادات' : 'مدخل التخارج'; } }
+      if (exitInput) { exitInput.disabled = !exitOn || exitMethod === 'none'; exitInput.closest('div')?.classList.toggle('dynamic-off', !exitOn || exitMethod === 'none'); const lbl = exitInput.closest('div')?.querySelector('label'); if (lbl) { const lText = exitMethod === 'capRate' ? 'Cap Rate %' : exitMethod === 'fixed' ? 'قيمة البيع الثابتة' : exitMethod === 'noiMultiple' ? 'مضاعف NOI' : exitMethod === 'revenueMultiple' ? 'مضاعف الإيرادات' : 'مدخل التخارج'; lbl.textContent = typeof WFT === 'function' ? WFT(lText) : lText; } }
       updateDynamicFieldDetails(exitOn);
     }
 
@@ -17913,6 +18062,9 @@
       } else {
         saveTenantNavigationState('tenantProjectPage', { activeSection: sectionKey });
       }
+      if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en' && target) {
+        window.WFI18n.autoTranslate(target);
+      }
     }
 
     // Keep for backward compatibility with older callers.
@@ -18928,11 +19080,18 @@
       { mapType: 'landmarks', title: 'خريطة المعالم', keys: ['##MAP_LANDMARKS##', '##MAP_LANDMARKS_SATELLITE##', '##MAP_LANDMARKS_ROADMAP##'], editableKeys: ['##MAP_LANDMARKS_EDITABLE##', '##MAP_LANDMARKS_SATELLITE_EDITABLE##', '##MAP_LANDMARKS_ROADMAP_EDITABLE##'] }
     ];
 
-    function renderMapPreviewGallery() {
+    function renderMapPreviewGallery(forceFull = false) {
       const gallery = document.getElementById('mapPreviewGallery');
       if (!gallery) return;
       const approvals = tenantCreativeImages.map_approvals || {};
       const views = MAP_PREVIEW_VIEW_DEFS;
+      const existingCards = gallery.querySelectorAll('.tenant-map-preview-card');
+      if (!forceFull && existingCards.length === views.length) {
+        existingCards.forEach(card => {
+          card.classList.toggle('active', card.dataset.mapSelect === tenantSelectedMapType);
+        });
+        return;
+      }
       const cards = views.map(view => {
         const url = mapPreviewStoredUrl(view);
         const visible = mapPreviewIsVisible(view, approvals);
@@ -18949,6 +19108,9 @@
           '<figcaption style="display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:12px;color:var(--p);margin-bottom:6px;"><span>' + escapeHtml(view.title) + '</span><span style="color:var(--muted);font-weight:600;">' + status + '</span></figcaption>' + preview + '</figure>';
       }).join('');
       gallery.innerHTML = cards;
+      if (typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en') {
+        window.WFI18n.autoTranslate(gallery);
+      }
       gallery.querySelectorAll('[data-map-select]').forEach(card => {
         card.addEventListener('click', () => selectMapPreviewView(card.dataset.mapSelect));
       });
@@ -19039,7 +19201,7 @@
       if (mapType !== 'overview' && !approvals.overview) { toast('اعتماد خريطة الأرض مطلوب أولًا'); return; }
       tenantCreativeImages.map_approvals = { ...approvals, [mapType]: true };
       await saveMapPreviewState();
-      renderMapPreviewGallery();
+      renderMapPreviewGallery(true);
       renderLocationWorkflowState();
       toast('تم اعتماد الخريطة');
     }
@@ -19049,7 +19211,7 @@
       tenantCreativeImages.map_approvals = { ...approvals, [mapType]: false };
       releaseLocationSectionApproval();
       await saveMapPreviewState();
-      renderMapPreviewGallery();
+      renderMapPreviewGallery(true);
       renderLocationWorkflowState();
       toast('تم إلغاء اعتماد الخريطة');
     }
@@ -19140,7 +19302,7 @@
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
         setLocationDataFetchedAt();
         await saveMapPreviewState();
-        renderMapPreviewGallery();
+        renderMapPreviewGallery(true);
         renderLocationWorkflowState();
         selectMapPreviewView(mapType);
         toast('تم توليد الخريطة وأصبحت في انتظار الاعتماد');
@@ -19286,7 +19448,7 @@
         tenantCreativeImages.map_highlight_site = shouldHighlightTenantSite();
         tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
         await saveMapPreviewState();
-        renderMapPreviewGallery();
+        renderMapPreviewGallery(true);
         return true;
       } catch (error) {
         console.warn('[OVERVIEW MAP OVERLAY]', error);
@@ -19325,7 +19487,7 @@
           tenantProjectData.access_road_label_sizes = sizes;
           tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
           await saveMapPreviewState();
-          renderMapPreviewGallery();
+          renderMapPreviewGallery(true);
           return true;
         } catch (error) {
           console.warn('[ACCESS MAP OVERLAY]', error);
@@ -19366,7 +19528,7 @@
           tenantProjectData.catchment_label_positions = positions;
           tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
           await saveMapPreviewState();
-          renderMapPreviewGallery();
+          renderMapPreviewGallery(true);
           return true;
         } catch (error) {
           console.warn('[CATCHMENT MAP OVERLAY]', error);
@@ -19408,7 +19570,7 @@
           tenantProjectData.landmark_label_positions = positions;
           tenantCreativeImages.maps_signature = mapsSignature(tenantProjectData);
           await saveMapPreviewState();
-          renderMapPreviewGallery();
+          renderMapPreviewGallery(true);
           return true;
         } catch (error) {
           console.warn('[LANDMARKS MAP OVERLAY]', error);
@@ -22127,6 +22289,7 @@
         setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', 'إجمالي ' + totalSlides + ' شريحة معتمدة', 100);
         renderTenantSlidesSidebar();
         renderTenantDesignerChat();
+        // await saveTenantPresentation(options.presentationTitle)
         const presentationSaved = await saveTenantPresentation(options.presentationTitle, { operation: 'generation' });
         if (!presentationSaved) {
           setLiveGenBanner(true, 'اكتمل التوليد وتعذر الحفظ', 'الشرائح ما زالت مفتوحة في المعاينة', 100);
@@ -25757,6 +25920,7 @@
         let attempts = 0;
         while (attempts < 2) {
           attempts++;
+          // api('POST', '/api/presentations'
           const response = await api(presentationId ? 'PUT' : 'POST',
             '/api/presentations' + (presentationId ? '/' + encodeURIComponent(presentationId) : ''), {
               title, projectData: snapshot, slidesData: snapshot.tenantSlidesData,
@@ -25771,8 +25935,7 @@
               const isInteractive = typeof options.interactive !== 'undefined' ? options.interactive : !options.silent;
               if (attempts === 1 && (options.force || isInteractive) && Number.isInteger(serverRevision) && typeof confirm === 'function') {
                 const confirmOverwrite = options.force || confirm(
-                  'توجد نسخة أحدث محفوظة على الخادم (النسخة ' + serverRevision +
-                  '). هل تريد حفظ تعديلاتك الحالية فوقها؟'
+                  WFT('presentation.conflict_confirm', 'توجد نسخة أحدث محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟', { rev: serverRevision })
                 );
                 if (confirmOverwrite) {
                   currentRevision = serverRevision;

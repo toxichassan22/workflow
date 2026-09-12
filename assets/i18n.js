@@ -53,7 +53,8 @@
     "nav.menu": "القائمة",
     "nav.new_proposal": "عرض جديد",
     "nav.projects": "المشاريع",
-    "nav.staff": "الموظفون"
+    "nav.staff": "الموظفون",
+    "presentation.conflict_confirm": "توجد نسخة أحدث محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟"
   }/*I18N_AR_END*/;
 
   var WFI18N_EN = /*I18N_EN_BEGIN*/{
@@ -75,7 +76,8 @@
     "nav.menu": "Menu",
     "nav.new_proposal": "New proposal",
     "nav.projects": "Projects",
-    "nav.staff": "Staff"
+    "nav.staff": "Staff",
+    "presentation.conflict_confirm": "A newer version is saved on the server (revision {rev}). Do you want to overwrite it with your current changes?"
   }/*I18N_EN_END*/;
 
   // Legacy exact-match map: full Arabic chrome strings rendered by old
@@ -1038,7 +1040,7 @@
   "تحليل الموقع معتمد": "Location analysis approved",
   "تحليل الموقع والبيانات": "Site and data analysis",
   "تحليل الموقع والخرائط": "Location & maps analysis",
-  "تحليل الموقع يحتاج اعتمادًا قبل توليد الخرائط": "Site analysis requires Approve before generating maps",
+  "تحليل الموقع يحتاج اعتمادًا قبل توليد الخرائط": "Location analysis requires approval before generating maps",
   "تحليل بيانات القسم وبناء الشرائح": "Analyze section data and structure slides",
   "تحليل بيانات المشروع وتحديد عدد الشرائح": "Analyze Project data and set Slide count",
   "تحليل رابط الموقع": "Analyze Location URL",
@@ -2799,7 +2801,41 @@
   "يومي": "Daily",
   "٠١٢٣٤٥٦٧٨٩": "0123456789",
   "— تم الإبقاء على": "— Retained",
-  "— صورة": "— Image"
+  "— صورة": "— Image",
+  "توليد خريطة الأرض / المبنى": "Generate Plot & Site Map",
+  "توليد خريطة الطرق الرئيسية": "Generate Main Access Roads Map",
+  "توليد خريطة المنطقة": "Generate Catchment Area Map",
+  "توليد خريطة المعالم": "Generate Key Landmarks Map",
+  "توليد خريطة الموقع / المبنى": "Generate Plot & Site Map",
+  "إعادة توليد خريطة الأرض / المبنى": "Regenerate Plot & Site Map",
+  "إعادة توليد خريطة الطرق الرئيسية": "Regenerate Main Access Roads Map",
+  "إعادة توليد خريطة المنطقة": "Regenerate Catchment Area Map",
+  "إعادة توليد خريطة المعالم": "Regenerate Key Landmarks Map",
+  "إعادة توليد خريطة الموقع / المبنى": "Regenerate Plot & Site Map",
+  "بيانات الموقع / العنوان التفصيلي": "Location Details / Detailed Address",
+  "بانتظار اعتماد خريطة الأرض / المبنى": "Pending Plot & Site Map Approval",
+  "بانتظار اعتماد خريطة الأرض / السابقة": "Pending Plot / Prior Map Approval",
+  "معتمد بدون ملف": "Approved without File",
+  "غير مولد": "Not Generated",
+  "إضافة صف": "Add Row",
+  "+ إضافة صف": "+ Add Row",
+  "المساحة المعتمدة للدراسة المالية (م2)": "Approved area for the financial study (sqm)",
+  "مساحة الأرض حسب الكروكي (م2)": "Land area per croquis (sqm)",
+  "مساحة الأرض (م2)": "Land Area (sqm)",
+  "مساحة البناء (م2)": "Built-up Area (sqm)",
+  "مساحة الأرض م²": "Land Area sqm",
+  "نسبة التغطية %": "Coverage Ratio %",
+  "عدد الطوابق": "Number of Floors",
+  "تحليل رخصة البناء والكروكي معًا": "Unified Analysis of Permit & Croquis",
+  "تحليل رخصة البناء والكروكي": "Building Permit & Croquis Analysis",
+  "تحليل رخصة البناء والكروكي بالذكاء الاصطناعي": "AI Analysis of Building Permit & Croquis",
+  "استخراج بيانات الكروكي": "Extract Croquis Data",
+  "تحليل الكروكي": "Croquis Analysis",
+  "اعتماد بيانات الكروكي": "Approve Croquis Data",
+  "إلغاء اعتماد بيانات الكروكي": "Unlock Croquis Data",
+  "بيانات الأرض والكروكي والاشتراطات": "Land, Croquis & Regulations Data",
+  "الفترة / الأسابيع": "Period / Weeks",
+  "تجاري / تجزئة": "Commercial / Retail"
 }/*I18N_EN_AUTO_END*/;
 
 
@@ -2885,6 +2921,11 @@
     '#tenantChatMessages', '.tenant-chat-messages',
     '.visual-concept-chat-message', '#aiRulesChatLog', '#trainingChatLog'
   ].join(',');
+  var AUTO_CONTAINER_SKIP_SELECTOR = [
+    '.slide', '.ge-slide-card', '.pdf-export-page',
+    '#tenantChatMessages', '.tenant-chat-messages',
+    '.visual-concept-chat-message', '#aiRulesChatLog', '#trainingChatLog'
+  ].join(',');
   var AR_RE = /[؀-ۿ]/;
   var autoApplied = [];
   var autoObserver = null;
@@ -2933,13 +2974,38 @@
       if (!raw || !AR_RE.test(raw)) continue;
       var key = autoNorm(raw);
       if (!key) continue;
-      var en = WFI18N_EN_AUTO[key];
-      if (en === undefined || en === null || en === '') continue;
       var p = tn.parentElement;
       if (!p || autoSkipped(p, false)) continue;
+
+      var en = WFI18N_EN_AUTO[key];
+      var prefix = '';
+      var suffix = '';
+      if (!en) {
+        var altKey = key.indexOf('²') !== -1 ? key.replace(/²/g, '2') : (key.indexOf('2') !== -1 ? key.replace(/2/g, '²') : null);
+        if (altKey && WFI18N_EN_AUTO[altKey]) en = WFI18N_EN_AUTO[altKey];
+      }
+      if (!en) {
+        var m = key.match(/^([\s*•:\-–—]+)?(.*?)([\s*•:\-–—]+)?$/);
+        if (m && m[2] && m[2] !== key) {
+          var coreKey = autoNorm(m[2]);
+          if (coreKey) {
+            en = WFI18N_EN_AUTO[coreKey];
+            if (!en) {
+              var altCore = coreKey.indexOf('²') !== -1 ? coreKey.replace(/²/g, '2') : (coreKey.indexOf('2') !== -1 ? coreKey.replace(/2/g, '²') : null);
+              if (altCore && WFI18N_EN_AUTO[altCore]) en = WFI18N_EN_AUTO[altCore];
+            }
+            if (en) {
+              prefix = m[1] || '';
+              suffix = m[3] || '';
+            }
+          }
+        }
+      }
+      if (en === undefined || en === null || en === '') continue;
+
       var lead = (raw.match(/^\s+/) || [''])[0];
       var trail = (raw.match(/\s+$/) || [''])[0];
-      var out = lead + en + trail;
+      var out = lead + prefix + en + suffix + trail;
       if (out === raw) continue;
       autoApplied.push({ node: tn, ar: raw, en: out });
       tn.nodeValue = out;
@@ -2970,10 +3036,17 @@
     if (getLang() !== 'en') return;
     try {
       var root = scope || document;
-      var selects = (root.querySelectorAll ? root.querySelectorAll('select') : []);
+      var selects = [];
+      if (root && root.tagName === 'SELECT') {
+        selects.push(root);
+      }
+      if (root && root.querySelectorAll) {
+        var found = root.querySelectorAll('select');
+        for (var s = 0; s < found.length; s++) selects.push(found[s]);
+      }
       for (var i = 0; i < selects.length; i++) {
         var sel = selects[i];
-        if (autoSkipped(sel, true)) continue;
+        if (sel && sel.closest && sel.closest(AUTO_CONTAINER_SKIP_SELECTOR)) continue;
         for (var j = 0; j < sel.options.length; j++) {
           var opt = sel.options[j];
           var raw = opt.getAttribute('data-ar-text');
@@ -2983,11 +3056,36 @@
           }
           if (!raw || !AR_RE.test(raw)) continue;
           var norm = autoNorm(raw);
-          if (norm && WFI18N_EN_AUTO[norm]) {
+          if (!norm) continue;
+          var en = WFI18N_EN_AUTO[norm];
+          var prefix = '';
+          var suffix = '';
+          if (!en) {
+            var altKey = norm.indexOf('²') !== -1 ? norm.replace(/²/g, '2') : (norm.indexOf('2') !== -1 ? norm.replace(/2/g, '²') : null);
+            if (altKey && WFI18N_EN_AUTO[altKey]) en = WFI18N_EN_AUTO[altKey];
+          }
+          if (!en) {
+            var m = norm.match(/^([\s*•:\-–—]+)?(.*?)([\s*•:\-–—]+)?$/);
+            if (m && m[2] && m[2] !== norm) {
+              var coreKey = autoNorm(m[2]);
+              if (coreKey) {
+                en = WFI18N_EN_AUTO[coreKey];
+                if (!en) {
+                  var altCore = coreKey.indexOf('²') !== -1 ? coreKey.replace(/²/g, '2') : (coreKey.indexOf('2') !== -1 ? coreKey.replace(/2/g, '²') : null);
+                  if (altCore && WFI18N_EN_AUTO[altCore]) en = WFI18N_EN_AUTO[altCore];
+                }
+                if (en) {
+                  prefix = m[1] || '';
+                  suffix = m[3] || '';
+                }
+              }
+            }
+          }
+          if (en) {
             if (!opt.hasAttribute('value')) {
               opt.setAttribute('value', raw);
             }
-            opt.textContent = WFI18N_EN_AUTO[norm];
+            opt.textContent = prefix + en + suffix;
           }
         }
       }
@@ -3030,23 +3128,52 @@
   function autoObserve() {
     if (autoObserver || typeof MutationObserver === 'undefined') return;
     var pending = [];
+    var autoObsTimerType = null;
     var flush = function () {
+      if (autoObsTimer) {
+        if (typeof cancelAnimationFrame === 'function' && autoObsTimerType === 'raf') {
+          cancelAnimationFrame(autoObsTimer);
+        } else {
+          clearTimeout(autoObsTimer);
+        }
+      }
       autoObsTimer = null;
+      autoObsTimerType = null;
       if (getLang() !== 'en') { pending = []; return; }
       var work = pending;
       pending = [];
-      for (var i = 0; i < work.length && i < 200; i++) {
+      for (var i = 0; i < work.length; i++) {
         var rec = work[i];
         try {
           if (rec.type === 'attributes' && rec.target) {
             if (!autoSkipped(rec.target, true)) {
               autoSwapAttr(rec.target, rec.attributeName);
             }
+          } else if (rec.type === 'characterData' && rec.target) {
+            var cp = rec.target.parentElement || rec.target;
+            if (cp && !autoSkipped(cp, false)) {
+              autoTranslateSubtree(cp);
+            }
           } else if (rec.addedNodes) {
+            if (rec.target && (rec.target.tagName === 'SELECT' || rec.target.tagName === 'OPTGROUP')) {
+              autoTranslateSelectOptions(rec.target.tagName === 'SELECT' ? rec.target : rec.target.parentElement);
+            }
             for (var j = 0; j < rec.addedNodes.length; j++) {
               var nd = rec.addedNodes[j];
-              if (nd && nd.nodeType === 1 && !autoSkipped(nd, false)) {
-                autoTranslateSubtree(nd);
+              if (!nd) continue;
+              if (nd.nodeType === 1) {
+                if (nd.tagName === 'SELECT') {
+                  autoTranslateSelectOptions(nd);
+                } else if (nd.tagName === 'OPTION' || nd.tagName === 'OPTGROUP') {
+                  autoTranslateSelectOptions(nd.closest ? nd.closest('select') : nd.parentElement);
+                } else if (!autoSkipped(nd, false)) {
+                  autoTranslateSubtree(nd);
+                }
+              } else if (nd.nodeType === 3) {
+                var par = nd.parentElement;
+                if (par && !autoSkipped(par, false)) {
+                  autoTranslateSubtree(par);
+                }
               }
             }
           }
@@ -3056,11 +3183,19 @@
     autoObserver = new MutationObserver(function (muts) {
       if (getLang() !== 'en') return;
       for (var i = 0; i < muts.length; i++) pending.push(muts[i]);
-      if (!autoObsTimer) autoObsTimer = setTimeout(flush, 300);
+      if (!autoObsTimer) {
+        if (typeof requestAnimationFrame === 'function') {
+          autoObsTimerType = 'raf';
+          autoObsTimer = requestAnimationFrame(flush);
+        } else {
+          autoObsTimerType = 'timeout';
+          autoObsTimer = setTimeout(flush, 0);
+        }
+      }
     });
     try {
       autoObserver.observe(document.documentElement, {
-        childList: true, subtree: true, attributes: true,
+        childList: true, subtree: true, characterData: true, attributes: true,
         attributeFilter: ['placeholder', 'title', 'aria-label']
       });
     } catch (e) { /* ignore */ }
@@ -3103,6 +3238,7 @@
     document.addEventListener('wf:lang', function () { applyI18nToDOM(document); });
   }
 
+  window.WFI18N_EN_AUTO = WFI18N_EN_AUTO;
   window.WFI18n = {
     getLang: getLang,
     setLang: setLang,
@@ -3111,6 +3247,7 @@
     applyI18nToDOM: applyI18nToDOM,
     autoTranslate: autoTranslateSubtree,
     autoRestore: autoRestore,
+    autoDict: WFI18N_EN_AUTO,
     supported: SUPPORTED.slice(),
     defaultLang: DEFAULT_LANG,
     storageKey: STORAGE_KEY
