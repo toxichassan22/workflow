@@ -144,8 +144,17 @@ class I18nFoundationTests(unittest.TestCase):
         src = I18N_JS.read_text(encoding='utf-8')
         for token in ('window.WFI18n', 'window.WFT', 'window.toggleAppLanguage',
                       'wf:lang', 'wf.lang', 'data-i18n',
-                      'document.documentElement'):
+                      'document.documentElement', 'WFI18N_EN_AUTO',
+                      'autoTranslate', 'autoRestore', 'TreeWalker',
+                      'MutationObserver', 'isConnected'):
             self.assertIn(token, src, 'assets/i18n.js must define %s' % token)
+        # Generated-deck and AI-chat content must never be touched: the offer
+        # language is a separate concern from the UI language.
+        for guard in ('.ge-slide-card', '#tenantChatMessages',
+                      '.tenant-chat-messages', 'textarea', 'option'):
+            self.assertIn(
+                guard, src,
+                'auto-translate skip list must keep %s' % guard)
         html = INDEX.read_text(encoding='utf-8')
         self.assertIn('langToggleBtn', html)
         self.assertIn('toggleAppLanguage', html)
@@ -196,6 +205,36 @@ class I18nFoundationTests(unittest.TestCase):
             'NEW hardcoded Arabic UI strings in index.html. Put the text in '
             'assets/i18n.js (both languages) and use WFT()/data-i18n instead:\n'
             + '\n'.join(fresh))
+
+    def test_auto_map_is_real_and_safe(self):
+        src = I18N_JS.read_text(encoding='utf-8')
+        match = re.search(
+            r'/\*I18N_EN_AUTO_BEGIN\*/(.*?)/\*I18N_EN_AUTO_END\*/', src, re.S)
+        self.assertIsNotNone(
+            match, 'assets/i18n.js lost its I18N_EN_AUTO markers')
+        auto = json.loads(match.group(1))
+        self.assertGreaterEqual(
+            len(auto), 1000,
+            'EN_AUTO map shrank unexpectedly: %d entries' % len(auto))
+        for key, value in auto.items():
+            self.assertRegex(
+                key, AR_CHAR, 'auto key without Arabic: %r' % key)
+            self.assertNotIn('{', key, 'unrenderable fragment key: %r' % key)
+            self.assertNotIn('}', key, 'unrenderable fragment key: %r' % key)
+            self.assertTrue(
+                isinstance(value, str) and value.strip(),
+                'empty en_auto value: %s' % key)
+            self.assertNotRegex(
+                value, AR_CHAR, 'en_auto value carries Arabic: %s' % key)
+        # Product terminology must stay consistent with the dotted dicts.
+        for ar, en in (('مسودة', 'Draft'), ('معتمد', 'Approved'),
+                       ('كروكي', 'Croquis'), ('الدراسة المالية', 'Financial study'),
+                       ('تعميد العروض', 'Offer approval'),
+                       ('سكني', 'Residential'),
+                       ('الملخص التنفيذي', 'Executive summary')):
+            self.assertEqual(
+                auto.get(ar), en,
+                'en_auto[%r] should stay %r' % (ar, en))
 
     def test_i18n_js_parses_as_javascript(self):
         node = shutil.which('node')

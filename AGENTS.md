@@ -1207,11 +1207,18 @@ instead of adding more literals:
   no-JS fallback. The switch is the text-only `#langToggleBtn` (`toggleAppLanguage()`); it flips
   `document.dir` and fires `wf:lang` so dynamic views re-apply. Text-only per the no-icons rule.
 - `tests/test_i18n.py` guards all of it: dict key-set sync, real English on the en side (no Arabic
-  script outside `lang.*`), load order before the inline script, known-key bindings,
-  `node --check`, and a ratchet (`tests/i18n_hardcoded_baseline.txt` — the legacy toast /
-  confirm / placeholder / loader literals) that fails on any NEW hardcoded Arabic UI literal.
-  Migrating a literal to `WFT()` / `data-i18n` lets its baseline entry shrink away; regenerate
-  only for that with `python tests/test_i18n.py --rebuild-baseline`, never to silence new strings.
+  script outside `lang.*`), the `EN_AUTO` map (1000+ exact-match legacy strings, same no-Arabic
+  rule, product-glossary anchors like `كروكي` → `Croquis`), load order before the inline script,
+  known-key bindings, `node --check`, the skip list (generated slides, chat logs, textarea,
+  select/option stay Arabic — the offer language is separate from the UI language), and a ratchet
+  (`tests/i18n_hardcoded_baseline.txt` — the legacy toast / confirm / placeholder / loader
+  literals) that fails on any NEW hardcoded Arabic UI literal. Migrating a literal to `WFT()` /
+  `data-i18n` lets its baseline entry shrink away; regenerate only for that with
+  `python tests/test_i18n.py --rebuild-baseline`, never to silence new strings. Exact-matchable
+  legacy chrome also gets an `EN_AUTO` entry (Arabic text as key) so the DOM pass translates it;
+  interpolated sentences and user data never match and are left alone. Switching back to Arabic
+  restores only values the pass itself wrote (`isConnected` + value check), so it can never
+  clobber newer content.
 - Per-operation loader titles at call sites are still legacy baseline entries; migrate them when
   touching that operation. Full-site English and per-tenant offer language are separate staged
   work built on this foundation, not part of it.
