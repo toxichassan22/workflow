@@ -20,6 +20,24 @@ class DesignerTargetTests(unittest.TestCase):
         self.assertEqual(targets.explicit_slide_numbers('غير الشرائح 2 إلى 4'), [2, 3, 4])
         self.assertIsNone(targets.explicit_slide_numbers('حجم الخط 24'))
 
+    def test_explicit_slide_numbers_spelling_dialects_and_corrections(self):
+        self.assertEqual(targets.explicit_slide_numbers('احذف عمود الحاله من شريحه رقم 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('احذف عمود الحالة من الشريحة 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('شيل صف 3 من شريحه 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('احذف عمود الحاله من سلايد 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('احذف عمود الحاله من سلايده 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('احذف عمود الحاله من صفحه 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('احذف عمود الحاله من الصفحه 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('احذف عمود الحاله من رقم 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('احذف عمود الحاله في رقم 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('رقم 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('شريحه 21'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('21 مش 1'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('انا بقولك 21 مش 1'), [21])
+        self.assertEqual(targets.explicit_slide_numbers('شريحة 21 بدل 1'), [21])
+        self.assertIsNone(targets.explicit_slide_numbers('مش الشريحة 1'))
+
     def test_partial_or_expanded_selection_is_rejected(self):
         slides = [{} for _ in range(4)]
         for indexes in [[1], [1, 2, 3], [2, 3]]:

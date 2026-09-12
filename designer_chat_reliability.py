@@ -617,11 +617,12 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
     tail = text[axis.end():]
     # A slide qualifier is never a row number or part of a target label.
     slide_scope = re.search(
-        r"(?<!\w)(?:(?:من|في|in|from|on)\s+)?(?:ال)?(?:شريحه|شريحة|شرايح|شرائح|سلايد|slides?)(?!\w)",
+        r"(?<!\w)(?:(?:من|في|in|from|on)\s+)?(?:(?:ال)?(?:شريح[ةه]|شرايح|شرائح|سلايد[ةهات]*|صفح[ةه]|صفحات)|slides?|(?:من|في)\s+رقم)(?!\w)",
         _TABLE_QUOTES_RE.sub(lambda m: " " * len(m.group()), tail),
     )
     if slide_scope:
         tail = tail[:slide_scope.start()]
+    tail = re.sub(r"\s+(?:من|في|in|from|on)\s+(?:(?:ال)?(?:شريح[ةه]|سلايد[ةه]?|صفح[ةه]|رقم)\s+)?\d+\s*$", "", tail)
     scopes = list(_TABLE_SCOPE_RE.finditer(masked))
     if len(scopes) > 1:
         result["reason"] = "ambiguous_table_request"
@@ -630,7 +631,7 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
         scope = scopes[0]
         if scope.start() > axis.end():
             selector_text = text[scope.end():]
-            selector_text = re.split(r"\s+(?:من|في|in|from|on)\s+(?:ال)?(?:شريح[هة]|شرائح|slides?)\b", selector_text)[0]
+            selector_text = re.split(r"\s+(?:من|في|in|from|on)\s+(?:(?:ال)?(?:شريح[هة]|شرائح|سلايد[ةهات]*|صفح[هة]|صفحات)|slides?)\b", selector_text)[0]
             tail = text[axis.end():scope.start()]
         else:
             selector_text = text[scope.end():verbs[0].start()]

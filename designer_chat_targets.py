@@ -56,6 +56,23 @@ def resolve_indexes(params, count, current_index):
 
 def explicit_slide_numbers(message):
     text = str(message or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789'))
+
+    # Check for standalone slide specification: e.g. '21', 'رقم 21', 'شريحه 21'
+    standalone = re.fullmatch(
+        r'\s*(?:(?:ال)?(?:شريح[ةه]|شرايح|شرائح|سلايد[ةهات]*|صفح[ةه]|صفحات|رقم)\s*)?#?\s*(\d+)\s*',
+        text, re.I
+    )
+    if standalone:
+        return [int(standalone.group(1))]
+
+    # Handle correction phrasing: e.g. '21 مش 1' or 'انا بقولك 21 مش 1' or 'شريحة 21 مش 1' or '21 بدل 1'
+    correction = re.search(
+        r'(\d+)\s*(?:مش|مو|ليس|بدل)\s*(?:ال)?(?:شريح[ةه]|سلايد[ةه]?|صفح[ةه]|رقم)?\s*\d+',
+        text, re.I
+    )
+    if correction:
+        return [int(correction.group(1))]
+
     # Negated or contrasting references need conversation-aware interpretation.
     if re.search(r'\b(?:لا|مش|ليس|بدل|عدا|باستثناء|except|not)\b', text, re.I):
         return None
@@ -63,7 +80,7 @@ def explicit_slide_numbers(message):
     if reference:
         text = text[:reference.start()]
     matches = re.finditer(
-        r'(?:الشرائح|شرائح|الشريحة|شريحة|السلايدات|سلايدات|السلايد|سلايد|slides?)\s*(?:رقم\s*)?'
+        r'(?:(?:ال)?(?:شريح[ةه]|شرايح|شرائح|سلايد[ةهات]*|صفح[ةه]|صفحات)|slides?|(?:من|في)\s+رقم)\s*(?:رقم\s*)?'
         r'(\d+(?:\s*(?:،|,|و|and|إلى|الى|to|-)\s*\d+)*)', text, re.I)
     numbers = []
     for match in matches:
