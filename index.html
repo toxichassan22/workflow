@@ -1004,6 +1004,13 @@
       font-weight: 800
     }
 
+    /* Translatable fragments stay inline: a nested span must never become a
+       block of its own, or one value stacks into several lines. */
+    .metric span span {
+      display: inline;
+      margin: 0;
+    }
+
     .metric strong {
       display: block;
       font-size: 20px;
@@ -1605,6 +1612,13 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    /* Translatable fragments stay inline: a nested span must never become a
+       block of its own, or one info line stacks into several lines. */
+    .slide-toolbar-title span span {
+      display: inline;
+      margin-top: 0;
     }
 
     .slide-toolbar-actions {
@@ -2852,6 +2866,13 @@
       color: var(--muted) !important;
       font-size: 12px !important;
       font-weight: 800 !important;
+    }
+
+    /* Translatable fragments stay inline: a nested span must never become a
+       block of its own, or one value stacks into several lines. */
+    #section-financial-calc .metric span span {
+      display: inline !important;
+      margin: 0 !important;
     }
 
     #section-financial-calc .metric strong {
@@ -5338,6 +5359,13 @@
       font-size: 12px !important;
       font-weight: 800 !important;
       margin-bottom: 4px !important;
+    }
+
+    /* Translatable fragments stay inline: a nested span must never become a
+       block of its own, or one value stacks into several lines. */
+    #section-financial-calc .metric span span {
+      display: inline !important;
+      margin: 0 !important;
     }
 
     #section-financial-calc .metric strong {
