@@ -12,6 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="/assets/i18n.js"></script>
   <style>
     /* ===== Three-Panel Slide Preview Layout ===== */
     .tenant-app.preview-active {
@@ -5544,29 +5545,30 @@
         <span id="tenantUserInfo" class="tenant-hint"
           style="background:#E8F4FA;border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:600;white-space:nowrap"></span>
         <div class="tenant-dropdown" style="position:relative">
-          <button class="btn ghost" onclick="toggleTenantDropdown(this)">القائمة</button>
+          <button class="btn ghost" onclick="toggleTenantDropdown(this)" data-i18n="nav.menu">القائمة</button>
           <div class="tenant-dropdown-menu" style="min-width:200px">
             <button class="btn ghost" data-permission="create_presentation"
-              onclick="startTenantProject(); closeTenantDropdown()">عرض جديد</button>
+              onclick="startTenantProject(); closeTenantDropdown()" data-i18n="nav.new_proposal">عرض جديد</button>
             <button class="btn ghost" data-permission="view_presentations"
-              onclick="openTenantPresentations(); closeTenantDropdown()">المشاريع</button>
+              onclick="openTenantPresentations(); closeTenantDropdown()" data-i18n="nav.projects">المشاريع</button>
             <button class="btn ghost" data-permission="company_settings"
-              onclick="openTenantSettings(); closeTenantDropdown()">إعدادات الشركة</button>
+              onclick="openTenantSettings(); closeTenantDropdown()" data-i18n="nav.company_settings">إعدادات الشركة</button>
             <button class="btn ghost" data-permission="custom_fields"
-              onclick="openTenantFields(); closeTenantDropdown()">الحقول</button>
+              onclick="openTenantFields(); closeTenantDropdown()" data-i18n="nav.fields">الحقول</button>
             <button class="btn ghost" data-permission="company_settings"
-              onclick="openTenantTeam(); closeTenantDropdown()">فريق التطوير</button>
+              onclick="openTenantTeam(); closeTenantDropdown()" data-i18n="nav.dev_team">فريق التطوير</button>
             <button class="btn ghost" data-permission="manage_users"
-              onclick="openTenantUsers(); closeTenantDropdown()">الموظفون</button>
+              onclick="openTenantUsers(); closeTenantDropdown()" data-i18n="nav.staff">الموظفون</button>
             <button class="btn ghost" data-permission="ai_rules"
-              onclick="openTenantAIRules(); closeTenantDropdown()">قواعد AI</button>
+              onclick="openTenantAIRules(); closeTenantDropdown()" data-i18n="nav.ai_rules">قواعد AI</button>
             <button class="btn ghost" data-permission="approvals"
-              onclick="openTenantApprovals(); closeTenantDropdown()">تعميد العروض</button>
+              onclick="openTenantApprovals(); closeTenantDropdown()" data-i18n="nav.approve_offers">تعميد العروض</button>
             <button class="btn ghost tenant-hidden" data-permission="sag_admin_panel" id="tenantAdminBtn"
-              onclick="openTenantAdmin(); closeTenantDropdown()">لوحة المدير</button>
+              onclick="openTenantAdmin(); closeTenantDropdown()" data-i18n="nav.admin">لوحة المدير</button>
           </div>
         </div>
-        <button class="btn danger" onclick="tenantLogout()">خروج</button>
+        <button class="btn ghost" id="langToggleBtn" onclick="toggleAppLanguage()">English</button>
+        <button class="btn danger" onclick="tenantLogout()" data-i18n="nav.logout">خروج</button>
       </div>
     </div>
 
@@ -6638,17 +6640,17 @@
       const alreadyVisible = loader.style.display === 'flex';
       const continueExisting = alreadyVisible && loaderSessionActive && options.reset !== true;
       clearTimeout(loaderHideTimer);
-      document.getElementById('globalLoaderTitle').textContent = title || 'جاري التحميل...';
+      document.getElementById('globalLoaderTitle').textContent = title || WFT('loader.loading', 'جاري التحميل...');
       document.getElementById('globalLoaderText').textContent = text || '';
       document.getElementById('globalLoaderProgress').style.display = 'block';
       loaderProgressMax = Number.isFinite(Number(options.maxProgress)) ? Math.max(1, Math.min(99, Number(options.maxProgress))) : 92;
       const nextPct = pct === undefined || pct === null ? (continueExisting ? loaderProgressValue : 5) : pct;
       if (continueExisting) {
-        renderLoaderProgress(nextPct, text || 'جاري التحضير...');
+        renderLoaderProgress(nextPct, text || WFT('loader.preparing', 'جاري التحضير...'));
       } else {
         loaderSessionActive = true;
         loaderProgressValue = 0;
-        renderLoaderProgress(nextPct, text || 'جاري التحضير...', { allowDecrease: true });
+        renderLoaderProgress(nextPct, text || WFT('loader.preparing', 'جاري التحضير...'), { allowDecrease: true });
       }
       loader.style.display = 'flex';
       startLoaderProgressTimer();
@@ -6664,22 +6666,22 @@
       const loader = document.getElementById('globalLoader');
       if (!loader || loader.style.display === 'none') return;
       stopLoaderProgressTimer();
-      renderLoaderProgress(100, completionText || 'اكتمل');
+      renderLoaderProgress(100, completionText || WFT('loader.done', 'اكتمل'));
       const textEl = document.getElementById('globalLoaderText');
-      if (textEl) textEl.textContent = completionText || 'اكتمل التحميل';
+      if (textEl) textEl.textContent = completionText || WFT('loader.loaded', 'اكتمل التحميل');
       clearTimeout(loaderHideTimer);
       loaderHideTimer = setTimeout(() => {
         loader.style.display = 'none';
         loaderSessionActive = false;
         loaderProgressMax = 92;
-        renderLoaderProgress(0, 'جاري التحضير...', { allowDecrease: true });
+        renderLoaderProgress(0, WFT('loader.preparing', 'جاري التحضير...'), { allowDecrease: true });
       }, 420);
     }
 
     async function readBlobWithProgress(response, startPct, endPct) {
       const total = Number(response.headers.get('content-length') || 0);
       if (!response.body || !total) {
-        updateLoaderProgress(endPct - 2, 'جاري تجهيز الملف للتحميل...');
+        updateLoaderProgress(endPct - 2, WFT('loader.preparing_file', 'جاري تجهيز الملف للتحميل...'));
         return response.blob();
       }
       const reader = response.body.getReader();
@@ -6692,7 +6694,7 @@
         received += result.value.byteLength;
         const ratio = Math.min(1, received / total);
         const pct = startPct + Math.round(ratio * (endPct - startPct));
-        updateLoaderProgress(pct, 'جاري تحميل الملف (' + pct + '%)...');
+        updateLoaderProgress(pct, WFT('loader.uploading_file', 'جاري تحميل الملف ({pct}%)...', { pct: pct }));
       }
       return new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
     }

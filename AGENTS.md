@@ -1189,3 +1189,29 @@ inline progress state. Disable the triggering action while the operation is runn
 current step when possible, and always clear the progress state on both success and failure. Do not
 leave the user with a visually idle screen while a request is in flight. New agents must apply this
 rule to every new workflow and generation action.
+
+## UI internationalization (i18n)
+
+The shell was Arabic-only with thousands of hardcoded literals and a fixed `lang="ar" dir="rtl"`
+root, so every new screen re-created the problem. New UI strings must go through the foundation
+instead of adding more literals:
+
+- `assets/i18n.js` is the single source of truth: the `WFI18N_AR` / `WFI18N_EN` dicts
+  (JSON-compatible blocks between the `I18N_*_BEGIN/END` markers — edit the text, never the
+  markers) plus the runtime (`WFI18n.getLang/setLang/toggle/t/applyI18nToDOM`, storage key
+  `wf.lang`, default `ar`). It loads from `/assets/i18n.js` with an absolute path before the
+  main inline script; a relative URL would 404 against client routes (`/app/...`, `/c/<slug>`).
+- JS uses the `WFT('section.key', 'Arabic fallback')` global — never a bare `t()`, which would
+  collide with locals in the one shared inline-script scope. Static HTML uses `data-i18n` /
+  `data-i18n-ph` / `data-i18n-title` / `data-i18n-aria` and keeps its Arabic text content as the
+  no-JS fallback. The switch is the text-only `#langToggleBtn` (`toggleAppLanguage()`); it flips
+  `document.dir` and fires `wf:lang` so dynamic views re-apply. Text-only per the no-icons rule.
+- `tests/test_i18n.py` guards all of it: dict key-set sync, real English on the en side (no Arabic
+  script outside `lang.*`), load order before the inline script, known-key bindings,
+  `node --check`, and a ratchet (`tests/i18n_hardcoded_baseline.txt` — the legacy toast /
+  confirm / placeholder / loader literals) that fails on any NEW hardcoded Arabic UI literal.
+  Migrating a literal to `WFT()` / `data-i18n` lets its baseline entry shrink away; regenerate
+  only for that with `python tests/test_i18n.py --rebuild-baseline`, never to silence new strings.
+- Per-operation loader titles at call sites are still legacy baseline entries; migrate them when
+  touching that operation. Full-site English and per-tenant offer language are separate staged
+  work built on this foundation, not part of it.
