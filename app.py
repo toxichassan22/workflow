@@ -9852,7 +9852,10 @@ def _freeze_presentation_project_metadata(value, freeze):
                 return json.dumps(_freeze_presentation_project_metadata(decoded, freeze), ensure_ascii=False)
         from urllib.parse import urlsplit
         path = urlsplit(text).path if '<' not in text and '\n' not in text else ''
-        if path.startswith(('/api/project-files/', '/uploads/project-documents/')) or re.search(r'\.(?:pdf|docx?|xlsx?|csv|txt)$', path, re.I):
+        normalized_path = '/' + path.lstrip('/')
+        if (normalized_path.startswith(('/api/project-files/', '/uploads/project-documents/'))
+                or '/project-documents/' in normalized_path
+                or re.search(r'\.(?:pdf|docx?|xlsx?|csv|txt)$', normalized_path, re.I)):
             return value
     return freeze(value)
 
@@ -9878,6 +9881,17 @@ def _commit_presentation_state(tenant_id, presentation_id=None, **kwargs):
             path = os.path.join(root, 'assets', 'logo.png')
         if path and os.path.isfile(path):
             authorized[f'/tenant-assets/{tenant_id}/{kind}'] = path
+    for pf in db.get_project_files(tenant_id):
+        storage_path = pf.get('storage_path')
+        if storage_path and os.path.isfile(storage_path) and (pf.get('mime_type') or '').startswith('image/'):
+            file_id = pf.get('id')
+            if file_id:
+                authorized[f'/api/project-files/{file_id}'] = storage_path
+            try:
+                rel_pf = '/' + os.path.relpath(storage_path, root).replace('\\', '/')
+                authorized[rel_pf] = storage_path
+            except ValueError:
+                pass
     def freeze(value):
         if isinstance(value, dict):
             return {key: freeze(item) for key, item in value.items()}

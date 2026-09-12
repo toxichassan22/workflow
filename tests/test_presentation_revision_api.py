@@ -288,6 +288,23 @@ class PresentationRevisionApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 404, response.get_json())
             provider.assert_not_called()
 
+    def test_project_documents_image_in_metadata_allowed_without_authorization_error(self):
+        project = {
+            'project_name': 'Project With Croquis Image',
+            'croquis_file': f'/uploads/{self.tenant}/project-documents/a99131413d33f94ab3fcca7bffb7c7fa6d61c1628e75d683c8aa5955dcda3f47.png',
+            'land_photos': [f'uploads/{self.tenant}/project-documents/b1234567890abcdef.jpg'],
+        }
+        response = self.client.post('/api/presentations', headers=self.headers, json={
+            'title': 'Project Image Test', 'projectData': project,
+            'slidesData': [{'html': '<div class="slide">Slide Content</div>'}],
+            'slideCount': 1,
+        })
+        self.assertEqual(response.status_code, 201, response.get_json())
+        data = response.get_json()
+        self.assertTrue(data.get('success'))
+        self.assertTrue(data.get('presentationId'))
+
 
 if __name__ == '__main__':
     unittest.main()
+
