@@ -85,6 +85,45 @@ class TableDeletionSafetyTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_applied(source, command, expected)
 
+    def test_polite_phrases_dialects_and_unit_labels_apply_surgically(self):
+        source = slide()
+        expected_row = source.replace(ROWS[1], '')
+        for command in (
+            'احذف صف البناء لو سمحت',
+            'شيل صف البناء بعد اذنك',
+            'ممكن تشيل صف البناء',
+            'شيل الصف بتاع البناء',
+            'احذف صف البناء لو تكرمت',
+            'شيل صف البناء من فضلك',
+        ):
+            with self.subTest(command=command):
+                self.assert_applied(source, command, expected_row)
+
+        expected_col = source
+        for cell in ('<th>السعر</th>', '<td data-x="a > b">100</td>', '<td>200</td>', '<td>300</td>', '<td>600</td>'):
+            expected_col = expected_col.replace(cell, '')
+        for command in (
+            'شيل عمود السعر لو سمحت',
+            'ممكن تشيل عمود السعر',
+            'شيل العمود بتاع السعر',
+            'شيل العمود اللي اسمه السعر',
+            'احذف عمود السعر من فضلك',
+            'شيل العمود حق السعر',
+        ):
+            with self.subTest(command=command):
+                self.assert_applied(source, command, expected_col)
+
+        # ة vs ه spelling flexibility:
+        expected_area = source
+        for cell in ('<th>المساحة</th>', '<td>10</td>', '<td>20</td>', '<td>30</td>', '<td>60</td>'):
+            expected_area = expected_area.replace(cell, '')
+        self.assert_applied(source, 'شيل عمود المساحه', expected_area)
+
+        # Unit stripping in header:
+        source_with_units = source.replace('<th>المساحة</th>', '<th>المساحة (م²)</th>')
+        expected_units = expected_area.replace('<th>المساحة</th>', '')
+        self.assert_applied(source_with_units, 'احذف عمود المساحة', expected_units)
+
     def test_multiple_numbered_rows_use_original_positions_atomically(self):
         source = slide()
         expected = source.replace(ROWS[0], '').replace(ROWS[2], '')

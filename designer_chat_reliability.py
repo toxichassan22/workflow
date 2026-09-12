@@ -479,12 +479,17 @@ def semantic_part_instruction(part_index: int, total_parts: int) -> str:
 
 
 _AR_DIGITS_TABLE_EDIT = str.maketrans(
-    "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹أإآٱى", "01234567890123456789ااااي"
+    "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹أإآٱىة", "01234567890123456789اااايه"
 )
 
 _TABLE_EDIT_VERBS = (
     "احذف", "حذف", "امسح", "مسح", "شيل", "اشيل", "أشيل", "شال",
     "ازيل", "أزيل", "ازال", "إزالة", "ازالة", "ازل", "أزل",
+    "تشيل", "تشيلي", "شيلي", "تزيل", "تزيلي", "ازيلي", "أزيلي",
+    "تحذف", "تحذفي", "احذفي", "تمسح", "تمسحي", "امسحي",
+    "الغي", "ألغي", "إلغاء", "الغاء", "الغ",
+    "اسقط", "أسقط", "إسقاط",
+    "طير", "تطير",
     "احذفلي", "امسحلي", "شيللي", "remove", "delete",
 )
 
@@ -495,7 +500,7 @@ _TABLE_EDIT_ROW_WORDS = (
 
 _TABLE_EDIT_COL_WORDS = (
     "عمود", "عامود", "العمود", "العامود", "اعمدة", "أعمدة", "الاعمدة",
-    "الأعمدة", "عواميد", "column", "columns",
+    "الأعمدة", "عواميد", "العواميد", "column", "columns",
 )
 
 _TABLE_EDIT_ORDINALS = (
@@ -577,6 +582,8 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
     selection belongs to the caller; numbers here refer only to rows/columns.
     """
     text = _normalize_table_edit_text(message)
+    # Strip leading polite conversational fillers
+    text = re.sub(r"^(?:لو\s*(?:سمحت|تكرمت|ممكن|تفضلت)|من\s*فضلك|بعد\s*اذنك|ممكن|تقدر|ياريت|يا\s*ريت|فضلا|فضلاً)\s*", "", text)
     # Words in quoted labels cannot introduce a second operation or axis.
     masked = _TABLE_QUOTES_RE.sub(lambda match: " " * len(match.group()), text)
     axes = list(_TABLE_AXIS_RE.finditer(masked))
@@ -586,7 +593,7 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
     cell = re.search(r"(?<!\w)(?:الخليه|الخلية|خليه|خلية|الخلايا|خلايا|cells?)(?!\w)", masked)
     edit = re.search(r"(?<!\w)(?:و)?(?:اضف|اضافة|عدل|تعديل|غير|استبدل|add|edit|replace|change)(?!\w)", masked)
     whole_table = _TABLE_SCOPE_RE.search(masked)
-    handled = bool((verbs or edit or re.search(r"تحذف|تمسح", masked)) and (axes or cell or whole_table))
+    handled = bool((verbs or edit or re.search(r"تحذف|تمسح|تشيل", masked)) and (axes or cell or whole_table))
     result = {"handled": handled, "operation": "delete" if verbs else "edit",
               "supported": False, "reason": "not_a_table_edit", "request": None}
     if not handled:
@@ -595,7 +602,7 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
     if re.search(r"(?<!\w)(?:لا|لاتحذف|متشيلش|متمسحش|ليس|بدون|دون|not|never|don't)(?!\w)", masked):
         result["reason"] = "negated_or_conditional_request"
         return result
-    if re.search(r"(?<!\w)(?:اذا|لو|if|unless)(?!\w)", masked):
+    if re.search(r"(?<!\w)(?:اذا|لو(?!\s*(?:سمحت|تكرمت|ممكن|تفضلت|عليك امر))|if|unless)(?!\w)", masked):
         result["reason"] = "negated_or_conditional_request"
         return result
     if not verbs or edit or cell:
@@ -634,7 +641,11 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
                 result["reason"] = "ambiguous_table_selector"
                 return result
             request["table"] = selector
-    tail = re.sub(r"\s+(?:فقط|فضلا|لو سمحت|please)\s*$", "", tail.strip())
+    courtesy_suffix_re = re.compile(
+        r"\s+(?:لو سمحت|من فضلك|لو تكرمت|بعد اذنك|فضلا|فضلاً|بالله|شكرا|شكراً|رجاء|رجاءً|please|thanks|thx|فقط)\s*$",
+        re.IGNORECASE,
+    )
+    tail = courtesy_suffix_re.sub("", tail.strip())
     # Permit the common reversed form «احذف آخر صف» / 'delete last row'.
     before_axis = text[verbs[0].end():axis.start()].strip()
     if before_axis:
@@ -643,7 +654,15 @@ def detect_table_edit_request(message: Any) -> Dict[str, Any]:
             return result
         tail = before_axis
     contains = bool(re.match(r"^(?:اللي فيه|الذي يحتوي|يحتوي على|containing)\s+", tail.strip()))
-    tail = re.sub(r"^(?:اللي فيه|الذي يحتوي(?: على)?|يحتوي على|containing|الخاص ب|بعنوان|باسم|بإسم|باسم|اسمه|عنوانه|named)\s*", "", tail.strip())
+    tail = re.sub(
+        r"^(?:اللي فيه|الذي يحتوي(?: على)?|يحتوي على|containing|"
+        r"بتاع(?:ة|ت)?|حق(?:ة)?|تبع|"
+        r"(?:اللي|اللى|الذي|التي)\s+(?:اسمها|اسمه|بعنوان|باسم)|"
+        r"الخاص\s+ب(?:ـ)?|خاص\s+ب(?:ـ)?|"
+        r"بعنوان|باسم|بإسم|اسمه|اسمها|عنوانه|عنوانها|المسمى|المسمي|المعنون|named)\s*",
+        "", tail.strip(),
+    )
+    tail = courtesy_suffix_re.sub("", tail.strip())
     if not tail:
         result["reason"] = "missing_table_target"
         return result
@@ -933,9 +952,10 @@ def _remove_data_row_from_table(table_html: str, data_index: int) -> Union[str, 
     return _delete_source_spans(table_html, [(row["start"], row["end"])])
 
 
-def _remove_column_from_table(table_html: str, col_index: int) -> Union[str, None]:
-    result = apply_table_delete_request(table_html, f"delete column {col_index + 1}")
-    return result["html"] if result["changed"] else None
+def _strip_table_units(text: str) -> str:
+    t = re.sub(r"[\(\[\{].*?[\)\]\}]", "", str(text or ""))
+    t = re.sub(r"\b(?:ر\.?س|ريال|م٢|م2|متر\s+مربع|نسبة|نسبه)\b", "", t)
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def apply_table_delete_request(html: str, message: Any) -> Dict[str, Any]:
@@ -1004,11 +1024,15 @@ def apply_table_delete_request(html: str, message: Any) -> Dict[str, Any]:
                     for index, row in enumerate(rows):
                         labels = [_table_node_text(cell) for cell in row["cells"]]
                         contains = target.get("contains") and re.search(r"(?<!\w)" + re.escape(needle) + r"(?!\w)", " ".join(labels))
-                        if needle and (needle in labels or contains):
+                        clean_labels = [_normalize_table_edit_text(_strip_table_units(cell_text)) for cell_text in labels]
+                        if needle and (needle in labels or contains or needle in clean_labels):
                             hits.append((table_index, table, info, index))
                 else:
                     indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
                                if needle and _table_node_text(cell) == needle}
+                    if not indexes and needle:
+                        indexes = {index for row in info["headers"] for index, cell in enumerate(row["cells"])
+                                   if _normalize_table_edit_text(_strip_table_units(_table_node_text(cell))) == needle}
                     hits.extend((table_index, table, info, index) for index in sorted(indexes))
         if len(hits) != 1:
             result["reason"] = "ambiguous_table_target" if hits else (

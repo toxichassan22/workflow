@@ -5675,8 +5675,11 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
             tenant_id = None
 
     table_edit = designer_chat_reliability.apply_table_delete_request(html, instruction)
-    if table_edit['handled']:
-        return (table_edit['html'] if table_edit['changed'] else html), (table_edit['description'] or 'تعذر تحديد تعديل الجدول بأمان: ' + table_edit['reason'])
+    if table_edit['changed']:
+        return table_edit['html'], table_edit['description']
+    if table_edit['handled'] and table_edit.get('reason') in ('would_empty_table', 'negated_or_conditional_request'):
+        reason_text = _TABLE_PRECHECK_ARABIC_REASONS.get(table_edit['reason'], table_edit['reason'])
+        return html, (table_edit['description'] or f'تعذر تحديد تعديل الجدول بأمان: {reason_text}')
     if designer_chat_colors.is_color_only_request(instruction):
         color_html, color_message = designer_chat_colors.apply_color_edit(html, instruction)
         return color_html or html, color_message
@@ -6290,6 +6293,11 @@ def api_designer_chat():
                     slim_table_indexes = list(deterministic_indexes)
                     print(f"[DESIGNER-CHAT] table precheck blocked, using slim planner: {table_failure_note[:300]}")
                     slim_planner_only = True
+            elif table_probe.get('operation') == 'delete':
+                table_failure_note = _table_precheck_note(slides, deterministic_indexes, message)
+                slim_table_indexes = list(deterministic_indexes)
+                print(f"[DESIGNER-CHAT] table delete precheck blocked, using slim planner: {table_failure_note[:300]}")
+                slim_planner_only = True
     if deterministic_plan is not None:
         plan = deterministic_plan
         actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
