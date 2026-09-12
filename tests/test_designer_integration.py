@@ -47,7 +47,9 @@ class DesignerIntegrationTests(unittest.TestCase):
         self.assertEqual(result[0], slides[0])
         expected = slides[1]['html'].replace('<th>السعر</th>', '').replace('<td>1234.56</td>', '').replace('<td>12.34%</td>', '')
         self.assertEqual(result[1]['html'], expected)
-        self.assertEqual(model.call_count, 1)
+        # Supported table deletes bypass the planner LLM entirely (deterministic local edit),
+        # so a large deck never hits the planner token cap (402) for this operation.
+        self.assertEqual(model.call_count, 0)
 
     def test_color_edit_preserves_text_numbers_and_other_slide(self):
         slides = self.slides()

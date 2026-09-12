@@ -5416,6 +5416,89 @@ def _designer_project_context(project_data, creative_images=None, tenant_id=None
     return '\n\n'.join(parts)
 
 
+def _is_designer_prompt_token_error(exc_or_msg):
+    """True when an LLM failure is a prompt/context token limit, not a real model error."""
+    text = str(exc_or_msg or '').lower()
+    if not text:
+        return False
+    markers = (
+        'prompt tokens limit exceeded',
+        'prompt token',
+        'tokens limit exceeded',
+        'context length',
+        'context_length',
+        'max prompt',
+        'prompt is too long',
+        'prompt too large',
+        'input tokens',
+        'too many tokens',
+    )
+    if any(marker in text for marker in markers):
+        return True
+    # OpenRouter quotes the cap as [402] / 402 with a token comparison (427914 > 307449).
+    if '402' in text and ('>' in text or 'token' in text or 'credit' in text):
+        return True
+    return False
+
+
+def _resolve_deterministic_table_targets(message, data, slides, current_index, is_all_slides_request=False):
+    """Resolve 0-based slide indexes for a supported table row/column delete without an LLM.
+
+    Mirrors designer_chat_targets.prepare_actions scoping: an explicit UI target wins,
+    otherwise an explicit slide number in the message wins, otherwise the current preview
+    slide is the target. Raises designer_chat_targets.TargetError when the scope is invalid
+    so the caller falls through to the planner instead of editing the wrong slide.
+    """
+    count = len(slides) if isinstance(slides, list) else 0
+    if count <= 0:
+        raise designer_chat_targets.TargetError('لا توجد شرائح مفتوحة لتنفيذ الطلب')
+    if is_all_slides_request:
+        return list(range(count))
+    payload = data if isinstance(data, dict) else {}
+    if payload.get('target') == 'current' or payload.get('scope') == 'current':
+        return [designer_chat_targets.slide_number(current_index + 1, count) - 1]
+    explicit_raw = payload.get('indexes')
+    if isinstance(explicit_raw, list) and explicit_raw:
+        return [designer_chat_targets.slide_number(n, count) - 1 for n in explicit_raw]
+    explicit_numbers = designer_chat_targets.explicit_slide_numbers(message)
+    if explicit_numbers:
+        return [designer_chat_targets.slide_number(n, count) - 1 for n in explicit_numbers]
+    return [designer_chat_targets.slide_number(current_index + 1, count) - 1]
+
+
+def _build_designer_slim_planner_prompt(branding, training_note, watermark_note, summary,
+                                        target_html_snippets, project_facts_brief,
+                                        all_note, memory_note, history_note, focus_note,
+                                        explicit_scope_note, audit_note=''):
+    """Small planner prompt used only after the full prompt exceeds the model token cap.
+
+    The full planner carries the unabridged project snapshot plus every slide HTML verbatim,
+    which grows past 400k prompt tokens on real decks. The planner only decides the tool and
+    the target slides, so the retry carries the slide index list, the target slide HTML only,
+    and the brief section-grouped facts instead of the full deck.
+    """
+    targets_note = ''
+    if target_html_snippets:
+        joined = '\n\n'.join(target_html_snippets)
+        # Keep the retry bounded even when one table slide is itself large.
+        targets_note = '\n\n## الشرائح المستهدفة (HTML مختصر للقرار فقط)\n' + joined[:60000]
+    facts_note = ''
+    if str(project_facts_brief or '').strip():
+        facts_note = '\n\n## حقائق المشروع المختصرة\n' + str(project_facts_brief)[:40000]
+    audit_part = f'\n\n{audit_note}' if str(audit_note or '').strip() else ''
+    return f"""{build_design_rules(branding)}{training_note}
+
+{watermark_note}
+{facts_note}{targets_note}
+أنت Sol، كبير المصممين. حدّد الأداة والشرائح المستهدفة فقط وأعد JSON فقط:
+{{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
+- حذف صف أو عمود من جدول داخل شريحة هو edit_slides فقط وليس delete_slide. لا تختر delete_slide إلا إذا ذكر المستخدم كلمة شريحة/سلايد صراحة مع الحذف.
+{all_note}
+قائمة الشرائح الحالية في العرض:
+{json.dumps(summary, ensure_ascii=False)}{audit_part}
+{memory_note}{history_note}{focus_note}{explicit_scope_note}"""
+
+
 def _designer_project_data_for_request(request_project_data, presentation, tenant_id):
     """Merge the presentation snapshot with its latest saved draft and current request.
 
@@ -6093,14 +6176,63 @@ def api_designer_chat():
         "حدّد النية والنطاق من المحادثة والرسالة الحالية معاً."
     )
     training_note = f"\n\n## قواعد الشركة الملزمة (من التدريب — التزم بها في أي تصميم)\n{training_context}" if training_context else ""
-    audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index, creative_images)
-    project_context = _designer_project_context(project_data, creative_images, tenant_id)
+    # Deterministic table row/column deletes never need the planner LLM. The full planner
+    # prompt carries the unabridged project snapshot plus every slide HTML verbatim, which
+    # exceeds the model token cap on real decks (measured 427k > 307k) and turns a local
+    # surgical edit into a 402. Pre-check here: when every targeted slide deterministically
+    # applies, synthesize the edit_slides plan and skip the planner call entirely.
+    deterministic_plan = None
+    table_probe = designer_chat_reliability.detect_table_edit_request(message)
+    if table_probe.get('supported') and table_probe.get('operation') == 'delete':
+        try:
+            deterministic_indexes = _resolve_deterministic_table_targets(
+                message, data, slides, current_index, is_all_slides_request)
+            precheck_ok = bool(deterministic_indexes)
+            for _pre_idx in deterministic_indexes:
+                _pre_slide = slides[_pre_idx] if isinstance(slides[_pre_idx], dict) else {}
+                _pre_res = designer_chat_reliability.apply_table_delete_request(
+                    _pre_slide.get('html', ''), message)
+                if not _pre_res.get('changed'):
+                    precheck_ok = False
+                    break
+            if precheck_ok:
+                deterministic_plan = {
+                    'response': 'حذف حتمي من الجدول دون نموذج تخطيط.',
+                    'actions': [{
+                        'tool': 'edit_slides',
+                        'params': {
+                            'target': 'indexes',
+                            'indexes': [_i + 1 for _i in deterministic_indexes],
+                            'instruction': message,
+                        },
+                    }],
+                }
+                print(f"[DESIGNER-CHAT] deterministic table plan skips planner for slides "
+                      f"{[_i + 1 for _i in deterministic_indexes]}")
+        except Exception as _det_err:
+            print(f"[DESIGNER-CHAT] deterministic table precheck failed: {_det_err}")
+            deterministic_plan = None
+    if deterministic_plan is not None:
+        plan = deterministic_plan
+        actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
+        planner_raw = json.dumps(plan, ensure_ascii=False)
+    else:
+        audit_note = _build_designer_section_and_asset_context(slides, project_data, current_index, creative_images)
+        project_context = _designer_project_context(project_data, creative_images, tenant_id)
     watermark_note = (
         'العلامة المائية المستقلة معتمدة ومتاحة لأداة apply_watermark.'
         if branding.get('watermark_path') else
         'لا توجد علامة مائية مرفوعة في إعدادات الشركة؛ لا تستبدلها بشعار الشركة.'
     )
-    planner_prompt = f"""{build_design_rules(branding)}{training_note}
+    # An image the user attached in the chat: a design reference, something to insert, or the
+    # problem they are pointing at. The attach button used to open the training page's file input,
+    # so it never reached this endpoint at all.
+    attached_image = str(data.get('attachedImage') or '').strip()
+    user_image_refs = [{'data_uri': attached_image}] if attached_image.startswith('data:image/') else None
+    if deterministic_plan is not None:
+        pass
+    else:
+        planner_prompt = f"""{build_design_rules(branding)}{training_note}
 
 {watermark_note}
 
@@ -6176,20 +6308,94 @@ def api_designer_chat():
 قائمة الشرائح الحالية في العرض ({len(slides)} شريحة):
 {json.dumps(summary, ensure_ascii=False)}
 {memory_note}{history_note}{focus_note}{explicit_scope_note}"""
-    # An image the user attached in the chat: a design reference, something to insert, or the
-    # problem they are pointing at. The attach button used to open the training page's file input,
-    # so it never reached this endpoint at all.
-    attached_image = str(data.get('attachedImage') or '').strip()
-    user_image_refs = [{'data_uri': attached_image}] if attached_image.startswith('data:image/') else None
-    if user_image_refs:
-        planner_prompt += ("\n\nأرفق المستخدم صورة مع رسالته. انظر إليها قبل التخطيط، وإن لم يكن دورها"
-                          " واضحًا فاسأل عنه بأداة ask.")
+        if user_image_refs:
+            planner_prompt += ("\n\nأرفق المستخدم صورة مع رسالته. انظر إليها قبل التخطيط، وإن لم يكن دورها"
+                              " واضحًا فاسأل عنه بأداة ask.")
     try:
-        planner_raw = extract_chat_content(
-            call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
-            'DESIGNER-PLANNER')
-        plan = _designer_json_response(planner_raw)
-        actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
+        if deterministic_plan is not None:
+            pass
+        else:
+            try:
+                planner_raw = extract_chat_content(
+                    call_zai_chat(planner_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
+                    'DESIGNER-PLANNER')
+            except Exception as _planner_exc:
+                if not _is_designer_prompt_token_error(_planner_exc):
+                    raise
+                print(f"[DESIGNER-CHAT] planner prompt exceeded token cap ({len(planner_prompt)} chars): {_planner_exc}")
+                # A supported table delete never needs a second LLM attempt: the local
+                # surgical edit below applies it without any prompt tokens.
+                _retry_probe = designer_chat_reliability.detect_table_edit_request(message)
+                if _retry_probe.get('supported') and _retry_probe.get('operation') == 'delete':
+                    try:
+                        _retry_indexes = _resolve_deterministic_table_targets(
+                            message, data, slides, current_index, is_all_slides_request)
+                        _retry_ok = bool(_retry_indexes)
+                        for _r_idx in _retry_indexes:
+                            _r_slide = slides[_r_idx] if isinstance(slides[_r_idx], dict) else {}
+                            _r_res = designer_chat_reliability.apply_table_delete_request(
+                                _r_slide.get('html', ''), message)
+                            if not _r_res.get('changed'):
+                                _retry_ok = False
+                                break
+                        if _retry_ok:
+                            plan = {
+                                'response': 'حذف حتمي من الجدول بعد تجاوز حد التوكنز.',
+                                'actions': [{
+                                    'tool': 'edit_slides',
+                                    'params': {
+                                        'target': 'indexes',
+                                        'indexes': [_i + 1 for _i in _retry_indexes],
+                                        'instruction': message,
+                                    },
+                                }],
+                            }
+                            actions = plan.get('actions', [])
+                            planner_raw = json.dumps(plan, ensure_ascii=False)
+                        else:
+                            raise
+                    except Exception:
+                        raise _planner_exc
+                else:
+                    # Slim retry: target slides only plus brief facts instead of the full deck.
+                    try:
+                        _slim_targets = designer_chat_targets.explicit_slide_numbers(message) or [current_index + 1]
+                        _slim_valid = []
+                        for _n in _slim_targets:
+                            try:
+                                _slim_valid.append(designer_chat_targets.slide_number(_n, len(slides)) - 1)
+                            except Exception:
+                                continue
+                        if not _slim_valid:
+                            _slim_valid = [current_index] if 0 <= current_index < len(slides) else [0]
+                        _snippets = []
+                        for _s_idx in _slim_valid[:3]:
+                            _s = slides[_s_idx] if isinstance(slides[_s_idx], dict) else {}
+                            _snippets.append(
+                                f"### شريحة {_s_idx + 1}: {str(_s.get('title', ''))[:200]}\n"
+                                f"{str(_s.get('html', ''))[:20000]}")
+                        try:
+                            _brief = slide_engine.build_project_facts(project_data, tenant_id)
+                        except Exception:
+                            _brief = ''
+                        slim_prompt = _build_designer_slim_planner_prompt(
+                            branding, training_note, watermark_note, summary,
+                            _snippets, _brief, all_note, memory_note,
+                            history_note, focus_note, explicit_scope_note)
+                        print(f"[DESIGNER-CHAT] retrying planner slim ({len(slim_prompt)} chars, was {len(planner_prompt)} chars)")
+                        planner_raw = extract_chat_content(
+                            call_zai_chat(slim_prompt, message, max_tokens=8000, model=SLIDE_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
+                            'DESIGNER-PLANNER')
+                    except Exception as _slim_exc:
+                        if _is_designer_prompt_token_error(_slim_exc):
+                            return jsonify({'success': False,
+                                            'error': 'العرض كبير جدًا على حد التوكنز الحالي؛ حدّد شريحة واحدة برقمها وأعد المحاولة.',
+                                            'error_code': 'DESIGNER_PROMPT_TOO_LARGE'}), 402
+                        raise
+            else:
+                planner_raw = planner_raw
+            plan = _designer_json_response(planner_raw)
+            actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
 
         # A question is an answer on its own: nothing is edited until the user replies.
         question = ''
@@ -17509,13 +17715,6 @@ def api_training_chat():
         history_lines.append(f"{role}: {turn.get('text', '')}")
     context = '\n'.join(history_lines)
 
-
-    history_lines = []
-    for turn in history[-12:]:
-        role = 'المستخدم' if turn.get('role') == 'user' else 'المساعد'
-        history_lines.append(f"{role}: {turn.get('text', '')}")
-    context = '\n'.join(history_lines)
-
     # A file the admin attached to this message. Images used to be analysed by a separate endpoint
     # and stored as training text, so the agent answering the message never saw them, and a PDF
     # could not be attached at all.
@@ -18935,7 +19134,6 @@ HTML الحالي:
                 result['presentationId'] = pres_id
                 result['data'] = {
                     **_presentation_revision_response(saved_revision),
-                    'presentationId': pres_id,
                     'slidesData': _presentation_state(saved_revision['presentation'])['slidesData'],
                     'slideCount': len(slides),
                 }
