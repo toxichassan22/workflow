@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 import json
+import hashlib
 from datetime import datetime
 from flask import g
 
@@ -503,6 +504,8 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_ledger_created ON tenant_ledger(created_at);
     CREATE INDEX IF NOT EXISTS idx_ledger_idempotency ON tenant_ledger(idempotency_key);
     """)
+
+    _migrate_presentation_revision_schema(conn)
 
     branding_cols = [row['name'] for row in conn.execute('PRAGMA table_info(tenant_branding)').fetchall()]
     if 'moodboard_count' not in branding_cols:
@@ -1546,6 +1549,50 @@ def _migrate_project_draft_columns(conn):
         print(f"[DB DRAFT MIGRATION ERR] {e}")
 
 
+def _migrate_presentation_revision_schema(conn):
+    """Add full snapshots without rewriting historical slides-only backups.
+
+    Run before unrelated optional migrations. Introspection works through the
+    SQLite/Postgres shim and avoids failed ALTERs aborting Postgres transactions.
+    Revision zero denotes an existing identity whose baseline is captured lazily
+    under the same write lock as its first revision-aware save.
+    """
+    for table, additions in (
+        ('presentations', (('revision', 'INTEGER NOT NULL DEFAULT 0'),
+                           ('current_revision_id', 'TEXT'), ('creation_key', 'TEXT'))),
+        ('change_log', (('revision_id', 'TEXT'), ('previous_revision_id', 'TEXT'))),
+    ):
+        columns = {row['name'] for row in conn.execute(f'PRAGMA table_info({table})').fetchall()}
+        for name, definition in additions:
+            if name not in columns:
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
+    conn.execute('''CREATE TABLE IF NOT EXISTS presentation_revisions (
+        id TEXT PRIMARY KEY,
+        presentation_id TEXT NOT NULL REFERENCES presentations(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        project_data TEXT,
+        slides_data TEXT,
+        slide_count INTEGER NOT NULL,
+        draft_id TEXT,
+        status TEXT,
+        content_hash TEXT NOT NULL,
+        user_id TEXT,
+        user_name TEXT,
+        source TEXT NOT NULL,
+        action TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        details TEXT NOT NULL,
+        previous_revision_id TEXT,
+        restored_from_revision_id TEXT,
+        change_log_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (presentation_id, revision)
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_changelog_revision ON change_log(revision_id)')
+    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_presentation_creation_key ON presentations(tenant_id, creation_key)')
+
+
 def _migrate_presentation_draft_link(conn):
     try:
         cursor = conn.execute("PRAGMA table_info(presentations)")
@@ -1769,6 +1816,295 @@ def add_slide_template(tenant_id, slide_type, slide_name, design_instructions=No
 # ─────────────────────────────────────────────────────────────────────────────
 # Presentations CRUD
 # ─────────────────────────────────────────────────────────────────────────────
+
+_PRESENTATION_UNSET = object()
+# Ignore only presentation-independent UI bookkeeping, not project facts/media.
+_PRESENTATION_BOOKKEEPING_KEYS = {'designerChat', 'pageDrafts', 'sectionStatuses'}
+
+
+class PresentationRevisionConflict(Exception):
+    """The supplied base revision is stale. No state or history was committed."""
+
+    def __init__(self, expected_revision, current_revision):
+        self.expected_revision = expected_revision
+        self.current_revision = current_revision
+        super().__init__(f'Presentation revision conflict: expected {expected_revision}, current {current_revision}')
+
+
+def _presentation_json(value, kind, strict=False):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            if strict:
+                raise ValueError(f'Invalid presentation {kind} JSON')
+    if value is None:
+        value = [] if kind == 'slides_data' else {}
+    if strict and not isinstance(value, list if kind == 'slides_data' else dict):
+        raise ValueError(f'Invalid presentation {kind}')
+    return value
+
+
+def _presentation_content_hash(state):
+    project = _presentation_json(state.get('project_data'), 'project_data')
+    if isinstance(project, dict):
+        project = {key: value for key, value in project.items() if key not in _PRESENTATION_BOOKKEEPING_KEYS}
+    content = [state.get('title'), _presentation_json(state.get('slides_data'), 'slides_data'), project]
+    encoded = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+    return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+
+def _presentation_revision_metadata(row, legacy=False):
+    item = dict(row)
+    item['legacy'] = legacy
+    item['snapshot_kind'] = 'legacy-slides' if legacy else 'full'
+    item['details'] = _json_list(item.get('details'))
+    if legacy:
+        item.update(revision=None, source='manual', summary='نسخة قديمة للشرائح فقط',
+                    previous_revision_id=None, restored_from_revision_id=None,
+                    change_log_id=None, title=None, project_data=None, draft_id=None, status=None)
+        slides = _presentation_json(item.get('slides_data'), 'slides_data')
+        item['slide_count'] = len(slides) if isinstance(slides, list) else 0
+    return item
+
+
+def get_presentation_revisions(presentation_id, tenant_id, limit=200):
+    """Tenant-scoped metadata, newest full revisions followed by legacy backups."""
+    if not tenant_id:
+        return []
+    conn = get_db()
+    limit = max(1, min(int(limit or 200), 500))
+    rows = conn.execute('''SELECT r.id, r.presentation_id, r.revision, r.title, r.slide_count,
+        r.user_id, r.user_name, r.source, r.action, r.summary, r.details,
+        r.previous_revision_id, r.restored_from_revision_id, r.change_log_id, r.created_at
+        FROM presentation_revisions r JOIN presentations p ON p.id = r.presentation_id
+        WHERE p.id = ? AND p.tenant_id = ? ORDER BY r.revision DESC LIMIT ?''',
+        (presentation_id, tenant_id, limit)).fetchall()
+    entries = [_presentation_revision_metadata(row) for row in rows]
+    if len(entries) < limit:
+        legacy = conn.execute('''SELECT v.* FROM presentation_versions v
+            JOIN presentations p ON p.id = v.presentation_id
+            WHERE p.id = ? AND p.tenant_id = ? ORDER BY v.created_at DESC, v.id DESC LIMIT ?''',
+            (presentation_id, tenant_id, limit - len(entries))).fetchall()
+        for row in legacy:
+            item = _presentation_revision_metadata(row, legacy=True)
+            for key in ('slides_data', 'project_data', 'draft_id', 'status'):
+                item.pop(key, None)
+            entries.append(item)
+    return entries
+
+
+def get_presentation_revision(presentation_id, version_id, tenant_id):
+    """Return immutable full contents or an explicitly labeled slides-only backup.
+
+    JSON columns remain serialized, matching get_presentation()/legacy callers.
+    Version IDs are UUIDs, while revision numbers are per-presentation integers.
+    """
+    if not tenant_id:
+        return None
+    conn = get_db()
+    for table, legacy in (('presentation_revisions', False), ('presentation_versions', True)):
+        row = conn.execute(f'''SELECT r.* FROM {table} r
+            JOIN presentations p ON p.id = r.presentation_id
+            WHERE p.id = ? AND p.tenant_id = ? AND r.id = ?''',
+            (presentation_id, tenant_id, version_id)).fetchone()
+        if row:
+            return _presentation_revision_metadata(row, legacy=legacy)
+    return None
+
+
+def _insert_presentation_revision(conn, state, revision, *, user_id, user_name, source,
+                                  action, summary, details, previous_id=None, restored_from=None):
+    """Transaction-internal append only. Never calls a committing legacy helper."""
+    version_id, change_id = str(uuid.uuid4()), str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    details_json = json.dumps(details, ensure_ascii=False)
+    slides = _presentation_json(state.get('slides_data'), 'slides_data')
+    slide_count = len(slides) if isinstance(slides, list) else int(state.get('slide_count') or 0)
+    conn.execute('''INSERT INTO presentation_revisions
+        (id, presentation_id, revision, title, project_data, slides_data, slide_count,
+         draft_id, status, content_hash, user_id, user_name, source, action, summary, details,
+         previous_revision_id, restored_from_revision_id, change_log_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (version_id, state['id'], revision, state['title'], state.get('project_data'),
+         state.get('slides_data'), slide_count, state.get('draft_id'), state.get('status'),
+         _presentation_content_hash(state), user_id, user_name, source, action, summary,
+         details_json, previous_id, restored_from, change_id, now))
+    conn.execute('''INSERT INTO change_log
+        (id, tenant_id, target_type, target_id, user_id, user_name, source, action, summary,
+         details, created_at, revision_id, previous_revision_id)
+        VALUES (?, ?, 'presentation', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (change_id, state['tenant_id'], state['id'], user_id, user_name, source, action,
+         summary, details_json, now, version_id, previous_id))
+    return version_id
+
+
+def _transform_presentation_snapshot(state, transform):
+    if transform is None:
+        return state
+    transformed = transform(dict(state))
+    if not isinstance(transformed, dict):
+        raise ValueError('snapshot_transform must return a presentation state dict')
+    result = dict(state)
+    # Asset publication cannot change identity, workflow approval or project linkage.
+    for key in ('project_data', 'slides_data'):
+        if key in transformed:
+            result[key] = json.dumps(_presentation_json(transformed[key], key, strict=True),
+                                     ensure_ascii=False, allow_nan=False)
+    return result
+
+
+def commit_presentation_revision(tenant_id, presentation_id=None, *,
+                                 title=_PRESENTATION_UNSET, project_data=_PRESENTATION_UNSET,
+                                 slides_data=_PRESENTATION_UNSET, draft_id=_PRESENTATION_UNSET,
+                                 status=_PRESENTATION_UNSET, expected_revision=None,
+                                 user_id=None, user_name=None, source='manual', action='edit',
+                                 summary='', details=None, restore_version_id=None,
+                                 snapshot_transform=None, creation_key=None):
+    """Atomically create/update/restore one identity, full snapshot and readable history.
+
+    Expected revision is an integer (zero for an unversioned legacy identity).
+    None is reserved for trusted server/legacy integrations that cannot supply it.
+    Stale writes fail even when their content would be a no-op. Restore always
+    appends, keeps the current draft link, resets approval, and never edits a draft.
+    Ordinary identical saves do not add history, including bookkeeping-only edits.
+    All JSON is snapshotted, even ignored bookkeeping. Legacy helpers remain intact.
+    snapshot_transform receives a copied raw DB state and returns asset-frozen
+    project_data/slides_data (serialized or decoded). It runs on current and next
+    states under the write lock and must be deterministic and never commit the DB.
+    This helper owns the connection transaction: call without pending writes.
+    creation_key is an optional tenant-scoped create idempotency token. Reusing
+    it returns the existing current identity unchanged, even after later edits.
+    """
+    if not tenant_id:
+        raise ValueError('tenant_id is required')
+    if expected_revision is not None:
+        if isinstance(expected_revision, bool) or not str(expected_revision).isdigit():
+            raise ValueError('expected_revision must be a nonnegative integer')
+        expected_revision = int(expected_revision)
+    if source not in CHANGE_SOURCES:
+        raise ValueError('Invalid presentation change source')
+    created = presentation_id is None
+    if creation_key is not None:
+        if not created or not isinstance(creation_key, str) or not creation_key.strip() or len(creation_key) > 255:
+            raise ValueError('creation_key requires a new identity and a nonempty token up to 255 characters')
+    if created and restore_version_id:
+        raise ValueError('Restoration requires a presentation identity')
+    if created and expected_revision not in (None, 0):
+        raise PresentationRevisionConflict(expected_revision, 0)
+    conn = get_db()
+    try:
+        if created:
+            presentation_id = str(uuid.uuid4())
+            if title is _PRESENTATION_UNSET or not isinstance(title, str) or not title.strip():
+                raise ValueError('Presentation title is required')
+            inserted = conn.execute('''INSERT INTO presentations (id, tenant_id, title, creation_key)
+                VALUES (?, ?, ?, ?) ON CONFLICT (tenant_id, creation_key) DO NOTHING''',
+                (presentation_id, tenant_id, title, creation_key))
+            if inserted.rowcount == 0:
+                existing = dict(conn.execute('SELECT * FROM presentations WHERE tenant_id = ? AND creation_key = ?',
+                                             (tenant_id, creation_key)).fetchone())
+                conn.commit()
+                return {'presentation_id': existing['id'], 'revision': int(existing.get('revision') or 0),
+                        'version_id': existing.get('current_revision_id'), 'changed': False,
+                        'created': False, 'presentation': existing}
+        else:
+            # A write before the read serializes writers on SQLite AND Postgres.
+            # Unlike read-then-CAS, SQLite cannot fail a read snapshot upgrade here.
+            locked = conn.execute('''UPDATE presentations SET revision = revision
+                WHERE id = ? AND tenant_id = ?''', (presentation_id, tenant_id))
+            if locked.rowcount != 1:
+                raise LookupError('Presentation not found')
+        current = dict(conn.execute('SELECT * FROM presentations WHERE id = ? AND tenant_id = ?',
+                                    (presentation_id, tenant_id)).fetchone())
+        revision = int(current.get('revision') or 0)
+        if expected_revision is not None and expected_revision != revision:
+            raise PresentationRevisionConflict(expected_revision, revision)
+        if not created:
+            current = _transform_presentation_snapshot(current, snapshot_transform)
+        target = None
+        if restore_version_id:
+            target = get_presentation_revision(presentation_id, restore_version_id, tenant_id)
+            if not target:
+                raise LookupError('Presentation revision not found')
+            # Legacy backups never claimed to store a title or project facts.
+            slides_data = target['slides_data']
+            title = current['title'] if target['legacy'] else target['title']
+            project_data = current['project_data'] if target['legacy'] else target['project_data']
+            draft_id, status = current.get('draft_id'), 'draft'
+            action = 'restore'
+        state = dict(current)
+        for key, value in (('title', title), ('project_data', project_data),
+                           ('slides_data', slides_data), ('draft_id', draft_id), ('status', status)):
+            if value is _PRESENTATION_UNSET:
+                continue
+            if key in ('slides_data', 'project_data'):
+                value = json.dumps(_presentation_json(value, key, strict=True), ensure_ascii=False, allow_nan=False)
+            if key == 'title' and (not isinstance(value, str) or not value.strip()):
+                raise ValueError('Presentation title is required')
+            state[key] = value
+        if created and draft_id is _PRESENTATION_UNSET:
+            project = _presentation_json(state.get('project_data'), 'project_data', strict=True)
+            state['draft_id'] = project.get('draft_id') or project.get('draftId')
+        state = _transform_presentation_snapshot(state, snapshot_transform)
+        slides = _presentation_json(state.get('slides_data'), 'slides_data', strict=True)
+        state['slide_count'] = len(slides)
+        changed = created or bool(target) or _presentation_content_hash(current) != _presentation_content_hash(state)
+        if changed and not created and status is _PRESENTATION_UNSET and current.get('status') in ('approved', 'pending_approval'):
+            state['status'] = 'draft'
+        previous_id = current.get('current_revision_id')
+        if not created:
+            previous = conn.execute('SELECT content_hash FROM presentation_revisions WHERE id = ?',
+                                    (previous_id,)).fetchone() if previous_id else None
+            # Preserve the actual current state even if an unmigrated legacy caller
+            # changed it since the last revision-aware save. Never credit that to this actor.
+            if not previous or previous['content_hash'] != _presentation_content_hash(current):
+                if previous:
+                    revision += 1
+                previous_id = _insert_presentation_revision(
+                    conn, current, revision, user_id=None, user_name=None, source='system',
+                    action='baseline', summary='حفظ الحالة السابقة للعرض', details=[],
+                    previous_id=previous_id)
+        version_id = previous_id
+        if changed:
+            revision += 1
+            lines = [str(line).strip() for line in (details or []) if str(line or '').strip()]
+            if not lines:
+                from change_tracking import describe_slide_changes, describe_draft_changes
+                lines = describe_slide_changes(
+                    _presentation_json(current.get('slides_data'), 'slides_data'), slides)
+                lines += describe_draft_changes(
+                    _presentation_json(current.get('project_data'), 'project_data'),
+                    _presentation_json(state.get('project_data'), 'project_data'))
+                if current.get('title') != state['title']:
+                    lines.insert(0, f'عنوان العرض: من «{current.get("title") or ""}» إلى «{state["title"]}»')
+            summary = str(summary or '').strip() or (
+                'استعادة نسخة قديمة للشرائح فقط' if target and target['legacy'] else
+                'استعادة مراجعة العرض' if target else 'إنشاء العرض' if created else 'تعديل العرض')
+            version_id = _insert_presentation_revision(
+                conn, state, revision, user_id=user_id, user_name=user_name, source=source,
+                action='create' if created else action, summary=summary, details=lines,
+                previous_id=previous_id, restored_from=restore_version_id)
+        # No-op saves may update bookkeeping/status but never mutate a past snapshot.
+        updated_at = datetime.now().isoformat() if changed else current.get('updated_at')
+        conn.execute('''UPDATE presentations SET title = ?, project_data = ?, slides_data = ?,
+            slide_count = ?, draft_id = ?, status = ?, revision = ?, current_revision_id = ?, updated_at = ?
+            WHERE id = ? AND tenant_id = ?''',
+            (state['title'], state.get('project_data'), state.get('slides_data'), state['slide_count'],
+             state.get('draft_id'), state.get('status'), revision, version_id, updated_at,
+             presentation_id, tenant_id))
+        if created and state.get('draft_id'):
+            conn.execute('UPDATE map_images SET presentation_id = ? WHERE tenant_id = ? AND presentation_id = ?',
+                         (presentation_id, tenant_id, f"draft_{state['draft_id']}"))
+        result = dict(conn.execute('SELECT * FROM presentations WHERE id = ? AND tenant_id = ?',
+                                  (presentation_id, tenant_id)).fetchone())
+        conn.commit()
+        return {'presentation_id': presentation_id, 'revision': revision, 'version_id': version_id,
+                'changed': changed, 'created': created, 'presentation': result}
+    except Exception:
+        conn.rollback()
+        raise
+
 
 def create_presentation(tenant_id, title, project_data=None, slides_data=None, slide_count=0, draft_id=None):
     """Create a new presentation record."""
@@ -2490,11 +2826,13 @@ CHANGE_SOURCES = ('manual', 'ai', 'system')
 
 
 def log_change(tenant_id, target_type, target_id, user_id, user_name, action,
-               summary='', details=None, source='manual'):
+               summary='', details=None, source='manual', revision_id=None, previous_revision_id=None):
     """Record one change with the individual differences it produced.
 
     ``details`` is a list of human-readable Arabic lines; it is stored as JSON so the reader can
-    show them one per line instead of a single sentence.
+    show them one per line instead of a single sentence. Presentation events such as
+    approval/export link to the current revision without creating a content revision.
+    Explicit links must refer to this tenant's same presentation.
     """
     if target_type not in CHANGE_TARGETS or not target_id:
         return None
@@ -2503,14 +2841,30 @@ def log_change(tenant_id, target_type, target_id, user_id, user_name, action,
     if not summary and not lines:
         return None
     conn = get_db()
+    if target_type == 'presentation':
+        presentation = conn.execute('SELECT current_revision_id FROM presentations WHERE id = ? AND tenant_id = ?',
+                                    (str(target_id), tenant_id)).fetchone()
+        # Deletion audit may run after the presentation row was removed, and
+        # legacy callers historically could record such an unlinked event.
+        if presentation:
+            revision_id = revision_id or presentation['current_revision_id']
+        for linked_id in (revision_id, previous_revision_id):
+            if linked_id and not conn.execute('''SELECT r.id FROM presentation_revisions r
+                JOIN presentations p ON p.id = r.presentation_id
+                WHERE r.id = ? AND p.id = ? AND p.tenant_id = ?''',
+                (linked_id, str(target_id), tenant_id)).fetchone():
+                raise ValueError('Revision does not belong to the history target')
+    elif revision_id or previous_revision_id:
+        raise ValueError('Presentation revision links require a presentation target')
     change_id = str(uuid.uuid4())
     conn.execute(
         '''INSERT INTO change_log
-           (id, tenant_id, target_type, target_id, user_id, user_name, source, action, summary, details, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+           (id, tenant_id, target_type, target_id, user_id, user_name, source, action, summary, details,
+            created_at, revision_id, previous_revision_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (change_id, tenant_id, target_type, str(target_id), user_id, user_name,
          source if source in CHANGE_SOURCES else 'manual', action, summary,
-         json.dumps(lines, ensure_ascii=False), datetime.now().isoformat())
+         json.dumps(lines, ensure_ascii=False), datetime.now().isoformat(), revision_id, previous_revision_id)
     )
     conn.commit()
     return change_id
@@ -2520,10 +2874,11 @@ def get_change_log(tenant_id, target_type, target_id, limit=200):
     """Newest-first history for one presentation or draft, including legacy edit_log rows."""
     conn = get_db()
     rows = conn.execute(
-        '''SELECT user_name, source, action, summary, details, created_at
-           FROM change_log
-           WHERE tenant_id = ? AND target_type = ? AND target_id = ?
-           ORDER BY created_at DESC LIMIT ?''',
+        '''SELECT c.id, c.user_id, c.user_name, c.source, c.action, c.summary, c.details, c.created_at,
+                  c.revision_id, c.previous_revision_id, r.revision, r.restored_from_revision_id
+           FROM change_log c LEFT JOIN presentation_revisions r ON r.id = c.revision_id
+           WHERE c.tenant_id = ? AND c.target_type = ? AND c.target_id = ?
+           ORDER BY c.created_at DESC LIMIT ?''',
         (tenant_id, target_type, str(target_id), max(1, min(int(limit or 200), 500)))
     ).fetchall()
     entries = []
@@ -2534,9 +2889,10 @@ def get_change_log(tenant_id, target_type, target_id, limit=200):
     if target_type == 'presentation':
         # History written before this table existed still belongs to the reader.
         legacy = conn.execute(
-            '''SELECT user_name, action, details, created_at FROM edit_log
-               WHERE presentation_id = ? ORDER BY created_at DESC''',
-            (str(target_id),)
+            '''SELECT e.user_name, e.action, e.details, e.created_at FROM edit_log e
+               JOIN presentations p ON p.id = e.presentation_id
+               WHERE e.presentation_id = ? AND p.tenant_id = ? ORDER BY e.created_at DESC''',
+            (str(target_id), tenant_id)
         ).fetchall()
         for row in legacy:
             item = dict(row)
@@ -2966,7 +3322,7 @@ SECTION_DRAFT_STATUSES = {'draft', 'approved'}
 DRAFT_BOOKKEEPING_KEYS = {
     'draftId', 'draft_id', 'pageDrafts', 'sectionStatuses',
     'map_styles', 'map_type', 'calculate_landmark_driving', 'site_analysis_approved',
-    'designerChat',
+    'designerChat', 'presentation_scope',
 }
 
 # Below this many stored fields a draft is still being started, and blanking it can be a real

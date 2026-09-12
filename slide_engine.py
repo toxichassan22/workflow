@@ -2947,7 +2947,7 @@ PROMPT_COVERED_ELSEWHERE = {
 
 # The deck itself. Feeding a model the slides it produced last time invites it to copy them.
 # `designerChat` is the editing conversation: it belongs to the chat, never to a slide prompt.
-PROMPT_PREVIOUS_OUTPUT = {'tenantSlidesData', 'pageDrafts', 'slides', 'designerChat'}
+PROMPT_PREVIOUS_OUTPUT = {'tenantSlidesData', 'pageDrafts', 'slides', 'designerChat', 'presentation_scope'}
 
 # Machine artefacts of the land analysis and the map pipeline: the facts they produced are already
 # in the visible land and location fields.

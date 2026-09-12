@@ -6802,6 +6802,15 @@ def api_designer_chat():
             'chatHistory': persisted_project_data['designerChat']['messages'],
             'saved': False,
         }
+        if successful_execution and slide_changes:
+            response_data['changeSource'] = 'ai'
+            response_data['provenance'] = _issue_presentation_provenance(
+                slides, presentation_id, int((presentation or {}).get('revision') or 0),
+                [f'طلب التصميم: {message[:2000]}'] + [
+                    f'أداة التصميم: {item.get("tool")}' for item in executed
+                    if isinstance(item, dict) and item.get('status') == 'success'
+                ],
+            )
         if failure_reason:
             response_data['failureReason'] = failure_reason
         return jsonify({'success': True, 'data': response_data})
@@ -8636,6 +8645,22 @@ def api_generate_single_map_image():
     if not effective_id:
         return jsonify({'success': False, 'error': 'معرّف العرض أو المسودة مطلوب'}), 400
     highlight_site = data.get('highlightSite', True) is not False
+    presentation = None
+    expected_revision = None
+    if presentation_id:
+        presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
+        if not presentation:
+            return jsonify({'error': 'Presentation not found'}), 404
+        try:
+            expected_revision = _expected_presentation_revision(data, presentation)
+            # Freeze a legacy baseline before a map provider can overwrite its files.
+            checkpoint = _commit_presentation_state(
+                g.tenant_id, presentation_id, expected_revision=expected_revision,
+                action='حفظ حالة العرض قبل تعديل الخريطة', source='system')
+            expected_revision = checkpoint['revision']
+            presentation = checkpoint['presentation']
+        except (LookupError, ValueError) as error:
+            return jsonify({'error': str(error)}), 400
     if data.get('overlayOnly') is True and map_type == 'overview':
         result = maps_service.recompose_overview_map(
             project_data,
@@ -8696,13 +8721,39 @@ def api_generate_single_map_image():
             rel_path = os.path.relpath(path, os.path.dirname(__file__)).replace('\\', '/')
             placeholders[placeholder] = '/' + rel_path
     map_labels = {'overview': 'الموقع العام', 'access': 'الوصول', 'catchment': 'نطاق الخدمة', 'landmarks': 'المعالم'}
+    revision_result = None
     if presentation_id:
-        _record_change('presentation', presentation_id, 'توليد خريطة',
-                       [f'وُلّدت خريطة {map_labels.get(map_type, map_type)}'])
+        state = _presentation_state(presentation)
+        old_placeholders = dict(state['projectData'].get('map_placeholders') or {})
+        old_creative = state['projectData'].get('tenantCreativeImages') or {}
+        if isinstance(old_creative, dict):
+            old_placeholders.update(old_creative.get('map_placeholders') or {})
+        updated_project = {**state['projectData'], **project_data}
+        updated_project['map_placeholders'] = {**old_placeholders, **placeholders}
+        updated_project['tenantCreativeImages'] = {
+            **(old_creative if isinstance(old_creative, dict) else {}),
+            'map_placeholders': updated_project['map_placeholders'],
+        }
+        slides = state['slidesData']
+        for slide in slides:
+            if isinstance(slide, dict) and isinstance(slide.get('html'), str):
+                for token, url in placeholders.items():
+                    old_url = old_placeholders.get(token)
+                    if isinstance(old_url, str) and old_url:
+                        slide['html'] = slide['html'].replace(old_url, url)
+                    slide['html'] = slide['html'].replace(token, url)
+        try:
+            revision_result = _commit_presentation_state(
+                g.tenant_id, presentation_id, project_data=updated_project, slides_data=slides,
+                expected_revision=expected_revision, action='تعديل خريطة' if overlay_only else 'توليد خريطة',
+                details=[f'خريطة {map_labels.get(map_type, map_type)}'], source='manual')
+        except (LookupError, ValueError) as error:
+            return jsonify({'error': str(error)}), 400
     elif draft_id:
         _record_change('draft', draft_id, 'توليد خريطة',
                        [f'وُلّدت خريطة {map_labels.get(map_type, map_type)}'])
     return jsonify({
+        **(_presentation_revision_response(revision_result) if revision_result else {}),
         'success': True,
         'mapType': map_type,
         'placeholders': placeholders,
@@ -9323,10 +9374,18 @@ def api_get_presentations():
                 project_data = {}
             if isinstance(project_data, dict):
                 draft_id = project_data.get('draftId') or project_data.get('draft_id')
+        scope_data = p.get('project_data') or {}
+        if isinstance(scope_data, str):
+            try:
+                scope_data = json.loads(scope_data)
+            except (TypeError, ValueError):
+                scope_data = {}
         result.append({
             'id': p['id'],
             'title': p['title'],
             'draftId': draft_id,
+            'revision': int(p.get('revision') or 0),
+            'presentationScope': scope_data.get('presentation_scope') if isinstance(scope_data, dict) else None,
             'slideCount': p.get('slide_count', 0),
             'status': p.get('status', 'draft'),
             'createdAt': p.get('created_at'),
@@ -9349,12 +9408,174 @@ def api_delete_presentation(pres_id):
     return jsonify({'success': True})
 
 
+def _presentation_state(pres):
+    """Serialize stored state without merging mutable draft assets into a revision."""
+    state = dict(pres)
+    for stored, public, default in [('project_data', 'projectData', {}), ('slides_data', 'slidesData', [])]:
+        value = state.get(stored)
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (ValueError, TypeError):
+                value = default
+        state[public] = value if isinstance(value, type(default)) else default
+    state['slideCount'] = len(state['slidesData'])
+    state['draftId'] = state.get('draft_id')
+    state['revision'] = int(state.get('revision') or 0)
+    return state
+
+
+def _presentation_revision_response(result):
+    return {
+        'success': True, 'presentationId': result['presentation_id'],
+        'revision': result['revision'], 'versionId': result.get('version_id'),
+        'changed': result.get('changed', True),
+        'presentation': _presentation_state(result['presentation']),
+    }
+
+
+def _expected_presentation_revision(data, pres):
+    expected = data.get('expectedRevision', int((pres or {}).get('revision') or 0))
+    if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
+        raise ValueError('expectedRevision must be a non-negative integer')
+    return expected
+
+
+@app.errorhandler(db.PresentationRevisionConflict)
+def _presentation_conflict(error):
+    return jsonify({
+        'success': False, 'error': 'تغير العرض منذ فتحه؛ لم تُحفظ هذه التغييرات',
+        'error_code': 'PRESENTATION_REVISION_CONFLICT',
+        'expectedRevision': error.expected_revision, 'currentRevision': error.current_revision,
+    }), 409
+
+
+def _presentation_provenance_serializer():
+    from itsdangerous import URLSafeTimedSerializer
+    from auth import JWT_SECRET
+    return URLSafeTimedSerializer(JWT_SECRET, salt='presentation-ai-provenance-v1')
+
+
+def _presentation_slides_digest(slides):
+    import hashlib
+    return hashlib.sha256(json.dumps(slides, ensure_ascii=False, sort_keys=True,
+                                     separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
+def _issue_presentation_provenance(slides, presentation_id, revision, details):
+    return {'token': _presentation_provenance_serializer().dumps({
+        'tenant': g.tenant_id, 'actor': g.user_id, 'presentation': presentation_id,
+        'revision': revision, 'slides': _presentation_slides_digest(slides),
+        'details': details,
+    })}
+
+
+def _verified_presentation_provenance(data, presentation_id, revision):
+    """A client-supplied source or actor is not evidence of an AI edit."""
+    from itsdangerous import BadData
+    provenance = data.get('provenance')
+    if data.get('changeSource') != 'ai' or not isinstance(provenance, dict):
+        return 'manual', []
+    try:
+        receipt = _presentation_provenance_serializer().loads(provenance.get('token', ''), max_age=7 * 86400)
+        if (receipt.get('tenant') == g.tenant_id and receipt.get('actor') == g.user_id
+                and receipt.get('presentation') == presentation_id
+                and receipt.get('revision') == revision):
+            # The receipt proves an AI operation in this unsaved workspace, not that
+            # every final byte was AI-authored. Manual edits and fitting may follow it.
+            details = list(receipt.get('details') or [])
+            details.insert(0, 'حفظ بمساعدة الذكاء الاصطناعي؛ قد يتضمن تعديلات يدوية')
+            return 'ai', details
+    except (BadData, TypeError, ValueError):
+        pass
+    return 'manual', []
+
+
+def _freeze_presentation_project_metadata(value, freeze):
+    # Private source documents are retained as metadata, never copied to public
+    # revision assets. Rendered HTML still goes through the strict media freezer.
+    if isinstance(value, dict):
+        return {key: _freeze_presentation_project_metadata(item, freeze) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_freeze_presentation_project_metadata(item, freeze) for item in value]
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith(('{', '[')):
+            try:
+                decoded = json.loads(value)
+            except (TypeError, ValueError):
+                pass
+            else:
+                return json.dumps(_freeze_presentation_project_metadata(decoded, freeze), ensure_ascii=False)
+        from urllib.parse import urlsplit
+        path = urlsplit(text).path if '<' not in text and '\n' not in text else ''
+        if path.startswith(('/api/project-files/', '/uploads/project-documents/')) or re.search(r'\.(?:pdf|docx?|xlsx?|csv|txt)$', path, re.I):
+            return value
+    return freeze(value)
+
+
+def _commit_presentation_state(tenant_id, presentation_id=None, **kwargs):
+    """All application content writes use the transactional version/history authority."""
+    from presentation_assets import PresentationAssetError, freeze_presentation_assets
+    root = os.path.dirname(__file__)
+    authorized = {}
+    for row in db.get_map_images(tenant_id):
+        path = row.get('file_path')
+        if path:
+            full_path = os.path.abspath(path if os.path.isabs(path) else os.path.join(root, path))
+            try:
+                relative = '/' + os.path.relpath(full_path, root).replace('\\', '/')
+            except ValueError:
+                continue
+            if relative.startswith('/uploads/maps/') and os.path.isfile(full_path):
+                authorized[relative] = full_path
+    for kind, path in [('logo', _tenant_logo_storage_path(tenant_id)),
+                       ('watermark', _tenant_watermark_storage_path(tenant_id))]:
+        if kind == 'logo' and not path:
+            path = os.path.join(root, 'assets', 'logo.png')
+        if path and os.path.isfile(path):
+            authorized[f'/tenant-assets/{tenant_id}/{kind}'] = path
+    def freeze(value):
+        if isinstance(value, dict):
+            return {key: freeze(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [freeze(item) for item in value]
+        try:
+            return freeze_presentation_assets(
+                value, tenant_id, authorized_paths=authorized,
+                allowed_origin=request.host_url.rstrip('/'))
+        except PresentationAssetError as error:
+            # Keep historical provider paths that were never local tenant assets.
+            # New recognized tenant assets still fail closed; the exception URL
+            # identifies the legacy reference that is safe to leave untouched.
+            if str(error.url).startswith(('/uploads/maps/', '/uploads/creative/')):
+                return value
+            raise
+    def freeze_snapshot(state):
+        frozen = dict(state)
+        parsed = _presentation_state(state)
+        for stored, public in [('project_data', 'projectData'), ('slides_data', 'slidesData')]:
+            frozen[stored] = (_freeze_presentation_project_metadata(parsed[public], freeze)
+                              if stored == 'project_data' else freeze(parsed[public]))
+        return frozen
+    kwargs['snapshot_transform'] = freeze_snapshot
+    kwargs.setdefault('user_id', getattr(g, 'user_id', None))
+    kwargs.setdefault('user_name', getattr(g, 'user_name', None) or 'مدير الشركة')
+    return db.commit_presentation_revision(tenant_id, presentation_id, **kwargs)
+
+
 @app.route('/api/presentations', methods=['POST'])
 @require_permission('create_presentation')
 def api_save_presentation():
     """Save a new presentation."""
     data = request.json or {}
-    title = (data.get('title') or 'عرض بدون عنوان').strip()
+    if not isinstance(data, dict) or not isinstance(data.get('projectData', {}), dict) or not isinstance(data.get('slidesData', []), list):
+        return jsonify({'error': 'projectData must be an object and slidesData an array'}), 400
+    try:
+        expected_revision = _expected_presentation_revision(data, None)
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    title = str(data.get('title') or 'عرض بدون عنوان').strip()
     project_data = normalize_presentation_assets(data.get('projectData', {}), g.tenant_id)
     slides_data = normalize_presentation_assets(data.get('slidesData', []), g.tenant_id)
     branding = db.get_branding(g.tenant_id) or {}
@@ -9367,22 +9588,34 @@ def api_save_presentation():
     )
     slide_count = len(slides_data)
 
-    pres_id = db.create_presentation(
-        tenant_id=g.tenant_id,
-        title=title,
-        project_data=project_data,
-        slides_data=slides_data,
-        slide_count=slide_count,
-        draft_id=project_data.get('draftId') or project_data.get('draft_id'),
-    )
-    _record_change('presentation', pres_id, 'إنشاء العرض',
-                   [f'العنوان: «{title}»', f'عدد الشرائح: {slide_count}'])
+    scope = project_data.get('presentation_scope')
+    draft_id = project_data.get('draftId') or project_data.get('draft_id')
+    creation_key = None
+    if draft_id and isinstance(scope, str) and (scope == 'full' or re.fullmatch(r'(?:section|copy):[A-Za-z0-9_-]+', scope)):
+        creation_key = json.dumps([str(draft_id), scope], separators=(',', ':'))
+    source, provenance_details = _verified_presentation_provenance(data, None, 0)
+    try:
+        result = _commit_presentation_state(
+            g.tenant_id, title=title, project_data=project_data, slides_data=slides_data,
+            draft_id=draft_id, creation_key=creation_key,
+            expected_revision=expected_revision, source=source, action='إنشاء العرض',
+            details=[f'العنوان: «{title}»', f'عدد الشرائح: {slide_count}'] + provenance_details,
+        )
+    except (LookupError, ValueError) as error:
+        return jsonify({'error': str(error)}), 400
+    pres_id = result['presentation_id']
+    if not result.get('created', True):
+        return jsonify({
+            'success': False, 'error': 'يوجد عرض محفوظ لهذا القسم من المشروع؛ لم يُنشأ عرض مكرر',
+            'error_code': 'PRESENTATION_SCOPE_EXISTS', 'presentationId': pres_id,
+            'currentRevision': result['revision'],
+        }), 409
     try:
         db.link_draft_usage_to_presentation(
             g.tenant_id, project_data.get('draftId') or project_data.get('draft_id'), pres_id)
     except Exception as link_error:
         print(f"[AI-USAGE] usage link failed for presentation {pres_id}: {link_error}")
-    return jsonify({'success': True, 'presentationId': pres_id}), 201
+    return jsonify(_presentation_revision_response(result)), 201
 
 
 @app.route('/api/presentations/<pres_id>', methods=['GET'])
@@ -9393,6 +9626,9 @@ def api_get_presentation(pres_id):
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404
 
+    if int(pres.get('revision') or 0) > 0:
+        return jsonify({'success': True, 'presentation': _presentation_state(pres)})
+    pres['revision'] = int(pres.get('revision') or 0)
     pres['projectData'] = json.loads(pres['project_data']) if pres.get('project_data') else {}
     pres['projectData'] = _merge_persisted_map_assets(pres['projectData'], g.tenant_id, presentation_id=pres_id)
     slides = json.loads(pres['slides_data']) if pres.get('slides_data') else []
@@ -9430,14 +9666,33 @@ def api_update_presentation(pres_id):
         return jsonify({'error': 'Presentation not found'}), 404
 
     data = request.json or {}
+    if not isinstance(data, dict) or ('projectData' in data and not isinstance(data['projectData'], dict)) or ('slidesData' in data and not isinstance(data['slidesData'], list)):
+        return jsonify({'error': 'projectData must be an object and slidesData an array'}), 400
+    try:
+        expected_revision = _expected_presentation_revision(data, pres)
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    source, provenance_details = _verified_presentation_provenance(data, pres_id, expected_revision)
     updates = {}
-    for k in ['title', 'projectData', 'slidesData', 'slideCount', 'status']:
+    for k in ['title', 'projectData', 'slidesData']:
         if k in data:
-            db_key = {'projectData': 'project_data', 'slidesData': 'slides_data', 'slideCount': 'slide_count'}.get(k, k)
-            updates[db_key] = normalize_presentation_assets(data[k], g.tenant_id) if k in {'projectData', 'slidesData'} else data[k]
+            db_key = {'projectData': 'project_data', 'slidesData': 'slides_data'}.get(k, k)
+            updates[db_key] = normalize_presentation_assets(data[k], g.tenant_id) if k in {'projectData', 'slidesData'} else str(data[k] or '').strip()
+    # Approval is governed by its own permissioned workflow, never a content-save field.
+    if data.get('status') in {'draft', 'edited'}:
+        updates['status'] = 'draft'
     if isinstance(updates.get('project_data'), dict):
+        current_project = _presentation_state(pres)['projectData']
+        current_scope = current_project.get('presentation_scope')
+        incoming_scope = updates['project_data'].get('presentation_scope')
+        if current_scope and incoming_scope and current_scope != incoming_scope:
+            return jsonify({'error': 'Presentation scope does not match', 'error_code': 'PRESENTATION_SCOPE_MISMATCH'}), 409
+        if current_scope:
+            updates['project_data']['presentation_scope'] = current_scope
         updates['draft_id'] = (updates['project_data'].get('draftId')
                                or updates['project_data'].get('draft_id') or pres.get('draft_id'))
+        if pres.get('draft_id') and updates['draft_id'] != pres['draft_id']:
+            return jsonify({'error': 'Presentation project does not match', 'error_code': 'PRESENTATION_PROJECT_MISMATCH'}), 409
 
     if 'slides_data' in updates:
         project_data = updates.get('project_data')
@@ -9468,16 +9723,20 @@ def api_update_presentation(pres_id):
         details.extend(change_tracking.describe_draft_changes(old_project_data, updates['project_data']))
     if 'slides_data' in updates:
         current_slides = change_tracking.parse_slides(pres.get('slides_data'))
-        db.save_presentation_version(pres_id, g.user_id, g.user_name or 'System', current_slides, action='edit')
         details.extend(change_tracking.describe_slide_changes(current_slides, updates['slides_data']))
         action = 'تعديل الشرائح'
     if 'status' in updates and updates['status'] != pres.get('status'):
         details.append(f'حالة العرض: من «{pres.get("status") or "مسودة"}» إلى «{updates["status"]}»')
-    if details:
-        _record_change('presentation', pres_id, action, details, source='manual')
-
-    db.update_presentation(pres_id, **updates)
-    return jsonify({'success': True})
+    updates.pop('slide_count', None)
+    if data.get('operation') == 'generation':
+        action = 'توليد العرض'
+    try:
+        result = _commit_presentation_state(
+            g.tenant_id, pres_id, expected_revision=expected_revision,
+            source=source, action=action, details=details + provenance_details, **updates)
+    except (LookupError, ValueError) as error:
+        return jsonify({'error': str(error)}), 400
+    return jsonify(_presentation_revision_response(result))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -15156,55 +15415,92 @@ def api_accept_invite(token):
 # PRESENTATION VERSIONS & EDIT LOG
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _presentation_version_payload(version, include_snapshot=False):
+    item = dict(version)
+    legacy = bool(item.get('legacy')) or item.get('snapshot_kind') == 'legacy-slides'
+    item['snapshotKind'] = 'legacy-slides' if legacy else 'full'
+    item['label'] = 'نسخة قديمة: الشرائح فقط' if legacy else f'مراجعة {item.get("revision", 0)}'
+    if include_snapshot:
+        state = _presentation_state(item)
+        item['snapshot'] = {key: state.get(key) for key in
+                            ('title', 'projectData', 'slidesData', 'slideCount', 'draftId', 'status')}
+        if legacy:
+            item['snapshot'] = {key: item['snapshot'][key] for key in ('slidesData', 'slideCount')}
+    item.pop('slides_data', None)
+    item.pop('project_data', None)
+    return item
+
+
 @app.route('/api/presentations/<pres_id>/versions', methods=['GET'])
-@require_auth
+@require_permission('view_presentations')
 def api_get_versions(pres_id):
-    """Get all versions of a presentation."""
+    """Immutable revisions and explicitly labelled slides-only legacy backups."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404
-    versions = db.get_presentation_versions(pres_id)
-    return jsonify({'success': True, 'versions': versions})
+    versions = db.get_presentation_revisions(pres_id, g.tenant_id)
+    return jsonify({'success': True, 'currentRevision': int(pres.get('revision') or 0),
+                    'versions': [_presentation_version_payload(v) for v in versions]})
+
+
+@app.route('/api/presentations/<pres_id>/versions/<version_id>', methods=['GET'])
+@require_permission('view_presentations')
+def api_get_version(pres_id, version_id):
+    version = db.get_presentation_revision(pres_id, version_id, g.tenant_id)
+    if not version:
+        return jsonify({'error': 'Version not found'}), 404
+    return jsonify({'success': True, 'version': _presentation_version_payload(version, True)})
+
+
+@app.route('/api/presentations/<pres_id>/versions/compare', methods=['GET'])
+@require_permission('view_presentations')
+def api_compare_versions(pres_id):
+    pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
+    if not pres:
+        return jsonify({'error': 'Presentation not found'}), 404
+    before = db.get_presentation_revision(pres_id, request.args.get('from', ''), g.tenant_id)
+    to_id = request.args.get('to') or 'current'
+    after = pres if to_id == 'current' else db.get_presentation_revision(pres_id, to_id, g.tenant_id)
+    if not before or not after:
+        return jsonify({'error': 'Version not found'}), 404
+    old, new = _presentation_state(before), _presentation_state(after)
+    changes = change_tracking.describe_slide_changes(old['slidesData'], new['slidesData'])
+    if not before.get('legacy') and not after.get('legacy'):
+        if old.get('title') != new.get('title'):
+            changes.insert(0, f'عنوان العرض: من «{old.get("title") or ""}» إلى «{new.get("title") or ""}»')
+        changes.extend(change_tracking.describe_draft_changes(old['projectData'], new['projectData']))
+        if old.get('status') != new.get('status'):
+            changes.append(f'حالة العرض: من «{old.get("status") or ""}» إلى «{new.get("status") or ""}»')
+    return jsonify({'success': True, 'from': _presentation_version_payload(before, True),
+                    'to': _presentation_version_payload(after, True), 'changes': changes})
 
 
 @app.route('/api/presentations/<pres_id>/versions/<version_id>/restore', methods=['POST'])
-@require_auth
+@require_permission('create_presentation')
 def api_restore_version(pres_id, version_id):
-    """Restore a presentation to a previous version."""
+    """Restore creates a new revision of this card, not a rewrite of its source draft."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
     if not pres:
         return jsonify({'error': 'Presentation not found'}), 404
-
-    version = db.get_presentation_version(version_id)
-    if not version or version['presentation_id'] != pres_id:
+    version = db.get_presentation_revision(pres_id, version_id, g.tenant_id)
+    if not version:
         return jsonify({'error': 'Version not found'}), 404
-
-    # Save current state as a new version before restoring
-    import json as _json
-    current_slides = _json.loads(pres['slides_data']) if pres.get('slides_data') else []
-    db.save_presentation_version(pres_id, g.user_id, g.user_name or 'System', current_slides, action='pre-restore')
-
-    # Restore the old version
-    old_slides = _json.loads(version['slides_data']) if version.get('slides_data') else []
     try:
-        project_data = _json.loads(pres.get('project_data') or '{}')
-    except (TypeError, ValueError):
-        project_data = {}
-    old_slides = slide_engine.renumber_presentation_slides(
-        old_slides, branding=db.get_branding(g.tenant_id), project_data=project_data,
-        tenant_id=g.tenant_id,
-        creative_images=_presentation_creative_images(project_data, g.tenant_id),
-    )
-    db.update_presentation(pres_id, slides_data=old_slides, slide_count=len(old_slides))
-    _record_change('presentation', pres_id, 'استرجاع نسخة',
-                   [f'رجع العرض إلى نسخة {version["created_at"]}']
-                   + change_tracking.describe_slide_changes(current_slides, old_slides))
-
-    return jsonify({'success': True, 'slidesData': old_slides})
+        expected_revision = _expected_presentation_revision(request.json or {}, pres)
+        result = _commit_presentation_state(
+            g.tenant_id, pres_id, expected_revision=expected_revision,
+            restore_version_id=version_id, action='استرجاع نسخة', source='manual',
+            details=[_presentation_version_payload(version)['label']],
+        )
+    except (LookupError, ValueError) as error:
+        return jsonify({'error': str(error)}), 400
+    payload = _presentation_revision_response(result)
+    payload['slidesData'] = payload['presentation']['slidesData']
+    return jsonify(payload)
 
 
 @app.route('/api/presentations/<pres_id>/edit-log', methods=['GET'])
-@require_auth
+@require_permission('view_presentations')
 def api_get_edit_log(pres_id):
     """Get edit history for a presentation: who changed what, by hand or by the AI."""
     pres = db.get_presentation(pres_id, tenant_id=g.tenant_id)
@@ -15234,7 +15530,7 @@ def api_log_presentation_edit(pres_id):
     action = data.get('action', 'edit')
     details = data.get('details', '')
     lines = details if isinstance(details, list) else [details]
-    _record_change('presentation', pres_id, action, lines, source=data.get('source') or 'manual')
+    _record_change('presentation', pres_id, action, lines, source='manual')
     return jsonify({'success': True})
 
 
@@ -17199,6 +17495,21 @@ def api_training_chat():
 
     history = data.get('history') or []
     workspace = data.get('workspace') or {}
+    if isinstance(workspace, dict) and workspace.get('presentationId'):
+        workspace_presentation = db.get_presentation(workspace['presentationId'], tenant_id=g.tenant_id)
+        if not workspace_presentation:
+            return jsonify({'error': 'Presentation not found'}), 404
+        try:
+            workspace['expectedRevision'] = _expected_presentation_revision(workspace, workspace_presentation)
+        except ValueError as error:
+            return jsonify({'error': str(error)}), 400
+    history_lines = []
+    for turn in history[-12:]:
+        role = 'المستخدم' if turn.get('role') == 'user' else 'المساعد'
+        history_lines.append(f"{role}: {turn.get('text', '')}")
+    context = '\n'.join(history_lines)
+
+
     history_lines = []
     for turn in history[-12:]:
         role = 'المستخدم' if turn.get('role') == 'user' else 'المساعد'
@@ -18601,11 +18912,19 @@ HTML الحالي:
                 )
                 pres_id = workspace.get('presentationId')
                 existing = db.get_presentation(pres_id, tenant_id=tenant_id) if pres_id else None
-                if existing:
-                    db.save_presentation_version(pres_id, None, 'Super Agent', slides, action='agent_save')
-                    db.update_presentation(pres_id, title=title, project_data=project_data, slides_data=slides, slide_count=len(slides), status='edited')
-                else:
-                    pres_id = db.create_presentation(tenant_id, title, project_data, slides, len(slides))
+                if pres_id and not existing:
+                    raise LookupError('Presentation not found')
+                expected_revision = _expected_presentation_revision(workspace, existing)
+                saved_revision = _commit_presentation_state(
+                    tenant_id, pres_id, title=title, project_data=project_data, slides_data=slides,
+                    draft_id=(project_data or {}).get('draftId') or (project_data or {}).get('draft_id') or (existing or {}).get('draft_id'),
+                    expected_revision=expected_revision, source='ai', action='حفظ بواسطة وكيل الإدارة',
+                    details=['أداة التصميم: save_workspace'],
+                )
+                pres_id = saved_revision['presentation_id']
+                workspace['presentationId'] = pres_id
+                workspace['expectedRevision'] = saved_revision['revision']
+                if not existing:
                     try:
                         db.link_draft_usage_to_presentation(
                             tenant_id,
@@ -18615,8 +18934,9 @@ HTML الحالي:
                         print(f"[AI-USAGE] usage link failed for presentation {pres_id}: {link_error}")
                 result['presentationId'] = pres_id
                 result['data'] = {
+                    **_presentation_revision_response(saved_revision),
                     'presentationId': pres_id,
-                    'slidesData': slides,
+                    'slidesData': _presentation_state(saved_revision['presentation'])['slidesData'],
                     'slideCount': len(slides),
                 }
                 result['message'] = f'تم حفظ العرض "{title}" وعدد شرائحه {len(slides)}'
@@ -19056,9 +19376,16 @@ def static_creative_upload(tenant_id, filename):
     """Serve generated creative images without exposing arbitrary upload paths."""
     safe_tenant = re.sub(r'[^A-Za-z0-9_-]', '', tenant_id)
     safe_filename = os.path.basename(filename)
-    if safe_tenant != tenant_id or safe_filename != filename:
+    revision_asset = bool(re.fullmatch(r'revisions/[a-f0-9]{64}\.(?:png|jpg|jpeg|webp|gif|avif|bmp|ico|svg|ttf|otf|woff|woff2)', filename))
+    if safe_tenant != tenant_id or (safe_filename != filename and not revision_asset):
         return jsonify({'error': 'Not found'}), 404
+    if revision_asset:
+        safe_filename = filename
     creative_dir = os.path.join(UPLOADS_DIR, 'creative', safe_tenant)
+    if revision_asset:
+        revision_path = os.path.realpath(os.path.join(creative_dir, safe_filename))
+        if not revision_path.startswith(os.path.realpath(creative_dir) + os.sep):
+            return jsonify({'error': 'Not found'}), 404
     if not os.path.isfile(os.path.join(creative_dir, safe_filename)):
         return jsonify({'error': 'Not found'}), 404
     return send_from_directory(creative_dir, safe_filename, max_age=86400)

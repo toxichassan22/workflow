@@ -6007,8 +6007,10 @@
             id="btnGenerateSlidesToolbar">توليد العرض</button>
           <button type="button" class="btn slide-toolbar-btn slide-toolbar-approve"
             onclick="requestPresentationApproval(tenantPresentationId)" id="btnRequestApproval">تعميد</button>
-          <button type="button" class="btn slide-toolbar-btn slide-toolbar-primary" onclick="saveProjectAsDraft(); if(tenantPresentationId) saveExistingPresentation();">حفظ
-            كمسودة</button>
+          <button type="button" id="presentationSaveButton" class="btn slide-toolbar-btn slide-toolbar-primary" onclick="savePresentationFromToolbar()">حفظ كمسودة</button>
+          <button type="button" class="btn slide-toolbar-btn" onclick="showPresentationVersions(tenantPresentationId)">سجل التعديلات والنسخ</button>
+          <button type="button" id="presentationUndoButton" class="btn slide-toolbar-btn" onclick="undoPresentationChange()" disabled>تراجع</button>
+          <button type="button" id="presentationRedoButton" class="btn slide-toolbar-btn" onclick="redoPresentationChange()" disabled>إعادة التنفيذ</button>
 
           <div class="tenant-dropdown slide-toolbar-dropdown" data-permission="create_presentation">
             <button type="button" class="btn slide-toolbar-btn" onclick="toggleTenantDropdown(this)"
@@ -6018,6 +6020,7 @@
             <div class="tenant-dropdown-menu">
               <button type="button" class="btn ghost" data-permission="company_settings"
                 onclick="openPresentationFontSettings(); closeTenantDropdown()">نوع الخط</button>
+              <button type="button" class="btn ghost" onclick="savePresentationCopy(); closeTenantDropdown()">حفظ نسخة مستقلة</button>
               <button type="button" class="btn ghost" onclick="toggleMapStylePanel(); closeTenantDropdown()">نوع
                 الخرائط</button>
               <div class="slide-toolbar-menu-divider"></div>
@@ -6852,6 +6855,10 @@
     let tenantSlidesData = [];
     let tenantSlideGenerationCheckpoint = null;
     let tenantPresentationId = null;
+    let tenantPresentationRevision = 0;
+    let tenantPresentationProvenance = null;
+    let tenantPresentationSavePromise = null;
+    let tenantPresentationHistory = null;
     let tenantPresentationTitle = '';
     let tenantProjectMode = 'new';
     let tenantCreativeImages = { cover: '', moodboard: [], map_placeholders: {}, map_landmarks: [] };
@@ -7015,7 +7022,7 @@
       'survey_coordinates', 'directions_table', 'parcels', 'conflicts', 'warnings',
       'extraction_diagnostics', 'document_processing', 'land_document_processing',
       'document_summary', 'source_priority', 'company_branding',
-      'location_polygon', 'designerChat'
+      'location_polygon', 'designerChat', 'presentation_scope'
     ];
 
     // Mirrors slide_engine.financial_study_has_real_input(). The financial section is rendered for
@@ -7935,7 +7942,9 @@
       }
       if (!confirm('سيتم إعادة توليد الشريحة «' + context.snapshot.title + '» فقط، مع إبقاء باقي الشرائح كما هي. هل تريد المتابعة؟')) return;
 
+      checkpointPresentationUndo();
       isRegeneratingTenantSlide = true;
+      updatePresentationUndoButtons();
       renderTenantSlidesSidebar();
       setLiveGenBanner(true, 'إعادة توليد الشريحة ' + (context.slideIndex + 1) + ' من ' + tenantSlidesData.length,
         'لن تتأثر بقية الشرائح', 35);
@@ -7956,6 +7965,7 @@
         toast(error?.message || 'تعذر إعادة توليد الشريحة');
       } finally {
         isRegeneratingTenantSlide = false;
+        checkpointPresentationUndo();
         renderTenantSlidesSidebar();
         setLiveGenBanner(false);
       }
@@ -7995,7 +8005,9 @@
       const previousSlides = tenantSlidesData.slice();
       const previousPlan = tenantSlidePlan;
       const previousProjectData = { ...tenantProjectData };
+      checkpointPresentationUndo();
       isRegeneratingTenantSlide = true;
+      updatePresentationUndoButtons();
       renderTenantSlidesSidebar();
       try {
         await repairVisualConceptStoredImages();
@@ -8050,6 +8062,7 @@
         return false;
       } finally {
         isRegeneratingTenantSlide = false;
+        checkpointPresentationUndo();
         renderTenantSlidesSidebar();
         setLiveGenBanner(false);
       }
@@ -8422,6 +8435,7 @@
       }
       renderWorkflowStageSidebars(pageId);
       refreshGlobalRail();
+      updatePresentationUndoButtons();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -8544,9 +8558,9 @@
           const itemMapsCost = Number(itemCost?.maps_cost_usd) || 0;
           const itemReconcile = aiReconcileStatusText(reconcileByPresentation[item.id]);
           return '<div class="tenant-presentation-card"><div><h3>' + escapeHtml(item.title || 'عرض بدون عنوان') + '</h3>' +
-            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | ' + escapeHtml(date) + ' | التكلفة: ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) + (itemMapsCost > 0 ? ' (خرائط: ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | ' + itemReconcile : '') : '—') + '</div></div>' +
+            '<div class="meta">' + (item.slideCount || 0) + ' شريحة | النسخة ' + (item.revision || 0) + ' | ' + escapeHtml(date) + ' | التكلفة: ' + (itemCost ? formatUsageCost(itemCost.cost_usd || 0) + (itemMapsCost > 0 ? ' (خرائط: ' + formatUsageCost(itemMapsCost) + ')' : '') + (itemReconcile ? ' | ' + itemReconcile : '') : '—') + '</div></div>' +
             '<div class="tenant-actions"><button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + item.id + '\')">فتح العرض</button>' +
-            '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات</button></div></div>';
+            '<button type="button" class="btn ghost small" onclick="showEditLog(\'' + item.id + '\')">سجل التعديلات والنسخ</button></div></div>';
         }).join('') + '</section>'
       ).join('') : '<p class="tenant-hint">لا توجد عروض سابقة مطابقة.</p>';
     }
@@ -13518,6 +13532,8 @@
     async function startTenantProject() {
       setDraftDirty(false);
       tenantPresentationId = null;
+      tenantPresentationRevision = 0;
+      tenantPresentationProvenance = null;
       tenantPresentationTitle = '';
       tenantProjectMode = 'new';
       tenantProjectData = { draftId: crypto.randomUUID() };
@@ -13546,6 +13562,7 @@
       tenantProjectDraftApproval = null;
       tenantActiveProjectSection = null;
       clearSlidesEditorSurface();
+      resetPresentationUndo();
       showTenantPage('tenantProjectPage');
       if (await loadTenantProjectForm()) {
         // A new project is legitimately blank, so its freshly built form counts as filled.
@@ -18022,14 +18039,7 @@
             try {
               const presTitle = savedPresentationTitle
                 || snapshot.project_name || snapshot.projectName || 'عرض بدون عنوان';
-              const presResp = await api('PUT', '/api/presentations/' + savedPresentationId, {
-                title: presTitle,
-                projectData: snapshot,
-                slidesData: snapshot.tenantSlidesData,
-                slideCount: snapshot.tenantSlidesData.length,
-                status: 'edited'
-              });
-              if (!presResp?.success) throw new Error(presResp?.error || 'تعذر حفظ العرض');
+              await commitTenantPresentation(snapshot, savedPresentationId, presTitle);
             } catch (presErr) {
               console.error('[PRESENTATION SAVE]', presErr);
               setDraftDirty(true);
@@ -20362,6 +20372,7 @@
       resetDesignerChatForNewPresentation();
       await saveProjectAsDraftNow(true, false);
 
+      if (!(await preparePresentationGenerationTarget('section:' + sectionKey))) return;
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
       const presentationTitle = projectName + ' - ' + resolvedLabel;
       showTenantPage('tenantSlidesPage');
@@ -20383,9 +20394,7 @@
 
       tenantSlidePlan = planResponse.plan;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-      tenantPresentationId = null;
       tenantPresentationTitle = presentationTitle;
-      tenantProjectMode = 'new';
       await generateTenantSlides({
         sectionKey,
         sectionLabel: resolvedLabel,
@@ -20396,6 +20405,7 @@
     }
 
     async function directGenerateProposalFile() {
+      if (isGeneratingTenantSlides || tenantSlidePlanRequest || tenantPresentationSavePromise) return;
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
@@ -20411,6 +20421,8 @@
       if (factCount < GENERATION_MIN_FACTS && !confirm('بيانات المشروع المحفوظة ' + factCount +
         ' حقل. الذكاء الاصطناعي سيكتب محتوى الشرائح من عنده لأن الحقائق غير موجودة. متابعة؟')) return;
 
+      if (!(await preparePresentationGenerationTarget('full'))) return;
+
       // Persist the project snapshot used to create this presentation without carrying the
       // conversation from the previous presentation.
       resetDesignerChatForNewPresentation();
@@ -20419,8 +20431,6 @@
       // Navigate to the presentation page with the stage empty. Rendering the file's saved slides
       // here showed the previous deck for the whole planning wait, so the reader watched an old
       // presentation while a new one was being built.
-      tenantPresentationId = null;
-      tenantProjectMode = 'new';
       showTenantPage('tenantSlidesPage');
       clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
       setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
@@ -21800,7 +21810,7 @@
       tenantProjectData.slide_generation_checkpoint = tenantSlideGenerationCheckpoint;
       tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       try {
-        await saveProjectAsDraftNow(true);
+        await saveProjectAsDraftNow(true, false);
       } catch (error) {
         console.error('[SLIDE CHECKPOINT]', error);
       }
@@ -22075,7 +22085,7 @@
         setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', 'إجمالي ' + totalSlides + ' شريحة معتمدة', 100);
         renderTenantSlidesSidebar();
         renderTenantDesignerChat();
-        const presentationSaved = await saveTenantPresentation(options.presentationTitle);
+        const presentationSaved = await saveTenantPresentation(options.presentationTitle, { operation: 'generation' });
         if (!presentationSaved) {
           setLiveGenBanner(true, 'اكتمل التوليد وتعذر الحفظ', 'الشرائح ما زالت مفتوحة في المعاينة', 100);
           return;
@@ -22092,6 +22102,8 @@
         }, 3500);
       } finally {
         isGeneratingTenantSlides = false;
+        checkpointPresentationUndo();
+        updatePresentationUndoButtons();
       }
     }
 
@@ -22896,6 +22908,182 @@
       return title + '|' + normalized.length + '|' + (hash >>> 0).toString(36);
     }
 
+    // In-session deck history only. Reset AFTER workspace load/render; checkpoint
+    // BEFORE/AFTER generation. Saving the same deck must not clear this history.
+    const PRESENTATION_UNDO_LIMIT = 30;
+    const PRESENTATION_UNDO_MAX_CHARS = 16 * 1024 * 1024;
+    let presentationUndoHistory = [];
+    let presentationUndoPosition = -1;
+    let presentationUndoRestoring = false;
+    let presentationUndoEpoch = 0;
+    let presentationUndoPending = false;
+
+    function capturePresentationUndo() {
+      return {
+        data: JSON.stringify({
+          slides: tenantSlidesData || [], plan: tenantSlidePlan || null,
+          generationCheckpoint: typeof tenantSlideGenerationCheckpoint === 'undefined' ? null : tenantSlideGenerationCheckpoint,
+          provenance: typeof tenantPresentationProvenance === 'undefined' ? null : tenantPresentationProvenance
+        }),
+        active: activeSlideIndex, chat: tenantChatSlideIndex,
+        focus: Array.isArray(tenantChatFocusIndexes) ? tenantChatFocusIndexes.slice() : []
+      };
+    }
+
+    function presentationUndoBusy() {
+      return !!((typeof isGeneratingTenantSlides !== 'undefined' && isGeneratingTenantSlides)
+        || (typeof isRegeneratingTenantSlide !== 'undefined' && isRegeneratingTenantSlide)
+        || (typeof tenantSlidePlanRequest !== 'undefined' && tenantSlidePlanRequest)
+        || (typeof tenantPresentationSavePromise !== 'undefined' && tenantPresentationSavePromise)
+        || (typeof tenantDesignerChatBusy !== 'undefined' && tenantDesignerChatBusy)
+        || slideElementDragActive);
+    }
+
+    function presentationUndoAvailable() {
+      return !!document.getElementById('tenantSlidesPage')?.classList.contains('active')
+        && hasPermission('create_presentation') && !presentationUndoBusy()
+        && !Object.keys(slideEditSessions).length;
+    }
+
+    function updatePresentationUndoButtons() {
+      const available = presentationUndoAvailable();
+      const undo = document.getElementById('presentationUndoButton');
+      const redo = document.getElementById('presentationRedoButton');
+      if (undo) undo.disabled = !available || presentationUndoPosition <= 0;
+      if (redo) redo.disabled = !available || presentationUndoPosition >= presentationUndoHistory.length - 1;
+    }
+
+    function resetPresentationUndo() {
+      presentationUndoEpoch += 1;
+      presentationUndoPending = false;
+      presentationUndoHistory = [capturePresentationUndo()];
+      presentationUndoPosition = 0;
+      updatePresentationUndoButtons();
+    }
+
+    function clearPresentationUndoProvenance() {
+      if (typeof tenantPresentationProvenance !== 'undefined') tenantPresentationProvenance = null;
+      presentationUndoHistory.forEach(snapshot => {
+        const state = JSON.parse(snapshot.data);
+        state.provenance = null;
+        snapshot.data = JSON.stringify(state);
+      });
+      updatePresentationUndoButtons();
+    }
+
+    function checkpointPresentationUndo() {
+      if (presentationUndoRestoring) return false;
+      const snapshot = capturePresentationUndo();
+      const current = presentationUndoHistory[presentationUndoPosition];
+      if (current && current.data === snapshot.data) {
+        Object.assign(current, snapshot);
+        updatePresentationUndoButtons();
+        return false;
+      }
+      presentationUndoHistory.splice(presentationUndoPosition + 1);
+      presentationUndoHistory.push(snapshot);
+      let size = presentationUndoHistory.reduce((total, entry) => total + entry.data.length, 0);
+      // Retain an oversize current state, never multiple oversize copies.
+      while (presentationUndoHistory.length > 1 && (presentationUndoHistory.length > PRESENTATION_UNDO_LIMIT
+        || size > PRESENTATION_UNDO_MAX_CHARS)) size -= presentationUndoHistory.shift().data.length;
+      presentationUndoPosition = presentationUndoHistory.length - 1;
+      updatePresentationUndoButtons();
+      return true;
+    }
+
+    function beginPresentationUndoChange() {
+      if (presentationUndoRestoring) return;
+      checkpointPresentationUndo();
+      // Edit handlers write HTML after pushSlideEditHistory; defer the final
+      // snapshot until their synchronous action finishes, without renumbering.
+      if (presentationUndoPending) return;
+      presentationUndoPending = true;
+      const epoch = presentationUndoEpoch;
+      queueMicrotask(() => {
+        if (epoch !== presentationUndoEpoch) return;
+        presentationUndoPending = false;
+        checkpointPresentationUndo();
+      });
+    }
+
+    function restorePresentationUndo(position) {
+      const snapshot = presentationUndoHistory[position];
+      if (!snapshot) return false;
+      const state = JSON.parse(snapshot.data);
+      presentationUndoRestoring = true;
+      presentationUndoEpoch += 1;
+      presentationUndoPending = false;
+      try {
+        tenantSlidesData = state.slides;
+        tenantSlidePlan = state.plan;
+        tenantSlideGenerationCheckpoint = state.generationCheckpoint;
+        if (typeof tenantPresentationProvenance !== 'undefined') tenantPresentationProvenance = state.provenance;
+        [slideEditSessions, slideInlineEditStates, slideElementEditStates].forEach(sessions => {
+          Object.keys(sessions).forEach(key => delete sessions[key]);
+        });
+        const last = Math.max(0, tenantSlidesData.length - 1);
+        const bounded = value => Math.max(0, Math.min(last, Number.isInteger(value) ? value : 0));
+        activeSlideIndex = bounded(snapshot.active);
+        tenantChatSlideIndex = bounded(snapshot.chat);
+        tenantChatFocusIndexes = [...new Set(snapshot.focus.filter(index => Number.isInteger(index)
+          && index >= 1 && index <= tenantSlidesData.length))];
+        renumberTenantSlides();
+        renderTenantSlides();
+        // Rendering rebuilds a minimal plan: preserve full generation/media metadata.
+        tenantSlidePlan = state.plan;
+        tenantProjectData = { ...tenantProjectData, tenantSlidesData, tenantSlidePlan,
+          slide_generation_checkpoint: tenantSlideGenerationCheckpoint };
+        selectTenantSlide(activeSlideIndex, true);
+        tenantChatSlideIndex = bounded(snapshot.chat);
+        presentationUndoPosition = position;
+        presentationUndoHistory[position] = capturePresentationUndo();
+        setDraftDirty(true);
+      } finally {
+        presentationUndoRestoring = false;
+        updatePresentationUndoButtons();
+      }
+      return true;
+    }
+
+    function undoPresentationChange() {
+      if (!presentationUndoAvailable()) return false;
+      checkpointPresentationUndo();
+      return presentationUndoPosition > 0 && restorePresentationUndo(presentationUndoPosition - 1);
+    }
+
+    function redoPresentationChange() {
+      if (!presentationUndoAvailable()) return false;
+      checkpointPresentationUndo();
+      return presentationUndoPosition < presentationUndoHistory.length - 1
+        && restorePresentationUndo(presentationUndoPosition + 1);
+    }
+
+    function handlePresentationUndoKey(event) {
+      const key = String(event.key || '').toLowerCase();
+      if (event.defaultPrevented || event.isComposing || event.altKey || !(event.ctrlKey || event.metaKey)
+        || !['z', 'y'].includes(key) || (key === 'y' && event.shiftKey)) return;
+      if (!document.getElementById('tenantSlidesPage')?.classList.contains('active')
+        || !hasPermission('create_presentation') || presentationUndoBusy()) return;
+      const nativeEditor = el => el && (el.isContentEditable
+        || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)
+        || el.closest?.('[contenteditable]:not([contenteditable="false"]),[role="textbox"]'));
+      if (nativeEditor(event.target) || nativeEditor(document.activeElement)) return;
+      const redo = key === 'y' || event.shiftKey;
+      const card = event.target?.closest?.('.ge-slide-card');
+      const index = card ? Number(String(card.id).replace('slide-card-', '')) : activeSlideIndex;
+      const session = getSlideEditSession(index);
+      if (session) {
+        event.preventDefault();
+        if (redo) redoSlideEdit(index); else undoSlideEdit(index);
+      } else if (!Object.keys(slideEditSessions).length) {
+        const changed = redo ? redoPresentationChange() : undoPresentationChange();
+        if (changed) event.preventDefault();
+      }
+    }
+
+    document.addEventListener('keydown', handlePresentationUndoKey);
+    // End presentation undo helpers.
+
     function getSlideEditSession(index) {
       const session = slideEditSessions[index];
       if (!session) return null;
@@ -22915,6 +23103,7 @@
     }
 
     function pushSlideEditHistory(index) {
+      beginPresentationUndoChange();
       const session = getSlideEditSession(index);
       if (!session || !tenantSlidesData[index]) return false;
       session.undo.push(tenantSlidesData[index].html);
@@ -22946,6 +23135,7 @@
       };
       slideInlineEditStates[index] = true;
       slideElementEditStates[index] = true;
+      updatePresentationUndoButtons();
       refreshSingleSlideCard(index);
       toast('وضع التحرير مفعّل لهذه الشريحة');
     }
@@ -22958,6 +23148,7 @@
     }
 
     function endSlideEditSession(index, keep) {
+      beginPresentationUndoChange();
       const session = slideEditSessions[index];
       if (keep !== true && session && tenantSlidesData[index]) {
         tenantSlidesData[index].html = session.originalHtml;
@@ -22972,12 +23163,19 @@
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       triggerAutoSaveDraft();
       refreshSingleSlideCard(index);
+      if (keep === true && presentationUndoPosition >= 0) {
+        // Approval changes edit metadata, not deck content; merge it into the
+        // latest edit so one deck undo still restores the previous content.
+        presentationUndoHistory[presentationUndoPosition] = capturePresentationUndo();
+      }
+      updatePresentationUndoButtons();
       toast(keep === true ? 'تم اعتماد تعديلات الشريحة' : 'تم إلغاء تعديلات الشريحة');
     }
 
     function undoSlideEdit(index) {
       const session = getSlideEditSession(index);
       if (!session || !session.undo.length) { toast('لا توجد خطوات للتراجع'); return; }
+      beginPresentationUndoChange();
       const slide = tenantSlidesData[index];
       session.redo.push(slide.html);
       slide.html = session.undo.pop();
@@ -22991,6 +23189,7 @@
     function redoSlideEdit(index) {
       const session = getSlideEditSession(index);
       if (!session || !session.redo.length) { toast('لا توجد خطوات للتقدم'); return; }
+      beginPresentationUndoChange();
       const slide = tenantSlidesData[index];
       session.undo.push(slide.html);
       slide.html = session.redo.pop();
@@ -24409,7 +24608,8 @@
 
     function moveTenantSlide(fromIdx, toIdx) {
       if (fromIdx < 0 || fromIdx >= tenantSlidesData.length) return;
-      if (toIdx < 0 || toIdx >= tenantSlidesData.length) return;
+      if (toIdx < 0 || toIdx >= tenantSlidesData.length || fromIdx === toIdx) return;
+      beginPresentationUndoChange();
       const [moved] = tenantSlidesData.splice(fromIdx, 1);
       tenantSlidesData.splice(toIdx, 0, moved);
       renumberTenantSlides();
@@ -25031,6 +25231,8 @@
         return true;
       }
 
+      checkpointPresentationUndo();
+      const undoSlidesBefore = JSON.stringify(tenantSlidesData);
       // The executor owns structural positions; do not reinterpret the message
       // and move its last slide a second time after applying the returned workspace.
       if (reply.action === 'add_slide' || reply.action === 'insert_slide') {
@@ -25085,6 +25287,9 @@
         }
       }
 
+      if (JSON.stringify(tenantSlidesData) !== undoSlidesBefore && typeof tenantPresentationProvenance !== 'undefined') {
+        tenantPresentationProvenance = data.provenance || reply.provenance || tenantPresentationProvenance;
+      }
       if (reply.creativeImages && typeof reply.creativeImages === 'object') {
         tenantCreativeImages = reply.creativeImages;
         tenantProjectData = { ...tenantProjectData, tenantCreativeImages };
@@ -25102,6 +25307,7 @@
       renderTenantSlides();
       renderTenantDesignerChat();
       triggerAutoSaveDraft();
+      checkpointPresentationUndo();
       return true;
     }
 
@@ -25461,6 +25667,7 @@
       if (!hasPermission('create_presentation')) return;
       const title = document.getElementById('slideEditTitle').value;
       const html = document.getElementById('slideEditHtml').value;
+      beginPresentationUndoChange();
       tenantSlidesData[index].title = title;
       tenantSlidesData[index].html = html;
       tenantSlidesData[index]._designer_keep_html = true;
@@ -25474,6 +25681,7 @@
     function moveSlide(index, direction) {
       const newIndex = index + direction;
       if (newIndex < 0 || newIndex >= tenantSlidesData.length) return;
+      beginPresentationUndoChange();
       const temp = tenantSlidesData[index];
       tenantSlidesData[index] = tenantSlidesData[newIndex];
       tenantSlidesData[newIndex] = temp;
@@ -25486,6 +25694,7 @@
       if (!hasPermission('create_presentation')) return;
       if (tenantSlidesData.length <= 1) { toast('لا يمكن حذف آخر شريحة'); return; }
       if (!confirm('حذف الشريحة ' + (index + 1) + '؟')) return;
+      beginPresentationUndoChange();
       tenantSlidesData.splice(index, 1);
       activeSlideIndex = Math.min(activeSlideIndex, tenantSlidesData.length - 1);
       tenantChatSlideIndex = Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1);
@@ -25495,33 +25704,132 @@
       toast('تم حذف الشريحة');
     }
 
-    async function saveTenantPresentation(titleOverride = '') {
+    async function commitTenantPresentation(snapshot, presentationId, title, options = {}) {
+      if (tenantPresentationSavePromise) return tenantPresentationSavePromise;
+      const revision = options.expectedRevision ?? tenantPresentationRevision;
+      const provenance = tenantPresentationProvenance;
+      const button = document.getElementById('presentationSaveButton');
+      if (button) { button.disabled = true; button.textContent = 'جاري الحفظ...'; }
+      tenantPresentationSavePromise = (async () => {
+        const response = await api(presentationId ? 'PUT' : 'POST',
+          '/api/presentations' + (presentationId ? '/' + encodeURIComponent(presentationId) : ''), {
+            title, projectData: snapshot, slidesData: snapshot.tenantSlidesData,
+            slideCount: snapshot.tenantSlidesData.length,
+            ...(presentationId ? { expectedRevision: revision } : {}),
+            changeSource: provenance ? 'ai' : 'manual', provenance,
+            operation: options.operation || 'save'
+          });
+        if (!response?.success) {
+          if (response?.error_code === 'PRESENTATION_REVISION_CONFLICT') {
+            throw new Error('العرض له نسخة أحدث محفوظة بواسطة مستخدم آخر. تعديلاتك ما زالت مفتوحة ولم تُستبدل النسخة المحفوظة.');
+          }
+          throw new Error(response?.error || 'تعذر حفظ العرض');
+        }
+        if (!presentationId || tenantPresentationId === presentationId) {
+          tenantPresentationId = response.presentationId || presentationId;
+          tenantPresentationRevision = Number(response.revision) || 0;
+          tenantPresentationTitle = title;
+          tenantProjectMode = 'presentation';
+          clearPresentationUndoProvenance();
+          setSlidesEditorInfo(title, tenantSlidesData.length);
+        }
+        tenantArchiveCache = null;
+        return response;
+      })();
+      updatePresentationUndoButtons();
+      try { return await tenantPresentationSavePromise; }
+      finally {
+        tenantPresentationSavePromise = null;
+        if (button) { button.disabled = false; button.textContent = 'حفظ كمسودة'; }
+        updatePresentationUndoButtons();
+      }
+    }
+
+    async function saveTenantPresentation(titleOverride = '', options = {}) {
       const title = String(titleOverride || tenantPresentationTitle
         || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان').trim();
       renumberTenantSlides();
       tenantProjectData = {
-        ...tenantProjectData,
-        tenantSlidePlan,
-        tenantCreativeImages,
-        designerChat: designerChatPersistence(),
-        tenantSlidesData
+        ...tenantProjectData, tenantSlidePlan, tenantCreativeImages,
+        designerChat: designerChatPersistence(), tenantSlidesData
       };
-      const data = await api('POST', '/api/presentations', {
-        title: title,
-        projectData: tenantProjectData,
-        slidesData: tenantSlidesData,
-        slideCount: tenantSlidesData.length
-      });
-      if (data.success && data.presentationId) {
-        tenantPresentationId = data.presentationId;
-        tenantPresentationTitle = title;
-        tenantProjectMode = 'presentation';
-        tenantProjectData.designerChat = designerChatPersistence(data.presentationId);
-        tenantArchiveCache = null;
+      const snapshot = JSON.parse(JSON.stringify(tenantProjectData));
+      try {
+        const response = await commitTenantPresentation(snapshot, tenantPresentationId, title, options);
+        tenantProjectData.designerChat = designerChatPersistence(response.presentationId);
         return true;
+      } catch (error) {
+        setDraftDirty(true);
+        toast(error.message || 'تعذر حفظ العرض');
+        return false;
       }
-      toast(data.error || 'تعذر حفظ العرض');
-      return false;
+    }
+
+    async function savePresentationFromToolbar() {
+      if (tenantPresentationSavePromise || isGeneratingTenantSlides) return;
+      if (tenantPresentationId) await saveExistingPresentation();
+      else if (tenantSlidesData.length) await saveTenantPresentation();
+      else await saveProjectAsDraft();
+    }
+
+    async function savePresentationCopy() {
+      if (!tenantSlidesData.length || tenantPresentationSavePromise || isGeneratingTenantSlides) return;
+      const name = prompt('اسم العرض المستقل', (tenantPresentationTitle || 'عرض') + ' - نسخة مستقلة');
+      if (!name?.trim()) return;
+      const original = { id: tenantPresentationId, revision: tenantPresentationRevision,
+        title: tenantPresentationTitle, scope: tenantProjectData.presentation_scope };
+      tenantPresentationId = null;
+      tenantPresentationRevision = 0;
+      tenantProjectData.presentation_scope = 'copy:' + crypto.randomUUID();
+      if (await saveTenantPresentation(name.trim())) {
+        resetPresentationUndo();
+        toast('تم حفظ عرض مستقل');
+      } else {
+        tenantPresentationId = original.id;
+        tenantPresentationRevision = original.revision;
+        tenantPresentationTitle = original.title;
+        tenantProjectData.presentation_scope = original.scope;
+      }
+    }
+
+    async function preparePresentationGenerationTarget(scope) {
+      if (tenantPresentationSavePromise) await tenantPresentationSavePromise;
+      if (tenantPresentationId && tenantSlidesData.length && !(await saveTenantPresentation())) return false;
+      let target = null;
+      const currentScope = tenantProjectData.presentation_scope;
+      if (tenantPresentationId && (currentScope === scope || (!currentScope && scope === 'full')
+        || (scope === 'full' && String(currentScope || '').startsWith('copy:')))) {
+        target = { id: tenantPresentationId, revision: tenantPresentationRevision };
+      } else {
+        const draftId = tenantProjectData.draftId;
+        if (draftId) {
+          const response = await api('GET', '/api/presentations?draftId=' + encodeURIComponent(draftId));
+          if (!response?.success) { toast(response?.error || 'تعذر تحميل عروض المشروع'); return false; }
+          target = (response.presentations || []).find(item => item.presentationScope === scope) || null;
+        }
+      }
+      if (target && target.id !== tenantPresentationId) {
+        const response = await api('GET', '/api/presentations/' + encodeURIComponent(target.id));
+        if (!response?.success) { toast(response?.error || 'تعذر تحميل النسخة الحالية'); return false; }
+        const saved = response.presentation;
+        const checkpoint = await api('PUT', '/api/presentations/' + encodeURIComponent(target.id), {
+          title: saved.title, projectData: saved.projectData, slidesData: saved.slidesData,
+          expectedRevision: Number(saved.revision) || 0
+        });
+        if (!checkpoint?.success) { toast(checkpoint?.error || 'تعذر حماية النسخة الحالية'); return false; }
+        target.revision = checkpoint.revision;
+        tenantSlidesData = saved.slidesData || [];
+        tenantSlidePlan = recoverTenantSlidePlan(saved.projectData || {}, tenantSlidesData);
+        resetPresentationUndo();
+      }
+      tenantPresentationId = target?.id || null;
+      tenantPresentationRevision = Number(target?.revision) || 0;
+      tenantPresentationProvenance = null;
+      tenantProjectMode = target ? 'presentation' : 'new';
+      tenantProjectData.presentation_scope = target && String(currentScope || '').startsWith('copy:')
+        ? currentScope : scope;
+      checkpointPresentationUndo();
+      return true;
     }
 
     async function openExistingPresentation(presId) {
@@ -25530,6 +25838,8 @@
       const p = data.presentation;
       setDraftDirty(false);
       tenantPresentationId = p.id;
+      tenantPresentationRevision = Number(p.revision) || 0;
+      tenantPresentationProvenance = null;
       tenantPresentationTitle = p.title || '';
       tenantProjectMode = 'presentation';
       tenantProjectData = { ...(p.projectData || {}) };
@@ -25585,6 +25895,7 @@
       hydrateTenantProjectForm(tenantProjectData);
       applySectionStatuses(tenantProjectSectionStatuses);
       renderTenantSlides();
+      resetPresentationUndo();
       setSlidesEditorInfo(p.title || '', p.slideCount || tenantSlidesData.length);
       showTenantPage('tenantSlidesPage');
       refreshGlobalRail();
@@ -25688,6 +25999,8 @@
         const pageDrafts = draftData.pageDrafts || {};
         const sectionStatuses = draft.section_statuses || {};
         tenantPresentationId = null;
+        tenantPresentationRevision = 0;
+        tenantPresentationProvenance = null;
         tenantPresentationTitle = '';
         tenantProjectMode = 'draft';
         tenantProjectData = { ...draftData, draftId: draftData.draftId || draft.id || draftId };
@@ -25763,6 +26076,7 @@
         renderTenantSlides();
         setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '',
           tenantSlidesData.length);
+        resetPresentationUndo();
         refreshGlobalRail();
         toast('تم فتح المسودة المحفوظة بنجاح');
         void resumeTenantDesignerChatJob();
@@ -25787,26 +26101,10 @@
     }
 
     async function saveExistingPresentation() {
-      if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return; }
-      const title = tenantPresentationTitle
-        || tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
-      renumberTenantSlides();
-      tenantProjectData = {
-        ...tenantProjectData,
-        tenantSlidePlan,
-        tenantCreativeImages,
-        designerChat: designerChatPersistence(),
-        tenantSlidesData
-      };
-      const data = await api('PUT', '/api/presentations/' + tenantPresentationId, {
-        title: title,
-        projectData: tenantProjectData,
-        slidesData: tenantSlidesData,
-        slideCount: tenantSlidesData.length,
-        status: 'edited'
-      });
-      if (data.success) { toast('تم حفظ التعديلات'); }
-      else { toast(data.error || 'فشل الحفظ'); }
+      if (!tenantPresentationId) { toast('لا يوجد عرض مفتوح'); return false; }
+      const saved = await saveTenantPresentation();
+      if (saved) toast('تم حفظ نسخة العرض');
+      return saved;
     }
 
     async function regeneratePresentationMaps() {
@@ -26987,6 +27285,7 @@
     }
 
     async function applyAgentWorkspaceActions(actions) {
+      checkpointPresentationUndo();
       let changed = false;
       let planChanged = false;
       let dataChanged = false;
@@ -27031,6 +27330,7 @@
         triggerAutoSaveDraft();
       }
       if (changed || planChanged || dataChanged) triggerAutoSaveDraft();
+      if (changed || planChanged) checkpointPresentationUndo();
       return changed || planChanged || dataChanged;
     }
 
@@ -27771,43 +28071,153 @@
 
     // ── Presentation Versions & Edit Log ──
     async function showPresentationVersions(presId) {
-      const data = await api('GET', '/api/presentations/' + presId + '/versions');
-      if (!data.success) { toast('فشل تحميل النسخ'); return; }
-      if (!data.versions.length) { toast('لا توجد نسخ سابقة'); return; }
-      const html = data.versions.map(v => {
-        return '<div class="tenant-presentation-card" style="margin-bottom:8px">' +
-          '<div><strong>' + escapeHtml(v.user_name || 'نظام') + '</strong> - ' + escapeHtml(v.action) +
-          '<div class="meta">' + escapeHtml(v.created_at) + '</div></div>' +
-          '<div><button class="btn small ghost" onclick="restoreVersion(\'' + presId + '\', \'' + v.id + '\')">رجوع لهذه النسخة</button></div>' +
-          '</div>';
-      }).join('');
-      // Show in a modal-like section
-      const existing = document.getElementById('versionsModal');
-      if (existing) existing.remove();
+      if (!presId) { toast('لا توجد نسخة محفوظة لهذا العرض'); return; }
+      document.getElementById('versionsModal')?.remove();
       const modal = document.createElement('div');
       modal.id = 'versionsModal';
-      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:24px;max-width:600px;width:100%;max-height:80vh;overflow:auto">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
-        '<h3>النسخ السابقة</h3><button class="btn ghost" onclick="this.closest(\'#versionsModal\').remove()">إغلاق</button></div>' +
-        html + '</div>';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('aria-label', 'سجل التعديلات والنسخ');
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;direction:rtl';
+      modal.innerHTML = '<div style="background:#fff;border-radius:18px;padding:24px;width:min(1180px,100%);max-height:92vh;overflow:auto">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:16px"><h3 style="margin:0">سجل التعديلات والنسخ</h3>' +
+        '<button class="btn ghost" id="closePresentationHistory">إغلاق</button></div>' +
+        '<div id="presentationHistoryContent" aria-live="polite" style="margin-top:18px">جاري تحميل النسخ والسجل...</div></div>';
       document.body.appendChild(modal);
+      modal.querySelector('#closePresentationHistory').onclick = () => { modal.remove(); tenantPresentationHistory = null; };
+      const host = modal.querySelector('#presentationHistoryContent');
+      try {
+        const [versions, log] = await Promise.all([
+          api('GET', '/api/presentations/' + encodeURIComponent(presId) + '/versions'),
+          api('GET', '/api/presentations/' + encodeURIComponent(presId) + '/edit-log')
+        ]);
+        if (!versions?.success || !log?.success) throw new Error(versions?.error || log?.error || 'تعذر تحميل سجل العرض');
+        if (!modal.isConnected) return;
+        tenantPresentationHistory = { presId, revision: Number(versions.currentRevision) || 0,
+          versions: versions.versions || [], log: log.log || [], previewRequest: 0 };
+        const entries = tenantPresentationHistory.versions;
+        host.innerHTML = '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px">' +
+          '<strong>النسخة الحالية: ' + tenantPresentationHistory.revision + '</strong>' +
+          '<span class="tenant-hint">' + entries.length + ' نسخة محفوظة</span></div>' +
+          '<div id="presentationRevisionPreview" hidden style="margin-bottom:24px;padding:16px;border:1px solid #cbd5e1;border-radius:12px"></div>' +
+          (entries.length ? '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:12px">' + entries.map((v, index) => {
+            const linked = tenantPresentationHistory.log.find(entry => entry.revision_id === v.id && entry.id === v.change_log_id);
+            const source = v.source === 'ai' ? 'بمساعدة الذكاء الاصطناعي' : v.source === 'system' ? 'النظام' : 'يدوي';
+            const title = v.snapshotKind === 'legacy-slides' || v.legacy ? 'نسخة قديمة للشرائح فقط' : 'النسخة ' + v.revision;
+            return '<article style="padding:16px;border:1px solid #dbe2ea;border-radius:12px;background:#f8fafc">' +
+              '<div style="display:flex;justify-content:space-between;gap:8px"><strong>' + escapeHtml(title) + '</strong>' +
+              (Number(v.revision) === tenantPresentationHistory.revision && !v.legacy ? '<span>الحالية</span>' : '') + '</div>' +
+              '<div style="margin-top:8px">' + escapeHtml(v.user_name || 'غير مسجل') + ' | ' + source + '</div>' +
+              '<div class="meta" style="margin-top:4px">' + escapeHtml(String(v.created_at || '').replace('T', ' ').slice(0,19)) +
+              ' | ' + (v.slide_count || 0) + ' شريحة</div>' +
+              '<div style="margin-top:10px;line-height:1.8">' + escapeHtml(v.summary || linked?.summary || revisionActionLabel(v.action)) + '</div>' +
+              ((v.details || linked?.details || []).slice(0, 5).map(line => '<div style="font-size:13px;line-height:1.8">' + escapeHtml(line) + '</div>').join('')) +
+              '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
+              '<button class="btn small ghost" data-version-preview="' + index + '">معاينة ومقارنة</button>' +
+              (hasPermission('create_presentation') ? '<button class="btn small ghost" data-version-restore="' + index + '">استعادة</button>' : '') + '</div></article>';
+          }).join('') + '</div>' : '<p class="tenant-hint">لا توجد نسخ سابقة محفوظة.</p>') +
+          '<h3 style="margin-top:28px">كل الأحداث</h3>' +
+          (tenantPresentationHistory.log.length ? tenantPresentationHistory.log.map(renderChangeLogEntry).join('') : '<p class="tenant-hint">لا توجد أحداث مسجلة.</p>');
+        host.querySelectorAll('[data-version-preview]').forEach(button => {
+          button.onclick = () => previewPresentationVersion(presId, entries[Number(button.dataset.versionPreview)].id, button);
+        });
+        host.querySelectorAll('[data-version-restore]').forEach(button => {
+          button.onclick = () => restoreVersion(presId, entries[Number(button.dataset.versionRestore)].id, button);
+        });
+      } catch (error) {
+        host.textContent = error.message || 'تعذر تحميل سجل العرض';
+      }
     }
 
-    async function restoreVersion(presId, versionId) {
-      if (!confirm('رجوع للنسخة السابقة؟ سيتم حفظ النسخة الحالية أولاً.')) return;
-      const data = await api('POST', '/api/presentations/' + presId + '/versions/' + versionId + '/restore');
-      if (data.success) {
-        toast('تم استعادة النسخة');
-        document.getElementById('versionsModal').remove();
-        if (typeof renderTenantSlides === 'function' && Array.isArray(data.slidesData)) {
-          tenantSlidesData = data.slidesData;
-          renumberTenantSlides();
-          renderTenantSlides();
+    function revisionActionLabel(action) {
+      return ({ create: 'إنشاء العرض', edit: 'تعديل العرض', restore: 'استعادة نسخة سابقة',
+        baseline: 'الحالة السابقة قبل تفعيل سجل النسخ', generation: 'توليد العرض' })[action] || action || 'حفظ العرض';
+    }
+
+    function revisionPreviewFrame(host, slide, projectData) {
+      host.replaceChildren();
+      if (!slide) { host.textContent = 'لا توجد شريحة في هذه النسخة'; return; }
+      const frame = document.createElement('iframe');
+      frame.title = slide.title || 'معاينة شريحة محفوظة';
+      frame.setAttribute('sandbox', '');
+      frame.style.cssText = 'width:1280px;height:720px;border:0;transform-origin:top left;position:absolute;left:0;top:0;pointer-events:none;background:white';
+      const fontCss = projectData?._presentation_font_css || document.getElementById('tenantFontCss')?.textContent || '';
+      frame.srcdoc = '<!doctype html><html dir="rtl"><head><meta charset="utf-8">' +
+        '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src https: http: data:; font-src https: http: data:; style-src \'unsafe-inline\' https:; script-src \'none\'; form-action \'none\'; base-uri ' + window.location.origin + '">' +
+        '<base href="' + escapeHtml(window.location.origin + '/') + '"><style>html,body{margin:0;width:1280px;height:720px;overflow:hidden}*{box-sizing:border-box}' +
+        fontCss.replace(/<\/style/gi, '') + '</style></head><body>' + String(slide.html || '') + '</body></html>';
+      host.style.cssText = 'position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;background:#e2e8f0;border:1px solid #cbd5e1;border-radius:8px';
+      host.appendChild(frame);
+      const resize = () => { frame.style.transform = 'scale(' + host.clientWidth / 1280 + ')'; };
+      resize();
+      const observer = new ResizeObserver(() => {
+        if (!host.isConnected) observer.disconnect();
+        else resize();
+      });
+      observer.observe(host);
+    }
+
+    async function previewPresentationVersion(presId, versionId, button) {
+      const context = tenantPresentationHistory;
+      const host = document.getElementById('presentationRevisionPreview');
+      if (!context || context.presId !== presId || !host) return;
+      const request = ++context.previewRequest;
+      host.hidden = false;
+      host.textContent = 'جاري تحميل المعاينة والمقارنة...';
+      if (button) button.disabled = true;
+      try {
+        const prefix = '/api/presentations/' + encodeURIComponent(presId);
+        const [detail, current, comparison] = await Promise.all([
+          api('GET', prefix + '/versions/' + encodeURIComponent(versionId)),
+          api('GET', prefix),
+          api('GET', prefix + '/versions/compare?from=' + encodeURIComponent(versionId) + '&to=current')
+        ]);
+        if (!detail?.success || !current?.success || !comparison?.success) throw new Error('تعذر تحميل المعاينة');
+        if (tenantPresentationHistory !== context || context.previewRequest !== request) return;
+        const snapshot = detail.version.snapshot;
+        const latest = current.presentation;
+        const count = Math.max(snapshot.slidesData?.length || 0, latest.slidesData?.length || 0);
+        host.innerHTML = '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><h3>مقارنة النسخ</h3>' +
+          '<label>الشريحة <select id="revisionPreviewSlide">' + Array.from({ length: count }, (_, i) => '<option value="' + i + '">' + (i + 1) + '</option>').join('') + '</select></label></div>' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:16px;margin-top:12px">' +
+          '<div><h4>النسخة المحددة</h4><div id="revisionBeforeFrame"></div></div>' +
+          '<div><h4>النسخة الحالية المحفوظة</h4><div id="revisionAfterFrame"></div></div></div>' +
+          '<div style="margin-top:16px;line-height:1.9">' + (comparison.changes?.length
+            ? comparison.changes.map(line => '<div>' + escapeHtml(line) + '</div>').join('') : 'لا توجد اختلافات في المحتوى') + '</div>';
+        const render = () => {
+          const index = Number(host.querySelector('#revisionPreviewSlide').value) || 0;
+          revisionPreviewFrame(host.querySelector('#revisionBeforeFrame'), snapshot.slidesData?.[index], snapshot.projectData);
+          revisionPreviewFrame(host.querySelector('#revisionAfterFrame'), latest.slidesData?.[index], latest.projectData);
+        };
+        host.querySelector('#revisionPreviewSlide').onchange = render;
+        render();
+        host.scrollIntoView({ block: 'nearest' });
+      } catch (error) { if (context.previewRequest === request) host.textContent = error.message; }
+      finally { if (button) button.disabled = false; }
+    }
+
+    async function restoreVersion(presId, versionId, button) {
+      if (tenantPresentationSavePromise || isGeneratingTenantSlides) { toast('العرض قيد الحفظ أو التوليد'); return; }
+      if (!confirm('استعادة هذه النسخة كنسخة جديدة؟ النسخ المحفوظة الحالية ستبقى في السجل.')) return;
+      const context = tenantPresentationHistory;
+      if (!context || context.presId !== presId) return;
+      if (button) { button.disabled = true; button.textContent = 'جاري الاستعادة...'; }
+      try {
+        let expectedRevision = context.revision;
+        if (tenantPresentationId === presId && tenantSlidesData.length) {
+          const saved = await saveTenantPresentation();
+          if (!saved) return;
+          expectedRevision = tenantPresentationRevision;
         }
-      } else {
-        toast(data.error || 'فشل الاستعادة');
-      }
+        const data = await api('POST', '/api/presentations/' + encodeURIComponent(presId) + '/versions/' + encodeURIComponent(versionId) + '/restore', { expectedRevision });
+        if (!data?.success) throw new Error(data?.error_code === 'PRESENTATION_REVISION_CONFLICT'
+          ? 'ظهرت نسخة أحدث للعرض. لم يتم استبدالها.' : data?.error || 'تعذر الاستعادة');
+        tenantArchiveCache = null;
+        if (tenantPresentationId === presId) await openExistingPresentation(presId);
+        toast('تمت استعادة العرض كنسخة جديدة، وبقيت بيانات المشروع دون تغيير');
+        await showPresentationVersions(presId);
+      } catch (error) { toast(error.message || 'تعذر الاستعادة'); }
+      finally { if (button) { button.disabled = false; button.textContent = 'استعادة'; } }
     }
 
     // Every entry names its author, whether it was done by hand or by the AI, and the individual
@@ -27832,20 +28242,7 @@
     }
 
     async function showEditLog(presId) {
-      const data = await api('GET', '/api/presentations/' + presId + '/edit-log');
-      if (!data.success) { toast('فشل تحميل السجل'); return; }
-      if (!data.log.length) { toast('لا يوجد سجل تعديلات'); return; }
-      const html = data.log.map(renderChangeLogEntry).join('');
-      const existing = document.getElementById('editLogModal');
-      if (existing) existing.remove();
-      const modal = document.createElement('div');
-      modal.id = 'editLogModal';
-      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:24px;max-width:600px;width:100%;max-height:80vh;overflow:auto">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
-        '<h3>سجل التعديلات</h3><button class="btn ghost" onclick="this.closest(\'#editLogModal\').remove()">إغلاق</button></div>' +
-        html + '</div>';
-      document.body.appendChild(modal);
+      return showPresentationVersions(presId);
     }
 
     async function showDraftEditLog(draftId) {
