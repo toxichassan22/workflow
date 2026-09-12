@@ -43,6 +43,9 @@ import population_service
 import slide_engine
 import change_tracking
 import designer_chat_reliability
+import designer_chat_targets
+import designer_chat_colors
+import designer_chat_context
 from auth import require_auth, require_admin, require_company_admin, require_permission, hash_password, verify_password, create_token, decode_token
 from design_templates import get_all_templates, get_template, apply_template_colors, build_design_rules, extract_slide_elements, build_font_css
 
@@ -4116,36 +4119,11 @@ def detect_slide_from_message_py(text, slides):
 
 
 def _designer_target_indexes(action, count, current_index, force_all=False):
-    """Resolve planner targets using 1-based slide numbers from the model."""
+    """Resolve explicit targets without redirecting invalid numbers to another slide."""
     if force_all:
         return list(range(count))
     params = action.get('params') if isinstance(action.get('params'), dict) else action
-    target = params.get('target', params.get('scope', 'current'))
-    raw_indexes = params.get('indexes', params.get('slideIndexes', []))
-    if isinstance(raw_indexes, int):
-        raw_indexes = [raw_indexes]
-    indexes = []
-    if isinstance(raw_indexes, list):
-        for value in raw_indexes:
-            try:
-                number = int(value)
-                idx = number - 1
-                if 0 <= idx < count and idx not in indexes:
-                    indexes.append(idx)
-            except (TypeError, ValueError):
-                continue
-    if target in ('all', 'كل', 'all_slides', 'presentation'):
-        return list(range(count))
-    if indexes:
-        return indexes
-    if 'slideIndex' in params:
-        try:
-            idx = int(params.get('slideIndex')) - 1
-        except (TypeError, ValueError):
-            idx = current_index
-    else:
-        idx = current_index
-    return [max(0, min(idx, count - 1))] if count else []
+    return designer_chat_targets.resolve_indexes(params, count, current_index)
 
 
 def _designer_actionable_edit_request(message):
@@ -5421,7 +5399,7 @@ def _designer_project_context(project_data, creative_images=None, tenant_id=None
     parts = [
         "## ملف بيانات المشروع الكامل — مصدر الحقيقة الملزم",
         "هذه أحدث بيانات متاحة لملف المشروع. استخدم كل حقل مطلوب كما هو، ولا تقل إن المعلومة غير موجودة قبل البحث في هذا الملف كاملًا. إذا ورد رابط Google Maps فهو رابط المشروع الفعلي ويمكن إدراجه نصيًا عند طلب المستخدم.",
-        slide_engine.build_project_facts(source, tenant_id),
+        designer_chat_context.build_project_context(source, creative_images, tenant_id),
     ]
     for note in (
         _designer_boundary_facts_note(source),
@@ -5433,6 +5411,8 @@ def _designer_project_context(project_data, creative_images=None, tenant_id=None
     asset_note = _get_images_info(creative_images or {}, source)
     if str(asset_note or '').strip():
         parts.append("## الأصول والخرائط والصور المتاحة فعليًا\n" + asset_note.strip())
+    if source.get('_designer_deck_context'):
+        parts.append('## العرض الحالي الكامل: مرجع للسياق وليس إذنًا بتعديل الشرائح الأخرى\n' + source['_designer_deck_context'])
     return '\n\n'.join(parts)
 
 
@@ -5443,18 +5423,18 @@ def _designer_project_data_for_request(request_project_data, presentation, tenan
     project facts, while an unrelated newer project owned by the same user is never mixed in.
     Current browser values win because they may contain edits made after the last explicit save.
     """
-    cleaned_request = clean_project_data(request_project_data) if isinstance(request_project_data, dict) else {}
+    cleaned_request = copy.deepcopy(request_project_data) if isinstance(request_project_data, dict) else {}
     request_data = cleaned_request if isinstance(cleaned_request, dict) else {}
     presentation_data = {}
     if isinstance(presentation, dict):
         raw = presentation.get('project_data')
         if isinstance(raw, dict):
-            cleaned_presentation = clean_project_data(raw)
+            cleaned_presentation = copy.deepcopy(raw)
             presentation_data = cleaned_presentation if isinstance(cleaned_presentation, dict) else {}
         elif isinstance(raw, str) and raw.strip():
             try:
                 decoded = json.loads(raw)
-                cleaned_presentation = clean_project_data(decoded) if isinstance(decoded, dict) else {}
+                cleaned_presentation = decoded if isinstance(decoded, dict) else {}
                 presentation_data = cleaned_presentation if isinstance(cleaned_presentation, dict) else {}
             except (TypeError, ValueError):
                 presentation_data = {}
@@ -5469,15 +5449,14 @@ def _designer_project_data_for_request(request_project_data, presentation, tenan
         try:
             draft = db.get_project_draft_by_id(tenant_id, str(draft_id))
             if isinstance(draft, dict) and isinstance(draft.get('draft_data'), dict):
-                cleaned_draft = clean_project_data(draft['draft_data'])
+                cleaned_draft = copy.deepcopy(draft['draft_data'])
                 draft_data = cleaned_draft if isinstance(cleaned_draft, dict) else {}
         except Exception as exc:
             print(f'[DESIGNER-CHAT] Could not load linked draft {draft_id}: {exc}')
     merged = {**presentation_data, **draft_data, **request_data}
     if draft_id:
         merged['draftId'] = str(draft_id)
-    cleaned_merged = clean_project_data(merged)
-    return cleaned_merged if isinstance(cleaned_merged, dict) else {}
+    return merged
 
 
 def _designer_requests_boundary_data(instruction):
@@ -5551,6 +5530,13 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
             tenant_id = g.tenant_id
         except Exception:
             tenant_id = None
+
+    table_edit = designer_chat_reliability.apply_table_delete_request(html, instruction)
+    if table_edit['handled']:
+        return (table_edit['html'] if table_edit['changed'] else html), (table_edit['description'] or 'تعذر تحديد تعديل الجدول بأمان: ' + table_edit['reason'])
+    if designer_chat_colors.is_color_only_request(instruction):
+        color_html, color_message = designer_chat_colors.apply_color_edit(html, instruction)
+        return color_html or html, color_message
 
     rules = build_design_rules(branding)
     training_context = ''
@@ -5627,8 +5613,6 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
         return ph
 
     clean_html = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', _preserve_base64, html or '')
-    if len(clean_html) > 150000:
-        clean_html = clean_html[:150000]
 
     surface_note = '' if slide_type in ('cover', 'closing', 'section_divider', 'moodboard') else (
         "\n\n## عقد سطح شريحة المحتوى\n"
@@ -5658,7 +5642,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
             )
             canonical_boundary_html = resolve_designer_chat_placeholders(
                 canonical_boundary_html, project_data, presentation_id, tenant_id, creative_images)
-            canonical_boundary_html = slide_engine.finalize_slide_html(
+            canonical_boundary_html = slide_engine.finalize_designer_slide_html(
                 canonical_boundary_html, slide_type or 'content', project_data, branding,
                 creative_images=creative_images, tenant_id=tenant_id,
                 slide_num=slide_index + 1, slide_title=title,
@@ -5674,57 +5658,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
                 '[DESIGNER-EDIT] deterministic boundary build failed for slide %s', slide_index + 1)
     project_context = _designer_project_context(project_data, creative_images, tenant_id)
 
-    # A table row/column deletion is a presentation-only edit: the source project
-    # facts stay intact, so preservation rules («لا تحذف صفاً أو عموداً»، «دون حذف»)
-    # must not block it. Run it deterministically first — counting <tr>/<td> by hand
-    # is exactly where the model fails (RTL order, thead vs tbody, merged cells).
-    table_edit_note = ''
-    if designer_chat_reliability.is_table_row_column_request(instruction):
-        table_edit_note = (
-            "\n\n## طلب حذف صف/عمود من جدول الشريحة — استثناء صريح من قواعد الحفاظ\n"
-            "طلب المستخدم حذف صف أو عمود من جدول هذه الشريحة فقط، وليس من بيانات المشروع الأصلية. "
-            "قواعد «لا تحذف صفاً أو عموداً أو سنة» و«دون حذف» تحمي مصدر البيانات عند التوليد، "
-            "ولا تسري على هذا الطلب. نفّذ الحذف في HTML فقط: احذف عنصر <tr> للصف أو الخلية رقم N "
-            "من كل صف للعمود (بما فيها رأس الجدول)، وحافظ على بقية الصفوف والأعمدة والتنسيق. "
-            "ترقيم الصفوف يشمل صفوف البيانات دون رأس الجدول. لا تحذف الشريحة ولا تقسّمها، "
-            "ولا تعتذر ولا تطلب تأكيداً، ولا تعيد الصف/العمود المحذوف."
-        )
-        try:
-            deterministic_html, deterministic_msg = designer_chat_reliability.apply_table_row_column_edit(
-                html, instruction)
-        except Exception as deterministic_error:
-            print(f"[DESIGNER-EDIT TABLE] deterministic removal failed: {deterministic_error}")
-            deterministic_html, deterministic_msg = None, ''
-        if deterministic_html and designer_chat_reliability.materially_changed(
-                html, deterministic_html, deterministic_msg):
-            try:
-                final_html = resolve_designer_chat_placeholders(
-                    deterministic_html, project_data, presentation_id, tenant_id, creative_images)
-                final_html = slide_engine.finalize_slide_html(
-                    final_html, slide_type or 'content', project_data, branding,
-                    creative_images=creative_images, tenant_id=tenant_id,
-                    slide_num=slide_index + 1, slide_title=title,
-                    total_slides=total_slides or (slide_index + 1), content_source=content_source,
-                    allow_all_maps=True,
-                )
-                final_html = _sanitize_designer_output(final_html)
-                if not _is_watermark_removal_instruction(instruction):
-                    final_html = _carry_slide_watermark(html, final_html)
-                if designer_chat_reliability.materially_changed(html, final_html, deterministic_msg):
-                    if vision_error:
-                        deterministic_msg += ' التعديل جرى على الكود بدون معاينة بصرية للشريحة.'
-                    return final_html, deterministic_msg
-            except Exception:
-                app.logger.exception(
-                    '[DESIGNER-EDIT] deterministic table edit post-processing failed for slide %s',
-                    slide_index + 1)
-            else:
-                # Deterministic removal hit a merged-cells or empty-table guard:
-                # keep the explicit permission note below so the model retries
-                # the same deletion instead of refusing it again.
-                pass
-
-    prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}{table_edit_note}
+    prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}
 
 {project_context}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
@@ -5733,8 +5667,8 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
    - تحويل التخطيط بسلاسة بين عمودين أو ثلاثة أعمدة أو شبكة غير متماثلة (Asymmetric Grid) مع الحفاظ التام على انسيابية العناصر.
    - ضبط المحاذاة العمودية والأفقية والتوزيع المتوازن (align-items / justify-content).
 2. النظم الجمالية والهوية المعتمدة (Design System & Tokens):
-   - الخط الرسمي المعتمد هو The Sans Arabic حصراً لجميع العناصر (العناوين 700 والنصوص 400).
-   - لوحة الألوان المعتمدة: الكحلي الملكي (#0c2340), الذهبي الاستثماري (#c5a059), الرمادي الداكن (#1a202c), والأبيض النقي (#ffffff).
+   - حافظ على خط الشركة المحمل؛ لا تكتب اسم خط ثابت ولا تغيره في طلب لون أو محتوى.
+   - ألوان الشركة أعلاه هي الافتراضية. تغيير اللون الصريح من المستخدم يطبق على العناصر المطلوبة فقط دون إعادة تلوين باقي الشريحة.
    - تحقيق تباين لوني عالي (Contrast Ratio >= 4.5:1) لضمان سهولة القراءة الفائقة.
 3. التعديل الجراحي الموضعي (Surgical Modifications):
    - إضافة أو حذف أو تعديل بطاقة أو نص أو مكون محدد دون مساس بباقي محتويات الشريحة، ودون إعادة بناء من الصفر، ودون تدمير التنسيق.
@@ -5797,7 +5731,7 @@ HTML الحالي:
 
                 output = resolve_designer_chat_placeholders(output, project_data, presentation_id,
                                                            tenant_id, creative_images)
-                output = slide_engine.finalize_slide_html(
+                output = slide_engine.finalize_designer_slide_html(
                     output, slide_type or 'content', project_data, branding,
                     creative_images=creative_images, tenant_id=tenant_id,
                     slide_num=slide_index + 1, slide_title=title,
@@ -5879,16 +5813,7 @@ HTML الحالي:
             failure_reasons.append('provider_error')
             app.logger.exception('[DESIGNER-EDIT] attempt %s failed for slide %s', attempt, slide_index + 1)
 
-    fallback = resolve_designer_chat_placeholders(
-        html, project_data, presentation_id, tenant_id, creative_images)
-    fallback = slide_engine.finalize_slide_html(
-        fallback, slide_type or 'content', project_data, branding,
-        creative_images=creative_images, tenant_id=tenant_id,
-        slide_num=slide_index + 1, slide_title=title,
-        total_slides=total_slides or (slide_index + 1), content_source=content_source,
-        allow_all_maps=True,
-    )
-    fallback = _sanitize_designer_output(fallback)
+    fallback = html
 
     # The boundary diagram is a deterministic system slide. If Sol cannot safely edit it, rebuild
     # it from the newest linked-draft facts instead of returning the old snapshot. This gives new
@@ -6060,10 +5985,9 @@ def api_designer_chat():
     presentation = None
     slides = data.get('slidesData') if isinstance(data.get('slidesData'), list) else []
     current_index = data.get('slideIndex', 0)
-    try:
-        current_index = int(current_index)
-    except (TypeError, ValueError):
-        current_index = 0
+    if isinstance(current_index, bool) or not re.fullmatch(r'\d+', str(current_index)):
+        return jsonify({'success': False, 'error': 'رقم الشريحة الحالية غير صالح', 'error_code': 'DESIGNER_INVALID_TARGET'}), 422
+    current_index = int(current_index)
 
     if presentation_id:
         presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
@@ -6078,6 +6002,7 @@ def api_designer_chat():
     project_data = _designer_project_data_for_request(
         request_project_data, presentation, tenant_id)
     project_creative_images = copy.deepcopy(project_data.get('tenantCreativeImages')) if isinstance(project_data.get('tenantCreativeImages'), dict) else {}
+    authoritative_project_data = copy.deepcopy(project_data)
     project_data, creative_images = _hydrate_map_assets_for_request(
         project_data, data.get('creativeImages', {}), g.tenant_id,
         presentation_id=presentation_id,
@@ -6086,6 +6011,7 @@ def api_designer_chat():
     # presentation generation. Without this merge, the model can see a team name but
     # has no real image behind ##TEAM_LOGO_N## and falls back to the company logo.
     creative_images = _augment_generation_images(creative_images, project_data, g.tenant_id)
+    project_data.update(authoritative_project_data)
 
     # Every designer turn is project spend: resolve the draft once so no model
     # call in this flow can land outside the project total. The client often
@@ -6109,10 +6035,13 @@ def api_designer_chat():
         current_index = 0
     if not slides:
         return jsonify({'success': False, 'error': 'لا توجد شرائح مفتوحة لتنفيذ الطلب'}), 400
+    if current_index >= len(slides) or any(not isinstance(s, dict) for s in slides):
+        return jsonify({'success': False, 'error': 'العرض أو رقم الشريحة الحالية غير صالح', 'error_code': 'DESIGNER_INVALID_TARGET'}), 422
 
     # Kept so the history can state what the AI actually changed. An AI edit used to leave no trace
     # at all: no log entry, no version, and no record of the instruction behind it.
     slides_before = copy.deepcopy(slides)
+    project_data['_designer_deck_context'] = designer_chat_context.build_deck_context(slides)
 
     # Only a scope explicitly selected in the UI is a constraint. The model
     # interprets natural language, including negation, corrections and numbers.
@@ -6193,6 +6122,7 @@ def api_designer_chat():
 {{"response":"رسالة عربية تشرح ما ستفعله جراحياً", "actions":[{{"tool":"edit_slides|apply_watermark|remove_watermark|generate_image|insert_canonical_map|insert_financial_chart|delete_slide|duplicate_slide|reorder_slides|split_slide|merge_slides|create_slide|ask|chat_only", "params":{{}}}}]}}
 
 الأدوات المتاحة:
+أرقام الشرائح في كل الأدوات تشير إلى ترتيب العرض في بداية هذا الطلب، حتى عند نقل أو حذف شرائح في عملية سابقة ضمن الطلب نفسه.
 - edit_slides: params={{"target":"current|all|indexes", "indexes":[1-based], "instruction":"التعديل الجراحي المطلوب بدقة"}}
 - apply_watermark: params={{"target":"current|all|indexes", "indexes":[1-based], "only_white":true, "opacity":0.045, "width_px":480}} لإظهار العلامة المائية المستقلة المعتمدة في إعدادات الشركة في خلفية الشرائح — صيغ فعّل/أظهر/إظهار/أضف تعني هذه الأداة، و«إظهار» تعني الرؤية فقط وليست تكبيرًا. النطاق الافتراضي current عند عدم تحديد أرقام؛ أرسل all فقط عند طلب كل الشرائح صراحة (كل/جميع/العرض كله)، وأرسل indexes مع الأرقام العربية أو الإنجليزية المذكورة. أرسل only_white=true فقط إذا ذكر المستخدم الشرائح البيضاء أو الفاتحة صراحة، والافتراضي opacity=0.045 وwidth_px=480. إذا ذكر المستخدم نسبة أو قيمة شفافية صريحة (مثل 50%) فأرسلها كما هي حتى 1.0 ونفّذها فورًا دون اقتراح بديل، وإذا رفض اقتراحًا سابقًا أو كرر قيمة صريحة فلا تعِد طرح نفس السؤال بأداة ask. أرسل width_px حتى 640 إذا طلب علامة أكبر
 - remove_watermark: params={{"target":"current|all|indexes", "indexes":[1-based]}} لإخفاء العلامة المائية من الشرائح — صيغ اخف/إخفاء/عطّل/إلغاء التفعيل/احذف تعني هذه الأداة مع نفس قواعد النطاق أعلاه
@@ -6309,10 +6239,13 @@ def api_designer_chat():
                 'chatHistory': chat_messages[-DESIGNER_CHAT_STORED_TURNS * 2:], 'saved': False,
             }})
 
+        actions = designer_chat_targets.prepare_actions(actions, data, message, slides, current_index)
+        original_slide_objects = list(slides)
         executed = []
         assistant_messages = []
         tenant_id = g.tenant_id
-        for action_number, action in enumerate(actions):
+        for action_number, planned_action in enumerate(actions):
+            action = designer_chat_targets.remap_action(planned_action, original_slide_objects, slides)
             tool = action.get('tool') if isinstance(action, dict) else ''
             params = action.get('params') if isinstance(action.get('params'), dict) else {}
             if tool in ('ask', 'chat_only', 'validate_design_workspace', 'save_design_workspace'):
@@ -6409,6 +6342,9 @@ def api_designer_chat():
             elif tool in ('edit_slides', 'edit_design_slide', 'edit_design_slides'):
                 indexes = _designer_target_indexes(action, len(slides), current_index, force_all=is_all_slides_request)
                 instruction = params.get('instruction') or message
+                original_table_request = designer_chat_reliability.detect_table_edit_request(message)
+                if original_table_request.get('supported') and original_table_request.get('operation') == 'delete':
+                    instruction = message
                 changed_indexes = []
                 if indexes:
                     report_designer_progress(20, f'جاري تعديل الشريحة {indexes[0] + 1}...',
@@ -6492,8 +6428,8 @@ def api_designer_chat():
                         report_designer_progress(85, f"تم الانتهاء من معالجة الشريحة {idx + 1}...")
                 executed.append({
                     'tool': tool,
-                    'status': 'success' if changed_indexes else 'noop',
-                    'reason': None if changed_indexes else 'no_verified_change',
+                    'status': 'success' if len(changed_indexes) == len(indexes) and indexes else 'failed',
+                    'reason': None if len(changed_indexes) == len(indexes) and indexes else 'incomplete_edit',
                     'indexes': sorted(changed_indexes),
                     'requested_indexes': indexes,
                 })
@@ -6725,256 +6661,60 @@ def api_designer_chat():
                 executed.append({'tool': tool, 'status': 'success', 'indexes': targets, 'chart_type': chart_type})
             elif tool in ('delete_slide', 'remove_slide'):
                 raw_nums = params.get('slide_numbers') or params.get('slide_number') or params.get('slide_index') or params.get('index')
-                target_nums = []
-                if isinstance(raw_nums, list):
-                    for v in raw_nums:
-                        try:
-                            target_nums.append(int(v))
-                        except (TypeError, ValueError):
-                            pass
+                if not isinstance(raw_nums, list):
+                    raw_nums = [raw_nums]
+                target_nums = [designer_chat_targets.slide_number(value, len(slides)) for value in raw_nums]
+                del_indexes = sorted(set(n - 1 for n in target_nums), reverse=True)
+                if len(slides) - len(del_indexes) >= 1:
+                    removed_titles = []
+                    for d_idx in del_indexes:
+                        removed = slides.pop(d_idx)
+                        removed_titles.append(f'«{removed.get("title", f"شريحة {d_idx + 1}")}»')
+                    assistant_messages.append(f'تم حذف {len(del_indexes)} شريحة بنجاح ({", ".join(removed_titles)}).')
+                    executed.append({'tool': tool, 'status': 'success', 'deleted_indexes': del_indexes})
                 else:
-                    try:
-                        target_nums.append(int(raw_nums))
-                    except (TypeError, ValueError):
-                        target_nums.append(current_index + 1)
-                del_indexes = sorted(set(n - 1 for n in target_nums if 0 <= n - 1 < len(slides)), reverse=True)
-                if del_indexes:
-                    if len(slides) - len(del_indexes) >= 1:
-                        removed_titles = []
-                        for d_idx in del_indexes:
-                            removed = slides.pop(d_idx)
-                            removed_titles.append(f'«{removed.get("title", f"شريحة {d_idx + 1}")}»')
-                        assistant_messages.append(f'تم حذف {len(del_indexes)} شريحة بنجاح ({", ".join(removed_titles)}).')
-                        executed.append({'tool': tool, 'status': 'success', 'deleted_indexes': del_indexes})
-                    else:
-                        assistant_messages.append('لا يمكن حذف جميع الشرائح المتبقية في العرض.')
-                        executed.append({'tool': tool, 'status': 'rejected', 'reason': 'single_slide'})
-                else:
-                    assistant_messages.append('أرقام الشرائح المحددة للحذف غير صحيحة.')
-                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'out_of_bounds'})
+                    assistant_messages.append('لا يمكن حذف جميع الشرائح المتبقية في العرض.')
+                    executed.append({'tool': tool, 'status': 'rejected', 'reason': 'single_slide'})
             elif tool in ('duplicate_slide', 'clone_slide'):
                 raw_num = params.get('slide_number') or params.get('slide_index') or params.get('index')
-                try:
-                    target_num = int(raw_num)
-                except (TypeError, ValueError):
-                    target_num = current_index + 1
+                target_num = designer_chat_targets.slide_number(raw_num, len(slides))
                 dup_idx = target_num - 1
-                if 0 <= dup_idx < len(slides):
-                    cloned = copy.deepcopy(slides[dup_idx])
-                    cur_title = cloned.get('title', '')
-                    cloned['title'] = cur_title + ' (نسخة)' if not cur_title.endswith('(نسخة)') else cur_title
-                    slides.insert(dup_idx + 1, cloned)
-                    assistant_messages.append(f'تم تكرار الشريحة رقم {target_num} بنجاح.')
-                    executed.append({'tool': tool, 'status': 'success', 'duplicated_index': dup_idx + 1})
-                else:
-                    assistant_messages.append(f'رقم الشريحة {target_num} غير موجود.')
-                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'out_of_bounds'})
+                cloned = copy.deepcopy(slides[dup_idx])
+                cur_title = cloned.get('title', '')
+                cloned['title'] = cur_title + ' (نسخة)' if not cur_title.endswith('(نسخة)') else cur_title
+                slides.insert(dup_idx + 1, cloned)
+                assistant_messages.append(f'تم تكرار الشريحة رقم {target_num} بنجاح.')
+                executed.append({'tool': tool, 'status': 'success', 'duplicated_index': dup_idx + 1})
             elif tool in ('reorder_slides', 'move_slide'):
                 from_num = params.get('from_index') or params.get('from')
                 to_num = params.get('to_index') or params.get('to')
-                try:
-                    f_idx = int(from_num) - 1
-                    t_idx = int(to_num) - 1
-                except (TypeError, ValueError):
-                    f_idx, t_idx = -1, -1
-                if 0 <= f_idx < len(slides) and 0 <= t_idx < len(slides) and f_idx != t_idx:
-                    moved = slides.pop(f_idx)
-                    slides.insert(t_idx, moved)
-                    assistant_messages.append(f'تم نقل الشريحة من الترتيب {f_idx + 1} إلى الترتيب {t_idx + 1} بنجاح.')
-                    executed.append({'tool': tool, 'status': 'success', 'from_index': f_idx, 'to_index': t_idx})
-                else:
-                    assistant_messages.append('تعذر تغيير ترتيب الشريحة؛ تحقق من أرقام الشرائح المحددة.')
-                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'invalid_indexes'})
-            elif tool in ('split_slide', 'split_dense_slide'):
-                raw_num = params.get('slide_number') or params.get('slide_index') or params.get('index')
-                try:
-                    target_num = int(raw_num)
-                except (TypeError, ValueError):
-                    target_num = current_index + 1
-                sp_idx = target_num - 1
-                if 0 <= sp_idx < len(slides):
-                    base_slide = slides[sp_idx]
-                    base_html = base_slide.get('html', '')
-                    base_title = base_slide.get('title', f'شريحة {target_num}')
+                f_idx = designer_chat_targets.slide_number(from_num, len(slides)) - 1
+                t_idx = designer_chat_targets.slide_number(to_num, len(slides)) - 1
+                if f_idx == t_idx:
+                    raise designer_chat_targets.TargetError('موضعا النقل متطابقان؛ لم يتغير العرض.')
+                moved = slides.pop(f_idx)
+                slides.insert(t_idx, moved)
+                assistant_messages.append(f'تم نقل الشريحة من الترتيب {f_idx + 1} إلى الترتيب {t_idx + 1} بنجاح.')
+                executed.append({'tool': tool, 'status': 'success', 'from_index': f_idx, 'to_index': t_idx})
+            elif tool in ('split_slide', 'split_dense_slide', 'merge_slides', 'combine_slides',
+                          'create_slide', 'create_design_slide'):
+                import designer_chat_safety
 
-                    # 1. Check if slide contains a large table
-                    table_parts = designer_chat_reliability.split_table_slide(base_html, base_title, 'auto')
-                    if table_parts and len(table_parts) >= 2:
-                        generated = []
-                        for part in table_parts:
-                            p_slide = copy.deepcopy(base_slide)
-                            p_slide['title'] = part['title']
-                            p_slide['html'] = _carry_slide_watermark(base_html, part['html'])
-                            p_slide['_designer_keep_html'] = True
-                            generated.append(p_slide)
-                        slides[sp_idx:sp_idx + 1] = generated
-                        assistant_messages.append(f'تم تقسيم جدول الشريحة رقم {target_num} إلى {len(generated)} شرائح متوازنة.')
-                        executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
-                    else:
-                        parts_param = params.get('parts')
-                        req_parts = designer_chat_reliability.split_request_parts(params.get('instruction') or message)
-                        if isinstance(parts_param, int) and parts_param >= 2:
-                            parts_count = min(parts_param, 6)
-                        elif isinstance(req_parts, int) and req_parts >= 2:
-                            parts_count = min(req_parts, 6)
-                        else:
-                            parts_count = 2
-
-                        clean_base_title = re.sub(r'\s*[-–—]\s*الجزء\s+\S+(?:\s+من\s+\S+)?\s*$', '', str(base_title or '')).strip() or f'شريحة {target_num}'
-                        part_ordinals = ['الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس']
-                        part_titles = [
-                            f"{clean_base_title} - الجزء {part_ordinals[i] if i < len(part_ordinals) else (i + 1)}"
-                            for i in range(parts_count)
-                        ]
-
-                        try:
-                            flask_app = current_app._get_current_object()
-                        except Exception:
-                            flask_app = None
-
-                        def _render_part_job(p_idx):
-                            def _do():
-                                p_title = part_titles[p_idx]
-                                p_num = p_idx + 1
-                                p_instr = (
-                                    f"هذه عملية توزيع وإعادة تصميم محتوى الشريحة على {parts_count} شرائح بتصميم فاخر وقوي بصرياً. "
-                                    f"أنشئ الشريحة ({p_title}): احتفظ فقط بالجزء {p_num} من أصل {parts_count} من عناصر وبيانات ومؤشرات الشريحة الأصلية. "
-                                    f"تعليمات المستخدم الإضافية: {params.get('instruction') or message}. "
-                                    "حافظ على فخامة التصميم، المساحات المريحة، والوضوح التام بدون أي إيموجي أو أيقونات."
-                                )
-                                out_html, r_text = _designer_edit_slide(
-                                    base_html, p_title, p_instr, sp_idx + p_idx,
-                                    project_data, presentation_id, branding,
-                                    tenant_id=tenant_id, creative_images=creative_images,
-                                    user_image_refs=user_image_refs,
-                                    slide_type=base_slide.get('type', 'content'),
-                                    total_slides=len(slides) + parts_count - 1,
-                                    content_source=base_slide.get('content_source') or base_slide.get('contentSource'),
-                                )
-                                return p_idx, p_title, out_html, r_text
-
-                            if flask_app:
-                                with flask_app.app_context():
-                                    from flask import g
-                                    g.tenant_id = tenant_id
-                                    return _do()
-                            return _do()
-
-                        part_results = []
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, parts_count)) as executor:
-                            futures = [executor.submit(_render_part_job, i) for i in range(parts_count)]
-                            for f in concurrent.futures.as_completed(futures):
-                                try:
-                                    part_results.append(f.result())
-                                except Exception as err:
-                                    print(f"[SPLIT SLIDE ERROR] {err}")
-                        part_results.sort(key=lambda item: item[0])
-
-                        if len(part_results) != parts_count or any(
-                            not designer_chat_reliability.materially_changed(base_html, res[2], res[3])
-                            for res in part_results
-                        ):
-                            card_parts = designer_chat_reliability.split_cards_or_blocks(base_html, clean_base_title, parts_count)
-                            if card_parts and len(card_parts) >= 2:
-                                generated = []
-                                for cp in card_parts:
-                                    p_slide = copy.deepcopy(base_slide)
-                                    p_slide['title'] = cp['title']
-                                    p_slide['html'] = _carry_slide_watermark(base_html, cp['html'])
-                                    p_slide['_designer_keep_html'] = True
-                                    generated.append(p_slide)
-                                slides[sp_idx:sp_idx + 1] = generated
-                                assistant_messages.append(f'تم توزيع محتوى وعناصر الشريحة رقم {target_num} إلى {len(generated)} شرائح متوازنة.')
-                                executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
-                            else:
-                                generated = []
-                                for p_idx, p_title, p_html, _ in (part_results if part_results else [(0, part_titles[0], base_html, '')]):
-                                    p_slide = copy.deepcopy(base_slide)
-                                    p_slide['title'] = p_title
-                                    p_slide['html'] = _carry_slide_watermark(base_html, p_html)
-                                    p_slide['_designer_keep_html'] = True
-                                    generated.append(p_slide)
-                                slides[sp_idx:sp_idx + 1] = generated
-                                assistant_messages.append(f'تم توزيع الشريحة رقم {target_num} على {len(generated)} شرائح.')
-                                executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
-                        else:
-                            generated = []
-                            for p_idx, p_title, p_html, _ in part_results:
-                                p_slide = copy.deepcopy(base_slide)
-                                p_slide['title'] = p_title
-                                p_slide['html'] = _carry_slide_watermark(base_html, p_html)
-                                p_slide['_designer_keep_html'] = True
-                                generated.append(p_slide)
-                            slides[sp_idx:sp_idx + 1] = generated
-                            assistant_messages.append(f'تم تقسيم الشريحة رقم {target_num} بنجاح إلى {len(generated)} شرائح متناسقة ومصممة بعناية.')
-                            executed.append({'tool': tool, 'status': 'success', 'split_index': sp_idx, 'parts': len(generated)})
-                else:
-                    assistant_messages.append(f'رقم الشريحة {target_num} غير صحيح.')
-                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'out_of_bounds'})
-            elif tool in ('merge_slides', 'combine_slides'):
-                nums = params.get('slide_numbers') or [params.get('first_slide'), params.get('second_slide')]
-                resolved_nums = []
-                if isinstance(nums, list):
-                    for n in nums:
-                        try:
-                            resolved_nums.append(int(n))
-                        except (TypeError, ValueError):
-                            pass
-                if len(resolved_nums) >= 2:
-                    idx1 = min(resolved_nums[0] - 1, resolved_nums[1] - 1)
-                    idx2 = max(resolved_nums[0] - 1, resolved_nums[1] - 1)
-                elif len(slides) >= 2:
-                    idx1 = max(0, min(len(slides) - 2, current_index))
-                    idx2 = idx1 + 1
-                else:
-                    idx1, idx2 = -1, -1
-                if 0 <= idx1 < len(slides) and 0 <= idx2 < len(slides) and idx1 != idx2:
-                    slide1 = slides[idx1]
-                    slide2 = slides[idx2]
-                    merged_title = params.get('title') or slide1.get('title', '')
-                    merge_instruction = (
-                        f"ادمج محتوى وبيانات هاتين الشريحتين في شريحة واحدة متكاملة ومنظمة بدون أي حشو. "
-                        f"محتوى الشريحة الأولى: {slide1.get('title', '')}. "
-                        f"محتوى الشريحة الثانية: {slide2.get('title', '')}. "
-                        f"تعليمات الدمج: {params.get('instruction') or message}."
+                def render_structure_slide(html, title, instruction, index, kind, total, source):
+                    return _designer_edit_slide(
+                        html, title, instruction, index, project_data, presentation_id, branding,
+                        tenant_id=tenant_id, creative_images=creative_images,
+                        user_image_refs=user_image_refs, slide_type=kind, total_slides=total,
+                        content_source=source,
                     )
-                    merged_html, r_msg = _designer_edit_slide(
-                        slide1.get('html', ''), merged_title, merge_instruction, idx1,
-                        project_data, presentation_id, branding, tenant_id=tenant_id,
-                        creative_images=creative_images, user_image_refs=user_image_refs,
-                        slide_type=slide1.get('type', 'content'), total_slides=len(slides) - 1,
-                    )
-                    slide1['html'] = merged_html
-                    slide1['title'] = merged_title
-                    slide1['_designer_keep_html'] = True
-                    slides[idx1] = slide1
-                    slides.pop(idx2)
-                    assistant_messages.append(f'تم دمج الشريحتين {idx1 + 1} و {idx2 + 1} في شريحة واحدة بنجاح.')
-                    executed.append({'tool': tool, 'status': 'success', 'merged_index': idx1, 'removed_index': idx2})
-                else:
-                    assistant_messages.append('تعذر دمج الشرائح المحددة؛ تحقق من أرقام الشرائح.')
-                    executed.append({'tool': tool, 'status': 'failed', 'reason': 'invalid_indexes'})
-            elif tool in ('create_slide', 'create_design_slide'):
-                title = params.get('title') or 'شريحة جديدة'
-                slide_type = params.get('type') or 'content'
-                plan_slide = {'title': title, 'type': slide_type, 'design_style': params.get('designStyle', 'cards'), 'bullets': []}
-                pos_raw = params.get('position') or params.get('after') or params.get('index')
-                try:
-                    pos = int(pos_raw) if pos_raw is not None else len(slides)
-                except (TypeError, ValueError):
-                    pos = len(slides)
-                pos = max(0, min(len(slides), pos))
-                html, _ = _designer_edit_slide(
-                    '<div class="slide" style="width:1280px;height:720px;"><h1>' + title + '</h1></div>',
-                    title, params.get('instruction') or message, pos, project_data,
-                    presentation_id, branding, tenant_id=tenant_id, creative_images=creative_images,
-                    user_image_refs=user_image_refs, slide_type=slide_type,
-                    total_slides=len(slides) + 1,
+
+                structural_result, structural_message = designer_chat_safety.execute_structure(
+                    tool, params, slides, message, edit_slide=render_structure_slide,
+                    reliability=designer_chat_reliability, carry_watermark=_carry_slide_watermark,
+                    progress=report_designer_progress,
                 )
-                new_slide = {'html': html, 'title': title, 'type': slide_type, 'designStyle': plan_slide['design_style'], 'bullets': [], 'metrics': [], '_designer_keep_html': True}
-                slides.insert(pos, new_slide)
-                executed.append({'tool': tool, 'status': 'success', 'index': pos})
-                assistant_messages.append(f'تمت إضافة الشريحة الجديدة «{title}» في الموضع {pos + 1}.')
+                executed.append(structural_result)
+                assistant_messages.append(structural_message)
             elif tool in ('regenerate_maps', 'update_map_style', 'change_map_type'):
                 maptype = params.get('maptype') or params.get('style') or 'roadmap'
                 executed.append({'tool': tool, 'status': 'deferred', 'maptype': maptype})
@@ -6982,26 +6722,25 @@ def api_designer_chat():
             else:
                 executed.append({'tool': tool, 'status': 'skipped', 'message': 'أداة غير معروفة'})
 
-        # Auto-heal any multi-slide containers or unpackable fragments into distinct slides
-        try:
-            slides = designer_chat_reliability._auto_heal_workspace_slides(slides, globals())
-        except Exception:
-            pass
-
-        slides = slide_engine.renumber_presentation_slides(
-            slides, branding=branding, project_data=project_data, tenant_id=tenant_id,
-            allow_all_maps=True, creative_images=creative_images,
+        failed_actions = [item for item in executed if item.get('status') in ('failed', 'rejected', 'deferred', 'skipped', 'noop')]
+        structural_failure = any(item.get('tool') in designer_chat_targets.STRUCTURAL_TOOLS for item in failed_actions)
+        partial_batch_failure = any(
+            item.get('tool') in designer_chat_targets.EDIT_TOOLS
+            and len(item.get('requested_indexes') or []) > 1
+            and len(item.get('indexes') or []) != len(item.get('requested_indexes') or [])
+            for item in failed_actions
         )
+        if failed_actions and (structural_failure or partial_batch_failure or len(actions) > 1):
+            return jsonify({'success': False, 'error': 'لم يُطبق الطلب لأن إحدى عملياته لم تنجح. ' + ' '.join(dict.fromkeys(assistant_messages)),
+                            'error_code': 'DESIGNER_ATOMIC_EDIT_FAILED', 'actions': executed, 'slidesData': slides_before}), 422
+        structural_change = any(item.get('tool') in designer_chat_targets.STRUCTURAL_TOOLS
+                                and item.get('status') == 'success' for item in executed)
+        if structural_change:
+            slides = slide_engine.renumber_presentation_slides(
+                slides, branding=branding, project_data=project_data, tenant_id=tenant_id,
+                allow_all_maps=True, creative_images=creative_images, preserve_html=True,
+            )
         validation = _validate_workspace_data({'slidesData': slides})
-        if not validation['valid']:
-            try:
-                healed_slides = designer_chat_reliability._auto_heal_workspace_slides(slides, globals())
-                healed_val = _validate_workspace_data({'slidesData': healed_slides})
-                if healed_val['valid']:
-                    slides = healed_slides
-                    validation = healed_val
-            except Exception:
-                pass
         if not validation['valid']:
             return jsonify({'success': False, 'error': 'تم رفض التعديل لأن العرض يحتوي على شرائح غير صالحة', 'validation': validation}), 422
         slide_changes = change_tracking.describe_slide_changes(slides_before, slides)
@@ -7016,7 +6755,7 @@ def api_designer_chat():
         )
         failure_reason = None
         if successful_execution:
-            response_text = plan.get('response') or 'تم تنفيذ طلبك على العرض بالكامل.'
+            response_text = 'تم تطبيق التعديل المطلوب.'
             if assistant_messages:
                 response_text += ' ' + ' '.join(dict.fromkeys(assistant_messages))
         else:
@@ -7066,6 +6805,8 @@ def api_designer_chat():
         if failure_reason:
             response_data['failureReason'] = failure_reason
         return jsonify({'success': True, 'data': response_data})
+    except designer_chat_targets.TargetError as exc:
+        return jsonify({'success': False, 'error': str(exc), 'error_code': 'DESIGNER_INVALID_TARGET'}), 422
     except Exception as exc:
         print(f'[DESIGNER-CHAT ERROR] {exc}')
         return jsonify({'success': False, 'error': str(exc)}), 500

@@ -25054,8 +25054,9 @@
         // slide root would render as broken cards, and a shorter deck without a delete
         // request means slides were lost. Neither is applied quietly.
         const incoming = reply.slidesData.filter(item => item && typeof item.html === 'string' && containsSlideRoot(item.html));
-        const deleteIntent = /حذف|احذف|امسح|شيل|إزالة|ازالة/.test(String(message || '') + ' ' + String(reply.response || ''));
-        if (!incoming.length) {
+        const deleteIntent = Array.isArray(reply.actions) && reply.actions.some(action =>
+          action?.status === 'success' && ['delete_slide', 'remove_slide', 'merge_slides', 'combine_slides'].includes(action.tool));
+        if (!incoming.length || incoming.length !== reply.slidesData.length) {
           tenantDesignerMessages.push({
             role: 'assistant',
             content: 'تعذر تنفيذ الطلب. لم يتم تغيير العرض.',
@@ -25096,7 +25097,7 @@
         });
       }
       tenantProjectData.designerChat = designerChatPersistence();
-      renumberTenantSlides();
+      if (!Array.isArray(reply.slidesData)) renumberTenantSlides();
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       renderTenantSlides();
       renderTenantDesignerChat();

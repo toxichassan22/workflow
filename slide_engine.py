@@ -10555,6 +10555,151 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     return html
 
 
+def _designer_preserves_html(item):
+    html = str(item.get('html') or '')
+    return bool(
+        item.get('_designer_keep_html') or item.get('is_custom')
+        or item.get('keep_html') or item.get('custom_html')
+        or 'data-visual-media-caption="1"' in html
+    )
+
+
+def _rewrite_preserved_counter(html, slide_type, slide_num, total_slides):
+    """Change numeric text only, retaining nested counter markup and its styles."""
+    counter = _slide_counter_text(slide_num, total_slides)
+    if not counter or not html:
+        return html
+    opening = re.compile(r'<(?P<tag>[a-z][\w:-]*)\b[^>]*\bdata-slide-counter\s*=\s*["\'][^"\']*["\'][^>]*>', re.IGNORECASE)
+    matches = list(opening.finditer(html))
+    if not matches:
+        # Upgrade only an existing legacy footer/divider, never create chrome.
+        return _rewrite_slide_counter(html, slide_type, slide_num, total_slides)
+    for match in reversed(matches):
+        end = _slide_element_end(html, match)
+        close = html.rfind('</', match.end(), end)
+        if close < match.end():
+            continue
+        body = html[match.end():close]
+        text = re.sub(r'<[^>]*>', '', body).strip()
+        if not re.fullmatch(r'\d+(?:\s*[—–/\-]\s*\d+)?', text):
+            continue
+        values = iter(counter.split(' — ') if re.search(r'[—–/\-]', text) else [counter])
+        parts = re.split(r'(<[^>]*>)', body)
+        for i in range(0, len(parts), 2):
+            parts[i] = re.sub(r'\d+', lambda m: next(values, m.group(0)), parts[i])
+        html = html[:match.end()] + ''.join(parts) + html[close:]
+    return html
+
+
+def _refresh_preserved_index(html, entries, branding=None, project_data=None):
+    """Synchronize managed rows, not the index canvas or surrounding custom content."""
+    row_re = re.compile(r'<(?P<tag>[a-z][\w:-]*)\b[^>]*\bdata-index-section\s*=\s*["\'](?P<key>[^"\']+)["\'][^>]*>', re.IGNORECASE)
+    rows = [(m, _slide_element_end(html, m)) for m in row_re.finditer(html)]
+    by_key = {m.group('key'): html[m.start():end] for m, end in rows}
+    entries = [e for e in (entries or []) if isinstance(e, dict)]
+    if rows:
+        # New sections need new managed rows. Existing rows travel verbatim with
+        # their section when it moves; deleted sections leave no stale index row.
+        canonical = build_index_slide({'index_entries': entries}, 1, 1, branding, project_data)
+        fallback = {m.group('key'): canonical[m.start():_slide_element_end(canonical, m)]
+                    for m in row_re.finditer(canonical)}
+        ordered = [by_key.get(e['section_key'], fallback.get(e['section_key'], '')) for e in entries]
+        for i in range(len(rows) - 1, -1, -1):
+            match, end = rows[i]
+            replacement = (''.join(ordered[i:]) if i == len(rows) - 1
+                           else ordered[i] if i < len(ordered) else '')
+            html = html[:match.start()] + replacement + html[end:]
+    pages = {str(e.get('section_key')): e.get('page') for e in entries}
+    page_re = re.compile(r'(<(?P<tag>[a-z][\w:-]*)\b[^>]*\bdata-index-page\s*=\s*["\'](?P<key>[^"\']+)["\'][^>]*>)(?P<body>[^<]*)(</(?P=tag)\s*>)', re.IGNORECASE)
+
+    def update_page(match):
+        page = pages.get(match.group('key'))
+        if page is None:
+            return match.group(0)
+        body = re.sub(r'\d+', f'{int(page):02d}', match.group('body'), count=1)
+        return match.group(1) + body + match.group(5)
+
+    return page_re.sub(update_page, html)
+
+
+def finalize_designer_slide_html(html, slide_type, project_data, branding, creative_images=None,
+                                 map_placeholders=None, tenant_id=None, slide_num=None, slide_title=None,
+                                 total_slides=None, content_source=None, allow_all_maps=False):
+    """Finalize a designer edit without regenerating its content or visual design.
+
+    Safety and company/project logo compliance remain mandatory. Only logo
+    images may receive policy backing/sizing; user surfaces, tables, numbers,
+    media ownership and existing chrome are never normalized here. Save/export
+    numbering must use the preservation branch, not call this helper again.
+    """
+    if not html:
+        return html
+    project_data = project_data or {}
+    branding = branding or {}
+    html = _strip_presentation_icons(_block_external_images(html))
+    if map_placeholders:
+        html = _replace_map_placeholders(html, map_placeholders)
+    # Resolve only tokens already present. The generation resolver can otherwise
+    # insert a cover, a moodboard or competitor logos that the user removed.
+    html = IMAGE_TOKEN_RE.sub(
+        lambda m: m.group(0) if 'LOGO' in m.group(0).upper() and m.group(0).upper() in ('##LOGO##', '##PROJECT_LOGO##')
+        else _replace_creative_image_placeholders(m.group(0), creative_images or {}, 'content'), html)
+    project_logo = _project_logo_reference(project_data)
+    company_logo = resolve_logo_in_html('##LOGO##', tenant_id, _branding_cache=branding)
+    company_sources = {company_logo, branding.get('logo_path'), branding.get('logo'), branding.get('logo_url'), '/assets/logo.png'}
+    found = set()
+    hero = slide_type in ('cover', 'closing', 'section_divider')
+    size = 80 if hero else 40 if slide_type == 'moodboard' else 48
+    dark = dark_surface_color(branding.get('primary_color'), branding.get('secondary_color'))
+
+    def compliant_logo(match):
+        tag = match.group(0)
+        src_match = re.search(r'\bsrc\s*=\s*(["\'])(.*?)\1', tag, re.IGNORECASE)
+        if not src_match:
+            return tag
+        src = html_lib.unescape(src_match.group(2))
+        if src == '##PROJECT_LOGO##' or (project_logo and src == project_logo):
+            role, url, tone = 'project', project_logo, project_data.get('_project_logo_tone')
+        elif src == '##LOGO##' or src in company_sources:
+            role, url, tone = 'company', company_logo, project_data.get('_company_logo_tone') or branding.get('_logo_tone')
+        else:
+            return tag
+        if not url:
+            return ''
+        found.add(role)
+        tag = tag[:src_match.start(2)] + html_lib.escape(url, quote=True) + tag[src_match.end(2):]
+        background = dark if str(tone).lower() == 'light' else '#ffffff'
+        return _set_tag_style(tag, ('height', 'max-height', 'background', 'background-color', 'padding', 'border-radius', 'box-sizing', 'object-fit'),
+                              f'height:{size}px!important;max-height:{size}px!important;background:{background}!important;'
+                              'padding:4px 10px!important;border-radius:8px!important;box-sizing:border-box!important;object-fit:contain!important;')
+
+    html = re.sub(r'<img\b[^>]*>', compliant_logo, html, flags=re.IGNORECASE)
+    missing = ''.join(f'<img src="{token}" alt="">' for role, token in
+                      [('company', '##LOGO##'), ('project', '##PROJECT_LOGO##')]
+                      if role not in found and (role == 'company' or project_logo))
+    if missing:
+        missing = re.sub(r'<img\b[^>]*>', compliant_logo, missing)
+        overlay = ('<div data-designer-managed-logos="1" style="position:absolute;top:8px;left:24px;'
+                   'display:flex;gap:10px;z-index:10;">' + missing + '</div>')
+        html = re.sub(r'(<div\b[^>]*\bclass\s*=\s*["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>)',
+                      lambda m: m.group(0) + overlay, html, count=1, flags=re.IGNORECASE)
+    html = _rewrite_preserved_counter(html, slide_type, slide_num, total_slides)
+    # Existing header/footer markup is authoritative. Mark it without repainting.
+    for tag, marker in [('header', 'data-slide-header'), ('footer', 'data-slide-footer')]:
+        html = re.sub(rf'<{tag}\b[^>]*>', lambda m: _with_data_attribute(m.group(0), marker), html, flags=re.IGNORECASE)
+    if slide_type not in ('cover', 'closing', 'moodboard') and not re.search(r'\bdata-slide-counter\s*=', html, re.IGNORECASE):
+        counter = _slide_counter_text(slide_num, total_slides)
+        if counter:
+            counter_html = '<span data-slide-counter="1" dir="ltr">' + counter + '</span>'
+            if re.search(r'</footer\s*>', html, re.IGNORECASE):
+                html = re.sub(r'</footer\s*>', lambda m: counter_html + m.group(0), html, count=1, flags=re.IGNORECASE)
+            else:
+                footer = ('<footer data-slide-footer="1" style="position:absolute;bottom:8px;left:24px;">'
+                          + counter_html + '</footer>')
+                html = re.sub(r'(</div>\s*)$', lambda m: footer + m.group(0), html, count=1, flags=re.IGNORECASE)
+    return _drop_unresolved_image_placeholders(html)
+
+
 def finalize_slide_html(html, slide_type, project_data, branding, creative_images=None,
                         map_placeholders=None, tenant_id=None, slide_num=None, slide_title=None,
                         total_slides=None, content_source=None, allow_all_maps=False):
@@ -10686,7 +10831,12 @@ def _normalize_watermark_ink(html):
 
 
 def renumber_presentation_slides(slides, branding=None, project_data=None, tenant_id=None,
-                                 allow_all_maps=False, creative_images=None):
+                                 allow_all_maps=False, creative_images=None, preserve_html=False):
+    """Renumber a deck; designer/structural edits retain HTML across later saves.
+
+    ``preserve_html`` marks every source slide, not just the edited selection.
+    Generation's legacy migrations remain the default for unmarked slides.
+    """
     source = slides if isinstance(slides, list) else []
     total = len(source)
     if not total:
@@ -10733,6 +10883,17 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     current_section = ''
     for index, raw in enumerate(source):
         item = dict(raw) if isinstance(raw, dict) else {'html': str(raw or '')}
+        if preserve_html or _designer_preserves_html(item):
+            item['_designer_keep_html'] = True
+            item['is_custom'] = True
+            item['html'] = _normalize_watermark_ink(str(item.get('html') or ''))
+            item.setdefault('type', 'content')
+            section_key = _slide_section_key(item, current_section)
+            item.setdefault('section_key', section_key)
+            if item.get('type') == 'section_divider':
+                current_section = section_key
+            normalized.append(item)
+            continue
         if item.get('html'):
             item['html'] = _normalize_watermark_ink(item['html'])
         slide_type = str(item.get('type') or '').strip().lower()
@@ -10771,6 +10932,12 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     refresh_index_entries({'slides': normalized})
     for index, item in enumerate(normalized, 1):
         slide_type = str(item.get('type') or 'content')
+        if _designer_preserves_html(item):
+            html = _rewrite_preserved_counter(item.get('html') or '', slide_type, index, total)
+            if slide_type == 'index':
+                html = _refresh_preserved_index(html, item.get('index_entries'), branding, project_data)
+            item['html'] = _strip_presentation_icons(html)
+            continue
         # A designer-chat edit, user edit, or custom slide produced this HTML
         # (for example description bars added to visual slides, custom cards, or layouts).
         # Rebuilding from the canonical template would discard those edits.
