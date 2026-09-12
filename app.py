@@ -6552,7 +6552,37 @@ def api_designer_chat():
                 'chatHistory': chat_messages[-DESIGNER_CHAT_STORED_TURNS * 2:], 'saved': False,
             }})
 
-        actions = designer_chat_targets.prepare_actions(actions, data, message, slides, current_index)
+        try:
+            actions = designer_chat_targets.prepare_actions(actions, data, message, slides, current_index)
+        except designer_chat_targets.TargetError as _plan_scope_err:
+            # The planner named slides outside the explicit request (e.g. it followed an older
+            # focus instead of «شريحة 13»). For a supported table row/column delete the message
+            # itself already resolves the targets, and the executor below applies the edit
+            # deterministically — so fall back to those slides instead of failing the turn
+            # with «خطة التعديل لا تطابق الشرائح المحددة» and changing nothing.
+            _scope_probe = designer_chat_reliability.detect_table_edit_request(message)
+            _scope_fallback = None
+            if _scope_probe.get('supported') and _scope_probe.get('operation') == 'delete':
+                try:
+                    _scope_indexes = _resolve_deterministic_table_targets(
+                        message, data, slides, current_index, is_all_slides_request)
+                    if _scope_indexes:
+                        _scope_fallback = [{
+                            'tool': 'edit_slides',
+                            'params': {
+                                'target': 'indexes',
+                                'indexes': [_i + 1 for _i in _scope_indexes],
+                                'instruction': message,
+                            },
+                        }]
+                        print(f"[DESIGNER-CHAT] planner scope rejected ({_plan_scope_err}); "
+                              f"falling back to message-resolved slides {[_i + 1 for _i in _scope_indexes]}")
+                except Exception as _scope_resolve_err:
+                    print(f"[DESIGNER-CHAT] scope fallback resolve failed: {_scope_resolve_err}")
+                    _scope_fallback = None
+            if _scope_fallback is None:
+                raise
+            actions = _scope_fallback
         original_slide_objects = list(slides)
         executed = []
         assistant_messages = []

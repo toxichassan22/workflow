@@ -806,7 +806,11 @@ class _TableSourceParser(HTMLParser):
 
 
 def _table_node_text(node: Dict[str, Any]) -> str:
-    return _normalize_table_edit_text("".join(node["text"]))
+    # Text chunks split only by inline markup (<br>, <span>, <b>, ...) must not glue
+    # together: «نقطة التسمية<br>المقياس» is one header reading «نقطة التسمية المقياس»,
+    # not «نقطة التسميةالمقياس». Joining with a space keeps exact-name matching working
+    # for multi-line headers; the normalizer collapses any surplus whitespace.
+    return _normalize_table_edit_text(" ".join(node["text"]))
 
 
 def _table_edit_info(table: Dict[str, Any], source: str) -> Dict[str, Any]:
@@ -1440,9 +1444,17 @@ def install(app, namespace: Dict[str, Any]) -> None:
         from flask import request
 
         payload = request.get_json(silent=True) or {}
+        # Snapshot BEFORE the inner handler runs: api_designer_chat edits the very same
+        # slidesData list/dicts in place (request.get_json is cached per request), so reading
+        # "before" afterwards always equals "after" and every genuine edit was downgraded to
+        # «لم يتم تأكيد تغيير فعلي» while the client discarded the correct slidesData.
+        pristine_slides = copy.deepcopy(payload.get("slidesData")) if isinstance(payload.get("slidesData"), list) else []
+        result = original()
+        verify_payload = dict(payload)
+        verify_payload["slidesData"] = pristine_slides
         # Language interpretation belongs to the contextual planner. Deterministic
         # rendering remains available after it chooses an operation and its scope.
-        return _verify_original_result(original(), payload, namespace)
+        return _verify_original_result(result, verify_payload, namespace)
 
     secured_designer_chat = require_auth(reliable_designer_chat)
     app.view_functions["api_designer_chat"] = secured_designer_chat
