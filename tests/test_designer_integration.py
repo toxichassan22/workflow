@@ -51,6 +51,27 @@ class DesignerIntegrationTests(unittest.TestCase):
         # so a large deck never hits the planner token cap (402) for this operation.
         self.assertEqual(model.call_count, 0)
 
+    def test_blocked_table_delete_goes_slim_without_full_deck(self):
+        slides = self.slides()
+        prompts = []
+        def provider(prompt, instruction, **kwargs):
+            prompts.append(prompt)
+            content = {'response': 'سؤال', 'actions': [{'tool': 'ask', 'params': {'question': 'أي عمود تقصد؟'}}]}
+            return {'choices': [{'message': {'content': json.dumps(content)}}]}
+        with patch.object(self.module, 'call_zai_chat', side_effect=provider) as model:
+            response = self.module.app.test_client().post('/api/designer-chat', headers={'Authorization': 'Bearer ' + self.token},
+                json={'message': 'احذف عمود مجهول في الشريحة 2', 'slidesData': slides, 'projectData': {'project_name': 'Test'}})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['data']['action'], 'ask')
+        # One slim planner call only: the full unabridged deck prompt is skipped because the
+        # local precheck already named the blocker (unknown column header).
+        self.assertEqual(model.call_count, 1)
+        self.assertEqual(len(prompts), 1)
+        # The slim prompt carries the target slide only: slide 1 HTML body stays out,
+        # while the available headers note names the real column.
+        self.assertNotIn('#abcdef', prompts[0])
+        self.assertIn('السعر', prompts[0])
+
     def test_color_edit_preserves_text_numbers_and_other_slide(self):
         slides = self.slides()
         response, model = self.call([{'tool': 'edit_slides', 'params': {'indexes': [2], 'instruction': 'استبدل اللون #112233 باللون #445566'}}], slides, 'استبدل اللون #112233 باللون #445566 في الشريحة 2')

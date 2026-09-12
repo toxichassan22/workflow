@@ -5499,6 +5499,66 @@ def _build_designer_slim_planner_prompt(branding, training_note, watermark_note,
 {memory_note}{history_note}{focus_note}{explicit_scope_note}"""
 
 
+_TABLE_PRECHECK_ARABIC_REASONS = {
+    'column_name_not_found': 'اسم العمود غير موجود في ترويسة الجدول',
+    'row_name_not_found': 'اسم الصف غير موجود في الجدول',
+    'column_number_out_of_range': 'رقم العمود خارج الجدول',
+    'row_number_out_of_range': 'رقم الصف خارج الجدول',
+    'table_not_found': 'تعذر تحديد الجدول المقصود',
+    'ambiguous_table': 'يوجد أكثر من جدول في الشريحة وتعذر تحديد المقصود',
+    'ambiguous_table_target': 'الاسم المطلوب مكرر في أكثر من موضع',
+    'no_table_in_slide': 'لا يوجد جدول في الشريحة المستهدفة',
+    'merged_cells_unsupported': 'الجدول يحوي خلايا مدمجة والحذف الحتمي مرفوض عليها',
+    'nested_table_unsupported': 'الجدول متداخل والحذف الحتمي مرفوض عليه',
+    'malformed_table': 'بنية الجدول غير سليمة والحذف الحتمي مرفوض عليه',
+    'non_rectangular_table': 'صفوف الجدول غير متساوية الأعمدة والحذف الحتمي مرفوض عليه',
+    'column_layout_unsupported': 'الجدول يستخدم تخطيط أعمدة والحذف الحتمي مرفوض عليه',
+    'would_empty_table': 'الحذف المطلوب سيفرغ الجدول بالكامل وهو مرفوض',
+    'missing_table_target': 'لم يحدد رقم أو اسم الصف أو العمود',
+    'ambiguous_table_request': 'الطلب غامض ويحتاج توضيح الصف أو العمود',
+    'ambiguous_table_selector': 'محدد الجدول غامض',
+    'compound_table_request': 'الطلب مركب ويحتاج تنفيذه على خطوات',
+    'negated_or_conditional_request': 'الطلب منفي أو مشروط',
+    'unsupported_table_edit': 'هذا النوع من تعديل الجدول غير مدعوم حتميًا',
+}
+
+
+def _table_precheck_note(slides, indexes, message):
+    """Short Arabic note naming why the local table edit cannot apply, without any LLM call.
+
+    Used when the planner prompt itself exceeds the token cap: instead of surfacing a raw
+    402, the user learns which slide failed, why, and — for a missing column — which headers
+    actually exist so the retry can name one of them.
+    """
+    for idx in list(indexes or [])[:3]:
+        slide = slides[idx] if isinstance(slides[idx], dict) else {}
+        try:
+            res = designer_chat_reliability.apply_table_delete_request(slide.get('html', ''), message)
+        except Exception:
+            continue
+        if res.get('changed'):
+            continue
+        reason = str(res.get('reason') or 'unknown')
+        arabic = _TABLE_PRECHECK_ARABIC_REASONS.get(reason, reason)
+        suffix = ''
+        try:
+            request = res.get('request') if isinstance(res.get('request'), dict) else {}
+            if request.get('kind') == 'column':
+                headers = []
+                for match in re.finditer(r'<th\b[^>]*>(.*?)</th>', str(slide.get('html', '')),
+                                         flags=re.IGNORECASE | re.DOTALL):
+                    text = re.sub(r'<[^>]+>', ' ', html_lib.unescape(match.group(1)))
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    if text:
+                        headers.append(text)
+                if headers:
+                    suffix = '؛ الأعمدة المتاحة: ' + '، '.join(headers[:12])
+        except Exception:
+            suffix = ''
+        return f'تعذر الحذف الحتمي في الشريحة {idx + 1}: {arabic}{suffix}'
+    return ''
+
+
 def _designer_project_data_for_request(request_project_data, presentation, tenant_id):
     """Merge the presentation snapshot with its latest saved draft and current request.
 
@@ -6180,38 +6240,56 @@ def api_designer_chat():
     # prompt carries the unabridged project snapshot plus every slide HTML verbatim, which
     # exceeds the model token cap on real decks (measured 427k > 307k) and turns a local
     # surgical edit into a 402. Pre-check here: when every targeted slide deterministically
-    # applies, synthesize the edit_slides plan and skip the planner call entirely.
+    # applies, synthesize the edit_slides plan and skip the planner call entirely. When the
+    # request names a table edit but the local check cannot apply it (unknown column name,
+    # ambiguous table, merged cells, ...), skip the doomed full prompt as well and route
+    # straight to the slim planner retry — the failure note below tells the model exactly
+    # what is missing so it can ask precisely instead of erroring with a raw 402.
     deterministic_plan = None
+    slim_planner_only = False
+    slim_table_indexes = None
+    table_failure_note = ''
     table_probe = designer_chat_reliability.detect_table_edit_request(message)
-    if table_probe.get('supported') and table_probe.get('operation') == 'delete':
+    if table_probe.get('handled'):
         try:
             deterministic_indexes = _resolve_deterministic_table_targets(
                 message, data, slides, current_index, is_all_slides_request)
-            precheck_ok = bool(deterministic_indexes)
-            for _pre_idx in deterministic_indexes:
-                _pre_slide = slides[_pre_idx] if isinstance(slides[_pre_idx], dict) else {}
-                _pre_res = designer_chat_reliability.apply_table_delete_request(
-                    _pre_slide.get('html', ''), message)
-                if not _pre_res.get('changed'):
-                    precheck_ok = False
-                    break
-            if precheck_ok:
-                deterministic_plan = {
-                    'response': 'حذف حتمي من الجدول دون نموذج تخطيط.',
-                    'actions': [{
-                        'tool': 'edit_slides',
-                        'params': {
-                            'target': 'indexes',
-                            'indexes': [_i + 1 for _i in deterministic_indexes],
-                            'instruction': message,
-                        },
-                    }],
-                }
-                print(f"[DESIGNER-CHAT] deterministic table plan skips planner for slides "
-                      f"{[_i + 1 for _i in deterministic_indexes]}")
+        except designer_chat_targets.TargetError as _scope_err:
+            # An out-of-range slide number needs no LLM call at all.
+            return jsonify({'success': False, 'error': str(_scope_err),
+                            'error_code': 'DESIGNER_INVALID_TARGET'}), 422
         except Exception as _det_err:
             print(f"[DESIGNER-CHAT] deterministic table precheck failed: {_det_err}")
-            deterministic_plan = None
+            deterministic_indexes = None
+        if deterministic_indexes is not None:
+            if table_probe.get('supported') and table_probe.get('operation') == 'delete':
+                precheck_ok = bool(deterministic_indexes)
+                for _pre_idx in deterministic_indexes:
+                    _pre_slide = slides[_pre_idx] if isinstance(slides[_pre_idx], dict) else {}
+                    _pre_res = designer_chat_reliability.apply_table_delete_request(
+                        _pre_slide.get('html', ''), message)
+                    if not _pre_res.get('changed'):
+                        precheck_ok = False
+                        break
+                if precheck_ok:
+                    deterministic_plan = {
+                        'response': 'حذف حتمي من الجدول دون نموذج تخطيط.',
+                        'actions': [{
+                            'tool': 'edit_slides',
+                            'params': {
+                                'target': 'indexes',
+                                'indexes': [_i + 1 for _i in deterministic_indexes],
+                                'instruction': message,
+                            },
+                        }],
+                    }
+                    print(f"[DESIGNER-CHAT] deterministic table plan skips planner for slides "
+                          f"{[_i + 1 for _i in deterministic_indexes]}")
+                else:
+                    table_failure_note = _table_precheck_note(slides, deterministic_indexes, message)
+                    slim_table_indexes = list(deterministic_indexes)
+                    print(f"[DESIGNER-CHAT] table precheck blocked, using slim planner: {table_failure_note[:300]}")
+                    slim_planner_only = True
     if deterministic_plan is not None:
         plan = deterministic_plan
         actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
@@ -6231,6 +6309,29 @@ def api_designer_chat():
     user_image_refs = [{'data_uri': attached_image}] if attached_image.startswith('data:image/') else None
     if deterministic_plan is not None:
         pass
+    elif slim_planner_only:
+        # The full prompt is already doomed on this deck (or the local check already named
+        # the exact blocker), so go slim directly: target slides only plus brief facts and
+        # the deterministic failure note. The planner can then ask precisely — or, if the
+        # retry still exceeds the cap, the caller returns the note instead of a raw 402.
+        _slim_snippets = []
+        for _s_idx in (slim_table_indexes or [])[:3]:
+            _s = slides[_s_idx] if isinstance(slides[_s_idx], dict) else {}
+            _slim_snippets.append(
+                f"### شريحة {_s_idx + 1}: {str(_s.get('title', ''))[:200]}\n"
+                f"{str(_s.get('html', ''))[:20000]}")
+        try:
+            _slim_brief = slide_engine.build_project_facts(project_data, tenant_id)
+        except Exception:
+            _slim_brief = ''
+        if table_failure_note:
+            _slim_brief = (str(_slim_brief or '') + "\n\n## نتيجة الفحص الحتمي للجدول (لا تعيد اختراعها)\n"
+                           + table_failure_note)[:42000]
+        planner_prompt = _build_designer_slim_planner_prompt(
+            branding, training_note, watermark_note, summary,
+            _slim_snippets, _slim_brief, all_note, memory_note,
+            history_note, focus_note, explicit_scope_note)
+        print(f"[DESIGNER-CHAT] table-blocked prompt goes slim directly ({len(planner_prompt)} chars)")
     else:
         planner_prompt = f"""{build_design_rules(branding)}{training_note}
 
@@ -6323,6 +6424,13 @@ def api_designer_chat():
                 if not _is_designer_prompt_token_error(_planner_exc):
                     raise
                 print(f"[DESIGNER-CHAT] planner prompt exceeded token cap ({len(planner_prompt)} chars): {_planner_exc}")
+                if slim_planner_only:
+                    # Already slim and still over the cap: surface the deterministic
+                    # diagnosis instead of a raw provider 402.
+                    _detail = f' {table_failure_note}' if table_failure_note else ''
+                    return jsonify({'success': False,
+                                    'error': f'تعذر تنفيذ الطلب ضمن حد التوكنز الحالي.{_detail}',
+                                    'error_code': 'DESIGNER_PROMPT_TOO_LARGE'}), 402
                 # A supported table delete never needs a second LLM attempt: the local
                 # surgical edit below applies it without any prompt tokens.
                 _retry_probe = designer_chat_reliability.detect_table_edit_request(message)
@@ -6388,12 +6496,11 @@ def api_designer_chat():
                             'DESIGNER-PLANNER')
                     except Exception as _slim_exc:
                         if _is_designer_prompt_token_error(_slim_exc):
+                            _detail = f' {table_failure_note}' if table_failure_note else ''
                             return jsonify({'success': False,
-                                            'error': 'العرض كبير جدًا على حد التوكنز الحالي؛ حدّد شريحة واحدة برقمها وأعد المحاولة.',
+                                            'error': f'العرض كبير جدًا على حد التوكنز الحالي؛ حدّد شريحة واحدة برقمها وأعد المحاولة.{_detail}',
                                             'error_code': 'DESIGNER_PROMPT_TOO_LARGE'}), 402
                         raise
-            else:
-                planner_raw = planner_raw
             plan = _designer_json_response(planner_raw)
             actions = plan.get('actions', []) if isinstance(plan.get('actions'), list) else []
 
