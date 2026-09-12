@@ -10821,7 +10821,10 @@
       if (!host) return;
       const choices = (options || []).map(String);
       const selectedValues = Array.isArray(selected) ? selected.map(String) : [];
-      const signature = JSON.stringify({ choices, selectedValues, placeholder, closeAfterSelection });
+      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+      const trVal = (val) => (isEn && typeof WFI18N_EN_AUTO !== 'undefined' && WFI18N_EN_AUTO[val]) ? WFI18N_EN_AUTO[val] : val;
+      const formatSummary = (vals) => vals.length ? (isEn ? vals.map(trVal).join(', ') : vals.join('، ')) : trVal(placeholder);
+      const signature = JSON.stringify({ choices, selectedValues, placeholder, closeAfterSelection, lang: isEn ? 'en' : 'ar' });
       const existing = host.querySelector('details.project-multi-select');
       if (existing && host.dataset.multiSelectSignature === signature) return;
       const keepOpen = existing?.open === true;
@@ -10830,17 +10833,17 @@
       host.innerHTML = '<details class="project-multi-select"><summary></summary><div class="project-multi-select-menu">' +
         choices.map(value => '<button type="button" class="project-multi-select-option' +
           (picked.has(value) ? ' selected' : '') + '" data-value="' + escapeHtml(value) + '">' +
-          escapeHtml(value) + '</button>').join('') + '</div></details>';
+          escapeHtml(trVal(value)) + '</button>').join('') + '</div></details>';
       const details = host.querySelector('details');
       const summary = host.querySelector('summary');
       const update = () => {
         const next = choices.filter(value => picked.has(value));
-        if (summary) summary.textContent = next.length ? next.join('، ') : placeholder;
-        host.dataset.multiSelectSignature = JSON.stringify({ choices, selectedValues: next, placeholder, closeAfterSelection });
+        if (summary) summary.textContent = formatSummary(next);
+        host.dataset.multiSelectSignature = JSON.stringify({ choices, selectedValues: next, placeholder, closeAfterSelection, lang: isEn ? 'en' : 'ar' });
         if (closeAfterSelection && details) details.open = false;
         if (typeof onChange === 'function') onChange(next);
       };
-      if (summary) summary.textContent = selectedValues.length ? selectedValues.join('، ') : placeholder;
+      if (summary) summary.textContent = formatSummary(selectedValues);
       host.querySelectorAll('.project-multi-select-option').forEach(button => {
         button.addEventListener('click', () => {
           const value = button.dataset.value || '';
@@ -10970,14 +10973,18 @@
         host.dataset.subtypeSignature = '';
         return;
       }
+      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+      const trVal = (val) => (isEn && typeof WFI18N_EN_AUTO !== 'undefined' && WFI18N_EN_AUTO[val]) ? WFI18N_EN_AUTO[val] : val;
       const showSubtypeLabels = groups.length > 1;
-      const signature = JSON.stringify(groups.map(group => group.main));
+      const signature = JSON.stringify({ groups: groups.map(group => group.main), lang: isEn ? 'en' : 'ar' });
       if (host.dataset.subtypeSignature !== signature) {
         host.dataset.subtypeSignature = signature;
-        host.innerHTML = groups.map((group, index) =>
-          '<div style="margin-top:10px"><label>' + (showSubtypeLabels ? (MARKET_SUBTYPE_LABELS[group.main] || ('الأنواع الفرعية ل' + group.main)) : '') +
-          '</label><div data-subtype-group-index="' + index + '"></div></div>'
-        ).join('');
+        host.innerHTML = groups.map((group, index) => {
+          const rawLbl = MARKET_SUBTYPE_LABELS[group.main] || ('الأنواع الفرعية ل' + group.main);
+          const lbl = isEn ? (WFI18N_EN_AUTO[rawLbl] || (trVal(group.main) + ' Subtypes')) : rawLbl;
+          return '<div style="margin-top:10px"><label>' + (showSubtypeLabels ? lbl : '') +
+            '</label><div data-subtype-group-index="' + index + '"></div></div>';
+        }).join('');
       }
       groups.forEach((group, index) => {
         const groupHost = host.querySelector('[data-subtype-group-index="' + index + '"]');
@@ -11085,12 +11092,15 @@
       if (Object.keys(normalized).length && JSON.stringify(current) !== JSON.stringify(normalized)) {
         persistGroupedChoiceValue(hidden, normalized, false);
       }
-      const signature = JSON.stringify(groups.map(group => group.key));
+      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+      const trVal = (val) => (isEn && typeof WFI18N_EN_AUTO !== 'undefined' && WFI18N_EN_AUTO[val]) ? WFI18N_EN_AUTO[val] : val;
+      const signature = JSON.stringify({ groups: groups.map(group => group.key), lang: isEn ? 'en' : 'ar' });
       if (host.dataset.audienceSignature !== signature) {
         host.dataset.audienceSignature = signature;
         host.innerHTML = groups.map((group, index) => {
-          const subtypeText = group.subtypes.length ? ' (' + group.subtypes.join('، ') + ')' : '';
-          const label = MARKET_AUDIENCE_LABELS[group.kind] || ('الفئة المستهدفة ل' + group.kind);
+          const subtypeText = group.subtypes.length ? (' (' + (isEn ? group.subtypes.map(trVal).join(', ') : group.subtypes.join('، ')) + ')') : '';
+          const rawLabel = MARKET_AUDIENCE_LABELS[group.kind] || ('الفئة المستهدفة ل' + group.kind);
+          const label = isEn ? (WFI18N_EN_AUTO[rawLabel] || (trVal(group.kind) + ' Target Audience')) : rawLabel;
           return '<div style="margin-top:10px"><label>' + label + subtypeText +
             '</label><div data-audience-group-index="' + index + '"></div></div>';
         }).join('');
@@ -11145,10 +11155,12 @@
       const host = document.getElementById('projectActivityClassFields');
       const groups = classificationGroupsForProject(mains, isOther, kinds);
       classInput.style.display = 'none';
+      const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+      const trVal = (val) => (isEn && typeof WFI18N_EN_AUTO !== 'undefined' && WFI18N_EN_AUTO[val]) ? WFI18N_EN_AUTO[val] : val;
       if (wrap) {
         wrap.style.display = groups.length ? '' : 'none';
         const fieldLabel = wrap.querySelector(':scope > label');
-        if (fieldLabel) fieldLabel.textContent = 'تصنيف النشاط';
+        if (fieldLabel) fieldLabel.textContent = trVal('تصنيف النشاط');
       }
       if (!host) return;
       const stored = parseStoredLandTable(classInput.value || tenantProjectData.activity_class || tenantProjectData.project_level);
@@ -11159,12 +11171,14 @@
         const specialized = MARKET_ACTIVITY_CLASS[kind] || MARKET_ACTIVITY_CLASS[marketAudienceKind(kind)];
         const options = specialized || MARKET_PROJECT_LEVELS;
         const selected = current[kind] || (groups.length === 1 ? (current.value || '') : '');
-        const selectOptions = '<option value="">-- اختر القيمة --</option>' + options.map(option =>
+        const selectOptions = '<option value="">' + trVal('-- اختر القيمة --') + '</option>' + options.map(option =>
           '<option value="' + String(option).replace(/"/g, '&quot;') + '"' +
-          (option === selected ? ' selected' : '') + '>' + option + '</option>'
+          (option === selected ? ' selected' : '') + '>' + trVal(option) + '</option>'
         ).join('');
+        const rawHint = MARKET_ACTIVITY_CLASS_LABELS[kind] || MARKET_ACTIVITY_CLASS_LABELS[marketAudienceKind(kind)] || kind;
+        const hint = isEn ? (WFI18N_EN_AUTO[rawHint] || trVal(rawHint)) : rawHint;
         return groups.length > 1
-          ? '<div style="margin-top:10px"><div class="tenant-hint" style="margin-bottom:6px">' + (MARKET_ACTIVITY_CLASS_LABELS[kind] || MARKET_ACTIVITY_CLASS_LABELS[marketAudienceKind(kind)] || kind) +
+          ? '<div style="margin-top:10px"><div class="tenant-hint" style="margin-bottom:6px">' + hint +
           '</div><select data-activity-kind="' + kind + '">' + selectOptions + '</select></div>'
           : '<select data-activity-kind="' + kind + '">' + selectOptions + '</select>';
       }).join('');
@@ -11242,6 +11256,12 @@
             syncMarketLocationMirrors();
           });
       });
+      if (!window.__wfClassificationLangBound) {
+        window.__wfClassificationLangBound = true;
+        document.addEventListener('wf:lang', () => {
+          try { syncProjectClassificationFields(); } catch (e) { /* ignore */ }
+        });
+      }
       syncProjectClassificationFields();
     }
 
@@ -15112,9 +15132,13 @@
             }
             if (!Array.isArray(opts)) opts = [];
 
+            const isEn = typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang() === 'en';
+            const trVal = (val) => (isEn && typeof WFI18N_EN_AUTO !== 'undefined' && WFI18N_EN_AUTO[val]) ? WFI18N_EN_AUTO[val] : val;
+
             const placeholderOpt = document.createElement('option');
             placeholderOpt.value = '';
-            placeholderOpt.textContent = '-- اختر القيمة --';
+            placeholderOpt.textContent = trVal('-- اختر القيمة --');
+            placeholderOpt.dataset.arText = '-- اختر القيمة --';
             input.appendChild(placeholderOpt);
 
             opts.forEach(opt => {
@@ -15123,13 +15147,15 @@
                 subOpts.forEach(o => {
                   const option = document.createElement('option');
                   option.value = o;
-                  option.textContent = o;
+                  option.textContent = trVal(o);
+                  option.dataset.arText = o;
                   input.appendChild(option);
                 });
               } else if (opt !== null && opt !== undefined) {
                 const option = document.createElement('option');
                 option.value = String(opt);
-                option.textContent = String(opt);
+                option.textContent = trVal(String(opt));
+                option.dataset.arText = String(opt);
                 input.appendChild(option);
               }
             });
@@ -18041,7 +18067,8 @@
             try {
               const presTitle = savedPresentationTitle
                 || snapshot.project_name || snapshot.projectName || 'عرض بدون عنوان';
-              await commitTenantPresentation(snapshot, savedPresentationId, presTitle);
+              const presResp = await commitTenantPresentation(snapshot, savedPresentationId, presTitle, { silent });
+              if (!presResp?.success) throw new Error(presResp?.error || 'تعذر حفظ العرض');
             } catch (presErr) {
               console.error('[PRESENTATION SAVE]', presErr);
               setDraftDirty(true);
@@ -18990,7 +19017,13 @@
     async function saveMapPreviewState() {
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
       if (tenantPresentationId) {
-        await api('PUT', '/api/presentations/' + encodeURIComponent(tenantPresentationId), { projectData: tenantProjectData });
+        const resp = await api('PUT', '/api/presentations/' + encodeURIComponent(tenantPresentationId), {
+          projectData: tenantProjectData,
+          expectedRevision: tenantPresentationRevision
+        });
+        if (resp && resp.revision) {
+          tenantPresentationRevision = Number(resp.revision) || tenantPresentationRevision;
+        }
       } else if (tenantProjectData.draftId && typeof saveProjectAsDraftNow === 'function') {
         // Regenerating a map is an explicit user action. Persist the new image URL
         // immediately for drafts; otherwise reload restores the previous placeholder.
@@ -19012,8 +19045,8 @@
     }
 
     async function unapproveMapPreview(mapType) {
-      // Approval was one-way, so an approved map could never be regenerated or replaced.
-      tenantCreativeImages.map_approvals = { ...(tenantCreativeImages.map_approvals || {}), [mapType]: false };
+      const approvals = tenantCreativeImages.map_approvals || {};
+      tenantCreativeImages.map_approvals = { ...approvals, [mapType]: false };
       releaseLocationSectionApproval();
       await saveMapPreviewState();
       renderMapPreviewGallery();
@@ -19053,6 +19086,9 @@
         if (!data.success) {
           toast(data.error || 'تعذر إعادة توليد الخريطة');
           return false;
+        }
+        if (data.revision) {
+          tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
         }
         const nextPlaceholders = { ...(tenantCreativeImages.map_placeholders || {}) };
         MAP_PREVIEW_VIEW_DEFS.filter(view => view.mapType === mapType).forEach(view => {
@@ -19243,6 +19279,7 @@
           overlayOnly: true
         });
         if (!data.success) return false;
+        if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
         tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
         tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
         tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
@@ -19272,6 +19309,7 @@
             overlayOnly: true
           });
           if (!data.success) return false;
+          if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
           tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
@@ -19315,6 +19353,7 @@
             overlayOnly: true
           });
           if (!data.success) return false;
+          if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
           tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
@@ -19356,6 +19395,7 @@
             overlayOnly: true
           });
           if (!data.success) return false;
+          if (data.revision) tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           tenantCreativeImages.map_zooms = { ...(tenantCreativeImages.map_zooms || {}), ...(data.zooms || {}) };
           tenantCreativeImages.map_centers = { ...(tenantCreativeImages.map_centers || {}), ...(data.centers || {}) };
@@ -25708,35 +25748,52 @@
 
     async function commitTenantPresentation(snapshot, presentationId, title, options = {}) {
       if (tenantPresentationSavePromise) return tenantPresentationSavePromise;
-      const revision = options.expectedRevision ?? tenantPresentationRevision;
+      const initialRevision = options.expectedRevision ?? tenantPresentationRevision;
       const provenance = tenantPresentationProvenance;
       const button = document.getElementById('presentationSaveButton');
       if (button) { button.disabled = true; button.textContent = 'جاري الحفظ...'; }
       tenantPresentationSavePromise = (async () => {
-        const response = await api(presentationId ? 'PUT' : 'POST',
-          '/api/presentations' + (presentationId ? '/' + encodeURIComponent(presentationId) : ''), {
-            title, projectData: snapshot, slidesData: snapshot.tenantSlidesData,
-            slideCount: snapshot.tenantSlidesData.length,
-            ...(presentationId ? { expectedRevision: revision } : {}),
-            changeSource: provenance ? 'ai' : 'manual', provenance,
-            operation: options.operation || 'save'
-          });
-        if (!response?.success) {
-          if (response?.error_code === 'PRESENTATION_REVISION_CONFLICT') {
-            throw new Error('العرض له نسخة أحدث محفوظة بواسطة مستخدم آخر. تعديلاتك ما زالت مفتوحة ولم تُستبدل النسخة المحفوظة.');
+        let currentRevision = initialRevision;
+        let attempts = 0;
+        while (attempts < 2) {
+          attempts++;
+          const response = await api(presentationId ? 'PUT' : 'POST',
+            '/api/presentations' + (presentationId ? '/' + encodeURIComponent(presentationId) : ''), {
+              title, projectData: snapshot, slidesData: snapshot.tenantSlidesData,
+              slideCount: snapshot.tenantSlidesData.length,
+              ...(presentationId ? { expectedRevision: currentRevision } : {}),
+              changeSource: provenance ? 'ai' : 'manual', provenance,
+              operation: options.operation || 'save'
+            });
+          if (!response?.success) {
+            if (response?.error_code === 'PRESENTATION_REVISION_CONFLICT') {
+              const serverRevision = Number(response.currentRevision);
+              const isInteractive = typeof options.interactive !== 'undefined' ? options.interactive : !options.silent;
+              if (attempts === 1 && (options.force || isInteractive) && Number.isInteger(serverRevision) && typeof confirm === 'function') {
+                const confirmOverwrite = options.force || confirm(
+                  'توجد نسخة أحدث محفوظة على الخادم (النسخة ' + serverRevision +
+                  '). هل تريد حفظ تعديلاتك الحالية فوقها؟'
+                );
+                if (confirmOverwrite) {
+                  currentRevision = serverRevision;
+                  continue;
+                }
+              }
+              throw new Error('العرض له نسخة أحدث محفوظة على الخادم. تعديلاتك ما زالت مفتوحة ولم تُستبدل النسخة المحفوظة.');
+            }
+            throw new Error(response?.error || 'تعذر حفظ العرض');
           }
-          throw new Error(response?.error || 'تعذر حفظ العرض');
+          if (!presentationId || tenantPresentationId === presentationId) {
+            tenantPresentationId = response.presentationId || presentationId;
+            tenantPresentationRevision = Number(response.revision) || 0;
+            tenantPresentationTitle = title;
+            tenantProjectMode = 'presentation';
+            clearPresentationUndoProvenance();
+            setSlidesEditorInfo(title, tenantSlidesData.length);
+          }
+          tenantArchiveCache = null;
+          return response;
         }
-        if (!presentationId || tenantPresentationId === presentationId) {
-          tenantPresentationId = response.presentationId || presentationId;
-          tenantPresentationRevision = Number(response.revision) || 0;
-          tenantPresentationTitle = title;
-          tenantProjectMode = 'presentation';
-          clearPresentationUndoProvenance();
-          setSlidesEditorInfo(title, tenantSlidesData.length);
-        }
-        tenantArchiveCache = null;
-        return response;
       })();
       updatePresentationUndoButtons();
       try { return await tenantPresentationSavePromise; }
@@ -25848,8 +25905,11 @@
       // Keep saving to the draft this presentation was generated from. Without an
       // id the next save mints a random one and forks a second draft row, so a
       // later reopen can land on the older row and read as "saved but lost".
-      if (!tenantProjectData.draftId) {
-        tenantProjectData.draftId = p.draft_id || p.draftId || tenantProjectData.draft_id || null;
+      if (p.draft_id) {
+        tenantProjectData.draftId = p.draft_id;
+        tenantProjectData.draft_id = p.draft_id;
+      } else if (!tenantProjectData.draftId) {
+        tenantProjectData.draftId = p.draftId || tenantProjectData.draft_id || null;
       }
       tenantSlidesData = Array.isArray(p.slidesData)
         ? p.slidesData
@@ -27301,6 +27361,9 @@
         if (data.presentationId) {
           tenantPresentationId = data.presentationId;
           changed = true;
+        }
+        if (data.revision) {
+          tenantPresentationRevision = Number(data.revision) || tenantPresentationRevision;
         }
         if (data.projectData && typeof data.projectData === 'object') {
           tenantProjectData = { ...(tenantProjectData || {}), ...data.projectData };

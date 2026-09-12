@@ -10054,10 +10054,13 @@ def api_update_presentation(pres_id):
             return jsonify({'error': 'Presentation scope does not match', 'error_code': 'PRESENTATION_SCOPE_MISMATCH'}), 409
         if current_scope:
             updates['project_data']['presentation_scope'] = current_scope
-        updates['draft_id'] = (updates['project_data'].get('draftId')
-                               or updates['project_data'].get('draft_id') or pres.get('draft_id'))
-        if pres.get('draft_id') and updates['draft_id'] != pres['draft_id']:
-            return jsonify({'error': 'Presentation project does not match', 'error_code': 'PRESENTATION_PROJECT_MISMATCH'}), 409
+        if pres.get('draft_id'):
+            updates['draft_id'] = pres['draft_id']
+            updates['project_data']['draftId'] = pres['draft_id']
+            updates['project_data']['draft_id'] = pres['draft_id']
+        else:
+            updates['draft_id'] = (updates['project_data'].get('draftId')
+                                   or updates['project_data'].get('draft_id'))
 
     if 'slides_data' in updates:
         project_data = updates.get('project_data')
