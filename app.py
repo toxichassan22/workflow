@@ -5674,7 +5674,57 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
                 '[DESIGNER-EDIT] deterministic boundary build failed for slide %s', slide_index + 1)
     project_context = _designer_project_context(project_data, creative_images, tenant_id)
 
-    prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}
+    # A table row/column deletion is a presentation-only edit: the source project
+    # facts stay intact, so preservation rules («لا تحذف صفاً أو عموداً»، «دون حذف»)
+    # must not block it. Run it deterministically first — counting <tr>/<td> by hand
+    # is exactly where the model fails (RTL order, thead vs tbody, merged cells).
+    table_edit_note = ''
+    if designer_chat_reliability.is_table_row_column_request(instruction):
+        table_edit_note = (
+            "\n\n## طلب حذف صف/عمود من جدول الشريحة — استثناء صريح من قواعد الحفاظ\n"
+            "طلب المستخدم حذف صف أو عمود من جدول هذه الشريحة فقط، وليس من بيانات المشروع الأصلية. "
+            "قواعد «لا تحذف صفاً أو عموداً أو سنة» و«دون حذف» تحمي مصدر البيانات عند التوليد، "
+            "ولا تسري على هذا الطلب. نفّذ الحذف في HTML فقط: احذف عنصر <tr> للصف أو الخلية رقم N "
+            "من كل صف للعمود (بما فيها رأس الجدول)، وحافظ على بقية الصفوف والأعمدة والتنسيق. "
+            "ترقيم الصفوف يشمل صفوف البيانات دون رأس الجدول. لا تحذف الشريحة ولا تقسّمها، "
+            "ولا تعتذر ولا تطلب تأكيداً، ولا تعيد الصف/العمود المحذوف."
+        )
+        try:
+            deterministic_html, deterministic_msg = designer_chat_reliability.apply_table_row_column_edit(
+                html, instruction)
+        except Exception as deterministic_error:
+            print(f"[DESIGNER-EDIT TABLE] deterministic removal failed: {deterministic_error}")
+            deterministic_html, deterministic_msg = None, ''
+        if deterministic_html and designer_chat_reliability.materially_changed(
+                html, deterministic_html, deterministic_msg):
+            try:
+                final_html = resolve_designer_chat_placeholders(
+                    deterministic_html, project_data, presentation_id, tenant_id, creative_images)
+                final_html = slide_engine.finalize_slide_html(
+                    final_html, slide_type or 'content', project_data, branding,
+                    creative_images=creative_images, tenant_id=tenant_id,
+                    slide_num=slide_index + 1, slide_title=title,
+                    total_slides=total_slides or (slide_index + 1), content_source=content_source,
+                    allow_all_maps=True,
+                )
+                final_html = _sanitize_designer_output(final_html)
+                if not _is_watermark_removal_instruction(instruction):
+                    final_html = _carry_slide_watermark(html, final_html)
+                if designer_chat_reliability.materially_changed(html, final_html, deterministic_msg):
+                    if vision_error:
+                        deterministic_msg += ' التعديل جرى على الكود بدون معاينة بصرية للشريحة.'
+                    return final_html, deterministic_msg
+            except Exception:
+                app.logger.exception(
+                    '[DESIGNER-EDIT] deterministic table edit post-processing failed for slide %s',
+                    slide_index + 1)
+            else:
+                # Deterministic removal hit a merged-cells or empty-table guard:
+                # keep the explicit permission note below so the model retries
+                # the same deletion instead of refusing it again.
+                pass
+
+    prompt = f"""{rules}{training_note}{team_logo_note}{vision_note}{surface_note}{table_edit_note}
 
 {project_context}
 أنت Sol، كبير المصممين ومهندس العرض وجرّاح كود وتصميم (Surgical Code & Design Master). عدّل الشريحة بدقة جراحية متناهية حسب الطلب:
@@ -5688,6 +5738,7 @@ def _designer_edit_slide(html, title, instruction, slide_index, project_data, pr
    - تحقيق تباين لوني عالي (Contrast Ratio >= 4.5:1) لضمان سهولة القراءة الفائقة.
 3. التعديل الجراحي الموضعي (Surgical Modifications):
    - إضافة أو حذف أو تعديل بطاقة أو نص أو مكون محدد دون مساس بباقي محتويات الشريحة، ودون إعادة بناء من الصفر، ودون تدمير التنسيق.
+   - حذف صف أو عمود من جدول داخل الشريحة هو تعديل جراحي عادي: احذف <tr> الصف المطلوب أو خلية العمود من كل صف بما فيها الرأس، وحافظ على البقية.
 4. إدراج الخرائط والمكونات المعمارية:
    - يمكنك إدراج أو استبدال أي خريطة من الخرائط الأربع المعتمدة (##MAP_OVERVIEW##, ##MAP_ACCESS##, ##MAP_CATCHMENT##, ##MAP_LANDMARKS##) أو صور المكونات مع ضبط موضعها وأبعادها بدقة.
 5. الصياغة العقارية والاستثمارية الرفيعة (Saudi Real Estate Phrasing):
@@ -6188,6 +6239,7 @@ def api_designer_chat():
 17. إذا طلب المستخدم إعادة توليد أو تصميم قسم كامل أو توزيع محتوى شريحة على عدة شرائح (مثل: «أعد توليد قسم الملخص التنفيذي على أكثر من شريحة مصممة جيداً وقوية بصرياً»):
 - أنت Agent كامل الصلاحية: اختر الشريحة أو الشرائح المناسبة من قائمة الشرائح، ونفذ التقسيم والتوزيع الفاخر عبر tool="split_slide" مع تحديد slide_number و parts وتضمين تعليمات التصميم الجمالي والتوزيع المتناسق في instruction، أو ادمج بين edit_slides و create_slide.
 - احرص دائماً على الحفاظ التام على كامل الأرقام والبيانات والمؤشرات دون حذف أي تفصيل، وتوزيعها في كروت فاخرة وأقسام متوازنة مريحة بصرياً وخالية من أي إيموجي أو أيقونات.
+18. حذف صف أو عمود أو سطر من جدول داخل شريحة (مثل: «احذف الصف الثالث من الجدول» أو «شيل عمود السعر») هو تعديل داخل الشريحة عبر tool="edit_slides" فقط — وليس delete_slide ولا split_slide ولا create_slide. لا تختر delete_slide إلا إذا ذكر المستخدم كلمة شريحة/سلايد صراحة مع الحذف (مثل: «احذف الشريحة 5»). قواعد الحفاظ على البيانات لا تمنع هذا الحذف: هو حذف عرضي من الشريحة فقط وبيانات المشروع الأصلية تبقى كما هي. عند اختيار edit_slides لطلب صف/عمود اكتب instruction مكتملة تحمل نوع الحذف (صف أم عمود) ورقمه أو محتواه أو اسم العمود، ولا تنسخ الرد القصير وحده.
 
 {audit_note}
 

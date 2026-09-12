@@ -477,6 +477,439 @@ def semantic_part_instruction(part_index: int, total_parts: int) -> str:
     )
 
 
+_AR_DIGITS_TABLE_EDIT = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+_TABLE_EDIT_VERBS = (
+    "احذف", "حذف", "امسح", "مسح", "شيل", "اشيل", "أشيل", "شال",
+    "ازيل", "أزيل", "ازال", "إزالة", "ازالة", "ازل", "أزل",
+    "احذفلي", "امسحلي", "شيللي", "remove", "delete",
+)
+
+_TABLE_EDIT_ROW_WORDS = (
+    "صف", "صفوف", "الصف", "الصفوف", "سطر", "سطور", "السطر", "السطور",
+    "row", "rows",
+)
+
+_TABLE_EDIT_COL_WORDS = (
+    "عمود", "عامود", "العمود", "العامود", "اعمدة", "أعمدة", "الاعمدة",
+    "الأعمدة", "عواميد", "column", "columns",
+)
+
+_TABLE_EDIT_ORDINALS = (
+    (("الأول", "الاول", "الاولى", "الأولى", "اول", "أول", "اولى", "أولى"), 1),
+    (("الثاني", "الثانى", "الثانية", "الثانيه", "ثاني", "ثانى", "تاني", "التاني"), 2),
+    (("الثالث", "الثالثة", "الثالثه", "ثالث", "تالت", "التالت"), 3),
+    (("الرابع", "الرابعة", "الرابعه", "رابع"), 4),
+    (("الخامس", "الخامسة", "الخامسه", "خامس"), 5),
+    (("السادس", "السادسة", "السادسه", "سادس"), 6),
+    (("السابع", "السابعة", "السابعه", "سابع"), 7),
+    (("الثامن", "الثامنة", "الثامنه", "ثامن", "تامن"), 8),
+    (("التاسع", "التاسعة", "التاسعه", "تاسع"), 9),
+    (("العاشر", "العاشرة", "العاشره", "عاشر"), 10),
+)
+
+_TABLE_EDIT_LAST_WORDS = ("اخر", "آخر", "الاخر", "الآخر", "الاخير", "الأخير", "الاخيرة", "الأخيرة", "last")
+
+_TABLE_EDIT_STOPWORDS = {
+    "من", "في", "فى", "الجدول", "جدول", "الشريحة", "شريحة", "الشريحه",
+    "شريحه", "السلايد", "سلايد", "الحالي", "الحالى", "الحالية", "الحاليه",
+    "ده", "دي", "ذي", "لو", "سمحت", "فضلا", "فضلاً", "عايز", "عايزه",
+    "اريد", "أريد", "ممكن", "رقم", "برقم", "اللي", "الذي", "التي",
+    "فيه", "فيها", "عنوانه", "عنوانها", "اسمه", "اسمها", "نصه", "اللى",
+    "اللى", "ده", "دى",
+}
+
+
+def _normalize_table_edit_text(message: Any) -> str:
+    text = str(message or "").strip().lower()
+    if not text:
+        return ""
+    return text.translate(_AR_DIGITS_TABLE_EDIT)
+
+
+def is_table_row_column_request(message: Any) -> bool:
+    """True when the user asks to delete a row/column inside a slide table.
+
+    «احذف الشريحة 5» is a slide deletion, not a table edit, so a bare
+    slide/slide-deletion phrasing without any row/column word never matches.
+    «احذف الصف الثالث من الشريحة 5» mentions a slide only as the location,
+    so the row/column word decides.
+    """
+    normalized = _normalize_table_edit_text(message)
+    if not normalized:
+        return False
+    has_verb = any(verb in normalized for verb in _TABLE_EDIT_VERBS)
+    if not has_verb:
+        return False
+    has_row = any(word in normalized for word in _TABLE_EDIT_ROW_WORDS)
+    has_col = any(word in normalized for word in _TABLE_EDIT_COL_WORDS)
+    return bool(has_row or has_col)
+
+
+def _ordinal_number_in_text(normalized: str) -> Union[int, None]:
+    for variants, number in _TABLE_EDIT_ORDINALS:
+        for variant in variants:
+            if variant in normalized:
+                return number
+    return None
+
+
+def _last_requested_in_text(normalized: str) -> bool:
+    return any(word in normalized for word in _TABLE_EDIT_LAST_WORDS)
+
+
+def _digit_after_keyword(normalized: str, keywords: Sequence[str]) -> Union[int, None]:
+    for keyword in keywords:
+        match = re.search(rf"{re.escape(keyword)}\s*(?:رقم\s*)?(\d{{1,3}})", normalized)
+        if match:
+            try:
+                number = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if 1 <= number <= 200:
+                return number
+    generic = re.search(r"(?:رقم\s*)(\d{1,3})", normalized)
+    if generic:
+        try:
+            number = int(generic.group(1))
+        except (TypeError, ValueError):
+            return None
+        if 1 <= number <= 200:
+            return number
+    return None
+
+
+def _extract_quoted_text(message: Any) -> str:
+    raw = str(message or "")
+    for pattern in (r'"([^"]{2,80})"', r"'([^']{2,80})'", r"«([^»]{2,80})»", r"“([^”]{2,80})”"):
+        match = re.search(pattern, raw)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+    return ""
+
+
+def _extract_row_text_hint(normalized: str, raw_message: Any) -> str:
+    quoted = _extract_quoted_text(raw_message)
+    if quoted:
+        return quoted
+    for marker in ("اللي فيه", "اللي فيها", "الذي فيه", "الذي يحتوي", "التي تحتوي",
+                   "يحتوي على", "تحتوي على", "الخاص ب", "الخاصة ب", "الخاصه ب", "بعنوان", "باسم", "بإسم", "نصه"):
+        if marker in normalized:
+            tail = normalized.split(marker, 1)[1].strip()
+            tail = re.split(r"[،,.؛;!؟?]", tail)[0].strip()
+            words = [word for word in re.split(r"\s+", tail) if word and word not in _TABLE_EDIT_STOPWORDS]
+            hint = " ".join(words[:6]).strip()
+            if len(hint) >= 2:
+                return hint
+    return ""
+
+
+def _extract_column_name_hint(normalized: str, raw_message: Any) -> str:
+    quoted = _extract_quoted_text(raw_message)
+    if quoted:
+        return quoted
+    for keyword in ("العمود", "العامود", "عمود", "عامود"):
+        if keyword in normalized:
+            tail = normalized.split(keyword, 1)[1].strip()
+            tail = re.sub(r"^(?:رقم\s*\d+\s*)", "", tail).strip()
+            tail = re.split(r"[،,.؛;!؟?]", tail)[0].strip()
+            words = []
+            for word in re.split(r"\s+", tail):
+                if not word or word in _TABLE_EDIT_STOPWORDS:
+                    if words:
+                        break
+                    continue
+                if word.isdigit():
+                    continue
+                if any(v in word for v in ("صف", "سطر", "جدول", "شريح", "سلايد")):
+                    break
+                words.append(word)
+                if len(words) >= 3:
+                    break
+            hint = " ".join(words).strip()
+            hint = re.sub(r"^(?:اللي|الذي|التي|ذو|ذات)\s+", "", hint).strip()
+            if len(hint) >= 2:
+                return hint
+    return ""
+
+
+def parse_table_edit_request(message: Any) -> Union[Dict[str, Any], None]:
+    """Parse «احذف الصف الثالث» / «شيل عمود السعر» into a structured target."""
+    normalized = _normalize_table_edit_text(message)
+    if not normalized:
+        return None
+    if not any(verb in normalized for verb in _TABLE_EDIT_VERBS):
+        return None
+    has_row = any(word in normalized for word in _TABLE_EDIT_ROW_WORDS)
+    has_col = any(word in normalized for word in _TABLE_EDIT_COL_WORDS)
+    # Ambiguous («احذف الصف والعمود») stays with the model so it can ask.
+    if has_row and has_col:
+        return None
+    if not (has_row or has_col):
+        return None
+    kind = "row" if has_row else "column"
+    keywords = _TABLE_EDIT_ROW_WORDS if kind == "row" else _TABLE_EDIT_COL_WORDS
+    number = _digit_after_keyword(normalized, keywords)
+    if number is None:
+        ordinal = _ordinal_number_in_text(normalized)
+        if ordinal is not None:
+            number = ordinal
+    is_last = _last_requested_in_text(normalized)
+    if kind == "row":
+        if number is None and not is_last:
+            hint = _extract_row_text_hint(normalized, message)
+            if not hint:
+                return None
+            return {"kind": "row", "by": "text", "text": hint}
+        if is_last and number is None:
+            return {"kind": "row", "by": "number", "number": "last"}
+        return {"kind": "row", "by": "number", "number": int(number)}
+    if number is not None:
+        return {"kind": "column", "by": "number", "number": int(number)}
+    name_hint = _extract_column_name_hint(normalized, message)
+    if not name_hint:
+        return None
+    return {"kind": "column", "by": "name", "name": name_hint}
+
+
+def _split_table_for_edit(table_html: str) -> Union[Dict[str, Any], None]:
+    """Split one table into header cells and data rows for surgical deletion."""
+    body_match = _TBODY_RE.search(table_html)
+    if body_match:
+        rows = _TR_RE.findall(body_match.group(2))
+        if len(rows) < 1:
+            return None
+        thead_match = re.search(r"<thead\b[^>]*>[\s\S]*?</thead>", table_html, re.IGNORECASE)
+        header_cells: List[str] = []
+        if thead_match:
+            header_cells = _TD_RE.findall(thead_match.group(0))
+        else:
+            first_row = _TR_RE.search(body_match.group(2))
+            if first_row and re.search(r"<th\b", first_row.group(0), re.IGNORECASE):
+                header_cells = _TD_RE.findall(first_row.group(0))
+                rows = rows[1:]
+                if not rows:
+                    return None
+        return {
+            "kind": "tbody",
+            "table_html": table_html,
+            "body_match": body_match,
+            "rows": rows,
+            "header_cells": header_cells,
+        }
+    row_matches = list(_TR_RE.finditer(table_html))
+    if not row_matches:
+        return None
+    thead_match = re.search(r"<thead\b[^>]*>[\s\S]*?</thead>", table_html, re.IGNORECASE)
+    data_matches = [
+        row_match for row_match in row_matches
+        if not thead_match or not (thead_match.start() <= row_match.start() < thead_match.end())
+    ]
+    header_cells = []
+    if thead_match:
+        header_cells = _TD_RE.findall(thead_match.group(0))
+    elif data_matches and re.search(r"<th\b", data_matches[0].group(0), re.IGNORECASE):
+        header_cells = _TD_RE.findall(data_matches.pop(0).group(0))
+    rows = [row_match.group(0) for row_match in data_matches]
+    if not rows:
+        return None
+    return {
+        "kind": "direct",
+        "table_html": table_html,
+        "row_matches": data_matches,
+        "rows": rows,
+        "header_cells": header_cells,
+    }
+
+
+def _row_has_merged_cells(row_html: str) -> bool:
+    return bool(re.search(r"\b(?:colspan|rowspan)\s*=", row_html, re.IGNORECASE))
+
+
+def _remove_data_row_from_table(table_html: str, data_index: int) -> Union[str, None]:
+    """Remove the Nth data row (0-based, header excluded). Returns new table or None."""
+    info = _split_table_for_edit(table_html)
+    if not info or data_index < 0 or data_index >= len(info["rows"]):
+        return None
+    target_row = info["rows"][data_index]
+    if _row_has_merged_cells(target_row):
+        return None
+    if len(info["rows"]) <= 1:
+        return None
+    if info["kind"] == "tbody":
+        body_match = info["body_match"]
+        kept = [row for idx, row in enumerate(info["rows"]) if idx != data_index]
+        prefix = table_html[:body_match.start(2)]
+        suffix = table_html[body_match.end(2):]
+        return prefix + "".join(kept) + suffix
+    row_matches = info["row_matches"]
+    doomed = row_matches[data_index]
+    return table_html[:doomed.start()] + table_html[doomed.end():]
+
+
+def _remove_column_from_table(table_html: str, col_index: int) -> Union[str, None]:
+    """Remove the Nth column (0-based, DOM order) from header and every data row."""
+    if col_index < 0:
+        return None
+    if re.search(r"\b(?:colspan|rowspan)\s*=", table_html, re.IGNORECASE):
+        return None
+    changed = False
+
+    def drop_cell(row_html: str) -> str:
+        nonlocal changed
+        cells = list(_TD_RE.finditer(row_html))
+        if col_index >= len(cells):
+            return row_html
+        doomed = cells[col_index]
+        changed = True
+        return row_html[:doomed.start()] + row_html[doomed.end():]
+
+    output = _TR_RE.sub(
+        lambda match: drop_cell(match.group(0)),
+        table_html,
+    )
+    if not changed:
+        return None
+    # The header row must keep at least one cell, and every data row must keep one.
+    for row_html in _TR_RE.findall(output):
+        if not _TD_RE.search(row_html):
+            return None
+    return output
+
+
+def _candidate_tables(html: str) -> List[Tuple[Any, str]]:
+    return [(match, match.group(0)) for match in _TABLE_RE.finditer(str(html or ""))]
+
+
+def apply_table_row_column_edit(html: str, message: Any) -> Tuple[Union[str, None], str]:
+    """Deterministically delete one table row/column named by the user.
+
+    Returns (new_html, description) on success, or (None, reason) when the
+    request is not a concrete row/column deletion. HTML-only: project facts
+    are never touched, so preservation rules for source data still hold.
+    """
+    request = parse_table_edit_request(message)
+    if not request:
+        return None, "not_a_table_edit"
+    source = str(html or "")
+    candidates = _candidate_tables(source)
+    if not candidates:
+        return None, "no_table_in_slide"
+    kind = request.get("kind")
+    if kind == "row" and request.get("by") == "number":
+        number = request.get("number")
+        scored = []
+        for match, table_html in candidates:
+            info = _split_table_for_edit(table_html)
+            if not info:
+                continue
+            scored.append((len(info["rows"]), match, table_html, info))
+        if not scored:
+            return None, "no_data_rows"
+        scored.sort(key=lambda item: item[0], reverse=True)
+        count, match, table_html, info = scored[0]
+        target = (count - 1) if number == "last" else (int(number) - 1)
+        if target < 0 or target >= count:
+            return None, "row_number_out_of_range"
+        updated_table = _remove_data_row_from_table(table_html, target)
+        if not updated_table:
+            return None, "row_not_removable"
+        updated = source[:match.start()] + updated_table + source[match.end():]
+        label = "الأخير" if number == "last" else f"رقم {number}"
+        return updated, f"تم حذف الصف {label} من جدول الشريحة (الترقيم يشمل صفوف البيانات دون رأس الجدول) مع الحفاظ على بقية الصفوف والتنسيق."
+    if kind == "row" and request.get("by") == "text":
+        needle = re.sub(r"\s+", " ", str(request.get("text") or "")).strip()
+        if len(needle) < 2:
+            return None, "row_text_too_short"
+        needle_folded = needle.casefold()
+        for match, table_html in candidates:
+            info = _split_table_for_edit(table_html)
+            if not info:
+                continue
+            hit = -1
+            for idx, row_html in enumerate(info["rows"]):
+                cleaned = _clean_text(row_html).casefold()
+                if needle_folded in cleaned or needle_folded in str(row_html).casefold():
+                    hit = idx
+                    break
+            if hit < 0:
+                # Fall back to a looser word-overlap match for inflected Arabic.
+                needle_words = [word for word in re.split(r"\s+", needle_folded) if len(word) >= 3]
+                if needle_words:
+                    for idx, row_html in enumerate(info["rows"]):
+                        cleaned = _clean_text(row_html).casefold()
+                        if needle_words and all(word in cleaned for word in needle_words[:2]):
+                            hit = idx
+                            break
+            if hit >= 0:
+                updated_table = _remove_data_row_from_table(table_html, hit)
+                if not updated_table:
+                    return None, "row_not_removable"
+                updated = source[:match.start()] + updated_table + source[match.end():]
+                return updated, f"تم حذف الصف الذي يحتوي على «{needle}» من جدول الشريحة مع الحفاظ على بقية الصفوف والتنسيق."
+        return None, "row_text_not_found"
+    if kind == "column" and request.get("by") == "number":
+        number = int(request.get("number") or 0)
+        scored = []
+        for match, table_html in candidates:
+            info = _split_table_for_edit(table_html)
+            if not info or not info["rows"]:
+                continue
+            widths = [len(_TD_RE.findall(row)) for row in info["rows"]]
+            if info["header_cells"]:
+                widths.append(len(info["header_cells"]))
+            scored.append((max(widths) if widths else 0, match, table_html))
+        if not scored:
+            return None, "no_columns"
+        scored.sort(key=lambda item: item[0], reverse=True)
+        width, match, table_html = scored[0]
+        target = number - 1
+        if target < 0 or target >= width:
+            return None, "column_number_out_of_range"
+        updated_table = _remove_column_from_table(table_html, target)
+        if not updated_table:
+            return None, "column_not_removable"
+        updated = source[:match.start()] + updated_table + source[match.end():]
+        return updated, f"تم حذف العمود رقم {number} من جدول الشريحة من كل الصفوف (بما فيها رأس الجدول) مع الحفاظ على بقية الأعمدة والتنسيق."
+    if kind == "column" and request.get("by") == "name":
+        needle = re.sub(r"\s+", " ", str(request.get("name") or "")).strip()
+        if len(needle) < 2:
+            return None, "column_name_too_short"
+        needle_folded = needle.casefold()
+        for match, table_html in candidates:
+            info = _split_table_for_edit(table_html)
+            if not info:
+                continue
+            header_texts = [_clean_text(cell) for cell in info["header_cells"]]
+            header_folded = [text.casefold() for text in header_texts]
+            hit = -1
+            for idx, text in enumerate(header_folded):
+                if needle_folded in text or text in needle_folded:
+                    hit = idx
+                    break
+            if hit < 0 and header_folded:
+                needle_words = [word for word in re.split(r"\s+", needle_folded) if len(word) >= 3]
+                for idx, text in enumerate(header_folded):
+                    if needle_words and any(word in text for word in needle_words):
+                        hit = idx
+                        break
+            if hit < 0:
+                # No header row: probe the first data row positionally.
+                first_cells = [_clean_text(cell).casefold() for cell in _TD_RE.findall(info["rows"][0])]
+                for idx, text in enumerate(first_cells):
+                    if needle_folded in text:
+                        hit = idx
+                        break
+            if hit >= 0:
+                updated_table = _remove_column_from_table(table_html, hit)
+                if not updated_table:
+                    return None, "column_not_removable"
+                updated = source[:match.start()] + updated_table + source[match.end():]
+                return updated, f"تم حذف عمود «{needle}» من جدول الشريحة من كل الصفوف مع الحفاظ على بقية الأعمدة والتنسيق."
+        return None, "column_name_not_found"
+    return None, "unsupported_table_edit"
+
+
 def materially_changed(before: Any, after: Any, response_text: Any = "") -> bool:
     response = str(response_text or "")
     if "تم الحفاظ على تصميم الشريحة" in response or "تعذر التعديل التلقائي" in response:
