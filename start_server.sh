@@ -20,12 +20,38 @@ DEPLOYMENT_MARKER="$APP_DIR/.deployed_commit"
 WATCHDOG_LOG="$APP_DIR/watchdog.log"
 HEALTH_PATH="/health"
 
-# Load optional APP_PORT from .env
+# Load optional APP_PORT from .env literally: values keep $, #, !, backticks and
+# spaces exactly as written. Sourcing the file with `.` would expand $VARS and
+# $(cmd), which silently rewrites secrets (e.g. a password containing $7 loses
+# it and every login after a restart fails with "Invalid email or password").
+load_env_file() {
+  local env_file="$1" line key value quoted
+  [ -f "$env_file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in export[[:space:]]*) line="${line#export}" ;; esac
+    case "$line" in
+      *=*) key="${line%%=*}"; value="${line#*=}" ;;
+      *) continue ;;
+    esac
+    key="$(printf '%s' "$key" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    case "$key" in ''|*[!A-Za-z0-9_]* ) continue ;; esac
+    quoted=0
+    case "$value" in
+      \'*\') value="${value#\'}"; value="${value%\'}"; quoted=1 ;;
+      \"*\") value="${value#\"}"; value="${value%\"}"; quoted=1 ;;
+    esac
+    if [ "$quoted" -eq 0 ]; then
+      case "$value" in *' #'*) value="${value%%' #'*}" ;; esac
+      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    fi
+    printf -v "$key" '%s' "$value"
+    export "$key"
+  done < "$env_file"
+}
 if [ -f "$APP_DIR/.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "$APP_DIR/.env"
-  set +a
+  load_env_file "$APP_DIR/.env"
 fi
 
 PORT="${APP_PORT:-8000}"

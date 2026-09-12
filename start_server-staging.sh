@@ -22,16 +22,40 @@ for lib_dir in \
 done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Load a .env file literally: values keep $, #, !, backticks and spaces exactly
+# as written. Sourcing the file with `.` would expand $VARS and $(cmd), which
+# silently rewrites secrets (e.g. ADMIN_PASSWORD=K9#mP$7vL!2xQ@5wZ lost its $7
+# and every login after a restart failed with "Invalid email or password").
+load_env_file() {
+  local env_file="$1" line key value quoted
+  [ -f "$env_file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in export[[:space:]]*) line="${line#export}" ;; esac
+    case "$line" in
+      *=*) key="${line%%=*}"; value="${line#*=}" ;;
+      *) continue ;;
+    esac
+    key="$(printf '%s' "$key" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    case "$key" in ''|*[!A-Za-z0-9_]* ) continue ;; esac
+    quoted=0
+    case "$value" in
+      \'*\') value="${value#\'}"; value="${value%\'}"; quoted=1 ;;
+      \"*\") value="${value#\"}"; value="${value%\"}"; quoted=1 ;;
+    esac
+    if [ "$quoted" -eq 0 ]; then
+      case "$value" in *' #'*) value="${value%%' #'*}" ;; esac
+      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    fi
+    printf -v "$key" '%s' "$value"
+    export "$key"
+  done < "$env_file"
+}
 if [ -f "$SCRIPT_DIR/.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "$SCRIPT_DIR/.env"
-  set +a
+  load_env_file "$SCRIPT_DIR/.env"
 elif [ -f "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env"
-  set +a
+  load_env_file "${STAGING_APP_DIR:-/home/landloom/proposal-generator-staging}/.env"
 fi
 
 APP_DIR="${STAGING_APP_DIR:-/home/demos/proposal-generator-staging}"
