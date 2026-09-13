@@ -592,25 +592,51 @@
         if (!canResume) tenantSlidesData = [];
         activeSlideIndex = Math.min(startIndex, Math.max(0, tenantSlidesData.length - 1));
 
-        for (let i = startIndex; i < totalSlides; i++) {
-          const plan = tenantSlidePlan.slides[i] || {};
-          const slidePct = Math.round(20 + (i / totalSlides) * 75);
-          setLiveGenBanner(true, 'الشريحة ' + (i + 1) + ' من ' + totalSlides + ': ' + (plan.title || ''), 'جاري الصياغة والتصميم بالذكاء الاصطناعي...', slidePct);
+        // Slides generate in small parallel waves, but they are committed in plan
+        // order: tenantSlidesData stays dense, so checkpoints, resume, ordering and
+        // the final validation below work exactly as they did for the sequential loop.
+        const SLIDE_GENERATION_CONCURRENCY = 3;
+        const pendingSlides = {};
+        let launchIndex = startIndex;
+        let inFlightCount = 0;
+        let commitIndex = startIndex;
+        let generationStopped = false;
+        let generationFinished = false;
+        let generationFailure = null;
+        let finishResolve = null;
+        const generationDone = new Promise((resolve) => { finishResolve = resolve; });
+        let commitRunning = false;
+        let commitAgain = false;
 
-          // Update active card & thumb styling
+        function updateGenerationBanner() {
+          const done = tenantSlidesData.length;
+          const slidePct = Math.round(20 + (done / totalSlides) * 75);
+          const activeTitles = [];
+          Object.keys(pendingSlides).forEach((key) => {
+            const idx = Number(key);
+            if (pendingSlides[key] === true && idx >= commitIndex) {
+              const plan = tenantSlidePlan.slides[idx] || {};
+              if (plan.title) activeTitles.push((idx + 1) + '. ' + plan.title);
+            }
+          });
+          setLiveGenBanner(true, 'توليد الشرائح (' + done + ' من ' + totalSlides + ')',
+            activeTitles.length ? activeTitles.slice(0, 3).join(' | ') : 'جاري الصياغة والتصميم بالذكاء الاصطناعي...', slidePct);
+        }
+
+        function markSlideGenerating(i) {
+          const plan = tenantSlidePlan.slides[i] || {};
           document.querySelectorAll('.ge-slide-card').forEach((c, idx) => {
             c.classList.toggle('active-slide', idx === i);
-            c.classList.toggle('generating-live', idx === i);
+            if (idx === i) c.classList.add('generating-live');
           });
           document.querySelectorAll('.ge-thumb').forEach((t, idx) => {
-            t.classList.toggle('active', idx === i);
-            t.classList.toggle('generating-live', idx === i);
+            if (idx === i) {
+              t.classList.add('active');
+              t.classList.add('generating-live');
+            }
           });
-
-          // Pulse the generating stage and scroll into view
           const cardEl = document.getElementById('slide-card-' + i);
           if (cardEl) {
-            cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             const stageInner = document.getElementById('slide-stage-inner-' + i);
             if (stageInner) {
               stageInner.className = 'slide live-gen-skeleton-stage live-gen-skeleton-pulse';
@@ -622,51 +648,38 @@
                 '</div>';
             }
           }
+        }
 
-          let generated = null;
-          let lastError = '';
+        function buildSlidePayload(i) {
+          const plan = tenantSlidePlan.slides[i] || {};
+          const _snapSlide = tenantSlidePlan.slides[i];
+          const genPayload = {
+            projectData: slimGenerationProjectData(tenantProjectData),
+            slidePlan: { slides: [_snapSlide] },
+            images: generationImages,
+            slideIndex: 0,
+            _slideNum: (i + 1),
+            _totalSlides: totalSlides
+          };
+          if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
+          return genPayload;
+        }
 
-          // The request is already a background job. Retrying here could enqueue a second paid
-          // generation after a browser or proxy timeout, so a failed slide is checkpointed for an
-          // explicit resume instead.
-          for (let attempt = 1; attempt <= 1 && !generated; attempt++) {
-            try {
-              // Snapshot the specific slide so a mutating plan cannot break the request.
-              const _snapSlide = tenantSlidePlan.slides[i];
-              const genPayload = {
-                projectData: slimGenerationProjectData(tenantProjectData),
-                slidePlan: { slides: [_snapSlide] },
-                images: generationImages,
-                slideIndex: 0,
-                _slideNum: (i + 1),
-                _totalSlides: totalSlides
-              };
-              if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
+        function renderTenantSlidePartial(i, partial) {
+          if (generationStopped || generationFinished || !partial) return;
+          const cardEl = document.getElementById('slide-card-' + i);
+          if (!cardEl) return;
+          const stage = cardEl.querySelector('.tenant-slide-stage');
+          if (!stage) return;
+          // Preview only: the finalized slide still renders on completion below.
+          try {
+            const preview = processSlideHtmlClient(String(partial));
+            if (preview) stage.innerHTML = preview;
+          } catch (previewError) { /* preview-only */ }
+        }
 
-              const data = await requestTenantSlideGeneration(genPayload);
-              if (data.success && data.slide && data.slide.html && containsSlideRoot(data.slide.html)) {
-                generated = data.slide;
-              } else {
-                lastError = data.error || 'استجابة غير مكتملة من الخادم';
-              }
-            } catch (err) {
-              lastError = err.message || 'خطأ في الاتصال';
-              console.error('Slide generation error for index', i, 'attempt', attempt, err);
-            }
-            if (!generated && attempt < 3) {
-              setLiveGenBanner(true, 'إعادة المحاولة ' + (attempt + 1) + ' للشريحة ' + (i + 1), plan.title || '', slidePct);
-            }
-          }
-
-          if (!generated) {
-            await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError);
-            setLiveGenBanner(true, 'توقف التوليد مؤقتًا عند الشريحة ' + (i + 1),
-              'تم حفظ ' + tenantSlidesData.length + ' شريحة ويمكن استكمال العرض لاحقًا.', slidePct);
-            renderTenantSlidesSidebar();
-            toast('تم حفظ نقطة التوقف عند الشريحة ' + (i + 1));
-            return;
-          }
-
+        async function commitSlide(i, generated) {
+          const plan = tenantSlidePlan.slides[i] || {};
           const slideObj = {
             title: generated.title || plan.title,
             type: generated.type || plan.type || 'content',
@@ -684,8 +697,16 @@
           await saveTenantSlideGenerationCheckpoint(i + 1, 'running');
 
           // Live populate the slide card right in front of the user!
+          const cardEl = document.getElementById('slide-card-' + i);
+          document.querySelectorAll('.ge-slide-card').forEach((c, idx) => {
+            c.classList.toggle('active-slide', idx === i);
+          });
+          document.querySelectorAll('.ge-thumb').forEach((t, idx) => {
+            t.classList.toggle('active', idx === i);
+          });
           if (cardEl) {
             cardEl.classList.remove('generating-live');
+            cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             const stage = cardEl.querySelector('.tenant-slide-stage');
             if (stage) {
               const slideHtml = processSlideHtmlClient(generated.html, generated.type);
@@ -703,6 +724,114 @@
             thumbEl.title = slideObj.title;
           }
         }
+
+        async function pauseSlideGeneration(i, lastError) {
+          generationStopped = true;
+          generationFinished = true;
+          generationFailure = { index: i, error: lastError || '' };
+          await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError);
+          const slidePct = Math.round(20 + (tenantSlidesData.length / totalSlides) * 75);
+          setLiveGenBanner(true, 'توقف التوليد مؤقتًا عند الشريحة ' + (i + 1),
+            'تم حفظ ' + tenantSlidesData.length + ' شريحة ويمكن استكمال العرض لاحقًا.', slidePct);
+          renderTenantSlidesSidebar();
+          toast('تم حفظ نقطة التوقف عند الشريحة ' + (i + 1));
+          if (typeof finishResolve === 'function') finishResolve();
+        }
+
+        async function drainCommits() {
+          if (commitRunning) { commitAgain = true; return; }
+          commitRunning = true;
+          try {
+            do {
+              commitAgain = false;
+              while (!generationFinished && commitIndex < totalSlides) {
+                const entry = pendingSlides[commitIndex];
+                if (!entry || entry === true) break;
+                if (!entry.slide) {
+                  await pauseSlideGeneration(commitIndex, entry.error);
+                  break;
+                }
+                try {
+                  await commitSlide(commitIndex, entry.slide);
+                } catch (commitError) {
+                  // Committing only renders and checkpoints; a failure here
+                  // pauses at this slide exactly like a generation failure.
+                  console.error('Slide commit error for index', commitIndex, commitError);
+                  await pauseSlideGeneration(commitIndex, (commitError && commitError.message) || 'خطأ في الحفظ');
+                  break;
+                }
+                delete pendingSlides[commitIndex];
+                commitIndex += 1;
+              }
+              updateGenerationBanner();
+              if (!generationFinished && commitIndex >= totalSlides) {
+                generationFinished = true;
+                if (typeof finishResolve === 'function') finishResolve();
+              }
+            } while (commitAgain && !generationFinished);
+          } finally {
+            commitRunning = false;
+          }
+        }
+
+        function pumpSlideLaunches() {
+          if (generationStopped || generationFinished) return;
+          while (inFlightCount < SLIDE_GENERATION_CONCURRENCY && launchIndex < totalSlides) {
+            const i = launchIndex;
+            launchIndex += 1;
+            inFlightCount += 1;
+            pendingSlides[i] = true;
+            try {
+              markSlideGenerating(i);
+            } catch (markError) {
+              // A preview-only DOM failure must pause the slide like a
+              // generation failure, never leak the in-flight slot.
+              pendingSlides[i] = { error: (markError && markError.message) || 'خطأ في العرض' };
+              inFlightCount -= 1;
+              drainCommits();
+              continue;
+            }
+            runSlideWorker(i);
+          }
+          updateGenerationBanner();
+        }
+
+        async function runSlideWorker(i) {
+          let generated = null;
+          let lastError = '';
+
+          // The request is already a background job. Retrying here could enqueue a second paid
+          // generation after a browser or proxy timeout, so a failed slide is checkpointed for an
+          // explicit resume instead.
+          for (let attempt = 1; attempt <= 1 && !generated; attempt++) {
+            try {
+              // Snapshot the specific slide so a mutating plan cannot break the request.
+              const data = await requestTenantSlideGeneration(buildSlidePayload(i),
+                (partial) => renderTenantSlidePartial(i, partial));
+              if (data.success && data.slide && data.slide.html && containsSlideRoot(data.slide.html)) {
+                generated = data.slide;
+              } else {
+                lastError = data.error || 'استجابة غير مكتملة من الخادم';
+              }
+            } catch (err) {
+              lastError = err.message || 'خطأ في الاتصال';
+              console.error('Slide generation error for index', i, 'attempt', attempt, err);
+            }
+            if (!generated && attempt < 3) {
+              const plan = tenantSlidePlan.slides[i] || {};
+              setLiveGenBanner(true, 'إعادة المحاولة ' + (attempt + 1) + ' للشريحة ' + (i + 1), plan.title || '', Math.round(20 + (tenantSlidesData.length / totalSlides) * 75));
+            }
+          }
+
+          pendingSlides[i] = generated ? { slide: generated } : { error: lastError };
+          inFlightCount -= 1;
+          await drainCommits();
+          pumpSlideLaunches();
+        }
+
+        pumpSlideLaunches();
+        await generationDone;
+        if (generationFailure) return;
 
         if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !containsSlideRoot(s.html))) {
           setLiveGenBanner(true, 'لم يكتمل التوليد', 'حدث خطأ في بعض الشرائح ولم يتم الحفظ', 90);

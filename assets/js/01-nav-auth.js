@@ -444,8 +444,10 @@
 
     // A slide can take longer than the shared hosting proxy allows. Queueing the request keeps the
     // browser connected only to short status calls and guarantees that a timeout cannot start the
-    // same paid AI generation three more times.
-    async function requestTenantSlideGeneration(payload) {
+    // same paid AI generation three more times. While the job runs, the worker publishes the
+    // streamed text as `partial`, so the caller can paint the slide live; the completed slide
+    // below is still the same finalized response, never the preview.
+    async function requestTenantSlideGeneration(payload, onPartial) {
       const queued = await apiWithTimeout(
         'POST', '/api/generate-slide-single-job', payload, 30000,
         'تعذر تسجيل مهمة توليد الشريحة؛ لم يبدأ استهلاك جديد.'
@@ -454,12 +456,19 @@
 
       const started = Date.now();
       const maxWaitMs = 10 * 60 * 1000;
+      let lastPartial = '';
       while (Date.now() - started < maxWaitMs) {
-        await new Promise(resolve => setTimeout(resolve, 2500));
+        await new Promise(resolve => setTimeout(resolve, 1000));
         const result = await apiWithTimeout(
           'GET', '/api/generate-slide-single/jobs/' + encodeURIComponent(queued.jobId), null,
           30000, 'انتهت مهلة متابعة مهمة توليد الشريحة.'
         );
+        if (result && typeof result.partial === 'string' && result.partial && result.partial !== lastPartial) {
+          lastPartial = result.partial;
+          if (typeof onPartial === 'function') {
+            try { onPartial(result.partial); } catch (previewError) { /* preview-only */ }
+          }
+        }
         if (result?.status === 'completed' || (result?.success && result?.slide)) return result;
         if (result?.status === 'failed' || result?.status === 'not_found' || result?.error_code) return result;
         if (result?.error && !['queued', 'running'].includes(result?.status)) return result;

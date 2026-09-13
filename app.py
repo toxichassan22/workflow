@@ -406,6 +406,226 @@ def call_zai_chat_parallel(system_prompt, user_content, temperature=0.7, max_tok
     raise Exception(f"All {attempts} parallel GLM attempts failed")
 
 
+def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None, on_token=None, read_timeout=60):
+    """Streaming twin of call_openrouter_chat: identical request, tokens via on_token.
+
+    The payload carries the same model, messages and limits with stream mode on,
+    so the provider generates the same completion it would for the non-stream
+    call. Deltas are concatenated and returned in the same choices shape, so
+    callers that read response['choices'][0]['message']['content'] work
+    unchanged, and metering settles exactly once from the stream's usage chunk
+    (falling back to an empty usage record exactly like the non-stream error
+    paths when the provider sends none). Transport and HTTP failures return the
+    same {"error": ...} shape; only on_token is new, and it must never raise.
+    """
+    import time as _time
+    if not OPENROUTER_KEY:
+        return {"error": {"message": "OPENROUTER_KEY is missing"}}
+    model_name = model or GLM_OPENROUTER_MODEL
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com",
+        "X-Title": "Real Estate Proposal Generator"
+    }
+    user_message_content = user_content
+    if image_references:
+        user_message_content = [{"type": "text", "text": str(user_content)}]
+        for image_reference in image_references:
+            if isinstance(image_reference, dict):
+                image_url = image_reference.get('data_uri') or image_reference.get('url')
+            else:
+                image_url = image_reference
+            if isinstance(image_url, str) and image_url.startswith('data:image/'):
+                user_message_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": image_url}
+                })
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message_content}
+        ],
+        "max_tokens": max_tokens,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "usage": {"include": True},
+    }
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
+    if response_format:
+        payload["response_format"] = response_format
+    if provider:
+        payload["provider"] = provider
+    if tools:
+        payload["tools"] = tools
+    if plugins:
+        payload["plugins"] = plugins
+    attempt_id = _begin_ai_attempt_record(usage_ctx, model_name)
+
+    def _fail(message):
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        return {"error": {"message": message}}
+
+    def _delta_text(delta, *keys):
+        for key in keys:
+            piece = delta.get(key)
+            if isinstance(piece, list):
+                piece = ' '.join(
+                    part.get('text', '') if isinstance(part, dict) else str(part)
+                    for part in piece
+                )
+            if piece:
+                return str(piece)
+        return ''
+
+    start = _time.monotonic()
+    try:
+        response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=(15, read_timeout), stream=True)
+    except requests.exceptions.Timeout:
+        print(f"[OPENROUTER STREAM TIMEOUT] model={model_name} cap={max_tokens}")
+        return _fail(f"انتهت مهلة الاتصال بالمزوّد ({timeout} ثانية)")
+    except requests.exceptions.ConnectionError as exc:
+        print(f"[OPENROUTER STREAM CONNECTION] model={model_name} {exc}")
+        return _fail("انقطع الاتصال بالمزوّد قبل اكتمال الطلب")
+    except Exception as exc:
+        print(f"[OPENROUTER STREAM EXCEPTION] model={model_name} {exc}")
+        return _fail(str(exc))
+    if response.status_code >= 400:
+        try:
+            data = response.json()
+        except Exception:
+            data = {}
+        try:
+            response.close()
+        except Exception:
+            pass
+        error = data.get('error', {}) if isinstance(data, dict) else data
+        print(f"[OPENROUTER STREAM HTTP ERROR] status={response.status_code} model={model_name} error={error}")
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        if isinstance(error, dict) and 'message' in error:
+            error['message'] = f"[{response.status_code}] {error['message']}"
+            return {"error": error}
+        return {"error": error if isinstance(error, dict) else {"message": f"[{response.status_code}] {error}"}}
+    content_parts = []
+    reasoning_parts = []
+    generation_id = None
+    usage = {}
+    try:
+        for line in response.iter_lines(decode_unicode=True):
+            if _time.monotonic() - start > timeout:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+                return _fail(f"انتهت مهلة الاتصال بالمزوّد ({timeout} ثانية)")
+            if not line:
+                continue
+            text = line.strip()
+            if not text.startswith('data:'):
+                continue
+            text = text[5:].strip()
+            if text == '[DONE]':
+                break
+            try:
+                chunk = json.loads(text)
+            except Exception:
+                continue
+            if not isinstance(chunk, dict):
+                continue
+            if generation_id is None and isinstance(chunk.get('id'), str) and chunk.get('id'):
+                generation_id = chunk.get('id')
+            if isinstance(chunk.get('usage'), dict):
+                usage = chunk.get('usage')
+            choices = chunk.get('choices')
+            choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+            delta = choice.get('delta')
+            if not isinstance(delta, dict):
+                continue
+            piece = _delta_text(delta, 'content')
+            if piece:
+                content_parts.append(piece)
+            else:
+                for key in ('reasoning_content', 'reasoning', 'reasoning_details'):
+                    rpiece = _delta_text(delta, key)
+                    if rpiece:
+                        reasoning_parts.append(rpiece)
+                        break
+            if on_token and content_parts:
+                try:
+                    on_token(''.join(content_parts))
+                except Exception:
+                    pass
+        try:
+            response.close()
+        except Exception:
+            pass
+    except requests.exceptions.Timeout:
+        print(f"[OPENROUTER STREAM STALL] model={model_name} cap={max_tokens}")
+        return _fail(f"انتهت مهلة الاتصال بالمزوّد ({timeout} ثانية)")
+    except requests.exceptions.ConnectionError as exc:
+        print(f"[OPENROUTER STREAM CONNECTION] model={model_name} {exc}")
+        return _fail("انقطع الاتصال بالمزوّد قبل اكتمال الطلب")
+    except Exception as exc:
+        print(f"[OPENROUTER STREAM EXCEPTION] model={model_name} {exc}")
+        return _fail(str(exc))
+    final_text = ''.join(content_parts)
+    if not final_text.strip() and reasoning_parts:
+        final_text = ''.join(reasoning_parts)
+    _, settled_usage = _extract_openrouter_usage({'id': generation_id, 'usage': usage})
+    _settle_ai_attempt_record(attempt_id, 'ok', settled_usage, generation_id)
+    return {"choices": [{"message": {"content": final_text}}], "usage": usage, "id": generation_id}
+
+
+def call_zai_chat_stream(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300, reasoning_effort=None, response_format=None, model=None, image_references=None, usage_ctx=None, on_token=None):
+    """Streaming twin of call_zai_chat: same defaults, tokens via on_token."""
+    if not OPENROUTER_KEY:
+        return {"error": {"message": "OPENROUTER_KEY is required for the text model"}}
+    return call_openrouter_chat_stream(
+        system_prompt,
+        user_content,
+        temperature=None,
+        max_tokens=max_tokens,
+        model=model or LUNA_TEXT_MODEL,
+        timeout=timeout,
+        reasoning_effort=reasoning_effort,
+        response_format=response_format,
+        image_references=image_references,
+        usage_ctx=usage_ctx,
+        on_token=on_token,
+    )
+
+
+def _slide_stream_progress(tenant_id, job_id, interval=1.0):
+    """Throttle live slide previews: at most one job-file publish per interval.
+
+    The callback only ever writes the in-progress text; the completed job body
+    keeps today's shape, so clients that ignore unknown keys see no change.
+    """
+    import time as _time
+    state = {'last': 0.0}
+
+    def _on_token(full_text):
+        now = _time.monotonic()
+        if now - state['last'] < interval:
+            return
+        state['last'] = now
+        try:
+            _write_job('.slide_jobs', tenant_id, job_id, {
+                'status': 'running',
+                'success': True,
+                'message': 'جاري توليد الشريحة...',
+                'partial': full_text,
+            })
+        except Exception as exc:
+            print(f'[SLIDE STREAM] partial write failed: {exc}')
+
+    return _on_token
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # AI usage metering: per-call OpenRouter consumption, attributed per tenant,
 # draft and presentation. Token figures are copied verbatim from the provider
@@ -9288,6 +9508,13 @@ def api_generate_slide_single():
     def call_glm_fn(sys_prompt, user_msg, max_tokens=6000):
         if training_context:
             sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
+        # Inside a background slide job the worker streams the single call and
+        # publishes live previews; the request, model and limits are identical,
+        # so the completion - and the validation loop around it - is unchanged.
+        # Direct (non-job) calls keep the previous raced behaviour byte for byte.
+        stream_job = getattr(g, '_slide_stream_job', None)
+        if isinstance(stream_job, dict) and stream_job.get('job_id'):
+            return call_zai_chat_stream(sys_prompt, user_msg, max_tokens=max_tokens, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id), on_token=_slide_stream_progress(g.tenant_id, stream_job['job_id']))
         return call_zai_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
 
     # Apply the same ownership repair used by the full-plan normalizer before
@@ -9347,6 +9574,9 @@ def _run_slide_generation_job(flask_app, tenant_id, payload, job_id, authorizati
     with flask_app.test_request_context(
             '/api/generate-slide-single', method='POST', json=payload,
             headers={'Authorization': authorization}):
+        # g is bound to this worker's request context, so the single-slide
+        # route streams this job's completion as live previews through it.
+        g._slide_stream_job = {'tenant_id': tenant_id, 'job_id': job_id}
         try:
             result = api_generate_slide_single()
             response = result[0] if isinstance(result, tuple) else result
